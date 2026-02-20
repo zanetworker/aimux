@@ -163,6 +163,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "?":
 		return a.navigateTo(viewHelp, "Help")
+	case "l":
+		if a.currentView == viewInstances {
+			return a.openLogsForSelected()
+		}
 	case "esc":
 		if a.filterInput != "" {
 			a.filterInput = ""
@@ -275,10 +279,24 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 			return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 		}
 
-		// No tmux — show conversation trace
-		return a.openLogsForSelected()
+		// No tmux — resume the Claude session directly
+		// Suspends claudetopus and opens the Claude prompt.
+		// When user exits Claude (/exit or Ctrl+C), they return here.
+		return a.resumeSession(selected)
 	}
 	return a, nil
+}
+
+// resumeSession suspends claudetopus and launches claude --resume for the
+// selected instance. The user gets dropped into the Claude prompt and can
+// continue the conversation. On exit, they return to claudetopus.
+func (a App) resumeSession(inst *model.Instance) (tea.Model, tea.Cmd) {
+	cmd := jump.ResumeClaudeSession(inst.SessionID, inst.WorkingDir)
+	if cmd == nil {
+		// No session ID and no working dir — fall back to trace view
+		return a.openLogsForSelected()
+	}
+	return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 }
 
 // findTmuxTarget finds a matching tmux session for the instance.
@@ -331,15 +349,15 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	// Try tmux first
 	tmuxTarget := a.findTmuxTarget(selected)
 	if tmuxTarget != "" {
 		cmd := jump.SuspendAndAttach(tmuxTarget)
 		return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 	}
 
-	// No tmux — show trace view
-	a.statusHint = fmt.Sprintf("No tmux session for PID %d. Showing trace. Run in tmux for attach.", selected.PID)
-	return a.openLogsForSelected()
+	// No tmux — resume the session directly
+	return a.resumeSession(selected)
 }
 
 func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
@@ -487,7 +505,7 @@ func (a App) renderStatusBar() string {
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(a.statusHint)
 	} else {
-		hints = " :command  j/k:nav  Enter:attach/trace  /:filter  ?:help"
+		hints = " :command  j/k:nav  Enter:resume  l:trace  /:filter  ?:help"
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
 		}
