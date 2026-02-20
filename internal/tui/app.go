@@ -272,31 +272,31 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// If tmux session available, attach to it
+		// Open the Claude session in a tmux split pane below claudetopus.
+		// Claudetopus stays visible in the top pane.
+		// If inside tmux with a matching session, switch to it.
 		tmuxTarget := a.findTmuxTarget(selected)
-		if tmuxTarget != "" {
+		if tmuxTarget != "" && !jump.IsInsideTmux() {
+			// Not in tmux ourselves but target has a tmux session — attach
+			cmd := jump.SuspendAndAttach(tmuxTarget)
+			return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+		}
+		if tmuxTarget != "" && jump.IsInsideTmux() {
+			// We're in tmux and target has a session — switch to it
 			cmd := jump.SuspendAndAttach(tmuxTarget)
 			return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 		}
 
-		// No tmux — resume the Claude session directly
-		// Suspends claudetopus and opens the Claude prompt.
-		// When user exits Claude (/exit or Ctrl+C), they return here.
-		return a.resumeSession(selected)
+		// Open a split pane with claude --resume (or --continue)
+		err := jump.ResumeInPane(selected.SessionID, selected.WorkingDir)
+		if err != nil {
+			a.statusHint = fmt.Sprintf("Could not open session: %v", err)
+		} else {
+			a.statusHint = "Session opened in pane below. Ctrl+b ↓ to focus it."
+		}
+		return a, nil
 	}
 	return a, nil
-}
-
-// resumeSession suspends claudetopus and launches claude --resume for the
-// selected instance. The user gets dropped into the Claude prompt and can
-// continue the conversation. On exit, they return to claudetopus.
-func (a App) resumeSession(inst *model.Instance) (tea.Model, tea.Cmd) {
-	cmd := jump.ResumeClaudeSession(inst.SessionID, inst.WorkingDir)
-	if cmd == nil {
-		// No session ID and no working dir — fall back to trace view
-		return a.openLogsForSelected()
-	}
-	return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 }
 
 // findTmuxTarget finds a matching tmux session for the instance.
@@ -348,16 +348,8 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 	if selected == nil {
 		return a, nil
 	}
-
-	// Try tmux first
-	tmuxTarget := a.findTmuxTarget(selected)
-	if tmuxTarget != "" {
-		cmd := jump.SuspendAndAttach(tmuxTarget)
-		return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
-	}
-
-	// No tmux — resume the session directly
-	return a.resumeSession(selected)
+	// J always opens a split pane (same as Enter)
+	return a.handleEnter()
 }
 
 func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
@@ -505,7 +497,7 @@ func (a App) renderStatusBar() string {
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(a.statusHint)
 	} else {
-		hints = " :command  j/k:nav  Enter:resume  l:trace  /:filter  ?:help"
+		hints = " :command  j/k:nav  Enter:open pane  l:trace  /:filter  ?:help"
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
 		}
