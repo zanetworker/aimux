@@ -1,0 +1,8 @@
+{
+  "name": "test-team",
+  "description": "A test team",
+  "members": [
+    {"agentId": "lead@test-team", "name": "team-lead", "agentType": "team-lead", "model": "claude-opus-4-6[1m]"},
+    {"agentId": "researcher@test-team", "name": "researcher", "agentType": "general-purpose", "model": "claude-opus-4-6"}
+  ]
+}
