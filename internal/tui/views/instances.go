@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,11 +32,12 @@ var (
 
 // InstancesView renders the main instance table.
 type InstancesView struct {
-	instances []model.Instance
-	cursor    int
-	width     int
-	height    int
-	filter    string
+	instances   []model.Instance
+	cursor      int
+	selectedPID int // track selection by PID across refreshes
+	width       int
+	height      int
+	filter      string
 }
 
 // NewInstancesView creates a new InstancesView.
@@ -43,9 +45,26 @@ func NewInstancesView() *InstancesView {
 	return &InstancesView{}
 }
 
-// SetInstances updates the list of instances.
+// SetInstances updates the list of instances with stable sort order.
+// Preserves cursor position by tracking the selected PID across refreshes.
 func (v *InstancesView) SetInstances(instances []model.Instance) {
+	// Sort by PID for stable ordering
+	sort.Slice(instances, func(i, j int) bool {
+		return instances[i].PID < instances[j].PID
+	})
 	v.instances = instances
+
+	// Restore cursor to the same PID if it still exists
+	if v.selectedPID != 0 {
+		f := v.filtered()
+		for i, inst := range f {
+			if inst.PID == v.selectedPID {
+				v.cursor = i
+				return
+			}
+		}
+	}
+	// PID gone or no previous selection — clamp cursor
 	if v.cursor >= len(v.filtered()) {
 		v.cursor = max(0, len(v.filtered())-1)
 	}
@@ -99,6 +118,10 @@ func (v *InstancesView) Update(msg tea.Msg) {
 		case "G":
 			v.cursor = len(f) - 1
 		}
+	}
+	// Track selected PID for cursor preservation across refreshes
+	if v.cursor >= 0 && v.cursor < len(f) {
+		v.selectedPID = f[v.cursor].PID
 	}
 }
 

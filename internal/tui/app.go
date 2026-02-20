@@ -257,7 +257,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 
 func (a App) handleEnter() (tea.Model, tea.Cmd) {
 	if a.currentView == viewInstances {
-		return a.openLogsForSelected()
+		// Enter = jump to session (like k9s Enter on a pod)
+		return a.handleJump()
 	}
 	return a, nil
 }
@@ -288,17 +289,30 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 	if selected == nil {
 		return a, nil
 	}
-	// Try tmux first
-	if selected.TMuxSession != "" && jump.TmuxHasSession(selected.TMuxSession) {
-		cmd := jump.SuspendAndAttach(selected.TMuxSession)
+
+	// Try tmux — check matched session first, then try "claude-<project>" convention
+	tmuxTarget := selected.TMuxSession
+	if tmuxTarget == "" && selected.WorkingDir != "" {
+		// Try the convention: claude-<last-dir-segment>
+		project := selected.ShortProject()
+		if project != "" && jump.TmuxHasSession("claude-"+project) {
+			tmuxTarget = "claude-" + project
+		} else if project != "" && jump.TmuxHasSession(project) {
+			tmuxTarget = project
+		}
+	}
+	if tmuxTarget != "" && jump.TmuxHasSession(tmuxTarget) {
+		cmd := jump.SuspendAndAttach(tmuxTarget)
 		return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 	}
+
 	// Try iTerm2
 	if jump.IsITerm2() {
 		_ = jump.ITerm2FocusByPID(selected.PID)
 		return a, nil
 	}
-	// Fallback: open logs
+
+	// Fallback: open logs view
 	return a.openLogsForSelected()
 }
 
@@ -443,7 +457,7 @@ func (a App) renderStatusBar() string {
 				Foreground(lipgloss.Color("#F59E0B")).Render("|"))
 	}
 
-	hints := " :command  j/k:nav  Enter:drill  /:filter  J:jump  ?:help"
+	hints := " :command  j/k:nav  Enter:attach  /:filter  :l logs  ?:help"
 	if a.filterInput != "" {
 		hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
 	}
