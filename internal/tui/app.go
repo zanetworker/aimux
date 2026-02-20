@@ -62,6 +62,9 @@ type App struct {
 
 	// Breadcrumb trail
 	breadcrumbs []string
+
+	// Temporary status hint (shown once then cleared)
+	statusHint string
 }
 
 // NewApp creates a new root TUI application.
@@ -139,6 +142,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Clear any status hint on keypress
+	a.statusHint = ""
+
 	switch msg.String() {
 	case "q":
 		if a.currentView == viewInstances {
@@ -284,6 +290,11 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 	return a.navigateTo(viewLogs, fmt.Sprintf("Logs [PID %d]", selected.PID))
 }
 
+// statusMsg is shown briefly in the status bar.
+type statusMsg struct {
+	text string
+}
+
 func (a App) handleJump() (tea.Model, tea.Cmd) {
 	selected := a.instancesView.Selected()
 	if selected == nil {
@@ -293,26 +304,29 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 	// Try tmux — check matched session first, then try "claude-<project>" convention
 	tmuxTarget := selected.TMuxSession
 	if tmuxTarget == "" && selected.WorkingDir != "" {
-		// Try the convention: claude-<last-dir-segment>
 		project := selected.ShortProject()
-		if project != "" && jump.TmuxHasSession("claude-"+project) {
-			tmuxTarget = "claude-" + project
-		} else if project != "" && jump.TmuxHasSession(project) {
-			tmuxTarget = project
+		if project != "" {
+			// Try common naming conventions
+			candidates := []string{
+				"claude-" + project,
+				project,
+			}
+			for _, c := range candidates {
+				if jump.TmuxHasSession(c) {
+					tmuxTarget = c
+					break
+				}
+			}
 		}
 	}
-	if tmuxTarget != "" && jump.TmuxHasSession(tmuxTarget) {
+
+	if tmuxTarget != "" {
 		cmd := jump.SuspendAndAttach(tmuxTarget)
 		return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 	}
 
-	// Try iTerm2
-	if jump.IsITerm2() {
-		_ = jump.ITerm2FocusByPID(selected.PID)
-		return a, nil
-	}
-
-	// Fallback: open logs view
+	// No tmux session found — show logs as fallback with a hint
+	a.statusHint = fmt.Sprintf("No tmux session for PID %d (%s). Showing logs. Use tmux for attach.", selected.PID, selected.ShortProject())
 	return a.openLogsForSelected()
 }
 
@@ -457,9 +471,14 @@ func (a App) renderStatusBar() string {
 				Foreground(lipgloss.Color("#F59E0B")).Render("|"))
 	}
 
-	hints := " :command  j/k:nav  Enter:attach  /:filter  :l logs  ?:help"
-	if a.filterInput != "" {
-		hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
+	var hints string
+	if a.statusHint != "" {
+		hints = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(a.statusHint)
+	} else {
+		hints = " :command  j/k:nav  Enter:attach  /:filter  :l logs  ?:help"
+		if a.filterInput != "" {
+			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
+		}
 	}
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6B7280")).

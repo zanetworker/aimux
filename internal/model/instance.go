@@ -101,6 +101,9 @@ type Instance struct {
 //	"claude-haiku-3-5"              -> "haiku-3.5"
 func (i Instance) ShortModel() string {
 	m := i.Model
+	if m == "" {
+		return "default"
+	}
 
 	// Strip the "claude-" prefix.
 	m = strings.TrimPrefix(m, "claude-")

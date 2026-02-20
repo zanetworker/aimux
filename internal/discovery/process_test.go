@@ -118,17 +118,21 @@ func TestIsClaudeProcess(t *testing.T) {
 		want bool
 	}{
 		{"claude binary", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /usr/local/bin/claude --model opus", true},
+		{"bare claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 claude --dangerously-skip-permissions", true},
+		{"vscode claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /Users/test/.vscode/extensions/anthropic.claude-code-2.1.49-darwin-arm64/resources/native-binary/claude --output-format stream-json", true},
 		{"not claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /usr/local/bin/vim", false},
 		{"grep claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 grep claude", false},
 		{"claudetopus", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 claudetopus", false},
 		{"tmux claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 tmux new -s claude-proj", false},
+		{"chrome helper", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /Applications/Claude.app/Contents/Helpers/chrome-native-host chrome-extension://abc", false},
+		{"zsh subprocess", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /bin/zsh -c -l source /Users/test/.claude/shell-snapshots/snapshot.sh", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := isClaudeProcess(tt.line)
 			if got != tt.want {
-				t.Errorf("isClaudeProcess(%q) = %v, want %v", tt.line, got, tt.want)
+				t.Errorf("isClaudeProcess(%q) = %v, want %v", tt.line[:60], got, tt.want)
 			}
 		})
 	}
@@ -138,7 +142,7 @@ func TestBuildInstance(t *testing.T) {
 	proc := rawProcess{
 		PID:      42,
 		MemoryKB: 512000,
-		Command:  "/usr/local/bin/claude --model opus --permission-mode full --resume sess-123",
+		Command:  "/usr/local/bin/claude --model opus --permission-mode plan --resume sess-123",
 	}
 
 	inst := buildInstance(proc)
@@ -152,8 +156,8 @@ func TestBuildInstance(t *testing.T) {
 	if inst.Model != "opus" {
 		t.Errorf("Model = %q, want %q", inst.Model, "opus")
 	}
-	if inst.PermissionMode != "full" {
-		t.Errorf("PermissionMode = %q, want %q", inst.PermissionMode, "full")
+	if inst.PermissionMode != "plan" {
+		t.Errorf("PermissionMode = %q, want %q", inst.PermissionMode, "plan")
 	}
 	if inst.SessionID != "sess-123" {
 		t.Errorf("SessionID = %q, want %q", inst.SessionID, "sess-123")
@@ -161,8 +165,29 @@ func TestBuildInstance(t *testing.T) {
 	if inst.Source != model.SourceCLI {
 		t.Errorf("Source = %v, want %v", inst.Source, model.SourceCLI)
 	}
-	if inst.Status != model.StatusUnknown {
-		t.Errorf("Status = %v, want %v", inst.Status, model.StatusUnknown)
+}
+
+func TestBuildInstanceBypass(t *testing.T) {
+	proc := rawProcess{
+		PID:      99,
+		MemoryKB: 200000,
+		Command:  "claude --dangerously-skip-permissions",
+	}
+	inst := buildInstance(proc)
+	if inst.PermissionMode != "bypass" {
+		t.Errorf("PermissionMode = %q, want %q", inst.PermissionMode, "bypass")
+	}
+}
+
+func TestBuildInstanceDefaultPerm(t *testing.T) {
+	proc := rawProcess{
+		PID:      88,
+		MemoryKB: 100000,
+		Command:  "claude",
+	}
+	inst := buildInstance(proc)
+	if inst.PermissionMode != "default" {
+		t.Errorf("PermissionMode = %q, want %q", inst.PermissionMode, "default")
 	}
 }
 

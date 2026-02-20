@@ -70,7 +70,7 @@ func TestShortModel(t *testing.T) {
 		{"claude-sonnet-4-5[1m]", "sonnet-4.5"},
 		{"unknown-model", "unknown-model"},
 		{"singleword", "singleword"},
-		{"", ""},
+		{"", "default"},
 	}
 	for _, tt := range tests {
 		inst := Instance{Model: tt.model}

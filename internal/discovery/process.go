@@ -89,20 +89,46 @@ func extractSessionID(args string) string {
 }
 
 // isClaudeProcess returns true if the ps line represents a Claude Code process
-// we want to track.
+// we want to track. Must be an actual claude binary invocation, not a wrapper
+// or helper process.
 func isClaudeProcess(line string) bool {
-	lower := strings.ToLower(line)
-	// Must reference a claude binary or node running claude.
-	if !strings.Contains(lower, "claude") {
+	fields := strings.Fields(line)
+	if len(fields) < 11 {
 		return false
 	}
-	// Exclude tmux wrappers, grep, and claudetopus itself.
-	excludes := []string{"grep", "claudetopus", "tmux"}
-	for _, ex := range excludes {
-		if strings.Contains(lower, ex) {
-			return false
-		}
+
+	// The binary is fields[10] (first word of the command)
+	binary := fields[10]
+
+	// Must be the actual claude binary (bare "claude" or path ending in "/claude")
+	isClaude := binary == "claude" || strings.HasSuffix(binary, "/claude")
+	if !isClaude {
+		return false
 	}
+
+	// Exclude processes that aren't actual Claude Code sessions:
+	cmd := strings.Join(fields[10:], " ")
+
+	// Chrome native host helper from Claude desktop app
+	if strings.Contains(cmd, "chrome-native-host") || strings.Contains(cmd, "Claude.app/Contents/Helpers") {
+		return false
+	}
+
+	// Shell subprocesses spawned by Claude (zsh -c, bash -c)
+	if strings.Contains(binary, "/zsh") || strings.Contains(binary, "/bash") {
+		return false
+	}
+
+	// tmux wrapper processes
+	if strings.Contains(cmd, "tmux") {
+		return false
+	}
+
+	// grep/claudetopus itself
+	if strings.Contains(cmd, "grep") || strings.Contains(cmd, "claudetopus") {
+		return false
+	}
+
 	return true
 }
 
@@ -135,12 +161,24 @@ func ScanProcesses() ([]model.Instance, error) {
 
 // buildInstance creates a model.Instance from a rawProcess.
 func buildInstance(proc rawProcess) model.Instance {
+	perm := extractFlag(proc.Command, "--permission-mode")
+	// Detect bypass from --dangerously-skip-permissions flag
+	if perm == "" && strings.Contains(proc.Command, "--dangerously-skip-permissions") {
+		perm = "bypass"
+	}
+	if perm == "bypassPermissions" {
+		perm = "bypass"
+	}
+	if perm == "" {
+		perm = "default"
+	}
+
 	return model.Instance{
 		PID:            proc.PID,
 		MemoryMB:       proc.MemoryKB / 1024,
 		Source:         classifySource(proc.Command),
 		Model:          extractFlag(proc.Command, "--model"),
-		PermissionMode: extractFlag(proc.Command, "--permission-mode"),
+		PermissionMode: perm,
 		SessionID:      extractSessionID(proc.Command),
 		Status:         model.StatusUnknown,
 		LastActivity:   time.Now(),
