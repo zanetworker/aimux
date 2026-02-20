@@ -272,29 +272,33 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Open the Claude session in a tmux split pane below claudetopus.
-		// Claudetopus stays visible in the top pane.
-		// If inside tmux with a matching session, switch to it.
+		// If the instance is running in a known tmux session, switch to it
 		tmuxTarget := a.findTmuxTarget(selected)
-		if tmuxTarget != "" && !jump.IsInsideTmux() {
-			// Not in tmux ourselves but target has a tmux session — attach
-			cmd := jump.SuspendAndAttach(tmuxTarget)
-			return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
-		}
-		if tmuxTarget != "" && jump.IsInsideTmux() {
-			// We're in tmux and target has a session — switch to it
+		if tmuxTarget != "" {
 			cmd := jump.SuspendAndAttach(tmuxTarget)
 			return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 		}
 
-		// Open a split pane with claude --resume (or --continue)
-		err := jump.ResumeInPane(selected.SessionID, selected.WorkingDir)
+		// Try to open a split pane (tmux or iTerm2)
+		result, err := jump.ResumeInPane(selected.SessionID, selected.WorkingDir)
 		if err != nil {
-			a.statusHint = fmt.Sprintf("Could not open session: %v", err)
-		} else {
-			a.statusHint = "Session opened in pane below. Ctrl+b ↓ to focus it."
+			a.statusHint = fmt.Sprintf("Error: %v", err)
+			return a, nil
 		}
-		return a, nil
+		if result != nil {
+			// Split pane opened successfully
+			a.statusHint = result.Hint
+			return a, nil
+		}
+
+		// Fallback: suspend TUI and run claude directly
+		// User exits Claude with /exit or Ctrl+C to return here
+		cmd := jump.ResumeCmd(selected.SessionID, selected.WorkingDir)
+		if cmd == nil {
+			a.statusHint = "No session data available for this instance"
+			return a, nil
+		}
+		return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 	}
 	return a, nil
 }
