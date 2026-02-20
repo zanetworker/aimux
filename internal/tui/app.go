@@ -263,10 +263,40 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 
 func (a App) handleEnter() (tea.Model, tea.Cmd) {
 	if a.currentView == viewInstances {
-		// Enter = jump to session (like k9s Enter on a pod)
-		return a.handleJump()
+		selected := a.instancesView.Selected()
+		if selected == nil {
+			return a, nil
+		}
+
+		// If tmux session available, attach to it
+		tmuxTarget := a.findTmuxTarget(selected)
+		if tmuxTarget != "" {
+			cmd := jump.SuspendAndAttach(tmuxTarget)
+			return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+		}
+
+		// No tmux — show conversation trace
+		return a.openLogsForSelected()
 	}
 	return a, nil
+}
+
+// findTmuxTarget finds a matching tmux session for the instance.
+func (a App) findTmuxTarget(inst *model.Instance) string {
+	if inst.TMuxSession != "" && jump.TmuxHasSession(inst.TMuxSession) {
+		return inst.TMuxSession
+	}
+	if inst.WorkingDir != "" {
+		project := inst.ShortProject()
+		if project != "" {
+			for _, candidate := range []string{"claude-" + project, project} {
+				if jump.TmuxHasSession(candidate) {
+					return candidate
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
@@ -301,32 +331,14 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Try tmux — check matched session first, then try "claude-<project>" convention
-	tmuxTarget := selected.TMuxSession
-	if tmuxTarget == "" && selected.WorkingDir != "" {
-		project := selected.ShortProject()
-		if project != "" {
-			// Try common naming conventions
-			candidates := []string{
-				"claude-" + project,
-				project,
-			}
-			for _, c := range candidates {
-				if jump.TmuxHasSession(c) {
-					tmuxTarget = c
-					break
-				}
-			}
-		}
-	}
-
+	tmuxTarget := a.findTmuxTarget(selected)
 	if tmuxTarget != "" {
 		cmd := jump.SuspendAndAttach(tmuxTarget)
 		return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
 	}
 
-	// No tmux session found — show logs as fallback with a hint
-	a.statusHint = fmt.Sprintf("No tmux session for PID %d (%s). Showing logs. Use tmux for attach.", selected.PID, selected.ShortProject())
+	// No tmux — show trace view
+	a.statusHint = fmt.Sprintf("No tmux session for PID %d. Showing trace. Run in tmux for attach.", selected.PID)
 	return a.openLogsForSelected()
 }
 
@@ -475,7 +487,7 @@ func (a App) renderStatusBar() string {
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(a.statusHint)
 	} else {
-		hints = " :command  j/k:nav  Enter:attach  /:filter  :l logs  ?:help"
+		hints = " :command  j/k:nav  Enter:attach/trace  /:filter  ?:help"
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
 		}
