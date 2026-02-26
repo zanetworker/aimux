@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/zanetworker/claudetopus/internal/cost"
-	"github.com/zanetworker/claudetopus/internal/model"
+	"github.com/zanetworker/agentmux/internal/cost"
+	"github.com/zanetworker/agentmux/internal/model"
 )
 
 // Orchestrator coordinates all discovery sources to produce enriched instances.

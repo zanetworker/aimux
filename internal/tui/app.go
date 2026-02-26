@@ -7,11 +7,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/claudetopus/internal/discovery"
-	"github.com/zanetworker/claudetopus/internal/jump"
-	"github.com/zanetworker/claudetopus/internal/model"
-	"github.com/zanetworker/claudetopus/internal/team"
-	"github.com/zanetworker/claudetopus/internal/tui/views"
+	"github.com/zanetworker/agentmux/internal/discovery"
+	"github.com/zanetworker/agentmux/internal/jump"
+	"github.com/zanetworker/agentmux/internal/model"
+	"github.com/zanetworker/agentmux/internal/team"
+	"github.com/zanetworker/agentmux/internal/tui/views"
 )
 
 type viewType int
@@ -454,7 +454,7 @@ func (a App) renderHeader() string {
 	left := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#7C3AED")).
-		Render(" claudetopus")
+		Render(" agentmux")
 
 	middle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#E5E7EB")).

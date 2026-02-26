@@ -1,7 +1,7 @@
 version: 2
 builds:
-  - main: ./cmd/claudetopus
-    binary: claudetopus
+  - main: ./cmd/agentmux
+    binary: agentmux
     env:
       - CGO_ENABLED=0
     goos:

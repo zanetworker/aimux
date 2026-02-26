@@ -1,10 +1,10 @@
 .PHONY: build run clean test install lint
 
-BINARY=claudetopus
+BINARY=agentmux
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 build:
-	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/claudetopus
+	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/agentmux
 
 run: build
 	./$(BINARY)

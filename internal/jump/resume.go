@@ -12,7 +12,7 @@ type ResumeResult struct {
 	Hint   string // status bar hint for the user
 }
 
-// ResumeInPane opens a Claude session alongside claudetopus.
+// ResumeInPane opens a Claude session alongside agentmux.
 // Tries, in order:
 //  1. tmux split pane (if inside tmux)
 //  2. iTerm2 split pane (if inside iTerm2)

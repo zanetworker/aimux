@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/claudetopus/internal/model"
+	"github.com/zanetworker/agentmux/internal/model"
 )
 
 // Column widths for the instance table.

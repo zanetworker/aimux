@@ -1,4 +1,4 @@
-module github.com/zanetworker/claudetopus
+module github.com/zanetworker/agentmux
 
 go 1.24.2
 
