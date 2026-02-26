@@ -1,95 +1,89 @@
-# claudetopus
+# agentmux
 
-A k9s-style TUI control plane for managing multiple Claude Code instances.
+Multiplex your AI agents.
 
-Like [k9s](https://github.com/derailed/k9s) gives you a dashboard for Kubernetes clusters, claudetopus gives you a dashboard for all your running Claude Code sessions — CLI, VS Code, SDK agents — in one place.
+A k9s-style TUI dashboard for managing multiple AI coding agent sessions -- Claude, Codex, Gemini -- from a single terminal. Discover running agents, view conversation traces, zoom into live PTY sessions, and track costs across projects.
 
 ```
-┌─ claudetopus ── Instances ──────────── 8 instances (●3 ○4 ◐1)  $4.23 ┐
-│                                                                       │
-│  PID    STATUS     MODEL        PROJECT          PERM     MEM   COST  │
-│  3629   ● Active   opus-4.6     claudetopus      bypass   405M  $0.82 │
-│  96297  ● Active   opus-4.6     demoharness      bypass   1.4G  $2.10 │
-│  14152  ○ Idle     opus-4.6     excalidraw-mcp   default  128M  $0.45 │
-│  3347   ◐ Waiting  opus-4.6     app-interface    plan     108M  $0.31 │
-│  97069  ● Active   default      remote-claude    bypass   402M  $0.55 │
-│  40662  ○ Idle     default      llama-stack      default  95M   $0.00 │
-│  20844  ○ Idle     default      trustyai         bypass   130M  $0.00 │
-│  39811  ○ Idle     sonnet-4.5   blog-concept     bypass   146M  $0.00 │
-│                                                                       │
-├───────────────────────────────────────────────────────────────────────┤
-│ :command  j/k:nav  Enter:open pane  l:trace  /:filter  ?:help        │
-└───────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           agentmux      │
+│  │ ● Active   2 │ │ ◐ Waiting  0 │ │ ○ Idle     1 │                         │
+│  └──────────────┘ └──────────────┘ └──────────────┘                         │
+│  Agents                                                                      │
+├────────────────────────────────┬──────────────────────────────────────────────┤
+│ NAME          AGENT  MODEL    │  ● claudetopus                              │
+│───────────────────────────────│  claude · opus-4.6 · dangerously            │
+│▸● claudetopus claude opus-4.6│──────────────────────────────────────────────│
+│  dangerously · 14m · $0.82   │ 14:32 USER  add k9s header to the TUI      │
+│                               │ 14:32 ASST  I'll redesign the header...    │
+│ ● trustyai    claude sonnet  │ 14:33 TOOL  Edit styles.go                  │
+│  plan · 8m · $0.31           │ 14:33 ASST  Updated. Build succeeded.      │
+│                               │                                             │
+│ ○ llama-stack claude haiku   │                                [12/12] ●    │
+│  default · 2h · $0.11        │                                             │
+├────────────────────────────────┴──────────────────────────────────────────────┤
+│ :cmd  j/k:nav  Enter:zoom  l:trace  /:filter  ?:help                       │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Why
 
-If you run multiple Claude Code instances — across terminal tabs, VS Code panels, tmux sessions, SDK agents — you have no unified way to:
+If you run multiple AI coding agents -- across terminal tabs, VS Code panels, tmux sessions -- you have no unified way to:
 
-- **See what each instance is doing** — which project, what model, is it idle or active?
-- **Check the conversation trace** — what did the user ask, what tools were called, what commands ran?
-- **Jump into a session** — switch to a running Claude conversation without hunting through tabs
-- **Track costs** — how many tokens consumed, estimated spend per session
+- **See what each agent is doing** -- which project, what model, is it idle or active?
+- **Check the conversation trace** -- what prompts were sent, what tools were called?
+- **Jump into a session** -- zoom into a running agent's PTY without hunting through tabs
+- **Track costs** -- token usage and estimated spend per project, per provider
 
-claudetopus solves all of these from a single terminal.
+agentmux solves all of these from a single terminal.
 
 ## Install
 
+**Requirements:** Go 1.24+
+
 ```bash
 # From source
-git clone https://github.com/zanetworker/claudetopus.git
-cd claudetopus
+git clone https://github.com/zanetworker/agentmux.git
+cd agentmux
 make install    # builds and copies to /usr/local/bin
 
 # Or just build locally
 make build
-./claudetopus
+./agentmux
 ```
-
-**Requirements:** Go 1.24+
 
 ## Usage
 
 ```bash
-claudetopus     # launch the TUI
+agentmux     # launch the TUI
 ```
 
 For the best experience, run inside tmux:
 
 ```bash
 tmux new -s control-plane
-claudetopus
+agentmux
 ```
 
-This enables split-pane session opening — press Enter on any instance and the Claude session opens in a pane below, with claudetopus still visible above.
+This enables split-pane session opening -- press Enter on any agent and its PTY session opens in a pane below, with agentmux still visible above.
 
 ## Views
 
-### Instances (default)
+### Agents (default)
 
-The main dashboard. Shows all running Claude Code processes with their status, model, project, permission mode, memory usage, and estimated cost.
+The main dashboard. Shows all running AI coding agent processes with their status, provider, model, project, permission mode, uptime, and estimated cost.
 
-```
- PID    STATUS     MODEL        PROJECT          PERM     MEM   COST
- 3629   ● Active   opus-4.6     claudetopus      bypass   405M  $0.82
- 96297  ● Active   opus-4.6     demoharness      bypass   1.4G  $2.10
- 14152  ○ Idle     opus-4.6     excalidraw-mcp   default  128M  $0.45
-```
+Split layout: agent list on the left (~35%), preview pane with conversation trace on the right (~65%).
 
 **Status indicators:**
-- `●` Active — recent conversation activity
-- `○` Idle — no activity in the last 30 seconds
-- `◐` Waiting — blocked on a permission prompt
-- `?` Unknown — process found but no session data
-
-**Instance types detected:**
-- **CLI** — terminal sessions (`claude`, `claude --dangerously-skip-permissions`)
-- **VSCode** — VS Code extension panels
-- **SDK** — remote-claude / Agent SDK processes
+- `●` Active -- recent conversation activity
+- `○` Idle -- no activity in the last 30 seconds
+- `◐` Waiting -- blocked on a permission prompt
+- `?` Unknown -- process found but no session data
 
 ### Conversation Trace (`l`)
 
-Press `l` on any instance to see its conversation trace — a chronological view of user prompts, assistant responses, and tool calls.
+Press `l` on any agent to see its conversation trace -- a chronological view of user prompts, assistant responses, and tool calls.
 
 ```
  17:32:28 USER fix the authentication bug in login.go
@@ -97,49 +91,31 @@ Press `l` on any instance to see its conversation trace — a chronological view
  17:32:38 TOOL Read /src/auth/login.go
  17:32:39 TOOL Grep /pattern: handleAuth/
  17:32:41 ASST Found the issue. The token validation is missing...
-          ... (truncated)
  17:32:45 TOOL Edit /src/auth/login.go
  17:32:46 TOOL Bash $ go test ./src/auth/ -v
  17:32:50 ASST Fixed. The tests pass now.
 ```
 
-Tool calls show contextual snippets:
-- **Bash** — shows the command (`$ go test ./...`)
-- **Read/Write/Edit** — shows the file path
-- **Grep** — shows the search pattern
-- **Task** — shows the task description
-
 ### Costs (`:costs`)
 
-Aggregated token usage and estimated cost per project.
+Aggregated token usage and estimated cost per project, with provider column.
 
 ```
- PROJECT              MODEL       TOKENS IN   TOKENS OUT   COST
- demoharness          opus-4.6    245.0K      48.0K        $7.28
- claudetopus          opus-4.6    128.0K      22.0K        $3.57
- app-interface        opus-4.6    45.0K       8.0K         $1.28
- ─────────────────────────────────────────────────────────────
- TOTAL                            418.0K      78.0K        $12.13
+ PROJECT              AGENT      MODEL       TOKENS IN   TOKENS OUT   COST
+ demoharness          claude     opus-4.6    245.0K      48.0K        $7.28
+ claudetopus          claude     opus-4.6    128.0K      22.0K        $3.57
+ app-interface        claude     opus-4.6    45.0K       8.0K         $1.28
+ ────────────────────────────────────────────────────────────────────────
+ TOTAL                                       418.0K      78.0K        $12.13
 ```
 
 ### Teams (`:teams`)
 
 Shows Claude Code team configurations and their members.
 
-```
- ▸ default (3 members)
-   researcher      general-purpose
-   implementer     general-purpose
-   reviewer        general-purpose
-
- ▸ api-research (2 members)
-   lead            team-lead
-   analyst         general-purpose
-```
-
 ### Help (`?`)
 
-Full keybinding reference.
+Full keybinding reference and provider support status.
 
 ## Key Bindings
 
@@ -149,12 +125,13 @@ Full keybinding reference.
 |-----|--------|
 | `j` / `k` | Move cursor down / up |
 | `g` / `G` | Jump to top / bottom |
-| `Enter` | Open session (split pane or resume) |
+| `Enter` / `J` | Zoom into agent session (interactive PTY) |
+| `Ctrl+]` | Zoom out of session (keep session alive) |
 | `l` | View conversation trace |
 | `Esc` | Go back |
-| `/` | Filter instances |
+| `/` | Filter agents |
 | `?` | Show help |
-| `q` | Quit (from instances view) |
+| `q` | Quit (from agents view) |
 
 ### Trace View
 
@@ -163,13 +140,13 @@ Full keybinding reference.
 | `j` / `k` | Scroll line by line |
 | `d` / `u` | Page down / page up |
 | `g` / `G` | Jump to top / bottom (G = follow latest) |
-| `Esc` | Back to instances |
+| `Esc` | Back to agents |
 
 ### Commands (press `:`)
 
 | Command | Alias | View |
 |---------|-------|------|
-| `:instances` | `:i` | Instance list |
+| `:instances` | `:i` | Agent list |
 | `:logs` | `:l` | Conversation trace |
 | `:teams` | `:t` | Teams overview |
 | `:costs` | `:c` | Cost dashboard |
@@ -178,57 +155,55 @@ Full keybinding reference.
 
 Tab completion works in the command palette.
 
-## Opening Sessions
+## Provider System
 
-When you press `Enter` on an instance, claudetopus opens the Claude session using the best available method:
+agentmux uses a provider interface to support multiple AI coding agents. Each provider implements discovery, session resumption, and conversation parsing.
 
-| Terminal | What happens | Switch back |
-|----------|-------------|-------------|
-| **tmux** | Split pane below claudetopus | `Ctrl+b ↑` |
-| **iTerm2** | Split pane via AppleScript | `Cmd+[` |
-| **Other** | Suspends TUI, runs Claude directly | `/exit` returns to claudetopus |
+| Provider | Status | Discovery | Resume | Trace |
+|----------|--------|-----------|--------|-------|
+| Claude | Full support | Process scanning + session logs | PTY embed via `claude --resume` | JSONL parsing |
+| Codex | Stub | Planned | Planned | Planned |
+| Gemini | Stub | Planned | Planned | Planned |
 
-For tmux sessions that already exist (e.g., `claude-myproject`), Enter attaches directly to that session.
+Adding a new provider requires implementing the `Provider` interface:
 
-![Session Flow](docs/images/session-flow.png)
+```go
+type Provider interface {
+    Name() string
+    Discover() ([]agent.Agent, error)
+    ResumeCommand(a agent.Agent) *exec.Cmd
+    ParseConversation(sessionPath string) ([]Segment, error)
+}
+```
 
 ## Architecture
 
-![Architecture](docs/images/architecture.png)
-
 ### Data Sources
 
-claudetopus reads everything from the filesystem. No daemon, no hooks, no modifications to Claude Code required.
+agentmux reads everything from the filesystem. No daemon, no hooks, no modifications to your AI tools required.
 
 | Source | Location | Data |
 |--------|----------|------|
 | Process table | `ps aux` | PID, binary path, CLI flags, memory |
 | Session logs | `~/.claude/projects/*/` | Messages, tool calls, token usage |
-| Debug logs | `~/.claude/debug/` | Plugin loading, MCP connections |
 | Teams | `~/.claude/teams/*/config.json` | Team membership |
-| Tasks | `~/.claude/tasks/*/` | Task lists, ownership |
 | tmux | `tmux list-sessions` | Session names for jump support |
 
-### How Discovery Works
+### Session Embedding
 
-![Discovery Pipeline](docs/images/discovery-pipeline.png)
+When you press Enter on an agent, agentmux opens an embedded PTY session directly in the TUI. The agent's CLI process runs inside a pseudo-terminal, with its output rendered through a VT emulator (charmbracelet/x/vt) into the Bubble Tea view. Press `Ctrl+]` to zoom out without killing the session.
 
-## Cost Tracking
+### Discovery Pipeline
 
-Costs are estimated from token usage in session JSONL files using these rates:
-
-| Model | Input (per 1M) | Output (per 1M) | Cache Read | Cache Write |
-|-------|----------------|-----------------|------------|-------------|
-| claude-opus-4-6 | $15.00 | $75.00 | $1.50 | $18.75 |
-| claude-sonnet-4-5 | $3.00 | $15.00 | $0.30 | $3.75 |
-| claude-haiku-3-5 | $0.80 | $4.00 | $0.08 | $1.00 |
+The orchestrator queries all registered providers in parallel. Each provider scans for its agent's processes, enriches them with session data (model, tokens, status), and returns `agent.Agent` structs. The TUI refreshes every 2 seconds.
 
 ## Built With
 
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) — TUI framework
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss) — Styling
-- [Bubbles](https://github.com/charmbracelet/bubbles) — TUI components
-- [fsnotify](https://github.com/fsnotify/fsnotify) — File watching
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) -- TUI framework
+- [Lip Gloss](https://github.com/charmbracelet/lipgloss) -- Styling
+- [charmbracelet/x/vt](https://github.com/charmbracelet/x) -- VT emulator for PTY embedding
+- [creack/pty](https://github.com/creack/pty) -- PTY creation
+- Go standard library -- process scanning, JSONL parsing
 
 ## License
 
