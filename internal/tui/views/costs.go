@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/agentmux/internal/model"
+	"github.com/zanetworker/agentmux/internal/agent"
 )
 
 var (
@@ -16,7 +16,7 @@ var (
 
 // CostsView renders a cost dashboard aggregated by project.
 type CostsView struct {
-	instances []model.Instance
+	instances []agent.Agent
 	width     int
 	height    int
 }
@@ -27,7 +27,7 @@ func NewCostsView() *CostsView {
 }
 
 // SetInstances updates the instances used for cost aggregation.
-func (v *CostsView) SetInstances(instances []model.Instance) {
+func (v *CostsView) SetInstances(instances []agent.Agent) {
 	v.instances = instances
 }
 

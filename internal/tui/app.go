@@ -7,9 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/zanetworker/agentmux/internal/agent"
 	"github.com/zanetworker/agentmux/internal/discovery"
 	"github.com/zanetworker/agentmux/internal/jump"
-	"github.com/zanetworker/agentmux/internal/model"
 	"github.com/zanetworker/agentmux/internal/team"
 	"github.com/zanetworker/agentmux/internal/tui/views"
 )
@@ -28,7 +28,7 @@ const (
 type tickMsg time.Time
 
 // instancesMsg carries discovered instances.
-type instancesMsg []model.Instance
+type instancesMsg []agent.Agent
 
 // teamsMsg carries team configs.
 type teamsMsg []team.TeamConfig
@@ -37,7 +37,7 @@ type teamsMsg []team.TeamConfig
 type App struct {
 	// State
 	currentView viewType
-	instances   []model.Instance
+	instances   []agent.Agent
 	teams       []team.TeamConfig
 	width       int
 	height      int
@@ -116,7 +116,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.discoverInstances, a.tick())
 
 	case instancesMsg:
-		a.instances = []model.Instance(msg)
+		a.instances = []agent.Agent(msg)
 		a.instancesView.SetInstances(a.instances)
 		a.costsView.SetInstances(a.instances)
 		if a.currentView == viewLogs && a.logsView != nil {
@@ -304,7 +304,7 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 }
 
 // findTmuxTarget finds a matching tmux session for the instance.
-func (a App) findTmuxTarget(inst *model.Instance) string {
+func (a App) findTmuxTarget(inst *agent.Agent) string {
 	if inst.TMuxSession != "" && jump.TmuxHasSession(inst.TMuxSession) {
 		return inst.TMuxSession
 	}
@@ -432,11 +432,11 @@ func (a App) renderHeader() string {
 	var totalCost float64
 	for _, inst := range a.instances {
 		switch inst.Status {
-		case model.StatusActive:
+		case agent.StatusActive:
 			active++
-		case model.StatusIdle:
+		case agent.StatusIdle:
 			idle++
-		case model.StatusWaitingPermission:
+		case agent.StatusWaitingPermission:
 			waiting++
 		}
 		totalCost += inst.EstCostUSD

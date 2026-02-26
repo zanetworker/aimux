@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/zanetworker/agentmux/internal/model"
+	"github.com/zanetworker/agentmux/internal/agent"
 )
 
 func TestParseProcessLine(t *testing.T) {
@@ -46,13 +46,13 @@ func TestClassifySource(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  string
-		want model.SourceType
+		want agent.SourceType
 	}{
-		{"CLI", "/usr/local/bin/claude --model opus", model.SourceCLI},
-		{"VSCode", "/Users/test/.vscode/extensions/anthropic.claude-code/node_modules/claude --model opus", model.SourceVSCode},
-		{"VSCode server", "/home/user/.vscode-server/extensions/anthropic.claude-code/bin/claude", model.SourceVSCode},
-		{"SDK", "python -m claude_agent_sdk run", model.SourceSDK},
-		{"plain CLI", "claude chat", model.SourceCLI},
+		{"CLI", "/usr/local/bin/claude --model opus", agent.SourceCLI},
+		{"VSCode", "/Users/test/.vscode/extensions/anthropic.claude-code/node_modules/claude --model opus", agent.SourceVSCode},
+		{"VSCode server", "/home/user/.vscode-server/extensions/anthropic.claude-code/bin/claude", agent.SourceVSCode},
+		{"SDK", "python -m claude_agent_sdk run", agent.SourceSDK},
+		{"plain CLI", "claude chat", agent.SourceCLI},
 	}
 
 	for _, tt := range tests {
@@ -162,8 +162,8 @@ func TestBuildInstance(t *testing.T) {
 	if inst.SessionID != "sess-123" {
 		t.Errorf("SessionID = %q, want %q", inst.SessionID, "sess-123")
 	}
-	if inst.Source != model.SourceCLI {
-		t.Errorf("Source = %v, want %v", inst.Source, model.SourceCLI)
+	if inst.Source != agent.SourceCLI {
+		t.Errorf("Source = %v, want %v", inst.Source, agent.SourceCLI)
 	}
 }
 

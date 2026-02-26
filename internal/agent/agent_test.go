@@ -1,4 +1,4 @@
-package model
+package agent
 
 import (
 	"testing"
@@ -73,8 +73,8 @@ func TestShortModel(t *testing.T) {
 		{"", "default"},
 	}
 	for _, tt := range tests {
-		inst := Instance{Model: tt.model}
-		if got := inst.ShortModel(); got != tt.want {
+		a := Agent{Model: tt.model}
+		if got := a.ShortModel(); got != tt.want {
 			t.Errorf("ShortModel(%q) = %q, want %q", tt.model, got, tt.want)
 		}
 	}
@@ -91,8 +91,8 @@ func TestShortProject(t *testing.T) {
 		{"", ""},
 	}
 	for _, tt := range tests {
-		inst := Instance{WorkingDir: tt.workingDir}
-		if got := inst.ShortProject(); got != tt.want {
+		a := Agent{WorkingDir: tt.workingDir}
+		if got := a.ShortProject(); got != tt.want {
 			t.Errorf("ShortProject(%q) = %q, want %q", tt.workingDir, got, tt.want)
 		}
 	}
@@ -113,8 +113,8 @@ func TestFormatMemory(t *testing.T) {
 		{10240, "10.2G"},
 	}
 	for _, tt := range tests {
-		inst := Instance{MemoryMB: tt.memoryMB}
-		if got := inst.FormatMemory(); got != tt.want {
+		a := Agent{MemoryMB: tt.memoryMB}
+		if got := a.FormatMemory(); got != tt.want {
 			t.Errorf("FormatMemory(%d) = %q, want %q", tt.memoryMB, got, tt.want)
 		}
 	}
@@ -132,14 +132,14 @@ func TestFormatCost(t *testing.T) {
 		{100.999, "$101.00"},
 	}
 	for _, tt := range tests {
-		inst := Instance{EstCostUSD: tt.cost}
-		if got := inst.FormatCost(); got != tt.want {
+		a := Agent{EstCostUSD: tt.cost}
+		if got := a.FormatCost(); got != tt.want {
 			t.Errorf("FormatCost(%f) = %q, want %q", tt.cost, got, tt.want)
 		}
 	}
 }
 
-func TestInstanceIcon(t *testing.T) {
+func TestAgentIcon(t *testing.T) {
 	tests := []struct {
 		status Status
 		want   string
@@ -150,18 +150,21 @@ func TestInstanceIcon(t *testing.T) {
 		{StatusUnknown, "?"},
 	}
 	for _, tt := range tests {
-		inst := Instance{Status: tt.status}
-		if got := inst.Icon(); got != tt.want {
-			t.Errorf("Instance.Icon() with status %v = %q, want %q", tt.status, got, tt.want)
+		a := Agent{Status: tt.status}
+		if got := a.Icon(); got != tt.want {
+			t.Errorf("Agent.Icon() with status %v = %q, want %q", tt.status, got, tt.want)
 		}
 	}
 }
 
-func TestInstanceFullStruct(t *testing.T) {
+func TestAgentFullStruct(t *testing.T) {
 	now := time.Now()
-	inst := Instance{
+	a := Agent{
 		PID:            12345,
 		SessionID:      "sess-abc",
+		Name:           "claudetopus",
+		ProviderName:   "claude",
+		SessionFile:    "/tmp/session.jsonl",
 		Model:          "claude-opus-4-6[1m]",
 		PermissionMode: "default",
 		WorkingDir:     "/Users/user/projects/claudetopus",
@@ -180,22 +183,31 @@ func TestInstanceFullStruct(t *testing.T) {
 		LastActivity:   now,
 	}
 
-	if got := inst.ShortModel(); got != "opus-4.6" {
+	if got := a.ShortModel(); got != "opus-4.6" {
 		t.Errorf("ShortModel() = %q, want %q", got, "opus-4.6")
 	}
-	if got := inst.ShortProject(); got != "claudetopus" {
+	if got := a.ShortProject(); got != "claudetopus" {
 		t.Errorf("ShortProject() = %q, want %q", got, "claudetopus")
 	}
-	if got := inst.FormatMemory(); got != "1.4G" {
+	if got := a.FormatMemory(); got != "1.4G" {
 		t.Errorf("FormatMemory() = %q, want %q", got, "1.4G")
 	}
-	if got := inst.FormatCost(); got != "$0.82" {
+	if got := a.FormatCost(); got != "$0.82" {
 		t.Errorf("FormatCost() = %q, want %q", got, "$0.82")
 	}
-	if got := inst.Icon(); got != "●" {
+	if got := a.Icon(); got != "●" {
 		t.Errorf("Icon() = %q, want %q", got, "●")
 	}
-	if got := inst.Source.String(); got != "CLI" {
+	if got := a.Source.String(); got != "CLI" {
 		t.Errorf("Source.String() = %q, want %q", got, "CLI")
+	}
+	if a.Name != "claudetopus" {
+		t.Errorf("Name = %q, want %q", a.Name, "claudetopus")
+	}
+	if a.ProviderName != "claude" {
+		t.Errorf("ProviderName = %q, want %q", a.ProviderName, "claude")
+	}
+	if a.SessionFile != "/tmp/session.jsonl" {
+		t.Errorf("SessionFile = %q, want %q", a.SessionFile, "/tmp/session.jsonl")
 	}
 }

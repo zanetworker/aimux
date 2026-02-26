@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/agentmux/internal/model"
+	"github.com/zanetworker/agentmux/internal/agent"
 )
 
 // Column widths for the instance table.
@@ -32,7 +32,7 @@ var (
 
 // InstancesView renders the main instance table.
 type InstancesView struct {
-	instances   []model.Instance
+	instances   []agent.Agent
 	cursor      int
 	selectedPID int // track selection by PID across refreshes
 	width       int
@@ -47,7 +47,7 @@ func NewInstancesView() *InstancesView {
 
 // SetInstances updates the list of instances with stable sort order.
 // Preserves cursor position by tracking the selected PID across refreshes.
-func (v *InstancesView) SetInstances(instances []model.Instance) {
+func (v *InstancesView) SetInstances(instances []agent.Agent) {
 	// Sort by PID for stable ordering
 	sort.Slice(instances, func(i, j int) bool {
 		return instances[i].PID < instances[j].PID
@@ -83,7 +83,7 @@ func (v *InstancesView) SetFilter(f string) {
 }
 
 // Selected returns the currently selected instance, or nil.
-func (v *InstancesView) Selected() *model.Instance {
+func (v *InstancesView) Selected() *agent.Agent {
 	f := v.filtered()
 	if v.cursor >= 0 && v.cursor < len(f) {
 		return &f[v.cursor]
@@ -186,26 +186,26 @@ func (v *InstancesView) View() string {
 	return b.String()
 }
 
-func (v *InstancesView) renderStatusIcon(s model.Status) string {
+func (v *InstancesView) renderStatusIcon(s agent.Status) string {
 	icon := s.Icon()
 	switch s {
-	case model.StatusActive:
+	case agent.StatusActive:
 		return activeIcon.Render(icon)
-	case model.StatusIdle:
+	case agent.StatusIdle:
 		return idleIcon.Render(icon)
-	case model.StatusWaitingPermission:
+	case agent.StatusWaitingPermission:
 		return waitingIcon.Render(icon)
 	default:
 		return mutedIcon.Render(icon)
 	}
 }
 
-func (v *InstancesView) filtered() []model.Instance {
+func (v *InstancesView) filtered() []agent.Agent {
 	if v.filter == "" {
 		return v.instances
 	}
 	f := strings.ToLower(v.filter)
-	var out []model.Instance
+	var out []agent.Agent
 	for _, inst := range v.instances {
 		if strings.Contains(strings.ToLower(inst.ShortProject()), f) ||
 			strings.Contains(strings.ToLower(inst.ShortModel()), f) ||

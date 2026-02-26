@@ -1,4 +1,4 @@
-package model
+package agent
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// SourceType represents how a Claude instance was launched.
+// SourceType represents how an agent was launched.
 type SourceType int
 
 const (
@@ -29,7 +29,7 @@ func (s SourceType) String() string {
 	}
 }
 
-// Status represents the current state of a Claude instance.
+// Status represents the current state of an agent.
 type Status int
 
 const (
@@ -70,11 +70,14 @@ func (s Status) Icon() string {
 	}
 }
 
-// Instance represents a running Claude Code session.
-type Instance struct {
+// Agent represents a running AI coding agent session.
+type Agent struct {
 	PID            int
 	SessionID      string
-	Model          string // e.g. "claude-opus-4-6[1m]"
+	Name           string     // project name, derived from WorkingDir
+	ProviderName   string     // "claude", "codex", "gemini"
+	SessionFile    string     // path to conversation log
+	Model          string     // e.g. "claude-opus-4-6[1m]"
 	PermissionMode string
 	WorkingDir     string
 	Source         SourceType
@@ -99,8 +102,8 @@ type Instance struct {
 //	"claude-opus-4-6[1m]"           -> "opus-4.6"
 //	"claude-sonnet-4-5@20250929"    -> "sonnet-4.5"
 //	"claude-haiku-3-5"              -> "haiku-3.5"
-func (i Instance) ShortModel() string {
-	m := i.Model
+func (a Agent) ShortModel() string {
+	m := a.Model
 	if m == "" {
 		return "default"
 	}
@@ -130,11 +133,11 @@ func (i Instance) ShortModel() string {
 }
 
 // ShortProject returns the last path segment of WorkingDir.
-func (i Instance) ShortProject() string {
-	if i.WorkingDir == "" {
+func (a Agent) ShortProject() string {
+	if a.WorkingDir == "" {
 		return ""
 	}
-	return filepath.Base(i.WorkingDir)
+	return filepath.Base(a.WorkingDir)
 }
 
 // FormatMemory returns a human-friendly memory string.
@@ -144,12 +147,12 @@ func (i Instance) ShortProject() string {
 //	405  -> "405M"
 //	1400 -> "1.4G"
 //	0    -> "0M"
-func (i Instance) FormatMemory() string {
-	if i.MemoryMB >= 1000 {
-		gb := float64(i.MemoryMB) / 1000.0
+func (a Agent) FormatMemory() string {
+	if a.MemoryMB >= 1000 {
+		gb := float64(a.MemoryMB) / 1000.0
 		return fmt.Sprintf("%.1fG", gb)
 	}
-	return fmt.Sprintf("%dM", i.MemoryMB)
+	return fmt.Sprintf("%dM", a.MemoryMB)
 }
 
 // FormatCost returns the estimated cost formatted as a dollar amount.
@@ -159,11 +162,11 @@ func (i Instance) FormatMemory() string {
 //	0.82  -> "$0.82"
 //	12.5  -> "$12.50"
 //	0     -> "$0.00"
-func (i Instance) FormatCost() string {
-	return fmt.Sprintf("$%.2f", i.EstCostUSD)
+func (a Agent) FormatCost() string {
+	return fmt.Sprintf("$%.2f", a.EstCostUSD)
 }
 
-// Icon returns the status icon for this instance.
-func (i Instance) Icon() string {
-	return i.Status.Icon()
+// Icon returns the status icon for this agent.
+func (a Agent) Icon() string {
+	return a.Status.Icon()
 }

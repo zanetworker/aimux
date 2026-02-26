@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zanetworker/agentmux/internal/agent"
 	"github.com/zanetworker/agentmux/internal/cost"
-	"github.com/zanetworker/agentmux/internal/model"
 )
 
 // Orchestrator coordinates all discovery sources to produce enriched instances.
@@ -25,7 +25,7 @@ func NewOrchestrator() *Orchestrator {
 }
 
 // Discover finds all Claude instances and enriches them with session and tmux data.
-func (o *Orchestrator) Discover() ([]model.Instance, error) {
+func (o *Orchestrator) Discover() ([]agent.Agent, error) {
 	instances, err := ScanProcesses()
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func (o *Orchestrator) Discover() ([]model.Instance, error) {
 	return instances, nil
 }
 
-func (o *Orchestrator) enrichInstance(inst *model.Instance, tmuxSessions []tmuxSession) {
+func (o *Orchestrator) enrichInstance(inst *agent.Agent, tmuxSessions []tmuxSession) {
 	// Resolve working directory
 	if inst.WorkingDir == "" {
 		cwd, err := getProcessCwd(inst.PID)
@@ -95,9 +95,9 @@ func (o *Orchestrator) enrichInstance(inst *model.Instance, tmuxSessions []tmuxS
 
 			// Determine status from activity
 			if time.Since(info.LastTimestamp) < 30*time.Second {
-				inst.Status = model.StatusActive
+				inst.Status = agent.StatusActive
 			} else if !info.LastTimestamp.IsZero() {
-				inst.Status = model.StatusIdle
+				inst.Status = agent.StatusIdle
 			}
 		}
 	}

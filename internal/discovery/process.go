@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/model"
+	"github.com/zanetworker/agentmux/internal/agent"
 )
 
 // rawProcess holds fields parsed from ps output.
@@ -58,14 +58,14 @@ func parseProcessLine(line string) (rawProcess, error) {
 }
 
 // classifySource detects how a Claude instance was launched.
-func classifySource(cmd string) model.SourceType {
+func classifySource(cmd string) agent.SourceType {
 	if strings.Contains(cmd, ".vscode/extensions/") || strings.Contains(cmd, ".vscode-server/") {
-		return model.SourceVSCode
+		return agent.SourceVSCode
 	}
 	if strings.Contains(cmd, "claude_agent_sdk") {
-		return model.SourceSDK
+		return agent.SourceSDK
 	}
-	return model.SourceCLI
+	return agent.SourceCLI
 }
 
 // extractFlag extracts the value following a CLI flag from a command string.
@@ -134,13 +134,13 @@ func isClaudeProcess(line string) bool {
 
 // ScanProcesses runs `ps aux`, parses each line, and returns Instance stubs
 // for every detected Claude process.
-func ScanProcesses() ([]model.Instance, error) {
+func ScanProcesses() ([]agent.Agent, error) {
 	out, err := exec.Command("ps", "aux").Output()
 	if err != nil {
 		return nil, fmt.Errorf("ps aux: %w", err)
 	}
 
-	var instances []model.Instance
+	var instances []agent.Agent
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines[1:] { // skip header
 		line = strings.TrimSpace(line)
@@ -159,8 +159,8 @@ func ScanProcesses() ([]model.Instance, error) {
 	return instances, nil
 }
 
-// buildInstance creates a model.Instance from a rawProcess.
-func buildInstance(proc rawProcess) model.Instance {
+// buildInstance creates a agent.Agent from a rawProcess.
+func buildInstance(proc rawProcess) agent.Agent {
 	perm := extractFlag(proc.Command, "--permission-mode")
 	// Detect bypass from --dangerously-skip-permissions flag
 	if perm == "" && strings.Contains(proc.Command, "--dangerously-skip-permissions") {
@@ -173,14 +173,14 @@ func buildInstance(proc rawProcess) model.Instance {
 		perm = "default"
 	}
 
-	return model.Instance{
+	return agent.Agent{
 		PID:            proc.PID,
 		MemoryMB:       proc.MemoryKB / 1024,
 		Source:         classifySource(proc.Command),
 		Model:          extractFlag(proc.Command, "--model"),
 		PermissionMode: perm,
 		SessionID:      extractSessionID(proc.Command),
-		Status:         model.StatusUnknown,
+		Status:         agent.StatusUnknown,
 		LastActivity:   time.Now(),
 	}
 }
