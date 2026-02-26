@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/agentmux/internal/agent"
 	"github.com/zanetworker/agentmux/internal/discovery"
-	"github.com/zanetworker/agentmux/internal/jump"
 	"github.com/zanetworker/agentmux/internal/provider"
 	"github.com/zanetworker/agentmux/internal/team"
 	"github.com/zanetworker/agentmux/internal/tui/views"
@@ -35,6 +34,10 @@ type instancesMsg []agent.Agent
 type teamsMsg []team.TeamConfig
 
 // App is the root Bubble Tea model that wires all views together.
+// It implements a three-state layout machine:
+//   - Split view (default): agents table on left (~35%) + preview pane on right (~65%)
+//   - Zoomed session: full-screen interactive PTY
+//   - Sub-views: costs, teams, help (full-screen, non-interactive)
 type App struct {
 	// State
 	currentView viewType
@@ -44,12 +47,18 @@ type App struct {
 	height      int
 
 	// Sub-views
-	headerView *views.HeaderView
-	agentsView *views.AgentsView
-	logsView   *views.LogsView
-	costsView  *views.CostsView
-	teamsView  *views.TeamsView
-	helpView   *views.HelpView
+	headerView  *views.HeaderView
+	agentsView  *views.AgentsView
+	previewPane *views.PreviewPane
+	sessionView *views.SessionView
+	logsView    *views.LogsView
+	costsView   *views.CostsView
+	teamsView   *views.TeamsView
+	helpView    *views.HelpView
+
+	// Layout
+	layout *Layout
+	zoomed bool
 
 	// Command palette
 	commandMode  bool
@@ -62,6 +71,11 @@ type App struct {
 	// Discovery
 	orchestrator *discovery.Orchestrator
 
+	// Provider access for ResumeCommand — the orchestrator's AgentProvider
+	// interface only exposes Name() and Discover(), so we keep the full
+	// provider.Provider slice for ResumeCommand lookups.
+	providers []provider.Provider
+
 	// Breadcrumb trail
 	breadcrumbs []string
 
@@ -71,19 +85,31 @@ type App struct {
 
 // NewApp creates a new root TUI application.
 func NewApp() App {
+	providers := []provider.Provider{
+		&provider.Claude{},
+		&provider.Codex{},
+		&provider.Gemini{},
+	}
+
+	// Build AgentProvider slice for the orchestrator from the same providers.
+	agentProviders := make([]discovery.AgentProvider, len(providers))
+	for i, p := range providers {
+		agentProviders[i] = p
+	}
+
 	return App{
-		currentView: viewAgents,
-		headerView:  views.NewHeaderView(),
-		agentsView:  views.NewAgentsView(),
-		costsView:   views.NewCostsView(),
-		teamsView:   views.NewTeamsView(),
-		helpView:    views.NewHelpView(),
-		orchestrator: discovery.NewOrchestrator(
-			&provider.Claude{},
-			&provider.Codex{},
-			&provider.Gemini{},
-		),
-		breadcrumbs: []string{"Agents"},
+		currentView:  viewAgents,
+		headerView:   views.NewHeaderView(),
+		agentsView:   views.NewAgentsView(),
+		previewPane:  views.NewPreviewPane(),
+		sessionView:  views.NewSessionView(),
+		costsView:    views.NewCostsView(),
+		teamsView:    views.NewTeamsView(),
+		helpView:     views.NewHelpView(),
+		layout:       NewLayout(0, 0),
+		orchestrator: discovery.NewOrchestrator(agentProviders...),
+		providers:    providers,
+		breadcrumbs:  []string{"Agents"},
 	}
 }
 
@@ -116,7 +142,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.headerView.SetWidth(a.width)
 		a.resizeViews()
 		return a, nil
 
@@ -138,7 +163,27 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.teamsView.SetTeams(a.teams)
 		return a, nil
 
+	case views.PTYOutputMsg:
+		if a.sessionView != nil {
+			cmd := a.sessionView.HandleOutput(msg.Data)
+			return a, cmd
+		}
+		return a, nil
+
+	case views.PTYExitMsg:
+		a.zoomed = false
+		a.layout.SetZoomed(false)
+		if a.sessionView != nil {
+			a.sessionView.Close()
+		}
+		return a, nil
+
 	case tea.KeyMsg:
+		// When zoomed into a session, intercept only Ctrl+] to zoom out.
+		// All other keys are forwarded to the PTY subprocess.
+		if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
+			return a.handleZoomedKey(msg)
+		}
 		if a.commandMode {
 			return a.handleCommandInput(msg)
 		}
@@ -148,6 +193,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleKey(msg)
 	}
 	return a, nil
+}
+
+// handleZoomedKey processes keys while the session view is zoomed in.
+// Only Ctrl+] zooms out; everything else goes to the PTY.
+func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+]":
+		a.zoomed = false
+		a.layout.SetZoomed(false)
+		return a, nil
+	default:
+		a.sessionView.SendKey(msg.String())
+		return a, nil
+	}
 }
 
 func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -193,12 +252,20 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch a.currentView {
 	case viewAgents:
 		a.agentsView.Update(msg)
+		// Update preview pane when cursor moves
+		a.syncPreview()
 	case viewLogs:
 		if a.logsView != nil {
 			a.logsView.Update(msg)
 		}
 	}
 	return a, nil
+}
+
+// syncPreview updates the preview pane with the currently selected agent.
+func (a *App) syncPreview() {
+	selected := a.agentsView.Selected()
+	a.previewPane.SetAgent(selected)
 }
 
 func (a App) handleCommandInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -275,59 +342,61 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleEnter() (tea.Model, tea.Cmd) {
-	if a.currentView == viewAgents {
-		selected := a.agentsView.Selected()
-		if selected == nil {
-			return a, nil
-		}
-
-		// If the instance is running in a known tmux session, switch to it
-		tmuxTarget := a.findTmuxTarget(selected)
-		if tmuxTarget != "" {
-			cmd := jump.SuspendAndAttach(tmuxTarget)
-			return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
-		}
-
-		// Try to open a split pane (tmux or iTerm2)
-		result, err := jump.ResumeInPane(selected.SessionID, selected.WorkingDir)
-		if err != nil {
-			a.statusHint = fmt.Sprintf("Error: %v", err)
-			return a, nil
-		}
-		if result != nil {
-			// Split pane opened successfully
-			a.statusHint = result.Hint
-			return a, nil
-		}
-
-		// Fallback: suspend TUI and run claude directly
-		// User exits Claude with /exit or Ctrl+C to return here
-		cmd := jump.ResumeCmd(selected.SessionID, selected.WorkingDir)
-		if cmd == nil {
-			a.statusHint = "No session data available for this instance"
-			return a, nil
-		}
-		return a, tea.ExecProcess(cmd, func(err error) tea.Msg { return nil })
+	if a.currentView != viewAgents {
+		return a, nil
 	}
-	return a, nil
+	selected := a.agentsView.Selected()
+	if selected == nil {
+		return a, nil
+	}
+
+	// Find the full provider.Provider for ResumeCommand access.
+	p := a.providerFor(selected.ProviderName)
+	if p == nil {
+		a.statusHint = "No provider for " + selected.ProviderName
+		return a, nil
+	}
+
+	cmd := p.ResumeCommand(*selected)
+	if cmd == nil {
+		a.statusHint = "No session data available for this instance"
+		return a, nil
+	}
+
+	// Open PTY session in the session view and zoom in.
+	teaCmd, err := a.sessionView.Open(selected, cmd)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Error: %v", err)
+		return a, nil
+	}
+
+	a.zoomed = true
+	a.layout.SetZoomed(true)
+	return a, teaCmd
 }
 
-// findTmuxTarget finds a matching tmux session for the instance.
-func (a App) findTmuxTarget(inst *agent.Agent) string {
-	if inst.TMuxSession != "" && jump.TmuxHasSession(inst.TMuxSession) {
-		return inst.TMuxSession
-	}
-	if inst.WorkingDir != "" {
-		project := inst.ShortProject()
-		if project != "" {
-			for _, candidate := range []string{"claude-" + project, project} {
-				if jump.TmuxHasSession(candidate) {
-					return candidate
-				}
-			}
+// providerFor returns the full provider.Provider whose Name() matches, or nil.
+func (a App) providerFor(name string) provider.Provider {
+	for _, p := range a.providers {
+		if p.Name() == name {
+			return p
 		}
 	}
-	return ""
+	return nil
+}
+
+// statusMsg is shown briefly in the status bar.
+type statusMsg struct {
+	text string
+}
+
+func (a App) handleJump() (tea.Model, tea.Cmd) {
+	selected := a.agentsView.Selected()
+	if selected == nil {
+		return a, nil
+	}
+	// J always opens a zoomed session (same as Enter)
+	return a.handleEnter()
 }
 
 func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
@@ -351,20 +420,6 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 	return a.navigateTo(viewLogs, fmt.Sprintf("Logs [PID %d]", selected.PID))
 }
 
-// statusMsg is shown briefly in the status bar.
-type statusMsg struct {
-	text string
-}
-
-func (a App) handleJump() (tea.Model, tea.Cmd) {
-	selected := a.agentsView.Selected()
-	if selected == nil {
-		return a, nil
-	}
-	// J always opens a split pane (same as Enter)
-	return a.handleEnter()
-}
-
 func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
 	a.currentView = v
 	if v == viewAgents {
@@ -386,17 +441,24 @@ func (a App) navigateBack() (tea.Model, tea.Cmd) {
 }
 
 func (a *App) resizeViews() {
+	a.layout.SetSize(a.width, a.height)
+	a.headerView.SetWidth(a.width)
+
 	headerHeight := a.headerView.Height()
-	contentHeight := a.height - headerHeight - 1
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
-	a.agentsView.SetSize(a.width, contentHeight)
+	contentHeight := a.layout.ContentHeight(headerHeight)
+
+	leftW, rightW := a.layout.SplitVertical(35)
+
+	a.agentsView.SetSize(leftW, contentHeight)
+	a.previewPane.SetSize(rightW, contentHeight)
 	a.costsView.SetSize(a.width, contentHeight)
 	a.teamsView.SetSize(a.width, contentHeight)
 	a.helpView.SetSize(a.width, contentHeight)
 	if a.logsView != nil {
 		a.logsView.SetSize(a.width, contentHeight)
+	}
+	if a.sessionView != nil {
+		a.sessionView.SetSize(a.width, a.height)
 	}
 }
 
@@ -407,12 +469,30 @@ func (a App) View() string {
 		return "Loading..."
 	}
 
+	// Zoomed: full-screen session — no header, no status bar.
+	if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
+		return a.sessionView.View()
+	}
+
 	header := a.headerView.View()
+	headerHeight := a.headerView.Height()
+	contentHeight := a.layout.ContentHeight(headerHeight)
 
 	var content string
 	switch a.currentView {
 	case viewAgents:
-		content = a.agentsView.View()
+		leftW, rightW := a.layout.SplitVertical(35)
+		a.agentsView.SetSize(leftW, contentHeight)
+		a.previewPane.SetSize(rightW, contentHeight)
+
+		// Update preview with currently selected agent
+		selected := a.agentsView.Selected()
+		a.previewPane.SetAgent(selected)
+
+		content = lipgloss.JoinHorizontal(lipgloss.Top,
+			a.agentsView.View(),
+			a.previewPane.View(),
+		)
 	case viewLogs:
 		if a.logsView != nil {
 			content = a.logsView.View()
@@ -430,7 +510,6 @@ func (a App) View() string {
 	statusBar := a.renderStatusBar()
 
 	// Pad content to fill the screen
-	headerHeight := a.headerView.Height()
 	contentLines := strings.Count(content, "\n") + 1
 	availableHeight := a.height - headerHeight - 1
 	if contentLines < availableHeight {
@@ -466,7 +545,7 @@ func (a App) renderStatusBar() string {
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(colorWaiting).Render(a.statusHint)
 	} else {
-		hints = " :command  j/k:nav  Enter:open pane  l:trace  /:filter  ?:help"
+		hints = " :cmd  j/k:nav  Enter:zoom  l:trace  /:filter  ?:help"
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
 		}

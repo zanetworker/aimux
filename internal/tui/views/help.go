@@ -36,7 +36,8 @@ func (v *HelpView) View() string {
 	b.WriteString(helpTitleStyle.Render("Navigation"))
 	b.WriteString("\n")
 	writeHelp(&b, "j/k", "Move cursor down/up")
-	writeHelp(&b, "Enter", "Resume session (tmux attach or claude --resume)")
+	writeHelp(&b, "Enter", "Zoom into session (interactive PTY)")
+	writeHelp(&b, "Ctrl+]", "Zoom out of session")
 	writeHelp(&b, "Esc", "Go back")
 	writeHelp(&b, "g/G", "Jump to top / bottom")
 	writeHelp(&b, "/", "Filter instances")
@@ -57,7 +58,8 @@ func (v *HelpView) View() string {
 
 	b.WriteString(helpTitleStyle.Render("Actions"))
 	b.WriteString("\n")
-	writeHelp(&b, "Enter / J", "Resume session (tmux or claude --resume)")
+	writeHelp(&b, "Enter / J", "Zoom into interactive PTY session")
+	writeHelp(&b, "Ctrl+]", "Zoom out (keep session alive)")
 	writeHelp(&b, "l", "View conversation trace")
 	writeHelp(&b, "d / u", "Page down / up in trace")
 
