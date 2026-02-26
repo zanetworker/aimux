@@ -156,6 +156,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewLogs && a.logsView != nil {
 			a.logsView.Reload()
 		}
+		// Refresh preview pane conversation data on tick
+		if a.currentView == viewAgents {
+			a.previewPane.Reload()
+		}
 		return a, nil
 
 	case teamsMsg:
@@ -196,12 +200,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleZoomedKey processes keys while the session view is zoomed in.
-// Only Ctrl+] zooms out; everything else goes to the PTY.
+// Ctrl+] or Esc+Esc zooms out; everything else goes to the PTY.
 func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+]":
+	case "ctrl+]", "ctrl+\\":
 		a.zoomed = false
 		a.layout.SetZoomed(false)
+		// Close the PTY session when zooming out
+		a.sessionView.Close()
 		return a, nil
 	default:
 		a.sessionView.SendKey(msg.String())

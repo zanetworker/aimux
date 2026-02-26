@@ -37,7 +37,7 @@ func (v *HelpView) View() string {
 	b.WriteString("\n")
 	writeHelp(&b, "j/k", "Move cursor down/up")
 	writeHelp(&b, "Enter", "Zoom into agent session (interactive PTY)")
-	writeHelp(&b, "Ctrl+]", "Zoom out of session")
+	writeHelp(&b, "Ctrl+] / Ctrl+\\", "Zoom out of session")
 	writeHelp(&b, "Esc", "Go back")
 	writeHelp(&b, "g/G", "Jump to top / bottom")
 	writeHelp(&b, "/", "Filter agents")

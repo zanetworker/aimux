@@ -96,12 +96,91 @@ func (sv *SessionView) HandleOutput(data []byte) tea.Cmd {
 	return sv.readPTY()
 }
 
-// SendKey forwards a keystroke string to the PTY subprocess.
+// SendKey forwards a keystroke to the PTY subprocess, translating Bubble Tea
+// key names to their actual terminal byte sequences.
 func (sv *SessionView) SendKey(key string) {
 	if sv.session == nil || !sv.active {
 		return
 	}
-	_, _ = sv.session.Write([]byte(key))
+	data := keyToBytes(key)
+	if len(data) > 0 {
+		_, _ = sv.session.Write(data)
+	}
+}
+
+// keyToBytes converts a Bubble Tea key string to the raw bytes a terminal
+// would send. Single printable characters pass through as-is. Named keys
+// are mapped to their ANSI escape sequences or control codes.
+func keyToBytes(key string) []byte {
+	// Single printable character — pass through directly
+	if len(key) == 1 {
+		return []byte(key)
+	}
+
+	switch key {
+	case "enter":
+		return []byte{'\r'}
+	case "tab":
+		return []byte{'\t'}
+	case "backspace":
+		return []byte{0x7f}
+	case "esc", "escape":
+		return []byte{0x1b}
+	case "space":
+		return []byte{' '}
+	case "up":
+		return []byte("\x1b[A")
+	case "down":
+		return []byte("\x1b[B")
+	case "right":
+		return []byte("\x1b[C")
+	case "left":
+		return []byte("\x1b[D")
+	case "home":
+		return []byte("\x1b[H")
+	case "end":
+		return []byte("\x1b[F")
+	case "pgup":
+		return []byte("\x1b[5~")
+	case "pgdown":
+		return []byte("\x1b[6~")
+	case "delete":
+		return []byte("\x1b[3~")
+	case "insert":
+		return []byte("\x1b[2~")
+	}
+
+	// Ctrl+letter: ctrl+a=0x01, ctrl+b=0x02, ..., ctrl+z=0x1a
+	if strings.HasPrefix(key, "ctrl+") {
+		ch := key[5:]
+		if len(ch) == 1 && ch[0] >= 'a' && ch[0] <= 'z' {
+			return []byte{ch[0] - 'a' + 1}
+		}
+		// Ctrl+[ = ESC (0x1b), Ctrl+] = 0x1d, Ctrl+\ = 0x1c
+		switch ch {
+		case "[":
+			return []byte{0x1b}
+		case "\\":
+			return []byte{0x1c}
+		case "]":
+			return []byte{0x1d}
+		}
+	}
+
+	// Function keys
+	switch key {
+	case "f1":
+		return []byte("\x1bOP")
+	case "f2":
+		return []byte("\x1bOQ")
+	case "f3":
+		return []byte("\x1bOR")
+	case "f4":
+		return []byte("\x1bOS")
+	}
+
+	// Unknown key — try sending as-is (covers multi-byte UTF-8 chars)
+	return []byte(key)
 }
 
 // SetSize resizes the PTY and VT emulator to fit the new dimensions.

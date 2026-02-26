@@ -40,11 +40,20 @@ func NewPreviewPane() *PreviewPane {
 }
 
 // SetAgent updates the agent whose conversation is displayed. It reloads the
-// conversation from the agent's SessionFile. If the agent is nil or has no
-// SessionFile, the pane shows a placeholder message.
+// conversation from the agent's SessionFile only if the agent changed.
+// If the agent is nil or has no SessionFile, the pane shows a placeholder.
 func (p *PreviewPane) SetAgent(a *agent.Agent) {
+	if a == nil {
+		p.agent = nil
+		p.logsView = nil
+		return
+	}
+	// Skip reload if same agent (by PID)
+	if p.agent != nil && p.agent.PID == a.PID {
+		return
+	}
 	p.agent = a
-	if a == nil || a.SessionFile == "" {
+	if a.SessionFile == "" {
 		p.logsView = nil
 		return
 	}
