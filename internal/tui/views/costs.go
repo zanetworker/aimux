@@ -28,9 +28,9 @@ func NewCostsView() *CostsView {
 	return &CostsView{}
 }
 
-// SetInstances updates the instances used for cost aggregation.
-func (v *CostsView) SetInstances(instances []agent.Agent) {
-	v.instances = instances
+// SetAgents updates the agents used for cost aggregation.
+func (v *CostsView) SetAgents(agents []agent.Agent) {
+	v.instances = agents
 }
 
 // SetSize sets the available width and height.
@@ -41,6 +41,7 @@ func (v *CostsView) SetSize(w, h int) {
 
 type projectCost struct {
 	project   string
+	provider  string
 	model     string
 	tokensIn  int64
 	tokensOut int64
@@ -62,7 +63,11 @@ func (v *CostsView) View() string {
 		}
 		pc, ok := agg[proj]
 		if !ok {
-			pc = &projectCost{project: proj, model: inst.ShortModel()}
+			prov := inst.ProviderName
+			if prov == "" {
+				prov = "unknown"
+			}
+			pc = &projectCost{project: proj, provider: prov, model: inst.ShortModel()}
 			agg[proj] = pc
 		}
 		pc.tokensIn += inst.TokensIn
@@ -82,8 +87,8 @@ func (v *CostsView) View() string {
 	var b strings.Builder
 
 	// Header
-	header := fmt.Sprintf("%-20s %-14s %12s %12s %10s",
-		"PROJECT", "MODEL", "TOKENS IN", "TOKENS OUT", "COST",
+	header := fmt.Sprintf("%-20s %-10s %-14s %12s %12s %10s",
+		"PROJECT", "AGENT", "MODEL", "TOKENS IN", "TOKENS OUT", "COST",
 	)
 	b.WriteString(costHeaderStyle.Render(header))
 	b.WriteString("\n")
@@ -96,8 +101,9 @@ func (v *CostsView) View() string {
 		totalOut += row.tokensOut
 		totalCost += row.cost
 
-		line := fmt.Sprintf("%-20s %-14s %12s %12s %10s",
+		line := fmt.Sprintf("%-20s %-10s %-14s %12s %12s %10s",
 			truncate(row.project, 20),
+			truncate(row.provider, 10),
 			truncate(row.model, 14),
 			formatTokens(row.tokensIn),
 			formatTokens(row.tokensOut),
@@ -108,13 +114,13 @@ func (v *CostsView) View() string {
 	}
 
 	// Separator
-	sep := strings.Repeat("─", 70)
+	sep := strings.Repeat("─", 80)
 	b.WriteString(separatorStyle.Render(sep))
 	b.WriteString("\n")
 
 	// Total
-	total := fmt.Sprintf("%-20s %-14s %12s %12s %10s",
-		"TOTAL", "",
+	total := fmt.Sprintf("%-20s %-10s %-14s %12s %12s %10s",
+		"TOTAL", "", "",
 		formatTokens(totalIn),
 		formatTokens(totalOut),
 		costValueStyle.Render(fmt.Sprintf("$%.2f", totalCost)),

@@ -152,7 +152,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.instances = []agent.Agent(msg)
 		a.agentsView.SetAgents(a.instances)
 		a.headerView.SetAgents(a.instances)
-		a.costsView.SetInstances(a.instances)
+		a.costsView.SetAgents(a.instances)
 		if a.currentView == viewLogs && a.logsView != nil {
 			a.logsView.Reload()
 		}
