@@ -11,7 +11,8 @@ import (
 var (
 	teamHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
 	memberStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
-	agentTypeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	agentTypeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	teamMutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 )
 
 // TeamsView renders the teams overview.
@@ -40,7 +41,7 @@ func (v *TeamsView) SetSize(w, h int) {
 // View renders the teams display.
 func (v *TeamsView) View() string {
 	if len(v.teams) == 0 {
-		return mutedIcon.Render("  No teams configured.")
+		return teamMutedStyle.Render("  No teams configured.")
 	}
 
 	var b strings.Builder

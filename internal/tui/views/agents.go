@@ -10,29 +10,36 @@ import (
 	"github.com/zanetworker/agentmux/internal/agent"
 )
 
-// Column widths for the instance table.
+// Column widths for the agents table — k9s-style.
 const (
-	colPID    = 8
-	colStatus = 10
-	colModel  = 14
-	colProject = 20
-	colPerm   = 10
-	colMem    = 8
-	colCostW  = 8
+	colName  = 22
+	colAgent = 10
+	colModel = 14
+	colMode  = 14
+	colAge   = 8
+	colCostA = 8
 )
 
 var (
-	headerStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5E7EB"))
-	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("#374151"))
-	activeIcon    = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
-	idleIcon      = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	waitingIcon   = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
-	mutedIcon     = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	// Table header: blue text on dark blue background.
+	tableHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#5F87FF")).
+				Background(lipgloss.Color("#1E293B"))
+
+	// Selected row: dark blue background.
+	agentSelectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("#1E3A5F"))
+
+	// Status icon styles.
+	agentActiveIcon  = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	agentIdleIcon    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	agentWaitingIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+	agentMutedIcon   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 )
 
-// InstancesView renders the main instance table.
-type InstancesView struct {
-	instances   []agent.Agent
+// AgentsView renders the main agents table with k9s-style columns.
+type AgentsView struct {
+	agents      []agent.Agent
 	cursor      int
 	selectedPID int // track selection by PID across refreshes
 	width       int
@@ -40,50 +47,50 @@ type InstancesView struct {
 	filter      string
 }
 
-// NewInstancesView creates a new InstancesView.
-func NewInstancesView() *InstancesView {
-	return &InstancesView{}
+// NewAgentsView creates a new AgentsView.
+func NewAgentsView() *AgentsView {
+	return &AgentsView{}
 }
 
-// SetInstances updates the list of instances with stable sort order.
+// SetAgents updates the list of agents with stable sort order.
 // Preserves cursor position by tracking the selected PID across refreshes.
-func (v *InstancesView) SetInstances(instances []agent.Agent) {
+func (v *AgentsView) SetAgents(agents []agent.Agent) {
 	// Sort by PID for stable ordering
-	sort.Slice(instances, func(i, j int) bool {
-		return instances[i].PID < instances[j].PID
+	sort.Slice(agents, func(i, j int) bool {
+		return agents[i].PID < agents[j].PID
 	})
-	v.instances = instances
+	v.agents = agents
 
 	// Restore cursor to the same PID if it still exists
 	if v.selectedPID != 0 {
 		f := v.filtered()
-		for i, inst := range f {
-			if inst.PID == v.selectedPID {
+		for i, a := range f {
+			if a.PID == v.selectedPID {
 				v.cursor = i
 				return
 			}
 		}
 	}
-	// PID gone or no previous selection — clamp cursor
+	// PID gone or no previous selection - clamp cursor
 	if v.cursor >= len(v.filtered()) {
 		v.cursor = max(0, len(v.filtered())-1)
 	}
 }
 
 // SetSize sets the available width and height.
-func (v *InstancesView) SetSize(w, h int) {
+func (v *AgentsView) SetSize(w, h int) {
 	v.width = w
 	v.height = h
 }
 
-// SetFilter sets a filter string for instances.
-func (v *InstancesView) SetFilter(f string) {
+// SetFilter sets a filter string for agents.
+func (v *AgentsView) SetFilter(f string) {
 	v.filter = f
 	v.cursor = 0
 }
 
-// Selected returns the currently selected instance, or nil.
-func (v *InstancesView) Selected() *agent.Agent {
+// Selected returns the currently selected agent, or nil.
+func (v *AgentsView) Selected() *agent.Agent {
 	f := v.filtered()
 	if v.cursor >= 0 && v.cursor < len(f) {
 		return &f[v.cursor]
@@ -92,12 +99,12 @@ func (v *InstancesView) Selected() *agent.Agent {
 }
 
 // Cursor returns the current cursor position.
-func (v *InstancesView) Cursor() int {
+func (v *AgentsView) Cursor() int {
 	return v.cursor
 }
 
 // Update handles key messages for navigation.
-func (v *InstancesView) Update(msg tea.Msg) {
+func (v *AgentsView) Update(msg tea.Msg) {
 	f := v.filtered()
 	if len(f) == 0 {
 		return
@@ -125,26 +132,29 @@ func (v *InstancesView) Update(msg tea.Msg) {
 	}
 }
 
-// View renders the instance table.
-func (v *InstancesView) View() string {
+// View renders the agents table with k9s-style headers and status icons.
+func (v *AgentsView) View() string {
 	var b strings.Builder
 
-	// Header
-	header := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-		colPID, "PID",
-		colStatus, "STATUS",
+	// Header row: k9s-style blue on dark blue
+	header := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s %-*s",
+		colName, "NAME",
+		colAgent, "AGENT",
 		colModel, "MODEL",
-		colProject, "PROJECT",
-		colPerm, "PERM",
-		colMem, "MEM",
-		colCostW, "COST",
+		colMode, "MODE",
+		colAge, "AGE",
+		colCostA, "COST",
 	)
-	b.WriteString(headerStyle.Render(header))
+	// Pad header to full width
+	if len(header) < v.width {
+		header += strings.Repeat(" ", v.width-len(header))
+	}
+	b.WriteString(tableHeaderStyle.Render(header))
 	b.WriteString("\n")
 
 	f := v.filtered()
 	if len(f) == 0 {
-		b.WriteString(mutedIcon.Render("  No instances found."))
+		b.WriteString(agentMutedIcon.Render("  No agents found."))
 		return b.String()
 	}
 
@@ -163,20 +173,27 @@ func (v *InstancesView) View() string {
 	}
 
 	for idx := start; idx < end; idx++ {
-		inst := f[idx]
-		icon := v.renderStatusIcon(inst.Status)
-		row := fmt.Sprintf("%-*d %s %-*s %-*s %-*s %-*s %-*s %-*s",
-			colPID, inst.PID,
-			icon,
-			colStatus-2, inst.Status.String(),
-			colModel, inst.ShortModel(),
-			colProject, truncate(inst.ShortProject(), colProject),
-			colPerm, truncate(inst.PermissionMode, colPerm),
-			colMem, inst.FormatMemory(),
-			colCostW, inst.FormatCost(),
+		a := f[idx]
+		icon := v.renderStatusIcon(a.Status)
+
+		// Format: ▸● name
+		nameCol := fmt.Sprintf("▸%s %s", icon, truncate(a.ShortProject(), colName-3))
+
+		row := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s %-*s",
+			colName, nameCol,
+			colAgent, truncate(a.ProviderName, colAgent),
+			colModel, truncate(a.ShortModel(), colModel),
+			colMode, truncate(a.PermissionMode, colMode),
+			colAge, a.FormatAge(),
+			colCostA, a.FormatCost(),
 		)
+
 		if idx == v.cursor {
-			b.WriteString(selectedStyle.Render(row))
+			// Pad to full width for selected background
+			if lipgloss.Width(row) < v.width {
+				row += strings.Repeat(" ", v.width-lipgloss.Width(row))
+			}
+			b.WriteString(agentSelectedStyle.Render(row))
 		} else {
 			b.WriteString(row)
 		}
@@ -186,32 +203,33 @@ func (v *InstancesView) View() string {
 	return b.String()
 }
 
-func (v *InstancesView) renderStatusIcon(s agent.Status) string {
+func (v *AgentsView) renderStatusIcon(s agent.Status) string {
 	icon := s.Icon()
 	switch s {
 	case agent.StatusActive:
-		return activeIcon.Render(icon)
+		return agentActiveIcon.Render(icon)
 	case agent.StatusIdle:
-		return idleIcon.Render(icon)
+		return agentIdleIcon.Render(icon)
 	case agent.StatusWaitingPermission:
-		return waitingIcon.Render(icon)
+		return agentWaitingIcon.Render(icon)
 	default:
-		return mutedIcon.Render(icon)
+		return agentMutedIcon.Render(icon)
 	}
 }
 
-func (v *InstancesView) filtered() []agent.Agent {
+func (v *AgentsView) filtered() []agent.Agent {
 	if v.filter == "" {
-		return v.instances
+		return v.agents
 	}
 	f := strings.ToLower(v.filter)
 	var out []agent.Agent
-	for _, inst := range v.instances {
-		if strings.Contains(strings.ToLower(inst.ShortProject()), f) ||
-			strings.Contains(strings.ToLower(inst.ShortModel()), f) ||
-			strings.Contains(strings.ToLower(inst.Status.String()), f) ||
-			strings.Contains(strings.ToLower(inst.Source.String()), f) {
-			out = append(out, inst)
+	for _, a := range v.agents {
+		if strings.Contains(strings.ToLower(a.ShortProject()), f) ||
+			strings.Contains(strings.ToLower(a.ShortModel()), f) ||
+			strings.Contains(strings.ToLower(a.Status.String()), f) ||
+			strings.Contains(strings.ToLower(a.Source.String()), f) ||
+			strings.Contains(strings.ToLower(a.ProviderName), f) {
+			out = append(out, a)
 		}
 	}
 	return out

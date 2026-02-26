@@ -170,3 +170,28 @@ func (a Agent) FormatCost() string {
 func (a Agent) Icon() string {
 	return a.Status.Icon()
 }
+
+// FormatAge returns a human-friendly age string based on StartTime or LastActivity.
+func (a Agent) FormatAge() string {
+	if a.StartTime.IsZero() {
+		if a.LastActivity.IsZero() {
+			return "-"
+		}
+		return formatDuration(time.Since(a.LastActivity))
+	}
+	return formatDuration(time.Since(a.StartTime))
+}
+
+// formatDuration formats a duration into a compact human-readable string.
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}

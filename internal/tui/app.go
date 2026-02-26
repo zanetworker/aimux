@@ -18,7 +18,7 @@ import (
 type viewType int
 
 const (
-	viewInstances viewType = iota
+	viewAgents viewType = iota
 	viewLogs
 	viewCosts
 	viewTeams
@@ -44,11 +44,12 @@ type App struct {
 	height      int
 
 	// Sub-views
-	instancesView *views.InstancesView
-	logsView      *views.LogsView
-	costsView     *views.CostsView
-	teamsView     *views.TeamsView
-	helpView      *views.HelpView
+	headerView *views.HeaderView
+	agentsView *views.AgentsView
+	logsView   *views.LogsView
+	costsView  *views.CostsView
+	teamsView  *views.TeamsView
+	helpView   *views.HelpView
 
 	// Command palette
 	commandMode  bool
@@ -71,17 +72,18 @@ type App struct {
 // NewApp creates a new root TUI application.
 func NewApp() App {
 	return App{
-		currentView:   viewInstances,
-		instancesView: views.NewInstancesView(),
-		costsView:     views.NewCostsView(),
-		teamsView:     views.NewTeamsView(),
-		helpView:      views.NewHelpView(),
+		currentView: viewAgents,
+		headerView:  views.NewHeaderView(),
+		agentsView:  views.NewAgentsView(),
+		costsView:   views.NewCostsView(),
+		teamsView:   views.NewTeamsView(),
+		helpView:    views.NewHelpView(),
 		orchestrator: discovery.NewOrchestrator(
 			&provider.Claude{},
 			&provider.Codex{},
 			&provider.Gemini{},
 		),
-		breadcrumbs: []string{"Instances"},
+		breadcrumbs: []string{"Agents"},
 	}
 }
 
@@ -114,6 +116,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		a.headerView.SetWidth(a.width)
 		a.resizeViews()
 		return a, nil
 
@@ -122,7 +125,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case instancesMsg:
 		a.instances = []agent.Agent(msg)
-		a.instancesView.SetInstances(a.instances)
+		a.agentsView.SetAgents(a.instances)
+		a.headerView.SetAgents(a.instances)
 		a.costsView.SetInstances(a.instances)
 		if a.currentView == viewLogs && a.logsView != nil {
 			a.logsView.Reload()
@@ -152,7 +156,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "q":
-		if a.currentView == viewInstances {
+		if a.currentView == viewAgents {
 			return a, tea.Quit
 		}
 		return a.navigateBack()
@@ -161,7 +165,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.commandInput = ""
 		return a, nil
 	case "/":
-		if a.currentView == viewInstances {
+		if a.currentView == viewAgents {
 			a.filterMode = true
 			a.filterInput = ""
 			return a, nil
@@ -169,13 +173,13 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		return a.navigateTo(viewHelp, "Help")
 	case "l":
-		if a.currentView == viewInstances {
+		if a.currentView == viewAgents {
 			return a.openLogsForSelected()
 		}
 	case "esc":
 		if a.filterInput != "" {
 			a.filterInput = ""
-			a.instancesView.SetFilter("")
+			a.agentsView.SetFilter("")
 			return a, nil
 		}
 		return a.navigateBack()
@@ -187,8 +191,8 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Delegate navigation keys to the current view
 	switch a.currentView {
-	case viewInstances:
-		a.instancesView.Update(msg)
+	case viewAgents:
+		a.agentsView.Update(msg)
 	case viewLogs:
 		if a.logsView != nil {
 			a.logsView.Update(msg)
@@ -231,12 +235,12 @@ func (a App) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		a.filterMode = false
-		a.instancesView.SetFilter(a.filterInput)
+		a.agentsView.SetFilter(a.filterInput)
 		return a, nil
 	case "esc":
 		a.filterMode = false
 		a.filterInput = ""
-		a.instancesView.SetFilter("")
+		a.agentsView.SetFilter("")
 		return a, nil
 	case "backspace":
 		if len(a.filterInput) > 0 {
@@ -254,7 +258,7 @@ func (a App) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 	switch cmd {
 	case "instances":
-		return a.navigateTo(viewInstances, "Instances")
+		return a.navigateTo(viewAgents, "Agents")
 	case "logs":
 		return a.openLogsForSelected()
 	case "teams":
@@ -271,8 +275,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 }
 
 func (a App) handleEnter() (tea.Model, tea.Cmd) {
-	if a.currentView == viewInstances {
-		selected := a.instancesView.Selected()
+	if a.currentView == viewAgents {
+		selected := a.agentsView.Selected()
 		if selected == nil {
 			return a, nil
 		}
@@ -327,7 +331,7 @@ func (a App) findTmuxTarget(inst *agent.Agent) string {
 }
 
 func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
-	selected := a.instancesView.Selected()
+	selected := a.agentsView.Selected()
 	if selected == nil {
 		return a, nil
 	}
@@ -339,7 +343,7 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 		}
 	}
 	a.logsView = views.NewLogsView(selected.PID, sessionFile)
-	contentHeight := a.height - 4
+	contentHeight := a.height - a.headerView.Height()
 	if contentHeight < 1 {
 		contentHeight = 10
 	}
@@ -353,7 +357,7 @@ type statusMsg struct {
 }
 
 func (a App) handleJump() (tea.Model, tea.Cmd) {
-	selected := a.instancesView.Selected()
+	selected := a.agentsView.Selected()
 	if selected == nil {
 		return a, nil
 	}
@@ -363,28 +367,31 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 
 func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
 	a.currentView = v
-	if v == viewInstances {
-		a.breadcrumbs = []string{"Instances"}
+	if v == viewAgents {
+		a.breadcrumbs = []string{"Agents"}
 	} else {
-		a.breadcrumbs = []string{"Instances", label}
+		a.breadcrumbs = []string{"Agents", label}
 	}
+	a.headerView.SetCrumbs(a.breadcrumbs)
 	return a, nil
 }
 
 func (a App) navigateBack() (tea.Model, tea.Cmd) {
-	if a.currentView != viewInstances {
-		a.currentView = viewInstances
-		a.breadcrumbs = []string{"Instances"}
+	if a.currentView != viewAgents {
+		a.currentView = viewAgents
+		a.breadcrumbs = []string{"Agents"}
+		a.headerView.SetCrumbs(a.breadcrumbs)
 	}
 	return a, nil
 }
 
 func (a *App) resizeViews() {
-	contentHeight := a.height - 4
+	headerHeight := a.headerView.Height()
+	contentHeight := a.height - headerHeight - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
-	a.instancesView.SetSize(a.width, contentHeight)
+	a.agentsView.SetSize(a.width, contentHeight)
 	a.costsView.SetSize(a.width, contentHeight)
 	a.teamsView.SetSize(a.width, contentHeight)
 	a.helpView.SetSize(a.width, contentHeight)
@@ -400,12 +407,12 @@ func (a App) View() string {
 		return "Loading..."
 	}
 
-	header := a.renderHeader()
+	header := a.headerView.View()
 
 	var content string
 	switch a.currentView {
-	case viewInstances:
-		content = a.instancesView.View()
+	case viewAgents:
+		content = a.agentsView.View()
 	case viewLogs:
 		if a.logsView != nil {
 			content = a.logsView.View()
@@ -423,61 +430,14 @@ func (a App) View() string {
 	statusBar := a.renderStatusBar()
 
 	// Pad content to fill the screen
+	headerHeight := a.headerView.Height()
 	contentLines := strings.Count(content, "\n") + 1
-	availableHeight := a.height - 3
+	availableHeight := a.height - headerHeight - 1
 	if contentLines < availableHeight {
 		content += strings.Repeat("\n", availableHeight-contentLines)
 	}
 
 	return header + "\n" + content + "\n" + statusBar
-}
-
-func (a App) renderHeader() string {
-	active, idle, waiting := 0, 0, 0
-	var totalCost float64
-	for _, inst := range a.instances {
-		switch inst.Status {
-		case agent.StatusActive:
-			active++
-		case agent.StatusIdle:
-			idle++
-		case agent.StatusWaitingPermission:
-			waiting++
-		}
-		totalCost += inst.EstCostUSD
-	}
-
-	viewLabel := strings.Join(a.breadcrumbs, " > ")
-	stats := fmt.Sprintf("%d instances (%s%d %s%d %s%d)  $%.2f",
-		len(a.instances),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render("●"), active,
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("○"), idle,
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("◐"), waiting,
-		totalCost,
-	)
-
-	left := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
-		Render(" agentmux")
-
-	middle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB")).
-		Render("  " + viewLabel)
-
-	right := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#9CA3AF")).
-		Render(stats + " ")
-
-	gap := a.width - lipgloss.Width(left) - lipgloss.Width(middle) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
-	}
-
-	return lipgloss.NewStyle().
-		Background(lipgloss.Color("#111827")).
-		Width(a.width).
-		Render(left + middle + strings.Repeat(" ", gap) + right)
 }
 
 func (a App) renderStatusBar() string {
@@ -486,25 +446,25 @@ func (a App) renderStatusBar() string {
 			Background(lipgloss.Color("#111827")).
 			Width(a.width).
 			Render(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7C3AED")).
+				Foreground(colorLogo).
 				Bold(true).
 				Render(" :") + a.commandInput + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#7C3AED")).Render("|"))
+				Foreground(colorLogo).Render("|"))
 	}
 	if a.filterMode {
 		return lipgloss.NewStyle().
 			Background(lipgloss.Color("#111827")).
 			Width(a.width).
 			Render(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F59E0B")).
+				Foreground(colorWaiting).
 				Bold(true).
 				Render(" /") + a.filterInput + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F59E0B")).Render("|"))
+				Foreground(colorWaiting).Render("|"))
 	}
 
 	var hints string
 	if a.statusHint != "" {
-		hints = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(a.statusHint)
+		hints = " " + lipgloss.NewStyle().Foreground(colorWaiting).Render(a.statusHint)
 	} else {
 		hints = " :command  j/k:nav  Enter:open pane  l:trace  /:filter  ?:help"
 		if a.filterInput != "" {
@@ -512,7 +472,7 @@ func (a App) renderStatusBar() string {
 		}
 	}
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(colorIdle).
 		Background(lipgloss.Color("#111827")).
 		Width(a.width).
 		Render(hints)

@@ -10,8 +10,10 @@ import (
 )
 
 var (
-	costValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399"))
-	separatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
+	costValueStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399"))
+	separatorStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
+	costHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5E7EB"))
+	costMutedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 )
 
 // CostsView renders a cost dashboard aggregated by project.
@@ -48,7 +50,7 @@ type projectCost struct {
 // View renders the costs table.
 func (v *CostsView) View() string {
 	if len(v.instances) == 0 {
-		return mutedIcon.Render("  No cost data available.")
+		return costMutedStyle.Render("  No cost data available.")
 	}
 
 	// Aggregate by project
@@ -83,7 +85,7 @@ func (v *CostsView) View() string {
 	header := fmt.Sprintf("%-20s %-14s %12s %12s %10s",
 		"PROJECT", "MODEL", "TOKENS IN", "TOKENS OUT", "COST",
 	)
-	b.WriteString(headerStyle.Render(header))
+	b.WriteString(costHeaderStyle.Render(header))
 	b.WriteString("\n")
 
 	var totalIn, totalOut int64
@@ -117,7 +119,7 @@ func (v *CostsView) View() string {
 		formatTokens(totalOut),
 		costValueStyle.Render(fmt.Sprintf("$%.2f", totalCost)),
 	)
-	b.WriteString(headerStyle.Render(total))
+	b.WriteString(costHeaderStyle.Render(total))
 	b.WriteString("\n")
 
 	return b.String()
