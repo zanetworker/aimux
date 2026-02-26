@@ -24,11 +24,10 @@ var (
 
 // ASCII art logo for the right side of the header.
 var asciiLogo = []string{
-	"         _                       ",
-	"  ___ _ | | ___  _  _  _ __  ___ ",
-	" / _|| || |/ _ \\| || || '_ \\/ -_)",
-	" \\__|_||_|\\___/ \\_,_|| .__/\\___|",
-	"                     |_|         ",
+	"  __ _ __ _ ___ _ _| |_ _ __ _  ___ __",
+	" / _` / _` / -_) ' \\  _| '  \\ || \\ \\ /",
+	" \\__,_\\__, \\___|_||_\\__|_|_|_\\_,_/_\\_\\",
+	"      |___/                            ",
 }
 
 // HeaderView renders a k9s-style header with info boxes and ASCII logo.
@@ -77,8 +76,8 @@ func (h *HeaderView) View() string {
 
 // Height returns the rendered height of the header (for layout calculations).
 func (h *HeaderView) Height() int {
-	// Logo is 5 lines + 1 for border/padding, plus 1 for crumb bar
-	return 8
+	// Logo is 4 lines + 1 for crumb bar + 1 for padding
+	return 6
 }
 
 func (h *HeaderView) renderInfoBoxes() string {

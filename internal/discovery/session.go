@@ -116,9 +116,10 @@ func SessionFilesForDir(workingDir string) []string {
 		return nil
 	}
 
-	// Claude uses the absolute path with slashes replaced by hyphens,
-	// with a leading hyphen (from the leading /).
+	// Claude encodes the absolute path by replacing both "/" and "."
+	// with hyphens, resulting in a leading hyphen (from the leading /).
 	dirKey := strings.ReplaceAll(workingDir, "/", "-")
+	dirKey = strings.ReplaceAll(dirKey, ".", "-")
 	projectsDir := filepath.Join(home, ".claude", "projects", dirKey)
 
 	pattern := filepath.Join(projectsDir, "*.jsonl")
