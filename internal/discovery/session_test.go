@@ -69,8 +69,8 @@ func TestParseSessionFileNotFound(t *testing.T) {
 
 func TestFindSessionFile(t *testing.T) {
 	// With a non-existent projects dir, should return empty string.
-	result := findSessionFile("abc-123", "/nonexistent/projects")
+	result := FindSessionFile("abc-123", "/nonexistent/projects")
 	if result != "" {
-		t.Errorf("findSessionFile should return empty for nonexistent dir, got %q", result)
+		t.Errorf("FindSessionFile should return empty for nonexistent dir, got %q", result)
 	}
 }

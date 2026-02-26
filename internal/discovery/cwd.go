@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// getProcessCwd returns the current working directory of a process using
+// GetProcessCwd returns the current working directory of a process using
 // `lsof -p PID -Fn`. It looks for the "fcwd" line followed by the "n/path" line.
-func getProcessCwd(pid int) (string, error) {
+func GetProcessCwd(pid int) (string, error) {
 	out, err := exec.Command("lsof", "-p", strconv.Itoa(pid), "-Fn").Output()
 	if err != nil {
 		return "", fmt.Errorf("lsof -p %d: %w", pid, err)

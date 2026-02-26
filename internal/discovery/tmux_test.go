@@ -51,7 +51,7 @@ func TestParseTmuxLine(t *testing.T) {
 }
 
 func TestMatchTmuxSession(t *testing.T) {
-	sessions := []tmuxSession{
+	sessions := []TmuxSession{
 		{Name: "claude-myproject", Attached: true},
 		{Name: "claude-other", Attached: false},
 		{Name: "main", Attached: true},
@@ -70,9 +70,9 @@ func TestMatchTmuxSession(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := matchTmuxSession(sessions, tt.workingDir)
+			got := MatchTmuxSession(sessions, tt.workingDir)
 			if got != tt.want {
-				t.Errorf("matchTmuxSession(%q) = %q, want %q", tt.workingDir, got, tt.want)
+				t.Errorf("MatchTmuxSession(%q) = %q, want %q", tt.workingDir, got, tt.want)
 			}
 		})
 	}

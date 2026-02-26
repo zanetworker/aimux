@@ -10,6 +10,7 @@ import (
 	"github.com/zanetworker/agentmux/internal/agent"
 	"github.com/zanetworker/agentmux/internal/discovery"
 	"github.com/zanetworker/agentmux/internal/jump"
+	"github.com/zanetworker/agentmux/internal/provider"
 	"github.com/zanetworker/agentmux/internal/team"
 	"github.com/zanetworker/agentmux/internal/tui/views"
 )
@@ -75,8 +76,12 @@ func NewApp() App {
 		costsView:     views.NewCostsView(),
 		teamsView:     views.NewTeamsView(),
 		helpView:      views.NewHelpView(),
-		orchestrator:  discovery.NewOrchestrator(),
-		breadcrumbs:   []string{"Instances"},
+		orchestrator: discovery.NewOrchestrator(
+			&provider.Claude{},
+			&provider.Codex{},
+			&provider.Gemini{},
+		),
+		breadcrumbs: []string{"Instances"},
 	}
 }
 

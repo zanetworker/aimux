@@ -86,9 +86,9 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 	return info, nil
 }
 
-// findSessionFile searches for a session JSONL file matching the given session ID
+// FindSessionFile searches for a session JSONL file matching the given session ID
 // within the projects directory.
-func findSessionFile(sessionID, projectsDir string) string {
+func FindSessionFile(sessionID, projectsDir string) string {
 	pattern := filepath.Join(projectsDir, "*", sessionID+".jsonl")
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {
@@ -104,7 +104,7 @@ func FindSessionFileDefault(sessionID string) string {
 	if err != nil {
 		return ""
 	}
-	return findSessionFile(sessionID, filepath.Join(home, ".claude", "projects"))
+	return FindSessionFile(sessionID, filepath.Join(home, ".claude", "projects"))
 }
 
 // SessionFilesForDir finds all JSONL session files associated with a working

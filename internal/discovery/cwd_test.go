@@ -7,9 +7,9 @@ import (
 
 func TestGetProcessCwdOwnPID(t *testing.T) {
 	pid := os.Getpid()
-	cwd, err := getProcessCwd(pid)
+	cwd, err := GetProcessCwd(pid)
 	if err != nil {
-		t.Fatalf("getProcessCwd(%d): %v", pid, err)
+		t.Fatalf("GetProcessCwd(%d): %v", pid, err)
 	}
 
 	expected, err := os.Getwd()
@@ -18,12 +18,12 @@ func TestGetProcessCwdOwnPID(t *testing.T) {
 	}
 
 	if cwd != expected {
-		t.Errorf("getProcessCwd(%d) = %q, want %q", pid, cwd, expected)
+		t.Errorf("GetProcessCwd(%d) = %q, want %q", pid, cwd, expected)
 	}
 }
 
 func TestGetProcessCwdInvalidPID(t *testing.T) {
-	_, err := getProcessCwd(9999999)
+	_, err := GetProcessCwd(9999999)
 	if err == nil {
 		t.Error("expected error for invalid PID")
 	}

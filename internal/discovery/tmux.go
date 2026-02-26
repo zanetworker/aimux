@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// tmuxSession represents a tmux session with its name and attachment state.
-type tmuxSession struct {
+// TmuxSession represents a tmux session with its name and attachment state.
+type TmuxSession struct {
 	Name     string
 	Attached bool
 }
@@ -32,13 +32,13 @@ func parseTmuxLine(line string) (name string, attached bool) {
 
 // ListTmuxSessions runs `tmux list-sessions` and returns the parsed results.
 // Returns nil if tmux is not running or not installed.
-func ListTmuxSessions() []tmuxSession {
+func ListTmuxSessions() []TmuxSession {
 	out, err := exec.Command("tmux", "list-sessions").Output()
 	if err != nil {
 		return nil
 	}
 
-	var sessions []tmuxSession
+	var sessions []TmuxSession
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -46,7 +46,7 @@ func ListTmuxSessions() []tmuxSession {
 		}
 		name, attached := parseTmuxLine(line)
 		if name != "" {
-			sessions = append(sessions, tmuxSession{
+			sessions = append(sessions, TmuxSession{
 				Name:     name,
 				Attached: attached,
 			})
@@ -55,9 +55,9 @@ func ListTmuxSessions() []tmuxSession {
 	return sessions
 }
 
-// matchTmuxSession finds a tmux session matching the "claude-<project>" naming
+// MatchTmuxSession finds a tmux session matching the "claude-<project>" naming
 // convention based on the working directory's base name.
-func matchTmuxSession(sessions []tmuxSession, workingDir string) string {
+func MatchTmuxSession(sessions []TmuxSession, workingDir string) string {
 	if workingDir == "" {
 		return ""
 	}

@@ -1,104 +1,50 @@
 package discovery
 
 import (
-	"os"
-	"path/filepath"
-	"time"
-
 	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/cost"
 )
 
-// Orchestrator coordinates all discovery sources to produce enriched instances.
+// AgentProvider is the minimal interface that the orchestrator requires from
+// each provider. It is intentionally kept small to avoid a circular dependency
+// between the discovery and provider packages. Any type implementing
+// provider.Provider automatically satisfies this interface.
+type AgentProvider interface {
+	Name() string
+	Discover() ([]agent.Agent, error)
+}
+
+// Orchestrator coordinates multiple providers to produce a unified list of agents.
 type Orchestrator struct {
-	projectsDir string
-	teamsDir    string
+	providers []AgentProvider
 }
 
-// NewOrchestrator creates an orchestrator with default paths.
-func NewOrchestrator() *Orchestrator {
-	home, _ := os.UserHomeDir()
-	return &Orchestrator{
-		projectsDir: filepath.Join(home, ".claude", "projects"),
-		teamsDir:    filepath.Join(home, ".claude", "teams"),
-	}
+// NewOrchestrator creates an orchestrator that iterates the given providers.
+func NewOrchestrator(providers ...AgentProvider) *Orchestrator {
+	return &Orchestrator{providers: providers}
 }
 
-// Discover finds all Claude instances and enriches them with session and tmux data.
+// Discover queries every registered provider and merges the results.
+// Individual provider errors are silently skipped so that one failing
+// provider does not prevent the others from returning agents.
 func (o *Orchestrator) Discover() ([]agent.Agent, error) {
-	instances, err := ScanProcesses()
-	if err != nil {
-		return nil, err
+	var all []agent.Agent
+	for _, p := range o.providers {
+		agents, err := p.Discover()
+		if err != nil {
+			continue
+		}
+		all = append(all, agents...)
 	}
-
-	tmuxSessions := ListTmuxSessions()
-
-	for i := range instances {
-		o.enrichInstance(&instances[i], tmuxSessions)
-	}
-	return instances, nil
+	return all, nil
 }
 
-func (o *Orchestrator) enrichInstance(inst *agent.Agent, tmuxSessions []tmuxSession) {
-	// Resolve working directory
-	if inst.WorkingDir == "" {
-		cwd, err := getProcessCwd(inst.PID)
-		if err == nil {
-			inst.WorkingDir = cwd
+// ProviderFor returns the first provider whose Name() matches the given name,
+// or nil if no provider matches.
+func (o *Orchestrator) ProviderFor(name string) AgentProvider {
+	for _, p := range o.providers {
+		if p.Name() == name {
+			return p
 		}
 	}
-
-	// Match tmux session
-	if inst.WorkingDir != "" {
-		inst.TMuxSession = matchTmuxSession(tmuxSessions, inst.WorkingDir)
-	}
-
-	// Find and parse session JSONL
-	sessionFile := ""
-	if inst.SessionID != "" {
-		sessionFile = findSessionFile(inst.SessionID, o.projectsDir)
-	}
-	if sessionFile == "" && inst.WorkingDir != "" {
-		files := SessionFilesForDir(inst.WorkingDir)
-		if len(files) > 0 {
-			// Use the most recently modified file
-			var newest string
-			var newestTime time.Time
-			for _, f := range files {
-				info, err := os.Stat(f)
-				if err == nil && info.ModTime().After(newestTime) {
-					newest = f
-					newestTime = info.ModTime()
-				}
-			}
-			sessionFile = newest
-		}
-	}
-
-	if sessionFile != "" {
-		info, err := ParseSessionFile(sessionFile)
-		if err == nil {
-			if inst.SessionID == "" {
-				inst.SessionID = info.SessionID
-			}
-			inst.GitBranch = info.GitBranch
-			inst.TokensIn = info.TokensIn
-			inst.TokensOut = info.TokensOut
-			inst.LastActivity = info.LastTimestamp
-			inst.EstCostUSD = cost.Calculate(
-				inst.Model,
-				info.TokensIn,
-				info.TokensOut,
-				info.CacheReadTokens,
-				info.CacheWriteTokens,
-			)
-
-			// Determine status from activity
-			if time.Since(info.LastTimestamp) < 30*time.Second {
-				inst.Status = agent.StatusActive
-			} else if !info.LastTimestamp.IsZero() {
-				inst.Status = agent.StatusIdle
-			}
-		}
-	}
+	return nil
 }
