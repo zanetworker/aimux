@@ -2,18 +2,21 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Color constants used throughout the TUI.
+// Color constants used throughout the TUI — k9s-inspired palette.
 const (
-	colorPrimary   = lipgloss.Color("#7C3AED") // Purple
-	colorSecondary = lipgloss.Color("#06B6D4") // Cyan
-	colorActive    = lipgloss.Color("#22C55E") // Green
-	colorIdle      = lipgloss.Color("#6B7280") // Gray
-	colorWaiting   = lipgloss.Color("#F59E0B") // Amber
-	colorError     = lipgloss.Color("#EF4444") // Red
-	colorBorder    = lipgloss.Color("#374151") // Dark gray
-	colorHeader    = lipgloss.Color("#E5E7EB") // Light gray
-	colorMuted     = lipgloss.Color("#9CA3AF") // Medium gray
-	colorCost      = lipgloss.Color("#34D399") // Emerald
+	colorLogo       = lipgloss.Color("#5F87FF")
+	colorActive     = lipgloss.Color("#22C55E")
+	colorIdle       = lipgloss.Color("#6B7280")
+	colorWaiting    = lipgloss.Color("#F59E0B")
+	colorError      = lipgloss.Color("#EF4444")
+	colorBorder     = lipgloss.Color("#374151")
+	colorHeader     = lipgloss.Color("#E5E7EB")
+	colorMuted      = lipgloss.Color("#9CA3AF")
+	colorCost       = lipgloss.Color("#34D399")
+	colorTableHead  = lipgloss.Color("#5F87FF")
+	colorSelected   = lipgloss.Color("#1E3A5F")
+	colorInfoBox    = lipgloss.Color("#1C1C2E")
+	colorInfoBorder = lipgloss.Color("#3B3B5C")
 )
 
 // StatusStyle returns a lipgloss style colored for the given status string.
