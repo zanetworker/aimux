@@ -16,6 +16,10 @@ var (
 				Bold(true).
 				Foreground(lipgloss.Color("#E5E7EB")).
 				Background(lipgloss.Color("#1E293B"))
+	sessionBadgeStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#111827")).
+				Background(lipgloss.Color("#5F87FF"))
 	sessionStatusStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#22C55E")).
 				Background(lipgloss.Color("#111827")).
@@ -265,7 +269,8 @@ func (sv *SessionView) renderHeader() string {
 		provider = sv.agent.ProviderName
 	}
 
-	left := sessionHeaderStyle.Render(fmt.Sprintf(" %s ", name))
+	badge := sessionBadgeStyle.Render(" agentmux ")
+	left := badge + sessionHeaderStyle.Render(fmt.Sprintf(" %s ", name))
 	if provider != "" {
 		left += " " + sessionHintStyle.Render(provider)
 	}
@@ -273,7 +278,7 @@ func (sv *SessionView) renderHeader() string {
 		left += " " + sessionHintStyle.Render(model)
 	}
 
-	right := sessionHintStyle.Render(" Ctrl+] to zoom out ")
+	right := sessionHintStyle.Render(" Tab:trace  Ctrl+f:split  Esc:exit ")
 
 	gap := sv.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {
@@ -285,16 +290,17 @@ func (sv *SessionView) renderHeader() string {
 }
 
 func (sv *SessionView) renderStatusBar() string {
+	badge := sessionBadgeStyle.Render(" agentmux ")
 	mode := sessionModeStyle.Render(" INTERACTIVE ")
-	hint := sessionHintStyle.Render(" Ctrl+] zoom out ")
+	hint := sessionHintStyle.Render(" Ctrl+f:split  Esc:exit ")
 
-	gap := sv.width - lipgloss.Width(mode) - lipgloss.Width(hint)
+	gap := sv.width - lipgloss.Width(badge) - lipgloss.Width(mode) - lipgloss.Width(hint)
 	if gap < 0 {
 		gap = 0
 	}
 	fill := sessionStatusStyle.Render(strings.Repeat(" ", gap))
 
-	return mode + fill + hint
+	return badge + mode + fill + hint
 }
 
 // readPTY returns a tea.Cmd that reads the next chunk from the PTY. When the

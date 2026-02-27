@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,8 @@ type Claude struct{}
 func (c *Claude) Name() string { return "claude" }
 
 // Discover finds all running Claude Code processes, then enriches each agent
-// with CWD, tmux session, session JSONL data, and estimated cost.
+// with CWD, tmux session, session JSONL data, and estimated cost. SDK-spawned
+// agents sharing the same directory and model are grouped into single entries.
 func (c *Claude) Discover() ([]agent.Agent, error) {
 	agents, err := discovery.ScanProcesses()
 	if err != nil {
@@ -36,7 +38,74 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 			agents[i].Name = agents[i].ShortProject()
 		}
 	}
+
+	// Deduplicate: group SDK agents by (WorkingDir, Model), dedup CLI by SessionFile
+	agents = deduplicateAgents(agents)
+
 	return agents, nil
+}
+
+// deduplicateAgents groups SDK agents sharing the same (WorkingDir, Model) into
+// single entries with a GroupCount, and deduplicates CLI agents that share the
+// same SessionFile (same conversation, multiple processes).
+func deduplicateAgents(agents []agent.Agent) []agent.Agent {
+	type groupKey struct {
+		WorkingDir  string
+		Model       string
+		Source      agent.SourceType
+		SessionFile string
+	}
+
+	groups := make(map[string]*agent.Agent)
+	order := make([]string, 0) // preserve discovery order
+
+	for i := range agents {
+		a := &agents[i]
+		var key string
+
+		switch a.Source {
+		case agent.SourceSDK:
+			// Group SDK agents by (WorkingDir, Model)
+			key = fmt.Sprintf("sdk:%s:%s", a.WorkingDir, a.Model)
+		case agent.SourceVSCode:
+			// Group VSCode agents by (WorkingDir, Model)
+			key = fmt.Sprintf("vsc:%s:%s", a.WorkingDir, a.Model)
+		default:
+			// CLI agents: dedup by SessionFile if available, otherwise by PID
+			if a.SessionFile != "" {
+				key = fmt.Sprintf("cli:sf:%s", a.SessionFile)
+			} else {
+				key = fmt.Sprintf("cli:pid:%d", a.PID)
+			}
+		}
+
+		if existing, ok := groups[key]; ok {
+			// Merge into existing: keep the more active one, accumulate count
+			existing.GroupCount++
+			existing.GroupPIDs = append(existing.GroupPIDs, a.PID)
+			// Keep the one with more recent activity
+			if a.LastActivity.After(existing.LastActivity) {
+				pid := existing.PID
+				gpids := existing.GroupPIDs
+				gc := existing.GroupCount
+				*existing = *a
+				existing.GroupPIDs = append([]int{pid}, gpids...)
+				existing.GroupCount = gc
+			}
+		} else {
+			copy := *a
+			copy.GroupCount = 1
+			copy.GroupPIDs = []int{a.PID}
+			groups[key] = &copy
+			order = append(order, key)
+		}
+	}
+
+	result := make([]agent.Agent, 0, len(groups))
+	for _, key := range order {
+		result = append(result, *groups[key])
+	}
+	return result
 }
 
 // enrichAgent resolves the working directory, matches a tmux session,
@@ -78,12 +147,16 @@ func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSes
 	}
 
 	if sessionFile != "" {
+		inst.SessionFile = sessionFile
 		info, err := discovery.ParseSessionFile(sessionFile)
 		if err == nil {
 			if inst.SessionID == "" {
 				inst.SessionID = info.SessionID
 			}
 			inst.GitBranch = info.GitBranch
+			if inst.Model == "" && info.Model != "" {
+				inst.Model = info.Model
+			}
 			inst.TokensIn = info.TokensIn
 			inst.TokensOut = info.TokensOut
 			inst.LastActivity = info.LastTimestamp

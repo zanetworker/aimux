@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -93,6 +94,8 @@ type Agent struct {
 	TaskID         string
 	TaskSubject    string
 	LastActivity   time.Time
+	GroupCount     int    // number of processes grouped into this entry (0 or 1 = single)
+	GroupPIDs      []int  // PIDs of grouped processes (for drill-down)
 }
 
 // ShortModel returns a human-friendly shortened model name.
@@ -138,6 +141,28 @@ func (a Agent) ShortProject() string {
 		return ""
 	}
 	return filepath.Base(a.WorkingDir)
+}
+
+// ShortDir returns a compact directory path showing the last two path
+// segments (parent/project). If the path is under $HOME, the home prefix
+// is replaced with "~".
+func (a Agent) ShortDir() string {
+	if a.WorkingDir == "" {
+		return ""
+	}
+	dir := a.WorkingDir
+
+	// Replace home prefix with ~
+	if home, err := os.UserHomeDir(); err == nil {
+		dir = strings.Replace(dir, home, "~", 1)
+	}
+
+	// Show last two segments: parent/project
+	parts := strings.Split(dir, string(filepath.Separator))
+	if len(parts) > 2 {
+		return strings.Join(parts[len(parts)-2:], "/")
+	}
+	return dir
 }
 
 // FormatMemory returns a human-friendly memory string.

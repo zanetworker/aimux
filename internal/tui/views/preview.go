@@ -58,6 +58,7 @@ func (p *PreviewPane) SetAgent(a *agent.Agent) {
 		return
 	}
 	p.logsView = NewLogsView(a.PID, a.SessionFile)
+	p.logsView.compact = true // no interactive hints in preview
 	p.resizeLogsView()
 }
 
@@ -79,8 +80,8 @@ func (p *PreviewPane) resizeLogsView() {
 	if p.logsView == nil {
 		return
 	}
-	// Reserve 4 lines for header (agent info) and 1 line for the border char
-	contentHeight := p.height - 4
+	// Reserve 5 lines for header (agent info + dir line) and 1 line for the border char
+	contentHeight := p.height - 5
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -161,6 +162,33 @@ func (p *PreviewPane) renderHeader() string {
 
 	infoLine := strings.Join(infoParts, "  ")
 
+	// Dir line
+	var dirLine string
+	if a.WorkingDir != "" {
+		dirLine = previewLabelStyle.Render("Dir: ") + previewValueStyle.Render(truncatePreview(a.WorkingDir, maxW-5))
+	}
+
+	// Source and group info
+	var sourceLine string
+	if a.Source.String() != "CLI" || a.GroupCount > 1 {
+		parts := []string{previewLabelStyle.Render("Source: ") + previewValueStyle.Render(a.Source.String())}
+		if a.GroupCount > 1 {
+			parts = append(parts,
+				previewLabelStyle.Render("Instances: ")+previewValueStyle.Render(fmt.Sprintf("%d", a.GroupCount)))
+			// Show PIDs
+			var pidStrs []string
+			for _, pid := range a.GroupPIDs {
+				pidStrs = append(pidStrs, fmt.Sprintf("%d", pid))
+			}
+			if len(pidStrs) > 5 {
+				pidStrs = append(pidStrs[:5], "...")
+			}
+			parts = append(parts,
+				previewLabelStyle.Render("PIDs: ")+previewDimStyle.Render(strings.Join(pidStrs, ", ")))
+		}
+		sourceLine = strings.Join(parts, "  ")
+	}
+
 	// Status line
 	statusIcon := a.Icon()
 	statusText := a.Status.String()
@@ -173,7 +201,15 @@ func (p *PreviewPane) renderHeader() string {
 
 	separator := previewBorderStyle.Render(strings.Repeat("─", maxW))
 
-	return nameLine + "\n" + infoLine + "\n" + statusLine + "\n" + separator
+	result := nameLine + "\n" + infoLine + "\n"
+	if dirLine != "" {
+		result += dirLine + "\n"
+	}
+	if sourceLine != "" {
+		result += sourceLine + "\n"
+	}
+	result += statusLine + "\n" + separator
+	return result
 }
 
 func truncatePreview(s string, maxLen int) string {

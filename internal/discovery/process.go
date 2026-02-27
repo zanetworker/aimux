@@ -133,7 +133,9 @@ func isClaudeProcess(line string) bool {
 }
 
 // ScanProcesses runs `ps aux`, parses each line, and returns Instance stubs
-// for every detected Claude process.
+// for every detected Claude process. Subagent processes (whose parent PID is
+// also a Claude process) are automatically filtered out so that only top-level
+// sessions appear.
 func ScanProcesses() ([]agent.Agent, error) {
 	out, err := exec.Command("ps", "aux").Output()
 	if err != nil {
@@ -156,7 +158,44 @@ func ScanProcesses() ([]agent.Agent, error) {
 		}
 		instances = append(instances, buildInstance(proc))
 	}
-	return instances, nil
+
+	return filterSubagents(instances), nil
+}
+
+// filterSubagents removes processes whose parent PID is also a Claude process
+// in the list. This eliminates duplicate entries from Task-spawned subagents.
+func filterSubagents(agents []agent.Agent) []agent.Agent {
+	if len(agents) <= 1 {
+		return agents
+	}
+
+	pidSet := make(map[int]bool, len(agents))
+	for _, a := range agents {
+		pidSet[a.PID] = true
+	}
+
+	var filtered []agent.Agent
+	for _, a := range agents {
+		ppid := getParentPID(a.PID)
+		if ppid > 0 && pidSet[ppid] {
+			continue // parent is also a Claude process — this is a subagent
+		}
+		filtered = append(filtered, a)
+	}
+	return filtered
+}
+
+// getParentPID returns the parent PID for a given process, or 0 on error.
+func getParentPID(pid int) int {
+	out, err := exec.Command("ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0
+	}
+	ppid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0
+	}
+	return ppid
 }
 
 // buildInstance creates a agent.Agent from a rawProcess.

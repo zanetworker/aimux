@@ -10,6 +10,7 @@ var (
 	helpTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
 	helpKeyStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#06B6D4"))
 	helpDescStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+	helpDimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 )
 
 // HelpView renders the help overlay.
@@ -33,56 +34,78 @@ func (v *HelpView) SetSize(w, h int) {
 func (v *HelpView) View() string {
 	var b strings.Builder
 
-	b.WriteString(helpTitleStyle.Render("Navigation"))
+	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	idleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	waitingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+
+	b.WriteString(helpTitleStyle.Render("Status Icons"))
+	b.WriteString("\n")
+	writeHelp(&b, activeStyle.Render("●")+" Active", "Processing (activity in last 30s)")
+	writeHelp(&b, idleStyle.Render("○")+" Idle", "Waiting for user input")
+	writeHelp(&b, waitingStyle.Render("◐")+" Waiting", "Blocked on permission prompt")
+	b.WriteString("\n")
+
+	b.WriteString(helpTitleStyle.Render("Agent List"))
 	b.WriteString("\n")
 	writeHelp(&b, "j/k", "Move cursor down/up")
-	writeHelp(&b, "Enter", "Zoom into agent session (interactive PTY)")
-	writeHelp(&b, "Ctrl+] / Ctrl+\\", "Zoom out of session")
-	writeHelp(&b, "Esc", "Go back")
+	writeHelp(&b, "Enter", "Open split view (trace + session)")
+	writeHelp(&b, "l", "Open trace viewer (full screen)")
+	writeHelp(&b, "/", "Filter agents by name, dir, model")
+	writeHelp(&b, "Esc", "Clear filter / go back")
 	writeHelp(&b, "g/G", "Jump to top / bottom")
-	writeHelp(&b, "/", "Filter agents")
-	writeHelp(&b, "q", "Quit")
+	writeHelp(&b, "?", "This help screen")
+	writeHelp(&b, "q", "Quit agentmux")
+	b.WriteString("\n")
+
+	b.WriteString(helpTitleStyle.Render("Split View (Enter on agent)"))
+	b.WriteString("\n")
+	writeHelp(&b, "Tab", "Switch focus: TRACE <-> SESSION")
+	writeHelp(&b, "Ctrl+f", "Toggle fullscreen / split view")
+	writeHelp(&b, "Ctrl+g", "Exit back to agent list")
+	b.WriteString(helpDimStyle.Render("  When TRACE focused: j/k, Enter, +, / work on turns\n"))
+	b.WriteString(helpDimStyle.Render("  When SESSION focused: all keys go to the agent\n"))
+	b.WriteString("\n")
+
+	b.WriteString(helpTitleStyle.Render("Trace Viewer"))
+	b.WriteString("\n")
+	writeHelp(&b, "j/k", "Navigate between turns")
+	writeHelp(&b, "Enter/Space", "Expand/collapse turn (INPUT/ACTIONS/OUTPUT)")
+	writeHelp(&b, "c", "Collapse all expanded turns")
+	writeHelp(&b, "d/u", "Page down/up (5 turns)")
+	writeHelp(&b, "g/G", "Jump to first/last turn")
+	writeHelp(&b, "/", "Search turns by keyword, Esc to clear")
+	b.WriteString("\n")
+
+	b.WriteString(helpTitleStyle.Render("Annotations (in trace viewer)"))
+	b.WriteString("\n")
+	writeHelp(&b, "+", "Cycle label: GOOD -> BAD -> WASTE -> remove")
+	b.WriteString(helpDimStyle.Render("  Labels appear as colored badges in the turn header.\n"))
+	b.WriteString(helpDimStyle.Render("  Annotations auto-save to ~/.agentmux/evaluations/\n"))
+	b.WriteString(helpDimStyle.Render("  Use :export to write all turns + labels as JSONL.\n"))
 	b.WriteString("\n")
 
 	b.WriteString(helpTitleStyle.Render("Commands"))
 	b.WriteString("\n")
+	writeHelp(&b, ":export", "Export trace + annotations as JSONL")
 	writeHelp(&b, ":instances :i", "Agent list")
-	writeHelp(&b, ":logs :l", "Log viewer")
-	writeHelp(&b, ":session :s", "Session detail")
+	writeHelp(&b, ":logs :l", "Trace viewer")
 	writeHelp(&b, ":teams :t", "Teams overview")
 	writeHelp(&b, ":costs :c", "Cost dashboard")
-	writeHelp(&b, ":new :n", "Launch new agent")
-	writeHelp(&b, ":kill", "Kill selected agent")
 	writeHelp(&b, ":quit :q", "Quit")
-	b.WriteString("\n")
-
-	b.WriteString(helpTitleStyle.Render("Actions"))
-	b.WriteString("\n")
-	writeHelp(&b, "Enter / J", "Zoom into interactive PTY session")
-	writeHelp(&b, "Ctrl+]", "Zoom out (keep session alive)")
-	writeHelp(&b, "l", "View conversation trace")
-	writeHelp(&b, "d / u", "Page down / up in trace")
 	b.WriteString("\n")
 
 	b.WriteString(helpTitleStyle.Render("Providers"))
 	b.WriteString("\n")
-	writeHelp(&b, "Claude", "Full support (discover, resume, trace)")
-	writeHelp(&b, "Codex", "Stub (planned)")
-	writeHelp(&b, "Gemini", "Stub (planned)")
+	writeHelp(&b, "Claude", "Full support (discover, resume, trace, eval)")
+	writeHelp(&b, "Codex", "Discovery, resume, session files")
+	writeHelp(&b, "Gemini", "Planned")
 
 	return b.String()
 }
 
 func writeHelp(b *strings.Builder, key, desc string) {
 	b.WriteString("  ")
-	b.WriteString(helpKeyStyle.Render(padRight(key, 16)))
+	b.WriteString(helpKeyStyle.Render(padRight(key, 18)))
 	b.WriteString(helpDescStyle.Render(desc))
 	b.WriteString("\n")
-}
-
-func padRight(s string, n int) string {
-	if len(s) >= n {
-		return s
-	}
-	return s + strings.Repeat(" ", n-len(s))
 }

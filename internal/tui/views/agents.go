@@ -15,7 +15,7 @@ const (
 	colName  = 22
 	colAgent = 10
 	colModel = 14
-	colMode  = 14
+	colDir   = 22
 	colAge   = 8
 	colCostA = 8
 )
@@ -132,22 +132,32 @@ func (v *AgentsView) Update(msg tea.Msg) {
 	}
 }
 
+// padRight pads a string with spaces so its visual (display) width reaches
+// the target. Unlike fmt's %-*s, this correctly handles multi-byte UTF-8
+// characters and ANSI escape sequences.
+func padRight(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-w)
+}
+
 // View renders the agents table with k9s-style headers and status icons.
 func (v *AgentsView) View() string {
 	var b strings.Builder
 
-	// Header row: k9s-style blue on dark blue
-	header := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s %-*s",
-		colName, "NAME",
-		colAgent, "AGENT",
-		colModel, "MODEL",
-		colMode, "MODE",
-		colAge, "AGE",
-		colCostA, "COST",
-	)
+	// Header row: k9s-style blue on dark blue — plain ASCII, so padRight
+	// and fmt produce the same result, but we use padRight for consistency.
+	header := " " + padRight("NAME", colName) + " " +
+		padRight("AGENT", colAgent) + " " +
+		padRight("MODEL", colModel) + " " +
+		padRight("DIR", colDir) + " " +
+		padRight("AGE", colAge) + " " +
+		padRight("COST", colCostA)
 	// Pad header to full width
-	if len(header) < v.width {
-		header += strings.Repeat(" ", v.width-len(header))
+	if lipgloss.Width(header) < v.width {
+		header += strings.Repeat(" ", v.width-lipgloss.Width(header))
 	}
 	b.WriteString(tableHeaderStyle.Render(header))
 	b.WriteString("\n")
@@ -176,17 +186,22 @@ func (v *AgentsView) View() string {
 		a := f[idx]
 		icon := v.renderStatusIcon(a.Status)
 
-		// Format: ▸● name
-		nameCol := fmt.Sprintf("▸%s %s", icon, truncate(a.ShortProject(), colName-3))
+		// Format: ▸● name — use padRight because icon contains ANSI codes
+		name := a.ShortProject()
+		if a.GroupCount > 1 {
+			badge := agentMutedIcon.Render(fmt.Sprintf("x%d", a.GroupCount))
+			name = truncate(name, colName-7) + " " + badge
+		} else {
+			name = truncate(name, colName-3)
+		}
+		nameCol := "▸" + icon + " " + name
 
-		row := fmt.Sprintf(" %-*s %-*s %-*s %-*s %-*s %-*s",
-			colName, nameCol,
-			colAgent, truncate(a.ProviderName, colAgent),
-			colModel, truncate(a.ShortModel(), colModel),
-			colMode, truncate(a.PermissionMode, colMode),
-			colAge, a.FormatAge(),
-			colCostA, a.FormatCost(),
-		)
+		row := " " + padRight(nameCol, colName) + " " +
+			padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
+			padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
+			padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
+			padRight(a.FormatAge(), colAge) + " " +
+			padRight(a.FormatCost(), colCostA)
 
 		if idx == v.cursor {
 			// Pad to full width for selected background
@@ -228,7 +243,8 @@ func (v *AgentsView) filtered() []agent.Agent {
 			strings.Contains(strings.ToLower(a.ShortModel()), f) ||
 			strings.Contains(strings.ToLower(a.Status.String()), f) ||
 			strings.Contains(strings.ToLower(a.Source.String()), f) ||
-			strings.Contains(strings.ToLower(a.ProviderName), f) {
+			strings.Contains(strings.ToLower(a.ProviderName), f) ||
+			strings.Contains(strings.ToLower(a.ShortDir()), f) {
 			out = append(out, a)
 		}
 	}

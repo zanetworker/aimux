@@ -32,9 +32,10 @@ var asciiLogo = []string{
 
 // HeaderView renders a k9s-style header with info boxes and ASCII logo.
 type HeaderView struct {
-	agents []agent.Agent
-	crumbs []string
-	width  int
+	agents   []agent.Agent
+	crumbs   []string
+	hintText string // contextual key hints for the current view
+	width    int
 }
 
 // NewHeaderView creates a new HeaderView.
@@ -59,6 +60,11 @@ func (h *HeaderView) SetWidth(w int) {
 	h.width = w
 }
 
+// SetHint sets the contextual key hint bar text.
+func (h *HeaderView) SetHint(hint string) {
+	h.hintText = hint
+}
+
 // View renders the header.
 func (h *HeaderView) View() string {
 	infoBoxes := h.renderInfoBoxes()
@@ -71,13 +77,46 @@ func (h *HeaderView) View() string {
 	// Ensure the top row fills the width
 	topRow = lipgloss.NewStyle().Width(h.width).Render(topRow)
 
-	return topRow + "\n" + crumbBar
+	result := topRow + "\n" + crumbBar
+	if h.hintText != "" {
+		result += "\n" + h.renderHintBar()
+	}
+	return result
 }
 
 // Height returns the rendered height of the header (for layout calculations).
 func (h *HeaderView) Height() int {
-	// Logo is 4 lines + 1 for crumb bar + 1 for padding
-	return 6
+	// Logo is 4 lines + 1 for crumb bar + 1 for hint bar
+	return 7
+}
+
+func (h *HeaderView) renderHintBar() string {
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#E5E7EB")).
+		Background(lipgloss.Color("#374151")).
+		Bold(true).
+		Padding(0, 1)
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280"))
+	barBg := lipgloss.NewStyle().
+		Background(lipgloss.Color("#0F172A")).
+		Width(h.width)
+
+	// Parse hint text: "Key:desc  Key:desc" -> styled output
+	parts := strings.Fields(h.hintText)
+	var rendered []string
+	for _, part := range parts {
+		if idx := strings.Index(part, ":"); idx > 0 {
+			key := part[:idx]
+			desc := part[idx+1:]
+			rendered = append(rendered, keyStyle.Render(key)+" "+descStyle.Render(desc))
+		} else {
+			rendered = append(rendered, descStyle.Render(part))
+		}
+	}
+
+	content := " " + strings.Join(rendered, "  ")
+	return barBg.Render(content)
 }
 
 func (h *HeaderView) renderInfoBoxes() string {

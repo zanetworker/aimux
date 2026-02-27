@@ -64,9 +64,10 @@ func (s *Session) Resize(cols, rows int) error {
 	})
 }
 
-// Close terminates the PTY session. It sends SIGINT to the process, closes the
-// PTY file descriptor, and waits for the process to exit. It is safe to call
-// multiple times.
+// Close terminates the PTY session. It closes the PTY file descriptor and
+// signals the process to exit, but does not block waiting for the process to
+// finish. Cleanup runs in a background goroutine so the TUI returns
+// immediately. It is safe to call multiple times.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -74,11 +75,14 @@ func (s *Session) Close() error {
 		return nil
 	}
 	s.closed = true
-	if s.cmd.Process != nil {
-		_ = s.cmd.Process.Signal(os.Interrupt)
-	}
 	_ = s.ptmx.Close()
-	_ = s.cmd.Wait()
+	cmd := s.cmd
+	go func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Signal(os.Interrupt)
+		}
+		_ = cmd.Wait()
+	}()
 	return nil
 }
 

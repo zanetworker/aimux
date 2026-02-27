@@ -14,6 +14,7 @@ import (
 type SessionInfo struct {
 	SessionID        string
 	GitBranch        string
+	Model            string
 	TokensIn         int64
 	TokensOut        int64
 	CacheReadTokens  int64
@@ -29,6 +30,7 @@ type sessionLine struct {
 	GitBranch string    `json:"gitBranch"`
 	Timestamp time.Time `json:"timestamp"`
 	Message   *struct {
+		Model string `json:"model"`
 		Usage *struct {
 			InputTokens              int64 `json:"input_tokens"`
 			OutputTokens             int64 `json:"output_tokens"`
@@ -70,12 +72,17 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 			info.LastTimestamp = entry.Timestamp
 		}
 
-		if entry.Message != nil && entry.Message.Usage != nil {
-			u := entry.Message.Usage
-			info.TokensIn += u.InputTokens
-			info.TokensOut += u.OutputTokens
-			info.CacheReadTokens += u.CacheReadInputTokens
-			info.CacheWriteTokens += u.CacheCreationInputTokens
+		if entry.Message != nil {
+			if info.Model == "" && entry.Message.Model != "" {
+				info.Model = entry.Message.Model
+			}
+			if entry.Message.Usage != nil {
+				u := entry.Message.Usage
+				info.TokensIn += u.InputTokens
+				info.TokensOut += u.OutputTokens
+				info.CacheReadTokens += u.CacheReadInputTokens
+				info.CacheWriteTokens += u.CacheCreationInputTokens
+			}
 		}
 	}
 

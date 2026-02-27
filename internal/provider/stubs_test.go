@@ -15,20 +15,23 @@ func TestCodexName(t *testing.T) {
 
 func TestCodexDiscover(t *testing.T) {
 	c := &Codex{}
-	agents, err := c.Discover()
+	_, err := c.Discover()
 	if err != nil {
 		t.Errorf("Codex.Discover() error = %v, want nil", err)
 	}
-	if agents != nil {
-		t.Errorf("Codex.Discover() = %v, want nil", agents)
-	}
+	// Codex now does real discovery; result depends on running processes
 }
 
 func TestCodexResumeCommand(t *testing.T) {
 	c := &Codex{}
-	cmd := c.ResumeCommand(agent.Agent{SessionID: "test", WorkingDir: "/tmp"})
-	if cmd != nil {
-		t.Errorf("Codex.ResumeCommand() = %v, want nil", cmd)
+	cmd := c.ResumeCommand(agent.Agent{SessionID: "test-session", WorkingDir: "/tmp"})
+	if cmd == nil {
+		t.Skip("codex binary not found")
+	}
+	// Should produce: codex resume --no-alt-screen <session-id>
+	args := cmd.Args
+	if len(args) < 4 || args[1] != "resume" || args[2] != "--no-alt-screen" || args[3] != "test-session" {
+		t.Errorf("Codex.ResumeCommand() args = %v, want [codex resume --no-alt-screen test-session]", args)
 	}
 }
 
