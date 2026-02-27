@@ -782,9 +782,9 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  l:trace  /:filter  ?:help  q:quit")
+		a.headerView.SetHint("Enter:open  l:logs  /:filter  ?:help  q:quit")
 	case viewLogs:
-		a.headerView.SetHint("j/k:turns  Enter:expand  a:label  /:search  c:collapse  J:jump  :export  Esc:back")
+		a.headerView.SetHint("j/k:turns  Enter:expand  a:annotate  /:search  c:collapse  J:jump  :export  Esc:back")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
@@ -989,15 +989,15 @@ func (a App) renderStatusBar() string {
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(colorWaiting).Render(a.statusHint)
 	} else if a.currentView == viewLogs {
-		hints = " j/k:turns  Enter:expand  a:label(GOOD/BAD/WASTE)  /:filter  c:collapse  :export  Esc:back"
+		hints = " j/k:turns  Enter:expand  a:annotate(GOOD/BAD/WASTE)  /:filter  c:collapse  :export  Esc:back"
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d processes grouped (same dir+model)  Enter:zoom  l:trace  ?:help",
+			hints = fmt.Sprintf(" x%d = %d processes grouped (same dir+model)  Enter:zoom  l:logs  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " :cmd  j/k:nav  Enter:zoom  l:trace  /:filter  ?:help"
+			hints = " :cmd  j/k:nav  Enter:zoom  l:logs  /:filter  ?:help"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)

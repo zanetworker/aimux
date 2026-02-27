@@ -49,7 +49,7 @@ func (v *HelpView) View() string {
 	b.WriteString("\n")
 	writeHelp(&b, "j/k", "Move cursor down/up")
 	writeHelp(&b, "Enter", "Open split view (trace + session)")
-	writeHelp(&b, "l", "Open trace viewer (full screen)")
+	writeHelp(&b, "l", "Open logs/trace viewer (full screen)")
 	writeHelp(&b, "/", "Filter agents by name, dir, model")
 	writeHelp(&b, "Esc", "Clear filter / go back")
 	writeHelp(&b, "g/G", "Jump to top / bottom")
@@ -78,7 +78,7 @@ func (v *HelpView) View() string {
 
 	b.WriteString(helpTitleStyle.Render("Annotations (in trace viewer)"))
 	b.WriteString("\n")
-	writeHelp(&b, "a", "Cycle label: GOOD -> BAD -> WASTE -> remove")
+	writeHelp(&b, "a", "Annotate: cycle GOOD -> BAD -> WASTE -> remove")
 	b.WriteString(helpDimStyle.Render("  Labels appear as colored badges in the turn header.\n"))
 	b.WriteString(helpDimStyle.Render("  Annotations auto-save to ~/.agentmux/evaluations/\n"))
 	b.WriteString(helpDimStyle.Render("  Use :export to write all turns + labels as JSONL.\n"))
