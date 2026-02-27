@@ -222,7 +222,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Label:     msg.Label,
 					Timestamp: time.Now(),
 				})
-				a.statusHint = fmt.Sprintf("Turn %d: [%s] saved. +:cycle  :export to save all as JSONL",
+				a.statusHint = fmt.Sprintf("Turn %d: [%s] saved. a:cycle  :export to save all as JSONL",
 					msg.Turn, strings.ToUpper(msg.Label))
 			}
 		}
@@ -784,7 +784,7 @@ func (a App) View() string {
 	case viewAgents:
 		a.headerView.SetHint("Enter:open  l:trace  /:filter  ?:help  q:quit")
 	case viewLogs:
-		a.headerView.SetHint("j/k:turns  Enter:expand  +:label  /:search  c:collapse  J:jump  :export  Esc:back")
+		a.headerView.SetHint("j/k:turns  Enter:expand  a:label  /:search  c:collapse  J:jump  :export  Esc:back")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
@@ -941,7 +941,7 @@ func (a App) renderSplitView() string {
 	hintStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	var focusHint string
 	if focus == "trace" {
-		focusHint = " [TRACE] j/k:turns  Enter:expand  +:annotate  /:filter"
+		focusHint = " [TRACE] j/k:turns  Enter:expand  a:annotate  /:filter"
 	} else {
 		focusHint = " [SESSION] typing goes to agent"
 	}
@@ -989,7 +989,7 @@ func (a App) renderStatusBar() string {
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(colorWaiting).Render(a.statusHint)
 	} else if a.currentView == viewLogs {
-		hints = " j/k:turns  Enter:expand  +:label(GOOD/BAD/WASTE)  /:filter  c:collapse  :export  Esc:back"
+		hints = " j/k:turns  Enter:expand  a:label(GOOD/BAD/WASTE)  /:filter  c:collapse  :export  Esc:back"
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()

@@ -78,7 +78,7 @@ func (v *HelpView) View() string {
 
 	b.WriteString(helpTitleStyle.Render("Annotations (in trace viewer)"))
 	b.WriteString("\n")
-	writeHelp(&b, "+", "Cycle label: GOOD -> BAD -> WASTE -> remove")
+	writeHelp(&b, "a", "Cycle label: GOOD -> BAD -> WASTE -> remove")
 	b.WriteString(helpDimStyle.Render("  Labels appear as colored badges in the turn header.\n"))
 	b.WriteString(helpDimStyle.Render("  Annotations auto-save to ~/.agentmux/evaluations/\n"))
 	b.WriteString(helpDimStyle.Render("  Use :export to write all turns + labels as JSONL.\n"))

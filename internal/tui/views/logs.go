@@ -165,18 +165,19 @@ func estimateTurnCost(model string, tokIn, tokOut int64) float64 {
 // Each turn shows INPUT (user), ACTIONS (tools), and OUTPUT (assistant)
 // sections inspired by MLflow/Braintrust trace UIs.
 type LogsView struct {
-	turns       []TraceTurn
-	filePath    string
-	width       int
-	height      int
-	cursor      int
-	expanded    map[int]bool
-	pid         int
-	filterText  string
-	filterMode  bool
-	filterInput string
-	annotations map[int]string
-	compact     bool // when true, hides the interactive status bar (for preview pane)
+	turns        []TraceTurn
+	filePath     string
+	width        int
+	height       int
+	cursor       int
+	expanded     map[int]bool
+	pid          int
+	filterText   string
+	filterMode   bool
+	filterInput  string
+	annotations  map[int]string
+	compact      bool // when true, hides the interactive status bar (for preview pane)
+	scrollOffset int  // line-level scroll offset within the rendered view
 }
 
 // NewLogsView creates a new LogsView for the given PID and log file path.
@@ -307,32 +308,45 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 		case "j", "down":
 			if v.cursor < len(visible)-1 {
 				v.cursor++
+				v.scrollOffset = 0 // reset line scroll when moving to next turn
 			}
 		case "k", "up":
 			if v.cursor > 0 {
 				v.cursor--
+				v.scrollOffset = 0
 			}
 		case "c":
 			// Collapse all expanded turns
 			v.expanded = make(map[int]bool)
+			v.scrollOffset = 0
 		case "g":
 			v.cursor = 0
+			v.scrollOffset = 0
 		case "G":
 			v.cursor = len(visible) - 1
+			v.scrollOffset = 0
 		case "enter", " ":
 			if len(visible) > 0 && v.cursor < len(visible) {
 				turnNum := visible[v.cursor].Number
 				v.expanded[turnNum] = !v.expanded[turnNum]
+				v.scrollOffset = 0 // reset scroll when toggling
 			}
 		case "d":
-			v.cursor += 5
-			if v.cursor >= len(visible) {
-				v.cursor = len(visible) - 1
+			// Page down: scroll by half the visible height (lines, not turns)
+			halfPage := v.height / 2
+			if halfPage < 1 {
+				halfPage = 5
 			}
+			v.scrollOffset += halfPage
 		case "u":
-			v.cursor -= 5
-			if v.cursor < 0 {
-				v.cursor = 0
+			// Page up: scroll by half the visible height
+			halfPage := v.height / 2
+			if halfPage < 1 {
+				halfPage = 5
+			}
+			v.scrollOffset -= halfPage
+			if v.scrollOffset < 0 {
+				v.scrollOffset = 0
 			}
 		case "/":
 			v.filterMode = true
@@ -344,8 +358,8 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 				v.cursor = 0
 				return nil
 			}
-		case "+":
-			// Cycle annotation on current turn
+		case "a":
+			// Cycle annotation on current turn (a = annotate)
 			if len(visible) == 0 || v.cursor >= len(visible) {
 				return nil
 			}
@@ -439,16 +453,19 @@ func (v *LogsView) View() string {
 		allLines = append(allLines, lines...)
 	}
 
-	// Scroll window centered on cursor
+	// Scroll window: start at cursor turn header, then apply line-level offset
 	visibleHeight := v.height - 1
 	if visibleHeight < 1 {
 		visibleHeight = len(allLines)
 	}
 
-	start := cursorLineStart - visibleHeight/3
+	// Base position: show the selected turn's header at the top
+	start := cursorLineStart + v.scrollOffset
 	if start < 0 {
 		start = 0
+		v.scrollOffset = -cursorLineStart // clamp
 	}
+
 	end := start + visibleHeight
 	if end > len(allLines) {
 		end = len(allLines)
@@ -456,6 +473,15 @@ func (v *LogsView) View() string {
 		if start < 0 {
 			start = 0
 		}
+	}
+
+	// Clamp scroll offset so it doesn't go past the content
+	maxOffset := len(allLines) - cursorLineStart - visibleHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if v.scrollOffset > maxOffset {
+		v.scrollOffset = maxOffset
 	}
 
 	var b strings.Builder
@@ -467,6 +493,9 @@ func (v *LogsView) View() string {
 	// Status bar (hidden in compact/preview mode)
 	if !v.compact {
 		status := fmt.Sprintf(" Turn %d/%d", v.cursor+1, len(visible))
+		if v.scrollOffset > 0 {
+			status += fmt.Sprintf("  +%d lines", v.scrollOffset)
+		}
 		b.WriteString(dimStyle.Render(status))
 		if v.filterMode {
 			b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("|"))
