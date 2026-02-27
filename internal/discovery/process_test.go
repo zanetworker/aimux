@@ -191,6 +191,125 @@ func TestBuildInstanceDefaultPerm(t *testing.T) {
 	}
 }
 
+// --- filterSubagents tests ---
+
+// mockParentPID returns a function that maps PIDs to parent PIDs based on
+// the provided mapping. Unknown PIDs return 0.
+func mockParentPID(mapping map[int]int) func(int) int {
+	return func(pid int) int {
+		return mapping[pid]
+	}
+}
+
+func TestFilterSubagentsRemovesChildProcesses(t *testing.T) {
+	// PID 100 is the parent, PID 200 is a subagent of 100.
+	original := getParentPID
+	getParentPID = mockParentPID(map[int]int{
+		100: 1,   // parent is init/launchd
+		200: 100, // parent is PID 100 (a Claude process)
+	})
+	defer func() { getParentPID = original }()
+
+	agents := []agent.Agent{
+		{PID: 100, Model: "opus"},
+		{PID: 200, Model: "opus"},
+	}
+
+	filtered := filterSubagents(agents)
+
+	if len(filtered) != 1 {
+		t.Fatalf("filterSubagents() returned %d agents, want 1", len(filtered))
+	}
+	if filtered[0].PID != 100 {
+		t.Errorf("remaining PID = %d, want 100", filtered[0].PID)
+	}
+}
+
+func TestFilterSubagentsKeepsIndependentProcesses(t *testing.T) {
+	original := getParentPID
+	getParentPID = mockParentPID(map[int]int{
+		100: 1, // parent is init
+		200: 1, // parent is init (independent)
+		300: 1, // parent is init (independent)
+	})
+	defer func() { getParentPID = original }()
+
+	agents := []agent.Agent{
+		{PID: 100, Model: "opus"},
+		{PID: 200, Model: "sonnet"},
+		{PID: 300, Model: "haiku"},
+	}
+
+	filtered := filterSubagents(agents)
+
+	if len(filtered) != 3 {
+		t.Errorf("filterSubagents() returned %d agents, want 3", len(filtered))
+	}
+}
+
+func TestFilterSubagentsEmptyList(t *testing.T) {
+	filtered := filterSubagents(nil)
+	if len(filtered) != 0 {
+		t.Errorf("filterSubagents(nil) returned %d agents, want 0", len(filtered))
+	}
+}
+
+func TestFilterSubagentsSingleAgent(t *testing.T) {
+	agents := []agent.Agent{{PID: 42}}
+	filtered := filterSubagents(agents)
+	if len(filtered) != 1 {
+		t.Errorf("filterSubagents() returned %d agents, want 1", len(filtered))
+	}
+}
+
+func TestFilterSubagentsMultipleSubagents(t *testing.T) {
+	// PID 100 is the parent, PIDs 200 and 300 are both subagents of 100.
+	original := getParentPID
+	getParentPID = mockParentPID(map[int]int{
+		100: 1,
+		200: 100,
+		300: 100,
+	})
+	defer func() { getParentPID = original }()
+
+	agents := []agent.Agent{
+		{PID: 100},
+		{PID: 200},
+		{PID: 300},
+	}
+
+	filtered := filterSubagents(agents)
+
+	if len(filtered) != 1 {
+		t.Fatalf("filterSubagents() returned %d agents, want 1", len(filtered))
+	}
+	if filtered[0].PID != 100 {
+		t.Errorf("remaining PID = %d, want 100", filtered[0].PID)
+	}
+}
+
+func TestFilterSubagentsParentPIDNotInList(t *testing.T) {
+	// PID 200 has parent PID 999, but 999 is not in the agent list.
+	// So 200 should NOT be filtered out.
+	original := getParentPID
+	getParentPID = mockParentPID(map[int]int{
+		100: 1,
+		200: 999, // parent not in agent list
+	})
+	defer func() { getParentPID = original }()
+
+	agents := []agent.Agent{
+		{PID: 100},
+		{PID: 200},
+	}
+
+	filtered := filterSubagents(agents)
+
+	if len(filtered) != 2 {
+		t.Errorf("filterSubagents() returned %d agents, want 2 (parent not in list)", len(filtered))
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsAt(s, sub))
 }
