@@ -870,7 +870,24 @@ func (v *LogsView) sectionHeader(label string, style lipgloss.Style, w int) stri
 
 // --- JSONL Parsing ---
 
+// parseJSONLToTurns detects the format (Claude or Codex) and dispatches
+// to the appropriate parser.
 func parseJSONLToTurns(data string) []TraceTurn {
+	// Detect format by checking the first non-empty line
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, `"session_meta"`) || strings.Contains(line, `"response_item"`) || strings.Contains(line, `"event_msg"`) {
+			return parseCodexJSONL(data)
+		}
+		break
+	}
+	return parseClaudeJSONL(data)
+}
+
+func parseClaudeJSONL(data string) []TraceTurn {
 	var entries []jsonlEntry
 	for _, line := range strings.Split(data, "\n") {
 		line = strings.TrimSpace(line)
@@ -1239,6 +1256,211 @@ func toolInputSnippet(toolName string, input map[string]interface{}) string {
 		}
 	}
 	return ""
+}
+
+// --- Codex JSONL parsing ---
+
+// parseCodexJSONL parses Codex CLI session JSONL into TraceTurns.
+// Codex format uses: session_meta, event_msg (user_message, token_count),
+// response_item (message role=assistant, function_call, function_call_output).
+func parseCodexJSONL(data string) []TraceTurn {
+	var turns []TraceTurn
+	var current *TraceTurn
+	turnNum := 0
+	pendingCalls := make(map[string]*ToolSpan) // call_id -> span
+
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			continue
+		}
+
+		var entryType string
+		json.Unmarshal(raw["type"], &entryType)
+
+		var ts time.Time
+		var tsStr string
+		if err := json.Unmarshal(raw["timestamp"], &tsStr); err == nil {
+			ts, _ = time.Parse(time.RFC3339Nano, tsStr)
+		}
+
+		switch entryType {
+		case "event_msg":
+			var payload struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+				Info    *struct {
+					TotalTokenUsage *struct {
+						InputTokens  int64 `json:"input_tokens"`
+						OutputTokens int64 `json:"output_tokens"`
+					} `json:"total_token_usage"`
+				} `json:"info"`
+			}
+			json.Unmarshal(raw["payload"], &payload)
+
+			if payload.Type == "user_message" && payload.Message != "" {
+				// New user turn
+				if current != nil {
+					turns = append(turns, *current)
+				}
+				turnNum++
+				current = &TraceTurn{
+					Number:    turnNum,
+					Timestamp: ts,
+				}
+				for _, l := range strings.Split(payload.Message, "\n") {
+					trimmed := strings.TrimSpace(l)
+					if trimmed != "" {
+						current.UserLines = append(current.UserLines, trimmed)
+					}
+				}
+			}
+
+			if payload.Type == "token_count" && payload.Info != nil && payload.Info.TotalTokenUsage != nil && current != nil {
+				current.TokensIn = payload.Info.TotalTokenUsage.InputTokens
+				current.TokensOut = payload.Info.TotalTokenUsage.OutputTokens
+			}
+
+		case "response_item":
+			var payload struct {
+				Type      string `json:"type"`
+				Role      string `json:"role"`
+				Name      string `json:"name"`
+				CallID    string `json:"call_id"`
+				Arguments string `json:"arguments"`
+				Output    string `json:"output"`
+				Content   json.RawMessage `json:"content"`
+			}
+			json.Unmarshal(raw["payload"], &payload)
+
+			if current == nil {
+				turnNum++
+				current = &TraceTurn{Number: turnNum, Timestamp: ts}
+			}
+
+			if !ts.IsZero() {
+				current.EndTime = ts
+			}
+
+			switch payload.Type {
+			case "message":
+				if payload.Role == "assistant" {
+					// Extract text from content blocks
+					var contentBlocks []map[string]interface{}
+					if err := json.Unmarshal(payload.Content, &contentBlocks); err == nil {
+						for _, block := range contentBlocks {
+							if blockType, _ := block["type"].(string); blockType == "output_text" {
+								if text, _ := block["text"].(string); text != "" {
+									for _, l := range strings.Split(text, "\n") {
+										trimmed := strings.TrimSpace(l)
+										if trimmed != "" {
+											current.OutputLines = append(current.OutputLines, trimmed)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
+			case "function_call":
+				name := payload.Name
+				snippet := ""
+				// Try to parse arguments as JSON for a snippet
+				if payload.Arguments != "" {
+					var args map[string]interface{}
+					if err := json.Unmarshal([]byte(payload.Arguments), &args); err == nil {
+						if cmd, ok := args["cmd"].(string); ok {
+							cmd = strings.TrimSpace(cmd)
+							if len(cmd) > 60 {
+								cmd = cmd[:57] + "..."
+							}
+							snippet = "$ " + cmd
+						} else if path, ok := args["file_path"].(string); ok {
+							snippet = path
+						}
+					} else {
+						// Arguments is a plain string
+						s := payload.Arguments
+						if len(s) > 60 {
+							s = s[:57] + "..."
+						}
+						snippet = s
+					}
+				}
+
+				// Map Codex tool names to shorter display names
+				displayName := codexToolName(name)
+
+				span := ToolSpan{
+					Name:      displayName,
+					Snippet:   snippet,
+					Success:   true,
+					toolUseID: payload.CallID,
+				}
+				current.Actions = append(current.Actions, span)
+				if payload.CallID != "" {
+					idx := len(current.Actions) - 1
+					pendingCalls[payload.CallID] = &current.Actions[idx]
+				}
+
+			case "function_call_output":
+				if payload.CallID != "" {
+					if span, ok := pendingCalls[payload.CallID]; ok {
+						output := payload.Output
+						if strings.Contains(strings.ToLower(output), "error") ||
+							strings.Contains(output, "Process exited with code 1") {
+							span.Success = false
+							if len(output) > 200 {
+								output = output[:200]
+							}
+							span.ErrorMsg = output
+						}
+						delete(pendingCalls, payload.CallID)
+					}
+				}
+			}
+		}
+	}
+
+	if current != nil {
+		turns = append(turns, *current)
+	}
+
+	// Calculate per-turn cost (Codex uses GPT models)
+	for i := range turns {
+		turns[i].CostUSD = estimateTurnCost("gpt", turns[i].TokensIn, turns[i].TokensOut)
+	}
+
+	return turns
+}
+
+// codexToolName maps Codex function names to shorter display names.
+func codexToolName(name string) string {
+	switch name {
+	case "exec_command", "shell":
+		return "Bash"
+	case "read_file":
+		return "Read"
+	case "write_file":
+		return "Write"
+	case "apply_patch", "edit_file":
+		return "Edit"
+	case "search_files", "grep":
+		return "Grep"
+	case "list_directory", "ls":
+		return "Ls"
+	default:
+		if len(name) > 12 {
+			return name[:12]
+		}
+		return name
+	}
 }
 
 func min(a, b int) int {
