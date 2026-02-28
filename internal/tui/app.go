@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"os"
 	"os/exec"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -91,6 +93,11 @@ type App struct {
 	// Temporary status hint (shown once then cleared)
 	statusHint string
 
+	// Kill confirmation
+	killConfirm  bool            // true when waiting for y/n confirmation
+	killTarget   *agent.Agent    // agent to kill
+	hiddenAgents map[string]bool // session IDs hidden from view (session-only entries removed by user)
+
 	// Evaluation: annotation persistence
 	evalStore      *evaluation.Store
 	evalSessionID  string
@@ -123,6 +130,7 @@ func NewApp() App {
 		orchestrator: discovery.NewOrchestrator(agentProviders...),
 		providers:    providers,
 		breadcrumbs:  []string{"Agents"},
+		hiddenAgents: make(map[string]bool),
 	}
 }
 
@@ -171,7 +179,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.discoverInstances, a.tick())
 
 	case instancesMsg:
-		a.instances = []agent.Agent(msg)
+		a.instances = a.filterHidden([]agent.Agent(msg))
 		a.agentsView.SetAgents(a.instances)
 		a.headerView.SetAgents(a.instances)
 		a.costsView.SetAgents(a.instances)
@@ -229,6 +237,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
+		// Kill confirmation prompt
+		if a.killConfirm {
+			return a.handleKillConfirm(msg)
+		}
 		// When zoomed into a session, intercept only Ctrl+] to zoom out.
 		// All other keys are forwarded to the PTY subprocess.
 		if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
@@ -346,6 +358,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "?":
 		return a.navigateTo(viewHelp, "Help")
+	case "x":
+		if a.currentView == viewAgents {
+			return a.promptKill()
+		}
 	case "l":
 		if a.currentView == viewAgents {
 			return a.openLogsForSelected()
@@ -466,6 +482,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		return a.navigateTo(viewHelp, "Help")
 	case "export":
 		return a.exportTrace()
+	case "kill":
+		return a.promptKill()
 	case "quit":
 		return a, tea.Quit
 	}
@@ -662,6 +680,140 @@ func (a App) jumpToSession() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// promptKill shows a confirmation prompt before killing the selected agent.
+// For session-only entries (PID=0), offers to remove and delete trace files.
+func (a App) promptKill() (tea.Model, tea.Cmd) {
+	selected := a.agentsView.Selected()
+	if selected == nil {
+		a.statusHint = "No agent selected"
+		return a, nil
+	}
+	a.killConfirm = true
+	a.killTarget = selected
+	if selected.PID == 0 {
+		a.statusHint = fmt.Sprintf("Remove %s? y:remove  d:remove+delete trace  n:cancel", selected.ShortProject())
+	} else {
+		a.statusHint = fmt.Sprintf("Kill %s (PID %d)? y:confirm  n:cancel", selected.ShortProject(), selected.PID)
+	}
+	return a, nil
+}
+
+// handleKillConfirm processes the y/n/d response to the kill confirmation.
+func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	target := a.killTarget
+	a.killConfirm = false
+	a.killTarget = nil
+
+	if target == nil {
+		return a, nil
+	}
+
+	switch msg.String() {
+	case "y", "Y":
+		if target.PID == 0 {
+			// Session-only: hide from view by adding to hidden set
+			a.hideAgent(target)
+			a.statusHint = fmt.Sprintf("Removed %s from view", target.ShortProject())
+		} else {
+			err := killAgent(target)
+			if err != nil {
+				a.statusHint = fmt.Sprintf("Kill failed: %v", err)
+			} else {
+				a.statusHint = fmt.Sprintf("Killed %s (PID %d)", target.ShortProject(), target.PID)
+			}
+		}
+		return a, nil
+	case "d", "D":
+		// Remove + delete trace file
+		a.hideAgent(target)
+		if target.SessionFile != "" {
+			if err := os.Remove(target.SessionFile); err != nil {
+				a.statusHint = fmt.Sprintf("Removed from view, but failed to delete trace: %v", err)
+			} else {
+				a.statusHint = fmt.Sprintf("Removed %s and deleted trace file", target.ShortProject())
+			}
+		} else {
+			a.statusHint = fmt.Sprintf("Removed %s (no trace file to delete)", target.ShortProject())
+		}
+		return a, nil
+	default:
+		a.statusHint = "Cancelled"
+		return a, nil
+	}
+}
+
+// hideAgent adds an agent to the hidden set so it doesn't appear in the list.
+func (a *App) hideAgent(ag *agent.Agent) {
+	key := ag.SessionID
+	if key == "" && ag.SessionFile != "" {
+		key = ag.SessionFile
+	}
+	if key == "" {
+		key = fmt.Sprintf("pid-%d", ag.PID)
+	}
+	a.hiddenAgents[key] = true
+}
+
+// filterHidden removes hidden agents from the list.
+func (a *App) filterHidden(agents []agent.Agent) []agent.Agent {
+	if len(a.hiddenAgents) == 0 {
+		return agents
+	}
+	var result []agent.Agent
+	for _, ag := range agents {
+		key := ag.SessionID
+		if key == "" && ag.SessionFile != "" {
+			key = ag.SessionFile
+		}
+		if key == "" {
+			key = fmt.Sprintf("pid-%d", ag.PID)
+		}
+		if !a.hiddenAgents[key] {
+			result = append(result, ag)
+		}
+	}
+	return result
+}
+
+// killAgent sends SIGTERM to the agent process, waits briefly, then SIGKILL
+// if still alive. Also kills grouped sub-processes.
+func killAgent(ag *agent.Agent) error {
+	pids := []int{ag.PID}
+	if len(ag.GroupPIDs) > 0 {
+		pids = ag.GroupPIDs
+	}
+
+	var firstErr error
+	for _, pid := range pids {
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("find process %d: %w", pid, err)
+			}
+			continue
+		}
+
+		// Send SIGTERM for graceful shutdown
+		if err := proc.Signal(syscall.SIGTERM); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("SIGTERM %d: %w", pid, err)
+			}
+			continue
+		}
+
+		// Wait briefly then force kill if still alive
+		go func(p *os.Process, id int) {
+			time.Sleep(3 * time.Second)
+			// Check if still alive by sending signal 0
+			if err := p.Signal(syscall.Signal(0)); err == nil {
+				_ = p.Signal(syscall.SIGKILL)
+			}
+		}(proc, pid)
+	}
+
+	return firstErr
+}
+
 // openLogsForAgent opens the trace viewer for a specific agent and session file.
 // Used for non-Claude providers where embedding a PTY isn't possible.
 func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, tea.Cmd) {
@@ -791,7 +943,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  l:logs  s:sort  /:filter  ?:help  q:quit")
+		a.headerView.SetHint("Enter:open  l:logs  x:kill  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  Esc:back  ?:more")
 	case viewCosts:
@@ -1003,10 +1155,10 @@ func (a App) renderStatusBar() string {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d processes grouped (same dir+model)  Enter:zoom  l:logs  ?:help",
+			hints = fmt.Sprintf(" x%d = %d processes grouped (same dir+model)  Enter:open  x:kill  l:logs  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " :cmd  j/k:nav  Enter:zoom  l:logs  /:filter  ?:help"
+			hints = " j/k:nav  Enter:open  x:kill  l:logs  s:sort  /:filter  ?:help"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)

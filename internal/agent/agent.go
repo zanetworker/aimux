@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -144,26 +143,24 @@ func (a Agent) ShortProject() string {
 	return filepath.Base(a.WorkingDir)
 }
 
-// ShortDir returns a compact directory path showing the last two path
-// segments (parent/project). If the path is under $HOME, the home prefix
-// is replaced with "~".
+// ShortDir returns the parent directory name — the directory containing
+// the project. This disambiguates agents with the same project name in
+// different locations. The full path is available in the preview pane.
+//
+// Examples:
+//
+//	"/Users/me/go/src/github.com/zanetworker/agentmux" -> "zanetworker"
+//	"/Users/me/projects/myapp"                          -> "projects"
+//	"/tmp/test"                                         -> "tmp"
 func (a Agent) ShortDir() string {
 	if a.WorkingDir == "" {
 		return ""
 	}
-	dir := a.WorkingDir
-
-	// Replace home prefix with ~
-	if home, err := os.UserHomeDir(); err == nil {
-		dir = strings.Replace(dir, home, "~", 1)
+	parent := filepath.Dir(a.WorkingDir)
+	if parent == "" || parent == "." || parent == "/" {
+		return filepath.Base(a.WorkingDir)
 	}
-
-	// Show last two segments: parent/project
-	parts := strings.Split(dir, string(filepath.Separator))
-	if len(parts) > 2 {
-		return strings.Join(parts[len(parts)-2:], "/")
-	}
-	return dir
+	return filepath.Base(parent)
 }
 
 // FormatMemory returns a human-friendly memory string.
