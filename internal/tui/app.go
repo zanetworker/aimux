@@ -267,7 +267,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case views.AnnotationMsg:
-		// Persist annotation to disk
+		// Persist annotation to disk and update views
 		if a.evalStore != nil {
 			if msg.Label == "" {
 				_ = a.evalStore.Remove(msg.Turn)
@@ -285,6 +285,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				hint += "  a:cycle  N:note  :export"
 				a.statusHint = hint
+			}
+		}
+		// Sync annotation state to whichever trace view is active
+		if a.splitTrace != nil {
+			annots := a.splitTrace.Annotations()
+			notes := a.splitTrace.Notes()
+			if msg.Label == "" {
+				delete(annots, msg.Turn)
+				delete(notes, msg.Turn)
+			} else {
+				annots[msg.Turn] = msg.Label
+				if msg.Note != "" {
+					notes[msg.Turn] = msg.Note
+				}
 			}
 		}
 		return a, nil
@@ -712,11 +726,30 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Create live trace pane
+	// Create live trace pane with annotations loaded
 	if sessionFile != "" {
 		leftW := a.width - rightW
 		a.splitTrace = views.NewLogsView(selected.PID, sessionFile, a.parserForProvider(p))
 		a.splitTrace.SetSize(leftW, a.height-1)
+
+		// Set up evaluation store and load annotations into split trace
+		sessionID := selected.SessionID
+		if sessionID == "" {
+			sessionID = fmt.Sprintf("pid-%d", selected.PID)
+		}
+		a.evalSessionID = sessionID
+		a.evalStore = evaluation.NewStore(sessionID)
+		annotations, _ := a.evalStore.Load()
+		annotMap := make(map[int]string)
+		noteMap := make(map[int]string)
+		for _, ann := range annotations {
+			annotMap[ann.Turn] = ann.Label
+			if ann.Note != "" {
+				noteMap[ann.Turn] = ann.Note
+			}
+		}
+		a.splitTrace.SetAnnotations(annotMap)
+		a.splitTrace.SetNotes(noteMap)
 	}
 
 	a.zoomed = true
@@ -1347,7 +1380,7 @@ func (a App) renderSplitView() string {
 	hintStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	var focusHint string
 	if focus == "trace" {
-		focusHint = " [TRACE] j/k:turns  Enter:expand  a:annotate  /:filter"
+		focusHint = " [TRACE] j/k:turns  Enter:expand  a:annotate  N:note  /:filter"
 	} else {
 		focusHint = " [SESSION] typing goes to agent"
 	}

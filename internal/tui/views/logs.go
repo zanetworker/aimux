@@ -185,6 +185,11 @@ func (v *LogsView) NoteInput() (string, int) {
 	return v.noteInput, v.noteTurn
 }
 
+// Annotations returns the current annotations map.
+func (v *LogsView) Annotations() map[int]string {
+	return v.annotations
+}
+
 // SetAnnotations loads a set of turn annotations from external storage.
 func (v *LogsView) SetAnnotations(a map[int]string) {
 	if a == nil {
@@ -834,9 +839,17 @@ func (v *LogsView) renderTurnHeader(t TraceTurn, selected, expanded bool, w int)
 		meta = append(meta, bar)
 	}
 
-	// Annotation badge
+	// Annotation badge + note
 	if label, ok := v.annotations[t.Number]; ok && label != "" {
 		badge := renderAnnotationBadge(label)
+		if note, hasNote := v.notes[t.Number]; hasNote && note != "" {
+			noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Italic(true)
+			truncNote := note
+			if len(truncNote) > 30 {
+				truncNote = truncNote[:27] + "..."
+			}
+			badge += " " + noteStyle.Render("\""+truncNote+"\"")
+		}
 		meta = append(meta, badge)
 	}
 
