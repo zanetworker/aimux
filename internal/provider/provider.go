@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/agentmux/internal/trace"
 )
 
 // Provider discovers and manages AI CLI agents of a specific type.
@@ -34,6 +35,11 @@ type Provider interface {
 
 	// SpawnArgs returns the available models and modes for the launcher UI.
 	SpawnArgs() SpawnArgs
+
+	// ParseTrace reads a session/trace file and parses it into a
+	// provider-specific structured trace. Each provider knows its own
+	// log format (Claude JSONL, Codex JSONL, Gemini JSON).
+	ParseTrace(filePath string) ([]trace.Turn, error)
 }
 
 // RecentDir is a recently-used project directory from a provider's session history.

@@ -7,152 +7,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/agentmux/internal/trace"
 )
 
-// --- parseJSONLToTurns tests ---
-
-func TestParseJSONLToTurnsClaudeFormat(t *testing.T) {
-	claudeData := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"fix the bug"}}
-{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll fix that."},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"main.go"}}],"usage":{"input_tokens":100,"output_tokens":50}}}`
-
-	turns := parseJSONLToTurns(claudeData)
-
-	if len(turns) != 1 {
-		t.Fatalf("parseJSONLToTurns() returned %d turns, want 1", len(turns))
-	}
-
-	turn := turns[0]
-	if turn.Number != 1 {
-		t.Errorf("Number = %d, want 1", turn.Number)
-	}
-	if len(turn.UserLines) == 0 {
-		t.Fatal("UserLines is empty")
-	}
-	if turn.UserLines[0] != "fix the bug" {
-		t.Errorf("UserLines[0] = %q, want %q", turn.UserLines[0], "fix the bug")
-	}
-	if len(turn.Actions) != 1 {
-		t.Fatalf("Actions has %d entries, want 1", len(turn.Actions))
-	}
-	if turn.Actions[0].Name != "Read" {
-		t.Errorf("Actions[0].Name = %q, want %q", turn.Actions[0].Name, "Read")
-	}
-	if turn.Actions[0].Snippet != "main.go" {
-		t.Errorf("Actions[0].Snippet = %q, want %q", turn.Actions[0].Snippet, "main.go")
-	}
-	if len(turn.OutputLines) == 0 {
-		t.Fatal("OutputLines is empty")
-	}
-	if turn.OutputLines[0] != "I'll fix that." {
-		t.Errorf("OutputLines[0] = %q, want %q", turn.OutputLines[0], "I'll fix that.")
-	}
-	if turn.TokensIn != 100 {
-		t.Errorf("TokensIn = %d, want 100", turn.TokensIn)
-	}
-	if turn.TokensOut != 50 {
-		t.Errorf("TokensOut = %d, want 50", turn.TokensOut)
-	}
-	if turn.Model != "claude-opus-4-6" {
-		t.Errorf("Model = %q, want %q", turn.Model, "claude-opus-4-6")
-	}
-}
-
-func TestParseJSONLToTurnsCodexFormat(t *testing.T) {
-	codexData := `{"timestamp":"2026-01-01T10:00:00Z","type":"session_meta","payload":{"id":"abc-123","cwd":"/tmp/test"}}
-{"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"fix the bug"}}
-{"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I'll look at it."}]}}
-{"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{\"cmd\":\"cat main.go\"}"}}
-{"timestamp":"2026-01-01T10:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"file contents here"}}`
-
-	turns := parseJSONLToTurns(codexData)
-
-	if len(turns) != 1 {
-		t.Fatalf("parseJSONLToTurns() returned %d turns, want 1", len(turns))
-	}
-
-	turn := turns[0]
-	if turn.Number != 1 {
-		t.Errorf("Number = %d, want 1", turn.Number)
-	}
-	if len(turn.UserLines) == 0 {
-		t.Fatal("UserLines is empty")
-	}
-	if turn.UserLines[0] != "fix the bug" {
-		t.Errorf("UserLines[0] = %q, want %q", turn.UserLines[0], "fix the bug")
-	}
-	if len(turn.Actions) != 1 {
-		t.Fatalf("Actions has %d entries, want 1", len(turn.Actions))
-	}
-	if turn.Actions[0].Name != "Bash" {
-		t.Errorf("Actions[0].Name = %q, want %q (mapped from exec_command)", turn.Actions[0].Name, "Bash")
-	}
-	if !strings.Contains(turn.Actions[0].Snippet, "cat main.go") {
-		t.Errorf("Actions[0].Snippet = %q, should contain %q", turn.Actions[0].Snippet, "cat main.go")
-	}
-	if len(turn.OutputLines) == 0 {
-		t.Fatal("OutputLines is empty")
-	}
-	if turn.OutputLines[0] != "I'll look at it." {
-		t.Errorf("OutputLines[0] = %q, want %q", turn.OutputLines[0], "I'll look at it.")
-	}
-}
-
-func TestParseJSONLToTurnsAutoDetectClaude(t *testing.T) {
-	// The first non-empty line does not contain session_meta/response_item/event_msg,
-	// so it should be detected as Claude format.
-	claudeData := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"hello"}}`
-	turns := parseJSONLToTurns(claudeData)
-
-	if len(turns) != 1 {
-		t.Fatalf("expected 1 turn for Claude format, got %d", len(turns))
-	}
-	if turns[0].UserLines[0] != "hello" {
-		t.Errorf("UserLines[0] = %q, want %q", turns[0].UserLines[0], "hello")
-	}
-}
-
-func TestParseJSONLToTurnsAutoDetectCodex(t *testing.T) {
-	// The first non-empty line contains "session_meta", so it should be detected as Codex.
-	codexData := `{"timestamp":"2026-01-01T10:00:00Z","type":"session_meta","payload":{"id":"abc"}}
-{"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello codex"}}`
-
-	turns := parseJSONLToTurns(codexData)
-
-	if len(turns) != 1 {
-		t.Fatalf("expected 1 turn for Codex format, got %d", len(turns))
-	}
-	if turns[0].UserLines[0] != "hello codex" {
-		t.Errorf("UserLines[0] = %q, want %q", turns[0].UserLines[0], "hello codex")
-	}
-}
-
-func TestParseJSONLToTurnsEmptyData(t *testing.T) {
-	turns := parseJSONLToTurns("")
-	if len(turns) != 0 {
-		t.Errorf("expected 0 turns for empty data, got %d", len(turns))
-	}
-}
-
-func TestParseJSONLToTurnsMultipleTurns(t *testing.T) {
-	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"first question"}}
-{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"first answer"}],"usage":{"input_tokens":50,"output_tokens":25}}}
-{"type":"user","timestamp":"2026-01-01T10:01:00Z","message":{"role":"user","content":"second question"}}
-{"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"second answer"}],"usage":{"input_tokens":80,"output_tokens":40}}}`
-
-	turns := parseJSONLToTurns(data)
-
-	if len(turns) != 2 {
-		t.Fatalf("expected 2 turns, got %d", len(turns))
-	}
-	if turns[0].UserLines[0] != "first question" {
-		t.Errorf("turn 1 UserLines[0] = %q, want %q", turns[0].UserLines[0], "first question")
-	}
-	if turns[1].UserLines[0] != "second question" {
-		t.Errorf("turn 2 UserLines[0] = %q, want %q", turns[1].UserLines[0], "second question")
-	}
-}
-
 // --- TraceTurn.Duration() tests ---
+// TraceTurn is a type alias for trace.Turn, so these test the trace package
+// behavior through the alias.
 
 func TestTraceTurnDurationValid(t *testing.T) {
 	turn := TraceTurn{
@@ -237,7 +97,8 @@ func TestTraceTurnErrorCountNoActions(t *testing.T) {
 	}
 }
 
-// --- estimateTurnCost tests ---
+// --- trace.EstimateTurnCost tests ---
+// Cost estimation now lives in the trace package.
 
 func TestEstimateTurnCost(t *testing.T) {
 	tests := []struct {
@@ -269,16 +130,8 @@ func TestEstimateTurnCost(t *testing.T) {
 			model:   "claude-haiku-3-5",
 			tokIn:   1000,
 			tokOut:  500,
-			wantMin: 0.0008, // (1000*0.25 + 500*1.25) / 1M = 0.000875
-			wantMax: 0.001,
-		},
-		{
-			name:    "unknown model defaults to sonnet rates",
-			model:   "gpt-4o",
-			tokIn:   1000,
-			tokOut:  500,
-			wantMin: 0.01,
-			wantMax: 0.012,
+			wantMin: 0.002, // (1000*0.80 + 500*4.00) / 1M = 0.0028
+			wantMax: 0.004,
 		},
 		{
 			name:    "zero tokens",
@@ -292,9 +145,9 @@ func TestEstimateTurnCost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := estimateTurnCost(tt.model, tt.tokIn, tt.tokOut)
+			got := trace.EstimateTurnCost(tt.model, tt.tokIn, tt.tokOut)
 			if got < tt.wantMin || got > tt.wantMax {
-				t.Errorf("estimateTurnCost(%q, %d, %d) = %f, want between %f and %f",
+				t.Errorf("EstimateTurnCost(%q, %d, %d) = %f, want between %f and %f",
 					tt.model, tt.tokIn, tt.tokOut, got, tt.wantMin, tt.wantMax)
 			}
 		})
@@ -323,37 +176,6 @@ func TestFormatTokenCount(t *testing.T) {
 			got := formatTokenCount(tt.n)
 			if got != tt.want {
 				t.Errorf("formatTokenCount(%d) = %q, want %q", tt.n, got, tt.want)
-			}
-		})
-	}
-}
-
-// --- codexToolName tests ---
-
-func TestCodexToolName(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"exec_command", "Bash"},
-		{"shell", "Bash"},
-		{"read_file", "Read"},
-		{"write_file", "Write"},
-		{"apply_patch", "Edit"},
-		{"edit_file", "Edit"},
-		{"search_files", "Grep"},
-		{"grep", "Grep"},
-		{"list_directory", "Ls"},
-		{"ls", "Ls"},
-		{"unknown_short", "unknown_shor"},  // truncated to 12
-		{"tiny", "tiny"},                    // short enough, no truncation
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := codexToolName(tt.input)
-			if got != tt.want {
-				t.Errorf("codexToolName(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -496,57 +318,6 @@ func TestHeaderViewHeight(t *testing.T) {
 	}
 }
 
-// --- Claude format with tool_result (error matching) ---
-
-func TestParseClaudeJSONLToolResultError(t *testing.T) {
-	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"run the build"}}
-{"type":"assistant","timestamp":"2026-01-01T10:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"go build ./..."}}],"usage":{"input_tokens":50,"output_tokens":20}}}
-{"type":"user","timestamp":"2026-01-01T10:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","is_error":true,"content":"compilation failed: undefined variable"}]}}`
-
-	turns := parseJSONLToTurns(data)
-
-	if len(turns) != 1 {
-		t.Fatalf("expected 1 turn, got %d", len(turns))
-	}
-	if len(turns[0].Actions) != 1 {
-		t.Fatalf("expected 1 action, got %d", len(turns[0].Actions))
-	}
-
-	action := turns[0].Actions[0]
-	if action.Success {
-		t.Error("expected action.Success = false for errored tool result")
-	}
-	if !strings.Contains(action.ErrorMsg, "compilation failed") {
-		t.Errorf("ErrorMsg = %q, should contain %q", action.ErrorMsg, "compilation failed")
-	}
-}
-
-// --- Codex format function_call_output with error ---
-
-func TestParseCodexJSONLFunctionCallError(t *testing.T) {
-	data := `{"timestamp":"2026-01-01T10:00:00Z","type":"session_meta","payload":{"id":"test"}}
-{"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"run tests"}}
-{"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{\"cmd\":\"go test\"}"}}
-{"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Process exited with code 1\nerror in test"}}`
-
-	turns := parseJSONLToTurns(data)
-
-	if len(turns) != 1 {
-		t.Fatalf("expected 1 turn, got %d", len(turns))
-	}
-	if len(turns[0].Actions) != 1 {
-		t.Fatalf("expected 1 action, got %d", len(turns[0].Actions))
-	}
-
-	action := turns[0].Actions[0]
-	if action.Success {
-		t.Error("expected action.Success = false for error output")
-	}
-	if action.ErrorMsg == "" {
-		t.Error("expected non-empty ErrorMsg for error output")
-	}
-}
-
 // --- costColor tests ---
 
 func TestCostColor(t *testing.T) {
@@ -578,9 +349,6 @@ func TestCostColorThresholds(t *testing.T) {
 	tests := []struct {
 		name string
 		cost float64
-		// We can't directly compare lipgloss styles, so we verify the function
-		// returns different results for different brackets by checking rendered
-		// output is non-empty and the function doesn't panic.
 	}{
 		{"negative", -1.0},
 		{"zero", 0},

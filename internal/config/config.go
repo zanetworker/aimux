@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +13,7 @@ type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
 	DefaultRuntime  string                    `yaml:"default_runtime"`
+	Shell           string                    `yaml:"shell"` // login shell for spawning agents
 }
 
 // ProviderConfig controls a single provider's behaviour.
@@ -72,6 +74,9 @@ func Load(path string) (Config, error) {
 	if fileCfg.DefaultRuntime != "" {
 		cfg.DefaultRuntime = fileCfg.DefaultRuntime
 	}
+	if fileCfg.Shell != "" {
+		cfg.Shell = fileCfg.Shell
+	}
 	if fileCfg.Providers != nil {
 		for name, pc := range fileCfg.Providers {
 			cfg.Providers[name] = pc
@@ -79,6 +84,35 @@ func Load(path string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// ResolveShell returns the shell to use for spawning agents in tmux sessions.
+// Priority: config shell > $SHELL env var > /bin/sh (POSIX fallback).
+func (c Config) ResolveShell() string {
+	if c.Shell != "" {
+		return c.Shell
+	}
+	if sh := os.Getenv("SHELL"); sh != "" {
+		return sh
+	}
+	return "/bin/sh"
+}
+
+// ShellRCPrefix returns a shell command prefix that sources the user's RC file.
+// This ensures shell functions and env vars are available when running commands
+// via login shell (zsh -lc alone doesn't source .zshrc for non-interactive shells).
+func ShellRCPrefix(shell string) string {
+	base := filepath.Base(shell)
+	switch {
+	case strings.Contains(base, "zsh"):
+		return "source ~/.zshrc 2>/dev/null; "
+	case strings.Contains(base, "bash"):
+		return "source ~/.bashrc 2>/dev/null; "
+	case strings.Contains(base, "fish"):
+		return "source ~/.config/fish/config.fish 2>/dev/null; "
+	default:
+		return ""
+	}
 }
 
 // IsProviderEnabled returns true if the named provider is enabled in the config.

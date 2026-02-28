@@ -41,7 +41,7 @@ func TestShellQuote(t *testing.T) {
 }
 
 func TestLaunch_NilCmd(t *testing.T) {
-	err := Launch(nil, "claude", "/tmp", "tmux")
+	err := Launch(nil, "claude", "/tmp", "tmux", "/bin/sh")
 	if err == nil {
 		t.Error("Launch(nil) should return error")
 	}
@@ -49,7 +49,7 @@ func TestLaunch_NilCmd(t *testing.T) {
 
 func TestLaunch_UnsupportedRuntime(t *testing.T) {
 	cmd := exec.Command("echo", "test")
-	err := Launch(cmd, "claude", "/tmp", "unsupported")
+	err := Launch(cmd, "claude", "/tmp", "unsupported", "/bin/sh")
 	if err == nil {
 		t.Error("Launch with unsupported runtime should return error")
 	}

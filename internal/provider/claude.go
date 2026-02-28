@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"github.com/zanetworker/agentmux/internal/agent"
 	"github.com/zanetworker/agentmux/internal/cost"
 	"github.com/zanetworker/agentmux/internal/discovery"
+	"github.com/zanetworker/agentmux/internal/trace"
 )
 
 // Claude is a Provider implementation for the Claude Code CLI.
@@ -459,4 +461,360 @@ func findBinary(name string) string {
 		return name
 	}
 	return path
+}
+
+// ParseTrace reads a Claude JSONL session file and parses it into trace turns.
+func (c *Claude) ParseTrace(filePath string) ([]trace.Turn, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read Claude trace %s: %w", filePath, err)
+	}
+	return parseClaudeJSONL(string(data)), nil
+}
+
+// --- Claude JSONL trace parsing ---
+
+type claudeContentBlock struct {
+	blockType     string
+	text          string
+	toolName      string
+	toolSnippet   string
+	toolUseID     string
+	editOldString string
+	editNewString string
+}
+
+type claudeToolResultEntry struct {
+	toolUseID string
+	content   string
+	isError   bool
+}
+
+type claudeJSONLEntry struct {
+	entryType      string
+	timestamp      time.Time
+	isHumanMessage bool
+	textContent    string
+	blocks         []claudeContentBlock
+	tokensIn       int64
+	tokensOut      int64
+	model          string
+	hasToolResults bool
+	toolResults    []claudeToolResultEntry
+}
+
+func parseClaudeRawEntry(line string) claudeJSONLEntry {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return claudeJSONLEntry{}
+	}
+
+	var e claudeJSONLEntry
+	json.Unmarshal(raw["type"], &e.entryType)
+
+	var tsStr string
+	if err := json.Unmarshal(raw["timestamp"], &tsStr); err == nil {
+		e.timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
+	}
+
+	switch e.entryType {
+	case "user":
+		e.parseClaudeUser(raw)
+	case "assistant":
+		e.parseClaudeAssistant(raw)
+	}
+
+	return e
+}
+
+func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
+	msgRaw := raw["message"]
+	if msgRaw == nil {
+		return
+	}
+
+	var msgObj map[string]json.RawMessage
+	if err := json.Unmarshal(msgRaw, &msgObj); err != nil {
+		return
+	}
+
+	contentRaw := msgObj["content"]
+	if contentRaw == nil {
+		return
+	}
+
+	// Try as simple string (human message)
+	var contentStr string
+	if err := json.Unmarshal(contentRaw, &contentStr); err == nil {
+		e.isHumanMessage = true
+		e.textContent = contentStr
+		return
+	}
+
+	// Try as array (could contain tool_result blocks)
+	var contentArr []map[string]interface{}
+	if err := json.Unmarshal(contentRaw, &contentArr); err == nil {
+		for _, item := range contentArr {
+			itemType, _ := item["type"].(string)
+			if itemType == "tool_result" {
+				e.hasToolResults = true
+				tr := claudeToolResultEntry{}
+				tr.toolUseID, _ = item["tool_use_id"].(string)
+				if isErr, ok := item["is_error"].(bool); ok {
+					tr.isError = isErr
+				}
+				switch c := item["content"].(type) {
+				case string:
+					tr.content = c
+				case []interface{}:
+					var parts []string
+					for _, block := range c {
+						if bm, ok := block.(map[string]interface{}); ok {
+							if text, ok := bm["text"].(string); ok {
+								parts = append(parts, text)
+							}
+						}
+					}
+					tr.content = strings.Join(parts, "\n")
+				}
+				e.toolResults = append(e.toolResults, tr)
+			}
+		}
+	}
+
+	e.isHumanMessage = false
+}
+
+func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) {
+	msgRaw := raw["message"]
+	if msgRaw == nil {
+		return
+	}
+
+	var msgObj map[string]json.RawMessage
+	if err := json.Unmarshal(msgRaw, &msgObj); err != nil {
+		return
+	}
+
+	// Parse model name
+	if modelRaw := msgObj["model"]; modelRaw != nil {
+		json.Unmarshal(modelRaw, &e.model)
+	}
+
+	if usageRaw := msgObj["usage"]; usageRaw != nil {
+		var usage struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+		}
+		json.Unmarshal(usageRaw, &usage)
+		e.tokensIn = usage.InputTokens
+		e.tokensOut = usage.OutputTokens
+	}
+
+	var blocks []map[string]interface{}
+	if err := json.Unmarshal(msgObj["content"], &blocks); err != nil {
+		return
+	}
+
+	for _, block := range blocks {
+		blockType, _ := block["type"].(string)
+		switch blockType {
+		case "text":
+			text, _ := block["text"].(string)
+			text = strings.TrimSpace(text)
+			if text != "" {
+				e.blocks = append(e.blocks, claudeContentBlock{
+					blockType: "text",
+					text:      text,
+				})
+			}
+		case "tool_use":
+			name, _ := block["name"].(string)
+			id, _ := block["id"].(string)
+			snippet := ""
+			var editOld, editNew string
+			if input, ok := block["input"].(map[string]interface{}); ok {
+				snippet = claudeToolInputSnippet(name, input)
+				if name == "Edit" {
+					if old, ok := input["old_string"].(string); ok {
+						editOld = old
+					}
+					if ns, ok := input["new_string"].(string); ok {
+						editNew = ns
+					}
+				}
+			}
+			e.blocks = append(e.blocks, claudeContentBlock{
+				blockType:     "tool_use",
+				toolName:      name,
+				toolSnippet:   snippet,
+				toolUseID:     id,
+				editOldString: editOld,
+				editNewString: editNew,
+			})
+		}
+	}
+}
+
+func parseClaudeJSONL(data string) []trace.Turn {
+	var entries []claudeJSONLEntry
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		e := parseClaudeRawEntry(line)
+		if e.entryType != "" {
+			entries = append(entries, e)
+		}
+	}
+
+	var turns []trace.Turn
+	var current *trace.Turn
+	turnNum := 0
+
+	// Index of tool_use_id -> pointer to the ToolSpan (across turns).
+	pendingTools := make(map[string]*trace.ToolSpan)
+
+	for _, e := range entries {
+		switch e.entryType {
+		case "user":
+			if e.isHumanMessage && e.textContent != "" {
+				if current != nil {
+					turns = append(turns, *current)
+				}
+				turnNum++
+				current = &trace.Turn{
+					Number:    turnNum,
+					Timestamp: e.timestamp,
+				}
+				for _, line := range strings.Split(e.textContent, "\n") {
+					trimmed := strings.TrimSpace(line)
+					if trimmed != "" {
+						current.UserLines = append(current.UserLines, trimmed)
+					}
+				}
+			} else if e.hasToolResults {
+				for _, tr := range e.toolResults {
+					if span, ok := pendingTools[tr.toolUseID]; ok {
+						span.Success = !tr.isError
+						if tr.isError {
+							errMsg := tr.content
+							if len(errMsg) > 200 {
+								errMsg = errMsg[:200]
+							}
+							span.ErrorMsg = errMsg
+						}
+						delete(pendingTools, tr.toolUseID)
+					}
+				}
+			}
+
+		case "assistant":
+			if current == nil {
+				turnNum++
+				current = &trace.Turn{
+					Number:    turnNum,
+					Timestamp: e.timestamp,
+				}
+			}
+			current.TokensIn += e.tokensIn
+			current.TokensOut += e.tokensOut
+
+			if !e.timestamp.IsZero() {
+				current.EndTime = e.timestamp
+			}
+
+			if e.model != "" && current.Model == "" {
+				current.Model = e.model
+			}
+
+			for _, block := range e.blocks {
+				switch block.blockType {
+				case "text":
+					for _, line := range strings.Split(block.text, "\n") {
+						trimmed := strings.TrimSpace(line)
+						if trimmed != "" {
+							current.OutputLines = append(current.OutputLines, trimmed)
+						}
+					}
+				case "tool_use":
+					span := trace.ToolSpan{
+						Name:      block.toolName,
+						Snippet:   block.toolSnippet,
+						Success:   true,
+						ToolUseID: block.toolUseID,
+						OldString: block.editOldString,
+						NewString: block.editNewString,
+					}
+					current.Actions = append(current.Actions, span)
+					if block.toolUseID != "" {
+						idx := len(current.Actions) - 1
+						pendingTools[block.toolUseID] = &current.Actions[idx]
+					}
+				}
+			}
+		}
+	}
+
+	if current != nil {
+		turns = append(turns, *current)
+	}
+
+	// Calculate per-turn cost using the cost package
+	for i := range turns {
+		turns[i].CostUSD = trace.EstimateTurnCost(turns[i].Model, turns[i].TokensIn, turns[i].TokensOut)
+	}
+
+	return turns
+}
+
+// claudeToolInputSnippet extracts a human-readable snippet from tool input.
+func claudeToolInputSnippet(toolName string, input map[string]interface{}) string {
+	switch toolName {
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok {
+			cmd = strings.TrimSpace(cmd)
+			if len(cmd) > 60 {
+				cmd = cmd[:57] + "..."
+			}
+			return "$ " + cmd
+		}
+	case "Read":
+		if path, ok := input["file_path"].(string); ok {
+			return path
+		}
+	case "Write":
+		if path, ok := input["file_path"].(string); ok {
+			return path
+		}
+	case "Edit":
+		if path, ok := input["file_path"].(string); ok {
+			return path
+		}
+	case "Grep":
+		if pattern, ok := input["pattern"].(string); ok {
+			return "/" + pattern + "/"
+		}
+	case "Glob":
+		if pattern, ok := input["pattern"].(string); ok {
+			return pattern
+		}
+	case "Task":
+		if desc, ok := input["description"].(string); ok {
+			return desc
+		}
+	case "WebSearch":
+		if query, ok := input["query"].(string); ok {
+			return query
+		}
+	case "WebFetch":
+		if url, ok := input["url"].(string); ok {
+			if len(url) > 50 {
+				url = url[:47] + "..."
+			}
+			return url
+		}
+	}
+	return ""
 }

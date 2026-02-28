@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zanetworker/agentmux/internal/config"
 )
 
 // TmuxSession mirrors a tmux session's pane content. It polls
@@ -30,18 +33,25 @@ type TmuxSession struct {
 
 // StartTmux creates a new tmux session running cmd, then mirrors it.
 // The session is killed when Close is called.
-func StartTmux(cmd *exec.Cmd, cols, rows int) (*TmuxSession, error) {
+func StartTmux(cmd *exec.Cmd, cols, rows int, shell string) (*TmuxSession, error) {
 	if cmd == nil {
 		return nil, fmt.Errorf("tmux: nil command")
 	}
 
 	name := fmt.Sprintf("agentmux-embed-%d", time.Now().UnixNano())
 
-	// Build: tmux new-session -d -s <name> -x <cols> -y <rows> -- <binary> <args...>
+	// Build the command string for the user's shell with RC file sourced.
+	// Use the command name (not absolute path) so shell functions take
+	// precedence over the raw binary (e.g., gemini() wrapper).
+	var cmdParts []string
+	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
+	cmdParts = append(cmdParts, cmd.Args[1:]...)
+	innerCmd := strings.Join(cmdParts, " ")
+	shellCmd := config.ShellRCPrefix(shell) + innerCmd
+
 	args := []string{"new-session", "-d", "-s", name,
-		"-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows), "--"}
-	args = append(args, cmd.Path)
-	args = append(args, cmd.Args[1:]...)
+		"-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows),
+		"--", shell, "-lc", shellCmd}
 
 	tmuxCmd := exec.Command("tmux", args...)
 	if cmd.Dir != "" {

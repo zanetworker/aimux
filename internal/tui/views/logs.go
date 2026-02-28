@@ -1,14 +1,12 @@
 package views
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/zanetworker/agentmux/internal/trace"
 )
 
 // --- Styles ---
@@ -92,74 +90,19 @@ type AnnotationMsg struct {
 
 // --- Data model ---
 
-// ToolSpan represents a single tool call within a turn.
-type ToolSpan struct {
-	Name      string
-	Snippet   string // short description of the input
-	Success   bool   // true if tool succeeded
-	ErrorMsg  string // error message if failed
-	OldString string // for Edit: the old text
-	NewString string // for Edit: the new text
-	toolUseID string // internal: for matching tool_result
-}
+// TraceTurn is an alias for trace.Turn, kept for backward compatibility
+// within the views package. All parsing now happens in the provider layer.
+type TraceTurn = trace.Turn
 
-// TraceTurn groups a user prompt with the assistant response into one logical
-// unit -- the fundamental trace element for evaluation (input -> actions -> output).
-type TraceTurn struct {
-	Number      int
-	Timestamp   time.Time
-	EndTime     time.Time // timestamp of last entry in this turn (for duration)
-	UserLines   []string  // full user input text
-	Actions     []ToolSpan
-	OutputLines []string
-	TokensIn    int64
-	TokensOut   int64
-	CostUSD     float64 // calculated from tokens + model
-	Model       string  // model used for this turn
-}
-
-// Duration returns the wall-clock duration of this turn.
-func (t TraceTurn) Duration() time.Duration {
-	if t.EndTime.IsZero() || t.Timestamp.IsZero() {
-		return 0
-	}
-	d := t.EndTime.Sub(t.Timestamp)
-	if d < 0 {
-		return 0
-	}
-	return d
-}
-
-// ErrorCount returns the number of failed tool calls in this turn.
-func (t TraceTurn) ErrorCount() int {
-	n := 0
-	for _, a := range t.Actions {
-		if !a.Success {
-			n++
-		}
-	}
-	return n
-}
-
-// --- Cost estimation ---
-
-func estimateTurnCost(model string, tokIn, tokOut int64) float64 {
-	// Rough rates per million tokens
-	var inRate, outRate float64
-	switch {
-	case strings.Contains(model, "opus"):
-		inRate, outRate = 15.0, 75.0
-	case strings.Contains(model, "sonnet"):
-		inRate, outRate = 3.0, 15.0
-	case strings.Contains(model, "haiku"):
-		inRate, outRate = 0.25, 1.25
-	default:
-		inRate, outRate = 3.0, 15.0
-	}
-	return (float64(tokIn)*inRate + float64(tokOut)*outRate) / 1_000_000
-}
+// ToolSpan is an alias for trace.ToolSpan, kept for backward compatibility
+// within the views package.
+type ToolSpan = trace.ToolSpan
 
 // --- LogsView ---
+
+// TraceParser is a function that reads a file and returns parsed trace turns.
+// Each provider supplies its own parser via Provider.ParseTrace.
+type TraceParser func(filePath string) ([]trace.Turn, error)
 
 // LogsView renders a structured conversation trace grouped by turns.
 // Each turn shows INPUT (user), ACTIONS (tools), and OUTPUT (assistant)
@@ -167,6 +110,7 @@ func estimateTurnCost(model string, tokIn, tokOut int64) float64 {
 type LogsView struct {
 	turns        []TraceTurn
 	filePath     string
+	parser       TraceParser
 	width        int
 	height       int
 	cursor       int
@@ -181,10 +125,13 @@ type LogsView struct {
 }
 
 // NewLogsView creates a new LogsView for the given PID and log file path.
-func NewLogsView(pid int, filePath string) *LogsView {
+// The parser function is called during Reload() to parse the session file
+// into structured trace turns. If parser is nil, Reload returns no turns.
+func NewLogsView(pid int, filePath string, parser TraceParser) *LogsView {
 	v := &LogsView{
 		pid:         pid,
 		filePath:    filePath,
+		parser:      parser,
 		expanded:    make(map[int]bool),
 		annotations: make(map[int]string),
 	}
@@ -217,11 +164,16 @@ func (v *LogsView) SetAnnotations(a map[int]string) {
 	}
 }
 
-// Reload reads and parses the JSONL log file into turns. Preserves the
-// cursor position unless new turns were added while the cursor was at the
-// bottom (auto-follow mode).
+// Reload reads and parses the session file into turns using the provider's
+// parser. Preserves the cursor position unless new turns were added while
+// the cursor was at the bottom (auto-follow mode).
 func (v *LogsView) Reload() {
-	data, err := os.ReadFile(v.filePath)
+	if v.parser == nil {
+		v.turns = nil
+		return
+	}
+
+	turns, err := v.parser(v.filePath)
 	if err != nil {
 		v.turns = nil
 		return
@@ -231,7 +183,7 @@ func (v *LogsView) Reload() {
 	prevCursor := v.cursor
 	atBottom := prevCursor >= prevCount-1
 
-	v.turns = parseJSONLToTurns(string(data))
+	v.turns = turns
 
 	if len(v.turns) == 0 {
 		v.cursor = 0
@@ -943,335 +895,6 @@ func (v *LogsView) sectionHeader(label string, style lipgloss.Style, w int) stri
 	return rendered + turnRuleStyle.Render(strings.Repeat("─", ruleLen))
 }
 
-// --- JSONL Parsing ---
-
-// parseJSONLToTurns detects the format (Claude or Codex) and dispatches
-// to the appropriate parser.
-func parseJSONLToTurns(data string) []TraceTurn {
-	// Detect format by checking the first non-empty line
-	for _, line := range strings.Split(data, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, `"session_meta"`) || strings.Contains(line, `"response_item"`) || strings.Contains(line, `"event_msg"`) {
-			return parseCodexJSONL(data)
-		}
-		break
-	}
-	return parseClaudeJSONL(data)
-}
-
-func parseClaudeJSONL(data string) []TraceTurn {
-	var entries []jsonlEntry
-	for _, line := range strings.Split(data, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		e := parseRawEntry(line)
-		if e.entryType != "" {
-			entries = append(entries, e)
-		}
-	}
-
-	var turns []TraceTurn
-	var current *TraceTurn
-	turnNum := 0
-
-	// Index of tool_use_id -> pointer to the ToolSpan (across turns).
-	// We build this as we go so tool_result entries can look up their tool.
-	pendingTools := make(map[string]*ToolSpan)
-
-	for _, e := range entries {
-		switch e.entryType {
-		case "user":
-			if e.isHumanMessage && e.textContent != "" {
-				if current != nil {
-					turns = append(turns, *current)
-				}
-				turnNum++
-				current = &TraceTurn{
-					Number:    turnNum,
-					Timestamp: e.timestamp,
-				}
-				// Split user input into lines
-				for _, line := range strings.Split(e.textContent, "\n") {
-					trimmed := strings.TrimSpace(line)
-					if trimmed != "" {
-						current.UserLines = append(current.UserLines, trimmed)
-					}
-				}
-			} else if e.hasToolResults {
-				// This is a user message with tool_result blocks.
-				// Match each result to its pending tool_use_id.
-				for _, tr := range e.toolResults {
-					if span, ok := pendingTools[tr.toolUseID]; ok {
-						span.Success = !tr.isError
-						if tr.isError {
-							// Take first 200 chars of error content
-							errMsg := tr.content
-							if len(errMsg) > 200 {
-								errMsg = errMsg[:200]
-							}
-							span.ErrorMsg = errMsg
-						}
-						delete(pendingTools, tr.toolUseID)
-					}
-				}
-			}
-
-		case "assistant":
-			if current == nil {
-				turnNum++
-				current = &TraceTurn{
-					Number:    turnNum,
-					Timestamp: e.timestamp,
-				}
-			}
-			current.TokensIn += e.tokensIn
-			current.TokensOut += e.tokensOut
-
-			// Track end time for duration calculation
-			if !e.timestamp.IsZero() {
-				current.EndTime = e.timestamp
-			}
-
-			// Parse model name
-			if e.model != "" && current.Model == "" {
-				current.Model = e.model
-			}
-
-			for _, block := range e.blocks {
-				switch block.blockType {
-				case "text":
-					for _, line := range strings.Split(block.text, "\n") {
-						trimmed := strings.TrimSpace(line)
-						if trimmed != "" {
-							current.OutputLines = append(current.OutputLines, trimmed)
-						}
-					}
-				case "tool_use":
-					span := ToolSpan{
-						Name:      block.toolName,
-						Snippet:   block.toolSnippet,
-						Success:   true, // default to success; overwritten by tool_result
-						toolUseID: block.toolUseID,
-						OldString: block.editOldString,
-						NewString: block.editNewString,
-					}
-					current.Actions = append(current.Actions, span)
-					// Register for tool_result matching
-					if block.toolUseID != "" {
-						// Store pointer to the last appended span
-						idx := len(current.Actions) - 1
-						pendingTools[block.toolUseID] = &current.Actions[idx]
-					}
-				}
-			}
-		}
-	}
-
-	if current != nil {
-		turns = append(turns, *current)
-	}
-
-	// Calculate per-turn cost
-	for i := range turns {
-		turns[i].CostUSD = estimateTurnCost(turns[i].Model, turns[i].TokensIn, turns[i].TokensOut)
-	}
-
-	return turns
-}
-
-// --- Raw JSONL entry parsing ---
-
-type contentBlock struct {
-	blockType     string
-	text          string
-	toolName      string
-	toolSnippet   string
-	toolUseID     string
-	editOldString string
-	editNewString string
-}
-
-type toolResultEntry struct {
-	toolUseID string
-	content   string
-	isError   bool
-}
-
-type jsonlEntry struct {
-	entryType      string
-	timestamp      time.Time
-	isHumanMessage bool
-	textContent    string
-	blocks         []contentBlock
-	tokensIn       int64
-	tokensOut      int64
-	model          string
-	hasToolResults bool
-	toolResults    []toolResultEntry
-}
-
-func parseRawEntry(line string) jsonlEntry {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(line), &raw); err != nil {
-		return jsonlEntry{}
-	}
-
-	var e jsonlEntry
-	json.Unmarshal(raw["type"], &e.entryType)
-
-	var tsStr string
-	if err := json.Unmarshal(raw["timestamp"], &tsStr); err == nil {
-		e.timestamp, _ = time.Parse(time.RFC3339Nano, tsStr)
-	}
-
-	switch e.entryType {
-	case "user":
-		e.parseUser(raw)
-	case "assistant":
-		e.parseAssistant(raw)
-	}
-
-	return e
-}
-
-func (e *jsonlEntry) parseUser(raw map[string]json.RawMessage) {
-	msgRaw := raw["message"]
-	if msgRaw == nil {
-		return
-	}
-
-	var msgObj map[string]json.RawMessage
-	if err := json.Unmarshal(msgRaw, &msgObj); err != nil {
-		return
-	}
-
-	contentRaw := msgObj["content"]
-	if contentRaw == nil {
-		return
-	}
-
-	// Try as simple string (human message)
-	var contentStr string
-	if err := json.Unmarshal(contentRaw, &contentStr); err == nil {
-		e.isHumanMessage = true
-		e.textContent = contentStr
-		return
-	}
-
-	// Try as array (could contain tool_result blocks)
-	var contentArr []map[string]interface{}
-	if err := json.Unmarshal(contentRaw, &contentArr); err == nil {
-		for _, item := range contentArr {
-			itemType, _ := item["type"].(string)
-			if itemType == "tool_result" {
-				e.hasToolResults = true
-				tr := toolResultEntry{}
-				tr.toolUseID, _ = item["tool_use_id"].(string)
-				// is_error can be bool
-				if isErr, ok := item["is_error"].(bool); ok {
-					tr.isError = isErr
-				}
-				// content can be string or array
-				switch c := item["content"].(type) {
-				case string:
-					tr.content = c
-				case []interface{}:
-					// Array of content blocks; extract text
-					var parts []string
-					for _, block := range c {
-						if bm, ok := block.(map[string]interface{}); ok {
-							if text, ok := bm["text"].(string); ok {
-								parts = append(parts, text)
-							}
-						}
-					}
-					tr.content = strings.Join(parts, "\n")
-				}
-				e.toolResults = append(e.toolResults, tr)
-			}
-		}
-	}
-
-	e.isHumanMessage = false
-}
-
-func (e *jsonlEntry) parseAssistant(raw map[string]json.RawMessage) {
-	msgRaw := raw["message"]
-	if msgRaw == nil {
-		return
-	}
-
-	var msgObj map[string]json.RawMessage
-	if err := json.Unmarshal(msgRaw, &msgObj); err != nil {
-		return
-	}
-
-	// Parse model name
-	if modelRaw := msgObj["model"]; modelRaw != nil {
-		json.Unmarshal(modelRaw, &e.model)
-	}
-
-	if usageRaw := msgObj["usage"]; usageRaw != nil {
-		var usage struct {
-			InputTokens  int64 `json:"input_tokens"`
-			OutputTokens int64 `json:"output_tokens"`
-		}
-		json.Unmarshal(usageRaw, &usage)
-		e.tokensIn = usage.InputTokens
-		e.tokensOut = usage.OutputTokens
-	}
-
-	var blocks []map[string]interface{}
-	if err := json.Unmarshal(msgObj["content"], &blocks); err != nil {
-		return
-	}
-
-	for _, block := range blocks {
-		blockType, _ := block["type"].(string)
-		switch blockType {
-		case "text":
-			text, _ := block["text"].(string)
-			text = strings.TrimSpace(text)
-			if text != "" {
-				e.blocks = append(e.blocks, contentBlock{
-					blockType: "text",
-					text:      text,
-				})
-			}
-		case "tool_use":
-			name, _ := block["name"].(string)
-			id, _ := block["id"].(string)
-			snippet := ""
-			var editOld, editNew string
-			if input, ok := block["input"].(map[string]interface{}); ok {
-				snippet = toolInputSnippet(name, input)
-				// Extract Edit diff data
-				if name == "Edit" {
-					if old, ok := input["old_string"].(string); ok {
-						editOld = old
-					}
-					if ns, ok := input["new_string"].(string); ok {
-						editNew = ns
-					}
-				}
-			}
-			e.blocks = append(e.blocks, contentBlock{
-				blockType:     "tool_use",
-				toolName:      name,
-				toolSnippet:   snippet,
-				toolUseID:     id,
-				editOldString: editOld,
-				editNewString: editNew,
-			})
-		}
-	}
-}
-
 // --- Helpers ---
 
 func formatTokenCount(n int64) string {
@@ -1282,265 +905,4 @@ func formatTokenCount(n int64) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d", n)
-}
-
-func toolInputSnippet(toolName string, input map[string]interface{}) string {
-	switch toolName {
-	case "Bash":
-		if cmd, ok := input["command"].(string); ok {
-			cmd = strings.TrimSpace(cmd)
-			if len(cmd) > 60 {
-				cmd = cmd[:57] + "..."
-			}
-			return "$ " + cmd
-		}
-	case "Read":
-		if path, ok := input["file_path"].(string); ok {
-			return path
-		}
-	case "Write":
-		if path, ok := input["file_path"].(string); ok {
-			return path
-		}
-	case "Edit":
-		if path, ok := input["file_path"].(string); ok {
-			return path
-		}
-	case "Grep":
-		if pattern, ok := input["pattern"].(string); ok {
-			return "/" + pattern + "/"
-		}
-	case "Glob":
-		if pattern, ok := input["pattern"].(string); ok {
-			return pattern
-		}
-	case "Task":
-		if desc, ok := input["description"].(string); ok {
-			return desc
-		}
-	case "WebSearch":
-		if query, ok := input["query"].(string); ok {
-			return query
-		}
-	case "WebFetch":
-		if url, ok := input["url"].(string); ok {
-			if len(url) > 50 {
-				url = url[:47] + "..."
-			}
-			return url
-		}
-	}
-	return ""
-}
-
-// --- Codex JSONL parsing ---
-
-// parseCodexJSONL parses Codex CLI session JSONL into TraceTurns.
-// Codex format uses: session_meta, event_msg (user_message, token_count),
-// response_item (message role=assistant, function_call, function_call_output).
-func parseCodexJSONL(data string) []TraceTurn {
-	var turns []TraceTurn
-	var current *TraceTurn
-	turnNum := 0
-	pendingCalls := make(map[string]*ToolSpan) // call_id -> span
-
-	for _, line := range strings.Split(data, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			continue
-		}
-
-		var entryType string
-		json.Unmarshal(raw["type"], &entryType)
-
-		var ts time.Time
-		var tsStr string
-		if err := json.Unmarshal(raw["timestamp"], &tsStr); err == nil {
-			ts, _ = time.Parse(time.RFC3339Nano, tsStr)
-		}
-
-		switch entryType {
-		case "event_msg":
-			var payload struct {
-				Type    string `json:"type"`
-				Message string `json:"message"`
-				Info    *struct {
-					TotalTokenUsage *struct {
-						InputTokens  int64 `json:"input_tokens"`
-						OutputTokens int64 `json:"output_tokens"`
-					} `json:"total_token_usage"`
-				} `json:"info"`
-			}
-			json.Unmarshal(raw["payload"], &payload)
-
-			if payload.Type == "user_message" && payload.Message != "" {
-				// New user turn
-				if current != nil {
-					turns = append(turns, *current)
-				}
-				turnNum++
-				current = &TraceTurn{
-					Number:    turnNum,
-					Timestamp: ts,
-				}
-				for _, l := range strings.Split(payload.Message, "\n") {
-					trimmed := strings.TrimSpace(l)
-					if trimmed != "" {
-						current.UserLines = append(current.UserLines, trimmed)
-					}
-				}
-			}
-
-			if payload.Type == "token_count" && payload.Info != nil && payload.Info.TotalTokenUsage != nil && current != nil {
-				current.TokensIn = payload.Info.TotalTokenUsage.InputTokens
-				current.TokensOut = payload.Info.TotalTokenUsage.OutputTokens
-			}
-
-		case "response_item":
-			var payload struct {
-				Type      string `json:"type"`
-				Role      string `json:"role"`
-				Name      string `json:"name"`
-				CallID    string `json:"call_id"`
-				Arguments string `json:"arguments"`
-				Output    string `json:"output"`
-				Content   json.RawMessage `json:"content"`
-			}
-			json.Unmarshal(raw["payload"], &payload)
-
-			if current == nil {
-				turnNum++
-				current = &TraceTurn{Number: turnNum, Timestamp: ts}
-			}
-
-			if !ts.IsZero() {
-				current.EndTime = ts
-			}
-
-			switch payload.Type {
-			case "message":
-				if payload.Role == "assistant" {
-					// Extract text from content blocks
-					var contentBlocks []map[string]interface{}
-					if err := json.Unmarshal(payload.Content, &contentBlocks); err == nil {
-						for _, block := range contentBlocks {
-							if blockType, _ := block["type"].(string); blockType == "output_text" {
-								if text, _ := block["text"].(string); text != "" {
-									for _, l := range strings.Split(text, "\n") {
-										trimmed := strings.TrimSpace(l)
-										if trimmed != "" {
-											current.OutputLines = append(current.OutputLines, trimmed)
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-
-			case "function_call":
-				name := payload.Name
-				snippet := ""
-				// Try to parse arguments as JSON for a snippet
-				if payload.Arguments != "" {
-					var args map[string]interface{}
-					if err := json.Unmarshal([]byte(payload.Arguments), &args); err == nil {
-						if cmd, ok := args["cmd"].(string); ok {
-							cmd = strings.TrimSpace(cmd)
-							if len(cmd) > 60 {
-								cmd = cmd[:57] + "..."
-							}
-							snippet = "$ " + cmd
-						} else if path, ok := args["file_path"].(string); ok {
-							snippet = path
-						}
-					} else {
-						// Arguments is a plain string
-						s := payload.Arguments
-						if len(s) > 60 {
-							s = s[:57] + "..."
-						}
-						snippet = s
-					}
-				}
-
-				// Map Codex tool names to shorter display names
-				displayName := codexToolName(name)
-
-				span := ToolSpan{
-					Name:      displayName,
-					Snippet:   snippet,
-					Success:   true,
-					toolUseID: payload.CallID,
-				}
-				current.Actions = append(current.Actions, span)
-				if payload.CallID != "" {
-					idx := len(current.Actions) - 1
-					pendingCalls[payload.CallID] = &current.Actions[idx]
-				}
-
-			case "function_call_output":
-				if payload.CallID != "" {
-					if span, ok := pendingCalls[payload.CallID]; ok {
-						output := payload.Output
-						if strings.Contains(strings.ToLower(output), "error") ||
-							strings.Contains(output, "Process exited with code 1") {
-							span.Success = false
-							if len(output) > 200 {
-								output = output[:200]
-							}
-							span.ErrorMsg = output
-						}
-						delete(pendingCalls, payload.CallID)
-					}
-				}
-			}
-		}
-	}
-
-	if current != nil {
-		turns = append(turns, *current)
-	}
-
-	// Calculate per-turn cost (Codex uses GPT models)
-	for i := range turns {
-		turns[i].CostUSD = estimateTurnCost("gpt", turns[i].TokensIn, turns[i].TokensOut)
-	}
-
-	return turns
-}
-
-// codexToolName maps Codex function names to shorter display names.
-func codexToolName(name string) string {
-	switch name {
-	case "exec_command", "shell":
-		return "Bash"
-	case "read_file":
-		return "Read"
-	case "write_file":
-		return "Write"
-	case "apply_patch", "edit_file":
-		return "Edit"
-	case "search_files", "grep":
-		return "Grep"
-	case "list_directory", "ls":
-		return "Ls"
-	default:
-		if len(name) > 12 {
-			return name[:12]
-		}
-		return name
-	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

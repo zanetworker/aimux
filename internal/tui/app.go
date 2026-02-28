@@ -22,6 +22,7 @@ import (
 	"github.com/zanetworker/agentmux/internal/spawn"
 	"github.com/zanetworker/agentmux/internal/team"
 	"github.com/zanetworker/agentmux/internal/terminal"
+	"github.com/zanetworker/agentmux/internal/trace"
 	"github.com/zanetworker/agentmux/internal/tui/views"
 )
 
@@ -110,6 +111,9 @@ type App struct {
 	// Evaluation: annotation persistence
 	evalStore      *evaluation.Store
 	evalSessionID  string
+
+	// Config
+	cfg config.Config
 }
 
 // NewApp creates a new root TUI application.
@@ -150,6 +154,7 @@ func NewApp() App {
 		providers:    providers,
 		breadcrumbs:  []string{"Agents"},
 		hiddenAgents: make(map[string]bool),
+		cfg:          cfg,
 	}
 }
 
@@ -229,7 +234,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		cmd := p.SpawnCommand(msg.Dir, msg.Model, msg.Mode)
-		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime); err != nil {
+		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell()); err != nil {
 			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
 		} else {
 			name := filepath.Base(msg.Dir)
@@ -457,7 +462,19 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // syncPreview updates the preview pane with the currently selected agent.
 func (a *App) syncPreview() {
 	selected := a.agentsView.Selected()
+	if selected != nil {
+		if p := a.providerFor(selected.ProviderName); p != nil {
+			a.previewPane.SetParser(a.parserForProvider(p))
+		}
+	}
 	a.previewPane.SetAgent(selected)
+}
+
+// parserForProvider returns a TraceParser function wrapping the provider's ParseTrace.
+func (a App) parserForProvider(p provider.Provider) views.TraceParser {
+	return func(filePath string) ([]trace.Turn, error) {
+		return p.ParseTrace(filePath)
+	}
 }
 
 func (a App) handleCommandInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -673,7 +690,7 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		if selected.TMuxSession != "" {
 			backend, err = terminal.AttachTmux(selected.TMuxSession, contentW, contentH)
 		} else {
-			backend, err = terminal.StartTmux(cmd, contentW, contentH)
+			backend, err = terminal.StartTmux(cmd, contentW, contentH, a.cfg.ResolveShell())
 		}
 		if err != nil {
 			a.statusHint = fmt.Sprintf("Tmux mirror failed: %v", err)
@@ -690,7 +707,7 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 	// Create live trace pane
 	if sessionFile != "" {
 		leftW := a.width - rightW
-		a.splitTrace = views.NewLogsView(selected.PID, sessionFile)
+		a.splitTrace = views.NewLogsView(selected.PID, sessionFile, a.parserForProvider(p))
 		a.splitTrace.SetSize(leftW, a.height-1)
 	}
 
@@ -960,7 +977,12 @@ func killAgent(ag *agent.Agent) error {
 // openLogsForAgent opens the trace viewer for a specific agent and session file.
 // Used for non-Claude providers where embedding a PTY isn't possible.
 func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, tea.Cmd) {
-	a.logsView = views.NewLogsView(ag.PID, sessionFile)
+	p := a.providerFor(ag.ProviderName)
+	var parser views.TraceParser
+	if p != nil {
+		parser = a.parserForProvider(p)
+	}
+	a.logsView = views.NewLogsView(ag.PID, sessionFile, parser)
 	contentHeight := a.height - a.headerView.Height()
 	if contentHeight < 1 {
 		contentHeight = 10
@@ -991,13 +1013,18 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 	if selected == nil {
 		return a, nil
 	}
+	p := a.providerFor(selected.ProviderName)
 	sessionFile := selected.SessionFile
 	if sessionFile == "" {
-		if p := a.providerFor(selected.ProviderName); p != nil {
+		if p != nil {
 			sessionFile = p.FindSessionFile(*selected)
 		}
 	}
-	a.logsView = views.NewLogsView(selected.PID, sessionFile)
+	var parser views.TraceParser
+	if p != nil {
+		parser = a.parserForProvider(p)
+	}
+	a.logsView = views.NewLogsView(selected.PID, sessionFile, parser)
 	contentHeight := a.height - a.headerView.Height()
 	if contentHeight < 1 {
 		contentHeight = 10

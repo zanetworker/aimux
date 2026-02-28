@@ -13,6 +13,7 @@ import (
 
 	"github.com/zanetworker/agentmux/internal/agent"
 	"github.com/zanetworker/agentmux/internal/discovery"
+	"github.com/zanetworker/agentmux/internal/trace"
 )
 
 // Gemini is a Provider implementation for the Google Gemini CLI.
@@ -63,7 +64,48 @@ func (g *Gemini) Discover() ([]agent.Agent, error) {
 		agents = append(agents, *a)
 	}
 
+	// Deduplicate: group by WorkingDir (Gemini spawns multiple node processes)
+	agents = g.dedup(agents)
+
 	return agents, nil
+}
+
+// dedup groups Gemini agents by WorkingDir, keeping one entry per project.
+// Multiple node processes for the same session are merged into a single entry.
+func (g *Gemini) dedup(agents []agent.Agent) []agent.Agent {
+	type key struct{ dir string }
+	groups := make(map[key]*agent.Agent)
+	var order []key
+
+	for i := range agents {
+		a := &agents[i]
+		k := key{a.WorkingDir}
+		if existing, ok := groups[k]; ok {
+			existing.GroupCount++
+			existing.GroupPIDs = append(existing.GroupPIDs, a.PID)
+			// Keep the one with more memory (main process vs wrapper)
+			if a.MemoryMB > existing.MemoryMB {
+				pid := existing.PID
+				gpids := existing.GroupPIDs
+				gc := existing.GroupCount
+				*existing = *a
+				existing.GroupPIDs = append([]int{pid}, gpids...)
+				existing.GroupCount = gc
+			}
+		} else {
+			copy := *a
+			copy.GroupCount = 1
+			copy.GroupPIDs = []int{a.PID}
+			groups[k] = &copy
+			order = append(order, k)
+		}
+	}
+
+	result := make([]agent.Agent, 0, len(groups))
+	for _, k := range order {
+		result = append(result, *groups[k])
+	}
+	return result
 }
 
 // isGeminiProcess returns true if a ps line represents a Gemini CLI process.
@@ -134,8 +176,8 @@ func (g *Gemini) parseProcess(line string) *agent.Agent {
 	}
 }
 
-// enrichFromSession finds the session file for a running agent and extracts
-// lastUpdated to determine active/idle status.
+// enrichFromSession finds the logs file for a running agent and extracts
+// timestamps to determine active/idle status.
 func (g *Gemini) enrichFromSession(a *agent.Agent, projects map[string]string) {
 	if a.WorkingDir == "" {
 		return
@@ -151,21 +193,32 @@ func (g *Gemini) enrichFromSession(a *agent.Agent, projects map[string]string) {
 		return
 	}
 
-	chatsDir := filepath.Join(home, ".gemini", "tmp", projectName, "chats")
-	sessionFile, lastUpdated := newestSessionJSON(chatsDir)
-	if sessionFile == "" {
+	// Use logs.json as the session file (contains conversation history)
+	logsPath := filepath.Join(home, ".gemini", "tmp", projectName, "logs.json")
+	info, err := os.Stat(logsPath)
+	if err != nil {
+		// Fall back to newest session JSON for last activity time
+		chatsDir := filepath.Join(home, ".gemini", "tmp", projectName, "chats")
+		sf, lastUpdated := newestSessionJSON(chatsDir)
+		if sf != "" && !lastUpdated.IsZero() {
+			a.SessionFile = sf
+			a.LastActivity = lastUpdated
+			if time.Since(lastUpdated) < 30*time.Second {
+				a.Status = agent.StatusActive
+			} else {
+				a.Status = agent.StatusIdle
+			}
+		}
 		return
 	}
 
-	a.SessionFile = sessionFile
-
-	if !lastUpdated.IsZero() {
-		a.LastActivity = lastUpdated
-		if time.Since(lastUpdated) < 30*time.Second {
-			a.Status = agent.StatusActive
-		} else {
-			a.Status = agent.StatusIdle
-		}
+	a.SessionFile = logsPath
+	lastMod := info.ModTime()
+	a.LastActivity = lastMod
+	if time.Since(lastMod) < 30*time.Second {
+		a.Status = agent.StatusActive
+	} else {
+		a.Status = agent.StatusIdle
 	}
 }
 
@@ -183,8 +236,9 @@ func (g *Gemini) ResumeCommand(a agent.Agent) *exec.Cmd {
 	return cmd
 }
 
-// FindSessionFile resolves the session file for a Gemini agent by looking up
-// the project name in projects.json and finding the newest session in chats/.
+// FindSessionFile resolves the log file for a Gemini agent by looking up
+// the project name in projects.json and returning the logs.json file.
+// This file contains the conversation history (user prompts with timestamps).
 func (g *Gemini) FindSessionFile(a agent.Agent) string {
 	if a.WorkingDir == "" {
 		return ""
@@ -201,9 +255,11 @@ func (g *Gemini) FindSessionFile(a agent.Agent) string {
 		return ""
 	}
 
-	chatsDir := filepath.Join(home, ".gemini", "tmp", projectName, "chats")
-	path, _ := newestSessionJSON(chatsDir)
-	return path
+	logsPath := filepath.Join(home, ".gemini", "tmp", projectName, "logs.json")
+	if _, err := os.Stat(logsPath); err != nil {
+		return ""
+	}
+	return logsPath
 }
 
 // RecentDirs returns recently-used project directories from Gemini's
@@ -378,4 +434,68 @@ func geminiExtractFlag(args, flag string) string {
 		}
 	}
 	return ""
+}
+
+// ParseTrace reads a Gemini logs.json file and parses it into trace turns.
+func (g *Gemini) ParseTrace(filePath string) ([]trace.Turn, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read Gemini trace %s: %w", filePath, err)
+	}
+	return parseGeminiJSON(string(data)), nil
+}
+
+// --- Gemini JSON trace parsing ---
+
+// geminiLogEntry is a single entry in Gemini's logs.json array.
+type geminiLogEntry struct {
+	SessionID string `json:"sessionId"`
+	MessageID int    `json:"messageId"`
+	Type      string `json:"type"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+}
+
+// parseGeminiJSON parses Gemini's logs.json (JSON array of messages) into trace turns.
+// Each user message becomes a turn. Gemini logs only store user prompts, not
+// assistant responses (those are in the session JSON files).
+func parseGeminiJSON(data string) []trace.Turn {
+	var entries []geminiLogEntry
+	if err := json.Unmarshal([]byte(data), &entries); err != nil {
+		return nil
+	}
+
+	var turns []trace.Turn
+	turnNum := 0
+
+	for _, e := range entries {
+		ts, err := time.Parse(time.RFC3339Nano, e.Timestamp)
+		if err != nil {
+			ts = time.Time{}
+		}
+
+		if e.Type == "user" {
+			turnNum++
+			turn := trace.Turn{
+				Number:    turnNum,
+				Timestamp: ts,
+				EndTime:   ts,
+				UserLines: []string{e.Message},
+			}
+			turns = append(turns, turn)
+		} else if e.Type == "model" || e.Type == "assistant" {
+			if len(turns) > 0 {
+				last := &turns[len(turns)-1]
+				last.OutputLines = append(last.OutputLines, e.Message)
+				last.EndTime = ts
+			}
+		} else if e.Type == "info" {
+			if len(turns) > 0 {
+				last := &turns[len(turns)-1]
+				last.OutputLines = append(last.OutputLines, "[info] "+e.Message)
+			}
+		}
+	}
+
+	return turns
 }

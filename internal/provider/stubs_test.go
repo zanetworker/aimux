@@ -492,6 +492,294 @@ func TestCodexParseSession_NoTokens(t *testing.T) {
 	}
 }
 
+// --- Codex ParseTrace tests ---
+
+func TestCodexParseTrace_BasicTurn(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"timestamp":"2026-01-01T10:00:00Z","type":"session_meta","payload":{"id":"abc-123","cwd":"/tmp/test"}}
+{"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"fix the bug"}}
+{"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I'll look at it."}]}}
+{"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{\"cmd\":\"cat main.go\"}"}}
+{"timestamp":"2026-01-01T10:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"file contents here"}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Codex{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("ParseTrace returned %d turns, want 1", len(turns))
+	}
+
+	turn := turns[0]
+	if turn.Number != 1 {
+		t.Errorf("Number = %d, want 1", turn.Number)
+	}
+	if len(turn.UserLines) == 0 || turn.UserLines[0] != "fix the bug" {
+		t.Errorf("UserLines = %v, want [\"fix the bug\"]", turn.UserLines)
+	}
+	if len(turn.Actions) != 1 {
+		t.Fatalf("Actions has %d entries, want 1", len(turn.Actions))
+	}
+	if turn.Actions[0].Name != "Bash" {
+		t.Errorf("Actions[0].Name = %q, want %q (mapped from exec_command)", turn.Actions[0].Name, "Bash")
+	}
+	if !strings.Contains(turn.Actions[0].Snippet, "cat main.go") {
+		t.Errorf("Actions[0].Snippet = %q, should contain %q", turn.Actions[0].Snippet, "cat main.go")
+	}
+	if len(turn.OutputLines) == 0 || turn.OutputLines[0] != "I'll look at it." {
+		t.Errorf("OutputLines = %v, want [\"I'll look at it.\"]", turn.OutputLines)
+	}
+}
+
+func TestCodexParseTrace_FunctionCallError(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"timestamp":"2026-01-01T10:00:00Z","type":"session_meta","payload":{"id":"test"}}
+{"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"run tests"}}
+{"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{\"cmd\":\"go test\"}"}}
+{"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Process exited with code 1\nerror in test"}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Codex{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if len(turns[0].Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(turns[0].Actions))
+	}
+	action := turns[0].Actions[0]
+	if action.Success {
+		t.Error("expected action.Success = false for error output")
+	}
+	if action.ErrorMsg == "" {
+		t.Error("expected non-empty ErrorMsg for error output")
+	}
+}
+
+func TestCodexParseTrace_MissingFile(t *testing.T) {
+	c := &Codex{}
+	_, err := c.ParseTrace("/nonexistent/path/session.jsonl")
+	if err == nil {
+		t.Error("ParseTrace on missing file should return error")
+	}
+}
+
+func TestCodexParseTrace_EmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "empty.jsonl")
+	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Codex{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Errorf("expected 0 turns for empty file, got %d", len(turns))
+	}
+}
+
+func TestCodexParseTrace_ToolNameMapping(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"timestamp":"2026-01-01T10:00:00Z","type":"session_meta","payload":{"id":"test"}}
+{"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"read a file"}}
+{"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"function_call","name":"read_file","call_id":"c1","arguments":"{\"file_path\":\"main.go\"}"}}
+{"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"package main"}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Codex{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 || len(turns[0].Actions) != 1 {
+		t.Fatalf("expected 1 turn with 1 action")
+	}
+	if turns[0].Actions[0].Name != "Read" {
+		t.Errorf("tool name mapping: got %q, want %q", turns[0].Actions[0].Name, "Read")
+	}
+}
+
+// --- Gemini ParseTrace tests ---
+
+func TestGeminiParseTrace_BasicTurn(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "logs.json")
+
+	data := `[
+		{"sessionId":"s1","messageId":1,"type":"user","message":"hello gemini","timestamp":"2026-01-01T10:00:00Z"},
+		{"sessionId":"s1","messageId":2,"type":"model","message":"Hi there! How can I help?","timestamp":"2026-01-01T10:00:05Z"}
+	]`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &Gemini{}
+	turns, err := g.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("ParseTrace returned %d turns, want 1", len(turns))
+	}
+
+	turn := turns[0]
+	if turn.Number != 1 {
+		t.Errorf("Number = %d, want 1", turn.Number)
+	}
+	if len(turn.UserLines) == 0 || turn.UserLines[0] != "hello gemini" {
+		t.Errorf("UserLines = %v, want [\"hello gemini\"]", turn.UserLines)
+	}
+	if len(turn.OutputLines) == 0 || turn.OutputLines[0] != "Hi there! How can I help?" {
+		t.Errorf("OutputLines = %v, want [\"Hi there! How can I help?\"]", turn.OutputLines)
+	}
+}
+
+func TestGeminiParseTrace_MultipleTurns(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "logs.json")
+
+	data := `[
+		{"sessionId":"s1","messageId":1,"type":"user","message":"first question","timestamp":"2026-01-01T10:00:00Z"},
+		{"sessionId":"s1","messageId":2,"type":"model","message":"first answer","timestamp":"2026-01-01T10:00:05Z"},
+		{"sessionId":"s1","messageId":3,"type":"user","message":"second question","timestamp":"2026-01-01T10:01:00Z"},
+		{"sessionId":"s1","messageId":4,"type":"model","message":"second answer","timestamp":"2026-01-01T10:01:05Z"}
+	]`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &Gemini{}
+	turns, err := g.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 2 {
+		t.Fatalf("expected 2 turns, got %d", len(turns))
+	}
+	if turns[0].UserLines[0] != "first question" {
+		t.Errorf("turn 1 UserLines[0] = %q, want %q", turns[0].UserLines[0], "first question")
+	}
+	if turns[1].UserLines[0] != "second question" {
+		t.Errorf("turn 2 UserLines[0] = %q, want %q", turns[1].UserLines[0], "second question")
+	}
+}
+
+func TestGeminiParseTrace_InfoMessage(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "logs.json")
+
+	data := `[
+		{"sessionId":"s1","messageId":1,"type":"user","message":"what is the status?","timestamp":"2026-01-01T10:00:00Z"},
+		{"sessionId":"s1","messageId":2,"type":"info","message":"session started","timestamp":"2026-01-01T10:00:01Z"}
+	]`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &Gemini{}
+	turns, err := g.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if len(turns[0].OutputLines) == 0 {
+		t.Fatal("expected info message in OutputLines")
+	}
+	if !strings.Contains(turns[0].OutputLines[0], "[info]") {
+		t.Errorf("OutputLines[0] = %q, want to contain [info]", turns[0].OutputLines[0])
+	}
+}
+
+func TestGeminiParseTrace_MissingFile(t *testing.T) {
+	g := &Gemini{}
+	_, err := g.ParseTrace("/nonexistent/path/logs.json")
+	if err == nil {
+		t.Error("ParseTrace on missing file should return error")
+	}
+}
+
+func TestGeminiParseTrace_InvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "bad.json")
+	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &Gemini{}
+	turns, err := g.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace should not error on invalid JSON, got: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Errorf("expected 0 turns for invalid JSON, got %d", len(turns))
+	}
+}
+
+// --- codexToolName tests (moved from views) ---
+
+func TestCodexToolName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"exec_command", "Bash"},
+		{"shell", "Bash"},
+		{"read_file", "Read"},
+		{"write_file", "Write"},
+		{"apply_patch", "Edit"},
+		{"edit_file", "Edit"},
+		{"search_files", "Grep"},
+		{"grep", "Grep"},
+		{"list_directory", "Ls"},
+		{"ls", "Ls"},
+		{"unknown_short", "unknown_shor"}, // truncated to 12
+		{"tiny", "tiny"},                  // short enough, no truncation
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := codexToolName(tt.input)
+			if got != tt.want {
+				t.Errorf("codexToolName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 // Suppress unused variable warnings for time import.
 var _ = time.Now
 

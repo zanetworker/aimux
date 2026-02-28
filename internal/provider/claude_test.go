@@ -557,5 +557,171 @@ func writeTestSessionWithTokens(t *testing.T, path, sessionID, model string, tok
 	}
 }
 
+// --- ParseTrace tests ---
+
+func TestClaudeParseTrace_BasicTurn(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"fix the bug"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll fix that."},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"main.go"}}],"usage":{"input_tokens":100,"output_tokens":50}}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Claude{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("ParseTrace returned %d turns, want 1", len(turns))
+	}
+
+	turn := turns[0]
+	if turn.Number != 1 {
+		t.Errorf("Number = %d, want 1", turn.Number)
+	}
+	if len(turn.UserLines) == 0 || turn.UserLines[0] != "fix the bug" {
+		t.Errorf("UserLines = %v, want [\"fix the bug\"]", turn.UserLines)
+	}
+	if len(turn.Actions) != 1 {
+		t.Fatalf("Actions has %d entries, want 1", len(turn.Actions))
+	}
+	if turn.Actions[0].Name != "Read" {
+		t.Errorf("Actions[0].Name = %q, want %q", turn.Actions[0].Name, "Read")
+	}
+	if turn.Actions[0].Snippet != "main.go" {
+		t.Errorf("Actions[0].Snippet = %q, want %q", turn.Actions[0].Snippet, "main.go")
+	}
+	if len(turn.OutputLines) == 0 || turn.OutputLines[0] != "I'll fix that." {
+		t.Errorf("OutputLines = %v, want [\"I'll fix that.\"]", turn.OutputLines)
+	}
+	if turn.TokensIn != 100 {
+		t.Errorf("TokensIn = %d, want 100", turn.TokensIn)
+	}
+	if turn.TokensOut != 50 {
+		t.Errorf("TokensOut = %d, want 50", turn.TokensOut)
+	}
+	if turn.Model != "claude-opus-4-6" {
+		t.Errorf("Model = %q, want %q", turn.Model, "claude-opus-4-6")
+	}
+}
+
+func TestClaudeParseTrace_MultipleTurns(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"first question"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"first answer"}],"usage":{"input_tokens":50,"output_tokens":25}}}
+{"type":"user","timestamp":"2026-01-01T10:01:00Z","message":{"role":"user","content":"second question"}}
+{"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"second answer"}],"usage":{"input_tokens":80,"output_tokens":40}}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Claude{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 2 {
+		t.Fatalf("expected 2 turns, got %d", len(turns))
+	}
+	if turns[0].UserLines[0] != "first question" {
+		t.Errorf("turn 1 UserLines[0] = %q, want %q", turns[0].UserLines[0], "first question")
+	}
+	if turns[1].UserLines[0] != "second question" {
+		t.Errorf("turn 2 UserLines[0] = %q, want %q", turns[1].UserLines[0], "second question")
+	}
+}
+
+func TestClaudeParseTrace_ToolResultError(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"run the build"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"go build ./..."}}],"usage":{"input_tokens":50,"output_tokens":20}}}
+{"type":"user","timestamp":"2026-01-01T10:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","is_error":true,"content":"compilation failed: undefined variable"}]}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Claude{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if len(turns[0].Actions) != 1 {
+		t.Fatalf("expected 1 action, got %d", len(turns[0].Actions))
+	}
+	action := turns[0].Actions[0]
+	if action.Success {
+		t.Error("expected action.Success = false for errored tool result")
+	}
+	if action.ErrorMsg == "" || action.ErrorMsg != "compilation failed: undefined variable" {
+		t.Errorf("ErrorMsg = %q, want %q", action.ErrorMsg, "compilation failed: undefined variable")
+	}
+}
+
+func TestClaudeParseTrace_MissingFile(t *testing.T) {
+	c := &Claude{}
+	_, err := c.ParseTrace("/nonexistent/path/session.jsonl")
+	if err == nil {
+		t.Error("ParseTrace on missing file should return error")
+	}
+}
+
+func TestClaudeParseTrace_EmptyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "empty.jsonl")
+	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Claude{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Errorf("expected 0 turns for empty file, got %d", len(turns))
+	}
+}
+
+func TestClaudeParseTrace_CostCalculation(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"hello"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1000,"output_tokens":500}}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Claude{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+	if turns[0].CostUSD <= 0 {
+		t.Errorf("CostUSD = %f, want > 0", turns[0].CostUSD)
+	}
+}
+
 // Verify Claude implements the Provider interface at compile time.
 var _ Provider = (*Claude)(nil)

@@ -36,6 +36,7 @@ var (
 type PreviewPane struct {
 	agent    *agent.Agent
 	logsView *LogsView
+	parser   TraceParser // parser function set by app.go for the current agent
 	width    int
 	height   int
 }
@@ -43,6 +44,13 @@ type PreviewPane struct {
 // NewPreviewPane creates a new preview pane.
 func NewPreviewPane() *PreviewPane {
 	return &PreviewPane{}
+}
+
+// SetParser updates the trace parser used for creating LogsViews.
+// Called by app.go when the selected agent changes and the provider's
+// ParseTrace method should be used.
+func (p *PreviewPane) SetParser(parser TraceParser) {
+	p.parser = parser
 }
 
 // SetAgent updates the agent whose conversation is displayed. It reloads the
@@ -59,11 +67,11 @@ func (p *PreviewPane) SetAgent(a *agent.Agent) {
 		return
 	}
 	p.agent = a
-	if a.SessionFile == "" {
+	if a.SessionFile == "" || p.parser == nil {
 		p.logsView = nil
 		return
 	}
-	p.logsView = NewLogsView(a.PID, a.SessionFile)
+	p.logsView = NewLogsView(a.PID, a.SessionFile, p.parser)
 	p.logsView.compact = true // no interactive hints in preview
 	p.resizeLogsView()
 }

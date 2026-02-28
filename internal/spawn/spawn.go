@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zanetworker/agentmux/internal/config"
 	"github.com/zanetworker/agentmux/internal/jump"
 )
 
 // Launch runs a pre-built exec.Cmd in the specified runtime environment
 // (tmux session or iTerm2 split pane). The provider name and directory
-// are used to derive the tmux session name.
-func Launch(cmd *exec.Cmd, providerName, dir, runtime string) error {
+// are used to derive the tmux session name. The shell parameter specifies
+// the login shell to use (e.g., "/bin/zsh"); use config.ResolveShell().
+func Launch(cmd *exec.Cmd, providerName, dir, runtime, shell string) error {
 	if cmd == nil {
 		return fmt.Errorf("spawn: nil command")
 	}
@@ -23,7 +25,7 @@ func Launch(cmd *exec.Cmd, providerName, dir, runtime string) error {
 
 	switch runtime {
 	case "tmux":
-		return launchTmux(cmd, providerName, dir)
+		return launchTmux(cmd, providerName, dir, shell)
 	case "iterm":
 		return launchITerm(cmd, dir)
 	default:
@@ -32,17 +34,25 @@ func Launch(cmd *exec.Cmd, providerName, dir, runtime string) error {
 }
 
 // launchTmux creates a new tmux session running the command.
-func launchTmux(cmd *exec.Cmd, providerName, dir string) error {
+func launchTmux(cmd *exec.Cmd, providerName, dir, shell string) error {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return fmt.Errorf("spawn: tmux not found in PATH: %w", err)
 	}
 
 	sessionName := TmuxSessionName(providerName, dir)
 
-	// Build: tmux new-session -d -s <name> -c <dir> -- <binary> <args...>
-	args := []string{"new-session", "-d", "-s", sessionName, "-c", dir, "--"}
-	args = append(args, cmd.Path)
-	args = append(args, cmd.Args[1:]...)
+	// Run through a login shell with RC file sourced so shell functions
+	// and env vars are available (e.g., gemini() wrapper with Vertex AI config).
+	// Use Args[0] (the command name) instead of Path (absolute binary path)
+	// so shell functions take precedence over the raw binary.
+	var cmdParts []string
+	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
+	cmdParts = append(cmdParts, cmd.Args[1:]...)
+	innerCmd := strings.Join(cmdParts, " ")
+	shellCmd := config.ShellRCPrefix(shell) + innerCmd
+
+	args := []string{"new-session", "-d", "-s", sessionName, "-c", dir,
+		"--", shell, "-lc", shellCmd}
 
 	tmuxCmd := exec.Command("tmux", args...)
 	if err := tmuxCmd.Run(); err != nil {
