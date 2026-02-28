@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/zanetworker/agentmux/internal/agent"
@@ -44,6 +45,156 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 	agents = deduplicateAgents(agents)
 
 	return agents, nil
+}
+
+// discoverRecentSessions finds idle Claude sessions — one per project directory,
+// using the newest session file from the last 24 hours. Only shows projects that
+// don't already have a running process.
+func (c *Claude) discoverRecentSessions(running []agent.Agent, projectsDir string) []agent.Agent {
+	cutoff := time.Now().Add(-24 * time.Hour)
+
+	// Collect all identifiers from running agents for dedup
+	runningIDs := make(map[string]bool)
+	runningDirs := make(map[string]bool)
+	runningFiles := make(map[string]bool)
+	for _, a := range running {
+		if a.SessionID != "" {
+			runningIDs[a.SessionID] = true
+		}
+		if a.WorkingDir != "" {
+			runningDirs[a.WorkingDir] = true
+		}
+		if a.SessionFile != "" {
+			runningFiles[a.SessionFile] = true
+		}
+	}
+
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
+
+	var agents []agent.Agent
+
+	for _, dirEntry := range entries {
+		if !dirEntry.IsDir() {
+			continue
+		}
+		dirKey := dirEntry.Name()
+
+		// Skip projects that already have a running agent
+		derivedDir := decodeDirKey(dirKey)
+		if derivedDir != "" && runningDirs[derivedDir] {
+			continue
+		}
+
+		// Find the single newest JSONL file in this project dir
+		subdir := filepath.Join(projectsDir, dirKey)
+		newestPath, newestMod := newestJSONL(subdir, cutoff)
+		if newestPath == "" {
+			continue
+		}
+
+		// Skip if this exact file is already used by a running agent
+		if runningFiles[newestPath] {
+			continue
+		}
+
+		info, err := discovery.ParseSessionFile(newestPath)
+		if err != nil {
+			continue
+		}
+
+		// Skip if session ID matches a running agent
+		if info.SessionID != "" && runningIDs[info.SessionID] {
+			continue
+		}
+
+		a := agent.Agent{
+			PID:          0,
+			SessionID:    info.SessionID,
+			ProviderName: "claude",
+			SessionFile:  newestPath,
+			Status:       agent.StatusIdle,
+			Source:       agent.SourceCLI,
+			GroupCount:   1,
+			GroupPIDs:    []int{},
+			Model:        info.Model,
+			TokensIn:     info.TokensIn,
+			TokensOut:    info.TokensOut,
+			LastAction:   info.LastAction,
+			GitBranch:    info.GitBranch,
+		}
+
+		a.EstCostUSD = cost.Calculate(
+			info.Model,
+			info.TokensIn,
+			info.TokensOut,
+			info.CacheReadTokens,
+			info.CacheWriteTokens,
+		)
+
+		if derivedDir != "" {
+			a.WorkingDir = derivedDir
+			a.Name = filepath.Base(derivedDir)
+		} else {
+			a.Name = dirKey
+		}
+
+		if !info.LastTimestamp.IsZero() {
+			a.LastActivity = info.LastTimestamp
+			a.StartTime = info.LastTimestamp
+		} else {
+			a.LastActivity = newestMod
+			a.StartTime = newestMod
+		}
+
+		agents = append(agents, a)
+	}
+
+	return agents
+}
+
+// newestJSONL returns the path and mod time of the most recently modified
+// .jsonl file in dir that was modified after cutoff. Returns ("", zero) if none.
+func newestJSONL(dir string, cutoff time.Time) (string, time.Time) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return "", time.Time{}
+	}
+	var bestPath string
+	var bestMod time.Time
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+			continue
+		}
+		info, err := f.Info()
+		if err != nil || info.ModTime().Before(cutoff) {
+			continue
+		}
+		if info.ModTime().After(bestMod) {
+			bestPath = filepath.Join(dir, f.Name())
+			bestMod = info.ModTime()
+		}
+	}
+	return bestPath, bestMod
+}
+
+// decodeDirKey attempts to reverse Claude's dir-key encoding. Claude encodes
+// working directory paths by replacing "/" and "." with "-". The result has a
+// leading "-" (from the leading "/"). This decoding is best-effort because the
+// encoding is lossy (hyphens in original path are indistinguishable from
+// replaced separators). Returns "" if the key doesn't look like an encoded path.
+func decodeDirKey(key string) string {
+	if !strings.HasPrefix(key, "-") {
+		return ""
+	}
+	// Replace the leading "-" with "/" and each remaining "-" with "/".
+	// This produces a path like "/Users/foo/project" from
+	// "-Users-foo-project". It won't be exact when the original path
+	// contained hyphens or dots, but it's sufficient for matching against
+	// running agents' WorkingDir.
+	return strings.ReplaceAll(key, "-", "/")
 }
 
 // deduplicateAgents groups SDK agents sharing the same (WorkingDir, Model) into
@@ -194,10 +345,6 @@ func (c *Claude) ResumeCommand(a agent.Agent) *exec.Cmd {
 		cmd.Dir = a.WorkingDir
 	}
 	return cmd
-}
-
-func (c *Claude) ParseConversation(sessionPath string) ([]Segment, error) {
-	return nil, nil // Will be implemented when we refactor logs view
 }
 
 // CanEmbed returns true because Claude's TUI works inside an embedded PTY.

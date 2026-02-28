@@ -955,7 +955,7 @@ func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, t
 	a.logsView.SetAnnotations(annotMap)
 
 	label := fmt.Sprintf("Trace [%s: %s]", ag.ProviderName, ag.ShortProject())
-	a.statusHint = "J:jump to session in terminal"
+	a.statusHint = "J:jump to session  :export  a:annotate"
 	return a.navigateTo(viewLogs, label)
 }
 
@@ -1060,7 +1060,7 @@ func (a App) View() string {
 	case viewAgents:
 		a.headerView.SetHint("Enter:open  l:logs  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
-		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  Esc:back  ?:more")
+		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  :export  Esc:back  ?:more")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:

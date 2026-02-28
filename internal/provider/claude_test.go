@@ -1,9 +1,12 @@
 package provider
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zanetworker/agentmux/internal/agent"
 )
@@ -70,17 +73,6 @@ func TestClaudeResumeCommandWithNothing(t *testing.T) {
 	cmd := c.ResumeCommand(a)
 	if cmd != nil {
 		t.Errorf("ResumeCommand returned %v, want nil", cmd)
-	}
-}
-
-func TestClaudeParseConversation(t *testing.T) {
-	c := &Claude{}
-	segments, err := c.ParseConversation("/some/path")
-	if err != nil {
-		t.Errorf("ParseConversation returned error: %v", err)
-	}
-	if segments != nil {
-		t.Errorf("ParseConversation returned %v, want nil", segments)
 	}
 }
 
@@ -268,6 +260,300 @@ func TestNewestFileModTime(t *testing.T) {
 	got = newestFileModTime(tmpDir, "*.txt")
 	if !got.IsZero() {
 		t.Errorf("newestFileModTime with *.txt = %v, want zero (no .txt files)", got)
+	}
+}
+
+// --- discoverRecentSessions tests ---
+
+func TestDiscoverRecentSessions_EmptyDir(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	// No subdirectories at all
+	agents := c.discoverRecentSessions(nil, projectsDir)
+	if len(agents) != 0 {
+		t.Errorf("discoverRecentSessions on empty dir returned %d agents, want 0", len(agents))
+	}
+}
+
+func TestDiscoverRecentSessions_NoRecentFiles(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	// Create a subdir with an old .jsonl file (>24h)
+	subdir := filepath.Join(projectsDir, "-tmp-myproject")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(subdir, "session-old.jsonl")
+	writeTestSession(t, sessionFile, "old-session-id", "claude-sonnet-4-5")
+
+	// Backdate the file to 48 hours ago
+	oldTime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(sessionFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	agents := c.discoverRecentSessions(nil, projectsDir)
+	if len(agents) != 0 {
+		t.Errorf("discoverRecentSessions with only old files returned %d agents, want 0", len(agents))
+	}
+}
+
+func TestDiscoverRecentSessions_FindsRecentSession(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	// Create a subdir with a recent .jsonl file
+	subdir := filepath.Join(projectsDir, "-tmp-myproject")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(subdir, "test-session-123.jsonl")
+	writeTestSession(t, sessionFile, "test-session-123", "claude-sonnet-4-5")
+
+	agents := c.discoverRecentSessions(nil, projectsDir)
+	if len(agents) != 1 {
+		t.Fatalf("discoverRecentSessions returned %d agents, want 1", len(agents))
+	}
+
+	a := agents[0]
+	if a.PID != 0 {
+		t.Errorf("agent PID = %d, want 0", a.PID)
+	}
+	if a.Status != agent.StatusIdle {
+		t.Errorf("agent Status = %v, want StatusIdle", a.Status)
+	}
+	if a.ProviderName != "claude" {
+		t.Errorf("agent ProviderName = %q, want %q", a.ProviderName, "claude")
+	}
+	if a.Source != agent.SourceCLI {
+		t.Errorf("agent Source = %v, want SourceCLI", a.Source)
+	}
+	if a.SessionID != "test-session-123" {
+		t.Errorf("agent SessionID = %q, want %q", a.SessionID, "test-session-123")
+	}
+	if a.SessionFile != sessionFile {
+		t.Errorf("agent SessionFile = %q, want %q", a.SessionFile, sessionFile)
+	}
+	if a.Model != "claude-sonnet-4-5" {
+		t.Errorf("agent Model = %q, want %q", a.Model, "claude-sonnet-4-5")
+	}
+	if a.Name != "myproject" {
+		t.Errorf("agent Name = %q, want %q", a.Name, "myproject")
+	}
+	if a.WorkingDir != "/tmp/myproject" {
+		t.Errorf("agent WorkingDir = %q, want %q", a.WorkingDir, "/tmp/myproject")
+	}
+}
+
+func TestDiscoverRecentSessions_SkipsRunningBySessionID(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	subdir := filepath.Join(projectsDir, "-tmp-myproject")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(subdir, "running-session.jsonl")
+	writeTestSession(t, sessionFile, "running-session-id", "claude-sonnet-4-5")
+
+	// Simulate a running agent with the same session ID
+	running := []agent.Agent{
+		{
+			PID:       42,
+			SessionID: "running-session-id",
+		},
+	}
+
+	agents := c.discoverRecentSessions(running, projectsDir)
+	if len(agents) != 0 {
+		t.Errorf("discoverRecentSessions should skip session matching running ID, got %d agents", len(agents))
+	}
+}
+
+func TestDiscoverRecentSessions_SkipsRunningByWorkingDir(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	subdir := filepath.Join(projectsDir, "-tmp-myproject")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(subdir, "session-abc.jsonl")
+	writeTestSession(t, sessionFile, "session-abc", "claude-sonnet-4-5")
+
+	// Simulate a running agent in the same decoded working directory
+	running := []agent.Agent{
+		{
+			PID:        42,
+			WorkingDir: "/tmp/myproject",
+		},
+	}
+
+	agents := c.discoverRecentSessions(running, projectsDir)
+	if len(agents) != 0 {
+		t.Errorf("discoverRecentSessions should skip session matching running WorkingDir, got %d agents", len(agents))
+	}
+}
+
+func TestDiscoverRecentSessions_SkipsNonJSONL(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	subdir := filepath.Join(projectsDir, "-tmp-myproject")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Create a non-JSONL file
+	txtFile := filepath.Join(subdir, "notes.txt")
+	if err := os.WriteFile(txtFile, []byte("not a session"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agents := c.discoverRecentSessions(nil, projectsDir)
+	if len(agents) != 0 {
+		t.Errorf("discoverRecentSessions should skip non-JSONL files, got %d agents", len(agents))
+	}
+}
+
+func TestDiscoverRecentSessions_OnePerProjectDir(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	subdir := filepath.Join(projectsDir, "-tmp-myproject")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestSession(t, filepath.Join(subdir, "session-1.jsonl"), "session-1", "claude-opus-4-6")
+	writeTestSession(t, filepath.Join(subdir, "session-2.jsonl"), "session-2", "claude-sonnet-4-5")
+
+	agents := c.discoverRecentSessions(nil, projectsDir)
+	// Should return only 1 entry per project directory (the newest session)
+	if len(agents) != 1 {
+		t.Fatalf("discoverRecentSessions returned %d agents, want 1 (one per project dir)", len(agents))
+	}
+
+	if agents[0].WorkingDir != "/tmp/myproject" {
+		t.Errorf("agent WorkingDir = %q, want %q", agents[0].WorkingDir, "/tmp/myproject")
+	}
+}
+
+func TestDiscoverRecentSessions_NonexistentDir(t *testing.T) {
+	c := &Claude{}
+	agents := c.discoverRecentSessions(nil, "/nonexistent/path/that/does/not/exist")
+	if len(agents) != 0 {
+		t.Errorf("discoverRecentSessions on nonexistent dir returned %d agents, want 0", len(agents))
+	}
+}
+
+func TestDiscoverRecentSessions_TokensAndCost(t *testing.T) {
+	c := &Claude{}
+	projectsDir := t.TempDir()
+
+	subdir := filepath.Join(projectsDir, "-tmp-myproject")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionFile := filepath.Join(subdir, "session-cost.jsonl")
+	writeTestSessionWithTokens(t, sessionFile, "session-cost", "claude-sonnet-4-5", 1000, 500)
+
+	agents := c.discoverRecentSessions(nil, projectsDir)
+	if len(agents) != 1 {
+		t.Fatalf("discoverRecentSessions returned %d agents, want 1", len(agents))
+	}
+
+	a := agents[0]
+	if a.TokensIn != 1000 {
+		t.Errorf("agent TokensIn = %d, want 1000", a.TokensIn)
+	}
+	if a.TokensOut != 500 {
+		t.Errorf("agent TokensOut = %d, want 500", a.TokensOut)
+	}
+	if a.EstCostUSD <= 0 {
+		t.Errorf("agent EstCostUSD = %f, want > 0", a.EstCostUSD)
+	}
+}
+
+// --- decodeDirKey tests ---
+
+func TestDecodeDirKey_Standard(t *testing.T) {
+	got := decodeDirKey("-Users-azaalouk-go-src-project")
+	want := "/Users/azaalouk/go/src/project"
+	if got != want {
+		t.Errorf("decodeDirKey(%q) = %q, want %q", "-Users-azaalouk-go-src-project", got, want)
+	}
+}
+
+func TestDecodeDirKey_NoLeadingHyphen(t *testing.T) {
+	got := decodeDirKey("relative-path")
+	if got != "" {
+		t.Errorf("decodeDirKey(%q) = %q, want empty string", "relative-path", got)
+	}
+}
+
+func TestDecodeDirKey_SingleComponent(t *testing.T) {
+	got := decodeDirKey("-tmp")
+	want := "/tmp"
+	if got != want {
+		t.Errorf("decodeDirKey(%q) = %q, want %q", "-tmp", got, want)
+	}
+}
+
+func TestDecodeDirKey_Empty(t *testing.T) {
+	got := decodeDirKey("")
+	if got != "" {
+		t.Errorf("decodeDirKey(%q) = %q, want empty string", "", got)
+	}
+}
+
+// --- test helpers ---
+
+// writeTestSession creates a minimal Claude JSONL session file for testing.
+func writeTestSession(t *testing.T, path, sessionID, model string) {
+	t.Helper()
+	writeTestSessionWithTokens(t, path, sessionID, model, 0, 0)
+}
+
+// writeTestSessionWithTokens creates a Claude JSONL session file with token usage.
+func writeTestSessionWithTokens(t *testing.T, path, sessionID, model string, tokensIn, tokensOut int64) {
+	t.Helper()
+
+	ts := time.Now().Add(-5 * time.Minute).Format(time.RFC3339Nano)
+
+	// First line: session init with sessionId
+	line1 := map[string]interface{}{
+		"type":      "init",
+		"sessionId": sessionID,
+		"timestamp": ts,
+	}
+
+	// Second line: assistant message with model and usage
+	line2 := map[string]interface{}{
+		"type":      "assistant",
+		"timestamp": ts,
+		"message": map[string]interface{}{
+			"model": model,
+			"usage": map[string]interface{}{
+				"input_tokens":  tokensIn,
+				"output_tokens": tokensOut,
+			},
+		},
+	}
+
+	b1, err := json.Marshal(line1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := json.Marshal(line2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := fmt.Sprintf("%s\n%s\n", string(b1), string(b2))
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

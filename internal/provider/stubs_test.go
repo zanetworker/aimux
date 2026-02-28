@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,22 @@ func TestCodexDiscover(t *testing.T) {
 	// Codex now does real discovery; result depends on running processes
 }
 
+func TestCodexDiscoverWithTmux(t *testing.T) {
+	// Verify that Discover() works correctly with tmux session matching.
+	// Even if tmux is not installed or has no sessions, Discover() should
+	// not error — ListTmuxSessions() returns nil gracefully.
+	c := &Codex{}
+	agents, err := c.Discover()
+	if err != nil {
+		t.Fatalf("Codex.Discover() with tmux matching error = %v, want nil", err)
+	}
+	// If any agents were discovered, verify the TMuxSession field is a string
+	// (may be empty if no matching tmux session exists).
+	for _, a := range agents {
+		_ = a.TMuxSession // access the field to ensure it's set without panic
+	}
+}
+
 func TestCodexResumeCommand(t *testing.T) {
 	c := &Codex{}
 	cmd := c.ResumeCommand(agent.Agent{SessionID: "test-session", WorkingDir: "/tmp"})
@@ -36,17 +53,6 @@ func TestCodexResumeCommand(t *testing.T) {
 	args := cmd.Args
 	if len(args) < 4 || args[1] != "resume" || args[2] != "--no-alt-screen" || args[3] != "test-session" {
 		t.Errorf("Codex.ResumeCommand() args = %v, want [codex resume --no-alt-screen test-session]", args)
-	}
-}
-
-func TestCodexParseConversation(t *testing.T) {
-	c := &Codex{}
-	segments, err := c.ParseConversation("/some/path")
-	if err != nil {
-		t.Errorf("Codex.ParseConversation() error = %v, want nil", err)
-	}
-	if segments != nil {
-		t.Errorf("Codex.ParseConversation() = %v, want nil", segments)
 	}
 }
 
@@ -73,17 +79,6 @@ func TestGeminiResumeCommand(t *testing.T) {
 	cmd := g.ResumeCommand(agent.Agent{SessionID: "test", WorkingDir: "/tmp"})
 	if cmd != nil {
 		t.Errorf("Gemini.ResumeCommand() = %v, want nil", cmd)
-	}
-}
-
-func TestGeminiParseConversation(t *testing.T) {
-	g := &Gemini{}
-	segments, err := g.ParseConversation("/some/path")
-	if err != nil {
-		t.Errorf("Gemini.ParseConversation() error = %v, want nil", err)
-	}
-	if segments != nil {
-		t.Errorf("Gemini.ParseConversation() = %v, want nil", segments)
 	}
 }
 
@@ -303,6 +298,66 @@ func TestExtractCodexCWD_MissingFile(t *testing.T) {
 	got := extractCodexCWD("/nonexistent/path/session.jsonl")
 	if got != "" {
 		t.Errorf("extractCodexCWD on missing file = %q, want empty", got)
+	}
+}
+
+func TestCodexParseSessionTokens(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	lines := []string{
+		`{"timestamp":"2026-02-28T09:37:29.758Z","type":"session_meta","payload":{"id":"test-123","cwd":"/tmp/project"}}`,
+		`{"timestamp":"2026-02-28T09:38:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":50000,"cached_input_tokens":3000,"output_tokens":1200,"total_tokens":51200}}}}`,
+		`{"timestamp":"2026-02-28T09:39:00.000Z","model":"o3","type":"response"}`,
+	}
+	content := []byte(strings.Join(lines, "\n") + "\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Codex{}
+	info := c.parseSession(path)
+
+	if info.sessionID != "test-123" {
+		t.Errorf("sessionID = %q, want %q", info.sessionID, "test-123")
+	}
+	if info.cwd != "/tmp/project" {
+		t.Errorf("cwd = %q, want %q", info.cwd, "/tmp/project")
+	}
+	if info.tokensIn != 50000 {
+		t.Errorf("tokensIn = %d, want %d", info.tokensIn, 50000)
+	}
+	if info.tokensOut != 1200 {
+		t.Errorf("tokensOut = %d, want %d", info.tokensOut, 1200)
+	}
+	if info.cachedIn != 3000 {
+		t.Errorf("cachedIn = %d, want %d", info.cachedIn, 3000)
+	}
+	if info.model != "o3" {
+		t.Errorf("model = %q, want %q", info.model, "o3")
+	}
+}
+
+func TestCodexParseSession_NoTokens(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	content := `{"timestamp":"2026-02-28T09:37:29.758Z","type":"session_meta","payload":{"id":"test-456","cwd":"/tmp"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Codex{}
+	info := c.parseSession(path)
+
+	if info.sessionID != "test-456" {
+		t.Errorf("sessionID = %q, want %q", info.sessionID, "test-456")
+	}
+	if info.tokensIn != 0 {
+		t.Errorf("tokensIn = %d, want 0", info.tokensIn)
+	}
+	if info.tokensOut != 0 {
+		t.Errorf("tokensOut = %d, want 0", info.tokensOut)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/agentmux/internal/cost"
+	"github.com/zanetworker/agentmux/internal/discovery"
 )
 
 // Codex is a Provider implementation for the OpenAI Codex CLI.
@@ -28,6 +30,8 @@ func (c *Codex) Discover() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps aux: %w", err)
 	}
+
+	tmuxSessions := discovery.ListTmuxSessions()
 
 	var agents []agent.Agent
 	lines := strings.Split(string(out), "\n")
@@ -50,7 +54,7 @@ func (c *Codex) Discover() ([]agent.Agent, error) {
 
 	// Enrich with session data
 	for i := range agents {
-		c.enrichAgent(&agents[i])
+		c.enrichAgent(&agents[i], tmuxSessions)
 	}
 
 	// Also discover recent sessions that aren't running (resumable)
@@ -303,13 +307,18 @@ func (c *Codex) dedup(agents []agent.Agent) []agent.Agent {
 	return result
 }
 
-// enrichAgent resolves CWD and finds the latest session file.
-func (c *Codex) enrichAgent(a *agent.Agent) {
+// enrichAgent resolves CWD, matches a tmux session, and finds the latest session file.
+func (c *Codex) enrichAgent(a *agent.Agent, tmuxSessions []discovery.TmuxSession) {
 	// Resolve CWD if not already set
 	if a.WorkingDir == "" {
 		if cwd, err := getCwd(a.PID); err == nil {
 			a.WorkingDir = cwd
 		}
+	}
+
+	// Match tmux session
+	if a.WorkingDir != "" {
+		a.TMuxSession = discovery.MatchTmuxSession(tmuxSessions, a.WorkingDir)
 	}
 
 	a.Name = a.ShortProject()
@@ -342,6 +351,20 @@ func (c *Codex) enrichAgent(a *agent.Agent) {
 	if info.sessionID != "" {
 		a.SessionID = info.sessionID
 	}
+	if info.model != "" && a.Model == "" {
+		a.Model = info.model
+	}
+	if info.tokensIn > 0 || info.tokensOut > 0 {
+		a.TokensIn = info.tokensIn
+		a.TokensOut = info.tokensOut
+		a.EstCostUSD = cost.Calculate(
+			a.Model,
+			info.tokensIn,
+			info.tokensOut,
+			info.cachedIn,
+			0,
+		)
+	}
 	if !info.lastTimestamp.IsZero() {
 		a.LastActivity = info.lastTimestamp
 		if time.Since(info.lastTimestamp) < 30*time.Second {
@@ -372,7 +395,11 @@ func getCwd(pid int) (string, error) {
 type codexSessionInfo struct {
 	sessionID     string
 	cwd           string
+	model         string
 	lastTimestamp time.Time
+	tokensIn      int64
+	tokensOut     int64
+	cachedIn      int64
 }
 
 // findSessionFile finds the most recent Codex session file matching a CWD.
@@ -462,7 +489,7 @@ func (c *Codex) readSessionMeta(path string) codexSessionInfo {
 	return codexSessionInfo{}
 }
 
-// parseSession reads a Codex JSONL session for metadata.
+// parseSession reads a Codex JSONL session for metadata including token usage.
 func (c *Codex) parseSession(path string) codexSessionInfo {
 	f, err := os.Open(path)
 	if err != nil {
@@ -478,18 +505,52 @@ func (c *Codex) parseSession(path string) codexSessionInfo {
 		var entry struct {
 			Timestamp string `json:"timestamp"`
 			Type      string `json:"type"`
-			Payload   struct {
-				ID  string `json:"id"`
-				CWD string `json:"cwd"`
-			} `json:"payload"`
+			Payload   json.RawMessage `json:"payload"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			continue
 		}
 
 		if entry.Type == "session_meta" {
-			info.sessionID = entry.Payload.ID
-			info.cwd = entry.Payload.CWD
+			var meta struct {
+				ID    string `json:"id"`
+				CWD   string `json:"cwd"`
+				Model string `json:"model"`
+			}
+			if json.Unmarshal(entry.Payload, &meta) == nil {
+				info.sessionID = meta.ID
+				info.cwd = meta.CWD
+				if meta.Model != "" {
+					info.model = meta.Model
+				}
+			}
+		}
+
+		// Extract token counts from event_msg with type=token_count
+		if entry.Type == "event_msg" {
+			var evt struct {
+				Type string `json:"type"`
+				Info struct {
+					TotalTokenUsage struct {
+						InputTokens       int64 `json:"input_tokens"`
+						CachedInputTokens int64 `json:"cached_input_tokens"`
+						OutputTokens      int64 `json:"output_tokens"`
+					} `json:"total_token_usage"`
+				} `json:"info"`
+			}
+			if json.Unmarshal(entry.Payload, &evt) == nil && evt.Type == "token_count" {
+				info.tokensIn = evt.Info.TotalTokenUsage.InputTokens
+				info.tokensOut = evt.Info.TotalTokenUsage.OutputTokens
+				info.cachedIn = evt.Info.TotalTokenUsage.CachedInputTokens
+			}
+		}
+
+		// Extract model from response entries
+		var modelEntry struct {
+			Model string `json:"model"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &modelEntry) == nil && modelEntry.Model != "" {
+			info.model = modelEntry.Model
 		}
 
 		if entry.Timestamp != "" {
@@ -519,10 +580,6 @@ func (c *Codex) ResumeCommand(a agent.Agent) *exec.Cmd {
 		return cmd
 	}
 	return nil
-}
-
-func (c *Codex) ParseConversation(sessionPath string) ([]Segment, error) {
-	return nil, nil
 }
 
 // CanEmbed returns false because Codex's TUI cannot run inside an embedded PTY.

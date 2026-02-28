@@ -3,6 +3,7 @@ package cost
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func almostEqual(a, b float64) bool {
@@ -103,5 +104,29 @@ func TestCalculateWithSuffixedModel(t *testing.T) {
 	got := Calculate("claude-opus-4-6[1m]", 1_000_000, 100_000, 0, 0)
 	if !almostEqual(got, 22.50) {
 		t.Errorf("Opus with [1m] suffix: got $%.4f, want $22.50", got)
+	}
+}
+
+func TestPricingNotStale(t *testing.T) {
+	verified, err := time.Parse("2006-01-02", pricingLastVerified)
+	if err != nil {
+		t.Fatalf("pricingLastVerified %q is not a valid date: %v", pricingLastVerified, err)
+	}
+	age := time.Since(verified)
+	if age > 90*24*time.Hour {
+		t.Errorf("pricing data is %d days old (last verified: %s); "+
+			"check provider pricing pages and update pricingLastVerified in tracker.go",
+			int(age.Hours()/24), pricingLastVerified)
+	}
+}
+
+func TestAllModelsHavePricing(t *testing.T) {
+	for model, p := range pricing {
+		if p.Input <= 0 {
+			t.Errorf("model %q has zero/negative Input price", model)
+		}
+		if p.Output <= 0 {
+			t.Errorf("model %q has zero/negative Output price", model)
+		}
 	}
 }

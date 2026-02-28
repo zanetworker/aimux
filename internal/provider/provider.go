@@ -14,7 +14,6 @@ type Provider interface {
 	Name() string
 	Discover() ([]agent.Agent, error)
 	ResumeCommand(a agent.Agent) *exec.Cmd
-	ParseConversation(sessionPath string) ([]Segment, error)
 
 	// CanEmbed returns true if the agent's TUI can run inside an
 	// embedded PTY (split view). False means trace-only view with

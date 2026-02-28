@@ -11,8 +11,7 @@ type Gemini struct{}
 
 func (g *Gemini) Name() string                                            { return "gemini" }
 func (g *Gemini) Discover() ([]agent.Agent, error)                        { return nil, nil }
-func (g *Gemini) ResumeCommand(a agent.Agent) *exec.Cmd                   { return nil }
-func (g *Gemini) ParseConversation(sessionPath string) ([]Segment, error) { return nil, nil }
+func (g *Gemini) ResumeCommand(a agent.Agent) *exec.Cmd { return nil }
 
 // CanEmbed returns false because Gemini's TUI cannot run inside an embedded PTY.
 func (g *Gemini) CanEmbed() bool { return false }

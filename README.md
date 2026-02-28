@@ -2,16 +2,21 @@
   <img src="assets/logo.png" width="128" alt="agentmux logo">
   <br>
   <strong>agentmux</strong><br>
-  <sub>k9s for your AI coding agents</sub>
+  <sub>Launch, observe, and debug your AI coding agents from one terminal.</sub>
 </p>
 
 <p align="center">
-  <a href="https://github.com/zanetworker/agentmux/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zanetworker/agentmux?style=flat-square" alt="License"></a>
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/go-1.24%2B-00ADD8?style=flat-square&logo=go" alt="Go 1.24+">
-  <a href="https://github.com/zanetworker/agentmux/releases"><img src="https://img.shields.io/github/v/release/zanetworker/agentmux?style=flat-square&include_prereleases&label=release" alt="Release"></a>
 </p>
 
-A single-pane-of-glass TUI for managing multiple AI coding agent sessions -- Claude, Codex, Gemini -- from one terminal. Discover running agents, view conversation traces, zoom into live PTY sessions, launch new agents, and track costs across projects.
+agentmux is an agent-agnostic CLI dashboard that gives you one place to launch, monitor, and trace AI coding agents -- Claude, Codex, Gemini, or any provider you plug in. Think k9s, but for your coding agents instead of your pods.
+
+**One-stop launcher** -- spawn agents into tmux or iTerm from a single command palette. Pick the provider, model, mode, and project directory. No context switching, no hunting through tabs, no remembering CLI flags.
+
+**Tracing and observability** -- see exactly what each agent is doing in real time without leaving your terminal. Inspect conversation traces turn by turn, see which tools were called, catch mistakes as they happen, and debug agent behavior without digging through log files.
+
+**Agent-agnostic** -- not locked into one vendor. Works with any CLI-based AI agent through a pluggable provider interface. Swap between Claude, Codex, and Gemini from the same seat. Enable or disable providers via config. Adding a new one is a single Go file.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -39,6 +44,7 @@ A single-pane-of-glass TUI for managing multiple AI coding agent sessions -- Cla
 
 ## Table of Contents
 
+- [Table of Contents](#table-of-contents)
 - [Why](#why)
 - [Quick Start](#quick-start)
 - [Features](#features)
@@ -51,15 +57,17 @@ A single-pane-of-glass TUI for managing multiple AI coding agent sessions -- Cla
 
 ## Why
 
-If you run multiple AI coding agents across terminal tabs, VS Code panels, and tmux sessions, you have no unified way to see what they're all doing. agentmux fixes that.
+You're running 5 agents across 3 projects. Claude is refactoring your auth module. Codex is writing tests in another repo. A third Claude session is idle -- or is it stuck on a permission prompt? You don't know, because each one lives in its own tab, its own terminal, its own world.
 
-| Problem | agentmux |
-|---------|----------|
-| Which agents are running? What model? Idle or active? | Live dashboard with status, model, cost per agent |
-| What did the agent just do? What tools did it call? | Conversation trace viewer with filtering |
-| I need to interact with that agent | Zoom into a live PTY session, or jump out to a split pane |
-| How much am I spending? | Cost dashboard aggregated by project |
-| I want to launch a new agent from here | Built-in launcher with recent directories |
+You're blind. You're context-switching constantly between terminals, UIs, etc. And when an agent quietly deletes a file it shouldn't have, you won't notice until your build breaks.
+
+**agentmux is your control plane.** One terminal. Every agent. Full visibility.
+
+- **See everything at once** -- which agents are running, which are idle, which are waiting for input. Status, model, cost, project -- all in one view.
+- **Trace what happened** -- every prompt, every response, every tool call. When an agent makes a mistake, you see exactly where it went wrong.
+- **Launch from here** -- spawn a new Claude, Codex, or Gemini session without opening another terminal, without remembering flags, without breaking flow.
+- **Stay in your terminal** -- no browser tabs, no separate dashboards, no context switching. It's all right here.
+- **Bring your own agent** -- agentmux ships with Claude, Codex, and Gemini, but the provider interface is open. Add support for your favorite agent in a single Go file and it plugs into discovery, tracing, launching, and the full dashboard -- no fork required.
 
 ## Quick Start
 
@@ -213,14 +221,13 @@ Each provider implements discovery, session management, and spawning through a c
 <details>
 <summary><strong>Adding a new provider</strong></summary>
 
-Implement the `Provider` interface and register it in `app.go`:
+Implement the `Provider` interface (8 methods), register in `app.go`, add to config defaults, and add model pricing:
 
 ```go
 type Provider interface {
     Name() string
     Discover() ([]agent.Agent, error)
     ResumeCommand(a agent.Agent) *exec.Cmd
-    ParseConversation(sessionPath string) ([]Segment, error)
     CanEmbed() bool
     FindSessionFile(a agent.Agent) string
     RecentDirs(max int) []RecentDir
@@ -229,7 +236,7 @@ type Provider interface {
 }
 ```
 
-The orchestrator and all views pick up new providers automatically. See [CLAUDE.md](CLAUDE.md) for the full guide.
+The orchestrator and all views pick up new providers automatically. For the complete walkthrough with code examples, testing checklist, and a full end-to-end example, see **[Adding a Provider](docs/adding-a-provider.md)**.
 
 </details>
 
