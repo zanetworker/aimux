@@ -576,9 +576,10 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Resolve session file for the trace pane
+	// Resolve session file for the trace pane.
+	// Only use Claude-specific fallback for Claude agents.
 	sessionFile := selected.SessionFile
-	if sessionFile == "" {
+	if sessionFile == "" && selected.ProviderName == "claude" {
 		sessionFile = discovery.FindSessionFileDefault(selected.SessionID)
 		if sessionFile == "" {
 			files := discovery.SessionFilesForDir(selected.WorkingDir)
@@ -592,7 +593,7 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 	// in a PTY reliably. Open trace-only view instead; use J to jump out.
 	if selected.ProviderName != "claude" {
 		if sessionFile == "" {
-			a.statusHint = "No session data available for this instance"
+			a.statusHint = "No trace data yet — agent may still be starting"
 			return a, nil
 		}
 		return a.openLogsForAgent(selected, sessionFile)
