@@ -70,11 +70,15 @@ func (c *Codex) discoverRecentSessions(running []agent.Agent) []agent.Agent {
 	sessionsDir := filepath.Join(home, ".codex", "sessions")
 	cutoff := time.Now().Add(-24 * time.Hour)
 
-	// Collect session IDs that are already running
+	// Collect session IDs and working dirs that are already running
 	runningIDs := make(map[string]bool)
+	runningDirs := make(map[string]bool)
 	for _, a := range running {
 		if a.SessionID != "" {
 			runningIDs[a.SessionID] = true
+		}
+		if a.WorkingDir != "" {
+			runningDirs[a.WorkingDir] = true
 		}
 	}
 
@@ -96,6 +100,9 @@ func (c *Codex) discoverRecentSessions(running []agent.Agent) []agent.Agent {
 		}
 		if runningIDs[meta.sessionID] {
 			return nil // already shown as running
+		}
+		if meta.cwd != "" && runningDirs[meta.cwd] {
+			return nil // running process in same directory
 		}
 
 		// Parse full session for last activity
@@ -318,6 +325,15 @@ func (c *Codex) enrichAgent(a *agent.Agent) {
 		return
 	}
 
+	// Don't show stale session files for recently started agents.
+	// If the session file was last modified more than 30s before the agent
+	// started, it belongs to a previous session.
+	if info, err := os.Stat(sessionFile); err == nil {
+		if !a.StartTime.IsZero() && info.ModTime().Before(a.StartTime.Add(-30*time.Second)) {
+			return
+		}
+	}
+
 	a.SessionFile = sessionFile
 
 	// Parse session for metadata
@@ -359,21 +375,24 @@ type codexSessionInfo struct {
 }
 
 // findSessionFile finds the most recent Codex session file matching a CWD.
+// Only considers files modified in the last 24 hours. Returns "" if no
+// matching recent file is found.
 func (c *Codex) findSessionFile(sessionsDir, workingDir string) string {
-	// Codex stores sessions in YYYY/MM/DD subdirectories (newer) or flat (older)
-	var candidates []string
+	cutoff := time.Now().Add(-24 * time.Hour)
 
-	// Walk the sessions directory for JSONL files
+	var candidates []string
 	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+		if err != nil || info.IsDir() {
 			return nil
 		}
-		if info.IsDir() {
+		if !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
-		if strings.HasSuffix(path, ".jsonl") {
-			candidates = append(candidates, path)
+		// Only consider recent files
+		if info.ModTime().Before(cutoff) {
+			return nil
 		}
+		candidates = append(candidates, path)
 		return nil
 	})
 
@@ -391,7 +410,7 @@ func (c *Codex) findSessionFile(sessionsDir, workingDir string) string {
 			continue
 		}
 
-		// If we have a workingDir, try to match by reading the session_meta
+		// Must match the working directory
 		if workingDir != "" {
 			meta := c.readSessionMeta(path)
 			if meta.cwd != "" && meta.cwd != workingDir {
@@ -405,19 +424,7 @@ func (c *Codex) findSessionFile(sessionsDir, workingDir string) string {
 		}
 	}
 
-	// If no CWD match, just return the newest file overall
-	if best == "" && len(candidates) > 0 {
-		for _, path := range candidates {
-			info, err := os.Stat(path)
-			if err != nil {
-				continue
-			}
-			if info.ModTime().After(bestTime) {
-				best = path
-				bestTime = info.ModTime()
-			}
-		}
-	}
+	// No fallback — only return files that actually match the CWD
 
 	return best
 }

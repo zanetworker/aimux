@@ -1020,7 +1020,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  l:logs  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  l:logs  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  Esc:back  ?:more")
 	case viewCosts:
@@ -1066,12 +1066,19 @@ func (a App) View() string {
 
 	statusBar := a.renderStatusBar()
 
-	// Pad content to fill the screen
-	contentLines := strings.Count(content, "\n") + 1
+	// Fit content to exact available height: pad if short, truncate if long
 	availableHeight := a.height - headerHeight - 1
-	if contentLines < availableHeight {
-		content += strings.Repeat("\n", availableHeight-contentLines)
+	if availableHeight < 1 {
+		availableHeight = 1
 	}
+	lines := strings.Split(content, "\n")
+	if len(lines) > availableHeight {
+		lines = lines[:availableHeight]
+	}
+	for len(lines) < availableHeight {
+		lines = append(lines, "")
+	}
+	content = strings.Join(lines, "\n")
 
 	result := header + "\n" + content + "\n" + statusBar
 
@@ -1243,7 +1250,7 @@ func (a App) renderStatusBar() string {
 			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  :new:launch  x:kill  l:logs  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " j/k:nav  Enter:open  :new:launch  x:kill  l:logs  s:sort  ?:help"
+			hints = " j/k:nav  Enter:open  :new:launch  x:kill  l:logs  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)

@@ -14,10 +14,8 @@ import (
 // --- Styles ---
 
 var (
-	launcherBoxStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#5F87FF")).
-				Padding(1, 2)
+	launcherBoxBorderStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#5F87FF"))
 	launcherTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("#5F87FF"))
@@ -339,7 +337,7 @@ func (l *LauncherView) selectedDir() string {
 
 // --- View rendering ---
 
-// View renders the launcher overlay.
+// View renders the launcher overlay as a full-screen replacement.
 func (l *LauncherView) View() string {
 	var content string
 	switch l.state {
@@ -351,30 +349,56 @@ func (l *LauncherView) View() string {
 		content = l.viewOptions()
 	}
 
-	boxW := l.width * 55 / 100
-	if boxW < 45 {
-		boxW = 45
-	}
-	if boxW > l.width-8 {
-		boxW = l.width - 8
-	}
-
-	// Content width is boxW minus border (2) and padding (4)
-	box := launcherBoxStyle.Width(boxW).Render(content)
-
-	// Center the box
-	boxH := lipgloss.Height(box)
-	topPad := (l.height - boxH) / 3
-	if topPad < 0 {
-		topPad = 0
-	}
-	leftPad := (l.width - lipgloss.Width(box)) / 2
-	if leftPad < 0 {
-		leftPad = 0
+	// Render content lines with left padding for centering
+	contentLines := strings.Split(content, "\n")
+	maxContentW := 0
+	for _, line := range contentLines {
+		if w := lipgloss.Width(line); w > maxContentW {
+			maxContentW = w
+		}
 	}
 
-	return strings.Repeat("\n", topPad) +
-		strings.Repeat(" ", leftPad) + box
+	leftPad := (l.width - maxContentW) / 2
+	if leftPad < 2 {
+		leftPad = 2
+	}
+	topPad := (l.height - len(contentLines)) / 3
+	if topPad < 1 {
+		topPad = 1
+	}
+
+	var b strings.Builder
+
+	// Top padding (blank lines fill screen above the content)
+	for i := 0; i < topPad; i++ {
+		b.WriteString(strings.Repeat(" ", l.width) + "\n")
+	}
+
+	// Top border
+	borderW := maxContentW + 4
+	pad := strings.Repeat(" ", leftPad-1)
+	b.WriteString(pad + launcherBoxBorderStyle.Render("┌"+strings.Repeat("─", borderW)+"┐") + "\n")
+
+	// Content lines with border
+	for _, line := range contentLines {
+		lineW := lipgloss.Width(line)
+		rightFill := maxContentW - lineW + 2
+		if rightFill < 0 {
+			rightFill = 0
+		}
+		b.WriteString(pad + launcherBoxBorderStyle.Render("│") + "  " + line + strings.Repeat(" ", rightFill) + launcherBoxBorderStyle.Render("│") + "\n")
+	}
+
+	// Bottom border
+	b.WriteString(pad + launcherBoxBorderStyle.Render("└"+strings.Repeat("─", borderW)+"┘") + "\n")
+
+	// Fill remaining height
+	rendered := topPad + len(contentLines) + 2 // +2 for top/bottom borders
+	for i := rendered; i < l.height; i++ {
+		b.WriteString(strings.Repeat(" ", l.width) + "\n")
+	}
+
+	return b.String()
 }
 
 func (l *LauncherView) viewProvider() string {

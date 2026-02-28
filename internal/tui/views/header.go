@@ -86,15 +86,22 @@ func (h *HeaderView) View() string {
 
 	result := topRow + "\n" + crumbBar
 	if h.hintText != "" {
-		result += "\n" + h.renderHintBar()
+		sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).Render(strings.Repeat("─", h.width))
+		result += "\n" + h.renderHintBar() + "\n" + sep
 	}
 	return result
 }
 
 // Height returns the rendered height of the header (for layout calculations).
+// Must match the actual number of newlines in View() output.
 func (h *HeaderView) Height() int {
-	// Logo is 4 lines + 1 for crumb bar + 1 for hint bar
-	return 7
+	// Info boxes / logo row:  4 lines (rounded border top + 2 content + bottom)
+	// Breadcrumbs:            1 line
+	// Hint bar + separator:   2 lines (when hint is set)
+	if h.hintText != "" {
+		return 4 + 1 + 2 // = 7
+	}
+	return 4 + 1 // = 5
 }
 
 func (h *HeaderView) renderHintBar() string {
@@ -103,8 +110,6 @@ func (h *HeaderView) renderHintBar() string {
 		Bold(true)
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6B7280"))
-	barBg := lipgloss.NewStyle().
-		Width(h.width)
 
 	// Parse hint text: "Key:desc  Key:desc" -> styled output
 	parts := strings.Fields(h.hintText)
@@ -119,8 +124,8 @@ func (h *HeaderView) renderHintBar() string {
 		}
 	}
 
-	content := " " + strings.Join(rendered, "  ")
-	return barBg.Render(content)
+	prefix := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).Render(" ❯ ")
+	return prefix + strings.Join(rendered, "  ")
 }
 
 func (h *HeaderView) renderInfoBoxes() string {
@@ -152,10 +157,10 @@ func (h *HeaderView) renderInfoBoxes() string {
 	labelStyle := lipgloss.NewStyle().Foreground(colorMutedText)
 	valueStyle := lipgloss.NewStyle().Foreground(colorHeaderText).Bold(true)
 
-	// Agent count box
-	activeStr := lipgloss.NewStyle().Foreground(colorActive).Render(fmt.Sprintf("●%d", active))
-	waitingStr := lipgloss.NewStyle().Foreground(colorWaiting).Render(fmt.Sprintf("◐%d", waiting))
-	idleStr := lipgloss.NewStyle().Foreground(colorIdle).Render(fmt.Sprintf("○%d", idle))
+	// Agent count box with labeled status icons
+	activeStr := lipgloss.NewStyle().Foreground(colorActive).Render(fmt.Sprintf("●%d active", active))
+	waitingStr := lipgloss.NewStyle().Foreground(colorWaiting).Render(fmt.Sprintf("◐%d wait", waiting))
+	idleStr := lipgloss.NewStyle().Foreground(colorIdle).Render(fmt.Sprintf("○%d idle", idle))
 
 	agentBox := boxStyle.Render(
 		labelStyle.Render("Agents") + " " +

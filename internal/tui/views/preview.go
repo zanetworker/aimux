@@ -174,25 +174,24 @@ func (p *PreviewPane) renderHeader() string {
 		dirLine = previewLabelStyle.Render("Dir: ") + previewValueStyle.Render(truncatePreview(a.WorkingDir, maxW-5))
 	}
 
-	// Source and group info
+	// Source line
 	var sourceLine string
-	if a.Source.String() != "CLI" || a.GroupCount > 1 {
-		parts := []string{previewLabelStyle.Render("Source: ") + previewValueStyle.Render(a.Source.String())}
-		if a.GroupCount > 1 {
-			parts = append(parts,
-				previewLabelStyle.Render("Instances: ")+previewValueStyle.Render(fmt.Sprintf("%d", a.GroupCount)))
-			// Show PIDs
-			var pidStrs []string
-			for _, pid := range a.GroupPIDs {
-				pidStrs = append(pidStrs, fmt.Sprintf("%d", pid))
+	if a.Source.String() != "CLI" {
+		sourceLine = previewLabelStyle.Render("Source: ") + previewValueStyle.Render(a.Source.String())
+	}
+
+	// Grouped processes section
+	var groupLines string
+	if a.GroupCount > 1 {
+		groupStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+		groupLines = groupStyle.Render(fmt.Sprintf("  %d Grouped Processes", a.GroupCount)) + "\n"
+		for i, pid := range a.GroupPIDs {
+			if i >= 8 {
+				groupLines += previewDimStyle.Render(fmt.Sprintf("  ... and %d more", len(a.GroupPIDs)-8)) + "\n"
+				break
 			}
-			if len(pidStrs) > 5 {
-				pidStrs = append(pidStrs[:5], "...")
-			}
-			parts = append(parts,
-				previewLabelStyle.Render("PIDs: ")+previewDimStyle.Render(strings.Join(pidStrs, ", ")))
+			groupLines += previewDimStyle.Render(fmt.Sprintf("  PID %d", pid)) + "\n"
 		}
-		sourceLine = strings.Join(parts, "  ")
 	}
 
 	// Git branch line
@@ -271,6 +270,11 @@ func (p *PreviewPane) renderHeader() string {
 		result += tokenLine + "\n"
 	}
 	result += statusLine + "\n"
+
+	// Grouped processes
+	if groupLines != "" {
+		result += groupLines
+	}
 
 	// Recent Actions section
 	actionsSection := p.renderRecentActions()
