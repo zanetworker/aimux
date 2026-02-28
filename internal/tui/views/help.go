@@ -50,6 +50,7 @@ func (v *HelpView) View() string {
 	writeHelp(&b, "j/k", "Move cursor down/up")
 	writeHelp(&b, "Enter", "Open split view (trace + session)")
 	writeHelp(&b, "l", "Open logs/trace viewer (full screen)")
+	writeHelp(&b, ":new / :n", "Launch new agent (provider, dir, options)")
 	writeHelp(&b, "x", "Kill selected agent (with confirmation)")
 	writeHelp(&b, "s", "Sort: cycle Name/Cost/Age/Model/PID")
 	writeHelp(&b, "/", "Filter agents by name, dir, model")
@@ -91,6 +92,7 @@ func (v *HelpView) View() string {
 
 	b.WriteString(helpTitleStyle.Render("Commands"))
 	b.WriteString("\n")
+	writeHelp(&b, ":new / :n", "Launch new agent")
 	writeHelp(&b, ":export", "Export trace + annotations as JSONL")
 	writeHelp(&b, ":instances :i", "Agent list")
 	writeHelp(&b, ":logs :l", "Trace viewer")
