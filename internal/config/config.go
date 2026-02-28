@@ -13,7 +13,14 @@ type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
 	DefaultRuntime  string                    `yaml:"default_runtime"`
-	Shell           string                    `yaml:"shell"` // login shell for spawning agents
+	Shell           string                    `yaml:"shell"`   // login shell for spawning agents
+	Export          ExportConfig              `yaml:"export"`  // OTEL export settings
+}
+
+// ExportConfig holds settings for exporting traces via OTLP.
+type ExportConfig struct {
+	Endpoint string `yaml:"endpoint"` // e.g., "localhost:5000" for MLflow
+	Insecure bool   `yaml:"insecure"` // true for HTTP (no TLS), default true
 }
 
 // ProviderConfig controls a single provider's behaviour.
@@ -76,6 +83,9 @@ func Load(path string) (Config, error) {
 	}
 	if fileCfg.Shell != "" {
 		cfg.Shell = fileCfg.Shell
+	}
+	if fileCfg.Export.Endpoint != "" {
+		cfg.Export = fileCfg.Export
 	}
 	if fileCfg.Providers != nil {
 		for name, pc := range fileCfg.Providers {

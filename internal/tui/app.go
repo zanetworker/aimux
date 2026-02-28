@@ -19,6 +19,7 @@ import (
 	"github.com/zanetworker/agentmux/internal/evaluation"
 	"github.com/zanetworker/agentmux/internal/jump"
 	"github.com/zanetworker/agentmux/internal/provider"
+	agentmuxotel "github.com/zanetworker/agentmux/internal/otel"
 	"github.com/zanetworker/agentmux/internal/spawn"
 	"github.com/zanetworker/agentmux/internal/team"
 	"github.com/zanetworker/agentmux/internal/terminal"
@@ -275,10 +276,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = a.evalStore.Save(evaluation.Annotation{
 					Turn:      msg.Turn,
 					Label:     msg.Label,
+					Note:      msg.Note,
 					Timestamp: time.Now(),
 				})
-				a.statusHint = fmt.Sprintf("Turn %d: [%s] saved. a:cycle  :export to save all as JSONL",
-					msg.Turn, strings.ToUpper(msg.Label))
+				hint := fmt.Sprintf("Turn %d: [%s]", msg.Turn, strings.ToUpper(msg.Label))
+				if msg.Note != "" {
+					hint += fmt.Sprintf(" \"%s\"", msg.Note)
+				}
+				hint += "  a:cycle  N:note  :export"
+				a.statusHint = hint
 			}
 		}
 		return a, nil
@@ -550,6 +556,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		return a.promptKill()
 	case "new":
 		return a.openLauncher()
+	case "export-otel":
+		return a.exportOTEL()
 	case "quit":
 		return a, tea.Quit
 	}
@@ -792,6 +800,49 @@ func (a App) exportTrace() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// exportOTEL sends the current trace + annotations as OTLP/HTTP spans to
+// the configured export endpoint (e.g., MLflow, Jaeger).
+func (a App) exportOTEL() (tea.Model, tea.Cmd) {
+	if a.logsView == nil || a.evalSessionID == "" {
+		a.statusHint = "Open a trace first (l on an agent), then :export-otel"
+		return a, nil
+	}
+
+	endpoint := a.cfg.Export.Endpoint
+	if endpoint == "" {
+		a.statusHint = "Set export.endpoint in ~/.agentmux/config.yaml first"
+		return a, nil
+	}
+
+	turns := a.logsView.Turns()
+	if len(turns) == 0 {
+		a.statusHint = "No trace data to export"
+		return a, nil
+	}
+
+	// Determine provider name from the current agent context
+	providerName := ""
+	selected := a.agentsView.Selected()
+	if selected != nil {
+		providerName = selected.ProviderName
+	}
+
+	cfg := agentmuxotel.ExportConfig{
+		Endpoint:  endpoint,
+		Insecure:  a.cfg.Export.Insecure,
+		SessionID: a.evalSessionID,
+		Provider:  providerName,
+	}
+
+	if err := agentmuxotel.ExportTrace(cfg, turns, a.evalStore); err != nil {
+		a.statusHint = fmt.Sprintf("OTEL export failed: %v", err)
+		return a, nil
+	}
+
+	a.statusHint = fmt.Sprintf("Exported %d turns via OTLP to %s", len(turns), endpoint)
+	return a, nil
+}
+
 // jumpToSession opens the selected agent's session in a separate terminal pane
 // (iTerm split or tmux pane). Used for providers like Codex whose TUI can't embed.
 func (a App) jumpToSession() (tea.Model, tea.Cmd) {
@@ -998,13 +1049,18 @@ func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, t
 	a.evalStore = evaluation.NewStore(sessionID)
 	annotations, _ := a.evalStore.Load()
 	annotMap := make(map[int]string)
+	noteMap := make(map[int]string)
 	for _, ann := range annotations {
 		annotMap[ann.Turn] = ann.Label
+		if ann.Note != "" {
+			noteMap[ann.Turn] = ann.Note
+		}
 	}
 	a.logsView.SetAnnotations(annotMap)
+	a.logsView.SetNotes(noteMap)
 
 	label := fmt.Sprintf("Trace [%s: %s]", ag.ProviderName, ag.ShortProject())
-	a.statusHint = "J:jump to session  :export  a:annotate"
+	a.statusHint = "J:jump to session  :export  a:annotate  N:note"
 	return a.navigateTo(viewLogs, label)
 }
 
@@ -1040,10 +1096,15 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 	a.evalStore = evaluation.NewStore(sessionID)
 	annotations, _ := a.evalStore.Load()
 	annotMap := make(map[int]string)
+	noteMap := make(map[int]string)
 	for _, ann := range annotations {
 		annotMap[ann.Turn] = ann.Label
+		if ann.Note != "" {
+			noteMap[ann.Turn] = ann.Note
+		}
 	}
 	a.logsView.SetAnnotations(annotMap)
+	a.logsView.SetNotes(noteMap)
 
 	return a.navigateTo(viewLogs, fmt.Sprintf("Logs [PID %d]", selected.PID))
 }
@@ -1114,7 +1175,7 @@ func (a App) View() string {
 	case viewAgents:
 		a.headerView.SetHint("Enter:open  l:logs  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
-		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  :export  Esc:back  ?:more")
+		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  N:note  :export  Esc:back  ?:more")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
@@ -1329,12 +1390,23 @@ func (a App) renderStatusBar() string {
 				Render(" /") + a.filterInput + lipgloss.NewStyle().
 				Foreground(colorWaiting).Render("|"))
 	}
+	if a.currentView == viewLogs && a.logsView != nil && a.logsView.NoteMode() {
+		noteText, noteTurn := a.logsView.NoteInput()
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color("#111827")).
+			Width(a.width).
+			Render(lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#F59E0B")).
+				Bold(true).
+				Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#F59E0B")).Render("|"))
+	}
 
 	var hints string
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(colorWaiting).Render(a.statusHint)
 	} else if a.currentView == viewLogs {
-		hints = " j/k:turns  Enter:expand  a:annotate(GOOD/BAD/WASTE)  /:filter  c:collapse  :export  Esc:back"
+		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  c:collapse  :export  Esc:back"
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()

@@ -86,6 +86,7 @@ var (
 type AnnotationMsg struct {
 	Turn  int
 	Label string // "" means remove
+	Note  string // free-text rationale (set via 'n' key)
 }
 
 // --- Data model ---
@@ -120,8 +121,12 @@ type LogsView struct {
 	filterMode   bool
 	filterInput  string
 	annotations  map[int]string
-	compact      bool // when true, hides the interactive status bar (for preview pane)
-	scrollOffset int  // line-level scroll offset within the rendered view
+	notes        map[int]string // free-text notes per turn
+	noteMode     bool           // true when typing a note
+	noteInput    string         // current note input text
+	noteTurn     int            // which turn the note is for
+	compact      bool           // when true, hides the interactive status bar (for preview pane)
+	scrollOffset int            // line-level scroll offset within the rendered view
 }
 
 // NewLogsView creates a new LogsView for the given PID and log file path.
@@ -134,6 +139,7 @@ func NewLogsView(pid int, filePath string, parser TraceParser) *LogsView {
 		parser:      parser,
 		expanded:    make(map[int]bool),
 		annotations: make(map[int]string),
+		notes:       make(map[int]string),
 	}
 	v.Reload()
 	return v
@@ -150,9 +156,33 @@ func (v *LogsView) Turns() []TraceTurn {
 	return v.turns
 }
 
-// HasActiveFilter returns true if the logs view has a filter or filter mode active.
+// HasActiveFilter returns true if the logs view has a filter, note input, or filter mode active.
 func (v *LogsView) HasActiveFilter() bool {
-	return v.filterMode || v.filterText != ""
+	return v.filterMode || v.filterText != "" || v.noteMode
+}
+
+// SetNotes loads notes from external storage.
+func (v *LogsView) SetNotes(n map[int]string) {
+	if n == nil {
+		v.notes = make(map[int]string)
+	} else {
+		v.notes = n
+	}
+}
+
+// Notes returns the current notes map for export.
+func (v *LogsView) Notes() map[int]string {
+	return v.notes
+}
+
+// NoteMode returns true if the user is currently typing a note.
+func (v *LogsView) NoteMode() bool {
+	return v.noteMode
+}
+
+// NoteInput returns the current note input text and turn number.
+func (v *LogsView) NoteInput() (string, int) {
+	return v.noteInput, v.noteTurn
 }
 
 // SetAnnotations loads a set of turn annotations from external storage.
@@ -246,6 +276,10 @@ var annotationCycle = []string{"good", "bad", "wasteful", ""}
 func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Note input mode
+		if v.noteMode {
+			return v.handleNoteKey(msg)
+		}
 		// Filter mode input
 		if v.filterMode {
 			return v.handleFilterKey(msg)
@@ -387,9 +421,56 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 			return func() tea.Msg {
 				return AnnotationMsg{Turn: turnNum, Label: next}
 			}
+		case "N":
+			// Open note input for current turn
+			if len(visible) == 0 || v.cursor >= len(visible) {
+				return nil
+			}
+			turnNum := visible[v.cursor].Number
+			// Must have an annotation label first
+			if v.annotations[turnNum] == "" {
+				return nil
+			}
+			v.noteMode = true
+			v.noteTurn = turnNum
+			v.noteInput = v.notes[turnNum] // pre-fill with existing note
+			return nil
 		}
 	}
 	return nil
+}
+
+// handleNoteKey processes keystrokes while in note input mode.
+func (v *LogsView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		v.noteMode = false
+		turnNum := v.noteTurn
+		note := v.noteInput
+		if note != "" {
+			v.notes[turnNum] = note
+		} else {
+			delete(v.notes, turnNum)
+		}
+		label := v.annotations[turnNum]
+		return func() tea.Msg {
+			return AnnotationMsg{Turn: turnNum, Label: label, Note: note}
+		}
+	case "esc":
+		v.noteMode = false
+		v.noteInput = ""
+		return nil
+	case "backspace":
+		if len(v.noteInput) > 0 {
+			v.noteInput = v.noteInput[:len(v.noteInput)-1]
+		}
+		return nil
+	default:
+		if len(msg.String()) == 1 {
+			v.noteInput += msg.String()
+		}
+		return nil
+	}
 }
 
 func (v *LogsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
