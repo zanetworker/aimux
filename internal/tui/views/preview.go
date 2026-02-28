@@ -2,6 +2,8 @@ package views
 
 import (
 	"fmt"
+	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -192,13 +194,19 @@ func (p *PreviewPane) renderHeader() string {
 	var groupLines string
 	if a.GroupCount > 1 {
 		groupStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+		pidStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#5F87FF"))
 		groupLines = groupStyle.Render(fmt.Sprintf("  %d Grouped Processes", a.GroupCount)) + "\n"
 		for i, pid := range a.GroupPIDs {
-			if i >= 8 {
-				groupLines += previewDimStyle.Render(fmt.Sprintf("  ... and %d more", len(a.GroupPIDs)-8)) + "\n"
+			if i >= 6 {
+				groupLines += previewDimStyle.Render(fmt.Sprintf("  ... and %d more", len(a.GroupPIDs)-6)) + "\n"
 				break
 			}
-			groupLines += previewDimStyle.Render(fmt.Sprintf("  PID %d", pid)) + "\n"
+			cmdInfo := processInfo(pid)
+			groupLines += pidStyle.Render(fmt.Sprintf("  PID %d", pid))
+			if cmdInfo != "" {
+				groupLines += previewDimStyle.Render("  " + cmdInfo)
+			}
+			groupLines += "\n"
 		}
 	}
 
@@ -353,6 +361,31 @@ func renderTokenBar(label string, tokens int64, maxTokens int64, width int) stri
 		bar,
 		previewValueStyle.Render(formatTokens(tokens)),
 	)
+}
+
+// processInfo returns a short description of a process by PID: its command
+// name and RSS memory. Returns "" if the process can't be inspected.
+func processInfo(pid int) string {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "rss=,comm=").Output()
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(string(out))
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return ""
+	}
+	rss, _ := strconv.ParseUint(fields[0], 10, 64)
+	cmd := fields[len(fields)-1]
+	// Show just the binary basename
+	parts := strings.Split(cmd, "/")
+	binary := parts[len(parts)-1]
+
+	if rss > 0 {
+		mb := rss / 1024
+		return fmt.Sprintf("%s (%dMB)", binary, mb)
+	}
+	return binary
 }
 
 func truncatePreview(s string, maxLen int) string {
