@@ -7,6 +7,7 @@ import (
 
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +17,7 @@ import (
 	"github.com/zanetworker/agentmux/internal/evaluation"
 	"github.com/zanetworker/agentmux/internal/jump"
 	"github.com/zanetworker/agentmux/internal/provider"
+	"github.com/zanetworker/agentmux/internal/spawn"
 	"github.com/zanetworker/agentmux/internal/team"
 	"github.com/zanetworker/agentmux/internal/tui/views"
 )
@@ -92,6 +94,10 @@ type App struct {
 
 	// Temporary status hint (shown once then cleared)
 	statusHint string
+
+	// Launcher overlay
+	launcherActive bool
+	launcherView   *views.LauncherView
 
 	// Kill confirmation
 	killConfirm  bool            // true when waiting for y/n confirmation
@@ -201,6 +207,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.teamsView.SetTeams(a.teams)
 		return a, nil
 
+	case views.LaunchMsg:
+		a.launcherActive = false
+		a.launcherView = nil
+		cfg := spawn.LaunchConfig{
+			Provider: msg.Provider,
+			Dir:      msg.Dir,
+			Model:    msg.Model,
+			Mode:     msg.Mode,
+			Runtime:  msg.Runtime,
+		}
+		if err := spawn.Spawn(cfg); err != nil {
+			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
+		} else {
+			name := filepath.Base(cfg.Dir)
+			a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", cfg.Provider, name, cfg.Runtime)
+		}
+		return a, nil
+
+	case views.LaunchCancelMsg:
+		a.launcherActive = false
+		a.launcherView = nil
+		a.statusHint = "Launch cancelled"
+		return a, nil
+
 	case views.PTYOutputMsg:
 		if a.sessionView != nil {
 			cmd := a.sessionView.HandleOutput(msg.Data)
@@ -237,6 +267,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
+		// Launcher overlay active — route all keys to it
+		if a.launcherActive && a.launcherView != nil {
+			cmd := a.launcherView.Update(msg)
+			return a, cmd
+		}
 		// Kill confirmation prompt
 		if a.killConfirm {
 			return a.handleKillConfirm(msg)
@@ -484,10 +519,52 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		return a.exportTrace()
 	case "kill":
 		return a.promptKill()
+	case "new":
+		return a.openLauncher()
 	case "quit":
 		return a, tea.Quit
 	}
 	return a, nil
+}
+
+func (a App) openLauncher() (tea.Model, tea.Cmd) {
+	// Build recent dirs list from spawn package
+	recentRaw := spawn.RecentDirs(20)
+	var entries []views.RecentDirEntry
+	for _, r := range recentRaw {
+		display := filepath.Base(r.Path)
+		if display == "" || display == "." {
+			display = r.Path
+		}
+		age := ""
+		if !r.LastUsed.IsZero() {
+			age = formatDurationShort(time.Since(r.LastUsed))
+		}
+		entries = append(entries, views.RecentDirEntry{
+			Path:     r.Path,
+			Display:  display,
+			Provider: r.Provider,
+			Age:      age,
+		})
+	}
+
+	a.launcherView = views.NewLauncherView(entries)
+	a.launcherView.SetSize(a.width, a.height)
+	a.launcherActive = true
+	return a, nil
+}
+
+func formatDurationShort(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
 func (a App) handleEnter() (tea.Model, tea.Cmd) {
@@ -996,7 +1073,15 @@ func (a App) View() string {
 		content += strings.Repeat("\n", availableHeight-contentLines)
 	}
 
-	return header + "\n" + content + "\n" + statusBar
+	result := header + "\n" + content + "\n" + statusBar
+
+	// Overlay the launcher if active
+	if a.launcherActive && a.launcherView != nil {
+		a.launcherView.SetSize(a.width, a.height)
+		return a.launcherView.View()
+	}
+
+	return result
 }
 
 // renderSplitView renders the split layout: live trace (left) + session (right).
