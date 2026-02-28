@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -522,6 +523,132 @@ func (c *Codex) ResumeCommand(a agent.Agent) *exec.Cmd {
 
 func (c *Codex) ParseConversation(sessionPath string) ([]Segment, error) {
 	return nil, nil
+}
+
+// CanEmbed returns false because Codex's TUI cannot run inside an embedded PTY.
+func (c *Codex) CanEmbed() bool { return false }
+
+// FindSessionFile resolves the session/trace file for a Codex agent.
+// Returns "" if the agent has no WorkingDir or if the session file is stale
+// (not modified in the last 24 hours).
+func (c *Codex) FindSessionFile(a agent.Agent) string {
+	if a.WorkingDir == "" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	sessionsDir := filepath.Join(home, ".codex", "sessions")
+	sf := c.findSessionFile(sessionsDir, a.WorkingDir)
+	if sf == "" {
+		return ""
+	}
+	// Stale file check: files must be modified in last 24h
+	info, err := os.Stat(sf)
+	if err != nil {
+		return ""
+	}
+	if time.Since(info.ModTime()) > 24*time.Hour {
+		return ""
+	}
+	return sf
+}
+
+// RecentDirs returns recently-used project directories from Codex's
+// session history (~/.codex/sessions/). Scans recursively for .jsonl
+// files from the last 30 days, reads session_meta for CWD, deduplicates
+// by path, sorts by newest first, and caps at max.
+func (c *Codex) RecentDirs(max int) []RecentDir {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	sessionsDir := filepath.Join(home, ".codex", "sessions")
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	byPath := make(map[string]*RecentDir)
+
+	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		if info.ModTime().Before(cutoff) {
+			return nil
+		}
+
+		cwd := extractCodexCWD(path)
+		if cwd == "" {
+			return nil
+		}
+
+		if existing, ok := byPath[cwd]; ok {
+			if info.ModTime().After(existing.LastUsed) {
+				existing.LastUsed = info.ModTime()
+			}
+		} else {
+			byPath[cwd] = &RecentDir{
+				Path:     cwd,
+				LastUsed: info.ModTime(),
+			}
+		}
+		return nil
+	})
+
+	result := make([]RecentDir, 0, len(byPath))
+	for _, rd := range byPath {
+		result = append(result, *rd)
+	}
+
+	// Sort by most recent first
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].LastUsed.After(result[j].LastUsed)
+	})
+
+	if max > 0 && len(result) > max {
+		result = result[:max]
+	}
+	return result
+}
+
+// SpawnCommand builds the exec.Cmd to launch a new Codex session.
+//
+// Flags:
+//   - --no-alt-screen always
+//   - --model <model> if model is set and not "default"
+//   - --full-auto if mode == "full-auto"
+//   - --sandbox workspace-write if mode is empty or "default"
+func (c *Codex) SpawnCommand(dir, model, mode string) *exec.Cmd {
+	bin := findBinary("codex")
+	args := []string{"--no-alt-screen"}
+
+	if model != "" && model != "default" {
+		args = append(args, "--model", model)
+	}
+
+	switch mode {
+	case "full-auto":
+		args = append(args, "--full-auto")
+	case "", "default":
+		args = append(args, "--sandbox", "workspace-write")
+	}
+
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	return cmd
+}
+
+// SpawnArgs returns the available models and modes for launching Codex.
+func (c *Codex) SpawnArgs() SpawnArgs {
+	return SpawnArgs{
+		Models: []string{"default", "o3", "o4-mini"},
+		Modes:  []string{"default", "full-auto"},
+	}
 }
 
 // codexExtractFlag extracts the value following a CLI flag from a command string.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/zanetworker/agentmux/internal/agent"
@@ -197,6 +198,112 @@ func (c *Claude) ResumeCommand(a agent.Agent) *exec.Cmd {
 
 func (c *Claude) ParseConversation(sessionPath string) ([]Segment, error) {
 	return nil, nil // Will be implemented when we refactor logs view
+}
+
+// CanEmbed returns true because Claude's TUI works inside an embedded PTY.
+func (c *Claude) CanEmbed() bool { return true }
+
+// FindSessionFile resolves the session/trace file for a Claude agent.
+// It first tries the session ID lookup, then falls back to finding the
+// newest JSONL in the agent's working directory.
+func (c *Claude) FindSessionFile(a agent.Agent) string {
+	if a.SessionID != "" {
+		if sf := discovery.FindSessionFileDefault(a.SessionID); sf != "" {
+			return sf
+		}
+	}
+	if a.WorkingDir != "" {
+		files := discovery.SessionFilesForDir(a.WorkingDir)
+		if len(files) > 0 {
+			var newest string
+			var newestTime time.Time
+			for _, f := range files {
+				info, err := os.Stat(f)
+				if err == nil && info.ModTime().After(newestTime) {
+					newest = f
+					newestTime = info.ModTime()
+				}
+			}
+			return newest
+		}
+	}
+	return ""
+}
+
+// RecentDirs returns recently-used project directories from Claude's
+// session history (~/.claude/projects/). Each subdirectory is a dir-key
+// (the encoded working directory path). The newest .jsonl in each
+// subdirectory determines LastUsed.
+func (c *Claude) RecentDirs(max int) []RecentDir {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	projectsDir := filepath.Join(home, ".claude", "projects")
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
+
+	var dirs []RecentDir
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		subdir := filepath.Join(projectsDir, e.Name())
+		newest := newestFileModTime(subdir, "*.jsonl")
+		if newest.IsZero() {
+			continue
+		}
+		dirs = append(dirs, RecentDir{
+			Path:     e.Name(),
+			LastUsed: newest,
+		})
+	}
+
+	// Sort by most recent first
+	sort.Slice(dirs, func(i, j int) bool {
+		return dirs[i].LastUsed.After(dirs[j].LastUsed)
+	})
+
+	if max > 0 && len(dirs) > max {
+		dirs = dirs[:max]
+	}
+	return dirs
+}
+
+// SpawnCommand builds the exec.Cmd to launch a new Claude session.
+//
+// Flags:
+//   - --model <model> if model is set and not "default"
+//   - --dangerously-skip-permissions if mode == "bypass"
+//   - --permission-mode plan if mode == "plan"
+func (c *Claude) SpawnCommand(dir, model, mode string) *exec.Cmd {
+	bin := findBinary("claude")
+	var args []string
+
+	if model != "" && model != "default" {
+		args = append(args, "--model", model)
+	}
+
+	switch mode {
+	case "bypass":
+		args = append(args, "--dangerously-skip-permissions")
+	case "plan":
+		args = append(args, "--permission-mode", "plan")
+	}
+
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	return cmd
+}
+
+// SpawnArgs returns the available models and modes for launching Claude.
+func (c *Claude) SpawnArgs() SpawnArgs {
+	return SpawnArgs{
+		Models: []string{"default", "opus", "sonnet", "haiku"},
+		Modes:  []string{"default", "bypass", "plan"},
+	}
 }
 
 func findBinary(name string) string {

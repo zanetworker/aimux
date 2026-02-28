@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/agentmux/internal/config"
 	"github.com/zanetworker/agentmux/internal/discovery"
 	"github.com/zanetworker/agentmux/internal/evaluation"
 	"github.com/zanetworker/agentmux/internal/jump"
@@ -111,10 +113,20 @@ type App struct {
 
 // NewApp creates a new root TUI application.
 func NewApp() App {
-	providers := []provider.Provider{
+	cfg, _ := config.Load(config.DefaultPath())
+
+	allProviders := []provider.Provider{
 		&provider.Claude{},
 		&provider.Codex{},
 		&provider.Gemini{},
+	}
+
+	// Filter to enabled providers only.
+	var providers []provider.Provider
+	for _, p := range allProviders {
+		if cfg.IsProviderEnabled(p.Name()) {
+			providers = append(providers, p)
+		}
 	}
 
 	// Build AgentProvider slice for the orchestrator from the same providers.
@@ -210,18 +222,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case views.LaunchMsg:
 		a.launcherActive = false
 		a.launcherView = nil
-		cfg := spawn.LaunchConfig{
-			Provider: msg.Provider,
-			Dir:      msg.Dir,
-			Model:    msg.Model,
-			Mode:     msg.Mode,
-			Runtime:  msg.Runtime,
+		p := a.providerFor(msg.Provider)
+		if p == nil {
+			a.statusHint = fmt.Sprintf("Launch failed: unknown provider %q", msg.Provider)
+			return a, nil
 		}
-		if err := spawn.Spawn(cfg); err != nil {
+		cmd := p.SpawnCommand(msg.Dir, msg.Model, msg.Mode)
+		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime); err != nil {
 			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
 		} else {
-			name := filepath.Base(cfg.Dir)
-			a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", cfg.Provider, name, cfg.Runtime)
+			name := filepath.Base(msg.Dir)
+			a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, msg.Runtime)
 		}
 		return a, nil
 
@@ -528,22 +539,57 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 }
 
 func (a App) openLauncher() (tea.Model, tea.Cmd) {
-	// Build recent dirs list from spawn package
-	recentRaw := spawn.RecentDirs(20)
+	// Build recent dirs list from all enabled providers.
+	type dirEntry struct {
+		path     string
+		lastUsed time.Time
+		provider string
+	}
+	byPath := make(map[string]*dirEntry)
+
+	for _, p := range a.providers {
+		for _, rd := range p.RecentDirs(20) {
+			if existing, ok := byPath[rd.Path]; ok {
+				existing.provider = "both"
+				if rd.LastUsed.After(existing.lastUsed) {
+					existing.lastUsed = rd.LastUsed
+				}
+			} else {
+				byPath[rd.Path] = &dirEntry{
+					path:     rd.Path,
+					lastUsed: rd.LastUsed,
+					provider: p.Name(),
+				}
+			}
+		}
+	}
+
+	// Sort by most recent first
+	sorted := make([]*dirEntry, 0, len(byPath))
+	for _, de := range byPath {
+		sorted = append(sorted, de)
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].lastUsed.After(sorted[j].lastUsed)
+	})
+	if len(sorted) > 20 {
+		sorted = sorted[:20]
+	}
+
 	var entries []views.RecentDirEntry
-	for _, r := range recentRaw {
-		display := filepath.Base(r.Path)
+	for _, de := range sorted {
+		display := filepath.Base(de.path)
 		if display == "" || display == "." {
-			display = r.Path
+			display = de.path
 		}
 		age := ""
-		if !r.LastUsed.IsZero() {
-			age = formatDurationShort(time.Since(r.LastUsed))
+		if !de.lastUsed.IsZero() {
+			age = formatDurationShort(time.Since(de.lastUsed))
 		}
 		entries = append(entries, views.RecentDirEntry{
-			Path:     r.Path,
+			Path:     de.path,
 			Display:  display,
-			Provider: r.Provider,
+			Provider: de.provider,
 			Age:      age,
 		})
 	}
@@ -576,34 +622,26 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Resolve session file for the trace pane.
-	// Only use Claude-specific fallback for Claude agents.
-	sessionFile := selected.SessionFile
-	if sessionFile == "" && selected.ProviderName == "claude" {
-		sessionFile = discovery.FindSessionFileDefault(selected.SessionID)
-		if sessionFile == "" {
-			files := discovery.SessionFilesForDir(selected.WorkingDir)
-			if len(files) > 0 {
-				sessionFile = files[len(files)-1]
-			}
-		}
+	p := a.providerFor(selected.ProviderName)
+	if p == nil {
+		a.statusHint = "No provider for " + selected.ProviderName
+		return a, nil
 	}
 
-	// For non-Claude providers (Codex, Gemini), their TUIs can't be embedded
-	// in a PTY reliably. Open trace-only view instead; use J to jump out.
-	if selected.ProviderName != "claude" {
+	// Resolve session file for the trace pane via the provider.
+	sessionFile := selected.SessionFile
+	if sessionFile == "" {
+		sessionFile = p.FindSessionFile(*selected)
+	}
+
+	// Providers that can't embed their TUI in a PTY get trace-only view.
+	// Use J to jump out to a separate terminal pane.
+	if !p.CanEmbed() {
 		if sessionFile == "" {
 			a.statusHint = "No trace data yet — agent may still be starting"
 			return a, nil
 		}
 		return a.openLogsForAgent(selected, sessionFile)
-	}
-
-	// Claude: open split view with embedded PTY
-	p := a.providerFor(selected.ProviderName)
-	if p == nil {
-		a.statusHint = "No provider for " + selected.ProviderName
-		return a, nil
 	}
 
 	cmd := p.ResumeCommand(*selected)
@@ -926,11 +964,10 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 	if selected == nil {
 		return a, nil
 	}
-	sessionFile := discovery.FindSessionFileDefault(selected.SessionID)
+	sessionFile := selected.SessionFile
 	if sessionFile == "" {
-		files := discovery.SessionFilesForDir(selected.WorkingDir)
-		if len(files) > 0 {
-			sessionFile = files[len(files)-1]
+		if p := a.providerFor(selected.ProviderName); p != nil {
+			sessionFile = p.FindSessionFile(*selected)
 		}
 	}
 	a.logsView = views.NewLogsView(selected.PID, sessionFile)

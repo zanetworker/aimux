@@ -8,11 +8,45 @@ import (
 )
 
 // Provider discovers and manages AI CLI agents of a specific type.
+// Adding a new provider requires only implementing this interface and
+// registering in app.go NewApp() — no other files need changes.
 type Provider interface {
 	Name() string
 	Discover() ([]agent.Agent, error)
 	ResumeCommand(a agent.Agent) *exec.Cmd
 	ParseConversation(sessionPath string) ([]Segment, error)
+
+	// CanEmbed returns true if the agent's TUI can run inside an
+	// embedded PTY (split view). False means trace-only view with
+	// jump-out for interaction.
+	CanEmbed() bool
+
+	// FindSessionFile resolves the session/trace file for an agent.
+	// Each provider knows its own storage layout. Returns "" if none found.
+	FindSessionFile(a agent.Agent) string
+
+	// RecentDirs returns recently-used project directories from this
+	// provider's session history, sorted by most recent first.
+	RecentDirs(max int) []RecentDir
+
+	// SpawnCommand builds the exec.Cmd to launch a new agent session
+	// in the given directory with the specified model and mode.
+	SpawnCommand(dir, model, mode string) *exec.Cmd
+
+	// SpawnArgs returns the available models and modes for the launcher UI.
+	SpawnArgs() SpawnArgs
+}
+
+// RecentDir is a recently-used project directory from a provider's session history.
+type RecentDir struct {
+	Path     string
+	LastUsed time.Time
+}
+
+// SpawnArgs describes the available options for launching a new agent.
+type SpawnArgs struct {
+	Models []string // e.g., ["default", "opus", "sonnet", "haiku"]
+	Modes  []string // e.g., ["default", "bypass", "plan"]
 }
 
 // Segment is a single conversation turn, provider-agnostic.

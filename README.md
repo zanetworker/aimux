@@ -155,17 +155,47 @@ Full keybinding reference and provider support status.
 
 Tab completion works in the command palette.
 
+## Configuration
+
+agentmux looks for a config file at `~/.agentmux/config.yaml`. If the file doesn't exist, all defaults are used.
+
+```yaml
+# Enable/disable providers
+providers:
+  claude:
+    enabled: true
+  codex:
+    enabled: true
+  gemini:
+    enabled: false
+
+# Discovery refresh interval
+refresh_interval: "2s"
+
+# Default runtime for launching new agents: "tmux" or "iterm"
+default_runtime: tmux
+```
+
+Providers can also specify a custom binary path:
+
+```yaml
+providers:
+  claude:
+    enabled: true
+    binary: /opt/homebrew/bin/claude
+```
+
 ## Provider System
 
-agentmux uses a provider interface to support multiple AI coding agents. Each provider implements discovery, session resumption, and conversation parsing.
+agentmux uses a provider interface to support multiple AI coding agents. Each provider implements discovery, session resumption, conversation parsing, and spawning. Providers can be enabled or disabled via the config file.
 
-| Provider | Status | Discovery | Resume | Trace |
-|----------|--------|-----------|--------|-------|
-| Claude | Full support | Process scanning + session logs | PTY embed via `claude --resume` | JSONL parsing |
-| Codex | Stub | Planned | Planned | Planned |
-| Gemini | Stub | Planned | Planned | Planned |
+| Provider | Discovery | Resume | Trace | Embed | Spawn |
+|----------|-----------|--------|-------|-------|-------|
+| Claude | Process scanning + session JSONL | PTY embed via `claude --resume` | JSONL parsing | Yes | `claude` CLI |
+| Codex | Process scanning + session JSONL | Trace-only (jump out with `J`) | JSONL parsing | No | `codex` CLI |
+| Gemini | Stub | Stub | Stub | No | `gemini` CLI |
 
-Adding a new provider requires implementing the `Provider` interface:
+Adding a new provider requires implementing the `Provider` interface and registering it in `app.go`:
 
 ```go
 type Provider interface {
@@ -173,6 +203,11 @@ type Provider interface {
     Discover() ([]agent.Agent, error)
     ResumeCommand(a agent.Agent) *exec.Cmd
     ParseConversation(sessionPath string) ([]Segment, error)
+    CanEmbed() bool
+    FindSessionFile(a agent.Agent) string
+    RecentDirs(max int) []RecentDir
+    SpawnCommand(dir, model, mode string) *exec.Cmd
+    SpawnArgs() SpawnArgs
 }
 ```
 
@@ -184,8 +219,9 @@ agentmux reads everything from the filesystem. No daemon, no hooks, no modificat
 
 | Source | Location | Data |
 |--------|----------|------|
+| Config | `~/.agentmux/config.yaml` | Provider enable/disable, runtime prefs |
 | Process table | `ps aux` | PID, binary path, CLI flags, memory |
-| Session logs | `~/.claude/projects/*/` | Messages, tool calls, token usage |
+| Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/` | Messages, tool calls, token usage |
 | Teams | `~/.claude/teams/*/config.json` | Team membership |
 | tmux | `tmux list-sessions` | Session names for jump support |
 
@@ -195,7 +231,7 @@ When you press Enter on an agent, agentmux opens an embedded PTY session directl
 
 ### Discovery Pipeline
 
-The orchestrator queries all registered providers in parallel. Each provider scans for its agent's processes, enriches them with session data (model, tokens, status), and returns `agent.Agent` structs. The TUI refreshes every 2 seconds.
+On startup, agentmux loads `~/.agentmux/config.yaml` and registers only the enabled providers. The orchestrator then queries all registered providers in parallel. Each provider scans for its agent's processes, enriches them with session data (model, tokens, status), and returns `agent.Agent` structs. The TUI refreshes every 2 seconds.
 
 ## Built With
 
