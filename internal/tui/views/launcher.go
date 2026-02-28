@@ -233,6 +233,11 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 		return nil
 	}
 	entry := items[l.dirCursor]
+	if entry.name == "." {
+		// Select this directory
+		l.state = statePickOptions
+		return nil
+	}
 	if entry.name == ".." {
 		l.browsePath = filepath.Dir(l.browsePath)
 		l.dirCursor = 0
@@ -242,8 +247,6 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 	}
 	fullPath := filepath.Join(l.browsePath, entry.name)
 	if entry.isDir {
-		// Check if this dir has a git repo or source files — treat as selectable project
-		// For now: Enter on a dir descends, to SELECT press 's' or Enter when it has files
 		l.browsePath = fullPath
 		l.dirCursor = 0
 		l.filterText = ""
@@ -348,14 +351,15 @@ func (l *LauncherView) View() string {
 		content = l.viewOptions()
 	}
 
-	boxW := l.width * 60 / 100
-	if boxW < 50 {
-		boxW = 50
+	boxW := l.width * 55 / 100
+	if boxW < 45 {
+		boxW = 45
 	}
-	if boxW > l.width-4 {
-		boxW = l.width - 4
+	if boxW > l.width-8 {
+		boxW = l.width - 8
 	}
 
+	// Content width is boxW minus border (2) and padding (4)
 	box := launcherBoxStyle.Width(boxW).Render(content)
 
 	// Center the box
@@ -425,9 +429,9 @@ func (l *LauncherView) viewDirectory() string {
 		b.WriteString("\n")
 	}
 
-	hints := "j/k:select  Enter:open  Tab:switch  Esc:cancel"
+	hints := "j/k:select  Enter:pick  Tab:browse  Esc:cancel"
 	if l.browseMode {
-		hints = "j/k:select  Enter:open  Backspace:up  s:select-dir  Tab:recent  Esc:cancel"
+		hints = "j/k:nav  Enter:open  .:select  Backspace:up  Tab:recent  Esc:cancel"
 	}
 	b.WriteString(launcherHintStyle.Render(hints))
 	return b.String()
@@ -503,11 +507,15 @@ func (l *LauncherView) viewBrowse() string {
 			style = launcherSelectedStyle
 		}
 
-		icon := "  "
-		if entry.isDir {
-			icon = "📁"
+		var label string
+		if entry.name == "." {
+			label = "✓ SELECT THIS DIRECTORY"
+		} else if entry.isDir {
+			label = "📁 " + entry.name
+		} else {
+			label = "  " + entry.name
 		}
-		b.WriteString(cursor + icon + " " + style.Render(entry.name) + "\n")
+		b.WriteString(cursor + style.Render(label) + "\n")
 	}
 	return b.String()
 }
@@ -595,7 +603,10 @@ func (l *LauncherView) filteredBrowse() []browseEntry {
 func (l *LauncherView) loadBrowseDir() {
 	l.browseItems = nil
 
-	// Add parent directory entry
+	// "." means select this directory
+	l.browseItems = append(l.browseItems, browseEntry{name: ".", isDir: true})
+
+	// ".." to go up
 	if l.browsePath != "/" {
 		l.browseItems = append(l.browseItems, browseEntry{name: "..", isDir: true})
 	}
