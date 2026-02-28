@@ -313,6 +313,10 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 			} else if v.cursor < len(visible)-1 {
 				v.cursor++
 				v.scrollOffset = 0
+			} else {
+				// Wrap to first turn
+				v.cursor = 0
+				v.scrollOffset = 0
 			}
 		case "k", "up":
 			if v.cursor < len(visible) && v.expanded[visible[v.cursor].Number] && v.scrollOffset > 0 {
@@ -320,6 +324,39 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 			} else if v.cursor > 0 {
 				v.cursor--
 				v.scrollOffset = 0
+			} else {
+				// Wrap to last turn
+				v.cursor = len(visible) - 1
+				v.scrollOffset = 0
+			}
+		case "J":
+			// Fast scroll down (10 lines) within expanded turn
+			if v.cursor < len(visible) && v.expanded[visible[v.cursor].Number] {
+				v.scrollOffset += 10
+			}
+		case "K":
+			// Fast scroll up (10 lines) within expanded turn
+			if v.cursor < len(visible) && v.expanded[visible[v.cursor].Number] && v.scrollOffset > 0 {
+				v.scrollOffset -= 10
+				if v.scrollOffset < 0 {
+					v.scrollOffset = 0
+				}
+			}
+		case "n":
+			// Jump to next turn, wrap to first
+			v.scrollOffset = 0
+			if v.cursor < len(visible)-1 {
+				v.cursor++
+			} else {
+				v.cursor = 0
+			}
+		case "p":
+			// Jump to previous turn, wrap to last
+			v.scrollOffset = 0
+			if v.cursor > 0 {
+				v.cursor--
+			} else {
+				v.cursor = len(visible) - 1
 			}
 		case "c":
 			// Collapse all expanded turns
@@ -331,11 +368,19 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 		case "G":
 			v.cursor = len(visible) - 1
 			v.scrollOffset = 0
-		case "enter", " ":
+		case "enter":
 			if len(visible) > 0 && v.cursor < len(visible) {
 				turnNum := visible[v.cursor].Number
 				v.expanded[turnNum] = !v.expanded[turnNum]
 				v.scrollOffset = 0 // reset scroll when toggling
+			}
+		case " ":
+			// Space jumps to next turn, wrap to first
+			v.scrollOffset = 0
+			if v.cursor < len(visible)-1 {
+				v.cursor++
+			} else {
+				v.cursor = 0
 			}
 		case "d":
 			// Page down: scroll by half the visible height (lines, not turns)

@@ -793,7 +793,7 @@ func (a App) View() string {
 	case viewAgents:
 		a.headerView.SetHint("Enter:open  l:logs  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
-		a.headerView.SetHint("j/k:turns  Enter:expand  a:annotate  /:search  c:collapse  J:jump  :export  Esc:back")
+		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  Esc:back  ?:more")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
