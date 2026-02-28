@@ -13,10 +13,11 @@ import (
 // Column widths for the agents table — k9s-style.
 const (
 	colName  = 22
-	colAgent = 10
-	colModel = 14
-	colDir   = 22
-	colAge   = 8
+	colAgent = 8
+	colModel = 12
+	colDir   = 16
+	colLast  = 14
+	colAge   = 6
 	colCostA = 8
 )
 
@@ -37,14 +38,29 @@ var (
 	agentMutedIcon   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 )
 
+// costColor returns a lipgloss style for the cost value based on thresholds.
+func costColor(cost float64) lipgloss.Style {
+	switch {
+	case cost <= 0:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")) // dim gray
+	case cost < 10:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")) // default
+	case cost < 50:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")) // yellow
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")) // red
+	}
+}
+
 // AgentsView renders the main agents table with k9s-style columns.
 type AgentsView struct {
 	agents      []agent.Agent
 	cursor      int
-	selectedPID int // track selection by PID across refreshes
+	selectedPID int    // track selection by PID across refreshes
 	width       int
 	height      int
 	filter      string
+	sortField   string // "", "name", "cost", "age", "model"
 }
 
 // NewAgentsView creates a new AgentsView.
@@ -55,10 +71,29 @@ func NewAgentsView() *AgentsView {
 // SetAgents updates the list of agents with stable sort order.
 // Preserves cursor position by tracking the selected PID across refreshes.
 func (v *AgentsView) SetAgents(agents []agent.Agent) {
-	// Sort by PID for stable ordering
-	sort.Slice(agents, func(i, j int) bool {
-		return agents[i].PID < agents[j].PID
-	})
+	// Sort based on the active sort field
+	switch v.sortField {
+	case "name":
+		sort.Slice(agents, func(i, j int) bool {
+			return strings.ToLower(agents[i].ShortProject()) < strings.ToLower(agents[j].ShortProject())
+		})
+	case "cost":
+		sort.Slice(agents, func(i, j int) bool {
+			return agents[i].EstCostUSD > agents[j].EstCostUSD // descending
+		})
+	case "age":
+		sort.Slice(agents, func(i, j int) bool {
+			return agents[i].LastActivity.After(agents[j].LastActivity)
+		})
+	case "model":
+		sort.Slice(agents, func(i, j int) bool {
+			return agents[i].ShortModel() < agents[j].ShortModel()
+		})
+	default:
+		sort.Slice(agents, func(i, j int) bool {
+			return agents[i].PID < agents[j].PID
+		})
+	}
 	v.agents = agents
 
 	// Restore cursor to the same PID if it still exists
@@ -103,6 +138,11 @@ func (v *AgentsView) Cursor() int {
 	return v.cursor
 }
 
+// SortField returns the current sort field name.
+func (v *AgentsView) SortField() string {
+	return v.sortField
+}
+
 // Update handles key messages for navigation.
 func (v *AgentsView) Update(msg tea.Msg) {
 	f := v.filtered()
@@ -124,6 +164,20 @@ func (v *AgentsView) Update(msg tea.Msg) {
 			v.cursor = 0
 		case "G":
 			v.cursor = len(f) - 1
+		case "s":
+			// Cycle sort field
+			switch v.sortField {
+			case "":
+				v.sortField = "name"
+			case "name":
+				v.sortField = "cost"
+			case "cost":
+				v.sortField = "age"
+			case "age":
+				v.sortField = "model"
+			default:
+				v.sortField = ""
+			}
 		}
 	}
 	// Track selected PID for cursor preservation across refreshes
@@ -147,14 +201,33 @@ func padRight(s string, width int) string {
 func (v *AgentsView) View() string {
 	var b strings.Builder
 
+	// Build sort-indicator-aware column headers.
+	nameHeader := "NAME"
+	if v.sortField == "name" {
+		nameHeader = "NAME \u25bc"
+	}
+	modelHeader := "MODEL"
+	if v.sortField == "model" {
+		modelHeader = "MODEL \u25bc"
+	}
+	ageHeader := "AGE"
+	if v.sortField == "age" {
+		ageHeader = "AGE \u25bc"
+	}
+	costHeader := "COST"
+	if v.sortField == "cost" {
+		costHeader = "COST \u25bc"
+	}
+
 	// Header row: k9s-style blue on dark blue — plain ASCII, so padRight
 	// and fmt produce the same result, but we use padRight for consistency.
-	header := " " + padRight("NAME", colName) + " " +
+	header := " " + padRight(nameHeader, colName) + " " +
 		padRight("AGENT", colAgent) + " " +
-		padRight("MODEL", colModel) + " " +
+		padRight(modelHeader, colModel) + " " +
 		padRight("DIR", colDir) + " " +
-		padRight("AGE", colAge) + " " +
-		padRight("COST", colCostA)
+		padRight("LAST", colLast) + " " +
+		padRight(ageHeader, colAge) + " " +
+		padRight(costHeader, colCostA)
 	// Pad header to full width
 	if lipgloss.Width(header) < v.width {
 		header += strings.Repeat(" ", v.width-lipgloss.Width(header))
@@ -196,12 +269,15 @@ func (v *AgentsView) View() string {
 		}
 		nameCol := "▸" + icon + " " + name
 
+		costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
+
 		row := " " + padRight(nameCol, colName) + " " +
 			padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
 			padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
 			padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
+			padRight(truncate(a.LastAction, colLast), colLast) + " " +
 			padRight(a.FormatAge(), colAge) + " " +
-			padRight(a.FormatCost(), colCostA)
+			padRight(costRendered, colCostA)
 
 		if idx == v.cursor {
 			// Pad to full width for selected background
@@ -244,7 +320,8 @@ func (v *AgentsView) filtered() []agent.Agent {
 			strings.Contains(strings.ToLower(a.Status.String()), f) ||
 			strings.Contains(strings.ToLower(a.Source.String()), f) ||
 			strings.Contains(strings.ToLower(a.ProviderName), f) ||
-			strings.Contains(strings.ToLower(a.ShortDir()), f) {
+			strings.Contains(strings.ToLower(a.ShortDir()), f) ||
+			strings.Contains(strings.ToLower(a.LastAction), f) {
 			out = append(out, a)
 		}
 	}

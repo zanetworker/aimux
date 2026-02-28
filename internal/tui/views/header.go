@@ -71,6 +71,13 @@ func (h *HeaderView) View() string {
 	logo := h.renderLogo()
 	crumbBar := h.renderCrumbs()
 
+	// Hide logo if terminal is too narrow to fit both info boxes and logo
+	infoW := lipgloss.Width(infoBoxes)
+	logoW := lipgloss.Width(logo)
+	if infoW+logoW+2 > h.width {
+		logo = "" // hide logo for narrow terminals
+	}
+
 	// Join info boxes and logo horizontally
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, infoBoxes, h.fillGap(infoBoxes, logo), logo)
 
@@ -159,11 +166,22 @@ func (h *HeaderView) renderInfoBoxes() string {
 			activeStr + " " + waitingStr + " " + idleStr,
 	)
 
-	// Cost box
+	// Cost box — color-coded by threshold
 	costStyle := lipgloss.NewStyle().Foreground(colorCost).Bold(true)
+	var costStyled string
+	switch {
+	case totalCost <= 0:
+		costStyled = lipgloss.NewStyle().Foreground(colorIdle).Render(fmt.Sprintf("$%.2f", totalCost))
+	case totalCost < 10:
+		costStyled = costStyle.Render(fmt.Sprintf("$%.2f", totalCost))
+	case totalCost < 50:
+		costStyled = lipgloss.NewStyle().Foreground(colorWaiting).Bold(true).Render(fmt.Sprintf("$%.2f", totalCost))
+	default:
+		costStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render(fmt.Sprintf("$%.2f", totalCost))
+	}
 	costBox := boxStyle.Render(
 		labelStyle.Render("Cost") + "\n" +
-			costStyle.Render(fmt.Sprintf("$%.2f", totalCost)),
+			costStyled,
 	)
 
 	// Provider box

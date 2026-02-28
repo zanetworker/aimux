@@ -159,6 +159,7 @@ func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSes
 			}
 			inst.TokensIn = info.TokensIn
 			inst.TokensOut = info.TokensOut
+			inst.LastAction = info.LastAction
 			inst.LastActivity = info.LastTimestamp
 			inst.EstCostUSD = cost.Calculate(
 				inst.Model,

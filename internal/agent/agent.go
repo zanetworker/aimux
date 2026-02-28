@@ -96,6 +96,7 @@ type Agent struct {
 	LastActivity   time.Time
 	GroupCount     int    // number of processes grouped into this entry (0 or 1 = single)
 	GroupPIDs      []int  // PIDs of grouped processes (for drill-down)
+	LastAction     string // most recent tool call, e.g. "Ed main.go", "Sh go test"
 }
 
 // ShortModel returns a human-friendly shortened model name.

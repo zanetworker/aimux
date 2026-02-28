@@ -50,6 +50,7 @@ func (v *HelpView) View() string {
 	writeHelp(&b, "j/k", "Move cursor down/up")
 	writeHelp(&b, "Enter", "Open split view (trace + session)")
 	writeHelp(&b, "l", "Open logs/trace viewer (full screen)")
+	writeHelp(&b, "s", "Sort: cycle Name/Cost/Age/Model/PID")
 	writeHelp(&b, "/", "Filter agents by name, dir, model")
 	writeHelp(&b, "Esc", "Clear filter / go back")
 	writeHelp(&b, "g/G", "Jump to top / bottom")

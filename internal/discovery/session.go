@@ -21,6 +21,7 @@ type SessionInfo struct {
 	CacheWriteTokens int64
 	MessageCount     int
 	LastTimestamp     time.Time
+	LastAction       string // most recent tool call, e.g. "Ed main.go"
 }
 
 // sessionLine is the minimal structure needed to parse JSONL entries.
@@ -30,8 +31,9 @@ type sessionLine struct {
 	GitBranch string    `json:"gitBranch"`
 	Timestamp time.Time `json:"timestamp"`
 	Message   *struct {
-		Model string `json:"model"`
-		Usage *struct {
+		Model   string `json:"model"`
+		Content json.RawMessage `json:"content"`
+		Usage   *struct {
 			InputTokens              int64 `json:"input_tokens"`
 			OutputTokens             int64 `json:"output_tokens"`
 			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
@@ -83,6 +85,10 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 				info.CacheReadTokens += u.CacheReadInputTokens
 				info.CacheWriteTokens += u.CacheCreationInputTokens
 			}
+			// Extract last tool call for LastAction
+			if action := extractLastToolAction(entry.Message.Content); action != "" {
+				info.LastAction = action
+			}
 		}
 	}
 
@@ -91,6 +97,100 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 	}
 
 	return info, nil
+}
+
+// extractLastToolAction parses the content array of an assistant message to find
+// the last tool_use block and return a short summary like "Ed main.go".
+func extractLastToolAction(content json.RawMessage) string {
+	if content == nil {
+		return ""
+	}
+	var blocks []struct {
+		Type  string                 `json:"type"`
+		Name  string                 `json:"name"`
+		Input map[string]interface{} `json:"input"`
+	}
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return ""
+	}
+
+	// Find the last tool_use block
+	var lastTool string
+	var lastInput map[string]interface{}
+	for _, b := range blocks {
+		if b.Type == "tool_use" && b.Name != "" {
+			lastTool = b.Name
+			lastInput = b.Input
+		}
+	}
+	if lastTool == "" {
+		return ""
+	}
+
+	short := shortToolLabel(lastTool)
+	snippet := toolSnippetForAction(lastTool, lastInput)
+	if snippet != "" {
+		return short + " " + snippet
+	}
+	return short
+}
+
+// shortToolLabel returns a 2-3 char label for a tool name.
+func shortToolLabel(name string) string {
+	switch name {
+	case "Read":
+		return "Rd"
+	case "Write":
+		return "Wr"
+	case "Edit":
+		return "Ed"
+	case "Bash":
+		return "Sh"
+	case "Grep":
+		return "Gr"
+	case "Glob":
+		return "Gl"
+	case "Task":
+		return "Tk"
+	default:
+		if len(name) > 3 {
+			return name[:3]
+		}
+		return name
+	}
+}
+
+// toolSnippetForAction extracts a short identifier from tool input.
+func toolSnippetForAction(name string, input map[string]interface{}) string {
+	if input == nil {
+		return ""
+	}
+	switch name {
+	case "Read", "Write", "Edit":
+		if path, ok := input["file_path"].(string); ok {
+			return filepath.Base(path)
+		}
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok {
+			cmd = strings.TrimSpace(cmd)
+			if len(cmd) > 20 {
+				cmd = cmd[:17] + "..."
+			}
+			return cmd
+		}
+	case "Grep":
+		if p, ok := input["pattern"].(string); ok {
+			if len(p) > 15 {
+				p = p[:12] + "..."
+			}
+			return "/" + p + "/"
+		}
+	case "Glob":
+		if p, ok := input["pattern"].(string); ok {
+			return p
+		}
+	}
+	return ""
 }
 
 // FindSessionFile searches for a session JSONL file matching the given session ID

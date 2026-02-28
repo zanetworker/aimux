@@ -782,7 +782,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  l:logs  /:filter  ?:help  q:quit")
+		a.headerView.SetHint("Enter:open  l:logs  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
 		a.headerView.SetHint("j/k:turns  Enter:expand  a:annotate  /:search  c:collapse  J:jump  :export  Esc:back")
 	case viewCosts:

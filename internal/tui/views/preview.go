@@ -22,6 +22,12 @@ var (
 				Bold(true)
 	previewDimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280"))
+
+	// Preview-specific accent styles
+	previewSuccessStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	previewFailStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+	previewToolStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+	previewTokenBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
 )
 
 // PreviewPane renders a read-only conversation preview for the right side of a
@@ -80,8 +86,8 @@ func (p *PreviewPane) resizeLogsView() {
 	if p.logsView == nil {
 		return
 	}
-	// Reserve 5 lines for header (agent info + dir line) and 1 line for the border char
-	contentHeight := p.height - 5
+	// Reserve 10 lines for header (agent info, tokens, actions) and 1 line for the border char
+	contentHeight := p.height - 10
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -189,6 +195,42 @@ func (p *PreviewPane) renderHeader() string {
 		sourceLine = strings.Join(parts, "  ")
 	}
 
+	// Git branch line
+	var branchLine string
+	if a.GitBranch != "" {
+		branchLine = previewLabelStyle.Render("Branch: ") + previewValueStyle.Render(a.GitBranch)
+	}
+
+	// Memory line
+	var memLine string
+	if a.MemoryMB > 0 {
+		memLine = previewLabelStyle.Render("Mem: ") + previewValueStyle.Render(a.FormatMemory())
+	}
+
+	// Token bar line
+	var tokenLine string
+	if a.TokensIn > 0 || a.TokensOut > 0 {
+		inBar := renderTokenBar("IN ", a.TokensIn, 200000, 10)
+		outBar := renderTokenBar("OUT", a.TokensOut, 200000, 10)
+		tokenLine = inBar + "    " + outBar
+	}
+
+	// Session ID line
+	var sessionLine string
+	if a.SessionID != "" {
+		sid := a.SessionID
+		if len(sid) > 12 {
+			sid = sid[:12] + "..."
+		}
+		sessionLine = previewLabelStyle.Render("Session: ") + previewDimStyle.Render(sid)
+	}
+
+	// Tmux line
+	var tmuxLine string
+	if a.TMuxSession != "" {
+		tmuxLine = previewLabelStyle.Render("Tmux: ") + previewValueStyle.Render(a.TMuxSession)
+	}
+
 	// Status line
 	statusIcon := a.Icon()
 	statusText := a.Status.String()
@@ -208,8 +250,97 @@ func (p *PreviewPane) renderHeader() string {
 	if sourceLine != "" {
 		result += sourceLine + "\n"
 	}
-	result += statusLine + "\n" + separator
+	if branchLine != "" {
+		result += branchLine + "\n"
+	}
+	// Combine memory, session, tmux on concise lines
+	var extraParts []string
+	if memLine != "" {
+		extraParts = append(extraParts, memLine)
+	}
+	if sessionLine != "" {
+		extraParts = append(extraParts, sessionLine)
+	}
+	if tmuxLine != "" {
+		extraParts = append(extraParts, tmuxLine)
+	}
+	if len(extraParts) > 0 {
+		result += strings.Join(extraParts, "  ") + "\n"
+	}
+	if tokenLine != "" {
+		result += tokenLine + "\n"
+	}
+	result += statusLine + "\n"
+
+	// Recent Actions section
+	actionsSection := p.renderRecentActions()
+	if actionsSection != "" {
+		result += actionsSection + "\n"
+	}
+
+	result += separator
 	return result
+}
+
+// renderRecentActions returns the last 3 tool calls from the session trace.
+func (p *PreviewPane) renderRecentActions() string {
+	if p.logsView == nil {
+		return ""
+	}
+	turns := p.logsView.Turns()
+	if len(turns) == 0 {
+		return ""
+	}
+
+	// Collect up to 3 tool spans from the last turns backwards
+	var actions []ToolSpan
+	for i := len(turns) - 1; i >= 0 && len(actions) < 3; i-- {
+		t := turns[i]
+		for j := len(t.Actions) - 1; j >= 0 && len(actions) < 3; j-- {
+			actions = append(actions, t.Actions[j])
+		}
+	}
+
+	if len(actions) == 0 {
+		return ""
+	}
+
+	var lines []string
+	lines = append(lines, previewLabelStyle.Render("Recent Actions"))
+	for _, action := range actions {
+		var indicator string
+		if action.Success {
+			indicator = previewSuccessStyle.Render("✓")
+		} else {
+			indicator = previewFailStyle.Render("✗")
+		}
+		toolName := previewToolStyle.Render(padRight(action.Name, 6))
+		snippet := action.Snippet
+		if len(snippet) > 40 {
+			snippet = snippet[:37] + "..."
+		}
+		line := fmt.Sprintf("  %s %s %s", indicator, toolName, previewDimStyle.Render(snippet))
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderTokenBar creates a visual bar showing token usage relative to a maximum.
+func renderTokenBar(label string, tokens int64, maxTokens int64, width int) string {
+	if maxTokens <= 0 {
+		maxTokens = 200000
+	}
+	ratio := float64(tokens) / float64(maxTokens)
+	if ratio > 1 {
+		ratio = 1
+	}
+	filled := int(ratio * float64(width))
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	return fmt.Sprintf("%s %s %s",
+		previewTokenBarStyle.Render(label),
+		bar,
+		previewValueStyle.Render(formatTokens(tokens)),
+	)
 }
 
 func truncatePreview(s string, maxLen int) string {
