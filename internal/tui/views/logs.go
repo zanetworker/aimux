@@ -306,12 +306,18 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 
 		switch msg.String() {
 		case "j", "down":
-			if v.cursor < len(visible)-1 {
+			// If current turn is expanded, scroll line-by-line within it
+			if v.cursor < len(visible) && v.expanded[visible[v.cursor].Number] {
+				v.scrollOffset++
+				// Clamping happens in View()
+			} else if v.cursor < len(visible)-1 {
 				v.cursor++
-				v.scrollOffset = 0 // reset line scroll when moving to next turn
+				v.scrollOffset = 0
 			}
 		case "k", "up":
-			if v.cursor > 0 {
+			if v.cursor < len(visible) && v.expanded[visible[v.cursor].Number] && v.scrollOffset > 0 {
+				v.scrollOffset--
+			} else if v.cursor > 0 {
 				v.cursor--
 				v.scrollOffset = 0
 			}

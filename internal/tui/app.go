@@ -269,17 +269,22 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.exitZoom()
 	}
 
-	// Ctrl+f toggles split/fullscreen — works in ANY zoomed state
+	// Ctrl+f toggles split/fullscreen — zooms whichever pane is focused
 	if key == "ctrl+f" && a.splitTrace != nil {
 		a.splitMode = !a.splitMode
 		if !a.splitMode {
-			a.sessionView.SetSize(a.width, a.height)
+			// Full-screen the focused pane
+			if a.splitFocus == "trace" {
+				a.splitTrace.SetSize(a.width, a.height-1)
+			} else {
+				a.sessionView.SetSize(a.width, a.height)
+			}
 		} else {
+			// Return to split
 			leftW := a.width * 40 / 100
 			rightW := a.width - leftW - 1
 			a.sessionView.SetSize(rightW, a.height)
 			a.splitTrace.SetSize(leftW, a.height-3)
-			a.splitFocus = "trace"
 		}
 		return a, nil
 	}
@@ -775,6 +780,10 @@ func (a App) View() string {
 	if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
 		if a.splitMode {
 			return a.renderSplitView()
+		}
+		// Full-screen whichever pane was focused
+		if a.splitFocus == "trace" && a.splitTrace != nil {
+			return a.splitTrace.View()
 		}
 		return a.sessionView.View()
 	}

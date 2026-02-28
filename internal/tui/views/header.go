@@ -99,14 +99,11 @@ func (h *HeaderView) Height() int {
 
 func (h *HeaderView) renderHintBar() string {
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB")).
-		Background(lipgloss.Color("#374151")).
-		Bold(true).
-		Padding(0, 1)
+		Foreground(lipgloss.Color("#5F87FF")).
+		Bold(true)
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6B7280"))
 	barBg := lipgloss.NewStyle().
-		Background(lipgloss.Color("#0F172A")).
 		Width(h.width)
 
 	// Parse hint text: "Key:desc  Key:desc" -> styled output
