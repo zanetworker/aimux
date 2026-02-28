@@ -65,21 +65,21 @@ func TestGeminiName(t *testing.T) {
 
 func TestGeminiDiscover(t *testing.T) {
 	g := &Gemini{}
-	agents, err := g.Discover()
+	_, err := g.Discover()
 	if err != nil {
 		t.Errorf("Gemini.Discover() error = %v, want nil", err)
 	}
-	if agents != nil {
-		t.Errorf("Gemini.Discover() = %v, want nil", agents)
-	}
+	// Result depends on running processes — just verify no error
 }
 
 func TestGeminiResumeCommand(t *testing.T) {
 	g := &Gemini{}
 	cmd := g.ResumeCommand(agent.Agent{SessionID: "test", WorkingDir: "/tmp"})
-	if cmd != nil {
-		t.Errorf("Gemini.ResumeCommand() = %v, want nil", cmd)
+	if cmd == nil {
+		t.Fatal("Gemini.ResumeCommand() returned nil, want non-nil")
 	}
+	assertArgPresent(t, cmd.Args, "--resume")
+	assertArgPresent(t, cmd.Args, "latest")
 }
 
 // --- Codex new methods ---
@@ -189,7 +189,7 @@ func TestCodexRecentDirs_NoHome(t *testing.T) {
 	_ = c.RecentDirs(5)
 }
 
-// --- Gemini new methods ---
+// --- Gemini tests ---
 
 func TestGeminiCanEmbed(t *testing.T) {
 	g := &Gemini{}
@@ -198,23 +198,49 @@ func TestGeminiCanEmbed(t *testing.T) {
 	}
 }
 
-func TestGeminiFindSessionFile(t *testing.T) {
+func TestGeminiDiscover_NoError(t *testing.T) {
 	g := &Gemini{}
-	a := agent.Agent{SessionID: "test", WorkingDir: "/tmp"}
+	_, err := g.Discover()
+	if err != nil {
+		t.Errorf("Gemini.Discover() error = %v, want nil", err)
+	}
+}
+
+func TestGeminiResumeCommand_WithWorkingDir(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.ResumeCommand(agent.Agent{WorkingDir: "/tmp/project"})
+	if cmd == nil {
+		t.Fatal("ResumeCommand returned nil")
+	}
+	assertArgPresent(t, cmd.Args, "--resume")
+	assertArgPresent(t, cmd.Args, "latest")
+	if cmd.Dir != "/tmp/project" {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, "/tmp/project")
+	}
+}
+
+func TestGeminiResumeCommand_NoWorkingDir(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.ResumeCommand(agent.Agent{})
+	if cmd != nil {
+		t.Errorf("ResumeCommand with no WorkingDir should return nil, got %v", cmd)
+	}
+}
+
+func TestGeminiFindSessionFile_NoWorkingDir(t *testing.T) {
+	g := &Gemini{}
+	a := agent.Agent{SessionID: "test"}
 	if got := g.FindSessionFile(a); got != "" {
-		t.Errorf("Gemini.FindSessionFile() = %q, want empty", got)
+		t.Errorf("Gemini.FindSessionFile(no WorkingDir) = %q, want empty", got)
 	}
 }
 
-func TestGeminiRecentDirs(t *testing.T) {
+func TestGeminiRecentDirs_NoPanic(t *testing.T) {
 	g := &Gemini{}
-	dirs := g.RecentDirs(10)
-	if dirs != nil {
-		t.Errorf("Gemini.RecentDirs() = %v, want nil", dirs)
-	}
+	_ = g.RecentDirs(5)
 }
 
-func TestGeminiSpawnCommand(t *testing.T) {
+func TestGeminiSpawnCommand_Default(t *testing.T) {
 	g := &Gemini{}
 	cmd := g.SpawnCommand("/tmp/myproject", "", "")
 	if cmd == nil {
@@ -226,33 +252,138 @@ func TestGeminiSpawnCommand(t *testing.T) {
 	if base := filepath.Base(cmd.Args[0]); base != "gemini" {
 		t.Errorf("binary = %q, want %q", base, "gemini")
 	}
-	// No flags for gemini
 	if len(cmd.Args) != 1 {
 		t.Errorf("Args = %v, want 1 element (binary only)", cmd.Args)
 	}
 }
 
-func TestGeminiSpawnCommand_IgnoresModelAndMode(t *testing.T) {
+func TestGeminiSpawnCommand_DefaultModelSkipped(t *testing.T) {
 	g := &Gemini{}
-	cmd := g.SpawnCommand("/tmp/myproject", "some-model", "some-mode")
+	cmd := g.SpawnCommand("/tmp/myproject", "default", "")
 	if cmd == nil {
 		t.Fatal("SpawnCommand returned nil")
 	}
-	// Gemini ignores model and mode — should still be just the binary
-	if len(cmd.Args) != 1 {
-		t.Errorf("Args = %v, want 1 element (binary only)", cmd.Args)
+	assertArgAbsent(t, cmd.Args, "--model")
+}
+
+func TestGeminiSpawnCommand_WithModel(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.SpawnCommand("/tmp/myproject", "gemini-2.5-pro", "")
+	if cmd == nil {
+		t.Fatal("SpawnCommand returned nil")
 	}
+	assertArgsContain(t, cmd.Args, "--model", "gemini-2.5-pro")
+}
+
+func TestGeminiSpawnCommand_Yolo(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.SpawnCommand("/tmp/myproject", "", "yolo")
+	if cmd == nil {
+		t.Fatal("SpawnCommand returned nil")
+	}
+	assertArgPresent(t, cmd.Args, "--yolo")
+}
+
+func TestGeminiSpawnCommand_Plan(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.SpawnCommand("/tmp/myproject", "", "plan")
+	if cmd == nil {
+		t.Fatal("SpawnCommand returned nil")
+	}
+	assertArgsContain(t, cmd.Args, "--approval-mode", "plan")
+}
+
+func TestGeminiSpawnCommand_ModelAndYolo(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.SpawnCommand("/tmp/myproject", "gemini-3-pro", "yolo")
+	if cmd == nil {
+		t.Fatal("SpawnCommand returned nil")
+	}
+	assertArgsContain(t, cmd.Args, "--model", "gemini-3-pro")
+	assertArgPresent(t, cmd.Args, "--yolo")
 }
 
 func TestGeminiSpawnArgs(t *testing.T) {
 	g := &Gemini{}
 	sa := g.SpawnArgs()
 
-	if len(sa.Models) != 1 || sa.Models[0] != "default" {
-		t.Errorf("SpawnArgs.Models = %v, want [default]", sa.Models)
+	expectedModels := []string{"default", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro", "gemini-3.1-flash"}
+	if len(sa.Models) != len(expectedModels) {
+		t.Fatalf("SpawnArgs.Models = %v, want %v", sa.Models, expectedModels)
 	}
-	if len(sa.Modes) != 1 || sa.Modes[0] != "default" {
-		t.Errorf("SpawnArgs.Modes = %v, want [default]", sa.Modes)
+	for i, m := range expectedModels {
+		if sa.Models[i] != m {
+			t.Errorf("SpawnArgs.Models[%d] = %q, want %q", i, sa.Models[i], m)
+		}
+	}
+
+	expectedModes := []string{"default", "yolo", "plan"}
+	if len(sa.Modes) != len(expectedModes) {
+		t.Fatalf("SpawnArgs.Modes = %v, want %v", sa.Modes, expectedModes)
+	}
+	for i, m := range expectedModes {
+		if sa.Modes[i] != m {
+			t.Errorf("SpawnArgs.Modes[%d] = %q, want %q", i, sa.Modes[i], m)
+		}
+	}
+}
+
+func TestGeminiExtractFlag(t *testing.T) {
+	if got := geminiExtractFlag("gemini --model gemini-2.5-pro --yolo", "--model"); got != "gemini-2.5-pro" {
+		t.Errorf("geminiExtractFlag(--model) = %q, want %q", got, "gemini-2.5-pro")
+	}
+	if got := geminiExtractFlag("gemini --yolo", "--model"); got != "" {
+		t.Errorf("geminiExtractFlag(missing) = %q, want empty", got)
+	}
+}
+
+func TestIsGeminiProcess(t *testing.T) {
+	tests := []struct {
+		line string
+		want bool
+	}{
+		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 /opt/homebrew/bin/gemini", true},
+		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 node /path/to/gemini --model x", true},
+		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 grep gemini", false},
+		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 agentmux gemini", false},
+		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 /usr/bin/python3 something", false},
+	}
+	for _, tt := range tests {
+		if got := isGeminiProcess(tt.line); got != tt.want {
+			t.Errorf("isGeminiProcess(%q) = %v, want %v", tt.line[:40], got, tt.want)
+		}
+	}
+}
+
+func TestNewestSessionJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Empty dir
+	path, mod := newestSessionJSON(tmpDir)
+	if path != "" {
+		t.Errorf("newestSessionJSON(empty) = %q, want empty", path)
+	}
+	if !mod.IsZero() {
+		t.Errorf("newestSessionJSON(empty) time should be zero")
+	}
+
+	// Create session files
+	s1 := `{"sessionId":"aaa","startTime":"2026-02-28T09:00:00Z","lastUpdated":"2026-02-28T09:10:00Z","messages":[]}`
+	s2 := `{"sessionId":"bbb","startTime":"2026-02-28T10:00:00Z","lastUpdated":"2026-02-28T10:30:00Z","messages":[]}`
+
+	os.WriteFile(filepath.Join(tmpDir, "session-2026-02-28T09-00-aaa.json"), []byte(s1), 0o644)
+	// Make s2 newer by writing it after
+	os.WriteFile(filepath.Join(tmpDir, "session-2026-02-28T10-00-bbb.json"), []byte(s2), 0o644)
+
+	path, mod = newestSessionJSON(tmpDir)
+	if path == "" {
+		t.Fatal("newestSessionJSON should find a session")
+	}
+	if !strings.Contains(path, "bbb") {
+		t.Errorf("expected newest session (bbb), got %q", filepath.Base(path))
+	}
+	if mod.IsZero() {
+		t.Error("mod time should not be zero")
 	}
 }
 

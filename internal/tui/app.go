@@ -21,6 +21,7 @@ import (
 	"github.com/zanetworker/agentmux/internal/provider"
 	"github.com/zanetworker/agentmux/internal/spawn"
 	"github.com/zanetworker/agentmux/internal/team"
+	"github.com/zanetworker/agentmux/internal/terminal"
 	"github.com/zanetworker/agentmux/internal/tui/views"
 )
 
@@ -634,9 +635,9 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		sessionFile = p.FindSessionFile(*selected)
 	}
 
-	// Providers that can't embed their TUI in a PTY get trace-only view.
-	// Use J to jump out to a separate terminal pane.
-	if !p.CanEmbed() {
+	cmd := p.ResumeCommand(*selected)
+	if cmd == nil {
+		// No resume possible — fall back to trace-only view
 		if sessionFile == "" {
 			a.statusHint = "No trace data yet — agent may still be starting"
 			return a, nil
@@ -644,17 +645,43 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		return a.openLogsForAgent(selected, sessionFile)
 	}
 
-	cmd := p.ResumeCommand(*selected)
-	if cmd == nil {
-		a.statusHint = "No session data available for this instance"
-		return a, nil
-	}
-
 	// Size the session view for the right half
 	rightW := a.width * 60 / 100
 	a.sessionView.SetSize(rightW, a.height)
 
-	teaCmd, err := a.sessionView.Open(selected, cmd)
+	contentH := a.height - 2
+	if contentH < 1 {
+		contentH = 24
+	}
+	contentW := rightW
+	if contentW < 1 {
+		contentW = 80
+	}
+
+	// Pick backend: direct PTY for embeddable providers, tmux mirror for others
+	var backend terminal.SessionBackend
+	if p.CanEmbed() {
+		sess, err := terminal.Start(cmd)
+		if err != nil {
+			a.statusHint = fmt.Sprintf("Error: %v", err)
+			return a, nil
+		}
+		backend = sess
+	} else {
+		// Use tmux mirror — attach to existing session if available, else create
+		var err error
+		if selected.TMuxSession != "" {
+			backend, err = terminal.AttachTmux(selected.TMuxSession, contentW, contentH)
+		} else {
+			backend, err = terminal.StartTmux(cmd, contentW, contentH)
+		}
+		if err != nil {
+			a.statusHint = fmt.Sprintf("Tmux mirror failed: %v", err)
+			return a, nil
+		}
+	}
+
+	teaCmd, err := a.sessionView.Open(selected, backend)
 	if err != nil {
 		a.statusHint = fmt.Sprintf("Error: %v", err)
 		return a, nil

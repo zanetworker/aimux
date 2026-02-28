@@ -2,7 +2,6 @@ package views
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -41,13 +40,13 @@ type PTYOutputMsg struct {
 // PTYExitMsg signals that the PTY subprocess has exited.
 type PTYExitMsg struct{}
 
-// SessionView provides a full-screen interactive terminal view. It wraps a PTY
-// session and a VT terminal emulator to render the subprocess output within the
-// Bubble Tea TUI. The user interacts with the subprocess directly; keystrokes
-// are forwarded to the PTY.
+// SessionView provides a full-screen interactive terminal view. It wraps a
+// session backend (direct PTY or tmux mirror) and a VT terminal emulator to
+// render output within the Bubble Tea TUI. The user interacts with the
+// subprocess directly; keystrokes are forwarded to the backend.
 type SessionView struct {
 	agent    *agent.Agent
-	session  *terminal.Session
+	session  terminal.SessionBackend
 	termView *terminal.TermView
 	width    int
 	height   int
@@ -59,17 +58,12 @@ func NewSessionView() *SessionView {
 	return &SessionView{}
 }
 
-// Open spawns a PTY session for the given agent and command, and starts a
-// background goroutine to read PTY output. It returns a tea.Cmd that delivers
-// the first PTYOutputMsg.
-func (sv *SessionView) Open(a *agent.Agent, cmd *exec.Cmd) (tea.Cmd, error) {
-	sess, err := terminal.Start(cmd)
-	if err != nil {
-		return nil, fmt.Errorf("starting PTY session: %w", err)
-	}
-
+// Open starts an interactive session using the given backend (direct PTY or
+// tmux mirror). It starts a background goroutine to read output and returns
+// a tea.Cmd that delivers the first PTYOutputMsg.
+func (sv *SessionView) Open(a *agent.Agent, backend terminal.SessionBackend) (tea.Cmd, error) {
 	sv.agent = a
-	sv.session = sess
+	sv.session = backend
 	sv.active = true
 
 	// Create the VT emulator sized for the content area (minus header + status bars)
@@ -83,20 +77,24 @@ func (sv *SessionView) Open(a *agent.Agent, cmd *exec.Cmd) (tea.Cmd, error) {
 	}
 	sv.termView = terminal.NewTermView(contentWidth, contentHeight)
 
-	// Resize the PTY to match
-	_ = sess.Resize(contentWidth, contentHeight)
+	// Resize the backend to match
+	_ = backend.Resize(contentWidth, contentHeight)
 
 	// Return a command that reads the first chunk of PTY output
 	return sv.readPTY(), nil
 }
 
-// HandleOutput feeds raw PTY data into the VT emulator and returns a tea.Cmd
-// to continue reading. Returns nil when the session is no longer active.
+// HandleOutput feeds raw data into the VT emulator (for direct PTY backends)
+// and returns a tea.Cmd to continue reading. For DirectRenderer backends
+// (tmux), the data is ignored since Render() provides the content directly.
 func (sv *SessionView) HandleOutput(data []byte) tea.Cmd {
-	if sv.termView == nil || !sv.active {
+	if !sv.active {
 		return nil
 	}
-	sv.termView.Write(data)
+	// Only feed through VT emulator if the backend isn't a DirectRenderer
+	if _, isDirect := sv.session.(terminal.DirectRenderer); !isDirect && sv.termView != nil {
+		sv.termView.Write(data)
+	}
 	return sv.readPTY()
 }
 
@@ -228,7 +226,7 @@ func (sv *SessionView) Agent() *agent.Agent {
 // View renders the session view with a header bar, terminal content, and a
 // status bar at the bottom.
 func (sv *SessionView) View() string {
-	if !sv.active || sv.termView == nil {
+	if !sv.active {
 		return ""
 	}
 
@@ -239,8 +237,13 @@ func (sv *SessionView) View() string {
 	b.WriteString(header)
 	b.WriteString("\n")
 
-	// Terminal content
-	termContent := sv.termView.Render()
+	// Terminal content — use DirectRenderer if available, else VT emulator
+	var termContent string
+	if dr, ok := sv.session.(terminal.DirectRenderer); ok {
+		termContent = dr.Render()
+	} else if sv.termView != nil {
+		termContent = sv.termView.Render()
+	}
 	b.WriteString(termContent)
 
 	// Pad to fill height if needed

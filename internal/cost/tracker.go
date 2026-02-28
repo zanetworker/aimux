@@ -50,6 +50,23 @@ var pricing = map[string]ModelPricing{
 		Input:  2.00,
 		Output: 8.00,
 	},
+	// Google Gemini models
+	"gemini-2.5-pro": {
+		Input:  1.25,
+		Output: 10.00,
+	},
+	"gemini-2.5-flash": {
+		Input:  0.15,
+		Output: 0.60,
+	},
+	"gemini-3-pro": {
+		Input:  1.25,
+		Output: 10.00,
+	},
+	"gemini-3.1-flash": {
+		Input:  0.15,
+		Output: 0.60,
+	},
 }
 
 // aliases maps short names to canonical model names.

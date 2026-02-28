@@ -582,7 +582,8 @@ func (c *Codex) ResumeCommand(a agent.Agent) *exec.Cmd {
 	return nil
 }
 
-// CanEmbed returns false because Codex's TUI cannot run inside an embedded PTY.
+// CanEmbed returns false — Codex's TUI hangs inside an embedded PTY even
+// with --no-alt-screen. Use trace view + J to jump out instead.
 func (c *Codex) CanEmbed() bool { return false }
 
 // FindSessionFile resolves the session/trace file for a Codex agent.
