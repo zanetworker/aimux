@@ -154,10 +154,10 @@ func eventsToTurn(events []*Span, num int) trace.Turn {
 				t.TokensOut += s.AttrInt64("output_tokens")
 			}
 
-			if cost, ok := s.Attr("gen_ai.usage.cost").(float64); ok {
-				t.CostUSD += cost
-			} else if cost, ok := s.Attr("cost_usd").(float64); ok {
-				t.CostUSD += cost
+			if c := s.AttrFloat64("gen_ai.usage.cost"); c > 0 {
+				t.CostUSD += c
+			} else if c := s.AttrFloat64("cost_usd"); c > 0 {
+				t.CostUSD += c
 			}
 
 			if !s.End.IsZero() {
@@ -246,8 +246,8 @@ func spanToTurn(s *Span, num int) trace.Turn {
 		}
 	}
 
-	if cost, ok := s.Attr("gen_ai.usage.cost").(float64); ok {
-		t.CostUSD = cost
+	if c := s.AttrFloat64("gen_ai.usage.cost"); c > 0 {
+		t.CostUSD = c
 	}
 
 	for _, child := range s.Children {

@@ -1,6 +1,7 @@
 package otel
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -48,6 +49,7 @@ func (s *Span) AttrStr(key string) string {
 }
 
 // AttrInt64 returns a span attribute as int64, or 0 if not set.
+// Handles string-encoded numbers (Claude Code sends tokens as strings).
 func (s *Span) AttrInt64(key string) int64 {
 	switch v := s.Attr(key).(type) {
 	case int64:
@@ -56,6 +58,26 @@ func (s *Span) AttrInt64(key string) int64 {
 		return int64(v)
 	case int:
 		return int64(v)
+	case string:
+		n, _ := strconv.ParseInt(v, 10, 64)
+		return n
+	}
+	return 0
+}
+
+// AttrFloat64 returns a span attribute as float64, or 0 if not set.
+// Handles string-encoded numbers (Claude Code sends cost_usd as string).
+func (s *Span) AttrFloat64(key string) float64 {
+	switch v := s.Attr(key).(type) {
+	case float64:
+		return v
+	case int64:
+		return float64(v)
+	case int:
+		return float64(v)
+	case string:
+		f, _ := strconv.ParseFloat(v, 64)
+		return f
 	}
 	return 0
 }

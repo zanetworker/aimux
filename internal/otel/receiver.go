@@ -85,6 +85,7 @@ func (r *Receiver) loggingMiddleware(next http.Handler) http.Handler {
 
 // handleDebug returns receiver diagnostics as plain text.
 // Access via: curl http://localhost:4318/debug
+// Add ?events=1 to dump all stored events with attributes.
 func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprintf(w, "agentmux OTEL receiver debug\n")
@@ -95,6 +96,30 @@ func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(w, "\n--- recent requests (%d) ---\n", len(r.debugLog))
 	for _, entry := range r.debugLog {
 		fmt.Fprintf(w, "%s\n", entry)
+	}
+
+	// Dump events if requested
+	if req.URL.Query().Get("events") == "1" {
+		fmt.Fprintf(w, "\n--- stored events ---\n")
+		for _, convID := range r.store.ConversationIDs() {
+			root := r.store.GetByConversation(convID)
+			if root == nil {
+				continue
+			}
+			fmt.Fprintf(w, "\nconversation: %s\n", convID)
+			dumpSpan(w, root, 0)
+			for _, child := range root.Children {
+				dumpSpan(w, child, 1)
+			}
+		}
+	}
+}
+
+func dumpSpan(w http.ResponseWriter, s *Span, indent int) {
+	prefix := strings.Repeat("  ", indent)
+	fmt.Fprintf(w, "%s[%s] %s (id=%s)\n", prefix, s.Start.Format("15:04:05"), s.Name, s.SpanID)
+	for k, v := range s.Attrs {
+		fmt.Fprintf(w, "%s  %s = %v\n", prefix, k, v)
 	}
 }
 
