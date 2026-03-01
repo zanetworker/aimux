@@ -419,13 +419,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.killConfirm {
 			return a.handleKillConfirm(msg)
 		}
+		// Command mode takes priority over zoomed key handling
+		// so typing :export works from split view
+		if a.commandMode {
+			return a.handleCommandInput(msg)
+		}
 		// When zoomed into a session, intercept only Ctrl+] to zoom out.
 		// All other keys are forwarded to the PTY subprocess.
 		if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
 			return a.handleZoomedKey(msg)
-		}
-		if a.commandMode {
-			return a.handleCommandInput(msg)
 		}
 		if a.filterMode {
 			return a.handleFilterInput(msg)
