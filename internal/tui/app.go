@@ -300,8 +300,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
+			// Try to create a trace pane (may be empty for new sessions)
+			sessionFile := ""
+			if p != nil {
+				sessionFile = p.FindSessionFile(*newAgent)
+			}
+			if sessionFile != "" {
+				leftW := a.width - rightW - 1
+				a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
+				a.splitTrace.SetSize(leftW, a.height-1)
+			}
+
 			a.zoomed = true
-			a.splitMode = false // full-screen session for new launch
+			a.splitMode = sessionFile != "" // split if trace data available
+			a.splitFocus = "session"        // focus on session so user can type
 			a.layout.SetZoomed(true)
 			a.statusHint = fmt.Sprintf("Launched %s in %s", msg.Provider, name)
 			return a, teaCmd
@@ -450,9 +462,8 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Split mode key routing
-	// In split mode with trace focused, route keys to trace pane
-	if a.splitMode && a.splitFocus == "trace" && a.splitTrace != nil {
+	// Route keys to trace pane when focused (both split and fullscreen trace)
+	if a.splitFocus == "trace" && a.splitTrace != nil {
 		cmd := a.splitTrace.Update(msg)
 		return a, cmd
 	}
