@@ -100,7 +100,16 @@ type LauncherView struct {
 	modeCursor   int
 	runtimes     []string
 	runtimeCursor int
-	optionField  int // 0=model, 1=mode, 2=runtime
+	otelEnabled  bool // toggle for OTEL tracing on spawned session
+	otelAvailable bool // true if OTEL receiver is running
+	optionField  int // 0=model, 1=mode, 2=runtime, 3=otel
+	providerOpts map[string]ProviderOptions
+}
+
+// ProviderOptions holds the models and modes for a specific provider.
+type ProviderOptions struct {
+	Models []string
+	Modes  []string
 }
 
 type browseEntry struct {
@@ -108,21 +117,47 @@ type browseEntry struct {
 	isDir bool
 }
 
-// NewLauncherView creates a new launcher overlay.
-func NewLauncherView(recentDirs []RecentDirEntry) *LauncherView {
+// NewLauncherView creates a new launcher overlay. providerOpts maps provider
+// names to their available models and modes. otelAvailable is true if the
+// OTEL receiver is running (shows toggle in options).
+func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]ProviderOptions, otelAvailable bool) *LauncherView {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		home = "/"
 	}
 
+	providers := make([]string, 0, len(providerOpts))
+	for name := range providerOpts {
+		providers = append(providers, name)
+	}
+	// Sort for consistent order
+	sort.Strings(providers)
+
+	// Default to first provider's options
+	var models, modes []string
+	if len(providers) > 0 {
+		opts := providerOpts[providers[0]]
+		models = opts.Models
+		modes = opts.Modes
+	}
+	if len(models) == 0 {
+		models = []string{"default"}
+	}
+	if len(modes) == 0 {
+		modes = []string{"default"}
+	}
+
 	return &LauncherView{
-		state:     statePickProvider,
-		providers: []string{"claude", "codex", "gemini"},
-		recentDirs: recentDirs,
-		browsePath: home,
-		models:    []string{"default", "opus", "sonnet", "haiku"},
-		modes:     []string{"default", "bypass", "plan"},
-		runtimes:  []string{"tmux", "iterm"},
+		state:         statePickProvider,
+		providers:     providers,
+		recentDirs:    recentDirs,
+		browsePath:    home,
+		models:        models,
+		modes:         modes,
+		runtimes:      []string{"tmux", "iterm"},
+		otelAvailable: otelAvailable,
+		otelEnabled:   otelAvailable, // default on if receiver is running
+		providerOpts:  providerOpts,
 	}
 }
 
@@ -167,6 +202,14 @@ func (l *LauncherView) updateProvider(key string) tea.Cmd {
 			l.providerCursor--
 		}
 	case "enter":
+		// Update models/modes for the selected provider
+		selected := l.providers[l.providerCursor]
+		if opts, ok := l.providerOpts[selected]; ok {
+			l.models = opts.Models
+			l.modes = opts.Modes
+		}
+		l.modelCursor = 0
+		l.modeCursor = 0
 		l.state = statePickDirectory
 		if l.browseMode {
 			l.loadBrowseDir()

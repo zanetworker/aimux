@@ -6,6 +6,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func testProviderOpts() map[string]ProviderOptions {
+	return map[string]ProviderOptions{
+		"claude": {Models: []string{"default", "opus", "sonnet", "haiku"}, Modes: []string{"default", "plan", "acceptEdits", "bypass", "dontAsk"}},
+		"codex":  {Models: []string{"default", "o3", "o4-mini"}, Modes: []string{"default", "full-auto", "full-access", "read-only"}},
+		"gemini": {Models: []string{"default", "gemini-2.5-pro"}, Modes: []string{"default", "yolo", "plan"}},
+	}
+}
+
 func sendKey(l *LauncherView, key string) tea.Cmd {
 	return l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 }
@@ -23,7 +31,7 @@ func sendTab(l *LauncherView) tea.Cmd {
 }
 
 func TestLauncherInitialState(t *testing.T) {
-	l := NewLauncherView(nil)
+	l := NewLauncherView(nil, testProviderOpts(), false)
 	if l.state != statePickProvider {
 		t.Errorf("initial state = %d, want statePickProvider", l.state)
 	}
@@ -33,7 +41,7 @@ func TestLauncherInitialState(t *testing.T) {
 }
 
 func TestLauncherProviderNavigation(t *testing.T) {
-	l := NewLauncherView(nil)
+	l := NewLauncherView(nil, testProviderOpts(), false)
 
 	sendKey(l, "j")
 	if l.providerCursor != 1 {
@@ -58,7 +66,7 @@ func TestLauncherProviderNavigation(t *testing.T) {
 }
 
 func TestLauncherProviderToDirectory(t *testing.T) {
-	l := NewLauncherView(nil)
+	l := NewLauncherView(nil, testProviderOpts(), false)
 	sendEnter(l) // pick first provider (claude)
 	if l.state != statePickDirectory {
 		t.Errorf("state = %d, want statePickDirectory", l.state)
@@ -70,7 +78,7 @@ func TestLauncherRecentDirSelection(t *testing.T) {
 		{Path: "/tmp/project-a", Display: "project-a", Age: "2m ago"},
 		{Path: "/tmp/project-b", Display: "project-b", Age: "1h ago"},
 	}
-	l := NewLauncherView(recent)
+	l := NewLauncherView(recent, testProviderOpts(), false)
 	sendEnter(l) // pick provider
 
 	// Should be in recent mode by default
@@ -87,7 +95,7 @@ func TestLauncherRecentDirSelection(t *testing.T) {
 }
 
 func TestLauncherTabSwitchesMode(t *testing.T) {
-	l := NewLauncherView(nil)
+	l := NewLauncherView(nil, testProviderOpts(), false)
 	sendEnter(l) // pick provider
 
 	if l.browseMode {
@@ -111,7 +119,7 @@ func TestLauncherFuzzyFilter(t *testing.T) {
 		{Path: "/tmp/blog", Display: "blog"},
 		{Path: "/tmp/remote-claude", Display: "remote-claude"},
 	}
-	l := NewLauncherView(recent)
+	l := NewLauncherView(recent, testProviderOpts(), false)
 	sendEnter(l) // pick provider
 
 	sendKey(l, "b") // filter by "b"
@@ -126,7 +134,7 @@ func TestLauncherFuzzyFilter(t *testing.T) {
 
 func TestLauncherOptionsNavigation(t *testing.T) {
 	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
-	l := NewLauncherView(recent)
+	l := NewLauncherView(recent, testProviderOpts(), false)
 	sendEnter(l) // provider
 	sendEnter(l) // directory
 
@@ -154,7 +162,7 @@ func TestLauncherOptionsNavigation(t *testing.T) {
 
 func TestLauncherEmitLaunch(t *testing.T) {
 	recent := []RecentDirEntry{{Path: "/tmp/myproject", Display: "myproject"}}
-	l := NewLauncherView(recent)
+	l := NewLauncherView(recent, testProviderOpts(), false)
 	sendEnter(l) // provider: claude
 	sendEnter(l) // directory: /tmp/myproject
 	cmd := sendEnter(l) // launch with defaults
@@ -184,7 +192,7 @@ func TestLauncherEmitLaunch(t *testing.T) {
 }
 
 func TestLauncherEscCancels(t *testing.T) {
-	l := NewLauncherView(nil)
+	l := NewLauncherView(nil, testProviderOpts(), false)
 
 	cmd := sendEsc(l)
 	if cmd == nil {
@@ -201,7 +209,7 @@ func TestLauncherEscCancelsAtEachStep(t *testing.T) {
 	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
 
 	// Cancel at provider step
-	l := NewLauncherView(recent)
+	l := NewLauncherView(recent, testProviderOpts(), false)
 	cmd := sendEsc(l)
 	msg := cmd()
 	if _, ok := msg.(LaunchCancelMsg); !ok {
@@ -209,7 +217,7 @@ func TestLauncherEscCancelsAtEachStep(t *testing.T) {
 	}
 
 	// Cancel at directory step
-	l = NewLauncherView(recent)
+	l = NewLauncherView(recent, testProviderOpts(), false)
 	sendEnter(l)
 	cmd = sendEsc(l)
 	msg = cmd()
@@ -218,7 +226,7 @@ func TestLauncherEscCancelsAtEachStep(t *testing.T) {
 	}
 
 	// Cancel at options step
-	l = NewLauncherView(recent)
+	l = NewLauncherView(recent, testProviderOpts(), false)
 	sendEnter(l)
 	sendEnter(l)
 	cmd = sendEsc(l)
@@ -230,7 +238,7 @@ func TestLauncherEscCancelsAtEachStep(t *testing.T) {
 
 func TestLauncherSelectCodex(t *testing.T) {
 	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
-	l := NewLauncherView(recent)
+	l := NewLauncherView(recent, testProviderOpts(), false)
 
 	sendKey(l, "j") // move to codex
 	sendEnter(l)     // pick codex
@@ -244,7 +252,7 @@ func TestLauncherSelectCodex(t *testing.T) {
 }
 
 func TestLauncherViewRenders(t *testing.T) {
-	l := NewLauncherView(nil)
+	l := NewLauncherView(nil, testProviderOpts(), false)
 	l.SetSize(80, 40)
 	view := l.View()
 	if view == "" {

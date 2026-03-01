@@ -666,7 +666,17 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 		})
 	}
 
-	a.launcherView = views.NewLauncherView(entries)
+	// Build provider options from registered providers
+	providerOpts := make(map[string]views.ProviderOptions)
+	for _, p := range a.providers {
+		sa := p.SpawnArgs()
+		providerOpts[p.Name()] = views.ProviderOptions{
+			Models: sa.Models,
+			Modes:  sa.Modes,
+		}
+	}
+
+	a.launcherView = views.NewLauncherView(entries, providerOpts, a.cfg.OTELReceiver.Enabled)
 	a.launcherView.SetSize(a.width, a.height)
 	a.launcherActive = true
 	return a, nil
