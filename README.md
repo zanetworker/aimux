@@ -10,15 +10,15 @@
   <img src="https://img.shields.io/badge/go-1.24%2B-00ADD8?style=flat-square&logo=go" alt="Go 1.24+">
 </p>
 
-You're running 5 agents across 3 projects. Claude is refactoring auth. Codex is writing tests. A third session is idle -- or stuck on a permission prompt? You don't know, because each lives in its own terminal.
+You're running 5 agents across 3 projects. Claude is refactoring auth. Codex is writing tests. A third session is idle, or stuck on a permission prompt? You don't know, because each lives in its own terminal.
 
 **agentmux is your control plane.** One terminal. Every agent. Full visibility.
 
-- **See everything** -- all agents, their status, model, cost, and project in one view
-- **Trace what happened** -- every prompt, response, and tool call, turn by turn
-- **Launch from here** -- spawn Claude, Codex, or Gemini without leaving the dashboard
-- **Annotate and export** -- label turns GOOD/BAD/WASTE, export to MLflow for eval datasets
-- **Bring your own agent** -- pluggable provider interface, add a new agent in one Go file
+- **See everything**: all agents, their status, model, cost, and project in one view
+- **Trace what happened**: every prompt, response, and tool call, turn by turn
+- **Launch from here**: spawn Claude, Codex, or Gemini without leaving the dashboard
+- **Annotate and export**: label turns GOOD/BAD/WASTE, export to MLflow for eval datasets
+- **Bring your own agent**: pluggable provider interface, add a new agent in one Go file
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -129,7 +129,7 @@ View Claude Code team configurations and members.
 
 ## Configuration
 
-`~/.agentmux/config.yaml` -- all settings optional:
+`~/.agentmux/config.yaml`, all settings optional:
 
 ```yaml
 providers:
@@ -162,7 +162,7 @@ mlflow server --host 127.0.0.1 --port 5001
 curl -X POST http://localhost:5001/api/2.0/mlflow/experiments/create \
   -H "Content-Type: application/json" \
   -d '{"name": "agent-evals"}'
-# Returns {"experiment_id": "1"} -- put in config above
+# Returns {"experiment_id": "1"} — put in config above
 ```
 
 In agentmux: `Tab` to trace pane, `a` to annotate, `e` then `o` to export.
