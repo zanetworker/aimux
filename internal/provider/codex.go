@@ -714,6 +714,15 @@ func (c *Codex) SpawnArgs() SpawnArgs {
 	}
 }
 
+// OTELEnv returns env vars to enable Codex CLI's OTEL tracing.
+// Codex respects the standard OTEL_EXPORTER_OTLP_ENDPOINT env var.
+func (c *Codex) OTELEnv(endpoint string) string {
+	return fmt.Sprintf(
+		"OTEL_EXPORTER_OTLP_ENDPOINT=%s ",
+		endpoint,
+	)
+}
+
 // codexExtractFlag extracts the value following a CLI flag from a command string.
 func codexExtractFlag(args, flag string) string {
 	fields := strings.Fields(args)

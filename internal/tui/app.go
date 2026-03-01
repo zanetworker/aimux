@@ -258,8 +258,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmd := p.SpawnCommand(msg.Dir, msg.Model, msg.Mode)
 		envPrefix := ""
-		if msg.OTELEnabled {
-			envPrefix = a.cfg.OTELEnvPrefix()
+		if msg.OTELEnabled && a.cfg.OTELReceiver.Enabled {
+			endpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
+			envPrefix = p.OTELEnv(endpoint)
 		}
 		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), envPrefix); err != nil {
 			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
@@ -1423,7 +1424,14 @@ func (a App) renderSplitView() string {
 	if a.splitFocus == "trace" {
 		traceHeaderStyle = focusedHeaderStyle
 	}
-	traceHeader := traceHeaderStyle.Render(padRight(" TRACE ", leftW))
+	// Show data source indicator in trace header
+	traceLabel := " TRACE "
+	if a.otelStore != nil && a.otelStore.HasData() {
+		traceLabel = " TRACE [OTEL] "
+	} else {
+		traceLabel = " TRACE [FILE] "
+	}
+	traceHeader := traceHeaderStyle.Render(padRight(traceLabel, leftW))
 	leftLines = append(leftLines, traceHeader)
 
 	if a.splitTrace != nil {

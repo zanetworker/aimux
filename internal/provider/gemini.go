@@ -333,6 +333,16 @@ func (g *Gemini) SpawnArgs() SpawnArgs {
 	}
 }
 
+// OTELEnv returns env vars to enable Gemini CLI's OTEL tracing.
+// Gemini respects OTEL_EXPORTER_OTLP_ENDPOINT and needs telemetry enabled.
+func (g *Gemini) OTELEnv(endpoint string) string {
+	return fmt.Sprintf(
+		"GEMINI_CLI_TELEMETRY_ENABLED=true "+
+			"OTEL_EXPORTER_OTLP_ENDPOINT=%s ",
+		endpoint,
+	)
+}
+
 // --- helpers ---
 
 // geminiProjectsFile is the structure of ~/.gemini/projects.json.

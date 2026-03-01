@@ -513,6 +513,17 @@ func (c *Claude) SpawnArgs() SpawnArgs {
 	}
 }
 
+// OTELEnv returns env vars to enable Claude Code's OTEL tracing.
+func (c *Claude) OTELEnv(endpoint string) string {
+	return fmt.Sprintf(
+		"CLAUDE_CODE_ENABLE_TELEMETRY=1 "+
+			"OTEL_EXPORTER_OTLP_ENDPOINT=%s "+
+			"OTEL_METRICS_EXPORTER=none "+
+			"OTEL_LOGS_EXPORTER=otlp ",
+		endpoint,
+	)
+}
+
 func findBinary(name string) string {
 	path, err := exec.LookPath(name)
 	if err != nil {

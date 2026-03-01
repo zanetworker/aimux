@@ -40,6 +40,11 @@ type Provider interface {
 	// provider-specific structured trace. Each provider knows its own
 	// log format (Claude JSONL, Codex JSONL, Gemini JSON).
 	ParseTrace(filePath string) ([]trace.Turn, error)
+
+	// OTELEnv returns the shell env var prefix needed to enable OTEL
+	// tracing for this provider, pointing at the given endpoint.
+	// Each provider knows its own OTEL activation mechanism.
+	OTELEnv(endpoint string) string
 }
 
 // RecentDir is a recently-used project directory from a provider's session history.
