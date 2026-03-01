@@ -581,16 +581,23 @@ func (a *App) syncPreview() {
 // file-based ParseTrace.
 func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 	return func(filePath string) ([]trace.Turn, error) {
-		// Check OTEL store for live data
+		// Prefer file-based parsing -- it has richer data (full response
+		// text, tool snippets) that OTEL events don't include.
+		if filePath != "" {
+			turns, err := p.ParseTrace(filePath)
+			if err == nil && len(turns) > 0 {
+				return turns, nil
+			}
+		}
+
+		// Fall back to OTEL store for live data (when file isn't
+		// available yet, e.g. newly launched sessions)
 		if a.otelStore != nil && a.otelStore.HasData() {
-			// Try multiple session identifiers to find OTEL data
 			var sessionIDs []string
 
-			// From dashboard selection
 			if selected := a.agentsView.Selected(); selected != nil && selected.SessionID != "" {
 				sessionIDs = append(sessionIDs, selected.SessionID)
 			}
-			// From session view (for :new launches where agent isn't in dashboard yet)
 			if a.sessionView != nil && a.sessionView.Agent() != nil {
 				ag := a.sessionView.Agent()
 				if ag.SessionID != "" {
@@ -610,8 +617,12 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 				}
 			}
 		}
-		// Fall back to file-based parsing
-		return p.ParseTrace(filePath)
+
+		// Last resort: try file even if path was empty (shouldn't happen)
+		if filePath != "" {
+			return p.ParseTrace(filePath)
+		}
+		return nil, nil
 	}
 }
 
@@ -1449,14 +1460,11 @@ func (a App) renderSplitView() string {
 	}
 	// Show data source indicator in trace header
 	traceLabel := " TRACE [FILE] "
-	if a.otelStore != nil && a.otelStore.HasData() {
-		traceLabel = " TRACE [OTEL] "
-	}
-	// Show receiver stats for debugging
+	// Show receiver stats when OTEL is active
 	if a.otelReceiver != nil {
-		traces, logs, _ := a.otelReceiver.Stats()
-		if traces > 0 || logs > 0 {
-			traceLabel = fmt.Sprintf(" TRACE [OTEL t:%d l:%d] ", traces, logs)
+		_, logs, _ := a.otelReceiver.Stats()
+		if logs > 0 {
+			traceLabel = fmt.Sprintf(" TRACE [FILE+OTEL l:%d] ", logs)
 		}
 	}
 	traceHeader := traceHeaderStyle.Render(padRight(traceLabel, leftW))
