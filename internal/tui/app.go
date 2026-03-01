@@ -583,17 +583,8 @@ func (a *App) syncPreview() {
 // file-based ParseTrace.
 func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 	return func(filePath string) ([]trace.Turn, error) {
-		// Prefer file-based parsing -- it has richer data (full response
-		// text, tool snippets) that OTEL events don't include.
-		if filePath != "" {
-			turns, err := p.ParseTrace(filePath)
-			if err == nil && len(turns) > 0 {
-				return turns, nil
-			}
-		}
-
-		// Fall back to OTEL store for live data (when file isn't
-		// available yet, e.g. newly launched sessions)
+		// Prefer OTEL when receiver is enabled -- it feeds into
+		// MLflow/Jaeger export and provides live streaming data.
 		if a.otelStore != nil && a.otelStore.HasData() {
 			var sessionIDs []string
 
@@ -620,7 +611,8 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 			}
 		}
 
-		// Last resort: try file even if path was empty (shouldn't happen)
+		// Fall back to file-based parsing when OTEL has no data
+		// (agent not launched with OTEL, or receiver disabled)
 		if filePath != "" {
 			return p.ParseTrace(filePath)
 		}
@@ -1462,11 +1454,10 @@ func (a App) renderSplitView() string {
 	}
 	// Show data source indicator in trace header
 	traceLabel := " TRACE [FILE] "
-	// Show receiver stats when OTEL is active
 	if a.otelReceiver != nil {
 		_, logs, _ := a.otelReceiver.Stats()
 		if logs > 0 {
-			traceLabel = fmt.Sprintf(" TRACE [FILE+OTEL l:%d] ", logs)
+			traceLabel = fmt.Sprintf(" TRACE [OTEL l:%d] ", logs)
 		}
 	}
 	traceHeader := traceHeaderStyle.Render(padRight(traceLabel, leftW))
