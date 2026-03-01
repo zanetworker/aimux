@@ -440,6 +440,10 @@ func (c *Claude) SpawnCommand(dir, model, mode string) *exec.Cmd {
 		args = append(args, "--dangerously-skip-permissions")
 	case "plan":
 		args = append(args, "--permission-mode", "plan")
+	case "acceptEdits":
+		args = append(args, "--permission-mode", "acceptEdits")
+	case "dontAsk":
+		args = append(args, "--permission-mode", "dontAsk")
 	}
 
 	cmd := exec.Command(bin, args...)
@@ -451,7 +455,7 @@ func (c *Claude) SpawnCommand(dir, model, mode string) *exec.Cmd {
 func (c *Claude) SpawnArgs() SpawnArgs {
 	return SpawnArgs{
 		Models: []string{"default", "opus", "sonnet", "haiku"},
-		Modes:  []string{"default", "bypass", "plan"},
+		Modes:  []string{"default", "plan", "acceptEdits", "bypass", "dontAsk"},
 	}
 }
 

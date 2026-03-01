@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,45 @@ func TestIsProviderEnabled(t *testing.T) {
 	// Unknown provider defaults to enabled
 	if !cfg.IsProviderEnabled("unknown-provider") {
 		t.Error("unknown provider should default to enabled")
+	}
+}
+
+func TestOTELEnvPrefix_Disabled(t *testing.T) {
+	cfg := Default()
+	if prefix := cfg.OTELEnvPrefix(); prefix != "" {
+		t.Errorf("OTELEnvPrefix when disabled = %q, want empty", prefix)
+	}
+}
+
+func TestOTELEnvPrefix_Enabled(t *testing.T) {
+	cfg := Default()
+	cfg.OTELReceiver.Enabled = true
+	cfg.OTELReceiver.Port = 4318
+
+	prefix := cfg.OTELEnvPrefix()
+	if prefix == "" {
+		t.Fatal("OTELEnvPrefix when enabled should not be empty")
+	}
+	if !strings.Contains(prefix, "CLAUDE_CODE_ENABLE_TELEMETRY=1") {
+		t.Errorf("prefix should contain CLAUDE_CODE_ENABLE_TELEMETRY=1, got %q", prefix)
+	}
+	if !strings.Contains(prefix, "http://localhost:4318") {
+		t.Errorf("prefix should contain endpoint, got %q", prefix)
+	}
+}
+
+func TestOTELReceiverPort_Default(t *testing.T) {
+	cfg := Default()
+	if port := cfg.OTELReceiverPort(); port != 4318 {
+		t.Errorf("OTELReceiverPort default = %d, want 4318", port)
+	}
+}
+
+func TestOTELReceiverPort_Custom(t *testing.T) {
+	cfg := Default()
+	cfg.OTELReceiver.Port = 9999
+	if port := cfg.OTELReceiverPort(); port != 9999 {
+		t.Errorf("OTELReceiverPort custom = %d, want 9999", port)
 	}
 }
 

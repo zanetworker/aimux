@@ -693,6 +693,10 @@ func (c *Codex) SpawnCommand(dir, model, mode string) *exec.Cmd {
 	switch mode {
 	case "full-auto":
 		args = append(args, "--full-auto")
+	case "full-access":
+		args = append(args, "--sandbox", "danger-full-access", "--ask-for-approval", "never")
+	case "read-only":
+		args = append(args, "--sandbox", "read-only")
 	case "", "default":
 		args = append(args, "--sandbox", "workspace-write")
 	}
@@ -706,7 +710,7 @@ func (c *Codex) SpawnCommand(dir, model, mode string) *exec.Cmd {
 func (c *Codex) SpawnArgs() SpawnArgs {
 	return SpawnArgs{
 		Models: []string{"default", "o3", "o4-mini"},
-		Modes:  []string{"default", "full-auto"},
+		Modes:  []string{"default", "full-auto", "full-access", "read-only"},
 	}
 }
 

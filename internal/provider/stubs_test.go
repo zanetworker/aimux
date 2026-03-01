@@ -162,7 +162,7 @@ func TestCodexSpawnArgs(t *testing.T) {
 	c := &Codex{}
 	sa := c.SpawnArgs()
 	expectedModels := []string{"default", "o3", "o4-mini"}
-	expectedModes := []string{"default", "full-auto"}
+	expectedModes := []string{"default", "full-auto", "full-access", "read-only"}
 
 	if len(sa.Models) != len(expectedModels) {
 		t.Fatalf("SpawnArgs.Models length = %d, want %d", len(sa.Models), len(expectedModels))
@@ -317,7 +317,7 @@ func TestGeminiSpawnArgs(t *testing.T) {
 		}
 	}
 
-	expectedModes := []string{"default", "yolo", "plan"}
+	expectedModes := []string{"default", "yolo", "auto_edit", "plan", "sandbox"}
 	if len(sa.Modes) != len(expectedModes) {
 		t.Fatalf("SpawnArgs.Modes = %v, want %v", sa.Modes, expectedModes)
 	}

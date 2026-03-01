@@ -33,7 +33,7 @@ type TmuxSession struct {
 
 // StartTmux creates a new tmux session running cmd, then mirrors it.
 // The session is killed when Close is called.
-func StartTmux(cmd *exec.Cmd, cols, rows int, shell string) (*TmuxSession, error) {
+func StartTmux(cmd *exec.Cmd, cols, rows int, shell, envPrefix string) (*TmuxSession, error) {
 	if cmd == nil {
 		return nil, fmt.Errorf("tmux: nil command")
 	}
@@ -47,7 +47,7 @@ func StartTmux(cmd *exec.Cmd, cols, rows int, shell string) (*TmuxSession, error
 	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
 	cmdParts = append(cmdParts, cmd.Args[1:]...)
 	innerCmd := strings.Join(cmdParts, " ")
-	shellCmd := config.ShellRCPrefix(shell) + innerCmd
+	shellCmd := config.ShellRCPrefix(shell) + envPrefix + innerCmd
 
 	args := []string{"new-session", "-d", "-s", name,
 		"-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows),

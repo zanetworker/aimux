@@ -14,7 +14,8 @@ import (
 // (tmux session or iTerm2 split pane). The provider name and directory
 // are used to derive the tmux session name. The shell parameter specifies
 // the login shell to use (e.g., "/bin/zsh"); use config.ResolveShell().
-func Launch(cmd *exec.Cmd, providerName, dir, runtime, shell string) error {
+// The envPrefix is prepended to the command (e.g., OTEL env vars).
+func Launch(cmd *exec.Cmd, providerName, dir, runtime, shell, envPrefix string) error {
 	if cmd == nil {
 		return fmt.Errorf("spawn: nil command")
 	}
@@ -25,7 +26,7 @@ func Launch(cmd *exec.Cmd, providerName, dir, runtime, shell string) error {
 
 	switch runtime {
 	case "tmux":
-		return launchTmux(cmd, providerName, dir, shell)
+		return launchTmux(cmd, providerName, dir, shell, envPrefix)
 	case "iterm":
 		return launchITerm(cmd, dir)
 	default:
@@ -34,7 +35,7 @@ func Launch(cmd *exec.Cmd, providerName, dir, runtime, shell string) error {
 }
 
 // launchTmux creates a new tmux session running the command.
-func launchTmux(cmd *exec.Cmd, providerName, dir, shell string) error {
+func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return fmt.Errorf("spawn: tmux not found in PATH: %w", err)
 	}
@@ -49,7 +50,7 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell string) error {
 	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
 	cmdParts = append(cmdParts, cmd.Args[1:]...)
 	innerCmd := strings.Join(cmdParts, " ")
-	shellCmd := config.ShellRCPrefix(shell) + innerCmd
+	shellCmd := config.ShellRCPrefix(shell) + envPrefix + innerCmd
 
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", dir,
 		"--", shell, "-lc", shellCmd}

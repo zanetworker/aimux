@@ -248,7 +248,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		cmd := p.SpawnCommand(msg.Dir, msg.Model, msg.Mode)
-		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell()); err != nil {
+		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), a.cfg.OTELEnvPrefix()); err != nil {
 			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
 		} else {
 			name := filepath.Base(msg.Dir)
@@ -744,7 +744,7 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		if selected.TMuxSession != "" {
 			backend, err = terminal.AttachTmux(selected.TMuxSession, contentW, contentH)
 		} else {
-			backend, err = terminal.StartTmux(cmd, contentW, contentH, a.cfg.ResolveShell())
+			backend, err = terminal.StartTmux(cmd, contentW, contentH, a.cfg.ResolveShell(), a.cfg.OTELEnvPrefix())
 		}
 		if err != nil {
 			a.statusHint = fmt.Sprintf("Tmux mirror failed: %v", err)

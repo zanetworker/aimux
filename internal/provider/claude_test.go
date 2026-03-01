@@ -164,7 +164,7 @@ func TestClaudeSpawnArgs(t *testing.T) {
 	c := &Claude{}
 	sa := c.SpawnArgs()
 	expectedModels := []string{"default", "opus", "sonnet", "haiku"}
-	expectedModes := []string{"default", "bypass", "plan"}
+	expectedModes := []string{"default", "plan", "acceptEdits", "bypass", "dontAsk"}
 
 	if len(sa.Models) != len(expectedModels) {
 		t.Fatalf("SpawnArgs.Models length = %d, want %d", len(sa.Models), len(expectedModels))

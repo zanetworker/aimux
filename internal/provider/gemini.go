@@ -314,6 +314,10 @@ func (g *Gemini) SpawnCommand(dir, model, mode string) *exec.Cmd {
 		args = append(args, "--yolo")
 	case "plan":
 		args = append(args, "--approval-mode", "plan")
+	case "auto_edit":
+		args = append(args, "--approval-mode", "auto_edit")
+	case "sandbox":
+		args = append(args, "--sandbox")
 	}
 
 	cmd := exec.Command(bin, args...)
@@ -325,7 +329,7 @@ func (g *Gemini) SpawnCommand(dir, model, mode string) *exec.Cmd {
 func (g *Gemini) SpawnArgs() SpawnArgs {
 	return SpawnArgs{
 		Models: []string{"default", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro", "gemini-3.1-flash"},
-		Modes:  []string{"default", "yolo", "plan"},
+		Modes:  []string{"default", "yolo", "auto_edit", "plan", "sandbox"},
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 )
 
 func TestStartTmux_NilCmd(t *testing.T) {
-	_, err := StartTmux(nil, 80, 24, "/bin/sh")
+	_, err := StartTmux(nil, 80, 24, "/bin/sh", "")
 	if err == nil {
 		t.Error("StartTmux(nil) should return error")
 	}
@@ -25,7 +25,7 @@ func TestStartTmux_CreateAndClose(t *testing.T) {
 	}
 
 	cmd := exec.Command("sh", "-c", "echo hello; sleep 10")
-	ts, err := StartTmux(cmd, 80, 24, "/bin/sh")
+	ts, err := StartTmux(cmd, 80, 24, "/bin/sh", "")
 	if err != nil {
 		t.Fatalf("StartTmux error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestTmuxSession_Resize(t *testing.T) {
 	}
 
 	cmd := exec.Command("sh", "-c", "sleep 10")
-	ts, err := StartTmux(cmd, 80, 24, "/bin/sh")
+	ts, err := StartTmux(cmd, 80, 24, "/bin/sh", "")
 	if err != nil {
 		t.Fatalf("StartTmux error: %v", err)
 	}
