@@ -84,18 +84,20 @@ Requires **Go 1.24+**. For the best experience, run inside tmux -- this enables 
 
 **Discovery** -- automatically finds running Claude, Codex, and Gemini processes. Enriches each with session data, model, token usage, git branch, and permission mode. Refreshes every 2 seconds.
 
-**Conversation Trace** -- press `l` on any agent to see a chronological view of user prompts, assistant responses, and tool calls. Filter with `/`, annotate turns with `a`, export with `:export`.
+**Conversation Trace** -- press `t` on any agent to see a chronological view of user prompts, assistant responses, and tool calls. Filter with `/`, annotate turns with `a`, add notes with `N`.
 
 ```
  17:32:28 USER fix the authentication bug in login.go
  17:32:37 ASST I'll look at the login.go file to understand the issue.
  17:32:38 TOOL Read /src/auth/login.go
  17:32:41 ASST Found the issue. The token validation is missing...
- 17:32:45 TOOL Edit /src/auth/login.go
+ 17:32:45 TOOL Edit /src/auth/login.go   [BAD] "deleted wrong file"
  17:32:50 ASST Fixed. The tests pass now.
 ```
 
-**Session Embedding** -- press `Enter` on a Claude agent to open a split view: live trace on the left, interactive PTY session on the right. For providers that can't embed (Codex), press `J` to jump out to a tmux or iTerm split pane.
+**Session Embedding** -- press `Enter` on any agent to open a split view: live trace on the left, interactive session on the right. Works for all providers -- Claude uses direct PTY, Codex and Gemini use tmux mirror.
+
+**Annotations and Export** -- label turns as GOOD, BAD, or WASTE while watching agents work. Add free-text notes explaining why. Export traces with annotations via `:export` (JSONL to disk) or `:export-otel` (OTLP/HTTP to MLflow, Jaeger, Grafana, or any OTEL backend).
 
 **Agent Launcher** -- press `:new` to spawn a new Claude, Codex, or Gemini session. Pick from recent project directories, choose model and mode, launch into tmux or iTerm.
 
@@ -124,7 +126,7 @@ Requires **Go 1.24+**. For the best experience, run inside tmux -- this enables 
 | `Enter` | Zoom into agent session (split view with trace + PTY) |
 | `J` | Jump to session in external terminal pane |
 | `Ctrl+]` / `Esc` | Zoom out (keep session alive) |
-| `l` | View conversation trace |
+| `t` | View conversation trace |
 | `x` | Kill agent process |
 | `/` | Filter agents |
 | `s` | Cycle sort order |
@@ -155,6 +157,7 @@ Requires **Go 1.24+**. For the best experience, run inside tmux -- this enables 
 | `Enter` / `Space` | Expand / collapse turn |
 | `/` | Search / filter |
 | `a` | Annotate turn (GOOD / BAD / WASTE) |
+| `N` | Add/edit note on annotated turn |
 | `c` | Collapse all turns |
 
 </details>
@@ -165,11 +168,12 @@ Requires **Go 1.24+**. For the best experience, run inside tmux -- this enables 
 | Command | Alias | Action |
 |---------|-------|--------|
 | `:instances` | `:i` | Agent list |
-| `:logs` | `:l` | Conversation trace |
+| `:traces` | `:l` | Conversation trace |
 | `:teams` | `:t` | Teams overview |
 | `:costs` | `:c` | Cost dashboard |
 | `:new` | | Launch new agent |
-| `:export` | | Export trace as JSONL |
+| `:export` | | Export trace + annotations as JSONL |
+| `:export-otel` | | Export trace + annotations via OTLP to configured endpoint |
 | `:help` | `:?` | Help |
 | `:quit` | `:q` | Exit |
 
@@ -192,6 +196,12 @@ providers:
 
 refresh_interval: "2s"        # discovery refresh rate
 default_runtime: tmux         # "tmux" or "iterm"
+shell: /bin/zsh               # login shell for spawning agents
+
+# OTEL export endpoint (for :export-otel)
+export:
+  endpoint: "localhost:5000"  # MLflow, Jaeger, or any OTLP backend
+  insecure: true              # true for HTTP (no TLS)
 ```
 
 <details>
@@ -208,15 +218,39 @@ providers:
 
 </details>
 
+<details>
+<summary><strong>OTEL export to MLflow</strong></summary>
+
+agentmux can export traces with human annotations to any OpenTelemetry-compatible backend. This connects your in-terminal annotation workflow to evaluation platforms like MLflow.
+
+```bash
+# Start MLflow
+mlflow server --host 127.0.0.1 --port 5000
+
+# Configure agentmux
+# Add to ~/.agentmux/config.yaml:
+#   export:
+#     endpoint: "localhost:5000"
+#     insecure: true
+
+# In agentmux: open a trace, annotate with a/N, then :export-otel
+```
+
+Your annotations (GOOD/BAD/WASTE + notes) become MLflow feedback assessments that can be used to build evaluation datasets, calibrate LLM judges, and detect regressions.
+
+See [docs/examples/mlflow-integration.md](docs/examples/mlflow-integration.md) for the full walkthrough.
+
+</details>
+
 ## Provider System
 
 Each provider implements discovery, session management, and spawning through a common interface. Providers can be enabled or disabled via config.
 
-| Provider | Discovery | Session View | Embed PTY | Spawn |
-|----------|-----------|--------------|-----------|-------|
-| Claude | Process scan + JSONL | Split: trace + interactive PTY | Yes | `claude` CLI |
-| Codex | Process scan + JSONL | Trace-only (jump out with `J`) | No | `codex` CLI |
-| Gemini | Stub | Stub | No | `gemini` CLI |
+| Provider | Discovery | Session View | Trace | Cost | Spawn |
+|----------|-----------|--------------|-------|------|-------|
+| Claude | Process scan + JSONL | Split: direct PTY embed | Full (JSONL) | Full | `claude` CLI |
+| Codex | Process scan + JSONL | Split: tmux mirror | Full (JSONL) | Full | `codex` CLI |
+| Gemini | Process scan + JSON | Split: tmux mirror | User prompts (logs.json) | Full | `gemini` CLI |
 
 <details>
 <summary><strong>Adding a new provider</strong></summary>
