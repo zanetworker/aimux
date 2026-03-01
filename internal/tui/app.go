@@ -254,10 +254,60 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), envPrefix); err != nil {
 			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
-		} else {
-			name := filepath.Base(msg.Dir)
-			a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, msg.Runtime)
+			return a, nil
 		}
+
+		name := filepath.Base(msg.Dir)
+
+		// Immediately open split view for the new tmux session
+		if msg.Runtime == "tmux" {
+			tmuxName := spawn.TmuxSessionName(msg.Provider, msg.Dir)
+
+			// Size the session view
+			rightW := a.width * 60 / 100
+			a.sessionView.SetSize(rightW, a.height)
+
+			contentH := a.height - 2
+			if contentH < 1 {
+				contentH = 24
+			}
+			contentW := rightW
+			if contentW < 1 {
+				contentW = 80
+			}
+
+			backend, err := terminal.AttachTmux(tmuxName, contentW, contentH)
+			if err != nil {
+				a.statusHint = fmt.Sprintf("Launched %s in %s but mirror failed: %v", msg.Provider, name, err)
+				return a, nil
+			}
+
+			// Create a temporary agent for the session view
+			newAgent := &agent.Agent{
+				Name:         name,
+				ProviderName: msg.Provider,
+				WorkingDir:   msg.Dir,
+				TMuxSession:  tmuxName,
+				Status:       agent.StatusActive,
+				Model:        msg.Model,
+				GroupCount:    1,
+				GroupPIDs:     []int{},
+			}
+
+			teaCmd, err := a.sessionView.Open(newAgent, backend)
+			if err != nil {
+				a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, msg.Runtime)
+				return a, nil
+			}
+
+			a.zoomed = true
+			a.splitMode = false // full-screen session for new launch
+			a.layout.SetZoomed(true)
+			a.statusHint = fmt.Sprintf("Launched %s in %s", msg.Provider, name)
+			return a, teaCmd
+		}
+
+		a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, msg.Runtime)
 		return a, nil
 
 	case views.LaunchCancelMsg:

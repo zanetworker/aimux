@@ -71,27 +71,33 @@ func NewAgentsView() *AgentsView {
 // SetAgents updates the list of agents with stable sort order.
 // Preserves cursor position by tracking the selected PID across refreshes.
 func (v *AgentsView) SetAgents(agents []agent.Agent) {
-	// Sort based on the active sort field
+	// Sort with stable sort to prevent flickering between ticks.
+	// Default: active agents first, then by name alphabetically.
 	switch v.sortField {
 	case "name":
-		sort.Slice(agents, func(i, j int) bool {
+		sort.SliceStable(agents, func(i, j int) bool {
 			return strings.ToLower(agents[i].ShortProject()) < strings.ToLower(agents[j].ShortProject())
 		})
 	case "cost":
-		sort.Slice(agents, func(i, j int) bool {
-			return agents[i].EstCostUSD > agents[j].EstCostUSD // descending
+		sort.SliceStable(agents, func(i, j int) bool {
+			return agents[i].EstCostUSD > agents[j].EstCostUSD
 		})
 	case "age":
-		sort.Slice(agents, func(i, j int) bool {
+		sort.SliceStable(agents, func(i, j int) bool {
 			return agents[i].LastActivity.After(agents[j].LastActivity)
 		})
 	case "model":
-		sort.Slice(agents, func(i, j int) bool {
+		sort.SliceStable(agents, func(i, j int) bool {
 			return agents[i].ShortModel() < agents[j].ShortModel()
 		})
 	default:
-		sort.Slice(agents, func(i, j int) bool {
-			return agents[i].PID < agents[j].PID
+		// Default: status priority (active > waiting > idle > unknown), then name
+		sort.SliceStable(agents, func(i, j int) bool {
+			si, sj := agents[i].Status, agents[j].Status
+			if si != sj {
+				return si < sj // Active=0, Idle=1, Waiting=2, Unknown=3
+			}
+			return strings.ToLower(agents[i].ShortProject()) < strings.ToLower(agents[j].ShortProject())
 		})
 	}
 	v.agents = agents
