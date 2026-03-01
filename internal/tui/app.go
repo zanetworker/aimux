@@ -1438,11 +1438,16 @@ func (a App) renderSplitView() string {
 		traceHeaderStyle = focusedHeaderStyle
 	}
 	// Show data source indicator in trace header
-	traceLabel := " TRACE "
+	traceLabel := " TRACE [FILE] "
 	if a.otelStore != nil && a.otelStore.HasData() {
 		traceLabel = " TRACE [OTEL] "
-	} else {
-		traceLabel = " TRACE [FILE] "
+	}
+	// Show receiver stats for debugging
+	if a.otelReceiver != nil {
+		traces, logs, _ := a.otelReceiver.Stats()
+		if traces > 0 || logs > 0 {
+			traceLabel = fmt.Sprintf(" TRACE [OTEL t:%d l:%d] ", traces, logs)
+		}
 	}
 	traceHeader := traceHeaderStyle.Render(padRight(traceLabel, leftW))
 	leftLines = append(leftLines, traceHeader)

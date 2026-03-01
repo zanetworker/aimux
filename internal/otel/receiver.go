@@ -21,9 +21,12 @@ import (
 // from Claude Code, Codex CLI, Gemini CLI, or any OTEL-instrumented agent.
 // It stores spans in a SpanStore for the TUI to display.
 type Receiver struct {
-	store  *SpanStore
-	server *http.Server
-	port   int
+	store       *SpanStore
+	server      *http.Server
+	port        int
+	traceCount  int // number of /v1/traces requests received
+	logsCount   int // number of /v1/logs requests received
+	otherCount  int // number of other requests received
 }
 
 // NewReceiver creates a new OTLP/HTTP receiver.
@@ -76,9 +79,15 @@ func (r *Receiver) Port() int {
 	return r.port
 }
 
+// Stats returns request counts for debugging.
+func (r *Receiver) Stats() (traces, logs, other int) {
+	return r.traceCount, r.logsCount, r.otherCount
+}
+
 // handleTraces processes incoming OTLP/HTTP POST /v1/traces requests.
 // Accepts protobuf-encoded ExportTraceServiceRequest.
 func (r *Receiver) handleTraces(w http.ResponseWriter, req *http.Request) {
+	r.traceCount++
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -173,6 +182,7 @@ func protoSpanToSpan(ps *tracepb.Span, resourceAttrs map[string]any) *Span {
 // the OTEL logs protocol. We convert these into our Span model so the
 // trace viewer can display them.
 func (r *Receiver) handleLogs(w http.ResponseWriter, req *http.Request) {
+	r.logsCount++
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
