@@ -434,7 +434,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			return a.promptKill()
 		}
-	case "l":
+	case "t":
 		if a.currentView == viewAgents {
 			return a.openLogsForSelected()
 		}
@@ -555,7 +555,7 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 	switch cmd {
 	case "instances":
 		return a.navigateTo(viewAgents, "Agents")
-	case "logs":
+	case "logs", "traces":
 		return a.openLogsForSelected()
 	case "teams":
 		a2, _ := a.navigateTo(viewTeams, "Teams")
@@ -1206,7 +1206,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  l:traces  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
+		a.headerView.SetHint("Enter:open  t:traces  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  N:note  :export  Esc:back  ?:more")
 	case viewCosts:
@@ -1379,7 +1379,11 @@ func (a App) renderSplitView() string {
 	focus := a.splitFocus
 	hintStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	var focusHint string
-	if focus == "trace" {
+	if focus == "trace" && a.splitTrace != nil && a.splitTrace.NoteMode() {
+		noteText, noteTurn := a.splitTrace.NoteInput()
+		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+		focusHint = noteStyle.Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + noteStyle.Render("|")
+	} else if focus == "trace" {
 		focusHint = " [TRACE] j/k:turns  Enter:expand  a:annotate  N:note  /:filter"
 	} else {
 		focusHint = " [SESSION] typing goes to agent"
@@ -1444,10 +1448,10 @@ func (a App) renderStatusBar() string {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  :new:launch  x:kill  l:traces  ?:help",
+			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  :new:launch  x:kill  t:traces  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " j/k:nav  Enter:open  :new:launch  x:kill  l:traces  s:sort  ?:help  q:quit"
+			hints = " j/k:nav  Enter:open  :new:launch  x:kill  t:traces  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)

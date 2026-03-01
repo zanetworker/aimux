@@ -16,7 +16,7 @@ var commandAliases = map[string]string{
 
 // allCommands is the full list of available commands.
 var allCommands = []string{
-	"instances", "logs", "session", "teams", "costs",
+	"instances", "logs", "traces", "session", "teams", "costs",
 	"help", "new", "kill", "export", "export-otel", "quit",
 }
 
