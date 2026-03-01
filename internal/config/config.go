@@ -13,14 +13,21 @@ type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
 	DefaultRuntime  string                    `yaml:"default_runtime"`
-	Shell           string                    `yaml:"shell"`   // login shell for spawning agents
-	Export          ExportConfig              `yaml:"export"`  // OTEL export settings
+	Shell           string                    `yaml:"shell"`     // login shell for spawning agents
+	Export          ExportConfig              `yaml:"export"`    // OTEL export settings
+	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`      // OTEL receiver settings
 }
 
 // ExportConfig holds settings for exporting traces via OTLP.
 type ExportConfig struct {
 	Endpoint string `yaml:"endpoint"` // e.g., "localhost:5000" for MLflow
 	Insecure bool   `yaml:"insecure"` // true for HTTP (no TLS), default true
+}
+
+// OTELReceiverConfig holds settings for the embedded OTLP/HTTP receiver.
+type OTELReceiverConfig struct {
+	Enabled bool `yaml:"enabled"` // false by default
+	Port    int  `yaml:"port"`    // default 4318
 }
 
 // ProviderConfig controls a single provider's behaviour.
@@ -87,6 +94,9 @@ func Load(path string) (Config, error) {
 	if fileCfg.Export.Endpoint != "" {
 		cfg.Export = fileCfg.Export
 	}
+	if fileCfg.OTELReceiver.Enabled {
+		cfg.OTELReceiver = fileCfg.OTELReceiver
+	}
 	if fileCfg.Providers != nil {
 		for name, pc := range fileCfg.Providers {
 			cfg.Providers[name] = pc
@@ -123,6 +133,14 @@ func ShellRCPrefix(shell string) string {
 	default:
 		return ""
 	}
+}
+
+// OTELReceiverPort returns the configured OTEL receiver port, defaulting to 4318.
+func (c Config) OTELReceiverPort() int {
+	if c.OTELReceiver.Port > 0 {
+		return c.OTELReceiver.Port
+	}
+	return 4318
 }
 
 // IsProviderEnabled returns true if the named provider is enabled in the config.

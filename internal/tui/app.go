@@ -115,6 +115,10 @@ type App struct {
 
 	// Config
 	cfg config.Config
+
+	// OTEL receiver (optional)
+	otelReceiver *agentmuxotel.Receiver
+	otelStore    *agentmuxotel.SpanStore
 }
 
 // NewApp creates a new root TUI application.
@@ -141,7 +145,7 @@ func NewApp() App {
 		agentProviders[i] = p
 	}
 
-	return App{
+	app := App{
 		currentView:  viewAgents,
 		headerView:   views.NewHeaderView(),
 		agentsView:   views.NewAgentsView(),
@@ -156,7 +160,16 @@ func NewApp() App {
 		breadcrumbs:  []string{"Agents"},
 		hiddenAgents: make(map[string]bool),
 		cfg:          cfg,
+		otelStore:    agentmuxotel.NewSpanStore(),
 	}
+
+	// Start OTEL receiver if enabled
+	if cfg.OTELReceiver.Enabled {
+		app.otelReceiver = agentmuxotel.NewReceiver(app.otelStore, cfg.OTELReceiverPort())
+		_ = app.otelReceiver.Start()
+	}
+
+	return app
 }
 
 func (a App) Init() tea.Cmd {
