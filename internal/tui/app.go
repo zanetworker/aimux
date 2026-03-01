@@ -230,6 +230,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Refresh live trace in split mode
 		if a.splitMode && a.splitTrace != nil {
+			// If trace has no data yet, try to discover the session file
+			if len(a.splitTrace.Turns()) == 0 && a.sessionView != nil && a.sessionView.Agent() != nil {
+				ag := a.sessionView.Agent()
+				if p := a.providerFor(ag.ProviderName); p != nil {
+					if sf := p.FindSessionFile(*ag); sf != "" {
+						a.splitTrace.SetFilePath(sf)
+					}
+				}
+			}
 			a.splitTrace.Reload()
 		}
 		return a, nil
