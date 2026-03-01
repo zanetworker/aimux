@@ -780,6 +780,54 @@ func TestCodexToolName(t *testing.T) {
 	}
 }
 
+// --- Codex new mode tests ---
+
+func TestCodexSpawnCommand_FullAccess(t *testing.T) {
+	c := &Codex{}
+	cmd := c.SpawnCommand("/tmp/p", "", "full-access")
+	assertArgsContain(t, cmd.Args, "--sandbox", "danger-full-access")
+	assertArgsContain(t, cmd.Args, "--ask-for-approval", "never")
+}
+
+func TestCodexSpawnCommand_ReadOnly(t *testing.T) {
+	c := &Codex{}
+	cmd := c.SpawnCommand("/tmp/p", "", "read-only")
+	assertArgsContain(t, cmd.Args, "--sandbox", "read-only")
+}
+
+func TestCodexOTELEnv(t *testing.T) {
+	c := &Codex{}
+	env := c.OTELEnv("http://localhost:4318")
+	if !strings.Contains(env, "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318") {
+		t.Errorf("missing endpoint, got %q", env)
+	}
+}
+
+// --- Gemini new mode tests ---
+
+func TestGeminiSpawnCommand_AutoEdit(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.SpawnCommand("/tmp/p", "", "auto_edit")
+	assertArgsContain(t, cmd.Args, "--approval-mode", "auto_edit")
+}
+
+func TestGeminiSpawnCommand_Sandbox(t *testing.T) {
+	g := &Gemini{}
+	cmd := g.SpawnCommand("/tmp/p", "", "sandbox")
+	assertArgPresent(t, cmd.Args, "--sandbox")
+}
+
+func TestGeminiOTELEnv(t *testing.T) {
+	g := &Gemini{}
+	env := g.OTELEnv("http://localhost:4318")
+	if !strings.Contains(env, "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318") {
+		t.Errorf("missing endpoint, got %q", env)
+	}
+	if !strings.Contains(env, "GEMINI_CLI_TELEMETRY_ENABLED=true") {
+		t.Errorf("missing GEMINI_CLI_TELEMETRY_ENABLED, got %q", env)
+	}
+}
+
 // Suppress unused variable warnings for time import.
 var _ = time.Now
 

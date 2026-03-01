@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -720,6 +721,29 @@ func TestClaudeParseTrace_CostCalculation(t *testing.T) {
 	}
 	if turns[0].CostUSD <= 0 {
 		t.Errorf("CostUSD = %f, want > 0", turns[0].CostUSD)
+	}
+}
+
+func TestClaudeSpawnCommand_AcceptEdits(t *testing.T) {
+	c := &Claude{}
+	cmd := c.SpawnCommand("/tmp/p", "", "acceptEdits")
+	assertArgsContain(t, cmd.Args, "--permission-mode", "acceptEdits")
+}
+
+func TestClaudeSpawnCommand_DontAsk(t *testing.T) {
+	c := &Claude{}
+	cmd := c.SpawnCommand("/tmp/p", "", "dontAsk")
+	assertArgsContain(t, cmd.Args, "--permission-mode", "dontAsk")
+}
+
+func TestClaudeOTELEnv(t *testing.T) {
+	c := &Claude{}
+	env := c.OTELEnv("http://localhost:4318")
+	if !strings.Contains(env, "CLAUDE_CODE_ENABLE_TELEMETRY=1") {
+		t.Errorf("missing CLAUDE_CODE_ENABLE_TELEMETRY, got %q", env)
+	}
+	if !strings.Contains(env, "http://localhost:4318") {
+		t.Errorf("missing endpoint, got %q", env)
 	}
 }
 
