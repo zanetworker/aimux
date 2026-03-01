@@ -65,8 +65,9 @@ internal/
 - **Provider interface**: All agent types implement `provider.Provider` with 10 methods: Name, Discover, ResumeCommand, CanEmbed, FindSessionFile, RecentDirs, SpawnCommand, SpawnArgs, ParseTrace, OTELEnv. Adding a provider = one Go file + register in app.go.
 - **SessionBackend interface**: `terminal.SessionBackend` (Read/Write/Resize/Close/Alive) with two implementations: direct PTY (Claude) and tmux mirror (Codex/Gemini). `DirectRenderer` optional interface skips VT emulator for tmux.
 - **Trace parsing**: Each provider owns its parser via `ParseTrace`. Shared types in `internal/trace/`. LogsView receives a `TraceParser` function from app.go.
-- **OTEL dual mode**: File-based parsing is default (zero-config). OTEL receiver (port 4318) supplements when enabled. `parserForProvider` checks OTEL store first, falls back to files. Trace header shows [FILE] or [OTEL].
-- **Config**: `~/.agentmux/config.yaml` -- providers, shell, export endpoint, OTEL receiver. Each provider's `OTELEnv(endpoint)` returns the right env vars for its OTEL mechanism.
+- **OTEL dual mode**: File-based parsing for display (full responses). OTEL receiver (port 4318) collects live telemetry for export. `parserForProvider` checks file first, falls back to OTEL for new sessions. Trace header shows [FILE] (otel:N). Claude Code sends events via OTEL logs protocol (no response text -- Anthropic privacy design). Export to MLflow via `e` → `o` in split view or `:export-otel`.
+- **Export**: `e` key in trace pane opens export menu: `j` for JSONL (to `~/.agentmux/exports/`), `o` for OTEL (to configured endpoint). MLflow requires `x-mlflow-experiment-id` header, set via `export.experiment_id` in config.
+- **Config**: `~/.agentmux/config.yaml` -- providers, shell, export (endpoint + experiment_id), OTEL receiver. Each provider's `OTELEnv(endpoint)` returns the right env vars for its OTEL mechanism.
 - **Stable agent ordering**: `sort.SliceStable` with status priority (active first), then alphabetical. Cursor preserved by PID tracking.
 
 ## Building and Testing
@@ -111,6 +112,7 @@ otel:
   enabled: true
   port: 4318
 export:
-  endpoint: "localhost:5000"
+  endpoint: "localhost:5001"
   insecure: true
+  experiment_id: "1"          # MLflow experiment ID
 ```

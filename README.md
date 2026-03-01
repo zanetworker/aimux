@@ -144,6 +144,7 @@ Requires **Go 1.24+**. For the best experience, run inside tmux -- this enables 
 |-----|--------|
 | `Tab` | Switch focus between trace and session panes |
 | `Ctrl+f` | Toggle fullscreen on focused pane |
+| `e` | Export menu (when trace pane focused): `j` JSONL, `o` OTEL |
 | `Esc` / `Ctrl+]` | Exit split view |
 
 </details>
@@ -205,10 +206,11 @@ otel:
   enabled: true               # runs OTLP/HTTP receiver on this port
   port: 4318                  # standard OTLP/HTTP port
 
-# OTEL export endpoint (for :export-otel)
+# OTEL export endpoint (for e -> o in split view, or :export-otel)
 export:
-  endpoint: "localhost:5000"  # MLflow, Jaeger, or any OTLP backend
+  endpoint: "localhost:5001"  # MLflow, Jaeger, or any OTLP backend
   insecure: true              # true for HTTP (no TLS)
+  experiment_id: "1"          # MLflow experiment ID (required for MLflow)
 ```
 
 <details>
@@ -232,15 +234,30 @@ agentmux can export traces with human annotations to any OpenTelemetry-compatibl
 
 ```bash
 # Start MLflow
-mlflow server --host 127.0.0.1 --port 5000
+mlflow server --host 127.0.0.1 --port 5001
 
-# Configure agentmux
-# Add to ~/.agentmux/config.yaml:
-#   export:
-#     endpoint: "localhost:5000"
-#     insecure: true
+# Create an experiment
+curl -X POST http://localhost:5001/api/2.0/mlflow/experiments/create \
+  -H "Content-Type: application/json" \
+  -d '{"name": "agent-evals-responses"}'
+# Returns {"experiment_id": "1"} -- use this ID below
+```
 
-# In agentmux: open a trace, annotate with a/N, then :export-otel
+```yaml
+# ~/.agentmux/config.yaml
+export:
+  endpoint: "localhost:5001"
+  insecure: true
+  experiment_id: "1"           # from the create step above
+```
+
+```
+# In agentmux split view:
+# 1. Tab to focus trace pane
+# 2. a to annotate turns (GOOD/BAD/WASTE)
+# 3. N to add notes
+# 4. e then o to export via OTEL to MLflow
+# Or e then j for local JSONL export to ~/.agentmux/exports/
 ```
 
 Your annotations (GOOD/BAD/WASTE + notes) become MLflow feedback assessments that can be used to build evaluation datasets, calibrate LLM judges, and detect regressions.
