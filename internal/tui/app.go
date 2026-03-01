@@ -1053,10 +1053,11 @@ func (a App) exportOTEL() (tea.Model, tea.Cmd) {
 	}
 
 	cfg := agentmuxotel.ExportConfig{
-		Endpoint:  endpoint,
-		Insecure:  a.cfg.Export.Insecure,
-		SessionID: sessionID,
-		Provider:  providerName,
+		Endpoint:     endpoint,
+		Insecure:     a.cfg.Export.Insecure,
+		SessionID:    sessionID,
+		Provider:     providerName,
+		ExperimentID: a.cfg.Export.ExperimentID,
 	}
 
 	if err := agentmuxotel.ExportTrace(cfg, turns, a.evalStore); err != nil {

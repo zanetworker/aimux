@@ -21,8 +21,9 @@ type Config struct {
 
 // ExportConfig holds settings for exporting traces via OTLP.
 type ExportConfig struct {
-	Endpoint string `yaml:"endpoint"` // e.g., "localhost:5000" for MLflow
-	Insecure bool   `yaml:"insecure"` // true for HTTP (no TLS), default true
+	Endpoint     string `yaml:"endpoint"`      // e.g., "localhost:5001" for MLflow
+	Insecure     bool   `yaml:"insecure"`      // true for HTTP (no TLS), default true
+	ExperimentID string `yaml:"experiment_id"` // MLflow experiment ID (required by MLflow)
 }
 
 // OTELReceiverConfig holds settings for the embedded OTLP/HTTP receiver.

@@ -19,10 +19,12 @@ import (
 
 // ExportConfig holds the configuration for OTEL export.
 type ExportConfig struct {
-	Endpoint  string // e.g., "localhost:5000" (MLflow) or "localhost:4318" (collector)
-	Insecure  bool   // true for HTTP (no TLS)
-	SessionID string // session identifier
-	Provider  string // "claude", "codex", "gemini"
+	Endpoint     string            // e.g., "localhost:5001" (MLflow) or "localhost:4318" (collector)
+	Insecure     bool              // true for HTTP (no TLS)
+	SessionID    string            // session identifier
+	Provider     string            // "claude", "codex", "gemini"
+	ExperimentID string            // MLflow experiment ID (required by MLflow OTLP endpoint)
+	Headers      map[string]string // extra HTTP headers
 }
 
 // ExportTrace sends trace turns and annotations as OTLP/HTTP spans to the
@@ -38,6 +40,18 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 	}
 	if cfg.Insecure {
 		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+
+	// Add headers (MLflow requires x-mlflow-experiment-id)
+	headers := make(map[string]string)
+	for k, v := range cfg.Headers {
+		headers[k] = v
+	}
+	if cfg.ExperimentID != "" {
+		headers["x-mlflow-experiment-id"] = cfg.ExperimentID
+	}
+	if len(headers) > 0 {
+		opts = append(opts, otlptracehttp.WithHeaders(headers))
 	}
 
 	exporter, err := otlptracehttp.New(ctx, opts...)
