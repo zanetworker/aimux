@@ -583,8 +583,17 @@ func (a *App) syncPreview() {
 // file-based ParseTrace.
 func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 	return func(filePath string) ([]trace.Turn, error) {
-		// Prefer OTEL when receiver is enabled -- it feeds into
-		// MLflow/Jaeger export and provides live streaming data.
+		// File-based parsing for display (has full response text).
+		// OTEL receiver still collects data for :export-otel to MLflow/Jaeger.
+		if filePath != "" {
+			turns, err := p.ParseTrace(filePath)
+			if err == nil && len(turns) > 0 {
+				return turns, nil
+			}
+		}
+
+		// Fall back to OTEL when file isn't available yet
+		// (newly launched sessions before session file is created)
 		if a.otelStore != nil && a.otelStore.HasData() {
 			var sessionIDs []string
 
@@ -609,12 +618,6 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 					}
 				}
 			}
-		}
-
-		// Fall back to file-based parsing when OTEL has no data
-		// (agent not launched with OTEL, or receiver disabled)
-		if filePath != "" {
-			return p.ParseTrace(filePath)
 		}
 		return nil, nil
 	}
@@ -1457,7 +1460,7 @@ func (a App) renderSplitView() string {
 	if a.otelReceiver != nil {
 		_, logs, _ := a.otelReceiver.Stats()
 		if logs > 0 {
-			traceLabel = fmt.Sprintf(" TRACE [OTEL l:%d] ", logs)
+			traceLabel = fmt.Sprintf(" TRACE [FILE] (otel:%d) ", logs)
 		}
 	}
 	traceHeader := traceHeaderStyle.Render(padRight(traceLabel, leftW))
