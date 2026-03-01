@@ -503,9 +503,28 @@ func (a *App) syncPreview() {
 	a.previewPane.SetAgent(selected)
 }
 
-// parserForProvider returns a TraceParser function wrapping the provider's ParseTrace.
+// parserForProvider returns a TraceParser function that checks the OTEL store
+// first (if receiver is enabled and has data), then falls back to the provider's
+// file-based ParseTrace.
 func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 	return func(filePath string) ([]trace.Turn, error) {
+		// Check OTEL store for live data
+		if a.otelStore != nil && a.otelStore.HasData() {
+			// Try to find spans matching this session
+			selected := a.agentsView.Selected()
+			if selected != nil {
+				sessionID := selected.SessionID
+				if sessionID != "" {
+					if root := a.otelStore.GetByConversation(sessionID); root != nil {
+						turns := agentmuxotel.SpansToTurns(root)
+						if len(turns) > 0 {
+							return turns, nil
+						}
+					}
+				}
+			}
+		}
+		// Fall back to file-based parsing
 		return p.ParseTrace(filePath)
 	}
 }
