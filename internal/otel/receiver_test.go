@@ -110,26 +110,29 @@ func TestReceiver_LogsEndToEnd(t *testing.T) {
 								EventName:    "claude_code.user_prompt",
 								Attributes: []*commonpb.KeyValue{
 									{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: sessionID}}},
+									{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "prompt-1"}}},
 									{Key: "prompt", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "fix the otel bug"}}},
 								},
 							},
-							// API request event
+							// API request event (same prompt.id = same turn)
 							{
 								TimeUnixNano: uint64(now.Add(1 * time.Second).UnixNano()),
 								EventName:    "claude_code.api_request",
 								Attributes: []*commonpb.KeyValue{
 									{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: sessionID}}},
+									{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "prompt-1"}}},
 									{Key: "model", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "claude-opus-4-6"}}},
 									{Key: "input_tokens", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: 5000}}},
 									{Key: "output_tokens", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: 1200}}},
 								},
 							},
-							// Tool result event
+							// Tool result event (same prompt.id = same turn)
 							{
 								TimeUnixNano: uint64(now.Add(2 * time.Second).UnixNano()),
 								EventName:    "claude_code.tool_result",
 								Attributes: []*commonpb.KeyValue{
 									{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: sessionID}}},
+									{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "prompt-1"}}},
 									{Key: "tool_name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "Read"}}},
 									{Key: "success", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "true"}}},
 								},
@@ -208,23 +211,27 @@ func TestReceiver_LogsEndToEnd(t *testing.T) {
 		t.Errorf("tool child name = %q, want Read", toolChild.AttrStr("gen_ai.tool.name"))
 	}
 
-	// Verify the full pipeline: SpansToTurns conversion
+	// Verify the full pipeline: SpansToTurns groups by prompt.id
+	// All 3 events share prompt.id="prompt-1" so they become 1 turn
 	turns := SpansToTurns(root)
-	if len(turns) != 2 {
-		t.Fatalf("SpansToTurns returned %d turns, want 2", len(turns))
+	if len(turns) != 1 {
+		t.Fatalf("SpansToTurns returned %d turns, want 1 (all events share prompt.id)", len(turns))
 	}
 
-	// First turn is the api_request (chat)
+	// The single turn aggregates data from all events
+	if len(turns[0].UserLines) == 0 || turns[0].UserLines[0] != "fix the otel bug" {
+		t.Errorf("turn[0].UserLines = %v, want [fix the otel bug]", turns[0].UserLines)
+	}
 	if turns[0].Model != "claude-opus-4-6" {
 		t.Errorf("turn[0].Model = %q, want claude-opus-4-6", turns[0].Model)
 	}
+	// TokensIn: logRecordToSpan copies raw "input_tokens" AND sets
+	// "gen_ai.usage.input_tokens", converter picks gen_ai.usage.* first
 	if turns[0].TokensIn != 5000 {
 		t.Errorf("turn[0].TokensIn = %d, want 5000", turns[0].TokensIn)
 	}
-
-	// Second turn is the tool_result
-	if turns[1].Number != 2 {
-		t.Errorf("turn[1].Number = %d, want 2", turns[1].Number)
+	if len(turns[0].Actions) != 1 || turns[0].Actions[0].Name != "Read" {
+		t.Errorf("turn[0].Actions = %v, want 1 action (Read)", turns[0].Actions)
 	}
 }
 

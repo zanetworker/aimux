@@ -6,36 +6,39 @@ import (
 )
 
 func TestSpansToTurns_BasicTree(t *testing.T) {
+	now := time.Now()
 	root := &Span{
 		SpanID: "root",
-		Name:   "invoke_agent",
-		Start:  time.Now().Add(-5 * time.Minute),
-		End:    time.Now(),
+		Name:   "claude_code.user_prompt",
+		Start:  now.Add(-5 * time.Minute),
+		End:    now,
+		Attrs: map[string]any{
+			"gen_ai.input.messages": "fix the bug",
+			"prompt.id":            "p1",
+		},
 		Children: []*Span{
 			{
-				SpanID: "turn1",
-				Name:   "chat turn-1",
-				Start:  time.Now().Add(-5 * time.Minute),
-				End:    time.Now().Add(-3 * time.Minute),
+				SpanID: "api1",
+				Name:   "claude_code.api_request",
+				Start:  now.Add(-4 * time.Minute),
+				End:    now.Add(-3 * time.Minute),
 				Attrs: map[string]any{
-					"gen_ai.input.messages":      "fix the bug",
-					"gen_ai.output.messages":     "I'll look at it.",
 					"gen_ai.request.model":       "claude-opus-4-6",
 					"gen_ai.usage.input_tokens":  int64(5000),
 					"gen_ai.usage.output_tokens": int64(200),
+					"prompt.id":                 "p1",
 				},
-				Children: []*Span{
-					{
-						SpanID: "tool1",
-						Name:   "execute_tool Read",
-						Attrs: map[string]any{
-							"gen_ai.operation.name":      "execute_tool",
-							"gen_ai.tool.name":           "Read",
-							"gen_ai.tool.call.arguments": "main.go",
-						},
-						Status: StatusOK,
-					},
+			},
+			{
+				SpanID: "tool1",
+				Name:   "claude_code.tool_result",
+				Start:  now.Add(-3 * time.Minute),
+				Attrs: map[string]any{
+					"tool_name": "Read",
+					"success":   "true",
+					"prompt.id": "p1",
 				},
+				Status: StatusOK,
 			},
 		},
 	}
@@ -51,9 +54,6 @@ func TestSpansToTurns_BasicTree(t *testing.T) {
 	}
 	if len(turn.UserLines) == 0 || turn.UserLines[0] != "fix the bug" {
 		t.Errorf("UserLines = %v, want [\"fix the bug\"]", turn.UserLines)
-	}
-	if len(turn.OutputLines) == 0 || turn.OutputLines[0] != "I'll look at it." {
-		t.Errorf("OutputLines = %v, want [\"I'll look at it.\"]", turn.OutputLines)
 	}
 	if turn.Model != "claude-opus-4-6" {
 		t.Errorf("Model = %q, want %q", turn.Model, "claude-opus-4-6")
@@ -87,24 +87,21 @@ func TestSpansToTurns_EmptyRoot(t *testing.T) {
 func TestSpansToTurns_ToolError(t *testing.T) {
 	root := &Span{
 		SpanID: "root",
+		Name:   "claude_code.user_prompt",
+		Attrs: map[string]any{
+			"gen_ai.input.messages": "run tests",
+			"prompt.id":            "p1",
+		},
 		Children: []*Span{
 			{
-				SpanID: "turn1",
-				Name:   "chat",
+				SpanID: "tool1",
+				Name:   "claude_code.tool_result",
+				Status: StatusError,
 				Attrs: map[string]any{
-					"gen_ai.input.messages": "run tests",
-				},
-				Children: []*Span{
-					{
-						SpanID: "tool1",
-						Name:   "execute_tool Bash",
-						Status: StatusError,
-						Attrs: map[string]any{
-							"gen_ai.operation.name": "execute_tool",
-							"gen_ai.tool.name":      "Bash",
-							"error.type":            "exit code 1",
-						},
-					},
+					"tool_name": "Bash",
+					"success":   "false",
+					"error":     "exit code 1",
+					"prompt.id": "p1",
 				},
 			},
 		},
@@ -112,12 +109,78 @@ func TestSpansToTurns_ToolError(t *testing.T) {
 
 	turns := SpansToTurns(root)
 	if len(turns) != 1 || len(turns[0].Actions) != 1 {
-		t.Fatal("expected 1 turn with 1 action")
+		t.Fatalf("expected 1 turn with 1 action, got %d turns", len(turns))
 	}
 	if turns[0].Actions[0].Success {
 		t.Error("expected Success = false for error span")
 	}
 	if turns[0].Actions[0].ErrorMsg != "exit code 1" {
 		t.Errorf("ErrorMsg = %q, want %q", turns[0].Actions[0].ErrorMsg, "exit code 1")
+	}
+}
+
+func TestSpansToTurns_MultiplePrompts(t *testing.T) {
+	now := time.Now()
+	root := &Span{
+		SpanID: "root",
+		Name:   "claude_code.user_prompt",
+		Start:  now,
+		Attrs: map[string]any{
+			"gen_ai.input.messages": "hello",
+			"prompt.id":            "p1",
+		},
+		Children: []*Span{
+			{
+				SpanID: "api1",
+				Name:   "claude_code.api_request",
+				Start:  now.Add(1 * time.Second),
+				Attrs: map[string]any{
+					"model":    "claude-opus-4-6",
+					"prompt.id": "p1",
+				},
+			},
+			// Second prompt
+			{
+				SpanID: "prompt2",
+				Name:   "claude_code.user_prompt",
+				Start:  now.Add(10 * time.Second),
+				Attrs: map[string]any{
+					"gen_ai.input.messages": "fix the bug",
+					"prompt.id":            "p2",
+				},
+			},
+			{
+				SpanID: "api2",
+				Name:   "claude_code.api_request",
+				Start:  now.Add(11 * time.Second),
+				Attrs: map[string]any{
+					"model":    "claude-opus-4-6",
+					"prompt.id": "p2",
+				},
+			},
+			{
+				SpanID: "tool2",
+				Name:   "claude_code.tool_result",
+				Start:  now.Add(12 * time.Second),
+				Attrs: map[string]any{
+					"tool_name": "Read",
+					"prompt.id": "p2",
+				},
+			},
+		},
+	}
+
+	turns := SpansToTurns(root)
+	if len(turns) != 2 {
+		t.Fatalf("got %d turns, want 2 (one per prompt.id)", len(turns))
+	}
+	if turns[0].UserLines[0] != "hello" {
+		t.Errorf("turn[0] user = %v, want [hello]", turns[0].UserLines)
+	}
+	if turns[1].UserLines[0] != "fix the bug" {
+		t.Errorf("turn[1] user = %v, want [fix the bug]", turns[1].UserLines)
+	}
+	if len(turns[1].Actions) != 1 {
+		t.Errorf("turn[1] actions = %d, want 1", len(turns[1].Actions))
 	}
 }

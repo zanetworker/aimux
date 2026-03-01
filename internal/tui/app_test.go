@@ -48,21 +48,24 @@ func TestParserForProvider_FallsBackToFile(t *testing.T) {
 func TestParserForProvider_PrefersOTEL(t *testing.T) {
 	store := agentmuxotel.NewSpanStore()
 
-	// Add OTEL data for a session
+	// Add OTEL data for a session (Claude log events format)
 	root := &agentmuxotel.Span{
 		SpanID:  "root-1",
 		TraceID: "session-test-otel",
-		Name:    "invoke_agent",
+		Name:    "claude_code.user_prompt",
 		Attrs: map[string]any{
 			"gen_ai.conversation.id": "session-test-otel",
+			"gen_ai.input.messages":  "from otel",
+			"prompt.id":             "p1",
 		},
 		Children: []*agentmuxotel.Span{
 			{
 				SpanID: "turn-1",
-				Name:   "chat",
+				Name:   "claude_code.api_request",
 				Attrs: map[string]any{
-					"gen_ai.input.messages":  "from otel",
-					"gen_ai.output.messages": "otel response",
+					"gen_ai.request.model":      "claude-opus-4-6",
+					"gen_ai.usage.input_tokens": int64(100),
+					"prompt.id":                "p1",
 				},
 			},
 		},
@@ -160,11 +163,13 @@ func TestParserForProvider_OTELEmptyFallsBackToFile(t *testing.T) {
 }
 
 // TestOTELStoreLogEvents verifies that Claude-style log events get
-// stored and can be converted to turns.
+// stored and can be converted to turns, grouped by prompt.id.
 func TestOTELStoreLogEvents(t *testing.T) {
 	store := agentmuxotel.NewSpanStore()
 
-	// Simulate Claude log events
+	// Simulate Claude log events -- all share the same prompt.id
+	promptID := "prompt-1"
+
 	userPrompt := &agentmuxotel.Span{
 		SpanID:  "log-1",
 		TraceID: "sess-abc",
@@ -174,6 +179,7 @@ func TestOTELStoreLogEvents(t *testing.T) {
 			"gen_ai.operation.name":  "invoke_agent",
 			"gen_ai.input.messages":  "fix the bug",
 			"session.id":            "sess-abc",
+			"prompt.id":             promptID,
 		},
 	}
 	store.Add(userPrompt)
@@ -187,6 +193,7 @@ func TestOTELStoreLogEvents(t *testing.T) {
 			"gen_ai.operation.name":     "chat",
 			"gen_ai.request.model":      "claude-opus-4-6",
 			"gen_ai.usage.input_tokens": int64(5000),
+			"prompt.id":                promptID,
 		},
 	}
 	store.Add(apiRequest)
@@ -199,6 +206,7 @@ func TestOTELStoreLogEvents(t *testing.T) {
 			"gen_ai.conversation.id": "sess-abc",
 			"gen_ai.operation.name":  "execute_tool",
 			"gen_ai.tool.name":       "Read",
+			"prompt.id":             promptID,
 		},
 	}
 	store.Add(toolResult)
@@ -212,10 +220,22 @@ func TestOTELStoreLogEvents(t *testing.T) {
 		t.Fatalf("root has %d children, want 2 (api_request + tool_result)", len(root.Children))
 	}
 
-	// Convert to turns
+	// Convert to turns -- all 3 events share prompt.id so they become 1 turn
 	turns := agentmuxotel.SpansToTurns(root)
-	if len(turns) != 2 {
-		t.Fatalf("SpansToTurns returned %d turns, want 2", len(turns))
+	if len(turns) != 1 {
+		t.Fatalf("SpansToTurns returned %d turns, want 1 (all events share prompt.id)", len(turns))
+	}
+	if turns[0].UserLines[0] != "fix the bug" {
+		t.Errorf("turn[0].UserLines = %v, want [fix the bug]", turns[0].UserLines)
+	}
+	if turns[0].Model != "claude-opus-4-6" {
+		t.Errorf("turn[0].Model = %q, want claude-opus-4-6", turns[0].Model)
+	}
+	if turns[0].TokensIn != 5000 {
+		t.Errorf("turn[0].TokensIn = %d, want 5000", turns[0].TokensIn)
+	}
+	if len(turns[0].Actions) != 1 || turns[0].Actions[0].Name != "Read" {
+		t.Errorf("turn[0].Actions = %v, want 1 action (Read)", turns[0].Actions)
 	}
 }
 
