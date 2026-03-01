@@ -74,9 +74,10 @@ type App struct {
 	zoomed bool
 
 	// Split mode: trace (left) + interactive session (right)
-	splitMode  bool
-	splitFocus string          // "trace" or "session"
-	splitTrace *views.LogsView // live trace pane in split mode
+	splitMode      bool
+	splitFocus     string          // "trace" or "session"
+	splitTrace     *views.LogsView // live trace pane in split mode
+	splitLaunchTime time.Time      // when :new session was launched (filters old files)
 
 	// Command palette
 	commandMode  bool
@@ -237,7 +238,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ag := a.sessionView.Agent()
 				if p := a.providerFor(ag.ProviderName); p != nil {
 					if sf := p.FindSessionFile(*ag); sf != "" {
-						a.splitTrace.SetFilePath(sf)
+						// For :new launches, only accept files created after launch
+						// to avoid showing traces from previous sessions in the same dir.
+						if !a.splitLaunchTime.IsZero() {
+							if info, err := os.Stat(sf); err == nil && info.ModTime().Before(a.splitLaunchTime) {
+								sf = "" // stale file, skip
+							}
+						}
+						if sf != "" {
+							a.splitTrace.SetFilePath(sf)
+						}
 					}
 				}
 			}
@@ -324,8 +334,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Set eval context so :export and :export-otel work from split view
 			a.evalSessionID = newAgent.SessionID
 			if a.evalSessionID == "" {
-				a.evalSessionID = tmuxName // use tmux session name until real ID is discovered
+				a.evalSessionID = tmuxName
 			}
+			a.splitLaunchTime = time.Now() // filter out old session files
 
 			a.zoomed = true
 			a.splitMode = true       // always split -- trace fills in as data arrives
@@ -478,6 +489,13 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	// Command palette -- intercept ":" before routing to trace or PTY
+	if key == ":" {
+		a.commandMode = true
+		a.commandInput = ""
+		return a, nil
+	}
+
 	// Route keys to trace pane when focused (both split and fullscreen trace)
 	if a.splitFocus == "trace" && a.splitTrace != nil {
 		cmd := a.splitTrace.Update(msg)
@@ -493,6 +511,7 @@ func (a App) exitZoom() (tea.Model, tea.Cmd) {
 	a.zoomed = false
 	a.splitMode = false
 	a.splitTrace = nil
+	a.splitLaunchTime = time.Time{}
 	a.layout.SetZoomed(false)
 	a.sessionView.Close()
 	return a, nil
