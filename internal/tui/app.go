@@ -321,6 +321,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
 			a.splitTrace.SetSize(leftW, a.height-1)
 
+			// Set eval context so :export and :export-otel work from split view
+			a.evalSessionID = newAgent.SessionID
+			if a.evalSessionID == "" {
+				a.evalSessionID = tmuxName // use tmux session name until real ID is discovered
+			}
+
 			a.zoomed = true
 			a.splitMode = true       // always split -- trace fills in as data arrives
 			a.splitFocus = "session" // focus on session so user can type
