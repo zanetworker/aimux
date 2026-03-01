@@ -922,13 +922,13 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 }
 
 func (a App) exportTrace() (tea.Model, tea.Cmd) {
-	if a.logsView == nil || a.evalSessionID == "" {
-		a.statusHint = "Open a trace first (l on an agent), then :export"
+	// Get turns from whichever trace view is active (standalone or split)
+	turns := a.activeTraceTurns()
+	sessionID := a.activeTraceSessionID()
+	if len(turns) == 0 || sessionID == "" {
+		a.statusHint = "Open a trace first (l on an agent or Enter for split view), then :export"
 		return a, nil
 	}
-
-	// Build export turns from the current trace data
-	turns := a.logsView.Turns()
 	var exportTurns []evaluation.ExportTurn
 	for _, t := range turns {
 		et := evaluation.ExportTurn{
@@ -961,7 +961,7 @@ func (a App) exportTrace() (tea.Model, tea.Cmd) {
 		exportTurns = append(exportTurns, et)
 	}
 
-	path := evaluation.ExportPath(a.evalSessionID)
+	path := evaluation.ExportPath(sessionID)
 	if err := evaluation.WriteExport(path, exportTurns); err != nil {
 		a.statusHint = fmt.Sprintf("Export failed: %v", err)
 		return a, nil
@@ -974,8 +974,10 @@ func (a App) exportTrace() (tea.Model, tea.Cmd) {
 // exportOTEL sends the current trace + annotations as OTLP/HTTP spans to
 // the configured export endpoint (e.g., MLflow, Jaeger).
 func (a App) exportOTEL() (tea.Model, tea.Cmd) {
-	if a.logsView == nil || a.evalSessionID == "" {
-		a.statusHint = "Open a trace first (l on an agent), then :export-otel"
+	turns := a.activeTraceTurns()
+	sessionID := a.activeTraceSessionID()
+	if len(turns) == 0 || sessionID == "" {
+		a.statusHint = "Open a trace first (l on an agent or Enter for split view), then :export-otel"
 		return a, nil
 	}
 
@@ -985,23 +987,20 @@ func (a App) exportOTEL() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	turns := a.logsView.Turns()
-	if len(turns) == 0 {
-		a.statusHint = "No trace data to export"
-		return a, nil
-	}
-
 	// Determine provider name from the current agent context
 	providerName := ""
 	selected := a.agentsView.Selected()
 	if selected != nil {
 		providerName = selected.ProviderName
 	}
+	if providerName == "" && a.sessionView != nil && a.sessionView.Agent() != nil {
+		providerName = a.sessionView.Agent().ProviderName
+	}
 
 	cfg := agentmuxotel.ExportConfig{
 		Endpoint:  endpoint,
 		Insecure:  a.cfg.Export.Insecure,
-		SessionID: a.evalSessionID,
+		SessionID: sessionID,
 		Provider:  providerName,
 	}
 
@@ -1616,6 +1615,34 @@ func (a App) renderStatusBar() string {
 		Background(lipgloss.Color("#111827")).
 		Width(a.width).
 		Render(hints)
+}
+
+// activeTraceTurns returns turns from whichever trace view is active:
+// standalone logs view (via `l`) or split trace pane (via Enter).
+func (a App) activeTraceTurns() []trace.Turn {
+	if a.logsView != nil {
+		return a.logsView.Turns()
+	}
+	if a.splitTrace != nil {
+		return a.splitTrace.Turns()
+	}
+	return nil
+}
+
+// activeTraceSessionID returns the session ID for the active trace context.
+func (a App) activeTraceSessionID() string {
+	if a.evalSessionID != "" {
+		return a.evalSessionID
+	}
+	// Derive from session view agent in split mode
+	if a.sessionView != nil && a.sessionView.Agent() != nil {
+		ag := a.sessionView.Agent()
+		if ag.SessionID != "" {
+			return ag.SessionID
+		}
+		return fmt.Sprintf("pid-%d", ag.PID)
+	}
+	return ""
 }
 
 // otelEnvForCmd merges OTEL env vars (from the provider's OTELEnv shell prefix)
