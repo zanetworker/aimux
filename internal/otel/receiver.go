@@ -27,6 +27,7 @@ type Receiver struct {
 	traceCount  int // number of /v1/traces requests received
 	logsCount   int // number of /v1/logs requests received
 	otherCount  int // number of other requests received
+	debugLog    []string // recent request log for diagnostics
 }
 
 // NewReceiver creates a new OTLP/HTTP receiver.
@@ -44,13 +45,14 @@ func (r *Receiver) Start() error {
 	mux.HandleFunc("/v1/traces", r.handleTraces)
 	mux.HandleFunc("/v1/logs", r.handleLogs)
 	mux.HandleFunc("/v1/metrics", r.handleMetrics) // accept but ignore metrics
+	mux.HandleFunc("/debug", r.handleDebug)        // diagnostic endpoint
 	// Catch-all: Gemini may send to "/" instead of signal-specific paths
 	// (known bug: github.com/google-gemini/gemini-cli/issues/15581)
 	mux.HandleFunc("/", r.handleFallback)
 
 	r.server = &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", r.port),
-		Handler:      mux,
+		Handler:      r.loggingMiddleware(mux),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
@@ -63,6 +65,37 @@ func (r *Receiver) Start() error {
 	}()
 
 	return nil
+}
+
+// loggingMiddleware records every incoming request for diagnostics.
+func (r *Receiver) loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		entry := fmt.Sprintf("%s %s %s cl=%d proto=%s",
+			time.Now().Format("15:04:05"),
+			req.Method, req.URL.Path,
+			req.ContentLength, req.Proto)
+		r.debugLog = append(r.debugLog, entry)
+		// Keep only last 50 entries
+		if len(r.debugLog) > 50 {
+			r.debugLog = r.debugLog[len(r.debugLog)-50:]
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
+// handleDebug returns receiver diagnostics as plain text.
+// Access via: curl http://localhost:4318/debug
+func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintf(w, "agentmux OTEL receiver debug\n")
+	fmt.Fprintf(w, "port: %d\n", r.port)
+	fmt.Fprintf(w, "traces: %d, logs: %d, other: %d\n", r.traceCount, r.logsCount, r.otherCount)
+	fmt.Fprintf(w, "store entries: %d\n", r.store.TraceCount())
+	fmt.Fprintf(w, "store conversations: %s\n", strings.Join(r.store.ConversationIDs(), ", "))
+	fmt.Fprintf(w, "\n--- recent requests (%d) ---\n", len(r.debugLog))
+	for _, entry := range r.debugLog {
+		fmt.Fprintf(w, "%s\n", entry)
+	}
 }
 
 // Stop shuts down the receiver.
@@ -332,9 +365,13 @@ func (r *Receiver) handleMetrics(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte("{}"))
 }
 
-// handleFallback tries to parse the body as traces, then logs.
+// handleFallback tries to parse the body as traces or logs.
 // Gemini CLI may send to "/" instead of signal-specific paths.
+// We detect the actual type by checking for non-empty inner records,
+// since protobuf can cross-deserialize between trace and log request
+// types (same field numbers) but only the correct type has inner data.
 func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
+	r.otherCount++
 	if req.Method != http.MethodPost {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -347,10 +384,9 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 	}
 	defer req.Body.Close()
 
-	// Try as traces first
+	// Try as traces -- check for actual spans (not just non-empty containers)
 	var traceReq collectorpb.ExportTraceServiceRequest
-	if err := proto.Unmarshal(body, &traceReq); err == nil && len(traceReq.ResourceSpans) > 0 {
-		// Re-wrap in a request and handle
+	if err := proto.Unmarshal(body, &traceReq); err == nil && hasValidSpans(&traceReq) {
 		for _, rs := range traceReq.ResourceSpans {
 			resourceAttrs := make(map[string]any)
 			if rs.Resource != nil {
@@ -370,9 +406,9 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Try as logs
+	// Try as logs -- check for actual log records
 	var logsReq collectorlogspb.ExportLogsServiceRequest
-	if err := proto.Unmarshal(body, &logsReq); err == nil && len(logsReq.ResourceLogs) > 0 {
+	if err := proto.Unmarshal(body, &logsReq); err == nil && hasValidLogRecords(&logsReq) {
 		for _, rl := range logsReq.ResourceLogs {
 			resourceAttrs := make(map[string]any)
 			if rl.Resource != nil {
@@ -397,6 +433,36 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 	// Unknown format -- accept silently
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("{}"))
+}
+
+// hasValidSpans checks if a trace request has actual spans (not cross-deserialized
+// log records). A valid span must have a non-empty TraceId.
+func hasValidSpans(req *collectorpb.ExportTraceServiceRequest) bool {
+	for _, rs := range req.ResourceSpans {
+		for _, ss := range rs.ScopeSpans {
+			for _, s := range ss.Spans {
+				if len(s.TraceId) > 0 {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasValidLogRecords checks if a logs request has actual log records (not
+// cross-deserialized spans). A valid log record must have a non-zero timestamp.
+func hasValidLogRecords(req *collectorlogspb.ExportLogsServiceRequest) bool {
+	for _, rl := range req.ResourceLogs {
+		for _, sl := range rl.ScopeLogs {
+			for _, lr := range sl.LogRecords {
+				if lr.TimeUnixNano > 0 {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // extractValue converts an OTLP AnyValue to a Go value.

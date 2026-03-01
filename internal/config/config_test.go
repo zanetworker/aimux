@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -144,27 +143,21 @@ func TestIsProviderEnabled(t *testing.T) {
 	}
 }
 
-func TestOTELEnvPrefix_Disabled(t *testing.T) {
+func TestOTELEndpoint_Disabled(t *testing.T) {
 	cfg := Default()
-	if prefix := cfg.OTELEnvPrefix(); prefix != "" {
-		t.Errorf("OTELEnvPrefix when disabled = %q, want empty", prefix)
+	if ep := cfg.OTELEndpoint(); ep != "" {
+		t.Errorf("OTELEndpoint when disabled = %q, want empty", ep)
 	}
 }
 
-func TestOTELEnvPrefix_Enabled(t *testing.T) {
+func TestOTELEndpoint_Enabled(t *testing.T) {
 	cfg := Default()
 	cfg.OTELReceiver.Enabled = true
 	cfg.OTELReceiver.Port = 4318
 
-	prefix := cfg.OTELEnvPrefix()
-	if prefix == "" {
-		t.Fatal("OTELEnvPrefix when enabled should not be empty")
-	}
-	if !strings.Contains(prefix, "CLAUDE_CODE_ENABLE_TELEMETRY=1") {
-		t.Errorf("prefix should contain CLAUDE_CODE_ENABLE_TELEMETRY=1, got %q", prefix)
-	}
-	if !strings.Contains(prefix, "http://localhost:4318") {
-		t.Errorf("prefix should contain endpoint, got %q", prefix)
+	ep := cfg.OTELEndpoint()
+	if ep != "http://localhost:4318" {
+		t.Errorf("OTELEndpoint = %q, want http://localhost:4318", ep)
 	}
 }
 

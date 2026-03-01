@@ -310,13 +310,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			// Create trace pane -- may be empty initially for new sessions
-			// but will populate as the agent produces trace data on ticks
+			// Create trace pane -- always start empty for new sessions.
+			// The tick handler will discover the session file once the agent
+			// creates one. Don't use FindSessionFile here because it would
+			// pick up an old session file from a previous run in the same dir.
 			leftW := a.width - rightW - 1
 			sessionFile := ""
-			if p != nil {
-				sessionFile = p.FindSessionFile(*newAgent)
-			}
 			a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
 			a.splitTrace.SetSize(leftW, a.height-1)
 
@@ -826,9 +825,19 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		contentW = 80
 	}
 
+	// Build OTEL env prefix for the provider (used by both PTY and tmux paths)
+	otelEnvPrefix := ""
+	if endpoint := a.cfg.OTELEndpoint(); endpoint != "" {
+		otelEnvPrefix = p.OTELEnv(endpoint)
+	}
+
 	// Pick backend: direct PTY for embeddable providers, tmux mirror for others
 	var backend terminal.SessionBackend
 	if p.CanEmbed() {
+		// Inject OTEL env vars into the command's environment
+		if otelEnvPrefix != "" {
+			cmd.Env = otelEnvForCmd(cmd, otelEnvPrefix)
+		}
 		sess, err := terminal.Start(cmd)
 		if err != nil {
 			a.statusHint = fmt.Sprintf("Error: %v", err)
@@ -841,7 +850,7 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		if selected.TMuxSession != "" {
 			backend, err = terminal.AttachTmux(selected.TMuxSession, contentW, contentH)
 		} else {
-			backend, err = terminal.StartTmux(cmd, contentW, contentH, a.cfg.ResolveShell(), a.cfg.OTELEnvPrefix())
+			backend, err = terminal.StartTmux(cmd, contentW, contentH, a.cfg.ResolveShell(), otelEnvPrefix)
 		}
 		if err != nil {
 			a.statusHint = fmt.Sprintf("Tmux mirror failed: %v", err)
@@ -1607,4 +1616,21 @@ func (a App) renderStatusBar() string {
 		Background(lipgloss.Color("#111827")).
 		Width(a.width).
 		Render(hints)
+}
+
+// otelEnvForCmd merges OTEL env vars (from the provider's OTELEnv shell prefix)
+// into a cmd.Env slice suitable for exec.Cmd. Starts from the current process
+// environment so the child inherits everything else.
+func otelEnvForCmd(cmd *exec.Cmd, shellPrefix string) []string {
+	env := os.Environ()
+	if cmd.Env != nil {
+		env = cmd.Env
+	}
+	// Parse "KEY=value KEY2=value2 " shell-style prefix into individual vars
+	for _, part := range strings.Fields(shellPrefix) {
+		if strings.Contains(part, "=") {
+			env = append(env, part)
+		}
+	}
+	return env
 }

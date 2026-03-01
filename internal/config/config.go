@@ -144,22 +144,12 @@ func (c Config) OTELReceiverPort() int {
 	return 4318
 }
 
-// OTELEnvPrefix returns shell env var declarations that configure spawned agents
-// to export OTEL traces back to agentmux's receiver. Returns "" if the receiver
-// is disabled. Works with Claude, Codex, and Gemini CLIs.
-func (c Config) OTELEnvPrefix() string {
+// OTELEndpoint returns the OTEL receiver endpoint URL, or "" if disabled.
+func (c Config) OTELEndpoint() string {
 	if !c.OTELReceiver.Enabled {
 		return ""
 	}
-	port := c.OTELReceiverPort()
-	endpoint := fmt.Sprintf("http://localhost:%d", port)
-	return fmt.Sprintf(
-		"CLAUDE_CODE_ENABLE_TELEMETRY=1 "+
-			"OTEL_EXPORTER_OTLP_ENDPOINT=%s "+
-			"OTEL_METRICS_EXPORTER=none "+
-			"OTEL_LOGS_EXPORTER=otlp ",
-		endpoint,
-	)
+	return fmt.Sprintf("http://localhost:%d", c.OTELReceiverPort())
 }
 
 // IsProviderEnabled returns true if the named provider is enabled in the config.

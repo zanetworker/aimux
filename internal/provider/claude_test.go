@@ -739,11 +739,25 @@ func TestClaudeSpawnCommand_DontAsk(t *testing.T) {
 func TestClaudeOTELEnv(t *testing.T) {
 	c := &Claude{}
 	env := c.OTELEnv("http://localhost:4318")
-	if !strings.Contains(env, "CLAUDE_CODE_ENABLE_TELEMETRY=1") {
-		t.Errorf("missing CLAUDE_CODE_ENABLE_TELEMETRY, got %q", env)
+
+	required := []string{
+		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+		"OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318",
+		"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://localhost:4318/v1/logs",
+		"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf",
+		"OTEL_LOGS_EXPORTER=otlp",
+		"OTEL_METRICS_EXPORTER=otlp",
 	}
-	if !strings.Contains(env, "http://localhost:4318") {
-		t.Errorf("missing endpoint, got %q", env)
+	for _, r := range required {
+		if !strings.Contains(env, r) {
+			t.Errorf("OTELEnv missing %q, got:\n%s", r, env)
+		}
+	}
+
+	// Verify we don't use "none" for any exporter (crashes some OTEL SDKs)
+	if strings.Contains(env, "=none") {
+		t.Errorf("OTELEnv should not set any exporter to 'none', got:\n%s", env)
 	}
 }
 

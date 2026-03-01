@@ -2,7 +2,9 @@ package tui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zanetworker/agentmux/internal/agent"
@@ -248,5 +250,105 @@ func TestLogsViewSetFilePath(t *testing.T) {
 	}
 	if lv.Turns()[0].UserLines[0] != "late discovery" {
 		t.Errorf("UserLines = %v, want [late discovery]", lv.Turns()[0].UserLines)
+	}
+}
+
+// TestOtelEnvForCmd verifies that otelEnvForCmd correctly merges
+// OTEL env vars from a shell-style prefix into cmd.Env.
+func TestOtelEnvForCmd(t *testing.T) {
+	cmd := exec.Command("echo", "test")
+
+	prefix := "CLAUDE_CODE_ENABLE_TELEMETRY=1 " +
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf " +
+		"OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 " +
+		"OTEL_LOGS_EXPORTER=otlp "
+
+	env := otelEnvForCmd(cmd, prefix)
+
+	required := map[string]string{
+		"CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+		"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+		"OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
+		"OTEL_LOGS_EXPORTER":          "otlp",
+	}
+
+	for key, want := range required {
+		found := false
+		for _, e := range env {
+			if strings.HasPrefix(e, key+"=") {
+				val := strings.TrimPrefix(e, key+"=")
+				if val != want {
+					t.Errorf("env %s = %q, want %q", key, val, want)
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("env missing %s=%s", key, want)
+		}
+	}
+
+	// Verify original env is preserved (should include PATH at minimum)
+	hasPath := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			hasPath = true
+			break
+		}
+	}
+	if !hasPath {
+		t.Error("env should preserve original process env (PATH missing)")
+	}
+}
+
+// TestOtelEnvForCmd_PreservesExisting verifies that otelEnvForCmd
+// preserves any env already set on the cmd.
+func TestOtelEnvForCmd_PreservesExisting(t *testing.T) {
+	cmd := exec.Command("echo")
+	cmd.Env = []string{"EXISTING=value", "PATH=/usr/bin"}
+
+	env := otelEnvForCmd(cmd, "NEW_VAR=1 ")
+
+	has := func(key string) bool {
+		for _, e := range env {
+			if strings.HasPrefix(e, key+"=") {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !has("EXISTING") {
+		t.Error("lost EXISTING env var")
+	}
+	if !has("NEW_VAR") {
+		t.Error("missing NEW_VAR")
+	}
+}
+
+// TestAllProvidersOTELEnvIncludeProtocol verifies that ALL providers'
+// OTELEnv methods include the http/protobuf protocol setting.
+// This is the root cause test -- without this protocol setting,
+// agents default to gRPC and our HTTP receiver can't handle it.
+func TestAllProvidersOTELEnvIncludeProtocol(t *testing.T) {
+	providers := []provider.Provider{
+		&provider.Claude{},
+		&provider.Codex{},
+		&provider.Gemini{},
+	}
+
+	endpoint := "http://localhost:4318"
+	for _, p := range providers {
+		env := p.OTELEnv(endpoint)
+		if !strings.Contains(env, "OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf") {
+			t.Errorf("%s.OTELEnv missing OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf:\n%s", p.Name(), env)
+		}
+		if !strings.Contains(env, endpoint) {
+			t.Errorf("%s.OTELEnv missing endpoint %s:\n%s", p.Name(), endpoint, env)
+		}
+		if !strings.Contains(env, "OTEL_LOGS_EXPORTER=otlp") {
+			t.Errorf("%s.OTELEnv missing OTEL_LOGS_EXPORTER=otlp:\n%s", p.Name(), env)
+		}
 	}
 }

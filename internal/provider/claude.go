@@ -514,19 +514,23 @@ func (c *Claude) SpawnArgs() SpawnArgs {
 }
 
 // OTELEnv returns env vars to enable Claude Code's OTEL tracing.
-// Forces http/protobuf protocol since agentmux's receiver is HTTP (port 4318),
-// not gRPC (port 4317 which is Claude's default).
+// Sets both generic and signal-specific endpoints with explicit paths
+// to avoid OTEL SDK path-appending issues across different Node.js
+// SDK versions. Uses http/protobuf protocol (port 4318).
 func (c *Claude) OTELEnv(endpoint string) string {
 	return fmt.Sprintf(
 		"CLAUDE_CODE_ENABLE_TELEMETRY=1 "+
 			"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf "+
 			"OTEL_EXPORTER_OTLP_ENDPOINT=%s "+
-			"OTEL_METRICS_EXPORTER=none "+
+			"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=%s/v1/logs "+
+			"OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf "+
+			"OTEL_METRICS_EXPORTER=otlp "+
 			"OTEL_LOGS_EXPORTER=otlp "+
 			"OTEL_LOG_USER_PROMPTS=1 "+
 			"OTEL_LOG_TOOL_DETAILS=1 "+
+			"OTEL_METRIC_EXPORT_INTERVAL=30000 "+
 			"OTEL_LOGS_EXPORT_INTERVAL=2000 ",
-		endpoint,
+		endpoint, endpoint,
 	)
 }
 

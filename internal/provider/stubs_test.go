@@ -798,8 +798,16 @@ func TestCodexSpawnCommand_ReadOnly(t *testing.T) {
 func TestCodexOTELEnv(t *testing.T) {
 	c := &Codex{}
 	env := c.OTELEnv("http://localhost:4318")
-	if !strings.Contains(env, "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318") {
-		t.Errorf("missing endpoint, got %q", env)
+
+	required := []string{
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+		"OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318",
+		"OTEL_LOGS_EXPORTER=otlp",
+	}
+	for _, r := range required {
+		if !strings.Contains(env, r) {
+			t.Errorf("OTELEnv missing %q, got:\n%s", r, env)
+		}
 	}
 }
 
@@ -820,11 +828,17 @@ func TestGeminiSpawnCommand_Sandbox(t *testing.T) {
 func TestGeminiOTELEnv(t *testing.T) {
 	g := &Gemini{}
 	env := g.OTELEnv("http://localhost:4318")
-	if !strings.Contains(env, "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318") {
-		t.Errorf("missing endpoint, got %q", env)
+
+	required := []string{
+		"GEMINI_CLI_TELEMETRY_ENABLED=true",
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf",
+		"OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318",
+		"OTEL_LOGS_EXPORTER=otlp",
 	}
-	if !strings.Contains(env, "GEMINI_CLI_TELEMETRY_ENABLED=true") {
-		t.Errorf("missing GEMINI_CLI_TELEMETRY_ENABLED, got %q", env)
+	for _, r := range required {
+		if !strings.Contains(env, r) {
+			t.Errorf("OTELEnv missing %q, got:\n%s", r, env)
+		}
 	}
 }
 

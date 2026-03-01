@@ -138,6 +138,24 @@ func (ss *SpanStore) LastUpdate() time.Time {
 	return ss.lastUpdate
 }
 
+// TraceCount returns the number of distinct trace IDs stored.
+func (ss *SpanStore) TraceCount() int {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return len(ss.byTraceID)
+}
+
+// ConversationIDs returns all conversation/session IDs in the store.
+func (ss *SpanStore) ConversationIDs() []string {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	ids := make([]string, 0, len(ss.byConversation))
+	for id := range ss.byConversation {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // AssembleTree builds parent-child relationships for all spans in a trace.
 // Call after all spans for a trace have been added.
 func (ss *SpanStore) AssembleTree(traceID string) *Span {
