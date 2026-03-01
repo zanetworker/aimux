@@ -101,6 +101,8 @@ Requires **Go 1.24+**. For the best experience, run inside tmux -- this enables 
 
 **Agent Launcher** -- press `:new` to spawn a new Claude, Codex, or Gemini session. Pick from recent project directories, choose model and mode, launch into tmux or iTerm.
 
+**Live OTEL Tracing** -- when the OTEL receiver is enabled, agents launched via `:new` send OpenTelemetry events directly to agentmux. The trace pane shows `[OTEL]` with live data -- user prompts, API requests, tool calls, and costs flowing in real time. Falls back to file-based parsing when OTEL isn't available. Debug the receiver anytime with `curl http://localhost:4318/debug`.
+
 **Cost Dashboard** -- aggregated token usage and estimated USD spend per project.
 
 ```
@@ -198,6 +200,11 @@ refresh_interval: "2s"        # discovery refresh rate
 default_runtime: tmux         # "tmux" or "iterm"
 shell: /bin/zsh               # login shell for spawning agents
 
+# OTEL receiver -- collects live telemetry from spawned agents
+otel:
+  enabled: true               # runs OTLP/HTTP receiver on this port
+  port: 4318                  # standard OTLP/HTTP port
+
 # OTEL export endpoint (for :export-otel)
 export:
   endpoint: "localhost:5000"  # MLflow, Jaeger, or any OTLP backend
@@ -246,16 +253,16 @@ See [docs/examples/mlflow-integration.md](docs/examples/mlflow-integration.md) f
 
 Each provider implements discovery, session management, and spawning through a common interface. Providers can be enabled or disabled via config.
 
-| Provider | Discovery | Session View | Trace | Cost | Spawn |
-|----------|-----------|--------------|-------|------|-------|
-| Claude | Process scan + JSONL | Split: direct PTY embed | Full (JSONL) | Full | `claude` CLI |
-| Codex | Process scan + JSONL | Split: tmux mirror | Full (JSONL) | Full | `codex` CLI |
-| Gemini | Process scan + JSON | Split: tmux mirror | User prompts (logs.json) | Full | `gemini` CLI |
+| Provider | Discovery | Session View | Trace | Cost | Spawn | OTEL |
+|----------|-----------|--------------|-------|------|-------|------|
+| Claude | Process scan + JSONL | Split: direct PTY embed | Full (JSONL + OTEL) | Full | `claude` CLI | Logs via http/protobuf |
+| Codex | Process scan + JSONL | Split: tmux mirror | Full (JSONL) | Full | `codex` CLI | Traces + logs |
+| Gemini | Process scan + JSON | Split: tmux mirror | User prompts (logs.json) | Full | `gemini` CLI | Traces + logs |
 
 <details>
 <summary><strong>Adding a new provider</strong></summary>
 
-Implement the `Provider` interface (8 methods), register in `app.go`, add to config defaults, and add model pricing:
+Implement the `Provider` interface (10 methods), register in `app.go`, add to config defaults, and add model pricing:
 
 ```go
 type Provider interface {
@@ -267,6 +274,8 @@ type Provider interface {
     RecentDirs(max int) []RecentDir
     SpawnCommand(dir, model, mode string) *exec.Cmd
     SpawnArgs() SpawnArgs
+    ParseTrace(filePath string) ([]trace.Turn, error)
+    OTELEnv(endpoint string) string
 }
 ```
 
@@ -283,6 +292,7 @@ agentmux reads everything from the filesystem. No daemon, no hooks, no modificat
 | Config | `~/.agentmux/config.yaml` | Provider settings, runtime prefs |
 | Process table | `ps aux` | PID, binary path, CLI flags, memory |
 | Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/` | Messages, tool calls, token usage |
+| OTEL receiver | `localhost:4318` (OTLP/HTTP) | Live events from spawned agents |
 | Teams | `~/.claude/teams/*/config.json` | Team membership |
 | tmux | `tmux list-sessions` | Session names for jump support |
 
@@ -308,6 +318,7 @@ For non-embeddable providers, `J` opens the session in a tmux split pane or iTer
 - [Lip Gloss](https://github.com/charmbracelet/lipgloss) -- Styling
 - [charmbracelet/x/vt](https://github.com/charmbracelet/x) -- VT emulator for PTY embedding
 - [creack/pty](https://github.com/creack/pty) -- PTY creation
+- [OpenTelemetry](https://opentelemetry.io/) -- OTLP/HTTP receiver and exporter
 
 ## License
 
