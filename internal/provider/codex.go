@@ -715,10 +715,11 @@ func (c *Codex) SpawnArgs() SpawnArgs {
 }
 
 // OTELEnv returns env vars to enable Codex CLI's OTEL tracing.
-// Codex respects the standard OTEL_EXPORTER_OTLP_ENDPOINT env var.
+// Forces http/protobuf protocol to match agentmux's HTTP receiver.
 func (c *Codex) OTELEnv(endpoint string) string {
 	return fmt.Sprintf(
-		"OTEL_EXPORTER_OTLP_ENDPOINT=%s ",
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf "+
+			"OTEL_EXPORTER_OTLP_ENDPOINT=%s ",
 		endpoint,
 	)
 }
