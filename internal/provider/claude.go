@@ -183,20 +183,69 @@ func newestJSONL(dir string, cutoff time.Time) (string, time.Time) {
 }
 
 // decodeDirKey attempts to reverse Claude's dir-key encoding. Claude encodes
-// working directory paths by replacing "/" and "." with "-". The result has a
-// leading "-" (from the leading "/"). This decoding is best-effort because the
-// encoding is lossy (hyphens in original path are indistinguishable from
-// replaced separators). Returns "" if the key doesn't look like an encoded path.
+// working directory paths by replacing "/" with "-". The result has a leading
+// "-" (from the leading "/"). This decoding tries the naive replacement first,
+// then progressively tries to fix common patterns (github.com, dots in paths)
+// by checking if the decoded path exists on disk.
 func decodeDirKey(key string) string {
 	if !strings.HasPrefix(key, "-") {
 		return ""
 	}
-	// Replace the leading "-" with "/" and each remaining "-" with "/".
-	// This produces a path like "/Users/foo/project" from
-	// "-Users-foo-project". It won't be exact when the original path
-	// contained hyphens or dots, but it's sufficient for matching against
-	// running agents' WorkingDir.
-	return strings.ReplaceAll(key, "-", "/")
+
+	// Naive: replace all hyphens with /
+	naive := strings.ReplaceAll(key, "-", "/")
+
+	// Check if it exists
+	if _, err := os.Stat(naive); err == nil {
+		return naive
+	}
+
+	// Try common fix: "github/com" -> "github.com"
+	fixed := strings.ReplaceAll(naive, "github/com", "github.com")
+	if _, err := os.Stat(fixed); err == nil {
+		return fixed
+	}
+
+	// Try reconstructing by walking from root. For each segment after the
+	// leading /, check if the segment exists. If not, try joining it with
+	// the next segment using "-" or "." instead of "/".
+	parts := strings.Split(naive[1:], "/") // skip leading /
+	path := "/"
+	for i := 0; i < len(parts); i++ {
+		candidate := filepath.Join(path, parts[i])
+		if _, err := os.Stat(candidate); err == nil {
+			path = candidate
+			continue
+		}
+		// Try joining with next segment using hyphen
+		if i+1 < len(parts) {
+			hyphenJoin := filepath.Join(path, parts[i]+"-"+parts[i+1])
+			if _, err := os.Stat(hyphenJoin); err == nil {
+				path = hyphenJoin
+				i++ // skip next part
+				continue
+			}
+			// Try dot join
+			dotJoin := filepath.Join(path, parts[i]+"."+parts[i+1])
+			if _, err := os.Stat(dotJoin); err == nil {
+				path = dotJoin
+				i++
+				continue
+			}
+		}
+		// Give up on reconstruction, use what we have
+		for j := i; j < len(parts); j++ {
+			path = filepath.Join(path, parts[j])
+		}
+		break
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+
+	// Last resort: return the naive decode
+	return naive
 }
 
 // deduplicateAgents groups SDK agents sharing the same (WorkingDir, Model) into
@@ -404,8 +453,13 @@ func (c *Claude) RecentDirs(max int) []RecentDir {
 		if newest.IsZero() {
 			continue
 		}
+		// Decode dir-key to absolute path
+		absPath := decodeDirKey(e.Name())
+		if absPath == "" {
+			absPath = e.Name() // fallback to raw key
+		}
 		dirs = append(dirs, RecentDir{
-			Path:     e.Name(),
+			Path:     absPath,
 			LastUsed: newest,
 		})
 	}
