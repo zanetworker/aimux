@@ -145,6 +145,11 @@ func NewLogsView(pid int, filePath string, parser TraceParser) *LogsView {
 	return v
 }
 
+// FilePath returns the current file path for the trace data source.
+func (v *LogsView) FilePath() string {
+	return v.filePath
+}
+
 // SetFilePath updates the file path for the trace data source.
 // Used when the session file isn't available at creation time
 // but is discovered later (e.g., newly launched agents).

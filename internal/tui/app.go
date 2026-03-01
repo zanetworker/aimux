@@ -230,8 +230,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Refresh live trace in split/zoomed mode
 		if a.zoomed && a.splitTrace != nil {
-			// If trace has no data yet, try to discover the session file
-			if len(a.splitTrace.Turns()) == 0 && a.sessionView != nil && a.sessionView.Agent() != nil {
+			// Keep trying to discover the session file until found.
+			// New sessions start with empty filePath (OTEL fills the gap),
+			// then switch to file parsing once the session file is created.
+			if a.splitTrace.FilePath() == "" && a.sessionView != nil && a.sessionView.Agent() != nil {
 				ag := a.sessionView.Agent()
 				if p := a.providerFor(ag.ProviderName); p != nil {
 					if sf := p.FindSessionFile(*ag); sf != "" {
