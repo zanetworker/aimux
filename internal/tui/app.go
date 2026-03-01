@@ -300,20 +300,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			// Try to create a trace pane (may be empty for new sessions)
+			// Create trace pane -- may be empty initially for new sessions
+			// but will populate as the agent produces trace data on ticks
+			leftW := a.width - rightW - 1
 			sessionFile := ""
 			if p != nil {
 				sessionFile = p.FindSessionFile(*newAgent)
 			}
-			if sessionFile != "" {
-				leftW := a.width - rightW - 1
-				a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
-				a.splitTrace.SetSize(leftW, a.height-1)
-			}
+			a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
+			a.splitTrace.SetSize(leftW, a.height-1)
 
 			a.zoomed = true
-			a.splitMode = sessionFile != "" // split if trace data available
-			a.splitFocus = "session"        // focus on session so user can type
+			a.splitMode = true       // always split -- trace fills in as data arrives
+			a.splitFocus = "session" // focus on session so user can type
 			a.layout.SetZoomed(true)
 			a.statusHint = fmt.Sprintf("Launched %s in %s", msg.Provider, name)
 			return a, teaCmd
