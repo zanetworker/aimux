@@ -1,78 +1,90 @@
 # agentmux -- Project Guide for Claude
 
+## Pre-Commit Checklist
+
+Before committing or pushing ANY code:
+1. Run `go build ./...` -- must compile with zero errors
+2. Run `go vet ./...` -- must pass with zero issues
+3. Run `go test ./... -timeout 30s` -- ALL packages must pass
+4. Check for missing tests: every new method, function, or behavior MUST have tests
+5. When fixing something for one provider, verify the same fix applies to all three (Claude, Codex, Gemini)
+
+Never push code that hasn't been built and tested. Never claim work is done without running the test suite.
+
 ## What This Is
 
-agentmux is a Go TUI tool that provides a k9s-style dashboard for managing multiple AI coding agent sessions. It discovers running agents (Claude, Codex, Gemini), displays their status, lets you zoom into live PTY sessions, view conversation traces, and track costs. Single binary, provider-extensible.
+agentmux is a Go TUI tool that provides a k9s-style dashboard for managing multiple AI coding agent sessions. It discovers running agents (Claude, Codex, Gemini), displays their status, lets you zoom into live sessions, view conversation traces, annotate agent behavior, and export traces via OTEL. Single binary, provider-extensible.
 
 ## Project Structure
 
 ```
-cmd/agentmux/main.go           # CLI entry point. Creates TUI app and runs it.
+cmd/agentmux/main.go           # CLI entry point
 internal/
-  agent/
-    agent.go                    # Agent struct, Status enum, SourceType, helper methods
-  cost/
-    tracker.go                  # Token-based cost estimation per model
-  discovery/
-    orchestrator.go             # Multi-provider discovery orchestrator
-    process.go                  # Process table scanning (ps aux)
-    session.go                  # Session file discovery (~/.claude/projects)
-    cwd.go                      # Working directory resolution for PIDs
-    tmux.go                     # tmux session discovery
+  agent/agent.go                # Agent struct, Status enum, SourceType
+  config/config.go              # Config struct, YAML loading (~/.agentmux/config.yaml)
+  cost/tracker.go               # Per-model pricing, cost estimation
+  discovery/                    # Process scanning, session file discovery, tmux
+  evaluation/                   # Annotation persistence, JSONL export
+  jump/                         # Session resumption (tmux split, iTerm2)
+  otel/
+    receiver.go                 # OTLP/HTTP receiver (port 4318)
+    store.go                    # Span data model + in-memory store
+    converter.go                # OTEL span -> trace.Turn bridge
+    exporter.go                 # trace.Turn -> OTLP/HTTP export
   provider/
-    provider.go                 # Provider interface + Segment/Role types
-    claude.go                   # Claude provider: discover, resume, parse conversation
-    codex.go                    # Codex provider stub
-    gemini.go                   # Gemini provider stub
-  jump/
-    resume.go                   # Session resumption logic
-    tmux.go                     # tmux split-pane jumping
-    iterm.go                    # iTerm2 split-pane via AppleScript
-  team/
-    reader.go                   # Team config reading (~/.claude/teams)
+    provider.go                 # Provider interface (10 methods)
+    claude.go                   # Claude: full discovery, PTY embed, JSONL parsing
+    codex.go                    # Codex: full discovery, tmux mirror, JSONL parsing
+    gemini.go                   # Gemini: full discovery, tmux mirror, JSON parsing
+    helpers.go                  # Shared helpers
+  spawn/spawn.go                # Launch agents into tmux/iTerm
+  team/reader.go                # Team config reading
   terminal/
-    embed.go                    # Embedded PTY management (creack/pty)
-    view.go                     # VT emulator rendering (charmbracelet/x/vt)
+    backend.go                  # SessionBackend interface
+    embed.go                    # Direct PTY backend (Claude)
+    tmux.go                     # Tmux mirror backend (Codex, Gemini)
+    view.go                     # VT emulator rendering
+  trace/trace.go                # Shared Turn/ToolSpan types
   tui/
-    app.go                      # Root Bubble Tea model, wires all views
-    layout.go                   # Layout engine (split view, zoomed, sub-views)
-    command.go                  # Command palette parsing and tab completion
-    styles.go                   # Shared TUI color constants and styles
+    app.go                      # Root Bubble Tea model
+    command.go                  # Command palette
     views/
-      agents.go                 # Agent list table with status, provider, model columns
-      preview.go                # Right-side preview pane with agent details
-      session.go                # Full-screen zoomed PTY session view
-      logs.go                   # Conversation trace viewer
-      costs.go                  # Cost dashboard aggregated by project
+      agents.go                 # Agent list table
+      preview.go                # Right-side preview pane
+      session.go                # Interactive session view
+      logs.go                   # Trace viewer with annotations
+      launcher.go               # Agent launcher overlay
+      costs.go                  # Cost dashboard
       teams.go                  # Teams overview
-      header.go                 # Top bar with status badges and breadcrumbs
-      help.go                   # Help overlay with keybindings
+      header.go                 # Top bar
+      help.go                   # Help overlay
 ```
 
 ## Key Patterns
 
-- **Provider interface**: All agent types implement `provider.Provider` with `Name()`, `Discover()`, `ResumeCommand()`, and `ParseConversation()`. The orchestrator calls all providers in parallel.
-- **Agent struct**: The `agent.Agent` struct is the universal data model. It includes `ProviderName` to identify which provider discovered it. All views operate on `[]agent.Agent`.
-- **Three-state layout**: The TUI has three layout modes: split view (agents + preview), zoomed session (full-screen PTY), and sub-views (costs, teams, help as full-screen non-interactive).
-- **PTY embedding**: When zooming into a session, the provider's `ResumeCommand()` builds an `exec.Cmd` which is run inside a creack/pty pseudo-terminal. Output is rendered through charmbracelet/x/vt into the Bubble Tea view. `Ctrl+]` zooms out without killing the process.
-- **Discovery refresh**: The orchestrator runs every 2 seconds via Bubble Tea's tick mechanism. Each provider scans for its processes, enriches with session data, and returns agents.
-- **Cost estimation**: Token counts come from session JSONL files. The cost tracker applies per-model rates (opus, sonnet, haiku) to estimate USD spend.
+- **Provider interface**: All agent types implement `provider.Provider` with 10 methods: Name, Discover, ResumeCommand, CanEmbed, FindSessionFile, RecentDirs, SpawnCommand, SpawnArgs, ParseTrace, OTELEnv. Adding a provider = one Go file + register in app.go.
+- **SessionBackend interface**: `terminal.SessionBackend` (Read/Write/Resize/Close/Alive) with two implementations: direct PTY (Claude) and tmux mirror (Codex/Gemini). `DirectRenderer` optional interface skips VT emulator for tmux.
+- **Trace parsing**: Each provider owns its parser via `ParseTrace`. Shared types in `internal/trace/`. LogsView receives a `TraceParser` function from app.go.
+- **OTEL dual mode**: File-based parsing is default (zero-config). OTEL receiver (port 4318) supplements when enabled. `parserForProvider` checks OTEL store first, falls back to files. Trace header shows [FILE] or [OTEL].
+- **Config**: `~/.agentmux/config.yaml` -- providers, shell, export endpoint, OTEL receiver. Each provider's `OTELEnv(endpoint)` returns the right env vars for its OTEL mechanism.
+- **Stable agent ordering**: `sort.SliceStable` with status priority (active first), then alphabetical. Cursor preserved by PID tracking.
 
 ## Building and Testing
 
 ```bash
 go build -o agentmux ./cmd/agentmux    # Build
-go test ./... -timeout 30s              # All tests
+go test ./... -timeout 30s              # All tests (107+ provider tests)
 make build                              # Build via Makefile
 make install                            # Build and copy to /usr/local/bin
 ```
 
 ## Adding a New Provider
 
-1. Create `internal/provider/yourprovider.go`
-2. Implement the `Provider` interface: `Name()`, `Discover()`, `ResumeCommand()`, `ParseConversation()`
-3. Register it in `tui/app.go` in the `NewApp()` constructor alongside Claude, Codex, Gemini
-4. The orchestrator and all views will pick it up automatically
+See `docs/adding-a-provider.md` for the full guide. Summary:
+1. Create `internal/provider/yourprovider.go` implementing all 10 Provider interface methods
+2. Register in `tui/app.go` `NewApp()` and `config/config.go` `Default()`
+3. Add model pricing to `cost/tracker.go`
+4. Add tests (compile-time interface check + all methods)
 
 ## Dependencies
 
@@ -80,9 +92,25 @@ make install                            # Build and copy to /usr/local/bin
 |---------|---------|
 | `charmbracelet/bubbletea` | TUI framework |
 | `charmbracelet/lipgloss` | Terminal styling |
-| `charmbracelet/x/vt` | VT emulator for embedded PTY rendering |
+| `charmbracelet/x/vt` | VT emulator for PTY rendering |
 | `creack/pty` | Pseudo-terminal creation |
+| `go.opentelemetry.io/otel` | OTEL span construction + export |
+| `go.opentelemetry.io/proto/otlp` | OTLP protobuf types for receiver |
+| `gopkg.in/yaml.v3` | Config file parsing |
 
-## Environment Variables
+## Key Config
 
-- `TERM` -- Set to `xterm-256color` in embedded PTY sessions.
+```yaml
+# ~/.agentmux/config.yaml
+providers:
+  claude: { enabled: true }
+  codex: { enabled: true }
+  gemini: { enabled: true }
+shell: /bin/zsh
+otel:
+  enabled: true
+  port: 4318
+export:
+  endpoint: "localhost:5000"
+  insecure: true
+```
