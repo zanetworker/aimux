@@ -39,6 +39,10 @@ func (r *Receiver) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", r.handleTraces)
 	mux.HandleFunc("/v1/logs", r.handleLogs)
+	mux.HandleFunc("/v1/metrics", r.handleMetrics) // accept but ignore metrics
+	// Catch-all: Gemini may send to "/" instead of signal-specific paths
+	// (known bug: github.com/google-gemini/gemini-cli/issues/15581)
+	mux.HandleFunc("/", r.handleFallback)
 
 	r.server = &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", r.port),
@@ -275,6 +279,84 @@ func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
 	}
 
 	return span
+}
+
+// handleMetrics accepts but ignores metrics -- we don't process them but
+// need to return 200 so the exporter doesn't error.
+func (r *Receiver) handleMetrics(w http.ResponseWriter, req *http.Request) {
+	if req.Method == http.MethodPost {
+		io.ReadAll(req.Body)
+		req.Body.Close()
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{}"))
+}
+
+// handleFallback tries to parse the body as traces, then logs.
+// Gemini CLI may send to "/" instead of signal-specific paths.
+func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	defer req.Body.Close()
+
+	// Try as traces first
+	var traceReq collectorpb.ExportTraceServiceRequest
+	if err := proto.Unmarshal(body, &traceReq); err == nil && len(traceReq.ResourceSpans) > 0 {
+		// Re-wrap in a request and handle
+		for _, rs := range traceReq.ResourceSpans {
+			resourceAttrs := make(map[string]any)
+			if rs.Resource != nil {
+				for _, kv := range rs.Resource.Attributes {
+					resourceAttrs[kv.Key] = extractValue(kv.Value)
+				}
+			}
+			for _, ss := range rs.ScopeSpans {
+				for _, ps := range ss.Spans {
+					span := protoSpanToSpan(ps, resourceAttrs)
+					r.store.Add(span)
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("{}"))
+		return
+	}
+
+	// Try as logs
+	var logsReq collectorlogspb.ExportLogsServiceRequest
+	if err := proto.Unmarshal(body, &logsReq); err == nil && len(logsReq.ResourceLogs) > 0 {
+		for _, rl := range logsReq.ResourceLogs {
+			resourceAttrs := make(map[string]any)
+			if rl.Resource != nil {
+				for _, kv := range rl.Resource.Attributes {
+					resourceAttrs[kv.Key] = extractValue(kv.Value)
+				}
+			}
+			for _, sl := range rl.ScopeLogs {
+				for _, lr := range sl.LogRecords {
+					span := logRecordToSpan(lr, resourceAttrs)
+					if span != nil {
+						r.store.Add(span)
+					}
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("{}"))
+		return
+	}
+
+	// Unknown format -- accept silently
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{}"))
 }
 
 // extractValue converts an OTLP AnyValue to a Go value.

@@ -334,12 +334,14 @@ func (g *Gemini) SpawnArgs() SpawnArgs {
 }
 
 // OTELEnv returns env vars to enable Gemini CLI's OTEL tracing.
-// Forces http/protobuf protocol to match agentmux's HTTP receiver.
+// Gemini exports traces, metrics, and logs.
 func (g *Gemini) OTELEnv(endpoint string) string {
 	return fmt.Sprintf(
 		"GEMINI_CLI_TELEMETRY_ENABLED=true "+
 			"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf "+
-			"OTEL_EXPORTER_OTLP_ENDPOINT=%s ",
+			"OTEL_EXPORTER_OTLP_ENDPOINT=%s "+
+			"OTEL_TRACES_EXPORTER=otlp "+
+			"OTEL_LOGS_EXPORTER=otlp ",
 		endpoint,
 	)
 }
