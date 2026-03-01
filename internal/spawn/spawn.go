@@ -42,6 +42,11 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error
 
 	sessionName := TmuxSessionName(providerName, dir)
 
+	// If session already exists, kill it first (user is re-launching)
+	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil {
+		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	}
+
 	// Run through a login shell with RC file sourced so shell functions
 	// and env vars are available (e.g., gemini() wrapper with Vertex AI config).
 	// Use Args[0] (the command name) instead of Path (absolute binary path)
