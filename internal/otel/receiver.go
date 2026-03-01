@@ -9,7 +9,9 @@ import (
 	"time"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	collectorlogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectorpb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -36,6 +38,7 @@ func NewReceiver(store *SpanStore, port int) *Receiver {
 func (r *Receiver) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", r.handleTraces)
+	mux.HandleFunc("/v1/logs", r.handleLogs)
 
 	r.server = &http.Server{
 		Addr:         fmt.Sprintf("127.0.0.1:%d", r.port),
@@ -158,6 +161,120 @@ func protoSpanToSpan(ps *tracepb.Span, resourceAttrs map[string]any) *Span {
 		Status:   status,
 		Attrs:    attrs,
 	}
+}
+
+// handleLogs processes incoming OTLP/HTTP POST /v1/logs requests.
+// Claude Code exports events (user_prompt, tool_result, api_request) via
+// the OTEL logs protocol. We convert these into our Span model so the
+// trace viewer can display them.
+func (r *Receiver) handleLogs(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer req.Body.Close()
+
+	var logsReq collectorlogspb.ExportLogsServiceRequest
+	if err := proto.Unmarshal(body, &logsReq); err != nil {
+		http.Error(w, "invalid protobuf", http.StatusBadRequest)
+		return
+	}
+
+	for _, resourceLogs := range logsReq.ResourceLogs {
+		// Extract resource attributes
+		resourceAttrs := make(map[string]any)
+		if resourceLogs.Resource != nil {
+			for _, kv := range resourceLogs.Resource.Attributes {
+				resourceAttrs[kv.Key] = extractValue(kv.Value)
+			}
+		}
+
+		for _, scopeLogs := range resourceLogs.ScopeLogs {
+			for _, logRecord := range scopeLogs.LogRecords {
+				span := logRecordToSpan(logRecord, resourceAttrs)
+				if span != nil {
+					r.store.Add(span)
+				}
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{}"))
+}
+
+// logRecordToSpan converts a Claude Code OTEL log event into a Span.
+// Claude events have attributes like session.id, event.name, tool_name, etc.
+func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
+	attrs := make(map[string]any)
+	for k, v := range resourceAttrs {
+		attrs[k] = v
+	}
+	for _, kv := range lr.Attributes {
+		attrs[kv.Key] = extractValue(kv.Value)
+	}
+
+	// Extract event name
+	eventName, _ := attrs["event.name"].(string)
+	if eventName == "" {
+		return nil
+	}
+
+	// Use session.id as the conversation ID for store indexing
+	sessionID, _ := attrs["session.id"].(string)
+	if sessionID != "" {
+		attrs["gen_ai.conversation.id"] = sessionID
+	}
+
+	ts := time.Unix(0, int64(lr.TimeUnixNano))
+
+	// Map Claude events to our span model
+	span := &Span{
+		SpanID:  fmt.Sprintf("log-%d", lr.TimeUnixNano),
+		TraceID: sessionID,
+		Name:    eventName,
+		Start:   ts,
+		End:     ts,
+		Status:  StatusOK,
+		Attrs:   attrs,
+	}
+
+	// Enrich based on event type
+	switch eventName {
+	case "user_prompt":
+		// Root-level event for the session
+		span.ParentID = ""
+		attrs["gen_ai.operation.name"] = "invoke_agent"
+		if prompt, ok := attrs["prompt"].(string); ok {
+			attrs["gen_ai.input.messages"] = prompt
+		}
+
+	case "api_request":
+		attrs["gen_ai.operation.name"] = "chat"
+		if model, ok := attrs["model"].(string); ok {
+			attrs["gen_ai.request.model"] = model
+		}
+
+	case "tool_result":
+		attrs["gen_ai.operation.name"] = "execute_tool"
+		if toolName, ok := attrs["tool_name"].(string); ok {
+			attrs["gen_ai.tool.name"] = toolName
+		}
+		if success, ok := attrs["success"].(string); ok && success == "false" {
+			span.Status = StatusError
+		}
+
+	case "api_error":
+		span.Status = StatusError
+	}
+
+	return span
 }
 
 // extractValue converts an OTLP AnyValue to a Go value.

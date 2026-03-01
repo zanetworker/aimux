@@ -522,7 +522,10 @@ func (c *Claude) OTELEnv(endpoint string) string {
 			"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf "+
 			"OTEL_EXPORTER_OTLP_ENDPOINT=%s "+
 			"OTEL_METRICS_EXPORTER=none "+
-			"OTEL_LOGS_EXPORTER=otlp ",
+			"OTEL_LOGS_EXPORTER=otlp "+
+			"OTEL_LOG_USER_PROMPTS=1 "+
+			"OTEL_LOG_TOOL_DETAILS=1 "+
+			"OTEL_LOGS_EXPORT_INTERVAL=2000 ",
 		endpoint,
 	)
 }

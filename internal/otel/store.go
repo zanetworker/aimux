@@ -89,18 +89,23 @@ func (ss *SpanStore) Add(span *Span) {
 	ss.byTraceID[span.TraceID] = append(ss.byTraceID[span.TraceID], span)
 	ss.lastUpdate = time.Now()
 
-	// Index by conversation ID if present
-	if convID := span.AttrStr("gen_ai.conversation.id"); convID != "" {
-		if span.ParentID == "" {
-			// Root span — store as the conversation root
-			ss.byConversation[convID] = span
-		}
+	// Index by conversation/session ID
+	convID := span.AttrStr("gen_ai.conversation.id")
+	if convID == "" {
+		convID = span.AttrStr("agentmux.session_id")
 	}
 
-	// Also index by agentmux session ID
-	if sessID := span.AttrStr("agentmux.session_id"); sessID != "" {
-		if span.ParentID == "" {
-			ss.byConversation[sessID] = span
+	if convID != "" {
+		if existing, ok := ss.byConversation[convID]; ok {
+			// Session already has a root.
+			// For log events (no explicit parent), auto-attach as children.
+			if span.ParentID == "" && span.SpanID != existing.SpanID {
+				existing.Children = append(existing.Children, span)
+				span.ParentID = existing.SpanID
+			}
+		} else if span.ParentID == "" {
+			// First span for this session -- becomes root
+			ss.byConversation[convID] = span
 		}
 	}
 }
