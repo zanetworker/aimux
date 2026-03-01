@@ -513,7 +513,6 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Route keys to trace pane when focused (both split and fullscreen trace)
-	// Must come before export intercept so note mode can use all keys
 	if a.splitFocus == "trace" && a.splitTrace != nil {
 		// Intercept "e" for export only when NOT in note/filter input mode
 		if key == "e" && !a.splitTrace.HasActiveFilter() && !a.splitTrace.NoteMode() {
@@ -523,13 +522,6 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		cmd := a.splitTrace.Update(msg)
 		return a, cmd
-	}
-
-	// Export menu -- "e" when session pane is focused
-	if key == "e" && a.splitTrace != nil {
-		a.exportConfirm = true
-		a.statusHint = "Export: j:JSONL  o:OTEL  Esc:cancel"
-		return a, nil
 	}
 
 	// Send to PTY session
@@ -1601,7 +1593,7 @@ func (a App) renderSplitView() string {
 	} else if focus == "trace" {
 		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  e:export"
 	} else {
-		focusHint = " [SESSION] typing goes to agent  e:export"
+		focusHint = " [SESSION] typing goes to agent"
 	}
 	hints := hintStyle.Render(focusHint + "  Tab:switch  Ctrl+f:fullscreen  Esc:exit")
 	statusGap := a.width - lipgloss.Width(badge) - lipgloss.Width(hints)
