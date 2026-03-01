@@ -512,21 +512,24 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Export menu -- "e" in split view shows export options
-	if key == "e" && a.splitTrace != nil {
-		if a.exportConfirm {
-			// Already showing menu, ignore
+	// Route keys to trace pane when focused (both split and fullscreen trace)
+	// Must come before export intercept so note mode can use all keys
+	if a.splitFocus == "trace" && a.splitTrace != nil {
+		// Intercept "e" for export only when NOT in note/filter input mode
+		if key == "e" && !a.splitTrace.HasActiveFilter() && !a.splitTrace.NoteMode() {
+			a.exportConfirm = true
+			a.statusHint = "Export: j:JSONL  o:OTEL  Esc:cancel"
 			return a, nil
 		}
+		cmd := a.splitTrace.Update(msg)
+		return a, cmd
+	}
+
+	// Export menu -- "e" when session pane is focused
+	if key == "e" && a.splitTrace != nil {
 		a.exportConfirm = true
 		a.statusHint = "Export: j:JSONL  o:OTEL  Esc:cancel"
 		return a, nil
-	}
-
-	// Route keys to trace pane when focused (both split and fullscreen trace)
-	if a.splitFocus == "trace" && a.splitTrace != nil {
-		cmd := a.splitTrace.Update(msg)
-		return a, cmd
 	}
 
 	// Send to PTY session
@@ -1586,14 +1589,19 @@ func (a App) renderSplitView() string {
 	focus := a.splitFocus
 	hintStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	var focusHint string
-	if focus == "trace" && a.splitTrace != nil && a.splitTrace.NoteMode() {
+	if a.statusHint != "" {
+		// Show export menu or other status messages
+		focusHint = " " + a.statusHint
+	} else if a.commandMode {
+		focusHint = " :" + a.commandInput + "█"
+	} else if focus == "trace" && a.splitTrace != nil && a.splitTrace.NoteMode() {
 		noteText, noteTurn := a.splitTrace.NoteInput()
 		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
 		focusHint = noteStyle.Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + noteStyle.Render("|")
 	} else if focus == "trace" {
 		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  e:export"
 	} else {
-		focusHint = " [SESSION] typing goes to agent"
+		focusHint = " [SESSION] typing goes to agent  e:export"
 	}
 	hints := hintStyle.Render(focusHint + "  Tab:switch  Ctrl+f:fullscreen  Esc:exit")
 	statusGap := a.width - lipgloss.Width(badge) - lipgloss.Width(hints)
