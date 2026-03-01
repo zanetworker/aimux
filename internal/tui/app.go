@@ -1206,7 +1206,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  l:logs  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
+		a.headerView.SetHint("Enter:open  l:traces  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  N:note  :export  Esc:back  ?:more")
 	case viewCosts:
@@ -1444,10 +1444,10 @@ func (a App) renderStatusBar() string {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  :new:launch  x:kill  l:logs  ?:help",
+			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  :new:launch  x:kill  l:traces  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " j/k:nav  Enter:open  :new:launch  x:kill  l:logs  s:sort  ?:help  q:quit"
+			hints = " j/k:nav  Enter:open  :new:launch  x:kill  l:traces  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)

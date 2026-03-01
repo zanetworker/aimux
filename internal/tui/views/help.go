@@ -49,7 +49,7 @@ func (v *HelpView) View() string {
 	b.WriteString("\n")
 	writeHelp(&b, "j/k", "Move cursor down/up")
 	writeHelp(&b, "Enter", "Open split view (trace + session)")
-	writeHelp(&b, "l", "Open logs/trace viewer (full screen)")
+	writeHelp(&b, "l", "Open trace viewer (full screen)")
 	writeHelp(&b, ":new / :n", "Launch new agent (provider, dir, options)")
 	writeHelp(&b, "x", "Kill selected agent (with confirmation)")
 	writeHelp(&b, "s", "Sort: cycle Name/Cost/Age/Model/PID")
