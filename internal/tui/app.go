@@ -283,7 +283,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.Note != "" {
 					hint += fmt.Sprintf(" \"%s\"", msg.Note)
 				}
-				hint += "  a:cycle  N:note  :export"
+				hint += "  a:cycle  N:note  :export  :export-otel"
 				a.statusHint = hint
 			}
 		}
@@ -1093,7 +1093,7 @@ func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, t
 	a.logsView.SetNotes(noteMap)
 
 	label := fmt.Sprintf("Trace [%s: %s]", ag.ProviderName, ag.ShortProject())
-	a.statusHint = "J:jump to session  :export  a:annotate  N:note"
+	a.statusHint = "J:jump  a:annotate  N:note  :export  :export-otel"
 	return a.navigateTo(viewLogs, label)
 }
 
@@ -1208,7 +1208,7 @@ func (a App) View() string {
 	case viewAgents:
 		a.headerView.SetHint("Enter:open  t:traces  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
 	case viewLogs:
-		a.headerView.SetHint("j/k:scroll  Space:next  Enter:expand  a:annotate  N:note  :export  Esc:back  ?:more")
+		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
@@ -1384,7 +1384,7 @@ func (a App) renderSplitView() string {
 		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
 		focusHint = noteStyle.Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + noteStyle.Render("|")
 	} else if focus == "trace" {
-		focusHint = " [TRACE] j/k:turns  Enter:expand  a:annotate  N:note  /:filter"
+		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  :export-otel"
 	} else {
 		focusHint = " [SESSION] typing goes to agent"
 	}
@@ -1443,7 +1443,7 @@ func (a App) renderStatusBar() string {
 	if a.statusHint != "" {
 		hints = " " + lipgloss.NewStyle().Foreground(colorWaiting).Render(a.statusHint)
 	} else if a.currentView == viewLogs {
-		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  c:collapse  :export  Esc:back"
+		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
