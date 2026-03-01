@@ -1100,6 +1100,8 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				a.statusHint = fmt.Sprintf("Kill failed: %v", err)
 			} else {
+				// Also hide so the idle session file doesn't reappear
+				a.hideAgent(target)
 				a.statusHint = fmt.Sprintf("Killed %s (PID %d)", target.ShortProject(), target.PID)
 			}
 		}
