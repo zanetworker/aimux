@@ -1487,7 +1487,11 @@ func (a App) renderStatusBar() string {
 
 	var hints string
 	if a.statusHint != "" {
-		hints = " " + lipgloss.NewStyle().Foreground(colorWaiting).Render(a.statusHint)
+		hintColor := colorWaiting
+		if strings.Contains(a.statusHint, "failed") || strings.Contains(a.statusHint, "Error") {
+			hintColor = lipgloss.Color("#EF4444") // red for errors
+		}
+		hints = " " + lipgloss.NewStyle().Foreground(hintColor).Bold(true).Render(a.statusHint)
 	} else if a.currentView == viewLogs {
 		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
 	} else {
