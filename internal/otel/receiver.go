@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -224,10 +225,22 @@ func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
 		attrs[kv.Key] = extractValue(kv.Value)
 	}
 
-	// Extract event name
-	eventName, _ := attrs["event.name"].(string)
+	// Extract event name from multiple sources:
+	// 1. LogRecord.EventName field (OTLP spec field 12)
+	// 2. "event.name" attribute (Claude Code convention)
+	// 3. Body string value as fallback
+	eventName := lr.EventName
 	if eventName == "" {
-		return nil
+		eventName, _ = attrs["event.name"].(string)
+	}
+	if eventName == "" && lr.Body != nil {
+		if sv, ok := lr.Body.Value.(*commonpb.AnyValue_StringValue); ok {
+			eventName = sv.StringValue
+		}
+	}
+	if eventName == "" {
+		// Accept any log record even without event name -- store raw attributes
+		eventName = "unknown_event"
 	}
 
 	// Use session.id as the conversation ID for store indexing
@@ -249,10 +262,15 @@ func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
 		Attrs:   attrs,
 	}
 
+	// Normalize event name: strip "claude_code." prefix for matching
+	shortName := eventName
+	if idx := strings.LastIndex(eventName, "."); idx >= 0 {
+		shortName = eventName[idx+1:]
+	}
+
 	// Enrich based on event type
-	switch eventName {
+	switch shortName {
 	case "user_prompt":
-		// Root-level event for the session
 		span.ParentID = ""
 		attrs["gen_ai.operation.name"] = "invoke_agent"
 		if prompt, ok := attrs["prompt"].(string); ok {
@@ -263,6 +281,15 @@ func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
 		attrs["gen_ai.operation.name"] = "chat"
 		if model, ok := attrs["model"].(string); ok {
 			attrs["gen_ai.request.model"] = model
+		}
+		if tokens, ok := attrs["input_tokens"]; ok {
+			attrs["gen_ai.usage.input_tokens"] = tokens
+		}
+		if tokens, ok := attrs["output_tokens"]; ok {
+			attrs["gen_ai.usage.output_tokens"] = tokens
+		}
+		if cost, ok := attrs["cost_usd"]; ok {
+			attrs["gen_ai.usage.cost"] = cost
 		}
 
 	case "tool_result":
@@ -276,6 +303,9 @@ func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
 
 	case "api_error":
 		span.Status = StatusError
+
+	case "tool_decision":
+		attrs["gen_ai.operation.name"] = "tool_decision"
 	}
 
 	return span
