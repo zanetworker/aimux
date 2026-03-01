@@ -228,8 +228,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			a.previewPane.Reload()
 		}
-		// Refresh live trace in split mode
-		if a.splitMode && a.splitTrace != nil {
+		// Refresh live trace in split/zoomed mode
+		if a.zoomed && a.splitTrace != nil {
 			// If trace has no data yet, try to discover the session file
 			if len(a.splitTrace.Turns()) == 0 && a.sessionView != nil && a.sessionView.Agent() != nil {
 				ag := a.sessionView.Agent()
@@ -584,16 +584,29 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 	return func(filePath string) ([]trace.Turn, error) {
 		// Check OTEL store for live data
 		if a.otelStore != nil && a.otelStore.HasData() {
-			// Try to find spans matching this session
-			selected := a.agentsView.Selected()
-			if selected != nil {
-				sessionID := selected.SessionID
-				if sessionID != "" {
-					if root := a.otelStore.GetByConversation(sessionID); root != nil {
-						turns := agentmuxotel.SpansToTurns(root)
-						if len(turns) > 0 {
-							return turns, nil
-						}
+			// Try multiple session identifiers to find OTEL data
+			var sessionIDs []string
+
+			// From dashboard selection
+			if selected := a.agentsView.Selected(); selected != nil && selected.SessionID != "" {
+				sessionIDs = append(sessionIDs, selected.SessionID)
+			}
+			// From session view (for :new launches where agent isn't in dashboard yet)
+			if a.sessionView != nil && a.sessionView.Agent() != nil {
+				ag := a.sessionView.Agent()
+				if ag.SessionID != "" {
+					sessionIDs = append(sessionIDs, ag.SessionID)
+				}
+				if ag.TMuxSession != "" {
+					sessionIDs = append(sessionIDs, ag.TMuxSession)
+				}
+			}
+
+			for _, id := range sessionIDs {
+				if root := a.otelStore.GetByConversation(id); root != nil {
+					turns := agentmuxotel.SpansToTurns(root)
+					if len(turns) > 0 {
+						return turns, nil
 					}
 				}
 			}
