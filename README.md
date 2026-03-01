@@ -2,21 +2,13 @@
   <img src="assets/logo.png" width="128" alt="agentmux logo">
   <br>
   <strong>agentmux</strong><br>
-  <sub>Launch, observe, and debug your AI coding agents from one terminal.</sub>
+  <sub>k9s for your AI coding agents. Launch, observe, and debug from one terminal.</sub>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/go-1.24%2B-00ADD8?style=flat-square&logo=go" alt="Go 1.24+">
 </p>
-
-agentmux is an agent-agnostic CLI dashboard that gives you one place to launch, monitor, and trace AI coding agents -- Claude, Codex, Gemini, or any provider you plug in. Think k9s, but for your coding agents instead of your pods.
-
-**One-stop launcher** -- spawn agents into tmux or iTerm from a single command palette. Pick the provider, model, mode, and project directory. No context switching, no hunting through tabs, no remembering CLI flags.
-
-**Tracing and observability** -- see exactly what each agent is doing in real time without leaving your terminal. Inspect conversation traces turn by turn, see which tools were called, catch mistakes as they happen, and debug agent behavior without digging through log files.
-
-**Agent-agnostic** -- not locked into one vendor. Works with any CLI-based AI agent through a pluggable provider interface. Swap between Claude, Codex, and Gemini from the same seat. Enable or disable providers via config. Adding a new one is a single Go file.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -40,35 +32,6 @@ agentmux is an agent-agnostic CLI dashboard that gives you one place to launch, 
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-<!-- TODO: replace with a real terminal recording (GIF or SVG via vhs/asciinema) -->
-
-## Table of Contents
-
-- [Table of Contents](#table-of-contents)
-- [Why](#why)
-- [Quick Start](#quick-start)
-- [Features](#features)
-- [Key Bindings](#key-bindings)
-- [Configuration](#configuration)
-- [Provider System](#provider-system)
-- [Architecture](#architecture)
-- [Built With](#built-with)
-- [License](#license)
-
-## Why
-
-You're running 5 agents across 3 projects. Claude is refactoring your auth module. Codex is writing tests in another repo. A third Claude session is idle -- or is it stuck on a permission prompt? You don't know, because each one lives in its own tab, its own terminal, its own world.
-
-You're blind. You're context-switching constantly between terminals, UIs, etc. And when an agent quietly deletes a file it shouldn't have, you won't notice until your build breaks.
-
-**agentmux is your control plane.** One terminal. Every agent. Full visibility.
-
-- **See everything at once** -- which agents are running, which are idle, which are waiting for input. Status, model, cost, project -- all in one view.
-- **Trace what happened** -- every prompt, every response, every tool call. When an agent makes a mistake, you see exactly where it went wrong.
-- **Launch from here** -- spawn a new Claude, Codex, or Gemini session without opening another terminal, without remembering flags, without breaking flow.
-- **Stay in your terminal** -- no browser tabs, no separate dashboards, no context switching. It's all right here.
-- **Bring your own agent** -- agentmux ships with Claude, Codex, and Gemini, but the provider interface is open. Add support for your favorite agent in a single Go file and it plugs into discovery, tracing, launching, and the full dashboard -- no fork required.
-
 ## Quick Start
 
 ```bash
@@ -78,159 +41,108 @@ make install       # builds and copies to /usr/local/bin
 agentmux           # launch the TUI
 ```
 
-Requires **Go 1.24+**. For the best experience, run inside tmux -- this enables split-pane session embedding.
+Requires **Go 1.24+** and **tmux** for split-pane session embedding.
 
 ## Features
 
-**Discovery** -- automatically finds running Claude, Codex, and Gemini processes. Enriches each with session data, model, token usage, git branch, and permission mode. Refreshes every 2 seconds.
+### Discovery
 
-**Conversation Trace** -- press `t` on any agent to see a chronological view of user prompts, assistant responses, and tool calls. Filter with `/`, annotate turns with `a`, add notes with `N`.
+Auto-finds running Claude, Codex, and Gemini processes. Shows status, model, tokens, cost, git branch, and permission mode. Refreshes every 2s.
 
-```
- 17:32:28 USER fix the authentication bug in login.go
- 17:32:37 ASST I'll look at the login.go file to understand the issue.
- 17:32:38 TOOL Read /src/auth/login.go
- 17:32:41 ASST Found the issue. The token validation is missing...
- 17:32:45 TOOL Edit /src/auth/login.go   [BAD] "deleted wrong file"
- 17:32:50 ASST Fixed. The tests pass now.
-```
+### Split View
 
-**Session Embedding** -- press `Enter` on any agent to open a split view: live trace on the left, interactive session on the right. Works for all providers -- Claude uses direct PTY, Codex and Gemini use tmux mirror.
+Press `Enter` on any agent to open **trace + session** side by side. Live trace on the left, interactive session on the right. Claude uses direct PTY embedding, Codex and Gemini use tmux mirror.
 
-**Annotations and Export** -- label turns as GOOD, BAD, or WASTE while watching agents work. Add free-text notes explaining why. Export traces with annotations via `:export` (JSONL to disk) or `:export-otel` (OTLP/HTTP to MLflow, Jaeger, Grafana, or any OTEL backend).
+### Conversation Trace
 
-**Agent Launcher** -- press `:new` to spawn a new Claude, Codex, or Gemini session. Pick from recent project directories, choose model and mode, launch into tmux or iTerm.
-
-**Live OTEL Tracing** -- when the OTEL receiver is enabled, agents launched via `:new` send OpenTelemetry events directly to agentmux. The trace pane shows `[OTEL]` with live data -- user prompts, API requests, tool calls, and costs flowing in real time. Falls back to file-based parsing when OTEL isn't available. Debug the receiver anytime with `curl http://localhost:4318/debug`.
-
-**Cost Dashboard** -- aggregated token usage and estimated USD spend per project.
+Full turn-by-turn view of prompts, responses, and tool calls:
 
 ```
- PROJECT              AGENT      MODEL       TOKENS IN   TOKENS OUT   COST
- demoharness          claude     opus-4.6    245.0K      48.0K        $7.28
- claudetopus          claude     opus-4.6    128.0K      22.0K        $3.57
- app-interface        claude     opus-4.6    45.0K       8.0K         $1.28
- ────────────────────────────────────────────────────────────────────────
- TOTAL                                       418.0K      78.0K        $12.13
+ 17:32 USER  fix the authentication bug in login.go
+ 17:32 ASST  I'll look at the login.go file...
+ 17:32 TOOL  Read /src/auth/login.go
+ 17:32 TOOL  Edit /src/auth/login.go   [BAD] "deleted wrong file"
 ```
 
-**Teams** -- view Claude Code team configurations and their members.
+### Annotations
+
+Label turns as **GOOD**, **BAD**, or **WASTE** while watching agents work. Add free-text notes. Annotations persist to disk and export with traces.
+
+### Export to MLflow
+
+Press `e` in the trace pane to export:
+- **`j`** JSONL to `~/.agentmux/exports/`
+- **`o`** OTLP to MLflow, Jaeger, or any OTEL backend
+
+Annotations become MLflow feedback assessments for building eval datasets.
+
+### Agent Launcher
+
+Press `:new` to spawn agents. Pick provider, model, mode, and project directory. Launches into tmux with OTEL telemetry enabled.
+
+### Cost Dashboard
+
+Aggregated token usage and estimated USD spend per project:
+
+```
+ PROJECT        AGENT   MODEL      IN       OUT      COST
+ claudetopus    claude  opus-4.6   128.0K   22.0K    $3.57
+ trustyai       claude  sonnet     45.0K    8.0K     $1.28
+ ─────────────────────────────────────────────────────────
+ TOTAL                             173.0K   30.0K    $4.85
+```
+
+### OTEL Receiver
+
+Built-in OTLP/HTTP receiver on port 4318 collects live telemetry from spawned agents. Debug anytime: `curl http://localhost:4318/debug`
+
+### Teams
+
+View Claude Code team configurations and members.
 
 ## Key Bindings
 
-<details>
-<summary><strong>Navigation</strong></summary>
-
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Move cursor down / up |
-| `g` / `G` | Jump to top / bottom |
-| `Enter` | Zoom into agent session (split view with trace + PTY) |
-| `J` | Jump to session in external terminal pane |
-| `Ctrl+]` / `Esc` | Zoom out (keep session alive) |
-| `t` | View conversation trace |
-| `x` | Kill agent process |
-| `/` | Filter agents |
-| `s` | Cycle sort order |
-| `?` | Show help |
-| `q` | Quit |
-
-</details>
-
-<details>
-<summary><strong>Split View (zoomed session)</strong></summary>
-
-| Key | Action |
-|-----|--------|
-| `Tab` | Switch focus between trace and session panes |
-| `Ctrl+f` | Toggle fullscreen on focused pane |
-| `e` | Export menu (when trace pane focused): `j` JSONL, `o` OTEL |
-| `Esc` / `Ctrl+]` | Exit split view |
-
-</details>
-
-<details>
-<summary><strong>Trace View</strong></summary>
-
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Scroll line by line |
-| `d` / `u` | Page down / page up |
-| `g` / `G` | Jump to top / bottom (G follows latest) |
-| `Enter` / `Space` | Expand / collapse turn |
-| `/` | Search / filter |
-| `a` | Annotate turn (GOOD / BAD / WASTE) |
-| `N` | Add/edit note on annotated turn |
-| `c` | Collapse all turns |
-
-</details>
-
-<details>
-<summary><strong>Commands (press <code>:</code>)</strong></summary>
-
-| Command | Alias | Action |
-|---------|-------|--------|
-| `:instances` | `:i` | Agent list |
-| `:traces` | `:l` | Conversation trace |
-| `:teams` | `:t` | Teams overview |
-| `:costs` | `:c` | Cost dashboard |
-| `:new` | | Launch new agent |
-| `:export` | | Export trace + annotations as JSONL |
-| `:export-otel` | | Export trace + annotations via OTLP to configured endpoint |
-| `:help` | `:?` | Help |
-| `:quit` | `:q` | Exit |
-
-Tab completion works in the command palette.
-
-</details>
+| Key | Where | Action |
+|-----|-------|--------|
+| `j`/`k` | Everywhere | Navigate up/down |
+| `Enter` | Agent list | Split view (trace + session) |
+| `l` | Agent list | Standalone trace view |
+| `Tab` | Split view | Switch focus between panes |
+| `e` | Trace pane | Export menu (`j`:JSONL, `o`:OTEL) |
+| `a` | Trace pane | Annotate turn (GOOD/BAD/WASTE) |
+| `N` | Trace pane | Add note to annotated turn |
+| `Ctrl+f` | Split view | Toggle fullscreen on focused pane |
+| `x` | Agent list | Kill agent |
+| `:new` | Anywhere | Launch new agent |
+| `Esc` | Split/trace | Exit to agent list |
+| `?` | Anywhere | Help |
 
 ## Configuration
 
-agentmux looks for `~/.agentmux/config.yaml`. All settings are optional -- if the file doesn't exist, all providers are enabled with sensible defaults.
+`~/.agentmux/config.yaml` -- all settings optional:
 
 ```yaml
 providers:
-  claude:
-    enabled: true
-  codex:
-    enabled: true
-  gemini:
-    enabled: false            # disable providers you don't use
+  claude: { enabled: true }
+  codex:  { enabled: true }
+  gemini: { enabled: false }
 
-refresh_interval: "2s"        # discovery refresh rate
-default_runtime: tmux         # "tmux" or "iterm"
-shell: /bin/zsh               # login shell for spawning agents
+shell: /bin/zsh
 
-# OTEL receiver -- collects live telemetry from spawned agents
+# OTEL receiver (collects telemetry from spawned agents)
 otel:
-  enabled: true               # runs OTLP/HTTP receiver on this port
-  port: 4318                  # standard OTLP/HTTP port
+  enabled: true
+  port: 4318
 
-# OTEL export endpoint (for e -> o in split view, or :export-otel)
+# Export destination (MLflow, Jaeger, etc.)
 export:
-  endpoint: "localhost:5001"  # MLflow, Jaeger, or any OTLP backend
-  insecure: true              # true for HTTP (no TLS)
-  experiment_id: "1"          # MLflow experiment ID (required for MLflow)
+  endpoint: "localhost:5001"
+  insecure: true
+  experiment_id: "1"          # MLflow experiment ID
 ```
 
 <details>
-<summary><strong>Custom binary paths</strong></summary>
-
-Override the binary location for any provider:
-
-```yaml
-providers:
-  claude:
-    enabled: true
-    binary: /opt/homebrew/bin/claude
-```
-
-</details>
-
-<details>
-<summary><strong>OTEL export to MLflow</strong></summary>
-
-agentmux can export traces with human annotations to any OpenTelemetry-compatible backend. This connects your in-terminal annotation workflow to evaluation platforms like MLflow.
+<summary><strong>MLflow setup</strong></summary>
 
 ```bash
 # Start MLflow
@@ -239,47 +151,26 @@ mlflow server --host 127.0.0.1 --port 5001
 # Create an experiment
 curl -X POST http://localhost:5001/api/2.0/mlflow/experiments/create \
   -H "Content-Type: application/json" \
-  -d '{"name": "agent-evals-responses"}'
-# Returns {"experiment_id": "1"} -- use this ID below
+  -d '{"name": "agent-evals"}'
+# Returns {"experiment_id": "1"} -- put in config above
 ```
 
-```yaml
-# ~/.agentmux/config.yaml
-export:
-  endpoint: "localhost:5001"
-  insecure: true
-  experiment_id: "1"           # from the create step above
-```
-
-```
-# In agentmux split view:
-# 1. Tab to focus trace pane
-# 2. a to annotate turns (GOOD/BAD/WASTE)
-# 3. N to add notes
-# 4. e then o to export via OTEL to MLflow
-# Or e then j for local JSONL export to ~/.agentmux/exports/
-```
-
-Your annotations (GOOD/BAD/WASTE + notes) become MLflow feedback assessments that can be used to build evaluation datasets, calibrate LLM judges, and detect regressions.
-
-See [docs/examples/mlflow-integration.md](docs/examples/mlflow-integration.md) for the full walkthrough.
+In agentmux: `Tab` to trace pane, `a` to annotate, `e` then `o` to export.
 
 </details>
 
 ## Provider System
 
-Each provider implements discovery, session management, and spawning through a common interface. Providers can be enabled or disabled via config.
-
-| Provider | Discovery | Session View | Trace | Cost | Spawn | OTEL |
-|----------|-----------|--------------|-------|------|-------|------|
-| Claude | Process scan + JSONL | Split: direct PTY embed | Full (JSONL + OTEL) | Full | `claude` CLI | Logs via http/protobuf |
-| Codex | Process scan + JSONL | Split: tmux mirror | Full (JSONL) | Full | `codex` CLI | Traces + logs |
-| Gemini | Process scan + JSON | Split: tmux mirror | User prompts (logs.json) | Full | `gemini` CLI | Traces + logs |
+| Provider | Discovery | Trace | Session | OTEL |
+|----------|-----------|-------|---------|------|
+| Claude | Process scan + JSONL | Full conversations | Direct PTY embed | Logs via http/protobuf |
+| Codex | Process scan + JSONL | Full conversations | Tmux mirror | Traces + logs |
+| Gemini | Process scan + JSON | User prompts | Tmux mirror | Traces + logs |
 
 <details>
 <summary><strong>Adding a new provider</strong></summary>
 
-Implement the `Provider` interface (10 methods), register in `app.go`, add to config defaults, and add model pricing:
+Implement the `Provider` interface (10 methods), register in `app.go`, add pricing:
 
 ```go
 type Provider interface {
@@ -296,47 +187,30 @@ type Provider interface {
 }
 ```
 
-The orchestrator and all views pick up new providers automatically. For the complete walkthrough with code examples, testing checklist, and a full end-to-end example, see **[Adding a Provider](docs/adding-a-provider.md)**.
+See **[Adding a Provider](docs/adding-a-provider.md)** for the full walkthrough.
 
 </details>
 
 ## Architecture
 
-agentmux reads everything from the filesystem. No daemon, no hooks, no modifications to your AI tools.
+No daemon, no hooks, no modifications to your AI tools. Reads from the filesystem:
 
 | Source | Location | Data |
 |--------|----------|------|
-| Config | `~/.agentmux/config.yaml` | Provider settings, runtime prefs |
-| Process table | `ps aux` | PID, binary path, CLI flags, memory |
-| Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/` | Messages, tool calls, token usage |
-| OTEL receiver | `localhost:4318` (OTLP/HTTP) | Live events from spawned agents |
+| Config | `~/.agentmux/config.yaml` | Provider settings, export config |
+| Process table | `ps aux` | Running agents |
+| Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/` | Conversations, tool calls |
+| OTEL receiver | `localhost:4318` | Live telemetry from agents |
 | Teams | `~/.claude/teams/*/config.json` | Team membership |
-| tmux | `tmux list-sessions` | Session names for jump support |
-
-<details>
-<summary><strong>Discovery pipeline</strong></summary>
-
-On startup, agentmux loads config and registers only enabled providers. The orchestrator queries all providers in parallel every 2 seconds. Each provider scans for its processes, enriches with session data (model, tokens, status), and returns `agent.Agent` structs that drive all views.
-
-</details>
-
-<details>
-<summary><strong>Session embedding</strong></summary>
-
-When you press Enter on an embeddable agent, agentmux opens its CLI process inside a pseudo-terminal (creack/pty). Output is rendered through a VT emulator (charmbracelet/x/vt) into the Bubble Tea view. Press `Ctrl+]` to zoom out without killing the session.
-
-For non-embeddable providers, `J` opens the session in a tmux split pane or iTerm2 split.
-
-</details>
 
 ## Built With
 
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) -- TUI framework
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss) -- Styling
-- [charmbracelet/x/vt](https://github.com/charmbracelet/x) -- VT emulator for PTY embedding
-- [creack/pty](https://github.com/creack/pty) -- PTY creation
-- [OpenTelemetry](https://opentelemetry.io/) -- OTLP/HTTP receiver and exporter
+[Bubble Tea](https://github.com/charmbracelet/bubbletea) |
+[Lip Gloss](https://github.com/charmbracelet/lipgloss) |
+[charmbracelet/x/vt](https://github.com/charmbracelet/x) |
+[creack/pty](https://github.com/creack/pty) |
+[OpenTelemetry](https://opentelemetry.io/)
 
 ## License
 
-[MIT](LICENSE) -- attribution required.
+[MIT](LICENSE)
