@@ -80,8 +80,9 @@ type App struct {
 	splitLaunchTime time.Time      // when :new session was launched (filters old files)
 
 	// Command palette
-	commandMode  bool
-	commandInput string
+	commandMode   bool
+	commandInput  string
+	exportConfirm bool // showing export menu
 
 	// Filter mode
 	filterMode  bool
@@ -419,6 +420,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.killConfirm {
 			return a.handleKillConfirm(msg)
 		}
+		// Export menu (e key in split view)
+		if a.exportConfirm {
+			a.exportConfirm = false
+			switch msg.String() {
+			case "j", "J":
+				return a.exportTrace()
+			case "o", "O":
+				return a.exportOTEL()
+			default:
+				a.statusHint = "Export cancelled"
+				return a, nil
+			}
+		}
 		// Command mode takes priority over zoomed key handling
 		// so typing :export works from split view
 		if a.commandMode {
@@ -495,6 +509,17 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key == ":" {
 		a.commandMode = true
 		a.commandInput = ""
+		return a, nil
+	}
+
+	// Export menu -- "e" in split view shows export options
+	if key == "e" && a.splitTrace != nil {
+		if a.exportConfirm {
+			// Already showing menu, ignore
+			return a, nil
+		}
+		a.exportConfirm = true
+		a.statusHint = "Export: j:JSONL  o:OTEL  Esc:cancel"
 		return a, nil
 	}
 
@@ -1566,7 +1591,7 @@ func (a App) renderSplitView() string {
 		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
 		focusHint = noteStyle.Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + noteStyle.Render("|")
 	} else if focus == "trace" {
-		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  :export-otel"
+		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  e:export"
 	} else {
 		focusHint = " [SESSION] typing goes to agent"
 	}
