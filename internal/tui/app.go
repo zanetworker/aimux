@@ -248,7 +248,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		cmd := p.SpawnCommand(msg.Dir, msg.Model, msg.Mode)
-		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), a.cfg.OTELEnvPrefix()); err != nil {
+		envPrefix := ""
+		if msg.OTELEnabled {
+			envPrefix = a.cfg.OTELEnvPrefix()
+		}
+		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), envPrefix); err != nil {
 			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
 		} else {
 			name := filepath.Base(msg.Dir)

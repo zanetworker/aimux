@@ -47,11 +47,12 @@ var (
 
 // LaunchMsg is emitted when the user confirms the launch configuration.
 type LaunchMsg struct {
-	Provider string
-	Dir      string
-	Model    string
-	Mode     string
-	Runtime  string
+	Provider    string
+	Dir         string
+	Model       string
+	Mode        string
+	Runtime     string
+	OTELEnabled bool // true if OTEL tracing should be injected
 }
 
 // LaunchCancelMsg is emitted when the user cancels the launcher.
@@ -297,9 +298,13 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 }
 
 func (l *LauncherView) updateOptions(key string) tea.Cmd {
+	maxField := 2
+	if l.otelAvailable {
+		maxField = 3
+	}
 	switch key {
 	case "j", "down":
-		if l.optionField < 2 {
+		if l.optionField < maxField {
 			l.optionField++
 		}
 	case "k", "up":
@@ -320,6 +325,8 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 			if l.runtimeCursor < len(l.runtimes)-1 {
 				l.runtimeCursor++
 			}
+		case 3:
+			l.otelEnabled = !l.otelEnabled
 		}
 	case "h", "left":
 		switch l.optionField {
@@ -335,6 +342,13 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 			if l.runtimeCursor > 0 {
 				l.runtimeCursor--
 			}
+		case 3:
+			l.otelEnabled = !l.otelEnabled
+		}
+	case " ":
+		// Space toggles OTEL when on that field
+		if l.optionField == 3 {
+			l.otelEnabled = !l.otelEnabled
 		}
 	case "enter":
 		return l.emitLaunch()
@@ -358,11 +372,12 @@ func (l *LauncherView) emitLaunch() tea.Cmd {
 	}
 
 	msg := LaunchMsg{
-		Provider: l.providers[l.providerCursor],
-		Dir:      dir,
-		Model:    model,
-		Mode:     mode,
-		Runtime:  l.runtimes[l.runtimeCursor],
+		Provider:    l.providers[l.providerCursor],
+		Dir:         dir,
+		Model:       model,
+		Mode:        mode,
+		Runtime:     l.runtimes[l.runtimeCursor],
+		OTELEnabled: l.otelEnabled,
 	}
 	return func() tea.Msg { return msg }
 }
@@ -608,8 +623,25 @@ func (l *LauncherView) viewOptions() string {
 	// Runtime row
 	b.WriteString(l.renderOptionRow("Runtime:", l.runtimes, l.runtimeCursor, l.optionField == 2))
 
+	// OTEL tracing toggle (only if receiver is available)
+	if l.otelAvailable {
+		otelLabel := launcherLabelStyle.Render(fmt.Sprintf("%-10s", "Tracing:"))
+		var otelValue string
+		if l.otelEnabled {
+			otelValue = "ON (OTEL traces sent to agentmux)"
+		} else {
+			otelValue = "OFF"
+		}
+		if l.optionField == 3 {
+			otelValue = launcherSelectedStyle.Render(" " + otelValue + " ")
+		} else {
+			otelValue = launcherOptionStyle.Render(otelValue)
+		}
+		b.WriteString(otelLabel + otelValue + "\n")
+	}
+
 	b.WriteString("\n")
-	b.WriteString(launcherHintStyle.Render("j/k:field  h/l:option  Enter:launch  Esc:cancel"))
+	b.WriteString(launcherHintStyle.Render("j/k:field  h/l:option  Space:toggle  Enter:launch  Esc:cancel"))
 	return b.String()
 }
 
