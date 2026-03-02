@@ -239,6 +239,7 @@ func (c *Codex) parseProcess(line string) *agent.Agent {
 		ProviderName:   "codex",
 		PermissionMode: perm,
 		Status:         agent.StatusUnknown,
+		StartTime:      getProcessStartTime(pid),
 		LastActivity:   time.Now(),
 		Name:           fmt.Sprintf("codex-%s", func() string {
 			if isNodeWrapper {
@@ -250,7 +251,8 @@ func (c *Codex) parseProcess(line string) *agent.Agent {
 }
 
 // dedup removes node wrapper processes when the native binary is also present
-// (same session), and groups by WorkingDir+Model.
+// (same session), and groups by process tree. Separate sessions in the same
+// directory remain as separate entries.
 func (c *Codex) dedup(agents []agent.Agent) []agent.Agent {
 	// First resolve CWDs
 	for i := range agents {
@@ -277,23 +279,33 @@ func (c *Codex) dedup(agents []agent.Agent) []agent.Agent {
 		}
 	}
 
-	// Group by (WorkingDir, Model) — keep one per group
-	type key struct{ dir, model string }
-	groups := make(map[key]*agent.Agent)
-	var order []key
+	if len(agents) <= 1 {
+		return agents
+	}
+
+	// Find each process's root ancestor within the Codex process set.
+	pids := make([]int, len(agents))
+	for i, a := range agents {
+		pids[i] = a.PID
+	}
+	roots := findProcessRoots(pids)
+
+	// Group by root PID — processes sharing a root are the same session.
+	groups := make(map[int]*agent.Agent)
+	var order []int
 
 	for i := range agents {
 		a := &agents[i]
-		k := key{a.WorkingDir, a.Model}
-		if existing, ok := groups[k]; ok {
+		root := roots[a.PID]
+		if existing, ok := groups[root]; ok {
 			existing.GroupCount++
 			existing.GroupPIDs = append(existing.GroupPIDs, a.PID)
 		} else {
 			copy := *a
 			copy.GroupCount = 1
 			copy.GroupPIDs = []int{a.PID}
-			groups[k] = &copy
-			order = append(order, k)
+			groups[root] = &copy
+			order = append(order, root)
 		}
 	}
 

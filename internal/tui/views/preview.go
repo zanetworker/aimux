@@ -74,6 +74,7 @@ func (p *PreviewPane) SetAgent(a *agent.Agent) {
 		return
 	}
 	p.logsView = NewLogsView(a.PID, a.SessionFile, p.parser)
+	p.logsView.SetSessionCost(a.EstCostUSD)
 	p.logsView.compact = true // no interactive hints in preview
 	p.resizeLogsView()
 }

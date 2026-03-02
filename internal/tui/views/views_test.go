@@ -543,3 +543,87 @@ func TestAgentsViewSortByCost(t *testing.T) {
 		t.Errorf("first agent after cost sort has cost=%f, want 50.0", sel.EstCostUSD)
 	}
 }
+
+func TestAgentsViewTreeExpand(t *testing.T) {
+	v := NewAgentsView()
+
+	// Use names that sort "alpha" before "beta" so PID 100 (grouped) is first.
+	agents := []agent.Agent{
+		{PID: 100, WorkingDir: "/tmp/alpha", GroupCount: 3, GroupPIDs: []int{100, 101, 102}},
+		{PID: 200, WorkingDir: "/tmp/beta", GroupCount: 1, GroupPIDs: []int{200}},
+	}
+	v.SetAgents(agents)
+
+	// Initially collapsed: 2 rows (one per agent).
+	if len(v.rows) != 2 {
+		t.Fatalf("collapsed rows = %d, want 2", len(v.rows))
+	}
+
+	// Cursor is at 0 (alpha, PID 100, GroupCount=3). Press Tab to expand.
+	v.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	// Should now have: parent + 2 children (101, 102; 100 skipped) + second agent = 4 rows.
+	if len(v.rows) != 4 {
+		t.Fatalf("expanded rows = %d, want 4", len(v.rows))
+	}
+	if !v.rows[1].isChild {
+		t.Error("rows[1] should be a child row")
+	}
+	if !v.rows[2].isChild {
+		t.Error("rows[2] should be a child row")
+	}
+	if !v.rows[2].isLast {
+		t.Error("rows[2] should be the last child")
+	}
+	if v.rows[3].isChild {
+		t.Error("rows[3] should be a parent row (second agent)")
+	}
+
+	// Selected should return the parent agent.
+	sel := v.Selected()
+	if sel == nil || sel.PID != 100 {
+		t.Errorf("Selected PID = %v, want 100", sel)
+	}
+
+	// Press Tab again to collapse.
+	v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if len(v.rows) != 2 {
+		t.Fatalf("re-collapsed rows = %d, want 2", len(v.rows))
+	}
+}
+
+func TestAgentsViewTreeChildSelectsParent(t *testing.T) {
+	v := NewAgentsView()
+
+	agents := []agent.Agent{
+		{PID: 100, WorkingDir: "/tmp/proj", GroupCount: 2, GroupPIDs: []int{100, 101}},
+	}
+	v.SetAgents(agents)
+
+	// Expand.
+	v.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+	// Move cursor to child row.
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+
+	// Selecting a child should still return the parent agent.
+	sel := v.Selected()
+	if sel == nil || sel.PID != 100 {
+		t.Errorf("Selected on child row should return parent PID 100, got %v", sel)
+	}
+}
+
+func TestAgentsViewTreeNoExpandSingleProcess(t *testing.T) {
+	v := NewAgentsView()
+
+	agents := []agent.Agent{
+		{PID: 100, WorkingDir: "/tmp/proj", GroupCount: 1, GroupPIDs: []int{100}},
+	}
+	v.SetAgents(agents)
+
+	// Tab on a single-process agent should do nothing.
+	v.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if len(v.rows) != 1 {
+		t.Fatalf("rows after Tab on single process = %d, want 1", len(v.rows))
+	}
+}

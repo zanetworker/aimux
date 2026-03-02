@@ -52,11 +52,22 @@ func costColor(cost float64) lipgloss.Style {
 	}
 }
 
+// treeRow represents a single row in the agents table. Parent rows show the
+// session; child rows show individual sub-processes when expanded.
+type treeRow struct {
+	agent   agent.Agent // the session agent (always set)
+	isChild bool        // true for sub-process rows
+	childID int         // index into GroupPIDs (only for child rows)
+	isLast  bool        // last child in the group (for └─ vs ├─)
+}
+
 // AgentsView renders the main agents table with columns.
 type AgentsView struct {
 	agents      []agent.Agent
+	rows        []treeRow // flattened tree rows for rendering
 	cursor      int
-	selectedPID int    // track selection by PID across refreshes
+	selectedPID int           // track selection by PID across refreshes
+	expanded    map[int]bool  // PID -> expanded state
 	width       int
 	height      int
 	filter      string
@@ -65,7 +76,9 @@ type AgentsView struct {
 
 // NewAgentsView creates a new AgentsView.
 func NewAgentsView() *AgentsView {
-	return &AgentsView{}
+	return &AgentsView{
+		expanded: make(map[int]bool),
+	}
 }
 
 // SetAgents updates the list of agents with stable sort order.
@@ -101,20 +114,43 @@ func (v *AgentsView) SetAgents(agents []agent.Agent) {
 		})
 	}
 	v.agents = agents
+	v.buildTreeRows()
 
 	// Restore cursor to the same PID if it still exists
 	if v.selectedPID != 0 {
-		f := v.filtered()
-		for i, a := range f {
-			if a.PID == v.selectedPID {
+		for i, r := range v.rows {
+			if !r.isChild && r.agent.PID == v.selectedPID {
 				v.cursor = i
 				return
 			}
 		}
 	}
 	// PID gone or no previous selection - clamp cursor
-	if v.cursor >= len(v.filtered()) {
-		v.cursor = max(0, len(v.filtered())-1)
+	if v.cursor >= len(v.rows) {
+		v.cursor = max(0, len(v.rows)-1)
+	}
+}
+
+// buildTreeRows builds the flat list of treeRows from the filtered agents.
+// Parent rows are always present; child rows appear only for expanded agents.
+func (v *AgentsView) buildTreeRows() {
+	filtered := v.filtered()
+	v.rows = make([]treeRow, 0, len(filtered))
+	for _, a := range filtered {
+		v.rows = append(v.rows, treeRow{agent: a})
+		if v.expanded[a.PID] && a.GroupCount > 1 && len(a.GroupPIDs) > 0 {
+			for i, pid := range a.GroupPIDs {
+				if pid == a.PID {
+					continue // skip the representative PID (already shown as parent)
+				}
+				v.rows = append(v.rows, treeRow{
+					agent:   a,
+					isChild: true,
+					childID: i,
+					isLast:  i == len(a.GroupPIDs)-1,
+				})
+			}
+		}
 	}
 }
 
@@ -131,10 +167,11 @@ func (v *AgentsView) SetFilter(f string) {
 }
 
 // Selected returns the currently selected agent, or nil.
+// If the cursor is on a child row, the parent session agent is returned.
 func (v *AgentsView) Selected() *agent.Agent {
-	f := v.filtered()
-	if v.cursor >= 0 && v.cursor < len(f) {
-		return &f[v.cursor]
+	if v.cursor >= 0 && v.cursor < len(v.rows) {
+		r := &v.rows[v.cursor]
+		return &r.agent
 	}
 	return nil
 }
@@ -151,15 +188,14 @@ func (v *AgentsView) SortField() string {
 
 // Update handles key messages for navigation.
 func (v *AgentsView) Update(msg tea.Msg) {
-	f := v.filtered()
-	if len(f) == 0 {
+	if len(v.rows) == 0 {
 		return
 	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
-			if v.cursor < len(f)-1 {
+			if v.cursor < len(v.rows)-1 {
 				v.cursor++
 			}
 		case "k", "up":
@@ -169,7 +205,24 @@ func (v *AgentsView) Update(msg tea.Msg) {
 		case "g":
 			v.cursor = 0
 		case "G":
-			v.cursor = len(f) - 1
+			v.cursor = len(v.rows) - 1
+		case "tab", "x":
+			// Toggle expand/collapse for the selected agent's process tree.
+			if v.cursor >= 0 && v.cursor < len(v.rows) {
+				r := v.rows[v.cursor]
+				pid := r.agent.PID
+				if r.agent.GroupCount > 1 {
+					v.expanded[pid] = !v.expanded[pid]
+					v.buildTreeRows()
+					// Keep cursor on the parent row after rebuild.
+					for i, row := range v.rows {
+						if !row.isChild && row.agent.PID == pid {
+							v.cursor = i
+							break
+						}
+					}
+				}
+			}
 		case "s":
 			// Cycle sort field
 			switch v.sortField {
@@ -187,8 +240,8 @@ func (v *AgentsView) Update(msg tea.Msg) {
 		}
 	}
 	// Track selected PID for cursor preservation across refreshes
-	if v.cursor >= 0 && v.cursor < len(f) {
-		v.selectedPID = f[v.cursor].PID
+	if v.cursor >= 0 && v.cursor < len(v.rows) {
+		v.selectedPID = v.rows[v.cursor].agent.PID
 	}
 }
 
@@ -241,8 +294,7 @@ func (v *AgentsView) View() string {
 	b.WriteString(tableHeaderStyle.Render(header))
 	b.WriteString("\n")
 
-	f := v.filtered()
-	if len(f) == 0 {
+	if len(v.rows) == 0 {
 		b.WriteString(agentMutedIcon.Render("  No agents found."))
 		return b.String()
 	}
@@ -250,43 +302,28 @@ func (v *AgentsView) View() string {
 	// Determine visible range based on height (reserve 2 for header + border).
 	visibleHeight := v.height - 2
 	if visibleHeight < 1 {
-		visibleHeight = len(f)
+		visibleHeight = len(v.rows)
 	}
 	start := 0
 	if v.cursor >= visibleHeight {
 		start = v.cursor - visibleHeight + 1
 	}
 	end := start + visibleHeight
-	if end > len(f) {
-		end = len(f)
+	if end > len(v.rows) {
+		end = len(v.rows)
 	}
 
 	for idx := start; idx < end; idx++ {
-		a := f[idx]
-		icon := v.renderStatusIcon(a.Status)
+		r := v.rows[idx]
+		var row string
 
-		// Format: ▸● name — use padRight because icon contains ANSI codes
-		name := a.ShortProject()
-		if a.GroupCount > 1 {
-			badge := agentMutedIcon.Render(fmt.Sprintf("x%d", a.GroupCount))
-			name = truncate(name, colName-7) + " " + badge
+		if r.isChild {
+			row = v.renderChildRow(r)
 		} else {
-			name = truncate(name, colName-3)
+			row = v.renderParentRow(r)
 		}
-		nameCol := "▸" + icon + " " + name
-
-		costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
-
-		row := " " + padRight(nameCol, colName) + " " +
-			padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
-			padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
-			padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
-			padRight(truncate(a.LastAction, colLast), colLast) + " " +
-			padRight(a.FormatAge(), colAge) + " " +
-			padRight(costRendered, colCostA)
 
 		if idx == v.cursor {
-			// Pad to full width for selected background
 			if lipgloss.Width(row) < v.width {
 				row += strings.Repeat(" ", v.width-lipgloss.Width(row))
 			}
@@ -298,6 +335,55 @@ func (v *AgentsView) View() string {
 	}
 
 	return b.String()
+}
+
+// renderParentRow renders a session row with status icon, name, and columns.
+func (v *AgentsView) renderParentRow(r treeRow) string {
+	a := r.agent
+	icon := v.renderStatusIcon(a.Status)
+
+	name := a.Name
+	if name == "" {
+		name = a.ShortProject()
+	}
+	if a.GroupCount > 1 {
+		badge := agentMutedIcon.Render(fmt.Sprintf("x%d", a.GroupCount))
+		name = truncate(name, colName-7) + " " + badge
+	} else {
+		name = truncate(name, colName-3)
+	}
+	nameCol := "▸" + icon + " " + name
+
+	costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
+
+	return " " + padRight(nameCol, colName) + " " +
+		padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
+		padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
+		padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
+		padRight(truncate(a.LastAction, colLast), colLast) + " " +
+		padRight(a.FormatAge(), colAge) + " " +
+		padRight(costRendered, colCostA)
+}
+
+// renderChildRow renders a sub-process row with tree glyphs and process info.
+func (v *AgentsView) renderChildRow(r treeRow) string {
+	glyph := "├─"
+	if r.isLast {
+		glyph = "└─"
+	}
+	treeGlyph := agentMutedIcon.Render("   " + glyph + " ")
+
+	pid := 0
+	if r.childID >= 0 && r.childID < len(r.agent.GroupPIDs) {
+		pid = r.agent.GroupPIDs[r.childID]
+	}
+
+	pidStr := agentIdleIcon.Render(fmt.Sprintf("PID %d", pid))
+	info := processInfo(pid)
+	if info != "" {
+		info = agentMutedIcon.Render("  " + info)
+	}
+	return treeGlyph + pidStr + info
 }
 
 func (v *AgentsView) renderStatusIcon(s agent.Status) string {

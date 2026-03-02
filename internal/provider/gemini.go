@@ -30,7 +30,6 @@ func (g *Gemini) Discover() ([]agent.Agent, error) {
 	}
 
 	tmuxSessions := discovery.ListTmuxSessions()
-	projects := readGeminiProjects()
 
 	var agents []agent.Agent
 	lines := strings.Split(string(out), "\n")
@@ -57,30 +56,43 @@ func (g *Gemini) Discover() ([]agent.Agent, error) {
 		}
 
 		a.Name = a.ShortProject()
-
-		// Enrich with session data
-		g.enrichFromSession(a, projects)
-
 		agents = append(agents, *a)
 	}
 
-	// Deduplicate: group by WorkingDir (Gemini spawns multiple node processes)
+	// Deduplicate: group by process tree (Gemini spawns multiple node processes)
 	agents = g.dedup(agents)
+
+	// Enrich AFTER dedup so each session gets its own session file.
+	projects := readGeminiProjects()
+	g.enrichAfterDedup(agents, projects)
 
 	return agents, nil
 }
 
-// dedup groups Gemini agents by WorkingDir, keeping one entry per project.
-// Multiple node processes for the same session are merged into a single entry.
+// dedup groups Gemini agents by process tree, keeping one entry per session.
+// Multiple node processes spawned by the same Gemini session share a common
+// ancestor PID and are merged into a single entry. Separate sessions in the
+// same directory remain as separate entries.
 func (g *Gemini) dedup(agents []agent.Agent) []agent.Agent {
-	type key struct{ dir string }
-	groups := make(map[key]*agent.Agent)
-	var order []key
+	if len(agents) <= 1 {
+		return agents
+	}
+
+	// Find each process's root ancestor within the Gemini process set.
+	pids := make([]int, len(agents))
+	for i, a := range agents {
+		pids[i] = a.PID
+	}
+	roots := findProcessRoots(pids)
+
+	// Group by root PID — processes sharing a root are the same session.
+	groups := make(map[int]*agent.Agent)
+	var order []int
 
 	for i := range agents {
 		a := &agents[i]
-		k := key{a.WorkingDir}
-		if existing, ok := groups[k]; ok {
+		root := roots[a.PID]
+		if existing, ok := groups[root]; ok {
 			existing.GroupCount++
 			existing.GroupPIDs = append(existing.GroupPIDs, a.PID)
 			// Keep the one with more memory (main process vs wrapper)
@@ -96,8 +108,8 @@ func (g *Gemini) dedup(agents []agent.Agent) []agent.Agent {
 			copy := *a
 			copy.GroupCount = 1
 			copy.GroupPIDs = []int{a.PID}
-			groups[k] = &copy
-			order = append(order, k)
+			groups[root] = &copy
+			order = append(order, root)
 		}
 	}
 
@@ -170,38 +182,50 @@ func (g *Gemini) parseProcess(line string) *agent.Agent {
 		ProviderName:   "gemini",
 		PermissionMode: perm,
 		Status:         agent.StatusUnknown,
+		StartTime:      getProcessStartTime(pid),
 		LastActivity:   time.Now(),
 		GroupCount:     1,
 		GroupPIDs:      []int{pid},
 	}
 }
 
-// enrichFromSession finds the logs file for a running agent and extracts
-// timestamps to determine active/idle status.
-func (g *Gemini) enrichFromSession(a *agent.Agent, projects map[string]string) {
-	if a.WorkingDir == "" {
-		return
-	}
-
-	projectName, ok := projects[a.WorkingDir]
-	if !ok {
-		return
-	}
-
+// enrichAfterDedup assigns each deduped agent its own session file from the
+// project's chats directory. When multiple sessions share a directory, each
+// gets a unique session-*.json file instead of the shared logs.json.
+func (g *Gemini) enrichAfterDedup(agents []agent.Agent, projects map[string]string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
 
-	// Use logs.json as the session file (contains conversation history)
-	logsPath := filepath.Join(home, ".gemini", "tmp", projectName, "logs.json")
-	info, err := os.Stat(logsPath)
-	if err != nil {
-		// Fall back to newest session JSON for last activity time
+	// Track which session files have been assigned to avoid duplicates.
+	assigned := make(map[string]bool)
+
+	for i := range agents {
+		a := &agents[i]
+		if a.WorkingDir == "" {
+			continue
+		}
+		projectName, ok := projects[a.WorkingDir]
+		if !ok {
+			continue
+		}
+
 		chatsDir := filepath.Join(home, ".gemini", "tmp", projectName, "chats")
-		sf, lastUpdated := newestSessionJSON(chatsDir)
-		if sf != "" && !lastUpdated.IsZero() {
-			a.SessionFile = sf
+		sf := g.pickSessionFile(chatsDir, assigned)
+		if sf == "" {
+			continue
+		}
+		assigned[sf] = true
+		a.SessionFile = sf
+
+		// Parse the session file for timing and session ID.
+		lastUpdated := parseGeminiSessionTime(sf)
+		sessionID := parseGeminiSessionID(sf)
+		if sessionID != "" {
+			a.SessionID = sessionID
+		}
+		if !lastUpdated.IsZero() {
 			a.LastActivity = lastUpdated
 			if time.Since(lastUpdated) < 30*time.Second {
 				a.Status = agent.StatusActive
@@ -209,17 +233,37 @@ func (g *Gemini) enrichFromSession(a *agent.Agent, projects map[string]string) {
 				a.Status = agent.StatusIdle
 			}
 		}
-		return
+	}
+}
+
+// pickSessionFile returns the newest unassigned session-*.json in chatsDir.
+func (g *Gemini) pickSessionFile(chatsDir string, assigned map[string]bool) string {
+	entries, err := os.ReadDir(chatsDir)
+	if err != nil {
+		return ""
 	}
 
-	a.SessionFile = logsPath
-	lastMod := info.ModTime()
-	a.LastActivity = lastMod
-	if time.Since(lastMod) < 30*time.Second {
-		a.Status = agent.StatusActive
-	} else {
-		a.Status = agent.StatusIdle
+	var bestPath string
+	var bestTime time.Time
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "session-") || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(chatsDir, e.Name())
+		if assigned[path] {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(bestTime) {
+			bestPath = path
+			bestTime = info.ModTime()
+		}
 	}
+	return bestPath
 }
 
 // CanEmbed returns false because Gemini's TUI cannot run inside an embedded PTY.
@@ -236,10 +280,17 @@ func (g *Gemini) ResumeCommand(a agent.Agent) *exec.Cmd {
 	return cmd
 }
 
-// FindSessionFile resolves the log file for a Gemini agent by looking up
-// the project name in projects.json and returning the logs.json file.
-// This file contains the conversation history (user prompts with timestamps).
+// FindSessionFile resolves the session file for a Gemini agent. If the agent
+// has a SessionID, it finds the matching session-*.json in chats/. Otherwise
+// it falls back to the newest session file.
 func (g *Gemini) FindSessionFile(a agent.Agent) string {
+	// If a session file was already assigned during discovery, use it.
+	if a.SessionFile != "" {
+		if _, err := os.Stat(a.SessionFile); err == nil {
+			return a.SessionFile
+		}
+	}
+
 	if a.WorkingDir == "" {
 		return ""
 	}
@@ -255,11 +306,54 @@ func (g *Gemini) FindSessionFile(a agent.Agent) string {
 		return ""
 	}
 
-	logsPath := filepath.Join(home, ".gemini", "tmp", projectName, "logs.json")
-	if _, err := os.Stat(logsPath); err != nil {
+	chatsDir := filepath.Join(home, ".gemini", "tmp", projectName, "chats")
+
+	// If we have a SessionID, find the matching file.
+	if a.SessionID != "" {
+		if sf := findSessionFileByID(chatsDir, a.SessionID); sf != "" {
+			return sf
+		}
+	}
+
+	// Fall back to newest session file.
+	sf, _ := newestSessionJSON(chatsDir)
+	return sf
+}
+
+// findSessionFileByID finds a session-*.json file containing the given sessionId.
+func findSessionFileByID(chatsDir, sessionID string) string {
+	entries, err := os.ReadDir(chatsDir)
+	if err != nil {
 		return ""
 	}
-	return logsPath
+	// Quick check: session ID prefix is often in the filename.
+	prefix := sessionID
+	if len(prefix) > 8 {
+		prefix = prefix[:8]
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "session-") {
+			continue
+		}
+		if strings.Contains(e.Name(), prefix) {
+			path := filepath.Join(chatsDir, e.Name())
+			// Verify the full sessionId matches.
+			if id := parseGeminiSessionID(path); id == sessionID {
+				return path
+			}
+		}
+	}
+	// Slow path: check all files.
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), "session-") {
+			continue
+		}
+		path := filepath.Join(chatsDir, e.Name())
+		if id := parseGeminiSessionID(path); id == sessionID {
+			return path
+		}
+	}
+	return ""
 }
 
 // RecentDirs returns recently-used project directories from Gemini's
@@ -428,6 +522,21 @@ func parseGeminiSessionTime(path string) time.Time {
 	return t
 }
 
+// parseGeminiSessionID reads sessionId from a Gemini session JSON file.
+func parseGeminiSessionID(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var session struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(data, &session); err != nil {
+		return ""
+	}
+	return session.SessionID
+}
+
 // geminiGetCwd resolves the current working directory for a PID.
 func geminiGetCwd(pid int) (string, error) {
 	out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn").Output()
@@ -453,13 +562,109 @@ func geminiExtractFlag(args, flag string) string {
 	return ""
 }
 
-// ParseTrace reads a Gemini logs.json file and parses it into trace turns.
+// ParseTrace reads a Gemini session file and parses it into trace turns.
+// Supports both logs.json (array of log entries) and session-*.json (session
+// object with messages array) formats.
 func (g *Gemini) ParseTrace(filePath string) ([]trace.Turn, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("read Gemini trace %s: %w", filePath, err)
 	}
-	return parseGeminiJSON(string(data)), nil
+
+	// Detect format: session-*.json is an object with "messages", logs.json is an array.
+	trimmed := strings.TrimSpace(string(data))
+	if strings.HasPrefix(trimmed, "{") {
+		return parseGeminiSessionFile(trimmed), nil
+	}
+	return parseGeminiJSON(trimmed), nil
+}
+
+// --- Gemini session file trace parsing ---
+
+// geminiSessionFile is the structure of a Gemini session-*.json file.
+type geminiSessionFile struct {
+	SessionID string               `json:"sessionId"`
+	Messages  []geminiSessionMsg   `json:"messages"`
+}
+
+type geminiSessionMsg struct {
+	Timestamp string      `json:"timestamp"`
+	Type      string      `json:"type"` // "user", "gemini", "error", "info"
+	Content   interface{} `json:"content"`
+}
+
+// parseGeminiSessionFile parses a Gemini session-*.json file into trace turns.
+// Session files contain both user and model messages with full content.
+func parseGeminiSessionFile(data string) []trace.Turn {
+	var sf geminiSessionFile
+	if err := json.Unmarshal([]byte(data), &sf); err != nil {
+		return nil
+	}
+
+	var turns []trace.Turn
+	turnNum := 0
+
+	for _, m := range sf.Messages {
+		ts, err := time.Parse(time.RFC3339Nano, m.Timestamp)
+		if err != nil {
+			ts = time.Time{}
+		}
+
+		text := extractGeminiMsgText(m.Content)
+
+		switch m.Type {
+		case "user":
+			turnNum++
+			turn := trace.Turn{
+				Number:    turnNum,
+				Timestamp: ts,
+				EndTime:   ts,
+				UserLines: []string{text},
+			}
+			turns = append(turns, turn)
+
+		case "gemini", "model", "assistant":
+			if len(turns) > 0 {
+				last := &turns[len(turns)-1]
+				// Split long responses into lines for display.
+				for _, line := range strings.Split(text, "\n") {
+					trimmed := strings.TrimSpace(line)
+					if trimmed != "" {
+						last.OutputLines = append(last.OutputLines, trimmed)
+					}
+				}
+				last.EndTime = ts
+			}
+
+		case "error", "info":
+			if len(turns) > 0 {
+				last := &turns[len(turns)-1]
+				last.OutputLines = append(last.OutputLines, "["+m.Type+"] "+text)
+			}
+		}
+	}
+
+	return turns
+}
+
+// extractGeminiMsgText extracts text content from a Gemini message.
+// Content can be a plain string or an array of objects with "text" fields.
+func extractGeminiMsgText(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		var parts []string
+		for _, item := range c {
+			if m, ok := item.(map[string]interface{}); ok {
+				if text, ok := m["text"].(string); ok {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return fmt.Sprintf("%v", content)
 }
 
 // --- Gemini JSON trace parsing ---
@@ -476,11 +681,17 @@ type geminiLogEntry struct {
 // parseGeminiJSON parses Gemini's logs.json (JSON array of messages) into trace turns.
 // Each user message becomes a turn. Gemini logs only store user prompts, not
 // assistant responses (those are in the session JSON files).
+//
+// logs.json is append-only across all sessions for a project. We filter to only
+// the most recent sessionId so that stale data from prior sessions is excluded.
 func parseGeminiJSON(data string) []trace.Turn {
 	var entries []geminiLogEntry
 	if err := json.Unmarshal([]byte(data), &entries); err != nil {
 		return nil
 	}
+
+	// Find the most recent sessionId by timestamp.
+	entries = filterLatestSession(entries)
 
 	var turns []trace.Turn
 	turnNum := 0
@@ -515,4 +726,44 @@ func parseGeminiJSON(data string) []trace.Turn {
 	}
 
 	return turns
+}
+
+// filterLatestSession returns only entries belonging to the most recent session
+// in the logs. The most recent session is determined by the latest timestamp
+// across all entries. If entries have no sessionId, all entries are returned.
+func filterLatestSession(entries []geminiLogEntry) []geminiLogEntry {
+	if len(entries) == 0 {
+		return entries
+	}
+
+	// Find the sessionId with the latest timestamp.
+	var latestTime time.Time
+	var latestSessionID string
+
+	for _, e := range entries {
+		if e.SessionID == "" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, e.Timestamp)
+		if err != nil {
+			continue
+		}
+		if ts.After(latestTime) {
+			latestTime = ts
+			latestSessionID = e.SessionID
+		}
+	}
+
+	// No session IDs found — return everything (backwards compat).
+	if latestSessionID == "" {
+		return entries
+	}
+
+	var filtered []geminiLogEntry
+	for _, e := range entries {
+		if e.SessionID == latestSessionID {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }

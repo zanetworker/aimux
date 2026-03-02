@@ -112,6 +112,7 @@ type LogsView struct {
 	turns        []TraceTurn
 	filePath     string
 	parser       TraceParser
+	sessionCost  float64 // session-level cost from agent.EstCostUSD
 	width        int
 	height       int
 	cursor       int
@@ -161,6 +162,11 @@ func (v *LogsView) SetWarning(msg string) {
 // but is discovered later (e.g., newly launched agents).
 func (v *LogsView) SetFilePath(path string) {
 	v.filePath = path
+}
+
+// SetSessionCost sets the session-level cost for the trace summary.
+func (v *LogsView) SetSessionCost(cost float64) {
+	v.sessionCost = cost
 }
 
 // SetSize sets the available width and height.
@@ -624,7 +630,6 @@ func (v *LogsView) renderStats() string {
 	totalTurns := len(v.turns)
 	totalActions := 0
 	totalErrors := 0
-	totalCost := 0.0
 	toolCounts := make(map[string]int)
 
 	for _, t := range v.turns {
@@ -635,7 +640,6 @@ func (v *LogsView) renderStats() string {
 				totalErrors++
 			}
 		}
-		totalCost += t.CostUSD
 	}
 
 	parts := []string{
@@ -649,7 +653,15 @@ func (v *LogsView) renderStats() string {
 		parts = append(parts, fmt.Sprintf("%d errors", totalErrors))
 	}
 
-	parts = append(parts, costStyle.Render(fmt.Sprintf("$%.2f total", totalCost)))
+	// Use session-level cost if available (includes cache pricing);
+	// fall back to sum of per-turn costs.
+	displayCost := v.sessionCost
+	if displayCost <= 0 {
+		for _, t := range v.turns {
+			displayCost += t.CostUSD
+		}
+	}
+	parts = append(parts, costStyle.Render(fmt.Sprintf("$%.2f total", displayCost)))
 
 	// Top tool counts
 	type toolCount struct {
