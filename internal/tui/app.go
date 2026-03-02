@@ -346,6 +346,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
 			a.splitTrace.SetSize(leftW, a.height-1)
+			if msg.Provider == "gemini" {
+				a.splitTrace.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
+			}
 
 			a.zoomed = true
 			a.splitMode = true       // always split -- trace fills in as data arrives
@@ -960,6 +963,9 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		leftW := a.width - rightW
 		a.splitTrace = views.NewLogsView(selected.PID, sessionFile, a.parserForProvider(p))
 		a.splitTrace.SetSize(leftW, a.height-1)
+		if selected.ProviderName == "gemini" {
+			a.splitTrace.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
+		}
 
 		// Set up evaluation store and load annotations into split trace
 		sessionID := selected.SessionID
@@ -1302,6 +1308,9 @@ func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, t
 		parser = a.parserForProvider(p)
 	}
 	a.logsView = views.NewLogsView(ag.PID, sessionFile, parser)
+	if ag.ProviderName == "gemini" {
+		a.logsView.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
+	}
 	contentHeight := a.height - a.headerView.Height()
 	if contentHeight < 1 {
 		contentHeight = 10
@@ -1349,6 +1358,9 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 		parser = a.parserForProvider(p)
 	}
 	a.logsView = views.NewLogsView(selected.PID, sessionFile, parser)
+	if selected.ProviderName == "gemini" {
+		a.logsView.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
+	}
 	contentHeight := a.height - a.headerView.Height()
 	if contentHeight < 1 {
 		contentHeight = 10

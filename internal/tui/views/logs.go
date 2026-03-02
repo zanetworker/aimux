@@ -127,6 +127,7 @@ type LogsView struct {
 	noteTurn     int            // which turn the note is for
 	compact      bool           // when true, hides the interactive status bar (for preview pane)
 	scrollOffset int            // line-level scroll offset within the rendered view
+	warning      string         // provider-specific warning shown above turns
 }
 
 // NewLogsView creates a new LogsView for the given PID and log file path.
@@ -148,6 +149,11 @@ func NewLogsView(pid int, filePath string, parser TraceParser) *LogsView {
 // FilePath returns the current file path for the trace data source.
 func (v *LogsView) FilePath() string {
 	return v.filePath
+}
+
+// SetWarning sets a provider-specific warning shown above the trace turns.
+func (v *LogsView) SetWarning(msg string) {
+	v.warning = msg
 }
 
 // SetFilePath updates the file path for the trace data source.
@@ -524,6 +530,13 @@ func (v *LogsView) View() string {
 
 	// Render all lines, tracking where the cursor turn starts
 	var allLines []string
+
+	// Provider warning (e.g., Gemini trace limitations)
+	if v.warning != "" {
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+		allLines = append(allLines, warnStyle.Render("  "+v.warning))
+		allLines = append(allLines, "") // spacer
+	}
 
 	// Stats summary at the top
 	allLines = append(allLines, v.renderStats())
