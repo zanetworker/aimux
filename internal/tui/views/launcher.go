@@ -628,7 +628,7 @@ func (l *LauncherView) viewOptions() string {
 		otelLabel := launcherLabelStyle.Render(fmt.Sprintf("%-10s", "Tracing:"))
 		var otelValue string
 		if l.otelEnabled {
-			otelValue = "ON (OTEL traces sent to agentmux)"
+			otelValue = "ON (exports to MLflow/Jaeger, no assistant responses)"
 		} else {
 			otelValue = "OFF"
 		}
