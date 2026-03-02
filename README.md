@@ -10,6 +10,10 @@
   <img src="https://img.shields.io/badge/go-1.24%2B-00ADD8?style=flat-square&logo=go" alt="Go 1.24+">
 </p>
 
+<p align="center">
+  <img src="assets/demo.gif" alt="aimux demo" width="800">
+</p>
+
 You're running 5 agents across 3 projects. Claude is refactoring auth. Codex is writing tests. A third session is idle, or stuck on a permission prompt? You don't know, because each lives in its own terminal.
 
 **aimux is your control plane.** One terminal. Every agent. Full visibility.
@@ -20,44 +24,30 @@ You're running 5 agents across 3 projects. Claude is refactoring auth. Codex is 
 - **Annotate, label, and export**: mark turns GOOD/BAD/WASTE, export to MLflow for eval datasets
 - **Bring your own agent**: pluggable provider interface, add a new agent in one Go file
 
-```
-┌───────────────────────────────────────────────────────────────────────────────┐
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           aimux      │
-│  │ ● Active   2 │ │ ◐ Waiting  0 │ │ ○ Idle     1 │                         │
-│  └──────────────┘ └──────────────┘ └──────────────┘                         │
-│  Agents                                                                      │
-├────────────────────────────────┬──────────────────────────────────────────────┤
-│ NAME          AGENT  MODEL    │  ● claudetopus                              │
-│───────────────────────────────│  claude · opus-4.6 · dangerously            │
-│▸● claudetopus claude opus-4.6│──────────────────────────────────────────────│
-│  dangerously · 14m · $0.82   │ 14:32 USER  fix the auth bug in login.go      │
-│                               │ 14:32 ASST  I'll redesign the header...    │
-│ ● trustyai    claude sonnet  │ 14:33 TOOL  Edit styles.go                  │
-│  plan · 8m · $0.31           │ 14:33 ASST  Updated. Build succeeded.      │
-│                               │                                             │
-│ ○ llama-stack claude haiku   │                                [12/12] ●    │
-│  default · 2h · $0.11        │                                             │
-├────────────────────────────────┴──────────────────────────────────────────────┤
-│ :cmd  j/k:nav  Enter:zoom  l:trace  /:filter  ?:help                       │
-└───────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Quick Start
+## Install
 
 ```bash
+# Homebrew (macOS/Linux)
+brew install zanetworker/aimux/aimux
+
+# From source
 git clone https://github.com/zanetworker/aimux.git
 cd aimux
 make install       # builds and copies to /usr/local/bin
-aimux           # launch the TUI
 ```
 
-Requires **Go 1.24+** and **tmux** for split-pane session embedding.
+Then run:
+```bash
+aimux
+```
+
+Requires **tmux** for split-pane session embedding.
 
 ## Features
 
 ### Discovery
 
-Auto-finds running Claude, Codex, and Gemini processes. Shows status, model, tokens, cost, git branch, and permission mode. Refreshes every 2s.
+Auto-finds running Claude, Codex, and Gemini processes. Shows status, model, tokens, cost, git branch, and permission mode. Refreshes every 2s. Multiple sessions in the same project directory appear as separate entries with `#1`, `#2` suffixes.
 
 ### Split View
 
@@ -122,6 +112,7 @@ View Claude Code team configurations and members.
 | `a` | Trace pane | Annotate turn (GOOD/BAD/WASTE) |
 | `N` | Trace pane | Add note to annotated turn |
 | `Ctrl+f` | Split view | Toggle fullscreen on focused pane |
+| `Tab` | Agent list | Expand/collapse process tree (for grouped sessions) |
 | `x` | Agent list | Kill agent |
 | `:new` | Anywhere | Launch new agent |
 | `Esc` | Split/trace | Exit to agent list |
@@ -179,7 +170,7 @@ In aimux: `Tab` to trace pane, `a` to annotate, `e` then `o` to export.
 |----------|-----------|-------|---------|------|
 | Claude | Process scan + JSONL | Full conversations | Direct PTY embed | Logs via http/protobuf |
 | Codex | Process scan + JSONL | Full conversations | Tmux mirror | Traces + logs |
-| Gemini | Process scan + JSON | User prompts | Tmux mirror | Traces + logs |
+| Gemini | Process scan + JSON | Full conversations (per-session chat files) | Tmux mirror | Traces + logs |
 
 <details>
 <summary><strong>Adding a new provider</strong></summary>
@@ -213,7 +204,7 @@ No daemon, no hooks, no modifications to your AI tools. Reads from the filesyste
 |--------|----------|------|
 | Config | `~/.aimux/config.yaml` | Provider settings, export config |
 | Process table | `ps aux` | Running agents |
-| Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/` | Conversations, tool calls |
+| Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/`, `~/.gemini/tmp/*/chats/` | Conversations, tool calls |
 | OTEL receiver | `localhost:4318` | Live telemetry from agents |
 | Teams | `~/.claude/teams/*/config.json` | Team membership |
 
