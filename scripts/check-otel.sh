@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick check if the agentmux OTEL receiver is running and has data.
+# Quick check if the aimux OTEL receiver is running and has data.
 # Usage: ./scripts/check-otel.sh
 
 PORT=${1:-4318}
@@ -14,14 +14,14 @@ if [ "$STATUS" = "200" ]; then
 else
     echo "  Receiver: NOT RUNNING (got status $STATUS)"
     echo ""
-    echo "  Make sure agentmux is running with otel.enabled: true in ~/.agentmux/config.yaml"
+    echo "  Make sure aimux is running with otel.enabled: true in ~/.aimux/config.yaml"
     exit 1
 fi
 
 echo ""
 echo "To test OTEL tracing:"
 echo ""
-echo "  1. In agentmux, press :new and launch an agent with Tracing: ON"
+echo "  1. In aimux, press :new and launch an agent with Tracing: ON"
 echo "  2. Use the agent (type a prompt, let it respond)"
 echo "  3. The trace header should change from [FILE] to [OTEL]"
 echo ""
@@ -45,4 +45,4 @@ echo "  OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:$PORT \\"
 echo "  gemini"
 echo ""
 echo "NOTE: http/protobuf protocol is required (port 4318)."
-echo "      gRPC (port 4317) is NOT supported by agentmux's receiver."
+echo "      gRPC (port 4317) is NOT supported by aimux's receiver."

@@ -98,7 +98,7 @@ func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
 	r.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "agentmux OTEL receiver debug\n")
+	fmt.Fprintf(w, "aimux OTEL receiver debug\n")
 	fmt.Fprintf(w, "port: %d\n", r.port)
 	fmt.Fprintf(w, "traces: %d, logs: %d, other: %d\n", traces, logs, other)
 	fmt.Fprintf(w, "store entries: %d\n", r.store.TraceCount())

@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/config"
+	"github.com/zanetworker/aimux/internal/config"
 )
 
 // TmuxSession mirrors a tmux session's pane content. It polls
 // `tmux capture-pane` for output and forwards keystrokes via
 // `tmux send-keys`. This allows embedding any TUI (Codex, Gemini)
-// inside agentmux's split view.
+// inside aimux's split view.
 type TmuxSession struct {
 	sessionName string
 	created     bool // true if we created the session (kill on Close)
@@ -38,7 +38,7 @@ func StartTmux(cmd *exec.Cmd, cols, rows int, shell, envPrefix string) (*TmuxSes
 		return nil, fmt.Errorf("tmux: nil command")
 	}
 
-	name := fmt.Sprintf("agentmux-embed-%d", time.Now().UnixNano())
+	name := fmt.Sprintf("aimux-embed-%d", time.Now().UnixNano())
 
 	// Build the command string for the user's shell with RC file sourced.
 	// Use the command name (not absolute path) so shell functions take

@@ -1,8 +1,8 @@
-# agentmux Redesign Implementation Plan
+# aimux Redesign Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rename claudetopus to agentmux, introduce AgentProvider abstraction, redesign TUI to k9s-style with in-TUI session preview/zoom via PTY embedding.
+**Goal:** Rename claudetopus to aimux, introduce AgentProvider abstraction, redesign TUI to k9s-style with in-TUI session preview/zoom via PTY embedding.
 
 **Architecture:** Provider interface abstracts AI CLI discovery (Claude real, Codex/Gemini stubs). PTY embedding via `creack/pty` + `charmbracelet/x/vt` enables in-TUI session viewing. Split-pane layout shows agent list + live preview. Instance model renamed to Agent throughout.
 
@@ -10,11 +10,11 @@
 
 ---
 
-### Task 1: Rename Module — claudetopus → agentmux
+### Task 1: Rename Module — claudetopus → aimux
 
 **Files:**
 - Modify: `go.mod`
-- Modify: `cmd/claudetopus/main.go` → move to `cmd/agentmux/main.go`
+- Modify: `cmd/claudetopus/main.go` → move to `cmd/aimux/main.go`
 - Modify: `Makefile`
 - Modify: `.goreleaser.yml`
 - Modify: `.gitignore`
@@ -28,15 +28,15 @@ module github.com/zanetworker/claudetopus
 ```
 to:
 ```
-module github.com/zanetworker/agentmux
+module github.com/zanetworker/aimux
 ```
 
 **Step 2: Move cmd directory**
 
 Run:
 ```bash
-mkdir -p cmd/agentmux
-mv cmd/claudetopus/main.go cmd/agentmux/main.go
+mkdir -p cmd/aimux
+mv cmd/claudetopus/main.go cmd/aimux/main.go
 rmdir cmd/claudetopus
 ```
 
@@ -44,26 +44,26 @@ rmdir cmd/claudetopus
 
 Run:
 ```bash
-find . -name '*.go' -exec sed -i '' 's|github.com/zanetworker/claudetopus|github.com/zanetworker/agentmux|g' {} +
+find . -name '*.go' -exec sed -i '' 's|github.com/zanetworker/claudetopus|github.com/zanetworker/aimux|g' {} +
 ```
 
 **Step 4: Update Makefile**
 
-Replace `BINARY=claudetopus` with `BINARY=agentmux` and update the build path from `./cmd/claudetopus` to `./cmd/agentmux`.
+Replace `BINARY=claudetopus` with `BINARY=aimux` and update the build path from `./cmd/claudetopus` to `./cmd/aimux`.
 
 **Step 5: Update .goreleaser.yml**
 
-Change `main: ./cmd/claudetopus` to `main: ./cmd/agentmux` and `binary: claudetopus` to `binary: agentmux`.
+Change `main: ./cmd/claudetopus` to `main: ./cmd/aimux` and `binary: claudetopus` to `binary: aimux`.
 
 **Step 6: Update .gitignore**
 
-Change `/claudetopus` to `/agentmux`.
+Change `/claudetopus` to `/aimux`.
 
 **Step 7: Update process filter**
 
-In `internal/discovery/process.go`, the `isClaudeProcess` function filters out "claudetopus" from results. Change to filter out "agentmux":
+In `internal/discovery/process.go`, the `isClaudeProcess` function filters out "claudetopus" from results. Change to filter out "aimux":
 ```go
-if strings.Contains(cmd, "grep") || strings.Contains(cmd, "agentmux") {
+if strings.Contains(cmd, "grep") || strings.Contains(cmd, "aimux") {
     return false
 }
 ```
@@ -72,14 +72,14 @@ if strings.Contains(cmd, "grep") || strings.Contains(cmd, "agentmux") {
 
 In `internal/discovery/process_test.go`, update the test case:
 ```go
-{"agentmux", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 agentmux", false},
+{"aimux", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 aimux", false},
 ```
 
 **Step 9: Verify build and tests**
 
 Run:
 ```bash
-go build ./cmd/agentmux && go test ./... -timeout 30s
+go build ./cmd/aimux && go test ./... -timeout 30s
 ```
 
 Expected: Clean build, all tests pass.
@@ -88,7 +88,7 @@ Expected: Clean build, all tests pass.
 
 ```bash
 git add -A
-git commit -m "refactor: rename claudetopus to agentmux"
+git commit -m "refactor: rename claudetopus to aimux"
 ```
 
 ---
@@ -155,7 +155,7 @@ Note: Added `Name`, `ProviderName`, and `SessionFile` fields. `Name` is derived 
 
 **Step 4: Update all imports**
 
-Every file that imports `github.com/zanetworker/agentmux/internal/model` must change to `github.com/zanetworker/agentmux/internal/agent`. Every reference to `model.Instance` becomes `agent.Agent`, `model.Status*` becomes `agent.Status*`, etc.
+Every file that imports `github.com/zanetworker/aimux/internal/model` must change to `github.com/zanetworker/aimux/internal/agent`. Every reference to `model.Instance` becomes `agent.Agent`, `model.Status*` becomes `agent.Status*`, etc.
 
 Files to update:
 - `internal/discovery/orchestrator.go`
@@ -171,7 +171,7 @@ find . -name '*.go' -exec sed -i '' 's|/internal/model"|/internal/agent"|g' {} +
 find . -name '*.go' -exec sed -i '' 's|model\.Instance|agent.Agent|g' {} +
 find . -name '*.go' -exec sed -i '' 's|model\.Status|agent.Status|g' {} +
 find . -name '*.go' -exec sed -i '' 's|model\.Source|agent.Source|g' {} +
-find . -name '*.go' -exec sed -i '' 's|"github.com/zanetworker/agentmux/internal/model"|"github.com/zanetworker/agentmux/internal/agent"|g' {} +
+find . -name '*.go' -exec sed -i '' 's|"github.com/zanetworker/aimux/internal/model"|"github.com/zanetworker/aimux/internal/agent"|g' {} +
 ```
 
 Manually verify each file compiles — sed may miss edge cases.
@@ -180,7 +180,7 @@ Manually verify each file compiles — sed may miss edge cases.
 
 Run:
 ```bash
-go build ./cmd/agentmux && go test ./... -timeout 30s
+go build ./cmd/aimux && go test ./... -timeout 30s
 ```
 
 Expected: Clean build, all tests pass.
@@ -261,7 +261,7 @@ import (
     "os/exec"
     "time"
 
-    "github.com/zanetworker/agentmux/internal/agent"
+    "github.com/zanetworker/aimux/internal/agent"
 )
 
 // Provider discovers and manages AI CLI agents of a specific type.
@@ -348,7 +348,7 @@ import (
     "os/exec"
     "testing"
 
-    "github.com/zanetworker/agentmux/internal/agent"
+    "github.com/zanetworker/aimux/internal/agent"
 )
 
 func TestClaudeName(t *testing.T) {
@@ -416,8 +416,8 @@ package provider
 import (
     "os/exec"
 
-    "github.com/zanetworker/agentmux/internal/agent"
-    "github.com/zanetworker/agentmux/internal/discovery"
+    "github.com/zanetworker/aimux/internal/agent"
+    "github.com/zanetworker/aimux/internal/discovery"
 )
 
 // Claude discovers and manages Claude Code CLI agents.
@@ -502,7 +502,7 @@ package provider
 import (
     "testing"
 
-    "github.com/zanetworker/agentmux/internal/agent"
+    "github.com/zanetworker/aimux/internal/agent"
 )
 
 func TestCodexStub(t *testing.T) {
@@ -559,7 +559,7 @@ package provider
 import (
     "os/exec"
 
-    "github.com/zanetworker/agentmux/internal/agent"
+    "github.com/zanetworker/aimux/internal/agent"
 )
 
 // Codex discovers OpenAI Codex CLI agents.
@@ -579,7 +579,7 @@ package provider
 import (
     "os/exec"
 
-    "github.com/zanetworker/agentmux/internal/agent"
+    "github.com/zanetworker/aimux/internal/agent"
 )
 
 // Gemini discovers Google Gemini CLI agents.
@@ -610,7 +610,7 @@ git commit -m "feat: add Codex and Gemini provider stubs"
 
 **Files:**
 - Modify: `internal/discovery/orchestrator.go`
-- Modify: `cmd/agentmux/main.go`
+- Modify: `cmd/aimux/main.go`
 - Modify: `internal/tui/app.go`
 
 **Step 1: Refactor orchestrator to accept providers**
@@ -626,9 +626,9 @@ import (
     "path/filepath"
     "time"
 
-    "github.com/zanetworker/agentmux/internal/agent"
-    "github.com/zanetworker/agentmux/internal/cost"
-    "github.com/zanetworker/agentmux/internal/provider"
+    "github.com/zanetworker/aimux/internal/agent"
+    "github.com/zanetworker/aimux/internal/cost"
+    "github.com/zanetworker/aimux/internal/provider"
 )
 
 // Orchestrator coordinates all providers to produce enriched agents.
@@ -698,7 +698,7 @@ func NewApp() App {
 
 Run:
 ```bash
-go build ./cmd/agentmux && go test ./... -timeout 30s
+go build ./cmd/aimux && go test ./... -timeout 30s
 ```
 
 Expected: Clean build, all tests pass.
@@ -769,7 +769,7 @@ import (
     "strings"
 
     "github.com/charmbracelet/lipgloss"
-    "github.com/zanetworker/agentmux/internal/agent"
+    "github.com/zanetworker/aimux/internal/agent"
 )
 
 var (
@@ -794,7 +794,7 @@ var (
         Bold(true)
 )
 
-// logo is a small ASCII art logo for agentmux.
+// logo is a small ASCII art logo for aimux.
 var logo = []string{
     " █████╗ ██╗███╗   ███╗██╗   ██╗██╗  ██╗",
     "██╔══██╗██║████╗ ████║██║   ██║╚██╗██╔╝",
@@ -918,7 +918,7 @@ Replace the existing `renderHeader()` method in `app.go` with usage of the new `
 
 Run:
 ```bash
-go build ./cmd/agentmux
+go build ./cmd/aimux
 ```
 
 Expected: Clean build.
@@ -1023,7 +1023,7 @@ Change `instancesView` → `agentsView`, `SetInstances` → `SetAgents`, etc.
 
 Run:
 ```bash
-go build ./cmd/agentmux && go test ./... -timeout 30s
+go build ./cmd/aimux && go test ./... -timeout 30s
 ```
 
 **Step 6: Commit**
@@ -1176,7 +1176,7 @@ import (
     "strings"
 
     "github.com/charmbracelet/lipgloss"
-    "github.com/zanetworker/agentmux/internal/agent"
+    "github.com/zanetworker/aimux/internal/agent"
 )
 
 var (
@@ -1313,7 +1313,7 @@ When the selected agent changes (cursor moves), call `previewPane.SetAgent()`.
 
 **Step 3: Verify build**
 
-Run: `go build ./cmd/agentmux`
+Run: `go build ./cmd/aimux`
 
 **Step 4: Commit**
 
@@ -1590,8 +1590,8 @@ import (
 
     tea "github.com/charmbracelet/bubbletea"
     "github.com/charmbracelet/lipgloss"
-    "github.com/zanetworker/agentmux/internal/agent"
-    "github.com/zanetworker/agentmux/internal/terminal"
+    "github.com/zanetworker/aimux/internal/agent"
+    "github.com/zanetworker/aimux/internal/terminal"
 )
 
 // PTYOutputMsg carries raw PTY output for the Bubble Tea update loop.
@@ -1727,7 +1727,7 @@ func (sv *SessionView) View() string {
     var b strings.Builder
 
     // Header bar
-    title := fmt.Sprintf(" agentmux  ▸ %s  %s · %s · %s ",
+    title := fmt.Sprintf(" aimux  ▸ %s  %s · %s · %s ",
         sv.agent.ShortProject(),
         sv.agent.ProviderName,
         sv.agent.ShortModel(),
@@ -1782,7 +1782,7 @@ In `View`:
 
 **Step 3: Verify build**
 
-Run: `go build ./cmd/agentmux`
+Run: `go build ./cmd/aimux`
 
 **Step 4: Commit**
 
@@ -1872,7 +1872,7 @@ func (a App) View() string {
 
 Run:
 ```bash
-go build ./cmd/agentmux && ./agentmux
+go build ./cmd/aimux && ./aimux
 ```
 
 Expected: TUI launches with split pane layout. If Claude sessions are running, they appear in the left pane. Selecting one shows the conversation preview on the right.
@@ -1897,7 +1897,7 @@ Change `SetInstances` → `SetAgents`, update imports, and add the AGENT column 
 
 **Step 2: Verify build and tests**
 
-Run: `go build ./cmd/agentmux && go test ./... -timeout 30s`
+Run: `go build ./cmd/aimux && go test ./... -timeout 30s`
 
 **Step 3: Commit**
 
@@ -1924,7 +1924,7 @@ git commit -m "refactor: update costs view for agent model"
 
 ```bash
 git add internal/tui/views/help.go
-git commit -m "docs: update help view for agentmux"
+git commit -m "docs: update help view for aimux"
 ```
 
 ---
@@ -1946,7 +1946,7 @@ git commit -m "docs: update help view for agentmux"
 
 ```bash
 git add README.md
-git commit -m "docs: update README for agentmux rebrand"
+git commit -m "docs: update README for aimux rebrand"
 ```
 
 ---
@@ -1958,7 +1958,7 @@ git commit -m "docs: update README for agentmux rebrand"
 
 **Step 1: Update project guide**
 
-- Change all "claudetopus" references to "agentmux"
+- Change all "claudetopus" references to "aimux"
 - Update project structure section
 - Add provider and terminal packages
 - Update build/test commands
@@ -1967,7 +1967,7 @@ git commit -m "docs: update README for agentmux rebrand"
 
 ```bash
 git add CLAUDE.md
-git commit -m "docs: update CLAUDE.md for agentmux"
+git commit -m "docs: update CLAUDE.md for aimux"
 ```
 
 ---
@@ -1978,14 +1978,14 @@ git commit -m "docs: update CLAUDE.md for agentmux"
 
 Run:
 ```bash
-go build ./cmd/agentmux && go test ./... -timeout 30s
+go build ./cmd/aimux && go test ./... -timeout 30s
 ```
 
 Expected: Clean build, all tests pass.
 
 **Step 2: Run the TUI**
 
-Run: `./agentmux`
+Run: `./aimux`
 
 Verify:
 - [ ] Header shows k9s-style info boxes and ASCII logo
@@ -2004,7 +2004,7 @@ Verify:
 
 ```bash
 git add -A
-git commit -m "fix: integration polish for agentmux"
+git commit -m "fix: integration polish for aimux"
 ```
 
 ---
@@ -2013,7 +2013,7 @@ git commit -m "fix: integration polish for agentmux"
 
 | Task | Component | What it builds |
 |------|-----------|---------------|
-| 1 | Rename | claudetopus → agentmux (module, binary, imports) |
+| 1 | Rename | claudetopus → aimux (module, binary, imports) |
 | 2 | Data Model | Instance → Agent, model → agent package |
 | 3 | Provider Interface | Provider, Segment, Role types |
 | 4 | Claude Provider | Real Claude discovery + resume |

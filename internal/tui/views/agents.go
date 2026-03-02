@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 // Column widths for the agents table — k9s-style.

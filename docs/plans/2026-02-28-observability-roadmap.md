@@ -2,9 +2,9 @@
 
 ## Context
 
-agentmux traces agent behavior by parsing provider-specific session files (Claude JSONL, Codex JSONL, Gemini JSON). Users can annotate turns (GOOD/BAD/WASTE) and export with `:export`. This roadmap adds two capabilities without replacing the existing file-based approach.
+aimux traces agent behavior by parsing provider-specific session files (Claude JSONL, Codex JSONL, Gemini JSON). Users can annotate turns (GOOD/BAD/WASTE) and export with `:export`. This roadmap adds two capabilities without replacing the existing file-based approach.
 
-agentmux's unique value in the evaluation pipeline: **human annotations made in context**. You label turns while watching the agent work, capturing ground truth that automated judges can't produce. The annotations feed into evaluation platforms (MLflow, Braintrust, Langfuse, or any OTEL backend) for offline analysis, regression detection, and judge calibration.
+aimux's unique value in the evaluation pipeline: **human annotations made in context**. You label turns while watching the agent work, capturing ground truth that automated judges can't produce. The annotations feed into evaluation platforms (MLflow, Braintrust, Langfuse, or any OTEL backend) for offline analysis, regression detection, and judge calibration.
 
 ## Step 1a: Annotation Notes
 
@@ -37,7 +37,7 @@ agentmux's unique value in the evaluation pipeline: **human annotations made in 
 - No Python script needed
 
 **Scope**:
-- Config: `export.endpoint: http://localhost:5000/v1/traces` in `~/.agentmux/config.yaml`
+- Config: `export.endpoint: http://localhost:5000/v1/traces` in `~/.aimux/config.yaml`
 - `:export otel` command sends current trace as OTLP/HTTP POST
 - Mapping:
   - Session -> root span
@@ -48,8 +48,8 @@ agentmux's unique value in the evaluation pipeline: **human annotations made in 
   - Turn.TokensIn/Out -> `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens`
   - Turn.CostUSD -> `gen_ai.usage.cost`
   - Turn.Model -> `gen_ai.request.model`
-  - Annotation label -> span attribute `agentmux.label`
-  - Annotation note -> span attribute `agentmux.note`
+  - Annotation label -> span attribute `aimux.label`
+  - Annotation note -> span attribute `aimux.note`
 - Existing `:export` (JSONL to file) remains unchanged
 - OTLP/HTTP only (MLflow doesn't support gRPC yet)
 
@@ -66,15 +66,15 @@ agentmux's unique value in the evaluation pipeline: **human annotations made in 
 
 ## Step 2: OTEL Receiver (Optional Enhancement)
 
-**Goal**: agentmux can receive OTEL traces from Claude/Codex/Gemini alongside file-based parsing, providing richer real-time data when available.
+**Goal**: aimux can receive OTEL traces from Claude/Codex/Gemini alongside file-based parsing, providing richer real-time data when available.
 
 **Status**: Not started (depends on Step 1b for OTEL library familiarity)
 
 **Architecture**:
 ```
-Claude Code --OTLP--> agentmux OTEL receiver --> trace.Turn --> LogsView
-Codex CLI   --OTLP--> agentmux OTEL receiver --> trace.Turn --> LogsView
-Gemini CLI  --OTLP--> agentmux OTEL receiver --> trace.Turn --> LogsView
+Claude Code --OTLP--> aimux OTEL receiver --> trace.Turn --> LogsView
+Codex CLI   --OTLP--> aimux OTEL receiver --> trace.Turn --> LogsView
+Gemini CLI  --OTLP--> aimux OTEL receiver --> trace.Turn --> LogsView
                                                     ^
 Session files ---------> Provider.ParseTrace -------+  (fallback)
 ```
@@ -95,7 +95,7 @@ Session files ---------> Provider.ParseTrace -------+  (fallback)
 ## Evaluation Pipeline Flow
 
 ```
-agentmux (real-time, in-terminal)          Evaluation platform (offline, web)
+aimux (real-time, in-terminal)          Evaluation platform (offline, web)
 ─────────────────────────────────          ────────────────────────────────────
 Watch agent work in split view
 Agent deletes wrong file

@@ -1,4 +1,4 @@
-module github.com/zanetworker/agentmux
+module github.com/zanetworker/aimux
 
 go 1.24.2
 

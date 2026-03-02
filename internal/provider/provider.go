@@ -4,8 +4,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/trace"
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // Provider discovers and manages AI CLI agents of a specific type.

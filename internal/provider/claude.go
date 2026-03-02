@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/cost"
-	"github.com/zanetworker/agentmux/internal/discovery"
-	"github.com/zanetworker/agentmux/internal/trace"
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // Claude is a Provider implementation for the Claude Code CLI.

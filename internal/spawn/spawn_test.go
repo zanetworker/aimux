@@ -11,9 +11,9 @@ func TestTmuxSessionName(t *testing.T) {
 		dir      string
 		want     string
 	}{
-		{"claude", "/Users/me/projects/blog-concept", "agentmux-claude-blog-concept"},
-		{"codex", "/tmp/my project", "agentmux-codex-my-project"},
-		{"gemini", "/home/user/app", "agentmux-gemini-app"},
+		{"claude", "/Users/me/projects/blog-concept", "aimux-claude-blog-concept"},
+		{"codex", "/tmp/my project", "aimux-codex-my-project"},
+		{"gemini", "/home/user/app", "aimux-gemini-app"},
 	}
 	for _, tt := range tests {
 		got := TmuxSessionName(tt.provider, tt.dir)

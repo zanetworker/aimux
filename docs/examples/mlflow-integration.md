@@ -1,10 +1,10 @@
-# agentmux + MLflow Integration
+# aimux + MLflow Integration
 
-Export agent traces with human annotations from agentmux to MLflow for evaluation, regression detection, and judge calibration.
+Export agent traces with human annotations from aimux to MLflow for evaluation, regression detection, and judge calibration.
 
 ## Prerequisites
 
-- agentmux installed
+- aimux installed
 - MLflow 3.6+ (`pip install mlflow>=3.6`)
 - Python 3.10+
 
@@ -16,9 +16,9 @@ Export agent traces with human annotations from agentmux to MLflow for evaluatio
 mlflow server --host 127.0.0.1 --port 5000
 ```
 
-### 2. Configure agentmux
+### 2. Configure aimux
 
-Add the MLflow endpoint to `~/.agentmux/config.yaml`:
+Add the MLflow endpoint to `~/.aimux/config.yaml`:
 
 ```yaml
 export:
@@ -29,7 +29,7 @@ export:
 ### 3. Annotate and Export
 
 ```
-# In agentmux, open a trace (l on any agent)
+# In aimux, open a trace (l on any agent)
 # Annotate turns as you watch:
 #   a    → cycle label: GOOD → BAD → WASTE → clear
 #   N    → add a note explaining why (e.g., "deleted prod config")
@@ -50,15 +50,15 @@ Open http://localhost:5000 in your browser. Navigate to your experiment's Traces
   - `gen_ai.usage.cost`
   - `gen_ai.request.model`
 - Annotated turns have additional attributes:
-  - `agentmux.feedback.value` -- GOOD, BAD, or WASTE
-  - `agentmux.feedback.rationale` -- your note explaining why
+  - `aimux.feedback.value` -- GOOD, BAD, or WASTE
+  - `aimux.feedback.rationale` -- your note explaining why
 
 ## Evaluation Workflow
 
 ### Build an Evaluation Dataset
 
 1. In MLflow UI, go to Traces
-2. Select traces that have agentmux annotations
+2. Select traces that have aimux annotations
 3. Click "Add to evaluation dataset"
 4. Name it (e.g., `coding-agent-quality-v1`)
 
@@ -78,7 +78,7 @@ dataset = mlflow.data.load_delta(
 @mlflow.scorer
 def quality_scorer(inputs, outputs, trace):
     """Score based on patterns learned from human annotations."""
-    feedback = trace.get_attribute("agentmux.feedback.value")
+    feedback = trace.get_attribute("aimux.feedback.value")
     # Use as ground truth for calibrating automated judges
     return {"human_label": feedback}
 
@@ -94,7 +94,7 @@ results = mlflow.genai.evaluate(
 Export traces from different model sessions and compare:
 
 ```python
-# In agentmux: run the same task with opus, then sonnet
+# In aimux: run the same task with opus, then sonnet
 # Annotate both sessions
 # :export-otel for each
 
@@ -129,13 +129,13 @@ mlflow.genai.monitor(
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `agentmux.session_id` | string | Session identifier |
-| `agentmux.provider` | string | Provider name (claude, codex, gemini) |
-| `agentmux.turn.number` | int | Turn number within the session |
-| `agentmux.turn.action_count` | int | Number of tool calls in this turn |
-| `agentmux.turn.error_count` | int | Number of failed tool calls |
-| `agentmux.feedback.value` | string | Human annotation: good, bad, wasteful |
-| `agentmux.feedback.rationale` | string | Free-text note explaining the label |
+| `aimux.session_id` | string | Session identifier |
+| `aimux.provider` | string | Provider name (claude, codex, gemini) |
+| `aimux.turn.number` | int | Turn number within the session |
+| `aimux.turn.action_count` | int | Number of tool calls in this turn |
+| `aimux.turn.error_count` | int | Number of failed tool calls |
+| `aimux.feedback.value` | string | Human annotation: good, bad, wasteful |
+| `aimux.feedback.rationale` | string | Free-text note explaining the label |
 | `gen_ai.input.messages` | string | User prompt text |
 | `gen_ai.output.messages` | string | Agent response text |
 | `gen_ai.request.model` | string | Model used for this turn |

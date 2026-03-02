@@ -15,7 +15,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "=== agentmux OTEL diagnostic test ==="
+echo "=== aimux OTEL diagnostic test ==="
 echo ""
 
 # 1. Start a sniffer HTTP server

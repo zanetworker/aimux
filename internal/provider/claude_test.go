@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 func TestClaudeName(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/terminal"
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/terminal"
 )
 
 var (
@@ -272,7 +272,7 @@ func (sv *SessionView) renderHeader() string {
 		provider = sv.agent.ProviderName
 	}
 
-	badge := sessionBadgeStyle.Render(" agentmux ")
+	badge := sessionBadgeStyle.Render(" aimux ")
 	left := badge + sessionHeaderStyle.Render(fmt.Sprintf(" %s ", name))
 	if provider != "" {
 		left += " " + sessionHintStyle.Render(provider)
@@ -293,7 +293,7 @@ func (sv *SessionView) renderHeader() string {
 }
 
 func (sv *SessionView) renderStatusBar() string {
-	badge := sessionBadgeStyle.Render(" agentmux ")
+	badge := sessionBadgeStyle.Render(" aimux ")
 	mode := sessionModeStyle.Render(" INTERACTIVE ")
 	hint := sessionHintStyle.Render(" Ctrl+f:split  Esc:exit ")
 

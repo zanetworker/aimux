@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/discovery"
-	"github.com/zanetworker/agentmux/internal/trace"
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // Gemini is a Provider implementation for the Google Gemini CLI.
@@ -122,7 +122,7 @@ func isGeminiProcess(line string) bool {
 	}
 
 	// Exclude non-session processes
-	for _, exclude := range []string{"grep", "agentmux", "mcp-server", "mcp ", "tmux"} {
+	for _, exclude := range []string{"grep", "aimux", "mcp-server", "mcp ", "tmux"} {
 		if strings.Contains(cmd, exclude) {
 			return false
 		}

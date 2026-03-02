@@ -1,7 +1,7 @@
 package discovery
 
 import (
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 // AgentProvider is the minimal interface that the orchestrator requires from

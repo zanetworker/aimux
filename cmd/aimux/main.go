@@ -5,7 +5,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/zanetworker/agentmux/internal/tui"
+	"github.com/zanetworker/aimux/internal/tui"
 )
 
 func main() {

@@ -13,18 +13,18 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/config"
-	"github.com/zanetworker/agentmux/internal/discovery"
-	"github.com/zanetworker/agentmux/internal/evaluation"
-	"github.com/zanetworker/agentmux/internal/jump"
-	"github.com/zanetworker/agentmux/internal/provider"
-	agentmuxotel "github.com/zanetworker/agentmux/internal/otel"
-	"github.com/zanetworker/agentmux/internal/spawn"
-	"github.com/zanetworker/agentmux/internal/team"
-	"github.com/zanetworker/agentmux/internal/terminal"
-	"github.com/zanetworker/agentmux/internal/trace"
-	"github.com/zanetworker/agentmux/internal/tui/views"
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/evaluation"
+	"github.com/zanetworker/aimux/internal/jump"
+	"github.com/zanetworker/aimux/internal/provider"
+	aimuxotel "github.com/zanetworker/aimux/internal/otel"
+	"github.com/zanetworker/aimux/internal/spawn"
+	"github.com/zanetworker/aimux/internal/team"
+	"github.com/zanetworker/aimux/internal/terminal"
+	"github.com/zanetworker/aimux/internal/trace"
+	"github.com/zanetworker/aimux/internal/tui/views"
 )
 
 type viewType int
@@ -120,8 +120,8 @@ type App struct {
 	cfg config.Config
 
 	// OTEL receiver (optional)
-	otelReceiver *agentmuxotel.Receiver
-	otelStore    *agentmuxotel.SpanStore
+	otelReceiver *aimuxotel.Receiver
+	otelStore    *aimuxotel.SpanStore
 }
 
 // NewApp creates a new root TUI application.
@@ -163,12 +163,12 @@ func NewApp() App {
 		breadcrumbs:  []string{"Agents"},
 		hiddenAgents: make(map[string]bool),
 		cfg:          cfg,
-		otelStore:    agentmuxotel.NewSpanStore(),
+		otelStore:    aimuxotel.NewSpanStore(),
 	}
 
 	// Start OTEL receiver if enabled
 	if cfg.OTELReceiver.Enabled {
-		app.otelReceiver = agentmuxotel.NewReceiver(app.otelStore, cfg.OTELReceiverPort())
+		app.otelReceiver = aimuxotel.NewReceiver(app.otelStore, cfg.OTELReceiverPort())
 		_ = app.otelReceiver.Start()
 	}
 
@@ -698,7 +698,7 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 
 			for _, id := range sessionIDs {
 				if root := a.otelStore.GetByConversation(id); root != nil {
-					turns := agentmuxotel.SpansToTurns(root)
+					turns := aimuxotel.SpansToTurns(root)
 					if len(turns) > 0 {
 						return turns, nil
 					}
@@ -1082,7 +1082,7 @@ func (a App) exportOTEL() (tea.Model, tea.Cmd) {
 
 	endpoint := a.cfg.Export.Endpoint
 	if endpoint == "" {
-		a.statusHint = "Set export.endpoint in ~/.agentmux/config.yaml first"
+		a.statusHint = "Set export.endpoint in ~/.aimux/config.yaml first"
 		return a, nil
 	}
 
@@ -1096,7 +1096,7 @@ func (a App) exportOTEL() (tea.Model, tea.Cmd) {
 		providerName = a.sessionView.Agent().ProviderName
 	}
 
-	cfg := agentmuxotel.ExportConfig{
+	cfg := aimuxotel.ExportConfig{
 		Endpoint:     endpoint,
 		Insecure:     a.cfg.Export.Insecure,
 		SessionID:    sessionID,
@@ -1104,7 +1104,7 @@ func (a App) exportOTEL() (tea.Model, tea.Cmd) {
 		ExperimentID: a.cfg.Export.ExperimentID,
 	}
 
-	if err := agentmuxotel.ExportTrace(cfg, turns, a.evalStore); err != nil {
+	if err := aimuxotel.ExportTrace(cfg, turns, a.evalStore); err != nil {
 		a.statusHint = fmt.Sprintf("OTEL export failed: %v", err)
 		a.stickyHint = true
 		return a, nil
@@ -1630,7 +1630,7 @@ func (a App) renderSplitView() string {
 		Bold(true).
 		Foreground(lipgloss.Color("#111827")).
 		Background(lipgloss.Color("#5F87FF")).
-		Render(" agentmux ")
+		Render(" aimux ")
 	focus := a.splitFocus
 	hintStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	var focusHint string

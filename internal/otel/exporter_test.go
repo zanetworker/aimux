@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/trace"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 func TestExportTrace_NoEndpoint(t *testing.T) {

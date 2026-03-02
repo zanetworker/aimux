@@ -45,14 +45,14 @@ type ExportTurn struct {
 }
 
 // Store manages annotation persistence for a single agent session.
-// Annotations are stored as JSONL files under ~/.agentmux/evaluations/.
+// Annotations are stored as JSONL files under ~/.aimux/evaluations/.
 type Store struct {
 	sessionID string
 	dir       string
 }
 
 // NewStore creates a Store for the given session ID. The backing directory
-// (~/.agentmux/evaluations/) is created lazily on the first write.
+// (~/.aimux/evaluations/) is created lazily on the first write.
 func NewStore(sessionID string) *Store {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -61,7 +61,7 @@ func NewStore(sessionID string) *Store {
 	}
 	return &Store{
 		sessionID: sessionID,
-		dir:       filepath.Join(home, ".agentmux", "evaluations"),
+		dir:       filepath.Join(home, ".aimux", "evaluations"),
 	}
 }
 
@@ -225,13 +225,13 @@ func (s *Store) Remove(turn int) error {
 }
 
 // ExportPath returns the filesystem path for an exported evaluation JSONL
-// file. Exports are stored under ~/.agentmux/exports/.
+// file. Exports are stored under ~/.aimux/exports/.
 func ExportPath(sessionID string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".agentmux", "exports", sessionID+"-export.jsonl")
+	return filepath.Join(home, ".aimux", "exports", sessionID+"-export.jsonl")
 }
 
 // WriteExport writes all enriched turns as JSONL to the given path. The parent

@@ -57,7 +57,7 @@ func (v *HelpView) View() string {
 	writeHelp(&b, "Esc", "Clear filter / go back")
 	writeHelp(&b, "g/G", "Jump to top / bottom")
 	writeHelp(&b, "?", "This help screen")
-	writeHelp(&b, "q", "Quit agentmux")
+	writeHelp(&b, "q", "Quit aimux")
 	b.WriteString("\n")
 
 	b.WriteString(helpTitleStyle.Render("Split View (Enter on agent)"))
@@ -86,7 +86,7 @@ func (v *HelpView) View() string {
 	b.WriteString("\n")
 	writeHelp(&b, "a", "Annotate: cycle GOOD -> BAD -> WASTE -> remove")
 	b.WriteString(helpDimStyle.Render("  Labels appear as colored badges in the turn header.\n"))
-	b.WriteString(helpDimStyle.Render("  Annotations auto-save to ~/.agentmux/evaluations/\n"))
+	b.WriteString(helpDimStyle.Render("  Annotations auto-save to ~/.aimux/evaluations/\n"))
 	b.WriteString(helpDimStyle.Render("  Use :export to write all turns + labels as JSONL.\n"))
 	b.WriteString("\n")
 

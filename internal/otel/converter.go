@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zanetworker/agentmux/internal/trace"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // SpansToTurns converts a span tree (from the OTEL receiver) into trace.Turn

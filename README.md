@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="assets/logo.png" width="128" alt="agentmux logo">
+  <img src="assets/logo.png" width="128" alt="aimux logo">
   <br>
-  <strong>agentmux</strong><br>
+  <strong>aimux</strong><br>
   <sub>k9s for your AI coding agents. Launch, observe, and debug from one terminal.</sub>
 </p>
 
@@ -12,7 +12,7 @@
 
 You're running 5 agents across 3 projects. Claude is refactoring auth. Codex is writing tests. A third session is idle, or stuck on a permission prompt? You don't know, because each lives in its own terminal.
 
-**agentmux is your control plane.** One terminal. Every agent. Full visibility.
+**aimux is your control plane.** One terminal. Every agent. Full visibility.
 
 - **See everything**: all agents, their status, model, cost, and project in one view
 - **Trace what happened**: every prompt, response, and tool call, turn by turn
@@ -22,7 +22,7 @@ You're running 5 agents across 3 projects. Claude is refactoring auth. Codex is 
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           agentmux      │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           aimux      │
 │  │ ● Active   2 │ │ ◐ Waiting  0 │ │ ○ Idle     1 │                         │
 │  └──────────────┘ └──────────────┘ └──────────────┘                         │
 │  Agents                                                                      │
@@ -45,10 +45,10 @@ You're running 5 agents across 3 projects. Claude is refactoring auth. Codex is 
 ## Quick Start
 
 ```bash
-git clone https://github.com/zanetworker/agentmux.git
-cd agentmux
+git clone https://github.com/zanetworker/aimux.git
+cd aimux
 make install       # builds and copies to /usr/local/bin
-agentmux           # launch the TUI
+aimux           # launch the TUI
 ```
 
 Requires **Go 1.24+** and **tmux** for split-pane session embedding.
@@ -81,7 +81,7 @@ Label turns as **GOOD**, **BAD**, or **WASTE** while watching agents work. Add f
 ### Export to MLflow
 
 Press `e` in the trace pane to export:
-- **`j`** JSONL to `~/.agentmux/exports/`
+- **`j`** JSONL to `~/.aimux/exports/`
 - **`o`** OTLP to MLflow, Jaeger, or any OTEL backend
 
 Annotations become MLflow feedback assessments for building eval datasets.
@@ -129,7 +129,7 @@ View Claude Code team configurations and members.
 
 ## Configuration
 
-`~/.agentmux/config.yaml`, all settings optional:
+`~/.aimux/config.yaml`, all settings optional:
 
 ```yaml
 providers:
@@ -165,7 +165,7 @@ curl -X POST http://localhost:5001/api/2.0/mlflow/experiments/create \
 # Returns {"experiment_id": "1"} — put in config above
 ```
 
-In agentmux: `Tab` to trace pane, `a` to annotate, `e` then `o` to export.
+In aimux: `Tab` to trace pane, `a` to annotate, `e` then `o` to export.
 
 </details>
 
@@ -207,7 +207,7 @@ No daemon, no hooks, no modifications to your AI tools. Reads from the filesyste
 
 | Source | Location | Data |
 |--------|----------|------|
-| Config | `~/.agentmux/config.yaml` | Provider settings, export config |
+| Config | `~/.aimux/config.yaml` | Provider settings, export config |
 | Process table | `ps aux` | Running agents |
 | Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/` | Conversations, tool calls |
 | OTEL receiver | `localhost:4318` | Live telemetry from agents |

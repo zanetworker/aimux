@@ -3,7 +3,7 @@ package discovery
 import (
 	"testing"
 
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 func TestParseProcessLine(t *testing.T) {
@@ -122,7 +122,7 @@ func TestIsClaudeProcess(t *testing.T) {
 		{"vscode claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /Users/test/.vscode/extensions/anthropic.claude-code-2.1.49-darwin-arm64/resources/native-binary/claude --output-format stream-json", true},
 		{"not claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /usr/local/bin/vim", false},
 		{"grep claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 grep claude", false},
-		{"agentmux", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 agentmux", false},
+		{"aimux", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 aimux", false},
 		{"tmux claude", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 tmux new -s claude-proj", false},
 		{"chrome helper", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /Applications/Claude.app/Contents/Helpers/chrome-native-host chrome-extension://abc", false},
 		{"zsh subprocess", "user 123 0.0 0.0 0 0 s0 S 10:00 0:00 /bin/zsh -c -l source /Users/test/.claude/shell-snapshots/snapshot.sh", false},

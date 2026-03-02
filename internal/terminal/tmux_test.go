@@ -13,7 +13,7 @@ func TestStartTmux_NilCmd(t *testing.T) {
 }
 
 func TestAttachTmux_NonexistentSession(t *testing.T) {
-	_, err := AttachTmux("agentmux-nonexistent-test-session", 80, 24)
+	_, err := AttachTmux("aimux-nonexistent-test-session", 80, 24)
 	if err == nil {
 		t.Error("AttachTmux(nonexistent) should return error")
 	}

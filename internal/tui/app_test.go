@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zanetworker/agentmux/internal/agent"
-	agentmuxotel "github.com/zanetworker/agentmux/internal/otel"
-	"github.com/zanetworker/agentmux/internal/provider"
-	"github.com/zanetworker/agentmux/internal/trace"
-	"github.com/zanetworker/agentmux/internal/tui/views"
+	"github.com/zanetworker/aimux/internal/agent"
+	aimuxotel "github.com/zanetworker/aimux/internal/otel"
+	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/trace"
+	"github.com/zanetworker/aimux/internal/tui/views"
 )
 
 // TestParserForProvider_FallsBackToFile verifies that the parser uses
 // file-based parsing when the OTEL store is empty.
 func TestParserForProvider_FallsBackToFile(t *testing.T) {
 	app := App{
-		otelStore: agentmuxotel.NewSpanStore(),
+		otelStore: aimuxotel.NewSpanStore(),
 	}
 	p := &provider.Claude{}
 
@@ -46,10 +46,10 @@ func TestParserForProvider_FallsBackToFile(t *testing.T) {
 // TestParserForProvider_PrefersOTEL verifies that when the OTEL store has
 // data for the session, it is used instead of file parsing.
 func TestParserForProvider_PrefersOTEL(t *testing.T) {
-	store := agentmuxotel.NewSpanStore()
+	store := aimuxotel.NewSpanStore()
 
 	// Add OTEL data for a session (Claude log events format)
-	root := &agentmuxotel.Span{
+	root := &aimuxotel.Span{
 		SpanID:  "root-1",
 		TraceID: "session-test-otel",
 		Name:    "claude_code.user_prompt",
@@ -58,7 +58,7 @@ func TestParserForProvider_PrefersOTEL(t *testing.T) {
 			"gen_ai.input.messages":  "from otel",
 			"prompt.id":             "p1",
 		},
-		Children: []*agentmuxotel.Span{
+		Children: []*aimuxotel.Span{
 			{
 				SpanID: "turn-1",
 				Name:   "claude_code.api_request",
@@ -118,10 +118,10 @@ func TestParserForProvider_PrefersOTEL(t *testing.T) {
 // TestParserForProvider_OTELEmptyFallsBackToFile verifies that when the
 // OTEL store has data but not for this session, file parsing is used.
 func TestParserForProvider_OTELEmptyFallsBackToFile(t *testing.T) {
-	store := agentmuxotel.NewSpanStore()
+	store := aimuxotel.NewSpanStore()
 
 	// Add OTEL data for a DIFFERENT session
-	store.Add(&agentmuxotel.Span{
+	store.Add(&aimuxotel.Span{
 		SpanID:  "other-root",
 		TraceID: "other-session",
 		Name:    "invoke_agent",
@@ -165,12 +165,12 @@ func TestParserForProvider_OTELEmptyFallsBackToFile(t *testing.T) {
 // TestOTELStoreLogEvents verifies that Claude-style log events get
 // stored and can be converted to turns, grouped by prompt.id.
 func TestOTELStoreLogEvents(t *testing.T) {
-	store := agentmuxotel.NewSpanStore()
+	store := aimuxotel.NewSpanStore()
 
 	// Simulate Claude log events -- all share the same prompt.id
 	promptID := "prompt-1"
 
-	userPrompt := &agentmuxotel.Span{
+	userPrompt := &aimuxotel.Span{
 		SpanID:  "log-1",
 		TraceID: "sess-abc",
 		Name:    "claude_code.user_prompt",
@@ -184,7 +184,7 @@ func TestOTELStoreLogEvents(t *testing.T) {
 	}
 	store.Add(userPrompt)
 
-	apiRequest := &agentmuxotel.Span{
+	apiRequest := &aimuxotel.Span{
 		SpanID:  "log-2",
 		TraceID: "sess-abc",
 		Name:    "claude_code.api_request",
@@ -198,7 +198,7 @@ func TestOTELStoreLogEvents(t *testing.T) {
 	}
 	store.Add(apiRequest)
 
-	toolResult := &agentmuxotel.Span{
+	toolResult := &aimuxotel.Span{
 		SpanID:  "log-3",
 		TraceID: "sess-abc",
 		Name:    "claude_code.tool_result",
@@ -221,7 +221,7 @@ func TestOTELStoreLogEvents(t *testing.T) {
 	}
 
 	// Convert to turns -- all 3 events share prompt.id so they become 1 turn
-	turns := agentmuxotel.SpansToTurns(root)
+	turns := aimuxotel.SpansToTurns(root)
 	if len(turns) != 1 {
 		t.Fatalf("SpansToTurns returned %d turns, want 1 (all events share prompt.id)", len(turns))
 	}

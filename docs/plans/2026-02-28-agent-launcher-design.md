@@ -2,9 +2,9 @@
 
 ## Context
 
-agentmux currently discovers and inspects running agents but can't spawn new ones. Users must open a separate terminal, cd to the project directory, and run `claude`/`codex` manually. This adds friction and defeats the purpose of a unified dashboard.
+aimux currently discovers and inspects running agents but can't spawn new ones. Users must open a separate terminal, cd to the project directory, and run `claude`/`codex` manually. This adds friction and defeats the purpose of a unified dashboard.
 
-The launcher lets users spawn agents from within agentmux — pick a provider, pick a directory, configure options, launch. The agent runs in a tmux session (durable, survives agentmux exit) or iTerm pane (visible), and appears in the agent list via normal discovery.
+The launcher lets users spawn agents from within aimux — pick a provider, pick a directory, configure options, launch. The agent runs in a tmux session (durable, survives aimux exit) or iTerm pane (visible), and appears in the agent list via normal discovery.
 
 ## User Flow
 
@@ -58,7 +58,7 @@ func tmuxSessionName(provider, dir string) string
   - Codex: `codex [--model X] [--full-auto | --sandbox Y]`
   - Gemini: `gemini`
 - `Spawn`: either creates a tmux session or calls iTerm2SplitPane
-- tmux session name: `agentmux-<provider>-<basename(dir)>` (e.g., `agentmux-claude-blog`)
+- tmux session name: `aimux-<provider>-<basename(dir)>` (e.g., `aimux-claude-blog`)
 
 ### recent.go
 
@@ -137,8 +137,8 @@ Returns `LaunchMsg` when confirmed, `nil` when cancelled.
 ## Safety
 
 - No changes to discovery, providers, or agent struct
-- Spawn is fire-and-forget — agentmux doesn't manage the child process lifecycle
-- tmux sessions persist independently of agentmux
+- Spawn is fire-and-forget — aimux doesn't manage the child process lifecycle
+- tmux sessions persist independently of aimux
 - No credentials or tokens passed through the launcher
 - Session names are deterministic and predictable
 
@@ -149,4 +149,4 @@ Returns `LaunchMsg` when confirmed, `nil` when cancelled.
 3. Manual: `:new` → pick claude → pick a recent dir → Enter → agent appears in list
 4. Manual: `:new` → browse to a new dir → pick codex → launch in iTerm
 5. Manual: Esc at each step cancels cleanly
-6. Manual: kill agentmux, verify tmux session survives (`tmux ls`)
+6. Manual: kill aimux, verify tmux session survives (`tmux ls`)

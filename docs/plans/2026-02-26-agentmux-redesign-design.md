@@ -1,13 +1,13 @@
-# agentmux Redesign — Design Document
+# aimux Redesign — Design Document
 
 **Date:** 2026-02-26
-**Goal:** Rename claudetopus to agentmux, add k9s-style TUI chrome, embed live sessions in-TUI via PTY, and generalize for multi-agent CLI support (Claude, Codex, Gemini).
+**Goal:** Rename claudetopus to aimux, add k9s-style TUI chrome, embed live sessions in-TUI via PTY, and generalize for multi-agent CLI support (Claude, Codex, Gemini).
 
 ## What Changes
 
-### 1. Rename: claudetopus → agentmux
-- Module path: `github.com/zanetworker/agentmux`
-- Binary: `agentmux`
+### 1. Rename: claudetopus → aimux
+- Module path: `github.com/zanetworker/aimux`
+- Binary: `aimux`
 - All imports, references, strings updated
 
 ### 2. Data Model: Instance → Agent
@@ -29,7 +29,7 @@ type Provider interface {
 - Codex and Gemini stubs return empty slices
 
 ### 4. k9s-Style TUI
-- Header: info boxes (active/waiting/idle counts), session cost, agentmux branding
+- Header: info boxes (active/waiting/idle counts), session cost, aimux branding
 - Table: colored header row, agent-centric columns (NAME, AGENT, MODEL, MODE, AGE, COST)
 - Status bar: context-aware hints
 - Crumb trail for navigation
@@ -44,8 +44,8 @@ type Provider interface {
 ## Architecture
 
 ```
-agentmux
-├── cmd/agentmux/main.go
+aimux
+├── cmd/aimux/main.go
 ├── internal/
 │   ├── provider/
 │   │   ├── provider.go          # Interface, Segment, Role types
@@ -106,7 +106,7 @@ Esc from any sub-view returns to AgentList.
 ## PTY Embedding Flow
 
 1. User selects agent in list, right pane shows conversation preview (parsed from session JSONL)
-2. User presses Enter → agentmux spawns PTY with provider's ResumeCommand
+2. User presses Enter → aimux spawns PTY with provider's ResumeCommand
 3. PTY output is fed through charmbracelet/x/vt → rendered as cells in the view
 4. Keystrokes routed to PTY stdin
 5. User presses Ctrl+] → PTY stays alive in background, view returns to split

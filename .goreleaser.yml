@@ -1,7 +1,7 @@
 version: 2
 builds:
-  - main: ./cmd/agentmux
-    binary: agentmux
+  - main: ./cmd/aimux
+    binary: aimux
     env:
       - CGO_ENABLED=0
     goos:

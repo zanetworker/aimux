@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/cost"
-	"github.com/zanetworker/agentmux/internal/discovery"
-	"github.com/zanetworker/agentmux/internal/trace"
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // Codex is a Provider implementation for the OpenAI Codex CLI.
@@ -165,7 +165,7 @@ func isCodexProcess(line string) bool {
 	if strings.Contains(cmd, "mcp-server") {
 		return false
 	}
-	if strings.Contains(cmd, "grep") || strings.Contains(cmd, "agentmux") {
+	if strings.Contains(cmd, "grep") || strings.Contains(cmd, "aimux") {
 		return false
 	}
 	// Exclude tmux sessions
@@ -562,7 +562,7 @@ func (c *Codex) parseSession(path string) codexSessionInfo {
 
 func (c *Codex) ResumeCommand(a agent.Agent) *exec.Cmd {
 	bin := findBinary("codex")
-	// --no-alt-screen prevents Codex's TUI from fighting with agentmux's
+	// --no-alt-screen prevents Codex's TUI from fighting with aimux's
 	// Bubble Tea for the alternate screen buffer.
 	if a.SessionID != "" {
 		cmd := exec.Command(bin, "resume", "--no-alt-screen", a.SessionID)

@@ -149,7 +149,7 @@ func (a Agent) ShortProject() string {
 //
 // Examples:
 //
-//	"/Users/me/go/src/github.com/zanetworker/agentmux" -> "zanetworker"
+//	"/Users/me/go/src/github.com/zanetworker/aimux" -> "zanetworker"
 //	"/Users/me/projects/myapp"                          -> "projects"
 //	"/tmp/test"                                         -> "tmp"
 func (a Agent) ShortDir() string {

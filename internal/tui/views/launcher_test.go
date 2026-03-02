@@ -115,7 +115,7 @@ func TestLauncherTabSwitchesMode(t *testing.T) {
 
 func TestLauncherFuzzyFilter(t *testing.T) {
 	recent := []RecentDirEntry{
-		{Path: "/tmp/agentmux", Display: "agentmux"},
+		{Path: "/tmp/aimux", Display: "aimux"},
 		{Path: "/tmp/blog", Display: "blog"},
 		{Path: "/tmp/remote-claude", Display: "remote-claude"},
 	}

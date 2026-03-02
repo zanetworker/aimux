@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config holds the agentmux configuration.
+// Config holds the aimux configuration.
 type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
@@ -53,13 +53,13 @@ func Default() Config {
 }
 
 // DefaultPath returns the default config file path:
-// ~/.agentmux/config.yaml
+// ~/.aimux/config.yaml
 func DefaultPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".agentmux", "config.yaml")
+	return filepath.Join(home, ".aimux", "config.yaml")
 }
 
 // Load reads a YAML config file and merges it with the defaults.

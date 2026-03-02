@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// Span is agentmux's internal span representation, using OTEL GenAI semantic
+// Span is aimux's internal span representation, using OTEL GenAI semantic
 // convention attribute names but as a simple data struct (not the OTEL SDK
-// interface which is write-only). Supports hierarchy and agentmux extensions.
+// interface which is write-only). Supports hierarchy and aimux extensions.
 type Span struct {
 	SpanID   string
 	TraceID  string
@@ -20,7 +20,7 @@ type Span struct {
 	Attrs    map[string]any // gen_ai.* attributes by OTEL convention names
 	Children []*Span
 
-	// agentmux extensions (not in OTEL spec)
+	// aimux extensions (not in OTEL spec)
 	Label string // GOOD/BAD/WASTE annotation
 	Note  string // annotation rationale
 }
@@ -114,7 +114,7 @@ func (ss *SpanStore) Add(span *Span) {
 	// Index by conversation/session ID
 	convID := span.AttrStr("gen_ai.conversation.id")
 	if convID == "" {
-		convID = span.AttrStr("agentmux.session_id")
+		convID = span.AttrStr("aimux.session_id")
 	}
 
 	if convID != "" {

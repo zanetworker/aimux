@@ -1,4 +1,4 @@
-# agentmux -- Project Guide for Claude
+# aimux -- Project Guide for Claude
 
 ## Pre-Commit Checklist
 
@@ -13,15 +13,15 @@ Never push code that hasn't been built and tested. Never claim work is done with
 
 ## What This Is
 
-agentmux is a Go TUI tool that provides a k9s-style dashboard for managing multiple AI coding agent sessions. It discovers running agents (Claude, Codex, Gemini), displays their status, lets you zoom into live sessions, view conversation traces, annotate agent behavior, and export traces via OTEL. Single binary, provider-extensible.
+aimux is a Go TUI tool that provides a k9s-style dashboard for managing multiple AI coding agent sessions. It discovers running agents (Claude, Codex, Gemini), displays their status, lets you zoom into live sessions, view conversation traces, annotate agent behavior, and export traces via OTEL. Single binary, provider-extensible.
 
 ## Project Structure
 
 ```
-cmd/agentmux/main.go           # CLI entry point
+cmd/aimux/main.go           # CLI entry point
 internal/
   agent/agent.go                # Agent struct, Status enum, SourceType
-  config/config.go              # Config struct, YAML loading (~/.agentmux/config.yaml)
+  config/config.go              # Config struct, YAML loading (~/.aimux/config.yaml)
   cost/tracker.go               # Per-model pricing, cost estimation
   discovery/                    # Process scanning, session file discovery, tmux
   evaluation/                   # Annotation persistence, JSONL export
@@ -66,14 +66,14 @@ internal/
 - **SessionBackend interface**: `terminal.SessionBackend` (Read/Write/Resize/Close/Alive) with two implementations: direct PTY (Claude) and tmux mirror (Codex/Gemini). `DirectRenderer` optional interface skips VT emulator for tmux.
 - **Trace parsing**: Each provider owns its parser via `ParseTrace`. Shared types in `internal/trace/`. LogsView receives a `TraceParser` function from app.go.
 - **OTEL dual mode**: File-based parsing for display (full responses). OTEL receiver (port 4318) collects live telemetry for export. `parserForProvider` checks file first, falls back to OTEL for new sessions. Trace header shows [FILE] (otel:N). Claude Code sends events via OTEL logs protocol (no response text -- Anthropic privacy design). Export to MLflow via `e` → `o` in split view or `:export-otel`.
-- **Export**: `e` key in trace pane opens export menu: `j` for JSONL (to `~/.agentmux/exports/`), `o` for OTEL (to configured endpoint). MLflow requires `x-mlflow-experiment-id` header, set via `export.experiment_id` in config.
-- **Config**: `~/.agentmux/config.yaml` -- providers, shell, export (endpoint + experiment_id), OTEL receiver. Each provider's `OTELEnv(endpoint)` returns the right env vars for its OTEL mechanism.
+- **Export**: `e` key in trace pane opens export menu: `j` for JSONL (to `~/.aimux/exports/`), `o` for OTEL (to configured endpoint). MLflow requires `x-mlflow-experiment-id` header, set via `export.experiment_id` in config.
+- **Config**: `~/.aimux/config.yaml` -- providers, shell, export (endpoint + experiment_id), OTEL receiver. Each provider's `OTELEnv(endpoint)` returns the right env vars for its OTEL mechanism.
 - **Stable agent ordering**: `sort.SliceStable` with status priority (active first), then alphabetical. Cursor preserved by PID tracking.
 
 ## Building and Testing
 
 ```bash
-go build -o agentmux ./cmd/agentmux    # Build
+go build -o aimux ./cmd/aimux    # Build
 go test ./... -timeout 30s              # All tests (107+ provider tests)
 make build                              # Build via Makefile
 make install                            # Build and copy to /usr/local/bin
@@ -102,7 +102,7 @@ See `docs/adding-a-provider.md` for the full guide. Summary:
 ## Key Config
 
 ```yaml
-# ~/.agentmux/config.yaml
+# ~/.aimux/config.yaml
 providers:
   claude: { enabled: true }
   codex: { enabled: true }

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 var (

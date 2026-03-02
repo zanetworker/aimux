@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/cost"
+	"github.com/zanetworker/aimux/internal/cost"
 )
 
 // Turn groups a user prompt with the assistant response into one logical

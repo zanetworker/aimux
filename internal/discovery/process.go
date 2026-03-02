@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 // rawProcess holds fields parsed from ps output.
@@ -125,8 +125,8 @@ func isClaudeProcess(line string) bool {
 		return false
 	}
 
-	// grep/agentmux itself
-	if strings.Contains(cmd, "grep") || strings.Contains(cmd, "agentmux") {
+	// grep/aimux itself
+	if strings.Contains(cmd, "grep") || strings.Contains(cmd, "aimux") {
 		return false
 	}
 

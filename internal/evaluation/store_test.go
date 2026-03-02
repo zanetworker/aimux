@@ -17,7 +17,7 @@ func TestNewStoreCreatesCorrectPath(t *testing.T) {
 		t.Errorf("sessionID = %q, want %q", store.sessionID, "sess-abc-123")
 	}
 
-	// The directory should end with .agentmux/evaluations
+	// The directory should end with .aimux/evaluations
 	if !filepath.IsAbs(store.dir) {
 		t.Errorf("dir should be absolute, got %q", store.dir)
 	}
@@ -25,8 +25,8 @@ func TestNewStoreCreatesCorrectPath(t *testing.T) {
 		t.Errorf("dir should end with 'evaluations', got %q", store.dir)
 	}
 	parent := filepath.Base(filepath.Dir(store.dir))
-	if parent != ".agentmux" {
-		t.Errorf("parent dir should be '.agentmux', got %q", parent)
+	if parent != ".aimux" {
+		t.Errorf("parent dir should be '.aimux', got %q", parent)
 	}
 }
 

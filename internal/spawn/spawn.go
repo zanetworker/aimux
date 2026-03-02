@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zanetworker/agentmux/internal/config"
-	"github.com/zanetworker/agentmux/internal/jump"
+	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/jump"
 )
 
 // Launch runs a pre-built exec.Cmd in the specified runtime environment
@@ -89,9 +89,9 @@ func shellQuote(s string) string {
 }
 
 // TmuxSessionName returns the tmux session name for a given provider and directory.
-// Format: agentmux-<provider>-<basename(dir)> with spaces replaced by hyphens.
+// Format: aimux-<provider>-<basename(dir)> with spaces replaced by hyphens.
 func TmuxSessionName(provider, dir string) string {
 	base := filepath.Base(dir)
 	base = strings.ReplaceAll(base, " ", "-")
-	return fmt.Sprintf("agentmux-%s-%s", provider, base)
+	return fmt.Sprintf("aimux-%s-%s", provider, base)
 }

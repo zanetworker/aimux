@@ -1,8 +1,8 @@
-# Adding a New Provider to agentmux
+# Adding a New Provider to aimux
 
 ## Overview
 
-A **provider** is how agentmux learns about a type of AI coding agent. Each provider implements the `provider.Provider` interface, which gives agentmux the ability to:
+A **provider** is how aimux learns about a type of AI coding agent. Each provider implements the `provider.Provider` interface, which gives aimux the ability to:
 
 - **Discover** running agent processes and recent sessions automatically
 - **Display** agents in the dashboard with status, model, cost, and metadata
@@ -26,7 +26,7 @@ package provider
 import (
 	"os/exec"
 
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 type Aider struct{}
@@ -80,7 +80,7 @@ Providers: map[string]ProviderConfig{
 **5. Build and run:**
 
 ```bash
-go build -o agentmux ./cmd/agentmux
+go build -o aimux ./cmd/aimux
 go test ./... -timeout 30s
 ```
 
@@ -197,7 +197,7 @@ func (a *Aider) ResumeCommand(ag agent.Agent) *exec.Cmd {
 
 ### `CanEmbed() bool`
 
-Reports whether this agent's TUI can run inside agentmux's embedded PTY. If true, pressing Enter opens a split view (trace on left, live session on right). If false, pressing Enter opens the trace-only view, and the user presses J to jump out to a tmux or iTerm split pane.
+Reports whether this agent's TUI can run inside aimux's embedded PTY. If true, pressing Enter opens a split view (trace on left, live session on right). If false, pressing Enter opens the trace-only view, and the user presses J to jump out to a tmux or iTerm split pane.
 
 **When called:** When the user presses Enter on an agent, to decide the layout mode.
 
@@ -350,7 +350,7 @@ Providers: map[string]ProviderConfig{
 },
 ```
 
-Users can disable it in `~/.agentmux/config.yaml`:
+Users can disable it in `~/.aimux/config.yaml`:
 
 ```yaml
 providers:
@@ -394,7 +394,7 @@ var aliases = map[string]string{
 **How it works:** During `Discover()`, when you set `agent.TokensIn` and `agent.TokensOut`, call `cost.Calculate()` to populate `agent.EstCostUSD`:
 
 ```go
-import "github.com/zanetworker/agentmux/internal/cost"
+import "github.com/zanetworker/aimux/internal/cost"
 
 a.EstCostUSD = cost.Calculate(
 	a.Model,        // e.g. "gpt-4o"
@@ -569,8 +569,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
-	"github.com/zanetworker/agentmux/internal/cost"
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/cost"
 )
 
 // Aider is a Provider implementation for the aider AI pair programming tool.
@@ -654,7 +654,7 @@ func (a *Aider) isAiderProcess(line string) bool {
 	if strings.Contains(cmd, "grep") {
 		return false
 	}
-	if strings.Contains(cmd, "agentmux") {
+	if strings.Contains(cmd, "aimux") {
 		return false
 	}
 
@@ -829,7 +829,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 // Compile-time interface check.
@@ -972,8 +972,8 @@ func TestAiderSpawnArgs(t *testing.T) {
 ```bash
 go test ./internal/provider/ -v -timeout 30s
 go test ./... -timeout 30s
-go build -o agentmux ./cmd/agentmux
-./agentmux  # verify aider appears in :new launcher
+go build -o aimux ./cmd/aimux
+./aimux  # verify aider appears in :new launcher
 ```
 
 That is everything. The agent list, preview pane, trace viewer, cost dashboard, and launcher all pick up your provider automatically from the interface contract and registration.

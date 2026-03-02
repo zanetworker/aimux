@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zanetworker/agentmux/internal/agent"
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 func TestCodexName(t *testing.T) {
@@ -345,7 +345,7 @@ func TestIsGeminiProcess(t *testing.T) {
 		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 /opt/homebrew/bin/gemini", true},
 		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 node /path/to/gemini --model x", true},
 		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 grep gemini", false},
-		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 agentmux gemini", false},
+		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 aimux gemini", false},
 		{"user  123 0.0 0.1 1234 5678 ?? S  10:00AM 0:01.23 /usr/bin/python3 something", false},
 	}
 	for _, tt := range tests {

@@ -13,8 +13,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	oteltrace "go.opentelemetry.io/otel/trace"
 
-	"github.com/zanetworker/agentmux/internal/evaluation"
-	"github.com/zanetworker/agentmux/internal/trace"
+	"github.com/zanetworker/aimux/internal/evaluation"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // ExportConfig holds the configuration for OTEL export.
@@ -63,9 +63,9 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 	// Create trace provider
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
-			semconv.ServiceName("agentmux"),
-			attribute.String("agentmux.provider", cfg.Provider),
-			attribute.String("agentmux.session_id", cfg.SessionID),
+			semconv.ServiceName("aimux"),
+			attribute.String("aimux.provider", cfg.Provider),
+			attribute.String("aimux.session_id", cfg.SessionID),
 		),
 	)
 	if err != nil {
@@ -78,7 +78,7 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 	)
 	defer tp.Shutdown(ctx)
 
-	tracer := tp.Tracer("agentmux")
+	tracer := tp.Tracer("aimux")
 
 	// Determine session time bounds
 	var sessionStart, sessionEnd time.Time
@@ -100,9 +100,9 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 	sessionCtx, sessionSpan := tracer.Start(ctx, "session",
 		oteltrace.WithTimestamp(sessionStart),
 		oteltrace.WithAttributes(
-			attribute.String("agentmux.session_id", cfg.SessionID),
-			attribute.String("agentmux.provider", cfg.Provider),
-			attribute.Int("agentmux.turn_count", len(turns)),
+			attribute.String("aimux.session_id", cfg.SessionID),
+			attribute.String("aimux.provider", cfg.Provider),
+			attribute.Int("aimux.turn_count", len(turns)),
 		),
 	)
 
@@ -118,14 +118,14 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 		}
 
 		turnAttrs := []attribute.KeyValue{
-			attribute.Int("agentmux.turn.number", t.Number),
+			attribute.Int("aimux.turn.number", t.Number),
 			attribute.String("gen_ai.input.messages", strings.Join(t.UserLines, "\n")),
 			attribute.String("gen_ai.output.messages", strings.Join(t.OutputLines, "\n")),
 			attribute.Int64("gen_ai.usage.input_tokens", t.TokensIn),
 			attribute.Int64("gen_ai.usage.output_tokens", t.TokensOut),
 			attribute.Float64("gen_ai.usage.cost", t.CostUSD),
-			attribute.Int("agentmux.turn.action_count", len(t.Actions)),
-			attribute.Int("agentmux.turn.error_count", t.ErrorCount()),
+			attribute.Int("aimux.turn.action_count", len(t.Actions)),
+			attribute.Int("aimux.turn.error_count", t.ErrorCount()),
 		}
 
 		if t.Model != "" {
@@ -136,11 +136,11 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 		if store != nil {
 			if ann := store.GetForTurn(t.Number); ann != nil {
 				turnAttrs = append(turnAttrs,
-					attribute.String("agentmux.feedback.value", ann.Label),
+					attribute.String("aimux.feedback.value", ann.Label),
 				)
 				if ann.Note != "" {
 					turnAttrs = append(turnAttrs,
-						attribute.String("agentmux.feedback.rationale", ann.Note),
+						attribute.String("aimux.feedback.rationale", ann.Note),
 					)
 				}
 			}
