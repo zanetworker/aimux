@@ -652,7 +652,9 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 				if !a.splitLaunchTime.IsZero() {
 					var filtered []trace.Turn
 					for _, t := range turns {
-						if !t.Timestamp.IsZero() && t.Timestamp.Before(a.splitLaunchTime) {
+						// Skip turns from before launch: either explicitly old
+						// or missing timestamp (unparsed entries from old sessions)
+						if t.Timestamp.IsZero() || t.Timestamp.Before(a.splitLaunchTime) {
 							continue
 						}
 						filtered = append(filtered, t)
