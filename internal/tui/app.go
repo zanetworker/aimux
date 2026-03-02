@@ -83,6 +83,7 @@ type App struct {
 	commandMode   bool
 	commandInput  string
 	exportConfirm bool // showing export menu
+	stickyHint    bool // true = statusHint persists until keypress (not cleared by tick)
 
 	// Filter mode
 	filterMode  bool
@@ -230,8 +231,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			a.previewPane.Reload()
 		}
-		// Clear stale status hints on tick
-		a.statusHint = ""
+		// Clear stale status hints on tick (unless sticky)
+		if !a.stickyHint {
+			a.statusHint = ""
+		}
 
 		// Refresh live trace in split/zoomed mode
 		if a.zoomed && a.splitTrace != nil {
@@ -460,8 +463,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Clear status hints on any keypress (e.g., "Launched..." message)
+	// Clear status hints on any keypress (e.g., "Launched..." or export result)
 	a.statusHint = ""
+	a.stickyHint = false
 
 	// Exit keys — always work regardless of mode/focus
 	switch key {
@@ -1045,10 +1049,12 @@ func (a App) exportTrace() (tea.Model, tea.Cmd) {
 	path := evaluation.ExportPath(sessionID)
 	if err := evaluation.WriteExport(path, exportTurns); err != nil {
 		a.statusHint = fmt.Sprintf("Export failed: %v", err)
+		a.stickyHint = true
 		return a, nil
 	}
 
-	a.statusHint = fmt.Sprintf("Exported %d turns to %s", len(exportTurns), path)
+	a.statusHint = fmt.Sprintf("Exported %d turns to %s (press any key to dismiss)", len(exportTurns), path)
+	a.stickyHint = true
 	return a, nil
 }
 
@@ -1088,10 +1094,12 @@ func (a App) exportOTEL() (tea.Model, tea.Cmd) {
 
 	if err := agentmuxotel.ExportTrace(cfg, turns, a.evalStore); err != nil {
 		a.statusHint = fmt.Sprintf("OTEL export failed: %v", err)
+		a.stickyHint = true
 		return a, nil
 	}
 
-	a.statusHint = fmt.Sprintf("Exported %d turns via OTLP to %s", len(turns), endpoint)
+	a.statusHint = fmt.Sprintf("Exported %d turns to http://%s (press any key to dismiss)", len(turns), endpoint)
+	a.stickyHint = true
 	return a, nil
 }
 

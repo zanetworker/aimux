@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -21,13 +22,15 @@ import (
 // from Claude Code, Codex CLI, Gemini CLI, or any OTEL-instrumented agent.
 // It stores spans in a SpanStore for the TUI to display.
 type Receiver struct {
-	store       *SpanStore
-	server      *http.Server
-	port        int
-	traceCount  int // number of /v1/traces requests received
-	logsCount   int // number of /v1/logs requests received
-	otherCount  int // number of other requests received
-	debugLog    []string // recent request log for diagnostics
+	store  *SpanStore
+	server *http.Server
+	port   int
+
+	mu         sync.Mutex // protects counters and debugLog
+	traceCount int        // number of /v1/traces requests received
+	logsCount  int        // number of /v1/logs requests received
+	otherCount int        // number of other requests received
+	debugLog   []string   // recent request log for diagnostics
 }
 
 // NewReceiver creates a new OTLP/HTTP receiver.
@@ -74,11 +77,12 @@ func (r *Receiver) loggingMiddleware(next http.Handler) http.Handler {
 			time.Now().Format("15:04:05"),
 			req.Method, req.URL.Path,
 			req.ContentLength, req.Proto)
+		r.mu.Lock()
 		r.debugLog = append(r.debugLog, entry)
-		// Keep only last 50 entries
 		if len(r.debugLog) > 50 {
 			r.debugLog = r.debugLog[len(r.debugLog)-50:]
 		}
+		r.mu.Unlock()
 		next.ServeHTTP(w, req)
 	})
 }
@@ -87,14 +91,20 @@ func (r *Receiver) loggingMiddleware(next http.Handler) http.Handler {
 // Access via: curl http://localhost:4318/debug
 // Add ?events=1 to dump all stored events with attributes.
 func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
+	r.mu.Lock()
+	traces, logs, other := r.traceCount, r.logsCount, r.otherCount
+	logCopy := make([]string, len(r.debugLog))
+	copy(logCopy, r.debugLog)
+	r.mu.Unlock()
+
 	w.Header().Set("Content-Type", "text/plain")
 	fmt.Fprintf(w, "agentmux OTEL receiver debug\n")
 	fmt.Fprintf(w, "port: %d\n", r.port)
-	fmt.Fprintf(w, "traces: %d, logs: %d, other: %d\n", r.traceCount, r.logsCount, r.otherCount)
+	fmt.Fprintf(w, "traces: %d, logs: %d, other: %d\n", traces, logs, other)
 	fmt.Fprintf(w, "store entries: %d\n", r.store.TraceCount())
 	fmt.Fprintf(w, "store conversations: %s\n", strings.Join(r.store.ConversationIDs(), ", "))
-	fmt.Fprintf(w, "\n--- recent requests (%d) ---\n", len(r.debugLog))
-	for _, entry := range r.debugLog {
+	fmt.Fprintf(w, "\n--- recent requests (%d) ---\n", len(logCopy))
+	for _, entry := range logCopy {
 		fmt.Fprintf(w, "%s\n", entry)
 	}
 
@@ -137,26 +147,30 @@ func (r *Receiver) Port() int {
 	return r.port
 }
 
-// Stats returns request counts for debugging.
+// Stats returns request counts for debugging. Thread-safe.
 func (r *Receiver) Stats() (traces, logs, other int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.traceCount, r.logsCount, r.otherCount
 }
 
 // handleTraces processes incoming OTLP/HTTP POST /v1/traces requests.
 // Accepts protobuf-encoded ExportTraceServiceRequest.
 func (r *Receiver) handleTraces(w http.ResponseWriter, req *http.Request) {
+	r.mu.Lock()
 	r.traceCount++
+	r.mu.Unlock()
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	defer req.Body.Close()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	defer req.Body.Close()
 
 	var traceReq collectorpb.ExportTraceServiceRequest
 	if err := proto.Unmarshal(body, &traceReq); err != nil {
@@ -240,18 +254,20 @@ func protoSpanToSpan(ps *tracepb.Span, resourceAttrs map[string]any) *Span {
 // the OTEL logs protocol. We convert these into our Span model so the
 // trace viewer can display them.
 func (r *Receiver) handleLogs(w http.ResponseWriter, req *http.Request) {
+	r.mu.Lock()
 	r.logsCount++
+	r.mu.Unlock()
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	defer req.Body.Close()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	defer req.Body.Close()
 
 	var logsReq collectorlogspb.ExportLogsServiceRequest
 	if err := proto.Unmarshal(body, &logsReq); err != nil {
@@ -396,18 +412,20 @@ func (r *Receiver) handleMetrics(w http.ResponseWriter, req *http.Request) {
 // since protobuf can cross-deserialize between trace and log request
 // types (same field numbers) but only the correct type has inner data.
 func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
+	r.mu.Lock()
 	r.otherCount++
+	r.mu.Unlock()
 	if req.Method != http.MethodPost {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
+	defer req.Body.Close()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	defer req.Body.Close()
 
 	// Try as traces -- check for actual spans (not just non-empty containers)
 	var traceReq collectorpb.ExportTraceServiceRequest
