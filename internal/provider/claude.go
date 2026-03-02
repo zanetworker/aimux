@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -35,15 +36,20 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 	home, _ := os.UserHomeDir()
 	projectsDir := filepath.Join(home, ".claude", "projects")
 
+	// Track assigned session files so no two agents share the same file.
+	// When enrichAgent falls back to "newest file in dir", it skips files
+	// that were already claimed by a prior agent.
+	assignedFiles := make(map[string]bool)
+
 	for i := range agents {
-		c.enrichAgent(&agents[i], tmuxSessions, projectsDir)
+		c.enrichAgent(&agents[i], tmuxSessions, projectsDir, assignedFiles)
 		agents[i].ProviderName = "claude"
 		if agents[i].Name == "" {
 			agents[i].Name = agents[i].ShortProject()
 		}
 	}
 
-	// Deduplicate: group SDK agents by (WorkingDir, Model), dedup CLI by SessionFile
+	// Deduplicate: group SDK agents by (WorkingDir, Model), CLI by PID.
 	agents = deduplicateAgents(agents)
 
 	return agents, nil
@@ -249,16 +255,10 @@ func decodeDirKey(key string) string {
 }
 
 // deduplicateAgents groups SDK agents sharing the same (WorkingDir, Model) into
-// single entries with a GroupCount, and deduplicates CLI agents that share the
-// same SessionFile (same conversation, multiple processes).
+// single entries with a GroupCount. CLI agents are kept separate by PID since
+// filterSubagents already removed child processes, so each remaining PID is a
+// distinct session.
 func deduplicateAgents(agents []agent.Agent) []agent.Agent {
-	type groupKey struct {
-		WorkingDir  string
-		Model       string
-		Source      agent.SourceType
-		SessionFile string
-	}
-
 	groups := make(map[string]*agent.Agent)
 	order := make([]string, 0) // preserve discovery order
 
@@ -274,12 +274,8 @@ func deduplicateAgents(agents []agent.Agent) []agent.Agent {
 			// Group VSCode agents by (WorkingDir, Model)
 			key = fmt.Sprintf("vsc:%s:%s", a.WorkingDir, a.Model)
 		default:
-			// CLI agents: dedup by SessionFile if available, otherwise by PID
-			if a.SessionFile != "" {
-				key = fmt.Sprintf("cli:sf:%s", a.SessionFile)
-			} else {
-				key = fmt.Sprintf("cli:pid:%d", a.PID)
-			}
+			// CLI agents: each PID is a distinct session (subagents already filtered).
+			key = fmt.Sprintf("cli:pid:%d", a.PID)
 		}
 
 		if existing, ok := groups[key]; ok {
@@ -313,7 +309,10 @@ func deduplicateAgents(agents []agent.Agent) []agent.Agent {
 
 // enrichAgent resolves the working directory, matches a tmux session,
 // parses the session JSONL file, and calculates the estimated cost.
-func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSession, projectsDir string) {
+// assignedFiles tracks which session files have already been claimed by
+// other agents, so that multiple sessions in the same directory each get
+// a different file.
+func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSession, projectsDir string, assignedFiles map[string]bool) {
 	// Resolve working directory
 	if inst.WorkingDir == "" {
 		cwd, err := discovery.GetProcessCwd(inst.PID)
@@ -327,29 +326,22 @@ func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSes
 		inst.TMuxSession = discovery.MatchTmuxSession(tmuxSessions, inst.WorkingDir)
 	}
 
+	// Set StartTime from the OS process start time so Age shows correctly.
+	if inst.StartTime.IsZero() {
+		inst.StartTime = getProcessStartTime(inst.PID)
+	}
+
 	// Find and parse session JSONL
 	sessionFile := ""
 	if inst.SessionID != "" {
 		sessionFile = discovery.FindSessionFile(inst.SessionID, projectsDir)
 	}
 	if sessionFile == "" && inst.WorkingDir != "" {
-		files := discovery.SessionFilesForDir(inst.WorkingDir)
-		if len(files) > 0 {
-			// Use the most recently modified file
-			var newest string
-			var newestTime time.Time
-			for _, f := range files {
-				info, err := os.Stat(f)
-				if err == nil && info.ModTime().After(newestTime) {
-					newest = f
-					newestTime = info.ModTime()
-				}
-			}
-			sessionFile = newest
-		}
+		sessionFile = c.matchSessionFileByStartTime(inst.PID, inst.WorkingDir, assignedFiles)
 	}
 
 	if sessionFile != "" {
+		assignedFiles[sessionFile] = true
 		inst.SessionFile = sessionFile
 		info, err := discovery.ParseSessionFile(sessionFile)
 		if err == nil {
@@ -380,6 +372,83 @@ func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSes
 			}
 		}
 	}
+}
+
+// matchSessionFileByStartTime finds the session file whose first timestamp
+// best matches this process's start time. This correctly pairs each Claude
+// process with its own session file, even when multiple sessions share a
+// directory. Falls back to newest-unassigned if start time can't be obtained.
+func (c *Claude) matchSessionFileByStartTime(pid int, workingDir string, assignedFiles map[string]bool) string {
+	files := discovery.SessionFilesForDir(workingDir)
+	if len(files) == 0 {
+		return ""
+	}
+
+	// Try timing-based match first.
+	startTime := getProcessStartTime(pid)
+	if !startTime.IsZero() {
+		var bestFile string
+		var bestDelta time.Duration = 1<<63 - 1
+
+		for _, f := range files {
+			if assignedFiles[f] {
+				continue
+			}
+			firstTS := sessionFirstTimestamp(f)
+			if firstTS.IsZero() {
+				continue
+			}
+			delta := firstTS.Sub(startTime)
+			if delta < 0 {
+				delta = -delta
+			}
+			if delta < bestDelta {
+				bestDelta = delta
+				bestFile = f
+			}
+		}
+		if bestFile != "" {
+			return bestFile
+		}
+	}
+
+	// Fallback: newest unassigned file.
+	var newest string
+	var newestTime time.Time
+	for _, f := range files {
+		if assignedFiles[f] {
+			continue
+		}
+		info, err := os.Stat(f)
+		if err == nil && info.ModTime().After(newestTime) {
+			newest = f
+			newestTime = info.ModTime()
+		}
+	}
+	return newest
+}
+
+// sessionFirstTimestamp reads the first timestamp from a Claude JSONL file.
+func sessionFirstTimestamp(path string) time.Time {
+	f, err := os.Open(path)
+	if err != nil {
+		return time.Time{}
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+	for scanner.Scan() {
+		var entry struct {
+			Timestamp string `json:"timestamp"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &entry) == nil && entry.Timestamp != "" {
+			if ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp); err == nil {
+				return ts
+			}
+		}
+	}
+	return time.Time{}
 }
 
 func (c *Claude) ResumeCommand(a agent.Agent) *exec.Cmd {

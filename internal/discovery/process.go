@@ -163,8 +163,10 @@ func ScanProcesses() ([]agent.Agent, error) {
 	return filterSubagents(instances), nil
 }
 
-// filterSubagents removes processes whose parent PID is also a Claude process
-// in the list. This eliminates duplicate entries from Task-spawned subagents.
+// filterSubagents removes processes that have an ancestor PID which is also
+// a Claude process in the list. This eliminates duplicate entries from
+// Task-spawned subagents, even when there are intermediate processes
+// (e.g. claude → node → claude subagent).
 func filterSubagents(agents []agent.Agent) []agent.Agent {
 	if len(agents) <= 1 {
 		return agents
@@ -177,13 +179,32 @@ func filterSubagents(agents []agent.Agent) []agent.Agent {
 
 	var filtered []agent.Agent
 	for _, a := range agents {
-		ppid := getParentPID(a.PID)
-		if ppid > 0 && pidSet[ppid] {
-			continue // parent is also a Claude process — this is a subagent
+		if hasClaudeAncestor(a.PID, pidSet) {
+			continue // an ancestor is also a Claude process — this is a subagent
 		}
 		filtered = append(filtered, a)
 	}
 	return filtered
+}
+
+// hasClaudeAncestor walks up the process tree (up to 5 levels) checking if
+// any ancestor PID is in the Claude PID set. This handles intermediate
+// processes like node wrappers between parent and child Claude processes.
+func hasClaudeAncestor(pid int, claudePIDs map[int]bool) bool {
+	cur := pid
+	seen := map[int]bool{pid: true}
+	for i := 0; i < 5; i++ {
+		ppid := getParentPID(cur)
+		if ppid <= 1 || seen[ppid] {
+			return false
+		}
+		if claudePIDs[ppid] {
+			return true
+		}
+		seen[ppid] = true
+		cur = ppid
+	}
+	return false
 }
 
 // getParentPID returns the parent PID for a given process, or 0 on error.

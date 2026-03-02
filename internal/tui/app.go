@@ -962,6 +962,7 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 	if sessionFile != "" {
 		leftW := a.width - rightW
 		a.splitTrace = views.NewLogsView(selected.PID, sessionFile, a.parserForProvider(p))
+		a.splitTrace.SetSessionCost(selected.EstCostUSD)
 		a.splitTrace.SetSize(leftW, a.height-1)
 		if selected.ProviderName == "gemini" {
 			a.splitTrace.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
@@ -1309,6 +1310,7 @@ func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, t
 		parser = a.parserForProvider(p)
 	}
 	a.logsView = views.NewLogsView(ag.PID, sessionFile, parser)
+	a.logsView.SetSessionCost(ag.EstCostUSD)
 	if ag.ProviderName == "gemini" {
 		a.logsView.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
 	}
@@ -1359,6 +1361,7 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 		parser = a.parserForProvider(p)
 	}
 	a.logsView = views.NewLogsView(selected.PID, sessionFile, parser)
+	a.logsView.SetSessionCost(selected.EstCostUSD)
 	if selected.ProviderName == "gemini" {
 		a.logsView.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
 	}

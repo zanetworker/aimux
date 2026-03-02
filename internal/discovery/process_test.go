@@ -310,6 +310,34 @@ func TestFilterSubagentsParentPIDNotInList(t *testing.T) {
 	}
 }
 
+func TestFilterSubagentsMultiLevelAncestor(t *testing.T) {
+	// PID 100 is the parent claude. PID 300 is a subagent spawned via
+	// claude (100) → node (200) → claude (300). The intermediate node
+	// process (200) is NOT in the Claude PID set, but 300 should still
+	// be filtered because its grandparent (100) is a Claude process.
+	original := getParentPID
+	getParentPID = mockParentPID(map[int]int{
+		100: 1,   // parent is init
+		200: 100, // node wrapper, child of claude
+		300: 200, // subagent claude, child of node
+	})
+	defer func() { getParentPID = original }()
+
+	agents := []agent.Agent{
+		{PID: 100},
+		{PID: 300},
+	}
+
+	filtered := filterSubagents(agents)
+
+	if len(filtered) != 1 {
+		t.Fatalf("filterSubagents() returned %d agents, want 1", len(filtered))
+	}
+	if filtered[0].PID != 100 {
+		t.Errorf("remaining PID = %d, want 100", filtered[0].PID)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsAt(s, sub))
 }
