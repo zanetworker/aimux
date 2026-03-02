@@ -335,15 +335,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// pick up an old session file from a previous run in the same dir.
 			leftW := a.width - rightW - 1
 			sessionFile := ""
-			a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
-			a.splitTrace.SetSize(leftW, a.height-1)
 
-			// Set eval context so :export and :export-otel work from split view
+			// Set launch time and eval context BEFORE creating parser,
+			// since the parser closure captures a copy of App
+			a.splitLaunchTime = time.Now()
 			a.evalSessionID = newAgent.SessionID
 			if a.evalSessionID == "" {
 				a.evalSessionID = tmuxName
 			}
-			a.splitLaunchTime = time.Now() // filter out old session files
+
+			a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
+			a.splitTrace.SetSize(leftW, a.height-1)
 
 			a.zoomed = true
 			a.splitMode = true       // always split -- trace fills in as data arrives
