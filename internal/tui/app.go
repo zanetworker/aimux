@@ -230,6 +230,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			a.previewPane.Reload()
 		}
+		// Clear stale status hints on tick
+		a.statusHint = ""
+
 		// Refresh live trace in split/zoomed mode
 		if a.zoomed && a.splitTrace != nil {
 			// Keep trying to discover the session file until found.
@@ -456,6 +459,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // In full-screen mode: Ctrl+g/]/\ exits, all other keys go to PTY.
 func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Clear status hints on any keypress (e.g., "Launched..." message)
+	a.statusHint = ""
 
 	// Exit keys — always work regardless of mode/focus
 	switch key {
