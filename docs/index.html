@@ -59,9 +59,9 @@
         <h1>ai<span class="accent">mux</span></h1>
         <p>Multiplex your AI agents. Trace, launch, export. Never leave the terminal.</p>
         <div class="install-box">
-          <code>brew tap zanetworker/aimux && brew install aimux</code>
+          <code>brew install zanetworker/aimux/aimux</code>
         </div>
-        <p class="muted" style="margin-top: 20px;">or: go install github.com/zanetworker/aimux/cmd/aimux@latest</p>
+        <p class="muted" style="margin-top: 20px;">or: git clone + make install</p>
       </section>
 
       <!-- Problem -->
@@ -109,25 +109,14 @@
       <!-- Demo -->
       <section>
         <h2>In your <span class="accent">terminal</span></h2>
-        <pre><code>┌──────────────────────────────────────────────────────────────┐
-│  ● Active 2   ◐ Waiting 0   ○ Idle 1          aimux        │
-├─────────────────────┬────────────────────────────────────────┤
-│ NAME        MODEL   │ 14:32 USER  fix the auth bug          │
-│▸● myapp    opus-4.6 │ 14:32 ASST  I'll look at login.go... │
-│  $0.82 · 14m        │ 14:33 TOOL  Edit login.go             │
-│                     │ 14:33 ASST  Fixed. Tests pass.        │
-│ ● tests    sonnet   │                                        │
-│  $0.31 · 8m         │                          [12/12] ●    │
-├─────────────────────┴────────────────────────────────────────┤
-│ j/k:nav  Enter:zoom  e:export  a:annotate  ?:help           │
-└──────────────────────────────────────────────────────────────┘</code></pre>
+        <img src="https://raw.githubusercontent.com/zanetworker/aimux/main/assets/demo.gif" alt="aimux demo" style="max-width: 85%; border-radius: 8px; border: 1px solid #333;">
       </section>
 
       <!-- Install -->
       <section>
         <h2>Get <span class="accent">started</span></h2>
         <div class="install-box" style="margin-bottom: 30px;">
-          <code>brew tap zanetworker/aimux && brew install aimux</code>
+          <code>brew install zanetworker/aimux/aimux</code>
         </div>
         <pre><code># or build from source
 git clone https://github.com/zanetworker/aimux.git
