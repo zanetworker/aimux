@@ -641,7 +641,27 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 		if filePath != "" {
 			turns, err := p.ParseTrace(filePath)
 			if err == nil && len(turns) > 0 {
-				return turns, nil
+				// For :new launches, filter out turns from before the launch
+				// (Gemini's logs.json accumulates across sessions in same dir)
+				if !a.splitLaunchTime.IsZero() {
+					var filtered []trace.Turn
+					for _, t := range turns {
+						if !t.Timestamp.IsZero() && t.Timestamp.Before(a.splitLaunchTime) {
+							continue
+						}
+						filtered = append(filtered, t)
+					}
+					if len(filtered) > 0 {
+						// Re-number turns
+						for i := range filtered {
+							filtered[i].Number = i + 1
+						}
+						return filtered, nil
+					}
+					// All turns are old, fall through to OTEL
+				} else {
+					return turns, nil
+				}
 			}
 		}
 
