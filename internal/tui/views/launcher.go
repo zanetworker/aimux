@@ -626,16 +626,22 @@ func (l *LauncherView) viewOptions() string {
 	// OTEL tracing toggle (only if receiver is available)
 	if l.otelAvailable {
 		otelLabel := launcherLabelStyle.Render(fmt.Sprintf("%-10s", "Tracing:"))
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
 		var otelValue string
 		if l.otelEnabled {
-			otelValue = "ON (exports to MLflow/Jaeger, no assistant responses)"
+			onText := "ON"
+			warn := warnStyle.Render(" (no assistant responses in trace view)")
+			if l.optionField == 3 {
+				otelValue = launcherSelectedStyle.Render(" "+onText+" ") + warn
+			} else {
+				otelValue = launcherOptionStyle.Render(onText) + warn
+			}
 		} else {
-			otelValue = "OFF"
-		}
-		if l.optionField == 3 {
-			otelValue = launcherSelectedStyle.Render(" " + otelValue + " ")
-		} else {
-			otelValue = launcherOptionStyle.Render(otelValue)
+			if l.optionField == 3 {
+				otelValue = launcherSelectedStyle.Render(" OFF ")
+			} else {
+				otelValue = launcherOptionStyle.Render("OFF")
+			}
 		}
 		b.WriteString(otelLabel + otelValue + "\n")
 	}
