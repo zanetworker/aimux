@@ -429,13 +429,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Export menu (e key in split view)
 		if a.exportConfirm {
 			a.exportConfirm = false
+			a.stickyHint = false
 			switch msg.String() {
 			case "j", "J":
 				return a.exportTrace()
 			case "o", "O":
 				return a.exportOTEL()
 			default:
-				a.statusHint = "Export cancelled"
+				a.statusHint = ""
 				return a, nil
 			}
 		}
@@ -528,6 +529,7 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if key == "e" && !a.splitTrace.HasActiveFilter() && !a.splitTrace.NoteMode() {
 			a.exportConfirm = true
 			a.statusHint = "Export: j:JSONL  o:OTEL  Esc:cancel"
+			a.stickyHint = true
 			return a, nil
 		}
 		cmd := a.splitTrace.Update(msg)
