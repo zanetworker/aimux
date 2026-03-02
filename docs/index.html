@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>aimux</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+  <style>
+    :root {
+      --r-background-color: #0a0a0a;
+      --r-main-color: #e5e5e5;
+      --r-heading-color: #ffffff;
+      --r-link-color: #ef4444;
+      --r-link-color-hover: #dc2626;
+      --r-selection-background-color: #ef4444;
+    }
+    .reveal { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+    .reveal h1, .reveal h2, .reveal h3 { font-weight: 700; text-transform: none; }
+    .reveal h1 { font-size: 3em; }
+    .reveal h2 { font-size: 2em; }
+    .reveal .accent { color: #ef4444; }
+    .reveal .muted { color: #6b7280; font-size: 0.7em; }
+    .reveal pre { font-size: 0.55em; box-shadow: none; }
+    .reveal pre code {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 20px;
+      max-height: 500px;
+    }
+    .reveal .install-box {
+      background: #1a1a1a;
+      border: 2px solid #ef4444;
+      border-radius: 12px;
+      padding: 24px 40px;
+      display: inline-block;
+      margin-top: 20px;
+    }
+    .reveal .install-box code { color: #ef4444; font-size: 1.1em; }
+    .reveal ul { list-style: none; }
+    .reveal ul li::before { content: ""; display: inline-block; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; margin-right: 12px; }
+    .reveal .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; text-align: left; }
+    .reveal .feature-grid h3 { font-size: 1.1em; margin-bottom: 8px; }
+    .reveal .feature-grid p { font-size: 0.65em; color: #9ca3af; margin: 0; }
+    .reveal .links a { color: #e5e5e5; text-decoration: none; margin: 0 20px; border-bottom: 2px solid #ef4444; padding-bottom: 4px; }
+    .reveal .links a:hover { color: #ef4444; }
+    .logo-img { width: 120px; margin-bottom: 10px; }
+    .reveal .badge { display: inline-block; background: #ef4444; color: #000; font-weight: 700; font-size: 0.5em; padding: 4px 12px; border-radius: 4px; vertical-align: middle; margin-left: 12px; }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+
+      <!-- Hero -->
+      <section>
+        <img src="https://raw.githubusercontent.com/zanetworker/aimux/main/assets/logo.png" class="logo-img" alt="aimux">
+        <h1>ai<span class="accent">mux</span></h1>
+        <p>Multiplex your AI agents. Trace, launch, export. Never leave the terminal.</p>
+        <div class="install-box">
+          <code>brew tap zanetworker/aimux && brew install aimux</code>
+        </div>
+        <p class="muted" style="margin-top: 20px;">or: go install github.com/zanetworker/aimux/cmd/aimux@latest</p>
+      </section>
+
+      <!-- Problem -->
+      <section>
+        <h2>The <span class="accent">problem</span></h2>
+        <p style="font-size: 0.8em; max-width: 700px; margin: 0 auto; line-height: 1.6;">
+          You're running 5 agents across 3 projects.<br>
+          Claude is refactoring auth. Codex is writing tests.<br>
+          A third session is idle, or stuck on a permission prompt?<br><br>
+          <strong>You don't know.</strong> Each agent lives in its own terminal.
+        </p>
+      </section>
+
+      <!-- Features -->
+      <section>
+        <h2>What you <span class="accent">get</span></h2>
+        <div class="feature-grid">
+          <div>
+            <h3>Discovery</h3>
+            <p>Auto-finds Claude, Codex, Gemini. Status, model, cost, tokens. Refreshes every 2s.</p>
+          </div>
+          <div>
+            <h3>Split View</h3>
+            <p>Live trace + interactive session side by side. PTY embed or tmux mirror.</p>
+          </div>
+          <div>
+            <h3>Annotations</h3>
+            <p>Label turns GOOD/BAD/WASTE. Add notes. Export to MLflow for eval datasets.</p>
+          </div>
+          <div>
+            <h3>Agent Launcher</h3>
+            <p>Spawn agents from the dashboard. Pick provider, model, mode, directory.</p>
+          </div>
+          <div>
+            <h3>OTEL Receiver</h3>
+            <p>Built-in OTLP/HTTP telemetry. Live cost tracking across all sessions.</p>
+          </div>
+          <div>
+            <h3>Pluggable</h3>
+            <p>10-method Provider interface. Add a new agent in one Go file.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Demo -->
+      <section>
+        <h2>In your <span class="accent">terminal</span></h2>
+        <pre><code>┌──────────────────────────────────────────────────────────────┐
+│  ● Active 2   ◐ Waiting 0   ○ Idle 1          aimux        │
+├─────────────────────┬────────────────────────────────────────┤
+│ NAME        MODEL   │ 14:32 USER  fix the auth bug          │
+│▸● myapp    opus-4.6 │ 14:32 ASST  I'll look at login.go... │
+│  $0.82 · 14m        │ 14:33 TOOL  Edit login.go             │
+│                     │ 14:33 ASST  Fixed. Tests pass.        │
+│ ● tests    sonnet   │                                        │
+│  $0.31 · 8m         │                          [12/12] ●    │
+├─────────────────────┴────────────────────────────────────────┤
+│ j/k:nav  Enter:zoom  e:export  a:annotate  ?:help           │
+└──────────────────────────────────────────────────────────────┘</code></pre>
+      </section>
+
+      <!-- Install -->
+      <section>
+        <h2>Get <span class="accent">started</span></h2>
+        <div class="install-box" style="margin-bottom: 30px;">
+          <code>brew tap zanetworker/aimux && brew install aimux</code>
+        </div>
+        <pre><code># or build from source
+git clone https://github.com/zanetworker/aimux.git
+cd aimux && make install
+aimux</code></pre>
+        <div class="links" style="margin-top: 40px;">
+          <a href="https://github.com/zanetworker/aimux">GitHub</a>
+          <a href="https://github.com/zanetworker/aimux#features">Docs</a>
+          <a href="https://github.com/zanetworker/aimux/blob/main/LICENSE">MIT License</a>
+        </div>
+      </section>
+
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+  <script>
+    Reveal.initialize({
+      hash: true,
+      controls: true,
+      progress: true,
+      center: true,
+      transition: 'fade',
+      backgroundTransition: 'fade'
+    });
+  </script>
+</body>
+</html>

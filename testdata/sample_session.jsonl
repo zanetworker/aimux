@@ -1,0 +1,5 @@
+{"type":"progress","sessionId":"abc-123","timestamp":"2026-02-20T16:31:12.443Z","data":{"type":"hook_progress"}}
+{"type":"user","sessionId":"abc-123","cwd":"/Users/test/myproject","gitBranch":"main","message":{"role":"user","content":"hello"},"timestamp":"2026-02-20T16:32:28.695Z"}
+{"type":"assistant","sessionId":"abc-123","cwd":"/Users/test/myproject","gitBranch":"main","message":{"model":"claude-opus-4-6","role":"assistant","content":[{"type":"text","text":"Hi!"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":200,"cache_read_input_tokens":500}},"timestamp":"2026-02-20T16:32:37.451Z"}
+{"type":"user","sessionId":"abc-123","cwd":"/Users/test/myproject","gitBranch":"feature","message":{"role":"user","content":"fix the bug"},"timestamp":"2026-02-20T16:35:00.000Z"}
+{"type":"assistant","sessionId":"abc-123","cwd":"/Users/test/myproject","gitBranch":"feature","message":{"model":"claude-opus-4-6","role":"assistant","content":[{"type":"text","text":"Done."}],"usage":{"input_tokens":200,"output_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":1000}},"timestamp":"2026-02-20T16:35:10.000Z"}

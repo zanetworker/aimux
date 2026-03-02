@@ -1,0 +1,41 @@
+version: 2
+
+builds:
+  - main: ./cmd/aimux
+    binary: aimux
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: ['tar.gz']
+    name_template: "aimux_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: zanetworker
+    name: aimux
+
+brews:
+  - repository:
+      owner: zanetworker
+      name: homebrew-aimux
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/zanetworker/aimux"
+    description: "TUI dashboard for managing AI coding agent sessions"
+    license: "MIT"
+    install: |
+      bin.install "aimux"
+    test: |
+      system "#{bin}/aimux", "--help"
