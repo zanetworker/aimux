@@ -58,10 +58,6 @@ func (c *Codex) Discover() ([]agent.Agent, error) {
 		c.enrichAgent(&agents[i], tmuxSessions)
 	}
 
-	// Also discover recent sessions that aren't running (resumable)
-	recentSessions := c.discoverRecentSessions(agents)
-	agents = append(agents, recentSessions...)
-
 	return agents, nil
 }
 
