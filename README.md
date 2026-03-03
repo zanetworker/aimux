@@ -47,7 +47,7 @@ Requires **tmux** for split-pane session embedding.
 
 ### Discovery
 
-Auto-finds running Claude, Codex, and Gemini processes. Shows status, model, tokens, cost, git branch, and permission mode. Refreshes every 2s. Multiple sessions in the same project directory appear as separate entries with `#1`, `#2` suffixes.
+Auto-finds running Claude, Codex, and Gemini processes. Shows status, model, tokens, cost, git branch, and permission mode. Refreshes every 2s. Multiple sessions in the same project directory appear as separate entries with `#1`, `#2` suffixes. Sort by name, cost, age, model, or PID with `s`.
 
 ### Split View
 
@@ -82,7 +82,7 @@ Press `:new` to spawn agents. Pick provider, model, mode, and project directory.
 
 ### Cost Dashboard
 
-Aggregated token usage and estimated USD spend per project:
+Press `c` from the agent list for aggregated token usage and estimated USD spend per project:
 
 ```
  PROJECT        AGENT   MODEL      IN       OUT      COST
@@ -98,7 +98,7 @@ Built-in OTLP/HTTP receiver on port 4318 collects live telemetry from spawned ag
 
 ### Teams
 
-View Claude Code team configurations and members.
+Press `T` from the agent list to view Claude Code team configurations and members.
 
 ## Key Bindings
 
@@ -106,13 +106,16 @@ View Claude Code team configurations and members.
 |-----|-------|--------|
 | `j`/`k` | Everywhere | Navigate up/down |
 | `Enter` | Agent list | Split view (trace + session) |
-| `l` | Agent list | Standalone trace view |
+| `t` | Agent list | Standalone trace view |
+| `c` | Agent list | Cost dashboard |
+| `T` | Agent list | Teams overview |
 | `Tab` | Split view | Switch focus between panes |
 | `e` | Trace pane | Export menu (`j`:JSONL, `o`:OTEL) |
 | `a` | Trace pane | Annotate turn (GOOD/BAD/WASTE) |
 | `N` | Trace pane | Add note to annotated turn |
 | `Ctrl+f` | Split view | Toggle fullscreen on focused pane |
 | `Tab` | Agent list | Expand/collapse process tree (for grouped sessions) |
+| `s` | Agent list | Cycle sort: Name/Cost/Age/Model/PID |
 | `x` | Agent list | Kill agent |
 | `:new` | Anywhere | Launch new agent |
 | `Esc` | Split/trace | Exit to agent list |

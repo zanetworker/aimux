@@ -194,15 +194,22 @@ func (a Agent) Icon() string {
 	return a.Status.Icon()
 }
 
+// AgeTime returns the effective time used for age calculation: StartTime if
+// available, otherwise LastActivity. Returns the zero time if neither is set.
+func (a Agent) AgeTime() time.Time {
+	if !a.StartTime.IsZero() {
+		return a.StartTime
+	}
+	return a.LastActivity
+}
+
 // FormatAge returns a human-friendly age string based on StartTime or LastActivity.
 func (a Agent) FormatAge() string {
-	if a.StartTime.IsZero() {
-		if a.LastActivity.IsZero() {
-			return "-"
-		}
-		return formatDuration(time.Since(a.LastActivity))
+	t := a.AgeTime()
+	if t.IsZero() {
+		return "-"
 	}
-	return formatDuration(time.Since(a.StartTime))
+	return formatDuration(time.Since(t))
 }
 
 // formatDuration formats a duration into a compact human-readable string.

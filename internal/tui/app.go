@@ -590,6 +590,15 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			return a.openLogsForSelected()
 		}
+	case "c":
+		if a.currentView == viewAgents {
+			return a.navigateTo(viewCosts, "Costs")
+		}
+	case "T":
+		if a.currentView == viewAgents {
+			a2, _ := a.navigateTo(viewTeams, "Teams")
+			return a2, a.discoverTeams
+		}
 	case "esc":
 		if a.filterInput != "" {
 			a.filterInput = ""
@@ -1457,7 +1466,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  t:traces  :new:launch  x:kill  s:sort  /:filter  ?:help  q:quit")
+		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:teams  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
 	case viewCosts:
@@ -1716,10 +1725,10 @@ func (a App) renderStatusBar() string {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  :new:launch  x:kill  t:traces  ?:help",
+			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:teams  x:kill  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " j/k:nav  Enter:open  :new:launch  x:kill  t:traces  s:sort  ?:help  q:quit"
+			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:teams  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)

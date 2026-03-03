@@ -101,15 +101,16 @@ func (v *CostsView) View() string {
 		totalOut += row.tokensOut
 		totalCost += row.cost
 
-		line := fmt.Sprintf("%-20s %-10s %-14s %12s %12s %10s",
+		costStr := fmt.Sprintf("%10s", fmt.Sprintf("$%.2f", row.cost))
+		line := fmt.Sprintf("%-20s %-10s %-14s %12s %12s ",
 			truncate(row.project, 20),
 			truncate(row.provider, 10),
 			truncate(row.model, 14),
 			formatTokens(row.tokensIn),
 			formatTokens(row.tokensOut),
-			costValueStyle.Render(fmt.Sprintf("$%.2f", row.cost)),
 		)
 		b.WriteString(line)
+		b.WriteString(costValueStyle.Render(costStr))
 		b.WriteString("\n")
 	}
 
@@ -119,13 +120,14 @@ func (v *CostsView) View() string {
 	b.WriteString("\n")
 
 	// Total
-	total := fmt.Sprintf("%-20s %-10s %-14s %12s %12s %10s",
+	totalCostStr := fmt.Sprintf("%10s", fmt.Sprintf("$%.2f", totalCost))
+	total := fmt.Sprintf("%-20s %-10s %-14s %12s %12s ",
 		"TOTAL", "", "",
 		formatTokens(totalIn),
 		formatTokens(totalOut),
-		costValueStyle.Render(fmt.Sprintf("$%.2f", totalCost)),
 	)
 	b.WriteString(costHeaderStyle.Render(total))
+	b.WriteString(costValueStyle.Render(totalCostStr))
 	b.WriteString("\n")
 
 	return b.String()
