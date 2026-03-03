@@ -21,10 +21,27 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^ci:'
+      - '^chore:'
+      - '^style:'
+
 release:
   github:
     owner: zanetworker
     name: aimux
+  header: |
+    ## aimux {{ .Version }}
+
+    Install or upgrade:
+    ```
+    brew install zanetworker/aimux/aimux
+    brew upgrade zanetworker/aimux/aimux
+    ```
 
 brews:
   - repository:
@@ -38,4 +55,4 @@ brews:
     install: |
       bin.install "aimux"
     test: |
-      system "#{bin}/aimux", "--help"
+      assert_match "aimux", shell_output("#{bin}/aimux --version")

@@ -6,6 +6,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/zanetworker/aimux/releases/latest"><img src="https://img.shields.io/github/v/release/zanetworker/aimux?style=flat-square" alt="Release"></a>
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/go-1.24%2B-00ADD8?style=flat-square&logo=go" alt="Go 1.24+">
 </p>
@@ -38,7 +39,8 @@ make install       # builds and copies to /usr/local/bin
 
 Then run:
 ```bash
-aimux
+aimux            # launch the TUI
+aimux --version  # check installed version
 ```
 
 Requires **tmux** for split-pane session embedding.
@@ -210,6 +212,25 @@ No daemon, no hooks, no modifications to your AI tools. Reads from the filesyste
 | Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/`, `~/.gemini/tmp/*/chats/` | Conversations, tool calls |
 | OTEL receiver | `localhost:4318` | Live telemetry from agents |
 | Teams | `~/.claude/teams/*/config.json` | Team membership |
+
+## Releasing
+
+Releases are fully automated via CI. To cut a new release:
+
+```bash
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+This triggers the [Release workflow](.github/workflows/release.yml) which:
+1. Runs the full test suite (build, vet, test)
+2. Cross-compiles binaries for darwin/linux (amd64/arm64) via [GoReleaser](.goreleaser.yml)
+3. Creates a GitHub release with changelog and binaries
+4. Updates the [Homebrew tap](https://github.com/zanetworker/homebrew-aimux) formula
+
+Users then upgrade with `brew upgrade zanetworker/aimux/aimux`.
+
+**Do not run `goreleaser` locally** — let CI handle it to avoid duplicate asset conflicts.
 
 ## Built With
 

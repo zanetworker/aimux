@@ -8,7 +8,15 @@ import (
 	"github.com/zanetworker/aimux/internal/tui"
 )
 
+// version is set via ldflags at build time: -X main.version=v0.3.0
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("aimux %s\n", version)
+		return
+	}
+
 	app := tui.NewApp()
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
