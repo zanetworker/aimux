@@ -157,6 +157,51 @@ func TestAgentIcon(t *testing.T) {
 	}
 }
 
+func TestAgeTime(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name     string
+		agent    Agent
+		wantZero bool
+		wantTime time.Time
+	}{
+		{
+			name:     "prefers StartTime when both set",
+			agent:    Agent{StartTime: now.Add(-time.Hour), LastActivity: now.Add(-5 * time.Minute)},
+			wantTime: now.Add(-time.Hour),
+		},
+		{
+			name:     "falls back to LastActivity when StartTime zero",
+			agent:    Agent{LastActivity: now.Add(-30 * time.Minute)},
+			wantTime: now.Add(-30 * time.Minute),
+		},
+		{
+			name:     "returns zero when both zero",
+			agent:    Agent{},
+			wantZero: true,
+		},
+		{
+			name:     "uses StartTime even if older",
+			agent:    Agent{StartTime: now.Add(-24 * time.Hour), LastActivity: now.Add(-time.Second)},
+			wantTime: now.Add(-24 * time.Hour),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.agent.AgeTime()
+			if tt.wantZero {
+				if !got.IsZero() {
+					t.Errorf("AgeTime() = %v, want zero time", got)
+				}
+				return
+			}
+			if !got.Equal(tt.wantTime) {
+				t.Errorf("AgeTime() = %v, want %v", got, tt.wantTime)
+			}
+		})
+	}
+}
+
 func TestAgentFullStruct(t *testing.T) {
 	now := time.Now()
 	a := Agent{

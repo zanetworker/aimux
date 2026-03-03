@@ -97,7 +97,7 @@ func (v *AgentsView) SetAgents(agents []agent.Agent) {
 		})
 	case "age":
 		sort.SliceStable(agents, func(i, j int) bool {
-			return agents[i].LastActivity.After(agents[j].LastActivity)
+			return agents[i].AgeTime().Before(agents[j].AgeTime())
 		})
 	case "model":
 		sort.SliceStable(agents, func(i, j int) bool {

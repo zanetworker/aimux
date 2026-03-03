@@ -544,6 +544,80 @@ func TestAgentsViewSortByCost(t *testing.T) {
 	}
 }
 
+func TestAgentsViewSortByAge(t *testing.T) {
+	v := NewAgentsView()
+
+	now := time.Now()
+	agents := []agent.Agent{
+		{PID: 1, WorkingDir: "/tmp/recent", StartTime: now.Add(-5 * time.Minute)},
+		{PID: 2, WorkingDir: "/tmp/oldest", StartTime: now.Add(-2 * time.Hour)},
+		{PID: 3, WorkingDir: "/tmp/middle", StartTime: now.Add(-30 * time.Minute)},
+	}
+
+	v.SetAgents(agents)
+
+	// Press 's' three times to reach "age" sort: "" -> "name" -> "cost" -> "age".
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if v.SortField() != "age" {
+		t.Fatalf("SortField() = %q, want %q", v.SortField(), "age")
+	}
+
+	// SetAgents with fresh PIDs to avoid cursor preservation.
+	freshAgents := []agent.Agent{
+		{PID: 10, WorkingDir: "/tmp/recent", StartTime: now.Add(-5 * time.Minute)},
+		{PID: 20, WorkingDir: "/tmp/oldest", StartTime: now.Add(-2 * time.Hour)},
+		{PID: 30, WorkingDir: "/tmp/middle", StartTime: now.Add(-30 * time.Minute)},
+	}
+	v.SetAgents(freshAgents)
+
+	// Age sort is by AgeTime ascending (oldest first = earliest StartTime first).
+	sel := v.Selected()
+	if sel == nil {
+		t.Fatal("Selected() is nil after SetAgents with age sort")
+	}
+	if sel.ShortProject() != "oldest" {
+		t.Errorf("first agent after age sort = %q, want %q", sel.ShortProject(), "oldest")
+	}
+}
+
+func TestAgentsViewSortByAgeFallback(t *testing.T) {
+	v := NewAgentsView()
+
+	now := time.Now()
+	// Mix of agents: one with StartTime, one with only LastActivity, one with both.
+	agents := []agent.Agent{
+		{PID: 1, WorkingDir: "/tmp/onlyActivity", LastActivity: now.Add(-3 * time.Hour)},
+		{PID: 2, WorkingDir: "/tmp/hasStart", StartTime: now.Add(-1 * time.Hour), LastActivity: now.Add(-10 * time.Minute)},
+		{PID: 3, WorkingDir: "/tmp/oldest", StartTime: now.Add(-5 * time.Hour)},
+	}
+
+	v.SetAgents(agents)
+
+	// Press 's' three times to reach "age" sort.
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+
+	freshAgents := []agent.Agent{
+		{PID: 10, WorkingDir: "/tmp/onlyActivity", LastActivity: now.Add(-3 * time.Hour)},
+		{PID: 20, WorkingDir: "/tmp/hasStart", StartTime: now.Add(-1 * time.Hour), LastActivity: now.Add(-10 * time.Minute)},
+		{PID: 30, WorkingDir: "/tmp/oldest", StartTime: now.Add(-5 * time.Hour)},
+	}
+	v.SetAgents(freshAgents)
+
+	// Oldest first: "oldest" (5h ago via StartTime), then "onlyActivity" (3h via LastActivity),
+	// then "hasStart" (1h via StartTime, ignoring its LastActivity).
+	sel := v.Selected()
+	if sel == nil {
+		t.Fatal("Selected() is nil after SetAgents with age sort")
+	}
+	if sel.ShortProject() != "oldest" {
+		t.Errorf("first agent after age sort = %q, want %q", sel.ShortProject(), "oldest")
+	}
+}
+
 func TestAgentsViewTreeExpand(t *testing.T) {
 	v := NewAgentsView()
 
@@ -625,5 +699,53 @@ func TestAgentsViewTreeNoExpandSingleProcess(t *testing.T) {
 	v.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if len(v.rows) != 1 {
 		t.Fatalf("rows after Tab on single process = %d, want 1", len(v.rows))
+	}
+}
+
+func TestHelpViewContainsKeyBinds(t *testing.T) {
+	v := NewHelpView()
+	v.SetSize(120, 40)
+	output := v.View()
+
+	required := []string{"c", "Cost dashboard", "T", "Teams overview", ":costs :c", ":teams :t"}
+	for _, want := range required {
+		if !strings.Contains(output, want) {
+			t.Errorf("help view missing %q", want)
+		}
+	}
+}
+
+func TestCostsViewRender(t *testing.T) {
+	v := NewCostsView()
+	v.SetSize(120, 40)
+
+	// Empty state
+	output := v.View()
+	if !strings.Contains(output, "No cost data") {
+		t.Error("empty costs view should show 'No cost data'")
+	}
+
+	// With agents
+	v.SetAgents([]agent.Agent{
+		{WorkingDir: "/home/user/project-a", ProviderName: "claude", Model: "opus-4.6", TokensIn: 1000, TokensOut: 500, EstCostUSD: 5.50},
+		{WorkingDir: "/home/user/project-b", ProviderName: "claude", Model: "sonnet-4.5", TokensIn: 2000, TokensOut: 800, EstCostUSD: 1.20},
+	})
+	output = v.View()
+	if !strings.Contains(output, "TOTAL") {
+		t.Error("costs view should show TOTAL row")
+	}
+	if !strings.Contains(output, "project-a") {
+		t.Error("costs view should show project-a")
+	}
+}
+
+func TestTeamsViewRender(t *testing.T) {
+	v := NewTeamsView()
+	v.SetSize(120, 40)
+
+	// Empty state
+	output := v.View()
+	if !strings.Contains(output, "No teams") {
+		t.Error("empty teams view should show 'No teams'")
 	}
 }
