@@ -70,6 +70,10 @@ Full turn-by-turn view of prompts, responses, and tool calls:
 
 Label turns as **GOOD**, **BAD**, or **WASTE** while watching agents work. Add free-text notes. Annotations persist to disk and export with traces.
 
+<p align="center">
+  <img src="assets/annotations.png" alt="Trace view with GOOD/BAD annotations and notes" width="800">
+</p>
+
 ### Export to MLflow
 
 Press `e` in the trace pane to export:
@@ -77,6 +81,10 @@ Press `e` in the trace pane to export:
 - **`o`** OTLP to MLflow, Jaeger, or any OTEL backend
 
 Annotations become MLflow feedback assessments for building eval datasets.
+
+<p align="center">
+  <img src="assets/mlflow-trace.png" alt="Exported aimux trace in MLflow showing turn-by-turn inputs and outputs" width="800">
+</p>
 
 ### Agent Launcher
 
@@ -86,13 +94,9 @@ Press `:new` to spawn agents. Pick provider, model, mode, and project directory.
 
 Press `c` from the agent list for aggregated token usage and estimated USD spend per project:
 
-```
- PROJECT        AGENT   MODEL      IN       OUT      COST
- claudetopus    claude  opus-4.6   128.0K   22.0K    $3.57
- trustyai       claude  sonnet     45.0K    8.0K     $1.28
- ─────────────────────────────────────────────────────────
- TOTAL                             173.0K   30.0K    $4.85
-```
+<p align="center">
+  <img src="assets/costs.png" alt="Cost dashboard showing per-project token usage and cost breakdown" width="800">
+</p>
 
 ### OTEL Receiver
 
@@ -101,6 +105,10 @@ Built-in OTLP/HTTP receiver on port 4318 collects live telemetry from spawned ag
 ### Teams
 
 Press `T` from the agent list to view Claude Code team configurations and members.
+
+<p align="center">
+  <img src="assets/teams.png" alt="Teams view showing Claude Code team configurations and members" width="800">
+</p>
 
 ## Key Bindings
 
