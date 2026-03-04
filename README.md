@@ -88,7 +88,18 @@ Annotations become MLflow feedback assessments for building eval datasets.
 
 ### Agent Launcher
 
-Press `:new` to spawn agents. Pick provider, model, mode, and project directory. Launches into tmux with OTEL telemetry enabled.
+Press `:new` to spawn agents. The launcher walks you through each step:
+
+<p align="center">
+  <img src="assets/launcher-10.png" alt="Step 1: Pick provider" width="380">
+  <img src="assets/launcher-11.png" alt="Step 2: Recent directories" width="380">
+</p>
+<p align="center">
+  <img src="assets/launcher-12.png" alt="Step 3: Browse filesystem" width="380">
+  <img src="assets/launcher-13.png" alt="Step 4: Model, mode, runtime, tracing" width="380">
+</p>
+
+Pick provider, directory (recent or browse), model, permission mode, runtime (tmux/iTerm), and toggle OTEL tracing. Launches into tmux with telemetry enabled.
 
 ### Cost Dashboard
 
