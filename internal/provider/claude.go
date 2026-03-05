@@ -881,8 +881,8 @@ func parseClaudeJSONL(data string) []trace.Turn {
 				switch block.blockType {
 				case "text":
 					for _, line := range strings.Split(block.text, "\n") {
-						trimmed := strings.TrimSpace(line)
-						if trimmed != "" {
+						trimmed := strings.TrimRight(line, " \t\r")
+						if strings.TrimSpace(trimmed) != "" {
 							current.OutputLines = append(current.OutputLines, trimmed)
 						}
 					}

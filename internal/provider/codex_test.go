@@ -447,6 +447,40 @@ func TestCodexSpawnCommand_ReadOnly(t *testing.T) {
 	assertArgsContain(t, cmd.Args, "--sandbox", "read-only")
 }
 
+func TestCodexParseTrace_PreservesIndentation(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "codex.jsonl")
+
+	data := `{"timestamp":"2026-01-01T10:00:00Z","type":"session_meta","payload":{"id":"test"}}
+{"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"show code"}}
+{"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Here:\n` + "```" + `\nfunc main() {\n    fmt.Println(\"hi\")\n}\n` + "```" + `"}]}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cx := &Codex{}
+	turns, err := cx.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+
+	found := false
+	for _, line := range turns[0].OutputLines {
+		if strings.HasPrefix(line, "    ") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected indented line, got: %v", turns[0].OutputLines)
+	}
+}
+
 func TestCodexOTELEnv(t *testing.T) {
 	c := &Codex{}
 	env := c.OTELEnv("http://localhost:4318")

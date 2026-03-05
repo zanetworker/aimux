@@ -628,8 +628,8 @@ func parseGeminiSessionFile(data string) []trace.Turn {
 				last := &turns[len(turns)-1]
 				// Split long responses into lines for display.
 				for _, line := range strings.Split(text, "\n") {
-					trimmed := strings.TrimSpace(line)
-					if trimmed != "" {
+					trimmed := strings.TrimRight(line, " \t\r")
+					if strings.TrimSpace(trimmed) != "" {
 						last.OutputLines = append(last.OutputLines, trimmed)
 					}
 				}

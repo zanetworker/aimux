@@ -824,12 +824,7 @@ func (v *LogsView) renderTurn(t TraceTurn, selected, expanded bool) []string {
 	// -- OUTPUT section --
 	lines = append(lines, v.sectionHeader("OUTPUT", outputLabelStyle, innerW))
 	if len(t.OutputLines) > 0 {
-		for _, line := range t.OutputLines {
-			if len(line) > innerW {
-				line = line[:innerW-3] + "..."
-			}
-			lines = append(lines, "    "+outputTextStyle.Render(line))
-		}
+		lines = append(lines, renderMarkdownLines(t.OutputLines, innerW)...)
 	} else {
 		lines = append(lines, "    "+dimStyle.Render("(no output)"))
 	}

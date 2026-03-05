@@ -597,6 +597,54 @@ func TestGeminiSpawnCommand_Sandbox(t *testing.T) {
 	assertArgPresent(t, cmd.Args, "--sandbox")
 }
 
+func TestGeminiParseTrace_PreservesIndentation(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session-2026-01-01T10-00-indenttest.json")
+
+	data := `{
+		"sessionId": "indenttest",
+		"startTime": "2026-01-01T10:00:00Z",
+		"lastUpdated": "2026-01-01T10:01:00Z",
+		"messages": [
+			{
+				"timestamp": "2026-01-01T10:00:00Z",
+				"type": "user",
+				"content": [{"text": "show code"}]
+			},
+			{
+				"timestamp": "2026-01-01T10:00:05Z",
+				"type": "gemini",
+				"content": "Here:\n` + "```" + `\nfunc main() {\n    fmt.Println(\"hi\")\n}\n` + "```" + `"
+			}
+		]
+	}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &Gemini{}
+	turns, err := g.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) < 1 {
+		t.Fatal("expected at least 1 turn")
+	}
+
+	found := false
+	for _, line := range turns[0].OutputLines {
+		if strings.HasPrefix(line, "    ") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected indented line, got: %v", turns[0].OutputLines)
+	}
+}
+
 func TestGeminiOTELEnv(t *testing.T) {
 	g := &Gemini{}
 	env := g.OTELEnv("http://localhost:4318")
