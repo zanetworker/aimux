@@ -761,5 +761,40 @@ func TestClaudeOTELEnv(t *testing.T) {
 	}
 }
 
+func TestClaudeParseTrace_PreservesIndentation(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	// Text with leading whitespace (code block content)
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"show code"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Here is code:\n` + "```" + `go\nfunc main() {\n    fmt.Println(\"hello\")\n}\n` + "```" + `"}],"usage":{"input_tokens":10,"output_tokens":20}}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Claude{}
+	turns, err := c.ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn, got %d", len(turns))
+	}
+
+	// Check that the indented line preserves its leading spaces
+	found := false
+	for _, line := range turns[0].OutputLines {
+		if strings.HasPrefix(line, "    ") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected indented line with leading spaces, got: %v", turns[0].OutputLines)
+	}
+}
+
 // Verify Claude implements the Provider interface at compile time.
 var _ Provider = (*Claude)(nil)

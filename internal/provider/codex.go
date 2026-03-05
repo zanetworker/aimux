@@ -851,8 +851,8 @@ func parseCodexJSONL(data string) []trace.Turn {
 							if blockType, _ := block["type"].(string); blockType == "output_text" {
 								if text, _ := block["text"].(string); text != "" {
 									for _, l := range strings.Split(text, "\n") {
-										trimmed := strings.TrimSpace(l)
-										if trimmed != "" {
+										trimmed := strings.TrimRight(l, " \t\r")
+										if strings.TrimSpace(trimmed) != "" {
 											current.OutputLines = append(current.OutputLines, trimmed)
 										}
 									}
