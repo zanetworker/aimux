@@ -3,6 +3,8 @@ package otel
 import (
 	"testing"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/subagent"
 )
 
 func TestSpansToTurns_BasicTree(t *testing.T) {
@@ -182,5 +184,33 @@ func TestSpansToTurns_MultiplePrompts(t *testing.T) {
 	}
 	if len(turns[1].Actions) != 1 {
 		t.Errorf("turn[1] actions = %d, want 1", len(turns[1].Actions))
+	}
+}
+
+func TestEventsToTurns_SubagentIdentity(t *testing.T) {
+	root := &Span{
+		SpanID: "root", Name: "user_prompt", Start: time.Now(),
+		Attrs: map[string]any{
+			"prompt.id": "p1", "gen_ai.conversation.id": "s1",
+			"gen_ai.input.messages": "search the codebase",
+		},
+		Subagent: subagent.Info{ID: "sub-1", Type: "Explore"},
+	}
+	child := &Span{
+		SpanID: "c1", Name: "tool_result", Start: time.Now(), ParentID: "root",
+		Attrs:    map[string]any{"prompt.id": "p1", "gen_ai.tool.name": "Read"},
+		Subagent: subagent.Info{ID: "sub-1", Type: "Explore"},
+	}
+	root.Children = append(root.Children, child)
+
+	turns := SpansToTurns(root)
+	if len(turns) == 0 {
+		t.Fatal("expected at least 1 turn")
+	}
+	if turns[0].Subagent.Type != "Explore" {
+		t.Errorf("Turn.Subagent.Type = %q, want %q", turns[0].Subagent.Type, "Explore")
+	}
+	if turns[0].Subagent.ID != "sub-1" {
+		t.Errorf("Turn.Subagent.ID = %q, want %q", turns[0].Subagent.ID, "sub-1")
 	}
 }

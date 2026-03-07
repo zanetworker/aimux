@@ -160,7 +160,7 @@ func ScanProcesses() ([]agent.Agent, error) {
 		instances = append(instances, buildInstance(proc))
 	}
 
-	return filterSubagents(instances), nil
+	return instances, nil
 }
 
 // filterSubagents removes processes that have an ancestor PID which is also
@@ -207,8 +207,11 @@ func hasClaudeAncestor(pid int, claudePIDs map[int]bool) bool {
 	return false
 }
 
-// getParentPID returns the parent PID for a given process, or 0 on error.
-// It is a variable so tests can override it without calling external processes.
+// GetParentPID returns the parent PID for a given process, or 0 on error.
+// Exported for use by the correlator. Variable so tests can override it.
+var GetParentPID = getParentPIDImpl
+
+// getParentPID is the internal alias used within this package.
 var getParentPID = getParentPIDImpl
 
 func getParentPIDImpl(pid int) int {

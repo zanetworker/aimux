@@ -15,6 +15,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -732,6 +733,13 @@ func (c *Codex) OTELEnv(endpoint string) string {
 			"OTEL_LOGS_EXPORTER=otlp ",
 		endpoint,
 	)
+}
+
+func (c *Codex) OTELServiceName() string { return "codex-cli" }
+
+// SubagentAttrKeys returns zero AttrKeys — Codex doesn't support subagent tracking.
+func (c *Codex) SubagentAttrKeys() subagent.AttrKeys {
+	return subagent.AttrKeys{}
 }
 
 // codexExtractFlag extracts the value following a CLI flag from a command string.

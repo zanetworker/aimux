@@ -3,6 +3,7 @@ package otel
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/subagent"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	collectorlogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectorpb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
@@ -22,9 +24,10 @@ import (
 // from Claude Code, Codex CLI, Gemini CLI, or any OTEL-instrumented agent.
 // It stores spans in a SpanStore for the TUI to display.
 type Receiver struct {
-	store  *SpanStore
-	server *http.Server
-	port   int
+	store         *SpanStore
+	server        *http.Server
+	port          int
+	keysByService map[string]subagent.AttrKeys
 
 	mu         sync.Mutex // protects counters and debugLog
 	traceCount int        // number of /v1/traces requests received
@@ -33,12 +36,19 @@ type Receiver struct {
 	debugLog   []string   // recent request log for diagnostics
 }
 
+// NewReceiverWithKeys creates a new OTLP/HTTP receiver with per-service
+// subagent attribute keys for automatic extraction.
+func NewReceiverWithKeys(store *SpanStore, port int, keys map[string]subagent.AttrKeys) *Receiver {
+	return &Receiver{
+		store:         store,
+		port:          port,
+		keysByService: keys,
+	}
+}
+
 // NewReceiver creates a new OTLP/HTTP receiver.
 func NewReceiver(store *SpanStore, port int) *Receiver {
-	return &Receiver{
-		store: store,
-		port:  port,
-	}
+	return NewReceiverWithKeys(store, port, nil)
 }
 
 // Start begins listening for OTLP/HTTP trace data on the configured port.
@@ -49,6 +59,7 @@ func (r *Receiver) Start() error {
 	mux.HandleFunc("/v1/logs", r.handleLogs)
 	mux.HandleFunc("/v1/metrics", r.handleMetrics) // accept but ignore metrics
 	mux.HandleFunc("/debug", r.handleDebug)        // diagnostic endpoint
+	mux.HandleFunc("/v1/hooks", r.handleHooks)     // hook events from agents
 	// Catch-all: Gemini may send to "/" instead of signal-specific paths
 	// (known bug: github.com/google-gemini/gemini-cli/issues/15581)
 	mux.HandleFunc("/", r.handleFallback)
@@ -191,6 +202,7 @@ func (r *Receiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 		for _, scopeSpans := range resourceSpans.ScopeSpans {
 			for _, protoSpan := range scopeSpans.Spans {
 				span := protoSpanToSpan(protoSpan, resourceAttrs)
+				r.enrichSubagent(span)
 				r.store.Add(span)
 			}
 		}
@@ -288,6 +300,7 @@ func (r *Receiver) handleLogs(w http.ResponseWriter, req *http.Request) {
 			for _, logRecord := range scopeLogs.LogRecords {
 				span := logRecordToSpan(logRecord, resourceAttrs)
 				if span != nil {
+					r.enrichSubagent(span)
 					r.store.Add(span)
 				}
 			}
@@ -440,6 +453,7 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 			for _, ss := range rs.ScopeSpans {
 				for _, ps := range ss.Spans {
 					span := protoSpanToSpan(ps, resourceAttrs)
+					r.enrichSubagent(span)
 					r.store.Add(span)
 				}
 			}
@@ -463,6 +477,7 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 				for _, lr := range sl.LogRecords {
 					span := logRecordToSpan(lr, resourceAttrs)
 					if span != nil {
+						r.enrichSubagent(span)
 						r.store.Add(span)
 					}
 				}
@@ -506,6 +521,68 @@ func hasValidLogRecords(req *collectorlogspb.ExportLogsServiceRequest) bool {
 		}
 	}
 	return false
+}
+
+// enrichSubagent extracts subagent identity from span attributes using
+// per-service attribute key mappings.
+func (r *Receiver) enrichSubagent(span *Span) {
+	if r.keysByService == nil {
+		return
+	}
+	serviceName, _ := span.Attrs["service.name"].(string)
+	keys, ok := r.keysByService[serviceName]
+	if !ok || keys.Empty() {
+		return
+	}
+	span.Subagent = keys.Extract(span.Attrs)
+}
+
+// hookPayload is the JSON body for POST /v1/hooks.
+type hookPayload struct {
+	SessionID string `json:"session_id"`
+	HookEvent string `json:"hook_event_name"`
+	ToolName  string `json:"tool_name"`
+	ToolUseID string `json:"tool_use_id"`
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type"`
+}
+
+// handleHooks accepts hook events from agents and stores them as spans.
+func (r *Receiver) handleHooks(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	defer req.Body.Close()
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	var h hookPayload
+	if err := json.Unmarshal(body, &h); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	ts := time.Now()
+	spanID := fmt.Sprintf("hook-%s", h.ToolUseID)
+	if h.ToolUseID == "" {
+		spanID = fmt.Sprintf("hook-%d", ts.UnixNano())
+	}
+	span := &Span{
+		SpanID: spanID, TraceID: h.SessionID, Name: "tool_result",
+		Start: ts, End: ts, Status: StatusOK,
+		Attrs: map[string]any{
+			"gen_ai.conversation.id": h.SessionID,
+			"gen_ai.tool.name":       h.ToolName,
+			"tool_use_id":            h.ToolUseID,
+			"source":                 "hook",
+		},
+		Subagent: subagent.Info{ID: h.AgentID, Type: h.AgentType},
+	}
+	r.store.Add(span)
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("{}"))
 }
 
 // extractValue converts an OTLP AnyValue to a Go value.

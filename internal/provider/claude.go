@@ -13,7 +13,9 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -49,7 +51,11 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 		}
 	}
 
+	// Tag subagent relationships from process tree before dedup.
+	correlator.TagFromProcessTree(agents, discovery.GetParentPID)
+
 	// Deduplicate: group SDK agents by (WorkingDir, Model), CLI by PID.
+	// Subagents are excluded — they'll be nested under parents in the TUI.
 	agents = deduplicateAgents(agents)
 
 	return agents, nil
@@ -256,25 +262,30 @@ func decodeDirKey(key string) string {
 
 // deduplicateAgents groups SDK agents sharing the same (WorkingDir, Model) into
 // single entries with a GroupCount. CLI agents are kept separate by PID since
-// filterSubagents already removed child processes, so each remaining PID is a
-// distinct session.
+// deduplicateAgents groups SDK/VSCode agents by (WorkingDir, Model) and keeps
+// CLI agents as distinct entries by PID. Subagents (tagged by TagFromProcessTree)
+// are passed through without dedup — they'll be nested in the TUI.
 func deduplicateAgents(agents []agent.Agent) []agent.Agent {
 	groups := make(map[string]*agent.Agent)
 	order := make([]string, 0) // preserve discovery order
+	var subagents []agent.Agent
 
 	for i := range agents {
 		a := &agents[i]
-		var key string
 
+		// Subagents pass through — they'll be nested under parents in the TUI.
+		if a.IsSubagent() {
+			subagents = append(subagents, *a)
+			continue
+		}
+
+		var key string
 		switch a.Source {
 		case agent.SourceSDK:
-			// Group SDK agents by (WorkingDir, Model)
 			key = fmt.Sprintf("sdk:%s:%s", a.WorkingDir, a.Model)
 		case agent.SourceVSCode:
-			// Group VSCode agents by (WorkingDir, Model)
 			key = fmt.Sprintf("vsc:%s:%s", a.WorkingDir, a.Model)
 		default:
-			// CLI agents: each PID is a distinct session (subagents already filtered).
 			key = fmt.Sprintf("cli:pid:%d", a.PID)
 		}
 
@@ -300,10 +311,11 @@ func deduplicateAgents(agents []agent.Agent) []agent.Agent {
 		}
 	}
 
-	result := make([]agent.Agent, 0, len(groups))
+	result := make([]agent.Agent, 0, len(groups)+len(subagents))
 	for _, key := range order {
 		result = append(result, *groups[key])
 	}
+	result = append(result, subagents...)
 	return result
 }
 
@@ -601,6 +613,17 @@ func (c *Claude) OTELEnv(endpoint string) string {
 			"OTEL_LOGS_EXPORT_INTERVAL=2000 ",
 		endpoint, endpoint,
 	)
+}
+
+func (c *Claude) OTELServiceName() string { return "claude-code" }
+
+// SubagentAttrKeys returns the OTEL attribute names Claude uses for subagent identity.
+func (c *Claude) SubagentAttrKeys() subagent.AttrKeys {
+	return subagent.AttrKeys{
+		ID:       "agent_id",
+		Type:     "agent_type",
+		ParentID: "parent_agent_id",
+	}
 }
 
 func findBinary(name string) string {

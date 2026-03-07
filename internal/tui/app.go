@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
@@ -22,6 +23,7 @@ import (
 	"github.com/zanetworker/aimux/internal/provider"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/spawn"
+	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/team"
 	"github.com/zanetworker/aimux/internal/terminal"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -123,8 +125,9 @@ type App struct {
 	cfg config.Config
 
 	// OTEL receiver (optional)
-	otelReceiver *aimuxotel.Receiver
-	otelStore    *aimuxotel.SpanStore
+	otelReceiver    *aimuxotel.Receiver
+	otelStore       *aimuxotel.SpanStore
+	lastEnrichTime  time.Time
 }
 
 // NewApp creates a new root TUI application.
@@ -151,6 +154,15 @@ func NewApp() App {
 		agentProviders[i] = p
 	}
 
+	// Build subagent attr key mapping for OTEL receiver.
+	keysByService := make(map[string]subagent.AttrKeys)
+	for _, p := range providers {
+		keys := p.SubagentAttrKeys()
+		if sn := p.OTELServiceName(); sn != "" && !keys.Empty() {
+			keysByService[sn] = keys
+		}
+	}
+
 	app := App{
 		currentView:  viewAgents,
 		headerView:   views.NewHeaderView(),
@@ -172,7 +184,7 @@ func NewApp() App {
 
 	// Start OTEL receiver if enabled
 	if cfg.OTELReceiver.Enabled {
-		app.otelReceiver = aimuxotel.NewReceiver(app.otelStore, cfg.OTELReceiverPort())
+		app.otelReceiver = aimuxotel.NewReceiverWithKeys(app.otelStore, cfg.OTELReceiverPort(), keysByService)
 		_ = app.otelReceiver.Start()
 	}
 
@@ -225,6 +237,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case instancesMsg:
 		a.instances = a.filterHidden([]agent.Agent(msg))
+		if a.otelStore.LastUpdate().After(a.lastEnrichTime) {
+			a.instances = correlator.EnrichFromOTEL(a.instances, a.otelStore)
+			a.lastEnrichTime = a.otelStore.LastUpdate()
+		}
 		a.agentsView.SetAgents(a.instances)
 		a.headerView.SetAgents(a.instances)
 		a.costsView.SetAgents(a.instances)

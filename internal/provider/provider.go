@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -45,6 +46,15 @@ type Provider interface {
 	// tracing for this provider, pointing at the given endpoint.
 	// Each provider knows its own OTEL activation mechanism.
 	OTELEnv(endpoint string) string
+
+	// OTELServiceName returns the service.name value this provider
+	// emits in OTEL resource attributes (e.g. "claude-code").
+	OTELServiceName() string
+
+	// SubagentAttrKeys returns the OTEL attribute names this provider
+	// uses for subagent identity. Return zero AttrKeys if the provider
+	// doesn't support subagent tracking.
+	SubagentAttrKeys() subagent.AttrKeys
 }
 
 // RecentDir is a recently-used project directory from a provider's session history.

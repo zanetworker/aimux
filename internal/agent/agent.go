@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/subagent"
 )
 
 // SourceType represents how an agent was launched.
@@ -95,7 +97,14 @@ type Agent struct {
 	LastActivity   time.Time
 	GroupCount     int    // number of processes grouped into this entry (0 or 1 = single)
 	GroupPIDs      []int  // PIDs of grouped processes (for drill-down)
-	LastAction     string // most recent tool call, e.g. "Ed main.go", "Sh go test"
+	LastAction     string         // most recent tool call, e.g. "Ed main.go", "Sh go test"
+	ParentPID      int            // process tree parent (0 = top-level)
+	Subagent       subagent.Info  // from OTEL correlation
+}
+
+// IsSubagent returns true if this agent is nested under another agent.
+func (a Agent) IsSubagent() bool {
+	return a.ParentPID != 0
 }
 
 // ShortModel returns a human-friendly shortened model name.

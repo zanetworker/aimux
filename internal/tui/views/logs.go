@@ -839,6 +839,11 @@ func (v *LogsView) renderTurnHeader(t TraceTurn, selected, expanded bool, w int)
 
 	num := turnHeaderStyle.Render(fmt.Sprintf(" %s Turn %d", arrow, t.Number))
 
+	// Subagent type label
+	if t.Subagent.Type != "" {
+		num += dimStyle.Render(fmt.Sprintf(" [%s]", t.Subagent.Type))
+	}
+
 	var meta []string
 	if !t.Timestamp.IsZero() {
 		meta = append(meta, t.Timestamp.Format("15:04"))

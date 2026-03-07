@@ -55,10 +55,11 @@ func costColor(cost float64) lipgloss.Style {
 // treeRow represents a single row in the agents table. Parent rows show the
 // session; child rows show individual sub-processes when expanded.
 type treeRow struct {
-	agent   agent.Agent // the session agent (always set)
-	isChild bool        // true for sub-process rows
-	childID int         // index into GroupPIDs (only for child rows)
-	isLast  bool        // last child in the group (for └─ vs ├─)
+	agent      agent.Agent // the session agent (always set)
+	isChild    bool        // true for sub-process rows
+	childID    int         // index into GroupPIDs (only for child rows)
+	isLast     bool        // last child in the group (for └─ vs ├─)
+	isSubagent bool        // true for subagent rows
 }
 
 // AgentsView renders the main agents table with columns.
@@ -133,15 +134,30 @@ func (v *AgentsView) SetAgents(agents []agent.Agent) {
 
 // buildTreeRows builds the flat list of treeRows from the filtered agents.
 // Parent rows are always present; child rows appear only for expanded agents.
+// Subagent rows are nested under their parent agent.
 func (v *AgentsView) buildTreeRows() {
 	filtered := v.filtered()
 	v.rows = make([]treeRow, 0, len(filtered))
+
+	// Separate parents and subagents
+	var parents []agent.Agent
+	subByParent := make(map[int][]agent.Agent)
 	for _, a := range filtered {
+		if a.IsSubagent() {
+			subByParent[a.ParentPID] = append(subByParent[a.ParentPID], a)
+		} else {
+			parents = append(parents, a)
+		}
+	}
+
+	for _, a := range parents {
 		v.rows = append(v.rows, treeRow{agent: a})
+
+		// Existing process group expansion
 		if v.expanded[a.PID] && a.GroupCount > 1 && len(a.GroupPIDs) > 0 {
 			for i, pid := range a.GroupPIDs {
 				if pid == a.PID {
-					continue // skip the representative PID (already shown as parent)
+					continue
 				}
 				v.rows = append(v.rows, treeRow{
 					agent:   a,
@@ -150,6 +166,17 @@ func (v *AgentsView) buildTreeRows() {
 					isLast:  i == len(a.GroupPIDs)-1,
 				})
 			}
+		}
+
+		// Subagent children (always shown)
+		subs := subByParent[a.PID]
+		for i, sub := range subs {
+			v.rows = append(v.rows, treeRow{
+				agent:      sub,
+				isChild:    true,
+				isSubagent: true,
+				isLast:     i == len(subs)-1,
+			})
 		}
 	}
 }
@@ -371,6 +398,21 @@ func (v *AgentsView) renderChildRow(r treeRow) string {
 	if r.isLast {
 		glyph = "└─"
 	}
+
+	if r.isSubagent {
+		label := r.agent.Subagent.Type
+		if label == "" {
+			label = "subagent"
+		}
+		// Use the same column layout as parent but indented with glyph
+		status := r.agent.Status.Icon()
+		model := r.agent.ShortModel()
+		age := r.agent.FormatAge()
+		cost := r.agent.FormatCost()
+		return fmt.Sprintf("     %s %s  %s  %s  %s  %s",
+			glyph, label, model, status, age, cost)
+	}
+
 	treeGlyph := agentMutedIcon.Render("   " + glyph + " ")
 
 	pid := 0

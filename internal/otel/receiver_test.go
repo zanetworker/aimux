@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/subagent"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	collectorlogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
@@ -298,5 +299,118 @@ func TestReceiver_FallbackEndToEnd(t *testing.T) {
 	root := store.GetByConversation(sessionID)
 	if root == nil {
 		t.Fatal("GetByConversation returned nil after fallback processing")
+	}
+}
+
+func TestEnrichSubagent(t *testing.T) {
+	store := NewSpanStore()
+	keys := map[string]subagent.AttrKeys{
+		"claude-code": {ID: "agent_id", Type: "agent_type", ParentID: "parent_agent_id"},
+	}
+	r := NewReceiverWithKeys(store, 0, keys)
+	span := &Span{
+		SpanID: "s1",
+		Attrs: map[string]any{
+			"service.name": "claude-code", "agent_id": "sub-1",
+			"agent_type": "Explore", "parent_agent_id": "main-0",
+		},
+	}
+	r.enrichSubagent(span)
+	if span.Subagent.ID != "sub-1" {
+		t.Errorf("Subagent.ID = %q, want %q", span.Subagent.ID, "sub-1")
+	}
+	if span.Subagent.Type != "Explore" {
+		t.Errorf("Subagent.Type = %q, want %q", span.Subagent.Type, "Explore")
+	}
+	if span.Subagent.ParentID != "main-0" {
+		t.Errorf("Subagent.ParentID = %q, want %q", span.Subagent.ParentID, "main-0")
+	}
+}
+
+func TestEnrichSubagentUnknownService(t *testing.T) {
+	store := NewSpanStore()
+	keys := map[string]subagent.AttrKeys{"claude-code": {ID: "agent_id", Type: "agent_type"}}
+	r := NewReceiverWithKeys(store, 0, keys)
+	span := &Span{SpanID: "s1", Attrs: map[string]any{"service.name": "unknown", "agent_id": "sub-1"}}
+	r.enrichSubagent(span)
+	if span.Subagent.ID != "" {
+		t.Errorf("unknown service should not extract, got ID=%q", span.Subagent.ID)
+	}
+}
+
+func TestEnrichSubagentNilKeys(t *testing.T) {
+	store := NewSpanStore()
+	r := NewReceiver(store, 0)
+	span := &Span{SpanID: "s1", Attrs: map[string]any{"service.name": "claude-code", "agent_id": "sub-1"}}
+	r.enrichSubagent(span)
+	if span.Subagent.ID != "" {
+		t.Errorf("nil keysByService should not extract, got ID=%q", span.Subagent.ID)
+	}
+}
+
+func TestHandleHooks(t *testing.T) {
+	store := NewSpanStore()
+	port := 14322
+	r := NewReceiver(store, port)
+
+	if err := r.Start(); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer r.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	payload := `{"session_id":"sess-1","hook_event_name":"tool_result","tool_name":"Read","tool_use_id":"tu-123","agent_id":"agent-A","agent_type":"Explore"}`
+	resp, err := http.Post(
+		fmt.Sprintf("http://127.0.0.1:%d/v1/hooks", port),
+		"application/json",
+		bytes.NewBufferString(payload),
+	)
+	if err != nil {
+		t.Fatalf("POST /v1/hooks error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /v1/hooks status = %d, want 200", resp.StatusCode)
+	}
+
+	if !store.HasData() {
+		t.Fatal("store should have data after hook")
+	}
+
+	root := store.GetByConversation("sess-1")
+	if root == nil {
+		t.Fatal("GetByConversation returned nil for hook session")
+	}
+	if root.Subagent.ID != "agent-A" {
+		t.Errorf("Subagent.ID = %q, want %q", root.Subagent.ID, "agent-A")
+	}
+	if root.Subagent.Type != "Explore" {
+		t.Errorf("Subagent.Type = %q, want %q", root.Subagent.Type, "Explore")
+	}
+	if root.AttrStr("gen_ai.tool.name") != "Read" {
+		t.Errorf("tool name = %q, want Read", root.AttrStr("gen_ai.tool.name"))
+	}
+}
+
+func TestHandleHooksMethodNotAllowed(t *testing.T) {
+	store := NewSpanStore()
+	port := 14323
+	r := NewReceiver(store, port)
+
+	if err := r.Start(); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer r.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/hooks", port))
+	if err != nil {
+		t.Fatalf("GET /v1/hooks error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("GET /v1/hooks status = %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)
 	}
 }

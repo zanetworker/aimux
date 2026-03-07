@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/subagent"
 )
 
 // Turn groups a user prompt with the assistant response into one logical
@@ -22,7 +23,8 @@ type Turn struct {
 	TokensIn    int64
 	TokensOut   int64
 	CostUSD     float64 // calculated from tokens + model
-	Model       string  // model used for this turn
+	Model       string        // model used for this turn
+	Subagent    subagent.Info // subagent identity (empty for main thread)
 }
 
 // Duration returns the wall-clock duration of this turn.
