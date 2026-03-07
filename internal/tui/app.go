@@ -17,6 +17,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/evaluation"
+	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/jump"
 	"github.com/zanetworker/aimux/internal/provider"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
@@ -34,6 +35,7 @@ const (
 	viewLogs
 	viewCosts
 	viewTeams
+	viewSessions
 	viewHelp
 )
 
@@ -65,9 +67,10 @@ type App struct {
 	previewPane *views.PreviewPane
 	sessionView *views.SessionView
 	logsView    *views.LogsView
-	costsView   *views.CostsView
-	teamsView   *views.TeamsView
-	helpView    *views.HelpView
+	costsView    *views.CostsView
+	teamsView    *views.TeamsView
+	sessionsView *views.SessionsView
+	helpView     *views.HelpView
 
 	// Layout
 	layout *Layout
@@ -154,7 +157,8 @@ func NewApp() App {
 		agentsView:   views.NewAgentsView(),
 		previewPane:  views.NewPreviewPane(),
 		sessionView:  views.NewSessionView(),
-		costsView:    views.NewCostsView(),
+		costsView:     views.NewCostsView(),
+		sessionsView:  views.NewSessionsView(),
 		teamsView:    views.NewTeamsView(),
 		helpView:     views.NewHelpView(),
 		layout:       NewLayout(0, 0),
@@ -384,6 +388,39 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case views.SessionToggleScopeMsg:
+		dir := ""
+		if !msg.ShowAll {
+			dir = a.sessionsView.CurrentDir()
+		}
+		sessions, _ := history.Discover(history.DiscoverOpts{Dir: dir}, "")
+		a.sessionsView.SetSessions(sessions)
+		a.sessionsView.SetTagVocab(history.CollectTags(""))
+	case views.SessionAnnotateMsg:
+		// Persist session-level annotation
+		meta := history.LoadMeta(msg.Session.FilePath)
+		meta.Annotation = msg.Annotation
+		_ = history.SaveMeta(msg.Session.FilePath, meta)
+		a.statusHint = fmt.Sprintf("Session: [%s]", strings.ToUpper(msg.Annotation))
+		if msg.Annotation == "" {
+			a.statusHint = "Session: annotation removed"
+		}
+	case views.SessionTagMsg:
+		meta := history.LoadMeta(msg.Session.FilePath)
+		meta.Tags = msg.Tags
+		_ = history.SaveMeta(msg.Session.FilePath, meta)
+		a.statusHint = fmt.Sprintf("Session: tags updated (%d)", len(msg.Tags))
+	case views.SessionNoteMsg:
+		meta := history.LoadMeta(msg.Session.FilePath)
+		meta.Note = msg.Note
+		_ = history.SaveMeta(msg.Session.FilePath, meta)
+		a.statusHint = "Session: note saved"
+	case views.SessionResumeMsg:
+		if msg.SessionID == "" {
+			a.statusHint = "No session ID to resume"
+			return a, nil
+		}
+		return a.resumeSession(msg.SessionID, msg.WorkingDir, msg.FilePath)
 	case views.AnnotationMsg:
 		// Persist annotation to disk and update views
 		if a.evalStore != nil {
@@ -580,6 +617,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := a.logsView.Update(msg)
 			return a, cmd
 		}
+		if a.currentView == viewSessions {
+			cmd := a.sessionsView.Update(msg)
+			return a, cmd
+		}
 	case "?":
 		return a.navigateTo(viewHelp, "Help")
 	case "x":
@@ -599,11 +640,22 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a2, _ := a.navigateTo(viewTeams, "Teams")
 			return a2, a.discoverTeams
 		}
+	case "S":
+		if a.currentView == viewAgents {
+			return a.openSessions()
+		}
 	case "esc":
 		if a.filterInput != "" {
 			a.filterInput = ""
 			a.agentsView.SetFilter("")
 			return a, nil
+		}
+		// Let sessions view handle esc for its own input/filter modes
+		if a.currentView == viewSessions {
+			if a.sessionsView.HasActiveInput() || a.sessionsView.HasActiveFilter() {
+				cmd := a.sessionsView.Update(msg)
+				return a, cmd
+			}
 		}
 		// Let logs view handle esc for its own filter/search mode first
 		if a.currentView == viewLogs && a.logsView != nil && a.logsView.HasActiveFilter() {
@@ -615,6 +667,11 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Enter/Space in logs view -> expand/collapse turns
 		if a.currentView == viewLogs && a.logsView != nil {
 			cmd := a.logsView.Update(msg)
+			return a, cmd
+		}
+		// Enter in sessions view -> resume
+		if a.currentView == viewSessions {
+			cmd := a.sessionsView.Update(msg)
 			return a, cmd
 		}
 		return a.handleEnter()
@@ -636,6 +693,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := a.logsView.Update(msg)
 			return a, cmd
 		}
+	case viewSessions:
+		cmd := a.sessionsView.Update(msg)
+		return a, cmd
 	}
 	return a, nil
 }
@@ -1174,6 +1234,82 @@ func (a App) jumpToSession() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// resumeSession opens a past session in split view: trace on left, live Claude on right.
+// Mirrors handleEnter() but builds the command from session history instead of a running agent.
+func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.Model, tea.Cmd) {
+	claudeBin := "claude"
+	if path, err := exec.LookPath("claude"); err == nil {
+		claudeBin = path
+	}
+
+	cmd := exec.Command(claudeBin, "--resume", sessionID)
+	if workingDir != "" {
+		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
+			cmd.Dir = workingDir
+		} else {
+			a.statusHint = "Cannot resolve project directory for resume"
+			return a, nil
+		}
+	}
+
+	// Size the session view for the right half
+	rightW := a.width * 60 / 100
+	a.sessionView.SetSize(rightW, a.height)
+
+	// Start embedded PTY (Claude supports embedding)
+	sess, err := terminal.Start(cmd)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Resume failed: %v", err)
+		return a, nil
+	}
+
+	// Build a minimal agent for the session view
+	resumeAgent := &agent.Agent{
+		ProviderName: "claude",
+		SessionID:    sessionID,
+		WorkingDir:   workingDir,
+	}
+
+	teaCmd, err := a.sessionView.Open(resumeAgent, sess)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Error opening session: %v", err)
+		return a, nil
+	}
+
+	// Create trace pane on the left from the session file
+	if sessionFilePath != "" {
+		leftW := a.width - rightW
+		claudeProvider := a.providerFor("claude")
+		var parser func(string) ([]trace.Turn, error)
+		if claudeProvider != nil {
+			parser = claudeProvider.ParseTrace
+		}
+		a.splitTrace = views.NewLogsView(0, sessionFilePath, parser)
+		a.splitTrace.SetSize(leftW, a.height-1)
+
+		// Load existing annotations
+		a.evalSessionID = sessionID
+		a.evalStore = evaluation.NewStore(sessionID)
+		annotations, _ := a.evalStore.Load()
+		annotMap := make(map[int]string)
+		noteMap := make(map[int]string)
+		for _, ann := range annotations {
+			annotMap[ann.Turn] = ann.Label
+			if ann.Note != "" {
+				noteMap[ann.Turn] = ann.Note
+			}
+		}
+		a.splitTrace.SetAnnotations(annotMap)
+		a.splitTrace.SetNotes(noteMap)
+	}
+
+	a.zoomed = true
+	a.splitMode = true
+	a.splitFocus = "session" // start with focus on the live session (right)
+	a.layout.SetZoomed(true)
+	return a, teaCmd
+}
+
 // promptKill shows a confirmation prompt before killing the selected agent.
 // For session-only entries (PID=0), offers to remove and delete trace files.
 func (a App) promptKill() (tea.Model, tea.Cmd) {
@@ -1413,6 +1549,32 @@ func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// openSessions discovers past sessions and navigates to the sessions browser.
+func (a App) openSessions() (tea.Model, tea.Cmd) {
+	// Determine scope directory from selected agent (if any)
+	dir := ""
+	if sel := a.agentsView.Selected(); sel != nil {
+		dir = sel.WorkingDir
+	}
+	a.sessionsView.SetCurrentDir(dir)
+
+	// Set up trace parser (use Claude's parser as default)
+	for _, p := range a.providers {
+		if p.Name() == "claude" {
+			a.sessionsView.SetTraceParser(p.ParseTrace)
+			break
+		}
+	}
+
+	// Discover sessions in background
+	opts := history.DiscoverOpts{Dir: dir}
+	sessions, _ := history.Discover(opts, "")
+	a.sessionsView.SetSessions(sessions)
+	a.sessionsView.SetTagVocab(history.CollectTags(""))
+
+	return a.navigateTo(viewSessions, "Sessions")
+}
+
 func (a App) navigateBack() (tea.Model, tea.Cmd) {
 	if a.currentView != viewAgents {
 		a.currentView = viewAgents
@@ -1466,13 +1628,15 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:teams  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:teams  S:sessions  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
 		a.headerView.SetHint("Esc:back  ?:help")
+	case viewSessions:
+		a.headerView.SetHint("j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  p:preview  Esc:back")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
 	}
@@ -1506,6 +1670,9 @@ func (a App) View() string {
 		content = a.costsView.View()
 	case viewTeams:
 		content = a.teamsView.View()
+	case viewSessions:
+		a.sessionsView.SetSize(a.width, contentHeight)
+		content = a.sessionsView.View()
 	case viewHelp:
 		content = a.helpView.View()
 	}
@@ -1721,14 +1888,19 @@ func (a App) renderStatusBar() string {
 		hints = " " + lipgloss.NewStyle().Foreground(hintColor).Bold(true).Render(a.statusHint)
 	} else if a.currentView == viewLogs {
 		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
+	} else if a.currentView == viewSessions {
+		hints = " j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  p:preview  Esc:back"
+		if a.sessionsView.HasActiveFilter() {
+			hints += "  [Esc clears filter]"
+		}
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:teams  x:kill  ?:help",
+			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:teams  S:sessions  x:kill  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:teams  s:sort  ?:help  q:quit"
+			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:teams  S:sessions  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
