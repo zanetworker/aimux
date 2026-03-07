@@ -615,7 +615,11 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 
 	age := formatAge(s.LastActive)
 
-	prompt := s.FirstPrompt
+	// Use LLM-generated title if available, fall back to first prompt
+	prompt := s.Title
+	if prompt == "" {
+		prompt = s.FirstPrompt
+	}
 	if prompt == "" {
 		prompt = "(no prompt)"
 	}

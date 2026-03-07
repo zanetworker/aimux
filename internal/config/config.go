@@ -17,6 +17,13 @@ type Config struct {
 	Shell           string                    `yaml:"shell"`     // login shell for spawning agents
 	Export          ExportConfig              `yaml:"export"`    // OTEL export settings
 	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`      // OTEL receiver settings
+	Sessions        SessionsConfig            `yaml:"sessions"`  // session history settings
+}
+
+// SessionsConfig holds settings for the session history feature.
+type SessionsConfig struct {
+	AutoTitle  bool   `yaml:"auto_title"`  // generate titles via LLM on discovery
+	TitleModel string `yaml:"title_model"` // "haiku" (default), "sonnet", "opus"
 }
 
 // ExportConfig holds settings for exporting traces via OTLP/HTTP.

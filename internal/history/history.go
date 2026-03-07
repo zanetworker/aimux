@@ -28,6 +28,7 @@ type Session struct {
 	TokensOut   int64     `json:"tokens_out"`
 	CostUSD     float64   `json:"cost_usd"`
 	FirstPrompt string    `json:"first_prompt"`  // first user message (cleaned, for display)
+	Title       string    `json:"title"`         // LLM-generated title (from meta, or empty)
 	Resumable   bool      `json:"resumable"`     // true if provider supports resume
 	Annotation  string    `json:"annotation"`    // achieved/partial/failed/abandoned
 	Note        string    `json:"note"`          // free-text rationale
@@ -39,6 +40,7 @@ type Meta struct {
 	Annotation string   `json:"annotation,omitempty"`
 	Note       string   `json:"note,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
+	Title      string   `json:"title,omitempty"` // LLM-generated summary title
 	UpdatedAt  string   `json:"updated_at,omitempty"`
 }
 
@@ -126,6 +128,7 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 			s.Annotation = meta.Annotation
 			s.Note = meta.Note
 			s.Tags = meta.Tags
+			s.Title = meta.Title
 
 			sessions = append(sessions, s)
 		}
