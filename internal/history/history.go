@@ -326,8 +326,29 @@ func cleanPrompt(text string) string {
 	}
 
 	if best == "" {
-		// Fallback: collapse everything
-		best = strings.Join(lines, " ")
+		// Fallback: collapse non-noise lines
+		var fallbackParts []string
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !isNoiseLine(line) {
+				fallbackParts = append(fallbackParts, line)
+			}
+		}
+		if len(fallbackParts) > 0 {
+			best = strings.Join(fallbackParts, " ")
+		} else {
+			return "(no prompt)"
+		}
+	}
+
+	// Strip any remaining XML-like tags
+	for strings.Contains(best, "<") && strings.Contains(best, ">") {
+		start := strings.Index(best, "<")
+		end := strings.Index(best[start:], ">")
+		if end < 0 {
+			break
+		}
+		best = best[:start] + best[start+end+1:]
 	}
 
 	// Collapse whitespace
