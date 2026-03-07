@@ -27,9 +27,20 @@ func DefaultTitleConfig() TitleConfig {
 	}
 }
 
-// resolveModel maps short model names to full Anthropic model IDs.
+// isGeminiModel returns true if the model name refers to a Gemini model.
+func isGeminiModel(model string) bool {
+	switch model {
+	case "flash", "gemini-flash", "gemini-3-flash-preview":
+		return true
+	}
+	return strings.HasPrefix(model, "gemini")
+}
+
+// resolveModel maps short model names to full model IDs.
 func resolveModel(short string) string {
 	switch short {
+	case "flash", "gemini-flash":
+		return "gemini-3-flash-preview"
 	case "haiku":
 		return "claude-haiku-4-5-20251001"
 	case "sonnet":
@@ -37,15 +48,20 @@ func resolveModel(short string) string {
 	case "opus":
 		return "claude-opus-4-6-20250527"
 	default:
-		// Allow full model ID passthrough
 		return short
 	}
 }
 
-// resolveAPIKey returns the API key from config or environment.
+// resolveAPIKey returns the appropriate API key for the model.
 func resolveAPIKey(cfg TitleConfig) string {
 	if cfg.APIKey != "" {
 		return cfg.APIKey
+	}
+	if isGeminiModel(cfg.Model) {
+		if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+			return key
+		}
+		return os.Getenv("GOOGLE_API_KEY")
 	}
 	return os.Getenv("ANTHROPIC_API_KEY")
 }
@@ -97,9 +113,16 @@ func extractConversationSummary(filePath string) string {
 			continue
 		}
 
+		// Strip XML tags and noise from the text
+		text = stripXMLTags(text)
+		text = strings.TrimSpace(text)
+		if text == "" || len(text) < 5 {
+			continue
+		}
+
 		// Truncate individual messages
 		if len(text) > 200 {
-			text = text[:200] + "..."
+			text = text[:200]
 		}
 
 		if role == "user" {
@@ -113,6 +136,19 @@ func extractConversationSummary(filePath string) string {
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// stripXMLTags removes XML-like tags from text.
+func stripXMLTags(text string) string {
+	for strings.Contains(text, "<") && strings.Contains(text, ">") {
+		start := strings.Index(text, "<")
+		end := strings.Index(text[start:], ">")
+		if end < 0 {
+			break
+		}
+		text = text[:start] + text[start+end+1:]
+	}
+	return text
 }
 
 // extractTextFromContent pulls plain text from a message content field.
@@ -161,18 +197,87 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 
 	model := resolveModel(cfg.Model)
 
+	prompt := fmt.Sprintf(
+		"Generate a concise 3-8 word title for this AI assistant session. "+
+			"Focus on what the user wanted to accomplish. "+
+			"Return ONLY the title, no quotes, no punctuation at the end.\n\n"+
+			"Conversation:\n%s", conversationSummary)
+
+	if isGeminiModel(cfg.Model) {
+		return callGemini(prompt, model, apiKey)
+	}
+	return callAnthropic(prompt, model, apiKey)
+}
+
+func callGemini(prompt, model, apiKey string) (string, error) {
+	reqBody := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 100,
+		},
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("API request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("Gemini API error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("empty response from Gemini")
+	}
+
+	return strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text), nil
+}
+
+func callAnthropic(prompt, model, apiKey string) (string, error) {
 	reqBody := map[string]interface{}{
 		"model":      model,
 		"max_tokens": 30,
 		"messages": []map[string]interface{}{
-			{
-				"role": "user",
-				"content": fmt.Sprintf(
-					"Generate a concise 3-8 word title for this AI assistant session. "+
-						"Focus on what the user wanted to accomplish. "+
-						"Return ONLY the title, no quotes, no punctuation at the end.\n\n"+
-						"Conversation:\n%s", conversationSummary),
-			},
+			{"role": "user", "content": prompt},
 		},
 	}
 
@@ -189,7 +294,7 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("API request: %w", err)
@@ -202,7 +307,7 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("Anthropic API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -215,10 +320,10 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 	}
 
 	if len(result.Content) == 0 || result.Content[0].Text == "" {
-		return "", fmt.Errorf("empty response from API")
+		return "", fmt.Errorf("empty response from Anthropic")
 	}
 
-	return result.Content[0].Text, nil
+	return strings.TrimSpace(result.Content[0].Text), nil
 }
 
 // GenerateTitles generates titles for all sessions that don't have one yet.
@@ -236,7 +341,14 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 
 		title, err := GenerateTitle(s, cfg)
 		if err != nil {
-			return count, fmt.Errorf("session %s: %w", s.ID, err)
+			// Skip sessions that fail (safety filter, empty content, etc.)
+			// but stop on auth/network errors
+			errStr := err.Error()
+			if strings.Contains(errStr, "API key") {
+				return count, fmt.Errorf("session %s: %w", s.ID, err)
+			}
+			fmt.Fprintf(os.Stderr, "  skip %s: %v\n", s.ID[:8], err)
+			continue
 		}
 
 		// Save to meta

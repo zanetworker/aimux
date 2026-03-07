@@ -23,7 +23,7 @@ type Config struct {
 // SessionsConfig holds settings for the session history feature.
 type SessionsConfig struct {
 	AutoTitle  bool   `yaml:"auto_title"`  // generate titles via LLM on discovery
-	TitleModel string `yaml:"title_model"` // "haiku" (default), "sonnet", "opus"
+	TitleModel string `yaml:"title_model"` // "flash" (default), "haiku", "sonnet", "opus"
 }
 
 // ExportConfig holds settings for exporting traces via OTLP/HTTP.
@@ -64,6 +64,9 @@ func Default() Config {
 		},
 		RefreshInterval: "2s",
 		DefaultRuntime:  "tmux",
+		Sessions: SessionsConfig{
+			TitleModel: "flash",
+		},
 	}
 }
 
