@@ -76,6 +76,11 @@ type SessionNoteMsg struct {
 	Note    string
 }
 
+// SessionDeleteMsg is emitted when the user confirms deleting a session.
+type SessionDeleteMsg struct {
+	Session history.Session
+}
+
 // SessionToggleScopeMsg is emitted when the user toggles between
 // current directory and all projects.
 type SessionToggleScopeMsg struct {
@@ -106,6 +111,9 @@ type SessionsView struct {
 	// Note input
 	noteMode  bool
 	noteInput string
+
+	// Delete confirmation
+	deleteMode bool // true when showing delete confirmation
 
 	// Trace preview (reused LogsView)
 	previewLogs  *LogsView
@@ -176,9 +184,9 @@ func (v *SessionsView) SelectedSession() *history.Session {
 	return nil
 }
 
-// HasActiveInput returns true if the view has active text input.
+// HasActiveInput returns true if the view has active text input or confirmation.
 func (v *SessionsView) HasActiveInput() bool {
-	return v.filterMode || v.tagMode || v.noteMode
+	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode
 }
 
 // HasActiveFilter returns true if a search filter is currently applied.
@@ -193,6 +201,9 @@ var sessAnnotationCycle = []string{"achieved", "partial", "failed", "abandoned",
 func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if v.deleteMode {
+			return v.handleDeleteKey(msg)
+		}
 		if v.tagMode {
 			return v.handleTagKey(msg)
 		}
@@ -293,6 +304,13 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			}
 			v.noteMode = true
 			v.noteInput = s.Note
+		case "d":
+			// Delete session (show confirmation)
+			s := v.SelectedSession()
+			if s == nil {
+				return nil
+			}
+			v.deleteMode = true
 		case "p":
 			// Toggle trace preview
 			if v.previewLogs != nil {
@@ -353,6 +371,36 @@ func (v *SessionsView) handleTagKey(msg tea.KeyMsg) tea.Cmd {
 		if len(msg.String()) == 1 {
 			v.tagInput += msg.String()
 		}
+	}
+	return nil
+}
+
+func (v *SessionsView) handleDeleteKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "y", "Y":
+		v.deleteMode = false
+		s := v.SelectedSession()
+		if s == nil {
+			return nil
+		}
+		session := *s
+		// Remove from the sessions list
+		for i := range v.sessions {
+			if v.sessions[i].ID == session.ID {
+				v.sessions = append(v.sessions[:i], v.sessions[i+1:]...)
+				break
+			}
+		}
+		if v.cursor >= len(v.visibleSessions()) && v.cursor > 0 {
+			v.cursor--
+		}
+		v.previewLogs = nil
+		return func() tea.Msg {
+			return SessionDeleteMsg{Session: session}
+		}
+	default:
+		// Any other key cancels (default to No)
+		v.deleteMode = false
 	}
 	return nil
 }
@@ -571,6 +619,24 @@ func (v *SessionsView) View() string {
 	}
 	if v.noteMode {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("Note: ") + v.noteInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render("|"))
+	}
+	if v.deleteMode {
+		s := v.SelectedSession()
+		if s != nil {
+			title := s.Title
+			if title == "" {
+				title = s.FirstPrompt
+			}
+			if len(title) > 50 {
+				title = title[:47] + "..."
+			}
+			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
+			dimWarn := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+			b.WriteString("\n\n")
+			b.WriteString("  " + warnStyle.Render(fmt.Sprintf("Delete \"%s\" (%d turns)?", title, s.TurnCount)) + "\n")
+			b.WriteString("  " + dimWarn.Render("This permanently removes the session from Claude. Cannot be undone.") + "\n")
+			b.WriteString("  " + warnStyle.Render("y") + dimWarn.Render(" to confirm, any other key to cancel"))
+		}
 	}
 
 	return b.String()

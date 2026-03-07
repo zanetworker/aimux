@@ -14,9 +14,10 @@ import (
 
 // TitleConfig controls LLM-based session title generation.
 type TitleConfig struct {
-	Enabled bool   // generate titles automatically
-	Model   string // "haiku" (default), "sonnet", "opus"
-	APIKey  string // Anthropic API key (from env or config)
+	Enabled    bool   // generate titles automatically
+	Model      string // "flash" (default), "haiku", "sonnet", "opus"
+	APIKey     string // API key (from env or config)
+	Regenerate bool   // regenerate titles even if they already exist
 }
 
 // DefaultTitleConfig returns sensible defaults for title generation.
@@ -198,10 +199,14 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 	model := resolveModel(cfg.Model)
 
 	prompt := fmt.Sprintf(
-		"Generate a concise 3-8 word title for this AI assistant session. "+
-			"Focus on what the user wanted to accomplish. "+
-			"Return ONLY the title, no quotes, no punctuation at the end.\n\n"+
-			"Conversation:\n%s", conversationSummary)
+		"Your task: write a single descriptive title (5-10 words) summarizing this coding session.\n\n"+
+			"Rules:\n"+
+			"- Must be a COMPLETE phrase, never cut off mid-sentence\n"+
+			"- Must describe the SPECIFIC task, not generic words\n"+
+			"- BAD: 'Researching', 'Create', 'Optimize', 'Add dist directory to'\n"+
+			"- GOOD: 'Add dist directory to gitignore', 'Fix markdown rendering in trace view', 'Research Claude session storage and access patterns'\n\n"+
+			"Conversation:\n%s\n\n"+
+			"Title:", conversationSummary)
 
 	if isGeminiModel(cfg.Model) {
 		return callGemini(prompt, model, apiKey)
@@ -219,7 +224,7 @@ func callGemini(prompt, model, apiKey string) (string, error) {
 			},
 		},
 		"generationConfig": map[string]interface{}{
-			"maxOutputTokens": 100,
+			"maxOutputTokens": 256,
 		},
 	}
 
@@ -269,7 +274,14 @@ func callGemini(prompt, model, apiKey string) (string, error) {
 		return "", fmt.Errorf("empty response from Gemini")
 	}
 
-	return strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text), nil
+	title := strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text)
+	// Take only the first line (Gemini sometimes adds explanation)
+	if idx := strings.IndexAny(title, "\n\r"); idx > 0 {
+		title = title[:idx]
+	}
+	// Strip quotes if wrapped
+	title = strings.Trim(title, "\"'")
+	return title, nil
 }
 
 func callAnthropic(prompt, model, apiKey string) (string, error) {
@@ -330,14 +342,27 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 // Returns the number of titles generated and any error encountered.
 // Stops on first API error to avoid burning through quota on failures.
 func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
+	total := 0
+	for _, s := range sessions {
+		if (s.Title == "" || cfg.Regenerate) && s.FirstPrompt != "" && s.FirstPrompt != "(no prompt)" {
+			total++
+		}
+	}
+
 	count := 0
 	for _, s := range sessions {
-		if s.Title != "" {
+		if s.Title != "" && !cfg.Regenerate {
 			continue // already has a title
 		}
 		if s.FirstPrompt == "" || s.FirstPrompt == "(no prompt)" {
 			continue
 		}
+
+		prompt := s.FirstPrompt
+		if len(prompt) > 40 {
+			prompt = prompt[:37] + "..."
+		}
+		fmt.Fprintf(os.Stderr, "  [%d/%d] %s %s... ", count+1, total, s.ID[:8], prompt)
 
 		title, err := GenerateTitle(s, cfg)
 		if err != nil {
@@ -345,9 +370,10 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 			// but stop on auth/network errors
 			errStr := err.Error()
 			if strings.Contains(errStr, "API key") {
+				fmt.Fprintln(os.Stderr, "FAILED (auth)")
 				return count, fmt.Errorf("session %s: %w", s.ID, err)
 			}
-			fmt.Fprintf(os.Stderr, "  skip %s: %v\n", s.ID[:8], err)
+			fmt.Fprintf(os.Stderr, "skipped (%v)\n", err)
 			continue
 		}
 
@@ -358,6 +384,7 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 			return count, fmt.Errorf("save meta for %s: %w", s.ID, err)
 		}
 		count++
+		fmt.Fprintf(os.Stderr, "→ %q\n", title)
 	}
 	return count, nil
 }

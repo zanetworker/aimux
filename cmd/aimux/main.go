@@ -71,7 +71,7 @@ Sessions flags:
 // runSessions handles the "aimux sessions" subcommand.
 func runSessions(args []string) {
 	var dir string
-	var listMode, exportMode, jsonMode, generateTitles bool
+	var listMode, exportMode, jsonMode, generateTitles, regenerateTitles bool
 	var limit int
 	titleModel := "haiku"
 
@@ -95,6 +95,9 @@ func runSessions(args []string) {
 			}
 		case "--generate-titles":
 			generateTitles = true
+		case "--regenerate-titles":
+			generateTitles = true
+			regenerateTitles = true
 		case "--title-model":
 			if i+1 < len(args) {
 				titleModel = args[i+1]
@@ -124,8 +127,9 @@ func runSessions(args []string) {
 
 	if generateTitles {
 		cfg := history.TitleConfig{
-			Enabled: true,
-			Model:   titleModel,
+			Enabled:    true,
+			Model:      titleModel,
+			Regenerate: regenerateTitles,
 		}
 		fmt.Printf("Generating titles using %s...\n", titleModel)
 		count, err := history.GenerateTitles(filtered, cfg)

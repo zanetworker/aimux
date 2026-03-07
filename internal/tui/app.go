@@ -414,6 +414,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		meta.Tags = msg.Tags
 		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = fmt.Sprintf("Session: tags updated (%d)", len(msg.Tags))
+	case views.SessionDeleteMsg:
+		if err := os.Remove(msg.Session.FilePath); err != nil {
+			a.statusHint = fmt.Sprintf("Delete failed: %v", err)
+		} else {
+			metaPath := history.MetaPath(msg.Session.FilePath)
+			os.Remove(metaPath) // ignore error — may not exist
+			a.statusHint = "Session deleted"
+		}
 	case views.SessionNoteMsg:
 		meta := history.LoadMeta(msg.Session.FilePath)
 		meta.Note = msg.Note
@@ -1640,7 +1648,7 @@ func (a App) View() string {
 	case viewTeams:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewSessions:
-		a.headerView.SetHint("j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  p:preview  Esc:back")
+		a.headerView.SetHint("j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  d:delete  p:preview  Esc:back")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
 	}
@@ -1893,7 +1901,7 @@ func (a App) renderStatusBar() string {
 	} else if a.currentView == viewLogs {
 		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
 	} else if a.currentView == viewSessions {
-		hints = " j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  p:preview  Esc:back"
+		hints = " j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  d:delete  p:preview  Esc:back"
 		if a.sessionsView.HasActiveFilter() {
 			hints += "  [Esc clears filter]"
 		}
