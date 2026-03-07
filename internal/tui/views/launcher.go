@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 // --- Styles ---
@@ -55,6 +56,13 @@ type LaunchMsg struct {
 	OTELEnabled bool // true if OTEL tracing should be injected
 }
 
+// LaunchResumeMsg is emitted when the user picks a session to resume from the launcher.
+type LaunchResumeMsg struct {
+	SessionID string
+	Dir       string
+	FilePath  string
+}
+
 // LaunchCancelMsg is emitted when the user cancels the launcher.
 type LaunchCancelMsg struct{}
 
@@ -73,6 +81,7 @@ type launcherState int
 const (
 	statePickProvider launcherState = iota
 	statePickDirectory
+	statePickResume
 	statePickOptions
 )
 
@@ -105,6 +114,10 @@ type LauncherView struct {
 	otelAvailable bool // true if OTEL receiver is running
 	optionField  int // 0=model, 1=mode, 2=runtime, 3=otel
 	providerOpts map[string]ProviderOptions
+
+	// Resume step
+	resumeSessions []history.Session // recent sessions for selected directory
+	resumeCursor   int               // 0 = "New session", 1+ = sessions
 }
 
 // ProviderOptions holds the models and modes for a specific provider.
@@ -185,6 +198,8 @@ func (l *LauncherView) Update(msg tea.Msg) tea.Cmd {
 			return l.updateProvider(key)
 		case statePickDirectory:
 			return l.updateDirectory(key)
+		case statePickResume:
+			return l.updateResume(key)
 		case statePickOptions:
 			return l.updateOptions(key)
 		}
@@ -238,17 +253,17 @@ func (l *LauncherView) updateDirectory(key string) tea.Cmd {
 			l.dirCursor--
 		}
 	case "enter":
-		if l.browseMode {
+			if l.browseMode {
 			return l.handleBrowseEnter()
 		}
 		// Recent mode: select directory and advance
 		if l.dirCursor < len(l.filteredRecent()) {
-			l.state = statePickOptions
+			l.advanceFromDir()
 		}
 	case "s":
 		// Select the current browse directory as the project dir
 		if l.browseMode {
-			l.state = statePickOptions
+			l.advanceFromDir()
 			return nil
 		}
 	case "backspace":
@@ -277,7 +292,7 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 	entry := items[l.dirCursor]
 	if entry.name == "." {
 		// Select this directory
-		l.state = statePickOptions
+		l.advanceFromDir()
 		return nil
 	}
 	if entry.name == ".." {
@@ -356,6 +371,74 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 	return nil
 }
 
+// advanceFromDir transitions from directory selection to the resume step.
+// Looks up recent sessions for the selected directory; if none exist,
+// skips straight to options (new session).
+func (l *LauncherView) advanceFromDir() {
+	dir := l.selectedDir()
+	provider := ""
+	if l.providerCursor < len(l.providers) {
+		provider = l.providers[l.providerCursor]
+	}
+
+	// Only Claude supports resume for now
+	if provider != "claude" || dir == "" {
+		l.state = statePickOptions
+		return
+	}
+
+	sessions, _ := history.Discover(history.DiscoverOpts{Dir: dir, Limit: 5}, "")
+	// Filter out near-empty sessions
+	var meaningful []history.Session
+	for _, s := range sessions {
+		if s.TurnCount > 5 || s.CostUSD > 0 {
+			meaningful = append(meaningful, s)
+		}
+	}
+
+	if len(meaningful) == 0 {
+		l.state = statePickOptions
+		return
+	}
+
+	l.resumeSessions = meaningful
+	l.resumeCursor = 0 // "New session" is default
+	l.state = statePickResume
+}
+
+func (l *LauncherView) updateResume(key string) tea.Cmd {
+	maxIdx := len(l.resumeSessions) // 0 = new session, 1..N = resume options
+	switch key {
+	case "j", "down":
+		if l.resumeCursor < maxIdx {
+			l.resumeCursor++
+		}
+	case "k", "up":
+		if l.resumeCursor > 0 {
+			l.resumeCursor--
+		}
+	case "esc":
+		l.state = statePickDirectory
+		l.resumeCursor = 0
+	case "enter":
+		if l.resumeCursor == 0 {
+			// New session
+			l.state = statePickOptions
+			return nil
+		}
+		// Resume selected session
+		s := l.resumeSessions[l.resumeCursor-1]
+		return func() tea.Msg {
+			return LaunchResumeMsg{
+				SessionID: s.ID,
+				Dir:       s.Project,
+				FilePath:  s.FilePath,
+			}
+		}
+	}
+	return nil
+}
+
 func (l *LauncherView) emitLaunch() tea.Cmd {
 	dir := l.selectedDir()
 	if dir == "" {
@@ -403,6 +486,8 @@ func (l *LauncherView) View() string {
 		content = l.viewProvider()
 	case statePickDirectory:
 		content = l.viewDirectory()
+	case statePickResume:
+		content = l.viewResume()
 	case statePickOptions:
 		content = l.viewOptions()
 	}
@@ -600,6 +685,55 @@ func (l *LauncherView) viewBrowse() string {
 		b.WriteString(cursor + style.Render(label) + "\n")
 	}
 	return b.String()
+}
+
+func (l *LauncherView) viewResume() string {
+	dir := l.selectedDir()
+	shortDir := dir
+	if len(shortDir) > 40 {
+		shortDir = "..." + shortDir[len(shortDir)-37:]
+	}
+	provider := l.providers[l.providerCursor]
+
+	var lines []string
+	lines = append(lines, launcherTitleStyle.Render(fmt.Sprintf("  Launch %s in %s", provider, shortDir)))
+	lines = append(lines, "")
+
+	// "New session" option
+	marker := "  ○ "
+	style := launcherOptionStyle
+	if l.resumeCursor == 0 {
+		marker = "  ● "
+		style = launcherSelectedStyle
+	}
+	lines = append(lines, style.Render(marker+"New session"))
+	lines = append(lines, "")
+
+	// Recent sessions to resume
+	for i, s := range l.resumeSessions {
+		marker = "  ○ "
+		style = launcherOptionStyle
+		if l.resumeCursor == i+1 {
+			marker = "  ● "
+			style = launcherSelectedStyle
+		}
+
+		prompt := s.FirstPrompt
+		if prompt == "" {
+			prompt = "(no prompt)"
+		}
+		if len(prompt) > 50 {
+			prompt = prompt[:47] + "..."
+		}
+		age := formatAge(s.LastActive)
+		label := fmt.Sprintf("Resume: %s  (%s)", prompt, age)
+		lines = append(lines, style.Render(marker+label))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, launcherHintStyle.Render("  ↑↓ select  Enter launch  Esc back"))
+
+	return strings.Join(lines, "\n")
 }
 
 func (l *LauncherView) viewOptions() string {
