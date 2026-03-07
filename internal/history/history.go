@@ -27,7 +27,7 @@ type Session struct {
 	TokensIn    int64     `json:"tokens_in"`
 	TokensOut   int64     `json:"tokens_out"`
 	CostUSD     float64   `json:"cost_usd"`
-	FirstPrompt string    `json:"first_prompt"`  // first user message (for display)
+	FirstPrompt string    `json:"first_prompt"`  // first user message (cleaned, for display)
 	Resumable   bool      `json:"resumable"`     // true if provider supports resume
 	Annotation  string    `json:"annotation"`    // achieved/partial/failed/abandoned
 	Note        string    `json:"note"`          // free-text rationale
@@ -218,6 +218,7 @@ func scanSession(id, filePath, project string) (Session, error) {
 type sessionEntry struct {
 	Type      string    `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
+	GitBranch string    `json:"gitBranch"`
 	Message   *struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
@@ -299,22 +300,108 @@ func extractUserText(content json.RawMessage) string {
 }
 
 // cleanPrompt normalizes a user prompt for single-line display.
-// Collapses newlines, strips markdown headers, and truncates.
+// Extracts the first meaningful sentence, strips noise like pasted
+// content, markdown headers, Slack messages, and system prompts.
 func cleanPrompt(text string) string {
-	// Collapse newlines and extra whitespace into single spaces
-	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.ReplaceAll(text, "\r", " ")
-	text = strings.ReplaceAll(text, "\t", " ")
-	// Collapse multiple spaces
-	for strings.Contains(text, "  ") {
-		text = strings.ReplaceAll(text, "  ", " ")
+	// Split into lines and find the first meaningful one
+	lines := strings.Split(text, "\n")
+	var best string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip noise lines
+		if isNoiseLine(line) {
+			continue
+		}
+		// Strip markdown header prefix
+		line = strings.TrimLeft(line, "# ")
+		line = strings.TrimSpace(line)
+		if len(line) < 5 {
+			continue
+		}
+		best = line
+		break
 	}
-	text = strings.TrimSpace(text)
 
-	if len(text) > 120 {
-		text = text[:117] + "..."
+	if best == "" {
+		// Fallback: collapse everything
+		best = strings.Join(lines, " ")
 	}
-	return text
+
+	// Collapse whitespace
+	for strings.Contains(best, "  ") {
+		best = strings.ReplaceAll(best, "  ", " ")
+	}
+	best = strings.TrimSpace(best)
+
+	// Take first sentence if there are multiple
+	for _, sep := range []string{". ", "? ", "! "} {
+		if idx := strings.Index(best, sep); idx > 10 && idx < 100 {
+			best = best[:idx+1]
+			break
+		}
+	}
+
+	if len(best) > 80 {
+		best = best[:77] + "..."
+	}
+	return best
+}
+
+// isNoiseLine returns true for lines that are likely pasted content,
+// system prompts, or other noise rather than a real user request.
+func isNoiseLine(line string) bool {
+	lower := strings.ToLower(line)
+
+	// Pasted Slack/chat messages
+	if strings.Contains(line, "PM]") || strings.Contains(line, "AM]") {
+		return true
+	}
+	// Calendar/leave data
+	if strings.Contains(lower, "annual leave") || strings.Contains(lower, "approved") {
+		return true
+	}
+	// System/eval prompts
+	if strings.HasPrefix(lower, "# session evaluation") || strings.HasPrefix(lower, "analyze this claude") {
+		return true
+	}
+	// XML-like tags from system messages
+	if strings.HasPrefix(line, "<") {
+		return true
+	}
+	// Box-drawing characters (pasted terminal output)
+	if strings.ContainsAny(line[:minInt(3, len(line))], "┌┐└┘├┤┬┴│─╭╮╰╯║═") {
+		return true
+	}
+	// Lines starting with special characters (shell prompts, unicode markers)
+	if len(line) > 0 {
+		first := rune(line[0])
+		if first == 0x276F || first == 0x25CF { // ❯ ●
+			return true
+		}
+	}
+	if strings.HasPrefix(line, "❯") || strings.HasPrefix(line, "⏺") {
+		return true
+	}
+	// Very short or numeric-only lines
+	if len(strings.TrimSpace(line)) < 3 {
+		return true
+	}
+	// Date-only lines
+	if len(line) <= 12 && (strings.Contains(line, "/") || strings.Contains(line, "-")) {
+		digits := 0
+		for _, r := range line {
+			if r >= '0' && r <= '9' {
+				digits++
+			}
+		}
+		if digits > len(line)/2 {
+			return true
+		}
+	}
+	return false
 }
 
 // encodeProjectDir converts an absolute path to a Claude project directory name.
@@ -423,6 +510,13 @@ func buildCandidates(segments []string) []string {
 		candidates = append(candidates, dotJoin)
 	}
 	return candidates
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func dirExists(path string) bool {
