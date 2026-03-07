@@ -101,6 +101,27 @@ Press `:new` to spawn agents. The launcher walks you through each step:
 
 Pick provider, directory (recent or browse), model, permission mode, runtime (tmux/iTerm), and toggle OTEL tracing. Launches into tmux with telemetry enabled.
 
+### Session History
+
+Press `S` from the agent list to browse past sessions across all projects. Resume any session in split view, annotate outcomes, tag failure modes, and generate LLM-powered titles.
+
+- **Browse**: navigate past sessions sorted by recency with prompt preview
+- **Resume**: press `Enter` to reopen a session in split view (trace + live Claude)
+- **Annotate**: mark sessions as achieved/partial/failed/abandoned (`a` key)
+- **Tag**: add failure mode tags with autocomplete (`f` key)
+- **Filter**: fuzzy search by prompt, project, annotation, or tags (`/`)
+- **Delete**: remove sessions permanently (`d` key, with confirmation)
+- **LLM Titles**: auto-generate descriptive titles from session content
+
+CLI access:
+```bash
+aimux sessions --list                    # plain table
+aimux sessions --export                  # JSONL for eval pipelines
+aimux sessions --generate-titles         # generate titles with Gemini Flash
+aimux sessions --regenerate-titles       # regenerate all titles
+aimux resume <session-id>               # resume directly
+```
+
 ### Cost Dashboard
 
 Press `c` from the agent list for aggregated token usage and estimated USD spend per project:
@@ -129,6 +150,7 @@ Press `T` from the agent list to view Claude Code team configurations and member
 | `Enter` | Agent list | Split view (trace + session) |
 | `t` | Agent list | Standalone trace view |
 | `c` | Agent list | Cost dashboard |
+| `S` | Agent list | Session history browser |
 | `T` | Agent list | Teams overview |
 | `Tab` | Split view | Switch focus between panes |
 | `e` | Trace pane | Export menu (`j`:JSONL, `o`:OTEL) |
@@ -168,6 +190,12 @@ export:
   insecure: true
   mlflow:
     experiment_id: "1"        # required by MLflow
+
+# Session history: LLM-powered title generation
+# Requires GEMINI_API_KEY (for flash) or ANTHROPIC_API_KEY (for haiku/sonnet/opus)
+sessions:
+  auto_title: true
+  title_model: "flash"        # flash, haiku, sonnet, opus
 ```
 
 <details>
