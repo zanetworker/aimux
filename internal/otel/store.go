@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/subagent"
 )
 
 // Span is aimux's internal span representation, using OTEL GenAI semantic
@@ -23,6 +25,8 @@ type Span struct {
 	// aimux extensions (not in OTEL spec)
 	Label string // GOOD/BAD/WASTE annotation
 	Note  string // annotation rationale
+
+	Subagent subagent.Info
 }
 
 // SpanStatus represents the outcome of a span.
@@ -90,6 +94,8 @@ type SpanStore struct {
 	byConversation map[string]*Span
 	// byTraceID maps trace ID -> list of spans (flat, before tree assembly)
 	byTraceID map[string][]*Span
+	// seenToolUseIDs deduplicates spans by tool_use_id
+	seenToolUseIDs map[string]bool
 	// lastUpdate tracks when data was last received
 	lastUpdate time.Time
 }
@@ -99,6 +105,7 @@ func NewSpanStore() *SpanStore {
 	return &SpanStore{
 		byConversation: make(map[string]*Span),
 		byTraceID:      make(map[string][]*Span),
+		seenToolUseIDs: make(map[string]bool),
 	}
 }
 
@@ -107,6 +114,18 @@ func NewSpanStore() *SpanStore {
 func (ss *SpanStore) Add(span *Span) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
+
+	// Dedup by tool_use_id (hook arrives first, OTEL batch later).
+	// Cap at 10k entries to prevent unbounded growth in long sessions.
+	if tuid := span.AttrStr("tool_use_id"); tuid != "" {
+		if ss.seenToolUseIDs[tuid] {
+			return
+		}
+		if len(ss.seenToolUseIDs) >= 10000 {
+			ss.seenToolUseIDs = make(map[string]bool)
+		}
+		ss.seenToolUseIDs[tuid] = true
+	}
 
 	ss.byTraceID[span.TraceID] = append(ss.byTraceID[span.TraceID], span)
 	ss.lastUpdate = time.Now()
@@ -176,6 +195,57 @@ func (ss *SpanStore) ConversationIDs() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// SubagentInfoBySession returns the subagent identity for a session ID.
+func (ss *SpanStore) SubagentInfoBySession(sessionID string) subagent.Info {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	root, ok := ss.byConversation[sessionID]
+	if !ok {
+		return subagent.Info{}
+	}
+	if root.Subagent.HasIdentity() {
+		return root.Subagent
+	}
+	for _, child := range root.Children {
+		if child.Subagent.HasIdentity() {
+			return child.Subagent
+		}
+	}
+	return subagent.Info{}
+}
+
+// SubagentsBySession returns all distinct subagent identities seen in OTEL
+// events for a session. Used to create virtual agent entries for in-process
+// subagents that don't have their own PID.
+func (ss *SpanStore) SubagentsBySession(sessionID string) []subagent.Info {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	root, ok := ss.byConversation[sessionID]
+	if !ok {
+		return nil
+	}
+
+	seen := make(map[string]subagent.Info)
+	check := func(s *Span) {
+		if s.Subagent.HasIdentity() && s.Subagent.ID != "" {
+			seen[s.Subagent.ID] = s.Subagent
+		}
+	}
+	check(root)
+	for _, child := range root.Children {
+		check(child)
+	}
+
+	if len(seen) == 0 {
+		return nil
+	}
+	result := make([]subagent.Info, 0, len(seen))
+	for _, info := range seen {
+		result = append(result, info)
+	}
+	return result
 }
 
 // AssembleTree builds parent-child relationships for all spans in a trace.

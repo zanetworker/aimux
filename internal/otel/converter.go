@@ -106,6 +106,11 @@ func eventsToTurn(events []*Span, num int) trace.Turn {
 	t := trace.Turn{Number: num}
 
 	for _, s := range events {
+		// Pick up subagent identity from the first event that has it
+		if !t.Subagent.HasIdentity() && s.Subagent.HasIdentity() {
+			t.Subagent = s.Subagent
+		}
+
 		shortName := s.Name
 		if idx := strings.LastIndex(s.Name, "."); idx >= 0 {
 			shortName = s.Name[idx+1:]
@@ -245,6 +250,8 @@ func spanToTurn(s *Span, num int) trace.Turn {
 			}
 		}
 	}
+
+	t.Subagent = s.Subagent
 
 	if c := s.AttrFloat64("gen_ai.usage.cost"); c > 0 {
 		t.CostUSD = c

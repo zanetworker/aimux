@@ -95,6 +95,43 @@ func TestSpan_AttrHelpers(t *testing.T) {
 	}
 }
 
+func TestSpanStore_DedupByToolUseID(t *testing.T) {
+	store := NewSpanStore()
+	span1 := &Span{
+		SpanID: "hook-tu123", TraceID: "session-1", Name: "tool_result",
+		Start: time.Now(),
+		Attrs: map[string]any{"gen_ai.conversation.id": "session-1", "tool_use_id": "tu123"},
+	}
+	span2 := &Span{
+		SpanID: "log-999", TraceID: "session-1", Name: "tool_result",
+		Start: time.Now(),
+		Attrs: map[string]any{"gen_ai.conversation.id": "session-1", "tool_use_id": "tu123"},
+	}
+	store.Add(span1)
+	store.Add(span2)
+	spans := store.GetSpans("session-1")
+	if len(spans) != 1 {
+		t.Errorf("got %d spans, want 1 (dedup failed)", len(spans))
+	}
+}
+
+func TestSpanStore_NoDedupWithoutToolUseID(t *testing.T) {
+	store := NewSpanStore()
+	span1 := &Span{
+		SpanID: "log-1", TraceID: "s1", Name: "user_prompt",
+		Start: time.Now(), Attrs: map[string]any{"gen_ai.conversation.id": "s1"},
+	}
+	span2 := &Span{
+		SpanID: "log-2", TraceID: "s1", Name: "api_request",
+		Start: time.Now(), Attrs: map[string]any{"gen_ai.conversation.id": "s1"},
+	}
+	store.Add(span1)
+	store.Add(span2)
+	if len(store.GetSpans("s1")) != 2 {
+		t.Errorf("got %d spans, want 2", len(store.GetSpans("s1")))
+	}
+}
+
 func TestSpanStore_Empty(t *testing.T) {
 	store := NewSpanStore()
 	if store.HasData() {

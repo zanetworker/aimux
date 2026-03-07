@@ -13,6 +13,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -438,6 +439,13 @@ func (g *Gemini) OTELEnv(endpoint string) string {
 			"OTEL_LOGS_EXPORTER=otlp ",
 		endpoint,
 	)
+}
+
+func (g *Gemini) OTELServiceName() string { return "gemini-cli" }
+
+// SubagentAttrKeys returns zero AttrKeys — Gemini doesn't support subagent tracking.
+func (g *Gemini) SubagentAttrKeys() subagent.AttrKeys {
+	return subagent.AttrKeys{}
 }
 
 // --- helpers ---
