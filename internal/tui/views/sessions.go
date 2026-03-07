@@ -740,19 +740,25 @@ func formatAge(t time.Time) string {
 }
 
 // shortProject extracts a meaningful short name from a project path.
-// Handles decoded paths ("/Users/foo/myproject") and
+// Handles real paths ("/Users/foo/myproject") and
 // encoded paths ("/Users-foo-myproject" from decodeProjectDir).
-// Always extracts the last meaningful component via hyphen split,
-// since decoded paths still contain hyphens from Claude's encoding.
 func shortProject(path string) string {
 	if path == "" {
 		return "(unknown)"
 	}
-	// Strip leading / from decoded path
+	// For real paths with multiple slashes, take the last path component
+	if strings.Count(path, "/") > 1 {
+		parts := strings.Split(strings.TrimSuffix(path, "/"), "/")
+		for i := len(parts) - 1; i >= 0; i-- {
+			if parts[i] != "" && parts[i] != "." {
+				return parts[i]
+			}
+		}
+	}
+	// For encoded paths (hyphens instead of slashes), take last segment
 	path = strings.TrimPrefix(path, "/")
-	// Split by hyphen (covers both encoded and decoded formats)
+	path = strings.TrimPrefix(path, "-")
 	parts := strings.Split(path, "-")
-	// Walk backwards to find the last non-empty component
 	for i := len(parts) - 1; i >= 0; i-- {
 		if parts[i] != "" {
 			return parts[i]
