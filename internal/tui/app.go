@@ -271,6 +271,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.teamsView.SetTeams(a.teams)
 		return a, nil
 
+	case views.LaunchResumeMsg:
+		a.launcherActive = false
+		a.launcherView = nil
+		return a.resumeSession(msg.SessionID, msg.Dir, msg.FilePath)
 	case views.LaunchMsg:
 		a.launcherActive = false
 		a.launcherView = nil
