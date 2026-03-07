@@ -59,18 +59,21 @@ Usage:
   aimux --version          Show version
 
 Sessions flags:
-  --dir <path>     Scope to a specific directory
-  --list           Plain table output (scriptable)
-  --export         JSONL output for eval pipelines
-  --json           JSON output (with --list)
-  --limit <n>      Max sessions to show (default: all)`)
+  --dir <path>            Scope to a specific directory
+  --list                  Plain table output (scriptable)
+  --export                JSONL output for eval pipelines
+  --json                  JSON output (with --list)
+  --limit <n>             Max sessions to show (default: all)
+  --generate-titles       Generate LLM titles for sessions without one
+  --title-model <model>   Model for titles: haiku (default), sonnet, opus`)
 }
 
 // runSessions handles the "aimux sessions" subcommand.
 func runSessions(args []string) {
 	var dir string
-	var listMode, exportMode, jsonMode bool
+	var listMode, exportMode, jsonMode, generateTitles bool
 	var limit int
+	titleModel := "haiku"
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -88,6 +91,13 @@ func runSessions(args []string) {
 		case "--limit":
 			if i+1 < len(args) {
 				fmt.Sscanf(args[i+1], "%d", &limit)
+				i++
+			}
+		case "--generate-titles":
+			generateTitles = true
+		case "--title-model":
+			if i+1 < len(args) {
+				titleModel = args[i+1]
 				i++
 			}
 		}
@@ -110,6 +120,32 @@ func runSessions(args []string) {
 			continue
 		}
 		filtered = append(filtered, s)
+	}
+
+	if generateTitles {
+		cfg := history.TitleConfig{
+			Enabled: true,
+			Model:   titleModel,
+		}
+		fmt.Printf("Generating titles using %s...\n", titleModel)
+		count, err := history.GenerateTitles(filtered, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Stopped after %d titles: %v\n", count, err)
+		} else {
+			fmt.Printf("Generated %d titles.\n", count)
+		}
+		// Reload sessions to show new titles
+		sessions, _ = history.Discover(opts, "")
+		filtered = nil
+		for _, s := range sessions {
+			if s.TurnCount <= 5 && s.CostUSD == 0 {
+				continue
+			}
+			if s.LastActive.IsZero() {
+				continue
+			}
+			filtered = append(filtered, s)
+		}
 	}
 
 	if exportMode {
@@ -145,7 +181,10 @@ func printSessionsTable(sessions []history.Session) {
 	for _, s := range sessions {
 		proj := shortProjectName(s.Project)
 		age := shortAge(s.LastActive)
-		prompt := s.FirstPrompt
+		prompt := s.Title
+		if prompt == "" {
+			prompt = s.FirstPrompt
+		}
 		if len(prompt) > 40 {
 			prompt = prompt[:37] + "..."
 		}
