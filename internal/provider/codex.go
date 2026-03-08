@@ -742,6 +742,8 @@ func (c *Codex) SubagentAttrKeys() subagent.AttrKeys {
 	return subagent.AttrKeys{}
 }
 
+func (c *Codex) Kill(a agent.Agent) error { return KillLocalAgent(a) }
+
 // codexExtractFlag extracts the value following a CLI flag from a command string.
 func codexExtractFlag(args, flag string) string {
 	fields := strings.Fields(args)

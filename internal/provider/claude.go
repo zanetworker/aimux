@@ -626,6 +626,8 @@ func (c *Claude) SubagentAttrKeys() subagent.AttrKeys {
 	}
 }
 
+func (c *Claude) Kill(a agent.Agent) error { return KillLocalAgent(a) }
+
 func findBinary(name string) string {
 	path, err := exec.LookPath(name)
 	if err != nil {
