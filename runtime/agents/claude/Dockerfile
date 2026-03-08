@@ -12,9 +12,9 @@ RUN npm install -g @anthropic-ai/claude-code
 # Allow git in /workspace when running as non-root uid 1001 (OpenShift default)
 RUN git config --system --add safe.directory /workspace
 
-# Copy coordinator and agent — UBI9 python-312 workdir is /opt/app-root/src
-COPY coordinator/ /opt/app-root/src/coordinator/
-COPY agents/claude/ /opt/app-root/src/agent/
+# Build context is aimux repo root — paths reflect the runtime/ layout
+COPY runtime/coordinator/ /opt/app-root/src/coordinator/
+COPY runtime/agents/claude/ /opt/app-root/src/agent/
 
 # Give uid 1001 (OpenShift default) ownership of the app directory
 RUN chown -R 1001:0 /opt/app-root/src/
