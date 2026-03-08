@@ -297,7 +297,7 @@ func TestWriteExportCreatesDirectoriesAndWritesJSONL(t *testing.T) {
 		},
 	}
 
-	if err := WriteExport(path, turns); err != nil {
+	if err := WriteExport(path, turns, nil); err != nil {
 		t.Fatalf("WriteExport() error: %v", err)
 	}
 
@@ -338,7 +338,7 @@ func TestWriteExportCreatesDirectoriesAndWritesJSONL(t *testing.T) {
 func TestWriteExportEmptyTurns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty-export.jsonl")
 
-	if err := WriteExport(path, nil); err != nil {
+	if err := WriteExport(path, nil, nil); err != nil {
 		t.Fatalf("WriteExport(nil) error: %v", err)
 	}
 

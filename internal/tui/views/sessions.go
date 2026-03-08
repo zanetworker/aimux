@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -9,6 +10,29 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/history"
 )
+
+// SortField identifies which column to sort by.
+type SortField int
+
+const (
+	SortByAge         SortField = iota // default: most recent first
+	SortByCost                        // highest cost first
+	SortByTurns                       // most turns first
+	SortByTitle                       // alphabetical by title/prompt
+	SortByFailureMode                 // tagged sessions first
+)
+
+// sortFieldNames maps sort fields to display names.
+var sortFieldNames = map[SortField]string{
+	SortByAge:         "AGE",
+	SortByCost:        "COST",
+	SortByTurns:       "TURNS",
+	SortByTitle:       "TITLE",
+	SortByFailureMode: "FAIL",
+}
+
+// sortFieldOrder defines the cycle order when pressing 's'.
+var sortFieldOrder = []SortField{SortByAge, SortByCost, SortByTurns, SortByTitle, SortByFailureMode}
 
 // --- Styles ---
 
@@ -87,6 +111,18 @@ type SessionToggleScopeMsg struct {
 	ShowAll bool
 }
 
+// SessionBulkDeleteMsg is emitted when the user confirms bulk deletion.
+type SessionBulkDeleteMsg struct {
+	Sessions []history.Session
+}
+
+// cleanupItem represents a session flagged for potential cleanup.
+type cleanupItem struct {
+	session  history.Session
+	reason   string // "duplicate" or "empty"
+	selected bool
+}
+
 // --- SessionsView ---
 
 // SessionsView renders a browsable list of past sessions with trace preview.
@@ -107,13 +143,23 @@ type SessionsView struct {
 	tagMode     bool
 	tagInput    string
 	tagVocab    []string // autocomplete vocabulary
+	tagCursor   int      // selected suggestion index (-1 = typing custom)
 
 	// Note input
 	noteMode  bool
 	noteInput string
 
+	// Sort
+	sortField SortField // current sort column
+	sortAsc   bool      // true = ascending, false = descending
+
 	// Delete confirmation
 	deleteMode bool // true when showing delete confirmation
+
+	// Cleanup mode
+	cleanupMode   bool
+	cleanupItems  []cleanupItem
+	cleanupCursor int
 
 	// Trace preview (reused LogsView)
 	previewLogs  *LogsView
@@ -186,7 +232,7 @@ func (v *SessionsView) SelectedSession() *history.Session {
 
 // HasActiveInput returns true if the view has active text input or confirmation.
 func (v *SessionsView) HasActiveInput() bool {
-	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode
+	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode || v.cleanupMode
 }
 
 // HasActiveFilter returns true if a search filter is currently applied.
@@ -201,6 +247,9 @@ var sessAnnotationCycle = []string{"achieved", "partial", "failed", "abandoned",
 func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if v.cleanupMode {
+			return v.handleCleanupKey(msg)
+		}
 		if v.deleteMode {
 			return v.handleDeleteKey(msg)
 		}
@@ -292,6 +341,7 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			v.tagMode = true
+			v.tagCursor = -1
 			if len(s.Tags) > 0 {
 				v.tagInput = strings.Join(s.Tags, ", ")
 			} else {
@@ -311,6 +361,13 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			v.deleteMode = true
+		case "D":
+			v.enterCleanupMode()
+		case "s":
+			// Cycle sort field; pressing again on same field toggles direction
+			v.cycleSortField()
+			v.cursor = 0
+			v.previewLogs = nil
 		case "p":
 			// Toggle trace preview
 			if v.previewLogs != nil {
@@ -345,8 +402,16 @@ func (v *SessionsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (v *SessionsView) handleTagKey(msg tea.KeyMsg) tea.Cmd {
+	suggestions := v.tagSuggestions()
+
 	switch msg.String() {
 	case "enter":
+		// If a suggestion is selected, use it
+		if v.tagCursor >= 0 && v.tagCursor < len(suggestions) {
+			v.applyTagSuggestion(suggestions[v.tagCursor])
+			return nil
+		}
+		// Otherwise commit the current input
 		v.tagMode = false
 		s := v.SelectedSession()
 		if s == nil {
@@ -360,15 +425,30 @@ func (v *SessionsView) handleTagKey(msg tea.KeyMsg) tea.Cmd {
 	case "esc":
 		v.tagMode = false
 		v.tagInput = ""
+		v.tagCursor = -1
+	case "up":
+		if v.tagCursor > 0 {
+			v.tagCursor--
+		} else if v.tagCursor <= 0 && len(suggestions) > 0 {
+			v.tagCursor = 0
+		}
+	case "down":
+		if v.tagCursor < len(suggestions)-1 {
+			v.tagCursor++
+		}
 	case "tab":
-		// Autocomplete from vocabulary
-		v.autocompleteTag()
+		// Cycle through suggestions
+		if len(suggestions) > 0 {
+			v.tagCursor = (v.tagCursor + 1) % len(suggestions)
+		}
 	case "backspace":
+		v.tagCursor = -1
 		if len(v.tagInput) > 0 {
 			v.tagInput = v.tagInput[:len(v.tagInput)-1]
 		}
 	default:
 		if len(msg.String()) == 1 {
+			v.tagCursor = -1
 			v.tagInput += msg.String()
 		}
 	}
@@ -403,6 +483,19 @@ func (v *SessionsView) handleDeleteKey(msg tea.KeyMsg) tea.Cmd {
 		v.deleteMode = false
 	}
 	return nil
+}
+
+// applyTagSuggestion replaces the current partial tag with the selected suggestion.
+func (v *SessionsView) applyTagSuggestion(tag string) {
+	parts := strings.Split(v.tagInput, ",")
+	if len(parts) > 1 {
+		// Replace last part (the partial)
+		parts[len(parts)-1] = " " + tag
+		v.tagInput = strings.Join(parts, ",")
+	} else {
+		v.tagInput = tag
+	}
+	v.tagCursor = -1
 }
 
 func (v *SessionsView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
@@ -467,7 +560,46 @@ func parseTags(input string) []string {
 	return tags
 }
 
-// visibleSessions returns sessions matching the current filter.
+// cycleSortField advances to the next sort field, or toggles direction
+// if the current field is pressed again.
+func (v *SessionsView) cycleSortField() {
+	// Find current position in the cycle
+	for i, f := range sortFieldOrder {
+		if f == v.sortField {
+			next := sortFieldOrder[(i+1)%len(sortFieldOrder)]
+			if next == v.sortField {
+				v.sortAsc = !v.sortAsc
+			} else {
+				v.sortField = next
+				// Default direction per field
+				switch next {
+				case SortByAge:
+					v.sortAsc = false // newest first
+				case SortByCost:
+					v.sortAsc = false // highest first
+				case SortByTurns:
+					v.sortAsc = false // most turns first
+				case SortByTitle:
+					v.sortAsc = true // A-Z
+				case SortByFailureMode:
+					v.sortAsc = false // tagged first
+				}
+			}
+			return
+		}
+	}
+}
+
+// sessionTitle returns the display title for sorting purposes.
+func sessionTitle(s history.Session) string {
+	if s.Title != "" {
+		return strings.ToLower(s.Title)
+	}
+	return strings.ToLower(s.FirstPrompt)
+}
+
+// visibleSessions returns sessions matching the current filter, sorted
+// by the active sort field.
 // Near-empty sessions (1 turn, $0 cost) are hidden unless a filter is active.
 func (v *SessionsView) visibleSessions() []history.Session {
 	var result []history.Session
@@ -488,7 +620,45 @@ func (v *SessionsView) visibleSessions() []history.Session {
 		}
 		result = append(result, s)
 	}
+
+	// Apply sort
+	sort.SliceStable(result, func(i, j int) bool {
+		less := v.compareSessions(result[i], result[j])
+		if v.sortAsc {
+			return less
+		}
+		return !less
+	})
+
 	return result
+}
+
+// compareSessions returns true if a should appear before b in ascending order.
+func (v *SessionsView) compareSessions(a, b history.Session) bool {
+	switch v.sortField {
+	case SortByCost:
+		return a.CostUSD < b.CostUSD
+	case SortByTurns:
+		return a.TurnCount < b.TurnCount
+	case SortByTitle:
+		return sessionTitle(a) < sessionTitle(b)
+	case SortByFailureMode:
+		aHas := len(a.Tags) > 0
+		bHas := len(b.Tags) > 0
+		if aHas != bHas {
+			return !aHas // tagged sorts before untagged in ascending
+		}
+		aTag, bTag := "", ""
+		if len(a.Tags) > 0 {
+			aTag = strings.ToLower(a.Tags[0])
+		}
+		if len(b.Tags) > 0 {
+			bTag = strings.ToLower(b.Tags[0])
+		}
+		return aTag < bTag
+	default: // SortByAge
+		return a.LastActive.Before(b.LastActive)
+	}
 }
 
 func sessionMatchesFilter(s history.Session, needle string) bool {
@@ -565,15 +735,61 @@ func (v *SessionsView) View() string {
 		b.WriteString("  " + filterActiveStyle.Render(" FILTER: "+v.filterText+" ") + "\n\n")
 	}
 
+	if v.cleanupMode {
+		b.WriteString(v.renderCleanupView(w))
+		return b.String()
+	}
+
 	if len(visible) == 0 {
 		b.WriteString(sessDimStyle.Render("  No sessions found.") + "\n")
 		return b.String()
 	}
 
+	// Column header with sort indicator
+	cols := v.columnWidths(w)
+	colHeader := func(name string, field SortField, width int, leftAlign bool) string {
+		label := name
+		if v.sortField == field {
+			if v.sortAsc {
+				label += " \u25b2"
+			} else {
+				label += " \u25bc"
+			}
+		}
+		if leftAlign {
+			return fmt.Sprintf("%-*s", width, label)
+		}
+		return fmt.Sprintf("%*s", width, label)
+	}
+
+	var headerParts []string
+	headerParts = append(headerParts, " ")
+	headerParts = append(headerParts, colHeader("AGE", SortByAge, cols.age+2, true))
+	if v.showAll {
+		headerParts = append(headerParts, "  ")
+		headerParts = append(headerParts, fmt.Sprintf("%-*s", cols.project, "PROJECT"))
+	}
+	headerParts = append(headerParts, "  ")
+	headerParts = append(headerParts, colHeader("TITLE", SortByTitle, cols.prompt, true))
+	headerParts = append(headerParts, "  ")
+	headerParts = append(headerParts, colHeader("TURNS", SortByTurns, cols.turns+2, false))
+	headerParts = append(headerParts, "  ")
+	headerParts = append(headerParts, colHeader("COST", SortByCost, cols.cost, false))
+	header := strings.Join(headerParts, "")
+	b.WriteString(sessDimStyle.Render(header) + "\n")
+
 	// Session list - calculate how many rows fit
-	listHeight := v.height - 6 // header + padding
+	listHeight := v.height - 7 // header + column header + padding
 	if v.previewLogs != nil {
 		listHeight = v.height / 2
+	}
+	// Reserve space for tag input + suggestions dropdown
+	if v.tagMode {
+		sugCount := len(v.tagSuggestions())
+		if sugCount > 10 {
+			sugCount = 10 // cap visible suggestions
+		}
+		listHeight -= sugCount + 3 // suggestions + input line + hint line + padding
 	}
 	if listHeight < 3 {
 		listHeight = 3
@@ -610,11 +826,29 @@ func (v *SessionsView) View() string {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("|"))
 	}
 	if v.tagMode {
-		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("Tags: ") + v.tagInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("|"))
-		// Show autocomplete suggestions
+		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("Failure-mode: ") + v.tagInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("|"))
+		b.WriteString("\n  " + sessDimStyle.Render("  ↑/↓:select  Tab:cycle  Enter:pick  type to filter"))
+		// Show selectable suggestions (max 10 visible)
 		suggestions := v.tagSuggestions()
-		if len(suggestions) > 0 {
-			b.WriteString("\n  " + sessDimStyle.Render("  "+strings.Join(suggestions, "  ")))
+		maxVisible := 10
+		if len(suggestions) < maxVisible {
+			maxVisible = len(suggestions)
+		}
+		for i := 0; i < maxVisible; i++ {
+			tag := suggestions[i]
+			prefix := "    "
+			if i == v.tagCursor {
+				selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+				b.WriteString("\n" + prefix + selectedStyle.Render("▸ " + tag))
+			} else {
+				b.WriteString("\n" + prefix + sessDimStyle.Render("  " + tag))
+			}
+		}
+		if len(suggestions) > maxVisible {
+			b.WriteString("\n    " + sessDimStyle.Render(fmt.Sprintf("  ... and %d more (type to filter)", len(suggestions)-maxVisible)))
+		}
+		if len(suggestions) == 0 && v.tagInput != "" {
+			b.WriteString("\n    " + sessDimStyle.Render("(new tag: \"" + v.tagInput + "\")"))
 		}
 	}
 	if v.noteMode {
@@ -642,7 +876,7 @@ func (v *SessionsView) View() string {
 	return b.String()
 }
 
-// tagSuggestions returns matching tags from the vocabulary for autocomplete.
+// tagSuggestions returns all tags from vocabulary, with matches ranked first.
 func (v *SessionsView) tagSuggestions() []string {
 	if len(v.tagVocab) == 0 {
 		return nil
@@ -650,33 +884,61 @@ func (v *SessionsView) tagSuggestions() []string {
 	parts := strings.Split(v.tagInput, ",")
 	current := strings.TrimSpace(parts[len(parts)-1])
 	if current == "" {
-		// Show all vocabulary when no partial input
-		if len(v.tagVocab) > 8 {
-			return v.tagVocab[:8]
-		}
 		return v.tagVocab
 	}
 
+	// Show matches first, then remaining tags
 	lower := strings.ToLower(current)
-	var matches []string
+	var matches, rest []string
 	for _, tag := range v.tagVocab {
 		if strings.Contains(strings.ToLower(tag), lower) {
 			matches = append(matches, tag)
-			if len(matches) >= 5 {
-				break
-			}
+		} else {
+			rest = append(rest, tag)
 		}
 	}
-	return matches
+	return append(matches, rest...)
+}
+
+// colLayout holds the computed column widths for consistent alignment.
+type colLayout struct {
+	age     int
+	project int
+	prompt  int
+	turns   int
+	cost    int
+}
+
+// columnWidths computes fixed column widths based on available width.
+func (v *SessionsView) columnWidths(w int) colLayout {
+	c := colLayout{
+		age:   7,
+		turns: 5,
+		cost:  7,
+	}
+	if v.showAll {
+		c.project = 12
+	}
+	// marker(3) + spacing between columns(2*4=8 for non-project, 2*5=10 for project)
+	fixed := 3 + c.age + c.turns + c.cost + 8
+	if v.showAll {
+		fixed += c.project + 2
+	}
+	c.prompt = w - fixed
+	if c.prompt < 15 {
+		c.prompt = 15
+	}
+	return c
 }
 
 // renderSessionRow renders a single session row as a clean, columnar line.
 func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int) string {
 	isEmpty := s.TurnCount <= 1 && s.CostUSD == 0
+	cols := v.columnWidths(w)
 
 	marker := "  "
 	if selected {
-		marker = " ▸"
+		marker = " \u25b8"
 	}
 
 	age := formatAge(s.LastActive)
@@ -689,81 +951,99 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	if prompt == "" {
 		prompt = "(no prompt)"
 	}
-	// Clean up prompts that start with markdown headers
 	prompt = strings.TrimLeft(prompt, "# ")
 
-	// Layout: marker | age | [project] | prompt ... | turns | cost | [annotation] [tags]
-	// Fixed columns: marker(2) + age(8) + turns(5) + cost(7) + spacing(6) = ~28
-	metaW := 28
-	if v.showAll {
-		metaW += 14 // project column
+	// Prepend annotation and failure-mode tag to the title so they're always visible
+	var prefixes []string
+	if s.Annotation != "" {
+		prefixes = append(prefixes, strings.ToUpper(s.Annotation))
 	}
-	promptW := w - metaW
-	if promptW < 15 {
-		promptW = 15
+	if len(s.Tags) > 0 {
+		tag := s.Tags[0]
+		if len(tag) > 20 {
+			tag = tag[:18] + ".."
+		}
+		prefixes = append(prefixes, tag)
+	}
+	if len(prefixes) > 0 {
+		prompt = "[" + strings.Join(prefixes, "|") + "] " + prompt
 	}
 
 	var b strings.Builder
 	b.WriteString(marker + " ")
 
-	// Age column
-	ageStr := fmt.Sprintf("%-7s", age)
+	// Age column (fixed width)
+	ageStr := fmt.Sprintf("%-*s", cols.age, age)
 	if isEmpty {
 		b.WriteString(sessDimStyle.Render(ageStr))
 	} else {
 		b.WriteString(sessAgeStyle.Render(ageStr))
 	}
-	b.WriteString(" ")
+	b.WriteString("  ")
 
-	// Project column (all-projects mode only)
+	// Project column (all-projects mode only, fixed width)
 	if v.showAll {
 		proj := shortProject(s.Project)
-		projStr := fmt.Sprintf("%-12s", truncate(proj, 12))
+		projStr := fmt.Sprintf("%-*s", cols.project, truncate(proj, cols.project))
 		b.WriteString(sessProjectStyle.Render(projStr))
-		b.WriteString(" ")
+		b.WriteString("  ")
 	}
 
-	// Prompt — the main content
-	truncPrompt := truncate(prompt, promptW)
-	if isEmpty {
-		b.WriteString(sessDimStyle.Render(truncPrompt))
-	} else {
-		b.WriteString(sessPromptStyle.Render(truncPrompt))
-	}
-
-	// Right-aligned metadata: turns + cost
-	rightParts := []string{}
-	turnStr := fmt.Sprintf("%dt", s.TurnCount)
-	costStr := fmt.Sprintf("$%.2f", s.CostUSD)
-	if isEmpty {
-		rightParts = append(rightParts, sessDimStyle.Render(turnStr))
-		rightParts = append(rightParts, sessDimStyle.Render(costStr))
-	} else {
-		rightParts = append(rightParts, sessTurnStyle.Render(turnStr))
-		rightParts = append(rightParts, sessCostStyle.Render(costStr))
-	}
-
-	// Annotation badge
-	if s.Annotation != "" {
-		rightParts = append(rightParts, renderSessionAnnotation(s.Annotation))
-	}
-
-	// Tags (compact)
-	if len(s.Tags) > 0 {
-		tagStr := strings.Join(s.Tags, ",")
-		if len(tagStr) > 20 {
-			tagStr = tagStr[:17] + "..."
+	// Prompt column (fixed width, padded)
+	// If there's a prefix [ANNOTATION|tag], render it with color
+	if len(prefixes) > 0 && strings.HasPrefix(prompt, "[") {
+		tagEnd := strings.Index(prompt, "] ")
+		if tagEnd > 0 {
+			tagPart := prompt[:tagEnd+1]
+			restPart := prompt[tagEnd+2:]
+			prefixLen := len(tagPart) + 1 // +1 for space after bracket
+			truncRest := truncate(restPart, cols.prompt-prefixLen)
+			padded := fmt.Sprintf("%-*s", cols.prompt-prefixLen, truncRest)
+			// Color the prefix based on content
+			prefixStyle := sessAnnotStyle(s.Annotation, len(s.Tags) > 0)
+			b.WriteString(prefixStyle.Render(tagPart) + " " + sessPromptStyle.Render(padded))
+		} else {
+			b.WriteString(sessPromptStyle.Render(fmt.Sprintf("%-*s", cols.prompt, truncate(prompt, cols.prompt))))
 		}
-		rightParts = append(rightParts, sessTagStyle.Render(tagStr))
+	} else {
+		truncPrompt := fmt.Sprintf("%-*s", cols.prompt, truncate(prompt, cols.prompt))
+		if isEmpty {
+			b.WriteString(sessDimStyle.Render(truncPrompt))
+		} else {
+			b.WriteString(sessPromptStyle.Render(truncPrompt))
+		}
 	}
-
-	// View-only badge
-	if !s.Resumable {
-		rightParts = append(rightParts, sessViewOnlyStyle.Render("(view)"))
-	}
-
 	b.WriteString("  ")
-	b.WriteString(strings.Join(rightParts, " "))
+
+	// Turns column (right-aligned, fixed width)
+	turnStr := fmt.Sprintf("%*s", cols.turns, fmt.Sprintf("%dt", s.TurnCount))
+	if isEmpty {
+		b.WriteString(sessDimStyle.Render(turnStr))
+	} else {
+		b.WriteString(sessTurnStyle.Render(turnStr))
+	}
+	b.WriteString("  ")
+
+	// Cost column (right-aligned, fixed width)
+	costStr := fmt.Sprintf("%*s", cols.cost, fmt.Sprintf("$%.2f", s.CostUSD))
+	if isEmpty {
+		b.WriteString(sessDimStyle.Render(costStr))
+	} else {
+		b.WriteString(sessCostStyle.Render(costStr))
+	}
+
+	// Badges (annotation, view-only) after fixed columns
+	var badges []string
+	if s.Annotation != "" {
+		badges = append(badges, renderSessionAnnotation(s.Annotation))
+	}
+	if !s.Resumable {
+		badges = append(badges, sessViewOnlyStyle.Render("(view)"))
+	}
+	if len(badges) > 0 {
+		b.WriteString("  ")
+		b.WriteString(strings.Join(badges, " "))
+	}
 
 	line := b.String()
 
@@ -771,6 +1051,27 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 		return sessSelectedStyle.Render(padRight(line, w))
 	}
 	return line
+}
+
+// sessAnnotStyle returns a lipgloss style for the combined prefix badge
+// based on annotation type and whether failure tags are present.
+func sessAnnotStyle(annotation string, hasTags bool) lipgloss.Style {
+	if hasTags {
+		// Red for failure-mode tags (takes priority visually)
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
+	}
+	switch annotation {
+	case "achieved":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true)
+	case "partial":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	case "failed":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
+	case "abandoned":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Bold(true)
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	}
 }
 
 func renderSessionAnnotation(label string) string {
@@ -787,6 +1088,167 @@ func renderSessionAnnotation(label string) string {
 	default:
 		return sessDimStyle.Render("[" + tag + "]")
 	}
+}
+
+// enterCleanupMode scans visible sessions for duplicates and empties,
+// then enters cleanup mode if any candidates are found.
+func (v *SessionsView) enterCleanupMode() {
+	visible := v.visibleSessions()
+	dupes := history.FindDuplicates(visible)
+	empty := history.FindEmpty(visible)
+
+	dupeIDs := make(map[string]bool)
+	for _, s := range dupes {
+		dupeIDs[s.ID] = true
+	}
+
+	var items []cleanupItem
+	for _, s := range dupes {
+		items = append(items, cleanupItem{session: s, reason: "duplicate", selected: true})
+	}
+	for _, s := range empty {
+		if !dupeIDs[s.ID] {
+			items = append(items, cleanupItem{session: s, reason: "empty", selected: true})
+		}
+	}
+
+	if len(items) == 0 {
+		return
+	}
+	v.cleanupMode = true
+	v.cleanupItems = items
+	v.cleanupCursor = 0
+}
+
+// handleCleanupKey processes key events while in cleanup mode.
+func (v *SessionsView) handleCleanupKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "j", "down":
+		if v.cleanupCursor < len(v.cleanupItems)-1 {
+			v.cleanupCursor++
+		}
+	case "k", "up":
+		if v.cleanupCursor > 0 {
+			v.cleanupCursor--
+		}
+	case " ":
+		v.cleanupItems[v.cleanupCursor].selected = !v.cleanupItems[v.cleanupCursor].selected
+	case "a":
+		allSelected := true
+		for _, item := range v.cleanupItems {
+			if !item.selected {
+				allSelected = false
+				break
+			}
+		}
+		for i := range v.cleanupItems {
+			v.cleanupItems[i].selected = !allSelected
+		}
+	case "enter":
+		var toDelete []history.Session
+		for _, item := range v.cleanupItems {
+			if item.selected {
+				toDelete = append(toDelete, item.session)
+			}
+		}
+		v.cleanupMode = false
+		v.cleanupItems = nil
+		if len(toDelete) == 0 {
+			return nil
+		}
+		deleteIDs := make(map[string]bool)
+		for _, s := range toDelete {
+			deleteIDs[s.ID] = true
+		}
+		var kept []history.Session
+		for _, s := range v.sessions {
+			if !deleteIDs[s.ID] {
+				kept = append(kept, s)
+			}
+		}
+		v.sessions = kept
+		v.cursor = 0
+		v.previewLogs = nil
+		sessions := toDelete
+		return func() tea.Msg {
+			return SessionBulkDeleteMsg{Sessions: sessions}
+		}
+	case "esc":
+		v.cleanupMode = false
+		v.cleanupItems = nil
+	}
+	return nil
+}
+
+// renderCleanupView renders the bulk cleanup overlay.
+func (v *SessionsView) renderCleanupView(w int) string {
+	var b strings.Builder
+
+	dupeCount, emptyCount, selectedCount := 0, 0, 0
+	for _, item := range v.cleanupItems {
+		if item.reason == "duplicate" {
+			dupeCount++
+		}
+		if item.reason == "empty" {
+			emptyCount++
+		}
+		if item.selected {
+			selectedCount++
+		}
+	}
+
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	headerStr := fmt.Sprintf("  Cleanup: %d duplicates, %d empty -- %d selected", dupeCount, emptyCount, selectedCount)
+	b.WriteString(warnStyle.Render(headerStr) + "\n")
+	b.WriteString(sessDimStyle.Render("  space:toggle  a:all  enter:delete  esc:cancel") + "\n\n")
+
+	listHeight := v.height - 8
+	if listHeight < 3 {
+		listHeight = 3
+	}
+
+	start := 0
+	if v.cleanupCursor >= listHeight {
+		start = v.cleanupCursor - listHeight + 1
+	}
+	end := start + listHeight
+	if end > len(v.cleanupItems) {
+		end = len(v.cleanupItems)
+	}
+
+	for i := start; i < end; i++ {
+		item := v.cleanupItems[i]
+		selected := i == v.cleanupCursor
+
+		check := "[ ]"
+		if item.selected {
+			check = "[x]"
+		}
+
+		reason := sessDimStyle.Render(fmt.Sprintf("(%s)", item.reason))
+		prompt := item.session.Title
+		if prompt == "" {
+			prompt = item.session.FirstPrompt
+		}
+		if prompt == "" {
+			prompt = "(no prompt)"
+		}
+		if len(prompt) > 50 {
+			prompt = prompt[:47] + "..."
+		}
+
+		turnStr := sessTurnStyle.Render(fmt.Sprintf("%dt", item.session.TurnCount))
+		age := sessAgeStyle.Render(formatAge(item.session.LastActive))
+		costStr := sessCostStyle.Render(fmt.Sprintf("$%.2f", item.session.CostUSD))
+
+		line := fmt.Sprintf("  %s %s  %s  %-50s  %s  %s", check, reason, age, prompt, turnStr, costStr)
+		if selected {
+			line = sessSelectedStyle.Render(padRight(line, w))
+		}
+		b.WriteString(line + "\n")
+	}
+
+	return b.String()
 }
 
 // formatAge returns a human-readable age string like "2h ago", "3d ago".

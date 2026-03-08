@@ -24,6 +24,7 @@ type Config struct {
 type SessionsConfig struct {
 	AutoTitle  bool   `yaml:"auto_title"`  // generate titles via LLM on discovery
 	TitleModel string `yaml:"title_model"` // "flash" (default), "haiku", "sonnet", "opus"
+	APIKey     string `yaml:"api_key"`     // API key for title generation (overrides env vars)
 }
 
 // ExportConfig holds settings for exporting traces via OTLP/HTTP.
@@ -121,6 +122,15 @@ func Load(path string) (Config, error) {
 		for name, pc := range fileCfg.Providers {
 			cfg.Providers[name] = pc
 		}
+	}
+	if fileCfg.Sessions.TitleModel != "" {
+		cfg.Sessions.TitleModel = fileCfg.Sessions.TitleModel
+	}
+	if fileCfg.Sessions.AutoTitle {
+		cfg.Sessions.AutoTitle = fileCfg.Sessions.AutoTitle
+	}
+	if fileCfg.Sessions.APIKey != "" {
+		cfg.Sessions.APIKey = fileCfg.Sessions.APIKey
 	}
 
 	return cfg, nil

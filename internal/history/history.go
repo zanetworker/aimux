@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/cost"
 )
 
 // Session represents a past agent session discovered from session files.
@@ -24,9 +26,11 @@ type Session struct {
 	StartTime   time.Time `json:"start_time"`    // first entry timestamp
 	LastActive  time.Time `json:"last_active"`   // last entry timestamp
 	TurnCount   int       `json:"turn_count"`    // approximate conversation turns
-	TokensIn    int64     `json:"tokens_in"`
-	TokensOut   int64     `json:"tokens_out"`
-	CostUSD     float64   `json:"cost_usd"`
+	TokensIn         int64     `json:"tokens_in"`
+	TokensOut        int64     `json:"tokens_out"`
+	CacheReadTokens  int64     `json:"cache_read_tokens"`
+	CacheWriteTokens int64     `json:"cache_write_tokens"`
+	CostUSD          float64   `json:"cost_usd"`
 	FirstPrompt string    `json:"first_prompt"`  // first user message (cleaned, for display)
 	Title       string    `json:"title"`         // LLM-generated title (from meta, or empty)
 	Resumable   bool      `json:"resumable"`     // true if provider supports resume
@@ -167,18 +171,19 @@ func scanSession(id, filePath, project string) (Session, error) {
 	scanner.Buffer(make([]byte, 512*1024), 512*1024)
 
 	lineCount := 0
-	var firstLines []json.RawMessage
-	var allLines []json.RawMessage
 
-	// Read all lines but keep only what we need
+	// Parse all lines to accumulate tokens/cost accurately.
+	// First 10 lines also extract the first user prompt.
+	var model string
 	for scanner.Scan() {
 		lineCount++
 		raw := make(json.RawMessage, len(scanner.Bytes()))
 		copy(raw, scanner.Bytes())
-		allLines = append(allLines, raw)
 
-		if lineCount <= 10 {
-			firstLines = append(firstLines, raw)
+		extractPrompt := lineCount <= 10
+		m := parseSessionLine(raw, &s, extractPrompt)
+		if m != "" {
+			model = m
 		}
 	}
 
@@ -186,26 +191,9 @@ func scanSession(id, filePath, project string) (Session, error) {
 		return Session{}, fmt.Errorf("scan session file %s: %w", filePath, err)
 	}
 
-	if len(allLines) == 0 {
-		return s, nil
-	}
-
-	// Parse first lines for start time and first prompt
-	for _, raw := range firstLines {
-		parseSessionLine(raw, &s, true)
-	}
-
-	// Parse last few lines for end time and token totals
-	lastStart := len(allLines) - 10
-	if lastStart < 0 {
-		lastStart = 0
-	}
-	// Skip lines we already parsed from firstLines
-	for i := lastStart; i < len(allLines); i++ {
-		if i < len(firstLines) {
-			continue
-		}
-		parseSessionLine(allLines[i], &s, false)
+	// Compute cost from accumulated tokens
+	if model != "" {
+		s.CostUSD = cost.Calculate(model, s.TokensIn, s.TokensOut, s.CacheReadTokens, s.CacheWriteTokens)
 	}
 
 	// Approximate turn count from message count (rough: ~2 messages per turn)
@@ -223,21 +211,25 @@ type sessionEntry struct {
 	Timestamp time.Time `json:"timestamp"`
 	GitBranch string    `json:"gitBranch"`
 	Message   *struct {
+		Model   string          `json:"model"`
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 		Usage   *struct {
-			InputTokens  int64 `json:"input_tokens"`
-			OutputTokens int64 `json:"output_tokens"`
+			InputTokens              int64 `json:"input_tokens"`
+			OutputTokens             int64 `json:"output_tokens"`
+			CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
 }
 
 // parseSessionLine extracts metadata from a single JSONL entry.
 // If extractPrompt is true, it also looks for the first user message.
-func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) {
+// Returns the model name if found in this entry.
+func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) string {
 	var entry sessionEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
-		return
+		return ""
 	}
 
 	if !entry.Timestamp.IsZero() {
@@ -250,18 +242,27 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) {
 	}
 
 	if entry.Message == nil {
-		return
+		return ""
+	}
+
+	var model string
+	if entry.Message.Model != "" {
+		model = entry.Message.Model
 	}
 
 	if entry.Message.Usage != nil {
 		s.TokensIn += entry.Message.Usage.InputTokens
 		s.TokensOut += entry.Message.Usage.OutputTokens
+		s.CacheReadTokens += entry.Message.Usage.CacheReadInputTokens
+		s.CacheWriteTokens += entry.Message.Usage.CacheCreationInputTokens
 	}
 
 	// Extract first user prompt
 	if extractPrompt && s.FirstPrompt == "" && entry.Message.Role == "user" {
 		s.FirstPrompt = extractUserText(entry.Message.Content)
 	}
+
+	return model
 }
 
 // extractUserText pulls the text from a user message content array.
@@ -546,6 +547,69 @@ func minInt(a, b int) int {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// FindEmpty returns sessions with very low activity (<=2 turns and $0 cost).
+func FindEmpty(sessions []Session) []Session {
+	var result []Session
+	for _, s := range sessions {
+		if s.TurnCount <= 2 && s.CostUSD == 0 {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// FindDuplicates returns duplicate session candidates. Sessions with the same
+// FirstPrompt (or Title) within the same project are grouped; the one with the
+// most turns is kept, the rest are returned as duplicates.
+func FindDuplicates(sessions []Session) []Session {
+	type groupKey struct {
+		project string
+		prompt  string
+	}
+
+	groups := make(map[groupKey][]Session)
+	for _, s := range sessions {
+		prompt := s.Title
+		if prompt == "" {
+			prompt = s.FirstPrompt
+		}
+		if prompt == "" || prompt == "(no prompt)" {
+			continue
+		}
+		key := groupKey{project: s.Project, prompt: prompt}
+		groups[key] = append(groups[key], s)
+	}
+
+	var dupes []Session
+	for _, group := range groups {
+		if len(group) < 2 {
+			continue
+		}
+		bestIdx := 0
+		for i, s := range group {
+			if s.TurnCount > group[bestIdx].TurnCount {
+				bestIdx = i
+			}
+		}
+		for i, s := range group {
+			if i != bestIdx {
+				dupes = append(dupes, s)
+			}
+		}
+	}
+	return dupes
+}
+
+// TitleForSessionFile returns the LLM-generated title from the sidecar
+// .meta.json file, or "" if none exists.
+func TitleForSessionFile(sessionFilePath string) string {
+	if sessionFilePath == "" {
+		return ""
+	}
+	meta := LoadMeta(sessionFilePath)
+	return meta.Title
 }
 
 // MetaPath returns the sidecar metadata file path for a session file.

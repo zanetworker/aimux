@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 var (
@@ -97,8 +98,8 @@ func (p *PreviewPane) resizeLogsView() {
 	if p.logsView == nil {
 		return
 	}
-	// Reserve 10 lines for header (agent info, tokens, actions) and 1 line for the border char
-	contentHeight := p.height - 10
+	// Reserve 11 lines for header (agent info, title, tokens, actions) and 1 line for the border char
+	contentHeight := p.height - 11
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -164,6 +165,16 @@ func (p *PreviewPane) renderHeader() string {
 		name = "(unknown)"
 	}
 	nameLine := previewHeaderStyle.Render(truncatePreview(name, maxW))
+
+	// Session title (from LLM-generated meta)
+	var titleLine string
+	if a.SessionFile != "" {
+		title := history.TitleForSessionFile(a.SessionFile)
+		if title != "" {
+			titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Italic(true)
+			titleLine = titleStyle.Render(truncatePreview(title, maxW))
+		}
+	}
 
 	// Info line: provider | model | mode
 	var infoParts []string
@@ -259,7 +270,11 @@ func (p *PreviewPane) renderHeader() string {
 
 	separator := previewBorderStyle.Render(strings.Repeat("─", maxW))
 
-	result := nameLine + "\n" + infoLine + "\n"
+	result := nameLine + "\n"
+	if titleLine != "" {
+		result += titleLine + "\n"
+	}
+	result += infoLine + "\n"
 	if dirLine != "" {
 		result += dirLine + "\n"
 	}

@@ -410,6 +410,95 @@ func TestDiscover_UnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestDiscover_CostCalculation(t *testing.T) {
+	dir := t.TempDir()
+	projDir := filepath.Join(dir, "-Users-test-project")
+	os.MkdirAll(projDir, 0o755)
+
+	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	lines := []map[string]interface{}{
+		{
+			"type":      "human",
+			"timestamp": ts.Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "hello"},
+				},
+			},
+		},
+		{
+			"type":      "assistant",
+			"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"model": "claude-sonnet-4-5",
+				"role":  "assistant",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "Hi!"},
+				},
+				"usage": map[string]interface{}{
+					"input_tokens":                100000,
+					"output_tokens":               10000,
+					"cache_creation_input_tokens":  50000,
+					"cache_read_input_tokens":      200000,
+				},
+			},
+		},
+	}
+	writeSessionJSONL(t, projDir, "cost-test", lines)
+
+	sessions, err := Discover(DiscoverOpts{}, dir)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+
+	s := sessions[0]
+	if s.TokensIn != 100000 {
+		t.Errorf("TokensIn = %d, want 100000", s.TokensIn)
+	}
+	if s.TokensOut != 10000 {
+		t.Errorf("TokensOut = %d, want 10000", s.TokensOut)
+	}
+	if s.CacheReadTokens != 200000 {
+		t.Errorf("CacheReadTokens = %d, want 200000", s.CacheReadTokens)
+	}
+	if s.CacheWriteTokens != 50000 {
+		t.Errorf("CacheWriteTokens = %d, want 50000", s.CacheWriteTokens)
+	}
+
+	// claude-sonnet-4-5: $3/M in, $15/M out, $0.30/M cache read, $3.75/M cache write
+	// Cost = 100000/1M * 3 + 10000/1M * 15 + 50000/1M * 3.75 + 200000/1M * 0.30
+	// Cost = 0.30 + 0.15 + 0.1875 + 0.06 = 0.6975
+	if s.CostUSD < 0.69 || s.CostUSD > 0.70 {
+		t.Errorf("CostUSD = %.4f, want ~0.6975", s.CostUSD)
+	}
+}
+
+func TestTitleForSessionFile(t *testing.T) {
+	dir := t.TempDir()
+	sessionFile := filepath.Join(dir, "test.jsonl")
+	os.WriteFile(sessionFile, []byte("{}"), 0o644)
+
+	// No meta file — should return ""
+	if got := TitleForSessionFile(sessionFile); got != "" {
+		t.Errorf("expected empty title, got %q", got)
+	}
+
+	// With meta file
+	SaveMeta(sessionFile, Meta{Title: "Fix markdown rendering"})
+	if got := TitleForSessionFile(sessionFile); got != "Fix markdown rendering" {
+		t.Errorf("expected title, got %q", got)
+	}
+
+	// Empty path
+	if got := TitleForSessionFile(""); got != "" {
+		t.Errorf("expected empty for empty path, got %q", got)
+	}
+}
+
 func TestScanSession_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "empty.jsonl")

@@ -223,6 +223,11 @@ func (sv *SessionView) Agent() *agent.Agent {
 	return sv.agent
 }
 
+// TermView returns the underlying terminal view, or nil for DirectRenderer backends.
+func (sv *SessionView) TermView() *terminal.TermView {
+	return sv.termView
+}
+
 // View renders the session view with a header bar, terminal content, and a
 // status bar at the bottom.
 func (sv *SessionView) View() string {
@@ -244,6 +249,19 @@ func (sv *SessionView) View() string {
 	} else if sv.termView != nil {
 		termContent = sv.termView.Render()
 	}
+
+	// Show scroll indicator when viewing history
+	if sv.termView != nil && sv.termView.IsScrolled() {
+		scrollIndicator := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F59E0B")).Bold(true).
+			Render("-- scrolled (PgDn to resume) --")
+		lines := strings.Split(termContent, "\n")
+		if len(lines) > 0 {
+			lines[len(lines)-1] = scrollIndicator
+			termContent = strings.Join(lines, "\n")
+		}
+	}
+
 	b.WriteString(termContent)
 
 	// Pad to fill height if needed
@@ -281,7 +299,7 @@ func (sv *SessionView) renderHeader() string {
 		left += " " + sessionHintStyle.Render(model)
 	}
 
-	right := sessionHintStyle.Render(" Tab:trace  Ctrl+f:split  Esc:exit ")
+	right := sessionHintStyle.Render(" PgUp/PgDn:scroll  Tab:trace  Ctrl+f:split  Ctrl+]:exit ")
 
 	gap := sv.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {
@@ -295,7 +313,7 @@ func (sv *SessionView) renderHeader() string {
 func (sv *SessionView) renderStatusBar() string {
 	badge := sessionBadgeStyle.Render(" aimux ")
 	mode := sessionModeStyle.Render(" INTERACTIVE ")
-	hint := sessionHintStyle.Render(" Ctrl+f:split  Esc:exit ")
+	hint := sessionHintStyle.Render(" PgUp/PgDn:scroll  Ctrl+f:split  Ctrl+]:exit ")
 
 	gap := sv.width - lipgloss.Width(badge) - lipgloss.Width(mode) - lipgloss.Width(hint)
 	if gap < 0 {
