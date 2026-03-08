@@ -648,10 +648,20 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) exitZoom() (tea.Model, tea.Cmd) {
-	// If in full-screen mode (Ctrl+f toggled off split), return to split view
-	if !a.splitMode && a.splitTrace != nil {
+	// Use splitTrace nil check for TUI-specific full-screen detection:
+	// the Navigator only tracks state booleans, not TUI objects.
+	canReturnToSplit := !a.splitMode && a.splitTrace != nil
+	if canReturnToSplit {
+		a.ctrl.Nav.SplitMode = false // ensure Navigator matches before ExitZoom
+		a.ctrl.Nav.Zoomed = true
+	}
+
+	exitedFully := a.ctrl.Nav.ExitZoom()
+
+	if !exitedFully {
+		// Returned to split view
 		a.splitMode = true
-		a.splitFocus = "session"
+		a.splitFocus = a.ctrl.Nav.SplitFocus
 		// Resize back to split layout
 		leftW := a.width * 40 / 100
 		rightW := a.width - leftW - 1
@@ -660,7 +670,7 @@ func (a App) exitZoom() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Otherwise exit to main view
+	// Fully exited
 	a.zoomed = false
 	a.splitMode = false
 	a.splitTrace = nil
@@ -1499,12 +1509,9 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 }
 
 func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
+	a.ctrl.Nav.NavigateTo(controller.ViewType(v), label)
 	a.currentView = v
-	if v == viewAgents {
-		a.breadcrumbs = []string{"Agents"}
-	} else {
-		a.breadcrumbs = []string{"Agents", label}
-	}
+	a.breadcrumbs = a.ctrl.Nav.Breadcrumbs
 	a.headerView.SetCrumbs(a.breadcrumbs)
 	return a, nil
 }
@@ -1536,11 +1543,10 @@ func (a App) openSessions() (tea.Model, tea.Cmd) {
 }
 
 func (a App) navigateBack() (tea.Model, tea.Cmd) {
-	if a.currentView != viewAgents {
-		a.currentView = viewAgents
-		a.breadcrumbs = []string{"Agents"}
-		a.headerView.SetCrumbs(a.breadcrumbs)
-	}
+	a.ctrl.Nav.NavigateBack()
+	a.currentView = viewType(a.ctrl.Nav.CurrentView)
+	a.breadcrumbs = a.ctrl.Nav.Breadcrumbs
+	a.headerView.SetCrumbs(a.breadcrumbs)
 	return a, nil
 }
 
