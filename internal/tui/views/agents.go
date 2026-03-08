@@ -15,7 +15,8 @@ const (
 	colName  = 22
 	colAgent = 8
 	colModel = 12
-	colDir   = 16
+	colLoc   = 8  // location: "local" or "k8s"
+	colDir   = 12
 	colLast  = 14
 	colAge   = 6
 	colCostA = 8
@@ -310,6 +311,7 @@ func (v *AgentsView) View() string {
 	header := " " + padRight(nameHeader, colName) + " " +
 		padRight("AGENT", colAgent) + " " +
 		padRight(modelHeader, colModel) + " " +
+		padRight("LOC", colLoc) + " " +
 		padRight("DIR", colDir) + " " +
 		padRight("LAST", colLast) + " " +
 		padRight(ageHeader, colAge) + " " +
@@ -383,9 +385,12 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 
 	costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
 
+	loc := agentLocation(a)
+
 	return " " + padRight(nameCol, colName) + " " +
 		padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
 		padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
+		padRight(truncate(loc, colLoc), colLoc) + " " +
 		padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
 		padRight(truncate(a.LastAction, colLast), colLast) + " " +
 		padRight(a.FormatAge(), colAge) + " " +
@@ -460,6 +465,15 @@ func (v *AgentsView) filtered() []agent.Agent {
 		}
 	}
 	return out
+}
+
+// agentLocation returns "k8s" for Kubernetes-hosted agents (WorkingDir
+// starting with "k8s://") and "local" for all local agents.
+func agentLocation(a agent.Agent) string {
+	if strings.HasPrefix(a.WorkingDir, "k8s://") {
+		return "k8s"
+	}
+	return "local"
 }
 
 func truncate(s string, maxLen int) string {
