@@ -1,9 +1,16 @@
 import asyncio
+import logging
 import os
 import signal
 
 from claude_code_sdk import query, ClaudeCodeOptions, AssistantMessage
 from coordinator import AgentCoordinator
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger(__name__)
 
 ROLE = os.environ.get("ROLE", "coder")
 ALLOWED_TOOLS = os.environ.get("ALLOWED_TOOLS", "Read,Grep,Glob").split(",")
@@ -38,11 +45,10 @@ async def main():
         agent_id=os.environ["AGENT_ID"],
         role=ROLE,
     )
-    await coord.register(
-        provider=os.environ.get("PROVIDER", "claude"),
-        model=os.environ.get("MODEL", "default"),
-        namespace=os.environ.get("POD_NAMESPACE", ""),
-    )
+    provider = os.environ.get("PROVIDER", "claude")
+    model = os.environ.get("MODEL", "default")
+    await coord.register(provider=provider, model=model, namespace=os.environ.get("POD_NAMESPACE", ""))
+    log.info("Agent started: id=%s role=%s model=%s provider=%s", coord.agent, ROLE, model, provider)
 
     # Heartbeat runs as an independent asyncio task so long LLM calls
     # (which can take 60s+) don't prevent the heartbeat from firing every 10s.
@@ -75,16 +81,19 @@ async def main():
         task_id = await coord.claim_task()
         if task_id:
             task = await coord.r.hgetall(f"team:{coord.team}:task:{task_id}")
+            prompt_preview = task.get(b"prompt", b"").decode()[:80]
+            log.info("Claimed task %s: %s...", task_id, prompt_preview)
             try:
                 summary, result_full = await run_task(coord, task_id, task)
                 await coord.complete_task(task_id, summary, result_full=result_full)
+                log.info("Completed task %s (%d chars)", task_id, len(result_full))
                 await coord.send(
                     "lead",
                     f"Task {task_id} done: {summary[:200]}",
                     f"Task {task_id} done",
                 )
             except Exception as e:
-                # Never swallow exceptions — always report failure to Redis.
+                log.error("Task %s failed: %s", task_id, e)
                 await coord.fail_task(task_id, str(e))
                 await coord.send(
                     "lead",
