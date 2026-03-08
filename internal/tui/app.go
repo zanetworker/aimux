@@ -490,22 +490,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case tea.MouseMsg:
-		// Intercept mouse wheel for scrolling in zoomed session view
-		if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
-			if tv := a.sessionView.TermView(); tv != nil {
-				switch msg.Button {
-				case tea.MouseButtonWheelUp:
-					tv.ScrollUp(3)
-					return a, nil
-				case tea.MouseButtonWheelDown:
-					tv.ScrollDown(3)
-					return a, nil
-				}
-			}
-		}
-		return a, nil
-
 	case tea.KeyMsg:
 		// Launcher overlay active — route all keys to it
 		if a.launcherActive && a.launcherView != nil {
