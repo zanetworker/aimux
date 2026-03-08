@@ -1374,7 +1374,13 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.hideAgent(target)
 			a.statusHint = fmt.Sprintf("Removed %s from view", target.ShortProject())
 		} else {
-			err := a.ctrl.KillAgent(target)
+			p := a.providerFor(target.ProviderName)
+			var err error
+			if p != nil {
+				err = p.Kill(*target)
+			} else {
+				err = fmt.Errorf("unknown provider %q", target.ProviderName)
+			}
 			if err != nil {
 				a.statusHint = fmt.Sprintf("Kill failed: %v", err)
 			} else {

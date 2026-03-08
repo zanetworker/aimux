@@ -448,6 +448,8 @@ func (g *Gemini) SubagentAttrKeys() subagent.AttrKeys {
 	return subagent.AttrKeys{}
 }
 
+func (g *Gemini) Kill(a agent.Agent) error { return KillLocalAgent(a) }
+
 // --- helpers ---
 
 // geminiProjectsFile is the structure of ~/.gemini/projects.json.

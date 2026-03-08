@@ -55,6 +55,11 @@ type Provider interface {
 	// uses for subagent identity. Return zero AttrKeys if the provider
 	// doesn't support subagent tracking.
 	SubagentAttrKeys() subagent.AttrKeys
+
+	// Kill stops the agent. For local providers, this sends SIGTERM/SIGKILL
+	// to the process tree. For remote providers (e.g., Kubernetes), this
+	// deletes the pod or scales down the deployment.
+	Kill(a agent.Agent) error
 }
 
 // RecentDir is a recently-used project directory from a provider's session history.

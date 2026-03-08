@@ -3,51 +3,10 @@ package controller
 import (
 	"fmt"
 	"os"
-	"syscall"
-	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/history"
 )
-
-// KillAgent sends SIGTERM to the agent process, waits briefly, then SIGKILL
-// if still alive. Also kills grouped sub-processes.
-func (c *Controller) KillAgent(ag *agent.Agent) error {
-	pids := []int{ag.PID}
-	if len(ag.GroupPIDs) > 0 {
-		pids = ag.GroupPIDs
-	}
-
-	var firstErr error
-	for _, pid := range pids {
-		proc, err := os.FindProcess(pid)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("find process %d: %w", pid, err)
-			}
-			continue
-		}
-
-		// Send SIGTERM for graceful shutdown
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("SIGTERM %d: %w", pid, err)
-			}
-			continue
-		}
-
-		// Wait briefly then force kill if still alive
-		go func(p *os.Process, id int) {
-			time.Sleep(3 * time.Second)
-			// Check if still alive by sending signal 0
-			if err := p.Signal(syscall.Signal(0)); err == nil {
-				_ = p.Signal(syscall.SIGKILL)
-			}
-		}(proc, pid)
-	}
-
-	return firstErr
-}
 
 // FilterHidden removes agents whose session key is in the hidden set.
 // The key is derived from SessionID, SessionFile, or PID (in that priority).

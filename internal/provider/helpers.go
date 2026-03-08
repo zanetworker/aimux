@@ -4,12 +4,16 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 // newestFileModTime returns the modification time of the newest file matching
@@ -130,4 +134,41 @@ func extractCodexCWD(path string) string {
 		}
 	}
 	return ""
+}
+
+// KillLocalAgent sends SIGTERM to the agent's process tree, waits 3 seconds,
+// then SIGKILL if still alive. Used by all local providers (Claude, Codex, Gemini).
+// Remote providers (e.g., Kubernetes) should implement their own Kill method.
+func KillLocalAgent(a agent.Agent) error {
+	pids := []int{a.PID}
+	if len(a.GroupPIDs) > 0 {
+		pids = a.GroupPIDs
+	}
+
+	var firstErr error
+	for _, pid := range pids {
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("find process %d: %w", pid, err)
+			}
+			continue
+		}
+
+		if err := proc.Signal(syscall.SIGTERM); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("SIGTERM %d: %w", pid, err)
+			}
+			continue
+		}
+
+		go func(p *os.Process, id int) {
+			time.Sleep(3 * time.Second)
+			if err := p.Signal(syscall.Signal(0)); err == nil {
+				_ = p.Signal(syscall.SIGKILL)
+			}
+		}(proc, pid)
+	}
+
+	return firstErr
 }
