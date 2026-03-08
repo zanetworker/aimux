@@ -49,7 +49,7 @@ Requires **tmux** for split-pane session embedding.
 
 ### Discovery
 
-Auto-finds running Claude, Codex, and Gemini processes. Shows status, model, tokens, cost, git branch, and permission mode. Refreshes every 2s. Multiple sessions in the same project directory appear as separate entries with `#1`, `#2` suffixes. Sort by name, cost, age, model, or PID with `s`.
+Auto-finds running Claude, Codex, and Gemini processes. Shows status, model, tokens, cost, git branch, and permission mode. Refreshes every 2s. Multiple sessions in the same project directory appear as separate entries with `#1`, `#2` suffixes. Sort by name, cost, age, model, or PID with `s`. Subagents spawned via the Agent tool are detected and tracked with provider-aware identity across all three providers.
 
 ### Split View
 
@@ -265,8 +265,8 @@ No daemon, no hooks, no modifications to your AI tools. Reads from the filesyste
 Releases are fully automated via CI. To cut a new release:
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 This triggers the [Release workflow](.github/workflows/release.yml) which:
