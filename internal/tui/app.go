@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -240,7 +239,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(a.discoverInstances, a.tick())
 
 	case instancesMsg:
-		a.instances = a.filterHidden([]agent.Agent(msg))
+		a.instances = controller.FilterHidden([]agent.Agent(msg), a.hiddenAgents)
 		if a.otelStore.LastUpdate().After(a.lastEnrichTime) {
 			a.instances = correlator.EnrichFromOTEL(a.instances, a.otelStore)
 			a.lastEnrichTime = a.otelStore.LastUpdate()
@@ -435,22 +434,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = fmt.Sprintf("Session: tags updated (%d)", len(msg.Tags))
 	case views.SessionDeleteMsg:
-		if err := os.Remove(msg.Session.FilePath); err != nil {
+		if err := controller.DeleteSession(msg.Session); err != nil {
 			a.statusHint = fmt.Sprintf("Delete failed: %v", err)
 		} else {
-			metaPath := history.MetaPath(msg.Session.FilePath)
-			os.Remove(metaPath) // ignore error — may not exist
 			a.statusHint = "Session deleted"
 		}
 	case views.SessionBulkDeleteMsg:
-		deleted := 0
-		for _, s := range msg.Sessions {
-			if err := os.Remove(s.FilePath); err == nil {
-				metaPath := history.MetaPath(s.FilePath)
-				os.Remove(metaPath)
-				deleted++
-			}
-		}
+		deleted, _ := controller.BulkDeleteSessions(msg.Sessions)
 		a.statusHint = fmt.Sprintf("Deleted %d sessions", deleted)
 	case views.SessionNoteMsg:
 		meta := history.LoadMeta(msg.Session.FilePath)
@@ -1374,7 +1364,7 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.hideAgent(target)
 			a.statusHint = fmt.Sprintf("Removed %s from view", target.ShortProject())
 		} else {
-			err := killAgent(target)
+			err := a.ctrl.KillAgent(target)
 			if err != nil {
 				a.statusHint = fmt.Sprintf("Kill failed: %v", err)
 			} else {
@@ -1415,65 +1405,6 @@ func (a *App) hideAgent(ag *agent.Agent) {
 	a.hiddenAgents[key] = true
 }
 
-// filterHidden removes hidden agents from the list.
-func (a *App) filterHidden(agents []agent.Agent) []agent.Agent {
-	if len(a.hiddenAgents) == 0 {
-		return agents
-	}
-	var result []agent.Agent
-	for _, ag := range agents {
-		key := ag.SessionID
-		if key == "" && ag.SessionFile != "" {
-			key = ag.SessionFile
-		}
-		if key == "" {
-			key = fmt.Sprintf("pid-%d", ag.PID)
-		}
-		if !a.hiddenAgents[key] {
-			result = append(result, ag)
-		}
-	}
-	return result
-}
-
-// killAgent sends SIGTERM to the agent process, waits briefly, then SIGKILL
-// if still alive. Also kills grouped sub-processes.
-func killAgent(ag *agent.Agent) error {
-	pids := []int{ag.PID}
-	if len(ag.GroupPIDs) > 0 {
-		pids = ag.GroupPIDs
-	}
-
-	var firstErr error
-	for _, pid := range pids {
-		proc, err := os.FindProcess(pid)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("find process %d: %w", pid, err)
-			}
-			continue
-		}
-
-		// Send SIGTERM for graceful shutdown
-		if err := proc.Signal(syscall.SIGTERM); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("SIGTERM %d: %w", pid, err)
-			}
-			continue
-		}
-
-		// Wait briefly then force kill if still alive
-		go func(p *os.Process, id int) {
-			time.Sleep(3 * time.Second)
-			// Check if still alive by sending signal 0
-			if err := p.Signal(syscall.Signal(0)); err == nil {
-				_ = p.Signal(syscall.SIGKILL)
-			}
-		}(proc, pid)
-	}
-
-	return firstErr
-}
 
 // openLogsForAgent opens the trace viewer for a specific agent and session file.
 // Used for non-Claude providers where embedding a PTY isn't possible.
