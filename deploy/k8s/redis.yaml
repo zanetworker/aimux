@@ -112,5 +112,6 @@ spec:
     - name: redis
       port: 6379
       targetPort: 6379
+      nodePort: 30379
       protocol: TCP
-  type: ClusterIP
+  type: NodePort
