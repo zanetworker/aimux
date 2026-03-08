@@ -13,11 +13,15 @@ import (
 // all UI frontends. It does NOT import bubbletea or lipgloss.
 type Controller struct {
 	cfg config.Config
+	Nav *Navigator
 }
 
 // New creates a new Controller with the given configuration.
 func New(cfg config.Config) *Controller {
-	return &Controller{cfg: cfg}
+	return &Controller{
+		cfg: cfg,
+		Nav: NewNavigator(),
+	}
 }
 
 // ExportContext holds the runtime context needed for an export operation.
