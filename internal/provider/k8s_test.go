@@ -1,0 +1,206 @@
+package provider
+
+import (
+	"testing"
+
+	"github.com/zanetworker/aimux/internal/agent"
+)
+
+// Compile-time interface check — fails to compile if K8s is missing any method.
+var _ Provider = (*K8s)(nil)
+
+func TestK8sName(t *testing.T) {
+	k := &K8s{}
+	if got := k.Name(); got != "k8s" {
+		t.Errorf("K8s.Name() = %q, want %q", got, "k8s")
+	}
+}
+
+func TestK8sDiscover_NotConfigured(t *testing.T) {
+	// When RedisURL is empty the provider must return (nil, nil) and
+	// must not panic or attempt a network connection.
+	k := &K8s{}
+	agents, err := k.Discover()
+	if err != nil {
+		t.Errorf("K8s.Discover() with no config: error = %v, want nil", err)
+	}
+	if agents != nil {
+		t.Errorf("K8s.Discover() with no config: agents = %v, want nil", agents)
+	}
+}
+
+func TestK8sDiscover_BadURL(t *testing.T) {
+	// An unreachable / malformed Redis URL must not crash aimux.
+	// The provider silently returns (nil, nil).
+	k := NewK8s(K8sConfig{
+		RedisURL: "redis://127.0.0.1:19999", // port with nothing listening
+		TeamID:   "test-team",
+	})
+	agents, err := k.Discover()
+	if err != nil {
+		t.Errorf("K8s.Discover() with bad URL: error = %v, want nil", err)
+	}
+	if agents != nil {
+		t.Errorf("K8s.Discover() with bad URL: agents = %v, want nil", agents)
+	}
+}
+
+func TestK8sCanEmbed(t *testing.T) {
+	k := &K8s{}
+	if k.CanEmbed() {
+		t.Error("K8s.CanEmbed() = true, want false")
+	}
+}
+
+func TestK8sResumeCommand(t *testing.T) {
+	k := &K8s{}
+	if cmd := k.ResumeCommand(agent.Agent{}); cmd != nil {
+		t.Errorf("K8s.ResumeCommand() = %v, want nil", cmd)
+	}
+}
+
+func TestK8sFindSessionFile(t *testing.T) {
+	k := &K8s{}
+	if got := k.FindSessionFile(agent.Agent{}); got != "" {
+		t.Errorf("K8s.FindSessionFile() = %q, want empty string", got)
+	}
+}
+
+func TestK8sRecentDirs(t *testing.T) {
+	k := &K8s{}
+	if dirs := k.RecentDirs(10); dirs != nil {
+		t.Errorf("K8s.RecentDirs() = %v, want nil", dirs)
+	}
+}
+
+func TestK8sSpawnCommand(t *testing.T) {
+	k := &K8s{}
+	if cmd := k.SpawnCommand("/tmp", "claude-opus-4-6", "coder"); cmd != nil {
+		t.Errorf("K8s.SpawnCommand() = %v, want nil", cmd)
+	}
+}
+
+func TestK8sSpawnArgs(t *testing.T) {
+	k := &K8s{}
+	args := k.SpawnArgs()
+	if len(args.Models) == 0 {
+		t.Error("K8s.SpawnArgs().Models is empty")
+	}
+	if len(args.Modes) == 0 {
+		t.Error("K8s.SpawnArgs().Modes is empty")
+	}
+	// Verify expected models are present.
+	wantModels := []string{"claude-opus-4-6", "claude-sonnet-4-6"}
+	modelSet := make(map[string]bool)
+	for _, m := range args.Models {
+		modelSet[m] = true
+	}
+	for _, m := range wantModels {
+		if !modelSet[m] {
+			t.Errorf("K8s.SpawnArgs().Models missing %q", m)
+		}
+	}
+	// Verify expected modes are present.
+	wantModes := []string{"coder", "researcher", "reviewer"}
+	modeSet := make(map[string]bool)
+	for _, m := range args.Modes {
+		modeSet[m] = true
+	}
+	for _, m := range wantModes {
+		if !modeSet[m] {
+			t.Errorf("K8s.SpawnArgs().Modes missing %q", m)
+		}
+	}
+}
+
+func TestK8sParseTrace_NotConfigured(t *testing.T) {
+	k := &K8s{}
+	turns, err := k.ParseTrace("")
+	if err != nil {
+		t.Errorf("K8s.ParseTrace() error = %v, want nil", err)
+	}
+	// Must return at least one informational turn, not nil.
+	if len(turns) == 0 {
+		t.Error("K8s.ParseTrace() returned empty slice, want at least one informational turn")
+	}
+}
+
+func TestK8sParseTrace_Configured(t *testing.T) {
+	k := NewK8s(K8sConfig{
+		RedisURL: "redis://127.0.0.1:6379",
+		TeamID:   "my-team",
+	})
+	turns, err := k.ParseTrace("")
+	if err != nil {
+		t.Errorf("K8s.ParseTrace() with config error = %v, want nil", err)
+	}
+	// Must return at least one informational turn regardless of Redis reachability.
+	if len(turns) == 0 {
+		t.Error("K8s.ParseTrace() returned empty slice, want at least one turn")
+	}
+}
+
+func TestK8sOTELEnv(t *testing.T) {
+	k := &K8s{}
+	if got := k.OTELEnv("localhost:4318"); got != "" {
+		t.Errorf("K8s.OTELEnv() = %q, want empty string", got)
+	}
+}
+
+func TestK8sOTELServiceName(t *testing.T) {
+	k := &K8s{}
+	if got := k.OTELServiceName(); got != "k8s-agent" {
+		t.Errorf("K8s.OTELServiceName() = %q, want %q", got, "k8s-agent")
+	}
+}
+
+func TestK8sSubagentAttrKeys_Empty(t *testing.T) {
+	k := &K8s{}
+	keys := k.SubagentAttrKeys()
+	if !keys.Empty() {
+		t.Error("K8s.SubagentAttrKeys() should return empty AttrKeys")
+	}
+}
+
+func TestK8sDeploymentName(t *testing.T) {
+	k := &K8s{}
+	tests := []struct {
+		name      string
+		a         agent.Agent
+		wantContains string
+	}{
+		{
+			name:         "session ID with provider prefix",
+			a:            agent.Agent{SessionID: "claude-coder-abc123", Name: "coder"},
+			wantContains: "agent-claude-coder",
+		},
+		{
+			name:         "simple session ID",
+			a:            agent.Agent{SessionID: "xyz", Name: "researcher"},
+			wantContains: "agent-researcher",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := k.deploymentName(tt.a)
+			if got != tt.wantContains {
+				t.Errorf("K8s.deploymentName() = %q, want %q", got, tt.wantContains)
+			}
+		})
+	}
+}
+
+func TestNewK8s(t *testing.T) {
+	cfg := K8sConfig{
+		RedisURL:  "redis://localhost:6379",
+		TeamID:    "team1",
+		Namespace: "agents",
+	}
+	k := NewK8s(cfg)
+	if k == nil {
+		t.Fatal("NewK8s() returned nil")
+	}
+	if k.cfg.TeamID != "team1" {
+		t.Errorf("NewK8s().cfg.TeamID = %q, want %q", k.cfg.TeamID, "team1")
+	}
+}

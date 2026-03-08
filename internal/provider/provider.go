@@ -62,6 +62,13 @@ type Provider interface {
 	Kill(a agent.Agent) error
 }
 
+// Messenger is an optional interface for providers that support sending
+// messages to a specific agent (e.g. writing to a Redis inbox stream).
+// Check with: if m, ok := p.(provider.Messenger); ok { m.SendMessage(...) }
+type Messenger interface {
+	SendMessage(agentID, text string) error
+}
+
 // RecentDir is a recently-used project directory from a provider's session history.
 type RecentDir struct {
 	Path     string
