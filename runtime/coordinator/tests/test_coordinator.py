@@ -155,30 +155,29 @@ async def test_claim_task_dependency_not_met(coord, r):
 
 
 # ---------------------------------------------------------------------------
-# 5. test_complete_task_writes_result_ref
+# 5. test_complete_task_stores_full_result
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_complete_task_writes_result_ref(coord, r):
-    """complete_task() must store both result_summary (truncated) and
-    result_ref in the task hash, and set status=completed.
+async def test_complete_task_stores_full_result(coord, r):
+    """complete_task() stores truncated summary in the task hash and the
+    full result in a separate Redis key. status must be set to completed.
     """
     task_id = "task-001"
-    # Seed a minimal task hash.
     await r.hset(f"team:test-team:task:{task_id}", mapping={"status": "claimed"})
 
     summary = "Refactored users endpoint, all tests pass"
-    ref = "branch:task-task-001"
+    full = summary + " " + ("x" * 500)  # >500 chars total
 
-    await coord.complete_task(task_id, summary, result_ref=ref)
+    await coord.complete_task(task_id, summary, result_full=full)
 
     stored_status = await r.hget(f"team:test-team:task:{task_id}", "status")
     stored_summary = await r.hget(f"team:test-team:task:{task_id}", "result_summary")
-    stored_ref = await r.hget(f"team:test-team:task:{task_id}", "result_ref")
+    stored_full = await r.get(f"team:test-team:task:{task_id}:result_full")
 
     assert stored_status == b"completed"
     assert stored_summary == summary.encode()
-    assert stored_ref == ref.encode()
+    assert stored_full == full.encode()
 
 
 # ---------------------------------------------------------------------------
@@ -247,33 +246,25 @@ async def test_fail_task_dead(coord, r):
 
 
 # ---------------------------------------------------------------------------
-# 8. test_create_task_writes_source_branch
+# 8. test_create_task_with_depends_on
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_create_task_writes_source_branch(coord, r):
-    """create_task() must store source_branch in the task hash and add
-    the task to tasks:pending with a timestamp score.
-    """
-    task_id = "task-branch"
-    branch = "task-a3f2bc"
+async def test_create_task_with_depends_on(coord, r):
+    """create_task() stores depends_on as JSON and adds the task to tasks:pending."""
+    task_id = "task-dep"
 
     await coord.create_task(
         task_id=task_id,
         prompt="Review the refactored /users endpoint",
         required_role="reviewer",
         depends_on=["a3f2bc"],
-        source_branch=branch,
     )
 
-    stored_branch = await r.hget(f"team:test-team:task:{task_id}", "source_branch")
     stored_status = await r.hget(f"team:test-team:task:{task_id}", "status")
     stored_deps = await r.hget(f"team:test-team:task:{task_id}", "depends_on")
-    stored_ref = await r.hget(f"team:test-team:task:{task_id}", "result_ref")
     score = await r.zscore("team:test-team:tasks:pending", task_id)
 
-    assert stored_branch == branch.encode(), "source_branch must be stored in hash"
     assert stored_status == b"pending"
     assert json.loads(stored_deps) == ["a3f2bc"]
-    assert stored_ref == b"", "result_ref must be empty string on creation"
     assert score is not None, "task must appear in tasks:pending sorted set"

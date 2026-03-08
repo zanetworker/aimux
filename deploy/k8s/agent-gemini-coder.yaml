@@ -1,0 +1,66 @@
+# Gemini Coder agent Deployment.
+# replicas: 0 — scale-to-zero. spawn_agent MCP tool scales up on demand.
+# Results stored in Redis — no git workflow, no workspace volume.
+# Uses gemini-2.5-pro (more capable) for code generation tasks.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-gemini-coder
+  namespace: agents
+  labels:
+    app: agent-gemini-coder
+    team-component: agent
+    provider: gemini
+    role: coder
+    app.kubernetes.io/part-of: k8s-agents
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: agent-gemini-coder
+  template:
+    metadata:
+      labels:
+        app: agent-gemini-coder
+        team-component: agent
+        provider: gemini
+        role: coder
+        app.kubernetes.io/part-of: k8s-agents
+    spec:
+      serviceAccountName: mcp-server
+      containers:
+        - name: agent
+          image: quay.io/azaalouk/agent-gemini:latest
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis:6379"
+            - name: TEAM_ID
+              value: "my-team"
+            - name: AGENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: PROVIDER
+              value: "gemini"
+            - name: ROLE
+              value: "coder"
+            - name: MODEL
+              value: "gemini-2.5-pro"
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-keys
+                  key: google
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1000m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"

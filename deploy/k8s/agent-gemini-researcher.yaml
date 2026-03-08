@@ -1,0 +1,66 @@
+# Gemini Researcher agent Deployment.
+# replicas: 0 — scale-to-zero. spawn_agent MCP tool scales up on demand.
+# Results stored in Redis — no git workflow, no workspace volume.
+# Uses gemini-2.0-flash (cheap, fast) with native generation for research tasks.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-gemini-researcher
+  namespace: agents
+  labels:
+    app: agent-gemini-researcher
+    team-component: agent
+    provider: gemini
+    role: researcher
+    app.kubernetes.io/part-of: k8s-agents
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: agent-gemini-researcher
+  template:
+    metadata:
+      labels:
+        app: agent-gemini-researcher
+        team-component: agent
+        provider: gemini
+        role: researcher
+        app.kubernetes.io/part-of: k8s-agents
+    spec:
+      serviceAccountName: mcp-server
+      containers:
+        - name: agent
+          image: quay.io/azaalouk/agent-gemini:latest
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis:6379"
+            - name: TEAM_ID
+              value: "my-team"
+            - name: AGENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: PROVIDER
+              value: "gemini"
+            - name: ROLE
+              value: "researcher"
+            - name: MODEL
+              value: "gemini-2.0-flash"
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-keys
+                  key: google
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
