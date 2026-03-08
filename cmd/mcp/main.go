@@ -61,6 +61,7 @@ func main() {
 	s.AddTool(listTasksTool(), handleListTasks)
 	s.AddTool(getTaskTool(), handleGetTask)
 	s.AddTool(getTaskResultTool(), handleGetTaskResult)
+	s.AddTool(waitForTaskTool(), handleWaitForTask)
 	s.AddTool(listAgentsTool(), handleListAgents)
 	s.AddTool(sendMessageTool(), handleSendMessage)
 	s.AddTool(scaleDownTool(), handleScaleDown)
@@ -466,6 +467,36 @@ func handleGetCosts(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 		lines = append(lines, fmt.Sprintf("  WARNING: exceeds limit of $%.2f", maxCost))
 	}
 	return mcp.NewToolResultText(joinLines(lines)), nil
+}
+
+func waitForTaskTool() mcp.Tool {
+	return mcp.NewTool("wait_for_task",
+		mcp.WithDescription("Block until a task reaches completed, failed, or dead status. "+
+			"Use this instead of polling get_task in a loop. Times out after 10 minutes."),
+		mcp.WithString("task_id", mcp.Required(), mcp.Description("Task ID to wait for")),
+	)
+}
+
+func handleWaitForTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	taskID, err := req.RequireString("task_id")
+	if err != nil {
+		return mcp.NewToolResultText("Error: task_id is required"), nil
+	}
+
+	deadline := time.Now().Add(10 * time.Minute)
+	for time.Now().Before(deadline) {
+		t, err := rdb.HGetAll(ctx, teamKey("task:"+taskID)).Result()
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf("Error reading task: %v", err)), nil
+		}
+		status := t["status"]
+		if status == "completed" || status == "failed" || status == "dead" {
+			return mcp.NewToolResultText(fmt.Sprintf("Task %s: status=%s summary=%s",
+				taskID, status, t["result_summary"])), nil
+		}
+		time.Sleep(5 * time.Second)
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Task %s timed out after 10 minutes", taskID)), nil
 }
 
 func getTaskResultTool() mcp.Tool {

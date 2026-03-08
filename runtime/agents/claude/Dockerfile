@@ -22,8 +22,12 @@ RUN chown -R 1001:0 /opt/app-root/src/
 # Drop back to non-root before installing Python deps
 USER 1001
 
-RUN pip install --no-cache-dir -e /opt/app-root/src/coordinator/ && \
-    pip install --no-cache-dir claude-code-sdk redis
+# PYTHONPATH ensures `import coordinator` resolves to /opt/app-root/src/coordinator/
+ENV PYTHONPATH="/opt/app-root/src"
+# Disable Python output buffering so logs appear immediately in kubectl logs
+ENV PYTHONUNBUFFERED=1
+
+RUN pip install --no-cache-dir claude-code-sdk redis
 
 CMD ["python", "/opt/app-root/src/agent/main.py"]
 # Role behaviour controlled entirely by env vars:
