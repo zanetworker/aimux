@@ -14,10 +14,21 @@ type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
 	DefaultRuntime  string                    `yaml:"default_runtime"`
-	Shell           string                    `yaml:"shell"`     // login shell for spawning agents
-	Export          ExportConfig              `yaml:"export"`    // OTEL export settings
-	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`      // OTEL receiver settings
-	Sessions        SessionsConfig            `yaml:"sessions"`  // session history settings
+	Shell           string                    `yaml:"shell"`       // login shell for spawning agents
+	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
+	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
+	Sessions        SessionsConfig            `yaml:"sessions"`    // session history settings
+	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
+}
+
+// K8sProviderConfig holds connection settings for the Kubernetes agent provider.
+// Agents are discovered via Redis heartbeats rather than local process scanning.
+type K8sProviderConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	RedisURL   string `yaml:"redis_url"`   // e.g. "redis://:pass@localhost:6380"
+	TeamID     string `yaml:"team_id"`     // Redis team key prefix, e.g. "my-team"
+	Namespace  string `yaml:"namespace"`   // K8s namespace, e.g. "agents"
+	Kubeconfig string `yaml:"kubeconfig"`  // path to kubeconfig; empty = in-cluster or KUBECONFIG env
 }
 
 // SessionsConfig holds settings for the session history feature.
@@ -55,7 +66,8 @@ type ProviderConfig struct {
 }
 
 // Default returns the configuration used when no config file is present.
-// All known providers are enabled.
+// All known providers are enabled. The Kubernetes provider is disabled by
+// default because it requires a Redis URL and team ID to be useful.
 func Default() Config {
 	return Config{
 		Providers: map[string]ProviderConfig{
@@ -67,6 +79,10 @@ func Default() Config {
 		DefaultRuntime:  "tmux",
 		Sessions: SessionsConfig{
 			TitleModel: "flash",
+		},
+		Kubernetes: K8sProviderConfig{
+			Enabled:   false,
+			Namespace: "agents",
 		},
 	}
 }
@@ -131,6 +147,9 @@ func Load(path string) (Config, error) {
 	}
 	if fileCfg.Sessions.APIKey != "" {
 		cfg.Sessions.APIKey = fileCfg.Sessions.APIKey
+	}
+	if fileCfg.Kubernetes.Enabled {
+		cfg.Kubernetes = fileCfg.Kubernetes
 	}
 
 	return cfg, nil

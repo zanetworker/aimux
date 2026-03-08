@@ -142,6 +142,16 @@ func NewApp() App {
 		&provider.Gemini{},
 	}
 
+	// Register Kubernetes provider when explicitly enabled in config.
+	if cfg.Kubernetes.Enabled {
+		allProviders = append(allProviders, provider.NewK8s(provider.K8sConfig{
+			RedisURL:   cfg.Kubernetes.RedisURL,
+			TeamID:     cfg.Kubernetes.TeamID,
+			Namespace:  cfg.Kubernetes.Namespace,
+			Kubeconfig: cfg.Kubernetes.Kubeconfig,
+		}))
+	}
+
 	// Filter to enabled providers only.
 	var providers []provider.Provider
 	for _, p := range allProviders {
@@ -868,9 +878,14 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 func (a App) handleCommandInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		cmd := resolveCommand(a.commandInput)
+		raw := strings.TrimSpace(a.commandInput)
 		a.commandMode = false
 		a.commandInput = ""
+		// Handle commands that take arguments (e.g. "send hello world").
+		if strings.HasPrefix(raw, "send ") {
+			return a.sendMessageToSelected(strings.TrimPrefix(raw, "send "))
+		}
+		cmd := resolveCommand(raw)
 		return a.executeCommand(cmd)
 	case "esc":
 		a.commandMode = false
@@ -943,6 +958,37 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "quit":
 		return a, tea.Quit
 	}
+	return a, nil
+}
+
+// sendMessageToSelected sends a message to the currently selected K8s agent
+// via its Redis inbox. Only works for providers implementing Messenger.
+// Usage: :send <text>
+func (a App) sendMessageToSelected(text string) (tea.Model, tea.Cmd) {
+	if text == "" {
+		a.statusHint = "Usage: :send <message text>"
+		return a, nil
+	}
+	selected := a.agentsView.Selected()
+	if selected == nil {
+		a.statusHint = "No agent selected"
+		return a, nil
+	}
+	p := a.providerFor(selected.ProviderName)
+	if p == nil {
+		a.statusHint = "No provider for " + selected.ProviderName
+		return a, nil
+	}
+	m, ok := p.(provider.Messenger)
+	if !ok {
+		a.statusHint = selected.ProviderName + " does not support messaging"
+		return a, nil
+	}
+	if err := m.SendMessage(selected.SessionID, text); err != nil {
+		a.statusHint = "Send failed: " + err.Error()
+		return a, nil
+	}
+	a.statusHint = fmt.Sprintf("Sent to %s: %s", selected.SessionID, text)
 	return a, nil
 }
 
