@@ -44,6 +44,17 @@ type ExportTurn struct {
 	Note       string         `json:"note,omitempty"`
 }
 
+// ExportSessionMeta holds session-level evaluation metadata written as the
+// first line of a JSONL export file (type: "session_meta").
+type ExportSessionMeta struct {
+	Type         string   `json:"type"`                    // always "session_meta"
+	SessionID    string   `json:"session_id"`
+	Annotation   string   `json:"annotation,omitempty"`    // achieved/partial/failed/abandoned
+	FailureModes []string `json:"failure_modes,omitempty"` // failure-mode tags
+	Note         string   `json:"note,omitempty"`          // free-text rationale
+	Title        string   `json:"title,omitempty"`         // LLM-generated title
+}
+
 // Store manages annotation persistence for a single agent session.
 // Annotations are stored as JSONL files under ~/.aimux/evaluations/.
 type Store struct {
@@ -235,9 +246,10 @@ func ExportPath(sessionID string) string {
 }
 
 // WriteExport writes all enriched turns as JSONL to the given path. The parent
-// directory is created if it does not exist. Writes are performed atomically
-// via a temp file and rename.
-func WriteExport(path string, turns []ExportTurn) error {
+// directory is created if it does not exist. If sessionMeta is non-nil, it is
+// written as the first line (type: "session_meta"). Writes are performed
+// atomically via a temp file and rename.
+func WriteExport(path string, turns []ExportTurn, sessionMeta *ExportSessionMeta) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create export dir: %w", err)
@@ -256,6 +268,19 @@ func WriteExport(path string, turns []ExportTurn) error {
 			os.Remove(tmpPath)
 		}
 	}()
+
+	// Write session metadata as first line if provided
+	if sessionMeta != nil {
+		sessionMeta.Type = "session_meta"
+		metaData, err := json.Marshal(sessionMeta)
+		if err != nil {
+			return fmt.Errorf("marshal session meta: %w", err)
+		}
+		metaData = append(metaData, '\n')
+		if _, err := tmp.Write(metaData); err != nil {
+			return fmt.Errorf("write session meta: %w", err)
+		}
+	}
 
 	for _, t := range turns {
 		data, err := json.Marshal(t)

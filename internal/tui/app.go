@@ -438,6 +438,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			os.Remove(metaPath) // ignore error — may not exist
 			a.statusHint = "Session deleted"
 		}
+	case views.SessionBulkDeleteMsg:
+		deleted := 0
+		for _, s := range msg.Sessions {
+			if err := os.Remove(s.FilePath); err == nil {
+				metaPath := history.MetaPath(s.FilePath)
+				os.Remove(metaPath)
+				deleted++
+			}
+		}
+		a.statusHint = fmt.Sprintf("Deleted %d sessions", deleted)
 	case views.SessionNoteMsg:
 		meta := history.LoadMeta(msg.Session.FilePath)
 		meta.Note = msg.Note
@@ -481,6 +491,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				annots[msg.Turn] = msg.Label
 				if msg.Note != "" {
 					notes[msg.Turn] = msg.Note
+				}
+			}
+		}
+		return a, nil
+
+	case tea.MouseMsg:
+		// Intercept mouse wheel for scrolling in zoomed session view
+		if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
+			if tv := a.sessionView.TermView(); tv != nil {
+				switch msg.Button {
+				case tea.MouseButtonWheelUp:
+					tv.ScrollUp(3)
+					return a, nil
+				case tea.MouseButtonWheelDown:
+					tv.ScrollDown(3)
+					return a, nil
 				}
 			}
 		}
@@ -547,13 +573,17 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.exitZoom()
 	}
 
-	// Esc exits zoomed/split view (but clears trace filter first if active)
+	// Esc in split mode: clear trace filter if active, otherwise forward to PTY.
+	// Esc is NOT used to exit zoom — use Ctrl+]/g/\ instead.
+	// This allows shell features like Ctrl+R (reverse search) to work normally.
 	if key == "esc" {
 		if a.splitMode && a.splitFocus == "trace" && a.splitTrace != nil && a.splitTrace.HasActiveFilter() {
-			a.splitTrace.Update(msg) // let trace handle Esc to clear filter
+			a.splitTrace.Update(msg)
 			return a, nil
 		}
-		return a.exitZoom()
+		// Forward Esc to PTY (needed for Ctrl+R cancel, vim escape, etc.)
+		a.sessionView.SendKey(key)
+		return a, nil
 	}
 
 	// Ctrl+f toggles split/fullscreen — zooms whichever pane is focused
@@ -606,12 +636,37 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
+	// Intercept scroll keys in session view
+	if tv := a.sessionView.TermView(); tv != nil {
+		switch key {
+		case "pgup":
+			tv.ScrollUp(10)
+			return a, nil
+		case "pgdown":
+			tv.ScrollDown(10)
+			return a, nil
+		}
+	}
+
 	// Send to PTY session
 	a.sessionView.SendKey(key)
 	return a, nil
 }
 
 func (a App) exitZoom() (tea.Model, tea.Cmd) {
+	// If in full-screen mode (Ctrl+f toggled off split), return to split view
+	if !a.splitMode && a.splitTrace != nil {
+		a.splitMode = true
+		a.splitFocus = "session"
+		// Resize back to split layout
+		leftW := a.width * 40 / 100
+		rightW := a.width - leftW - 1
+		a.sessionView.SetSize(rightW, a.height)
+		a.splitTrace.SetSize(leftW, a.height-3)
+		return a, nil
+	}
+
+	// Otherwise exit to main view
 	a.zoomed = false
 	a.splitMode = false
 	a.splitTrace = nil
@@ -1156,8 +1211,23 @@ func (a App) exportTrace() (tea.Model, tea.Cmd) {
 		exportTurns = append(exportTurns, et)
 	}
 
+	// Load session-level metadata for export
+	var sessionMeta *evaluation.ExportSessionMeta
+	if filePath := a.activeTraceFilePath(); filePath != "" {
+		meta := history.LoadMeta(filePath)
+		if meta.Annotation != "" || len(meta.Tags) > 0 || meta.Note != "" || meta.Title != "" {
+			sessionMeta = &evaluation.ExportSessionMeta{
+				SessionID:    sessionID,
+				Annotation:   meta.Annotation,
+				FailureModes: meta.Tags,
+				Note:         meta.Note,
+				Title:        meta.Title,
+			}
+		}
+	}
+
 	path := evaluation.ExportPath(sessionID)
-	if err := evaluation.WriteExport(path, exportTurns); err != nil {
+	if err := evaluation.WriteExport(path, exportTurns, sessionMeta); err != nil {
 		a.statusHint = fmt.Sprintf("Export failed: %v", err)
 		a.stickyHint = true
 		return a, nil
@@ -1201,6 +1271,14 @@ func (a App) exportOTEL() (tea.Model, tea.Cmd) {
 		Provider:     providerName,
 		ExperimentID: a.cfg.Export.MLflow.ExperimentID,
 		Headers:      a.cfg.Export.Headers,
+	}
+
+	// Load session-level metadata for OTEL export
+	if filePath := a.activeTraceFilePath(); filePath != "" {
+		meta := history.LoadMeta(filePath)
+		cfg.Annotation = meta.Annotation
+		cfg.FailureModes = meta.Tags
+		cfg.Note = meta.Note
 	}
 
 	if err := aimuxotel.ExportTrace(cfg, turns, a.evalStore); err != nil {
@@ -1664,7 +1742,7 @@ func (a App) View() string {
 	case viewTeams:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewSessions:
-		a.headerView.SetHint("j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  d:delete  p:preview  Esc:back")
+		a.headerView.SetHint("j/k:nav  Enter:resume  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
 	}
@@ -1917,7 +1995,7 @@ func (a App) renderStatusBar() string {
 	} else if a.currentView == viewLogs {
 		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
 	} else if a.currentView == viewSessions {
-		hints = " j/k:nav  Enter:resume  /:filter  A:all  a:annotate  f:tag  N:note  d:delete  p:preview  Esc:back"
+		hints = " j/k:nav  Enter:resume  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back"
 		if a.sessionsView.HasActiveFilter() {
 			hints += "  [Esc clears filter]"
 		}
@@ -1951,6 +2029,20 @@ func (a App) activeTraceTurns() []trace.Turn {
 		return a.splitTrace.Turns()
 	}
 	return nil
+}
+
+// activeTraceFilePath returns the session file path for the active trace context.
+func (a App) activeTraceFilePath() string {
+	if a.logsView != nil {
+		return a.logsView.FilePath()
+	}
+	if a.splitTrace != nil {
+		return a.splitTrace.FilePath()
+	}
+	if a.sessionView != nil && a.sessionView.Agent() != nil {
+		return a.sessionView.Agent().SessionFile
+	}
+	return ""
 }
 
 // activeTraceSessionID returns the session ID for the active trace context.

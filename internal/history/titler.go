@@ -24,14 +24,14 @@ type TitleConfig struct {
 func DefaultTitleConfig() TitleConfig {
 	return TitleConfig{
 		Enabled: false,
-		Model:   "haiku",
+		Model:   "flash",
 	}
 }
 
 // isGeminiModel returns true if the model name refers to a Gemini model.
 func isGeminiModel(model string) bool {
 	switch model {
-	case "flash", "gemini-flash", "gemini-3-flash-preview":
+	case "flash", "gemini-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview":
 		return true
 	}
 	return strings.HasPrefix(model, "gemini")
@@ -41,7 +41,7 @@ func isGeminiModel(model string) bool {
 func resolveModel(short string) string {
 	switch short {
 	case "flash", "gemini-flash":
-		return "gemini-3-flash-preview"
+		return "gemini-3.1-flash-lite-preview"
 	case "haiku":
 		return "claude-haiku-4-5-20251001"
 	case "sonnet":

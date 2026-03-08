@@ -228,6 +228,139 @@ func TestSessionsView_ViewRenders(t *testing.T) {
 	}
 }
 
+func TestSessionsView_ColumnHeaders(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessions())
+	v.SetSize(100, 40)
+
+	output := v.View()
+	if !strings.Contains(output, "AGE") {
+		t.Error("expected AGE column header")
+	}
+	if !strings.Contains(output, "TITLE") {
+		t.Error("expected TITLE column header")
+	}
+	if !strings.Contains(output, "TURNS") {
+		t.Error("expected TURNS column header")
+	}
+	if !strings.Contains(output, "COST") {
+		t.Error("expected COST column header")
+	}
+}
+
+func TestSessionsView_ColumnHeadersAllProjects(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessions())
+	v.SetSize(120, 40)
+	v.showAll = true
+
+	output := v.View()
+	if !strings.Contains(output, "PROJECT") {
+		t.Error("expected PROJECT column header in all-projects mode")
+	}
+}
+
+func TestSessionsView_SortCycle(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessions())
+	v.SetSize(100, 40)
+
+	// Default: SortByAge descending (newest first)
+	if v.sortField != SortByAge {
+		t.Errorf("default sortField = %d, want SortByAge", v.sortField)
+	}
+
+	// Press 's' → SortByCost
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v.sortField != SortByCost {
+		t.Errorf("after first s: sortField = %d, want SortByCost", v.sortField)
+	}
+
+	visible := v.visibleSessions()
+	// Highest cost first (descending by default)
+	if visible[0].ID != "ghi-789" { // $1.23
+		t.Errorf("cost sort: first = %q, want ghi-789 ($1.23)", visible[0].ID)
+	}
+
+	// Press 's' → SortByTurns
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v.sortField != SortByTurns {
+		t.Errorf("after second s: sortField = %d, want SortByTurns", v.sortField)
+	}
+
+	// Press 's' → SortByTitle
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v.sortField != SortByTitle {
+		t.Errorf("after third s: sortField = %d, want SortByTitle", v.sortField)
+	}
+
+	// Title sort ascending by default
+	visible = v.visibleSessions()
+	if visible[0].ID != "def-456" { // "add table support"
+		t.Errorf("title sort: first = %q, want def-456 ('add table support')", visible[0].ID)
+	}
+
+	// Press 's' → SortByFailureMode
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v.sortField != SortByFailureMode {
+		t.Errorf("after fourth s: sortField = %d, want SortByFailureMode", v.sortField)
+	}
+
+	// Press 's' → back to SortByAge
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v.sortField != SortByAge {
+		t.Errorf("after fifth s: sortField = %d, want SortByAge (cycle back)", v.sortField)
+	}
+}
+
+func TestSessionsView_SortIndicator(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessions())
+	v.SetSize(100, 40)
+
+	output := v.View()
+	// Default sort is by AGE, should show arrow
+	if !strings.Contains(output, "AGE") {
+		t.Error("expected AGE with sort indicator")
+	}
+
+	// Switch to cost sort
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	output = v.View()
+	if !strings.Contains(output, "\u25bc") && !strings.Contains(output, "\u25b2") {
+		t.Error("expected sort arrow in output")
+	}
+}
+
+func TestSessionsView_ColumnWidths(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSize(100, 40)
+
+	cols := v.columnWidths(100)
+	if cols.age != 7 {
+		t.Errorf("age width = %d, want 7", cols.age)
+	}
+	if cols.turns != 5 {
+		t.Errorf("turns width = %d, want 5", cols.turns)
+	}
+	if cols.cost != 7 {
+		t.Errorf("cost width = %d, want 7", cols.cost)
+	}
+	if cols.project != 0 {
+		t.Errorf("project width = %d, want 0 when not showing all", cols.project)
+	}
+	if cols.prompt < 15 {
+		t.Errorf("prompt width = %d, want >= 15", cols.prompt)
+	}
+
+	// With showAll
+	v.showAll = true
+	cols = v.columnWidths(100)
+	if cols.project != 12 {
+		t.Errorf("project width = %d, want 12 when showing all", cols.project)
+	}
+}
+
 func TestSessionsView_AnnotationBadgeRendered(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
@@ -245,11 +378,11 @@ func TestSessionsView_AnnotationBadgeRendered(t *testing.T) {
 func TestSessionsView_TagsRendered(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(120, 40)
 
 	output := v.View()
 	if !strings.Contains(output, "loop-on-error") {
-		t.Error("expected tag in output")
+		t.Error("expected failure-mode badge with tag in output")
 	}
 }
 
@@ -363,6 +496,159 @@ func TestSessionMatchesFilter(t *testing.T) {
 	}
 	if sessionMatchesFilter(s, "nonexistent") {
 		t.Error("expected no match")
+	}
+}
+
+func TestSessionsView_FailureModeIndicator(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessions())
+	v.SetSize(120, 40)
+
+	output := v.View()
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "OTEL") {
+			if !strings.Contains(line, "loop-on-error") {
+				t.Error("expected [loop-on-error] badge for tagged session ghi-789")
+			}
+		}
+		if strings.Contains(line, "table support") {
+			if strings.Contains(line, "loop-on-error") {
+				t.Error("unexpected failure badge for untagged session def-456")
+			}
+		}
+	}
+}
+
+func TestSessionsView_SortByFailureMode(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessions())
+	v.SetSize(100, 40)
+
+	// Cycle to SortByFailureMode: Age -> Cost -> Turns -> Title -> FailureMode
+	for i := 0; i < 4; i++ {
+		v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	}
+	if v.sortField != SortByFailureMode {
+		t.Errorf("sortField = %d, want SortByFailureMode", v.sortField)
+	}
+
+	visible := v.visibleSessions()
+	if visible[0].ID != "ghi-789" {
+		t.Errorf("failure-mode sort: first = %q, want ghi-789 (tagged)", visible[0].ID)
+	}
+}
+
+func TestSessionsView_CleanupMode(t *testing.T) {
+	v := NewSessionsView()
+	now := time.Now()
+	sessions := []history.Session{
+		{ID: "a", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 20, CostUSD: 1.0, LastActive: now},
+		{ID: "b", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 2, CostUSD: 0.1, LastActive: now},
+		// "c" has TurnCount=1, CostUSD=0 which is hidden by visibleSessions filter,
+		// so it won't appear in cleanup. Use a session visible to the list instead.
+		{ID: "c", Project: "/proj", FirstPrompt: "another task", TurnCount: 1, CostUSD: 0, LastActive: now},
+		{ID: "d", Project: "/proj", FirstPrompt: "another task", TurnCount: 8, CostUSD: 0.5, LastActive: now},
+	}
+	v.SetSessions(sessions)
+	v.SetSize(100, 40)
+
+	// Enter cleanup mode — "b" is a duplicate of "a" (fewer turns),
+	// "c" is hidden by visibleSessions, so only "b" should appear
+	// unless both are visible. Let's verify what we get.
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	if !v.cleanupMode {
+		t.Fatal("expected cleanup mode")
+	}
+	if len(v.cleanupItems) < 1 {
+		t.Fatalf("expected at least 1 cleanup item, got %d", len(v.cleanupItems))
+	}
+
+	// All selected by default
+	for _, item := range v.cleanupItems {
+		if !item.selected {
+			t.Errorf("expected item %q selected by default", item.session.ID)
+		}
+	}
+
+	// Toggle first item off
+	v.handleCleanupKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	if v.cleanupItems[0].selected {
+		t.Error("expected first item deselected after space")
+	}
+
+	// Cancel
+	v.handleCleanupKey(tea.KeyMsg{Type: tea.KeyEscape})
+	if v.cleanupMode {
+		t.Error("expected cleanup mode exited after esc")
+	}
+}
+
+func TestSessionsView_CleanupModeConfirm(t *testing.T) {
+	v := NewSessionsView()
+	now := time.Now()
+	sessions := []history.Session{
+		{ID: "a", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 20, CostUSD: 1.0, LastActive: now},
+		{ID: "b", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 2, CostUSD: 0.1, LastActive: now},
+	}
+	v.SetSessions(sessions)
+	v.SetSize(100, 40)
+
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	if !v.cleanupMode {
+		t.Fatal("expected cleanup mode")
+	}
+
+	cmd := v.handleCleanupKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected command from enter")
+	}
+	msg := cmd()
+	bulkMsg, ok := msg.(SessionBulkDeleteMsg)
+	if !ok {
+		t.Fatalf("expected SessionBulkDeleteMsg, got %T", msg)
+	}
+	if len(bulkMsg.Sessions) != 1 {
+		t.Errorf("expected 1 session to delete, got %d", len(bulkMsg.Sessions))
+	}
+	if bulkMsg.Sessions[0].ID != "b" {
+		t.Errorf("expected session b to be deleted, got %q", bulkMsg.Sessions[0].ID)
+	}
+}
+
+func TestSessionsView_CleanupModeNoItems(t *testing.T) {
+	v := NewSessionsView()
+	sessions := []history.Session{
+		{ID: "a", Project: "/proj", FirstPrompt: "unique task", TurnCount: 20, CostUSD: 1.0, LastActive: time.Now()},
+	}
+	v.SetSessions(sessions)
+	v.SetSize(100, 40)
+
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	if v.cleanupMode {
+		t.Error("should not enter cleanup mode with no items to clean")
+	}
+}
+
+func TestSessionsView_CleanupRender(t *testing.T) {
+	v := NewSessionsView()
+	now := time.Now()
+	sessions := []history.Session{
+		{ID: "a", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 20, CostUSD: 1.0, LastActive: now},
+		{ID: "b", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 2, CostUSD: 0.1, LastActive: now},
+	}
+	v.SetSessions(sessions)
+	v.SetSize(100, 40)
+
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	output := v.View()
+	if !strings.Contains(output, "Cleanup") {
+		t.Error("expected 'Cleanup' header in cleanup view")
+	}
+	if !strings.Contains(output, "[x]") {
+		t.Error("expected checkbox in cleanup view")
+	}
+	if !strings.Contains(output, "duplicate") {
+		t.Error("expected 'duplicate' reason in cleanup view")
 	}
 }
 

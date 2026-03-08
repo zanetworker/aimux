@@ -25,6 +25,11 @@ type ExportConfig struct {
 	Provider     string            // "claude", "codex", "gemini"
 	ExperimentID string            // MLflow experiment ID (required by MLflow OTLP endpoint)
 	Headers      map[string]string // extra HTTP headers
+
+	// Session-level evaluation metadata (from .meta.json sidecar)
+	Annotation   string   // achieved/partial/failed/abandoned
+	FailureModes []string // failure-mode tags
+	Note         string   // free-text rationale
 }
 
 // ExportTrace sends trace turns and annotations as OTLP/HTTP spans to the
@@ -97,13 +102,23 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 	}
 
 	// Root span: the session
+	sessionAttrs := []attribute.KeyValue{
+		attribute.String("aimux.session_id", cfg.SessionID),
+		attribute.String("aimux.provider", cfg.Provider),
+		attribute.Int("aimux.turn_count", len(turns)),
+	}
+	if cfg.Annotation != "" {
+		sessionAttrs = append(sessionAttrs, attribute.String("aimux.session.annotation", cfg.Annotation))
+	}
+	if len(cfg.FailureModes) > 0 {
+		sessionAttrs = append(sessionAttrs, attribute.StringSlice("aimux.session.failure_modes", cfg.FailureModes))
+	}
+	if cfg.Note != "" {
+		sessionAttrs = append(sessionAttrs, attribute.String("aimux.session.note", cfg.Note))
+	}
 	sessionCtx, sessionSpan := tracer.Start(ctx, "session",
 		oteltrace.WithTimestamp(sessionStart),
-		oteltrace.WithAttributes(
-			attribute.String("aimux.session_id", cfg.SessionID),
-			attribute.String("aimux.provider", cfg.Provider),
-			attribute.Int("aimux.turn_count", len(turns)),
-		),
+		oteltrace.WithAttributes(sessionAttrs...),
 	)
 
 	// Child spans: each turn

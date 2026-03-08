@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/tui"
 )
@@ -40,7 +41,7 @@ func main() {
 
 func runTUI() {
 	app := tui.NewApp()
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -70,10 +71,16 @@ Sessions flags:
 
 // runSessions handles the "aimux sessions" subcommand.
 func runSessions(args []string) {
+	// Load config for session defaults
+	appCfg, _ := config.Load(config.DefaultPath())
+
 	var dir string
 	var listMode, exportMode, jsonMode, generateTitles, regenerateTitles bool
 	var limit int
-	titleModel := "haiku"
+	titleModel := appCfg.Sessions.TitleModel
+	if titleModel == "" {
+		titleModel = "flash"
+	}
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -129,6 +136,7 @@ func runSessions(args []string) {
 		cfg := history.TitleConfig{
 			Enabled:    true,
 			Model:      titleModel,
+			APIKey:     appCfg.Sessions.APIKey,
 			Regenerate: regenerateTitles,
 		}
 		fmt.Printf("Generating titles using %s...\n", titleModel)
