@@ -1,0 +1,16 @@
+{
+  "_comment": "Optional Claude Code hook that blocks the built-in Agent(team_name=...) tool when K8s mode is intended. This prevents accidentally spawning local subagents instead of K8s pods. Quick subagents (Explore, Plan) still work because they never use team_name. Add this to your ~/.claude/settings.json hooks section when doing K8s-only work.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import sys,json; p=json.loads(sys.stdin.read()); params=p.get('input',{}); has_team=bool(params.get('team_name')); read_only={'Explore','Plan','claude-code-guide'}; sys.exit(1) if has_team and params.get('subagent_type') not in read_only else sys.exit(0)\""
+          }
+        ]
+      }
+    ]
+  }
+}
