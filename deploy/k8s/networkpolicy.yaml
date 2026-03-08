@@ -1,0 +1,35 @@
+# NetworkPolicy: restrict Redis access to only agent and lead pods.
+# Default-deny posture: only pods with label team-component=agent or team-component=lead
+# can reach Redis on port 6379. All other ingress to Redis is dropped.
+#
+# This policy targets the Redis pod (app: redis) and whitelists ingress only from
+# pods whose team-component label is in {agent, lead}. The NetworkPolicy relies on
+# a CNI plugin that enforces NetworkPolicy (e.g., Calico, Cilium, OVN-Kubernetes).
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-access
+  namespace: agents
+  labels:
+    app.kubernetes.io/part-of: k8s-agents
+spec:
+  # Apply to: the Redis pod
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: team-component
+                operator: In
+                values:
+                  - agent
+                  - lead
+      ports:
+        - protocol: TCP
+          port: 6379

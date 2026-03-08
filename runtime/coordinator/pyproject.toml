@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=45"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coordinator"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "redis[asyncio]>=5.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "fakeredis[aioredis]>=2.23",
+]
