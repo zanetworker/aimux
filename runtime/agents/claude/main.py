@@ -1,42 +1,21 @@
 import asyncio
 import os
 import signal
-import subprocess
 
 from claude_code_sdk import query, ClaudeCodeOptions, AssistantMessage
 from coordinator import AgentCoordinator
 
-WORKSPACE = "/workspace"
 ROLE = os.environ.get("ROLE", "coder")
 ALLOWED_TOOLS = os.environ.get("ALLOWED_TOOLS", "Read,Grep,Glob").split(",")
-GIT_TOKEN = os.environ.get("GIT_TOKEN", "")
-GIT_HOST = os.environ.get("GIT_HOST", "")
-
-
-def git(*args):
-    """Run a git command in /workspace. Raises CalledProcessError on failure."""
-    subprocess.run(["git"] + list(args), cwd=WORKSPACE, check=True)
-
-
-def configure_git_auth():
-    """Set remote URL with token so git push works without interactive auth."""
-    if GIT_TOKEN and GIT_HOST:
-        git("remote", "set-url", "origin", f"https://{GIT_TOKEN}@{GIT_HOST}")
 
 
 async def run_task(coord, task_id: str, task: dict) -> tuple[str, str]:
-    """Execute one task. Returns (result_summary, result_ref).
+    """Execute one task. Returns (result_summary, result_full).
 
     task dict has bytes keys and bytes values (from Redis hgetall).
     Raises on any failure — caller is responsible for calling fail_task.
     """
     prompt = task.get(b"prompt", b"").decode()
-    source_branch = task.get(b"source_branch", b"").decode()
-
-    # Pull source branch if this task depends on a prior task's file output.
-    if source_branch:
-        git("fetch", "origin", source_branch)
-        git("checkout", source_branch)
 
     # Run the LLM agent — collect text blocks from AssistantMessage only.
     result_text = ""
@@ -49,20 +28,7 @@ async def run_task(coord, task_id: str, task: dict) -> tuple[str, str]:
                 if hasattr(block, "text"):
                     result_text += block.text
 
-    result_ref = ""
-
-    # Coders commit and push their file changes to a task-specific branch.
-    if ROLE == "coder":
-        configure_git_auth()
-        branch = f"task-{task_id}"
-        git("checkout", "-b", branch)
-        git("add", "-A")
-        git("commit", "-m", f"task {task_id}: {result_text[:80]}")
-        git("push", "origin", branch)
-        result_ref = f"branch:{branch}"
-
-    # Reviewers are read-only — result_ref is empty string, not None.
-    return result_text[:500], result_ref
+    return result_text[:500], result_text
 
 
 async def main():
@@ -110,8 +76,8 @@ async def main():
         if task_id:
             task = await coord.r.hgetall(f"team:{coord.team}:task:{task_id}")
             try:
-                summary, result_ref = await run_task(coord, task_id, task)
-                await coord.complete_task(task_id, summary, result_ref=result_ref)
+                summary, result_full = await run_task(coord, task_id, task)
+                await coord.complete_task(task_id, summary, result_full=result_full)
                 await coord.send(
                     "lead",
                     f"Task {task_id} done: {summary[:200]}",

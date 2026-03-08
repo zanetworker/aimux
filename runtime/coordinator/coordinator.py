@@ -198,7 +198,6 @@ class AgentCoordinator:
         prompt: str,
         required_role: str = "",
         depends_on: list[str] | None = None,
-        source_branch: str = "",
     ) -> None:
         """Create a new task and add it to the pending work queue.
 
@@ -213,8 +212,6 @@ class AgentCoordinator:
                 "required_role": required_role,
                 "assignee": "",
                 "result_summary": "",
-                "result_ref": "",
-                "source_branch": source_branch,
                 "error": "",
                 "depends_on": json.dumps(depends_on or []),
                 "retry_count": "0",
@@ -251,24 +248,33 @@ class AgentCoordinator:
         return None
 
     async def complete_task(
-        self, task_id: str, result_summary: str, result_ref: str = ""
+        self, task_id: str, result_summary: str, result_full: str = ""
     ) -> None:
         """Mark a task as completed.
 
-        result_summary is truncated to 500 characters (coordination payload
-        only — full output lives at result_ref).
-        result_ref is a git branch name or OTEL span ID pointing to the
-        full output.
+        result_summary (truncated to 500 chars) is stored in the task hash for
+        quick status checks. result_full (unlimited) is stored in a separate
+        Redis key so dependent tasks can read the complete output.
         """
-        await self.r.hset(
+        pipe = self.r.pipeline()
+        pipe.hset(
             f"team:{self.team}:task:{task_id}",
             mapping={
                 "status": "completed",
                 "result_summary": result_summary[:500],
-                "result_ref": result_ref,
                 "completed_at": str(time.time()),
             },
         )
+        if result_full:
+            pipe.set(f"team:{self.team}:task:{task_id}:result_full", result_full)
+        await pipe.execute()
+
+    async def get_task_result_full(self, task_id: str) -> str:
+        """Fetch the full result text for a completed task, or empty string."""
+        val = await self.r.get(f"team:{self.team}:task:{task_id}:result_full")
+        if val is None:
+            return ""
+        return val.decode() if isinstance(val, bytes) else val
 
     async def fail_task(self, task_id: str, error: str) -> None:
         """Record a task failure and decide whether to retry or mark dead.
