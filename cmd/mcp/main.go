@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -20,14 +19,12 @@ import (
 )
 
 var (
-	rdb         *redis.Client
-	k8s         *kubernetes.Clientset
-	namespace   string
-	teamID      string
-	maxAgents   int
-	maxCost     float64
-	githubToken string // for cleanup_branches
-	githubRepo  string // "owner/repo"
+	rdb       *redis.Client
+	k8s       *kubernetes.Clientset
+	namespace string
+	teamID    string
+	maxAgents int
+	maxCost   float64
 )
 
 func main() {
@@ -57,19 +54,17 @@ func main() {
 	teamID = envOr("TEAM_ID", "default")
 	maxAgents, _ = strconv.Atoi(envOr("MAX_AGENTS", "20"))
 	maxCost, _ = strconv.ParseFloat(envOr("MAX_COST_USD", "100"), 64)
-	githubToken = os.Getenv("GITHUB_TOKEN")
-	githubRepo = os.Getenv("GITHUB_REPO")
 
 	s := server.NewMCPServer("k8s-agents", "1.0.0")
 	s.AddTool(spawnAgentTool(), handleSpawnAgent)
 	s.AddTool(createTaskTool(), handleCreateTask)
 	s.AddTool(listTasksTool(), handleListTasks)
 	s.AddTool(getTaskTool(), handleGetTask)
+	s.AddTool(getTaskResultTool(), handleGetTaskResult)
 	s.AddTool(listAgentsTool(), handleListAgents)
 	s.AddTool(sendMessageTool(), handleSendMessage)
 	s.AddTool(scaleDownTool(), handleScaleDown)
 	s.AddTool(getCostsTool(), handleGetCosts)
-	s.AddTool(cleanupBranchesTool(), handleCleanupBranches)
 
 	if err := server.ServeStdio(s); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
@@ -159,12 +154,10 @@ func createTaskTool() mcp.Tool {
 	return mcp.NewTool("create_task",
 		mcp.WithDescription("Create a task for K8s agents to work on. Goes into a Redis queue. "+
 			"Agents matching required_role pick it up automatically. "+
-			"Use depends_on to chain tasks. "+
-			"Use source_branch when this task should start from a prior task's git output."),
+			"Use depends_on to chain tasks sequentially."),
 		mcp.WithString("prompt", mcp.Required(), mcp.Description("Task instructions for the agent")),
 		mcp.WithString("required_role", mcp.Description("Only agents with this role can claim it")),
 		mcp.WithString("depends_on", mcp.Description("Comma-separated task IDs that must complete first")),
-		mcp.WithString("source_branch", mcp.Description("Git branch to pull before starting (e.g. 'task-a3f2bc'). Use when this task depends on file output from a prior task.")),
 	)
 }
 
@@ -175,7 +168,6 @@ func handleCreateTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 	}
 	role := req.GetString("required_role", "")
 	depsStr := req.GetString("depends_on", "")
-	sourceBranch := req.GetString("source_branch", "")
 
 	taskID := uuid.New().String()[:8]
 	deps := "[]"
@@ -195,9 +187,7 @@ func handleCreateTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 		"required_role":  role,
 		"assignee":       "",
 		"depends_on":     deps,
-		"source_branch":  sourceBranch,
 		"result_summary": "",
-		"result_ref":     "",
 		"error":          "",
 		"retry_count":    "0",
 		"created_at":     fmt.Sprintf("%d", now),
@@ -209,20 +199,10 @@ func handleCreateTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 	}
 
 	score := float64(now)
-
-	// Write to tasks:pending so agents can claim it
-	if err := rdb.ZAdd(ctx, teamKey("tasks:pending"), redis.Z{
-		Score:  score,
-		Member: taskID,
-	}).Err(); err != nil {
+	if err := rdb.ZAdd(ctx, teamKey("tasks:pending"), redis.Z{Score: score, Member: taskID}).Err(); err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf("Error writing to tasks:pending: %v", err)), nil
 	}
-
-	// Write to tasks:all so list_tasks has ordered results without SCAN
-	if err := rdb.ZAdd(ctx, teamKey("tasks:all"), redis.Z{
-		Score:  score,
-		Member: taskID,
-	}).Err(); err != nil {
+	if err := rdb.ZAdd(ctx, teamKey("tasks:all"), redis.Z{Score: score, Member: taskID}).Err(); err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf("Error writing to tasks:all: %v", err)), nil
 	}
 
@@ -230,11 +210,7 @@ func handleCreateTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 	if role != "" {
 		label = role
 	}
-	msg := fmt.Sprintf("Task %s created (role=%s)", taskID, label)
-	if sourceBranch != "" {
-		msg += fmt.Sprintf(", source_branch=%s", sourceBranch)
-	}
-	return mcp.NewToolResultText(msg), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Task %s created (role=%s)", taskID, label)), nil
 }
 
 func listTasksTool() mcp.Tool {
@@ -492,82 +468,24 @@ func handleGetCosts(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTool
 	return mcp.NewToolResultText(joinLines(lines)), nil
 }
 
-func cleanupBranchesTool() mcp.Tool {
-	return mcp.NewTool("cleanup_branches",
-		mcp.WithDescription("Delete task branches from GitHub after work is complete. "+
-			"Call after scale_down when you no longer need the agents' file output. "+
-			"Only deletes branches named task-{id}. Never touches main or feature branches."),
-		mcp.WithString("task_ids", mcp.Required(),
-			mcp.Description("Comma-separated task IDs whose branches should be deleted (e.g. 'a3f2bc,b7d1ef')")),
+func getTaskResultTool() mcp.Tool {
+	return mcp.NewTool("get_task_result",
+		mcp.WithDescription("Get the full result text of a completed task. "+
+			"get_task returns only a 500-char summary; use this to read the complete output."),
+		mcp.WithString("task_id", mcp.Required(), mcp.Description("Task ID to fetch full result for")),
 	)
 }
 
-func handleCleanupBranches(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if githubToken == "" || githubRepo == "" {
-		return mcp.NewToolResultText("Error: GITHUB_TOKEN and GITHUB_REPO must be set for branch cleanup"), nil
-	}
-
-	taskIDsRaw, err := req.RequireString("task_ids")
+func handleGetTaskResult(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	taskID, err := req.RequireString("task_id")
 	if err != nil {
-		return mcp.NewToolResultText("Error: task_ids is required"), nil
+		return mcp.NewToolResultText("Error: task_id is required"), nil
 	}
-	ids := splitComma(taskIDsRaw)
-	var deleted, skipped []string
-
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		branch := "task-" + id
-
-		// Check if branch exists before trying to delete (404 = skip)
-		checkURL := fmt.Sprintf("https://api.github.com/repos/%s/git/ref/heads/%s", githubRepo, branch)
-		checkReq, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
-		if err != nil {
-			skipped = append(skipped, branch+" (request build failed)")
-			continue
-		}
-		checkReq.Header.Set("Authorization", "Bearer "+githubToken)
-		checkReq.Header.Set("Accept", "application/vnd.github+json")
-		resp, err := http.DefaultClient.Do(checkReq)
-		if err != nil {
-			skipped = append(skipped, branch+" (check failed)")
-			continue
-		}
-		resp.Body.Close()
-		if resp.StatusCode == 404 {
-			skipped = append(skipped, branch+" (not found)")
-			continue
-		}
-
-		// Delete the branch — GitHub returns 204 on success
-		delURL := fmt.Sprintf("https://api.github.com/repos/%s/git/refs/heads/%s", githubRepo, branch)
-		delReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, delURL, nil)
-		if err != nil {
-			skipped = append(skipped, branch+" (request build failed)")
-			continue
-		}
-		delReq.Header.Set("Authorization", "Bearer "+githubToken)
-		delReq.Header.Set("Accept", "application/vnd.github+json")
-		delResp, err := http.DefaultClient.Do(delReq)
-		if err != nil {
-			skipped = append(skipped, branch+" (delete failed)")
-			continue
-		}
-		delResp.Body.Close()
-		if delResp.StatusCode != 204 {
-			skipped = append(skipped, fmt.Sprintf("%s (delete returned %d)", branch, delResp.StatusCode))
-			continue
-		}
-		deleted = append(deleted, branch)
+	val, err := rdb.Get(ctx, teamKey("task:"+taskID+":result_full")).Result()
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf("No full result stored for task %s", taskID)), nil
 	}
-
-	return mcp.NewToolResultText(fmt.Sprintf(
-		"Deleted: %s\nSkipped: %s",
-		strings.Join(deleted, ", "),
-		strings.Join(skipped, ", "),
-	)), nil
+	return mcp.NewToolResultText(val), nil
 }
 
 // --- Helpers ---

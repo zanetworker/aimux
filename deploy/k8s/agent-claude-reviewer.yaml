@@ -1,18 +1,7 @@
 # Claude Reviewer agent Deployment.
-# replicas: 0 — scale-to-zero by default. The MCP server's spawn_agent tool scales
-# this up when Claude needs a reviewer. Agents are long-lived task loops (not Jobs).
-#
-# Reviewer role: read-only access to the codebase. ALLOWED_TOOLS restricts to
-# Read, Grep, Glob — no Edit, Write, or Bash. Lighter model (claude-sonnet-4-6)
-# and reduced resource footprint vs. coder.
-#
-# Workspace lifecycle:
-#   initContainer (alpine/git): clones repo via HTTPS token auth into emptyDir /workspace
-#   main container (agent):     reads code in /workspace, writes review output to Redis
-#   Both containers share the workspace emptyDir volume.
-#
-# Same image (quay.io/azaalouk/agent-claude:latest) as the coder — role is env-driven.
-
+# replicas: 0 — scale-to-zero. spawn_agent MCP tool scales up on demand.
+# Results stored in Redis — no git workflow, no workspace volume.
+# Same image as coder — role driven by ROLE + ALLOWED_TOOLS env vars.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -26,7 +15,6 @@ metadata:
     role: reviewer
     app.kubernetes.io/part-of: k8s-agents
 spec:
-  # Scale-to-zero: Claude MCP spawn_agent tool increments replicas to activate.
   replicas: 0
   selector:
     matchLabels:
@@ -41,34 +29,10 @@ spec:
         app.kubernetes.io/part-of: k8s-agents
     spec:
       serviceAccountName: mcp-server
-      initContainers:
-        - name: clone-repo
-          image: alpine/git
-          # HTTPS token auth: token embedded in URL so no SSH key needed.
-          # repo-secret holds two keys: token (GitHub PAT) and host (no https:// prefix).
-          command:
-            - sh
-            - -c
-            - git clone https://$(GIT_TOKEN)@$(GIT_HOST) /workspace
-          env:
-            - name: GIT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: repo-secret
-                  key: token
-            - name: GIT_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: repo-secret
-                  key: host
-          volumeMounts:
-            - name: workspace
-              mountPath: /workspace
       containers:
         - name: agent
           image: quay.io/azaalouk/agent-claude:latest
           env:
-            # REDIS_PASSWORD is resolved first so REDIS_URL can reference it via $(REDIS_PASSWORD).
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -78,7 +42,6 @@ spec:
               value: "redis://:$(REDIS_PASSWORD)@redis:6379"
             - name: TEAM_ID
               value: "my-team"
-            # AGENT_ID is set from the pod name so each replica has a unique identity.
             - name: AGENT_ID
               valueFrom:
                 fieldRef:
@@ -89,7 +52,6 @@ spec:
               value: "reviewer"
             - name: MODEL
               value: "claude-sonnet-4-6"
-            # Reviewers are read-only: no Edit, Write, or Bash.
             - name: ALLOWED_TOOLS
               value: "Read,Grep,Glob"
             - name: ANTHROPIC_API_KEY
@@ -97,16 +59,6 @@ spec:
                 secretKeyRef:
                   name: llm-keys
                   key: anthropic
-            - name: GIT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: repo-secret
-                  key: token
-            - name: GIT_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: repo-secret
-                  key: host
           resources:
             requests:
               memory: "1Gi"
@@ -114,10 +66,3 @@ spec:
             limits:
               memory: "2Gi"
               cpu: "1000m"
-          volumeMounts:
-            - name: workspace
-              mountPath: /workspace
-      volumes:
-        - name: workspace
-          emptyDir:
-            sizeLimit: 2Gi
