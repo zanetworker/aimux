@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/evaluation"
@@ -122,7 +123,8 @@ type App struct {
 	evalSessionID  string
 
 	// Config
-	cfg config.Config
+	cfg  config.Config
+	ctrl *controller.Controller
 
 	// OTEL receiver (optional)
 	otelReceiver    *aimuxotel.Receiver
@@ -133,6 +135,7 @@ type App struct {
 // NewApp creates a new root TUI application.
 func NewApp() App {
 	cfg, _ := config.Load(config.DefaultPath())
+	ctrl := controller.New(cfg)
 
 	allProviders := []provider.Provider{
 		&provider.Claude{},
@@ -179,6 +182,7 @@ func NewApp() App {
 		breadcrumbs:  []string{"Agents"},
 		hiddenAgents: make(map[string]bool),
 		cfg:          cfg,
+		ctrl:         ctrl,
 		otelStore:    aimuxotel.NewSpanStore(),
 	}
 
@@ -1172,68 +1176,20 @@ func (a App) handleJump() (tea.Model, tea.Cmd) {
 }
 
 func (a App) exportTrace() (tea.Model, tea.Cmd) {
-	// Get turns from whichever trace view is active (standalone or split)
-	turns := a.activeTraceTurns()
-	sessionID := a.activeTraceSessionID()
-	if len(turns) == 0 || sessionID == "" {
+	ctx := a.buildExportContext()
+	if ctx.SessionID == "" || len(ctx.Turns) == 0 {
 		a.statusHint = "Open a trace first (l on an agent or Enter for split view), then :export"
 		return a, nil
 	}
-	var exportTurns []evaluation.ExportTurn
-	for _, t := range turns {
-		et := evaluation.ExportTurn{
-			Turn:      t.Number,
-			Timestamp: t.Timestamp.Format(time.RFC3339),
-			Input:     strings.Join(t.UserLines, "\n"),
-			Output:    strings.Join(t.OutputLines, "\n"),
-			TokensIn:  t.TokensIn,
-			TokensOut: t.TokensOut,
-			CostUSD:   t.CostUSD,
-		}
-		if dur := t.Duration(); dur > 0 {
-			et.DurationMs = dur.Milliseconds()
-		}
-		for _, action := range t.Actions {
-			et.Actions = append(et.Actions, evaluation.ExportAction{
-				Tool:    action.Name,
-				Input:   action.Snippet,
-				Success: action.Success,
-				Error:   action.ErrorMsg,
-			})
-		}
-		// Include annotations
-		if a.evalStore != nil {
-			if ann := a.evalStore.GetForTurn(t.Number); ann != nil {
-				et.Label = ann.Label
-				et.Note = ann.Note
-			}
-		}
-		exportTurns = append(exportTurns, et)
-	}
 
-	// Load session-level metadata for export
-	var sessionMeta *evaluation.ExportSessionMeta
-	if filePath := a.activeTraceFilePath(); filePath != "" {
-		meta := history.LoadMeta(filePath)
-		if meta.Annotation != "" || len(meta.Tags) > 0 || meta.Note != "" || meta.Title != "" {
-			sessionMeta = &evaluation.ExportSessionMeta{
-				SessionID:    sessionID,
-				Annotation:   meta.Annotation,
-				FailureModes: meta.Tags,
-				Note:         meta.Note,
-				Title:        meta.Title,
-			}
-		}
-	}
-
-	path := evaluation.ExportPath(sessionID)
-	if err := evaluation.WriteExport(path, exportTurns, sessionMeta); err != nil {
+	result, err := a.ctrl.ExportJSONL(ctx)
+	if err != nil {
 		a.statusHint = fmt.Sprintf("Export failed: %v", err)
 		a.stickyHint = true
 		return a, nil
 	}
 
-	a.statusHint = fmt.Sprintf("Exported %d turns to %s (press any key to dismiss)", len(exportTurns), path)
+	a.statusHint = fmt.Sprintf("Exported %d turns to %s (press any key to dismiss)", result.Count, result.Path)
 	a.stickyHint = true
 	return a, nil
 }
@@ -1241,53 +1197,20 @@ func (a App) exportTrace() (tea.Model, tea.Cmd) {
 // exportOTEL sends the current trace + annotations as OTLP/HTTP spans to
 // the configured export endpoint (e.g., MLflow, Jaeger).
 func (a App) exportOTEL() (tea.Model, tea.Cmd) {
-	turns := a.activeTraceTurns()
-	sessionID := a.activeTraceSessionID()
-	if len(turns) == 0 || sessionID == "" {
+	ctx := a.buildExportContext()
+	if ctx.SessionID == "" || len(ctx.Turns) == 0 {
 		a.statusHint = "Open a trace first (l on an agent or Enter for split view), then :export-otel"
 		return a, nil
 	}
 
-	endpoint := a.cfg.Export.Endpoint
-	if endpoint == "" {
-		a.statusHint = "Set export.endpoint in ~/.aimux/config.yaml first"
-		return a, nil
-	}
-
-	// Determine provider name from the current agent context
-	providerName := ""
-	selected := a.agentsView.Selected()
-	if selected != nil {
-		providerName = selected.ProviderName
-	}
-	if providerName == "" && a.sessionView != nil && a.sessionView.Agent() != nil {
-		providerName = a.sessionView.Agent().ProviderName
-	}
-
-	cfg := aimuxotel.ExportConfig{
-		Endpoint:     endpoint,
-		Insecure:     a.cfg.Export.Insecure,
-		SessionID:    sessionID,
-		Provider:     providerName,
-		ExperimentID: a.cfg.Export.MLflow.ExperimentID,
-		Headers:      a.cfg.Export.Headers,
-	}
-
-	// Load session-level metadata for OTEL export
-	if filePath := a.activeTraceFilePath(); filePath != "" {
-		meta := history.LoadMeta(filePath)
-		cfg.Annotation = meta.Annotation
-		cfg.FailureModes = meta.Tags
-		cfg.Note = meta.Note
-	}
-
-	if err := aimuxotel.ExportTrace(cfg, turns, a.evalStore); err != nil {
+	result, err := a.ctrl.ExportOTEL(ctx)
+	if err != nil {
 		a.statusHint = fmt.Sprintf("OTEL export failed: %v", err)
 		a.stickyHint = true
 		return a, nil
 	}
 
-	a.statusHint = fmt.Sprintf("Exported %d turns to http://%s (press any key to dismiss)", len(turns), endpoint)
+	a.statusHint = fmt.Sprintf("Exported %d turns to %s (press any key to dismiss)", result.Count, result.Path)
 	a.stickyHint = true
 	return a, nil
 }
@@ -2029,6 +1952,27 @@ func (a App) activeTraceTurns() []trace.Turn {
 		return a.splitTrace.Turns()
 	}
 	return nil
+}
+
+// buildExportContext assembles an ExportContext from the current TUI state.
+// This is the bridge between TUI-specific state and UI-agnostic controller logic.
+func (a App) buildExportContext() controller.ExportContext {
+	turns := a.activeTraceTurns()
+	providerName := ""
+	if selected := a.agentsView.Selected(); selected != nil {
+		providerName = selected.ProviderName
+	}
+	if providerName == "" && a.sessionView != nil && a.sessionView.Agent() != nil {
+		providerName = a.sessionView.Agent().ProviderName
+	}
+
+	return controller.ExportContext{
+		SessionID:    a.activeTraceSessionID(),
+		SessionFile:  a.activeTraceFilePath(),
+		ProviderName: providerName,
+		Turns:        controller.TurnsToInputs(turns),
+		EvalStore:    a.evalStore,
+	}
 }
 
 // activeTraceFilePath returns the session file path for the active trace context.
