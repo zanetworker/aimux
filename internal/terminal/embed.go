@@ -71,7 +71,10 @@ func (s *Session) Resize(cols, rows int) error {
 // Sequences: disable CSI u mode, disable bracketed paste, disable focus
 // reporting, disable mouse reporting, reset character set, show cursor.
 var termResetSeq = []byte(
-	"\x1b[?2004l" + // disable bracketed paste
+	"\x1b[<u" + // pop kitty keyboard protocol mode (CSI u)
+		"\x1b[<u" + // pop again (in case multiple levels were pushed)
+		"\x1b[<u" + // pop a third time for safety
+		"\x1b[?2004l" + // disable bracketed paste
 		"\x1b[?1004l" + // disable focus reporting
 		"\x1b[?1000l" + // disable mouse click reporting
 		"\x1b[?1002l" + // disable mouse drag reporting
@@ -79,8 +82,7 @@ var termResetSeq = []byte(
 		"\x1b[?1006l" + // disable SGR mouse mode
 		"\x1b[?25h" + // show cursor
 		"\x1b[?1049l" + // exit alternate screen
-		"\x1b>" + // reset character set (DECKPNM)
-		"\x1b[?u", // disable CSI u key reporting (kitty protocol)
+		"\x1b>", // reset character set (DECKPNM)
 )
 
 // Close terminates the PTY session. It sends terminal reset sequences to
