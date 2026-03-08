@@ -64,10 +64,29 @@ func (s *Session) Resize(cols, rows int) error {
 	})
 }
 
-// Close terminates the PTY session. It closes the PTY file descriptor and
-// signals the process to exit, but does not block waiting for the process to
-// finish. Cleanup runs in a background goroutine so the TUI returns
-// immediately. It is safe to call multiple times.
+// termResetSeq restores standard terminal modes that the subprocess may have
+// changed. This prevents terminal corruption when the subprocess is killed
+// without getting a chance to clean up.
+//
+// Sequences: disable CSI u mode, disable bracketed paste, disable focus
+// reporting, disable mouse reporting, reset character set, show cursor.
+var termResetSeq = []byte(
+	"\x1b[?2004l" + // disable bracketed paste
+		"\x1b[?1004l" + // disable focus reporting
+		"\x1b[?1000l" + // disable mouse click reporting
+		"\x1b[?1002l" + // disable mouse drag reporting
+		"\x1b[?1003l" + // disable mouse all-motion reporting
+		"\x1b[?1006l" + // disable SGR mouse mode
+		"\x1b[?25h" + // show cursor
+		"\x1b[?1049l" + // exit alternate screen
+		"\x1b>" + // reset character set (DECKPNM)
+		"\x1b[?u", // disable CSI u key reporting (kitty protocol)
+)
+
+// Close terminates the PTY session. It sends terminal reset sequences to
+// restore standard modes, then closes the PTY file descriptor and signals
+// the process to exit. Cleanup runs in a background goroutine so the TUI
+// returns immediately. It is safe to call multiple times.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,6 +94,10 @@ func (s *Session) Close() error {
 		return nil
 	}
 	s.closed = true
+
+	// Write reset sequences before closing to prevent terminal corruption
+	_, _ = s.ptmx.Write(termResetSeq)
+
 	_ = s.ptmx.Close()
 	cmd := s.cmd
 	go func() {
