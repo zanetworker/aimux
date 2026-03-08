@@ -1,0 +1,32 @@
+FROM registry.access.redhat.com/ubi9/python-312
+
+# Install system packages as root
+USER root
+
+RUN dnf install -y nodejs npm git --setopt=install_weak_deps=0 && \
+    dnf clean all
+
+# Install Claude Code CLI (the subprocess that claude-code-sdk drives)
+RUN npm install -g @anthropic-ai/claude-code
+
+# Allow git in /workspace when running as non-root uid 1001 (OpenShift default)
+RUN git config --system --add safe.directory /workspace
+
+# Copy coordinator and agent — UBI9 python-312 workdir is /opt/app-root/src
+COPY coordinator/ /opt/app-root/src/coordinator/
+COPY agents/claude/ /opt/app-root/src/agent/
+
+# Give uid 1001 (OpenShift default) ownership of the app directory
+RUN chown -R 1001:0 /opt/app-root/src/
+
+# Drop back to non-root before installing Python deps
+USER 1001
+
+RUN pip install --no-cache-dir -e /opt/app-root/src/coordinator/ && \
+    pip install --no-cache-dir claude-code-sdk redis
+
+CMD ["python", "/opt/app-root/src/agent/main.py"]
+# Role behaviour controlled entirely by env vars:
+#   ROLE=coder       ALLOWED_TOOLS=Read,Edit,Write,Bash,Grep,Glob
+#   ROLE=reviewer    ALLOWED_TOOLS=Read,Grep,Glob
+#   ROLE=researcher  ALLOWED_TOOLS=Read,Grep,Glob,WebSearch,WebFetch

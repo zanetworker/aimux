@@ -1,0 +1,49 @@
+# RBAC for the k8s-agents system.
+# The mcp-server ServiceAccount is used by agent pods and the MCP server to scale
+# Deployments via the K8s API (spawn_agent and scale_down MCP tools call get+update
+# on Deployments in the agents namespace).
+# When running the MCP server locally (not in-cluster), kubeconfig credentials are
+# used instead — the ServiceAccount is only active for in-cluster operation.
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-server
+  namespace: agents
+  labels:
+    app.kubernetes.io/part-of: k8s-agents
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployment-scaler
+  namespace: agents
+  labels:
+    app.kubernetes.io/part-of: k8s-agents
+rules:
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - update
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mcp-server-scaler
+  namespace: agents
+  labels:
+    app.kubernetes.io/part-of: k8s-agents
+subjects:
+  - kind: ServiceAccount
+    name: mcp-server
+    namespace: agents
+roleRef:
+  kind: Role
+  name: deployment-scaler
+  apiGroup: rbac.authorization.k8s.io

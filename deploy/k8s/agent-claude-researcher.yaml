@@ -1,0 +1,112 @@
+# Claude Researcher agent Deployment.
+# replicas: 0 — scale-to-zero by default. The MCP server's spawn_agent tool scales
+# this up when Claude needs a researcher. Agents are long-lived task loops (not Jobs).
+#
+# Researcher role: read + web access. ALLOWED_TOOLS includes WebSearch and WebFetch.
+# Uses claude-haiku-4-5 (cheap, fast) since research tasks are high-volume/low-cost.
+# Lighter resource footprint than coder.
+#
+# Same image (quay.io/azaalouk/agent-claude:latest) as the coder — role is env-driven.
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-claude-researcher
+  namespace: agents
+  labels:
+    app: agent-claude-researcher
+    team-component: agent
+    provider: claude
+    role: researcher
+    app.kubernetes.io/part-of: k8s-agents
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: agent-claude-researcher
+  template:
+    metadata:
+      labels:
+        app: agent-claude-researcher
+        team-component: agent
+        provider: claude
+        role: researcher
+        app.kubernetes.io/part-of: k8s-agents
+    spec:
+      serviceAccountName: mcp-server
+      initContainers:
+        - name: clone-repo
+          image: alpine/git
+          command:
+            - sh
+            - -c
+            - git clone https://$(GIT_TOKEN)@$(GIT_HOST) /workspace
+          env:
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: token
+            - name: GIT_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: host
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      containers:
+        - name: agent
+          image: quay.io/azaalouk/agent-claude:latest
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis:6379"
+            - name: TEAM_ID
+              value: "my-team"
+            - name: AGENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: PROVIDER
+              value: "claude"
+            - name: ROLE
+              value: "researcher"
+            - name: MODEL
+              value: "claude-haiku-4-5-20251001"
+            - name: ALLOWED_TOOLS
+              value: "Read,Grep,Glob,WebSearch,WebFetch"
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-keys
+                  key: anthropic
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: token
+            - name: GIT_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: host
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 2Gi

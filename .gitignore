@@ -5,3 +5,6 @@
 .claude/
 dist/
 docs/plans/
+bin/
+runtime/**/__pycache__/
+runtime/**/*.pyc
