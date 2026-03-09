@@ -65,15 +65,20 @@ Pressing `n` or `:new` opens a tiny picker:
 
 Sessions have three distinct modes that differ in where the brain runs and what compute it uses for agents:
 
-| Mode | Brain | Agent arms | Context hint + hook |
-|---|---|---|---|
-| **Local** | Laptop | Local subprocesses (Agent tool) | No |
-| **Local + K8s arms** | Laptop | K8s pods via MCP tools | **Yes** |
-| **Remote (pod)** | K8s pod | Local or K8s (Claude decides) | No |
+| Mode | Brain | Agent arms | Context hint + hook | Resume existing |
+|---|---|---|---|---|
+| **Local** | Laptop | Local subprocesses (Agent tool) | No | Yes |
+| **Local + K8s arms** | Laptop | K8s coordinator pods via MCP | **Yes** | Yes |
+| **Remote (pod)** | K8s pod | Configurable — none, local, or K8s* | Optional* | Yes (existing pod) |
 
-**Local + K8s arms** is the "extend Claude's reach" mode — you stay in your local session but Claude spawns K8s pods when it needs parallel compute. The context hint tells Claude K8s agents are available. The hook steers Claude away from local `Agent(team_name=...)` calls toward `spawn_agent`/`create_task` MCP tools.
+**Local + K8s arms** is the "extend Claude's reach" mode — the brain stays on your laptop but Claude spawns K8s pods when it needs parallel compute. The context hint tells Claude K8s agents are available. The hook steers Claude away from local `Agent(team_name=...)` calls toward `spawn_agent`/`create_task` MCP tools.
 
-**Remote (pod)** runs Claude Code itself on K8s. No hint/hook needed — the pod has no local agent spawning capability anyway.
+**Remote (pod)** runs full Claude Code on K8s. It is identical to a local session capability-wise — same Claude Code binary, same tools. Two sub-configurations depending on how the pod is deployed:
+
+- **Standalone brain**: pod works on a project by itself (Read/Edit/Bash etc.), no K8s arms. Good for long-running autonomous work you don't want on your laptop.
+- **Remote brain + K8s arms**: pod additionally has the k8s-agents MCP server configured in its `~/.claude/settings.json`. Claude can then call `spawn_agent` → spawns coordinator pods as arms. Fully autonomous: brain and arms all in K8s, your laptop just observes via aimux. This is a deployment configuration choice, not a launcher choice.
+
+**Resume**: all three modes support resuming an existing session. For Remote, aimux checks if a Claude Code pod is already running for the selected directory (matched by git remote URL) before scaling up a new one.
 
 ### 5.2 Flow
 
@@ -106,10 +111,12 @@ Advanced options (model/mode/runtime/OTEL) via `o`, not shown by default.
 - The git remote URL of the directory is passed as context so Claude can tell K8s agents which repo to clone
 
 **Remote (pod)**:
-- Scales up a `MODE=session` Claude Code pod in K8s
-- aimux attaches via `kubectl exec` + tmux using `KubectlExecBackend`
-- The directory maps to a git remote URL — passed as context so Claude knows which repo to clone
-- No hint/hook needed — the pod has no local subagent spawning capability
+1. Check if a `MODE=session` pod already exists for this repo URL (resume case) — if yes, skip to step 3
+2. Scale up a `MODE=session` Claude Code pod, wait for Redis heartbeat
+3. aimux attaches via `kubectl exec` + tmux using `KubectlExecBackend`
+4. The git remote URL of the directory is passed as context so Claude knows which repo to clone
+
+The pod runs full Claude Code. Whether it can spawn K8s arms depends on whether the k8s-agents MCP server is configured in the pod's image/deployment — this is a deployment concern, not a launcher concern. aimux does not inject hints or hooks into the remote pod; the pod's configuration determines its capabilities.
 
 ### 5.4 Split pane for remote pod sessions
 
@@ -135,8 +142,9 @@ The TUI does not know it is talking to a remote pod vs a local process. All exis
 - `app.go` `handleLaunch()`:
   - `"local"` → existing path, unchanged
   - `"local+k8s"` → existing path + inject context hint + activate hook
-  - `"remote"` → scale up `MODE=session` pod, wait for Redis heartbeat, attach via `KubectlExecBackend`
-- `Local+K8s` option hidden when `!cfg.Kubernetes.Enabled`
+  - `"remote"` → check for existing pod (by repo URL) → resume or scale up → attach via `KubectlExecBackend`
+- `Local+K8s` and `Remote` options hidden when `!cfg.Kubernetes.Enabled`
+- `Remote` pod capabilities (standalone vs brain+arms) are deployment configuration — separate from the launcher
 
 ## 6. Task launcher (new)
 
