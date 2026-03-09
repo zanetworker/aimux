@@ -11,28 +11,37 @@ aimux observes AI agents running on a single machine. Claude Code coordinates ag
 
 **Goal**: Run 5-20 AI coding agents as Kubernetes pods, coordinating across nodes. Support multiple LLM providers (Claude, Codex, Gemini) in the same team. Extend aimux as the control plane for both local and remote agents.
 
-## 2. Two modes: local and remote
+## 2. Session and task modes
 
-The system has two independent modes that coexist. They don't interact.
+The system supports four modes selected explicitly from aimux's `:new` launcher. All modes coexist and are visible in aimux simultaneously.
 
 ```
-LOCAL (unchanged, works today)                REMOTE (new, K8s)
-─────────────────────────────                 ──────────────────
-Claude Code CLI                               Claude Code CLI + MCP server
-Built-in tools: Agent, TaskCreate,            MCP tools: spawn_agent, create_task,
-  TaskList, TaskUpdate, SendMessage             list_tasks, send_message, scale_down
-Spawns via: tmux / in-process                 Spawns via: K8s API (scale Deployment)
-Coordinates via: filesystem                   Coordinates via: Redis
-  ~/.claude/teams/  ~/.claude/tasks/            team:{id}:inbox:*  team:{id}:task:*
-aimux discovers via: process scanning         aimux discovers via: Redis + K8s API
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  MODE              │  BRAIN         │  ARMS                  │  COORDINATES VIA │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  Local session     │  Laptop        │  Local processes       │  Filesystem      │
+│                    │  Claude Code   │  (built-in Agent tool) │  ~/.claude/tasks │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  Local + K8s arms  │  Laptop        │  K8s coordinator pods  │  Redis           │
+│                    │  Claude Code   │  (MCP spawn_agent)     │  team:{id}:*     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  Remote session    │  K8s pod       │  Configurable*         │  Redis + OTEL    │
+│                    │  Claude Code   │  (pod deployment cfg)  │  kubectl exec    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  Remote task       │  None          │  K8s coordinator pod   │  Redis           │
+│                    │  (fire+forget) │  (Python coordinator)  │  team:{id}:*     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+* Remote pod can optionally have k8s-agents MCP server configured → brain spawns its own arms
 ```
 
-**The user decides which mode** by how they talk to Claude:
+**The user picks the mode explicitly** from the aimux launcher (`:new`), not by how they phrase a request to Claude. This removes ambiguity and makes the infrastructure choice deliberate.
 
-- "Create a team to review this PR" → Claude uses built-in Agent tool → local
-- "Spawn K8s agents to refactor the API" → Claude uses MCP tools → remote
+- **Local session**: unchanged from today. Claude Code on laptop, built-in Agent/Task tools, filesystem coordination.
+- **Local + K8s arms**: Claude Code on laptop with context hint injected — Claude knows it has K8s agents available via `spawn_agent`/`create_task`. Hook steers `Agent(team_name=...)` calls toward MCP tools. No pods pre-launched; Claude scales on demand.
+- **Remote session**: Full Claude Code runs in a K8s pod. aimux attaches via `kubectl exec` + tmux for split-pane access. Same trace/cost visibility as local. Pod capabilities (standalone vs brain+arms) depend on its deployment configuration.
+- **Remote task**: Fire-and-forget. No interactive session. One Python coordinator pod picks up the task from Redis, runs it, stores results. Visible in the Tasks view.
 
-Claude doesn't need special logic to choose. If you mention K8s/cluster/remote, it reaches for the MCP tools. If you just say "team", it uses the built-ins. Both can run simultaneously. aimux shows both in the same table with a LOCATION column (`local` vs `k8s/agents`).
+aimux discovers and shows all four in a single unified table with a `LOC` column (`local` vs `k8s`).
 
 ### 2.1 How Claude Code teams work locally (reference)
 
