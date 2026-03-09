@@ -61,57 +61,82 @@ Pressing `n` or `:new` opens a tiny picker:
 
 ## 5. Session launcher (redesigned)
 
-### 5.1 Flow
+### 5.1 Three session modes
 
-Same fields for local and remote — Where is a toggle, not a branch:
+Sessions have three distinct modes that differ in where the brain runs and what compute it uses for agents:
+
+| Mode | Brain | Agent arms | Context hint + hook |
+|---|---|---|---|
+| **Local** | Laptop | Local subprocesses (Agent tool) | No |
+| **Local + K8s arms** | Laptop | K8s pods via MCP tools | **Yes** |
+| **Remote (pod)** | K8s pod | Local or K8s (Claude decides) | No |
+
+**Local + K8s arms** is the "extend Claude's reach" mode — you stay in your local session but Claude spawns K8s pods when it needs parallel compute. The context hint tells Claude K8s agents are available. The hook steers Claude away from local `Agent(team_name=...)` calls toward `spawn_agent`/`create_task` MCP tools.
+
+**Remote (pod)** runs Claude Code itself on K8s. No hint/hook needed — the pod has no local agent spawning capability anyway.
+
+### 5.2 Flow
+
+Three-way Where toggle, same fields throughout:
 
 ```
-╭─ New Session ──────────────────────────────╮
-│                                            │
-│  Where:     [ Local ]  [ Remote ]          │
-│  Provider:  ▸ claude   codex   gemini      │
-│  Directory: ▸ aimux    zanetworker   2m    │
-│             blog-concept  zanetworker  1h  │
-│                                            │
-│  ↵ Launch                                  │
-╰────────────────────────────────────────────╯
+╭─ New Session ────────────────────────────────────────╮
+│                                                      │
+│  Where:  [ Local ]  [ Local+K8s ]  [ Remote (pod) ]  │
+│  Provider:  ▸ claude   codex   gemini                │
+│  Directory: ▸ aimux    zanetworker   2m              │
+│             blog-concept  zanetworker  1h            │
+│                                                      │
+│  ↵ Launch                                            │
+╰──────────────────────────────────────────────────────╯
 ```
 
+`Local+K8s` only shown if `kubernetes.enabled: true` in config — invisible otherwise.
 Advanced options (model/mode/runtime/OTEL) via `o`, not shown by default.
 
-### 5.2 What Launch does
+### 5.3 What each mode does on Launch
 
-**Local**: identical to today — spawns local Claude/Codex/Gemini process in the selected directory.
+**Local**: identical to today — spawns local Claude/Codex/Gemini process in the selected directory. No change.
 
-**Remote**: spawns a **Claude Code pod** on K8s (`MODE=session`):
-- Pod starts Claude Code inside a tmux session
-- aimux attaches via `kubectl exec` using the existing `TmuxBackend` interface
-- The directory maps to a git remote URL (`git remote get-url origin`) — passed as context so Claude knows which repo to clone
-- No K8s pods are pre-launched for the brain. Claude decides to spawn task coordinator pods if it needs parallel arms via the MCP `spawn_agent` tool
+**Local + K8s arms**:
+- Spawns local Claude process in the selected directory (same as Local)
+- Injects context hint: Claude is informed K8s agents are available via `spawn_agent` and `create_task`
+- Activates the hook: `Agent(team_name=...)` is intercepted and steered toward MCP tools
+- Claude decides when to call `spawn_agent` based on task complexity — no pods pre-launched
+- The git remote URL of the directory is passed as context so Claude can tell K8s agents which repo to clone
 
-### 5.3 Split pane for remote sessions
+**Remote (pod)**:
+- Scales up a `MODE=session` Claude Code pod in K8s
+- aimux attaches via `kubectl exec` + tmux using `KubectlExecBackend`
+- The directory maps to a git remote URL — passed as context so Claude knows which repo to clone
+- No hint/hook needed — the pod has no local subagent spawning capability
+
+### 5.4 Split pane for remote pod sessions
 
 Remote Claude Code sessions use a new `KubectlExecBackend` implementing the existing `terminal.SessionBackend` interface:
 
 ```go
 // internal/terminal/kubectl.go
 type KubectlExecBackend struct {
-    namespace string
-    podName   string
+    namespace   string
+    podName     string
     tmuxSession string
 }
 // implements Read/Write/Resize/Close/Alive
 // wraps: kubectl exec -it <pod> -n <ns> -- tmux attach -t claude
 ```
 
-This reuses all existing TUI split-pane rendering. The TUI does not know it is talking to a remote pod vs a local process.
+The TUI does not know it is talking to a remote pod vs a local process. All existing split-pane rendering is reused unchanged.
 
-### 5.4 Implementation changes
+### 5.5 Implementation changes
 
-- Add `Where` toggle to existing launcher (Tab to switch, same fields)
-- Add `Remote bool`, `RepoURL string` to `LaunchMsg`
-- `app.go` `handleLaunch()`: if `Remote=true`, scale up a `MODE=session` pod, wait for it to be ready (Redis heartbeat), attach via `KubectlExecBackend`
-- Existing local flow completely unchanged
+- Add three-way `Where` toggle to existing launcher (Tab to cycle)
+- Add `Where string` (`"local"` / `"local+k8s"` / `"remote"`) and `RepoURL string` to `LaunchMsg`
+- `app.go` `handleLaunch()`:
+  - `"local"` → existing path, unchanged
+  - `"local+k8s"` → existing path + inject context hint + activate hook
+  - `"remote"` → scale up `MODE=session` pod, wait for Redis heartbeat, attach via `KubectlExecBackend`
+- `Local+K8s` option hidden when `!cfg.Kubernetes.Enabled`
 
 ## 6. Task launcher (new)
 
@@ -264,7 +289,7 @@ internal/
     views/
       tasks.go       ← renders []task.Task [NEW, TUI]
       task_launcher.go   ← UI state machine [NEW, TUI]
-      launcher.go    ← Where toggle [MODIFY, TUI]
+      launcher.go    ← three-way Where toggle (Local/Local+K8s/Remote pod) [MODIFY, TUI]
 deploy/k8s/
   otel-collector.yaml   ← new
   agent-claude-coder.yaml    ← add MODE=agent env var
@@ -283,7 +308,10 @@ deploy/k8s/
 4. OTel Collector manifest + `otel/k8s_reader.go`
 5. Agent manifests: add `MODE` env var, add `agent-claude-session.yaml`
 6. `:new` picker (TUI)
-7. Session launcher: Where toggle + Remote launch path
+7. Session launcher: three-way Where toggle
+   - `Local` → unchanged existing path
+   - `Local+K8s` → existing path + context hint + hook activation (only shown when `kubernetes.enabled`)
+   - `Remote (pod)` → scale `MODE=session` pod + `KubectlExecBackend`
 8. Task launcher: minimal TUI, delegates to Spawner
 9. Tasks view: renders []task.Task from TaskLister
 10. Header: task summary counts
