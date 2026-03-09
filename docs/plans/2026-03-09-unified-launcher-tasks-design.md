@@ -17,6 +17,7 @@ aimux today is primarily an observability tool for local agents. The vision is a
 - **Claude decides scale.** The launcher never asks "how many agents". Claude (the brain) calls `spawn_agent` as needed. The launcher's job is to give Claude the right context and hands.
 - **Roles and counts are implementation details.** Users pick what they want done, not how many pods or which role.
 - **Visibility is cross-cutting.** Agents view, Tasks view, Sessions view show everything regardless of where it runs.
+- **Core/TUI separation.** All data types and business logic live in core packages with no bubbletea/lipgloss imports. TUI views are thin renderers. A future web or API frontend must be able to use core packages with zero TUI dependency.
 
 ## 3. Entry point: `:new` picker
 
@@ -104,7 +105,24 @@ Provider availability (Remote only): determined by whether the matching Deployme
 
 **Local**: deferred (V2). Show a message: "Local tasks available in a future version — use Session for interactive local work."
 
-### 5.3 LaunchTaskMsg (new message type)
+### 5.3 Task spawning — core/TUI separation
+
+The act of spawning a pod and creating a task in Redis is **not** in the TUI. It lives in a core package:
+
+```go
+// internal/task/loader.go
+type Spawner interface {
+    SpawnTask(provider, prompt string) error
+}
+
+// K8s provider implements Spawner:
+//   1. scales deployment via K8s API
+//   2. writes task to Redis
+// TUI calls: spawner.SpawnTask("claude", "Research MCP...")
+// TUI never touches Redis or K8s directly.
+```
+
+`LaunchTaskMsg` (TUI-internal message) carries only the user inputs. `app.go` finds the provider implementing `Spawner` and delegates:
 
 ```go
 type LaunchTaskMsg struct {
@@ -136,12 +154,37 @@ type LaunchTaskMsg struct {
 
 Select a task → right pane shows full result (reads `team:{id}:task:{id}:result_full` from Redis).
 
-### 6.3 Data sources
+### 6.3 Architecture — core/TUI separation
 
-- **Remote tasks**: Redis `team:{id}:tasks:all` sorted set → `HGETALL` each task hash
-- **Local tasks**: `~/.claude/tasks/{team}/task-*.json` files (same schema normalization as the Agent struct)
+The `Task` type and all loading logic live in **core packages**, not in views:
 
-Both normalized into a common `Task` struct with `LOC string` field.
+```
+internal/task/
+  task.go       ← Task struct, StatusIcon() — NO bubbletea/lipgloss
+  loader.go     ← LoadFromRedis(), LoadFromLocalFiles(), Spawner interface
+```
+
+The TUI view is a thin renderer:
+```
+internal/tui/views/tasks.go  ← renders []task.Task, imports internal/task
+```
+
+The provider interface returns core types:
+```go
+// In internal/provider/provider.go
+type TaskLister interface {
+    ListTasks() ([]task.Task, error)
+}
+```
+
+A web or API frontend imports `internal/task` and `internal/provider` directly — zero TUI dependency.
+
+### 6.4 Data sources
+
+- **Remote tasks**: `task.LoadFromRedis(redisURL, teamID)` — reads `team:{id}:tasks:all` sorted set, `HGETALL` each hash, normalizes to `[]task.Task`
+- **Local tasks**: `task.LoadFromLocalFiles(teamID)` — reads `~/.claude/tasks/{team}/task-*.json`, normalizes to `[]task.Task`
+
+Both set `task.Task.Loc` to `"k8s"` or `"local"` respectively. The TUI view receives `[]task.Task` and renders without knowing the source.
 
 ### 6.4 Header summary
 
@@ -163,13 +206,35 @@ The existing views are unchanged:
 
 The user experience for existing functionality is not affected. All changes are additive.
 
-## 8. Implementation order
+## 8. Package layout after this change
 
-1. `:new` picker (tiny 2-option menu)
-2. Session launcher: add `Where` toggle + `Remote` launch path
-3. Task launcher: new minimal overlay + `LaunchTaskMsg` handler
-4. Tasks view: new view, Redis + local file reader, result pane
-5. Header: add task summary counts
+```
+internal/
+  task/
+    task.go        ← Task struct, StatusIcon() [NEW, core]
+    loader.go      ← LoadFromRedis(), LoadFromLocalFiles(), Spawner interface [NEW, core]
+  provider/
+    provider.go    ← TaskLister interface (returns []task.Task) [MODIFY]
+    k8s.go         ← implements TaskLister + Spawner [MODIFY]
+  tui/
+    app.go         ← calls task.Load*(), delegates Spawner, no Redis/K8s calls [MODIFY]
+    views/
+      tasks.go     ← renders []task.Task [NEW, TUI]
+      task_launcher.go  ← UI state machine only [NEW, TUI]
+      launcher.go  ← add Where toggle [MODIFY, TUI]
+```
+
+**Test for correct separation:** `go test ./internal/task/... ./internal/provider/...` must pass with zero bubbletea/lipgloss imports in those packages.
+
+## 9. Implementation order
+
+1. `internal/task/` core package — `Task` struct + `LoadFromRedis()` + `Spawner` interface
+2. `provider.TaskLister` and `provider.Spawner` — K8s provider implements both
+3. `:new` picker (tiny TUI overlay)
+4. Session launcher: add `Where` toggle
+5. Task launcher: minimal TUI overlay, delegates to `Spawner`
+6. Tasks view: renders `[]task.Task` from `TaskLister`
+7. Header: task summary counts
 
 ## 9. Out of scope (future)
 
