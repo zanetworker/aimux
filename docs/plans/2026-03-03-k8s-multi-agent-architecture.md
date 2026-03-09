@@ -1700,57 +1700,107 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-## 9. aimux as observability plane
+## 9. aimux as unified control plane
 
-With the lead being your local Claude Code session (using MCP tools to manage K8s), aimux shifts from control plane to **observability + emergency override**. It watches Claude orchestrate agents across the cluster, shows costs, and lets you intervene.
+aimux is the single dashboard for all agent activity — local and remote — and the entry point for starting sessions and tasks. It is not just an observer: it lets you start, stop, course-correct, and read results from any agent regardless of where it runs.
 
-What aimux does:
-- **Observe**: shows local + K8s agents in one table, traces, costs, teams
-- **Override**: force-kill runaway agents (delete pod), send messages (course-correct), force-scale
+**What aimux does:**
+- **Start**: `:new` picker to launch sessions (Local / Local+K8s / Remote pod) or fire tasks at coordinator pods
+- **Observe**: unified agents table (local + K8s), task list, traces, costs — all in one view
+- **Override**: kill agents (scale down), send messages (`:send`), read task results
 - **Guard**: cost threshold alerts, dead agent detection
 
-What aimux doesn't do (Claude does it via MCP):
-- Decide how many agents to spawn
-- Create tasks
-- Assign work to agents
+**What aimux does NOT do** (Claude decides via MCP):
+- How many pods to spawn for a task
+- Which tasks to create
+- When to scale down
 
-### 9.1 Provider interface extensions
+### 9.1 Session modes
 
-The existing `Provider` interface has methods that don't fit K8s (`SpawnCommand() *exec.Cmd`, `ParseTrace(filePath string)`). Rather than break the interface, add optional interfaces following the existing `DirectRenderer` pattern:
+The `:new` picker offers Session or Task. Sessions have three modes:
+
+| Mode | Brain | Agent arms | Context hint + hook | Resume |
+|---|---|---|---|---|
+| **Local** | Laptop | Local processes (Agent tool) | No | Yes |
+| **Local + K8s** | Laptop | K8s coordinator pods (MCP tools) | **Yes** | Yes |
+| **Remote (pod)** | K8s Claude Code pod | Configurable via pod deployment | No (pod-config) | Yes (existing pod) |
+
+**Local**: identical to today.
+
+**Local + K8s**: spawns local Claude session + injects context hint ("K8s agents available via spawn_agent/create_task") + activates hook that steers `Agent(team_name=...)` toward MCP tools. Claude decides when to call `spawn_agent` — no pods pre-launched. Only shown when `kubernetes.enabled: true`.
+
+**Remote (pod)**: scales up a `MODE=session` Claude Code pod. aimux attaches via `kubectl exec` + tmux (`KubectlExecBackend`). Full Claude Code capabilities in the pod. Whether the pod can spawn K8s arms depends on whether the k8s-agents MCP server is configured in the pod's deployment — a deployment concern, not a launcher concern. Checks for an existing pod (same repo URL) before scaling a new one.
+
+### 9.2 Task launcher
+
+Tasks are fire-and-forget — no interactive session. The task launcher creates one Python coordinator pod (`MODE=agent`) + one task in Redis. The pod picks it up automatically. Task appears in the Tasks view.
+
+```
+╭─ New Task ──────────────────────────────────╮
+│  Where:     [ Local ]  [ Remote ]           │
+│  Provider:  ▸ claude ●   gemini ○           │
+│  Research MCP frameworks in 2026...         │
+│  ↵ Launch                                   │
+╰─────────────────────────────────────────────╯
+```
+
+Provider availability: whether a `MODE=agent` Deployment exists in the `agents` namespace.
+
+### 9.3 Tasks view
+
+New `T` keybinding. Shows all tasks from Redis + local `~/.claude/tasks/` files in one unified table.
+
+```
+ Tasks  ● 2 running  ✓ 14 done  ○ 3 pending  ✗ 1 failed   $4.02
+ ─────────────────────────────────────────────────────────────────
+ TASK                       AGENT            LOC    STATUS   AGE
+ ✓ Research: LangGraph      researcher-1     k8s    done     45m
+ ● Research: CrewAI         gemini-res-1     k8s    running  20m
+ ● Implement API             coder-1          k8s    running  30m
+ ○ Review implementation    (pending)         k8s    waiting  —
+ ✗ Research: Swarm          researcher-2     k8s    failed   35m
+```
+
+Select a task → right pane shows full result from `team:{id}:task:{id}:result_full`.
+
+`Task` type lives in `internal/task/` (core package, no TUI imports). `TasksView` is a thin renderer. `provider.TaskLister` and `provider.Spawner` are optional interfaces — K8s provider implements both.
+
+### 9.4 OTEL architecture — clean local/remote separation
+
+**Local mode (always runs, no K8s dependency):**
+```
+Local Claude Code → localhost:4318 → aimux OTEL receiver → trace view
+```
+Unconditional. Works offline. Zero K8s imports in this path.
+
+**Remote mode (additive, gated by config):**
+```
+Claude Code pod → otel-collector.agents.svc:4317 → OTel Collector (K8s, LoadBalancer) ← aimux reads
+```
+An OpenTelemetry Collector runs in K8s and is exposed via LoadBalancer (same pattern as Redis). aimux connects as a client to read remote spans. Only instantiated when `kubernetes.otel_endpoint` is configured.
 
 ```go
-// Already exists in codebase
-type DirectRenderer interface {
-    RenderDirect(w, h int) string
-}
-
-// New: for providers that spawn remotely
-type RemoteSpawner interface {
-    SpawnRemote(ctx context.Context, opts RemoteSpawnOpts) error
-}
-
-// New: for providers that get traces from non-file sources
-type RemoteTracer interface {
-    ParseTraceRemote(agentID string) ([]trace.Turn, error)
+a.otelReceiver = otel.StartReceiver(cfg.OTELPort)            // always
+if cfg.Kubernetes.Enabled && cfg.Kubernetes.OTELEndpoint != "" {
+    a.k8sOTELReader = otel.NewK8sReader(cfg.Kubernetes.OTELEndpoint) // conditional
 }
 ```
 
-TUI code: `if spawner, ok := provider.(RemoteSpawner); ok { spawner.SpawnRemote(...) } else { provider.SpawnCommand(...) }`.
+### 9.5 Feature mapping (local → K8s)
 
-### 9.2 Feature mapping (local → K8s)
-
-| Feature | Local | K8s Provider |
-|---------|-------|-------------|
-| Discovery | `ps` process scan | `HGETALL team:{id}:heartbeat` + K8s pod metadata |
+| Feature | Local | K8s |
+|---|---|---|
+| Discovery | `ps` process scan | Redis heartbeat + K8s Deployment labels (`team-component=agent`) |
 | Status | Process activity heuristic | Heartbeat recency + task status from Redis |
-| Traces | JSONL files | OTEL spans (aimux already has OTEL receiver) |
-| Sessions | PTY embed / tmux mirror | Read-only trace + message input (no remote PTY) |
-| Spawn | `exec.Command("claude")` | Scale up Deployment replicas via K8s API |
-| Kill | SIGTERM | Delete pod via K8s API |
-| Costs | Parse session JSONL | Read `team:{id}:cost:{agent}` hash |
-| Teams | `~/.claude/teams/*/config.json` | Read `team:{id}:config` hash |
+| Sessions (split pane) | PTY embed / tmux mirror | `kubectl exec` + tmux (`KubectlExecBackend`) |
+| Traces | JSONL files + local OTEL receiver | OTel Collector in K8s (LoadBalancer) |
+| Spawn | `exec.Command("claude")` | Scale Deployment replicas via K8s API |
+| Kill | SIGTERM | Scale Deployment to current-1 |
+| Costs | Parse session JSONL | Read `team:{id}:cost:{agent}` Redis hash |
+| Tasks | `~/.claude/tasks/` JSON files | Redis `team:{id}:tasks:all` sorted set |
+| Messages | PTY stdin | Redis XADD to `team:{id}:inbox:{agent}` |
 
-### 9.3 aimux config
+### 9.6 aimux config
 
 ```yaml
 providers:
@@ -1760,69 +1810,55 @@ providers:
     enabled: true
   kubernetes:
     enabled: true
-    redis_url: "redis://:password@redis.agents.svc:6379"
+    redis_url: "redis://:password@<elb>:6379"   # AWS LoadBalancer endpoint
     namespace: "agents"
     team_id: "my-team"
-    kubeconfig: ""        # empty = in-cluster, or path for remote
-    images:
-      claude: "quay.io/azaalouk/agent-claude:latest"
-      codex: "quay.io/azaalouk/agent-codex:latest"
-      gemini: "quay.io/azaalouk/agent-gemini:latest"
+    kubeconfig: ""                               # empty = KUBECONFIG env or in-cluster
+    otel_endpoint: "http://<elb>:4317"          # optional: K8s OTel Collector endpoint
 ```
 
-### 9.4 TUI mockups
+### 9.7 TUI mockups
 
-**Main view (mixed local + K8s):**
-
-```
-┌─ Agents 8 ──────────────────┐  ┌─ Cost ──┐  ┌─ Providers ─────────┐
-│ ●3 active ◐1 wait ○4 idle   │  │ $127.43 │  │ claude:4 codex:2    │
-│                              │  │         │  │ gemini:2             │
-└──────────────────────────────┘  └─────────┘  └──────────────────────┘
- Agents
- ❯ Enter:open  t:traces  c:costs  T:teams  :new:launch  x:kill  ?:help
-──────────────────────────────────────────────────────────────────────────
-
- STATUS  PROJECT        PROVIDER  MODEL        LOCATION     COST    AGE
- ● act   blog-concept   claude    opus-4.6     local        $47.13  2h
- ● act   aimux          claude    opus-4.6     local         $3.58  25m
- ◐ wait  trustyai       claude    sonnet-4.5   local         $1.20  1h
- ● act   api-service    claude    opus-4.6     k8s/agents   $32.10  45m
- ○ idle  api-service    codex     o3           k8s/agents   $18.50  40m
- ○ idle  api-service    codex     o4-mini      k8s/agents    $4.22  40m
- ○ idle  ml-pipeline    gemini    gemini-pro   k8s/agents    $8.90  30m
- ○ idle  ml-pipeline    gemini    flash-3.1    k8s/agents   $11.80  30m
-```
-
-**Split view for K8s agent (trace + messages):**
+**Main agents view (mixed local + K8s with LOC column):**
 
 ```
-┌─ TRACE (api-service / claude / k8s) ──────┬─ MESSAGES ─────────────────────┐
-│                                            │                                │
-│  ▸ [assistant] Reading routes.go...        │  [lead → agent-7x]            │
-│  ▸ [tool] Read routes.go                   │  Focus on /users endpoint.    │
-│  ▸ [assistant] Adding PUT and DELETE...    │                                │
-│  ▸ [tool] Edit routes.go:45               │  [agent-7x → lead]            │
-│  ▸ [tool] Bash: go test ./...             │  Done. All 42 tests pass.     │
-│    ok  api-service/routes  0.8s           │                                │
-│                                            │ ┌──────────────────────────┐  │
-│                                            │ │ > type message here...   │  │
-│                                            │ └──────────────────────────┘  │
-└────────────────────────────────────────────┴────────────────────────────────┘
+ NAME              AGENT    MODEL       LOC       DIR          LAST          AGE    COST
+ ● aimux #1        claude   opus-4.6    local     zanetworker  Rd MEMORY.md  5h     $3.58
+ ● researcher-1    claude   haiku-4.5   k8s       —            Task: ResearchMCP  45m  $0.82
+   └─ sub-agent    claude   haiku-4.5   k8s       —            Subtopic      12m    $0.12
+ ● coder-1         claude   opus-4.6    k8s       —            Ed routes.go  30m    $2.10
 ```
 
-**Teams view:**
+**`:new` picker:**
 
 ```
- ▸ api-service-team (4 members)                              k8s/agents
-     agent-claude-7x    claude    opus-4.6     coder         ● active
-     agent-codex-k9     codex     o3           coder         ○ idle
-     agent-codex-m2     codex     o4-mini      reviewer      ○ idle
-     agent-lead-0       claude    sonnet-4.5   lead          ● active
+╭─ New ────────╮
+│ [S]ession    │
+│ [T]ask       │
+╰──────────────╯
+```
 
- ▸ openai-research (2 members)                               local
-     team-lead          claude    opus-4.6     team-lead
-     crewai-researcher  claude    opus-4.6     general-purpose
+**Session launcher:**
+
+```
+╭─ New Session ────────────────────────────────────────╮
+│  Where:  [ Local ]  [ Local+K8s ]  [ Remote (pod) ]  │
+│  Provider:  ▸ claude   codex   gemini                │
+│  Directory: ▸ aimux    zanetworker   2m              │
+│  ↵ Launch                                            │
+╰──────────────────────────────────────────────────────╯
+```
+
+**Split view for remote Claude Code pod session:**
+
+```
+┌─ TRACE (aimux / claude / k8s) ─────────┬─ SESSION ──────────────────────────┐
+│  ▸ [assistant] Reading routes.go...    │ (kubectl exec → tmux attach)       │
+│  ▸ [tool] Read routes.go              │                                    │
+│  ▸ [tool] Edit routes.go:45           │  claude > what should I fix next?  │
+│  ▸ [tool] Bash: go test ./...         │  > _                               │
+│    ok  aimux/routes  0.8s             │                                    │
+└────────────────────────────────────────┴────────────────────────────────────┘
 ```
 
 ## 10. Scaling guide
@@ -1923,14 +1959,28 @@ Neither Codex CLI nor Gemini CLI has an equivalent team system. Codex has experi
 
 ## 15. Implementation order
 
-1. **MCP server** - spawn_agent, create_task, list_tasks, send_message, scale_down, get_costs, cleanup_branches
-2. **Monorepo scaffold** - coordinator package with tests, Dockerfile template (one per provider)
-3. **Claude agent worker** - container image (claude-code-sdk + coordinator + main loop, role via env vars)
-4. **Redis + agent manifests + RBAC** - deploy to dev cluster, replicas: 0
-5. **Git init container** - add to Deployment template, test clone + push with GitHub token secret
-6. **End-to-end test** - Claude Code + MCP server spawns agents, creates tasks, agents complete them, branches cleaned up
-7. **Hook config** - PreToolUse hook that blocks Agent(team_name=...) for K8s mode
-8. **Integration tests** - multi-agent claiming, crash recovery, broadcast delivery, branch handoff
-9. **Second provider image** - Codex or Gemini worker
-10. **aimux K8s provider** (Go) - implements Provider + RemoteSpawner + RemoteTracer, reads Redis + K8s API
-11. **aimux message input** - split view right pane writes to Redis inbox
+### Completed ✅
+1. **MCP server** — spawn_agent, create_task, list_tasks, wait_for_task, get_task_result, send_message, scale_down, get_costs
+2. **Coordinator package** — Python, tests (14/14 passing), coordinator loop, task claiming Lua script
+3. **Claude agent worker** — UBI9 image, MODE=agent (coordinator loop), pushed to quay.io/azaalouk/agent-claude
+4. **Gemini agent worker** — UBI9 image, MODE=agent, manifests defined
+5. **Redis + manifests + RBAC** — deployed to `agents` namespace, AWS LoadBalancer, Redis accessible externally
+6. **End-to-end test** — agent spawned, task claimed, Claude ran, result stored in Redis ✓
+7. **Hook config** — `deploy/k8s/hook-config.json` (opt-in, blocks Agent(team_name=...) for K8s mode)
+8. **Integration tests** — 14 coordinator tests + 16 K8s provider tests, all passing
+9. **aimux K8s provider** — Discover (Redis heartbeat), Kill (scale deployment), ParseTrace, Messenger (`:send`)
+10. **Tasks view core** — `internal/task/` package, `TaskLister`/`Spawner` interfaces on K8s provider
+11. **LOC column** — agents table shows "local" vs "k8s"
+
+### Remaining
+12. **`internal/task/` loaders** — `LoadFromRedis()`, `LoadFromLocalFiles()`, `GetFullResult()`
+13. **`:new` picker** — TUI overlay (Session / Task)
+14. **Session launcher: three-way Where toggle** — Local / Local+K8s / Remote (pod)
+    - `Local+K8s` → inject context hint + activate hook
+    - `Remote (pod)` → `KubectlExecBackend` (kubectl exec + tmux)
+15. **`KubectlExecBackend`** — `internal/terminal/kubectl.go`, implements `SessionBackend`
+16. **`MODE=session` deployment** — `deploy/k8s/agent-claude-session.yaml`, Claude Code pod with tmux
+17. **Task launcher** — TUI overlay, delegates to `provider.Spawner`
+18. **Tasks view** — `internal/tui/views/tasks.go`, renders `[]task.Task`, result pane
+19. **OTel Collector** — `deploy/k8s/otel-collector.yaml`, `otel/k8s_reader.go` (conditional)
+20. **Header task summary** — task counts in header bar
