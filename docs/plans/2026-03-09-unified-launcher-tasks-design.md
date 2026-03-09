@@ -21,7 +21,32 @@ aimux today is primarily an observability tool for local agents. The vision is a
 - **Core/TUI separation.** All data types and business logic live in core packages with no bubbletea/lipgloss imports. TUI views are thin renderers. A future web or API frontend uses core packages with zero TUI dependency.
 - **Local mode is self-contained.** aimux works perfectly with no K8s cluster configured. K8s features are purely additive, gated by `kubernetes.enabled: true`. No K8s imports are instantiated in local-only mode.
 
-## 3. Two K8s agent types
+## 3. How this maps to the original two-mode architecture
+
+The k8s architecture doc (`2026-03-03-k8s-multi-agent-architecture.md`) defined two modes:
+
+```
+LOCAL   → Claude Code on laptop + built-in tools (Agent, TaskCreate, TaskList...)
+          Spawns via tmux / in-process. Coordinates via ~/.claude/tasks/.
+          aimux discovers via process scanning.
+
+REMOTE  → Claude Code on laptop + MCP tools (spawn_agent, create_task, list_tasks...)
+          Spawns via K8s API (scale Deployment). Coordinates via Redis.
+          aimux discovers via Redis + K8s API.
+```
+
+The unified launcher formalizes these modes and adds two new ones:
+
+| Original concept | Launcher option | What runs where |
+|---|---|---|
+| LOCAL (original) | `Session → Local` | Brain: laptop. Arms: local processes. |
+| REMOTE (original) | `Session → Local+K8s` | Brain: laptop. Arms: K8s coordinator pods via MCP. |
+| New | `Session → Remote (pod)` | Brain: K8s Claude Code pod. Arms: configurable. |
+| New | `Task → Remote` | No brain. Fire-and-forget task to Python coordinator pod. |
+
+The original "The user decides which mode by how they talk to Claude" is now explicit: the user picks in the launcher rather than relying on Claude to infer from keywords. Same infrastructure, cleaner UX.
+
+## 4. Two K8s agent types
 
 The K8s infrastructure supports two distinct agent types, each purpose-built:
 
