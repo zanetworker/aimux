@@ -7,11 +7,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/subagent"
+	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/pkg/rediskeys"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,11 +37,129 @@ type K8sConfig struct {
 // This provider never embeds a PTY — agents run in pods and are viewed trace-only.
 type K8s struct {
 	cfg K8sConfig
+	mu  sync.Mutex
+	rdb *redis.Client
+
+	// Circuit breaker: skip Redis calls for a cooldown period after failure.
+	// Prevents the TUI from freezing when Redis is unreachable.
+	lastRedisErr  time.Time
+	redisCooldown time.Duration
 }
 
 // NewK8s constructs a K8s provider with the given configuration.
 func NewK8s(cfg K8sConfig) *K8s {
-	return &K8s{cfg: cfg}
+	return &K8s{cfg: cfg, redisCooldown: 30 * time.Second}
+}
+
+// redisClient returns the shared Redis client, creating it lazily on first use.
+// Thread-safe via mutex. Returns an error if RedisURL is not configured or the
+// server is unreachable on first connection.
+func (k *K8s) redisClient() (*redis.Client, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	// Circuit breaker: skip Redis for cooldown period after a failure.
+	if !k.lastRedisErr.IsZero() && time.Since(k.lastRedisErr) < k.redisCooldown {
+		return nil, fmt.Errorf("redis in cooldown (failed %s ago)", time.Since(k.lastRedisErr).Truncate(time.Second))
+	}
+
+	if k.rdb != nil {
+		return k.rdb, nil
+	}
+	if k.cfg.RedisURL == "" {
+		return nil, fmt.Errorf("redis not configured")
+	}
+	rdb, err := newRedisClient(k.cfg.RedisURL)
+	if err != nil {
+		k.lastRedisErr = time.Now()
+		return nil, err
+	}
+	k.rdb = rdb
+	k.lastRedisErr = time.Time{} // reset on success
+	return k.rdb, nil
+}
+
+// markRedisErr records a Redis command failure and triggers the circuit breaker cooldown.
+// Also closes the cached client so the next attempt creates a fresh connection.
+func (k *K8s) markRedisErr() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.lastRedisErr = time.Now()
+	if k.rdb != nil {
+		k.rdb.Close()
+		k.rdb = nil
+	}
+}
+
+// Close shuts down the shared Redis client if one was created.
+// Safe to call multiple times or when no client was initialized.
+func (k *K8s) Close() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.rdb != nil {
+		k.rdb.Close()
+		k.rdb = nil
+	}
+}
+
+// K8sHealthStatus represents the readiness of K8s infrastructure.
+type K8sHealthStatus struct {
+	Configured  bool     // true if redis_url is set in config
+	RedisOK     bool     // true if Redis responds to PING
+	RedisErr    string   // error message if Redis check failed
+	ClusterOK   bool     // true if K8s API server is reachable
+	ClusterErr  string   // error message if cluster check failed
+	Deployments []string // names of agent deployments found in namespace
+}
+
+// CheckHealth probes Redis and K8s connectivity. Designed to be called once
+// when the :new picker opens — not on every tick. Each check has a 1-second timeout.
+func (k *K8s) CheckHealth() K8sHealthStatus {
+	status := K8sHealthStatus{
+		Configured: k.cfg.RedisURL != "",
+	}
+	if !status.Configured {
+		status.RedisErr = "redis_url not set in ~/.aimux/config.yaml"
+		status.ClusterErr = "kubernetes not configured"
+		return status
+	}
+
+	// Check Redis
+	rdb, err := k.redisClient()
+	if err != nil {
+		status.RedisErr = "cannot connect — check redis_url in config"
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			status.RedisErr = "not responding — is Redis running?"
+			k.markRedisErr()
+		} else {
+			status.RedisOK = true
+		}
+	}
+
+	// Check K8s cluster
+	client, err := k.kubeClient()
+	if err != nil {
+		status.ClusterErr = "cannot connect — check kubeconfig"
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		deploys, err := client.AppsV1().Deployments(k.cfg.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "team-component in (agent,session)",
+		})
+		if err != nil {
+			status.ClusterErr = err.Error()
+		} else {
+			status.ClusterOK = true
+			for _, d := range deploys.Items {
+				status.Deployments = append(status.Deployments, d.Name)
+			}
+		}
+	}
+
+	return status
 }
 
 // Name returns the provider identifier used in config and display.
@@ -54,24 +174,17 @@ func (k *K8s) Name() string { return "k8s" }
 //   - Idle:    heartbeat 30–60 s ago
 //   - Unknown: heartbeat > 60 s ago (dead but still shown)
 func (k *K8s) Discover() ([]agent.Agent, error) {
-	if k.cfg.RedisURL == "" {
-		return nil, nil
-	}
-
-	rdb, err := newRedisClient(k.cfg.RedisURL)
+	rdb, err := k.redisClient()
 	if err != nil {
-		// Unreachable Redis must not crash the TUI.
 		return nil, nil
 	}
-	defer rdb.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	// Fetch all agent heartbeats: field=agentID, value=unix timestamp.
 	heartbeats, err := rdb.HGetAll(ctx, rediskeys.Heartbeat(k.cfg.TeamID)).Result()
 	if err != nil {
-		// Redis reachable but key missing or transient error — skip silently.
+		k.markRedisErr()
 		return nil, nil
 	}
 
@@ -261,14 +374,12 @@ func (k *K8s) ParseTrace(filePath string) ([]trace.Turn, error) {
 
 	agentID := strings.TrimPrefix(filePath, "k8s://")
 
-	opt, err := redis.ParseURL(k.cfg.RedisURL)
+	rdb, err := k.redisClient()
 	if err != nil {
-		return nil, fmt.Errorf("k8s ParseTrace: parse Redis URL: %w", err)
+		return nil, fmt.Errorf("k8s ParseTrace: connect to Redis: %w", err)
 	}
-	rdb := redis.NewClient(opt)
-	defer rdb.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	// Read all task IDs in creation order from the tasks:all sorted set.
@@ -278,7 +389,8 @@ func (k *K8s) ParseTrace(filePath string) ([]trace.Turn, error) {
 		Stop:  -1,
 	}).Result()
 	if err != nil {
-		return nil, fmt.Errorf("k8s ParseTrace: read tasks:all: %w", err)
+		k.markRedisErr()
+		return nil, nil
 	}
 
 	var turns []trace.Turn
@@ -334,17 +446,12 @@ func (k *K8s) ParseTrace(filePath string) ([]trace.Turn, error) {
 // SendMessage writes a message to the agent's Redis inbox stream.
 // Implements the optional Messenger interface.
 func (k *K8s) SendMessage(agentID, text string) error {
-	if k.cfg.RedisURL == "" {
-		return fmt.Errorf("k8s SendMessage: Redis not configured")
-	}
-	opt, err := redis.ParseURL(k.cfg.RedisURL)
+	rdb, err := k.redisClient()
 	if err != nil {
-		return fmt.Errorf("k8s SendMessage: parse Redis URL: %w", err)
+		return fmt.Errorf("k8s SendMessage: %w", err)
 	}
-	rdb := redis.NewClient(opt)
-	defer rdb.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	return rdb.XAdd(ctx, &redis.XAddArgs{
@@ -357,6 +464,120 @@ func (k *K8s) SendMessage(agentID, text string) error {
 			"timestamp": fmt.Sprintf("%d", time.Now().Unix()),
 		},
 	}).Err()
+}
+
+// ListTasks returns all tasks for the configured team by delegating to
+// task.LoadFromRedis. Returns (nil, nil) when Redis is not configured.
+// Implements the optional TaskLister interface.
+func (k *K8s) ListTasks() ([]task.Task, error) {
+	rdb, err := k.redisClient()
+	if err != nil {
+		// Unconfigured Redis returns empty task list, not an error.
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	tasks, err := task.LoadFromRedis(ctx, rdb, k.cfg.TeamID)
+	if err != nil {
+		k.markRedisErr()
+		return nil, nil
+	}
+	return tasks, nil
+}
+
+// GetTaskResult returns the full result reference for a task by delegating to
+// task.GetFullResult. Returns ("", nil) when Redis is not configured.
+// Implements the optional TaskLister interface.
+func (k *K8s) GetTaskResult(taskID string) (string, error) {
+	rdb, err := k.redisClient()
+	if err != nil {
+		// Unconfigured Redis returns empty result, not an error.
+		return "", nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	return task.GetFullResult(ctx, rdb, k.cfg.TeamID, taskID)
+}
+
+// SpawnRemote scales up the Kubernetes Deployment named "agent-{provider}-{role}"
+// to the specified replica count. Returns an error if the kube client cannot be
+// constructed or the deployment does not exist.
+// Implements the optional Spawner interface.
+func (k *K8s) SpawnRemote(provider, role string, count int) error {
+	clientset, err := k.kubeClient()
+	if err != nil {
+		return fmt.Errorf("cannot connect to cluster — check kubeconfig")
+	}
+
+	namespace := k.cfg.Namespace
+	if namespace == "" {
+		namespace = "agents"
+	}
+
+	deployName := spawnDeploymentName(provider, role)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("deployment %q not found — run: kubectl apply -f deploy/k8s/", deployName)
+	}
+
+	replicas := int32(count)
+	if deploy.Spec.Replicas != nil {
+		replicas = *deploy.Spec.Replicas + int32(count)
+	}
+	deploy.Spec.Replicas = &replicas
+	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("cannot scale %q — check RBAC permissions", deployName)
+	}
+	return nil
+}
+
+// ScaleDown scales the Kubernetes Deployment named "agent-{provider}-{role}"
+// to 0 replicas. Returns an error if the kube client cannot be constructed
+// or the deployment does not exist.
+// Implements the optional Spawner interface.
+func (k *K8s) ScaleDown(provider, role string) error {
+	clientset, err := k.kubeClient()
+	if err != nil {
+		return fmt.Errorf("cannot connect to cluster — check kubeconfig")
+	}
+
+	namespace := k.cfg.Namespace
+	if namespace == "" {
+		namespace = "agents"
+	}
+
+	deployName := spawnDeploymentName(provider, role)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("deployment %q not found — run: kubectl apply -f deploy/k8s/", deployName)
+	}
+
+	zero := int32(0)
+	deploy.Spec.Replicas = &zero
+	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("cannot scale down %q — check RBAC permissions", deployName)
+	}
+	return nil
+}
+
+// spawnDeploymentName constructs the Kubernetes deployment name for spawning.
+// Convention: "agent-{provider}-{role}", e.g. "agent-claude-coder".
+func spawnDeploymentName(provider, role string) string {
+	return "agent-" + provider + "-" + role
 }
 
 // OTELEnv returns "" — K8s agents configure their own OTEL settings via
@@ -389,7 +610,7 @@ func (k *K8s) Kill(a agent.Agent) error {
 	// Derive deployment name from role (Name field holds the role).
 	deployName := k.deploymentName(a)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 11*time.Second)
 	defer cancel()
 
 	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
@@ -465,15 +686,32 @@ func newRedisClient(url string) (*redis.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse redis URL: %w", err)
 	}
+	// Short timeouts so commands fail fast; circuit breaker handles retries.
+	opts.DialTimeout = 1 * time.Second
+	opts.ReadTimeout = 1 * time.Second
+	opts.WriteTimeout = 1 * time.Second
+
+	// Prevent the connection pool from spamming stderr when Redis is down.
+	// The pool's background goroutine retries dials and logs failures via
+	// the global redis logger. A small pool + limited retries keeps noise
+	// minimal, and the nopLogger silences the remaining pool-level output.
+	opts.PoolSize = 2
+	opts.MinIdleConns = 0
+	opts.MaxRetries = 1
 
 	rdb := redis.NewClient(opts)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		rdb.Close()
-		return nil, fmt.Errorf("ping redis: %w", err)
-	}
 	return rdb, nil
 }
+
+func init() {
+	// Silence the go-redis internal logger. Without this, the connection
+	// pool writes "failed to dial after N attempts" directly to stderr,
+	// which corrupts the TUI. Errors are surfaced via the circuit breaker
+	// in redisClient()/markRedisErr() instead.
+	redis.SetLogger(nopRedisLogger{})
+}
+
+// nopRedisLogger implements redis/internal.Logging and discards all output.
+type nopRedisLogger struct{}
+
+func (nopRedisLogger) Printf(_ context.Context, _ string, _ ...interface{}) {}

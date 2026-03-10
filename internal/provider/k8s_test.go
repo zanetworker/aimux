@@ -6,8 +6,10 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 )
 
-// Compile-time interface check — fails to compile if K8s is missing any method.
+// Compile-time interface checks — fails to compile if K8s is missing any method.
 var _ Provider = (*K8s)(nil)
+var _ TaskLister = (*K8s)(nil)
+var _ Spawner = (*K8s)(nil)
 
 func TestK8sName(t *testing.T) {
 	k := &K8s{}
@@ -202,5 +204,101 @@ func TestNewK8s(t *testing.T) {
 	}
 	if k.cfg.TeamID != "team1" {
 		t.Errorf("NewK8s().cfg.TeamID = %q, want %q", k.cfg.TeamID, "team1")
+	}
+}
+
+func TestK8sListTasks_NotConfigured(t *testing.T) {
+	// When RedisURL is empty, ListTasks must return (nil, nil) without panicking.
+	k := &K8s{}
+	tasks, err := k.ListTasks()
+	if err != nil {
+		t.Errorf("K8s.ListTasks() with no config: error = %v, want nil", err)
+	}
+	if tasks != nil {
+		t.Errorf("K8s.ListTasks() with no config: tasks = %v, want nil", tasks)
+	}
+}
+
+func TestK8sGetTaskResult_NotConfigured(t *testing.T) {
+	// When RedisURL is empty, GetTaskResult must return ("", nil) without panicking.
+	k := &K8s{}
+	result, err := k.GetTaskResult("task-123")
+	if err != nil {
+		t.Errorf("K8s.GetTaskResult() with no config: error = %v, want nil", err)
+	}
+	if result != "" {
+		t.Errorf("K8s.GetTaskResult() with no config: result = %q, want empty", result)
+	}
+}
+
+func TestK8sSpawnRemote_NoKubeconfig(t *testing.T) {
+	// When kubeconfig is set to a nonexistent path, SpawnRemote must return
+	// an error (not panic).
+	k := NewK8s(K8sConfig{
+		Kubeconfig: "/nonexistent/kubeconfig",
+		Namespace:  "agents",
+	})
+	err := k.SpawnRemote("claude", "coder", 2)
+	if err == nil {
+		t.Error("K8s.SpawnRemote() with bad kubeconfig: expected error, got nil")
+	}
+}
+
+func TestK8sScaleDown_NoKubeconfig(t *testing.T) {
+	// When kubeconfig is set to a nonexistent path, ScaleDown must return
+	// an error (not panic).
+	k := NewK8s(K8sConfig{
+		Kubeconfig: "/nonexistent/kubeconfig",
+		Namespace:  "agents",
+	})
+	err := k.ScaleDown("claude", "coder")
+	if err == nil {
+		t.Error("K8s.ScaleDown() with bad kubeconfig: expected error, got nil")
+	}
+}
+
+func TestNopRedisLogger(t *testing.T) {
+	// nopRedisLogger must implement the Logging interface and not panic.
+	var l nopRedisLogger
+	l.Printf(nil, "should not appear: %s %d", "test", 42)
+}
+
+func TestNewRedisClient_PoolSettings(t *testing.T) {
+	// Verify the client is created with constrained pool settings
+	// that prevent stderr spam when Redis is unreachable.
+	rdb, err := newRedisClient("redis://127.0.0.1:19999")
+	if err != nil {
+		t.Fatalf("newRedisClient() error = %v", err)
+	}
+	defer rdb.Close()
+	opts := rdb.Options()
+	if opts.PoolSize != 2 {
+		t.Errorf("PoolSize = %d, want 2", opts.PoolSize)
+	}
+	if opts.MinIdleConns != 0 {
+		t.Errorf("MinIdleConns = %d, want 0", opts.MinIdleConns)
+	}
+	if opts.MaxRetries != 1 {
+		t.Errorf("MaxRetries = %d, want 1", opts.MaxRetries)
+	}
+}
+
+func TestSpawnDeploymentName(t *testing.T) {
+	tests := []struct {
+		provider string
+		role     string
+		want     string
+	}{
+		{"claude", "coder", "agent-claude-coder"},
+		{"gemini", "researcher", "agent-gemini-researcher"},
+		{"codex", "reviewer", "agent-codex-reviewer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider+"-"+tt.role, func(t *testing.T) {
+			got := spawnDeploymentName(tt.provider, tt.role)
+			if got != tt.want {
+				t.Errorf("spawnDeploymentName(%q, %q) = %q, want %q", tt.provider, tt.role, got, tt.want)
+			}
+		})
 	}
 }
