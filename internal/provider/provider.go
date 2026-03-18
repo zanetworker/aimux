@@ -88,6 +88,33 @@ type Spawner interface {
 	ScaleDown(provider, role string) error
 }
 
+// RemoteProvider is an optional interface for providers that manage remote
+// agent infrastructure (e.g., Kubernetes pods). The TUI stores one of these
+// for on-demand operations (spawn sessions, health checks, status display).
+// Using this interface instead of a concrete type preserves provider decoupling.
+//
+//	if rp, ok := p.(provider.RemoteProvider); ok { rp.Status() }
+type RemoteProvider interface {
+	Provider
+	TaskLister
+	Spawner
+
+	// Status returns a human-readable connection status for display.
+	Status() string
+
+	// CheckHealth validates connectivity to backing infrastructure.
+	CheckHealth() K8sHealthStatus
+
+	// SpawnSession creates a new interactive session pod and waits for it
+	// to become ready. Returns the pod name and namespace.
+	SpawnSession(providerName string) (podName, namespace string, err error)
+
+	// ScaleDownOne decrements the replica count of the named deployment by 1.
+	ScaleDownOne(providerName, role string) error
+}
+
+// K8sHealthStatus is defined in k8s.go.
+
 // RecentDir is a recently-used project directory from a provider's session history.
 type RecentDir struct {
 	Path     string

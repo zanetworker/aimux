@@ -130,9 +130,10 @@ type App struct {
 	// Tasks view
 	tasksView *views.TasksView
 
-	// K8s provider: stored separately from polling providers.
+	// Remote provider (e.g., K8s): stored separately from polling providers.
 	// Only queried on-demand (tasks view, :new spawn) — never on every tick.
-	k8sProvider *provider.K8s
+	// Uses the RemoteProvider interface to avoid coupling to a concrete type.
+	remoteProvider provider.RemoteProvider
 
 	// Kill confirmation
 	killConfirm  bool            // true when waiting for y/n confirmation
@@ -165,18 +166,18 @@ func NewApp() App {
 	}
 
 	// K8s provider participates in discovery (agents table) but is also
-	// stored separately for on-demand operations (spawn, tasks, health check).
-	// Performance is safe: circuit breaker (30s cooldown), connection pool,
-	// and 1s timeouts prevent Redis from blocking the UI.
-	var k8sProv *provider.K8s
+	// stored as a RemoteProvider for on-demand operations (spawn, tasks,
+	// health check). Concrete type used only here; stored via interface.
+	var remoteProv provider.RemoteProvider
 	if cfg.Kubernetes.IsActive() {
-		k8sProv = provider.NewK8s(provider.K8sConfig{
+		k8s := provider.NewK8s(provider.K8sConfig{
 			RedisURL:   cfg.Kubernetes.RedisURL,
 			TeamID:     cfg.Kubernetes.TeamID,
 			Namespace:  cfg.Kubernetes.Namespace,
 			Kubeconfig: cfg.Kubernetes.Kubeconfig,
 		})
-		allProviders = append(allProviders, k8sProv)
+		allProviders = append(allProviders, k8s)
+		remoteProv = k8s
 	}
 
 	// Filter to enabled providers only.
@@ -221,7 +222,7 @@ func NewApp() App {
 		cfg:          cfg,
 		ctrl:         ctrl,
 		otelStore:    aimuxotel.NewSpanStore(),
-		k8sProvider:  k8sProv,
+		remoteProvider:  remoteProv,
 	}
 
 	// Start OTEL receiver if enabled
@@ -288,8 +289,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.costsView.SetAgents(a.instances)
 
 		// Update K8s status in header
-		if a.k8sProvider != nil {
-			a.headerView.SetK8sStatus(a.k8sProvider.Status())
+		if a.remoteProvider != nil {
+			a.headerView.SetK8sStatus(a.remoteProvider.Status())
 		}
 
 		// Refresh tasks only when viewing the tasks tab
@@ -904,8 +905,8 @@ func (a *App) refreshTasks() {
 	var allTasks []task.Task
 
 	// Only query K8s when user is actively viewing tasks — not on every tick.
-	if a.k8sProvider != nil && a.currentView == viewTasks {
-		tasks, _ := a.k8sProvider.ListTasks()
+	if a.remoteProvider != nil && a.currentView == viewTasks {
+		tasks, _ := a.remoteProvider.ListTasks()
 		allTasks = append(allTasks, tasks...)
 	}
 
@@ -1290,7 +1291,7 @@ func (a App) handleNewSession(msg views.NewSessionMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "remote":
-		if a.k8sProvider == nil {
+		if a.remoteProvider == nil {
 			a.pickerError("K8s not configured — set redis_url in ~/.aimux/config.yaml")
 			return a, nil
 		}
@@ -1298,7 +1299,7 @@ func (a App) handleNewSession(msg views.NewSessionMsg) (tea.Model, tea.Cmd) {
 		a.statusHint = fmt.Sprintf("Spawning remote %s session — pod starting...", msg.Provider)
 		a.stickyHint = true
 		// Run spawn + wait async so the TUI stays responsive.
-		k8s := a.k8sProvider
+		k8s := a.remoteProvider
 		provName := msg.Provider
 		return a, func() tea.Msg {
 			podName, namespace, err := k8s.SpawnSession(provName)
@@ -1326,17 +1327,17 @@ func (a App) handleNewTask(msg views.NewTaskMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Where {
 	case "remote":
-		if a.k8sProvider == nil {
+		if a.remoteProvider == nil {
 			a.pickerError("K8s not configured — set redis_url in ~/.aimux/config.yaml")
 			return a, nil
 		}
 		// Lazy health check
-		h := a.k8sProvider.CheckHealth()
+		h := a.remoteProvider.CheckHealth()
 		if !h.RedisOK {
 			a.pickerError("Redis unreachable: " + h.RedisErr)
 			return a, nil
 		}
-		if err := a.k8sProvider.SpawnRemote(msg.Provider, "task", 1); err != nil {
+		if err := a.remoteProvider.SpawnRemote(msg.Provider, "task", 1); err != nil {
 			a.pickerError(fmt.Sprintf("Remote task failed: %v", err))
 			return a, nil
 		}
@@ -1823,7 +1824,7 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			a.hideAgent(target)
 			a.statusHint = fmt.Sprintf("Deleting pod %s...", podName)
-			k8s := a.k8sProvider
+			k8s := a.remoteProvider
 			go func() {
 				// Decrement replicas by 1 so the deployment doesn't recreate the pod.
 				// ScaleDown failure is non-fatal: the pod is deleted regardless,
