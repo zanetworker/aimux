@@ -1,5 +1,15 @@
 # aimux -- Project Guide for Claude
 
+## Git Policy
+
+NEVER commit or push code without explicit user approval. Always ask before running `git commit` or `git push`. Show what will be committed (files, summary) and wait for confirmation.
+
+## Coding Discipline
+
+Always invoke the `development-tools:crafted-code` skill before writing the first line of any new feature, bug fix, refactor, or code review. Follow all nine principles in order.
+
+Separation of concerns is non-negotiable: core packages (everything under `internal/` except `tui/`) MUST NOT import `bubbletea`, `lipgloss`, or anything from `tui/`. Business logic belongs in core packages; `tui/` is a thin adapter layer for rendering and key handling only. When in doubt, ask: "does this function reference `tea.Model`, `tea.Cmd`, or `lipgloss`?" If no, it belongs in a core package.
+
 ## Pre-Commit Checklist
 
 Before committing or pushing ANY code:
