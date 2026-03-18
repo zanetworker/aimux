@@ -1,4 +1,4 @@
-.PHONY: build run clean test install lint build-mcp build-agent-claude push-agent-claude
+.PHONY: build run clean test install lint build-mcp build-agent-claude push-agent-claude build-agent-gemini push-agent-gemini
 
 BINARY=aimux
 REGISTRY=quay.io/azaalouk
@@ -29,6 +29,14 @@ build-agent-claude:
 
 push-agent-claude: build-agent-claude
 	podman push $(REGISTRY)/agent-claude:latest
+
+build-agent-gemini:
+	podman build --platform linux/amd64 \
+		-t $(REGISTRY)/agent-gemini:latest \
+		-f runtime/agents/gemini/Dockerfile .
+
+push-agent-gemini: build-agent-gemini
+	podman push $(REGISTRY)/agent-gemini:latest
 
 clean:
 	rm -f $(BINARY) bin/k8s-agents-mcp

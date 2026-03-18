@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -19,12 +20,14 @@ import (
 )
 
 var (
-	rdb       *redis.Client
-	k8s       *kubernetes.Clientset
-	namespace string
-	teamID    string
-	maxAgents int
-	maxCost   float64
+	rdb         *redis.Client
+	k8s         *kubernetes.Clientset
+	namespace   string
+	teamID      string
+	maxAgents   int
+	maxCost     float64
+	githubToken string // for cleanup_branches
+	githubRepo  string // "owner/repo"
 )
 
 func main() {
@@ -54,6 +57,8 @@ func main() {
 	teamID = envOr("TEAM_ID", "default")
 	maxAgents, _ = strconv.Atoi(envOr("MAX_AGENTS", "20"))
 	maxCost, _ = strconv.ParseFloat(envOr("MAX_COST_USD", "100"), 64)
+	githubToken = os.Getenv("GITHUB_TOKEN")
+	githubRepo = os.Getenv("GITHUB_REPO")
 
 	s := server.NewMCPServer("k8s-agents", "1.0.0")
 	s.AddTool(spawnAgentTool(), handleSpawnAgent)
@@ -66,6 +71,7 @@ func main() {
 	s.AddTool(sendMessageTool(), handleSendMessage)
 	s.AddTool(scaleDownTool(), handleScaleDown)
 	s.AddTool(getCostsTool(), handleGetCosts)
+	s.AddTool(cleanupBranchesTool(), handleCleanupBranches)
 
 	if err := server.ServeStdio(s); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
@@ -517,6 +523,83 @@ func handleGetTaskResult(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		return mcp.NewToolResultText(fmt.Sprintf("No full result stored for task %s", taskID)), nil
 	}
 	return mcp.NewToolResultText(val), nil
+}
+
+func cleanupBranchesTool() mcp.Tool {
+	return mcp.NewTool("cleanup_branches",
+		mcp.WithDescription("Delete task branches from GitHub after work is complete. "+
+			"Call after scale_down when you no longer need the agents' file output. "+
+			"Only deletes branches named task-{id}. Never touches main or feature branches."),
+		mcp.WithString("task_ids", mcp.Required(),
+			mcp.Description("Comma-separated task IDs whose branches should be deleted (e.g. 'a3f2bc,b7d1ef')")),
+	)
+}
+
+func handleCleanupBranches(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if githubToken == "" || githubRepo == "" {
+		return mcp.NewToolResultText("Error: GITHUB_TOKEN and GITHUB_REPO must be set for branch cleanup"), nil
+	}
+
+	idsStr, err := req.RequireString("task_ids")
+	if err != nil {
+		return mcp.NewToolResultText("Error: task_ids is required"), nil
+	}
+
+	ids := splitComma(idsStr)
+	var deleted, skipped []string
+
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		branch := "task-" + id
+
+		// Check if branch exists before trying to delete
+		checkURL := fmt.Sprintf("https://api.github.com/repos/%s/git/ref/heads/%s", githubRepo, branch)
+		checkReq, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
+		if err != nil {
+			skipped = append(skipped, branch+" (request error)")
+			continue
+		}
+		checkReq.Header.Set("Authorization", "Bearer "+githubToken)
+		checkReq.Header.Set("Accept", "application/vnd.github+json")
+		resp, err := http.DefaultClient.Do(checkReq)
+		if err != nil || resp.StatusCode == 404 {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			skipped = append(skipped, branch+" (not found)")
+			continue
+		}
+		resp.Body.Close()
+
+		// Delete the branch
+		delURL := fmt.Sprintf("https://api.github.com/repos/%s/git/refs/heads/%s", githubRepo, branch)
+		delReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, delURL, nil)
+		if err != nil {
+			skipped = append(skipped, branch+" (request error)")
+			continue
+		}
+		delReq.Header.Set("Authorization", "Bearer "+githubToken)
+		delReq.Header.Set("Accept", "application/vnd.github+json")
+		delResp, err := http.DefaultClient.Do(delReq)
+		if err != nil || delResp.StatusCode != 204 {
+			if delResp != nil {
+				delResp.Body.Close()
+			}
+			skipped = append(skipped, branch+" (delete failed)")
+			continue
+		}
+		delResp.Body.Close()
+		deleted = append(deleted, branch)
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Deleted: %s\nSkipped: %s",
+		strings.Join(deleted, ", "),
+		strings.Join(skipped, ", "),
+	)), nil
 }
 
 // --- Helpers ---
