@@ -115,24 +115,25 @@ type NewPickerView struct {
 	statusMsg string
 
 	// K8s health status (checked once when picker opens)
-	k8sHealth *K8sHealth
+	remoteHealth *RemoteHealth
 }
 
-// K8sHealth mirrors the provider health check result for display.
-type K8sHealth struct {
+// RemoteHealth mirrors the provider HealthStatus for display.
+// Generic fields map to any backend (K8s, EC2, SSH, etc.).
+type RemoteHealth struct {
 	Configured  bool
-	RedisOK     bool
-	RedisErr    string
-	ClusterOK   bool
-	ClusterErr  string
-	Deployments []string
+	CoordOK     bool     // coordination layer (Redis, SQS, etc.)
+	CoordErr    string
+	ComputeOK   bool     // compute layer (K8s API, EC2 API, etc.)
+	ComputeErr  string
+	Workloads   []string // discovered workloads
 }
 
 // NewPickerConfig holds the parameters needed to create a NewPickerView.
 type NewPickerConfig struct {
 	K8sEnabled bool
 	Providers  []ProviderSupport
-	Health     *K8sHealth        // nil when K8s is not configured
+	Health     *RemoteHealth     // nil when remote provider is not configured
 	RecentDirs []RecentDirEntry  // recent directories for session launcher
 }
 
@@ -187,26 +188,26 @@ func NewNewPickerView(cfg NewPickerConfig) *NewPickerView {
 		taskWhereOptions:    taskWhere,
 		taskProviders:       taskProviders,
 		providerSupport:     providers,
-		k8sHealth:           cfg.Health,
+		remoteHealth:           cfg.Health,
 	}
 }
 
-// k8sReady returns true when both Redis and cluster are accessible.
-func (v *NewPickerView) k8sReady() bool {
-	return v.k8sHealth != nil && v.k8sHealth.RedisOK && v.k8sHealth.ClusterOK
+// remoteReady returns true when the remote provider's infrastructure is healthy.
+func (v *NewPickerView) remoteReady() bool {
+	return v.remoteHealth != nil && v.remoteHealth.CoordOK && v.remoteHealth.ComputeOK
 }
 
-// k8sBlockReason returns a user-facing reason why K8s options are unavailable,
-// or empty string if everything is fine.
-func (v *NewPickerView) k8sBlockReason() string {
-	if v.k8sHealth == nil {
-		return "K8s not configured"
+// remoteBlockReason returns a user-facing reason why remote options are
+// unavailable, or empty string if everything is fine.
+func (v *NewPickerView) remoteBlockReason() string {
+	if v.remoteHealth == nil {
+		return "Remote provider not configured"
 	}
-	if !v.k8sHealth.RedisOK {
-		return "Redis unreachable: " + v.k8sHealth.RedisErr
+	if !v.remoteHealth.CoordOK {
+		return "Coordination layer unreachable: " + v.remoteHealth.CoordErr
 	}
-	if !v.k8sHealth.ClusterOK {
-		return "K8s cluster unreachable: " + v.k8sHealth.ClusterErr
+	if !v.remoteHealth.ComputeOK {
+		return "Compute layer unreachable: " + v.remoteHealth.ComputeErr
 	}
 	return ""
 }
@@ -620,30 +621,30 @@ func (v *NewPickerView) viewPicker() string {
 }
 
 func (v *NewPickerView) renderHealthBar() string {
-	if v.k8sHealth == nil || !v.k8s {
+	if v.remoteHealth == nil || !v.k8s {
 		return ""
 	}
 	var b strings.Builder
-	h := v.k8sHealth
+	h := v.remoteHealth
 
 	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))   // green
 	fail := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")) // red
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))  // grey
 
-	b.WriteString(dim.Render("K8s: "))
-	if h.RedisOK {
-		b.WriteString(ok.Render("✓ Redis"))
+	b.WriteString(dim.Render("Remote: "))
+	if h.CoordOK {
+		b.WriteString(ok.Render("✓ Coord"))
 	} else {
-		b.WriteString(fail.Render("✗ Redis"))
+		b.WriteString(fail.Render("✗ Coord"))
 	}
 	b.WriteString(dim.Render("  "))
-	if h.ClusterOK {
-		b.WriteString(ok.Render("✓ Cluster"))
-		if len(h.Deployments) > 0 {
-			b.WriteString(dim.Render(fmt.Sprintf(" (%d deploys)", len(h.Deployments))))
+	if h.ComputeOK {
+		b.WriteString(ok.Render("✓ Compute"))
+		if len(h.Workloads) > 0 {
+			b.WriteString(dim.Render(fmt.Sprintf(" (%d workloads)", len(h.Workloads))))
 		}
 	} else {
-		b.WriteString(fail.Render("✗ Cluster"))
+		b.WriteString(fail.Render("✗ Compute"))
 	}
 	b.WriteString("\n")
 	return b.String()

@@ -107,47 +107,42 @@ func (k *K8s) Close() {
 	}
 }
 
-// K8sHealthStatus represents the readiness of K8s infrastructure.
-type K8sHealthStatus struct {
-	Configured  bool     // true if redis_url is set in config
-	RedisOK     bool     // true if Redis responds to PING
-	RedisErr    string   // error message if Redis check failed
-	ClusterOK   bool     // true if K8s API server is reachable
-	ClusterErr  string   // error message if cluster check failed
-	Deployments []string // names of agent deployments found in namespace
-}
+// K8s maps its infrastructure to the generic HealthStatus:
+//   CoordOK   = Redis connectivity
+//   ComputeOK = Kubernetes API server
+//   Workloads = agent Deployments in namespace
 
 // CheckHealth probes Redis and K8s connectivity. Designed to be called once
 // when the :new picker opens — not on every tick. Each check has a 1-second timeout.
-func (k *K8s) CheckHealth() K8sHealthStatus {
-	status := K8sHealthStatus{
+func (k *K8s) CheckHealth() HealthStatus {
+	status := HealthStatus{
 		Configured: k.cfg.RedisURL != "",
 	}
 	if !status.Configured {
-		status.RedisErr = "redis_url not set in ~/.aimux/config.yaml"
-		status.ClusterErr = "kubernetes not configured"
+		status.CoordErr = "redis_url not set in ~/.aimux/config.yaml"
+		status.ComputeErr = "kubernetes not configured"
 		return status
 	}
 
-	// Check Redis
+	// Check coordination layer (Redis)
 	rdb, err := k.redisClient()
 	if err != nil {
-		status.RedisErr = "cannot connect — check redis_url in config"
+		status.CoordErr = "cannot connect — check redis_url in config"
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 		if err := rdb.Ping(ctx).Err(); err != nil {
-			status.RedisErr = "not responding — is Redis running?"
+			status.CoordErr = "not responding — is Redis running?"
 			k.markRedisErr()
 		} else {
-			status.RedisOK = true
+			status.CoordOK = true
 		}
 	}
 
-	// Check K8s cluster
+	// Check compute layer (K8s API)
 	client, err := k.kubeClient()
 	if err != nil {
-		status.ClusterErr = "cannot connect — check kubeconfig"
+		status.ComputeErr = "cannot connect — check kubeconfig"
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
@@ -155,11 +150,11 @@ func (k *K8s) CheckHealth() K8sHealthStatus {
 			LabelSelector: "team-component in (agent,session)",
 		})
 		if err != nil {
-			status.ClusterErr = err.Error()
+			status.ComputeErr = err.Error()
 		} else {
-			status.ClusterOK = true
+			status.ComputeOK = true
 			for _, d := range deploys.Items {
-				status.Deployments = append(status.Deployments, d.Name)
+				status.Workloads = append(status.Workloads, d.Name)
 			}
 		}
 	}

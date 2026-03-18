@@ -1333,8 +1333,8 @@ func (a App) handleNewTask(msg views.NewTaskMsg) (tea.Model, tea.Cmd) {
 		}
 		// Lazy health check
 		h := a.remoteProvider.CheckHealth()
-		if !h.RedisOK {
-			a.pickerError("Redis unreachable: " + h.RedisErr)
+		if !h.CoordOK {
+			a.pickerError("Coordination layer unreachable: " + h.CoordErr)
 			return a, nil
 		}
 		if err := a.remoteProvider.SpawnRemote(msg.Provider, "task", 1); err != nil {
