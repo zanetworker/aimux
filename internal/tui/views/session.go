@@ -51,6 +51,7 @@ type SessionView struct {
 	width    int
 	height   int
 	active   bool
+	dataCh   chan []byte // goroutine-based reader pushes data here
 }
 
 // NewSessionView creates a new SessionView in an inactive state.
@@ -75,13 +76,43 @@ func (sv *SessionView) Open(a *agent.Agent, backend terminal.SessionBackend) (te
 	if contentWidth < 1 {
 		contentWidth = 80
 	}
-	sv.termView = terminal.NewTermView(contentWidth, contentHeight)
+	sv.termView = terminal.NewTermView(contentWidth, contentHeight, backend)
 
 	// Resize the backend to match
 	_ = backend.Resize(contentWidth, contentHeight)
 
-	// Return a command that reads the first chunk of PTY output
+	// Start a dedicated reader goroutine that pushes data to a channel.
+	// This prevents blocking reads from stalling Bubble Tea's command pool.
+	//
+	// IMPORTANT: capture the channel and backend as local variables so that
+	// if Close()+Open() races with this goroutine, the old goroutine closes
+	// its own channel (not the new one) and reads from its own backend.
+	sv.dataCh = make(chan []byte, 16)
+	go readerLoop(backend, sv.dataCh)
+
+	// Return a command that waits for the first chunk from the channel
 	return sv.readPTY(), nil
+}
+
+// readerLoop runs in a dedicated goroutine and reads from the session backend.
+// Data is pushed to dataCh. When the backend closes or errors, the channel is closed.
+// The backend and channel are passed as parameters (not accessed via the SessionView
+// pointer) so that a subsequent Open() call cannot accidentally cause this goroutine
+// to close the new session's channel or read from the new session's backend.
+func readerLoop(backend terminal.SessionBackend, ch chan<- []byte) {
+	defer close(ch)
+	for {
+		buf := make([]byte, 4096)
+		n, err := backend.Read(buf)
+		if n > 0 {
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			ch <- data
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 // HandleOutput feeds raw data into the VT emulator (for direct PTY backends)
@@ -327,19 +358,30 @@ func (sv *SessionView) renderStatusBar() string {
 // readPTY returns a tea.Cmd that reads the next chunk from the PTY. When the
 // read fails (process exit or close), it sends a PTYExitMsg instead.
 func (sv *SessionView) readPTY() tea.Cmd {
-	sess := sv.session
-	if sess == nil {
+	ch := sv.dataCh
+	if ch == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		buf := make([]byte, 4096)
-		n, err := sess.Read(buf)
-		if err != nil || n == 0 {
+		// Wait for at least one chunk of data.
+		data, ok := <-ch
+		if !ok {
 			return PTYExitMsg{}
 		}
-		// Copy data to avoid buffer reuse issues
-		data := make([]byte, n)
-		copy(data, buf[:n])
-		return PTYOutputMsg{Data: data}
+
+		// Drain any additional buffered data to batch it into one message.
+		// This prevents flooding Bubble Tea's message queue with many small
+		// PTYOutputMsg messages that starve key event processing.
+		for {
+			select {
+			case more, ok := <-ch:
+				if !ok {
+					return PTYOutputMsg{Data: data}
+				}
+				data = append(data, more...)
+			default:
+				return PTYOutputMsg{Data: data}
+			}
+		}
 	}
 }
