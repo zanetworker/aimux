@@ -2029,7 +2029,7 @@ if __name__ == "__main__":
 aimux is the single dashboard for all agent activity — local and remote — and the entry point for starting sessions and tasks. It is not just an observer: it lets you start, stop, course-correct, and read results from any agent regardless of where it runs.
 
 **What aimux does:**
-- **Start**: `:new` picker to launch sessions (Local / Local+K8s / Remote pod) or fire tasks at coordinator pods
+- **Start**: `:new` picker to launch sessions (Local / Hybrid / Remote pod) or fire tasks at coordinator pods
 - **Observe**: unified agents table (local + K8s), task list, traces, costs — all in one view
 - **Override**: kill agents (scale down), send messages (`:send`), read task results
 - **Guard**: cost threshold alerts, dead agent detection
@@ -2166,7 +2166,7 @@ providers:
 
 ```
 ╭─ New Session ────────────────────────────────────────╮
-│  Where:  [ Local ]  [ Local+K8s ]  [ Remote (pod) ]  │
+│  Where:  [ Local ]  [ Hybrid ]  [ Remote (pod) ]  │
 │  Provider:  ▸ claude   codex   gemini                │
 │  Directory: ▸ aimux    zanetworker   2m              │
 │  ↵ Launch                                            │
@@ -2312,8 +2312,8 @@ Neither Codex CLI nor Gemini CLI has an equivalent team system. Codex has experi
 8. **`internal/task/` core package** — `Task` model + loaders (`LoadFromRedis()`, `LoadFromLocalFiles()`, `GetFullResult()`)
 9. **Provider task interfaces** — add optional `TaskLister`/`Spawner` interfaces and implement on K8s provider
 10. **`:new` picker** — TUI overlay (Session / Task)
-11. **Session launcher: three-way Where toggle** — Local / Local+K8s / Remote (pod)
-    - `Local+K8s` → inject context hint + activate hook
+11. **Session launcher: three-way Where toggle** — Local / Hybrid / Remote (pod)
+    - `Hybrid` → inject context hint + activate hook
     - `Remote (pod)` → `KubectlExecBackend` (kubectl exec + tmux)
 12. **`KubectlExecBackend`** — `internal/terminal/kubectl.go`, implements `SessionBackend` (Read/Write/Resize/Close/Alive via kubectl exec + tmux, see §6.9)
 13. **Session pod image + deployment** — `claude-session` Dockerfile (Claude CLI + tmux + git), two variants (standalone / brain+arms), manifest in §7.6

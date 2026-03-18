@@ -12,7 +12,7 @@ import (
 
 // NewSessionMsg is emitted when the user confirms a new session launch.
 type NewSessionMsg struct {
-	Where    string // "local", "local-k8s", "remote"
+	Where    string // "local", "hybrid", "remote"
 	Provider string // "claude", "codex", "gemini"
 	Dir      string
 }
@@ -115,12 +115,12 @@ type NewPickerView struct {
 	statusMsg string
 
 	// K8s health status (checked once when picker opens)
-	remoteHealth *RemoteHealth
+	infraHealth *InfraHealth
 }
 
-// RemoteHealth mirrors the provider HealthStatus for display.
+// InfraHealth mirrors the provider HealthStatus for display.
 // Generic fields map to any backend (K8s, EC2, SSH, etc.).
-type RemoteHealth struct {
+type InfraHealth struct {
 	Configured  bool
 	CoordOK     bool     // coordination layer (Redis, SQS, etc.)
 	CoordErr    string
@@ -133,7 +133,7 @@ type RemoteHealth struct {
 type NewPickerConfig struct {
 	K8sEnabled bool
 	Providers  []ProviderSupport
-	Health     *RemoteHealth     // nil when remote provider is not configured
+	Health     *InfraHealth     // nil when infra provider is not configured
 	RecentDirs []RecentDirEntry  // recent directories for session launcher
 }
 
@@ -160,7 +160,7 @@ func NewNewPickerView(cfg NewPickerConfig) *NewPickerView {
 
 	sessionWhere := []string{"Local"}
 	if cfg.K8sEnabled {
-		sessionWhere = append(sessionWhere, "Local+K8s", "Remote (pod)")
+		sessionWhere = append(sessionWhere, "Hybrid", "Remote (pod)")
 	}
 
 	taskWhere := []string{"Local"}
@@ -188,26 +188,26 @@ func NewNewPickerView(cfg NewPickerConfig) *NewPickerView {
 		taskWhereOptions:    taskWhere,
 		taskProviders:       taskProviders,
 		providerSupport:     providers,
-		remoteHealth:           cfg.Health,
+		infraHealth:           cfg.Health,
 	}
 }
 
-// remoteReady returns true when the remote provider's infrastructure is healthy.
-func (v *NewPickerView) remoteReady() bool {
-	return v.remoteHealth != nil && v.remoteHealth.CoordOK && v.remoteHealth.ComputeOK
+// infraReady returns true when the infra provider's infrastructure is healthy.
+func (v *NewPickerView) infraReady() bool {
+	return v.infraHealth != nil && v.infraHealth.CoordOK && v.infraHealth.ComputeOK
 }
 
-// remoteBlockReason returns a user-facing reason why remote options are
+// infraBlockReason returns a user-facing reason why infra options are
 // unavailable, or empty string if everything is fine.
-func (v *NewPickerView) remoteBlockReason() string {
-	if v.remoteHealth == nil {
-		return "Remote provider not configured"
+func (v *NewPickerView) infraBlockReason() string {
+	if v.infraHealth == nil {
+		return "Infra provider not configured"
 	}
-	if !v.remoteHealth.CoordOK {
-		return "Coordination layer unreachable: " + v.remoteHealth.CoordErr
+	if !v.infraHealth.CoordOK {
+		return "Coordination layer unreachable: " + v.infraHealth.CoordErr
 	}
-	if !v.remoteHealth.ComputeOK {
-		return "Compute layer unreachable: " + v.remoteHealth.ComputeErr
+	if !v.infraHealth.ComputeOK {
+		return "Compute layer unreachable: " + v.infraHealth.ComputeErr
 	}
 	return ""
 }
@@ -422,7 +422,7 @@ func (v *NewPickerView) isSessionProviderSupported(providerName, whereLabel stri
 	switch whereLabel {
 	case "Local":
 		return ps.LocalSession
-	case "Local+K8s":
+	case "Hybrid":
 		return ps.LocalK8s
 	case "Remote (pod)":
 		return ps.RemoteSession
@@ -525,8 +525,8 @@ func (v *NewPickerView) resolveSessionWhere() string {
 	switch label {
 	case "Local":
 		return "local"
-	case "Local+K8s":
-		return "local-k8s"
+	case "Hybrid":
+		return "hybrid"
 	case "Remote (pod)":
 		return "remote"
 	default:
@@ -552,7 +552,7 @@ func sessionWhereDescription(label string) string {
 	switch label {
 	case "Local":
 		return "Claude Code on your laptop with local agents"
-	case "Local+K8s":
+	case "Hybrid":
 		return "Claude Code on your laptop, tasks run on K8s pods"
 	case "Remote (pod)":
 		return "Full Claude Code runs in a K8s pod"
@@ -621,11 +621,11 @@ func (v *NewPickerView) viewPicker() string {
 }
 
 func (v *NewPickerView) renderHealthBar() string {
-	if v.remoteHealth == nil || !v.k8s {
+	if v.infraHealth == nil || !v.k8s {
 		return ""
 	}
 	var b strings.Builder
-	h := v.remoteHealth
+	h := v.infraHealth
 
 	ok := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))   // green
 	fail := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")) // red

@@ -58,7 +58,7 @@ type Provider interface {
 	SubagentAttrKeys() subagent.AttrKeys
 
 	// Kill stops the agent. For local providers, this sends SIGTERM/SIGKILL
-	// to the process tree. For remote providers (e.g., Kubernetes), this
+	// to the process tree. For infra providers (e.g., Kubernetes), this
 	// deletes the pod or scales down the deployment.
 	Kill(a agent.Agent) error
 }
@@ -88,14 +88,14 @@ type Spawner interface {
 	ScaleDown(provider, role string) error
 }
 
-// RemoteProvider is an optional interface for providers that manage remote
+// InfraProvider is an optional interface for providers that manage remote
 // agent infrastructure (Kubernetes, EC2, SSH hosts, etc.). The TUI stores
 // one of these for on-demand operations (spawn sessions, health checks,
 // status display). Each backend implements its own discovery, spawning, and
 // health check logic behind this interface.
 //
-//	if rp, ok := p.(provider.RemoteProvider); ok { rp.Status() }
-type RemoteProvider interface {
+//	if rp, ok := p.(provider.InfraProvider); ok { rp.Status() }
+type InfraProvider interface {
 	Provider
 	TaskLister
 	Spawner
@@ -117,7 +117,7 @@ type RemoteProvider interface {
 	ScaleDownOne(providerName, role string) error
 }
 
-// HealthStatus represents the readiness of a remote provider's infrastructure.
+// HealthStatus represents the readiness of a infra provider's infrastructure.
 // The two-layer model (coordination + compute) maps to any backend:
 //
 //	K8s:  CoordOK=Redis, ComputeOK=cluster API

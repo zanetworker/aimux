@@ -11,7 +11,7 @@ import (
 var _ Provider = (*K8s)(nil)
 var _ TaskLister = (*K8s)(nil)
 var _ Spawner = (*K8s)(nil)
-var _ RemoteProvider = (*K8s)(nil)
+var _ InfraProvider = (*K8s)(nil)
 
 func TestK8sName(t *testing.T) {
 	k := &K8s{}
