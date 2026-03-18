@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/tui"
 )
@@ -40,6 +41,10 @@ func main() {
 }
 
 func runTUI() {
+	debuglog.Init()
+	defer debuglog.Close()
+	debuglog.Log("aimux starting (version %s)", version)
+
 	app := tui.NewApp()
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
