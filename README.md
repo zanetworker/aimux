@@ -134,13 +134,31 @@ Press `c` from the agent list for aggregated token usage and estimated USD spend
 
 Built-in OTLP/HTTP receiver on port 4318 collects live telemetry from spawned agents. Debug anytime: `curl http://localhost:4318/debug`
 
+### Kubernetes Agents
+
+Run 5-20 AI coding agents as Kubernetes pods. Claude Code on your laptop acts as the lead, dispatching tasks to remote workers via an MCP server + Redis.
+
+Press `:new` to open the picker, then choose:
+- **Local + K8s** — your Claude Code session coordinates K8s worker pods
+- **Remote (pod)** — full Claude Code runs in a K8s pod, attach via split view
+- **Remote Task** — fire-and-forget task, results appear in the Tasks view
+
+Press `T` to see all tasks (K8s + local) with status, assignee, and results.
+
+```
+ Tasks  ● 2 running  ✓ 14 done  ○ 3 pending  ✗ 1 failed   $4.02
+ ─────────────────────────────────────────────────────────────────
+ TASK                       AGENT            LOC    STATUS   AGE
+ ✓ Research: LangGraph      researcher-1     k8s    done     45m
+ ● Implement API            coder-1          k8s    running  30m
+ ○ Review implementation    (pending)        k8s    waiting  —
+```
+
+See **[K8s Quickstart](docs/k8s-quickstart.md)** for setup.
+
 ### Teams
 
-Press `T` from the agent list to view Claude Code team configurations and members.
-
-<p align="center">
-  <img src="assets/teams.png" alt="Teams view showing Claude Code team configurations and members" width="800">
-</p>
+View Claude Code team configurations and members via `:teams` command.
 
 ## Key Bindings
 
@@ -151,7 +169,7 @@ Press `T` from the agent list to view Claude Code team configurations and member
 | `t` | Agent list | Standalone trace view |
 | `c` | Agent list | Cost dashboard |
 | `S` | Agent list | Session history browser |
-| `T` | Agent list | Teams overview |
+| `T` | Agent list | Tasks view (K8s + local) |
 | `Tab` | Split view | Switch focus between panes |
 | `e` | Trace pane | Export menu (`j`:JSONL, `o`:OTEL) |
 | `a` | Trace pane | Annotate turn (GOOD/BAD/WASTE) |
@@ -191,6 +209,14 @@ export:
   mlflow:
     experiment_id: "1"        # required by MLflow
 
+# Kubernetes agents (optional)
+kubernetes:
+  enabled: true
+  redis_url: "redis://:password@<elb>:6379"
+  namespace: "agents"
+  team_id: "my-team"
+  otel_endpoint: "http://<elb>:4317"   # optional: remote trace collection
+
 # Session history: LLM-powered title generation
 # Requires GEMINI_API_KEY (for flash) or ANTHROPIC_API_KEY (for haiku/sonnet/opus)
 sessions:
@@ -223,11 +249,12 @@ In aimux: `Tab` to trace pane, `a` to annotate, `e` then `o` to export.
 | Claude | Process scan + JSONL | Full conversations | Direct PTY embed | Logs via http/protobuf |
 | Codex | Process scan + JSONL | Full conversations | Tmux mirror | Traces + logs |
 | Gemini | Process scan + JSON | Full conversations (per-session chat files) | Tmux mirror | Traces + logs |
+| K8s | Redis heartbeat | OTel Collector | kubectl exec + tmux | Remote collector |
 
 <details>
 <summary><strong>Adding a new provider</strong></summary>
 
-Implement the `Provider` interface (10 methods), register in `app.go`, add pricing:
+Implement the `Provider` interface (11 methods), register in `app.go`, add pricing. Optionally implement `TaskLister` and `Spawner` for remote task management:
 
 ```go
 type Provider interface {
@@ -255,9 +282,12 @@ No daemon, no hooks, no modifications to your AI tools. Reads from the filesyste
 | Source | Location | Data |
 |--------|----------|------|
 | Config | `~/.aimux/config.yaml` | Provider settings, export config |
-| Process table | `ps aux` | Running agents |
+| Process table | `ps aux` | Running local agents |
 | Session logs | `~/.claude/projects/*/`, `~/.codex/sessions/`, `~/.gemini/tmp/*/chats/` | Conversations, tool calls |
-| OTEL receiver | `localhost:4318` | Live telemetry from agents |
+| OTEL receiver | `localhost:4318` | Live telemetry from local agents |
+| Redis | `redis://<endpoint>:6379` | K8s agent heartbeats, tasks, costs |
+| K8s API | via kubeconfig | Remote agent deployments, pod status |
+| OTel Collector | `<endpoint>:4317` | Traces from K8s agents |
 | Teams | `~/.claude/teams/*/config.json` | Team membership |
 
 ## Releasing

@@ -1,7 +1,7 @@
 # Kubernetes Multi-Agent Architecture with Redis Streams
 
 **Date**: 2026-03-05
-**Status**: Design (post-review)
+**Status**: Active implementation (partial)
 **Author**: azaalouk + Claude
 **Reviewed by**: Claude code-reviewer agent, OpenAI Codex CLI
 
@@ -70,12 +70,14 @@ For K8s, an MCP server provides equivalent tools with different names:
 | `TaskCreate` | `create_task` | Redis hash + sorted set |
 | `TaskList` | `list_tasks` | Redis ZRANGE |
 | `TaskGet` | `get_task` | Redis HGETALL |
+| (none) | `wait_for_task` | Redis polling helper (blocking wait) |
+| (none) | `get_task_result` | Redis GET (`task:{id}:result_full`) |
 | `TaskUpdate` | `claim_task`, `complete_task` | Redis Lua script |
 | `SendMessage` | `send_message` | Redis XADD |
 | (none) | `list_agents` | Redis heartbeat hash |
 | (none) | `scale_down` | K8s API (set replicas=0) |
 | (none) | `get_costs` | Redis cost hashes |
-| (none) | `cleanup_branches` | GitHub API (delete task branches) |
+| (none, planned) | `cleanup_branches` | GitHub API (delete task branches) |
 
 Claude discovers MCP tools automatically. Their descriptions tell Claude when to use them ("Spawn AI agents on Kubernetes for parallel work").
 
@@ -245,15 +247,23 @@ func handleSpawnAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 		return mcp.NewToolResultText(fmt.Sprintf("Error scaling: %v", err)), nil
 	}
 
-	// Wait for agents to register in Redis (pods take 30-60s to start)
+	// Wait for agents to register in Redis (pods take 30-60s to start).
+	// Count only agents matching this provider+role, not all heartbeats.
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(5 * time.Second)
-		current, _ := rdb.HGetAll(ctx, teamKey("heartbeat")).Result()
-		if len(current) >= int(targetReplicas) {
+		heartbeats, _ := rdb.HGetAll(ctx, teamKey("heartbeat")).Result()
+		matching := 0
+		for agentID := range heartbeats {
+			meta, _ := rdb.HGetAll(ctx, teamKey("agent:"+agentID)).Result()
+			if meta["provider"] == provider && meta["role"] == role {
+				matching++
+			}
+		}
+		if matching >= int(targetReplicas) {
 			return mcp.NewToolResultText(fmt.Sprintf(
-				"Scaled %s to %d replicas. %d agents registered and ready.",
-				deployName, targetReplicas, len(current))), nil
+				"Scaled %s to %d replicas. %d %s/%s agents registered and ready.",
+				deployName, targetReplicas, matching, provider, role)), nil
 		}
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
@@ -481,19 +491,44 @@ func getCostsTool() mcp.Tool {
 	)
 }
 
+// Per-model pricing (USD per 1K tokens)
+var modelPricing = map[string][2]float64{
+	"claude-opus-4-6":   {0.015, 0.075},
+	"claude-sonnet-4-6": {0.003, 0.015},
+	"claude-haiku-4-5":  {0.0008, 0.004},
+}
+
 func handleGetCosts(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	keys, _ := rdb.Keys(ctx, teamKey("cost:*")).Result()
+	// Use SCAN not KEYS — KEYS blocks Redis while scanning all keys
+	var keys []string
+	var cursor uint64
+	prefix := teamKey("cost:")
+	for {
+		batch, nextCursor, err := rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
+		if err != nil {
+			break
+		}
+		keys = append(keys, batch...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
 	var total float64
 	var lines []string
 
 	for _, key := range keys {
 		c, _ := rdb.HGetAll(ctx, key).Result()
-		agentID := key[len(teamKey("cost:")):]
+		agentID := key[len(prefix):]
 		tokensIn, _ := strconv.ParseInt(c["tokens_in"], 10, 64)
 		tokensOut, _ := strconv.ParseInt(c["tokens_out"], 10, 64)
-		cost := float64(tokensIn)*0.015/1000 + float64(tokensOut)*0.075/1000
+		priceIn, priceOut := 0.015, 0.075 // default to opus pricing
+		if p, ok := modelPricing[c["model"]]; ok {
+			priceIn, priceOut = p[0], p[1]
+		}
+		cost := float64(tokensIn)*priceIn/1000 + float64(tokensOut)*priceOut/1000
 		total += cost
-		lines = append(lines, fmt.Sprintf("  %s: $%.2f (%d in, %d out)", agentID, cost, tokensIn, tokensOut))
+		lines = append(lines, fmt.Sprintf("  %s (%s): $%.2f (%d in, %d out)", agentID, c["model"], cost, tokensIn, tokensOut))
 	}
 	lines = append(lines, fmt.Sprintf("  TOTAL: $%.2f", total))
 	if total > maxCost {
@@ -724,14 +759,18 @@ k8s-agents/
 │   ├── codex/
 │   │   ├── Dockerfile             # Python: COPY coordinator/ + pip install openai-agents
 │   │   └── main.py
-│   └── gemini/
-│       ├── Dockerfile             # Python: COPY coordinator/ + pip install google-genai
-│       └── main.py
+│   ├── gemini/
+│   │   ├── Dockerfile             # Python: COPY coordinator/ + pip install google-genai
+│   │   └── main.py
+│   └── session/
+│       ├── Dockerfile             # Ubuntu + Claude CLI + tmux + git (interactive sessions)
+│       └── claude-settings.json   # Optional: MCP server config for brain+arms variant
 ├── manifests/
 │   ├── redis.yaml
 │   ├── rbac.yaml                  # ServiceAccount + Role + RoleBinding for MCP server
 │   ├── agent-claude-coder.yaml    # Deployment: image=agent-claude, ROLE=coder
 │   ├── agent-claude-reviewer.yaml # Deployment: image=agent-claude, ROLE=reviewer
+│   ├── agent-claude-session.yaml  # Deployment: image=claude-session (interactive, §7.6)
 │   ├── agent-gemini-researcher.yaml
 │   └── networkpolicy.yaml
 ├── go.mod                         # Go module (MCP server)
@@ -787,6 +826,10 @@ CMD ["python", "/app/agent/main.py"]
 - Pending tasks in a separate sorted set. Listing available work = one ZRANGE call, not O(N) HGETs. Use SCAN not KEYS for listing task hashes.
 - Events stream uses MAXLEN ~10000 (larger than inbox) because broadcasts serve all agents.
 - `source_branch`: when a task depends on a prior task's file output, set this to the git branch the prior agent committed to. The worker pulls it before starting.
+
+**Known scaling constraints:**
+- `claim_task` fetches all pending task IDs via `ZRANGE ... 0 -1` then tries each with the Lua script. This is O(pending_tasks × agents) per second. Fine for <100 tasks. At higher scale, partition by role or use a blocking pop pattern.
+- After `scale_down`, stale heartbeat entries persist until the lead reaper runs (every 5 min). `list_agents` may show dead agents briefly. Not harmful — status shows "dead" — but noted for awareness.
 
 ## 6. Communication patterns
 
@@ -857,17 +900,19 @@ Returns: `1` = claimed, `0` = already taken, `-1` = wrong role, `-2` = dependenc
 ### 6.4 Task lifecycle
 
 ```
-  pending ──── Agent claims (Lua atomic) ──── claimed ──── Agent works ──── in_progress
-     ▲                                                                          │
-     │                                                                     ┌────▼────┐
-     │  retry (count < 3)                                                  │ success? │
-     │◄────────── failed ◄───────────────── no ◄───────────────────────────┤          │
-     │                                                                     │          │
-     │         dead (count >= 3,                                           └────┬────┘
-     │          needs human)             completed ◄──────── yes ───────────────┘
+  pending ─── Agent claims (Lua) ─── claimed ─── run_task() sets ─── in_progress
+     ▲                                                                     │
+     │                                                                ┌────▼────┐
+     │  retry (count < 3)                                             │ success? │
+     │◄────────── failed ◄──────────── no ◄───────────────────────────┤          │
+     │                                                                │          │
+     │         dead (count >= 3,                                      └────┬────┘
+     │          needs human)          completed ◄──────── yes ─────────────┘
      │
      └── heartbeat timeout (lead reassigns) ◄── agent crash during claimed/in_progress
 ```
+
+Status transitions: `pending` → `claimed` (Lua script, atomic) → `in_progress` (agent sets before LLM call) → `completed` or `failed` → `pending` (retry) or `dead` (retry_count >= 3).
 
 Task hash fields for failure handling: `retry_count` (int, default 0), `error` (last error message).
 
@@ -1022,6 +1067,160 @@ Nothing automatically. The task branch (`task-a3f2bc`) is deleted by `cleanup_br
 
 Two coder agents writing to the same file will produce merge conflicts when pushing. The lead must scope tasks to non-overlapping files. This is the same constraint as local worktree isolation in the dev-team skill.
 
+### 6.9 Remote session flow
+
+A remote session puts the full Claude Code CLI inside a K8s pod. You interact with it through aimux's split view, which attaches via `kubectl exec` + tmux. This is the K8s equivalent of running Claude Code locally — same tools, same capabilities, but the compute is remote.
+
+**Why run Claude Code remotely?**
+- Long-running sessions that outlive your laptop (close the lid, reconnect later)
+- Closer to the cluster (faster K8s API calls, lower latency to Redis)
+- Reproducible environment (same image, same tools, every time)
+- Can act as both brain and arms if the k8s-agents MCP server is bundled
+
+**Session pod vs worker pod — different image, different purpose:**
+
+| | Worker pod (`MODE=agent`) | Session pod (`MODE=session`) |
+|---|---|---|
+| Image | Python + coordinator + Agent SDK | Claude CLI + tmux + git + shell |
+| Entrypoint | Python main loop (claims tasks) | `sleep infinity` (waits for attach) |
+| LLM interaction | Headless API calls via SDK | Interactive CLI via terminal |
+| Coordination | Code-driven (Redis loop) | LLM-driven (Claude decides) |
+| MCP server | None (worker doesn't need K8s tools) | Optional (enables brain+arms) |
+| User interaction | None (fire-and-forget) | `kubectl exec` + tmux |
+
+**Session pod Dockerfile:**
+
+```dockerfile
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y \
+    tmux git curl nodejs npm python3 build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+# Optional: bundle MCP server for brain+arms mode
+COPY k8s-agents-mcp /usr/local/bin/
+COPY claude-settings.json /root/.claude/settings.json
+
+# Configure git for commits
+RUN git config --global user.name "claude-session" \
+    && git config --global user.email "claude@k8s"
+
+# Pod stays alive; aimux attaches via kubectl exec
+CMD ["sleep", "infinity"]
+```
+
+**Two session variants (same image, different config):**
+
+| Variant | MCP server bundled? | Claude can spawn K8s arms? | Use case |
+|---|---|---|---|
+| **Standalone** | No | No — same as local Claude Code | Long-running interactive work, outlives laptop |
+| **Brain+arms** | Yes (`claude-settings.json` pre-configured) | Yes — `spawn_agent`, `create_task`, etc. | Autonomous lead that coordinates worker pods |
+
+The variant is controlled by whether `claude-settings.json` is baked into the image (or mounted via ConfigMap). The standalone variant is just Claude Code in a pod with no MCP tools — same experience as local, but remote.
+
+**Pre-configured `claude-settings.json` for brain+arms variant:**
+
+```json
+{
+  "mcpServers": {
+    "k8s-agents": {
+      "command": "/usr/local/bin/k8s-agents-mcp",
+      "env": {
+        "REDIS_URL": "redis://:$(REDIS_PASSWORD)@redis.agents.svc:6379",
+        "K8S_NAMESPACE": "agents",
+        "TEAM_ID": "my-team",
+        "MAX_AGENTS": "20",
+        "MAX_COST_USD": "100"
+      }
+    }
+  }
+}
+```
+
+Note: inside the cluster, Redis is reachable at `redis.agents.svc:6379` (no LoadBalancer needed). The MCP server uses in-cluster K8s credentials from the pod's ServiceAccount.
+
+**Full flow — concrete example: remote interactive session**
+
+```
+STEP 1 — User selects Remote (pod) from aimux :new picker
+───────────────────────────────────────────────────────────
+aimux checks: does a running session pod exist for this repo?
+  → K8s API: list pods with label session-repo=<hash>, status=Running
+  → If yes: reuse existing pod (skip to step 3)
+  → If no: scale up
+
+aimux scales Deployment:
+  agent-claude-session replicas: 0 → 1
+  → Pod starts
+  → Init container: git clone https://TOKEN@github.com/org/repo /workspace
+  → Main container: sleep infinity (ready for attach)
+  → Pod reaches Running state (~30-60s)
+
+STEP 2 — aimux creates KubectlExecBackend
+──────────────────────────────────────────
+aimux runs:
+  kubectl exec -it agent-claude-session-xxxxx -- \
+    tmux new-session -A -s main -x {cols} -y {rows}
+
+  -A = attach if session "main" exists, create if not
+  -x/-y = set initial terminal size from aimux pane
+
+This gives aimux a bidirectional stdin/stdout pipe to the
+pod's tmux session. KubectlExecBackend wraps this:
+  Read()   → reads kubectl exec stdout
+  Write()  → writes to kubectl exec stdin
+  Resize() → kubectl exec ... tmux resize-window -t main -x W -y H
+  Close()  → sends tmux detach (Ctrl-B d), does NOT kill the pod
+  Alive()  → kubectl get pod ... -o jsonpath='{.status.phase}'
+
+STEP 3 — User works in the session
+───────────────────────────────────
+aimux split view shows:
+  Left pane:  trace (OTEL from pod → collector → aimux reads)
+  Right pane: live terminal (kubectl exec → tmux)
+
+User types in the right pane → goes to Claude Code in the pod.
+Claude has full tools: Read, Edit, Bash, etc. on the pod's /workspace.
+
+If brain+arms variant: Claude also sees MCP tools (spawn_agent, etc.)
+and can coordinate worker pods from inside K8s.
+
+STEP 4 — Disconnect and reconnect
+──────────────────────────────────
+User closes aimux or loses connection:
+  → kubectl exec terminates
+  → tmux session persists in the pod
+  → Claude Code session continues running (not killed)
+
+User reopens aimux, selects Remote (pod) from :new:
+  → aimux finds existing pod (step 1 check)
+  → tmux new-session -A reattaches to existing "main" session
+  → User sees Claude Code exactly where they left off
+
+STEP 5 — Cleanup
+─────────────────
+User is done → aimux kills the session:
+  → K8s provider scales Deployment to 0
+  → Pod terminated, workspace gone (emptyDir)
+  → Any uncommitted work is lost (same as closing a local session)
+
+Or: user keeps the pod running for days, reconnecting as needed.
+```
+
+**How aimux discovers remote sessions:**
+
+The K8s provider's `Discover()` method lists pods with label `team-component=session`:
+- Checks heartbeat in Redis (if brain+arms variant registered)
+- Falls back to pod phase from K8s API (standalone variant has no Redis entry)
+- Shows in the agents table with `LOC=k8s` and type `session`
+
+**Known tradeoffs:**
+- `kubectl exec` adds network latency to keystrokes. Fine for coding (not gaming). If latency is >200ms, consider running aimux closer to the cluster.
+- tmux-in-tmux: if you run aimux inside tmux locally, you get nested tmux. Set a different prefix key in the pod's tmux config, or use aimux's PTY rendering (which doesn't expose tmux to the user).
+- Terminal resize requires a separate `kubectl exec` call. The `KubectlExecBackend` debounces resize events (100ms) to avoid flooding.
+
 ## 7. Kubernetes manifests
 
 ### 7.1 Secrets
@@ -1151,7 +1350,7 @@ spec:
     - port: 6379
 ```
 
-### 7.2 Agent deployments (one per provider+role, same image)
+### 7.3 Agent deployments (one per provider+role, same image)
 
 Each role is a separate Deployment but uses the **same image per provider**. Role behaviour is driven entirely by env vars (`ROLE`, `ALLOWED_TOOLS`, `MODEL`). When Claude needs both coders and reviewers, it calls `spawn_agent` twice — once per role.
 
@@ -1178,7 +1377,6 @@ spec:
         provider: claude
         role: coder
     spec:
-      serviceAccountName: mcp-server   # RBAC: see §7.4
       initContainers:
       - name: clone-repo
         image: alpine/git
@@ -1206,13 +1404,13 @@ spec:
       - name: agent
         image: quay.io/azaalouk/agent-claude:latest   # same image for all claude roles
         env:
-        - name: REDIS_URL
-          value: "redis://:$(REDIS_PASSWORD)@redis:6379"
         - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
               name: redis-secret
               key: password
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis:6379"   # must come after REDIS_PASSWORD
         - name: TEAM_ID
           value: "my-team"
         - name: AGENT_ID
@@ -1276,7 +1474,6 @@ spec:
         provider: claude
         role: reviewer
     spec:
-      serviceAccountName: mcp-server
       initContainers:
       - name: clone-repo
         image: alpine/git
@@ -1302,13 +1499,13 @@ spec:
       - name: agent
         image: quay.io/azaalouk/agent-claude:latest   # same image as coder
         env:
-        - name: REDIS_URL
-          value: "redis://:$(REDIS_PASSWORD)@redis:6379"
         - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:
               name: redis-secret
               key: password
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis:6379"   # must come after REDIS_PASSWORD
         - name: TEAM_ID
           value: "my-team"
         - name: AGENT_ID
@@ -1390,7 +1587,7 @@ The lead sets `source_branch` when creating dependent tasks:
 create_task(prompt="Review the API changes", required_role=reviewer, depends_on=[task1], source_branch="task-{task1_id}")
 ```
 
-### 7.3 Lead (your local Claude Code session)
+### 7.4 Lead (your local Claude Code session)
 
 The lead is **not** a K8s pod. It's your local Claude Code session with the k8s-agents MCP server configured (see §2.4). This means:
 - No separate lead Deployment or StatefulSet on K8s
@@ -1400,7 +1597,7 @@ The lead is **not** a K8s pod. It's your local Claude Code session with the k8s-
 
 If you need an autonomous lead that runs without your laptop (e.g., CI/CD triggered), deploy the MCP server as a K8s pod and run the Agent SDK headless with the same MCP tools registered. But for interactive use, the local session is simpler.
 
-### 7.4 RBAC
+### 7.5 RBAC
 
 The MCP server needs permission to `get` and `update` Deployments to scale them. Without this, `spawn_agent` and `scale_down` get 403s from the K8s API.
 
@@ -1436,11 +1633,112 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-Register the `serviceAccountName: mcp-server` in each agent Deployment's pod spec (see §7.2). When running the MCP server locally (not in-cluster), it uses your kubeconfig credentials instead — no ServiceAccount needed.
+Agent pods do **not** need this ServiceAccount — they never call the K8s API. Only the MCP server does, and it runs locally using your kubeconfig. If the MCP server is deployed in-cluster in the future, give its pod `serviceAccountName: mcp-server`.
+
+### 7.6 Session deployment (Remote session mode)
+
+Session pods run the Claude Code CLI interactively, not the Python coordinator loop. Different image, different purpose (see §6.9 for full comparison).
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-claude-session
+  labels:
+    team-component: session
+    provider: claude
+spec:
+  replicas: 0          # scale-to-zero: aimux scales up on :new → Remote (pod)
+  selector:
+    matchLabels:
+      app: agent-claude-session
+  template:
+    metadata:
+      labels:
+        app: agent-claude-session
+        team-component: session      # distinct from "agent" — aimux discovers both
+        provider: claude
+        session-repo: ""             # set by aimux at scale-up time (hash of repo URL)
+    spec:
+      serviceAccountName: mcp-server   # brain+arms variant needs K8s API access
+      initContainers:
+      - name: clone-repo
+        image: alpine/git
+        command:
+        - sh
+        - -c
+        - git clone https://$(GIT_TOKEN)@$(GIT_HOST) /workspace
+        env:
+        - name: GIT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: repo-secret
+              key: token
+        - name: GIT_HOST
+          valueFrom:
+            secretKeyRef:
+              name: repo-secret
+              key: host
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      containers:
+      - name: session
+        image: quay.io/azaalouk/claude-session:latest   # Claude CLI + tmux + git
+        command: ["sleep", "infinity"]                    # aimux attaches via kubectl exec
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: password
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: llm-keys
+              key: anthropic
+        - name: GIT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: repo-secret
+              key: token
+        - name: GIT_HOST
+          valueFrom:
+            secretKeyRef:
+              name: repo-secret
+              key: host
+        # MCP server env (brain+arms variant — ignored if binary not in image)
+        - name: REDIS_URL
+          value: "redis://:$(REDIS_PASSWORD)@redis:6379"
+        - name: K8S_NAMESPACE
+          value: "agents"
+        - name: TEAM_ID
+          value: "my-team"
+        resources:
+          requests: { memory: "2Gi", cpu: "1000m" }
+          limits: { memory: "4Gi", cpu: "2000m" }      # more headroom than workers
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: workspace
+        emptyDir:
+          sizeLimit: 10Gi     # sessions accumulate more data than single-task workers
+```
+
+**Key differences from worker deployments:**
+- Label `team-component: session` (not `agent`) — aimux discovers these separately
+- `serviceAccountName: mcp-server` — needed only here, for brain+arms variant where the MCP server runs in-pod and calls the K8s API
+- `command: sleep infinity` — pod stays alive waiting for `kubectl exec` attachment
+- Higher resource limits — interactive sessions are longer-lived and more resource-hungry
+- Larger `emptyDir` — sessions accumulate files across multiple prompts
+
+**Standalone variant**: same manifest but without the MCP server binary in the image and without `serviceAccountName`. The claude CLI works the same, it just won't have K8s agent tools.
 
 ## 8. Coordination library (Python)
 
 ```python
+import asyncio
 import redis.asyncio as redis
 import json, time
 
@@ -1503,17 +1801,14 @@ class AgentCoordinator:
         )
 
     async def receive(self, timeout_ms: int = 5000) -> list[tuple[str, str, dict]]:
-        """Returns (stream, msg_id, data) tuples. Caller must ack after processing."""
-        streams = {
-            f"team:{self.team}:inbox:{self.agent}": ">",
-            f"team:{self.team}:events": ">",
-        }
-        groups = {
-            f"team:{self.team}:inbox:{self.agent}": "agents",
-            f"team:{self.team}:events": f"agent-{self.agent}",
-        }
+        """Returns (stream, msg_id, data) tuples. Caller must ack after processing.
+        Reads both inbox and events in parallel — two XREADGROUP calls with short
+        timeouts instead of one sequential blocking call per stream."""
+        inbox_stream = f"team:{self.team}:inbox:{self.agent}"
+        events_stream = f"team:{self.team}:events"
         messages = []
-        for stream, group in groups.items():
+
+        async def read_stream(stream: str, group: str):
             try:
                 results = await self.r.xreadgroup(
                     group, self.agent, {stream: ">"}, count=10, block=timeout_ms,
@@ -1523,6 +1818,12 @@ class AgentCoordinator:
                         messages.append((stream_name.decode(), msg_id.decode(), data))
             except Exception:
                 pass
+
+        # Read both streams concurrently — avoids doubling worst-case latency
+        await asyncio.gather(
+            read_stream(inbox_stream, "agents"),
+            read_stream(events_stream, f"agent-{self.agent}"),
+        )
         return messages
 
     async def ack(self, stream: str, msg_id: str):
@@ -1585,11 +1886,13 @@ class AgentCoordinator:
 
     # --- Cost ---
 
-    async def report_tokens(self, tokens_in: int, tokens_out: int):
+    async def report_tokens(self, tokens_in: int, tokens_out: int, model: str = ""):
         key = f"team:{self.team}:cost:{self.agent}"
         pipe = self.r.pipeline()
         pipe.hincrby(key, "tokens_in", tokens_in)
         pipe.hincrby(key, "tokens_out", tokens_out)
+        if model:
+            pipe.hset(key, "model", model)
         await pipe.execute()
 ```
 
@@ -1625,8 +1928,12 @@ async def run_task(coord, task_id: str, task: dict) -> tuple[str, str]:
         git("fetch", "origin", source_branch)
         git("checkout", source_branch)
 
-    # Run the LLM agent — filter to text output only
+    # Mark task as in_progress before LLM invocation
+    await coord.r.hset(f"team:{coord.team}:task:{task_id}", "status", "in_progress")
+
+    # Run the LLM agent — filter to text output only, track token usage
     result_text = ""
+    tokens_in, tokens_out = 0, 0
     async for msg in query(
         prompt=prompt,
         options=ClaudeCodeOptions(allowed_tools=ALLOWED_TOOLS),
@@ -1635,6 +1942,14 @@ async def run_task(coord, task_id: str, task: dict) -> tuple[str, str]:
             for block in msg.content:
                 if hasattr(block, "text"):
                     result_text += block.text
+        # Track token usage from result messages
+        if hasattr(msg, "usage") and msg.usage:
+            tokens_in += getattr(msg.usage, "input_tokens", 0)
+            tokens_out += getattr(msg.usage, "output_tokens", 0)
+
+    # Report token usage for cost tracking
+    if tokens_in or tokens_out:
+        await coord.report_tokens(tokens_in, tokens_out, model=os.environ.get("MODEL", ""))
 
     result_ref = ""
 
@@ -1664,20 +1979,21 @@ async def main():
         namespace=os.environ.get("POD_NAMESPACE", ""),
     )
 
+    # Graceful shutdown via Event (SystemExit inside asyncio.create_task is silently swallowed)
+    stop_event = asyncio.Event()
+    loop = asyncio.get_event_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop_event.set)
+
     # Heartbeat runs independently (not blocked by slow API calls)
     async def heartbeat_loop():
-        while True:
+        while not stop_event.is_set():
             await coord.heartbeat()
             await asyncio.sleep(10)
     asyncio.create_task(heartbeat_loop())
 
-    # Graceful shutdown
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown(coord)))
-
     # Main loop
-    while True:
+    while not stop_event.is_set():
         # 1. Check for messages
         messages = await coord.receive(timeout_ms=2000)
         for stream, msg_id, data in messages:
@@ -1701,9 +2017,8 @@ async def main():
 
         await asyncio.sleep(1)
 
-async def shutdown(coord):
+    # Signal received — clean shutdown
     await coord.deregister()
-    raise SystemExit(0)
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -1738,7 +2053,7 @@ The `:new` picker offers Session or Task. Sessions have three modes:
 
 **Local + K8s**: spawns local Claude session + injects context hint ("K8s agents available via spawn_agent/create_task") + activates hook that steers `Agent(team_name=...)` toward MCP tools. Claude decides when to call `spawn_agent` — no pods pre-launched. Only shown when `kubernetes.enabled: true`.
 
-**Remote (pod)**: scales up a `MODE=session` Claude Code pod. aimux attaches via `kubectl exec` + tmux (`KubectlExecBackend`). Full Claude Code capabilities in the pod. Whether the pod can spawn K8s arms depends on whether the k8s-agents MCP server is configured in the pod's deployment — a deployment concern, not a launcher concern. Checks for an existing pod (same repo URL) before scaling a new one.
+**Remote (pod)**: scales up `agent-claude-session` Deployment (§7.6). aimux attaches via `kubectl exec` + tmux using `KubectlExecBackend` (§6.9). Full Claude Code CLI in the pod — same tools as local. Two variants: **standalone** (just Claude Code, no K8s arms) and **brain+arms** (k8s-agents MCP server bundled, Claude can spawn worker pods). Variant is determined by the container image, not the launcher. Checks for an existing pod (matching `session-repo` label) before scaling a new one — supports resume after disconnect.
 
 ### 9.2 Task launcher
 
@@ -1770,7 +2085,7 @@ New `T` keybinding. Shows all tasks from Redis + local `~/.claude/tasks/` files 
  ✗ Research: Swarm          researcher-2     k8s    failed   35m
 ```
 
-Select a task → right pane shows full result from `team:{id}:task:{id}:result_full`.
+Select a task → right pane shows `result_summary` from the task hash, with `result_ref` linking to the full output (git branch or OTEL span ID).
 
 `Task` type lives in `internal/task/` (core package, no TUI imports). `TasksView` is a thin renderer. `provider.TaskLister` and `provider.Spawner` are optional interfaces — K8s provider implements both.
 
@@ -1806,7 +2121,7 @@ if cfg.Kubernetes.Enabled && cfg.Kubernetes.OTELEndpoint != "" {
 | Spawn | `exec.Command("claude")` | Scale Deployment replicas via K8s API |
 | Kill | SIGTERM | Scale Deployment to current-1 |
 | Costs | Parse session JSONL | Read `team:{id}:cost:{agent}` Redis hash |
-| Tasks | `~/.claude/tasks/` JSON files | Redis `team:{id}:tasks:all` sorted set |
+| Tasks | `~/.claude/tasks/` JSON files | Redis `team:{id}:tasks:pending` sorted set + `team:{id}:task:*` hashes |
 | Messages | PTY stdin | Redis XADD to `team:{id}:inbox:{agent}` |
 
 ### 9.6 aimux config
@@ -1886,6 +2201,9 @@ providers:
 1. **Multi-cluster**: One K8s provider per cluster, or one provider with cluster selector?
 2. **Rate limits**: Multiple agents hitting same API. Per-team rate limit tracking?
 3. **Git auth in init container**: SSH key vs token. Where to store credentials securely (K8s Secret, Vault)?
+4. **Hook stability**: The PreToolUse hook (§2.2) relies on Claude Code's internal Agent tool parameter schema (`team_name`). If Anthropic changes the parameter name, the hook silently stops working and agents spawn locally instead of on K8s. May need version-pinning or a more robust interception mechanism.
+5. **Mid-task observability**: The lead has no visibility into what a worker's Claude is doing between `create_task` and `complete_task`. Consider a `get_task_progress` MCP tool that returns recent OTEL spans for a task's agent, or surface this through aimux only.
+6. **Message delivery during long tasks**: Workers only check `receive()` between tasks, not during. A `shutdown_request` sent during a 10-minute task won't be seen until the task finishes. Document as intentional "finish-then-check" behavior, or add a background message listener.
 
 ## 12. Decision log
 
@@ -1934,6 +2252,10 @@ providers:
 | 41 | result_ref field for full task output | Only result_summary | 500 char truncation is fine for lead status. Dependent agents need the full output — result_ref points to the branch or OTEL span with complete content. |
 | 42 | Lead calls cleanup_branches after scale_down | Manual cleanup, TTL-based | Lead has full context of which task IDs were used. Cleanup is a natural final step. Keeps GitHub clean. Never touches main or non-task branches. |
 | 43 | cleanup_branches via GitHub API (not git CLI) | git CLI in MCP server, separate job | MCP server already has GITHUB_TOKEN for repo access. No git binary needed in the server binary. Atomic per-branch deletes with clear error reporting. |
+| 44 | Separate session image from worker image | Single image for both | Session needs Claude CLI + tmux (Node.js, interactive). Worker needs Python + coordinator SDK (headless). Combining bloats both. Two small images > one large image. |
+| 45 | `sleep infinity` + kubectl exec for session pods | Run claude CLI directly as entrypoint | `sleep infinity` keeps the pod alive independent of session state. Claude can crash and restart inside tmux without killing the pod. Supports disconnect/reconnect. |
+| 46 | tmux inside session pod | No multiplexer, raw kubectl exec | tmux session persists after kubectl disconnect. Enables resume. Without tmux, closing the terminal kills the Claude process. |
+| 47 | Two session variants (standalone / brain+arms) via image | Runtime flag, sidecar MCP | Image-level is simplest. No runtime conditionals. Standalone = image without MCP binary. Brain+arms = image with MCP binary + settings.json. |
 
 ## 13. Background: why Redis
 
@@ -1969,27 +2291,33 @@ Neither Codex CLI nor Gemini CLI has an equivalent team system. Codex has experi
 ## 15. Implementation order
 
 ### Completed ✅
-1. **MCP server** — spawn_agent, create_task, list_tasks, wait_for_task, get_task_result, send_message, scale_down, get_costs
-2. **Coordinator package** — Python, tests (14/14 passing), coordinator loop, task claiming Lua script
-3. **Claude agent worker** — UBI9 image, MODE=agent (coordinator loop), pushed to quay.io/azaalouk/agent-claude
-4. **Gemini agent worker** — UBI9 image, MODE=agent, manifests defined
-5. **Redis + manifests + RBAC** — deployed to `agents` namespace, AWS LoadBalancer, Redis accessible externally
-6. **End-to-end test** — agent spawned, task claimed, Claude ran, result stored in Redis ✓
-7. **Hook config** — `deploy/k8s/hook-config.json` (opt-in, blocks Agent(team_name=...) for K8s mode)
-8. **Integration tests** — 14 coordinator tests + 16 K8s provider tests, all passing
-9. **aimux K8s provider** — Discover (Redis heartbeat), Kill (scale deployment), ParseTrace, Messenger (`:send`)
-10. **Tasks view core** — `internal/task/` package, `TaskLister`/`Spawner` interfaces on K8s provider
-11. **LOC column** — agents table shows "local" vs "k8s"
+1. **MCP server (implemented toolset)** — `spawn_agent`, `create_task`, `list_tasks`, `get_task`, `wait_for_task`, `get_task_result`, `list_agents`, `send_message`, `scale_down`, `get_costs`
+   - Code: `cmd/mcp/main.go`
+2. **Coordinator package** — Python coordinator loop, Lua claim script, and tests passing (14/14)
+   - Code: `runtime/coordinator/coordinator.py`, `runtime/coordinator/lua/claim_task.lua`, `runtime/coordinator/tests/`
+3. **Worker runtimes + images** — Claude and Gemini worker runtimes (`MODE=agent`) with Dockerfiles and manifests
+   - Code: `runtime/agents/claude/main.py`, `runtime/agents/claude/Dockerfile`, `runtime/agents/gemini/main.py`, `runtime/agents/gemini/Dockerfile`
+   - Manifests: `deploy/k8s/agent-claude-coder.yaml`, `deploy/k8s/agent-claude-researcher.yaml`, `deploy/k8s/agent-claude-reviewer.yaml`, `deploy/k8s/agent-gemini-coder.yaml`, `deploy/k8s/agent-gemini-researcher.yaml`
+4. **K8s manifests foundation** — Redis, RBAC, NetworkPolicy, Secrets, worker Deployments, and hook config
+   - Files: `deploy/k8s/redis.yaml`, `deploy/k8s/rbac.yaml`, `deploy/k8s/networkpolicy.yaml`, `deploy/k8s/secrets.yaml`, `deploy/k8s/hook-config.json`
+5. **aimux K8s provider (core)** — Discover (Redis heartbeat), Kill (scale deployment), ParseTrace, Messenger (`:send`)
+   - Code: `internal/provider/k8s.go`
+   - Registration in app: `internal/tui/app.go`
+   - Shared Redis key patterns: `pkg/rediskeys/keys.go`
+6. **LOC column** — agents table shows `local` vs `k8s`
+   - Code: `internal/tui/views/agents.go` (`colLoc`, `agentLocation()`)
 
 ### Remaining
-12. **`internal/task/` loaders** — `LoadFromRedis()`, `LoadFromLocalFiles()`, `GetFullResult()`
-13. **`:new` picker** — TUI overlay (Session / Task)
-14. **Session launcher: three-way Where toggle** — Local / Local+K8s / Remote (pod)
+7. **`cleanup_branches` MCP tool** — GitHub branch cleanup flow remains planned
+8. **`internal/task/` core package** — `Task` model + loaders (`LoadFromRedis()`, `LoadFromLocalFiles()`, `GetFullResult()`)
+9. **Provider task interfaces** — add optional `TaskLister`/`Spawner` interfaces and implement on K8s provider
+10. **`:new` picker** — TUI overlay (Session / Task)
+11. **Session launcher: three-way Where toggle** — Local / Local+K8s / Remote (pod)
     - `Local+K8s` → inject context hint + activate hook
     - `Remote (pod)` → `KubectlExecBackend` (kubectl exec + tmux)
-15. **`KubectlExecBackend`** — `internal/terminal/kubectl.go`, implements `SessionBackend`
-16. **`MODE=session` deployment** — `deploy/k8s/agent-claude-session.yaml`, Claude Code pod with tmux
-17. **Task launcher** — TUI overlay, delegates to `provider.Spawner`
-18. **Tasks view** — `internal/tui/views/tasks.go`, renders `[]task.Task`, result pane
-19. **OTel Collector** — `deploy/k8s/otel-collector.yaml`, `otel/k8s_reader.go` (conditional)
-20. **Header task summary** — task counts in header bar
+12. **`KubectlExecBackend`** — `internal/terminal/kubectl.go`, implements `SessionBackend` (Read/Write/Resize/Close/Alive via kubectl exec + tmux, see §6.9)
+13. **Session pod image + deployment** — `claude-session` Dockerfile (Claude CLI + tmux + git), two variants (standalone / brain+arms), manifest in §7.6
+14. **Task launcher** — TUI overlay, delegates to provider-side task spawner
+15. **Tasks view** — `internal/tui/views/tasks.go`, renders `[]task.Task`, result pane
+16. **OTel Collector + remote reader** — `deploy/k8s/otel-collector.yaml`, `otel/k8s_reader.go` (conditional)
+17. **Header task summary** — task counts in header bar
