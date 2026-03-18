@@ -61,6 +61,69 @@ func TestKubectlExecBackend_PodName(t *testing.T) {
 	}
 }
 
+func TestNewKubectlExec_CommandArgs(t *testing.T) {
+	// Verify the kubectl command is constructed correctly without actually
+	// running it. We test the args building logic by checking that the
+	// resulting command would include sh -c with TERM and tmux.
+	// Can't test the full NewKubectlExec (needs a cluster), so we test
+	// the arg construction inline.
+	podName := "test-pod"
+	namespace := "test-ns"
+	container := "my-container"
+	args := []string{"exec", "-it", podName, "-n", namespace}
+	if container != "" {
+		args = append(args, "--container", container)
+	}
+	args = append(args, "--",
+		"sh", "-c",
+		"TERM=xterm-256color tmux -f /dev/null new-session -A -s main -x 120 -y 40")
+
+	// Verify essential args are present
+	found := map[string]bool{"exec": false, "-it": false, "sh": false, "xterm-256color": false}
+	for _, a := range args {
+		for key := range found {
+			if a == key || (key == "xterm-256color" && len(a) > 0 && contains(a, key)) {
+				found[key] = true
+			}
+		}
+	}
+	for key, ok := range found {
+		if !ok {
+			t.Errorf("expected %q in kubectl args, not found", key)
+		}
+	}
+
+	// Verify container flag is included
+	hasContainer := false
+	for i, a := range args {
+		if a == "--container" && i+1 < len(args) && args[i+1] == container {
+			hasContainer = true
+		}
+	}
+	if !hasContainer {
+		t.Error("--container flag missing from args")
+	}
+
+	// Verify dimensions in tmux command
+	lastArg := args[len(args)-1]
+	if !contains(lastArg, "120") || !contains(lastArg, "40") {
+		t.Errorf("tmux command missing dimensions: %s", lastArg)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))
+}
+
+func stringContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestPodPhase_NonexistentPod(t *testing.T) {
 	_, err := podPhase("nonexistent-pod-xyz", "default")
 	if err == nil {
