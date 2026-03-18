@@ -1,0 +1,128 @@
+# Claude Session pod Deployment.
+# replicas: 0 — scale-to-zero. aimux scales up on :new → Remote (pod).
+# Interactive Claude Code CLI — user attaches via kubectl exec + tmux.
+# Brain+arms variant: MCP server bundled in image, serviceAccount grants K8s API access.
+#
+# Auth options (pick ONE, create the corresponding secret):
+#
+#   1. Vertex AI (recommended for GCP):
+#      kubectl create secret generic gcp-adc --namespace=agents \
+#        --from-file=adc.json="$GOOGLE_APPLICATION_CREDENTIALS"
+#      Then set CLAUDE_CODE_USE_VERTEX, CLOUD_ML_REGION, ANTHROPIC_VERTEX_PROJECT_ID
+#      in your shell — aimux forwards them to the pod at attach time.
+#
+#   2. API key:
+#      kubectl create secret generic llm-keys --namespace=agents \
+#        --from-literal=anthropic="sk-ant-..."
+#
+#   3. Both: create both secrets. Vertex takes priority when both are set.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-claude-session
+  namespace: agents
+  labels:
+    app: agent-claude-session
+    team-component: session
+    provider: claude
+    app.kubernetes.io/part-of: k8s-agents
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: agent-claude-session
+  template:
+    metadata:
+      labels:
+        app: agent-claude-session
+        team-component: session
+        provider: claude
+        app.kubernetes.io/part-of: k8s-agents
+    spec:
+      serviceAccountName: mcp-server
+      initContainers:
+        - name: clone-repo
+          image: alpine/git
+          command:
+            - sh
+            - -c
+            - git clone https://$(GIT_TOKEN)@$(GIT_HOST) /workspace
+          env:
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: token
+            - name: GIT_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: host
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      containers:
+        - name: session
+          image: quay.io/azaalouk/claude-session:latest
+          command: ["sleep", "infinity"]
+          env:
+            # REDIS_PASSWORD must come before REDIS_URL (K8s $(VAR) substitution order)
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+                  optional: true
+            # --- Auth option 1: Vertex AI (GCP ADC) ---
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/var/secrets/gcp/adc.json"
+            # --- Auth option 2: API key ---
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-keys
+                  key: anthropic
+                  optional: true
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: token
+                  optional: true
+            - name: GIT_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: host
+                  optional: true
+            # MCP server env (brain+arms variant — ignored if binary not in image)
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis:6379"
+            - name: K8S_NAMESPACE
+              value: "agents"
+            - name: TEAM_ID
+              value: "my-team"
+            - name: TERM
+              value: "xterm-256color"
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: gcp-adc
+              mountPath: /var/secrets/gcp
+              readOnly: true
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: gcp-adc
+          secret:
+            secretName: gcp-adc
+            optional: true

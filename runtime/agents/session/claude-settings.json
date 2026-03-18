@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "k8s-agents": {
+      "command": "/usr/local/bin/k8s-agents-mcp",
+      "env": {
+        "REDIS_URL": "redis://:$(REDIS_PASSWORD)@redis.agents.svc:6379",
+        "K8S_NAMESPACE": "agents",
+        "TEAM_ID": "my-team",
+        "MAX_AGENTS": "20",
+        "MAX_COST_USD": "100"
+      }
+    }
+  }
+}
