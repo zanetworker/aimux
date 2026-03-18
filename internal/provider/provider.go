@@ -6,6 +6,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/subagent"
+	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -67,6 +68,24 @@ type Provider interface {
 // Check with: if m, ok := p.(provider.Messenger); ok { m.SendMessage(...) }
 type Messenger interface {
 	SendMessage(agentID, text string) error
+}
+
+// TaskLister is an optional interface for providers that support task management.
+// The TUI checks for this via type assertion:
+//
+//	if tl, ok := p.(provider.TaskLister); ok { tasks, _ := tl.ListTasks() }
+type TaskLister interface {
+	ListTasks() ([]task.Task, error)
+	GetTaskResult(taskID string) (string, error)
+}
+
+// Spawner is an optional interface for providers that can spawn agents remotely.
+// The TUI checks for this via type assertion:
+//
+//	if sp, ok := p.(provider.Spawner); ok { sp.SpawnRemote(...) }
+type Spawner interface {
+	SpawnRemote(provider, role string, count int) error
+	ScaleDown(provider, role string) error
 }
 
 // RecentDir is a recently-used project directory from a provider's session history.

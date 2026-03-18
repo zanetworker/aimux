@@ -23,12 +23,22 @@ type Config struct {
 
 // K8sProviderConfig holds connection settings for the Kubernetes agent provider.
 // Agents are discovered via Redis heartbeats rather than local process scanning.
+//
+// K8s is considered enabled when RedisURL is set (Enabled field is kept for
+// backward compatibility but RedisURL is the real gate).
 type K8sProviderConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	RedisURL   string `yaml:"redis_url"`   // e.g. "redis://:pass@localhost:6380"
-	TeamID     string `yaml:"team_id"`     // Redis team key prefix, e.g. "my-team"
-	Namespace  string `yaml:"namespace"`   // K8s namespace, e.g. "agents"
-	Kubeconfig string `yaml:"kubeconfig"`  // path to kubeconfig; empty = in-cluster or KUBECONFIG env
+	Enabled      bool   `yaml:"enabled"`
+	RedisURL     string `yaml:"redis_url"`      // e.g. "redis://:pass@localhost:6380"
+	TeamID       string `yaml:"team_id"`        // Redis team key prefix, e.g. "my-team"
+	Namespace    string `yaml:"namespace"`      // K8s namespace, e.g. "agents"
+	Kubeconfig   string `yaml:"kubeconfig"`     // path to kubeconfig; empty = KUBECONFIG env or in-cluster
+	OTELEndpoint string `yaml:"otel_endpoint"`  // e.g. "http://<elb>:4318" — OTel Collector for remote agent traces
+}
+
+// IsActive returns true when K8s is configured and usable.
+// Requires both enabled flag and a Redis URL.
+func (c K8sProviderConfig) IsActive() bool {
+	return c.Enabled && c.RedisURL != ""
 }
 
 // SessionsConfig holds settings for the session history feature.

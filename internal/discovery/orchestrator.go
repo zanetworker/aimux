@@ -33,14 +33,32 @@ func NewOrchestrator(providers ...AgentProvider) *Orchestrator {
 // Agents sharing the same project name get short unique suffixes to
 // disambiguate them in the UI (e.g. "myproject #1", "myproject #2").
 func (o *Orchestrator) Discover() ([]agent.Agent, error) {
-	var all []agent.Agent
-	for _, p := range o.providers {
-		agents, err := p.Discover()
-		if err != nil {
-			continue
-		}
-		all = append(all, agents...)
+	// Run all providers in parallel and wait for all to complete.
+	// Each provider owns its own timeouts (e.g., K8s uses 1s Redis
+	// timeouts + circuit breaker). No artificial deadline here —
+	// dropping slow results causes agents to flicker in the UI.
+	type result struct {
+		agents []agent.Agent
 	}
+
+	ch := make(chan result, len(o.providers))
+	for _, p := range o.providers {
+		go func(prov AgentProvider) {
+			agents, err := prov.Discover()
+			if err == nil {
+				ch <- result{agents: agents}
+			} else {
+				ch <- result{}
+			}
+		}(p)
+	}
+
+	var all []agent.Agent
+	for range len(o.providers) {
+		r := <-ch
+		all = append(all, r.agents...)
+	}
+
 	assignUniqueSuffixes(all)
 	return all, nil
 }

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zanetworker/aimux/internal/agent"
@@ -19,31 +20,25 @@ func TestK8sName(t *testing.T) {
 }
 
 func TestK8sDiscover_NotConfigured(t *testing.T) {
-	// When RedisURL is empty the provider must return (nil, nil) and
-	// must not panic or attempt a network connection.
+	// When RedisURL is empty the provider must not panic or return an error.
+	// It may still discover session pods via the K8s API if a kubeconfig is available.
 	k := &K8s{}
-	agents, err := k.Discover()
+	_, err := k.Discover()
 	if err != nil {
 		t.Errorf("K8s.Discover() with no config: error = %v, want nil", err)
-	}
-	if agents != nil {
-		t.Errorf("K8s.Discover() with no config: agents = %v, want nil", agents)
 	}
 }
 
 func TestK8sDiscover_BadURL(t *testing.T) {
-	// An unreachable / malformed Redis URL must not crash aimux.
-	// The provider silently returns (nil, nil).
+	// An unreachable Redis URL must not crash aimux.
+	// Pod discovery may still return results if a kubeconfig is available.
 	k := NewK8s(K8sConfig{
 		RedisURL: "redis://127.0.0.1:19999", // port with nothing listening
 		TeamID:   "test-team",
 	})
-	agents, err := k.Discover()
+	_, err := k.Discover()
 	if err != nil {
 		t.Errorf("K8s.Discover() with bad URL: error = %v, want nil", err)
-	}
-	if agents != nil {
-		t.Errorf("K8s.Discover() with bad URL: agents = %v, want nil", agents)
 	}
 }
 
@@ -207,6 +202,36 @@ func TestNewK8s(t *testing.T) {
 	}
 }
 
+func TestK8sStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  K8sConfig
+		want string
+	}{
+		{"not configured", K8sConfig{}, "not configured"},
+		{"configured but not connected", K8sConfig{RedisURL: "redis://localhost:6379"}, "connecting"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k := NewK8s(tt.cfg)
+			got := k.Status()
+			if got != tt.want {
+				t.Errorf("K8s.Status() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestK8sStatus_AfterError(t *testing.T) {
+	k := NewK8s(K8sConfig{RedisURL: "redis://localhost:19999"})
+	// Trigger a connection attempt that will fail
+	k.Discover()
+	status := k.Status()
+	if !strings.Contains(status, "disconnected") {
+		t.Errorf("K8s.Status() after error = %q, want it to contain 'disconnected'", status)
+	}
+}
+
 func TestK8sListTasks_NotConfigured(t *testing.T) {
 	// When RedisURL is empty, ListTasks must return (nil, nil) without panicking.
 	k := &K8s{}
@@ -254,6 +279,35 @@ func TestK8sScaleDown_NoKubeconfig(t *testing.T) {
 	err := k.ScaleDown("claude", "coder")
 	if err == nil {
 		t.Error("K8s.ScaleDown() with bad kubeconfig: expected error, got nil")
+	}
+}
+
+func TestMergeAgents(t *testing.T) {
+	primary := []agent.Agent{
+		{SessionID: "a", Name: "agent-a"},
+		{SessionID: "b", Name: "agent-b"},
+	}
+	secondary := []agent.Agent{
+		{SessionID: "b", Name: "agent-b-dup"},  // duplicate, should be skipped
+		{SessionID: "c", Name: "agent-c"},       // new, should be added
+	}
+	merged := mergeAgents(primary, secondary)
+	if len(merged) != 3 {
+		t.Fatalf("mergeAgents() returned %d agents, want 3", len(merged))
+	}
+	// Verify "b" comes from primary (not overwritten)
+	for _, a := range merged {
+		if a.SessionID == "b" && a.Name != "agent-b" {
+			t.Errorf("mergeAgents() should keep primary's agent-b, got %q", a.Name)
+		}
+	}
+}
+
+func TestMergeAgents_EmptySecondary(t *testing.T) {
+	primary := []agent.Agent{{SessionID: "a"}}
+	merged := mergeAgents(primary, nil)
+	if len(merged) != 1 {
+		t.Fatalf("mergeAgents(primary, nil) = %d agents, want 1", len(merged))
 	}
 }
 
