@@ -12,6 +12,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -67,15 +68,18 @@ func (k *K8s) redisClient() (*redis.Client, error) {
 		return k.rdb, nil
 	}
 	if k.cfg.RedisURL == "" {
+		debuglog.Log("k8s: redis not configured")
 		return nil, fmt.Errorf("redis not configured")
 	}
 	rdb, err := newRedisClient(k.cfg.RedisURL)
 	if err != nil {
 		k.lastRedisErr = time.Now()
+		debuglog.Log("k8s: redis connect failed: %v", err)
 		return nil, err
 	}
 	k.rdb = rdb
 	k.lastRedisErr = time.Time{} // reset on success
+	debuglog.Log("k8s: redis connected")
 	return k.rdb, nil
 }
 
@@ -89,6 +93,7 @@ func (k *K8s) markRedisErr() {
 		k.rdb.Close()
 		k.rdb = nil
 	}
+	debuglog.Log("k8s: redis error, circuit breaker active for %s", k.redisCooldown)
 }
 
 // Close shuts down the shared Redis client if one was created.
@@ -162,6 +167,22 @@ func (k *K8s) CheckHealth() K8sHealthStatus {
 	return status
 }
 
+// Status returns a human-readable connection status for display in the TUI.
+func (k *K8s) Status() string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.cfg.RedisURL == "" {
+		return "not configured"
+	}
+	if !k.lastRedisErr.IsZero() && time.Since(k.lastRedisErr) < k.redisCooldown {
+		return fmt.Sprintf("disconnected (retry in %s)", (k.redisCooldown - time.Since(k.lastRedisErr)).Truncate(time.Second))
+	}
+	if k.rdb != nil {
+		return "connected"
+	}
+	return "connecting"
+}
+
 // Name returns the provider identifier used in config and display.
 func (k *K8s) Name() string { return "k8s" }
 
@@ -174,9 +195,32 @@ func (k *K8s) Name() string { return "k8s" }
 //   - Idle:    heartbeat 30–60 s ago
 //   - Unknown: heartbeat > 60 s ago (dead but still shown)
 func (k *K8s) Discover() ([]agent.Agent, error) {
+	var agents []agent.Agent
+
+	// Phase 1: Redis heartbeats (coordinator-managed agents).
+	agents = append(agents, k.discoverFromRedis()...)
+
+	// Phase 2: K8s API session pods (sleep-infinity pods for kubectl exec).
+	agents = mergeAgents(agents, k.discoverSessionPods())
+
+	// Stable sort: active first, then idle, then unknown; alphabetical within tier.
+	sort.SliceStable(agents, func(i, j int) bool {
+		if agents[i].Status != agents[j].Status {
+			return agents[i].Status < agents[j].Status
+		}
+		return agents[i].Name < agents[j].Name
+	})
+
+	return agents, nil
+}
+
+// discoverFromRedis queries Redis heartbeats for coordinator-managed agents.
+// Returns nil (not error) when Redis is unavailable.
+func (k *K8s) discoverFromRedis() []agent.Agent {
 	rdb, err := k.redisClient()
 	if err != nil {
-		return nil, nil
+		debuglog.Log("k8s: redis discover skipped: %v", err)
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -184,9 +228,11 @@ func (k *K8s) Discover() ([]agent.Agent, error) {
 
 	heartbeats, err := rdb.HGetAll(ctx, rediskeys.Heartbeat(k.cfg.TeamID)).Result()
 	if err != nil {
+		debuglog.Log("k8s: redis heartbeat fetch failed: %v", err)
 		k.markRedisErr()
-		return nil, nil
+		return nil
 	}
+	debuglog.Log("k8s: redis discover found %d heartbeats", len(heartbeats))
 
 	now := time.Now()
 	var agents []agent.Agent
@@ -265,20 +311,90 @@ func (k *K8s) Discover() ([]agent.Agent, error) {
 		agents = append(agents, a)
 	}
 
-	// Stable sort: active first, then idle, then unknown; alphabetical within tier.
-	sort.SliceStable(agents, func(i, j int) bool {
-		if agents[i].Status != agents[j].Status {
-			return agents[i].Status < agents[j].Status
-		}
-		return agents[i].Name < agents[j].Name
-	})
-
-	return agents, nil
+	return agents
 }
 
 // findCurrentTask looks for the most recent claimed or in-progress task
 // assigned to agentID. Returns the first 60 characters of the prompt, or "".
 // Errors are swallowed — task subject is best-effort display data.
+// discoverSessionPods queries the K8s API for running session pods (label
+// team-component=session). All running pods are shown — idle pods represent
+// available capacity for new sessions. Status is set to Idle for pods
+// without an active tmux session, Active for pods with one.
+func (k *K8s) discoverSessionPods() []agent.Agent {
+	client, err := k.kubeClient()
+	if err != nil {
+		debuglog.Log("k8s: pod discover skipped (no kube client): %v", err)
+		return nil
+	}
+
+	namespace := k.cfg.Namespace
+	if namespace == "" {
+		namespace = "agents"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "team-component=session",
+		FieldSelector: "status.phase=Running",
+	})
+	if err != nil {
+		debuglog.Log("k8s: pod discover failed: %v", err)
+		return nil
+	}
+
+	var agents []agent.Agent
+	for _, pod := range pods.Items {
+		// ProviderName is the agent type (claude, gemini), not "k8s".
+		// The LOC column derives "k8s" from the WorkingDir prefix.
+		providerLabel := pod.Labels["provider"]
+		if providerLabel == "" {
+			providerLabel = "claude"
+		}
+
+		startTime := pod.CreationTimestamp.Time
+
+		a := agent.Agent{
+			PID:          0,
+			SessionID:    "pod-" + pod.Name,
+			Name:         pod.Name,
+			ProviderName: providerLabel,
+			Model:        pod.Labels["model"],
+			WorkingDir:   "k8s://" + namespace + "/" + pod.Name,
+			Status:       agent.StatusIdle,
+			TeamName:     k.cfg.TeamID,
+			StartTime:    startTime,
+			LastActivity: startTime,
+			Source:       agent.SourceSDK,
+		}
+		agents = append(agents, a)
+	}
+
+	debuglog.Log("k8s: pod discover found %d session pods", len(agents))
+	return agents
+}
+
+// mergeAgents combines two agent lists, deduplicating by SessionID.
+// If both lists contain an agent with the same SessionID, the first list wins
+// (Redis heartbeat data is richer than pod metadata alone).
+func mergeAgents(primary, secondary []agent.Agent) []agent.Agent {
+	if len(secondary) == 0 {
+		return primary
+	}
+	seen := make(map[string]bool, len(primary))
+	for _, a := range primary {
+		seen[a.SessionID] = true
+	}
+	for _, a := range secondary {
+		if !seen[a.SessionID] {
+			primary = append(primary, a)
+		}
+	}
+	return primary
+}
+
 func (k *K8s) findCurrentTask(ctx context.Context, rdb *redis.Client, agentID string) string {
 	// Use the TasksAll sorted set for ordered access (avoids SCAN).
 	taskIDs, err := rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
@@ -376,7 +492,12 @@ func (k *K8s) ParseTrace(filePath string) ([]trace.Turn, error) {
 
 	rdb, err := k.redisClient()
 	if err != nil {
-		return nil, fmt.Errorf("k8s ParseTrace: connect to Redis: %w", err)
+		debuglog.Log("k8s: ParseTrace redis connect failed: %v", err)
+		return []trace.Turn{{
+			Number:      1,
+			Timestamp:   time.Now(),
+			OutputLines: []string{fmt.Sprintf("K8s: cannot connect to Redis: %v", err)},
+		}}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -389,8 +510,13 @@ func (k *K8s) ParseTrace(filePath string) ([]trace.Turn, error) {
 		Stop:  -1,
 	}).Result()
 	if err != nil {
+		debuglog.Log("k8s: ParseTrace task scan failed: %v", err)
 		k.markRedisErr()
-		return nil, nil
+		return []trace.Turn{{
+			Number:      1,
+			Timestamp:   time.Now(),
+			OutputLines: []string{fmt.Sprintf("K8s: Redis query failed: %v", err)},
+		}}, nil
 	}
 
 	var turns []trace.Turn
@@ -481,6 +607,7 @@ func (k *K8s) ListTasks() ([]task.Task, error) {
 
 	tasks, err := task.LoadFromRedis(ctx, rdb, k.cfg.TeamID)
 	if err != nil {
+		debuglog.Log("k8s: ListTasks failed: %v", err)
 		k.markRedisErr()
 		return nil, nil
 	}
@@ -540,6 +667,68 @@ func (k *K8s) SpawnRemote(provider, role string, count int) error {
 	return nil
 }
 
+// SpawnSession scales up the session deployment by one replica, waits for the
+// new pod to be Running, and returns its name and namespace. The caller uses
+// the pod name to attach via KubectlExecBackend.
+func (k *K8s) SpawnSession(providerName string) (podName, namespace string, err error) {
+	clientset, err := k.kubeClient()
+	if err != nil {
+		return "", "", fmt.Errorf("cannot connect to cluster: %w", err)
+	}
+
+	namespace = k.cfg.Namespace
+	if namespace == "" {
+		namespace = "agents"
+	}
+
+	deployName := spawnDeploymentName(providerName, "session")
+
+	// Snapshot existing pod names before scaling up.
+	existingPods := make(map[string]bool)
+	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: "app=" + deployName,
+	})
+	if err == nil {
+		for _, p := range podList.Items {
+			existingPods[p.Name] = true
+		}
+	}
+
+	// Scale up by 1.
+	if err := k.SpawnRemote(providerName, "session", 1); err != nil {
+		return "", "", err
+	}
+	debuglog.Log("k8s: SpawnSession scaled up %s, waiting for new pod...", deployName)
+
+	// Poll for the new pod (one that wasn't in the snapshot).
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", "", fmt.Errorf("timed out waiting for pod to start (60s)")
+		case <-ticker.C:
+			pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: "app=" + deployName,
+				FieldSelector: "status.phase=Running",
+			})
+			if err != nil {
+				continue
+			}
+			for _, p := range pods.Items {
+				if !existingPods[p.Name] {
+					debuglog.Log("k8s: SpawnSession new pod ready: %s", p.Name)
+					return p.Name, namespace, nil
+				}
+			}
+		}
+	}
+}
+
 // ScaleDown scales the Kubernetes Deployment named "agent-{provider}-{role}"
 // to 0 replicas. Returns an error if the kube client cannot be constructed
 // or the deployment does not exist.
@@ -572,6 +761,42 @@ func (k *K8s) ScaleDown(provider, role string) error {
 		return fmt.Errorf("cannot scale down %q — check RBAC permissions", deployName)
 	}
 	return nil
+}
+
+// ScaleDownOne decrements the replica count of the deployment by 1 (min 0).
+// Used when deleting a single session pod.
+func (k *K8s) ScaleDownOne(providerName, role string) error {
+	clientset, err := k.kubeClient()
+	if err != nil {
+		return fmt.Errorf("cannot connect to cluster: %w", err)
+	}
+
+	namespace := k.cfg.Namespace
+	if namespace == "" {
+		namespace = "agents"
+	}
+
+	deployName := spawnDeploymentName(providerName, role)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	current := int32(1)
+	if deploy.Spec.Replicas != nil {
+		current = *deploy.Spec.Replicas
+	}
+	desired := current - 1
+	if desired < 0 {
+		desired = 0
+	}
+	deploy.Spec.Replicas = &desired
+	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
+	return err
 }
 
 // spawnDeploymentName constructs the Kubernetes deployment name for spawning.
