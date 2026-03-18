@@ -11,13 +11,13 @@ func keyMsg(k string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 }
 
-// healthyK8s returns a K8sHealth indicating all infrastructure is ready.
-func healthyK8s() *K8sHealth {
-	return &K8sHealth{
-		Configured:  true,
-		RedisOK:     true,
-		ClusterOK:   true,
-		Deployments: []string{"agent-claude-coder", "agent-claude-reviewer"},
+// healthyRemote returns a RemoteHealth indicating all infrastructure is ready.
+func healthyRemote() *RemoteHealth {
+	return &RemoteHealth{
+		Configured: true,
+		CoordOK:    true,
+		ComputeOK:  true,
+		Workloads:  []string{"agent-claude-coder", "agent-claude-reviewer"},
 	}
 }
 
@@ -140,7 +140,7 @@ func TestNewPickerView_QClosesOverlay(t *testing.T) {
 
 func TestNewPickerView_SessionTabCyclesWhereOptions(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("s")) // go to session
@@ -250,7 +250,7 @@ func TestNewPickerView_K8sOptionsHiddenWhenDisabled(t *testing.T) {
 
 func TestNewPickerView_K8sOptionsShownWhenEnabled(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 
@@ -265,7 +265,7 @@ func TestNewPickerView_K8sOptionsShownWhenEnabled(t *testing.T) {
 
 func TestNewPickerView_SessionRemoteWhereValue(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("s"))
@@ -288,7 +288,7 @@ func TestNewPickerView_SessionRemoteWhereValue(t *testing.T) {
 
 func TestNewPickerView_SessionLocalK8sWhereValue(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("s"))
@@ -309,7 +309,7 @@ func TestNewPickerView_SessionLocalK8sWhereValue(t *testing.T) {
 
 func TestNewPickerView_TaskRemoteWhereValue(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("t"))
@@ -344,7 +344,7 @@ func TestNewPickerView_TaskProvidersIncludeAll(t *testing.T) {
 
 func TestNewPickerView_ViewRendersWithoutPanic(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.SetSize(80, 24)
@@ -434,7 +434,7 @@ func TestNewPickerView_DoubleEscFromLevel2Cancels(t *testing.T) {
 func TestNewPickerView_GreyedOutSessionProvider_EnterIsNoop(t *testing.T) {
 	// Codex on Local+K8s is unsupported
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("s")) // go to session
@@ -464,7 +464,7 @@ func TestNewPickerView_GreyedOutSessionProvider_EnterIsNoop(t *testing.T) {
 func TestNewPickerView_GreyedOutSessionProvider_RemotePod(t *testing.T) {
 	// Gemini on Remote (pod) is unsupported
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("s"))
@@ -491,7 +491,7 @@ func TestNewPickerView_GreyedOutSessionProvider_RemotePod(t *testing.T) {
 func TestNewPickerView_SupportedSessionProvider_Emits(t *testing.T) {
 	// Claude on Remote (pod) IS supported
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("s"))
@@ -518,7 +518,7 @@ func TestNewPickerView_SupportedSessionProvider_Emits(t *testing.T) {
 func TestNewPickerView_GreyedOutTaskProvider_EnterIsNoop(t *testing.T) {
 	// Codex on Remote task is unsupported
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("t"))
@@ -577,7 +577,7 @@ func TestNewPickerView_StatusClearsOnNavigation(t *testing.T) {
 
 func TestNewPickerView_DescriptionChangesWithWhereCursor(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.SetSize(100, 30)
@@ -606,7 +606,7 @@ func TestNewPickerView_DescriptionChangesWithWhereCursor(t *testing.T) {
 
 func TestNewPickerView_TaskDescriptionChangesWithWhereCursor(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.SetSize(100, 30)
@@ -639,7 +639,7 @@ func TestNewPickerView_PickerShowsDescriptions(t *testing.T) {
 
 func TestNewPickerView_GreyedOutProviderShowsComingSoon(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.SetSize(100, 30)
@@ -656,7 +656,7 @@ func TestNewPickerView_GreyedOutProviderShowsComingSoon(t *testing.T) {
 
 func TestNewPickerView_ProviderSupportFiltering(t *testing.T) {
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers: []ProviderSupport{
 			{Name: "claude", LocalSession: true, LocalK8s: true, RemoteSession: true, RemoteTask: true},
 			{Name: "codex", LocalSession: true, LocalK8s: false, RemoteSession: false, RemoteTask: false},
@@ -756,7 +756,7 @@ func TestNewPickerView_DefaultProviderSupport(t *testing.T) {
 func TestNewPickerView_AllLocalSessionsSupported(t *testing.T) {
 	// Even with K8s enabled, all providers work for Local sessions
 	v := NewNewPickerView(NewPickerConfig{
-		K8sEnabled: true, Health: healthyK8s(),
+		K8sEnabled: true, Health: healthyRemote(),
 		Providers:  DefaultProviderSupport(),
 	})
 	v.Update(keyMsg("s"))

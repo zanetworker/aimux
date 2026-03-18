@@ -89,9 +89,10 @@ type Spawner interface {
 }
 
 // RemoteProvider is an optional interface for providers that manage remote
-// agent infrastructure (e.g., Kubernetes pods). The TUI stores one of these
-// for on-demand operations (spawn sessions, health checks, status display).
-// Using this interface instead of a concrete type preserves provider decoupling.
+// agent infrastructure (Kubernetes, EC2, SSH hosts, etc.). The TUI stores
+// one of these for on-demand operations (spawn sessions, health checks,
+// status display). Each backend implements its own discovery, spawning, and
+// health check logic behind this interface.
 //
 //	if rp, ok := p.(provider.RemoteProvider); ok { rp.Status() }
 type RemoteProvider interface {
@@ -103,17 +104,33 @@ type RemoteProvider interface {
 	Status() string
 
 	// CheckHealth validates connectivity to backing infrastructure.
-	CheckHealth() K8sHealthStatus
+	// The returned HealthStatus uses generic fields that map to any
+	// backend's coordination + compute layers.
+	CheckHealth() HealthStatus
 
-	// SpawnSession creates a new interactive session pod and waits for it
-	// to become ready. Returns the pod name and namespace.
-	SpawnSession(providerName string) (podName, namespace string, err error)
+	// SpawnSession creates a new interactive session instance and waits
+	// for it to become ready. Returns the instance name and namespace
+	// (or region, availability zone, etc. depending on the backend).
+	SpawnSession(providerName string) (instanceName, namespace string, err error)
 
-	// ScaleDownOne decrements the replica count of the named deployment by 1.
+	// ScaleDownOne removes one instance of the named workload.
 	ScaleDownOne(providerName, role string) error
 }
 
-// K8sHealthStatus is defined in k8s.go.
+// HealthStatus represents the readiness of a remote provider's infrastructure.
+// The two-layer model (coordination + compute) maps to any backend:
+//
+//	K8s:  CoordOK=Redis, ComputeOK=cluster API
+//	EC2:  CoordOK=SQS/DynamoDB, ComputeOK=EC2 API
+//	SSH:  CoordOK=control host, ComputeOK=target host reachable
+type HealthStatus struct {
+	Configured  bool     // true if the backend is configured
+	CoordOK     bool     // coordination layer healthy (Redis, SQS, etc.)
+	CoordErr    string   // coordination error message
+	ComputeOK   bool     // compute layer healthy (K8s API, EC2 API, etc.)
+	ComputeErr  string   // compute error message
+	Workloads   []string // discovered workload names (deployments, instances, etc.)
+}
 
 // RecentDir is a recently-used project directory from a provider's session history.
 type RecentDir struct {
