@@ -1553,6 +1553,11 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		// GOOGLE_APPLICATION_CREDENTIALS is skipped — it's a local file
 		// path. Mount the credentials as a K8s secret instead and set
 		// the env var in the deployment YAML.
+		//
+		// Security note: values are sent via tmux send-keys and may be
+		// visible in tmux scrollback. For production use, prefer K8s
+		// secrets (deploy/k8s/agent-claude-session.yaml) over this
+		// fallback mechanism.
 		authEnvVars := []string{
 			"ANTHROPIC_API_KEY",
 			"CLAUDE_CODE_USE_VERTEX",
@@ -1821,8 +1826,12 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			k8s := a.k8sProvider
 			go func() {
 				// Decrement replicas by 1 so the deployment doesn't recreate the pod.
+				// ScaleDown failure is non-fatal: the pod is deleted regardless,
+				// and the deployment will just recreate it (harmless).
 				if k8s != nil {
-					_ = k8s.ScaleDownOne(target.ProviderName, "session")
+					if err := k8s.ScaleDownOne(target.ProviderName, "session"); err != nil {
+						debuglog.Log("tui: ScaleDownOne failed (non-fatal): %v", err)
+					}
 				}
 				exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--grace-period=3", "--wait=false").Run()
 			}()
