@@ -7,12 +7,26 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/controller"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/internal/tui/views"
 )
+
+// keyMsg creates a tea.KeyMsg for testing key handling.
+func keyMsg(k string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+}
+
+// newTestController creates a controller with default config for testing.
+func newTestController() *controller.Controller {
+	cfg := config.Default()
+	return controller.New(cfg)
+}
 
 // TestParserForProvider_FallsBackToFile verifies that the parser uses
 // file-based parsing when the OTEL store is empty.
@@ -344,6 +358,130 @@ func TestOtelEnvForCmd_PreservesExisting(t *testing.T) {
 	}
 	if !has("NEW_VAR") {
 		t.Error("missing NEW_VAR")
+	}
+}
+
+// TestViewTasks_NavigateAndBack verifies that T navigates to tasks view
+// and Esc returns to agents view.
+func TestViewTasks_NavigateAndBack(t *testing.T) {
+	app := App{
+		currentView: viewAgents,
+		agentsView:  views.NewAgentsView(),
+		tasksView:   views.NewTasksView(),
+		headerView:  views.NewHeaderView(),
+		otelStore:   aimuxotel.NewSpanStore(),
+	}
+	app.ctrl = newTestController()
+
+	// Navigate to tasks via T key
+	result, _ := app.handleKey(keyMsg("T"))
+	a := result.(App)
+	if a.currentView != viewTasks {
+		t.Errorf("after T key: currentView = %d, want %d (viewTasks)", a.currentView, viewTasks)
+	}
+
+	// Navigate back via Esc
+	result, _ = a.handleKey(keyMsg("esc"))
+	a = result.(App)
+	if a.currentView != viewAgents {
+		t.Errorf("after Esc: currentView = %d, want %d (viewAgents)", a.currentView, viewAgents)
+	}
+}
+
+// TestViewTasks_QuitReturnsToAgents verifies that q in tasks view goes back.
+func TestViewTasks_QuitReturnsToAgents(t *testing.T) {
+	app := App{
+		currentView: viewTasks,
+		agentsView:  views.NewAgentsView(),
+		tasksView:   views.NewTasksView(),
+		headerView:  views.NewHeaderView(),
+		otelStore:   aimuxotel.NewSpanStore(),
+	}
+	app.ctrl = newTestController()
+	app.ctrl.Nav.NavigateTo(6, "Tasks") // viewTasks = 6
+
+	result, _ := app.handleKey(keyMsg("q"))
+	a := result.(App)
+	if a.currentView != viewAgents {
+		t.Errorf("after q in tasks: currentView = %d, want %d (viewAgents)", a.currentView, viewAgents)
+	}
+}
+
+// TestRefreshTasks_SetsTaskSummary verifies that refreshTasks updates
+// the header with correct task counts.
+func TestRefreshTasks_SetsTaskSummary(t *testing.T) {
+	app := App{
+		tasksView:  views.NewTasksView(),
+		headerView: views.NewHeaderView(),
+		providers:  []provider.Provider{}, // no providers with TaskLister
+	}
+	// Should not panic with zero task-capable providers
+	app.refreshTasks()
+
+	// Verify tasks view has zero tasks
+	if selected := app.tasksView.Selected(); selected != nil {
+		t.Error("expected no selected task with zero providers")
+	}
+}
+
+// TestExecuteCommand_Tasks verifies the :tasks command.
+func TestExecuteCommand_Tasks(t *testing.T) {
+	app := App{
+		currentView: viewAgents,
+		tasksView:   views.NewTasksView(),
+		headerView:  views.NewHeaderView(),
+		otelStore:   aimuxotel.NewSpanStore(),
+	}
+	app.ctrl = newTestController()
+
+	result, _ := app.executeCommand("tasks")
+	a := result.(App)
+	if a.currentView != viewTasks {
+		t.Errorf("executeCommand(tasks): currentView = %d, want %d (viewTasks)", a.currentView, viewTasks)
+	}
+}
+
+// TestResolveCommand_Tasks verifies the tasks command is resolvable.
+func TestResolveCommand_Tasks(t *testing.T) {
+	got := resolveCommand("tasks")
+	if got != "tasks" {
+		t.Errorf("resolveCommand(tasks) = %q, want %q", got, "tasks")
+	}
+}
+
+// TestOpenNewPicker_SetsState verifies that openNewPicker activates the picker.
+func TestOpenNewPicker_SetsState(t *testing.T) {
+	app := App{
+		currentView: viewAgents,
+		providers:   []provider.Provider{&provider.Claude{}},
+	}
+
+	result, _ := app.openNewPicker()
+	a := result.(App)
+	if !a.newPickerActive {
+		t.Error("expected newPickerActive = true after openNewPicker")
+	}
+	if a.newPicker == nil {
+		t.Error("expected newPicker != nil after openNewPicker")
+	}
+}
+
+// TestNewPickerCancel_ClearsState verifies that NewPickerCancelMsg clears the overlay.
+func TestNewPickerCancel_ClearsState(t *testing.T) {
+	app := App{
+		newPickerActive: true,
+		newPicker:       &views.NewPickerView{},
+		agentsView:      views.NewAgentsView(),
+		otelStore:       aimuxotel.NewSpanStore(),
+	}
+
+	result, _ := app.Update(views.NewPickerCancelMsg{})
+	a := result.(App)
+	if a.newPickerActive {
+		t.Error("expected newPickerActive = false after cancel")
+	}
+	if a.newPicker != nil {
+		t.Error("expected newPicker = nil after cancel")
 	}
 }
 

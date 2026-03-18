@@ -36,6 +36,15 @@ type HeaderView struct {
 	crumbs   []string
 	hintText string // contextual key hints for the current view
 	width    int
+
+	// Task summary counts
+	taskPending   int
+	taskActive    int
+	taskCompleted int
+	taskFailed    int
+
+	// K8s status
+	k8sStatus string // e.g. "connected", "disconnected (retry in 25s)", ""
 }
 
 // NewHeaderView creates a new HeaderView.
@@ -63,6 +72,19 @@ func (h *HeaderView) SetWidth(w int) {
 // SetHint sets the contextual key hint bar text.
 func (h *HeaderView) SetHint(hint string) {
 	h.hintText = hint
+}
+
+// SetK8sStatus updates the K8s connection status displayed in the header.
+func (h *HeaderView) SetK8sStatus(status string) {
+	h.k8sStatus = status
+}
+
+// SetTaskSummary updates the task counts displayed in the header.
+func (h *HeaderView) SetTaskSummary(pending, active, completed, failed int) {
+	h.taskPending = pending
+	h.taskActive = active
+	h.taskCompleted = completed
+	h.taskFailed = failed
 }
 
 // View renders the header.
@@ -200,7 +222,65 @@ func (h *HeaderView) renderInfoBoxes() string {
 			valueStyle.Render(providerStr),
 	)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, agentBox, " ", costBox, " ", providerBox)
+	boxes := lipgloss.JoinHorizontal(lipgloss.Top, agentBox, " ", costBox, " ", providerBox)
+
+	if h.k8sStatus != "" {
+		k8sBox := boxStyle.Render(h.renderK8sStatus())
+		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", k8sBox)
+	}
+
+	if taskSummary := h.renderTaskSummary(); taskSummary != "" {
+		taskBox := boxStyle.Render(taskSummary)
+		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", taskBox)
+	}
+
+	return boxes
+}
+
+// renderTaskSummary returns the formatted task summary content, or "" if no tasks exist.
+func (h *HeaderView) renderTaskSummary() string {
+	total := h.taskPending + h.taskActive + h.taskCompleted + h.taskFailed
+	if total == 0 {
+		return ""
+	}
+
+	labelStyle := lipgloss.NewStyle().Foreground(colorMutedText)
+	var parts []string
+
+	if h.taskPending > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorIdle).Render(fmt.Sprintf("○ %d pending", h.taskPending)))
+	}
+	if h.taskActive > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorWaiting).Render(fmt.Sprintf("● %d running", h.taskActive)))
+	}
+	if h.taskCompleted > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(colorActive).Render(fmt.Sprintf("✓ %d done", h.taskCompleted)))
+	}
+	if h.taskFailed > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(fmt.Sprintf("✗ %d failed", h.taskFailed)))
+	}
+
+	return labelStyle.Render("Tasks") + "\n" + strings.Join(parts, "  ")
+}
+
+// renderK8sStatus returns the formatted K8s connection status.
+func (h *HeaderView) renderK8sStatus() string {
+	labelStyle := lipgloss.NewStyle().Foreground(colorMutedText)
+	var statusColor lipgloss.Color
+	var icon string
+	switch {
+	case strings.HasPrefix(h.k8sStatus, "connected"):
+		statusColor = colorActive
+		icon = "●"
+	case strings.HasPrefix(h.k8sStatus, "connecting"):
+		statusColor = colorWaiting
+		icon = "◐"
+	default:
+		statusColor = lipgloss.Color("#EF4444")
+		icon = "○"
+	}
+	return labelStyle.Render("K8s") + "\n" +
+		lipgloss.NewStyle().Foreground(statusColor).Render(icon+" "+h.k8sStatus)
 }
 
 func (h *HeaderView) renderLogo() string {

@@ -175,6 +175,18 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 	}
 }
 
+// SkipToDirectory pre-selects a provider and jumps directly to the directory
+// step, skipping the provider selection screen. Used by the :new picker flow.
+func (l *LauncherView) SkipToDirectory(providerName string) {
+	for i, p := range l.providers {
+		if p == providerName {
+			l.providerCursor = i
+			break
+		}
+	}
+	l.state = statePickDirectory
+}
+
 // SetSize sets the available dimensions for the overlay.
 func (l *LauncherView) SetSize(w, h int) {
 	l.width = w

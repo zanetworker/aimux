@@ -15,6 +15,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/evaluation"
@@ -24,6 +25,7 @@ import (
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/subagent"
+	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/team"
 	"github.com/zanetworker/aimux/internal/terminal"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -39,6 +41,7 @@ const (
 	viewTeams
 	viewSessions
 	viewHelp
+	viewTasks
 )
 
 // tickMsg triggers periodic refresh.
@@ -49,6 +52,14 @@ type instancesMsg []agent.Agent
 
 // teamsMsg carries team configs.
 type teamsMsg []team.TeamConfig
+
+// k8sSessionReadyMsg is sent when a remote session pod is ready for attachment.
+type k8sSessionReadyMsg struct {
+	podName   string
+	namespace string
+	provider  string
+	err       error
+}
 
 // App is the root Bubble Tea model that wires all views together.
 // It implements a three-state layout machine:
@@ -112,6 +123,17 @@ type App struct {
 	launcherActive bool
 	launcherView   *views.LauncherView
 
+	// New picker overlay (:new command)
+	newPickerActive bool
+	newPicker       *views.NewPickerView
+
+	// Tasks view
+	tasksView *views.TasksView
+
+	// K8s provider: stored separately from polling providers.
+	// Only queried on-demand (tasks view, :new spawn) — never on every tick.
+	k8sProvider *provider.K8s
+
 	// Kill confirmation
 	killConfirm  bool            // true when waiting for y/n confirmation
 	killTarget   *agent.Agent    // agent to kill
@@ -142,14 +164,19 @@ func NewApp() App {
 		&provider.Gemini{},
 	}
 
-	// Register Kubernetes provider when explicitly enabled in config.
-	if cfg.Kubernetes.Enabled {
-		allProviders = append(allProviders, provider.NewK8s(provider.K8sConfig{
+	// K8s provider participates in discovery (agents table) but is also
+	// stored separately for on-demand operations (spawn, tasks, health check).
+	// Performance is safe: circuit breaker (30s cooldown), connection pool,
+	// and 1s timeouts prevent Redis from blocking the UI.
+	var k8sProv *provider.K8s
+	if cfg.Kubernetes.IsActive() {
+		k8sProv = provider.NewK8s(provider.K8sConfig{
 			RedisURL:   cfg.Kubernetes.RedisURL,
 			TeamID:     cfg.Kubernetes.TeamID,
 			Namespace:  cfg.Kubernetes.Namespace,
 			Kubeconfig: cfg.Kubernetes.Kubeconfig,
-		}))
+		})
+		allProviders = append(allProviders, k8sProv)
 	}
 
 	// Filter to enabled providers only.
@@ -185,6 +212,7 @@ func NewApp() App {
 		sessionsView:  views.NewSessionsView(),
 		teamsView:    views.NewTeamsView(),
 		helpView:     views.NewHelpView(),
+		tasksView:    views.NewTasksView(),
 		layout:       NewLayout(0, 0),
 		orchestrator: discovery.NewOrchestrator(agentProviders...),
 		providers:    providers,
@@ -193,6 +221,7 @@ func NewApp() App {
 		cfg:          cfg,
 		ctrl:         ctrl,
 		otelStore:    aimuxotel.NewSpanStore(),
+		k8sProvider:  k8sProv,
 	}
 
 	// Start OTEL receiver if enabled
@@ -257,6 +286,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.agentsView.SetAgents(a.instances)
 		a.headerView.SetAgents(a.instances)
 		a.costsView.SetAgents(a.instances)
+
+		// Update K8s status in header
+		if a.k8sProvider != nil {
+			a.headerView.SetK8sStatus(a.k8sProvider.Status())
+		}
+
+		// Refresh tasks only when viewing the tasks tab
+		if a.currentView == viewTasks {
+			a.refreshTasks()
+		}
 		if a.currentView == viewLogs && a.logsView != nil {
 			a.logsView.Reload()
 		}
@@ -412,6 +451,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case views.PTYExitMsg:
+		debuglog.Log("tui: PTYExitMsg received — exiting zoom")
 		a.zoomed = false
 		a.splitMode = false
 		a.splitTrace = nil
@@ -458,6 +498,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = "Session: note saved"
 	case views.SessionResumeMsg:
+		debuglog.Log("tui: SessionResumeMsg received: id=%q dir=%q file=%q", msg.SessionID, msg.WorkingDir, msg.FilePath)
 		if msg.SessionID == "" {
 			a.statusHint = "No session ID to resume"
 			return a, nil
@@ -516,7 +557,39 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case views.NewSessionMsg:
+		return a.handleNewSession(msg)
+	case views.NewTaskMsg:
+		return a.handleNewTask(msg)
+	case views.NewPickerCancelMsg:
+		a.newPickerActive = false
+		a.newPicker = nil
+		a.statusHint = "Cancelled"
+		return a, nil
+
+	case k8sSessionReadyMsg:
+		a.stickyHint = false
+		if msg.err != nil {
+			a.statusHint = fmt.Sprintf("Remote session failed: %v", msg.err)
+			return a, nil
+		}
+		// Build a synthetic agent for the new pod and attach.
+		podAgent := &agent.Agent{
+			SessionID:    "pod-" + msg.podName,
+			Name:         msg.podName,
+			ProviderName: msg.provider,
+			WorkingDir:   "k8s://" + msg.namespace + "/" + msg.podName,
+			Status:       agent.StatusActive,
+			Source:       agent.SourceSDK,
+		}
+		return a.openK8sSession(podAgent)
+
 	case tea.KeyMsg:
+		// New picker overlay active — route all keys to it
+		if a.newPickerActive && a.newPicker != nil {
+			_, cmd := a.newPicker.Update(msg)
+			return a, cmd
+		}
 		// Launcher overlay active — route all keys to it
 		if a.launcherActive && a.launcherView != nil {
 			cmd := a.launcherView.Update(msg)
@@ -550,6 +623,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
 			return a.handleZoomedKey(msg)
 		}
+		debuglog.Log("tui: key %q NOT routed to zoomed handler: zoomed=%v sessionView=%v active=%v",
+			msg.String(), a.zoomed, a.sessionView != nil, a.sessionView != nil && a.sessionView.Active())
+		// Fallback: if zoomed was set to false but session view is still showing,
+		// handle Ctrl+] to force exit.
+		if msg.String() == "ctrl+]" || msg.String() == "ctrl+g" {
+			debuglog.Log("tui: fallback exit key %q (zoomed=%v)", msg.String(), a.zoomed)
+			if a.sessionView != nil && a.sessionView.Active() {
+				return a.exitZoom()
+			}
+		}
 		if a.filterMode {
 			return a.handleFilterInput(msg)
 		}
@@ -564,16 +647,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	debuglog.Log("tui: zoomed key received: %q (bytes: %x)", key, []byte(key))
+
 	// Clear status hints on any keypress (e.g., "Launched..." or export result)
 	a.statusHint = ""
 	a.stickyHint = false
 
 	// Exit keys — always work regardless of mode/focus
 	switch key {
-	case "ctrl+]", "ctrl+\\", "ctrl+g":
+	case "ctrl+]", "ctrl+\\", "ctrl+g", "ctrl+q":
+		debuglog.Log("tui: exit zoom triggered by key %q", key)
 		return a.exitZoom()
 	}
 	if len(key) == 1 && key[0] == 0x1d {
+		debuglog.Log("tui: exit zoom triggered by raw 0x1d")
 		return a.exitZoom()
 	}
 
@@ -734,8 +821,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "T":
 		if a.currentView == viewAgents {
-			a2, _ := a.navigateTo(viewTeams, "Teams")
-			return a2, a.discoverTeams
+			return a.navigateTo(viewTasks, "Tasks")
 		}
 	case "S":
 		if a.currentView == viewAgents {
@@ -793,6 +879,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case viewSessions:
 		cmd := a.sessionsView.Update(msg)
 		return a, cmd
+	case viewTasks:
+		if a.tasksView != nil {
+			a.tasksView.HandleKey(msg.String())
+		}
 	}
 	return a, nil
 }
@@ -806,6 +896,36 @@ func (a *App) syncPreview() {
 		}
 	}
 	a.previewPane.SetAgent(selected)
+}
+
+// refreshTasks queries all providers that implement TaskLister and updates
+// the tasks view and header summary with the aggregated results.
+func (a *App) refreshTasks() {
+	var allTasks []task.Task
+
+	// Only query K8s when user is actively viewing tasks — not on every tick.
+	if a.k8sProvider != nil && a.currentView == viewTasks {
+		tasks, _ := a.k8sProvider.ListTasks()
+		allTasks = append(allTasks, tasks...)
+	}
+
+	a.tasksView.SetTasks(allTasks)
+
+	// Compute summary counts for the header
+	pending, active, completed, failed := 0, 0, 0, 0
+	for _, t := range allTasks {
+		switch t.Status {
+		case task.StatusPending:
+			pending++
+		case task.StatusInProgress, task.StatusClaimed:
+			active++
+		case task.StatusCompleted:
+			completed++
+		case task.StatusFailed, task.StatusDead:
+			failed++
+		}
+	}
+	a.headerView.SetTaskSummary(pending, active, completed, failed)
 }
 
 // parserForProvider returns a TraceParser function that checks the OTEL store
@@ -943,6 +1063,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "teams":
 		a2, _ := a.navigateTo(viewTeams, "Teams")
 		return a2, a.discoverTeams
+	case "tasks":
+		return a.navigateTo(viewTasks, "Tasks")
 	case "costs":
 		return a.navigateTo(viewCosts, "Costs")
 	case "help":
@@ -952,7 +1074,7 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "kill":
 		return a.promptKill()
 	case "new":
-		return a.openLauncher()
+		return a.openNewPicker()
 	case "export-otel":
 		return a.exportOTEL()
 	case "quit":
@@ -1064,6 +1186,190 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// openNewPicker shows the :new picker overlay for creating sessions or tasks.
+func (a App) openNewPicker() (tea.Model, tea.Cmd) {
+	var ps []views.ProviderSupport
+	for _, p := range a.providers {
+		name := p.Name()
+		ps = append(ps, views.ProviderSupport{
+			Name:          name,
+			LocalSession:  true,
+			LocalK8s:      name == "claude",
+			RemoteSession: name == "claude",
+			RemoteTask:    name == "claude" || name == "gemini",
+		})
+	}
+	// Health check is lazy — runs when user first selects a K8s option,
+	// not here. This keeps :new instant.
+
+	a.newPicker = views.NewNewPickerView(views.NewPickerConfig{
+		K8sEnabled: a.cfg.Kubernetes.IsActive(),
+		Providers:  ps,
+	})
+	a.newPicker.SetSize(a.width, a.height)
+	a.newPickerActive = true
+	return a, nil
+}
+
+// handleNewSession processes a NewSessionMsg from the :new picker.
+// For "local" sessions, it delegates to the existing launcher flow.
+// For "remote" sessions, it calls SpawnRemote on the K8s provider.
+func (a App) buildRecentDirs() []views.RecentDirEntry {
+	type dirEntry struct {
+		path     string
+		lastUsed time.Time
+		provider string
+	}
+	byPath := make(map[string]*dirEntry)
+	for _, p := range a.providers {
+		for _, rd := range p.RecentDirs(20) {
+			if existing, ok := byPath[rd.Path]; ok {
+				existing.provider = "both"
+				if rd.LastUsed.After(existing.lastUsed) {
+					existing.lastUsed = rd.LastUsed
+				}
+			} else {
+				byPath[rd.Path] = &dirEntry{path: rd.Path, lastUsed: rd.LastUsed, provider: p.Name()}
+			}
+		}
+	}
+	sorted := make([]*dirEntry, 0, len(byPath))
+	for _, de := range byPath {
+		sorted = append(sorted, de)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].lastUsed.After(sorted[j].lastUsed) })
+	if len(sorted) > 20 {
+		sorted = sorted[:20]
+	}
+	var entries []views.RecentDirEntry
+	for _, de := range sorted {
+		display := filepath.Base(de.path)
+		if display == "" || display == "." {
+			display = de.path
+		}
+		age := ""
+		if !de.lastUsed.IsZero() {
+			age = formatDurationShort(time.Since(de.lastUsed))
+		}
+		entries = append(entries, views.RecentDirEntry{Path: de.path, Display: display, Provider: de.provider, Age: age})
+	}
+	return entries
+}
+
+func (a *App) dismissPicker() {
+	a.newPickerActive = false
+	a.newPicker = nil
+}
+
+func (a *App) pickerError(msg string) {
+	if a.newPicker != nil {
+		a.newPicker.SetStatus(msg)
+	}
+}
+
+func (a App) handleNewSession(msg views.NewSessionMsg) (tea.Model, tea.Cmd) {
+	switch msg.Where {
+	case "local", "local-k8s":
+		// Dismiss picker, then open the full launcher at directory step.
+		a.newPickerActive = false
+		a.newPicker = nil
+		// Build the launcher directly (avoid chained value-receiver copies)
+		recentDirs := a.buildRecentDirs()
+		providerOpts := make(map[string]views.ProviderOptions)
+		for _, p := range a.providers {
+			sa := p.SpawnArgs()
+			providerOpts[p.Name()] = views.ProviderOptions{
+				Models: sa.Models,
+				Modes:  sa.Modes,
+			}
+		}
+		a.launcherView = views.NewLauncherView(recentDirs, providerOpts, a.cfg.OTELReceiver.Enabled)
+		a.launcherView.SetSize(a.width, a.height)
+		a.launcherView.SkipToDirectory(msg.Provider)
+		a.launcherActive = true
+		return a, nil
+
+	case "remote":
+		if a.k8sProvider == nil {
+			a.pickerError("K8s not configured — set redis_url in ~/.aimux/config.yaml")
+			return a, nil
+		}
+		a.dismissPicker()
+		a.statusHint = fmt.Sprintf("Spawning remote %s session — pod starting...", msg.Provider)
+		a.stickyHint = true
+		// Run spawn + wait async so the TUI stays responsive.
+		k8s := a.k8sProvider
+		provName := msg.Provider
+		return a, func() tea.Msg {
+			podName, namespace, err := k8s.SpawnSession(provName)
+			if err != nil {
+				return k8sSessionReadyMsg{err: err}
+			}
+			return k8sSessionReadyMsg{podName: podName, namespace: namespace, provider: provName}
+		}
+
+	default:
+		a.newPickerActive = false
+		a.newPicker = nil
+		return a.openLauncher()
+	}
+}
+
+// handleNewTask processes a NewTaskMsg from the :new picker.
+// For "local" tasks, it runs the prompt as a local command.
+// For "remote" tasks, it creates a task via TaskLister/Spawner.
+func (a App) handleNewTask(msg views.NewTaskMsg) (tea.Model, tea.Cmd) {
+	if msg.Prompt == "" {
+		a.pickerError("Task prompt cannot be empty")
+		return a, nil
+	}
+
+	switch msg.Where {
+	case "remote":
+		if a.k8sProvider == nil {
+			a.pickerError("K8s not configured — set redis_url in ~/.aimux/config.yaml")
+			return a, nil
+		}
+		// Lazy health check
+		h := a.k8sProvider.CheckHealth()
+		if !h.RedisOK {
+			a.pickerError("Redis unreachable: " + h.RedisErr)
+			return a, nil
+		}
+		if err := a.k8sProvider.SpawnRemote(msg.Provider, "task", 1); err != nil {
+			a.pickerError(fmt.Sprintf("Remote task failed: %v", err))
+			return a, nil
+		}
+		a.dismissPicker()
+		a.statusHint = fmt.Sprintf("Created remote task for %s", msg.Provider)
+		return a, nil
+	default:
+		p := a.providerFor(msg.Provider)
+		if p == nil {
+			a.pickerError(fmt.Sprintf("Unknown provider: %s", msg.Provider))
+			return a, nil
+		}
+		cmd := p.SpawnCommand(".", "", "")
+		if cmd == nil {
+			a.pickerError(fmt.Sprintf("Provider %s cannot spawn locally", msg.Provider))
+			return a, nil
+		}
+		cmd.Args = append(cmd.Args, "-p", msg.Prompt)
+		envPrefix := ""
+		if a.cfg.OTELReceiver.Enabled {
+			endpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
+			envPrefix = p.OTELEnv(endpoint)
+		}
+		if err := spawn.Launch(cmd, msg.Provider, ".", "tmux", a.cfg.ResolveShell(), envPrefix); err != nil {
+			a.pickerError(fmt.Sprintf("Task launch failed: %v", err))
+			return a, nil
+		}
+		a.dismissPicker()
+		a.statusHint = fmt.Sprintf("Launched %s task locally", msg.Provider)
+		return a, nil
+	}
+}
+
 func formatDurationShort(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds ago", int(d.Seconds()))
@@ -1084,6 +1390,11 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 	selected := a.agentsView.Selected()
 	if selected == nil {
 		return a, nil
+	}
+
+	// K8s session pods: attach via kubectl exec + tmux.
+	if strings.HasPrefix(selected.SessionID, "pod-") {
+		return a.openK8sSession(selected)
 	}
 
 	p := a.providerFor(selected.ProviderName)
@@ -1193,6 +1504,73 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 	a.zoomed = true
 	a.splitMode = true
 	a.splitFocus = "trace" // start with focus on the trace pane (left)
+	a.layout.SetZoomed(true)
+	return a, teaCmd
+}
+
+// openK8sSession attaches to a K8s session pod via kubectl exec + tmux.
+// The pod runs `sleep infinity` with a tmux session named "main" inside.
+func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
+	// Extract pod name and namespace from SessionID and WorkingDir.
+	podName := strings.TrimPrefix(selected.SessionID, "pod-")
+	namespace := "agents"
+	if parts := strings.SplitN(strings.TrimPrefix(selected.WorkingDir, "k8s://"), "/", 2); len(parts) == 2 {
+		namespace = parts[0]
+	}
+
+	// K8s sessions are zoomed full-screen (not split), so use full width.
+	contentW := a.width
+	contentH := a.height - 2
+	if contentW < 1 {
+		contentW = 80
+	}
+	if contentH < 1 {
+		contentH = 24
+	}
+
+	backend, err := terminal.NewKubectlExec(podName, namespace, "", contentW, contentH)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("kubectl exec failed: %v", err)
+		return a, nil
+	}
+
+	a.sessionView.SetSize(a.width, a.height)
+	teaCmd, err := a.sessionView.Open(selected, backend)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Error: %v", err)
+		return a, nil
+	}
+
+	// Set up the remote session environment and start claude.
+	// Forward local Claude auth env vars (Vertex AI, API key, or both)
+	// so the pod inherits credentials without prompting for login.
+	go func() {
+		time.Sleep(1 * time.Second)
+		backend.Write([]byte("export TERM=xterm-256color\n"))
+		time.Sleep(100 * time.Millisecond)
+
+		// Forward all Claude/Vertex auth-related env vars if set locally.
+		// GOOGLE_APPLICATION_CREDENTIALS is skipped — it's a local file
+		// path. Mount the credentials as a K8s secret instead and set
+		// the env var in the deployment YAML.
+		authEnvVars := []string{
+			"ANTHROPIC_API_KEY",
+			"CLAUDE_CODE_USE_VERTEX",
+			"CLOUD_ML_REGION",
+			"ANTHROPIC_VERTEX_PROJECT_ID",
+			"ANTHROPIC_VERTEX_REGION",
+		}
+		for _, key := range authEnvVars {
+			if val := os.Getenv(key); val != "" {
+				backend.Write([]byte(fmt.Sprintf("export %s=%q\n", key, val)))
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+		backend.Write([]byte("cd /workspace && claude\n"))
+	}()
+
+	a.zoomed = true
+	a.splitMode = false
 	a.layout.SetZoomed(true)
 	return a, teaCmd
 }
@@ -1312,6 +1690,8 @@ func (a App) jumpToSession() (tea.Model, tea.Cmd) {
 // resumeSession opens a past session in split view: trace on left, live Claude on right.
 // Mirrors handleEnter() but builds the command from session history instead of a running agent.
 func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.Model, tea.Cmd) {
+	debuglog.Log("tui: resumeSession start: id=%q dir=%q file=%q", sessionID, workingDir, sessionFilePath)
+
 	claudeBin := "claude"
 	if path, err := exec.LookPath("claude"); err == nil {
 		claudeBin = path
@@ -1322,6 +1702,7 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
 			cmd.Dir = workingDir
 		} else {
+			debuglog.Log("tui: resumeSession: workingDir %q not found", workingDir)
 			a.statusHint = "Cannot resolve project directory for resume"
 			return a, nil
 		}
@@ -1332,11 +1713,14 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 	a.sessionView.SetSize(rightW, a.height)
 
 	// Start embedded PTY (Claude supports embedding)
+	debuglog.Log("tui: resumeSession: starting PTY for %q", claudeBin)
 	sess, err := terminal.Start(cmd)
 	if err != nil {
+		debuglog.Log("tui: resumeSession: PTY start failed: %v", err)
 		a.statusHint = fmt.Sprintf("Resume failed: %v", err)
 		return a, nil
 	}
+	debuglog.Log("tui: resumeSession: PTY started, opening session view")
 
 	// Build a minimal agent for the session view
 	resumeAgent := &agent.Agent{
@@ -1347,12 +1731,14 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 
 	teaCmd, err := a.sessionView.Open(resumeAgent, sess)
 	if err != nil {
+		debuglog.Log("tui: resumeSession: session view open failed: %v", err)
 		a.statusHint = fmt.Sprintf("Error opening session: %v", err)
 		return a, nil
 	}
 
 	// Create trace pane on the left from the session file
 	if sessionFilePath != "" {
+		debuglog.Log("tui: resumeSession: parsing trace file %q", sessionFilePath)
 		leftW := a.width - rightW
 		claudeProvider := a.providerFor("claude")
 		var parser func(string) ([]trace.Turn, error)
@@ -1361,6 +1747,7 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 		}
 		a.splitTrace = views.NewLogsView(0, sessionFilePath, parser)
 		a.splitTrace.SetSize(leftW, a.height-1)
+		debuglog.Log("tui: resumeSession: trace loaded, splitTrace is set")
 
 		// Load existing annotations
 		a.evalSessionID = sessionID
@@ -1376,12 +1763,15 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 		}
 		a.splitTrace.SetAnnotations(annotMap)
 		a.splitTrace.SetNotes(noteMap)
+	} else {
+		debuglog.Log("tui: resumeSession: no session file, splitTrace will be nil")
 	}
 
 	a.zoomed = true
 	a.splitMode = true
 	a.splitFocus = "session" // start with focus on the live session (right)
 	a.layout.SetZoomed(true)
+	debuglog.Log("tui: resumeSession complete: zoomed=%v splitMode=%v splitFocus=%q splitTrace=%v", a.zoomed, a.splitMode, a.splitFocus, a.splitTrace != nil)
 	return a, teaCmd
 }
 
@@ -1395,7 +1785,10 @@ func (a App) promptKill() (tea.Model, tea.Cmd) {
 	}
 	a.killConfirm = true
 	a.killTarget = selected
-	if selected.PID == 0 {
+	if strings.HasPrefix(selected.SessionID, "pod-") {
+		podName := strings.TrimPrefix(selected.SessionID, "pod-")
+		a.statusHint = fmt.Sprintf("Delete pod %s? y:confirm  n:cancel", podName)
+	} else if selected.PID == 0 {
 		a.statusHint = fmt.Sprintf("Remove %s? y:remove  d:remove+delete trace  n:cancel", selected.ShortProject())
 	} else {
 		a.statusHint = fmt.Sprintf("Kill %s (PID %d)? y:confirm  n:cancel", selected.ShortProject(), selected.PID)
@@ -1415,6 +1808,26 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "y", "Y":
+		if strings.HasPrefix(target.SessionID, "pod-") {
+			// K8s session pod: scale down deployment (so it doesn't respawn)
+			// and delete the pod. Run async to avoid blocking the TUI.
+			podName := strings.TrimPrefix(target.SessionID, "pod-")
+			namespace := "agents"
+			if parts := strings.SplitN(strings.TrimPrefix(target.WorkingDir, "k8s://"), "/", 2); len(parts) == 2 {
+				namespace = parts[0]
+			}
+			a.hideAgent(target)
+			a.statusHint = fmt.Sprintf("Deleting pod %s...", podName)
+			k8s := a.k8sProvider
+			go func() {
+				// Decrement replicas by 1 so the deployment doesn't recreate the pod.
+				if k8s != nil {
+					_ = k8s.ScaleDownOne(target.ProviderName, "session")
+				}
+				exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--grace-period=3", "--wait=false").Run()
+			}()
+			return a, nil
+		}
 		if target.PID == 0 {
 			// Session-only: hide from view by adding to hidden set
 			a.hideAgent(target)
@@ -1615,6 +2028,7 @@ func (a *App) resizeViews() {
 	a.previewPane.SetSize(rightW, contentHeight)
 	a.costsView.SetSize(a.width, contentHeight)
 	a.teamsView.SetSize(a.width, contentHeight)
+	a.tasksView.SetSize(a.width, contentHeight)
 	a.helpView.SetSize(a.width, contentHeight)
 	if a.logsView != nil {
 		a.logsView.SetSize(a.width, contentHeight)
@@ -1646,13 +2060,15 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:teams  S:sessions  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
 		a.headerView.SetHint("Esc:back  ?:help")
+	case viewTasks:
+		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
 		a.headerView.SetHint("j/k:nav  Enter:resume  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
 	case viewHelp:
@@ -1688,6 +2104,9 @@ func (a App) View() string {
 		content = a.costsView.View()
 	case viewTeams:
 		content = a.teamsView.View()
+	case viewTasks:
+		a.tasksView.SetSize(a.width, contentHeight)
+		content = a.tasksView.View()
 	case viewSessions:
 		a.sessionsView.SetSize(a.width, contentHeight)
 		content = a.sessionsView.View()
@@ -1712,6 +2131,12 @@ func (a App) View() string {
 	content = strings.Join(lines, "\n")
 
 	result := header + "\n" + content + "\n" + statusBar
+
+	// Overlay the new picker if active
+	if a.newPickerActive && a.newPicker != nil {
+		a.newPicker.SetSize(a.width, a.height)
+		return a.newPicker.View()
+	}
 
 	// Overlay the launcher if active
 	if a.launcherActive && a.launcherView != nil {
@@ -1911,14 +2336,16 @@ func (a App) renderStatusBar() string {
 		if a.sessionsView.HasActiveFilter() {
 			hints += "  [Esc clears filter]"
 		}
+	} else if a.currentView == viewTasks {
+		hints = " j/k:nav  g/G:top/bottom  :new:create  Esc:back"
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:teams  S:sessions  x:kill  ?:help",
+			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:tasks  S:sessions  x:kill  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:teams  S:sessions  s:sort  ?:help  q:quit"
+			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:tasks  S:sessions  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
