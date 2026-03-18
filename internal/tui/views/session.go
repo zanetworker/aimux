@@ -279,6 +279,9 @@ func (sv *SessionView) View() string {
 		termContent = dr.Render()
 	} else if sv.termView != nil {
 		termContent = sv.termView.Render()
+		if len(strings.TrimSpace(termContent)) == 0 {
+			termContent = fmt.Sprintf("[VT emulator: %dx%d, waiting for content...]", sv.width, sv.height)
+		}
 	}
 
 	// Show scroll indicator when viewing history
