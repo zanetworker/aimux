@@ -1292,7 +1292,7 @@ func (a App) handleNewSession(msg views.NewSessionMsg) (tea.Model, tea.Cmd) {
 
 	case "remote":
 		if a.infraProvider == nil {
-			a.pickerError("K8s not configured — set redis_url in ~/.aimux/config.yaml")
+			a.pickerError("K8s not configured — set kubernetes.enabled and kubeconfig in ~/.aimux/config.yaml")
 			return a, nil
 		}
 		a.dismissPicker()
@@ -1328,15 +1328,13 @@ func (a App) handleNewTask(msg views.NewTaskMsg) (tea.Model, tea.Cmd) {
 	switch msg.Where {
 	case "remote":
 		if a.infraProvider == nil {
-			a.pickerError("K8s not configured — set redis_url in ~/.aimux/config.yaml")
+			a.pickerError("K8s not configured — set kubernetes.enabled and kubeconfig in ~/.aimux/config.yaml")
 			return a, nil
 		}
-		// Lazy health check
-		h := a.infraProvider.CheckHealth()
-		if !h.CoordOK {
-			a.pickerError("Coordination layer unreachable: " + h.CoordErr)
-			return a, nil
-		}
+		// Spawn directly — auto-provisioning inside SpawnRemote handles
+		// namespace, secrets, and deployment creation if needed.
+		// No health check gate: Redis is for coordination (optional),
+		// not a prerequisite for creating pods.
 		if err := a.infraProvider.SpawnRemote(msg.Provider, "task", 1); err != nil {
 			a.pickerError(fmt.Sprintf("Remote task failed: %v", err))
 			return a, nil
