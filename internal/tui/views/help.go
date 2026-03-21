@@ -34,15 +34,17 @@ func (v *HelpView) SetSize(w, h int) {
 func (v *HelpView) View() string {
 	var b strings.Builder
 
-	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
-	idleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	waitingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true)
+	idleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	waitingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	unknownStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 
 	b.WriteString(helpTitleStyle.Render("Status Icons"))
 	b.WriteString("\n")
-	writeHelp(&b, activeStyle.Render("●")+" Active", "Processing (activity in last 30s)")
-	writeHelp(&b, idleStyle.Render("○")+" Idle", "Waiting for user input")
-	writeHelp(&b, waitingStyle.Render("◐")+" Waiting", "Blocked on permission prompt")
+	writeHelp(&b, activeStyle.Render("▶")+" Active", "Processing (activity in last 30s)")
+	writeHelp(&b, idleStyle.Render("■")+" Idle", "Waiting for user input")
+	writeHelp(&b, waitingStyle.Render("⏸")+" Waiting", "Blocked on permission prompt")
+	writeHelp(&b, unknownStyle.Render("?")+" Unknown", "Agent status could not be determined")
 	b.WriteString("\n")
 
 	b.WriteString(helpTitleStyle.Render("Agent List"))
@@ -51,7 +53,9 @@ func (v *HelpView) View() string {
 	writeHelp(&b, "Enter", "Open split view (trace + session)")
 	writeHelp(&b, "t", "Open trace viewer (full screen)")
 	writeHelp(&b, "c", "Cost dashboard")
-	writeHelp(&b, "T", "Teams overview")
+	writeHelp(&b, "T", "Tasks view")
+	writeHelp(&b, "S", "Sessions browser (past sessions)")
+	writeHelp(&b, "H", "System health dashboard")
 	writeHelp(&b, ":new / :n", "Launch new agent (provider, dir, options)")
 	writeHelp(&b, "x", "Kill selected agent (with confirmation)")
 	writeHelp(&b, "s", "Sort: cycle Name/Cost/Age/Model/PID")
@@ -100,6 +104,7 @@ func (v *HelpView) View() string {
 	writeHelp(&b, ":logs :l", "Trace viewer")
 	writeHelp(&b, ":teams :t", "Teams overview")
 	writeHelp(&b, ":costs :c", "Cost dashboard")
+	writeHelp(&b, ":health", "System health (providers + infra)")
 	writeHelp(&b, ":quit :q", "Quit")
 	b.WriteString("\n")
 

@@ -33,10 +33,10 @@ var (
 	agentSelectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("#1E3A5F"))
 
 	// Status icon styles.
-	agentActiveIcon  = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
-	agentIdleIcon    = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	agentWaitingIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
-	agentMutedIcon   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	agentActiveIcon  = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true)
+	agentIdleIcon    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	agentWaitingIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	agentMutedIcon   = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 )
 
 // costColor returns a lipgloss style for the cost value based on thresholds.
