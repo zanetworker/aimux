@@ -45,9 +45,9 @@ func TestStatusIcon(t *testing.T) {
 		status Status
 		want   string
 	}{
-		{StatusActive, "●"},
-		{StatusIdle, "○"},
-		{StatusWaitingPermission, "◐"},
+		{StatusActive, "▶"},
+		{StatusIdle, "■"},
+		{StatusWaitingPermission, "⏸"},
 		{StatusUnknown, "?"},
 		{Status(99), "?"},
 	}
@@ -144,9 +144,9 @@ func TestAgentIcon(t *testing.T) {
 		status Status
 		want   string
 	}{
-		{StatusActive, "●"},
-		{StatusIdle, "○"},
-		{StatusWaitingPermission, "◐"},
+		{StatusActive, "▶"},
+		{StatusIdle, "■"},
+		{StatusWaitingPermission, "⏸"},
 		{StatusUnknown, "?"},
 	}
 	for _, tt := range tests {
@@ -240,8 +240,8 @@ func TestAgentFullStruct(t *testing.T) {
 	if got := a.FormatCost(); got != "$0.82" {
 		t.Errorf("FormatCost() = %q, want %q", got, "$0.82")
 	}
-	if got := a.Icon(); got != "●" {
-		t.Errorf("Icon() = %q, want %q", got, "●")
+	if got := a.Icon(); got != "▶" {
+		t.Errorf("Icon() = %q, want %q", got, "▶")
 	}
 	if got := a.Source.String(); got != "CLI" {
 		t.Errorf("Source.String() = %q, want %q", got, "CLI")

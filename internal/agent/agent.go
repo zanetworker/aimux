@@ -60,11 +60,11 @@ func (s Status) String() string {
 func (s Status) Icon() string {
 	switch s {
 	case StatusActive:
-		return "●"
+		return "▶"
 	case StatusIdle:
-		return "○"
+		return "■"
 	case StatusWaitingPermission:
-		return "◐"
+		return "⏸"
 	case StatusUnknown:
 		return "?"
 	default:
