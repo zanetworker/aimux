@@ -42,6 +42,7 @@ const (
 	viewSessions
 	viewHelp
 	viewTasks
+	viewHealth
 )
 
 // tickMsg triggers periodic refresh.
@@ -84,6 +85,7 @@ type App struct {
 	teamsView    *views.TeamsView
 	sessionsView *views.SessionsView
 	helpView     *views.HelpView
+	healthView   *views.HealthView
 
 	// Layout
 	layout *Layout
@@ -213,6 +215,7 @@ func NewApp() App {
 		sessionsView:  views.NewSessionsView(),
 		teamsView:    views.NewTeamsView(),
 		helpView:     views.NewHelpView(),
+		healthView:   views.NewHealthView(),
 		tasksView:    views.NewTasksView(),
 		layout:       NewLayout(0, 0),
 		orchestrator: discovery.NewOrchestrator(agentProviders...),
@@ -828,6 +831,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			return a.openSessions()
 		}
+	case "H":
+		if a.currentView == viewAgents {
+			return a.openHealth()
+		}
 	case "esc":
 		if a.filterInput != "" {
 			a.filterInput = ""
@@ -1068,6 +1075,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		return a.navigateTo(viewTasks, "Tasks")
 	case "costs":
 		return a.navigateTo(viewCosts, "Costs")
+	case "health":
+		return a.openHealth()
 	case "help":
 		return a.navigateTo(viewHelp, "Help")
 	case "export":
@@ -1113,6 +1122,19 @@ func (a App) sendMessageToSelected(text string) (tea.Model, tea.Cmd) {
 	}
 	a.statusHint = fmt.Sprintf("Sent to %s: %s", selected.SessionID, text)
 	return a, nil
+}
+
+func (a App) openHealth() (tea.Model, tea.Cmd) {
+	// Count active agents per provider from current instances.
+	counts := make(map[string]int)
+	for _, ag := range a.instances {
+		counts[ag.ProviderName]++
+	}
+
+	health := provider.GatherHealth(a.providers, a.infraProvider, counts)
+	a.healthView.SetHealth(health)
+	a.healthView.SetSize(a.width, a.height)
+	return a.navigateTo(viewHealth, "Health")
 }
 
 func (a App) openLauncher() (tea.Model, tea.Cmd) {
@@ -2068,7 +2090,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
 	case viewCosts:
@@ -2079,6 +2101,8 @@ func (a App) View() string {
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
 		a.headerView.SetHint("j/k:nav  Enter:resume  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
+	case viewHealth:
+		a.headerView.SetHint("Esc:back  :health to refresh")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
 	}
@@ -2118,6 +2142,9 @@ func (a App) View() string {
 	case viewSessions:
 		a.sessionsView.SetSize(a.width, contentHeight)
 		content = a.sessionsView.View()
+	case viewHealth:
+		a.healthView.SetSize(a.width, contentHeight)
+		content = a.healthView.View()
 	case viewHelp:
 		content = a.helpView.View()
 	}
@@ -2350,10 +2377,10 @@ func (a App) renderStatusBar() string {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
 		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:tasks  S:sessions  x:kill  ?:help",
+			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  x:kill  ?:help",
 				selected.GroupCount, selected.GroupCount)
 		} else {
-			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:tasks  S:sessions  s:sort  ?:help  q:quit"
+			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
