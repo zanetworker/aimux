@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -17,6 +18,10 @@ import (
 	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/pkg/rediskeys"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -646,8 +651,15 @@ func (k *K8s) SpawnRemote(provider, role string, count int) error {
 	defer cancel()
 
 	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("deployment %q not found — run: kubectl apply -f deploy/k8s/", deployName)
+	if errors.IsNotFound(err) {
+		// Auto-create the deployment if it doesn't exist.
+		debuglog.Log("k8s: deployment %q not found, creating automatically", deployName)
+		deploy, err = k.createAgentDeployment(ctx, clientset, namespace, provider, role)
+		if err != nil {
+			return fmt.Errorf("cannot create deployment %q: %w", deployName, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("cannot get deployment %q: %w", deployName, err)
 	}
 
 	replicas := int32(count)
@@ -661,6 +673,179 @@ func (k *K8s) SpawnRemote(provider, role string, count int) error {
 	}
 	return nil
 }
+
+// createAgentDeployment builds and creates a Deployment for the given provider
+// and role. The deployment starts at 0 replicas (SpawnRemote scales it up).
+//
+// The deployment is minimal — no service accounts, no repo cloning, no Redis.
+// Auth secrets (llm-keys, gcp-adc) are referenced as optional so the pod
+// starts even if they don't exist. For Vertex AI, env vars are forwarded
+// by aimux at attach time (sessions) or baked in (tasks via ensureAuthSecret).
+func (k *K8s) createAgentDeployment(ctx context.Context, clientset kubernetes.Interface, namespace, provider, role string) (*appsv1.Deployment, error) {
+	deployName := spawnDeploymentName(provider, role)
+	image := k.imageForProvider(provider)
+	replicas := int32(0)
+
+	// Ensure the namespace exists.
+	k.ensureNamespace(ctx, clientset, namespace)
+
+	// Ensure auth secrets exist from local env vars.
+	k.ensureAuthSecrets(ctx, clientset, namespace)
+
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      deployName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app":                          deployName,
+				"team-component":               role,
+				"provider":                     provider,
+				"app.kubernetes.io/part-of":    "k8s-agents",
+				"app.kubernetes.io/managed-by": "aimux",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": deployName},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app":                       deployName,
+						"team-component":            role,
+						"provider":                  provider,
+						"app.kubernetes.io/part-of": "k8s-agents",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:    role,
+						Image:   image,
+						Command: []string{"sleep", "infinity"},
+						Env: []corev1.EnvVar{
+							// Vertex AI auth via mounted ADC file
+							{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: "/var/secrets/gcp/adc.json"},
+							// API key auth via secret
+							{Name: "ANTHROPIC_API_KEY", ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "llm-keys"},
+									Key:                  "anthropic",
+									Optional:             boolPtr(true),
+								},
+							}},
+							{Name: "TERM", Value: "xterm-256color"},
+						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("1Gi"),
+								corev1.ResourceCPU:    resource.MustParse("500m"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
+								corev1.ResourceCPU:    resource.MustParse("1000m"),
+							},
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: "gcp-adc", MountPath: "/var/secrets/gcp", ReadOnly: true},
+						},
+					}},
+					Volumes: []corev1.Volume{
+						{Name: "gcp-adc", VolumeSource: corev1.VolumeSource{
+							Secret: &corev1.SecretVolumeSource{
+								SecretName: "gcp-adc",
+								Optional:   boolPtr(true),
+							},
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	debuglog.Log("k8s: creating deployment %s/%s (image=%s)", namespace, deployName, image)
+	return clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
+}
+
+// ensureNamespace creates the namespace if it doesn't exist.
+func (k *K8s) ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namespace string) {
+	_, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   namespace,
+				Labels: map[string]string{"app.kubernetes.io/managed-by": "aimux"},
+			},
+		}
+		if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
+			debuglog.Log("k8s: failed to create namespace %s: %v", namespace, err)
+		} else {
+			debuglog.Log("k8s: created namespace %s", namespace)
+		}
+	}
+}
+
+// ensureAuthSecrets creates auth secrets from local environment if they don't
+// already exist in the cluster. This lets users point at a bare cluster
+// without manual kubectl create secret commands.
+func (k *K8s) ensureAuthSecrets(ctx context.Context, clientset kubernetes.Interface, namespace string) {
+	// GCP ADC: copy local credentials file into a secret
+	if adcPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); adcPath != "" {
+		_, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "gcp-adc", metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			data, readErr := os.ReadFile(adcPath)
+			if readErr == nil {
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "gcp-adc",
+						Namespace: namespace,
+						Labels:    map[string]string{"app.kubernetes.io/managed-by": "aimux"},
+					},
+					Data: map[string][]byte{"adc.json": data},
+				}
+				if _, err := clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+					debuglog.Log("k8s: failed to create gcp-adc secret: %v", err)
+				} else {
+					debuglog.Log("k8s: created gcp-adc secret from %s", adcPath)
+				}
+			}
+		}
+	}
+
+	// API key: create llm-keys secret from env
+	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		_, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "llm-keys", metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "llm-keys",
+					Namespace: namespace,
+					Labels:    map[string]string{"app.kubernetes.io/managed-by": "aimux"},
+				},
+				Data: map[string][]byte{"anthropic": []byte(apiKey)},
+			}
+			if _, err := clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+				debuglog.Log("k8s: failed to create llm-keys secret: %v", err)
+			} else {
+				debuglog.Log("k8s: created llm-keys secret from ANTHROPIC_API_KEY")
+			}
+		}
+	}
+}
+
+// imageForProvider returns the container image for the given provider.
+func (k *K8s) imageForProvider(provider string) string {
+	switch provider {
+	case "claude":
+		return "quay.io/azaalouk/claude-session:latest"
+	case "gemini":
+		return "quay.io/azaalouk/gemini-session:latest"
+	default:
+		return "quay.io/azaalouk/" + provider + "-session:latest"
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 // SpawnSession scales up the session deployment by one replica, waits for the
 // new pod to be Running, and returns its name and namespace. The caller uses

@@ -1,10 +1,13 @@
 package provider
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // Compile-time interface checks — fails to compile if K8s is missing any method.
@@ -335,6 +338,130 @@ func TestNewRedisClient_PoolSettings(t *testing.T) {
 	}
 	if opts.MaxRetries != 1 {
 		t.Errorf("MaxRetries = %d, want 1", opts.MaxRetries)
+	}
+}
+
+// --- Auto-provisioning tests (fake K8s clientset) ---
+
+func TestCreateAgentDeployment_AutoCreates(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	k := NewK8s(K8sConfig{Namespace: "test-ns"})
+	ctx := context.Background()
+
+	// Namespace doesn't exist yet — createAgentDeployment should create it.
+	deploy, err := k.createAgentDeployment(ctx, clientset, "test-ns", "claude", "task")
+	if err != nil {
+		t.Fatalf("createAgentDeployment() error: %v", err)
+	}
+	if deploy.Name != "agent-claude-task" {
+		t.Errorf("deployment name = %q, want %q", deploy.Name, "agent-claude-task")
+	}
+
+	// Verify namespace was created.
+	ns, err := clientset.CoreV1().Namespaces().Get(ctx, "test-ns", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("namespace not created: %v", err)
+	}
+	if ns.Labels["app.kubernetes.io/managed-by"] != "aimux" {
+		t.Error("namespace missing managed-by label")
+	}
+
+	// Verify deployment exists with correct labels.
+	got, err := clientset.AppsV1().Deployments("test-ns").Get(ctx, "agent-claude-task", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("deployment not found after create: %v", err)
+	}
+	if got.Labels["provider"] != "claude" {
+		t.Errorf("deployment label provider = %q, want %q", got.Labels["provider"], "claude")
+	}
+	if got.Labels["team-component"] != "task" {
+		t.Errorf("deployment label team-component = %q, want %q", got.Labels["team-component"], "task")
+	}
+	if *got.Spec.Replicas != 0 {
+		t.Errorf("deployment replicas = %d, want 0", *got.Spec.Replicas)
+	}
+}
+
+func TestEnsureNamespace_Idempotent(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	k := NewK8s(K8sConfig{})
+	ctx := context.Background()
+
+	// First call creates.
+	k.ensureNamespace(ctx, clientset, "my-ns")
+	_, err := clientset.CoreV1().Namespaces().Get(ctx, "my-ns", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("namespace not created: %v", err)
+	}
+
+	// Second call is a no-op (doesn't error).
+	k.ensureNamespace(ctx, clientset, "my-ns")
+}
+
+func TestEnsureAuthSecrets_CreatesFromEnv(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	k := NewK8s(K8sConfig{})
+	ctx := context.Background()
+
+	// Create namespace first.
+	k.ensureNamespace(ctx, clientset, "test-ns")
+
+	// Set env var for API key.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key-123")
+
+	k.ensureAuthSecrets(ctx, clientset, "test-ns")
+
+	// Verify llm-keys secret was created.
+	secret, err := clientset.CoreV1().Secrets("test-ns").Get(ctx, "llm-keys", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("llm-keys secret not created: %v", err)
+	}
+	if string(secret.Data["anthropic"]) != "sk-test-key-123" {
+		t.Errorf("secret data = %q, want %q", string(secret.Data["anthropic"]), "sk-test-key-123")
+	}
+}
+
+func TestEnsureAuthSecrets_SkipsExisting(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	k := NewK8s(K8sConfig{})
+	ctx := context.Background()
+
+	k.ensureNamespace(ctx, clientset, "test-ns")
+
+	// Pre-create the secret with different data.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-new-key")
+	k.ensureAuthSecrets(ctx, clientset, "test-ns")
+
+	// Change env and call again — should NOT overwrite.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-overwrite-attempt")
+	k.ensureAuthSecrets(ctx, clientset, "test-ns")
+
+	secret, _ := clientset.CoreV1().Secrets("test-ns").Get(ctx, "llm-keys", metav1.GetOptions{})
+	if string(secret.Data["anthropic"]) != "sk-new-key" {
+		t.Errorf("secret was overwritten: got %q, want %q", string(secret.Data["anthropic"]), "sk-new-key")
+	}
+}
+
+func TestSpawnRemote_AutoCreatesDeployment(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	k := NewK8s(K8sConfig{Namespace: "test-ns"})
+
+	// Inject the fake clientset by overriding kubeClient.
+	// We can't easily do this without refactoring, so test via createAgentDeployment directly.
+	ctx := context.Background()
+	k.ensureNamespace(ctx, clientset, "test-ns")
+
+	// Create deployment (simulating what SpawnRemote does internally).
+	_, err := k.createAgentDeployment(ctx, clientset, "test-ns", "claude", "session")
+	if err != nil {
+		t.Fatalf("createAgentDeployment() error: %v", err)
+	}
+
+	// Verify it was created with correct image.
+	deploy, _ := clientset.AppsV1().Deployments("test-ns").Get(ctx, "agent-claude-session", metav1.GetOptions{})
+	image := deploy.Spec.Template.Spec.Containers[0].Image
+	if !strings.Contains(image, "claude-session") {
+		t.Errorf("deployment image = %q, want it to contain %q", image, "claude-session")
 	}
 }
 

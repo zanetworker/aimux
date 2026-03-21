@@ -1,0 +1,111 @@
+# Claude Task pod Deployment.
+# replicas: 0 — scale-to-zero. aimux scales up on :new → Remote Task.
+# Non-interactive: runs a prompt via claude -p, reports results, then idles.
+# Uses the same image and auth as agent-claude-session.
+#
+# Auth: same secrets as session (llm-keys for API key, gcp-adc for Vertex AI).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-claude-task
+  namespace: agents
+  labels:
+    app: agent-claude-task
+    team-component: task
+    provider: claude
+    app.kubernetes.io/part-of: k8s-agents
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: agent-claude-task
+  template:
+    metadata:
+      labels:
+        app: agent-claude-task
+        team-component: task
+        provider: claude
+        app.kubernetes.io/part-of: k8s-agents
+    spec:
+      serviceAccountName: mcp-server
+      initContainers:
+        - name: clone-repo
+          image: alpine/git
+          command:
+            - sh
+            - -c
+            - git clone https://$(GIT_TOKEN)@$(GIT_HOST) /workspace
+          env:
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: token
+                  optional: true
+            - name: GIT_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: repo-secret
+                  key: host
+                  optional: true
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      containers:
+        - name: task
+          image: quay.io/azaalouk/claude-session:latest
+          command: ["sleep", "infinity"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+                  optional: true
+            # --- Auth option 1: Vertex AI (GCP ADC) ---
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/var/secrets/gcp/adc.json"
+            - name: CLAUDE_CODE_USE_VERTEX
+              value: "1"
+            - name: CLOUD_ML_REGION
+              value: "us-east5"
+            - name: ANTHROPIC_VERTEX_PROJECT_ID
+              value: "ext-openshift-ai"
+            # --- Auth option 2: API key ---
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-keys
+                  key: anthropic
+                  optional: true
+            # Coordination
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis:6379"
+            - name: K8S_NAMESPACE
+              value: "agents"
+            - name: TEAM_ID
+              value: "my-team"
+            - name: TERM
+              value: "xterm-256color"
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: gcp-adc
+              mountPath: /var/secrets/gcp
+              readOnly: true
+      volumes:
+        - name: workspace
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: gcp-adc
+          secret:
+            secretName: gcp-adc
+            optional: true
