@@ -100,24 +100,28 @@
             <p>Aggregated token usage and USD spend per project. Press <code>c</code> for instant visibility.</p>
           </div>
           <div>
-            <h3>Teams</h3>
-            <p>View Claude Code team configs and members. Press <code>T</code> to see who's collaborating.</p>
+            <h3>Infrastructure</h3>
+            <p>Run agents on K8s, EC2, or SSH. Local, Hybrid, or Remote modes. Zero-setup auto-provisioning.</p>
           </div>
           <div>
             <h3>Session History</h3>
             <p>Browse all past sessions. LLM-generated titles. Resume, annotate, or delete from one view.</p>
           </div>
           <div>
-            <h3>OTEL Receiver</h3>
-            <p>Built-in OTLP/HTTP telemetry. Export to MLflow, Jaeger, or any OTEL backend.</p>
+            <h3>System Health</h3>
+            <p>Press <code>H</code> for unified health. Binary status, infra connectivity, workload inventory.</p>
           </div>
           <div>
-            <h3>Subagent Tracking</h3>
-            <p>Provider-agnostic identity tracking. Groups child processes across Claude, Codex, and Gemini.</p>
+            <h3>OTEL + Export</h3>
+            <p>Built-in OTLP/HTTP receiver. Export to MLflow, Jaeger, or any OTEL backend.</p>
+          </div>
+          <div>
+            <h3>Tasks View</h3>
+            <p>Fire-and-forget tasks on infra. Track status, results, cost. Press <code>T</code>.</p>
           </div>
           <div>
             <h3>Pluggable</h3>
-            <p>10-method Provider interface. Add a new agent in one Go file.</p>
+            <p>Provider + InfraProvider interfaces. Add a new agent or backend in one Go file.</p>
           </div>
         </div>
       </section>
@@ -166,6 +170,37 @@
         <h2><span class="accent">Teams</span> view</h2>
         <p style="font-size: 0.7em; color: #9ca3af; margin-bottom: 20px;">See Claude Code team configurations and members. Press <code>:teams</code> to view.</p>
         <img src="https://raw.githubusercontent.com/zanetworker/aimux/main/assets/teams.png" alt="Teams view" style="max-width: 85%; border-radius: 8px; border: 1px solid #333;">
+      </section>
+
+      <!-- Infrastructure -->
+      <section>
+        <h2>Scale to <span class="accent">infrastructure</span></h2>
+        <p style="font-size: 0.7em; color: #9ca3af; margin-bottom: 20px;">Three modes. One interface. Zero-setup K8s auto-provisioning.</p>
+        <pre><code style="font-size: 1.1em;">
+  Local    → Claude on your machine, workers local
+  Hybrid   → Claude local, workers on K8s/EC2 via MCP
+  Remote   → Claude itself on K8s, you attach via TUI
+        </code></pre>
+        <p style="font-size: 0.6em; color: #6b7280; margin-top: 20px;">
+          Just point at a cluster. Aimux auto-creates namespace, secrets, and deployments.<br>
+          Auth: Vertex AI, API key, or both. Forwarded from your local shell.
+        </p>
+      </section>
+
+      <!-- Health Dashboard -->
+      <section>
+        <h2>System <span class="accent">health</span></h2>
+        <p style="font-size: 0.7em; color: #9ca3af; margin-bottom: 20px;">Press <code>H</code> or <code>:health</code> for unified status across all providers and infrastructure.</p>
+        <pre><code style="font-size: 1.1em;">
+  Local Providers
+    claude      ✓  /opt/homebrew/bin/claude v2.1.72    3 active
+    codex       ✗  not installed
+    gemini      ✓  /opt/homebrew/bin/gemini v1.0.4     0 agents
+
+  Infrastructure (k8s)
+    Coordination:   ✓ connected
+    Compute:        ✓ connected  2 workloads
+        </code></pre>
       </section>
 
       <!-- Session History -->
