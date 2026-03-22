@@ -43,6 +43,48 @@ release:
     brew upgrade zanetworker/aimux/aimux
     ```
 
+    ### What's New
+
+    **Infrastructure Sessions (K8s, EC2, ...)**
+    Three modes for scaling agents beyond your laptop:
+    - **Local** — agents run on your machine
+    - **Hybrid** — Claude local, workers dispatched to K8s/EC2 via MCP
+    - **Remote** — Claude itself runs on K8s, you attach via TUI
+
+    **Zero-Setup K8s** — just point at a running cluster. Aimux auto-creates namespace, auth secrets, and deployments on first spawn. No `kubectl apply` needed. Supports Vertex AI and API key auth.
+
+    **System Health Dashboard** — press `H` or `:health` for unified status: local provider binaries, versions, agent counts, infra coordination/compute health, and workload inventory.
+
+    **New Picker** — `:new` command with unified overlay for sessions (local/hybrid/remote) and tasks. Provider selection, model picker, prompt input.
+
+    **Tasks View** — press `T` for K8s-managed background tasks with status, duration, and provider info.
+
+    **VT Emulator Deadlock Fix** — drains the VT emulator's response pipe to prevent session freezes when claude sends terminal queries (device attributes, cursor position).
+
+    **Architecture** — `InfraProvider` interface for multi-backend support (K8s today, EC2/SSH tomorrow). Clean separation between core packages and TUI. Provider decoupling via interfaces.
+
+    ### Usage
+
+    ```bash
+    # Basic usage
+    aimux                         # launch TUI, auto-discovers local agents
+
+    # K8s (zero-setup)
+    # Add to ~/.aimux/config.yaml:
+    #   kubernetes:
+    #     enabled: true
+    aimux                         # :new → Session → Remote → claude
+
+    # Key bindings
+    H                             # system health dashboard
+    T                             # tasks view
+    S                             # session history
+    :new                          # launch new agent (local/hybrid/remote)
+    :health                       # system health (also H key)
+    ```
+
+    See [K8s Quickstart](https://github.com/zanetworker/aimux/blob/main/docs/k8s-quickstart.md) for full setup guide.
+
 brews:
   - repository:
       owner: zanetworker
