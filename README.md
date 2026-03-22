@@ -134,27 +134,44 @@ Press `c` from the agent list for aggregated token usage and estimated USD spend
 
 Built-in OTLP/HTTP receiver on port 4318 collects live telemetry from spawned agents. Debug anytime: `curl http://localhost:4318/debug`
 
-### Kubernetes Agents
+### Infrastructure Sessions (K8s, EC2, ...)
 
-Run 5-20 AI coding agents as Kubernetes pods. Claude Code on your laptop acts as the lead, dispatching tasks to remote workers via an MCP server + Redis.
+Three modes for scaling your agents beyond your laptop:
 
-Press `:new` to open the picker, then choose:
-- **Local + K8s** — your Claude Code session coordinates K8s worker pods
-- **Remote (pod)** — full Claude Code runs in a K8s pod, attach via split view
-- **Remote Task** — fire-and-forget task, results appear in the Tasks view
+| Mode | Claude runs | Workers run | How |
+|------|-------------|-------------|-----|
+| **Local** | your machine | your machine | direct subprocess |
+| **Hybrid** | your machine | infra (K8s/EC2) | MCP server dispatches tasks |
+| **Remote** | infra (K8s/EC2) | infra | kubectl exec / SSH attach |
 
-Press `T` to see all tasks (K8s + local) with status, assignee, and results.
+Press `:new` to open the picker, then choose your mode and provider.
 
-```
- Tasks  ● 2 running  ✓ 14 done  ○ 3 pending  ✗ 1 failed   $4.02
- ─────────────────────────────────────────────────────────────────
- TASK                       AGENT            LOC    STATUS   AGE
- ✓ Research: LangGraph      researcher-1     k8s    done     45m
- ● Implement API            coder-1          k8s    running  30m
- ○ Review implementation    (pending)        k8s    waiting  —
-```
+**Zero-setup K8s**: just point at a running cluster. Aimux auto-creates the namespace, auth secrets (from your local `ANTHROPIC_API_KEY` or `GOOGLE_APPLICATION_CREDENTIALS`), and deployments on first spawn. No `kubectl apply` needed.
+
+Auth options: Vertex AI (GCP ADC), Anthropic API key, or both. Env vars from your local shell are forwarded to pods automatically.
+
+Press `T` for the tasks view, `H` or `:health` for the system health dashboard.
 
 See **[K8s Quickstart](docs/k8s-quickstart.md)** for setup.
+
+### System Health
+
+Press `H` or type `:health` for a unified status dashboard:
+
+```
+System Health
+
+  Local Providers
+    claude      ✓  /opt/homebrew/bin/claude v2.1.72    3 active
+    codex       ✗  not installed
+    gemini      ✓  /opt/homebrew/bin/gemini v1.0.4     0 agents
+
+  Infrastructure (k8s)
+    Coordination:   ✓ connected
+    Compute:        ✓ connected  2 workloads
+      - agent-claude-session
+      - agent-claude-task
+```
 
 ### Teams
 
@@ -169,7 +186,8 @@ View Claude Code team configurations and members via `:teams` command.
 | `t` | Agent list | Standalone trace view |
 | `c` | Agent list | Cost dashboard |
 | `S` | Agent list | Session history browser |
-| `T` | Agent list | Tasks view (K8s + local) |
+| `T` | Agent list | Tasks view |
+| `H` | Agent list | System health dashboard |
 | `Tab` | Split view | Switch focus between panes |
 | `e` | Trace pane | Export menu (`j`:JSONL, `o`:OTEL) |
 | `a` | Trace pane | Annotate turn (GOOD/BAD/WASTE) |
@@ -209,13 +227,15 @@ export:
   mlflow:
     experiment_id: "1"        # required by MLflow
 
-# Kubernetes agents (optional)
+# Infrastructure (K8s) — optional, zero-setup
+# Just enable and point at a cluster. Aimux auto-creates namespace,
+# secrets, and deployments on first spawn.
 kubernetes:
   enabled: true
-  redis_url: "redis://:password@<elb>:6379"
+  kubeconfig: ""                        # empty = default kubeconfig
   namespace: "agents"
+  redis_url: "redis://:password@<elb>:6379"  # optional: for coordination
   team_id: "my-team"
-  otel_endpoint: "http://<elb>:4317"   # optional: remote trace collection
 
 # Session history: LLM-powered title generation
 # Requires GEMINI_API_KEY (for flash) or ANTHROPIC_API_KEY (for haiku/sonnet/opus)
@@ -254,7 +274,7 @@ In aimux: `Tab` to trace pane, `a` to annotate, `e` then `o` to export.
 <details>
 <summary><strong>Adding a new provider</strong></summary>
 
-Implement the `Provider` interface (11 methods), register in `app.go`, add pricing. Optionally implement `TaskLister` and `Spawner` for remote task management:
+Implement the `Provider` interface (11 methods), register in `app.go`, add pricing. For infra providers, implement `InfraProvider` which adds health checks, session spawning, and task management:
 
 ```go
 type Provider interface {

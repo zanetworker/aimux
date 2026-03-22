@@ -1,15 +1,44 @@
 # Kubernetes Quickstart
 
-Run AI coding agents on Kubernetes, coordinated through Redis and controlled from your laptop via aimux.
+Run AI coding agents on Kubernetes, controlled from your laptop via aimux.
 
-## Prerequisites
+## Zero-Setup Path (fastest)
+
+Just point at a cluster. Aimux auto-creates everything on first spawn:
+
+```bash
+# 1. Enable K8s in aimux config
+cat >> ~/.aimux/config.yaml << 'EOF'
+kubernetes:
+  enabled: true
+  namespace: "agents"
+EOF
+
+# 2. Make sure your auth env vars are set (Vertex AI or API key)
+# Vertex AI:
+export CLAUDE_CODE_USE_VERTEX=1
+export CLOUD_ML_REGION=us-east5
+export ANTHROPIC_VERTEX_PROJECT_ID=your-project
+
+# Or API key:
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 3. Run aimux → :new → Session → Remote → claude
+aimux
+```
+
+Aimux auto-creates the `agents` namespace, auth secrets from your env vars, and the deployment. No `kubectl apply` needed.
+
+## Full Setup (with Redis coordination)
+
+For Hybrid mode (local Claude dispatching tasks to K8s workers), you need Redis.
+
+### Prerequisites
 
 - A Kubernetes cluster (any: kind, minikube, EKS, GKE, OpenShift)
 - `kubectl` configured and pointing at your cluster
 - Go 1.24+ (to build the MCP server)
 - Docker or Podman (only if building custom images)
-- An Anthropic API key (`ANTHROPIC_API_KEY`)
-- A GitHub PAT with repo scope (for agents that clone repos)
 
 ## Architecture (30-second version)
 
