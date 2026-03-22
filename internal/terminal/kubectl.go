@@ -44,11 +44,11 @@ func NewKubectlExec(podName, namespace, container string, cols, rows int) (*Kube
 		container = "session"
 	}
 	args := []string{"exec", "-it", podName, "-n", namespace, "--container", container}
-	// Use -f /dev/null to avoid tmux.conf issues, and set default-terminal
-	// for proper 256-color support inside the session.
-	args = append(args, "--",
-		"sh", "-c",
-		fmt.Sprintf("TERM=xterm-256color tmux -f /dev/null new-session -A -s main -x %d -y %d", cols, rows))
+	// Exec into a shell directly. Tmux is started later via Write() from
+	// openK8sSession, which gives the PTY time to initialize properly.
+	// This avoids "open terminal failed" errors from tmux when the exec
+	// command's TTY allocation hasn't completed yet.
+	args = append(args, "--", "bash", "-l")
 
 	cmd := exec.Command("kubectl", args...)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
