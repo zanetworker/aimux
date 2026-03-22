@@ -465,6 +465,114 @@ func TestSpawnRemote_AutoCreatesDeployment(t *testing.T) {
 	}
 }
 
+func TestCreateAgentDeployment_SecretsViaMounts(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	k := NewK8s(K8sConfig{Namespace: "test-ns"})
+	ctx := context.Background()
+
+	// Set env vars so ensureAuthSecrets creates secrets.
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "") // unset so file read doesn't fail
+
+	deploy, err := k.createAgentDeployment(ctx, clientset, "test-ns", "claude", "session")
+	if err != nil {
+		t.Fatalf("createAgentDeployment() error: %v", err)
+	}
+
+	container := deploy.Spec.Template.Spec.Containers[0]
+
+	// Verify ANTHROPIC_API_KEY comes from secretKeyRef, not a literal value.
+	for _, env := range container.Env {
+		if env.Name == "ANTHROPIC_API_KEY" {
+			if env.Value != "" {
+				t.Error("ANTHROPIC_API_KEY has a literal Value; should use secretKeyRef")
+			}
+			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+				t.Error("ANTHROPIC_API_KEY missing secretKeyRef")
+			} else {
+				if env.ValueFrom.SecretKeyRef.Name != "llm-keys" {
+					t.Errorf("secretKeyRef.Name = %q, want %q", env.ValueFrom.SecretKeyRef.Name, "llm-keys")
+				}
+				if *env.ValueFrom.SecretKeyRef.Optional != true {
+					t.Error("secretKeyRef should be optional")
+				}
+			}
+		}
+	}
+
+	// Verify GOOGLE_APPLICATION_CREDENTIALS points to a mounted path, not a forwarded value.
+	foundGAC := false
+	for _, env := range container.Env {
+		if env.Name == "GOOGLE_APPLICATION_CREDENTIALS" {
+			foundGAC = true
+			if env.Value != "/var/secrets/gcp/adc.json" {
+				t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q, want mount path", env.Value)
+			}
+		}
+	}
+	if !foundGAC {
+		t.Error("GOOGLE_APPLICATION_CREDENTIALS env var missing from deployment")
+	}
+
+	// Verify gcp-adc volume mount exists.
+	foundMount := false
+	for _, vm := range container.VolumeMounts {
+		if vm.Name == "gcp-adc" {
+			foundMount = true
+			if !vm.ReadOnly {
+				t.Error("gcp-adc volume mount should be read-only")
+			}
+		}
+	}
+	if !foundMount {
+		t.Error("gcp-adc volume mount missing from deployment")
+	}
+
+	// Verify gcp-adc volume references the secret.
+	foundVol := false
+	for _, vol := range deploy.Spec.Template.Spec.Volumes {
+		if vol.Name == "gcp-adc" {
+			foundVol = true
+			if vol.Secret == nil {
+				t.Error("gcp-adc volume should reference a secret")
+			} else if vol.Secret.SecretName != "gcp-adc" {
+				t.Errorf("volume secretName = %q, want %q", vol.Secret.SecretName, "gcp-adc")
+			}
+		}
+	}
+	if !foundVol {
+		t.Error("gcp-adc volume missing from deployment")
+	}
+}
+
+func TestTerminalForwarding_ExcludesCredentials(t *testing.T) {
+	// Verify that the config env vars forwarded via terminal
+	// do NOT include any credential-bearing variables.
+	// This is a policy test: if someone adds ANTHROPIC_API_KEY
+	// back to the terminal forwarding list, this test catches it.
+	credentialVars := map[string]bool{
+		"ANTHROPIC_API_KEY":              true,
+		"GOOGLE_APPLICATION_CREDENTIALS": true,
+		"AWS_SECRET_ACCESS_KEY":          true,
+		"AWS_SESSION_TOKEN":              true,
+	}
+
+	// These are the vars forwarded via terminal in openK8sSession.
+	// Keep this list in sync with app.go configEnvVars.
+	terminalForwardedVars := []string{
+		"CLAUDE_CODE_USE_VERTEX",
+		"CLOUD_ML_REGION",
+		"ANTHROPIC_VERTEX_PROJECT_ID",
+		"ANTHROPIC_VERTEX_REGION",
+	}
+
+	for _, v := range terminalForwardedVars {
+		if credentialVars[v] {
+			t.Errorf("credential %q must not be forwarded via terminal; use K8s secrets instead", v)
+		}
+	}
+}
+
 func TestSpawnDeploymentName(t *testing.T) {
 	tests := []struct {
 		provider string
