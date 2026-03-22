@@ -38,10 +38,12 @@ func NewKubectlExec(podName, namespace, container string, cols, rows int) (*Kube
 		namespace = "default"
 	}
 
-	args := []string{"exec", "-it", podName, "-n", namespace}
-	if container != "" {
-		args = append(args, "--container", container)
+	// Default to "session" container to avoid kubectl's
+	// "Defaulted container" stderr message on multi-container pods.
+	if container == "" {
+		container = "session"
 	}
+	args := []string{"exec", "-it", podName, "-n", namespace, "--container", container}
 	// Use -f /dev/null to avoid tmux.conf issues, and set default-terminal
 	// for proper 256-color support inside the session.
 	args = append(args, "--",
