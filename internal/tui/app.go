@@ -1562,23 +1562,19 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Set up the remote session environment and start claude.
-	// Forward local Claude auth env vars (Vertex AI, API key, or both)
-	// so the pod inherits credentials without prompting for login.
+	// Set up the remote session: env vars, tmux, then claude.
+	// kubectl exec gives us a bash shell. We set env vars, start tmux
+	// (for session persistence), then launch claude inside tmux.
 	go func() {
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
+
+		// Set TERM for color support.
 		backend.Write([]byte("export TERM=xterm-256color\n"))
 		time.Sleep(100 * time.Millisecond)
 
-		// Forward all Claude/Vertex auth-related env vars if set locally.
-		// GOOGLE_APPLICATION_CREDENTIALS is skipped — it's a local file
-		// path. Mount the credentials as a K8s secret instead and set
-		// the env var in the deployment YAML.
-		//
-		// Security note: values are sent via tmux send-keys and may be
-		// visible in tmux scrollback. For production use, prefer K8s
-		// secrets (deploy/k8s/agent-claude-session.yaml) over this
-		// fallback mechanism.
+		// Forward auth env vars from local shell.
+		// Security note: values are visible in shell history. For
+		// production use, prefer K8s secrets in the deployment YAML.
 		authEnvVars := []string{
 			"ANTHROPIC_API_KEY",
 			"CLAUDE_CODE_USE_VERTEX",
@@ -1592,7 +1588,13 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 				time.Sleep(50 * time.Millisecond)
 			}
 		}
-		backend.Write([]byte("cd /workspace && claude\n"))
+
+		// Launch claude. Use exec to replace the shell so there's no
+		// command echo or leftover shell prompt. The clear removes
+		// any env export output from the screen.
+		backend.Write([]byte("cd /workspace 2>/dev/null\n"))
+		time.Sleep(100 * time.Millisecond)
+		backend.Write([]byte("clear && exec claude\n"))
 	}()
 
 	a.zoomed = true
