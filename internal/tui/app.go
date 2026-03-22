@@ -1572,17 +1572,18 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		backend.Write([]byte("export TERM=xterm-256color\n"))
 		time.Sleep(100 * time.Millisecond)
 
-		// Forward auth env vars from local shell.
-		// Security note: values are visible in shell history. For
-		// production use, prefer K8s secrets in the deployment YAML.
-		authEnvVars := []string{
-			"ANTHROPIC_API_KEY",
+		// Forward non-secret config env vars from local shell.
+		// Credentials (API keys, GCP ADC) are NOT forwarded here.
+		// They're injected via K8s secrets (created by auto-provisioning
+		// in ensureAuthSecrets or manually via kubectl create secret).
+		// Only non-sensitive configuration values are sent via terminal.
+		configEnvVars := []string{
 			"CLAUDE_CODE_USE_VERTEX",
 			"CLOUD_ML_REGION",
 			"ANTHROPIC_VERTEX_PROJECT_ID",
 			"ANTHROPIC_VERTEX_REGION",
 		}
-		for _, key := range authEnvVars {
+		for _, key := range configEnvVars {
 			if val := os.Getenv(key); val != "" {
 				backend.Write([]byte(fmt.Sprintf("export %s=%q\n", key, val)))
 				time.Sleep(50 * time.Millisecond)
