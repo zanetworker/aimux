@@ -502,6 +502,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		meta.Note = msg.Note
 		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = "Session: note saved"
+	case views.SessionContentSearchResultMsg:
+		a.sessionsView.HandleContentSearchResult(msg)
+		count := len(msg.Matches)
+		if count == 0 {
+			a.statusHint = fmt.Sprintf("No sessions match '%s'", msg.Query)
+		} else {
+			a.statusHint = fmt.Sprintf("Found %d sessions matching '%s'", count, msg.Query)
+		}
+		return a, nil
 	case views.SessionResumeMsg:
 		debuglog.Log("tui: SessionResumeMsg received: id=%q dir=%q file=%q", msg.SessionID, msg.WorkingDir, msg.FilePath)
 		if msg.SessionID == "" {
@@ -2111,7 +2120,7 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		a.headerView.SetHint("j/k:nav  Enter:resume  C:copy-id  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
+		a.headerView.SetHint("j/k:nav  Enter:resume  C:copy-id  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
 	case viewHealth:
 		a.headerView.SetHint("Esc:back  :health to refresh")
 	case viewHelp:
@@ -2378,7 +2387,7 @@ func (a App) renderStatusBar() string {
 	} else if a.currentView == viewLogs {
 		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
 	} else if a.currentView == viewSessions {
-		hints = " j/k:nav  Enter:resume  C:copy-id  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back"
+		hints = " j/k:nav  Enter:resume  C:copy-id  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back"
 		if a.sessionsView.HasActiveFilter() {
 			hints += "  [Esc clears filter]"
 		}
@@ -2491,7 +2500,7 @@ func (a App) copySessionID() (tea.Model, tea.Cmd) {
 		a.statusHint = "No session ID available"
 		return a, nil
 	}
-	cmd := clipboard.ResumeCommand(sel.SessionID)
+	cmd := clipboard.ResumeCommand(sel.SessionID, sel.WorkingDir)
 	if err := clipboard.Copy(cmd); err != nil {
 		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
 		return a, nil
@@ -2507,7 +2516,7 @@ func (a App) copySessionIDFromSessions() (tea.Model, tea.Cmd) {
 		a.statusHint = "No session ID available"
 		return a, nil
 	}
-	cmd := clipboard.ResumeCommand(sel.ID)
+	cmd := clipboard.ResumeCommand(sel.ID, sel.Project)
 	if err := clipboard.Copy(cmd); err != nil {
 		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
 		return a, nil
