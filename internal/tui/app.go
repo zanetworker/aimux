@@ -27,6 +27,7 @@ import (
 	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/team"
+	"github.com/zanetworker/aimux/internal/clipboard"
 	"github.com/zanetworker/aimux/internal/terminal"
 	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/internal/tui/views"
@@ -830,6 +831,13 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "S":
 		if a.currentView == viewAgents {
 			return a.openSessions()
+		}
+	case "C":
+		if a.currentView == viewAgents {
+			return a.copySessionID()
+		}
+		if a.currentView == viewSessions {
+			return a.copySessionIDFromSessions()
 		}
 	case "H":
 		if a.currentView == viewAgents {
@@ -2093,7 +2101,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
 	case viewCosts:
@@ -2103,7 +2111,7 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		a.headerView.SetHint("j/k:nav  Enter:resume  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
+		a.headerView.SetHint("j/k:nav  Enter:resume  C:copy-id  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
 	case viewHealth:
 		a.headerView.SetHint("Esc:back  :health to refresh")
 	case viewHelp:
@@ -2370,7 +2378,7 @@ func (a App) renderStatusBar() string {
 	} else if a.currentView == viewLogs {
 		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
 	} else if a.currentView == viewSessions {
-		hints = " j/k:nav  Enter:resume  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back"
+		hints = " j/k:nav  Enter:resume  C:copy-id  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back"
 		if a.sessionsView.HasActiveFilter() {
 			hints += "  [Esc clears filter]"
 		}
@@ -2474,4 +2482,36 @@ func otelEnvForCmd(cmd *exec.Cmd, shellPrefix string) []string {
 		}
 	}
 	return env
+}
+
+// copySessionID copies the selected agent's session ID (as a resume command) to the clipboard.
+func (a App) copySessionID() (tea.Model, tea.Cmd) {
+	sel := a.agentsView.Selected()
+	if sel == nil || sel.SessionID == "" {
+		a.statusHint = "No session ID available"
+		return a, nil
+	}
+	cmd := clipboard.ResumeCommand(sel.SessionID)
+	if err := clipboard.Copy(cmd); err != nil {
+		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
+		return a, nil
+	}
+	a.statusHint = fmt.Sprintf("Copied: %s", cmd)
+	return a, nil
+}
+
+// copySessionIDFromSessions copies the selected past session's ID (as a resume command) to the clipboard.
+func (a App) copySessionIDFromSessions() (tea.Model, tea.Cmd) {
+	sel := a.sessionsView.SelectedSession()
+	if sel == nil || sel.ID == "" {
+		a.statusHint = "No session ID available"
+		return a, nil
+	}
+	cmd := clipboard.ResumeCommand(sel.ID)
+	if err := clipboard.Copy(cmd); err != nil {
+		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
+		return a, nil
+	}
+	a.statusHint = fmt.Sprintf("Copied: %s", cmd)
+	return a, nil
 }
