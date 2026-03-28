@@ -8,17 +8,19 @@ import (
 
 func TestResumeCommand(t *testing.T) {
 	tests := []struct {
-		sessionID string
-		want      string
+		sessionID  string
+		workingDir string
+		want       string
 	}{
-		{"abc-123", "claude --resume abc-123"},
-		{"", "claude --resume "},
-		{"session-with-dashes", "claude --resume session-with-dashes"},
+		{"abc-123", "", "claude --resume abc-123"},
+		{"abc-123", "/home/user/project", "cd /home/user/project && claude --resume abc-123"},
+		{"session-with-dashes", "", "claude --resume session-with-dashes"},
+		{"sess-1", "/tmp/test", "cd /tmp/test && claude --resume sess-1"},
 	}
 	for _, tt := range tests {
-		got := ResumeCommand(tt.sessionID)
+		got := ResumeCommand(tt.sessionID, tt.workingDir)
 		if got != tt.want {
-			t.Errorf("ResumeCommand(%q) = %q, want %q", tt.sessionID, got, tt.want)
+			t.Errorf("ResumeCommand(%q, %q) = %q, want %q", tt.sessionID, tt.workingDir, got, tt.want)
 		}
 	}
 }

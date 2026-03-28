@@ -32,6 +32,11 @@ func Copy(text string) error {
 }
 
 // ResumeCommand returns the full CLI command to resume a session.
-func ResumeCommand(sessionID string) string {
+// If workingDir is provided, the command includes a cd prefix so the
+// resume works regardless of the caller's current directory.
+func ResumeCommand(sessionID, workingDir string) string {
+	if workingDir != "" {
+		return "cd " + workingDir + " && claude --resume " + sessionID
+	}
 	return "claude --resume " + sessionID
 }
