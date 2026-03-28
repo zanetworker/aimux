@@ -116,6 +116,12 @@ type SessionBulkDeleteMsg struct {
 	Sessions []history.Session
 }
 
+// SessionContentSearchResultMsg carries the results of a deep content search.
+type SessionContentSearchResultMsg struct {
+	Matches []history.ContentMatch
+	Query   string
+}
+
 // cleanupItem represents a session flagged for potential cleanup.
 type cleanupItem struct {
 	session  history.Session
@@ -160,6 +166,11 @@ type SessionsView struct {
 	cleanupMode   bool
 	cleanupItems  []cleanupItem
 	cleanupCursor int
+
+	// Content search (deep search inside JSONL files)
+	contentSearchMode  bool
+	contentSearchInput string
+	contentSearchIDs   map[string]string // session ID -> snippet (nil = no active search)
 
 	// Trace preview (reused LogsView)
 	previewLogs  *LogsView
@@ -232,7 +243,7 @@ func (v *SessionsView) SelectedSession() *history.Session {
 
 // HasActiveInput returns true if the view has active text input or confirmation.
 func (v *SessionsView) HasActiveInput() bool {
-	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode || v.cleanupMode
+	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode || v.cleanupMode || v.contentSearchMode
 }
 
 // HasActiveFilter returns true if a search filter is currently applied.
@@ -258,6 +269,9 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 		}
 		if v.noteMode {
 			return v.handleNoteKey(msg)
+		}
+		if v.contentSearchMode {
+			return v.handleContentSearchKey(msg)
 		}
 		if v.filterMode {
 			return v.handleFilterKey(msg)
@@ -285,9 +299,10 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 				v.previewLogs = nil
 			}
 		case "esc":
-			// Clear filter first, then let app handle navigation
-			if v.filterText != "" {
+			// Clear filter and content search together
+			if v.filterText != "" || v.contentSearchIDs != nil {
 				v.filterText = ""
+				v.contentSearchIDs = nil
 				v.cursor = 0
 				return nil
 			}
@@ -303,6 +318,9 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 		case "/":
 			v.filterMode = true
 			v.filterInput = ""
+			// Clear previous search results so new search starts fresh
+			v.filterText = ""
+			v.contentSearchIDs = nil
 		case "enter":
 			s := v.SelectedSession()
 			if s != nil && s.Resumable {
@@ -375,9 +393,69 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			} else {
 				v.loadPreview()
 			}
+		case "F":
+			// Standalone deep content search inside session JSONL files
+			v.contentSearchMode = true
+			v.contentSearchInput = ""
 		}
 	}
 	return nil
+}
+
+func (v *SessionsView) handleContentSearchKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		v.contentSearchMode = false
+		query := v.contentSearchInput
+		if query == "" {
+			return nil
+		}
+		// Run search asynchronously
+		return func() tea.Msg {
+			matches, err := history.SearchContentWithSnippets(query, "")
+			if err != nil {
+				return SessionContentSearchResultMsg{Query: query}
+			}
+			return SessionContentSearchResultMsg{Matches: matches, Query: query}
+		}
+	case "esc":
+		v.contentSearchMode = false
+		v.contentSearchInput = ""
+	case "backspace":
+		if len(v.contentSearchInput) > 0 {
+			v.contentSearchInput = v.contentSearchInput[:len(v.contentSearchInput)-1]
+		}
+	default:
+		if len(msg.String()) == 1 {
+			v.contentSearchInput += msg.String()
+		}
+	}
+	return nil
+}
+
+// HandleContentSearchResult processes the async content search results.
+// Called from app.go when a SessionContentSearchResultMsg is received.
+func (v *SessionsView) HandleContentSearchResult(msg SessionContentSearchResultMsg) {
+	v.contentSearchIDs = make(map[string]string)
+	for _, m := range msg.Matches {
+		v.contentSearchIDs[m.SessionID] = m.Snippet
+	}
+	v.cursor = 0
+	v.previewLogs = nil
+}
+
+// ContentSearchSnippet returns the snippet for a session if one exists from
+// an active content search.
+func (v *SessionsView) ContentSearchSnippet(sessionID string) string {
+	if v.contentSearchIDs == nil {
+		return ""
+	}
+	return v.contentSearchIDs[sessionID]
+}
+
+// HasActiveContentSearch returns true if content search results are being displayed.
+func (v *SessionsView) HasActiveContentSearch() bool {
+	return v.contentSearchIDs != nil
 }
 
 func (v *SessionsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
@@ -386,6 +464,17 @@ func (v *SessionsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 		v.filterMode = false
 		v.filterText = v.filterInput
 		v.cursor = 0
+		// Also kick off async content search for deep matching
+		query := v.filterInput
+		if query != "" {
+			return func() tea.Msg {
+				matches, err := history.SearchContentWithSnippets(query, "")
+				if err != nil {
+					return SessionContentSearchResultMsg{Query: query}
+				}
+				return SessionContentSearchResultMsg{Matches: matches, Query: query}
+			}
+		}
 	case "esc":
 		v.filterMode = false
 		v.filterInput = ""
@@ -602,19 +691,35 @@ func sessionTitle(s history.Session) string {
 // by the active sort field.
 // Near-empty sessions (1 turn, $0 cost) are hidden unless a filter is active.
 func (v *SessionsView) visibleSessions() []history.Session {
+	isSearching := v.filterText != "" || v.contentSearchIDs != nil
 	var result []history.Session
 	for _, s := range v.sessions {
 		// Hide near-empty sessions (auto-memory, system operations) unless searching
-		if v.filterText == "" && s.CostUSD == 0 && s.TurnCount <= 5 {
+		if !isSearching && s.CostUSD == 0 && s.TurnCount <= 5 {
 			continue
 		}
 		// Hide sessions with no timestamps (broken/incomplete files)
-		if v.filterText == "" && s.LastActive.IsZero() {
+		if !isSearching && s.LastActive.IsZero() {
 			continue
 		}
-		if v.filterText != "" {
-			needle := strings.ToLower(v.filterText)
-			if !sessionMatchesFilter(s, needle) {
+		// When searching, a session passes if it matches metadata OR content
+		if isSearching {
+			metaMatch := false
+			contentMatch := false
+			if v.filterText != "" {
+				needle := strings.ToLower(v.filterText)
+				metaMatch = sessionMatchesFilter(s, needle)
+			}
+			if v.contentSearchIDs != nil {
+				_, contentMatch = v.contentSearchIDs[s.ID]
+			}
+			// If only metadata filter (no content results yet), use metadata
+			// If both active, pass on either match
+			if v.filterText != "" && v.contentSearchIDs == nil {
+				if !metaMatch {
+					continue
+				}
+			} else if !metaMatch && !contentMatch {
 				continue
 			}
 		}
@@ -730,9 +835,20 @@ func (v *SessionsView) View() string {
 	b.WriteString(sessDimStyle.Render(countStr) + "\n")
 	b.WriteString("\n")
 
-	// Filter indicator
+	// Search/filter indicators
 	if v.filterText != "" {
-		b.WriteString("  " + filterActiveStyle.Render(" FILTER: "+v.filterText+" ") + "\n\n")
+		var parts []string
+		parts = append(parts, filterActiveStyle.Render(" /"+v.filterText+" "))
+		if v.contentSearchIDs != nil {
+			searchBadge := lipgloss.NewStyle().Background(lipgloss.Color("#6D28D9")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+			parts = append(parts, searchBadge.Render(fmt.Sprintf(" +%d from content ", len(v.contentSearchIDs))))
+		}
+		b.WriteString("  " + strings.Join(parts, " ") + sessDimStyle.Render("  Esc:clear") + "\n\n")
+	} else if v.contentSearchIDs != nil {
+		searchBadge := lipgloss.NewStyle().Background(lipgloss.Color("#6D28D9")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+		count := len(v.contentSearchIDs)
+		label := fmt.Sprintf(" CONTENT SEARCH: %d matches ", count)
+		b.WriteString("  " + searchBadge.Render(label) + sessDimStyle.Render("  Esc:clear") + "\n\n")
 	}
 
 	if v.cleanupMode {
@@ -811,6 +927,14 @@ func (v *SessionsView) View() string {
 
 		line := v.renderSessionRow(s, selected, w)
 		b.WriteString(line + "\n")
+
+		// Show snippet from content search below the selected row
+		if selected && v.contentSearchIDs != nil {
+			if snippet, ok := v.contentSearchIDs[s.ID]; ok && snippet != "" {
+				snippetStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Italic(true)
+				b.WriteString("     " + snippetStyle.Render(truncate(snippet, w-8)) + "\n")
+			}
+		}
 	}
 
 	// Preview pane
@@ -822,6 +946,12 @@ func (v *SessionsView) View() string {
 	}
 
 	// Input modes
+	if v.contentSearchMode {
+		searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Bold(true)
+		cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA"))
+		b.WriteString("\n  " + searchStyle.Render("SEARCH CONTENT: ") + v.contentSearchInput + cursorStyle.Render("|"))
+		b.WriteString("\n  " + sessDimStyle.Render("  Enter:search  Esc:cancel — searches inside session files using ripgrep"))
+	}
 	if v.filterMode {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("|"))
 	}
