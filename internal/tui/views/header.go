@@ -245,12 +245,6 @@ func (h *HeaderView) renderInfoBoxes() string {
 		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", taskBox)
 	}
 
-	bellIcon := " 🔔"
-	if h.silenced {
-		bellIcon = " 🔕"
-	}
-	boxes += bellIcon
-
 	return boxes
 }
 
