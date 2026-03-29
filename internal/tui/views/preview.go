@@ -1,10 +1,12 @@
 package views
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
@@ -268,6 +270,17 @@ func (p *PreviewPane) renderHeader() string {
 		previewLabelStyle.Render("Cost: ")+previewValueStyle.Render(a.FormatCost()),
 	)
 
+	// Error banner — shown prominently when agent is in error state
+	var errorBanner string
+	if a.Status == agent.StatusError && a.LastAction != "" {
+		errorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#991B1B")).
+			Bold(true).
+			Padding(0, 1)
+		errorBanner = errorStyle.Render("ERROR: " + a.LastAction)
+	}
+
 	separator := previewBorderStyle.Render(strings.Repeat("─", maxW))
 
 	result := nameLine + "\n"
@@ -302,6 +315,18 @@ func (p *PreviewPane) renderHeader() string {
 		result += tokenLine + "\n"
 	}
 	result += statusLine + "\n"
+
+	// Error banner with pod logs for K8s agents
+	if errorBanner != "" {
+		result += errorBanner + "\n"
+		// For K8s pods, fetch recent init container logs
+		if strings.HasPrefix(a.WorkingDir, "k8s://") {
+			if logs := fetchPodErrorLogs(a); logs != "" {
+				logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FCA5A5"))
+				result += logStyle.Render(logs) + "\n"
+			}
+		}
+	}
 
 	// Grouped processes
 	if groupLines != "" {
@@ -402,6 +427,40 @@ func processInfo(pid int) string {
 		return fmt.Sprintf("%s (%dMB)", binary, mb)
 	}
 	return binary
+}
+
+// fetchPodErrorLogs gets the last few lines of init container logs for a K8s pod.
+// Returns empty string if logs can't be fetched (non-blocking, 2s timeout).
+func fetchPodErrorLogs(a *agent.Agent) string {
+	parts := strings.SplitN(strings.TrimPrefix(a.WorkingDir, "k8s://"), "/", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	namespace := parts[0]
+	podName := parts[1]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Try init container logs first (most common failure point)
+	out, err := exec.CommandContext(ctx, "kubectl", "logs", podName,
+		"-n", namespace,
+		"--init-container=clone-repo",
+		"--tail=5",
+	).CombinedOutput()
+	if err == nil && len(out) > 0 {
+		return strings.TrimSpace(string(out))
+	}
+
+	// Fall back to main container logs
+	out, err = exec.CommandContext(ctx, "kubectl", "logs", podName,
+		"-n", namespace,
+		"--tail=5",
+	).CombinedOutput()
+	if err == nil && len(out) > 0 {
+		return strings.TrimSpace(string(out))
+	}
+	return ""
 }
 
 func truncatePreview(s string, maxLen int) string {
