@@ -30,6 +30,7 @@ func TestStatusString(t *testing.T) {
 		{StatusActive, "Active"},
 		{StatusIdle, "Idle"},
 		{StatusWaitingPermission, "Waiting"},
+		{StatusError, "Error"},
 		{StatusUnknown, "Unknown"},
 		{Status(99), "Unknown"},
 	}
@@ -48,6 +49,7 @@ func TestStatusIcon(t *testing.T) {
 		{StatusActive, "▶"},
 		{StatusIdle, "■"},
 		{StatusWaitingPermission, "⏸"},
+		{StatusError, "✕"},
 		{StatusUnknown, "?"},
 		{Status(99), "?"},
 	}
@@ -147,6 +149,7 @@ func TestAgentIcon(t *testing.T) {
 		{StatusActive, "▶"},
 		{StatusIdle, "■"},
 		{StatusWaitingPermission, "⏸"},
+		{StatusError, "✕"},
 		{StatusUnknown, "?"},
 	}
 	for _, tt := range tests {

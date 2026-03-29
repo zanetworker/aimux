@@ -151,7 +151,7 @@ func (h *HeaderView) renderHintBar() string {
 }
 
 func (h *HeaderView) renderInfoBoxes() string {
-	active, idle, waiting := 0, 0, 0
+	active, idle, waiting, errors := 0, 0, 0, 0
 	var totalCost float64
 	providers := make(map[string]int)
 
@@ -163,6 +163,8 @@ func (h *HeaderView) renderInfoBoxes() string {
 			idle++
 		case agent.StatusWaitingPermission:
 			waiting++
+		case agent.StatusError:
+			errors++
 		}
 		totalCost += a.EstCostUSD
 		if a.ProviderName != "" {
@@ -183,11 +185,12 @@ func (h *HeaderView) renderInfoBoxes() string {
 	activeStr := lipgloss.NewStyle().Foreground(colorActive).Render(fmt.Sprintf("●%d active", active))
 	waitingStr := lipgloss.NewStyle().Foreground(colorWaiting).Render(fmt.Sprintf("◐%d wait", waiting))
 	idleStr := lipgloss.NewStyle().Foreground(colorIdle).Render(fmt.Sprintf("○%d idle", idle))
+	errorStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(fmt.Sprintf("✕%d err", errors))
 
 	agentBox := boxStyle.Render(
 		labelStyle.Render("Agents") + " " +
 			valueStyle.Render(fmt.Sprintf("%d", len(h.agents))) + "\n" +
-			activeStr + " " + waitingStr + " " + idleStr,
+			activeStr + " " + waitingStr + " " + idleStr + " " + errorStr,
 	)
 
 	// Cost box — color-coded by threshold

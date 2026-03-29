@@ -36,6 +36,7 @@ var (
 	agentActiveIcon  = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true)
 	agentIdleIcon    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 	agentWaitingIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	agentErrorIcon   = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
 	agentMutedIcon   = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 )
 
@@ -442,6 +443,8 @@ func (v *AgentsView) renderStatusIcon(s agent.Status) string {
 		return agentIdleIcon.Render(icon)
 	case agent.StatusWaitingPermission:
 		return agentWaitingIcon.Render(icon)
+	case agent.StatusError:
+		return agentErrorIcon.Render(icon)
 	default:
 		return agentMutedIcon.Render(icon)
 	}

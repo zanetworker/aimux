@@ -44,6 +44,8 @@ func (v *HelpView) View() string {
 	writeHelp(&b, activeStyle.Render("▶")+" Active", "Processing (activity in last 30s)")
 	writeHelp(&b, idleStyle.Render("■")+" Idle", "Waiting for user input")
 	writeHelp(&b, waitingStyle.Render("⏸")+" Waiting", "Blocked on permission prompt")
+	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
+	writeHelp(&b, errorStyle.Render("✕")+" Error", "Agent crashed or context overflow")
 	writeHelp(&b, unknownStyle.Render("?")+" Unknown", "Agent status could not be determined")
 	b.WriteString("\n")
 
