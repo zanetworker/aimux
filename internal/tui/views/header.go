@@ -45,6 +45,9 @@ type HeaderView struct {
 
 	// K8s status
 	k8sStatus string // e.g. "connected", "disconnected (retry in 25s)", ""
+
+	// Notification state
+	silenced bool
 }
 
 // NewHeaderView creates a new HeaderView.
@@ -85,6 +88,11 @@ func (h *HeaderView) SetTaskSummary(pending, active, completed, failed int) {
 	h.taskActive = active
 	h.taskCompleted = completed
 	h.taskFailed = failed
+}
+
+// SetSilenced updates the notification mute state.
+func (h *HeaderView) SetSilenced(silenced bool) {
+	h.silenced = silenced
 }
 
 // View renders the header.
@@ -236,6 +244,12 @@ func (h *HeaderView) renderInfoBoxes() string {
 		taskBox := boxStyle.Render(taskSummary)
 		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", taskBox)
 	}
+
+	bellIcon := " 🔔"
+	if h.silenced {
+		bellIcon = " 🔕"
+	}
+	boxes += bellIcon
 
 	return boxes
 }

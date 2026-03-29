@@ -21,6 +21,7 @@ import (
 	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/jump"
+	"github.com/zanetworker/aimux/internal/notify"
 	"github.com/zanetworker/aimux/internal/provider"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -147,6 +148,10 @@ type App struct {
 	evalStore      *evaluation.Store
 	evalSessionID  string
 
+	// Notifications
+	prevStatuses map[int]agent.Status // PID -> last known status for transition detection
+	silenced     bool                 // TUI-level mute toggle (m key)
+
 	// Config
 	cfg  config.Config
 	ctrl *controller.Controller
@@ -223,6 +228,7 @@ func NewApp() App {
 		providers:    providers,
 		breadcrumbs:  []string{"Agents"},
 		hiddenAgents: make(map[string]bool),
+		prevStatuses: make(map[int]agent.Status),
 		cfg:          cfg,
 		ctrl:         ctrl,
 		otelStore:    aimuxotel.NewSpanStore(),
@@ -288,8 +294,24 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.instances = correlator.EnrichFromOTEL(a.instances, a.otelStore)
 			a.lastEnrichTime = a.otelStore.LastUpdate()
 		}
+		// Detect state transitions and fire notifications
+		if !a.silenced && a.cfg.Notifications.Enabled {
+			for _, inst := range a.instances {
+				prev, known := a.prevStatuses[inst.PID]
+				if known && prev != inst.Status {
+					a.maybeNotify(inst)
+				}
+			}
+		}
+		// Update previous statuses
+		a.prevStatuses = make(map[int]agent.Status, len(a.instances))
+		for _, inst := range a.instances {
+			a.prevStatuses[inst.PID] = inst.Status
+		}
+
 		a.agentsView.SetAgents(a.instances)
 		a.headerView.SetAgents(a.instances)
+		a.headerView.SetSilenced(a.silenced)
 		a.costsView.SetAgents(a.instances)
 
 		// Update K8s status in header
@@ -847,6 +869,18 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if a.currentView == viewSessions {
 			return a.copySessionIDFromSessions()
+		}
+	case "m":
+		if a.currentView == viewAgents {
+			a.silenced = !a.silenced
+			a.headerView.SetSilenced(a.silenced)
+			if a.silenced {
+				a.statusHint = "Notifications silenced"
+			} else {
+				a.statusHint = "Notifications enabled"
+			}
+			a.stickyHint = false
+			return a, nil
 		}
 	case "H":
 		if a.currentView == viewAgents {
@@ -1930,6 +1964,41 @@ func (a *App) hideAgent(ag *agent.Agent) {
 	a.hiddenAgents[key] = true
 }
 
+
+// maybeNotify fires a macOS notification for an agent that changed state.
+func (a *App) maybeNotify(inst agent.Agent) {
+	name := inst.ShortProject()
+	if name == "" {
+		name = inst.ProviderName
+	}
+	title := "aimux: " + name
+
+	switch inst.Status {
+	case agent.StatusWaitingPermission:
+		if !a.cfg.Notifications.OnWaiting {
+			return
+		}
+		if a.cfg.Notifications.Sound {
+			notify.SendWithSound(title, "Needs permission")
+		} else {
+			notify.Send(title, "Needs permission")
+		}
+	case agent.StatusError:
+		if !a.cfg.Notifications.OnError {
+			return
+		}
+		if a.cfg.Notifications.Sound {
+			notify.SendWithSound(title, "Agent error")
+		} else {
+			notify.Send(title, "Agent error")
+		}
+	case agent.StatusIdle:
+		if !a.cfg.Notifications.OnIdle {
+			return
+		}
+		notify.Send(title, "Finished")
+	}
+}
 
 // openLogsForAgent opens the trace viewer for a specific agent and session file.
 // Used for non-Claude providers where embedding a PTY isn't possible.
