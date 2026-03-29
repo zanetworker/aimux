@@ -85,8 +85,9 @@ func (tv *TermView) Write(data []byte) {
 		}
 	}
 
-	// Auto-snap to bottom on new output
-	tv.scrollBack = 0
+	// Only snap to bottom if user is not scrolled back.
+	// This prevents yanking the viewport away while reading history.
+	// User must explicitly PgDn/scroll down to return to live view.
 }
 
 // Resize changes the dimensions of the virtual terminal.
