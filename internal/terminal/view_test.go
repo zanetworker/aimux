@@ -128,10 +128,17 @@ func TestTermView_WriteSnapsToBottom(t *testing.T) {
 		t.Fatal("should be scrolled after ScrollUp")
 	}
 
-	// Write new data — should snap to bottom
+	// Write new data — should NOT snap to bottom when user is scrolled back.
+	// User must explicitly scroll down to return to live view.
 	tv.Write([]byte("new output\n"))
 
+	if !tv.IsScrolled() {
+		t.Error("should stay scrolled when user is reading history")
+	}
+
+	// Explicitly scroll to bottom
+	tv.SnapToBottom()
 	if tv.IsScrolled() {
-		t.Error("should snap to bottom after Write")
+		t.Error("should be at bottom after SnapToBottom")
 	}
 }

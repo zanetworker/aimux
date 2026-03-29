@@ -583,10 +583,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if tv := a.sessionView.TermView(); tv != nil {
 				switch msg.Button {
 				case tea.MouseButtonWheelUp:
-					tv.ScrollUp(3)
+					tv.ScrollUp(1)
 					return a, nil
 				case tea.MouseButtonWheelDown:
-					tv.ScrollDown(3)
+					tv.ScrollDown(1)
 					return a, nil
 				}
 			}
@@ -767,10 +767,16 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if tv := a.sessionView.TermView(); tv != nil {
 		switch key {
 		case "pgup":
-			tv.ScrollUp(10)
+			tv.ScrollUp(tv.Height() / 2)
 			return a, nil
 		case "pgdown":
-			tv.ScrollDown(10)
+			tv.ScrollDown(tv.Height() / 2)
+			return a, nil
+		case "shift+up":
+			tv.ScrollUp(1)
+			return a, nil
+		case "shift+down":
+			tv.ScrollDown(1)
 			return a, nil
 		}
 	}
