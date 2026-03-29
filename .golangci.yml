@@ -13,14 +13,7 @@ linters:
     - gosec         # security scanner (SQL injection, hardcoded creds, etc.)
     - misspell      # catches typos in comments and strings
     - unconvert     # removes unnecessary type conversions
-
-linters-settings:
-  gosec:
-    excludes:
-      - G104  # allow unhandled errors in deferred Close() calls
-
-issues:
-  exclude-dirs:
-    - dist
-    - runtime
-    - testdata
+  settings:
+    gosec:
+      excludes:
+        - G104  # allow unhandled errors in deferred Close() calls
