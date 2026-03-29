@@ -81,9 +81,6 @@ type App struct {
 	headerView  *views.HeaderView
 	agentsView  *views.AgentsView
 	previewPane *views.PreviewPane
-	// Dashboard mode
-	dashboardActive bool
-	dashboardView   *views.DashboardView
 	sessionView *views.SessionView
 	logsView    *views.LogsView
 	costsView    *views.CostsView
@@ -218,9 +215,8 @@ func NewApp() App {
 		currentView:  viewAgents,
 		headerView:   views.NewHeaderView(),
 		agentsView:   views.NewAgentsView(),
-		previewPane:   views.NewPreviewPane(),
-		dashboardView: views.NewDashboardView(),
-		sessionView:   views.NewSessionView(),
+		previewPane:  views.NewPreviewPane(),
+		sessionView:  views.NewSessionView(),
 		costsView:     views.NewCostsView(),
 		sessionsView:  views.NewSessionsView(),
 		teamsView:    views.NewTeamsView(),
@@ -311,29 +307,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.prevStatuses = make(map[int]agent.Status, len(a.instances))
 		for _, inst := range a.instances {
 			a.prevStatuses[inst.PID] = inst.Status
-		}
-
-		// Dashboard: capture tmux panes and generate trace snippets
-		if a.dashboardActive {
-			captures := make(map[string]string)
-			snips := make(map[int]string)
-			for _, inst := range a.instances {
-				if inst.TMuxSession != "" {
-					captures[inst.TMuxSession] = terminal.CaptureTmuxPane(inst.TMuxSession, 10)
-				} else if inst.SessionFile != "" {
-					for _, p := range a.providers {
-						if p.Name() == inst.ProviderName {
-							turns, err := p.ParseTrace(inst.SessionFile)
-							if err == nil {
-								snips[inst.PID] = views.TraceSnippet(turns, 10)
-							}
-							break
-						}
-					}
-				}
-			}
-			a.dashboardView.SetTmuxCaptures(captures)
-			a.dashboardView.SetTraceSnippets(snips)
 		}
 
 		a.agentsView.SetAgents(a.instances)
@@ -896,17 +869,6 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if a.currentView == viewSessions {
 			return a.copySessionIDFromSessions()
-		}
-	case "d":
-		if a.currentView == viewAgents {
-			a.dashboardActive = !a.dashboardActive
-			if a.dashboardActive {
-				a.statusHint = "Dashboard mode"
-			} else {
-				a.statusHint = "Preview mode"
-			}
-			a.stickyHint = false
-			return a, nil
 		}
 	case "m":
 		if a.currentView == viewAgents {
@@ -2217,15 +2179,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		muteHint := "m:mute"
-		if a.silenced {
-			muteHint = "m:unmute"
-		}
-		dashHint := "d:dashboard"
-		if a.dashboardActive {
-			dashHint = "d:preview"
-		}
-		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  :new:launch  x:kill  s:sort  " + muteHint + "  " + dashHint + "  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
 	case viewCosts:
@@ -2251,26 +2205,15 @@ func (a App) View() string {
 	case viewAgents:
 		leftW, rightW := a.layout.SplitVertical(35)
 		a.agentsView.SetSize(leftW, contentHeight)
+		a.previewPane.SetSize(rightW, contentHeight)
 
+		// Update preview with currently selected agent
 		selected := a.agentsView.Selected()
-
-		var rightPane string
-		if a.dashboardActive {
-			a.dashboardView.SetSize(rightW, contentHeight)
-			a.dashboardView.SetAgents(a.instances)
-			if selected != nil {
-				a.dashboardView.SetSelected(selected.PID)
-			}
-			rightPane = a.dashboardView.View()
-		} else {
-			a.previewPane.SetSize(rightW, contentHeight)
-			a.previewPane.SetAgent(selected)
-			rightPane = a.previewPane.View()
-		}
+		a.previewPane.SetAgent(selected)
 
 		content = lipgloss.JoinHorizontal(lipgloss.Top,
 			a.agentsView.View(),
-			rightPane,
+			a.previewPane.View(),
 		)
 	case viewLogs:
 		if a.logsView != nil {
@@ -2522,23 +2465,11 @@ func (a App) renderStatusBar() string {
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()
-		dashH := "d:dashboard"
-		if a.dashboardActive {
-			dashH = "d:preview"
-		}
 		if selected != nil && selected.GroupCount > 1 {
-			muteH := "m:mute"
-			if a.silenced {
-				muteH = "m:unmute"
-			}
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  x:kill  %s  %s  ?:help",
-				selected.GroupCount, selected.GroupCount, muteH, dashH)
+			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  x:kill  ?:help",
+				selected.GroupCount, selected.GroupCount)
 		} else {
-			muteH := "m:mute"
-			if a.silenced {
-				muteH = "m:unmute"
-			}
-			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  s:sort  " + muteH + "  " + dashH + "  ?:help  q:quit"
+			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  s:sort  ?:help  q:quit"
 		}
 		if a.filterInput != "" {
 			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
