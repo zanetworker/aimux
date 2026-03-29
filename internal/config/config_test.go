@@ -176,6 +176,50 @@ func TestOTELReceiverPort_Custom(t *testing.T) {
 	}
 }
 
+func TestNotificationsConfigDefaults(t *testing.T) {
+	cfg := Default()
+	if !cfg.Notifications.Enabled {
+		t.Error("Notifications.Enabled should default to true")
+	}
+	if !cfg.Notifications.OnWaiting {
+		t.Error("Notifications.OnWaiting should default to true")
+	}
+	if !cfg.Notifications.OnError {
+		t.Error("Notifications.OnError should default to true")
+	}
+	if cfg.Notifications.OnIdle {
+		t.Error("Notifications.OnIdle should default to false")
+	}
+	if cfg.Notifications.Sound {
+		t.Error("Notifications.Sound should default to false")
+	}
+}
+
+func TestNotificationsConfigFromFile(t *testing.T) {
+	yamlContent := `
+notifications:
+  enabled: true
+  on_waiting: true
+  on_error: true
+  on_idle: true
+  sound: true
+`
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "config.yaml")
+	os.WriteFile(path, []byte(yamlContent), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Notifications.OnIdle {
+		t.Error("Notifications.OnIdle should be true from file")
+	}
+	if !cfg.Notifications.Sound {
+		t.Error("Notifications.Sound should be true from file")
+	}
+}
+
 func TestLoad_PartialProviders(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
