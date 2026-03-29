@@ -1,10 +1,35 @@
+# Compiled binaries
 /aimux
+/mcp
 *.exe
+
+# OS / IDE
 .DS_Store
 .idea/
+
+# Claude Code local config
 .claude/
+
+# Build artifacts
 dist/
-docs/plans/
 bin/
+
+# Docs scratch
+docs/plans/
+
+# Python artifacts
 runtime/**/__pycache__/
 runtime/**/*.pyc
+
+# Temporary data dumps (roadmap planning, sheet uploads)
+roadmap_*.json
+upload_*.json
+tab_*.json
+roadmap_chunk_*.json
+roadmap_part_*.json
+all_remaining_parts.txt
+upload_sheets.py
+
+# Environment files (may contain secrets)
+.env
+.env.*
