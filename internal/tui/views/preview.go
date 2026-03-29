@@ -39,11 +39,13 @@ var (
 // split pane layout. It shows the conversation trace of the currently selected
 // agent, parsed from its session JSONL file.
 type PreviewPane struct {
-	agent    *agent.Agent
-	logsView *LogsView
-	parser   TraceParser // parser function set by app.go for the current agent
-	width    int
-	height   int
+	agent         *agent.Agent
+	logsView      *LogsView
+	parser        TraceParser // parser function set by app.go for the current agent
+	width         int
+	height        int
+	cachedPodLogs string // cached kubectl logs output
+	cachedPodPID  int    // PID (or 0) the cached logs belong to
 }
 
 // NewPreviewPane creates a new preview pane.
@@ -72,6 +74,16 @@ func (p *PreviewPane) SetAgent(a *agent.Agent) {
 		return
 	}
 	p.agent = a
+
+	// Fetch pod error logs once on agent change (not on every render)
+	pid := a.PID
+	if a.Status == agent.StatusError && strings.HasPrefix(a.WorkingDir, "k8s://") && p.cachedPodPID != pid {
+		p.cachedPodLogs = fetchPodErrorLogs(a)
+		p.cachedPodPID = pid
+	} else if !strings.HasPrefix(a.WorkingDir, "k8s://") || a.Status != agent.StatusError {
+		p.cachedPodLogs = ""
+		p.cachedPodPID = 0
+	}
 	if a.SessionFile == "" || p.parser == nil {
 		p.logsView = nil
 		return
@@ -316,15 +328,12 @@ func (p *PreviewPane) renderHeader() string {
 	}
 	result += statusLine + "\n"
 
-	// Error banner with pod logs for K8s agents
+	// Error banner with cached pod logs for K8s agents
 	if errorBanner != "" {
 		result += errorBanner + "\n"
-		// For K8s pods, fetch recent init container logs
-		if strings.HasPrefix(a.WorkingDir, "k8s://") {
-			if logs := fetchPodErrorLogs(a); logs != "" {
-				logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FCA5A5"))
-				result += logStyle.Render(logs) + "\n"
-			}
+		if p.cachedPodLogs != "" {
+			logStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FCA5A5"))
+			result += logStyle.Render(p.cachedPodLogs) + "\n"
 		}
 	}
 
