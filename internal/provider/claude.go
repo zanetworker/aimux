@@ -382,6 +382,10 @@ func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSes
 				inst.Status = statusdetect.DetectFromJSONL(inst.SessionFile, 8192)
 			}
 		}
+	} else {
+		// No session file matched — fall back to process-alive heuristic.
+		// A running process with no session file is likely active.
+		inst.Status = agent.StatusActive
 	}
 }
 

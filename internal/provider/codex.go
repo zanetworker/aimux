@@ -381,6 +381,9 @@ func (c *Codex) enrichAgent(a *agent.Agent, tmuxSessions []discovery.TmuxSession
 	}
 	if a.SessionFile != "" {
 		a.Status = statusdetect.DetectFromJSONL(a.SessionFile, 8192)
+	} else {
+		// No session file — running process is likely active
+		a.Status = agent.StatusActive
 	}
 	if info.cwd != "" && a.WorkingDir == "" {
 		a.WorkingDir = info.cwd
