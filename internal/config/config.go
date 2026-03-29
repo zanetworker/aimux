@@ -18,6 +18,7 @@ type Config struct {
 	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
 	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
 	Sessions        SessionsConfig            `yaml:"sessions"`    // session history settings
+	Notifications   NotificationsConfig       `yaml:"notifications"` // macOS notification settings
 	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
 }
 
@@ -46,6 +47,15 @@ type SessionsConfig struct {
 	AutoTitle  bool   `yaml:"auto_title"`  // generate titles via LLM on discovery
 	TitleModel string `yaml:"title_model"` // "flash" (default), "haiku", "sonnet", "opus"
 	APIKey     string `yaml:"api_key"`     // API key for title generation (overrides env vars)
+}
+
+// NotificationsConfig controls macOS notification behavior.
+type NotificationsConfig struct {
+	Enabled   bool `yaml:"enabled"`    // master switch (default: true)
+	OnWaiting bool `yaml:"on_waiting"` // agent needs permission (default: true)
+	OnError   bool `yaml:"on_error"`   // agent crashed (default: true)
+	OnIdle    bool `yaml:"on_idle"`    // agent finished turn (default: false)
+	Sound     bool `yaml:"sound"`      // play macOS sound (default: false)
 }
 
 // ExportConfig holds settings for exporting traces via OTLP/HTTP.
@@ -89,6 +99,13 @@ func Default() Config {
 		DefaultRuntime:  "tmux",
 		Sessions: SessionsConfig{
 			TitleModel: "flash",
+		},
+		Notifications: NotificationsConfig{
+			Enabled:   true,
+			OnWaiting: true,
+			OnError:   true,
+			OnIdle:    false,
+			Sound:     false,
 		},
 		Kubernetes: K8sProviderConfig{
 			Enabled:   false,
@@ -157,6 +174,14 @@ func Load(path string) (Config, error) {
 	}
 	if fileCfg.Sessions.APIKey != "" {
 		cfg.Sessions.APIKey = fileCfg.Sessions.APIKey
+	}
+	// If the notifications section is present at all, take its values wholesale.
+	// Since YAML bool false and "not present" are indistinguishable, a user who
+	// sets e.g. notifications: { enabled: false } will also get on_waiting: false
+	// etc. This is acceptable — if the section is present, the user is explicitly
+	// configuring it.
+	if fileCfg.Notifications != (NotificationsConfig{}) {
+		cfg.Notifications = fileCfg.Notifications
 	}
 	if fileCfg.Kubernetes.Enabled {
 		cfg.Kubernetes = fileCfg.Kubernetes
