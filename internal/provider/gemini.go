@@ -228,6 +228,9 @@ func (g *Gemini) enrichAfterDedup(agents []agent.Agent, projects map[string]stri
 		}
 		if !lastUpdated.IsZero() {
 			a.LastActivity = lastUpdated
+			// TODO: Gemini uses session-*.json (JSON object with messages array),
+			// not JSONL format. statusdetect.DetectFromJSONL() cannot parse it.
+			// Keep timestamp heuristic until a Gemini-specific status detector is added.
 			if time.Since(lastUpdated) < 30*time.Second {
 				a.Status = agent.StatusActive
 			} else {

@@ -15,6 +15,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/statusdetect"
 	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
 )
@@ -377,11 +378,9 @@ func (c *Codex) enrichAgent(a *agent.Agent, tmuxSessions []discovery.TmuxSession
 	}
 	if !info.lastTimestamp.IsZero() {
 		a.LastActivity = info.lastTimestamp
-		if time.Since(info.lastTimestamp) < 30*time.Second {
-			a.Status = agent.StatusActive
-		} else {
-			a.Status = agent.StatusIdle
-		}
+	}
+	if a.SessionFile != "" {
+		a.Status = statusdetect.DetectFromJSONL(a.SessionFile, 8192)
 	}
 	if info.cwd != "" && a.WorkingDir == "" {
 		a.WorkingDir = info.cwd
