@@ -338,7 +338,7 @@ func (k *K8s) discoverSessionPods() []agent.Agent {
 
 	pods, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "team-component=session",
-		FieldSelector: "status.phase=Running",
+		FieldSelector: "status.phase!=Succeeded,status.phase!=Failed",
 	})
 	if err != nil {
 		debuglog.Log("k8s: pod discover failed: %v", err)
@@ -369,11 +369,61 @@ func (k *K8s) discoverSessionPods() []agent.Agent {
 			LastActivity: startTime,
 			Source:       agent.SourceSDK,
 		}
+		a.Status = podStatus(pod)
+		if a.Status == agent.StatusError {
+			a.LastAction = podErrorReason(pod)
+		}
 		agents = append(agents, a)
 	}
 
 	debuglog.Log("k8s: pod discover found %d session pods", len(agents))
 	return agents
+}
+
+// podStatus derives agent.Status from pod container states.
+func podStatus(pod corev1.Pod) agent.Status {
+	// Check init containers first.
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.State.Waiting != nil {
+			switch cs.State.Waiting.Reason {
+			case "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull":
+				return agent.StatusError
+			}
+			return agent.StatusIdle // still initializing
+		}
+	}
+	// Check main containers.
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting != nil {
+			switch cs.State.Waiting.Reason {
+			case "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull":
+				return agent.StatusError
+			}
+			return agent.StatusIdle
+		}
+		if cs.State.Running != nil && cs.Ready {
+			return agent.StatusActive
+		}
+	}
+	if pod.Status.Phase == corev1.PodPending {
+		return agent.StatusIdle
+	}
+	return agent.StatusIdle
+}
+
+// podErrorReason returns a human-readable reason for an unhealthy pod.
+func podErrorReason(pod corev1.Pod) string {
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
+			return "init:" + cs.State.Waiting.Reason
+		}
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting != nil && cs.State.Waiting.Reason != "" {
+			return cs.State.Waiting.Reason
+		}
+	}
+	return string(pod.Status.Phase)
 }
 
 // mergeAgents combines two agent lists, deduplicating by SessionID.

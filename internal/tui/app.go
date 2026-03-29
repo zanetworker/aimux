@@ -484,7 +484,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.splitTrace = nil
 		a.layout.SetZoomed(false)
 		if a.sessionView != nil {
+			agentName := ""
+			if ag := a.sessionView.Agent(); ag != nil {
+				agentName = ag.ShortProject()
+			}
 			a.sessionView.Close()
+			a.statusHint = fmt.Sprintf("Session ended: %s", agentName)
+			a.stickyHint = true
 		}
 		return a, nil
 
@@ -1589,6 +1595,13 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 // openK8sSession attaches to a K8s session pod via kubectl exec + tmux.
 // The pod runs `sleep infinity` with a tmux session named "main" inside.
 func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
+	// Don't try to exec into unhealthy pods.
+	if selected.Status == agent.StatusError {
+		a.statusHint = fmt.Sprintf("Cannot attach: pod is unhealthy (%s)", selected.LastAction)
+		a.stickyHint = true
+		return a, nil
+	}
+
 	// Extract pod name and namespace from SessionID and WorkingDir.
 	podName := strings.TrimPrefix(selected.SessionID, "pod-")
 	namespace := "agents"

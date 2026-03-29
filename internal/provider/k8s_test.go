@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -570,6 +571,149 @@ func TestTerminalForwarding_ExcludesCredentials(t *testing.T) {
 		if credentialVars[v] {
 			t.Errorf("credential %q must not be forwarded via terminal; use K8s secrets instead", v)
 		}
+	}
+}
+
+func TestPodStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  corev1.Pod
+		want agent.Status
+	}{
+		{
+			name: "running and ready",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					ContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}, Ready: true},
+					},
+				},
+			},
+			want: agent.StatusActive,
+		},
+		{
+			name: "CrashLoopBackOff",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					ContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}}},
+					},
+				},
+			},
+			want: agent.StatusError,
+		},
+		{
+			name: "ImagePullBackOff",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					ContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}}},
+					},
+				},
+			},
+			want: agent.StatusError,
+		},
+		{
+			name: "init container CrashLoopBackOff",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}}},
+					},
+				},
+			},
+			want: agent.StatusError,
+		},
+		{
+			name: "init container waiting normally",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"}}},
+					},
+				},
+			},
+			want: agent.StatusIdle,
+		},
+		{
+			name: "pending no container status",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{Phase: corev1.PodPending},
+			},
+			want: agent.StatusIdle,
+		},
+		{
+			name: "container waiting ContainerCreating",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					ContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}},
+					},
+				},
+			},
+			want: agent.StatusIdle,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := podStatus(tt.pod)
+			if got != tt.want {
+				t.Errorf("podStatus() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPodErrorReason(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  corev1.Pod
+		want string
+	}{
+		{
+			name: "container CrashLoopBackOff",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}}},
+					},
+				},
+			},
+			want: "CrashLoopBackOff",
+		},
+		{
+			name: "init container error",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ErrImagePull"}}},
+					},
+				},
+			},
+			want: "init:ErrImagePull",
+		},
+		{
+			name: "no waiting state falls back to phase",
+			pod: corev1.Pod{
+				Status: corev1.PodStatus{Phase: corev1.PodPending},
+			},
+			want: "Pending",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := podErrorReason(tt.pod)
+			if got != tt.want {
+				t.Errorf("podErrorReason() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
