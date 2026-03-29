@@ -38,6 +38,7 @@ const (
 	StatusActive            Status = iota // actively processing
 	StatusIdle                            // idle, waiting for input
 	StatusWaitingPermission               // blocked on permission prompt
+	StatusError                           // crashed, context overflow, or process gone
 	StatusUnknown                         // status could not be determined
 )
 
@@ -49,6 +50,8 @@ func (s Status) String() string {
 		return "Idle"
 	case StatusWaitingPermission:
 		return "Waiting"
+	case StatusError:
+		return "Error"
 	case StatusUnknown:
 		return "Unknown"
 	default:
@@ -65,6 +68,8 @@ func (s Status) Icon() string {
 		return "■"
 	case StatusWaitingPermission:
 		return "⏸"
+	case StatusError:
+		return "✕"
 	case StatusUnknown:
 		return "?"
 	default:
