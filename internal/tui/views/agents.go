@@ -111,7 +111,7 @@ func (v *AgentsView) SetAgents(agents []agent.Agent) {
 		sort.SliceStable(agents, func(i, j int) bool {
 			si, sj := agents[i].Status, agents[j].Status
 			if si != sj {
-				return si < sj // Active=0, Idle=1, Waiting=2, Unknown=3
+				return si < sj // Active=0, Idle=1, Waiting=2, Error=3, Unknown=4
 			}
 			return strings.ToLower(agents[i].ShortProject()) < strings.ToLower(agents[j].ShortProject())
 		})
