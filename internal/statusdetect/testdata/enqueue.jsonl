@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Done."}]},"timestamp":"2026-03-29T12:00:00Z"}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-03-29T12:00:30Z","content":"fix the bug"}
