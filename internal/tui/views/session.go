@@ -217,7 +217,12 @@ func keyToBytes(key string) []byte {
 }
 
 // SetSize resizes the PTY and VT emulator to fit the new dimensions.
+// Skips the resize if dimensions haven't changed to avoid sending
+// spurious SIGWINCH signals that cause the subprocess to re-draw.
 func (sv *SessionView) SetSize(w, h int) {
+	if w == sv.width && h == sv.height {
+		return
+	}
 	sv.width = w
 	sv.height = h
 	if !sv.active || sv.session == nil {
@@ -284,17 +289,7 @@ func (sv *SessionView) View() string {
 		}
 	}
 
-	// Show scroll indicator when viewing history
-	if sv.termView != nil && sv.termView.IsScrolled() {
-		scrollIndicator := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F59E0B")).Bold(true).
-			Render("-- scrolled (PgDn to resume) --")
-		lines := strings.Split(termContent, "\n")
-		if len(lines) > 0 {
-			lines[len(lines)-1] = scrollIndicator
-			termContent = strings.Join(lines, "\n")
-		}
-	}
+	// Scroll indicator is shown in the status bar below, not overlaid on content
 
 	b.WriteString(termContent)
 
@@ -333,7 +328,7 @@ func (sv *SessionView) renderHeader() string {
 		left += " " + sessionHintStyle.Render(model)
 	}
 
-	right := sessionHintStyle.Render(" PgUp/PgDn:scroll  Tab:trace  Ctrl+f:split  Ctrl+]:exit ")
+	right := sessionHintStyle.Render(" Shift+↑↓:scroll  Tab:trace  Ctrl+f:split  Ctrl+]:exit ")
 
 	gap := sv.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {
@@ -346,8 +341,20 @@ func (sv *SessionView) renderHeader() string {
 
 func (sv *SessionView) renderStatusBar() string {
 	badge := sessionBadgeStyle.Render(" aimux ")
-	mode := sessionModeStyle.Render(" INTERACTIVE ")
-	hint := sessionHintStyle.Render(" PgUp/PgDn:scroll  Ctrl+f:split  Ctrl+]:exit ")
+
+	// Show scroll state in the mode indicator
+	var mode string
+	if sv.termView != nil && sv.termView.IsScrolled() {
+		scrollStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#111827")).
+			Background(lipgloss.Color("#F59E0B"))
+		mode = scrollStyle.Render(" SCROLLED ")
+	} else {
+		mode = sessionModeStyle.Render(" INTERACTIVE ")
+	}
+
+	hint := sessionHintStyle.Render(" Shift+↑↓:scroll  PgUp/PgDn:page  Ctrl+f:split  Ctrl+]:exit ")
 
 	gap := sv.width - lipgloss.Width(badge) - lipgloss.Width(mode) - lipgloss.Width(hint)
 	if gap < 0 {
