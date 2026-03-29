@@ -61,7 +61,6 @@ func (v *HelpView) View() string {
 	writeHelp(&b, ":new / :n", "Launch new agent (provider, dir, options)")
 	writeHelp(&b, "x", "Kill selected agent (with confirmation)")
 	writeHelp(&b, "s", "Sort: cycle Name/Cost/Age/Model/PID")
-	writeHelp(&b, "d", "Toggle dashboard / preview mode")
 	writeHelp(&b, "m", "Mute/unmute notifications")
 	writeHelp(&b, "/", "Filter agents by name, dir, model")
 	writeHelp(&b, "Esc", "Clear filter / go back")
