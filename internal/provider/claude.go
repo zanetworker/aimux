@@ -15,6 +15,7 @@ import (
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/statusdetect"
 	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
 )
@@ -376,11 +377,9 @@ func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSes
 				info.CacheWriteTokens,
 			)
 
-			// Determine status from activity
-			if time.Since(info.LastTimestamp) < 30*time.Second {
-				inst.Status = agent.StatusActive
-			} else if !info.LastTimestamp.IsZero() {
-				inst.Status = agent.StatusIdle
+			// Determine status from JSONL events
+			if inst.SessionFile != "" {
+				inst.Status = statusdetect.DetectFromJSONL(inst.SessionFile, 8192)
 			}
 		}
 	}
