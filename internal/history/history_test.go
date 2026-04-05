@@ -211,6 +211,91 @@ func TestExtractUserText_Nil(t *testing.T) {
 	}
 }
 
+func TestParseSessionLine_SkipsNoisePrompt(t *testing.T) {
+	// First user message is all XML noise, second has real text.
+	// The parser should skip the noise and pick up the second message.
+	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	lines := []map[string]interface{}{
+		{
+			"type":      "human",
+			"timestamp": ts.Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "<system-reminder>some noise</system-reminder>"},
+				},
+			},
+		},
+		{
+			"type":      "human",
+			"timestamp": ts.Add(60 * time.Second).Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "fix the login bug"},
+				},
+			},
+		},
+	}
+	dir := t.TempDir()
+	projDir := filepath.Join(dir, "-Users-test-proj")
+	os.MkdirAll(projDir, 0o755)
+	writeSessionJSONL(t, projDir, "noise-test", lines)
+
+	sessions, err := Discover(DiscoverOpts{}, dir)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].FirstPrompt != "fix the login bug" {
+		t.Errorf("FirstPrompt = %q, want %q", sessions[0].FirstPrompt, "fix the login bug")
+	}
+}
+
+func TestParseSessionLine_ImageOnlyMessage(t *testing.T) {
+	// First user message has only an image block, second has text.
+	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	lines := []map[string]interface{}{
+		{
+			"type":      "human",
+			"timestamp": ts.Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "image", "source": map[string]interface{}{"type": "base64", "data": "abc"}},
+				},
+			},
+		},
+		{
+			"type":      "human",
+			"timestamp": ts.Add(60 * time.Second).Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "explain this screenshot"},
+				},
+			},
+		},
+	}
+	dir := t.TempDir()
+	projDir := filepath.Join(dir, "-Users-test-proj2")
+	os.MkdirAll(projDir, 0o755)
+	writeSessionJSONL(t, projDir, "img-test", lines)
+
+	sessions, err := Discover(DiscoverOpts{}, dir)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].FirstPrompt != "explain this screenshot" {
+		t.Errorf("FirstPrompt = %q, want %q", sessions[0].FirstPrompt, "explain this screenshot")
+	}
+}
+
 func TestDiscover_BasicSession(t *testing.T) {
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-myproject")
