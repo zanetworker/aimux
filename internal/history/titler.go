@@ -344,7 +344,7 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 	total := 0
 	for _, s := range sessions {
-		if (s.Title == "" || cfg.Regenerate) && s.FirstPrompt != "" && s.FirstPrompt != "(no prompt)" {
+		if (s.Title == "" || cfg.Regenerate) && s.FilePath != "" {
 			total++
 		}
 	}
@@ -354,11 +354,14 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 		if s.Title != "" && !cfg.Regenerate {
 			continue // already has a title
 		}
-		if s.FirstPrompt == "" || s.FirstPrompt == "(no prompt)" {
-			continue
+		if s.FilePath == "" {
+			continue // no session file to extract content from
 		}
 
 		prompt := s.FirstPrompt
+		if prompt == "" || prompt == "(no prompt)" {
+			prompt = "(from conversation)"
+		}
 		if len(prompt) > 40 {
 			prompt = prompt[:37] + "..."
 		}

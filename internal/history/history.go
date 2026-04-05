@@ -257,9 +257,11 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) strin
 		s.CacheWriteTokens += entry.Message.Usage.CacheCreationInputTokens
 	}
 
-	// Extract first user prompt
-	if extractPrompt && s.FirstPrompt == "" && entry.Message.Role == "user" {
-		s.FirstPrompt = extractUserText(entry.Message.Content)
+	// Extract first meaningful user prompt (skip image-only or noise-only messages)
+	if extractPrompt && (s.FirstPrompt == "" || s.FirstPrompt == "(no prompt)") && entry.Message.Role == "user" {
+		if text := extractUserText(entry.Message.Content); text != "" && text != "(no prompt)" {
+			s.FirstPrompt = text
+		}
 	}
 
 	return model
