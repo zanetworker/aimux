@@ -518,10 +518,9 @@ func (v *SessionsView) handleTagKey(msg tea.KeyMsg) tea.Cmd {
 			v.tagCursor = (v.tagCursor + 1) % len(suggestions)
 		}
 	default:
-		if msg.Type == tea.KeyRunes {
+		if v.tagInput.HandleKey(msg) {
 			v.tagCursor = -1
 		}
-		v.tagInput.HandleKey(msg)
 	}
 	return nil
 }
