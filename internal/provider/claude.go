@@ -33,19 +33,36 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.discoverFromAgents(agents, discovery.ListTmuxSessions())
+}
 
-	tmuxSessions := discovery.ListTmuxSessions()
+// DiscoverWithSnapshot uses a shared ps/tmux snapshot instead of running
+// its own subprocess calls.
+func (c *Claude) DiscoverWithSnapshot(snap *discovery.Snapshot) ([]agent.Agent, error) {
+	agents := discovery.ScanProcessesFromOutput(snap.PsOutput)
+	return c.discoverFromAgents(agents, snap.TmuxSessions)
+}
 
+func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discovery.TmuxSession) ([]agent.Agent, error) {
 	home, _ := os.UserHomeDir()
 	projectsDir := filepath.Join(home, ".claude", "projects")
 
-	// Track assigned session files so no two agents share the same file.
-	// When enrichAgent falls back to "newest file in dir", it skips files
-	// that were already claimed by a prior agent.
-	assignedFiles := make(map[string]bool)
+	// Batch CWD and start-time lookups in parallel — each is a subprocess
+	// call (~50-100ms) that blocks when done sequentially per agent.
+	c.batchResolveProcessInfo(agents)
 
+	// Match tmux sessions (cheap string matching, no subprocesses).
 	for i := range agents {
-		c.enrichAgent(&agents[i], tmuxSessions, projectsDir, assignedFiles)
+		if agents[i].WorkingDir != "" {
+			agents[i].TMuxSession = discovery.MatchTmuxSession(tmuxSessions, agents[i].WorkingDir)
+		}
+	}
+
+	// Session file matching and JSONL parsing must be sequential because
+	// assignedFiles tracks which files are already claimed.
+	assignedFiles := make(map[string]bool)
+	for i := range agents {
+		c.enrichSession(&agents[i], projectsDir, assignedFiles)
 		agents[i].ProviderName = "claude"
 		if agents[i].Name == "" {
 			agents[i].Name = agents[i].ShortProject()
@@ -60,6 +77,80 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 	agents = deduplicateAgents(agents)
 
 	return agents, nil
+}
+
+// batchResolveProcessInfo resolves CWD and start time for all agents
+// concurrently. These are independent per-process subprocess calls that
+// benefit significantly from parallelism (8 agents: ~500ms → ~70ms).
+func (c *Claude) batchResolveProcessInfo(agents []agent.Agent) {
+	type result struct {
+		idx       int
+		cwd       string
+		startTime time.Time
+	}
+	ch := make(chan result, len(agents))
+	for i, a := range agents {
+		go func(idx int, pid int) {
+			var r result
+			r.idx = idx
+			r.cwd, _ = discovery.GetProcessCwd(pid)
+			r.startTime = getProcessStartTime(pid)
+			ch <- r
+		}(i, a.PID)
+	}
+	for range agents {
+		r := <-ch
+		if agents[r.idx].WorkingDir == "" {
+			agents[r.idx].WorkingDir = r.cwd
+		}
+		if agents[r.idx].StartTime.IsZero() {
+			agents[r.idx].StartTime = r.startTime
+		}
+	}
+}
+
+// enrichSession matches a session file and parses JSONL data for an agent.
+// Must be called sequentially to respect assignedFiles tracking.
+func (c *Claude) enrichSession(inst *agent.Agent, projectsDir string, assignedFiles map[string]bool) {
+	sessionFile := ""
+	if inst.SessionID != "" {
+		sessionFile = discovery.FindSessionFile(inst.SessionID, projectsDir)
+	}
+	if sessionFile == "" && inst.WorkingDir != "" {
+		sessionFile = c.matchSessionFileByStartTime(inst.PID, inst.WorkingDir, assignedFiles)
+	}
+
+	if sessionFile != "" {
+		assignedFiles[sessionFile] = true
+		inst.SessionFile = sessionFile
+		info, err := discovery.ParseSessionFile(sessionFile)
+		if err == nil {
+			if inst.SessionID == "" {
+				inst.SessionID = info.SessionID
+			}
+			inst.GitBranch = info.GitBranch
+			if inst.Model == "" && info.Model != "" {
+				inst.Model = info.Model
+			}
+			inst.TokensIn = info.TokensIn
+			inst.TokensOut = info.TokensOut
+			inst.LastAction = info.LastAction
+			inst.LastActivity = info.LastTimestamp
+			inst.EstCostUSD = cost.Calculate(
+				inst.Model,
+				info.TokensIn,
+				info.TokensOut,
+				info.CacheReadTokens,
+				info.CacheWriteTokens,
+			)
+
+			if inst.SessionFile != "" {
+				inst.Status = statusdetect.DetectFromJSONL(inst.SessionFile, 8192)
+			}
+		}
+	} else {
+		inst.Status = agent.StatusActive
+	}
 }
 
 // discoverRecentSessions finds idle Claude sessions — one per project directory,
@@ -318,75 +409,6 @@ func deduplicateAgents(agents []agent.Agent) []agent.Agent {
 	}
 	result = append(result, subagents...)
 	return result
-}
-
-// enrichAgent resolves the working directory, matches a tmux session,
-// parses the session JSONL file, and calculates the estimated cost.
-// assignedFiles tracks which session files have already been claimed by
-// other agents, so that multiple sessions in the same directory each get
-// a different file.
-func (c *Claude) enrichAgent(inst *agent.Agent, tmuxSessions []discovery.TmuxSession, projectsDir string, assignedFiles map[string]bool) {
-	// Resolve working directory
-	if inst.WorkingDir == "" {
-		cwd, err := discovery.GetProcessCwd(inst.PID)
-		if err == nil {
-			inst.WorkingDir = cwd
-		}
-	}
-
-	// Match tmux session
-	if inst.WorkingDir != "" {
-		inst.TMuxSession = discovery.MatchTmuxSession(tmuxSessions, inst.WorkingDir)
-	}
-
-	// Set StartTime from the OS process start time so Age shows correctly.
-	if inst.StartTime.IsZero() {
-		inst.StartTime = getProcessStartTime(inst.PID)
-	}
-
-	// Find and parse session JSONL
-	sessionFile := ""
-	if inst.SessionID != "" {
-		sessionFile = discovery.FindSessionFile(inst.SessionID, projectsDir)
-	}
-	if sessionFile == "" && inst.WorkingDir != "" {
-		sessionFile = c.matchSessionFileByStartTime(inst.PID, inst.WorkingDir, assignedFiles)
-	}
-
-	if sessionFile != "" {
-		assignedFiles[sessionFile] = true
-		inst.SessionFile = sessionFile
-		info, err := discovery.ParseSessionFile(sessionFile)
-		if err == nil {
-			if inst.SessionID == "" {
-				inst.SessionID = info.SessionID
-			}
-			inst.GitBranch = info.GitBranch
-			if inst.Model == "" && info.Model != "" {
-				inst.Model = info.Model
-			}
-			inst.TokensIn = info.TokensIn
-			inst.TokensOut = info.TokensOut
-			inst.LastAction = info.LastAction
-			inst.LastActivity = info.LastTimestamp
-			inst.EstCostUSD = cost.Calculate(
-				inst.Model,
-				info.TokensIn,
-				info.TokensOut,
-				info.CacheReadTokens,
-				info.CacheWriteTokens,
-			)
-
-			// Determine status from JSONL events
-			if inst.SessionFile != "" {
-				inst.Status = statusdetect.DetectFromJSONL(inst.SessionFile, 8192)
-			}
-		}
-	} else {
-		// No session file matched — fall back to process-alive heuristic.
-		// A running process with no session file is likely active.
-		inst.Status = agent.StatusActive
-	}
 }
 
 // matchSessionFileByStartTime finds the session file whose first timestamp

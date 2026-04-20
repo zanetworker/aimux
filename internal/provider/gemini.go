@@ -29,14 +29,18 @@ func (g *Gemini) Discover() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps aux: %w", err)
 	}
+	return g.discoverFromLines(discovery.PsLines(string(out)), discovery.ListTmuxSessions())
+}
 
-	tmuxSessions := discovery.ListTmuxSessions()
+// DiscoverWithSnapshot uses a shared ps/tmux snapshot.
+func (g *Gemini) DiscoverWithSnapshot(snap *discovery.Snapshot) ([]agent.Agent, error) {
+	return g.discoverFromLines(discovery.PsLines(snap.PsOutput), snap.TmuxSessions)
+}
 
+func (g *Gemini) discoverFromLines(lines []string, tmuxSessions []discovery.TmuxSession) ([]agent.Agent, error) {
 	var agents []agent.Agent
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines[1:] {
-		line = strings.TrimSpace(line)
-		if line == "" || !isGeminiProcess(line) {
+	for _, line := range lines {
+		if !isGeminiProcess(line) {
 			continue
 		}
 		a := g.parseProcess(line)
@@ -44,14 +48,12 @@ func (g *Gemini) Discover() ([]agent.Agent, error) {
 			continue
 		}
 
-		// Resolve CWD
 		if a.WorkingDir == "" {
 			if cwd, err := geminiGetCwd(a.PID); err == nil {
 				a.WorkingDir = cwd
 			}
 		}
 
-		// Match tmux session
 		if a.WorkingDir != "" {
 			a.TMuxSession = discovery.MatchTmuxSession(tmuxSessions, a.WorkingDir)
 		}
@@ -60,10 +62,8 @@ func (g *Gemini) Discover() ([]agent.Agent, error) {
 		agents = append(agents, *a)
 	}
 
-	// Deduplicate: group by process tree (Gemini spawns multiple node processes)
 	agents = g.dedup(agents)
 
-	// Enrich AFTER dedup so each session gets its own session file.
 	projects := readGeminiProjects()
 	g.enrichAfterDedup(agents, projects)
 

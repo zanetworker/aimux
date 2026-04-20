@@ -142,18 +142,18 @@ type SessionsView struct {
 
 	// Filter
 	filterMode  bool
-	filterInput string
+	filterInput TextInput
 	filterText  string
 
 	// Tag input
 	tagMode     bool
-	tagInput    string
+	tagInput    TextInput
 	tagVocab    []string // autocomplete vocabulary
 	tagCursor   int      // selected suggestion index (-1 = typing custom)
 
 	// Note input
 	noteMode  bool
-	noteInput string
+	noteInput TextInput
 
 	// Sort
 	sortField SortField // current sort column
@@ -169,7 +169,7 @@ type SessionsView struct {
 
 	// Content search (deep search inside JSONL files)
 	contentSearchMode  bool
-	contentSearchInput string
+	contentSearchInput TextInput
 	contentSearchIDs   map[string]string // session ID -> snippet (nil = no active search)
 
 	// Trace preview (reused LogsView)
@@ -317,7 +317,7 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			}
 		case "/":
 			v.filterMode = true
-			v.filterInput = ""
+			v.filterInput.Reset()
 			// Clear previous search results so new search starts fresh
 			v.filterText = ""
 			v.contentSearchIDs = nil
@@ -361,9 +361,9 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			v.tagMode = true
 			v.tagCursor = -1
 			if len(s.Tags) > 0 {
-				v.tagInput = strings.Join(s.Tags, ", ")
+				v.tagInput.SetValue(strings.Join(s.Tags, ", "))
 			} else {
-				v.tagInput = ""
+				v.tagInput.Reset()
 			}
 		case "N":
 			s := v.SelectedSession()
@@ -371,7 +371,7 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			v.noteMode = true
-			v.noteInput = s.Note
+			v.noteInput.SetValue(s.Note)
 		case "d":
 			// Delete session (show confirmation)
 			s := v.SelectedSession()
@@ -396,7 +396,7 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 		case "F":
 			// Standalone deep content search inside session JSONL files
 			v.contentSearchMode = true
-			v.contentSearchInput = ""
+			v.contentSearchInput.Reset()
 		}
 	}
 	return nil
@@ -406,11 +406,10 @@ func (v *SessionsView) handleContentSearchKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		v.contentSearchMode = false
-		query := v.contentSearchInput
+		query := v.contentSearchInput.Value()
 		if query == "" {
 			return nil
 		}
-		// Run search asynchronously
 		return func() tea.Msg {
 			matches, err := history.SearchContentWithSnippets(query, "")
 			if err != nil {
@@ -420,15 +419,9 @@ func (v *SessionsView) handleContentSearchKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "esc":
 		v.contentSearchMode = false
-		v.contentSearchInput = ""
-	case "backspace":
-		if len(v.contentSearchInput) > 0 {
-			v.contentSearchInput = v.contentSearchInput[:len(v.contentSearchInput)-1]
-		}
+		v.contentSearchInput.Reset()
 	default:
-		if len(msg.String()) == 1 {
-			v.contentSearchInput += msg.String()
-		}
+		v.contentSearchInput.HandleKey(msg)
 	}
 	return nil
 }
@@ -462,10 +455,10 @@ func (v *SessionsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		v.filterMode = false
-		v.filterText = v.filterInput
+		v.filterText = v.filterInput.Value()
 		v.cursor = 0
 		// Also kick off async content search for deep matching
-		query := v.filterInput
+		query := v.filterInput.Value()
 		if query != "" {
 			return func() tea.Msg {
 				matches, err := history.SearchContentWithSnippets(query, "")
@@ -477,15 +470,9 @@ func (v *SessionsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "esc":
 		v.filterMode = false
-		v.filterInput = ""
-	case "backspace":
-		if len(v.filterInput) > 0 {
-			v.filterInput = v.filterInput[:len(v.filterInput)-1]
-		}
+		v.filterInput.Reset()
 	default:
-		if len(msg.String()) == 1 {
-			v.filterInput += msg.String()
-		}
+		v.filterInput.HandleKey(msg)
 	}
 	return nil
 }
@@ -506,14 +493,14 @@ func (v *SessionsView) handleTagKey(msg tea.KeyMsg) tea.Cmd {
 		if s == nil {
 			return nil
 		}
-		tags := parseTags(v.tagInput)
+		tags := parseTags(v.tagInput.Value())
 		s.Tags = tags
 		return func() tea.Msg {
 			return SessionTagMsg{Session: *s, Tags: tags}
 		}
 	case "esc":
 		v.tagMode = false
-		v.tagInput = ""
+		v.tagInput.Reset()
 		v.tagCursor = -1
 	case "up":
 		if v.tagCursor > 0 {
@@ -530,16 +517,11 @@ func (v *SessionsView) handleTagKey(msg tea.KeyMsg) tea.Cmd {
 		if len(suggestions) > 0 {
 			v.tagCursor = (v.tagCursor + 1) % len(suggestions)
 		}
-	case "backspace":
-		v.tagCursor = -1
-		if len(v.tagInput) > 0 {
-			v.tagInput = v.tagInput[:len(v.tagInput)-1]
-		}
 	default:
-		if len(msg.String()) == 1 {
+		if msg.Type == tea.KeyRunes {
 			v.tagCursor = -1
-			v.tagInput += msg.String()
 		}
+		v.tagInput.HandleKey(msg)
 	}
 	return nil
 }
@@ -576,13 +558,12 @@ func (v *SessionsView) handleDeleteKey(msg tea.KeyMsg) tea.Cmd {
 
 // applyTagSuggestion replaces the current partial tag with the selected suggestion.
 func (v *SessionsView) applyTagSuggestion(tag string) {
-	parts := strings.Split(v.tagInput, ",")
+	parts := strings.Split(v.tagInput.Value(), ",")
 	if len(parts) > 1 {
-		// Replace last part (the partial)
 		parts[len(parts)-1] = " " + tag
-		v.tagInput = strings.Join(parts, ",")
+		v.tagInput.SetValue(strings.Join(parts, ","))
 	} else {
-		v.tagInput = tag
+		v.tagInput.SetValue(tag)
 	}
 	v.tagCursor = -1
 }
@@ -595,21 +576,16 @@ func (v *SessionsView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
 		if s == nil {
 			return nil
 		}
-		s.Note = v.noteInput
+		note := v.noteInput.Value()
+		s.Note = note
 		return func() tea.Msg {
-			return SessionNoteMsg{Session: *s, Note: v.noteInput}
+			return SessionNoteMsg{Session: *s, Note: note}
 		}
 	case "esc":
 		v.noteMode = false
-		v.noteInput = ""
-	case "backspace":
-		if len(v.noteInput) > 0 {
-			v.noteInput = v.noteInput[:len(v.noteInput)-1]
-		}
+		v.noteInput.Reset()
 	default:
-		if len(msg.String()) == 1 {
-			v.noteInput += msg.String()
-		}
+		v.noteInput.HandleKey(msg)
 	}
 	return nil
 }
@@ -620,7 +596,7 @@ func (v *SessionsView) autocompleteTag() {
 		return
 	}
 	// Get the current partial tag (after the last comma)
-	parts := strings.Split(v.tagInput, ",")
+	parts := strings.Split(v.tagInput.Value(), ",")
 	current := strings.TrimSpace(parts[len(parts)-1])
 	if current == "" {
 		return
@@ -630,7 +606,7 @@ func (v *SessionsView) autocompleteTag() {
 	for _, tag := range v.tagVocab {
 		if strings.HasPrefix(strings.ToLower(tag), lower) && tag != current {
 			parts[len(parts)-1] = " " + tag
-			v.tagInput = strings.Join(parts, ",")
+			v.tagInput.SetValue(strings.Join(parts, ","))
 			return
 		}
 	}
@@ -949,14 +925,14 @@ func (v *SessionsView) View() string {
 	if v.contentSearchMode {
 		searchStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Bold(true)
 		cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA"))
-		b.WriteString("\n  " + searchStyle.Render("SEARCH CONTENT: ") + v.contentSearchInput + cursorStyle.Render("|"))
+		b.WriteString("\n  " + searchStyle.Render("SEARCH CONTENT: ") + v.contentSearchInput.BeforeCursor() + cursorStyle.Render("█") + v.contentSearchInput.AfterCursor())
 		b.WriteString("\n  " + sessDimStyle.Render("  Enter:search  Esc:cancel — searches inside session files using ripgrep"))
 	}
 	if v.filterMode {
-		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("|"))
+		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput.BeforeCursor() + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("█") + v.filterInput.AfterCursor())
 	}
 	if v.tagMode {
-		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("Failure-mode: ") + v.tagInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("|"))
+		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("Failure-mode: ") + v.tagInput.BeforeCursor() + lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("█") + v.tagInput.AfterCursor())
 		b.WriteString("\n  " + sessDimStyle.Render("  ↑/↓:select  Tab:cycle  Enter:pick  type to filter"))
 		// Show selectable suggestions (max 10 visible)
 		suggestions := v.tagSuggestions()
@@ -977,12 +953,12 @@ func (v *SessionsView) View() string {
 		if len(suggestions) > maxVisible {
 			b.WriteString("\n    " + sessDimStyle.Render(fmt.Sprintf("  ... and %d more (type to filter)", len(suggestions)-maxVisible)))
 		}
-		if len(suggestions) == 0 && v.tagInput != "" {
-			b.WriteString("\n    " + sessDimStyle.Render("(new tag: \"" + v.tagInput + "\")"))
+		if len(suggestions) == 0 && v.tagInput.Value() != "" {
+			b.WriteString("\n    " + sessDimStyle.Render("(new tag: \"" + v.tagInput.Value() + "\")"))
 		}
 	}
 	if v.noteMode {
-		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("Note: ") + v.noteInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render("|"))
+		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("Note: ") + v.noteInput.BeforeCursor() + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render("█") + v.noteInput.AfterCursor())
 	}
 	if v.deleteMode {
 		s := v.SelectedSession()
@@ -1011,7 +987,7 @@ func (v *SessionsView) tagSuggestions() []string {
 	if len(v.tagVocab) == 0 {
 		return nil
 	}
-	parts := strings.Split(v.tagInput, ",")
+	parts := strings.Split(v.tagInput.Value(), ",")
 	current := strings.TrimSpace(parts[len(parts)-1])
 	if current == "" {
 		return v.tagVocab

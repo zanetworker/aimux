@@ -101,13 +101,13 @@ type App struct {
 
 	// Command palette
 	commandMode   bool
-	commandInput  string
+	commandInput  views.TextInput
 	exportConfirm bool // showing export menu
 	stickyHint    bool // true = statusHint persists until keypress (not cleared by tick)
 
 	// Filter mode
 	filterMode  bool
-	filterInput string
+	filterInput views.TextInput
 
 	// Discovery
 	orchestrator *discovery.Orchestrator
@@ -752,7 +752,7 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Command palette -- intercept ":" before routing to trace or PTY
 	if key == ":" {
 		a.commandMode = true
-		a.commandInput = ""
+		a.commandInput.Reset()
 		return a, nil
 	}
 
@@ -837,12 +837,12 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.navigateBack()
 	case ":":
 		a.commandMode = true
-		a.commandInput = ""
+		a.commandInput.Reset()
 		return a, nil
 	case "/":
 		if a.currentView == viewAgents {
 			a.filterMode = true
-			a.filterInput = ""
+			a.filterInput.Reset()
 			return a, nil
 		}
 		if a.currentView == viewLogs && a.logsView != nil {
@@ -899,8 +899,8 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a.openHealth()
 		}
 	case "esc":
-		if a.filterInput != "" {
-			a.filterInput = ""
+		if a.filterInput.Value() != "" {
+			a.filterInput.Reset()
 			a.agentsView.SetFilter("")
 			return a, nil
 		}
@@ -1069,9 +1069,9 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 func (a App) handleCommandInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		raw := strings.TrimSpace(a.commandInput)
+		raw := strings.TrimSpace(a.commandInput.Value())
 		a.commandMode = false
-		a.commandInput = ""
+		a.commandInput.Reset()
 		// Handle commands that take arguments (e.g. "send hello world").
 		if strings.HasPrefix(raw, "send ") {
 			return a.sendMessageToSelected(strings.TrimPrefix(raw, "send "))
@@ -1080,23 +1080,16 @@ func (a App) handleCommandInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.executeCommand(cmd)
 	case "esc":
 		a.commandMode = false
-		a.commandInput = ""
-		return a, nil
-	case "backspace":
-		if len(a.commandInput) > 0 {
-			a.commandInput = a.commandInput[:len(a.commandInput)-1]
-		}
+		a.commandInput.Reset()
 		return a, nil
 	case "tab":
-		completions := commandCompletions(a.commandInput)
+		completions := commandCompletions(a.commandInput.Value())
 		if len(completions) == 1 {
-			a.commandInput = completions[0]
+			a.commandInput.SetValue(completions[0])
 		}
 		return a, nil
 	default:
-		if len(msg.String()) == 1 {
-			a.commandInput += msg.String()
-		}
+		a.commandInput.HandleKey(msg)
 		return a, nil
 	}
 }
@@ -1105,22 +1098,15 @@ func (a App) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		a.filterMode = false
-		a.agentsView.SetFilter(a.filterInput)
+		a.agentsView.SetFilter(a.filterInput.Value())
 		return a, nil
 	case "esc":
 		a.filterMode = false
-		a.filterInput = ""
+		a.filterInput.Reset()
 		a.agentsView.SetFilter("")
 		return a, nil
-	case "backspace":
-		if len(a.filterInput) > 0 {
-			a.filterInput = a.filterInput[:len(a.filterInput)-1]
-		}
-		return a, nil
 	default:
-		if len(msg.String()) == 1 {
-			a.filterInput += msg.String()
-		}
+		a.filterInput.HandleKey(msg)
 		return a, nil
 	}
 }
@@ -2404,7 +2390,7 @@ func (a App) renderSplitView() string {
 		// Show export menu or other status messages
 		focusHint = " " + a.statusHint
 	} else if a.commandMode {
-		focusHint = " :" + a.commandInput + "█"
+		focusHint = " :" + a.commandInput.BeforeCursor() + "█" + a.commandInput.AfterCursor()
 	} else if focus == "trace" && a.splitTrace != nil && a.splitTrace.NoteMode() {
 		noteText, noteTurn := a.splitTrace.NoteInput()
 		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
@@ -2440,8 +2426,8 @@ func (a App) renderStatusBar() string {
 			Render(lipgloss.NewStyle().
 				Foreground(colorLogo).
 				Bold(true).
-				Render(" :") + a.commandInput + lipgloss.NewStyle().
-				Foreground(colorLogo).Render("|"))
+				Render(" :") + a.commandInput.BeforeCursor() + lipgloss.NewStyle().
+				Foreground(colorLogo).Render("█") + a.commandInput.AfterCursor())
 	}
 	if a.filterMode {
 		return lipgloss.NewStyle().
@@ -2450,8 +2436,8 @@ func (a App) renderStatusBar() string {
 			Render(lipgloss.NewStyle().
 				Foreground(colorWaiting).
 				Bold(true).
-				Render(" /") + a.filterInput + lipgloss.NewStyle().
-				Foreground(colorWaiting).Render("|"))
+				Render(" /") + a.filterInput.BeforeCursor() + lipgloss.NewStyle().
+				Foreground(colorWaiting).Render("█") + a.filterInput.AfterCursor())
 	}
 	if a.currentView == viewLogs && a.logsView != nil && a.logsView.NoteMode() {
 		noteText, noteTurn := a.logsView.NoteInput()
@@ -2490,8 +2476,8 @@ func (a App) renderStatusBar() string {
 		} else {
 			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  s:sort  ?:help  q:quit"
 		}
-		if a.filterInput != "" {
-			hints += fmt.Sprintf("  [filter: %s]", a.filterInput)
+		if a.filterInput.Value() != "" {
+			hints += fmt.Sprintf("  [filter: %s]", a.filterInput.Value())
 		}
 	}
 	return lipgloss.NewStyle().

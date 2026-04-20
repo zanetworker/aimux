@@ -33,16 +33,17 @@ func (c *Codex) Discover() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps aux: %w", err)
 	}
+	return c.discoverFromLines(discovery.PsLines(string(out)), discovery.ListTmuxSessions())
+}
 
-	tmuxSessions := discovery.ListTmuxSessions()
+// DiscoverWithSnapshot uses a shared ps/tmux snapshot.
+func (c *Codex) DiscoverWithSnapshot(snap *discovery.Snapshot) ([]agent.Agent, error) {
+	return c.discoverFromLines(discovery.PsLines(snap.PsOutput), snap.TmuxSessions)
+}
 
+func (c *Codex) discoverFromLines(lines []string, tmuxSessions []discovery.TmuxSession) ([]agent.Agent, error) {
 	var agents []agent.Agent
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines[1:] {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
+	for _, line := range lines {
 		if !isCodexProcess(line) {
 			continue
 		}
@@ -52,10 +53,8 @@ func (c *Codex) Discover() ([]agent.Agent, error) {
 		}
 	}
 
-	// Deduplicate: keep only the native binary, not the node wrapper
 	agents = c.dedup(agents)
 
-	// Enrich with session data
 	for i := range agents {
 		c.enrichAgent(&agents[i], tmuxSessions)
 	}

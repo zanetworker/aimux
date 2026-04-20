@@ -485,6 +485,83 @@ func TestNewPickerCancel_ClearsState(t *testing.T) {
 	}
 }
 
+// TestFilterInput_AcceptsBracketedPaste verifies that pasting via clipboard
+// (bracketed paste) works without bracket artifacts.
+func TestFilterInput_AcceptsBracketedPaste(t *testing.T) {
+	app := App{
+		filterMode: true,
+	}
+
+	paste := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello world"), Paste: true}
+	result, _ := app.handleFilterInput(paste)
+	a := result.(App)
+	if a.filterInput.Value() != "hello world" {
+		t.Errorf("filterInput after paste = %q, want %q", a.filterInput.Value(), "hello world")
+	}
+}
+
+// TestCommandInput_AcceptsBracketedPaste verifies that pasting into the
+// ":" command input works without bracket artifacts.
+func TestCommandInput_AcceptsBracketedPaste(t *testing.T) {
+	app := App{
+		commandMode: true,
+	}
+
+	paste := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("send hello"), Paste: true}
+	result, _ := app.handleCommandInput(paste)
+	a := result.(App)
+	if a.commandInput.Value() != "send hello" {
+		t.Errorf("commandInput after paste = %q, want %q", a.commandInput.Value(), "send hello")
+	}
+}
+
+// TestFilterInput_CursorNavigation verifies Ctrl+A/E and arrow keys work
+// for editing pasted or typed text in the filter.
+func TestFilterInput_CursorNavigation(t *testing.T) {
+	app := App{
+		filterMode: true,
+	}
+
+	// Type "world"
+	result, _ := app.handleFilterInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("world")})
+	a := result.(App)
+
+	// Ctrl+A to go to beginning
+	result, _ = a.handleFilterInput(tea.KeyMsg{Type: tea.KeyCtrlA})
+	a = result.(App)
+
+	// Type "hello " at the beginning
+	result, _ = a.handleFilterInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello ")})
+	a = result.(App)
+	if a.filterInput.Value() != "hello world" {
+		t.Errorf("filterInput after ctrl+a + type = %q, want %q", a.filterInput.Value(), "hello world")
+	}
+
+	// Ctrl+E to go to end, type " !"
+	result, _ = a.handleFilterInput(tea.KeyMsg{Type: tea.KeyCtrlE})
+	a = result.(App)
+	result, _ = a.handleFilterInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("!")})
+	a = result.(App)
+	if a.filterInput.Value() != "hello world!" {
+		t.Errorf("filterInput after ctrl+e + type = %q, want %q", a.filterInput.Value(), "hello world!")
+	}
+}
+
+// TestFilterInput_RejectsSpecialKeys verifies that special keys like
+// arrow keys don't inject their string representation into the filter.
+func TestFilterInput_RejectsSpecialKeys(t *testing.T) {
+	app := App{
+		filterMode: true,
+	}
+
+	arrow := tea.KeyMsg{Type: tea.KeyUp}
+	result, _ := app.handleFilterInput(arrow)
+	a := result.(App)
+	if a.filterInput.Value() != "" {
+		t.Errorf("filterInput after arrow key = %q, want empty", a.filterInput.Value())
+	}
+}
+
 // TestAllProvidersOTELEnvIncludeProtocol verifies that ALL providers'
 // OTELEnv methods include the http/protobuf protocol setting.
 // This is the root cause test -- without this protocol setting,

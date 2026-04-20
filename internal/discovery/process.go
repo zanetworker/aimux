@@ -142,9 +142,13 @@ func ScanProcesses() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ps aux: %w", err)
 	}
+	return ScanProcessesFromOutput(string(out)), nil
+}
 
+// ScanProcessesFromOutput parses pre-captured `ps aux` output for Claude processes.
+func ScanProcessesFromOutput(psOutput string) []agent.Agent {
 	var instances []agent.Agent
-	lines := strings.Split(string(out), "\n")
+	lines := strings.Split(psOutput, "\n")
 	for _, line := range lines[1:] { // skip header
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -159,8 +163,21 @@ func ScanProcesses() ([]agent.Agent, error) {
 		}
 		instances = append(instances, buildInstance(proc))
 	}
+	return instances
+}
 
-	return instances, nil
+// PsLines returns the trimmed non-empty lines from ps aux output (skipping header).
+// Providers use this to avoid re-splitting the shared snapshot.
+func PsLines(psOutput string) []string {
+	raw := strings.Split(psOutput, "\n")
+	var lines []string
+	for _, line := range raw[1:] {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
 }
 
 // filterSubagents removes processes that have an ancestor PID which is also
