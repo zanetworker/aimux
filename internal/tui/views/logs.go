@@ -120,11 +120,11 @@ type LogsView struct {
 	pid          int
 	filterText   string
 	filterMode   bool
-	filterInput  string
+	filterInput  TextInput
 	annotations  map[int]string
 	notes        map[int]string // free-text notes per turn
 	noteMode     bool           // true when typing a note
-	noteInput    string         // current note input text
+	noteInput    TextInput
 	noteTurn     int            // which turn the note is for
 	compact      bool           // when true, hides the interactive status bar (for preview pane)
 	scrollOffset int            // line-level scroll offset within the rendered view
@@ -206,7 +206,7 @@ func (v *LogsView) NoteMode() bool {
 
 // NoteInput returns the current note input text and turn number.
 func (v *LogsView) NoteInput() (string, int) {
-	return v.noteInput, v.noteTurn
+	return v.noteInput.Value(), v.noteTurn
 }
 
 // Annotations returns the current annotations map.
@@ -416,7 +416,7 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 			}
 		case "/":
 			v.filterMode = true
-			v.filterInput = ""
+			v.filterInput.Reset()
 			return nil
 		case "esc":
 			if v.filterText != "" {
@@ -462,7 +462,7 @@ func (v *LogsView) Update(msg tea.Msg) tea.Cmd {
 			}
 			v.noteMode = true
 			v.noteTurn = turnNum
-			v.noteInput = v.notes[turnNum] // pre-fill with existing note
+			v.noteInput.SetValue(v.notes[turnNum]) // pre-fill with existing note
 			return nil
 		}
 	}
@@ -475,7 +475,7 @@ func (v *LogsView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		v.noteMode = false
 		turnNum := v.noteTurn
-		note := v.noteInput
+		note := v.noteInput.Value()
 		if note != "" {
 			v.notes[turnNum] = note
 		} else {
@@ -487,17 +487,10 @@ func (v *LogsView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	case "esc":
 		v.noteMode = false
-		v.noteInput = ""
-		return nil
-	case "backspace":
-		if len(v.noteInput) > 0 {
-			v.noteInput = v.noteInput[:len(v.noteInput)-1]
-		}
+		v.noteInput.Reset()
 		return nil
 	default:
-		if len(msg.String()) == 1 {
-			v.noteInput += msg.String()
-		}
+		v.noteInput.HandleKey(msg)
 		return nil
 	}
 }
@@ -506,22 +499,15 @@ func (v *LogsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "enter":
 		v.filterMode = false
-		v.filterText = v.filterInput
+		v.filterText = v.filterInput.Value()
 		v.cursor = 0
 		return nil
 	case "esc":
 		v.filterMode = false
-		v.filterInput = ""
-		return nil
-	case "backspace":
-		if len(v.filterInput) > 0 {
-			v.filterInput = v.filterInput[:len(v.filterInput)-1]
-		}
+		v.filterInput.Reset()
 		return nil
 	default:
-		if len(msg.String()) == 1 {
-			v.filterInput += msg.String()
-		}
+		v.filterInput.HandleKey(msg)
 		return nil
 	}
 }
@@ -618,7 +604,7 @@ func (v *LogsView) View() string {
 		}
 		b.WriteString(dimStyle.Render(status))
 		if v.filterMode {
-			b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("|"))
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput.BeforeCursor() + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("█") + v.filterInput.AfterCursor())
 		}
 	}
 

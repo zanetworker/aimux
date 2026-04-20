@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -17,6 +18,29 @@ type AgentProvider interface {
 	Discover() ([]agent.Agent, error)
 }
 
+// SnapshotProvider is an optional interface for providers that can accept
+// a shared process snapshot. This avoids each provider calling `ps aux`
+// and `tmux list-sessions` independently (~200ms each).
+type SnapshotProvider interface {
+	DiscoverWithSnapshot(snap *Snapshot) ([]agent.Agent, error)
+}
+
+// Snapshot holds shared data collected once and reused by all providers.
+type Snapshot struct {
+	PsOutput     string         // raw `ps aux` output
+	TmuxSessions []TmuxSession  // parsed tmux sessions
+}
+
+// TakeSnapshot captures a process snapshot (ps aux + tmux) once.
+func TakeSnapshot() *Snapshot {
+	snap := &Snapshot{}
+	if out, err := exec.Command("ps", "aux").Output(); err == nil {
+		snap.PsOutput = string(out)
+	}
+	snap.TmuxSessions = ListTmuxSessions()
+	return snap
+}
+
 // Orchestrator coordinates multiple providers to produce a unified list of agents.
 type Orchestrator struct {
 	providers []AgentProvider
@@ -28,15 +52,11 @@ func NewOrchestrator(providers ...AgentProvider) *Orchestrator {
 }
 
 // Discover queries every registered provider and merges the results.
-// Individual provider errors are silently skipped so that one failing
-// provider does not prevent the others from returning agents.
-// Agents sharing the same project name get short unique suffixes to
-// disambiguate them in the UI (e.g. "myproject #1", "myproject #2").
+// A single process snapshot is taken first and shared with providers
+// that implement SnapshotProvider, avoiding redundant ps/tmux calls.
 func (o *Orchestrator) Discover() ([]agent.Agent, error) {
-	// Run all providers in parallel and wait for all to complete.
-	// Each provider owns its own timeouts (e.g., K8s uses 1s Redis
-	// timeouts + circuit breaker). No artificial deadline here —
-	// dropping slow results causes agents to flicker in the UI.
+	snap := TakeSnapshot()
+
 	type result struct {
 		agents []agent.Agent
 	}
@@ -44,7 +64,13 @@ func (o *Orchestrator) Discover() ([]agent.Agent, error) {
 	ch := make(chan result, len(o.providers))
 	for _, p := range o.providers {
 		go func(prov AgentProvider) {
-			agents, err := prov.Discover()
+			var agents []agent.Agent
+			var err error
+			if sp, ok := prov.(SnapshotProvider); ok {
+				agents, err = sp.DiscoverWithSnapshot(snap)
+			} else {
+				agents, err = prov.Discover()
+			}
 			if err == nil {
 				ch <- result{agents: agents}
 			} else {
