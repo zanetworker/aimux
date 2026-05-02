@@ -48,6 +48,9 @@ type HeaderView struct {
 
 	// Notification state
 	silenced bool
+
+	// Attention counter
+	attentionCount int
 }
 
 // NewHeaderView creates a new HeaderView.
@@ -93,6 +96,11 @@ func (h *HeaderView) SetTaskSummary(pending, active, completed, failed int) {
 // SetSilenced updates the notification mute state.
 func (h *HeaderView) SetSilenced(silenced bool) {
 	h.silenced = silenced
+}
+
+// SetAttentionCount updates the attention counter (agents waiting + recently done).
+func (h *HeaderView) SetAttentionCount(n int) {
+	h.attentionCount = n
 }
 
 // View renders the header.
@@ -243,6 +251,16 @@ func (h *HeaderView) renderInfoBoxes() string {
 	if taskSummary := h.renderTaskSummary(); taskSummary != "" {
 		taskBox := boxStyle.Render(taskSummary)
 		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", taskBox)
+	}
+
+	// Attention box (only show when count > 0)
+	if h.attentionCount > 0 {
+		attentionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+		attentionBox := boxStyle.Render(
+			labelStyle.Render("Attention") + "\n" +
+				attentionStyle.Render(fmt.Sprintf("⚠ %d need action", h.attentionCount)),
+		)
+		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", attentionBox)
 	}
 
 	return boxes

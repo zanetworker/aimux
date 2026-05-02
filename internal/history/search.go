@@ -196,3 +196,32 @@ func cleanSnippet(line, needle string) string {
 
 	return snippet
 }
+
+// SearchFile counts matches of query in a single JSONL file.
+// Returns the count and a snippet from the first match.
+// Used by cross-session search to check each agent's session file individually.
+func SearchFile(filePath, query string) (count int, snippet string) {
+	if filePath == "" || query == "" {
+		return 0, ""
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, ""
+	}
+	defer f.Close()
+
+	needle := strings.ToLower(query)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(strings.ToLower(line), needle) {
+			count++
+			if snippet == "" {
+				snippet = cleanSnippet(line, needle)
+			}
+		}
+	}
+	return count, snippet
+}

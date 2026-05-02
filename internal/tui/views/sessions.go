@@ -172,6 +172,9 @@ type SessionsView struct {
 	contentSearchInput TextInput
 	contentSearchIDs   map[string]string // session ID -> snippet (nil = no active search)
 
+	// Subagent filtering
+	showSubagents bool
+
 	// Trace preview (reused LogsView)
 	previewLogs  *LogsView
 	traceParser  TraceParser
@@ -397,6 +400,10 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			// Standalone deep content search inside session JSONL files
 			v.contentSearchMode = true
 			v.contentSearchInput.Reset()
+		case "H":
+			v.showSubagents = !v.showSubagents
+			v.cursor = 0
+			v.previewLogs = nil
 		}
 	}
 	return nil
@@ -669,6 +676,9 @@ func (v *SessionsView) visibleSessions() []history.Session {
 	isSearching := v.filterText != "" || v.contentSearchIDs != nil
 	var result []history.Session
 	for _, s := range v.sessions {
+		if !v.showSubagents && !isSearching && s.IsSubagent {
+			continue
+		}
 		// Hide near-empty sessions (auto-memory, system operations) unless searching
 		if !isSearching && s.CostUSD == 0 && s.TurnCount <= 5 {
 			continue
@@ -802,6 +812,17 @@ func (v *SessionsView) View() string {
 	countStr := fmt.Sprintf("  %d sessions", len(visible))
 	if len(visible) < len(v.sessions) {
 		countStr += sessDimStyle.Render(fmt.Sprintf("  (%d total)", len(v.sessions)))
+	}
+	if !v.showSubagents {
+		hiddenCount := 0
+		for _, s := range v.sessions {
+			if s.IsSubagent {
+				hiddenCount++
+			}
+		}
+		if hiddenCount > 0 {
+			countStr += sessDimStyle.Render(fmt.Sprintf("  (+%d agent)", hiddenCount))
+		}
 	}
 	if !v.showAll && v.currentDir != "" {
 		countStr += sessDimStyle.Render("  press A for all projects")
@@ -1069,6 +1090,9 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 			tag = tag[:18] + ".."
 		}
 		prefixes = append(prefixes, tag)
+	}
+	if s.IsSubagent {
+		prefixes = append([]string{"agent"}, prefixes...)
 	}
 	if len(prefixes) > 0 {
 		prompt = "[" + strings.Join(prefixes, "|") + "] " + prompt
@@ -1402,4 +1426,20 @@ func shortProject(path string) string {
 		}
 	}
 	return path
+}
+
+// SubagentCount returns the number of subagent sessions in the sessions list.
+func (v *SessionsView) SubagentCount() int {
+	count := 0
+	for _, s := range v.sessions {
+		if s.IsSubagent {
+			count++
+		}
+	}
+	return count
+}
+
+// ShowSubagents returns whether subagent sessions are currently visible.
+func (v *SessionsView) ShowSubagents() bool {
+	return v.showSubagents
 }

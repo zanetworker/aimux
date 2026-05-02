@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/cache"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/debuglog"
@@ -49,6 +50,9 @@ const (
 
 // tickMsg triggers periodic refresh.
 type tickMsg time.Time
+
+// traceRefreshMsg signals that the tailer detected new content in the session file.
+type traceRefreshMsg struct{}
 
 // instancesMsg carries discovered instances.
 type instancesMsg []agent.Agent
@@ -98,12 +102,17 @@ type App struct {
 	splitFocus     string          // "trace" or "session"
 	splitTrace     *views.LogsView // live trace pane in split mode
 	splitLaunchTime time.Time      // when :new session was launched (filters old files)
+	splitLoading   bool            // true while session is connecting (before first output)
 
 	// Command palette
 	commandMode   bool
 	commandInput  views.TextInput
 	exportConfirm bool // showing export menu
 	stickyHint    bool // true = statusHint persists until keypress (not cleared by tick)
+
+	// Preview panel focus (agents dashboard)
+	previewFocused  bool   // true when right panel has focus
+	previewSection  string // "trace" or "diff" — which section is active in right panel
 
 	// Filter mode
 	filterMode  bool
@@ -149,8 +158,9 @@ type App struct {
 	evalSessionID  string
 
 	// Notifications
-	prevStatuses map[int]agent.Status // PID -> last known status for transition detection
-	silenced     bool                 // TUI-level mute toggle (m key)
+	prevStatuses   map[int]agent.Status // PID -> last known status for transition detection
+	silenced       bool                 // TUI-level mute toggle (m key)
+	doneTimestamps map[int]time.Time    // PID -> timestamp when agent finished
 
 	// Config
 	cfg  config.Config
@@ -160,6 +170,14 @@ type App struct {
 	otelReceiver    *aimuxotel.Receiver
 	otelStore       *aimuxotel.SpanStore
 	lastEnrichTime  time.Time
+
+	// Startup cache: tracks which PIDs came from cache (stale) vs fresh discovery
+	staleAgents map[int]bool
+
+	// Live trace streaming: tailer watches the session JSONL and signals
+	// traceRefresh when new lines are appended.
+	activeTailer *trace.Tailer
+	traceRefresh chan struct{}
 }
 
 // NewApp creates a new root TUI application.
@@ -211,6 +229,13 @@ func NewApp() App {
 		}
 	}
 
+	// Load cached agents for instant first paint
+	cachedAgents, _ := cache.Load(cache.DefaultPath())
+	staleAgents := make(map[int]bool)
+	for _, a := range cachedAgents {
+		staleAgents[a.PID] = true
+	}
+
 	app := App{
 		currentView:  viewAgents,
 		headerView:   views.NewHeaderView(),
@@ -226,13 +251,17 @@ func NewApp() App {
 		layout:       NewLayout(0, 0),
 		orchestrator: discovery.NewOrchestrator(agentProviders...),
 		providers:    providers,
-		breadcrumbs:  []string{"Agents"},
-		hiddenAgents: make(map[string]bool),
-		prevStatuses: make(map[int]agent.Status),
-		cfg:          cfg,
-		ctrl:         ctrl,
-		otelStore:    aimuxotel.NewSpanStore(),
+		breadcrumbs:    []string{"Agents"},
+		hiddenAgents:   make(map[string]bool),
+		prevStatuses:   make(map[int]agent.Status),
+		doneTimestamps: make(map[int]time.Time),
+		cfg:            cfg,
+		ctrl:           ctrl,
+		otelStore:      aimuxotel.NewSpanStore(),
 		infraProvider:  infraProv,
+		instances:      cachedAgents,
+		staleAgents:    staleAgents,
+		traceRefresh:   make(chan struct{}, 1),
 	}
 
 	// Start OTEL receiver if enabled
@@ -240,6 +269,9 @@ func NewApp() App {
 		app.otelReceiver = aimuxotel.NewReceiverWithKeys(app.otelStore, cfg.OTELReceiverPort(), keysByService)
 		_ = app.otelReceiver.Start()
 	}
+
+	// Set cached agents as initial instances and mark them stale in AgentsView
+	app.agentsView.SetStalePIDs(staleAgents)
 
 	return app
 }
@@ -294,20 +326,65 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.instances = correlator.EnrichFromOTEL(a.instances, a.otelStore)
 			a.lastEnrichTime = a.otelStore.LastUpdate()
 		}
-		// Detect state transitions and fire notifications
-		if !a.silenced && a.cfg.Notifications.Enabled {
-			for _, inst := range a.instances {
-				prev, known := a.prevStatuses[inst.PID]
-				if known && prev != inst.Status {
+
+		// Save cache on discovery refresh
+		go cache.Save(cache.DefaultPath(), []agent.Agent(msg))
+		a.staleAgents = make(map[int]bool)
+		a.agentsView.SetStalePIDs(a.staleAgents)
+
+		now := time.Now()
+		// Detect state transitions, fire notifications, and ring bell
+		for _, inst := range a.instances {
+			prev, known := a.prevStatuses[inst.PID]
+			if known && prev != inst.Status {
+				// Track Active → Idle transitions (agent finished)
+				if prev == agent.StatusActive && inst.Status == agent.StatusIdle {
+					a.doneTimestamps[inst.PID] = now
+				}
+
+				// Fire notifications
+				if !a.silenced && a.cfg.Notifications.Enabled {
 					a.maybeNotify(inst)
+				}
+
+				// Ring terminal bell for attention events
+				shouldBell := false
+				switch {
+				case prev == agent.StatusActive && inst.Status == agent.StatusWaitingPermission:
+					shouldBell = true
+				case prev == agent.StatusActive && inst.Status == agent.StatusIdle:
+					shouldBell = true
+				case inst.Status == agent.StatusError && prev != agent.StatusError:
+					shouldBell = true
+				}
+				if shouldBell && !a.silenced && a.cfg.Notifications.Bell {
+					fmt.Print("\a")
 				}
 			}
 		}
+
 		// Update previous statuses
 		a.prevStatuses = make(map[int]agent.Status, len(a.instances))
 		for _, inst := range a.instances {
 			a.prevStatuses[inst.PID] = inst.Status
 		}
+
+		// Calculate attention count: waiting + recently done (last 60s)
+		attention := 0
+		for _, inst := range a.instances {
+			if inst.Status == agent.StatusWaitingPermission {
+				attention++
+			}
+		}
+		// Add recently-done agents (within 60 seconds)
+		for pid, doneAt := range a.doneTimestamps {
+			if now.Sub(doneAt) < 60*time.Second {
+				attention++
+			} else {
+				delete(a.doneTimestamps, pid)
+			}
+		}
+		a.headerView.SetAttentionCount(attention)
 
 		a.agentsView.SetAgents(a.instances)
 		a.headerView.SetAgents(a.instances)
@@ -353,6 +430,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						if sf != "" {
 							a.splitTrace.SetFilePath(sf)
+							// Start tailer now that we have a file to watch.
+							if a.activeTailer == nil {
+								a.activeTailer = startTraceTailer(sf, a.traceRefresh)
+								if a.activeTailer != nil {
+									return a, tea.Batch(a.waitForTraceRefresh())
+								}
+							}
 						}
 					}
 				}
@@ -364,6 +448,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case teamsMsg:
 		a.teams = []team.TeamConfig(msg)
 		a.teamsView.SetTeams(a.teams)
+		return a, nil
+
+	case traceRefreshMsg:
+		if a.splitMode && a.splitTrace != nil {
+			a.splitTrace.Reload()
+		}
+		// Re-arm the channel listener for the next change.
+		if a.activeTailer != nil {
+			return a, a.waitForTraceRefresh()
+		}
 		return a, nil
 
 	case views.LaunchResumeMsg:
@@ -456,6 +550,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.zoomed = true
 			a.splitMode = true       // always split -- trace fills in as data arrives
 			a.splitFocus = "session" // focus on session so user can type
+			a.splitLoading = true    // show loading placeholder until first PTY output
 			a.layout.SetZoomed(true)
 			a.statusHint = fmt.Sprintf("Launched %s in %s", msg.Provider, name)
 			return a, teaCmd
@@ -471,6 +566,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case views.PTYOutputMsg:
+		if a.splitLoading {
+			a.splitLoading = false
+		}
 		if a.sessionView != nil {
 			cmd := a.sessionView.HandleOutput(msg.Data)
 			return a, cmd
@@ -479,9 +577,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case views.PTYExitMsg:
 		debuglog.Log("tui: PTYExitMsg received — exiting zoom")
+		a.stopActiveTailer()
 		a.zoomed = false
 		a.splitMode = false
 		a.splitTrace = nil
+		a.splitLoading = false
 		a.layout.SetZoomed(false)
 		if a.sessionView != nil {
 			agentName := ""
@@ -739,12 +839,24 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Tab switches focus — only in split mode
+	// Tab switches focus
 	if key == "tab" && a.splitMode {
 		if a.splitFocus == "trace" {
 			a.splitFocus = "session"
 		} else {
 			a.splitFocus = "trace"
+		}
+		return a, nil
+	}
+	if key == "tab" && a.currentView == viewAgents && !a.commandMode && !a.filterMode {
+		a.previewFocused = !a.previewFocused
+		if a.previewFocused {
+			if a.previewSection == "" {
+				a.previewSection = "trace"
+			}
+			a.statusHint = fmt.Sprintf("Preview [%s] (Tab:back, j/k:scroll, up/down:switch section)", a.previewSection)
+		} else {
+			a.statusHint = ""
 		}
 		return a, nil
 	}
@@ -763,6 +875,11 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.exportConfirm = true
 			a.statusHint = "Export: j:JSONL  o:OTEL  Esc:cancel"
 			a.stickyHint = true
+			return a, nil
+		}
+		// Intercept "$" for cost-per-turn toggle
+		if key == "$" {
+			a.splitTrace.ToggleCostPerTurn()
 			return a, nil
 		}
 		cmd := a.splitTrace.Update(msg)
@@ -816,10 +933,12 @@ func (a App) exitZoom() (tea.Model, tea.Cmd) {
 	}
 
 	// Fully exited
+	a.stopActiveTailer()
 	a.zoomed = false
 	a.splitMode = false
 	a.splitTrace = nil
 	a.splitLaunchTime = time.Time{}
+	a.splitLoading = false
 	a.layout.SetZoomed(false)
 	a.sessionView.Close()
 	return a, nil
@@ -898,6 +1017,24 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			return a.openHealth()
 		}
+	case "d":
+		if a.currentView == viewAgents && a.previewPane != nil {
+			if a.previewPane.IsDiffExpanded() {
+				a.previewPane.ToggleDiff()
+				a.statusHint = "Diff view closed"
+			} else if a.previewPane.IsDiffPickerMode() {
+				a.previewPane.ToggleDiff()
+				a.statusHint = ""
+			} else {
+				a.previewPane.ToggleDiff()
+				if a.previewPane.IsDiffPickerMode() {
+					a.statusHint = "Select file (j/k:navigate, Enter:view, Esc:close)"
+				} else {
+					a.statusHint = "No git changes"
+				}
+			}
+			return a, nil
+		}
 	case "esc":
 		if a.filterInput.Value() != "" {
 			a.filterInput.Reset()
@@ -918,6 +1055,20 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a.navigateBack()
 	case "enter", " ":
+		// Enter in file diff view -> back to file picker
+		if a.currentView == viewAgents && a.previewPane != nil && a.previewPane.IsDiffExpanded() {
+			a.previewPane.DiffPickerBack()
+			a.statusHint = "Select file (j/k:navigate, Enter:view, Esc:close)"
+			return a, nil
+		}
+		// Enter in diff file picker -> select file
+		if a.currentView == viewAgents && a.previewPane != nil && a.previewPane.IsDiffPickerMode() {
+			a.previewPane.DiffPickerSelect()
+			if a.previewPane.IsDiffExpanded() {
+				a.statusHint = "File diff (j/k:scroll, Enter/Esc:back, d:close)"
+			}
+			return a, nil
+		}
 		// Enter/Space in logs view -> expand/collapse turns
 		if a.currentView == viewLogs && a.logsView != nil {
 			cmd := a.logsView.Update(msg)
@@ -934,6 +1085,124 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a.jumpToSession()
 		}
 		return a.handleJump()
+	case "$":
+		if a.currentView == viewLogs && a.logsView != nil {
+			a.logsView.ToggleCostPerTurn()
+			return a, nil
+		}
+	}
+
+	// Right panel focused: j/k navigate within current section, boundary crossing switches sections
+	if a.currentView == viewAgents && a.previewFocused && a.previewPane != nil {
+		switch msg.String() {
+		case "j", "down":
+			if a.previewSection == "trace" {
+				if a.previewPane.TraceIsAtBottom() && a.previewPane.HasDiffChanges() {
+					a.previewSection = "diff"
+					a.previewPane.ToggleDiff()
+					a.statusHint = fmt.Sprintf("Preview [%s] (Tab:back, j/k:scroll)", a.previewSection)
+				} else {
+					a.previewPane.TraceScrollDown()
+				}
+			} else if a.previewSection == "diff" {
+				if a.previewPane.IsDiffPickerMode() {
+					a.previewPane.DiffPickerDown()
+				} else if a.previewPane.IsDiffExpanded() {
+					a.previewPane.ScrollDiff(1)
+				}
+			}
+			return a, nil
+		case "k", "up":
+			if a.previewSection == "trace" {
+				if a.previewPane.TraceIsAtTop() && a.previewPane.HasDiffChanges() {
+					a.previewSection = "diff"
+					a.previewPane.ToggleDiff()
+					a.statusHint = fmt.Sprintf("Preview [%s] (Tab:back, j/k:scroll)", a.previewSection)
+				} else {
+					a.previewPane.TraceScrollUp()
+				}
+			} else if a.previewSection == "diff" {
+				if a.previewPane.IsDiffPickerMode() {
+					a.previewPane.DiffPickerUp()
+				} else if a.previewPane.IsDiffExpanded() {
+					a.previewPane.ScrollDiff(-1)
+				}
+			}
+			return a, nil
+		case "enter", " ":
+			if a.previewSection == "diff" {
+				if a.previewPane.IsDiffExpanded() {
+					a.previewPane.DiffPickerBack()
+					a.statusHint = "Preview [diff] (j/k:navigate, Enter:view, Esc:back)"
+				} else if a.previewPane.IsDiffPickerMode() {
+					a.previewPane.DiffPickerSelect()
+					if a.previewPane.IsDiffExpanded() {
+						a.statusHint = "Preview [diff] (j/k:scroll, Enter/Esc:back)"
+					}
+				}
+				return a, nil
+			}
+			// In trace section, switch to diff section
+			a.previewSection = "diff"
+			a.previewPane.ToggleDiff()
+			a.statusHint = fmt.Sprintf("Preview [%s] (Tab:back, j/k:scroll)", a.previewSection)
+			return a, nil
+		case "esc":
+			if a.previewSection == "diff" {
+				if a.previewPane.IsDiffExpanded() {
+					a.previewPane.DiffPickerBack()
+					a.statusHint = "Preview [diff] (j/k:navigate, Enter:view)"
+					return a, nil
+				}
+				if a.previewPane.IsDiffPickerMode() {
+					a.previewPane.DiffPickerBack()
+				}
+				// Switch back to trace
+				a.previewSection = "trace"
+				a.statusHint = fmt.Sprintf("Preview [%s] (Tab:back, j/k:scroll)", a.previewSection)
+				return a, nil
+			}
+			// Esc from trace in right panel -> return focus to left
+			a.previewFocused = false
+			a.statusHint = ""
+			return a, nil
+		case "tab":
+			a.previewFocused = false
+			a.statusHint = ""
+			return a, nil
+		}
+		return a, nil
+	}
+
+	// Intercept j/k for diff scrolling when diff is expanded in preview pane
+	if a.currentView == viewAgents && a.previewPane != nil && a.previewPane.IsDiffPickerMode() {
+		switch msg.String() {
+		case "j", "down":
+			a.previewPane.DiffPickerDown()
+			return a, nil
+		case "k", "up":
+			a.previewPane.DiffPickerUp()
+			return a, nil
+		case "esc":
+			a.previewPane.DiffPickerBack()
+			a.statusHint = ""
+			return a, nil
+		}
+	}
+
+	if a.currentView == viewAgents && a.previewPane != nil && a.previewPane.IsDiffExpanded() {
+		switch msg.String() {
+		case "j", "down":
+			a.previewPane.ScrollDiff(1)
+			return a, nil
+		case "k", "up":
+			a.previewPane.ScrollDiff(-1)
+			return a, nil
+		case "esc":
+			a.previewPane.DiffPickerBack()
+			a.statusHint = "Select file (j/k:navigate, Enter:view, Esc:close)"
+			return a, nil
+		}
 	}
 
 	// Delegate navigation keys to the current view
@@ -1569,13 +1838,21 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		}
 		a.splitTrace.SetAnnotations(annotMap)
 		a.splitTrace.SetNotes(noteMap)
+
+		// Start live file tailer for real-time trace updates.
+		a.activeTailer = startTraceTailer(sessionFile, a.traceRefresh)
 	}
 
 	a.zoomed = true
 	a.splitMode = true
 	a.splitFocus = "trace" // start with focus on the trace pane (left)
+	a.splitLoading = true   // show loading placeholder until first PTY output
 	a.layout.SetZoomed(true)
-	return a, teaCmd
+	cmds := []tea.Cmd{teaCmd}
+	if a.activeTailer != nil {
+		cmds = append(cmds, a.waitForTraceRefresh())
+	}
+	return a, tea.Batch(cmds...)
 }
 
 // openK8sSession attaches to a K8s session pod via kubectl exec + tmux.
@@ -1848,6 +2125,9 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 		}
 		a.splitTrace.SetAnnotations(annotMap)
 		a.splitTrace.SetNotes(noteMap)
+
+		// Start live file tailer for real-time trace updates.
+		a.activeTailer = startTraceTailer(sessionFilePath, a.traceRefresh)
 	} else {
 		debuglog.Log("tui: resumeSession: no session file, splitTrace will be nil")
 	}
@@ -1855,9 +2135,14 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 	a.zoomed = true
 	a.splitMode = true
 	a.splitFocus = "session" // start with focus on the live session (right)
+	a.splitLoading = true      // show loading placeholder until first PTY output
 	a.layout.SetZoomed(true)
 	debuglog.Log("tui: resumeSession complete: zoomed=%v splitMode=%v splitFocus=%q splitTrace=%v", a.zoomed, a.splitMode, a.splitFocus, a.splitTrace != nil)
-	return a, teaCmd
+	cmds := []tea.Cmd{teaCmd}
+	if a.activeTailer != nil {
+		cmds = append(cmds, a.waitForTraceRefresh())
+	}
+	return a, tea.Batch(cmds...)
 }
 
 // promptKill shows a confirmation prompt before killing the selected agent.
@@ -2184,9 +2469,9 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
-		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  :export  :export-otel  Esc:back")
+		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  $:costs  :export  :export-otel  Esc:back")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
@@ -2194,7 +2479,14 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		a.headerView.SetHint("j/k:nav  Enter:resume  C:copy-id  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back")
+		hint := "j/k:nav  Enter:resume  C:copy-id  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
+		if a.sessionsView.ShowSubagents() {
+			hint += "  H:hide-agents"
+		} else {
+			hint += "  H:show-agents"
+		}
+		hint += "  Esc:back"
+		a.headerView.SetHint(hint)
 	case viewHealth:
 		a.headerView.SetHint("Esc:back  :health to refresh")
 	case viewHelp:
@@ -2336,7 +2628,17 @@ func (a App) renderSplitView() string {
 	}
 
 	// Right pane: session (rendered by SessionView with its own header/status)
-	sessionContent := a.sessionView.View()
+	var sessionContent string
+	if a.splitLoading {
+		// Show loading placeholder while session is connecting
+		sessionContent = lipgloss.Place(
+			rightW, contentH,
+			lipgloss.Center, lipgloss.Center,
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Loading session..."),
+		)
+	} else {
+		sessionContent = a.sessionView.View()
+	}
 	rightLines := strings.Split(sessionContent, "\n")
 	// Replace session header with our focused/unfocused version
 	sessionHeaderStyle := unfocusedHeaderStyle
@@ -2396,7 +2698,7 @@ func (a App) renderSplitView() string {
 		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
 		focusHint = noteStyle.Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + noteStyle.Render("|")
 	} else if focus == "trace" {
-		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  e:export"
+		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  $:costs  e:export"
 	} else {
 		focusHint = " [SESSION] typing goes to agent"
 	}
@@ -2459,7 +2761,7 @@ func (a App) renderStatusBar() string {
 		}
 		hints = " " + lipgloss.NewStyle().Foreground(hintColor).Bold(true).Render(a.statusHint)
 	} else if a.currentView == viewLogs {
-		hints = " j/k:turns  Enter:expand  a:annotate  N:note  /:filter  :export  :export-otel  Esc:back"
+		hints = " j/k:turns  Enter:expand  a:annotate  N:note  $:costs  /:filter  :export  :export-otel  Esc:back"
 	} else if a.currentView == viewSessions {
 		hints = " j/k:nav  Enter:resume  C:copy-id  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back"
 		if a.sessionsView.HasActiveFilter() {
@@ -2548,6 +2850,45 @@ func (a App) activeTraceSessionID() string {
 		return fmt.Sprintf("pid-%d", ag.PID)
 	}
 	return ""
+}
+
+// startTraceTailer creates a Tailer for the given session file. When new lines
+// are appended, it sends a non-blocking signal on the channel so the Bubble Tea
+// event loop can re-parse the trace. Returns nil if the file cannot be watched.
+func startTraceTailer(path string, ch chan struct{}) *trace.Tailer {
+	tailer, err := trace.NewTailer(path, func(_ string) {
+		// Non-blocking send: if a signal is already pending, skip.
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	})
+	if err != nil {
+		return nil
+	}
+	return tailer
+}
+
+// waitForTraceRefresh returns a tea.Cmd that blocks until the traceRefresh
+// channel receives a signal, then delivers a traceRefreshMsg.
+func (a App) waitForTraceRefresh() tea.Cmd {
+	return func() tea.Msg {
+		<-a.traceRefresh
+		return traceRefreshMsg{}
+	}
+}
+
+// stopActiveTailer stops the active file tailer and drains the channel.
+func (a *App) stopActiveTailer() {
+	if a.activeTailer != nil {
+		a.activeTailer.Stop()
+		a.activeTailer = nil
+	}
+	// Drain any pending signal so it doesn't fire after split exit.
+	select {
+	case <-a.traceRefresh:
+	default:
+	}
 }
 
 // otelEnvForCmd merges OTEL env vars (from the provider's OTELEnv shell prefix)

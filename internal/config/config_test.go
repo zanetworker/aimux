@@ -195,6 +195,19 @@ func TestNotificationsConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestDefaultNotificationConfig(t *testing.T) {
+	cfg := Default()
+	if !cfg.Notifications.Bell {
+		t.Error("expected Bell default true")
+	}
+	if !cfg.Notifications.Desktop {
+		t.Error("expected Desktop default true")
+	}
+	if !cfg.Notifications.OnDone {
+		t.Error("expected OnDone default true")
+	}
+}
+
 func TestNotificationsConfigFromFile(t *testing.T) {
 	yamlContent := `
 notifications:

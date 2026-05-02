@@ -74,13 +74,15 @@ type AgentsView struct {
 	width       int
 	height      int
 	filter      string
-	sortField   string // "", "name", "cost", "age", "model"
+	sortField   string        // "", "name", "cost", "age", "model"
+	stalePIDs   map[int]bool  // PIDs that came from cache (stale)
 }
 
 // NewAgentsView creates a new AgentsView.
 func NewAgentsView() *AgentsView {
 	return &AgentsView{
-		expanded: make(map[int]bool),
+		expanded:  make(map[int]bool),
+		stalePIDs: make(map[int]bool),
 	}
 }
 
@@ -193,6 +195,11 @@ func (v *AgentsView) SetSize(w, h int) {
 func (v *AgentsView) SetFilter(f string) {
 	v.filter = f
 	v.cursor = 0
+}
+
+// SetStalePIDs sets the map of PIDs that came from cache (stale).
+func (v *AgentsView) SetStalePIDs(pids map[int]bool) {
+	v.stalePIDs = pids
 }
 
 // Selected returns the currently selected agent, or nil.
@@ -388,7 +395,7 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 
 	loc := agentLocation(a)
 
-	return " " + padRight(nameCol, colName) + " " +
+	row := " " + padRight(nameCol, colName) + " " +
 		padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
 		padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
 		padRight(truncate(loc, colLoc), colLoc) + " " +
@@ -396,6 +403,14 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 		padRight(truncate(a.LastAction, colLast), colLast) + " " +
 		padRight(a.FormatAge(), colAge) + " " +
 		padRight(costRendered, colCostA)
+
+	// Apply dim styling if this agent is stale (from cache)
+	if v.stalePIDs[a.PID] {
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#4B5563"))
+		row = dimStyle.Render(row)
+	}
+
+	return row
 }
 
 // renderChildRow renders a sub-process row with tree glyphs and process info.
