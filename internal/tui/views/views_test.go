@@ -749,3 +749,94 @@ func TestTeamsViewRender(t *testing.T) {
 		t.Error("empty teams view should show 'No teams'")
 	}
 }
+
+// --- LogsView.ToggleCostPerTurn tests ---
+
+// --- LogsView.IsAtBottom / SnapToBottom tests ---
+
+func TestLogsViewIsAtBottom_EmptyTurns(t *testing.T) {
+	v := NewLogsView(0, "", nil)
+	if !v.IsAtBottom() {
+		t.Error("IsAtBottom should return true when there are no turns")
+	}
+}
+
+func TestLogsViewIsAtBottom_CursorAtEnd(t *testing.T) {
+	v := NewLogsView(0, "", nil)
+	// Inject turns directly for unit testing.
+	v.turns = []TraceTurn{
+		{Number: 1, UserLines: []string{"first"}},
+		{Number: 2, UserLines: []string{"second"}},
+	}
+	v.cursor = 1 // last turn
+	if !v.IsAtBottom() {
+		t.Error("IsAtBottom should return true when cursor is at the last turn")
+	}
+}
+
+func TestLogsViewIsAtBottom_CursorNotAtEnd(t *testing.T) {
+	v := NewLogsView(0, "", nil)
+	v.turns = []TraceTurn{
+		{Number: 1, UserLines: []string{"first"}},
+		{Number: 2, UserLines: []string{"second"}},
+	}
+	v.cursor = 0
+	if v.IsAtBottom() {
+		t.Error("IsAtBottom should return false when cursor is not at the last turn")
+	}
+}
+
+func TestLogsViewSnapToBottom(t *testing.T) {
+	v := NewLogsView(0, "", nil)
+	v.turns = []TraceTurn{
+		{Number: 1, UserLines: []string{"first"}},
+		{Number: 2, UserLines: []string{"second"}},
+		{Number: 3, UserLines: []string{"third"}},
+	}
+	v.cursor = 0
+	v.scrollOffset = 5
+
+	v.SnapToBottom()
+
+	if v.cursor != 2 {
+		t.Errorf("cursor = %d, want 2 (last turn)", v.cursor)
+	}
+	if v.scrollOffset != 0 {
+		t.Errorf("scrollOffset = %d, want 0", v.scrollOffset)
+	}
+}
+
+func TestLogsViewSnapToBottom_Empty(t *testing.T) {
+	v := NewLogsView(0, "", nil)
+	v.scrollOffset = 5
+
+	v.SnapToBottom()
+
+	if v.cursor != 0 {
+		t.Errorf("cursor = %d, want 0 (empty turns)", v.cursor)
+	}
+	if v.scrollOffset != 0 {
+		t.Errorf("scrollOffset = %d, want 0", v.scrollOffset)
+	}
+}
+
+func TestLogsViewToggleCostPerTurn(t *testing.T) {
+	v := NewLogsView(0, "", nil)
+
+	// Initial state should be false
+	if v.showCostPerTurn {
+		t.Error("initial showCostPerTurn should be false")
+	}
+
+	// Toggle to true
+	v.ToggleCostPerTurn()
+	if !v.showCostPerTurn {
+		t.Error("after first toggle, showCostPerTurn should be true")
+	}
+
+	// Toggle back to false
+	v.ToggleCostPerTurn()
+	if v.showCostPerTurn {
+		t.Error("after second toggle, showCostPerTurn should be false")
+	}
+}

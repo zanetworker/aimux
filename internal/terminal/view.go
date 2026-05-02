@@ -18,6 +18,11 @@ type TermView struct {
 	height     int
 	history    []string // scroll-back buffer: past screen renders
 	scrollBack int      // 0 = live bottom, >0 = lines scrolled up
+
+	dirty        bool   // set on Write, cleared on Render
+	cachedView   string // last Render() output
+	cacheScroll  int    // scrollBack value when cachedView was built
+	bytesWritten int    // bytes written since last history snapshot
 }
 
 // NewTermView creates a new TermView with the given column and row dimensions.
@@ -60,34 +65,46 @@ func NewTermView(cols, rows int, responseSink ...io.Writer) *TermView {
 }
 
 // Write feeds raw PTY output into the VT emulator. This processes ANSI escape
-// sequences and updates the internal screen buffer. Before writing, the current
-// screen is snapshotted into the scroll-back history if the content changes.
+// sequences and updates the internal screen buffer. History snapshots are
+// deferred to SnapshotHistory(), which should be called on a debounce timer
+// rather than on every write. This avoids the expensive double-Render that
+// the old implementation performed.
 func (tv *TermView) Write(data []byte) {
+	// Feed the VT emulator. SafeEmulator is internally thread-safe,
+	// so we must NOT hold tv.mu during this call to avoid deadlock
+	// with concurrent Render calls.
+	tv.term.Write(data)
+
 	tv.mu.Lock()
-	preRender := tv.term.Render()
+	tv.dirty = true
+	tv.bytesWritten += len(data)
+	tv.mu.Unlock()
+}
+
+// SnapshotHistory captures the current screen into the scroll-back buffer.
+// Call this on a debounce timer (e.g., every 100ms) rather than on every
+// Write, to amortise the cost of Render across bursts of PTY output.
+func (tv *TermView) SnapshotHistory() {
+	tv.mu.Lock()
+	if tv.bytesWritten == 0 {
+		tv.mu.Unlock()
+		return
+	}
 	tv.mu.Unlock()
 
-	tv.term.Write(data)
+	// Render outside the lock: SafeEmulator is thread-safe.
+	rendered := tv.term.Render()
 
 	tv.mu.Lock()
 	defer tv.mu.Unlock()
 
-	postRender := tv.term.Render()
-
-	// If content changed, capture pre-render lines into history
-	if preRender != postRender {
-		for _, line := range strings.Split(preRender, "\n") {
-			tv.history = append(tv.history, line)
-		}
-		// Cap history at 10000 lines to prevent unbounded growth
-		if len(tv.history) > 10000 {
-			tv.history = tv.history[len(tv.history)-10000:]
-		}
+	for _, line := range strings.Split(rendered, "\n") {
+		tv.history = append(tv.history, line)
 	}
-
-	// Only snap to bottom if user is not scrolled back.
-	// This prevents yanking the viewport away while reading history.
-	// User must explicitly PgDn/scroll down to return to live view.
+	if len(tv.history) > 10000 {
+		tv.history = tv.history[len(tv.history)-10000:]
+	}
+	tv.bytesWritten = 0
 }
 
 // Resize changes the dimensions of the virtual terminal.
@@ -101,32 +118,51 @@ func (tv *TermView) Resize(cols, rows int) {
 
 // Render returns the current screen buffer as a string with ANSI styling.
 // When scrolled back, it returns lines from the history buffer instead of the
-// live terminal output.
+// live terminal output. Results are cached and reused until the next Write or
+// scroll position change.
 func (tv *TermView) Render() string {
 	tv.mu.Lock()
 	scrollBack := tv.scrollBack
-	histLen := len(tv.history)
-	height := tv.height
+	dirty := tv.dirty
 	tv.mu.Unlock()
 
-	if scrollBack == 0 || histLen == 0 {
-		return tv.term.Render()
+	// Return cached result if nothing changed
+	if !dirty && scrollBack == tv.cacheScroll && tv.cachedView != "" {
+		return tv.cachedView
+	}
+
+	var result string
+	if scrollBack == 0 {
+		// Live view: render from the VT emulator (thread-safe, no lock needed)
+		result = tv.term.Render()
+	} else {
+		tv.mu.Lock()
+		histLen := len(tv.history)
+		height := tv.height
+		end := histLen
+		start := end - scrollBack
+		if start < 0 {
+			start = 0
+		}
+		var b strings.Builder
+		b.Grow(height * (tv.width + 1))
+		for i := start; i < end && i-start < height; i++ {
+			if i > start {
+				b.WriteByte('\n')
+			}
+			b.WriteString(tv.history[i])
+		}
+		result = b.String()
+		tv.mu.Unlock()
 	}
 
 	tv.mu.Lock()
-	// Take lines from history
-	end := histLen
-	start := end - scrollBack
-	if start < 0 {
-		start = 0
-	}
-	visible := make([]string, 0, height)
-	for i := start; i < end && len(visible) < height; i++ {
-		visible = append(visible, tv.history[i])
-	}
+	tv.dirty = false
+	tv.cachedView = result
+	tv.cacheScroll = scrollBack
 	tv.mu.Unlock()
 
-	return strings.Join(visible, "\n")
+	return result
 }
 
 // ScrollUp moves the viewport up by n lines.

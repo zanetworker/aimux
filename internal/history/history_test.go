@@ -584,6 +584,292 @@ func TestTitleForSessionFile(t *testing.T) {
 	}
 }
 
+func TestScanSession_SubagentDetection(t *testing.T) {
+	tests := map[string]struct {
+		lines    []map[string]interface{}
+		wantSub  bool
+		wantPerm string
+	}{
+		"bypass_no_human_is_subagent": {
+			lines: func() []map[string]interface{} {
+				ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+				return []map[string]interface{}{
+					{
+						"type":           "human",
+						"timestamp":      ts.Format(time.RFC3339),
+						"permissionMode": "bypassPermissions",
+						"message": map[string]interface{}{
+							"role": "user",
+							"content": []map[string]interface{}{
+								{"type": "tool_result", "tool_use_id": "t1", "content": "ok"},
+							},
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "Done."}},
+						},
+					},
+				}
+			}(),
+			wantSub:  true,
+			wantPerm: "bypassPermissions",
+		},
+		"bypass_with_human_not_subagent": {
+			lines: func() []map[string]interface{} {
+				ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+				return []map[string]interface{}{
+					{
+						"type":           "human",
+						"timestamp":      ts.Format(time.RFC3339),
+						"permissionMode": "bypassPermissions",
+						"message": map[string]interface{}{
+							"role": "user",
+							"content": []map[string]interface{}{
+								{"type": "text", "text": "Please fix the login page"},
+							},
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "Done."}},
+						},
+					},
+				}
+			}(),
+			wantSub:  false,
+			wantPerm: "bypassPermissions",
+		},
+		"default_no_human_short_is_subagent": {
+			lines: func() []map[string]interface{} {
+				ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+				return []map[string]interface{}{
+					{
+						"type":           "human",
+						"timestamp":      ts.Format(time.RFC3339),
+						"permissionMode": "default",
+						"message": map[string]interface{}{
+							"role": "user",
+							"content": []map[string]interface{}{
+								{"type": "tool_result", "tool_use_id": "t1", "content": "ok"},
+							},
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(2 * time.Minute).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "Done."}},
+						},
+					},
+				}
+			}(),
+			wantSub:  true,
+			wantPerm: "default",
+		},
+		"default_no_human_long_not_subagent": {
+			lines: func() []map[string]interface{} {
+				ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+				return []map[string]interface{}{
+					{
+						"type":           "human",
+						"timestamp":      ts.Format(time.RFC3339),
+						"permissionMode": "default",
+						"message": map[string]interface{}{
+							"role": "user",
+							"content": []map[string]interface{}{
+								{"type": "tool_result", "tool_use_id": "t1", "content": "ok"},
+							},
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(10 * time.Minute).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "Done."}},
+						},
+					},
+				}
+			}(),
+			wantSub:  false,
+			wantPerm: "default",
+		},
+		"normal_interactive_session": {
+			lines: func() []map[string]interface{} {
+				ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+				return []map[string]interface{}{
+					{
+						"type":           "human",
+						"timestamp":      ts.Format(time.RFC3339),
+						"permissionMode": "default",
+						"message": map[string]interface{}{
+							"role": "user",
+							"content": []map[string]interface{}{
+								{"type": "text", "text": "fix the bug in main.go"},
+							},
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "I'll look at it."}},
+						},
+					},
+					{
+						"type":      "human",
+						"timestamp": ts.Add(2 * time.Minute).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role": "user",
+							"content": []map[string]interface{}{
+								{"type": "text", "text": "also check the tests"},
+							},
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(3 * time.Minute).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "Tests pass."}},
+						},
+					},
+				}
+			}(),
+			wantSub:  false,
+			wantPerm: "default",
+		},
+		"local_command_caveat_not_human": {
+			lines: func() []map[string]interface{} {
+				ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+				return []map[string]interface{}{
+					{
+						"type":           "human",
+						"timestamp":      ts.Format(time.RFC3339),
+						"permissionMode": "bypassPermissions",
+						"message": map[string]interface{}{
+							"role":    "user",
+							"content": "<local-command-caveat>run ls</local-command-caveat>",
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "Done."}},
+						},
+					},
+				}
+			}(),
+			wantSub:  true,
+			wantPerm: "bypassPermissions",
+		},
+		"command_name_not_human": {
+			lines: func() []map[string]interface{} {
+				ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+				return []map[string]interface{}{
+					{
+						"type":           "human",
+						"timestamp":      ts.Format(time.RFC3339),
+						"permissionMode": "bypassPermissions",
+						"message": map[string]interface{}{
+							"role":    "user",
+							"content": "<command-name>bash</command-name>",
+						},
+					},
+					{
+						"type":      "assistant",
+						"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": []map[string]interface{}{{"type": "text", "text": "Done."}},
+						},
+					},
+				}
+			}(),
+			wantSub:  true,
+			wantPerm: "bypassPermissions",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			filePath := writeSessionJSONL(t, dir, "sub-"+name, tc.lines)
+
+			s, err := scanSession("sub-"+name, filePath, "/test")
+			if err != nil {
+				t.Fatalf("scanSession: %v", err)
+			}
+			if s.IsSubagent != tc.wantSub {
+				t.Errorf("IsSubagent = %v, want %v", s.IsSubagent, tc.wantSub)
+			}
+			if s.PermissionMode != tc.wantPerm {
+				t.Errorf("PermissionMode = %q, want %q", s.PermissionMode, tc.wantPerm)
+			}
+		})
+	}
+}
+
+func TestIsHumanMessage(t *testing.T) {
+	tests := map[string]struct {
+		content json.RawMessage
+		want    bool
+	}{
+		"nil_content": {
+			content: nil,
+			want:    false,
+		},
+		"plain_text_human": {
+			content: json.RawMessage(`"fix the bug in main.go"`),
+			want:    true,
+		},
+		"local_command_caveat": {
+			content: json.RawMessage(`"<local-command-caveat>run ls</local-command-caveat>"`),
+			want:    false,
+		},
+		"command_name": {
+			content: json.RawMessage(`"<command-name>bash</command-name>"`),
+			want:    false,
+		},
+		"text_block_human": {
+			content: json.RawMessage(`[{"type":"text","text":"please review this code"}]`),
+			want:    true,
+		},
+		"tool_result_only": {
+			content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]`),
+			want:    false,
+		},
+		"mixed_tool_result_no_text": {
+			content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"t1","content":"ok"},{"type":"tool_result","tool_use_id":"t2","content":"done"}]`),
+			want:    false,
+		},
+		"empty_string": {
+			content: json.RawMessage(`""`),
+			want:    false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := isHumanMessage(tc.content)
+			if got != tc.want {
+				t.Errorf("isHumanMessage = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestScanSession_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "empty.jsonl")

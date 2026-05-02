@@ -129,6 +129,7 @@ type LogsView struct {
 	compact      bool           // when true, hides the interactive status bar (for preview pane)
 	scrollOffset int            // line-level scroll offset within the rendered view
 	warning      string         // provider-specific warning shown above turns
+	showCostPerTurn bool        // when true, shows cost/tokens inline after each turn
 }
 
 // NewLogsView creates a new LogsView for the given PID and log file path.
@@ -197,6 +198,46 @@ func (v *LogsView) SetNotes(n map[int]string) {
 // Notes returns the current notes map for export.
 func (v *LogsView) Notes() map[int]string {
 	return v.notes
+}
+
+// IsAtBottom returns true if the cursor is at the last turn.
+// Used to decide whether live trace updates should auto-follow.
+func (v *LogsView) IsAtBottom() bool {
+	return len(v.turns) == 0 || v.cursor >= len(v.turns)-1
+}
+
+// SnapToBottom moves the cursor to the last turn and resets scroll offset.
+func (v *LogsView) SnapToBottom() {
+	if len(v.turns) > 0 {
+		v.cursor = len(v.turns) - 1
+	}
+	v.scrollOffset = 0
+}
+
+// IsAtTop returns true if the cursor is at the first turn with no scroll offset.
+func (v *LogsView) IsAtTop() bool {
+	return v.cursor == 0 && v.scrollOffset == 0
+}
+
+// ScrollCursorDown moves the cursor down one turn (for external callers).
+func (v *LogsView) ScrollCursorDown() {
+	if v.cursor < len(v.turns)-1 {
+		v.cursor++
+		v.scrollOffset = 0
+	}
+}
+
+// ScrollCursorUp moves the cursor up one turn (for external callers).
+func (v *LogsView) ScrollCursorUp() {
+	if v.cursor > 0 {
+		v.cursor--
+		v.scrollOffset = 0
+	}
+}
+
+// ToggleCostPerTurn toggles the cost-per-turn display mode.
+func (v *LogsView) ToggleCostPerTurn() {
+	v.showCostPerTurn = !v.showCostPerTurn
 }
 
 // NoteMode returns true if the user is currently typing a note.
@@ -808,6 +849,20 @@ func (v *LogsView) renderTurn(t TraceTurn, selected, expanded bool) []string {
 		lines = append(lines, renderMarkdownLines(t.OutputLines, innerW)...)
 	} else {
 		lines = append(lines, "    "+dimStyle.Render("(no output)"))
+	}
+
+	// -- Cost per turn (if enabled and data available) --
+	if v.showCostPerTurn && t.CostUSD > 0 {
+		costParts := []string{}
+		if t.Model != "" {
+			costParts = append(costParts, t.Model)
+		}
+		if t.TokensIn > 0 || t.TokensOut > 0 {
+			costParts = append(costParts, fmt.Sprintf("%s tokens", formatTokenCount(t.TokensIn+t.TokensOut)))
+		}
+		costParts = append(costParts, fmt.Sprintf("$%.3f", t.CostUSD))
+		costLine := "              [" + strings.Join(costParts, " | ") + "]"
+		lines = append(lines, dimStyle.Render(costLine))
 	}
 
 	// Bottom rule

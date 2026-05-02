@@ -55,7 +55,10 @@ type NotificationsConfig struct {
 	OnWaiting bool `yaml:"on_waiting"` // agent needs permission (default: true)
 	OnError   bool `yaml:"on_error"`   // agent crashed (default: true)
 	OnIdle    bool `yaml:"on_idle"`    // agent finished turn (default: false)
+	OnDone    bool `yaml:"on_done"`    // agent finished (default: true)
 	Sound     bool `yaml:"sound"`      // play macOS sound (default: false)
+	Bell      bool `yaml:"bell"`       // terminal bell on attention events (default: true)
+	Desktop   bool `yaml:"desktop"`    // macOS notification center (default: true)
 }
 
 // ExportConfig holds settings for exporting traces via OTLP/HTTP.
@@ -105,7 +108,10 @@ func Default() Config {
 			OnWaiting: true,
 			OnError:   true,
 			OnIdle:    false,
+			OnDone:    true,
 			Sound:     false,
+			Bell:      true,
+			Desktop:   true,
 		},
 		Kubernetes: K8sProviderConfig{
 			Enabled:   false,

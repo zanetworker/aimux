@@ -192,3 +192,36 @@ func TestExtractSnippet_NoFile(t *testing.T) {
 		t.Errorf("expected empty snippet for missing file, got %q", snippet)
 	}
 }
+
+func TestSearchFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.jsonl")
+	content := `{"role":"user","content":"fix auth.go"}
+{"role":"assistant","content":"looking at auth.go now"}
+{"role":"tool","name":"Read","input":"auth.go"}
+{"role":"assistant","content":"done with the fix"}
+`
+	os.WriteFile(path, []byte(content), 0644)
+
+	count, snippet := SearchFile(path, "auth.go")
+	if count != 3 {
+		t.Errorf("expected 3 matches, got %d", count)
+	}
+	if snippet == "" {
+		t.Error("expected non-empty snippet")
+	}
+}
+
+func TestSearchFileEmpty(t *testing.T) {
+	count, snippet := SearchFile("", "query")
+	if count != 0 || snippet != "" {
+		t.Error("expected zero results for empty path")
+	}
+}
+
+func TestSearchFileMissing(t *testing.T) {
+	count, snippet := SearchFile("/nonexistent/file.jsonl", "query")
+	if count != 0 || snippet != "" {
+		t.Error("expected zero results for missing file")
+	}
+}

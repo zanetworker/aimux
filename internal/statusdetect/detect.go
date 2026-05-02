@@ -133,5 +133,5 @@ func DetectFromJSONL(sessionFile string, tailBytes int64) agent.Status {
 		}
 	}
 
-	return agent.StatusUnknown
+	return agent.StatusIdle
 }

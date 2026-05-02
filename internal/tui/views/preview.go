@@ -6,10 +6,12 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/diff"
 	"github.com/zanetworker/aimux/internal/history"
 )
 
@@ -46,6 +48,14 @@ type PreviewPane struct {
 	height        int
 	cachedPodLogs string // cached kubectl logs output
 	cachedPodPID  int    // PID (or 0) the cached logs belong to
+	diffStat       string   // cached git diff --stat output
+	diffFull       string   // cached git diff output (for expanded view)
+	diffExpanded   bool     // true when showing full diff instead of trace
+	diffScroll     int      // scroll position within full diff view
+	diffPickerMode bool     // true when showing file picker
+	diffFiles      []string // list of changed files
+	diffFileCursor int      // cursor position in file picker
+	diffMu         sync.Mutex
 }
 
 // NewPreviewPane creates a new preview pane.
@@ -74,6 +84,22 @@ func (p *PreviewPane) SetAgent(a *agent.Agent) {
 		return
 	}
 	p.agent = a
+
+	// Reset diff state when agent changes
+	p.diffStat = ""
+	p.diffFull = ""
+	p.diffExpanded = false
+	p.diffScroll = 0
+
+	// Fetch diff stat if working dir is a local git repo
+	if a.WorkingDir != "" && !strings.HasPrefix(a.WorkingDir, "k8s://") {
+		go func(cwd string) {
+			stat, _ := diff.GetDiffStat(cwd)
+			p.diffMu.Lock()
+			p.diffStat = stat
+			p.diffMu.Unlock()
+		}(a.WorkingDir)
+	}
 
 	// Fetch pod error logs once on agent change (not on every render)
 	pid := a.PID
@@ -142,8 +168,75 @@ func (p *PreviewPane) View() string {
 		b.WriteString(border + " " + line + "\n")
 	}
 
-	// Content
-	if p.logsView == nil {
+	// Diff summary (compact, between header and content)
+	p.diffMu.Lock()
+	compact := diff.FormatCompact(p.diffStat)
+	diffExpanded := p.diffExpanded
+	diffFull := p.diffFull
+	diffScroll := p.diffScroll
+	diffPickerMode := p.diffPickerMode
+	diffFiles := append([]string{}, p.diffFiles...)
+	diffFileCursor := p.diffFileCursor
+	p.diffMu.Unlock()
+
+	if compact != "" && !diffExpanded && !diffPickerMode {
+		diffStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+		for _, line := range strings.Split(strings.TrimSpace(compact), "\n") {
+			b.WriteString(border + " " + diffStyle.Render(line) + "\n")
+		}
+	}
+
+	// File picker mode: show navigable file list
+	if diffPickerMode {
+		titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true)
+		hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+		selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Bold(true).Background(lipgloss.Color("#374151"))
+		normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+
+		b.WriteString(border + " " + titleStyle.Render("Select file to diff:") + "\n")
+		for i, file := range diffFiles {
+			prefix := "  "
+			style := normalStyle
+			if i == diffFileCursor {
+				prefix = "> "
+				style = selectedStyle
+			}
+			b.WriteString(border + " " + style.Render(prefix+"M "+file) + "\n")
+		}
+		b.WriteString(border + " " + hintStyle.Render("j/k:navigate  Enter:view  Esc:close") + "\n")
+
+		contentHeight := p.height - strings.Count(b.String(), "\n") - 1
+		for i := 0; i < contentHeight && i < 20; i++ {
+			b.WriteString(border + "\n")
+		}
+	} else if diffExpanded && diffFull != "" {
+		// Render expanded diff
+		diffLines := strings.Split(diffFull, "\n")
+		contentHeight := p.height - strings.Count(header, "\n") - 2
+		if contentHeight < 1 {
+			contentHeight = 1
+		}
+		visibleStart := diffScroll
+		visibleEnd := diffScroll + contentHeight
+		if visibleEnd > len(diffLines) {
+			visibleEnd = len(diffLines)
+		}
+		if visibleStart >= len(diffLines) {
+			visibleStart = 0
+		}
+
+		for i := visibleStart; i < visibleEnd; i++ {
+			line := diffLines[i]
+			styledLine := p.styleDiffLine(line)
+			b.WriteString(border + " " + styledLine + "\n")
+		}
+
+		// Fill remaining lines with empty borders
+		rendered := visibleEnd - visibleStart
+		for i := rendered; i < contentHeight; i++ {
+			b.WriteString(border + "\n")
+		}
+	} else if p.logsView == nil {
 		emptyMsg := previewDimStyle.Render("No conversation data")
 		b.WriteString(border + " " + emptyMsg + "\n")
 		// Fill remaining height with empty bordered lines
@@ -480,4 +573,183 @@ func truncatePreview(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// ToggleDiff cycles through diff states: trace -> file picker -> trace.
+// When in file picker, Enter selects a file. When viewing a file diff, Esc
+// returns to file picker.
+func (p *PreviewPane) ToggleDiff() {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+
+	if p.diffExpanded {
+		// Viewing a file diff -> back to trace
+		p.diffExpanded = false
+		p.diffPickerMode = false
+		p.diffScroll = 0
+		return
+	}
+
+	if p.diffPickerMode {
+		// File picker visible -> close it
+		p.diffPickerMode = false
+		return
+	}
+
+	// Trace view -> open file picker
+	if p.agent != nil && p.agent.WorkingDir != "" && !strings.HasPrefix(p.agent.WorkingDir, "k8s://") {
+		files, _ := diff.ListChangedFiles(p.agent.WorkingDir)
+		if len(files) > 0 {
+			p.diffFiles = files
+			p.diffFileCursor = 0
+			p.diffPickerMode = true
+			return
+		}
+	}
+}
+
+// DiffPickerSelect selects the currently highlighted file in the picker
+// and switches to showing that file's diff.
+func (p *PreviewPane) DiffPickerSelect() {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+
+	if !p.diffPickerMode || len(p.diffFiles) == 0 {
+		return
+	}
+
+	file := p.diffFiles[p.diffFileCursor]
+	fileDiff, _ := diff.GetFileDiff(p.agent.WorkingDir, file)
+	if fileDiff != "" {
+		p.diffFull = fileDiff
+		p.diffExpanded = true
+		p.diffPickerMode = false
+		p.diffScroll = 0
+	}
+}
+
+// DiffPickerUp moves the file picker cursor up.
+func (p *PreviewPane) DiffPickerUp() {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+	if p.diffFileCursor > 0 {
+		p.diffFileCursor--
+	}
+}
+
+// DiffPickerDown moves the file picker cursor down.
+func (p *PreviewPane) DiffPickerDown() {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+	if p.diffFileCursor < len(p.diffFiles)-1 {
+		p.diffFileCursor++
+	}
+}
+
+// DiffPickerBack returns from file diff view to the file picker.
+func (p *PreviewPane) DiffPickerBack() {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+	if p.diffExpanded {
+		p.diffExpanded = false
+		p.diffScroll = 0
+		p.diffPickerMode = true
+		return
+	}
+	if p.diffPickerMode {
+		p.diffPickerMode = false
+	}
+}
+
+// TraceScrollDown scrolls the preview trace down one turn.
+func (p *PreviewPane) TraceScrollDown() {
+	if p.logsView != nil {
+		p.logsView.ScrollCursorDown()
+	}
+}
+
+// TraceScrollUp scrolls the preview trace up one turn.
+func (p *PreviewPane) TraceScrollUp() {
+	if p.logsView != nil {
+		p.logsView.ScrollCursorUp()
+	}
+}
+
+// TraceIsAtBottom returns true if the trace cursor is at the last turn.
+func (p *PreviewPane) TraceIsAtBottom() bool {
+	if p.logsView == nil {
+		return true
+	}
+	return p.logsView.IsAtBottom()
+}
+
+// TraceIsAtTop returns true if the trace cursor is at the first turn.
+func (p *PreviewPane) TraceIsAtTop() bool {
+	if p.logsView == nil {
+		return true
+	}
+	return p.logsView.IsAtTop()
+}
+
+// HasDiffChanges returns true if the agent's CWD has uncommitted git changes.
+func (p *PreviewPane) HasDiffChanges() bool {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+	return p.diffStat != ""
+}
+
+// IsDiffPickerMode returns true if the file picker is active.
+func (p *PreviewPane) IsDiffPickerMode() bool {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+	return p.diffPickerMode
+}
+
+// ScrollDiff scrolls the expanded diff view by the given number of lines.
+// Positive values scroll down, negative values scroll up.
+func (p *PreviewPane) ScrollDiff(n int) {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+
+	if !p.diffExpanded || p.diffFull == "" {
+		return
+	}
+
+	diffLines := strings.Split(p.diffFull, "\n")
+	p.diffScroll += n
+
+	if p.diffScroll < 0 {
+		p.diffScroll = 0
+	}
+	maxScroll := len(diffLines) - 1
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if p.diffScroll > maxScroll {
+		p.diffScroll = maxScroll
+	}
+}
+
+// IsDiffExpanded returns true if the diff view is currently expanded.
+func (p *PreviewPane) IsDiffExpanded() bool {
+	p.diffMu.Lock()
+	defer p.diffMu.Unlock()
+	return p.diffExpanded
+}
+
+// styleDiffLine applies syntax highlighting to a diff line.
+func (p *PreviewPane) styleDiffLine(line string) string {
+	if strings.HasPrefix(line, "+") {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render(line)
+	}
+	if strings.HasPrefix(line, "-") {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(line)
+	}
+	if strings.HasPrefix(line, "@@") {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render(line)
+	}
+	if strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") {
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5E7EB")).Render(line)
+	}
+	return previewDimStyle.Render(line)
 }

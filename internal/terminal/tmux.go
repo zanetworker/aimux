@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,15 @@ import (
 
 	"github.com/zanetworker/aimux/internal/config"
 )
+
+// pollInterval returns the polling interval based on activity state.
+// Active (content changing) uses 100ms, idle (no changes) uses 500ms.
+func pollInterval(active bool) time.Duration {
+	if active {
+		return 100 * time.Millisecond
+	}
+	return 500 * time.Millisecond
+}
 
 // TmuxSession mirrors a tmux session's pane content. It polls
 // `tmux capture-pane` for output and forwards keystrokes via
@@ -99,9 +109,13 @@ func AttachTmux(sessionName string, cols, rows int) (*TmuxSession, error) {
 
 // poll periodically captures the tmux pane content and stores it for
 // Render(). Also signals Read() so the readPTY loop stays alive.
+// Uses adaptive polling: 100ms when content is changing (active),
+// 500ms when idle. Hash comparison reduces CPU overhead.
 func (ts *TmuxSession) poll(ctx context.Context) {
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(pollInterval(true))
 	defer ticker.Stop()
+
+	var prevHash uint64
 
 	for {
 		select {
@@ -113,6 +127,11 @@ func (ts *TmuxSession) poll(ctx context.Context) {
 				continue
 			}
 
+			// Compute FNV-1a hash for efficient change detection
+			h := fnv.New64a()
+			h.Write(out)
+			hash := h.Sum64()
+
 			ts.mu.Lock()
 			if ts.closed {
 				ts.mu.Unlock()
@@ -120,7 +139,8 @@ func (ts *TmuxSession) poll(ctx context.Context) {
 			}
 
 			// Store rendered content for Render() and signal Read()
-			if string(out) != string(ts.prev) {
+			if hash != prevHash {
+				prevHash = hash
 				ts.prev = out
 				ts.rendered = string(out)
 				// Put a single byte in pending so Read() returns and the
@@ -131,6 +151,12 @@ func (ts *TmuxSession) poll(ctx context.Context) {
 				case ts.signal <- struct{}{}:
 				default:
 				}
+
+				// Content changed - use fast polling
+				ticker.Reset(pollInterval(true))
+			} else {
+				// No change - slow down polling
+				ticker.Reset(pollInterval(false))
 			}
 			ts.mu.Unlock()
 		}

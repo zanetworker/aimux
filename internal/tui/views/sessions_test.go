@@ -669,3 +669,134 @@ func TestRenderSessionAnnotation(t *testing.T) {
 		}
 	}
 }
+
+func testSessionsWithSubagent() []history.Session {
+	now := time.Now()
+	return []history.Session{
+		{
+			ID:          "abc-123",
+			Provider:    "claude",
+			Project:     "/test",
+			FirstPrompt: "fix the bug",
+			LastActive:  now.Add(-2 * time.Hour),
+			TurnCount:   16,
+			CostUSD:     0.42,
+			Resumable:   true,
+		},
+		{
+			ID:          "sub-001",
+			Provider:    "claude",
+			Project:     "/test",
+			FirstPrompt: "YOU ARE A SESSION ANALYZER",
+			LastActive:  now.Add(-3 * time.Hour),
+			TurnCount:   6,
+			CostUSD:     0.05,
+			Resumable:   true,
+			IsSubagent:  true,
+		},
+		{
+			ID:          "sub-002",
+			Provider:    "claude",
+			Project:     "/test",
+			FirstPrompt: "Evaluate session abc-123",
+			LastActive:  now.Add(-4 * time.Hour),
+			TurnCount:   8,
+			CostUSD:     0.03,
+			Resumable:   true,
+			IsSubagent:  true,
+		},
+		{
+			ID:          "def-456",
+			Provider:    "claude",
+			Project:     "/test",
+			FirstPrompt: "add table support",
+			LastActive:  now.Add(-5 * time.Hour),
+			TurnCount:   8,
+			CostUSD:     0.18,
+			Resumable:   true,
+		},
+	}
+}
+
+func TestSessionsView_SubagentHiddenByDefault(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessionsWithSubagent())
+	v.SetSize(120, 40)
+
+	visible := v.visibleSessions()
+	for _, s := range visible {
+		if s.IsSubagent {
+			t.Errorf("subagent session %q should be hidden by default", s.ID)
+		}
+	}
+	if len(visible) != 2 {
+		t.Errorf("expected 2 visible sessions, got %d", len(visible))
+	}
+}
+
+func TestSessionsView_SubagentToggle(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessionsWithSubagent())
+	v.SetSize(120, 40)
+
+	visible := v.visibleSessions()
+	if len(visible) != 2 {
+		t.Fatalf("expected 2 visible before toggle, got %d", len(visible))
+	}
+
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	visible = v.visibleSessions()
+	if len(visible) != 4 {
+		t.Errorf("expected 4 visible after toggle on, got %d", len(visible))
+	}
+
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	visible = v.visibleSessions()
+	if len(visible) != 2 {
+		t.Errorf("expected 2 visible after toggle off, got %d", len(visible))
+	}
+}
+
+func TestSessionsView_SubagentBadge(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessionsWithSubagent())
+	v.SetSize(120, 40)
+
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+
+	output := v.View()
+	if !strings.Contains(output, "[agent]") {
+		t.Error("expected [agent] badge in rendered output for subagent sessions")
+	}
+}
+
+func TestSessionsView_SubagentCount(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessionsWithSubagent())
+	v.SetSize(120, 40)
+
+	output := v.View()
+	if !strings.Contains(output, "+2 agent") {
+		t.Errorf("expected hidden agent count in output, got:\n%s", output)
+	}
+}
+
+func TestSessionsView_SubagentVisibleDuringSearch(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessionsWithSubagent())
+	v.SetSize(120, 40)
+
+	v.filterMode = true
+	v.filterText = "session analyzer"
+
+	visible := v.visibleSessions()
+	found := false
+	for _, s := range visible {
+		if s.ID == "sub-001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("subagent session should be visible when filter matches it")
+	}
+}

@@ -37,6 +37,8 @@ type Session struct {
 	Annotation  string    `json:"annotation"`    // achieved/partial/failed/abandoned
 	Note        string    `json:"note"`          // free-text rationale
 	Tags        []string  `json:"tags"`          // failure mode tags
+	IsSubagent     bool   `json:"is_subagent"`
+	PermissionMode string `json:"permission_mode"`
 }
 
 // Meta holds session-level annotation data stored in sidecar .meta.json files.
@@ -171,6 +173,7 @@ func scanSession(id, filePath, project string) (Session, error) {
 	scanner.Buffer(make([]byte, 512*1024), 512*1024)
 
 	lineCount := 0
+	humanTurnCount := 0
 
 	// Parse all lines to accumulate tokens/cost accurately.
 	// First 10 lines also extract the first user prompt.
@@ -181,14 +184,27 @@ func scanSession(id, filePath, project string) (Session, error) {
 		copy(raw, scanner.Bytes())
 
 		extractPrompt := lineCount <= 10
-		m := parseSessionLine(raw, &s, extractPrompt)
+		m, isHuman := parseSessionLine(raw, &s, extractPrompt)
 		if m != "" {
 			model = m
+		}
+		if isHuman {
+			humanTurnCount++
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
 		return Session{}, fmt.Errorf("scan session file %s: %w", filePath, err)
+	}
+
+	// Apply subagent detection logic
+	if humanTurnCount == 0 {
+		if s.PermissionMode == "bypassPermissions" {
+			s.IsSubagent = true
+		} else if !s.StartTime.IsZero() && !s.LastActive.IsZero() &&
+			s.LastActive.Sub(s.StartTime) < 5*time.Minute {
+			s.IsSubagent = true
+		}
 	}
 
 	// Compute cost from accumulated tokens
@@ -207,10 +223,11 @@ func scanSession(id, filePath, project string) (Session, error) {
 
 // sessionEntry is the minimal structure for fast-scanning JSONL entries.
 type sessionEntry struct {
-	Type      string    `json:"type"`
-	Timestamp time.Time `json:"timestamp"`
-	GitBranch string    `json:"gitBranch"`
-	Message   *struct {
+	Type           string    `json:"type"`
+	Timestamp      time.Time `json:"timestamp"`
+	GitBranch      string    `json:"gitBranch"`
+	PermissionMode string    `json:"permissionMode"`
+	Message        *struct {
 		Model   string          `json:"model"`
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
@@ -223,13 +240,56 @@ type sessionEntry struct {
 	} `json:"message"`
 }
 
+// isHumanMessage returns true if the content appears to be a human-written message.
+// Returns false for tool_result-only content, system-generated content with markers
+// like <local-command-caveat> or <command-name>, or empty content.
+func isHumanMessage(content json.RawMessage) bool {
+	if content == nil {
+		return false
+	}
+
+	// Try parsing as plain string first
+	var text string
+	if err := json.Unmarshal(content, &text); err == nil {
+		if text == "" {
+			return false
+		}
+		// Check for system markers
+		if strings.Contains(text, "<local-command-caveat>") || strings.Contains(text, "<command-name>") {
+			return false
+		}
+		return true
+	}
+
+	// Try parsing as array of blocks
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(content, &blocks); err == nil {
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				// Check for system markers in text blocks
+				if strings.Contains(b.Text, "<local-command-caveat>") || strings.Contains(b.Text, "<command-name>") {
+					return false
+				}
+				return true
+			}
+		}
+		// All blocks are non-text (e.g., tool_result)
+		return false
+	}
+
+	return false
+}
+
 // parseSessionLine extracts metadata from a single JSONL entry.
 // If extractPrompt is true, it also looks for the first user message.
-// Returns the model name if found in this entry.
-func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) string {
+// Returns the model name if found in this entry, and a boolean indicating if this is a human message.
+func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (string, bool) {
 	var entry sessionEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
-		return ""
+		return "", false
 	}
 
 	if !entry.Timestamp.IsZero() {
@@ -241,8 +301,18 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) strin
 		}
 	}
 
+	// Track permission mode (first one wins)
+	if entry.PermissionMode != "" && s.PermissionMode == "" {
+		s.PermissionMode = entry.PermissionMode
+	}
+
 	if entry.Message == nil {
-		return ""
+		return "", false
+	}
+
+	var isHuman bool
+	if entry.Message.Role == "user" {
+		isHuman = isHumanMessage(entry.Message.Content)
 	}
 
 	var model string
@@ -264,7 +334,7 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) strin
 		}
 	}
 
-	return model
+	return model, isHuman
 }
 
 // extractUserText pulls the text from a user message content array.

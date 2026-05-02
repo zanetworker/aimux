@@ -64,3 +64,18 @@ func TestTmuxSession_Resize(t *testing.T) {
 		t.Errorf("Resize error: %v", err)
 	}
 }
+
+func TestPollIntervalAdaptive(t *testing.T) {
+	fast := pollInterval(true)
+	slow := pollInterval(false)
+
+	if fast >= slow {
+		t.Errorf("active interval (%v) should be less than idle (%v)", fast, slow)
+	}
+	if fast.Milliseconds() > 150 {
+		t.Errorf("active interval too slow: %v", fast)
+	}
+	if slow.Milliseconds() < 400 {
+		t.Errorf("idle interval too fast: %v", slow)
+	}
+}
