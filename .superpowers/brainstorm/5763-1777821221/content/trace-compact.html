@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux - Trace Side Panel</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
+  :root {
+    --bg-primary: #000000;
+    --bg-secondary: #060608;
+    --bg-tertiary: #1a1a1a;
+    --bg-card: #111111;
+    --accent: #FF3131;
+    --accent-hover: #ff5252;
+    --accent-muted: #cc2727;
+    --text-primary: #ededed;
+    --text-secondary: #a0a0a0;
+    --text-muted: #666666;
+    --border: #2a2a2a;
+    --border-hover: #3a3a3a;
+    --font-heading: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font-body); background: var(--bg-primary);
+    color: var(--text-primary); -webkit-font-smoothing: antialiased;
+    display: flex; height: 100vh; overflow: hidden;
+  }
+
+  /* Left: Board (compressed) */
+  .board-side {
+    flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .stats-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+  }
+  .logo { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+  .logo span { color: var(--text-primary); }
+  .stats-group { display: flex; gap: 16px; }
+  .stat-mini { text-align: center; }
+  .stat-mini-val { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+  .stat-mini-val.att { color: var(--accent); }
+  .stat-mini-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .launch-btn {
+    padding: 4px 10px; border-radius: 3px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); font-size: 11px; font-weight: 600;
+    cursor: pointer; font-family: var(--font-heading);
+  }
+
+  .board { display: flex; gap: 8px; padding: 12px; flex: 1; overflow-x: auto; }
+  .column { min-width: 200px; flex: 1; background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border); display: flex; flex-direction: column; }
+  .col-head {
+    padding: 8px 10px; border-bottom: 1px solid var(--border);
+    font-size: 10px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .col-head .cnt { background: var(--bg-tertiary); padding: 1px 6px; border-radius: 3px; font-size: 10px; border: 1px solid var(--border); }
+  .col-head .dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; display: inline-block; }
+  .dot-a { background: #3fb950; } .dot-i { background: var(--text-muted); } .dot-w { background: #d29922; }
+  .col-body { padding: 4px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .card:hover { border-color: var(--border-hover); }
+  .card.sel { border-color: var(--accent); }
+  .card-row { display: flex; align-items: center; justify-content: space-between; }
+  .card-repo { font-size: 12px; font-weight: 600; }
+  .card-prov {
+    font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 2px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .p-c { background: rgba(255,49,49,0.12); color: var(--accent); }
+  .p-x { background: rgba(63,185,80,0.12); color: #3fb950; }
+  .p-g { background: rgba(167,139,250,0.12); color: #a78bfa; }
+  .card-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .card-cost { font-size: 10px; color: #3fb950; font-weight: 600; }
+
+  /* Right: Trace panel */
+  .trace-panel {
+    width: 440px; background: var(--bg-secondary); display: flex; flex-direction: column;
+  }
+  .trace-header {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .trace-title { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+  .trace-title .branch { color: var(--text-muted); font-weight: 400; font-size: 11px; }
+  .trace-btns { display: flex; gap: 4px; }
+  .tbtn {
+    padding: 3px 8px; border-radius: 3px; border: 1px solid var(--border);
+    background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px;
+    cursor: pointer; font-family: var(--font-heading); font-weight: 500;
+  }
+  .tbtn.pri { color: var(--accent); border-color: var(--accent); background: transparent; }
+
+  /* Compact stats */
+  .trace-stats {
+    display: flex; gap: 12px; padding: 6px 14px; border-bottom: 1px solid var(--border);
+    font-size: 10px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+  .trace-stats .val { color: var(--text-secondary); font-weight: 600; }
+  .trace-stats .cost { color: #3fb950; }
+
+  /* Compact trace body */
+  .trace-body { flex: 1; overflow-y: auto; padding: 8px 14px; }
+
+  .turn { margin-bottom: 2px; }
+  .turn + .turn-u { margin-top: 10px; }
+
+  .turn-u {
+    padding: 6px 8px; background: var(--bg-tertiary); border-radius: 4px;
+    border: 1px solid var(--border); margin-bottom: 2px;
+  }
+  .turn-u-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .t-num { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
+  .t-role { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .t-role-u { color: var(--text-secondary); }
+  .t-role-a { color: var(--accent); }
+  .t-time { font-size: 9px; color: var(--text-muted); margin-left: auto; font-family: var(--font-mono); }
+  .t-text { font-size: 12px; color: var(--text-primary); line-height: 1.5; }
+  .t-text-a { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+
+  .turn-a {
+    padding: 6px 8px; background: var(--bg-card); border-left: 2px solid var(--accent-muted);
+    border-radius: 0 4px 4px 0;
+  }
+
+  /* Inline tool pills */
+  .tools { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  .tool-pill {
+    font-size: 9px; font-family: var(--font-mono); color: var(--text-muted);
+    background: var(--bg-primary); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 3px; display: flex; align-items: center; gap: 3px;
+    cursor: pointer;
+  }
+  .tool-pill:hover { border-color: var(--border-hover); color: var(--text-secondary); }
+  .tool-ok { color: #3fb950; font-size: 8px; }
+  .tool-err { color: var(--accent); font-size: 8px; }
+
+  /* Collapsed diff (click to expand) */
+  .diff-preview {
+    margin-top: 4px; padding: 4px 6px; background: var(--bg-primary);
+    border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono);
+    font-size: 10px; line-height: 1.5; max-height: 60px; overflow: hidden;
+    cursor: pointer; position: relative;
+  }
+  .diff-preview:hover { border-color: var(--border-hover); }
+  .diff-preview::after {
+    content: 'click to expand'; position: absolute; bottom: 0; left: 0; right: 0;
+    padding: 2px 6px; background: linear-gradient(transparent, var(--bg-primary));
+    font-size: 9px; color: var(--text-muted); text-align: center;
+  }
+  .d-add { color: #3fb950; } .d-del { color: var(--accent); } .d-ctx { color: var(--text-muted); }
+
+  /* Turn footer */
+  .t-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 4px; font-size: 9px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+  .annot { display: flex; gap: 2px; }
+  .a-btn {
+    padding: 1px 5px; border-radius: 2px; border: 1px solid var(--border);
+    background: transparent; font-size: 8px; cursor: pointer;
+    font-family: var(--font-heading); font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .a-g { color: #3fb950; } .a-g.on { background: rgba(63,185,80,0.15); border-color: #3fb950; }
+  .a-b { color: var(--accent); } .a-b.on { background: rgba(255,49,49,0.15); border-color: var(--accent); }
+  .a-w { color: #d29922; }
+
+  .live-bar {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border-top: 1px solid var(--border); font-size: 10px; color: var(--accent);
+    font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+</style>
+</head>
+<body>
+
+<!-- Left: Board -->
+<div class="board-side">
+  <div class="stats-bar">
+    <div class="logo">ai<span>mux</span></div>
+    <div class="stats-group">
+      <div class="stat-mini"><div class="stat-mini-val">7</div><div class="stat-mini-label">Active</div></div>
+      <div class="stat-mini"><div class="stat-mini-val">3</div><div class="stat-mini-label">Repos</div></div>
+      <div class="stat-mini"><div class="stat-mini-val">$4.82</div><div class="stat-mini-label">Cost</div></div>
+      <div class="stat-mini"><div class="stat-mini-val att">2</div><div class="stat-mini-label">Attn</div></div>
+    </div>
+    <button class="launch-btn">+ Launch</button>
+  </div>
+  <div class="board">
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-a"></span>Active</span><span class="cnt">3</span></div>
+      <div class="col-body">
+        <div class="card sel">
+          <div class="card-row"><span class="card-repo">aimux</span><span class="card-prov p-c">Claude</span></div>
+          <div class="card-sub">Edit internal/web/server.go</div>
+          <div class="card-row" style="margin-top:2px"><span style="font-size:9px;color:var(--text-muted)">opus-4.6</span><span class="card-cost">$1.23</span></div>
+        </div>
+        <div class="card">
+          <div class="card-row"><span class="card-repo">odh-operator</span><span class="card-prov p-x">Codex</span></div>
+          <div class="card-sub">Bash go test ./controllers/...</div>
+          <div class="card-row" style="margin-top:2px"><span style="font-size:9px;color:var(--text-muted)">codex-1</span><span class="card-cost">$0.45</span></div>
+        </div>
+        <div class="card">
+          <div class="card-row"><span class="card-repo">research</span><span class="card-prov p-c">Claude</span></div>
+          <div class="card-sub">Read wiki/mcp/gateway.md</div>
+          <div class="card-row" style="margin-top:2px"><span style="font-size:9px;color:var(--text-muted)">sonnet-4.6</span><span class="card-cost">$0.31</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-i"></span>Idle</span><span class="cnt">2</span></div>
+      <div class="col-body">
+        <div class="card">
+          <div class="card-row"><span class="card-repo">blog-concept</span><span class="card-prov p-c">Claude</span></div>
+          <div class="card-sub">Waiting for input</div>
+          <div class="card-row" style="margin-top:2px"><span style="font-size:9px;color:var(--text-muted)">opus-4.6</span><span class="card-cost">$2.10</span></div>
+        </div>
+        <div class="card">
+          <div class="card-row"><span class="card-repo">aimux</span><span class="card-prov p-g">Gemini</span></div>
+          <div class="card-sub">Completed task</div>
+          <div class="card-row" style="margin-top:2px"><span style="font-size:9px;color:var(--text-muted)">gemini-2.5</span><span class="card-cost">$0.08</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-w"></span>Waiting</span><span class="cnt">2</span></div>
+      <div class="col-body">
+        <div class="card" style="border-color:#d29922">
+          <div class="card-row"><span class="card-repo">mcp-gateway</span><span class="card-prov p-c">Claude</span></div>
+          <div class="card-sub" style="color:#d29922">&#9208; kubectl apply -f deploy.yaml</div>
+          <div class="card-row" style="margin-top:2px"><span style="font-size:9px;color:var(--text-muted)">opus-4.6</span><span class="card-cost">$0.87</span></div>
+        </div>
+        <div class="card" style="border-color:#d29922">
+          <div class="card-row"><span class="card-repo">kagenti-op</span><span class="card-prov p-x">Codex</span></div>
+          <div class="card-sub" style="color:#d29922">&#9208; Write: config/rbac/role.yaml</div>
+          <div class="card-row" style="margin-top:2px"><span style="font-size:9px;color:var(--text-muted)">codex-1</span><span class="card-cost">$0.22</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Right: Compact Trace Panel -->
+<div class="trace-panel">
+  <div class="trace-header">
+    <div>
+      <div class="trace-title">aimux <span class="branch">feat/web-dashboard</span></div>
+    </div>
+    <div class="trace-btns">
+      <button class="tbtn">Full Trace</button>
+      <button class="tbtn pri">Attach</button>
+      <button class="tbtn">&#10005;</button>
+    </div>
+  </div>
+
+  <div class="trace-stats">
+    <span>&#9654; <span class="val">Active</span></span>
+    <span>15 turns</span>
+    <span>45.2k / 12.8k tok</span>
+    <span class="cost">$1.23</span>
+    <span>14m</span>
+  </div>
+
+  <div class="trace-body">
+
+    <!-- Turn 1 -->
+    <div class="turn turn-u">
+      <div class="turn-u-head">
+        <span class="t-num">#1</span>
+        <span class="t-role t-role-u">You</span>
+        <span class="t-time">14:12</span>
+      </div>
+      <div class="t-text">Add a web dashboard to aimux. Start with the Go HTTP server in internal/frontend/web/</div>
+    </div>
+
+    <div class="turn turn-a">
+      <div class="turn-u-head">
+        <span class="t-num">#1</span>
+        <span class="t-role t-role-a">Claude</span>
+        <span class="t-time">14:12</span>
+      </div>
+      <div class="t-text-a">Setting up the web server package. Checking existing patterns first.</div>
+      <div class="tools">
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Glob internal/**/*.go</span>
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Read controller.go</span>
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Write server.go</span>
+      </div>
+      <div class="diff-preview">
+        <span class="d-add">+package web</span><br>
+        <span class="d-add">+type Server struct {</span><br>
+        <span class="d-add">+    ctrl  *controller.Controller</span><br>
+        <span class="d-add">+    disco *discovery.Orchestrator</span><br>
+        <span class="d-add">+    port  int</span><br>
+        <span class="d-add">+}</span>
+      </div>
+      <div class="t-foot">
+        <span>3.4k/1.2k &middot; $0.08 &middot; 5s</span>
+        <div class="annot">
+          <button class="a-btn a-g on">G</button>
+          <button class="a-btn a-b">B</button>
+          <button class="a-btn a-w">W</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn 2 -->
+    <div class="turn turn-u">
+      <div class="turn-u-head">
+        <span class="t-num">#2</span>
+        <span class="t-role t-role-u">You</span>
+        <span class="t-time">14:14</span>
+      </div>
+      <div class="t-text">Now add the SSE handler that streams agent state every 2 seconds.</div>
+    </div>
+
+    <div class="turn turn-a">
+      <div class="turn-u-head">
+        <span class="t-num">#2</span>
+        <span class="t-role t-role-a">Claude</span>
+        <span class="t-time">14:14</span>
+      </div>
+      <div class="t-text-a">Adding SSE endpoint using discovery orchestrator for agent snapshots.</div>
+      <div class="tools">
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Write sse.go</span>
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Edit server.go:28</span>
+      </div>
+      <div class="diff-preview">
+        <span class="d-add">+mux.HandleFunc("GET /api/events", s.handleSSE)</span><br>
+        <span class="d-add">+mux.HandleFunc("POST /api/agents/launch", s.handleLaunch)</span><br>
+        <span class="d-add">+mux.HandleFunc("POST /api/agents/{id}/annotate", s.handleAnnotate)</span>
+      </div>
+      <div class="t-foot">
+        <span>2.8k/1.6k &middot; $0.07 &middot; 6s</span>
+        <div class="annot">
+          <button class="a-btn a-g">G</button>
+          <button class="a-btn a-b">B</button>
+          <button class="a-btn a-w">W</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn 3 -->
+    <div class="turn turn-u">
+      <div class="turn-u-head">
+        <span class="t-num">#3</span>
+        <span class="t-role t-role-u">You</span>
+        <span class="t-time">14:16</span>
+      </div>
+      <div class="t-text">Run the tests</div>
+    </div>
+
+    <div class="turn turn-a">
+      <div class="turn-u-head">
+        <span class="t-num">#3</span>
+        <span class="t-role t-role-a">Claude</span>
+        <span class="t-time">14:16</span>
+      </div>
+      <div class="t-text-a">All 42 tests pass including new web server tests.</div>
+      <div class="tools">
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Bash go test ./...</span>
+      </div>
+      <div class="t-foot">
+        <span>1.2k/450 &middot; $0.03 &middot; 8s</span>
+        <div class="annot">
+          <button class="a-btn a-g on">G</button>
+          <button class="a-btn a-b">B</button>
+          <button class="a-btn a-w">W</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn 4 -->
+    <div class="turn turn-u">
+      <div class="turn-u-head">
+        <span class="t-num">#4</span>
+        <span class="t-role t-role-u">You</span>
+        <span class="t-time">14:18</span>
+      </div>
+      <div class="t-text">Add the REST handler for launching new agents</div>
+    </div>
+
+    <div class="turn turn-a">
+      <div class="turn-u-head">
+        <span class="t-num">#4</span>
+        <span class="t-role t-role-a">Claude</span>
+        <span class="t-time">14:18</span>
+      </div>
+      <div class="t-text-a">Adding launch handler that accepts provider, directory, model, and mode.</div>
+      <div class="tools">
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Read spawn/spawn.go</span>
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Write handlers.go</span>
+        <span class="tool-pill"><span class="tool-err">&#10007;</span> Bash go build</span>
+      </div>
+      <div class="t-foot">
+        <span>4.1k/2.2k &middot; $0.11 &middot; 7s</span>
+        <div class="annot">
+          <button class="a-btn a-g">G</button>
+          <button class="a-btn a-b on">B</button>
+          <button class="a-btn a-w">W</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn 5 -->
+    <div class="turn turn-u">
+      <div class="turn-u-head">
+        <span class="t-num">#5</span>
+        <span class="t-role t-role-u">You</span>
+        <span class="t-time">14:20</span>
+      </div>
+      <div class="t-text">Fix the build error</div>
+    </div>
+
+    <div class="turn turn-a">
+      <div class="turn-u-head">
+        <span class="t-num">#5</span>
+        <span class="t-role t-role-a">Claude</span>
+        <span class="t-time">14:20</span>
+      </div>
+      <div class="t-text-a">Missing import. Fixed and verified build passes.</div>
+      <div class="tools">
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Edit handlers.go:3</span>
+        <span class="tool-pill"><span class="tool-ok">&#10003;</span> Bash go build</span>
+      </div>
+      <div class="t-foot">
+        <span>800/320 &middot; $0.02 &middot; 3s</span>
+        <div class="annot">
+          <button class="a-btn a-g on">G</button>
+          <button class="a-btn a-b">B</button>
+          <button class="a-btn a-w">W</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="live-bar">
+    <span class="live-dot"></span>
+    Live &middot; Turn #15 &middot; $1.23
+  </div>
+</div>
+
+</body>
+</html>

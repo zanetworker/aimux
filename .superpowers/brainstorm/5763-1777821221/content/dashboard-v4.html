@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux web dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
+  :root {
+    --bg-0: #000000;
+    --bg-1: #0d0d0d;
+    --bg-2: #141414;
+    --bg-3: #1a1a1a;
+    --bg-4: #242424;
+    --bg-5: #333333;
+    --accent: #FF3131;
+    --accent-dim: rgba(255, 49, 49, 0.12);
+    --accent-glow: rgba(255, 49, 49, 0.25);
+    --teal: #49D3B4;
+    --teal-dim: rgba(73, 211, 180, 0.12);
+    --fg: #e6e6e6;
+    --fg-2: #b3b3b3;
+    --fg-3: #666666;
+    --fg-4: #404040;
+    --green: #69DF73;
+    --green-dim: rgba(105, 223, 115, 0.12);
+    --orange: #FFB251;
+    --orange-dim: rgba(255, 178, 81, 0.12);
+    --purple: #A772EF;
+    --purple-dim: rgba(167, 114, 239, 0.12);
+    --border: #1f1f1f;
+    --border-hover: #2e2e2e;
+    --font: 'Inter', system-ui, -apple-system, sans-serif;
+    --mono: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font); background: var(--bg-0); color: var(--fg);
+    -webkit-font-smoothing: antialiased; height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  /* ===== STATS BAR ===== */
+  .stats-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--bg-1); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+  .logo span { color: var(--fg); }
+  .stats-group { display: flex; gap: 24px; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 20px; font-weight: 700; color: var(--fg); letter-spacing: -0.02em; }
+  .stat-label { font-size: 10px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+  .stat.att .stat-value { color: var(--accent); }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .toggle-btn {
+    padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--bg-3); color: var(--fg-3); font-size: 11px;
+    cursor: pointer; font-family: var(--font); font-weight: 500;
+  }
+  .toggle-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .launch-btn {
+    padding: 5px 12px; border-radius: 4px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); font-size: 12px; font-weight: 600;
+    cursor: pointer; font-family: var(--font);
+  }
+  .launch-btn:hover { background: var(--accent-dim); }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ===== BOARD ===== */
+  .board { flex: 1; display: flex; gap: 12px; padding: 14px 18px; overflow-x: auto; }
+  .column {
+    min-width: 250px; flex: 1; background: var(--bg-1); border-radius: 6px;
+    border: 1px solid var(--border); display: flex; flex-direction: column;
+  }
+  .col-head {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; color: var(--fg-3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .col-head .cnt { background: var(--bg-3); padding: 1px 6px; border-radius: 3px; font-size: 10px; border: 1px solid var(--border); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; display: inline-block; }
+  .dot-a { background: var(--green); } .dot-i { background: var(--fg-3); }
+  .dot-w { background: var(--orange); } .dot-e { background: var(--accent); }
+  .col-body { padding: 6px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+
+  .card {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; cursor: pointer; transition: border-color 0.15s, background 0.15s;
+  }
+  .card:hover { border-color: var(--border-hover); background: var(--bg-3); }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 8px var(--accent-dim); }
+  .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .prov {
+    font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .p-c { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent); }
+  .p-x { background: var(--green-dim); color: var(--green); border: 1px solid rgba(105,223,115,0.3); }
+  .p-g { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(167,114,239,0.3); }
+  .card-time { font-size: 10px; color: var(--fg-4); }
+  .card-repo { font-size: 13px; font-weight: 600; margin-bottom: 2px; letter-spacing: -0.01em; }
+  .card-branch { font-size: 11px; color: var(--fg-2); margin-bottom: 6px; }
+  .card-branch code {
+    background: var(--bg-4); padding: 1px 5px; border-radius: 3px;
+    font-size: 10px; font-family: var(--mono); border: 1px solid var(--border); color: var(--accent);
+  }
+  .card-action { font-size: 11px; color: var(--fg-2); margin-bottom: 6px; font-style: italic; }
+  .card-meta { display: flex; justify-content: space-between; font-size: 10px; color: var(--fg-4); }
+  .card-cost { color: var(--green); font-weight: 600; }
+
+  /* ===== RIGHT PANEL ===== */
+  .right-panel {
+    width: 440px; background: var(--bg-1); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+
+  /* Panel header with tabs */
+  .panel-header {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-left { display: flex; align-items: center; gap: 10px; }
+  .panel-title { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+  .panel-title .branch { color: var(--fg-3); font-weight: 400; font-size: 11px; }
+
+  .panel-tabs {
+    display: flex; background: var(--bg-3); border-radius: 4px; padding: 2px;
+    border: 1px solid var(--border);
+  }
+  .panel-tab {
+    padding: 3px 12px; border-radius: 3px; font-size: 10px; font-weight: 600;
+    cursor: pointer; font-family: var(--font); text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--fg-3); background: transparent;
+    border: none; transition: all 0.15s;
+  }
+  .panel-tab:hover { color: var(--fg-2); }
+  .panel-tab.active { background: var(--bg-0); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+
+  .panel-right { display: flex; gap: 4px; align-items: center; }
+  .pbtn {
+    padding: 3px 8px; border-radius: 3px; border: 1px solid var(--border);
+    background: var(--bg-3); color: var(--fg-3); font-size: 10px;
+    cursor: pointer; font-family: var(--font); font-weight: 500;
+  }
+  .pbtn:hover { border-color: var(--border-hover); color: var(--fg-2); }
+
+  .panel-stats {
+    display: flex; gap: 10px; padding: 5px 12px; border-bottom: 1px solid var(--border);
+    font-size: 9px; color: var(--fg-4); font-family: var(--mono); flex-shrink: 0;
+  }
+  .panel-stats .v { color: var(--fg-2); font-weight: 600; }
+  .panel-stats .c { color: var(--green); }
+
+  /* Tab content area */
+  .tab-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* Trace tab */
+  .trace-tab { flex: 1; overflow-y: auto; padding: 8px 12px; }
+
+  .turn { margin-bottom: 2px; }
+  .turn + .turn-u { margin-top: 10px; }
+  .turn-u {
+    padding: 6px 8px; background: var(--bg-3); border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .turn-a {
+    padding: 6px 8px; background: var(--bg-2);
+    border-left: 2px solid var(--accent); border-radius: 0 4px 4px 0;
+  }
+  .th { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; }
+  .tn { font-size: 9px; color: var(--fg-4); font-family: var(--mono); }
+  .tr { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tr-u { color: var(--fg-2); } .tr-a { color: var(--accent); }
+  .tt { font-size: 9px; color: var(--fg-4); margin-left: auto; font-family: var(--mono); }
+  .tx { font-size: 12px; color: var(--fg); line-height: 1.5; }
+  .tx-a { font-size: 11px; color: var(--fg-2); line-height: 1.5; }
+
+  .tools { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+  .tp {
+    font-size: 9px; font-family: var(--mono); color: var(--fg-3);
+    background: var(--bg-0); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 3px; display: flex; align-items: center; gap: 3px;
+  }
+  .tok { color: var(--green); font-size: 8px; } .tox { color: var(--accent); font-size: 8px; }
+
+  .dp {
+    margin-top: 4px; padding: 4px 6px; background: var(--bg-0);
+    border: 1px solid var(--border); border-radius: 3px; font-family: var(--mono);
+    font-size: 9px; line-height: 1.5; max-height: 52px; overflow: hidden;
+    position: relative; cursor: pointer;
+  }
+  .dp::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 16px;
+    background: linear-gradient(transparent, var(--bg-0));
+  }
+  .da { color: var(--green); } .dd { color: var(--accent); }
+
+  .tf {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 4px; font-size: 9px; color: var(--fg-4); font-family: var(--mono);
+  }
+  .an { display: flex; gap: 2px; }
+  .ab {
+    padding: 1px 4px; border-radius: 2px; border: 1px solid var(--border);
+    background: transparent; font-size: 8px; cursor: pointer;
+    font-family: var(--font); font-weight: 700; text-transform: uppercase;
+  }
+  .ab-g { color: var(--green); } .ab-g.on { background: var(--green-dim); border-color: var(--green); }
+  .ab-r { color: var(--accent); } .ab-r.on { background: var(--accent-dim); border-color: var(--accent); }
+  .ab-w { color: var(--orange); }
+
+  .live-strip {
+    display: flex; align-items: center; gap: 5px; padding: 5px 12px;
+    border-top: 1px solid var(--border);
+    font-size: 9px; color: var(--accent); font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0;
+  }
+  .ld { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+  /* Session tab (terminal, hidden by default) */
+  .session-tab {
+    flex: 1; display: none; flex-direction: column;
+    background: var(--bg-0);
+  }
+  .session-tab.visible { display: flex; }
+  .trace-tab.hidden { display: none; }
+
+  .term-body {
+    padding: 12px 14px; font-family: var(--mono); font-size: 12px;
+    color: var(--fg); line-height: 1.8; flex: 1; overflow-y: auto;
+  }
+  .term-body .pr { color: var(--accent); font-weight: 600; }
+  .term-body .ou { color: var(--fg-4); }
+  .term-body .tc { color: var(--orange); }
+  .term-body .ok { color: var(--green); }
+  .term-body .blink {
+    display: inline-block; width: 7px; height: 14px;
+    background: var(--accent); animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<!-- Stats Bar -->
+<div class="stats-bar">
+  <div class="logo">ai<span>mux</span></div>
+  <div class="stats-group">
+    <div class="stat"><div class="stat-value">7</div><div class="stat-label">Active</div></div>
+    <div class="stat"><div class="stat-value">3</div><div class="stat-label">Repos</div></div>
+    <div class="stat"><div class="stat-value">$4.82</div><div class="stat-label">Cost Today</div></div>
+    <div class="stat att"><div class="stat-value">2</div><div class="stat-label">Need Attention</div></div>
+  </div>
+  <div class="controls">
+    <button class="toggle-btn active">By Status</button>
+    <button class="toggle-btn">By Repo</button>
+    <button class="launch-btn">+ Launch</button>
+  </div>
+</div>
+
+<div class="main">
+  <!-- Board -->
+  <div class="board">
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-a"></span>Active</span><span class="cnt">3</span></div>
+      <div class="col-body">
+        <div class="card sel">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">2m ago</span></div>
+          <div class="card-repo">aimux</div>
+          <div class="card-branch"><code>feat/web-dashboard</code></div>
+          <div class="card-action">Edit internal/web/server.go</div>
+          <div class="card-meta"><span>opus-4.6</span><span class="card-cost">$1.23</span></div>
+        </div>
+        <div class="card">
+          <div class="card-top"><span class="prov p-x">Codex</span><span class="card-time">30s</span></div>
+          <div class="card-repo">opendatahub-operator</div>
+          <div class="card-branch"><code>fix/reconciler-leak</code></div>
+          <div class="card-action">Bash go test ./controllers/...</div>
+          <div class="card-meta"><span>codex-1</span><span class="card-cost">$0.45</span></div>
+        </div>
+        <div class="card">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">1m</span></div>
+          <div class="card-repo">research</div>
+          <div class="card-branch"><code>main</code></div>
+          <div class="card-action">Read wiki/mcp/gateway.md</div>
+          <div class="card-meta"><span>sonnet-4.6</span><span class="card-cost">$0.31</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-i"></span>Idle</span><span class="cnt">2</span></div>
+      <div class="col-body">
+        <div class="card">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">8m</span></div>
+          <div class="card-repo">blog-concept</div>
+          <div class="card-branch"><code>draft/mcp-deep-dive</code></div>
+          <div class="card-action">Waiting for input</div>
+          <div class="card-meta"><span>opus-4.6</span><span class="card-cost">$2.10</span></div>
+        </div>
+        <div class="card">
+          <div class="card-top"><span class="prov p-g">Gemini</span><span class="card-time">12m</span></div>
+          <div class="card-repo">aimux</div>
+          <div class="card-branch"><code>test/provider-coverage</code></div>
+          <div class="card-action">Completed task</div>
+          <div class="card-meta"><span>gemini-2.5</span><span class="card-cost">$0.08</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-w"></span>Waiting</span><span class="cnt">2</span></div>
+      <div class="col-body">
+        <div class="card" style="border-color:var(--orange);">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">1m</span></div>
+          <div class="card-repo">mcp-gateway</div>
+          <div class="card-branch"><code>feat/auth-bridge</code></div>
+          <div class="card-action" style="color:var(--orange)">&#9208; kubectl apply -f deploy.yaml</div>
+          <div class="card-meta"><span>opus-4.6</span><span class="card-cost">$0.87</span></div>
+        </div>
+        <div class="card" style="border-color:var(--orange);">
+          <div class="card-top"><span class="prov p-x">Codex</span><span class="card-time">3m</span></div>
+          <div class="card-repo">kagenti-operator</div>
+          <div class="card-branch"><code>main</code></div>
+          <div class="card-action" style="color:var(--orange)">&#9208; Write: config/rbac/role.yaml</div>
+          <div class="card-meta"><span>codex-1</span><span class="card-cost">$0.22</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="right-panel">
+    <div class="panel-header">
+      <div class="panel-left">
+        <div class="panel-title">aimux <span class="branch">feat/web-dashboard</span></div>
+      </div>
+      <div class="panel-right">
+        <div class="panel-tabs">
+          <button class="panel-tab active" onclick="showTab('trace')">Trace</button>
+          <button class="panel-tab" onclick="showTab('session')">Session</button>
+        </div>
+        <button class="pbtn" title="Fullscreen">&#8599;</button>
+        <button class="pbtn">&#10005;</button>
+      </div>
+    </div>
+
+    <div class="panel-stats">
+      <span>&#9654; <span class="v">Active</span></span>
+      <span>15 turns</span>
+      <span>45.2k/12.8k</span>
+      <span class="c">$1.23</span>
+      <span>14m</span>
+    </div>
+
+    <div class="tab-content">
+      <!-- Trace Tab -->
+      <div class="trace-tab" id="trace-tab">
+        <div class="turn turn-u">
+          <div class="th"><span class="tn">#1</span><span class="tr tr-u">You</span><span class="tt">14:12</span></div>
+          <div class="tx">Add a web dashboard to aimux with Go HTTP server</div>
+        </div>
+        <div class="turn turn-a">
+          <div class="th"><span class="tn">#1</span><span class="tr tr-a">Claude</span><span class="tt">14:12</span></div>
+          <div class="tx-a">Setting up web server. Checking existing patterns.</div>
+          <div class="tools">
+            <span class="tp"><span class="tok">&#10003;</span> Glob internal/**</span>
+            <span class="tp"><span class="tok">&#10003;</span> Read controller.go</span>
+            <span class="tp"><span class="tok">&#10003;</span> Write server.go</span>
+          </div>
+          <div class="dp">
+            <span class="da">+package web</span><br>
+            <span class="da">+type Server struct {</span><br>
+            <span class="da">+    ctrl  *controller.Controller</span><br>
+            <span class="da">+    disco *discovery.Orchestrator</span>
+          </div>
+          <div class="tf"><span>3.4k/1.2k &middot; $0.08</span><div class="an"><button class="ab ab-g on">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+        </div>
+
+        <div class="turn turn-u">
+          <div class="th"><span class="tn">#2</span><span class="tr tr-u">You</span><span class="tt">14:14</span></div>
+          <div class="tx">Add SSE handler streaming agent state every 2s</div>
+        </div>
+        <div class="turn turn-a">
+          <div class="th"><span class="tn">#2</span><span class="tr tr-a">Claude</span><span class="tt">14:14</span></div>
+          <div class="tx-a">Adding SSE endpoint with discovery orchestrator.</div>
+          <div class="tools">
+            <span class="tp"><span class="tok">&#10003;</span> Write sse.go</span>
+            <span class="tp"><span class="tok">&#10003;</span> Edit server.go:28</span>
+          </div>
+          <div class="tf"><span>2.8k/1.6k &middot; $0.07</span><div class="an"><button class="ab ab-g">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+        </div>
+
+        <div class="turn turn-u">
+          <div class="th"><span class="tn">#3</span><span class="tr tr-u">You</span><span class="tt">14:16</span></div>
+          <div class="tx">Run the tests</div>
+        </div>
+        <div class="turn turn-a">
+          <div class="th"><span class="tn">#3</span><span class="tr tr-a">Claude</span><span class="tt">14:16</span></div>
+          <div class="tx-a">All 42 tests pass.</div>
+          <div class="tools"><span class="tp"><span class="tok">&#10003;</span> Bash go test ./...</span></div>
+          <div class="tf"><span>1.2k/450 &middot; $0.03</span><div class="an"><button class="ab ab-g on">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+        </div>
+
+        <div class="turn turn-u">
+          <div class="th"><span class="tn">#4</span><span class="tr tr-u">You</span><span class="tt">14:18</span></div>
+          <div class="tx">Add REST handler for launching new agents</div>
+        </div>
+        <div class="turn turn-a">
+          <div class="th"><span class="tn">#4</span><span class="tr tr-a">Claude</span><span class="tt">14:18</span></div>
+          <div class="tx-a">Adding launch handler with provider, directory, model.</div>
+          <div class="tools">
+            <span class="tp"><span class="tok">&#10003;</span> Read spawn.go</span>
+            <span class="tp"><span class="tok">&#10003;</span> Write handlers.go</span>
+            <span class="tp"><span class="tox">&#10007;</span> Bash go build</span>
+          </div>
+          <div class="tf"><span>4.1k/2.2k &middot; $0.11</span><div class="an"><button class="ab ab-g">G</button><button class="ab ab-r on">B</button><button class="ab ab-w">W</button></div></div>
+        </div>
+
+        <div class="turn turn-u">
+          <div class="th"><span class="tn">#5</span><span class="tr tr-u">You</span><span class="tt">14:20</span></div>
+          <div class="tx">Fix the build error</div>
+        </div>
+        <div class="turn turn-a">
+          <div class="th"><span class="tn">#5</span><span class="tr tr-a">Claude</span><span class="tt">14:20</span></div>
+          <div class="tx-a">Missing import. Fixed, build passes.</div>
+          <div class="tools">
+            <span class="tp"><span class="tok">&#10003;</span> Edit handlers.go:3</span>
+            <span class="tp"><span class="tok">&#10003;</span> Bash go build</span>
+          </div>
+          <div class="tf"><span>800/320 &middot; $0.02</span><div class="an"><button class="ab ab-g on">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+        </div>
+      </div>
+
+      <!-- Session Tab (hidden by default) -->
+      <div class="session-tab" id="session-tab">
+        <div class="term-body">
+          <div><span class="pr">$</span> claude --model opus "Add SSE endpoint"</div>
+          <div><span class="ou">+--------------------------------------+</span></div>
+          <div><span class="ou">| Claude Code                 opus-4.6 |</span></div>
+          <div><span class="ou">+--------------------------------------+</span></div>
+          <div>&nbsp;</div>
+          <div><span class="tc">  Edit internal/web/server.go</span></div>
+          <div><span class="ou">  + func (s *Server) handleSSE(w http.ResponseWriter,</span></div>
+          <div><span class="ou">  +     r *http.Request) {</span></div>
+          <div><span class="ou">  +     flusher, ok := w.(http.Flusher)</span></div>
+          <div><span class="ou">  +     if !ok {</span></div>
+          <div><span class="ou">  +         http.Error(w, "streaming not supported", 500)</span></div>
+          <div><span class="ou">  +         return</span></div>
+          <div><span class="ou">  +     }</span></div>
+          <div><span class="ou">  +</span></div>
+          <div><span class="ou">  +     w.Header().Set("Content-Type", "text/event-stream")</span></div>
+          <div><span class="ou">  +     w.Header().Set("Cache-Control", "no-cache")</span></div>
+          <div><span class="ou">  +     w.Header().Set("Connection", "keep-alive")</span></div>
+          <div><span class="ou">  +</span></div>
+          <div><span class="ou">  +     ticker := time.NewTicker(2 * time.Second)</span></div>
+          <div><span class="ou">  +     defer ticker.Stop()</span></div>
+          <div>&nbsp;</div>
+          <div><span class="tc">  Bash go test ./internal/web/... -v</span></div>
+          <div><span class="ok">  === RUN   TestSSEHandler</span></div>
+          <div><span class="ok">  --- PASS: TestSSEHandler (0.02s)</span></div>
+          <div><span class="ok">  === RUN   TestSSEDisconnect</span></div>
+          <div><span class="ok">  --- PASS: TestSSEDisconnect (0.01s)</span></div>
+          <div><span class="ok">  === RUN   TestSSEAgentSnapshot</span></div>
+          <div><span class="ok">  --- PASS: TestSSEAgentSnapshot (0.03s)</span></div>
+          <div><span class="ou">  ok  github.com/zanetworker/aimux/internal/web  0.234s</span></div>
+          <div>&nbsp;</div>
+          <div>All 42 tests pass including new web server tests. The SSE</div>
+          <div>handler correctly streams agent snapshots and handles</div>
+          <div>client disconnection gracefully.</div>
+          <div>&nbsp;</div>
+          <div><span class="pr">&#10095;</span> <span class="blink"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="live-strip"><span class="ld"></span> Live &middot; #15 &middot; $1.23</div>
+  </div>
+</div>
+
+<script>
+function showTab(name) {
+  const traceTab = document.getElementById('trace-tab');
+  const sessionTab = document.getElementById('session-tab');
+  const tabs = document.querySelectorAll('.panel-tab');
+
+  if (name === 'trace') {
+    traceTab.style.display = 'block';
+    traceTab.style.flex = '1';
+    traceTab.style.overflow = 'auto';
+    sessionTab.style.display = 'none';
+    tabs[0].classList.add('active');
+    tabs[1].classList.remove('active');
+  } else {
+    traceTab.style.display = 'none';
+    sessionTab.style.display = 'flex';
+    sessionTab.style.flex = '1';
+    tabs[0].classList.remove('active');
+    tabs[1].classList.add('active');
+  }
+}
+</script>
+
+</body>
+</html>

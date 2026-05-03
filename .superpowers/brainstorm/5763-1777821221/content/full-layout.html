@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux - Board + Trace + Terminal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
+  :root {
+    --bg-primary: #000000;
+    --bg-secondary: #060608;
+    --bg-tertiary: #1a1a1a;
+    --bg-card: #111111;
+    --accent: #FF3131;
+    --accent-hover: #ff5252;
+    --accent-muted: #cc2727;
+    --text-primary: #ededed;
+    --text-secondary: #a0a0a0;
+    --text-muted: #666666;
+    --border: #2a2a2a;
+    --border-hover: #3a3a3a;
+    --font-heading: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font-body); background: var(--bg-primary);
+    color: var(--text-primary); -webkit-font-smoothing: antialiased;
+    height: 100vh; overflow: hidden; display: flex; flex-direction: column;
+  }
+
+  /* ===== STATS BAR ===== */
+  .stats-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+  .logo span { color: var(--text-primary); }
+  .stats-group { display: flex; gap: 24px; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 20px; font-weight: 700; color: var(--text-primary); font-family: var(--font-heading); letter-spacing: -0.02em; }
+  .stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+  .stat.attention .stat-value { color: var(--accent); }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .toggle-btn {
+    padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--bg-tertiary); color: var(--text-muted); font-size: 11px;
+    cursor: pointer; font-family: var(--font-heading); font-weight: 500;
+  }
+  .toggle-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .launch-btn {
+    padding: 5px 12px; border-radius: 4px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); font-size: 12px; font-weight: 600;
+    cursor: pointer; font-family: var(--font-heading);
+  }
+
+  /* ===== MAIN AREA (board + trace) ===== */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ===== BOARD (full-size cards) ===== */
+  .board-area { flex: 1; display: flex; gap: 16px; padding: 16px 20px; overflow-x: auto; }
+  .column {
+    min-width: 260px; flex: 1; background: var(--bg-secondary); border-radius: 6px;
+    border: 1px solid var(--border); display: flex; flex-direction: column;
+  }
+  .col-head {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .col-head .cnt { background: var(--bg-tertiary); padding: 1px 6px; border-radius: 3px; font-size: 10px; border: 1px solid var(--border); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; display: inline-block; }
+  .dot-a { background: #3fb950; } .dot-i { background: var(--text-muted); } .dot-w { background: #d29922; } .dot-e { background: var(--accent); }
+  .col-body { padding: 6px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+
+  /* Full-size card */
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .card:hover { border-color: var(--border-hover); }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-muted); }
+  .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .prov {
+    font-size: 9px; font-weight: 600; padding: 2px 7px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-heading);
+  }
+  .p-c { background: rgba(255,49,49,0.12); color: var(--accent); border: 1px solid var(--accent); }
+  .p-x { background: rgba(63,185,80,0.12); color: #3fb950; border: 1px solid rgba(63,185,80,0.3); }
+  .p-g { background: rgba(167,139,250,0.12); color: #a78bfa; border: 1px solid rgba(167,139,250,0.3); }
+  .card-time { font-size: 10px; color: var(--text-muted); }
+  .card-repo { font-size: 13px; font-weight: 600; margin-bottom: 2px; letter-spacing: -0.01em; }
+  .card-branch { font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; }
+  .card-branch code {
+    background: var(--bg-tertiary); padding: 1px 5px; border-radius: 3px;
+    font-size: 10px; font-family: var(--font-mono); border: 1px solid var(--border); color: var(--accent);
+  }
+  .card-action { font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; font-style: italic; }
+  .card-meta { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); }
+  .card-cost { color: #3fb950; font-weight: 600; }
+
+  /* ===== TRACE PANEL (compact, right side) ===== */
+  .trace-panel {
+    width: 420px; background: var(--bg-secondary); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .trace-header {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .trace-title { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+  .trace-title .branch { color: var(--text-muted); font-weight: 400; font-size: 11px; }
+  .trace-btns { display: flex; gap: 4px; }
+  .tbtn {
+    padding: 3px 8px; border-radius: 3px; border: 1px solid var(--border);
+    background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px;
+    cursor: pointer; font-family: var(--font-heading); font-weight: 500;
+  }
+  .tbtn.pri { color: var(--accent); border-color: var(--accent); background: transparent; }
+
+  .trace-stats {
+    display: flex; gap: 10px; padding: 5px 12px; border-bottom: 1px solid var(--border);
+    font-size: 9px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+  .trace-stats .val { color: var(--text-secondary); font-weight: 600; }
+  .trace-stats .cost { color: #3fb950; }
+
+  .trace-body { flex: 1; overflow-y: auto; padding: 6px 10px; }
+
+  .turn { margin-bottom: 2px; }
+  .turn + .turn-u { margin-top: 8px; }
+
+  .turn-u {
+    padding: 5px 7px; background: var(--bg-tertiary); border-radius: 4px;
+    border: 1px solid var(--border); margin-bottom: 2px;
+  }
+  .turn-a {
+    padding: 5px 7px; background: var(--bg-card);
+    border-left: 2px solid var(--accent-muted); border-radius: 0 4px 4px 0;
+  }
+  .th { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
+  .tn { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
+  .tr { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tr-u { color: var(--text-secondary); } .tr-a { color: var(--accent); }
+  .tt { font-size: 9px; color: var(--text-muted); margin-left: auto; font-family: var(--font-mono); }
+  .tx { font-size: 12px; color: var(--text-primary); line-height: 1.5; }
+  .tx-a { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+
+  .tools { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+  .tp {
+    font-size: 9px; font-family: var(--font-mono); color: var(--text-muted);
+    background: var(--bg-primary); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 3px; display: flex; align-items: center; gap: 3px;
+  }
+  .tok { color: #3fb950; font-size: 8px; } .tox { color: var(--accent); font-size: 8px; }
+
+  .dp {
+    margin-top: 3px; padding: 3px 5px; background: var(--bg-primary);
+    border: 1px solid var(--border); border-radius: 3px; font-family: var(--font-mono);
+    font-size: 9px; line-height: 1.4; max-height: 48px; overflow: hidden;
+    position: relative;
+  }
+  .dp::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 16px;
+    background: linear-gradient(transparent, var(--bg-primary));
+  }
+  .da { color: #3fb950; } .dd { color: var(--accent); }
+
+  .tf {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 3px; font-size: 9px; color: var(--text-muted); font-family: var(--font-mono);
+  }
+  .an { display: flex; gap: 2px; }
+  .ab {
+    padding: 1px 4px; border-radius: 2px; border: 1px solid var(--border);
+    background: transparent; font-size: 8px; cursor: pointer;
+    font-family: var(--font-heading); font-weight: 700; text-transform: uppercase;
+  }
+  .ag { color: #3fb950; } .ag.on { background: rgba(63,185,80,0.15); border-color: #3fb950; }
+  .ar { color: var(--accent); } .ar.on { background: rgba(255,49,49,0.15); border-color: var(--accent); }
+  .aw { color: #d29922; }
+
+  .live-strip {
+    display: flex; align-items: center; gap: 5px; padding: 5px 12px;
+    border-top: 1px solid var(--border); font-size: 9px; color: var(--accent);
+    font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .ld { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+  /* ===== TERMINAL (bottom) ===== */
+  .terminal {
+    height: 220px; flex-shrink: 0; background: var(--bg-primary);
+    border-top: 3px solid var(--accent);
+  }
+  .term-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+  }
+  .term-head span { font-size: 11px; color: var(--text-muted); font-family: var(--font-heading); font-weight: 500; }
+  .term-head .detach {
+    font-size: 10px; color: var(--text-muted); cursor: pointer; border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: 3px; background: var(--bg-tertiary);
+  }
+  .term-body {
+    padding: 10px 14px; font-family: var(--font-mono); font-size: 12px;
+    color: var(--text-primary); line-height: 1.7; height: calc(100% - 30px); overflow-y: auto;
+  }
+  .term-body .pr { color: var(--accent); font-weight: 600; }
+  .term-body .ou { color: var(--text-muted); }
+  .term-body .tc { color: #d29922; }
+  .term-body .blink {
+    display: inline-block; width: 7px; height: 14px;
+    background: var(--accent); animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<!-- Stats Bar -->
+<div class="stats-bar">
+  <div class="logo">ai<span>mux</span></div>
+  <div class="stats-group">
+    <div class="stat"><div class="stat-value">7</div><div class="stat-label">Active</div></div>
+    <div class="stat"><div class="stat-value">3</div><div class="stat-label">Repos</div></div>
+    <div class="stat"><div class="stat-value">$4.82</div><div class="stat-label">Cost Today</div></div>
+    <div class="stat attention"><div class="stat-value">2</div><div class="stat-label">Need Attention</div></div>
+  </div>
+  <div class="controls">
+    <button class="toggle-btn active">By Status</button>
+    <button class="toggle-btn">By Repo</button>
+    <button class="launch-btn">+ Launch</button>
+  </div>
+</div>
+
+<!-- Main: Board + Trace -->
+<div class="main">
+  <!-- Board -->
+  <div class="board-area">
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-a"></span>Active</span><span class="cnt">3</span></div>
+      <div class="col-body">
+        <div class="card sel">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">2m ago</span></div>
+          <div class="card-repo">aimux</div>
+          <div class="card-branch"><code>feat/web-dashboard</code></div>
+          <div class="card-action">Edit internal/web/server.go</div>
+          <div class="card-meta"><span>opus-4.6</span><span class="card-cost">$1.23</span></div>
+        </div>
+        <div class="card">
+          <div class="card-top"><span class="prov p-x">Codex</span><span class="card-time">30s ago</span></div>
+          <div class="card-repo">opendatahub-operator</div>
+          <div class="card-branch"><code>fix/reconciler-leak</code></div>
+          <div class="card-action">Bash go test ./controllers/...</div>
+          <div class="card-meta"><span>codex-1</span><span class="card-cost">$0.45</span></div>
+        </div>
+        <div class="card">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">1m ago</span></div>
+          <div class="card-repo">research</div>
+          <div class="card-branch"><code>main</code></div>
+          <div class="card-action">Read wiki/mcp/gateway.md</div>
+          <div class="card-meta"><span>sonnet-4.6</span><span class="card-cost">$0.31</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-i"></span>Idle</span><span class="cnt">2</span></div>
+      <div class="col-body">
+        <div class="card">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">8m ago</span></div>
+          <div class="card-repo">blog-concept</div>
+          <div class="card-branch"><code>draft/mcp-deep-dive</code></div>
+          <div class="card-action">Waiting for input</div>
+          <div class="card-meta"><span>opus-4.6</span><span class="card-cost">$2.10</span></div>
+        </div>
+        <div class="card">
+          <div class="card-top"><span class="prov p-g">Gemini</span><span class="card-time">12m ago</span></div>
+          <div class="card-repo">aimux</div>
+          <div class="card-branch"><code>test/provider-coverage</code></div>
+          <div class="card-action">Completed task</div>
+          <div class="card-meta"><span>gemini-2.5</span><span class="card-cost">$0.08</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="col-head"><span><span class="dot dot-w"></span>Waiting</span><span class="cnt">2</span></div>
+      <div class="col-body">
+        <div class="card" style="border-color:#d29922">
+          <div class="card-top"><span class="prov p-c">Claude</span><span class="card-time">1m ago</span></div>
+          <div class="card-repo">mcp-gateway</div>
+          <div class="card-branch"><code>feat/auth-bridge</code></div>
+          <div class="card-action" style="color:#d29922">&#9208; kubectl apply -f deploy.yaml</div>
+          <div class="card-meta"><span>opus-4.6</span><span class="card-cost">$0.87</span></div>
+        </div>
+        <div class="card" style="border-color:#d29922">
+          <div class="card-top"><span class="prov p-x">Codex</span><span class="card-time">3m ago</span></div>
+          <div class="card-repo">kagenti-operator</div>
+          <div class="card-branch"><code>main</code></div>
+          <div class="card-action" style="color:#d29922">&#9208; Write: config/rbac/role.yaml</div>
+          <div class="card-meta"><span>codex-1</span><span class="card-cost">$0.22</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trace Panel (compact) -->
+  <div class="trace-panel">
+    <div class="trace-header">
+      <div><div class="trace-title">aimux <span class="branch">feat/web-dashboard</span></div></div>
+      <div class="trace-btns">
+        <button class="tbtn">Full Trace</button>
+        <button class="tbtn pri">Attached</button>
+        <button class="tbtn">&#10005;</button>
+      </div>
+    </div>
+    <div class="trace-stats">
+      <span>&#9654; <span class="val">Active</span></span>
+      <span>15 turns</span>
+      <span>45.2k/12.8k</span>
+      <span class="cost">$1.23</span>
+      <span>14m</span>
+    </div>
+    <div class="trace-body">
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#1</span><span class="tr tr-u">You</span><span class="tt">14:12</span></div>
+        <div class="tx">Add a web dashboard to aimux. Start with the Go HTTP server in internal/frontend/web/</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#1</span><span class="tr tr-a">Claude</span><span class="tt">14:12</span></div>
+        <div class="tx-a">Setting up web server package. Checking existing patterns.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Glob internal/**/*.go</span>
+          <span class="tp"><span class="tok">&#10003;</span> Read controller.go</span>
+          <span class="tp"><span class="tok">&#10003;</span> Write server.go</span>
+        </div>
+        <div class="dp">
+          <span class="da">+package web</span><br>
+          <span class="da">+type Server struct {</span><br>
+          <span class="da">+    ctrl  *controller.Controller</span><br>
+          <span class="da">+    disco *discovery.Orchestrator</span>
+        </div>
+        <div class="tf"><span>3.4k/1.2k &middot; $0.08</span><div class="an"><button class="ab ag on">G</button><button class="ab ar">B</button><button class="ab aw">W</button></div></div>
+      </div>
+
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#2</span><span class="tr tr-u">You</span><span class="tt">14:14</span></div>
+        <div class="tx">Add the SSE handler that streams agent state every 2s</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#2</span><span class="tr tr-a">Claude</span><span class="tt">14:14</span></div>
+        <div class="tx-a">Adding SSE endpoint with discovery orchestrator.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Write sse.go</span>
+          <span class="tp"><span class="tok">&#10003;</span> Edit server.go:28</span>
+        </div>
+        <div class="tf"><span>2.8k/1.6k &middot; $0.07</span><div class="an"><button class="ab ag">G</button><button class="ab ar">B</button><button class="ab aw">W</button></div></div>
+      </div>
+
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#3</span><span class="tr tr-u">You</span><span class="tt">14:16</span></div>
+        <div class="tx">Run the tests</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#3</span><span class="tr tr-a">Claude</span><span class="tt">14:16</span></div>
+        <div class="tx-a">All 42 tests pass including new web server tests.</div>
+        <div class="tools"><span class="tp"><span class="tok">&#10003;</span> Bash go test ./...</span></div>
+        <div class="tf"><span>1.2k/450 &middot; $0.03</span><div class="an"><button class="ab ag on">G</button><button class="ab ar">B</button><button class="ab aw">W</button></div></div>
+      </div>
+
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#4</span><span class="tr tr-u">You</span><span class="tt">14:18</span></div>
+        <div class="tx">Add the REST handler for launching new agents</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#4</span><span class="tr tr-a">Claude</span><span class="tt">14:18</span></div>
+        <div class="tx-a">Adding launch handler with provider, directory, model params.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Read spawn.go</span>
+          <span class="tp"><span class="tok">&#10003;</span> Write handlers.go</span>
+          <span class="tp"><span class="tox">&#10007;</span> Bash go build</span>
+        </div>
+        <div class="tf"><span>4.1k/2.2k &middot; $0.11</span><div class="an"><button class="ab ag">G</button><button class="ab ar on">B</button><button class="ab aw">W</button></div></div>
+      </div>
+
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#5</span><span class="tr tr-u">You</span><span class="tt">14:20</span></div>
+        <div class="tx">Fix the build error</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#5</span><span class="tr tr-a">Claude</span><span class="tt">14:20</span></div>
+        <div class="tx-a">Missing import. Fixed, build passes.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Edit handlers.go:3</span>
+          <span class="tp"><span class="tok">&#10003;</span> Bash go build</span>
+        </div>
+        <div class="tf"><span>800/320 &middot; $0.02</span><div class="an"><button class="ab ag on">G</button><button class="ab ar">B</button><button class="ab aw">W</button></div></div>
+      </div>
+    </div>
+    <div class="live-strip"><span class="ld"></span> Live &middot; #15 &middot; $1.23</div>
+  </div>
+</div>
+
+<!-- Terminal -->
+<div class="terminal">
+  <div class="term-head">
+    <span>Terminal: aimux / feat/web-dashboard (tmux: aimux-abc123)</span>
+    <span class="detach">Detach (Ctrl+D)</span>
+  </div>
+  <div class="term-body">
+    <div><span class="pr">$</span> claude --model opus "Add SSE endpoint"</div>
+    <div><span class="ou">+--------------------------------------+</span></div>
+    <div><span class="ou">| Claude Code                 opus-4.6 |</span></div>
+    <div><span class="ou">+--------------------------------------+</span></div>
+    <div>&nbsp;</div>
+    <div><span class="tc">  Edit internal/web/server.go</span></div>
+    <div><span class="ou">  + func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {</span></div>
+    <div><span class="ou">  +     flusher, ok := w.(http.Flusher)</span></div>
+    <div><span class="ou">  +     if !ok {</span></div>
+    <div><span class="ou">  +         http.Error(w, "streaming not supported", 500)</span></div>
+    <div><span class="ou">  +         return</span></div>
+    <div><span class="ou">  +     }</span></div>
+    <div>&nbsp;</div>
+    <div><span class="tc">  Bash go test ./internal/web/... -v</span></div>
+    <div><span class="ou">  ok  github.com/zanetworker/aimux/internal/web  0.234s</span></div>
+    <div>&nbsp;</div>
+    <div><span class="pr">&#10095;</span> <span class="blink"></span></div>
+  </div>
+</div>
+
+</body>
+</html>

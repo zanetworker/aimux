@@ -1,0 +1,36 @@
+<h2>What's the primary view when you open the dashboard?</h2>
+<p class="subtitle">This becomes the default landing page. Pick what you'd reach for most.</p>
+
+<div class="options">
+  <div class="option" data-choice="kanban" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Kanban Board</h3>
+      <p>Columns by status: <strong>Active</strong>, <strong>Idle</strong>, <strong>Waiting Permission</strong>, <strong>Error</strong>, <strong>Completed</strong>. Each card is a session with repo name, model, cost, last activity. Drag sessions between states (e.g., manually archive). Think Jira board but for agent sessions.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="grid" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Project Grid</h3>
+      <p>Group by <strong>repository</strong> first. Each repo is a card/row showing all its active sessions. Expand a repo to see individual sessions. Best when you have 5+ repos and want "which repos have agents running right now?"</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="timeline" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Activity Timeline</h3>
+      <p>Chronological feed of all agent activity across repos. Real-time stream of "Agent X in repo Y just edited file Z." Best for passive monitoring, like a news feed for your agents.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="command-center" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>Command Center</h3>
+      <p>Split dashboard: top row shows aggregate stats (total sessions, total cost, repos active), bottom shows a session list with inline trace preview. Click any session to expand its live trace. Think Grafana meets tmux.</p>
+    </div>
+  </div>
+</div>
