@@ -32,7 +32,7 @@ import (
 	"github.com/zanetworker/aimux/internal/clipboard"
 	"github.com/zanetworker/aimux/internal/terminal"
 	"github.com/zanetworker/aimux/internal/trace"
-	"github.com/zanetworker/aimux/internal/tui/views"
+	"github.com/zanetworker/aimux/internal/frontend/tui/views"
 )
 
 type viewType int
