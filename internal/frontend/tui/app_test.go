@@ -15,7 +15,7 @@ import (
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/trace"
-	"github.com/zanetworker/aimux/internal/tui/views"
+	"github.com/zanetworker/aimux/internal/frontend/tui/views"
 )
 
 // keyMsg creates a tea.KeyMsg for testing key handling.

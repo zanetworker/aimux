@@ -12,7 +12,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/tui"
+	"github.com/zanetworker/aimux/internal/frontend/tui"
 )
 
 // version is set via ldflags at build time: -X main.version=v0.3.0
