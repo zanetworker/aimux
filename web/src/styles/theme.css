@@ -1,38 +1,36 @@
 :root {
-  /* Base: shadcn zinc-950, not pure black */
-  --bg-0: #09090b;
-  /* Surface elevation via white overlays */
-  --bg-1: #0f0f11;
-  --bg-2: #141416;
-  --bg-3: #19191b;
-  --bg-4: #222224;
-  --bg-5: #2c2c2e;
+  /* DevHub dark-black: pure black base, HSL lightness steps, no rgba, no shadows */
+  --bg-0: #000000;
+  --bg-1: #0d0d0d;
+  --bg-2: #1a1a1a;
+  --bg-3: #333333;
+  --bg-4: #4d4d4d;
 
-  /* Accent */
-  --accent: #ef4444;
-  --accent-dim: rgba(239, 68, 68, 0.15);
+  /* Accent: DevHub primary */
+  --accent: #FF3131;
+  --accent-dim: #3b1010;
 
   /* Secondary */
-  --teal: #34d399;
-  --teal-dim: rgba(52, 211, 153, 0.15);
+  --teal: #49D3B4;
+  --teal-dim: #0d2e26;
 
-  /* Text: e0e0e0 primary (not pure white to avoid halation) */
-  --fg: #e0e0e0;
-  --fg-2: #a3a3a3;
-  --fg-3: #737373;
-  --fg-4: #525252;
+  /* Text: DevHub foreground scale */
+  --fg: #e6e6e6;
+  --fg-2: #a6a6a6;
+  --fg-3: #666666;
+  --fg-4: #404040;
 
-  /* Desaturated status colors */
-  --green: #4ade80;
-  --green-dim: rgba(74, 222, 128, 0.15);
-  --orange: #f59e0b;
-  --orange-dim: rgba(245, 158, 11, 0.15);
-  --purple: #a78bfa;
-  --purple-dim: rgba(167, 139, 250, 0.15);
+  /* Status: DevHub static colors */
+  --green: #69DF73;
+  --green-dim: #142e17;
+  --orange: #FFB251;
+  --orange-dim: #332210;
+  --purple: #A772EF;
+  --purple-dim: #1f1433;
 
-  /* Borders: white with low opacity for natural layering */
-  --border: rgba(255, 255, 255, 0.06);
-  --border-hover: rgba(255, 255, 255, 0.12);
+  /* Borders: solid hex, no rgba */
+  --border: #1a1a1a;
+  --border-hover: #333333;
 
   --font: 'Inter', system-ui, -apple-system, sans-serif;
   --mono: 'SF Mono', 'Fira Code', monospace;

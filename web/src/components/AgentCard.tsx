@@ -27,11 +27,11 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
   const providerStyle = providerColors[agent.ProviderName.toLowerCase() as keyof typeof providerColors] || providerColors.claude;
 
   const statusColors = {
-    0: { dot: '#4ade80', bg: 'rgba(74,222,128,0.15)', color: '#4ade80' }, // Active
-    1: { dot: '#525252', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Idle
-    2: { dot: '#f59e0b', bg: 'rgba(245,158,11,0.15)', color: '#f59e0b' }, // Waiting
-    3: { dot: '#ef4444', bg: 'var(--accent-dim)', color: 'var(--accent)' }, // Error
-    4: { dot: '#525252', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Unknown
+    0: { dot: 'var(--green)', bg: 'var(--green-dim)', color: 'var(--green)' },
+    1: { dot: 'var(--fg-3)', bg: 'var(--bg-2)', color: 'var(--fg-3)' },
+    2: { dot: 'var(--orange)', bg: 'var(--orange-dim)', color: 'var(--orange)' },
+    3: { dot: 'var(--accent)', bg: 'var(--accent-dim)', color: 'var(--accent)' },
+    4: { dot: 'var(--fg-3)', bg: 'var(--bg-2)', color: 'var(--fg-3)' },
   };
 
   const statusStyle = statusColors[agent.Status as keyof typeof statusColors] || statusColors[4];
@@ -69,17 +69,16 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
-  const borderLeftColor = agent.Status === 0 ? '#4ade80' : 'var(--fg-4)';
-  const borderLeftColorOverride = agent.Status === 2 ? '#f59e0b' : agent.Status === 3 ? '#ef4444' : borderLeftColor;
+  const borderLeftColor = agent.Status === 0 ? 'var(--green)' : 'var(--fg-4)';
+  const borderLeftColorOverride = agent.Status === 2 ? 'var(--orange)' : agent.Status === 3 ? 'var(--accent)' : borderLeftColor;
 
-  const borderColor = selected ? 'var(--accent)' : 'rgba(255,255,255,0.06)';
-  const boxShadow = 'none';
+  const borderColor = selected ? 'var(--accent)' : 'var(--border)';
 
   const cardBg = agent.Status === 2
-    ? 'rgba(245,158,11,0.04)'
+    ? 'var(--orange-dim)'
     : agent.Status === 3
-      ? 'rgba(239,68,68,0.04)'
-      : 'rgba(255,255,255,0.03)';
+      ? 'var(--accent-dim)'
+      : 'var(--bg-1)';
 
   const showAttention = agent.Status === 2 || agent.Status === 3;
 
@@ -95,17 +94,16 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
         borderRadius: 8,
         padding: '14px 16px',
         cursor: 'pointer',
-        boxShadow,
-        transition: 'all 0.15s ease',
+        transition: 'border-color 0.15s ease',
       }}
       onMouseEnter={(e) => {
         if (!selected) {
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+          e.currentTarget.style.borderColor = 'var(--border-hover)';
         }
       }}
       onMouseLeave={(e) => {
         if (!selected) {
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
+          e.currentTarget.style.borderColor = 'var(--border)';
         }
       }}
     >
