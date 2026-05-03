@@ -6,6 +6,8 @@ interface Props {
   onStatusFilter: (s: number | null) => void;
   providerFilter: string | null;
   onProviderFilter: (p: string | null) => void;
+  recentFilter: boolean;
+  onRecentFilter: (v: boolean) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   sortBy: string;
@@ -18,11 +20,16 @@ export function FilterBar({
   onStatusFilter,
   providerFilter,
   onProviderFilter,
+  recentFilter,
+  onRecentFilter,
   searchQuery,
   onSearchChange,
   sortBy,
   onSortChange,
 }: Props) {
+  const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
+  const recentCount = agents.filter(a => new Date(a.LastActivity).getTime() > thirtyMinAgo).length;
+
   const statusCounts = {
     all: agents.length,
     active: agents.filter(a => a.Status === 0).length,
@@ -94,6 +101,17 @@ export function FilterBar({
         dotColor={statusDots.error}
         active={statusFilter === 3}
         onClick={() => onStatusFilter(3)}
+      />
+
+      <Divider />
+
+      {/* Recent filter */}
+      <FilterPill
+        label="Recent"
+        count={recentCount}
+        dotColor="#14B8A6"
+        active={recentFilter}
+        onClick={() => onRecentFilter(!recentFilter)}
       />
 
       <Divider />
