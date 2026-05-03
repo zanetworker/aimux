@@ -7,16 +7,23 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/agent"
 )
 
 type Server struct {
-	port     int
-	listener net.Listener
-	srv      *http.Server
+	port       int
+	listener   net.Listener
+	srv        *http.Server
+	discoverFn func() ([]agent.Agent, error)
 }
 
 func NewServer(port int) *Server {
 	return &Server{port: port}
+}
+
+func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
+	s.discoverFn = fn
 }
 
 func (s *Server) Start() error {
@@ -26,6 +33,8 @@ func (s *Server) Start() error {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	mux.HandleFunc("GET /api/events", s.handleSSE)
 
 	sub, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
