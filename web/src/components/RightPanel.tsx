@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { Agent } from '../types';
 import { useTraceStream } from '../hooks/useTraceStream';
 import { TraceView } from './TraceView';
+import { SessionView } from './SessionView';
 
 interface RightPanelProps {
   agent: Agent;
@@ -246,19 +247,16 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
       </div>
 
       {/* Tab content */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        {activeTab === 'trace' ? (
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {activeTab === 'trace' && (
           <TraceView turns={turns} sessionId={agent.sessionId} />
-        ) : (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            color: 'var(--fg-3)',
-            fontSize: '13px',
-          }}>
-            Terminal coming soon
+        )}
+        {activeTab === 'session' && agent.tmuxSession && (
+          <SessionView tmuxSession={agent.tmuxSession} />
+        )}
+        {activeTab === 'session' && !agent.tmuxSession && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>No tmux session available for this agent.</p>
           </div>
         )}
       </div>
