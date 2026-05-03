@@ -1,22 +1,30 @@
 export interface Agent {
-  pid: number;
-  sessionId: string;
-  name: string;
-  providerName: string;
-  sessionFile: string;
-  model: string;
-  workingDir: string;
-  status: 'Active' | 'Idle' | 'Waiting' | 'Error' | 'Unknown';
-  gitBranch: string;
-  tokensIn: number;
-  tokensOut: number;
-  estCostUSD: number;
-  lastActivity: string;
-  lastAction: string;
-  tmuxSession: string;
-  teamName: string;
-  taskSubject: string;
+  PID: number;
+  SessionID: string;
+  Name: string;
+  ProviderName: string;
+  SessionFile: string;
+  Model: string;
+  WorkingDir: string;
+  Status: number; // 0=Active, 1=Idle, 2=WaitingPermission, 3=Error, 4=Unknown
+  GitBranch: string;
+  TokensIn: number;
+  TokensOut: number;
+  EstCostUSD: number;
+  LastActivity: string;
+  LastAction: string;
+  TMuxSession: string;
+  TeamName: string;
+  TaskSubject: string;
 }
+
+export const StatusLabel: Record<number, string> = {
+  0: 'Active',
+  1: 'Idle',
+  2: 'Waiting',
+  3: 'Error',
+  4: 'Unknown',
+};
 
 export interface ToolSpan {
   name: string;

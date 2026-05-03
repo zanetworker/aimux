@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux - Grid v2</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
+  :root {
+    --bg-0: #000000;
+    --bg-1: #0d0d0d;
+    --bg-2: #141414;
+    --bg-3: #1a1a1a;
+    --bg-4: #242424;
+    --accent: #FF3131;
+    --accent-dim: rgba(255, 49, 49, 0.12);
+    --teal: #49D3B4;
+    --teal-dim: rgba(73, 211, 180, 0.12);
+    --fg: #e6e6e6;
+    --fg-2: #b3b3b3;
+    --fg-3: #666666;
+    --fg-4: #404040;
+    --green: #69DF73;
+    --green-dim: rgba(105, 223, 115, 0.12);
+    --orange: #FFB251;
+    --orange-dim: rgba(255, 178, 81, 0.12);
+    --purple: #A772EF;
+    --purple-dim: rgba(167, 114, 239, 0.12);
+    --border: #1f1f1f;
+    --border-hover: #2e2e2e;
+    --font: 'Inter', system-ui, -apple-system, sans-serif;
+    --mono: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font); background: var(--bg-0); color: var(--fg);
+    -webkit-font-smoothing: antialiased; height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  /* ===== STATS BAR ===== */
+  .stats-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px; background: var(--bg-1); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .logo { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+  .logo span { color: var(--fg); }
+  .stats-group { display: flex; gap: 20px; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 18px; font-weight: 700; color: var(--fg); letter-spacing: -0.02em; }
+  .stat-label { font-size: 9px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+  .stat.att .stat-value { color: var(--accent); }
+  .launch-btn {
+    padding: 5px 12px; border-radius: 4px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); font-size: 12px; font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* ===== FILTER BAR ===== */
+  .filter-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 20px; background: var(--bg-1); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .filter-pills { display: flex; gap: 4px; }
+  .filter-pill {
+    padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border);
+    background: transparent; color: var(--fg-3); font-size: 10px;
+    cursor: pointer; font-weight: 500; display: flex; align-items: center; gap: 4px;
+  }
+  .filter-pill:hover { border-color: var(--border-hover); color: var(--fg-2); }
+  .filter-pill.active { border-color: var(--fg-3); color: var(--fg); background: var(--bg-3); }
+  .filter-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .filter-pill .cnt { font-size: 9px; color: var(--fg-4); margin-left: 2px; }
+  .filter-divider { width: 1px; height: 16px; background: var(--border); }
+  .search-input {
+    padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--bg-2); color: var(--fg); font-size: 11px; width: 180px;
+    font-family: var(--font);
+  }
+  .search-input:focus { outline: none; border-color: var(--accent); }
+  .search-input::placeholder { color: var(--fg-4); }
+  .sort-select {
+    padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--bg-2); color: var(--fg-2); font-size: 10px; cursor: pointer;
+  }
+
+  /* ===== MAIN ===== */
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .grid-area { flex: 1; overflow-y: auto; padding: 14px 20px; }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 8px;
+  }
+
+  /* ===== CARD ===== */
+  .card {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; cursor: pointer; transition: all 0.15s;
+    border-left: 3px solid transparent; position: relative;
+  }
+  .card:hover { border-color: var(--border-hover); background: var(--bg-3); }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 8px var(--accent-dim); }
+  .card.s-active { border-left-color: var(--green); }
+  .card.s-idle { border-left-color: var(--fg-4); }
+  .card.s-waiting { border-left-color: var(--orange); background: rgba(255, 178, 81, 0.03); }
+  .card.s-error { border-left-color: var(--accent); background: rgba(255, 49, 49, 0.03); }
+
+  /* Attention bell */
+  .card-bell {
+    position: absolute; top: 8px; right: 10px;
+    font-size: 14px; animation: ring 2s ease-in-out infinite;
+  }
+  @keyframes ring {
+    0%, 100% { transform: rotate(0); }
+    10% { transform: rotate(12deg); }
+    20% { transform: rotate(-12deg); }
+    30% { transform: rotate(8deg); }
+    40% { transform: rotate(-8deg); }
+    50% { transform: rotate(0); }
+  }
+
+  .card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.pulse { animation: dotpulse 2s infinite; }
+  @keyframes dotpulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  .prov {
+    font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .p-c { background: var(--accent-dim); color: var(--accent); }
+  .p-x { background: var(--green-dim); color: var(--green); }
+  .p-g { background: var(--purple-dim); color: var(--purple); }
+  .card-time { font-size: 9px; color: var(--fg-4); margin-left: auto; }
+
+  .card-repo { font-size: 13px; font-weight: 600; margin-bottom: 1px; letter-spacing: -0.01em; }
+  .card-branch {
+    font-family: var(--mono); font-size: 10px; padding: 1px 4px; border-radius: 3px;
+    background: var(--bg-4); color: var(--accent); display: inline-block; margin-bottom: 6px;
+  }
+
+  /* Session title / description */
+  .card-title {
+    font-size: 11px; color: var(--fg-2); line-height: 1.4; margin-bottom: 6px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Current action */
+  .card-action {
+    font-size: 10px; color: var(--fg-3); font-family: var(--mono);
+    padding: 3px 6px; background: var(--bg-0); border-radius: 3px;
+    border: 1px solid var(--border); margin-bottom: 6px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .card-action .action-icon { font-size: 9px; flex-shrink: 0; }
+
+  .card-bottom { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--fg-4); }
+  .card-cost { color: var(--green); font-weight: 600; }
+  .card-tokens { font-family: var(--mono); font-size: 9px; color: var(--fg-4); }
+
+  /* Status tag */
+  .status-tag {
+    font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 1px 5px; border-radius: 2px;
+  }
+  .st-active { background: var(--green-dim); color: var(--green); }
+  .st-idle { background: var(--bg-4); color: var(--fg-3); }
+  .st-waiting { background: var(--orange-dim); color: var(--orange); }
+  .st-error { background: var(--accent-dim); color: var(--accent); }
+
+  /* ===== RIGHT PANEL ===== */
+  .right-panel {
+    width: 440px; background: var(--bg-1); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .panel-header {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-title { font-size: 13px; font-weight: 600; }
+  .panel-title .branch { color: var(--fg-3); font-weight: 400; font-size: 11px; }
+  .panel-tabs {
+    display: flex; background: var(--bg-3); border-radius: 4px; padding: 2px;
+    border: 1px solid var(--border);
+  }
+  .panel-tab {
+    padding: 3px 12px; border-radius: 3px; font-size: 10px; font-weight: 600;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--fg-3); background: transparent; border: none;
+  }
+  .panel-tab.active { background: var(--bg-0); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .pbtn {
+    padding: 3px 8px; border-radius: 3px; border: 1px solid var(--border);
+    background: var(--bg-3); color: var(--fg-3); font-size: 10px; cursor: pointer;
+  }
+  .panel-stats {
+    display: flex; gap: 10px; padding: 5px 12px; border-bottom: 1px solid var(--border);
+    font-size: 9px; color: var(--fg-4); font-family: var(--mono);
+  }
+  .panel-stats .v { color: var(--fg-2); font-weight: 600; }
+  .panel-stats .c { color: var(--green); }
+
+  .trace-body { flex: 1; overflow-y: auto; padding: 8px 12px; }
+  .turn { margin-bottom: 2px; }
+  .turn + .turn-u { margin-top: 8px; }
+  .turn-u { padding: 5px 7px; background: var(--bg-3); border-radius: 4px; border: 1px solid var(--border); }
+  .turn-a { padding: 5px 7px; background: var(--bg-2); border-left: 2px solid var(--accent); border-radius: 0 4px 4px 0; }
+  .th { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
+  .tn { font-size: 9px; color: var(--fg-4); font-family: var(--mono); }
+  .tr { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tr-u { color: var(--fg-2); } .tr-a { color: var(--accent); }
+  .tt { font-size: 9px; color: var(--fg-4); margin-left: auto; font-family: var(--mono); }
+  .tx { font-size: 12px; color: var(--fg); line-height: 1.5; }
+  .tx-a { font-size: 11px; color: var(--fg-2); line-height: 1.5; }
+  .tools { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+  .tp {
+    font-size: 9px; font-family: var(--mono); color: var(--fg-3);
+    background: var(--bg-0); border: 1px solid var(--border);
+    padding: 1px 5px; border-radius: 3px; display: flex; align-items: center; gap: 3px;
+  }
+  .tok { color: var(--green); font-size: 8px; }
+  .tf { display: flex; align-items: center; justify-content: space-between; margin-top: 3px; font-size: 9px; color: var(--fg-4); font-family: var(--mono); }
+  .an { display: flex; gap: 2px; }
+  .ab { padding: 1px 4px; border-radius: 2px; border: 1px solid var(--border); background: transparent; font-size: 8px; cursor: pointer; font-weight: 700; text-transform: uppercase; }
+  .ab-g { color: var(--green); } .ab-g.on { background: var(--green-dim); border-color: var(--green); }
+  .ab-r { color: var(--accent); }
+  .ab-w { color: var(--orange); }
+
+  .live-strip {
+    display: flex; align-items: center; gap: 5px; padding: 5px 12px;
+    border-top: 1px solid var(--border);
+    font-size: 9px; color: var(--accent); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .ld { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: dotpulse 2s infinite; }
+</style>
+</head>
+<body>
+
+<!-- Stats Bar -->
+<div class="stats-bar">
+  <div class="logo">ai<span>mux</span></div>
+  <div class="stats-group">
+    <div class="stat"><div class="stat-value">48</div><div class="stat-label">Sessions</div></div>
+    <div class="stat"><div class="stat-value">5</div><div class="stat-label">Active</div></div>
+    <div class="stat"><div class="stat-value">12</div><div class="stat-label">Repos</div></div>
+    <div class="stat"><div class="stat-value">$247.82</div><div class="stat-label">Cost Today</div></div>
+    <div class="stat att"><div class="stat-value">2</div><div class="stat-label">Attention</div></div>
+  </div>
+  <button class="launch-btn">+ Launch</button>
+</div>
+
+<!-- Filter Bar -->
+<div class="filter-bar">
+  <div class="filter-pills">
+    <button class="filter-pill active">All <span class="cnt">48</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--green)"></span> Active <span class="cnt">5</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--fg-4)"></span> Idle <span class="cnt">39</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--orange)"></span> Waiting <span class="cnt">2</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--accent)"></span> Error <span class="cnt">2</span></button>
+  </div>
+  <div class="filter-divider"></div>
+  <div class="filter-pills">
+    <button class="filter-pill active"><span class="dot" style="background:var(--accent)"></span> Claude <span class="cnt">42</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--green)"></span> Codex <span class="cnt">4</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--purple)"></span> Gemini <span class="cnt">2</span></button>
+  </div>
+  <div class="filter-divider"></div>
+  <input class="search-input" type="text" placeholder="Search repos, branches...">
+  <select class="sort-select">
+    <option>Sort: Last Active</option>
+    <option>Sort: Cost (high)</option>
+    <option>Sort: Repo Name</option>
+    <option>Sort: Status</option>
+  </select>
+</div>
+
+<div class="main">
+  <div class="grid-area">
+    <div class="card-grid">
+
+      <!-- Active: building web dashboard -->
+      <div class="card s-active sel">
+        <div class="card-top">
+          <span class="status-dot pulse" style="background:var(--green)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-active">Active</span>
+          <span class="card-time">2m ago</span>
+        </div>
+        <div class="card-repo">aimux</div>
+        <span class="card-branch">feat/web-dashboard</span>
+        <div class="card-title">Building web dashboard with React frontend and Go backend SSE streaming for agent state monitoring</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--green)">&#9654;</span> Edit internal/frontend/web/server.go</div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">45.2k/12.8k</span></span>
+          <span class="card-cost">$1.23</span>
+        </div>
+      </div>
+
+      <!-- Active: vibe-kanban research -->
+      <div class="card s-active">
+        <div class="card-top">
+          <span class="status-dot pulse" style="background:var(--green)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-active">Active</span>
+          <span class="card-time">30s ago</span>
+        </div>
+        <div class="card-repo">vibe-kanban</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Researching vibe-kanban sunsetting, merging upstream, designing aimux web dashboard architecture</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--green)">&#9654;</span> Bash timeout 4 curl -s -N http://127.0.0.1:3000/api/events</div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">15.5k/228k</span></span>
+          <span class="card-cost">$166.10</span>
+        </div>
+      </div>
+
+      <!-- Active: Codex testing -->
+      <div class="card s-active">
+        <div class="card-top">
+          <span class="status-dot pulse" style="background:var(--green)"></span>
+          <span class="prov p-x">Codex</span>
+          <span class="status-tag st-active">Active</span>
+          <span class="card-time">1m ago</span>
+        </div>
+        <div class="card-repo">opendatahub-operator</div>
+        <span class="card-branch">fix/reconciler-leak</span>
+        <div class="card-title">Fixing memory leak in reconciler loop causing OOMKills on large cluster deployments</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--green)">&#9654;</span> Bash go test ./controllers/... -race</div>
+        <div class="card-bottom">
+          <span>codex-1 &middot; <span class="card-tokens">8.2k/3.1k</span></span>
+          <span class="card-cost">$0.45</span>
+        </div>
+      </div>
+
+      <!-- WAITING: permission prompt (bell!) -->
+      <div class="card s-waiting">
+        <span class="card-bell">&#128276;</span>
+        <div class="card-top">
+          <span class="status-dot pulse" style="background:var(--orange)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-waiting">Waiting</span>
+          <span class="card-time">1m ago</span>
+        </div>
+        <div class="card-repo">mcp-gateway</div>
+        <span class="card-branch">feat/auth-bridge</span>
+        <div class="card-title">Implementing OAuth token exchange for MCP gateway AuthBridge integration with Keycloak</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--orange)">&#9208;</span> Bash: kubectl apply -f deploy/auth-bridge.yaml</div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">22k/8.5k</span></span>
+          <span class="card-cost">$0.87</span>
+        </div>
+      </div>
+
+      <!-- WAITING: write permission (bell!) -->
+      <div class="card s-waiting">
+        <span class="card-bell">&#128276;</span>
+        <div class="card-top">
+          <span class="status-dot pulse" style="background:var(--orange)"></span>
+          <span class="prov p-x">Codex</span>
+          <span class="status-tag st-waiting">Waiting</span>
+          <span class="card-time">3m ago</span>
+        </div>
+        <div class="card-repo">kagenti-operator</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Creating RBAC roles and service accounts for multi-tenant agent namespace isolation</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--orange)">&#9208;</span> Write: config/rbac/role.yaml</div>
+        <div class="card-bottom">
+          <span>codex-1 &middot; <span class="card-tokens">5.1k/2.0k</span></span>
+          <span class="card-cost">$0.22</span>
+        </div>
+      </div>
+
+      <!-- ERROR: context overflow -->
+      <div class="card s-error">
+        <span class="card-bell">&#128276;</span>
+        <div class="card-top">
+          <span class="status-dot" style="background:var(--accent)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-error">Error</span>
+          <span class="card-time">5m ago</span>
+        </div>
+        <div class="card-repo">learn-rust</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Implementing async runtime comparison between Tokio and async-std for the CLI framework</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--accent)">&#10007;</span> Context overflow (1M tokens)</div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">980k/120k</span></span>
+          <span class="card-cost">$12.40</span>
+        </div>
+      </div>
+
+      <!-- Idle: blog -->
+      <div class="card s-idle">
+        <div class="card-top">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">8m ago</span>
+        </div>
+        <div class="card-repo">blog-concept</div>
+        <span class="card-branch">draft/mcp-deep-dive</span>
+        <div class="card-title">Writing deep dive blog post on MCP server architecture patterns and security considerations</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--fg-4)">&#9724;</span> Waiting for input</div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">31k/18k</span></span>
+          <span class="card-cost">$2.10</span>
+        </div>
+      </div>
+
+      <!-- Idle: marketplace -->
+      <div class="card s-idle">
+        <div class="card-top">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">12m ago</span>
+        </div>
+        <div class="card-repo">azaalouk-marketplace</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Syncing marketplace plugins and updating skill cache for persona context refresh pipeline</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--fg-4)">&#9724;</span> Sh diff ~/.claude/scripts/persona-context-sync.sh</div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">16.1k/42.2k</span></span>
+          <span class="card-cost">$29.60</span>
+        </div>
+      </div>
+
+      <!-- Idle: research -->
+      <div class="card s-idle">
+        <div class="card-top">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-g">Gemini</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">15m ago</span>
+        </div>
+        <div class="card-repo">research</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Analyzing Llama Stack upstream PRs for RHOAI 3.5 EA2 feature tracking and release notes</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--fg-4)">&#9724;</span> Read wiki/llama-stack/release-tracking.md</div>
+        <div class="card-bottom">
+          <span>gemini-2.5 &middot; <span class="card-tokens">4.2k/1.8k</span></span>
+          <span class="card-cost">$0.08</span>
+        </div>
+      </div>
+
+      <!-- Idle: showtime -->
+      <div class="card s-idle">
+        <div class="card-top">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">22m ago</span>
+        </div>
+        <div class="card-repo">showtime</div>
+        <span class="card-branch">feat/narration-v2</span>
+        <div class="card-title">Adding multi-voice TTS narration with per-segment voice selection and audio ducking</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--fg-4)">&#9724;</span> Write internal/narration/openai.go</div>
+        <div class="card-bottom">
+          <span>sonnet-4.6 &middot; <span class="card-tokens">12k/6.5k</span></span>
+          <span class="card-cost">$4.50</span>
+        </div>
+      </div>
+
+      <!-- Idle: rh-kb-chat -->
+      <div class="card s-idle">
+        <div class="card-top">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">35m ago</span>
+        </div>
+        <div class="card-repo">rh-kb-chat</div>
+        <span class="card-branch">feat/rag-pipeline</span>
+        <div class="card-title">Building RAG pipeline with pgvector embeddings for Red Hat knowledge base document retrieval</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--fg-4)">&#9724;</span> Bash python3 embed.py --chunk-size 512</div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">28k/15k</span></span>
+          <span class="card-cost">$8.30</span>
+        </div>
+      </div>
+
+      <!-- Idle: devhub -->
+      <div class="card s-idle">
+        <div class="card-top">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-x">Codex</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">1h ago</span>
+        </div>
+        <div class="card-repo">devhub</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Exploring DevHub dark-black theme color system for dashboard design reference</div>
+        <div class="card-action"><span class="action-icon" style="color:var(--fg-4)">&#9724;</span> Read packages/core/src/styles/themes/custom.ts</div>
+        <div class="card-bottom">
+          <span>codex-1 &middot; <span class="card-tokens">2.1k/800</span></span>
+          <span class="card-cost">$0.15</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="right-panel">
+    <div class="panel-header">
+      <div><div class="panel-title">aimux <span class="branch">feat/web-dashboard</span></div></div>
+      <div style="display:flex;gap:4px;align-items:center">
+        <div class="panel-tabs">
+          <button class="panel-tab active">Trace</button>
+          <button class="panel-tab">Session</button>
+        </div>
+        <button class="pbtn">&#8599;</button>
+        <button class="pbtn">&#10005;</button>
+      </div>
+    </div>
+    <div class="panel-stats">
+      <span>&#9654; <span class="v">Active</span></span>
+      <span>15 turns</span>
+      <span>45.2k/12.8k</span>
+      <span class="c">$1.23</span>
+      <span>14m</span>
+    </div>
+    <div class="trace-body">
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#1</span><span class="tr tr-u">You</span><span class="tt">14:12</span></div>
+        <div class="tx">Add a web dashboard to aimux with Go HTTP server</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#1</span><span class="tr tr-a">Claude</span><span class="tt">14:12</span></div>
+        <div class="tx-a">Setting up web server. Checking existing patterns.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Glob internal/**</span>
+          <span class="tp"><span class="tok">&#10003;</span> Read controller.go</span>
+          <span class="tp"><span class="tok">&#10003;</span> Write server.go</span>
+        </div>
+        <div class="tf"><span>3.4k/1.2k &middot; $0.08</span><div class="an"><button class="ab ab-g on">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+      </div>
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#2</span><span class="tr tr-u">You</span><span class="tt">14:14</span></div>
+        <div class="tx">Add SSE handler streaming agent state every 2s</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#2</span><span class="tr tr-a">Claude</span><span class="tt">14:14</span></div>
+        <div class="tx-a">Adding SSE endpoint with discovery orchestrator.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Write sse.go</span>
+          <span class="tp"><span class="tok">&#10003;</span> Edit server.go:28</span>
+        </div>
+        <div class="tf"><span>2.8k/1.6k &middot; $0.07</span><div class="an"><button class="ab ab-g">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+      </div>
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#3</span><span class="tr tr-u">You</span><span class="tt">14:16</span></div>
+        <div class="tx">Run the tests</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#3</span><span class="tr tr-a">Claude</span><span class="tt">14:16</span></div>
+        <div class="tx-a">All 42 tests pass.</div>
+        <div class="tools"><span class="tp"><span class="tok">&#10003;</span> Bash go test ./...</span></div>
+        <div class="tf"><span>1.2k/450 &middot; $0.03</span><div class="an"><button class="ab ab-g on">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+      </div>
+    </div>
+    <div class="live-strip"><span class="ld"></span> Live &middot; #15 &middot; $1.23</div>
+  </div>
+</div>
+
+</body>
+</html>

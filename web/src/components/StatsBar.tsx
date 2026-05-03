@@ -2,16 +2,15 @@ import type { Agent } from '../types';
 
 interface Props {
   agents: Agent[];
-  viewMode: 'status' | 'repo';
-  onViewModeChange: (mode: 'status' | 'repo') => void;
   onLaunch: () => void;
 }
 
-export function StatsBar({ agents, viewMode, onViewModeChange, onLaunch }: Props) {
-  const active = agents.filter(a => a.status === 'Active').length;
-  const repos = new Set(agents.map(a => a.name)).size;
-  const cost = agents.reduce((sum, a) => sum + a.estCostUSD, 0);
-  const attention = agents.filter(a => a.status === 'Waiting').length;
+export function StatsBar({ agents, onLaunch }: Props) {
+  const sessions = agents.length;
+  const active = agents.filter(a => a.Status === 0).length;
+  const repos = new Set(agents.map(a => a.Name)).size;
+  const cost = agents.reduce((sum, a) => sum + (a.EstCostUSD || 0), 0);
+  const attention = agents.filter(a => a.Status === 2 || a.Status === 3).length;
 
   return (
     <header style={{
@@ -24,15 +23,14 @@ export function StatsBar({ agents, viewMode, onViewModeChange, onLaunch }: Props
       </span>
 
       <div style={{ display: 'flex', gap: 24 }}>
+        <Stat value={sessions} label="Sessions" />
         <Stat value={active} label="Active" />
         <Stat value={repos} label="Repos" />
         <Stat value={`$${cost.toFixed(2)}`} label="Cost Today" />
-        <Stat value={attention} label="Need Attention" highlight={attention > 0} />
+        <Stat value={attention} label="Attention" highlight={attention > 0} />
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <ToggleBtn active={viewMode === 'status'} onClick={() => onViewModeChange('status')}>By Status</ToggleBtn>
-        <ToggleBtn active={viewMode === 'repo'} onClick={() => onViewModeChange('repo')}>By Repo</ToggleBtn>
         <button onClick={onLaunch} style={{
           padding: '5px 12px', borderRadius: 4, border: '1px solid var(--accent)',
           background: 'transparent', color: 'var(--accent)', fontSize: 12,
@@ -49,17 +47,5 @@ function Stat({ value, label, highlight }: { value: string | number; label: stri
       <div style={{ fontSize: 20, fontWeight: 700, color: highlight ? 'var(--accent)' : 'var(--fg)' }}>{value}</div>
       <div style={{ fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>{label}</div>
     </div>
-  );
-}
-
-function ToggleBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} style={{
-      padding: '5px 10px', borderRadius: 4,
-      border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-      background: active ? 'var(--accent)' : 'var(--bg-3)',
-      color: active ? '#fff' : 'var(--fg-3)',
-      fontSize: 11, cursor: 'pointer', fontWeight: 500,
-    }}>{children}</button>
   );
 }

@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux - Grid v3</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
+  :root {
+    --bg-0: #000000;
+    --bg-1: #0d0d0d;
+    --bg-2: #141414;
+    --bg-3: #1a1a1a;
+    --bg-4: #242424;
+    --accent: #FF3131;
+    --accent-dim: rgba(255, 49, 49, 0.12);
+    --teal: #49D3B4;
+    --fg: #e6e6e6;
+    --fg-2: #b3b3b3;
+    --fg-3: #666666;
+    --fg-4: #404040;
+    --green: #69DF73;
+    --green-dim: rgba(105, 223, 115, 0.12);
+    --orange: #FFB251;
+    --orange-dim: rgba(255, 178, 81, 0.12);
+    --purple: #A772EF;
+    --purple-dim: rgba(167, 114, 239, 0.12);
+    --border: #1f1f1f;
+    --border-hover: #2e2e2e;
+    --font: 'Inter', system-ui, -apple-system, sans-serif;
+    --mono: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font); background: var(--bg-0); color: var(--fg);
+    -webkit-font-smoothing: antialiased; height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  .stats-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px; background: var(--bg-1); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .logo { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+  .logo span { color: var(--fg); }
+  .stats-group { display: flex; gap: 20px; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 18px; font-weight: 700; color: var(--fg); letter-spacing: -0.02em; }
+  .stat-label { font-size: 9px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+  .stat.att .stat-value { color: var(--accent); }
+  .launch-btn {
+    padding: 5px 12px; border-radius: 4px; border: 1px solid var(--accent);
+    background: transparent; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+
+  .filter-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 20px; background: var(--bg-1); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .filter-pills { display: flex; gap: 4px; }
+  .filter-pill {
+    padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border);
+    background: transparent; color: var(--fg-3); font-size: 10px; cursor: pointer;
+    font-weight: 500; display: flex; align-items: center; gap: 4px;
+  }
+  .filter-pill.active { border-color: var(--fg-3); color: var(--fg); background: var(--bg-3); }
+  .filter-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .filter-pill .cnt { font-size: 9px; color: var(--fg-4); margin-left: 2px; }
+  .filter-divider { width: 1px; height: 16px; background: var(--border); }
+  .search-input {
+    padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--bg-2); color: var(--fg); font-size: 11px; width: 180px;
+  }
+  .search-input:focus { outline: none; border-color: var(--accent); }
+  .search-input::placeholder { color: var(--fg-4); }
+  .sort-select {
+    padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border);
+    background: var(--bg-2); color: var(--fg-2); font-size: 10px; cursor: pointer;
+  }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .grid-area { flex: 1; overflow-y: auto; padding: 14px 20px; }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 10px;
+  }
+
+  /* ===== CARD (bigger) ===== */
+  .card {
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; cursor: pointer; transition: all 0.15s;
+    border-left: 3px solid transparent; position: relative;
+  }
+  .card:hover { border-color: var(--border-hover); background: var(--bg-3); }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 8px var(--accent-dim); }
+  .card.s-active { border-left-color: var(--green); }
+  .card.s-idle { border-left-color: var(--fg-4); }
+  .card.s-waiting { border-left-color: var(--orange); background: rgba(255, 178, 81, 0.03); }
+  .card.s-error { border-left-color: var(--accent); background: rgba(255, 49, 49, 0.03); }
+
+  .card-bell {
+    position: absolute; top: 10px; right: 12px;
+    font-size: 15px; animation: ring 2s ease-in-out infinite;
+  }
+  @keyframes ring {
+    0%, 100% { transform: rotate(0); }
+    10% { transform: rotate(12deg); }
+    20% { transform: rotate(-12deg); }
+    30% { transform: rotate(8deg); }
+    40% { transform: rotate(-8deg); }
+    50% { transform: rotate(0); }
+  }
+
+  .card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.pulse { animation: dotpulse 2s infinite; }
+  @keyframes dotpulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  .prov {
+    font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .p-c { background: var(--accent-dim); color: var(--accent); }
+  .p-x { background: var(--green-dim); color: var(--green); }
+  .p-g { background: var(--purple-dim); color: var(--purple); }
+  .status-tag {
+    font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 1px 5px; border-radius: 2px;
+  }
+  .st-active { background: var(--green-dim); color: var(--green); }
+  .st-idle { background: var(--bg-4); color: var(--fg-3); }
+  .st-waiting { background: var(--orange-dim); color: var(--orange); }
+  .st-error { background: var(--accent-dim); color: var(--accent); }
+  .card-time { font-size: 9px; color: var(--fg-4); margin-left: auto; }
+
+  .card-repo { font-size: 14px; font-weight: 700; margin-bottom: 2px; letter-spacing: -0.01em; }
+  .card-branch {
+    font-family: var(--mono); font-size: 10px; padding: 1px 5px; border-radius: 3px;
+    background: var(--bg-4); color: var(--accent); display: inline-block; margin-bottom: 8px;
+  }
+
+  .card-title {
+    font-size: 12px; color: var(--fg-2); line-height: 1.5; margin-bottom: 8px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  /* Recent trace (last 2 turns) */
+  .card-trace {
+    background: var(--bg-0); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 10px; margin-bottom: 8px; font-size: 11px;
+  }
+  .trace-turn { margin-bottom: 6px; }
+  .trace-turn:last-child { margin-bottom: 0; }
+  .trace-turn-header { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
+  .trace-turn-num { font-size: 9px; color: var(--fg-4); font-family: var(--mono); }
+  .trace-turn-role { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .trace-role-u { color: var(--fg-3); }
+  .trace-role-a { color: var(--accent); }
+  .trace-turn-time { font-size: 8px; color: var(--fg-4); margin-left: auto; font-family: var(--mono); }
+  .trace-turn-text {
+    font-size: 11px; color: var(--fg-2); line-height: 1.4;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .trace-turn-tools { display: flex; gap: 3px; margin-top: 2px; flex-wrap: wrap; }
+  .trace-tool {
+    font-size: 8px; font-family: var(--mono); color: var(--fg-4);
+    background: var(--bg-2); border: 1px solid var(--border);
+    padding: 0px 4px; border-radius: 2px; display: flex; align-items: center; gap: 2px;
+  }
+  .trace-tool-ok { color: var(--green); }
+  .trace-tool-err { color: var(--accent); }
+
+  .card-bottom { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--fg-4); }
+  .card-cost { color: var(--green); font-weight: 600; }
+  .card-tokens { font-family: var(--mono); font-size: 9px; }
+
+  /* ===== RIGHT PANEL ===== */
+  .right-panel {
+    width: 440px; background: var(--bg-1); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .panel-header {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-title { font-size: 13px; font-weight: 600; }
+  .panel-title .branch { color: var(--fg-3); font-weight: 400; font-size: 11px; }
+  .panel-tabs { display: flex; background: var(--bg-3); border-radius: 4px; padding: 2px; border: 1px solid var(--border); }
+  .panel-tab {
+    padding: 3px 12px; border-radius: 3px; font-size: 10px; font-weight: 600;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--fg-3); background: transparent; border: none;
+  }
+  .panel-tab.active { background: var(--bg-0); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .pbtn {
+    padding: 3px 8px; border-radius: 3px; border: 1px solid var(--border);
+    background: var(--bg-3); color: var(--fg-3); font-size: 10px; cursor: pointer;
+  }
+  .panel-stats {
+    display: flex; gap: 10px; padding: 5px 12px; border-bottom: 1px solid var(--border);
+    font-size: 9px; color: var(--fg-4); font-family: var(--mono);
+  }
+  .panel-stats .v { color: var(--fg-2); font-weight: 600; }
+  .panel-stats .c { color: var(--green); }
+  .trace-body { flex: 1; overflow-y: auto; padding: 8px 12px; }
+  .turn { margin-bottom: 2px; }
+  .turn + .turn-u { margin-top: 8px; }
+  .turn-u { padding: 5px 7px; background: var(--bg-3); border-radius: 4px; border: 1px solid var(--border); }
+  .turn-a { padding: 5px 7px; background: var(--bg-2); border-left: 2px solid var(--accent); border-radius: 0 4px 4px 0; }
+  .th { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
+  .tn { font-size: 9px; color: var(--fg-4); font-family: var(--mono); }
+  .tr { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tr-u { color: var(--fg-2); } .tr-a { color: var(--accent); }
+  .tt { font-size: 9px; color: var(--fg-4); margin-left: auto; font-family: var(--mono); }
+  .tx { font-size: 12px; color: var(--fg); line-height: 1.5; }
+  .tx-a { font-size: 11px; color: var(--fg-2); line-height: 1.5; }
+  .tools { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+  .tp { font-size: 9px; font-family: var(--mono); color: var(--fg-3); background: var(--bg-0); border: 1px solid var(--border); padding: 1px 5px; border-radius: 3px; display: flex; align-items: center; gap: 3px; }
+  .tok { color: var(--green); font-size: 8px; }
+  .tf { display: flex; align-items: center; justify-content: space-between; margin-top: 3px; font-size: 9px; color: var(--fg-4); font-family: var(--mono); }
+  .an { display: flex; gap: 2px; }
+  .ab { padding: 1px 4px; border-radius: 2px; border: 1px solid var(--border); background: transparent; font-size: 8px; cursor: pointer; font-weight: 700; text-transform: uppercase; }
+  .ab-g { color: var(--green); } .ab-g.on { background: var(--green-dim); border-color: var(--green); }
+  .ab-r { color: var(--accent); }
+  .ab-w { color: var(--orange); }
+  .live-strip {
+    display: flex; align-items: center; gap: 5px; padding: 5px 12px; border-top: 1px solid var(--border);
+    font-size: 9px; color: var(--accent); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .ld { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: dotpulse 2s infinite; }
+</style>
+</head>
+<body>
+
+<div class="stats-bar">
+  <div class="logo">ai<span>mux</span></div>
+  <div class="stats-group">
+    <div class="stat"><div class="stat-value">48</div><div class="stat-label">Sessions</div></div>
+    <div class="stat"><div class="stat-value">5</div><div class="stat-label">Active</div></div>
+    <div class="stat"><div class="stat-value">12</div><div class="stat-label">Repos</div></div>
+    <div class="stat"><div class="stat-value">$247.82</div><div class="stat-label">Cost Today</div></div>
+    <div class="stat att"><div class="stat-value">2</div><div class="stat-label">Attention</div></div>
+  </div>
+  <button class="launch-btn">+ Launch</button>
+</div>
+
+<div class="filter-bar">
+  <div class="filter-pills">
+    <button class="filter-pill active">All <span class="cnt">48</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--green)"></span> Active <span class="cnt">5</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--fg-4)"></span> Idle <span class="cnt">39</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--orange)"></span> Waiting <span class="cnt">2</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--accent)"></span> Error <span class="cnt">2</span></button>
+  </div>
+  <div class="filter-divider"></div>
+  <div class="filter-pills">
+    <button class="filter-pill active"><span class="dot" style="background:var(--accent)"></span> Claude <span class="cnt">42</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--green)"></span> Codex <span class="cnt">4</span></button>
+    <button class="filter-pill"><span class="dot" style="background:var(--purple)"></span> Gemini <span class="cnt">2</span></button>
+  </div>
+  <div class="filter-divider"></div>
+  <input class="search-input" type="text" placeholder="Search repos, branches...">
+  <select class="sort-select">
+    <option>Sort: Last Active</option>
+    <option>Sort: Cost (high)</option>
+    <option>Sort: Repo Name</option>
+    <option>Sort: Status</option>
+  </select>
+</div>
+
+<div class="main">
+  <div class="grid-area">
+    <div class="card-grid">
+
+      <!-- Active: aimux dashboard -->
+      <div class="card s-active sel">
+        <div class="card-header">
+          <span class="status-dot pulse" style="background:var(--green)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-active">Active</span>
+          <span class="card-time">2m ago</span>
+        </div>
+        <div class="card-repo">aimux</div>
+        <span class="card-branch">feat/web-dashboard</span>
+        <div class="card-title">Building web dashboard with React frontend and Go backend SSE streaming for agent state monitoring</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#14</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">17:12</span>
+            </div>
+            <div class="trace-turn-text">Fix the JSON field name mismatch between Go and TypeScript</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#14</span>
+              <span class="trace-turn-role trace-role-a">Claude</span>
+              <span class="trace-turn-time">17:12</span>
+            </div>
+            <div class="trace-turn-text">Updated all TypeScript types to match Go's PascalCase JSON output.</div>
+            <div class="trace-turn-tools">
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Edit types.ts</span>
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Edit AgentCard.tsx</span>
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Edit KanbanBoard.tsx</span>
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Bash pnpm build</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">45.2k/12.8k</span></span>
+          <span class="card-cost">$1.23</span>
+        </div>
+      </div>
+
+      <!-- Active: vibe-kanban -->
+      <div class="card s-active">
+        <div class="card-header">
+          <span class="status-dot pulse" style="background:var(--green)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-active">Active</span>
+          <span class="card-time">30s ago</span>
+        </div>
+        <div class="card-repo">vibe-kanban</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Researching vibe-kanban sunsetting, designing aimux web dashboard architecture</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#42</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">17:18</span>
+            </div>
+            <div class="trace-turn-text">show me how it would look like</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#42</span>
+              <span class="trace-turn-role trace-role-a">Claude</span>
+              <span class="trace-turn-time">17:18</span>
+            </div>
+            <div class="trace-turn-text">Check http://localhost:53046 -- the new grid layout with filters and cards.</div>
+            <div class="trace-turn-tools">
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Write grid-v2.html</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">15.5k/228k</span></span>
+          <span class="card-cost">$166.10</span>
+        </div>
+      </div>
+
+      <!-- WAITING: bell + permission prompt -->
+      <div class="card s-waiting">
+        <span class="card-bell">&#128276;</span>
+        <div class="card-header">
+          <span class="status-dot pulse" style="background:var(--orange)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-waiting">Waiting</span>
+          <span class="card-time">1m ago</span>
+        </div>
+        <div class="card-repo">mcp-gateway</div>
+        <span class="card-branch">feat/auth-bridge</span>
+        <div class="card-title">Implementing OAuth token exchange for MCP gateway AuthBridge integration with Keycloak</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#8</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">17:15</span>
+            </div>
+            <div class="trace-turn-text">Deploy the auth bridge to the staging namespace</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#8</span>
+              <span class="trace-turn-role trace-role-a">Claude</span>
+              <span class="trace-turn-time">17:15</span>
+            </div>
+            <div class="trace-turn-text" style="color:var(--orange)">&#9208; Needs permission: kubectl apply -f deploy/auth-bridge.yaml</div>
+            <div class="trace-turn-tools">
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Read deploy/auth-bridge.yaml</span>
+              <span class="trace-tool" style="color:var(--orange)"><span>&#9208;</span> Bash kubectl apply...</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">22k/8.5k</span></span>
+          <span class="card-cost">$0.87</span>
+        </div>
+      </div>
+
+      <!-- ERROR: context overflow -->
+      <div class="card s-error">
+        <span class="card-bell">&#128276;</span>
+        <div class="card-header">
+          <span class="status-dot" style="background:var(--accent)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-error">Error</span>
+          <span class="card-time">5m ago</span>
+        </div>
+        <div class="card-repo">learn-rust</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Implementing async runtime comparison between Tokio and async-std</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#31</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">17:10</span>
+            </div>
+            <div class="trace-turn-text">Add benchmarks comparing the two runtimes</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#31</span>
+              <span class="trace-turn-role trace-role-a">Claude</span>
+              <span class="trace-turn-time">17:10</span>
+            </div>
+            <div class="trace-turn-text" style="color:var(--accent)">&#10007; Context window exceeded (1M tokens). Please run /clear or start a new session.</div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">980k/120k</span></span>
+          <span class="card-cost">$12.40</span>
+        </div>
+      </div>
+
+      <!-- Active: codex -->
+      <div class="card s-active">
+        <div class="card-header">
+          <span class="status-dot pulse" style="background:var(--green)"></span>
+          <span class="prov p-x">Codex</span>
+          <span class="status-tag st-active">Active</span>
+          <span class="card-time">1m ago</span>
+        </div>
+        <div class="card-repo">opendatahub-operator</div>
+        <span class="card-branch">fix/reconciler-leak</span>
+        <div class="card-title">Fixing memory leak in reconciler loop causing OOMKills on large cluster deployments</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#6</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">17:16</span>
+            </div>
+            <div class="trace-turn-text">Run the race detector on the controller tests</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#6</span>
+              <span class="trace-turn-role trace-role-a">Codex</span>
+              <span class="trace-turn-time">17:16</span>
+            </div>
+            <div class="trace-turn-text">Running tests with -race flag now.</div>
+            <div class="trace-turn-tools">
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Bash go test -race ./controllers/...</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>codex-1 &middot; <span class="card-tokens">8.2k/3.1k</span></span>
+          <span class="card-cost">$0.45</span>
+        </div>
+      </div>
+
+      <!-- Idle: blog -->
+      <div class="card s-idle">
+        <div class="card-header">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">8m ago</span>
+        </div>
+        <div class="card-repo">blog-concept</div>
+        <span class="card-branch">draft/mcp-deep-dive</span>
+        <div class="card-title">Writing deep dive blog post on MCP server architecture patterns and security considerations</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#12</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">17:05</span>
+            </div>
+            <div class="trace-turn-text">Add a section about OAuth for remote MCP servers</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#12</span>
+              <span class="trace-turn-role trace-role-a">Claude</span>
+              <span class="trace-turn-time">17:05</span>
+            </div>
+            <div class="trace-turn-text">Added OAuth section covering PKCE flow, token refresh, and type: http config.</div>
+            <div class="trace-turn-tools">
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Edit src/content/mcp-deep-dive.md</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">31k/18k</span></span>
+          <span class="card-cost">$2.10</span>
+        </div>
+      </div>
+
+      <!-- Idle: marketplace -->
+      <div class="card s-idle">
+        <div class="card-header">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-c">Claude</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">12m ago</span>
+        </div>
+        <div class="card-repo">azaalouk-marketplace</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Syncing marketplace plugins and updating skill cache for persona context refresh</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#5</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">17:00</span>
+            </div>
+            <div class="trace-turn-text">Run the persona context sync for all 24 skills</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#5</span>
+              <span class="trace-turn-role trace-role-a">Claude</span>
+              <span class="trace-turn-time">17:01</span>
+            </div>
+            <div class="trace-turn-text">Synced all 24 persona skills. Updated current-context.md and evolving-profile.md.</div>
+            <div class="trace-turn-tools">
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Bash persona-context-sync.sh</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>opus-4.6 &middot; <span class="card-tokens">16.1k/42.2k</span></span>
+          <span class="card-cost">$29.60</span>
+        </div>
+      </div>
+
+      <!-- Idle: research -->
+      <div class="card s-idle">
+        <div class="card-header">
+          <span class="status-dot" style="background:var(--fg-4)"></span>
+          <span class="prov p-g">Gemini</span>
+          <span class="status-tag st-idle">Idle</span>
+          <span class="card-time">15m ago</span>
+        </div>
+        <div class="card-repo">research</div>
+        <span class="card-branch">main</span>
+        <div class="card-title">Analyzing Llama Stack upstream PRs for RHOAI 3.5 EA2 feature tracking</div>
+        <div class="card-trace">
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#3</span>
+              <span class="trace-turn-role trace-role-u">You</span>
+              <span class="trace-turn-time">16:50</span>
+            </div>
+            <div class="trace-turn-text">Check which PRs from llama-stack v0.2.x are in the downstream RHOAI 3.5 build</div>
+          </div>
+          <div class="trace-turn">
+            <div class="trace-turn-header">
+              <span class="trace-turn-num">#3</span>
+              <span class="trace-turn-role trace-role-a">Gemini</span>
+              <span class="trace-turn-time">16:51</span>
+            </div>
+            <div class="trace-turn-text">Found 14 PRs merged in v0.2.4, 11 are in downstream. 3 missing: #892, #905, #911.</div>
+            <div class="trace-turn-tools">
+              <span class="trace-tool"><span class="trace-tool-ok">&#10003;</span> Read wiki/llama-stack/release-tracking.md</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-bottom">
+          <span>gemini-2.5 &middot; <span class="card-tokens">4.2k/1.8k</span></span>
+          <span class="card-cost">$0.08</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Right Panel -->
+  <div class="right-panel">
+    <div class="panel-header">
+      <div><div class="panel-title">aimux <span class="branch">feat/web-dashboard</span></div></div>
+      <div style="display:flex;gap:4px;align-items:center">
+        <div class="panel-tabs">
+          <button class="panel-tab active">Trace</button>
+          <button class="panel-tab">Session</button>
+        </div>
+        <button class="pbtn">&#8599;</button>
+        <button class="pbtn">&#10005;</button>
+      </div>
+    </div>
+    <div class="panel-stats">
+      <span>&#9654; <span class="v">Active</span></span>
+      <span>15 turns</span>
+      <span>45.2k/12.8k</span>
+      <span class="c">$1.23</span>
+      <span>14m</span>
+    </div>
+    <div class="trace-body">
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#13</span><span class="tr tr-u">You</span><span class="tt">17:10</span></div>
+        <div class="tx">Fix the JSON field name mismatch between Go and TypeScript</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#13</span><span class="tr tr-a">Claude</span><span class="tt">17:10</span></div>
+        <div class="tx-a">The Go Agent struct has no json tags, so fields serialize as PascalCase. Updating all TypeScript interfaces.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Edit types.ts</span>
+          <span class="tp"><span class="tok">&#10003;</span> Edit AgentCard.tsx</span>
+          <span class="tp"><span class="tok">&#10003;</span> Edit KanbanBoard.tsx</span>
+          <span class="tp"><span class="tok">&#10003;</span> Edit RightPanel.tsx</span>
+        </div>
+        <div class="tf"><span>3.4k/1.2k &middot; $0.08</span><div class="an"><button class="ab ab-g on">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+      </div>
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#14</span><span class="tr tr-u">You</span><span class="tt">17:12</span></div>
+        <div class="tx">Rebuild and verify</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#14</span><span class="tr tr-a">Claude</span><span class="tt">17:12</span></div>
+        <div class="tx-a">Build passes. Copied dist to embed dir. Go binary rebuilt.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Bash pnpm build</span>
+          <span class="tp"><span class="tok">&#10003;</span> Bash cp -r web/dist/*</span>
+          <span class="tp"><span class="tok">&#10003;</span> Bash go build</span>
+        </div>
+        <div class="tf"><span>1.2k/450 &middot; $0.03</span><div class="an"><button class="ab ab-g on">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+      </div>
+      <div class="turn turn-u">
+        <div class="th"><span class="tn">#15</span><span class="tr tr-u">You</span><span class="tt">17:14</span></div>
+        <div class="tx">Replace Kanban columns with a grid layout and add filter bar</div>
+      </div>
+      <div class="turn turn-a">
+        <div class="th"><span class="tn">#15</span><span class="tr tr-a">Claude</span><span class="tt">17:14</span></div>
+        <div class="tx-a">Rebuilding the board as a responsive card grid with status/provider filter pills and sort dropdown.</div>
+        <div class="tools">
+          <span class="tp"><span class="tok">&#10003;</span> Write grid-v3.html</span>
+        </div>
+        <div class="tf"><span>5.1k/3.2k &middot; $0.14</span><div class="an"><button class="ab ab-g">G</button><button class="ab ab-r">B</button><button class="ab ab-w">W</button></div></div>
+      </div>
+    </div>
+    <div class="live-strip"><span class="ld"></span> Live &middot; #15 &middot; $1.23</div>
+  </div>
+</div>
+
+</body>
+</html>
