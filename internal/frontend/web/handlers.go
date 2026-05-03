@@ -84,6 +84,25 @@ func (s *Server) handleTraceUnsubscribe(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]string{"status": "unsubscribed"})
 }
 
+func (s *Server) handleFastTrace(w http.ResponseWriter, r *http.Request) {
+	file := r.URL.Query().Get("file")
+	if file == "" {
+		http.Error(w, "missing file param", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasSuffix(file, ".jsonl") {
+		http.Error(w, "invalid file", http.StatusBadRequest)
+		return
+	}
+	turns, err := parseTailTurns(file, 128*1024)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"turns": turns})
+}
+
 func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 

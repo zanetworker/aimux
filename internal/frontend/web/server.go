@@ -56,6 +56,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/agents/{id}/archive", s.handleArchive)
 	mux.HandleFunc("GET /api/agents/{id}/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/agents/{id}/trace", s.handleGetTrace)
+	mux.HandleFunc("GET /api/trace", s.handleFastTrace)
 	mux.HandleFunc("GET /api/history", s.handleHistory)
 	mux.HandleFunc("POST /api/trace/subscribe/{sessionId}", s.handleTraceSubscribe)
 	mux.HandleFunc("POST /api/trace/unsubscribe/{sessionId}", s.handleTraceUnsubscribe)

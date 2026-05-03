@@ -48,11 +48,18 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
 
   const renderToolPill = (tool: ToolSpan, idx: number) => {
     const icon = tool.success ? '✓' : '✗';
-    let displayText = tool.snippet || tool.name;
-    displayText = shortenSnippet(displayText);
-    if (displayText.length > 30) {
-      displayText = displayText.substring(0, 27) + '...';
+    const iconColor = tool.success ? 'var(--green)' : 'var(--accent)';
+
+    // Build display text: "toolName snippet"
+    let displayText = tool.name;
+    if (tool.snippet) {
+      let snippet = shortenSnippet(tool.snippet);
+      if (snippet.length > 35) {
+        snippet = snippet.substring(0, 32) + '...';
+      }
+      displayText = `${tool.name} ${snippet}`;
     }
+
     return (
       <span
         key={idx}
@@ -65,11 +72,11 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
           borderRadius: '3px',
           marginRight: '4px',
           display: 'inline-block',
-          color: tool.success ? 'var(--green)' : 'var(--accent)',
         }}
         title={tool.errorMsg || tool.snippet}
       >
-        {icon} {displayText}
+        <span style={{ color: iconColor }}>{icon}</span>{' '}
+        <span style={{ color: 'var(--fg-2)' }}>{displayText}</span>
       </span>
     );
   };
@@ -84,7 +91,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
         color: 'var(--fg-3)',
         fontSize: '13px',
       }}>
-        No trace data yet
+        This session has no conversation history. It may be a new or empty session.
       </div>
     );
   }
@@ -102,32 +109,31 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
       {turns.map((turn) => (
         <div key={turn.number} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {/* User turn */}
-          {turn.userText && (
+          <div style={{
+            background: 'var(--bg-3)',
+            borderRadius: '6px',
+            padding: '8px 10px',
+          }}>
             <div style={{
-              background: 'var(--bg-3)',
-              borderRadius: '6px',
-              padding: '8px 10px',
+              fontSize: '10px',
+              fontWeight: 600,
+              color: 'var(--fg-4)',
+              marginBottom: '4px',
+              display: 'flex',
+              justifyContent: 'space-between',
             }}>
-              <div style={{
-                fontSize: '10px',
-                fontWeight: 600,
-                color: 'var(--fg-4)',
-                marginBottom: '4px',
-                display: 'flex',
-                justifyContent: 'space-between',
-              }}>
-                <span>Turn {turn.number} · YOU</span>
-                <span>{new Date(turn.timestamp).toLocaleTimeString()}</span>
-              </div>
-              <div style={{
-                fontSize: '12px',
-                color: 'var(--fg)',
-                lineHeight: '1.5',
-              }}>
-                {turn.userText}
-              </div>
+              <span>Turn {turn.number} · YOU</span>
+              <span>{new Date(turn.timestamp).toLocaleTimeString()}</span>
             </div>
-          )}
+            <div style={{
+              fontSize: '12px',
+              color: turn.userText ? 'var(--fg)' : 'var(--fg-3)',
+              lineHeight: '1.5',
+              fontStyle: turn.userText ? 'normal' : 'italic',
+            }}>
+              {turn.userText || '(system message)'}
+            </div>
+          </div>
 
           {/* Agent turn */}
           <div style={{
