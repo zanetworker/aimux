@@ -1,0 +1,36 @@
+<h2>How deep should "peek into a session" go?</h2>
+<p class="subtitle">When you click a session card on the Kanban board, what do you see?</p>
+
+<div class="options">
+  <div class="option" data-choice="summary" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Summary Only</h3>
+      <p>Expandable card showing: status, model, tokens/cost, git branch, last activity, files changed count, current task subject. Quick glance, no scrolling. For the full trace, you'd jump to aimux TUI.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="trace-preview" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Trace Preview Panel</h3>
+      <p>Side panel slides in showing the last ~10 turns of the conversation: user prompts, agent responses (truncated), and tool calls. Live-updating. Enough to understand "what is this agent doing right now?" without leaving the dashboard.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="full-trace" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Full Trace View</h3>
+      <p>Dedicated page with the complete conversation history, tool call details, diffs, annotations. Basically aimux's trace view in the browser. Rich, but heavier to build and navigate.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="embedded-terminal" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>Embedded Terminal</h3>
+      <p>Actually attach to the tmux session in the browser via xterm.js/ttyd. Full interactive access: you can type commands, respond to permission prompts, see the live terminal output. Most powerful, most complex.</p>
+    </div>
+  </div>
+</div>

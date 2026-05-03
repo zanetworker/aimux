@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux web dashboard mockup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; }
+
+  /* Stats Bar */
+  .stats-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: #161b22; border-bottom: 1px solid #30363d;
+  }
+  .stats-bar .logo { font-size: 18px; font-weight: 700; color: #58a6ff; }
+  .stats-bar .logo span { color: #e6edf3; }
+  .stats-group { display: flex; gap: 24px; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 22px; font-weight: 700; color: #f0f6fc; }
+  .stat-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat.attention .stat-value { color: #f85149; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .toggle-btn {
+    padding: 6px 12px; border-radius: 6px; border: 1px solid #30363d;
+    background: #21262d; color: #8b949e; font-size: 12px; cursor: pointer;
+  }
+  .toggle-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  .launch-btn {
+    padding: 6px 14px; border-radius: 6px; border: 1px solid #238636;
+    background: #238636; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+
+  /* Board */
+  .board { display: flex; gap: 16px; padding: 20px 24px; overflow-x: auto; height: calc(100vh - 56px - 280px); }
+  .column { min-width: 280px; flex: 1; background: #161b22; border-radius: 10px; border: 1px solid #30363d; display: flex; flex-direction: column; }
+  .column-header {
+    padding: 12px 16px; border-bottom: 1px solid #30363d;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; font-weight: 600; color: #8b949e;
+  }
+  .column-header .count { background: #30363d; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+  .column-header .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; display: inline-block; }
+  .dot-active { background: #3fb950; }
+  .dot-idle { background: #8b949e; }
+  .dot-waiting { background: #d29922; }
+  .dot-error { background: #f85149; }
+  .dot-completed { background: #58a6ff; }
+  .column-body { padding: 8px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+
+  /* Agent Card */
+  .card {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+    padding: 12px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .card:hover { border-color: #58a6ff; }
+  .card.selected { border-color: #58a6ff; box-shadow: 0 0 0 1px #58a6ff; }
+  .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .provider-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+  }
+  .provider-claude { background: #3b2508; color: #f0a050; }
+  .provider-codex { background: #0a2e1a; color: #3fb950; }
+  .provider-gemini { background: #1a1a3e; color: #a78bfa; }
+  .card-time { font-size: 11px; color: #484f58; }
+  .card-repo { font-size: 14px; font-weight: 600; color: #e6edf3; margin-bottom: 4px; }
+  .card-branch { font-size: 12px; color: #8b949e; margin-bottom: 8px; }
+  .card-branch code { background: #21262d; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+  .card-action { font-size: 12px; color: #58a6ff; margin-bottom: 8px; font-style: italic; }
+  .card-meta { display: flex; justify-content: space-between; font-size: 11px; color: #484f58; }
+  .card-model { color: #8b949e; }
+  .card-cost { color: #3fb950; font-weight: 600; }
+
+  /* Trace Panel */
+  .trace-panel {
+    position: fixed; right: 0; top: 0; bottom: 0; width: 480px;
+    background: #161b22; border-left: 1px solid #30363d;
+    display: flex; flex-direction: column; z-index: 100;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.4);
+  }
+  .trace-header {
+    padding: 16px; border-bottom: 1px solid #30363d;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .trace-header h3 { font-size: 14px; color: #e6edf3; }
+  .trace-actions { display: flex; gap: 6px; }
+  .trace-btn {
+    padding: 4px 10px; border-radius: 4px; border: 1px solid #30363d;
+    background: #21262d; color: #8b949e; font-size: 11px; cursor: pointer;
+  }
+  .trace-btn.primary { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  .trace-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .turn { margin-bottom: 16px; }
+  .turn-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .turn-number { font-size: 10px; color: #484f58; background: #21262d; padding: 1px 6px; border-radius: 3px; }
+  .turn-role { font-size: 11px; font-weight: 600; }
+  .turn-role.user { color: #58a6ff; }
+  .turn-role.agent { color: #3fb950; }
+  .turn-text { font-size: 13px; color: #c9d1d9; line-height: 1.5; margin-bottom: 4px; }
+  .turn-tool {
+    font-size: 11px; color: #8b949e; background: #0d1117;
+    padding: 4px 8px; border-radius: 4px; margin-top: 4px; font-family: monospace;
+  }
+  .turn-cost { font-size: 10px; color: #484f58; margin-top: 4px; }
+  .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #3fb950; padding: 8px 16px; border-top: 1px solid #30363d; }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: #3fb950; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* Terminal Panel (bottom) */
+  .terminal-panel {
+    position: fixed; bottom: 0; left: 0; right: 480px; height: 280px;
+    background: #0d1117; border-top: 1px solid #30363d; z-index: 50;
+  }
+  .terminal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 12px; background: #161b22; border-bottom: 1px solid #30363d;
+  }
+  .terminal-header span { font-size: 12px; color: #8b949e; }
+  .terminal-body {
+    padding: 12px; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px; color: #e6edf3; line-height: 1.6; height: calc(100% - 32px); overflow-y: auto;
+  }
+  .terminal-body .prompt { color: #3fb950; }
+  .terminal-body .cmd { color: #f0f6fc; }
+  .terminal-body .output { color: #8b949e; }
+  .terminal-body .tool-call { color: #d29922; }
+  .terminal-body .cursor-blink { display: inline-block; width: 8px; height: 16px; background: #e6edf3; animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<!-- Stats Bar -->
+<div class="stats-bar">
+  <div class="logo">ai<span>mux</span></div>
+  <div class="stats-group">
+    <div class="stat">
+      <div class="stat-value">7</div>
+      <div class="stat-label">Active</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">3</div>
+      <div class="stat-label">Repos</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">$4.82</div>
+      <div class="stat-label">Cost Today</div>
+    </div>
+    <div class="stat attention">
+      <div class="stat-value">2</div>
+      <div class="stat-label">Need Attention</div>
+    </div>
+  </div>
+  <div class="controls">
+    <button class="toggle-btn active">By Status</button>
+    <button class="toggle-btn">By Repo</button>
+    <button class="launch-btn">+ Launch</button>
+  </div>
+</div>
+
+<!-- Kanban Board -->
+<div class="board">
+  <!-- Active Column -->
+  <div class="column">
+    <div class="column-header">
+      <span><span class="dot dot-active"></span>Active</span>
+      <span class="count">3</span>
+    </div>
+    <div class="column-body">
+      <div class="card selected">
+        <div class="card-top">
+          <span class="provider-badge provider-claude">Claude</span>
+          <span class="card-time">2m ago</span>
+        </div>
+        <div class="card-repo">aimux</div>
+        <div class="card-branch"><code>feat/web-dashboard</code></div>
+        <div class="card-action">Edit internal/web/server.go</div>
+        <div class="card-meta">
+          <span class="card-model">opus-4.6</span>
+          <span class="card-cost">$1.23</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <span class="provider-badge provider-codex">Codex</span>
+          <span class="card-time">30s ago</span>
+        </div>
+        <div class="card-repo">opendatahub-operator</div>
+        <div class="card-branch"><code>fix/reconciler-leak</code></div>
+        <div class="card-action">Bash go test ./controllers/...</div>
+        <div class="card-meta">
+          <span class="card-model">codex-1</span>
+          <span class="card-cost">$0.45</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <span class="provider-badge provider-claude">Claude</span>
+          <span class="card-time">1m ago</span>
+        </div>
+        <div class="card-repo">research</div>
+        <div class="card-branch"><code>main</code></div>
+        <div class="card-action">Read wiki/mcp/gateway.md</div>
+        <div class="card-meta">
+          <span class="card-model">sonnet-4.6</span>
+          <span class="card-cost">$0.31</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Idle Column -->
+  <div class="column">
+    <div class="column-header">
+      <span><span class="dot dot-idle"></span>Idle</span>
+      <span class="count">2</span>
+    </div>
+    <div class="column-body">
+      <div class="card">
+        <div class="card-top">
+          <span class="provider-badge provider-claude">Claude</span>
+          <span class="card-time">8m ago</span>
+        </div>
+        <div class="card-repo">blog-concept</div>
+        <div class="card-branch"><code>draft/mcp-deep-dive</code></div>
+        <div class="card-action">Waiting for input</div>
+        <div class="card-meta">
+          <span class="card-model">opus-4.6</span>
+          <span class="card-cost">$2.10</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-top">
+          <span class="provider-badge provider-gemini">Gemini</span>
+          <span class="card-time">12m ago</span>
+        </div>
+        <div class="card-repo">aimux</div>
+        <div class="card-branch"><code>test/provider-coverage</code></div>
+        <div class="card-action">Completed task</div>
+        <div class="card-meta">
+          <span class="card-model">gemini-2.5</span>
+          <span class="card-cost">$0.08</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Waiting Permission Column -->
+  <div class="column">
+    <div class="column-header">
+      <span><span class="dot dot-waiting"></span>Waiting Permission</span>
+      <span class="count">2</span>
+    </div>
+    <div class="column-body">
+      <div class="card" style="border-color: #d29922;">
+        <div class="card-top">
+          <span class="provider-badge provider-claude">Claude</span>
+          <span class="card-time">1m ago</span>
+        </div>
+        <div class="card-repo">mcp-gateway</div>
+        <div class="card-branch"><code>feat/auth-bridge</code></div>
+        <div class="card-action" style="color: #d29922;">⏸ Bash: kubectl apply -f deploy.yaml</div>
+        <div class="card-meta">
+          <span class="card-model">opus-4.6</span>
+          <span class="card-cost">$0.87</span>
+        </div>
+      </div>
+      <div class="card" style="border-color: #d29922;">
+        <div class="card-top">
+          <span class="provider-badge provider-codex">Codex</span>
+          <span class="card-time">3m ago</span>
+        </div>
+        <div class="card-repo">kagenti-operator</div>
+        <div class="card-branch"><code>main</code></div>
+        <div class="card-action" style="color: #d29922;">⏸ Write: config/rbac/role.yaml</div>
+        <div class="card-meta">
+          <span class="card-model">codex-1</span>
+          <span class="card-cost">$0.22</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error Column -->
+  <div class="column">
+    <div class="column-header">
+      <span><span class="dot dot-error"></span>Error</span>
+      <span class="count">0</span>
+    </div>
+    <div class="column-body">
+      <div style="text-align: center; padding: 40px 16px; color: #484f58; font-size: 13px;">
+        No errors
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Trace Panel (right side) -->
+<div class="trace-panel">
+  <div class="trace-header">
+    <h3>aimux / feat/web-dashboard</h3>
+    <div class="trace-actions">
+      <button class="trace-btn">Full Trace</button>
+      <button class="trace-btn primary">Attach Terminal</button>
+      <button class="trace-btn">✕</button>
+    </div>
+  </div>
+  <div class="trace-body">
+    <div class="turn">
+      <div class="turn-header">
+        <span class="turn-number">#14</span>
+        <span class="turn-role user">You</span>
+      </div>
+      <div class="turn-text">Add the SSE endpoint for streaming agent state updates</div>
+    </div>
+    <div class="turn">
+      <div class="turn-header">
+        <span class="turn-number">#14</span>
+        <span class="turn-role agent">Claude</span>
+      </div>
+      <div class="turn-text">I'll create the SSE handler in the web server. This will stream agent state every 2 seconds...</div>
+      <div class="turn-tool">Edit internal/web/server.go (lines 45-89)</div>
+      <div class="turn-tool">Edit internal/web/sse.go (new file)</div>
+      <div class="turn-cost">2,140 in / 890 out / $0.05</div>
+    </div>
+    <div class="turn">
+      <div class="turn-header">
+        <span class="turn-number">#15</span>
+        <span class="turn-role user">You</span>
+      </div>
+      <div class="turn-text">Run the tests to make sure nothing broke</div>
+    </div>
+    <div class="turn">
+      <div class="turn-header">
+        <span class="turn-number">#15</span>
+        <span class="turn-role agent">Claude</span>
+      </div>
+      <div class="turn-text">Running the test suite now.</div>
+      <div class="turn-tool">Bash go test ./internal/web/... -v</div>
+      <div class="turn-text" style="margin-top: 8px;">All 12 tests pass. The SSE handler correctly streams agent snapshots and handles client disconnection.</div>
+      <div class="turn-cost">1,200 in / 450 out / $0.03</div>
+    </div>
+  </div>
+  <div class="live-indicator">
+    <span class="live-dot"></span>
+    Live — streaming trace updates
+  </div>
+</div>
+
+<!-- Terminal Panel (bottom) -->
+<div class="terminal-panel">
+  <div class="terminal-header">
+    <span>Terminal: aimux / feat/web-dashboard (tmux: aimux-abc123)</span>
+    <span style="font-size: 11px; color: #484f58;">Press Ctrl+D to detach</span>
+  </div>
+  <div class="terminal-body">
+    <div><span class="prompt">$</span> <span class="cmd">claude --model opus "Add SSE endpoint"</span></div>
+    <div><span class="output">╭──────────────────────────────────────╮</span></div>
+    <div><span class="output">│ Claude Code                    opus-4.6 │</span></div>
+    <div><span class="output">╰──────────────────────────────────────╯</span></div>
+    <div>&nbsp;</div>
+    <div><span class="tool-call">  Edit internal/web/server.go</span></div>
+    <div><span class="output">  + func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {</span></div>
+    <div><span class="output">  +     flusher, ok := w.(http.Flusher)</span></div>
+    <div><span class="output">  +     if !ok {</span></div>
+    <div><span class="output">  +         http.Error(w, "streaming not supported", 500)</span></div>
+    <div><span class="output">  +         return</span></div>
+    <div><span class="output">  +     }</span></div>
+    <div>&nbsp;</div>
+    <div><span class="tool-call">  Bash go test ./internal/web/... -v</span></div>
+    <div><span class="output">  ok  github.com/zanetworker/aimux/internal/web  0.234s</span></div>
+    <div>&nbsp;</div>
+    <div><span class="prompt">❯</span> <span class="cursor-blink"></span></div>
+  </div>
+</div>
+
+</body>
+</html>

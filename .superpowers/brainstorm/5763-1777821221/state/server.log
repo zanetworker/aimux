@@ -1,0 +1,10 @@
+{"type":"server-started","port":56262,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:56262","screen_dir":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content","state_dir":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/state"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/dashboard-mockup.html"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/waiting-2.html"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/dashboard-v2.html"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/trace-view.html"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/trace-compact.html"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/full-layout.html"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/dashboard-v3.html"}
+{"type":"screen-added","file":"/Users/azaalouk/go/src/github.com/zanetworker/aimux/.superpowers/brainstorm/5763-1777821221/content/dashboard-v4.html"}
+{"type":"server-stopped","reason":"idle timeout"}

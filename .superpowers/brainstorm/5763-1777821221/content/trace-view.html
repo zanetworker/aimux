@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux - Full Trace View</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
+  :root {
+    --bg-primary: #000000;
+    --bg-secondary: #060608;
+    --bg-tertiary: #1a1a1a;
+    --bg-card: #111111;
+    --accent: #FF3131;
+    --accent-hover: #ff5252;
+    --accent-muted: #cc2727;
+    --text-primary: #ededed;
+    --text-secondary: #a0a0a0;
+    --text-muted: #666666;
+    --border: #2a2a2a;
+    --border-hover: #3a3a3a;
+    --font-heading: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font-body); background: var(--bg-primary);
+    color: var(--text-primary); -webkit-font-smoothing: antialiased;
+  }
+
+  /* Header */
+  .trace-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--bg-secondary); border-bottom: 1px solid var(--border);
+  }
+  .trace-topbar .back {
+    color: var(--text-muted); font-size: 13px; cursor: pointer; text-decoration: none;
+    font-family: var(--font-heading); font-weight: 500;
+    transition: color 0.15s;
+  }
+  .trace-topbar .back:hover { color: var(--accent); }
+  .trace-topbar .session-info { display: flex; align-items: center; gap: 12px; }
+  .trace-topbar .session-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .trace-topbar .session-meta { font-size: 12px; color: var(--text-muted); }
+  .provider-badge {
+    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.04em; font-family: var(--font-heading);
+    background: rgba(255, 49, 49, 0.12); color: var(--accent); border: 1px solid var(--accent);
+  }
+  .trace-topbar .actions { display: flex; gap: 8px; }
+  .btn {
+    padding: 5px 12px; border-radius: 3px; border: 1px solid var(--border);
+    background: var(--bg-tertiary); color: var(--text-muted); font-size: 11px;
+    cursor: pointer; font-family: var(--font-heading); font-weight: 500;
+  }
+  .btn:hover { border-color: var(--border-hover); color: var(--text-secondary); }
+  .btn.primary { background: transparent; color: var(--accent); border-color: var(--accent); }
+  .btn.primary:hover { background: rgba(255, 49, 49, 0.12); }
+
+  /* Stats ribbon */
+  .stats-ribbon {
+    display: flex; gap: 32px; padding: 10px 24px; background: var(--bg-card);
+    border-bottom: 1px solid var(--border); font-size: 12px;
+  }
+  .ribbon-stat { display: flex; align-items: center; gap: 6px; }
+  .ribbon-label { color: var(--text-muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; font-weight: 500; }
+  .ribbon-value { color: var(--text-primary); font-weight: 600; font-family: var(--font-mono); font-size: 12px; }
+  .ribbon-value.cost { color: #3fb950; }
+  .ribbon-value.status { color: #3fb950; }
+
+  /* Main content */
+  .trace-container { max-width: 900px; margin: 0 auto; padding: 24px; }
+
+  /* Turn */
+  .turn { margin-bottom: 4px; }
+  .turn + .turn.turn-user { margin-top: 24px; }
+
+  /* User turn */
+  .turn-user {
+    padding: 16px 20px; background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 6px; margin-bottom: 4px;
+  }
+  .turn-header {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+  }
+  .turn-header-left { display: flex; align-items: center; gap: 8px; }
+  .turn-number {
+    font-size: 10px; color: var(--text-muted); background: var(--bg-tertiary);
+    padding: 1px 6px; border-radius: 3px; font-family: var(--font-mono); border: 1px solid var(--border);
+  }
+  .turn-role {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .turn-role.user { color: var(--text-secondary); }
+  .turn-role.agent { color: var(--accent); }
+  .turn-timestamp { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+  .turn-text { font-size: 14px; color: var(--text-primary); line-height: 1.7; }
+
+  /* Agent turn */
+  .turn-agent {
+    padding: 16px 20px; background: var(--bg-card); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-muted); border-radius: 0 6px 6px 0;
+  }
+  .turn-agent .turn-text { color: var(--text-secondary); font-size: 13px; line-height: 1.7; }
+
+  /* Tool calls */
+  .tool-calls { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .tool-call {
+    background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: 4px; overflow: hidden;
+  }
+  .tool-call-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; background: var(--bg-tertiary); cursor: pointer;
+  }
+  .tool-call-name {
+    font-size: 11px; font-family: var(--font-mono); font-weight: 600;
+    color: var(--text-primary); display: flex; align-items: center; gap: 6px;
+  }
+  .tool-icon { font-size: 12px; }
+  .tool-icon.success { color: #3fb950; }
+  .tool-icon.error { color: var(--accent); }
+  .tool-call-file { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+  .tool-call-body {
+    padding: 10px; font-family: var(--font-mono); font-size: 12px;
+    line-height: 1.6; color: var(--text-secondary); border-top: 1px solid var(--border);
+    max-height: 200px; overflow-y: auto;
+  }
+  .diff-add { color: #3fb950; }
+  .diff-del { color: var(--accent); }
+  .diff-ctx { color: var(--text-muted); }
+  .diff-header { color: #58a6ff; font-weight: 600; }
+
+  /* Bash tool */
+  .bash-output {
+    padding: 10px; font-family: var(--font-mono); font-size: 12px;
+    line-height: 1.6; color: var(--text-muted); border-top: 1px solid var(--border);
+  }
+  .bash-cmd { color: var(--text-primary); margin-bottom: 4px; }
+  .bash-cmd .prompt { color: var(--accent); font-weight: 600; }
+
+  /* Turn footer */
+  .turn-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .turn-tokens { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+  .turn-annotations { display: flex; gap: 4px; }
+  .annotation-btn {
+    padding: 2px 8px; border-radius: 3px; border: 1px solid var(--border);
+    background: transparent; font-size: 10px; cursor: pointer;
+    font-family: var(--font-heading); font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; transition: all 0.15s;
+  }
+  .annotation-btn.good { color: #3fb950; }
+  .annotation-btn.good:hover, .annotation-btn.good.active { background: rgba(63, 185, 80, 0.15); border-color: #3fb950; }
+  .annotation-btn.bad { color: var(--accent); }
+  .annotation-btn.bad:hover, .annotation-btn.bad.active { background: rgba(255, 49, 49, 0.15); border-color: var(--accent); }
+  .annotation-btn.waste { color: #d29922; }
+  .annotation-btn.waste:hover, .annotation-btn.waste.active { background: rgba(210, 153, 34, 0.15); border-color: #d29922; }
+
+  /* Search bar */
+  .search-bar {
+    position: sticky; top: 0; z-index: 10; padding: 12px 24px;
+    background: var(--bg-primary); border-bottom: 1px solid var(--border);
+  }
+  .search-input {
+    width: 100%; max-width: 900px; margin: 0 auto; display: block;
+    padding: 8px 12px; background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text-primary); font-size: 13px;
+    font-family: var(--font-body);
+  }
+  .search-input:focus { outline: none; border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-muted); }
+
+  /* Live indicator */
+  .live-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; padding: 8px; background: var(--bg-secondary);
+    border-top: 1px solid var(--border); z-index: 10;
+  }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .live-text { font-size: 11px; color: var(--accent); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="trace-topbar">
+  <a class="back">&#8592; Back to Board</a>
+  <div class="session-info">
+    <span class="provider-badge">Claude</span>
+    <span class="session-name">aimux</span>
+    <span class="session-meta">feat/web-dashboard &middot; opus-4.6 &middot; PID 48231</span>
+  </div>
+  <div class="actions">
+    <button class="btn">Export JSONL</button>
+    <button class="btn">Export OTEL</button>
+    <button class="btn primary">Attach Terminal</button>
+  </div>
+</div>
+
+<!-- Stats ribbon -->
+<div class="stats-ribbon">
+  <div class="ribbon-stat">
+    <span class="ribbon-label">Status</span>
+    <span class="ribbon-value status">&#9654; Active</span>
+  </div>
+  <div class="ribbon-stat">
+    <span class="ribbon-label">Turns</span>
+    <span class="ribbon-value">15</span>
+  </div>
+  <div class="ribbon-stat">
+    <span class="ribbon-label">Tokens</span>
+    <span class="ribbon-value">45,200 in / 12,800 out</span>
+  </div>
+  <div class="ribbon-stat">
+    <span class="ribbon-label">Cost</span>
+    <span class="ribbon-value cost">$1.23</span>
+  </div>
+  <div class="ribbon-stat">
+    <span class="ribbon-label">Duration</span>
+    <span class="ribbon-value">14m 32s</span>
+  </div>
+  <div class="ribbon-stat">
+    <span class="ribbon-label">Files Changed</span>
+    <span class="ribbon-value">6</span>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="search-bar">
+  <input class="search-input" type="text" placeholder="Search this trace... (/ to focus)">
+</div>
+
+<!-- Trace content -->
+<div class="trace-container">
+
+  <!-- Turn 1 -->
+  <div class="turn turn-user">
+    <div class="turn-header">
+      <div class="turn-header-left">
+        <span class="turn-number">#1</span>
+        <span class="turn-role user">You</span>
+      </div>
+      <span class="turn-timestamp">14:12:03</span>
+    </div>
+    <div class="turn-text">Add a web dashboard to aimux. Start with the Go HTTP server in internal/frontend/web/ that serves embedded static files and exposes an SSE endpoint for streaming agent state.</div>
+  </div>
+
+  <div class="turn turn-agent">
+    <div class="turn-header">
+      <div class="turn-header-left">
+        <span class="turn-number">#1</span>
+        <span class="turn-role agent">Claude</span>
+      </div>
+      <span class="turn-timestamp">14:12:08</span>
+    </div>
+    <div class="turn-text">I'll set up the web server package. Let me first check the existing project structure to understand the patterns used.</div>
+
+    <div class="tool-calls">
+      <div class="tool-call">
+        <div class="tool-call-header">
+          <span class="tool-call-name"><span class="tool-icon success">&#10003;</span> Glob</span>
+          <span class="tool-call-file">internal/**/*.go</span>
+        </div>
+      </div>
+
+      <div class="tool-call">
+        <div class="tool-call-header">
+          <span class="tool-call-name"><span class="tool-icon success">&#10003;</span> Read</span>
+          <span class="tool-call-file">internal/controller/controller.go</span>
+        </div>
+      </div>
+
+      <div class="tool-call">
+        <div class="tool-call-header">
+          <span class="tool-call-name"><span class="tool-icon success">&#10003;</span> Write</span>
+          <span class="tool-call-file">internal/frontend/web/server.go</span>
+        </div>
+        <div class="tool-call-body">
+          <div class="diff-header">+++ internal/frontend/web/server.go (new)</div>
+          <div class="diff-add">+package web</div>
+          <div class="diff-add">+</div>
+          <div class="diff-add">+import (</div>
+          <div class="diff-add">+    "embed"</div>
+          <div class="diff-add">+    "fmt"</div>
+          <div class="diff-add">+    "io/fs"</div>
+          <div class="diff-add">+    "net/http"</div>
+          <div class="diff-add">+</div>
+          <div class="diff-add">+    "github.com/zanetworker/aimux/internal/controller"</div>
+          <div class="diff-add">+    "github.com/zanetworker/aimux/internal/discovery"</div>
+          <div class="diff-add">+)</div>
+          <div class="diff-add">+</div>
+          <div class="diff-add">+//go:embed all:dist</div>
+          <div class="diff-add">+var staticFiles embed.FS</div>
+          <div class="diff-add">+</div>
+          <div class="diff-add">+type Server struct {</div>
+          <div class="diff-add">+    ctrl  *controller.Controller</div>
+          <div class="diff-add">+    disco *discovery.Orchestrator</div>
+          <div class="diff-add">+    port  int</div>
+          <div class="diff-add">+}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="turn-footer">
+      <span class="turn-tokens">3,400 in / 1,200 out / $0.08 / 5.2s</span>
+      <div class="turn-annotations">
+        <button class="annotation-btn good active">Good</button>
+        <button class="annotation-btn bad">Bad</button>
+        <button class="annotation-btn waste">Waste</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Turn 2 -->
+  <div class="turn turn-user">
+    <div class="turn-header">
+      <div class="turn-header-left">
+        <span class="turn-number">#2</span>
+        <span class="turn-role user">You</span>
+      </div>
+      <span class="turn-timestamp">14:14:22</span>
+    </div>
+    <div class="turn-text">Good. Now add the SSE handler that streams agent state every 2 seconds.</div>
+  </div>
+
+  <div class="turn turn-agent">
+    <div class="turn-header">
+      <div class="turn-header-left">
+        <span class="turn-number">#2</span>
+        <span class="turn-role agent">Claude</span>
+      </div>
+      <span class="turn-timestamp">14:14:28</span>
+    </div>
+    <div class="turn-text">I'll add the SSE endpoint. It will use the discovery orchestrator to get agent snapshots and push them as JSON events.</div>
+
+    <div class="tool-calls">
+      <div class="tool-call">
+        <div class="tool-call-header">
+          <span class="tool-call-name"><span class="tool-icon success">&#10003;</span> Write</span>
+          <span class="tool-call-file">internal/frontend/web/sse.go</span>
+        </div>
+        <div class="tool-call-body">
+          <div class="diff-header">+++ internal/frontend/web/sse.go (new)</div>
+          <div class="diff-add">+package web</div>
+          <div class="diff-add">+</div>
+          <div class="diff-add">+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {</div>
+          <div class="diff-add">+    flusher, ok := w.(http.Flusher)</div>
+          <div class="diff-add">+    if !ok {</div>
+          <div class="diff-add">+        http.Error(w, "streaming unsupported", http.StatusInternalServerError)</div>
+          <div class="diff-add">+        return</div>
+          <div class="diff-add">+    }</div>
+          <div class="diff-add">+</div>
+          <div class="diff-add">+    w.Header().Set("Content-Type", "text/event-stream")</div>
+          <div class="diff-add">+    w.Header().Set("Cache-Control", "no-cache")</div>
+          <div class="diff-add">+    w.Header().Set("Connection", "keep-alive")</div>
+          <div class="diff-add">+</div>
+          <div class="diff-add">+    ticker := time.NewTicker(2 * time.Second)</div>
+          <div class="diff-add">+    defer ticker.Stop()</div>
+          <div class="diff-add">+    ...</div>
+        </div>
+      </div>
+
+      <div class="tool-call">
+        <div class="tool-call-header">
+          <span class="tool-call-name"><span class="tool-icon success">&#10003;</span> Edit</span>
+          <span class="tool-call-file">internal/frontend/web/server.go:28-35</span>
+        </div>
+        <div class="tool-call-body">
+          <div class="diff-ctx"> func (s *Server) routes() http.Handler {</div>
+          <div class="diff-ctx">     mux := http.NewServeMux()</div>
+          <div class="diff-add">+    mux.HandleFunc("GET /api/events", s.handleSSE)</div>
+          <div class="diff-add">+    mux.HandleFunc("POST /api/agents/launch", s.handleLaunch)</div>
+          <div class="diff-add">+    mux.HandleFunc("POST /api/agents/{id}/annotate", s.handleAnnotate)</div>
+          <div class="diff-ctx">     mux.Handle("/", http.FileServer(http.FS(staticSub)))</div>
+          <div class="diff-ctx">     return mux</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="turn-footer">
+      <span class="turn-tokens">2,800 in / 1,600 out / $0.07 / 6.1s</span>
+      <div class="turn-annotations">
+        <button class="annotation-btn good">Good</button>
+        <button class="annotation-btn bad">Bad</button>
+        <button class="annotation-btn waste">Waste</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Turn 3 -->
+  <div class="turn turn-user">
+    <div class="turn-header">
+      <div class="turn-header-left">
+        <span class="turn-number">#3</span>
+        <span class="turn-role user">You</span>
+      </div>
+      <span class="turn-timestamp">14:16:45</span>
+    </div>
+    <div class="turn-text">Run the tests</div>
+  </div>
+
+  <div class="turn turn-agent">
+    <div class="turn-header">
+      <div class="turn-header-left">
+        <span class="turn-number">#3</span>
+        <span class="turn-role agent">Claude</span>
+      </div>
+      <span class="turn-timestamp">14:16:48</span>
+    </div>
+    <div class="turn-text">Running the full test suite.</div>
+
+    <div class="tool-calls">
+      <div class="tool-call">
+        <div class="tool-call-header">
+          <span class="tool-call-name"><span class="tool-icon success">&#10003;</span> Bash</span>
+          <span class="tool-call-file">go test ./... -count=1</span>
+        </div>
+        <div class="bash-output">
+          <div class="bash-cmd"><span class="prompt">$</span> go test ./... -count=1</div>
+          <div>ok  github.com/zanetworker/aimux/internal/agent          0.012s</div>
+          <div>ok  github.com/zanetworker/aimux/internal/controller      0.008s</div>
+          <div>ok  github.com/zanetworker/aimux/internal/discovery       0.234s</div>
+          <div>ok  github.com/zanetworker/aimux/internal/frontend/web    0.156s</div>
+          <div>ok  github.com/zanetworker/aimux/internal/trace           0.045s</div>
+          <div>ok  github.com/zanetworker/aimux/internal/cost            0.003s</div>
+          <div style="color: #3fb950; margin-top: 4px;">PASS - 42 tests, 0 failures</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="turn-text" style="margin-top: 12px;">All 42 tests pass, including the new web server tests. The SSE handler correctly streams agent snapshots and handles client disconnection gracefully.</div>
+
+    <div class="turn-footer">
+      <span class="turn-tokens">1,200 in / 450 out / $0.03 / 8.4s</span>
+      <div class="turn-annotations">
+        <button class="annotation-btn good active">Good</button>
+        <button class="annotation-btn bad">Bad</button>
+        <button class="annotation-btn waste">Waste</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Live bar -->
+<div class="live-bar">
+  <span class="live-dot"></span>
+  <span class="live-text">Live streaming &middot; Turn #15 &middot; $1.23 total</span>
+</div>
+
+</body>
+</html>
