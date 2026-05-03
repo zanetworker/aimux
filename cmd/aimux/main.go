@@ -12,11 +12,11 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/frontend/tui"
+	"github.com/zanetworker/aimux/internal/frontend/web"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/spawn"
-	"github.com/zanetworker/aimux/internal/frontend/tui"
-	"github.com/zanetworker/aimux/internal/frontend/web"
 )
 
 // version is set via ldflags at build time: -X main.version=v0.3.0
@@ -95,6 +95,41 @@ func createWebServer(port int) *web.Server {
 		shell := cfg.ResolveShell()
 		return spawn.Launch(cmd, providerName, dir, "tmux", shell, "")
 	})
+
+	// Wire trace parsing
+	claudeProvider := &provider.Claude{}
+	s.SetTraceParseFn(func(sessionFile string) ([]map[string]any, error) {
+		turns, err := claudeProvider.ParseTrace(sessionFile)
+		if err != nil {
+			return nil, err
+		}
+		// Convert to JSON-friendly format
+		result := make([]map[string]any, len(turns))
+		for i, t := range turns {
+			actions := make([]map[string]string, len(t.Actions))
+			for j, a := range t.Actions {
+				actions[j] = map[string]string{
+					"name":     a.Name,
+					"snippet":  a.Snippet,
+					"success":  fmt.Sprintf("%v", a.Success),
+					"errorMsg": a.ErrorMsg,
+				}
+			}
+			result[i] = map[string]any{
+				"number":     t.Number,
+				"timestamp":  t.Timestamp.Format(time.RFC3339),
+				"userText":   strings.Join(t.UserLines, "\n"),
+				"outputText": strings.Join(t.OutputLines, "\n"),
+				"actions":    actions,
+				"tokensIn":   t.TokensIn,
+				"tokensOut":  t.TokensOut,
+				"costUSD":    t.CostUSD,
+				"model":      t.Model,
+			}
+		}
+		return result, nil
+	})
+
 	return s
 }
 
