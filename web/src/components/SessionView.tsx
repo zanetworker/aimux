@@ -46,8 +46,14 @@ export function SessionView({ tmuxSession }: Props) {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(termRef.current);
-    fitAddon.fit();
     terminalRef.current = terminal;
+
+    // Delay fit so the container has settled its layout dimensions
+    requestAnimationFrame(() => {
+      fitAddon.fit();
+      // Fit again after a short delay to catch late layout shifts
+      setTimeout(() => fitAddon.fit(), 100);
+    });
 
     // Connect WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -93,8 +99,11 @@ export function SessionView({ tmuxSession }: Props) {
     <div
       ref={termRef}
       style={{
-        flex: 1,
-        height: '100%',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
         background: '#000000',
         padding: 4,
       }}

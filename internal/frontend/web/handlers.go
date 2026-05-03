@@ -118,6 +118,11 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit to last 20 turns for performance
+	if len(turns) > 20 {
+		turns = turns[len(turns)-20:]
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"turns": turns})
 }

@@ -14,6 +14,19 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
     });
   };
 
+  const stripMarkdown = (text: string): string => {
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '$1')    // **bold** -> bold
+      .replace(/\*(.*?)\*/g, '$1')         // *italic* -> italic
+      .replace(/`([^`]+)`/g, '$1')         // `code` -> code
+      .replace(/^#{1,6}\s+/gm, '')         // # headings -> text
+      .replace(/^\s*[-*+]\s+/gm, '- ')     // bullet normalization
+      .replace(/\|[-:]+\|/g, '')           // table separator rows
+      .replace(/^\|(.+)\|$/gm, (_, content) => content.replace(/\|/g, ', ').trim())  // table rows -> comma separated
+      .replace(/\n{3,}/g, '\n\n')          // collapse multiple newlines
+      .trim();
+  };
+
   const formatTokens = (tokensIn: number, tokensOut: number): string => {
     const formatK = (n: number) => {
       if (n < 1000) return String(n);
@@ -27,10 +40,19 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
     return `$${cost.toFixed(2)}`;
   };
 
+  const shortenSnippet = (snippet: string): string => {
+    return snippet
+      .replace(/\/Users\/[^/]+\/go\/src\/github\.com\/[^/]+\/[^/]+\//g, '')
+      .replace(/\/Users\/[^/]+\//g, '~/');
+  };
+
   const renderToolPill = (tool: ToolSpan, idx: number) => {
     const icon = tool.success ? '✓' : '✗';
-    const color = tool.success ? 'var(--green)' : 'var(--accent)';
-    const displayText = tool.snippet || tool.name;
+    let displayText = tool.snippet || tool.name;
+    displayText = shortenSnippet(displayText);
+    if (displayText.length > 30) {
+      displayText = displayText.substring(0, 27) + '...';
+    }
     return (
       <span
         key={idx}
@@ -43,7 +65,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
           borderRadius: '3px',
           marginRight: '4px',
           display: 'inline-block',
-          color,
+          color: tool.success ? 'var(--green)' : 'var(--accent)',
         }}
         title={tool.errorMsg || tool.snippet}
       >
@@ -89,7 +111,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
               <div style={{
                 fontSize: '10px',
                 fontWeight: 600,
-                color: 'var(--fg-3)',
+                color: 'var(--fg-4)',
                 marginBottom: '4px',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -99,7 +121,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
               </div>
               <div style={{
                 fontSize: '12px',
-                color: 'var(--fg-2)',
+                color: 'var(--fg)',
                 lineHeight: '1.5',
               }}>
                 {turn.userText}
@@ -117,7 +139,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
             <div style={{
               fontSize: '10px',
               fontWeight: 600,
-              color: 'var(--fg-3)',
+              color: 'var(--fg-4)',
               marginBottom: '4px',
               display: 'flex',
               justifyContent: 'space-between',
@@ -126,7 +148,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
               <span>{new Date(turn.timestamp).toLocaleTimeString()}</span>
             </div>
 
-            {/* Response text - truncated to 3 lines */}
+            {/* Response text - truncated to 200 chars after stripping markdown */}
             <div style={{
               fontSize: '12px',
               color: 'var(--fg-2)',
@@ -137,7 +159,10 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
               WebkitLineClamp: 3,
               WebkitBoxOrient: 'vertical',
             }}>
-              {turn.outputText || '(no response)'}
+              {(() => {
+                const text = stripMarkdown(turn.outputText || '(no response)');
+                return text.length > 200 ? text.substring(0, 197) + '...' : text;
+              })()}
             </div>
 
             {/* Tool calls */}
