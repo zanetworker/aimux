@@ -15,23 +15,23 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
       color: 'var(--accent)',
     },
     codex: {
-      background: 'rgba(105,223,115,0.12)',
-      color: '#69DF73',
+      background: 'rgba(74,222,128,0.15)',
+      color: '#4ade80',
     },
     gemini: {
-      background: 'rgba(167,114,239,0.12)',
-      color: '#A772EF',
+      background: 'rgba(167,139,250,0.15)',
+      color: '#a78bfa',
     },
   };
 
   const providerStyle = providerColors[agent.ProviderName.toLowerCase() as keyof typeof providerColors] || providerColors.claude;
 
   const statusColors = {
-    0: { dot: '#69DF73', bg: 'rgba(105,223,115,0.12)', color: '#69DF73' }, // Active
-    1: { dot: '#666666', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Idle
-    2: { dot: '#FFB251', bg: 'rgba(255,178,81,0.12)', color: '#FFB251' }, // Waiting
-    3: { dot: '#FF3131', bg: 'var(--accent-dim)', color: 'var(--accent)' }, // Error
-    4: { dot: '#666666', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Unknown
+    0: { dot: '#4ade80', bg: 'rgba(74,222,128,0.15)', color: '#4ade80' }, // Active
+    1: { dot: '#525252', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Idle
+    2: { dot: '#f59e0b', bg: 'rgba(245,158,11,0.15)', color: '#f59e0b' }, // Waiting
+    3: { dot: '#ef4444', bg: 'var(--accent-dim)', color: 'var(--accent)' }, // Error
+    4: { dot: '#525252', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Unknown
   };
 
   const statusStyle = statusColors[agent.Status as keyof typeof statusColors] || statusColors[4];
@@ -69,17 +69,17 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
-  const borderLeftColor = agent.Status === 0 ? '#69DF73' : 'var(--fg-4)';
-  const borderLeftColorOverride = agent.Status === 2 ? '#FFB251' : agent.Status === 3 ? '#FF3131' : borderLeftColor;
+  const borderLeftColor = agent.Status === 0 ? '#4ade80' : 'var(--fg-4)';
+  const borderLeftColorOverride = agent.Status === 2 ? '#f59e0b' : agent.Status === 3 ? '#ef4444' : borderLeftColor;
 
-  const borderColor = selected ? 'var(--accent)' : 'var(--border)';
-  const boxShadow = selected ? '0 0 8px var(--accent-dim)' : 'none';
+  const borderColor = selected ? 'var(--accent)' : 'rgba(255,255,255,0.06)';
+  const boxShadow = 'none';
 
   const cardBg = agent.Status === 2
-    ? 'rgba(255,178,81,0.03)'
+    ? 'rgba(245,158,11,0.04)'
     : agent.Status === 3
-      ? 'rgba(255,49,49,0.03)'
-      : 'var(--bg-2)';
+      ? 'rgba(239,68,68,0.04)'
+      : 'rgba(255,255,255,0.03)';
 
   const showAttention = agent.Status === 2 || agent.Status === 3;
 
@@ -100,18 +100,12 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
       }}
       onMouseEnter={(e) => {
         if (!selected) {
-          e.currentTarget.style.borderColor = 'var(--border-hover)';
-          e.currentTarget.style.background = agent.Status === 2
-            ? 'rgba(255,178,81,0.05)'
-            : agent.Status === 3
-              ? 'rgba(255,49,49,0.05)'
-              : 'var(--bg-3)';
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
         }
       }}
       onMouseLeave={(e) => {
         if (!selected) {
-          e.currentTarget.style.borderColor = 'var(--border)';
-          e.currentTarget.style.background = cardBg;
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)';
         }
       }}
     >
@@ -270,7 +264,7 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
             {formatTokenCount(agent.TokensIn, agent.TokensOut)}
           </span>
         </div>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#69DF73' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#4ade80' }}>
           ${(agent.EstCostUSD || 0).toFixed(2)}
         </span>
       </div>

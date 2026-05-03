@@ -45,16 +45,16 @@ export function FilterBar({
   };
 
   const statusDots = {
-    active: '#69DF73',
-    idle: '#666666',
-    waiting: '#FFB251',
-    error: '#FF3131',
+    active: '#4ade80',
+    idle: '#525252',
+    waiting: '#f59e0b',
+    error: '#ef4444',
   };
 
   const providerDots = {
     claude: 'var(--accent)',
-    codex: '#69DF73',
-    gemini: '#A772EF',
+    codex: '#4ade80',
+    gemini: '#a78bfa',
   };
 
   return (
@@ -109,7 +109,7 @@ export function FilterBar({
       <FilterPill
         label="Recent"
         count={recentCount}
-        dotColor="#14B8A6"
+        dotColor="#34d399"
         active={recentFilter}
         onClick={() => onRecentFilter(!recentFilter)}
       />
