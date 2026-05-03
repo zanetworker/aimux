@@ -116,6 +116,26 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
+              onClick={() => {
+                if (confirm('Kill this session?')) {
+                  fetch(`/api/agents/${agent.SessionID || String(agent.PID)}/archive`, { method: 'POST' });
+                  onClose();
+                }
+              }}
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--accent)',
+                color: 'var(--accent)',
+                fontSize: 10,
+                cursor: 'pointer',
+                padding: '2px 8px',
+                borderRadius: 3,
+              }}
+              title="Kill session"
+            >
+              Kill
+            </button>
+            <button
               onClick={onClose}
               style={{
                 background: 'transparent',

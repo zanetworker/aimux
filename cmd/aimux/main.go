@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -94,6 +95,20 @@ func createWebServer(port int) *web.Server {
 
 		shell := cfg.ResolveShell()
 		return spawn.Launch(cmd, providerName, dir, "tmux", shell, "")
+	})
+	s.SetKillFunc(func(pid int, tmuxSession string) error {
+		// Kill the tmux session if it exists
+		if tmuxSession != "" {
+			exec.Command("tmux", "kill-session", "-t", tmuxSession).Run()
+		}
+		// Also kill the process
+		if pid > 0 {
+			proc, err := os.FindProcess(pid)
+			if err == nil {
+				proc.Signal(syscall.SIGTERM)
+			}
+		}
+		return nil
 	})
 
 	// Wire trace parsing

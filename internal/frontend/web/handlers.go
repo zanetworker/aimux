@@ -60,8 +60,31 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "archived"})
+	sessionID := r.PathValue("id")
+
+	if s.discoverFn == nil || s.killFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	agents, err := s.discoverFn()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, a := range agents {
+		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
+			if err := s.killFn(a.PID, a.TMuxSession); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "killed"})
+			return
+		}
+	}
+	http.Error(w, "agent not found", http.StatusNotFound)
 }
 
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {

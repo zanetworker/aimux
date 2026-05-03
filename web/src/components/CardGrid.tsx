@@ -22,6 +22,14 @@ export function CardGrid({
   searchQuery,
   sortBy,
 }: Props) {
+  const handleKill = async (id: string) => {
+    try {
+      await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
+    } catch {
+      // ignore
+    }
+  };
+
   // Filter agents
   let filtered = agents;
 
@@ -83,6 +91,7 @@ export function CardGrid({
             agent={agent}
             selected={selectedId === (agent.SessionID || agent.PID.toString())}
             onClick={() => onSelect(agent.SessionID || agent.PID.toString())}
+            onKill={handleKill}
           />
         ))}
       </div>

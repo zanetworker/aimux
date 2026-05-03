@@ -19,6 +19,7 @@ type Server struct {
 	launchFn     func(provider, dir, model, mode string) error
 	annotateFn   func(sessionID string, turn int, label, note string) error
 	traceParseFn func(sessionFile string) ([]map[string]any, error)
+	killFn       func(pid int, tmuxSession string) error
 }
 
 func NewServer(port int) *Server {
@@ -39,6 +40,10 @@ func (s *Server) SetAnnotateFunc(fn func(sessionID string, turn int, label, note
 
 func (s *Server) SetTraceParseFn(fn func(sessionFile string) ([]map[string]any, error)) {
 	s.traceParseFn = fn
+}
+
+func (s *Server) SetKillFunc(fn func(pid int, tmuxSession string) error) {
+	s.killFn = fn
 }
 
 func (s *Server) Start() error {
