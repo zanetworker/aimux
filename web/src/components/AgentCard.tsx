@@ -43,6 +43,20 @@ export function AgentCard({ agent, selected, onClick }: Props) {
     4: '■',  // Unknown - square
   };
 
+  const shortenPath = (path: string): string => {
+    return path
+      .replace(/\/Users\/[^/]+\/go\/src\/github\.com\/[^/]+\//g, '')
+      .replace(/\/Users\/[^/]+\//g, '~/');
+  };
+
+  const formatTokenCount = (tokensIn: number, tokensOut: number): string => {
+    const formatK = (n: number) => {
+      if (n < 1000) return String(n);
+      return (n / 1000).toFixed(1) + 'k';
+    };
+    return `${formatK(tokensIn)} in / ${formatK(tokensOut)} out`;
+  };
+
   const timeSinceActivity = () => {
     if (!agent.LastActivity) return 'unknown';
     const now = new Date();
@@ -169,8 +183,8 @@ export function AgentCard({ agent, selected, onClick }: Props) {
         </span>
       </div>
 
-      {/* Session title */}
-      {agent.Title && (
+      {/* Description: Title if available, else LastAction */}
+      {(agent.Title || (!agent.Title && agent.LastAction)) && (
         <div style={{
           fontSize: 12,
           color: 'var(--fg-2)',
@@ -182,45 +196,47 @@ export function AgentCard({ agent, selected, onClick }: Props) {
           WebkitBoxOrient: 'vertical' as const,
           lineHeight: '1.4',
         }}>
-          {agent.Title}
+          {agent.Title || shortenPath(agent.LastAction || '')}
         </div>
       )}
 
-      {/* Last action */}
-      <div style={{
-        fontFamily: 'var(--mono)',
-        fontSize: 10,
-        padding: '6px 8px',
-        borderRadius: 4,
-        background: 'var(--bg-0)',
-        border: '1px solid var(--border)',
-        marginBottom: 10,
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-      }}>
-        <span style={{
-          color: statusStyle.color,
-          fontSize: 9,
+      {/* Last action - only show if Title exists */}
+      {agent.Title && agent.LastAction && (
+        <div style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 10,
+          padding: '6px 8px',
+          borderRadius: 4,
+          background: 'var(--bg-0)',
+          border: '1px solid var(--border)',
+          marginBottom: 10,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
         }}>
-          {actionIcons[agent.Status as keyof typeof actionIcons]}
-        </span>
-        <span style={{ color: 'var(--fg-3)' }}>
-          {agent.LastAction || (agent.Title ? '' : 'No activity')}
-        </span>
-      </div>
+          <span style={{
+            color: statusStyle.color,
+            fontSize: 9,
+          }}>
+            {actionIcons[agent.Status as keyof typeof actionIcons]}
+          </span>
+          <span style={{ color: 'var(--fg-2)' }}>
+            {shortenPath(agent.LastAction)}
+          </span>
+        </div>
+      )}
 
       {/* Bottom row */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)' }}>
             {agent.Model}
           </span>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-4)' }}>
-            {agent.TokensIn + agent.TokensOut} tok
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)' }}>
+            {formatTokenCount(agent.TokensIn, agent.TokensOut)}
           </span>
         </div>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#69DF73' }}>
