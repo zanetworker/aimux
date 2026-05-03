@@ -21,7 +21,7 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
   const [isResizing, setIsResizing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const turns = useTraceStream(agent.SessionID);
+  const turns = useTraceStream(agent.SessionID, agent.SessionFile);
 
   useEffect(() => {
     if (!isResizing) return;

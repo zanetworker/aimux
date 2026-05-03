@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Turn } from '../types';
 
-export function useTraceStream(sessionId: string | null): Turn[] {
+export function useTraceStream(sessionId: string | null, sessionFile?: string): Turn[] {
   const [turns, setTurns] = useState<Turn[]>([]);
 
   useEffect(() => {
@@ -14,7 +14,10 @@ export function useTraceStream(sessionId: string | null): Turn[] {
 
     async function fetchTrace() {
       try {
-        const resp = await fetch(`/api/agents/${sessionId}/trace`);
+        const url = sessionFile
+          ? `/api/trace?file=${encodeURIComponent(sessionFile)}`
+          : `/api/agents/${sessionId}/trace`;
+        const resp = await fetch(url);
         if (!resp.ok) return;
         const data = await resp.json();
         if (!cancelled && data.turns) {
@@ -41,14 +44,13 @@ export function useTraceStream(sessionId: string | null): Turn[] {
     }
 
     fetchTrace();
-    // Poll every 5 seconds for updates
     const interval = setInterval(fetchTrace, 5000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [sessionId]);
+  }, [sessionId, sessionFile]);
 
   return turns;
 }
