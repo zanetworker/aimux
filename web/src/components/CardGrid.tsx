@@ -7,6 +7,7 @@ interface Props {
   onSelect: (id: string) => void;
   statusFilter: number | null;
   providerFilter: string | null;
+  recentFilter: boolean;
   searchQuery: string;
   sortBy: string;
 }
@@ -17,6 +18,7 @@ export function CardGrid({
   onSelect,
   statusFilter,
   providerFilter,
+  recentFilter,
   searchQuery,
   sortBy,
 }: Props) {
@@ -29,6 +31,11 @@ export function CardGrid({
 
   if (providerFilter !== null) {
     filtered = filtered.filter(a => a.ProviderName.toLowerCase() === providerFilter.toLowerCase());
+  }
+
+  if (recentFilter) {
+    const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
+    filtered = filtered.filter(a => new Date(a.LastActivity).getTime() > thirtyMinAgo);
   }
 
   if (searchQuery) {
