@@ -2,12 +2,17 @@ import { useState } from 'react';
 import { useAgentStream } from './hooks/useAgentStream';
 import { StatsBar } from './components/StatsBar';
 import { KanbanBoard } from './components/KanbanBoard';
+import { RightPanel } from './components/RightPanel';
 import './styles/theme.css';
 
 export default function App() {
   const agents = useAgentStream();
   const [viewMode, setViewMode] = useState<'status' | 'repo'>('status');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const selectedAgent = agents.find(
+    a => a.sessionId === selectedId || String(a.pid) === selectedId
+  );
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -24,6 +29,12 @@ export default function App() {
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
+        {selectedAgent && (
+          <RightPanel
+            agent={selectedAgent}
+            onClose={() => setSelectedId(null)}
+          />
+        )}
       </div>
     </div>
   );
