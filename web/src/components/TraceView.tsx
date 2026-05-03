@@ -30,6 +30,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
   const renderToolPill = (tool: ToolSpan, idx: number) => {
     const icon = tool.success ? '✓' : '✗';
     const color = tool.success ? 'var(--green)' : 'var(--accent)';
+    const displayText = tool.snippet || tool.name;
     return (
       <span
         key={idx}
@@ -46,7 +47,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
         }}
         title={tool.errorMsg || tool.snippet}
       >
-        {icon} {tool.name}
+        {icon} {displayText}
       </span>
     );
   };
@@ -73,22 +74,23 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
       padding: '12px',
       display: 'flex',
       flexDirection: 'column',
-      gap: '12px',
+      gap: '8px',
+      flex: 1,
     }}>
       {turns.map((turn) => (
-        <div key={turn.number} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div key={turn.number} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           {/* User turn */}
           {turn.userText && (
             <div style={{
               background: 'var(--bg-3)',
               borderRadius: '6px',
-              padding: '10px',
+              padding: '8px 10px',
             }}>
               <div style={{
                 fontSize: '10px',
                 fontWeight: 600,
                 color: 'var(--fg-3)',
-                marginBottom: '6px',
+                marginBottom: '4px',
                 display: 'flex',
                 justifyContent: 'space-between',
               }}>
@@ -99,9 +101,6 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
                 fontSize: '12px',
                 color: 'var(--fg-2)',
                 lineHeight: '1.5',
-                maxHeight: '120px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
               }}>
                 {turn.userText}
               </div>
@@ -112,14 +111,14 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
           <div style={{
             background: 'var(--bg-2)',
             borderRadius: '6px',
-            padding: '10px',
+            padding: '8px 10px',
             borderLeft: '2px solid var(--accent)',
           }}>
             <div style={{
               fontSize: '10px',
               fontWeight: 600,
               color: 'var(--fg-3)',
-              marginBottom: '6px',
+              marginBottom: '4px',
               display: 'flex',
               justifyContent: 'space-between',
             }}>
@@ -127,22 +126,23 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
               <span>{new Date(turn.timestamp).toLocaleTimeString()}</span>
             </div>
 
-            {/* Response text */}
+            {/* Response text - truncated to 3 lines */}
             <div style={{
               fontSize: '12px',
               color: 'var(--fg-2)',
               lineHeight: '1.5',
-              marginBottom: turn.actions.length > 0 ? '8px' : '0',
-              maxHeight: '120px',
+              marginBottom: turn.actions.length > 0 ? '6px' : '0',
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
+              display: '-webkit-box',
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical',
             }}>
               {turn.outputText || '(no response)'}
             </div>
 
             {/* Tool calls */}
             {turn.actions.length > 0 && (
-              <div style={{ marginBottom: '8px' }}>
+              <div style={{ marginBottom: '6px' }}>
                 {turn.actions.map((tool, idx) => renderToolPill(tool, idx))}
               </div>
             )}
@@ -155,8 +155,8 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
               fontSize: '10px',
               color: 'var(--fg-3)',
               borderTop: '1px solid var(--border)',
-              paddingTop: '8px',
-              marginTop: '8px',
+              paddingTop: '6px',
+              marginTop: '6px',
             }}>
               <div style={{ display: 'flex', gap: '12px' }}>
                 <span>{formatTokens(turn.tokensIn, turn.tokensOut)}</span>
