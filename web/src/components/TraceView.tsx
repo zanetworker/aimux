@@ -66,7 +66,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
         style={{
           fontSize: '9px',
           fontFamily: 'var(--mono)',
-          background: 'rgba(255,255,255,0.04)',
+          background: 'var(--bg-2)',
           border: '1px solid var(--border)',
           padding: '1px 5px',
           borderRadius: '3px',
@@ -137,7 +137,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
 
           {/* Agent turn */}
           <div style={{
-            background: 'rgba(255,255,255,0.02)',
+            background: 'var(--bg-1)',
             borderRadius: '6px',
             padding: '8px 10px',
             borderLeft: '2px solid var(--accent)',
