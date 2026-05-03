@@ -1,11 +1,20 @@
-.PHONY: build run clean test install lint build-mcp build-agent-claude push-agent-claude build-agent-gemini push-agent-gemini
+.PHONY: build run clean test install lint build-mcp build-agent-claude push-agent-claude build-agent-gemini push-agent-gemini web-build web-dev build-all
 
 BINARY=aimux
 REGISTRY=quay.io/azaalouk
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
+web-build:
+	cd web && pnpm install && pnpm build
+	cp -r web/dist/* internal/frontend/web/dist/
+
+web-dev:
+	cd web && pnpm dev
+
 build:
 	go build -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/aimux
+
+build-all: web-build build
 
 run: build
 	./$(BINARY)
