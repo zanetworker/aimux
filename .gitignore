@@ -19,6 +19,9 @@ bin/
 # Web frontend embed copy (internal/frontend/web/dist is a copy of web/dist for embed)
 internal/frontend/web/dist/
 
+# Node modules
+node_modules/
+
 # Docs scratch
 docs/plans/
 

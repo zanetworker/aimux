@@ -16,6 +16,8 @@ type Server struct {
 	listener   net.Listener
 	srv        *http.Server
 	discoverFn func() ([]agent.Agent, error)
+	launchFn   func(provider, dir, model, mode string) error
+	annotateFn func(sessionID string, turn int, label, note string) error
 }
 
 func NewServer(port int) *Server {
@@ -24,6 +26,14 @@ func NewServer(port int) *Server {
 
 func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
 	s.discoverFn = fn
+}
+
+func (s *Server) SetLaunchFunc(fn func(provider, dir, model, mode string) error) {
+	s.launchFn = fn
+}
+
+func (s *Server) SetAnnotateFunc(fn func(sessionID string, turn int, label, note string) error) {
+	s.annotateFn = fn
 }
 
 func (s *Server) Start() error {
@@ -35,6 +45,14 @@ func (s *Server) Start() error {
 	})
 
 	mux.HandleFunc("GET /api/events", s.handleSSE)
+
+	mux.HandleFunc("POST /api/agents/launch", s.handleLaunch)
+	mux.HandleFunc("POST /api/agents/{id}/annotate", s.handleAnnotate)
+	mux.HandleFunc("POST /api/agents/{id}/archive", s.handleArchive)
+	mux.HandleFunc("GET /api/agents/{id}/diff", s.handleDiff)
+	mux.HandleFunc("GET /api/history", s.handleHistory)
+	mux.HandleFunc("POST /api/trace/subscribe/{sessionId}", s.handleTraceSubscribe)
+	mux.HandleFunc("POST /api/trace/unsubscribe/{sessionId}", s.handleTraceUnsubscribe)
 
 	sub, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
