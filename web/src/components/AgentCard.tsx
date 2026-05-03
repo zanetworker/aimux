@@ -5,9 +5,10 @@ interface Props {
   agent: Agent;
   selected: boolean;
   onClick: () => void;
+  onKill?: (id: string) => void;
 }
 
-export function AgentCard({ agent, selected, onClick }: Props) {
+export function AgentCard({ agent, selected, onClick, onKill }: Props) {
   const providerColors = {
     claude: {
       background: 'var(--accent-dim)',
@@ -85,6 +86,7 @@ export function AgentCard({ agent, selected, onClick }: Props) {
   return (
     <div
       onClick={onClick}
+      className="agent-card"
       style={{
         position: 'relative',
         background: cardBg,
@@ -125,6 +127,35 @@ export function AgentCard({ agent, selected, onClick }: Props) {
           🔔
         </div>
       )}
+
+      {/* Kill button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          if (onKill) {
+            if (confirm('Kill this session?')) {
+              onKill(agent.SessionID || String(agent.PID));
+            }
+          }
+        }}
+        className="kill-btn"
+        style={{
+          position: 'absolute',
+          top: 8,
+          right: showAttention ? 28 : 8,
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--fg-4)',
+          fontSize: 12,
+          cursor: 'pointer',
+          opacity: 0,
+          transition: 'opacity 0.15s',
+          padding: '2px 4px',
+        }}
+        title="Kill session"
+      >
+        ✕
+      </button>
 
       {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -256,6 +287,12 @@ export function AgentCard({ agent, selected, onClick }: Props) {
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        .agent-card:hover .kill-btn {
+          opacity: 1 !important;
+        }
+        .kill-btn:hover {
+          color: var(--accent) !important;
         }
       `}</style>
     </div>
