@@ -78,7 +78,7 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
     ? 'var(--orange-dim)'
     : agent.Status === 3
       ? 'var(--accent-dim)'
-      : 'var(--bg-1)';
+      : 'var(--bg-0)';
 
   const showAttention = agent.Status === 2 || agent.Status === 3;
 
