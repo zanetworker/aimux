@@ -1,35 +1,51 @@
 import { useState } from 'react';
 import { useAgentStream } from './hooks/useAgentStream';
 import { StatsBar } from './components/StatsBar';
-import { KanbanBoard } from './components/KanbanBoard';
+import { CardGrid } from './components/CardGrid';
+import { FilterBar } from './components/FilterBar';
 import { RightPanel } from './components/RightPanel';
 import { LaunchDialog } from './components/LaunchDialog';
 import './styles/theme.css';
 
 export default function App() {
   const agents = useAgentStream();
-  const [viewMode, setViewMode] = useState<'status' | 'repo'>('status');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<number | null>(null);
+  const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('lastActive');
 
   const selectedAgent = agents.find(
-    a => a.sessionId === selectedId || String(a.pid) === selectedId
+    a => a.SessionID === selectedId || String(a.PID) === selectedId
   );
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <StatsBar
         agents={agents}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
         onLaunch={() => setShowLaunch(true)}
       />
+      <FilterBar
+        agents={agents}
+        statusFilter={statusFilter}
+        onStatusFilter={setStatusFilter}
+        providerFilter={providerFilter}
+        onProviderFilter={setProviderFilter}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        sortBy={sortBy}
+        onSortChange={setSortBy}
+      />
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <KanbanBoard
+        <CardGrid
           agents={agents}
-          viewMode={viewMode}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          statusFilter={statusFilter}
+          providerFilter={providerFilter}
+          searchQuery={searchQuery}
+          sortBy={sortBy}
         />
         {selectedAgent && (
           <RightPanel

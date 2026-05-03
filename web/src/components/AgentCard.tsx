@@ -1,4 +1,5 @@
 import type { Agent } from '../types';
+import { StatusLabel } from '../types';
 
 interface Props {
   agent: Agent;
@@ -11,26 +12,41 @@ export function AgentCard({ agent, selected, onClick }: Props) {
     claude: {
       background: 'var(--accent-dim)',
       color: 'var(--accent)',
-      border: '1px solid var(--accent)',
     },
     codex: {
-      background: 'var(--green-dim)',
-      color: 'var(--green)',
-      border: '1px solid rgba(105,223,115,0.3)',
+      background: 'rgba(105,223,115,0.12)',
+      color: '#69DF73',
     },
     gemini: {
-      background: 'var(--purple-dim)',
-      color: 'var(--purple)',
-      border: '1px solid rgba(167,114,239,0.3)',
+      background: 'rgba(167,114,239,0.12)',
+      color: '#A772EF',
     },
   };
 
-  const providerStyle = providerColors[agent.providerName.toLowerCase() as keyof typeof providerColors] || providerColors.claude;
+  const providerStyle = providerColors[agent.ProviderName.toLowerCase() as keyof typeof providerColors] || providerColors.claude;
+
+  const statusColors = {
+    0: { dot: '#69DF73', bg: 'rgba(105,223,115,0.12)', color: '#69DF73' }, // Active
+    1: { dot: '#666666', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Idle
+    2: { dot: '#FFB251', bg: 'rgba(255,178,81,0.12)', color: '#FFB251' }, // Waiting
+    3: { dot: '#FF3131', bg: 'var(--accent-dim)', color: 'var(--accent)' }, // Error
+    4: { dot: '#666666', bg: 'var(--bg-4)', color: 'var(--fg-3)' }, // Unknown
+  };
+
+  const statusStyle = statusColors[agent.Status as keyof typeof statusColors] || statusColors[4];
+
+  const actionIcons = {
+    0: '▶',  // Active - play
+    1: '■',  // Idle - square
+    2: '⏸',  // Waiting - pause
+    3: '✕',  // Error - X
+    4: '■',  // Unknown - square
+  };
 
   const timeSinceActivity = () => {
-    if (!agent.lastActivity) return 'unknown';
+    if (!agent.LastActivity) return 'unknown';
     const now = new Date();
-    const last = new Date(agent.lastActivity);
+    const last = new Date(agent.LastActivity);
     const diff = Math.floor((now.getTime() - last.getTime()) / 1000);
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
@@ -38,43 +54,73 @@ export function AgentCard({ agent, selected, onClick }: Props) {
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
-  const borderColor = agent.status === 'Waiting'
-    ? 'var(--orange)'
-    : selected
-      ? 'var(--accent)'
-      : 'var(--border)';
+  const borderLeftColor = agent.Status === 0 ? '#69DF73' : 'var(--fg-4)';
+  const borderLeftColorOverride = agent.Status === 2 ? '#FFB251' : agent.Status === 3 ? '#FF3131' : borderLeftColor;
 
+  const borderColor = selected ? 'var(--accent)' : 'var(--border)';
   const boxShadow = selected ? '0 0 8px var(--accent-dim)' : 'none';
-  const hoverBg = 'var(--bg-3)';
-  const hoverBorder = 'var(--border-hover)';
+
+  const cardBg = agent.Status === 2
+    ? 'rgba(255,178,81,0.03)'
+    : agent.Status === 3
+      ? 'rgba(255,49,49,0.03)'
+      : 'var(--bg-2)';
+
+  const showAttention = agent.Status === 2 || agent.Status === 3;
 
   return (
     <div
       onClick={onClick}
       style={{
-        background: 'var(--bg-2)',
+        position: 'relative',
+        background: cardBg,
         border: `1px solid ${borderColor}`,
-        borderRadius: 6,
-        padding: '10px 12px',
+        borderLeft: `3px solid ${borderLeftColorOverride}`,
+        borderRadius: 8,
+        padding: '14px 16px',
         cursor: 'pointer',
         boxShadow,
         transition: 'all 0.15s ease',
       }}
       onMouseEnter={(e) => {
-        if (!selected && agent.status !== 'Waiting') {
-          e.currentTarget.style.borderColor = hoverBorder;
-          e.currentTarget.style.background = hoverBg;
+        if (!selected) {
+          e.currentTarget.style.borderColor = 'var(--border-hover)';
+          e.currentTarget.style.background = agent.Status === 2
+            ? 'rgba(255,178,81,0.05)'
+            : agent.Status === 3
+              ? 'rgba(255,49,49,0.05)'
+              : 'var(--bg-3)';
         }
       }}
       onMouseLeave={(e) => {
-        if (!selected && agent.status !== 'Waiting') {
+        if (!selected) {
           e.currentTarget.style.borderColor = 'var(--border)';
-          e.currentTarget.style.background = 'var(--bg-2)';
+          e.currentTarget.style.background = cardBg;
         }
       }}
     >
-      {/* Top row: provider badge + time */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+      {/* Attention bell */}
+      {showAttention && (
+        <div style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          fontSize: 14,
+          animation: 'ring 2s ease-in-out infinite',
+        }}>
+          🔔
+        </div>
+      )}
+
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{
+          width: 7,
+          height: 7,
+          borderRadius: '50%',
+          background: statusStyle.dot,
+          animation: agent.Status === 0 ? 'pulse 2s ease-in-out infinite' : 'none',
+        }} />
         <span style={{
           padding: '2px 6px',
           borderRadius: 3,
@@ -84,46 +130,118 @@ export function AgentCard({ agent, selected, onClick }: Props) {
           letterSpacing: '0.05em',
           ...providerStyle,
         }}>
-          {agent.providerName}
+          {agent.ProviderName}
         </span>
-        <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>
+        <span style={{
+          padding: '1px 5px',
+          borderRadius: 2,
+          fontSize: 8,
+          fontWeight: 700,
+          textTransform: 'uppercase' as const,
+          letterSpacing: '0.06em',
+          background: statusStyle.bg,
+          color: statusStyle.color,
+        }}>
+          {StatusLabel[agent.Status]}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 'auto' }}>
           {timeSinceActivity()}
         </span>
       </div>
 
       {/* Repo name */}
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: 'var(--fg)' }}>
-        {agent.name}
+      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: 'var(--fg)' }}>
+        {agent.Name}
       </div>
 
-      {/* Git branch */}
-      <div style={{ marginBottom: 6 }}>
+      {/* Branch */}
+      <div style={{ marginBottom: 8 }}>
         <span style={{
           fontFamily: 'var(--mono)',
-          fontSize: 11,
-          padding: '2px 4px',
+          fontSize: 10,
+          padding: '2px 6px',
           borderRadius: 3,
           background: 'var(--bg-4)',
           color: 'var(--accent)',
+          display: 'inline-block',
         }}>
-          {agent.gitBranch || 'main'}
+          {agent.GitBranch || 'main'}
         </span>
       </div>
+
+      {/* Session title */}
+      {agent.TaskSubject && (
+        <div style={{
+          fontSize: 12,
+          color: 'var(--fg-2)',
+          marginBottom: 8,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical' as const,
+          lineHeight: '1.4',
+        }}>
+          {agent.TaskSubject}
+        </div>
+      )}
 
       {/* Last action */}
-      <div style={{ fontSize: 11, fontStyle: 'italic', color: 'var(--fg-3)', marginBottom: 8 }}>
-        {agent.lastAction || 'No activity'}
+      <div style={{
+        fontFamily: 'var(--mono)',
+        fontSize: 10,
+        padding: '6px 8px',
+        borderRadius: 4,
+        background: 'var(--bg-0)',
+        border: '1px solid var(--border)',
+        marginBottom: 10,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      }}>
+        <span style={{
+          color: statusStyle.color,
+          fontSize: 9,
+        }}>
+          {actionIcons[agent.Status as keyof typeof actionIcons]}
+        </span>
+        <span style={{ color: 'var(--fg-3)' }}>
+          {agent.LastAction || (agent.TaskSubject ? '' : 'No activity')}
+        </span>
       </div>
 
-      {/* Bottom row: model + cost */}
+      {/* Bottom row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>
-          {agent.model}
-        </span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--green)' }}>
-          ${agent.estCostUSD.toFixed(3)}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)' }}>
+            {agent.Model}
+          </span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-4)' }}>
+            {agent.TokensIn + agent.TokensOut} tok
+          </span>
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#69DF73' }}>
+          ${(agent.EstCostUSD || 0).toFixed(2)}
         </span>
       </div>
+
+      <style>{`
+        @keyframes ring {
+          0%, 100% { transform: rotate(0); }
+          10% { transform: rotate(12deg); }
+          20% { transform: rotate(-12deg); }
+          30% { transform: rotate(8deg); }
+          40% { transform: rotate(-8deg); }
+          50% { transform: rotate(0); }
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   );
 }
