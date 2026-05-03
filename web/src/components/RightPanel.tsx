@@ -205,7 +205,9 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
           <TraceView turns={turns} sessionId={agent.SessionID} />
         )}
         {activeTab === 'session' && agent.TMuxSession && (
-          <SessionView tmuxSession={agent.TMuxSession} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <SessionView tmuxSession={agent.TMuxSession} />
+          </div>
         )}
         {activeTab === 'session' && !agent.TMuxSession && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

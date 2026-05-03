@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -78,4 +79,45 @@ func (s *Server) handleTraceSubscribe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTraceUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "unsubscribed"})
+}
+
+func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+
+	// Find agent by sessionID from current discovery
+	if s.discoverFn == nil {
+		http.Error(w, "discovery not configured", http.StatusServiceUnavailable)
+		return
+	}
+	agents, err := s.discoverFn()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var sessionFile string
+	for _, a := range agents {
+		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
+			sessionFile = a.SessionFile
+			break
+		}
+	}
+	if sessionFile == "" {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	if s.traceParseFn == nil {
+		http.Error(w, "trace parsing not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	turns, err := s.traceParseFn(sessionFile)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"turns": turns})
 }

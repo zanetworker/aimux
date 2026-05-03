@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +44,22 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	if err != nil {
 		return
 	}
-	data, err := json.Marshal(map[string]any{"agents": agents})
+
+	// Enrich with titles
+	type enrichedAgent struct {
+		agent.Agent
+		Title string
+	}
+
+	enriched := make([]enrichedAgent, len(agents))
+	for i, a := range agents {
+		enriched[i] = enrichedAgent{Agent: a}
+		if a.SessionFile != "" {
+			enriched[i].Title = history.TitleForSessionFile(a.SessionFile)
+		}
+	}
+
+	data, err := json.Marshal(map[string]any{"agents": enriched})
 	if err != nil {
 		return
 	}

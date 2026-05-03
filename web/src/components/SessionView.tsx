@@ -94,6 +94,7 @@ export function SessionView({ tmuxSession }: Props) {
       ref={termRef}
       style={{
         flex: 1,
+        height: '100%',
         background: '#000000',
         padding: 4,
       }}

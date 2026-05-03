@@ -16,6 +16,7 @@ export interface Agent {
   TMuxSession: string;
   TeamName: string;
   TaskSubject: string;
+  Title: string;
 }
 
 export const StatusLabel: Record<number, string> = {

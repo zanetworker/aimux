@@ -170,7 +170,7 @@ export function AgentCard({ agent, selected, onClick }: Props) {
       </div>
 
       {/* Session title */}
-      {agent.TaskSubject && (
+      {agent.Title && (
         <div style={{
           fontSize: 12,
           color: 'var(--fg-2)',
@@ -182,7 +182,7 @@ export function AgentCard({ agent, selected, onClick }: Props) {
           WebkitBoxOrient: 'vertical' as const,
           lineHeight: '1.4',
         }}>
-          {agent.TaskSubject}
+          {agent.Title}
         </div>
       )}
 
@@ -209,7 +209,7 @@ export function AgentCard({ agent, selected, onClick }: Props) {
           {actionIcons[agent.Status as keyof typeof actionIcons]}
         </span>
         <span style={{ color: 'var(--fg-3)' }}>
-          {agent.LastAction || (agent.TaskSubject ? '' : 'No activity')}
+          {agent.LastAction || (agent.Title ? '' : 'No activity')}
         </span>
       </div>
 

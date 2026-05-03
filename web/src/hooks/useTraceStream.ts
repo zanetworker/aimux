@@ -10,33 +10,43 @@ export function useTraceStream(sessionId: string | null): Turn[] {
       return;
     }
 
-    // Subscribe to trace events
-    fetch(`/api/trace/subscribe/${sessionId}`, { method: 'POST' });
+    let cancelled = false;
 
-    const handleTraceEvent = (e: MessageEvent) => {
+    async function fetchTrace() {
       try {
-        const data = JSON.parse(e.data);
-        if (data.sessionId === sessionId && data.turns) {
-          setTurns(prev => {
-            const existing = new Set(prev.map(t => t.number));
-            const newTurns = data.turns.filter((t: Turn) => !existing.has(t.number));
-            return [...prev, ...newTurns];
-          });
+        const resp = await fetch(`/api/agents/${sessionId}/trace`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!cancelled && data.turns) {
+          setTurns(data.turns.map((t: any) => ({
+            number: t.number,
+            timestamp: t.timestamp,
+            userText: t.userText,
+            outputText: t.outputText,
+            actions: (t.actions || []).map((a: any) => ({
+              name: a.name,
+              snippet: a.snippet,
+              success: a.success === 'true',
+              errorMsg: a.errorMsg,
+            })),
+            tokensIn: t.tokensIn,
+            tokensOut: t.tokensOut,
+            costUSD: t.costUSD,
+            model: t.model,
+          })));
         }
       } catch {
-        // ignore parse errors
+        // ignore
       }
-    };
+    }
 
-    // Listen on the existing SSE connection for trace events
-    // The EventSource is managed by useAgentStream, but we can create a second one
-    const es = new EventSource('/api/events');
-    es.addEventListener('trace', handleTraceEvent);
+    fetchTrace();
+    // Poll every 5 seconds for updates
+    const interval = setInterval(fetchTrace, 5000);
 
     return () => {
-      es.close();
-      fetch(`/api/trace/unsubscribe/${sessionId}`, { method: 'POST' });
-      setTurns([]);
+      cancelled = true;
+      clearInterval(interval);
     };
   }, [sessionId]);
 

@@ -12,12 +12,13 @@ import (
 )
 
 type Server struct {
-	port       int
-	listener   net.Listener
-	srv        *http.Server
-	discoverFn func() ([]agent.Agent, error)
-	launchFn   func(provider, dir, model, mode string) error
-	annotateFn func(sessionID string, turn int, label, note string) error
+	port         int
+	listener     net.Listener
+	srv          *http.Server
+	discoverFn   func() ([]agent.Agent, error)
+	launchFn     func(provider, dir, model, mode string) error
+	annotateFn   func(sessionID string, turn int, label, note string) error
+	traceParseFn func(sessionFile string) ([]map[string]any, error)
 }
 
 func NewServer(port int) *Server {
@@ -36,6 +37,10 @@ func (s *Server) SetAnnotateFunc(fn func(sessionID string, turn int, label, note
 	s.annotateFn = fn
 }
 
+func (s *Server) SetTraceParseFn(fn func(sessionFile string) ([]map[string]any, error)) {
+	s.traceParseFn = fn
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -50,6 +55,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/agents/{id}/annotate", s.handleAnnotate)
 	mux.HandleFunc("POST /api/agents/{id}/archive", s.handleArchive)
 	mux.HandleFunc("GET /api/agents/{id}/diff", s.handleDiff)
+	mux.HandleFunc("GET /api/agents/{id}/trace", s.handleGetTrace)
 	mux.HandleFunc("GET /api/history", s.handleHistory)
 	mux.HandleFunc("POST /api/trace/subscribe/{sessionId}", s.handleTraceSubscribe)
 	mux.HandleFunc("POST /api/trace/unsubscribe/{sessionId}", s.handleTraceUnsubscribe)
