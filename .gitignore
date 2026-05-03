@@ -11,8 +11,13 @@
 .claude/
 
 # Build artifacts
+# Note: dist/ matches all dist dirs, but we exclude web/dist below
 dist/
+!web/dist/
 bin/
+
+# Web frontend embed copy (internal/frontend/web/dist is a copy of web/dist for embed)
+internal/frontend/web/dist/
 
 # Docs scratch
 docs/plans/

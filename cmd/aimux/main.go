@@ -13,6 +13,7 @@ import (
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/frontend/tui"
+	"github.com/zanetworker/aimux/internal/frontend/web"
 )
 
 // version is set via ldflags at build time: -X main.version=v0.3.0
@@ -27,6 +28,10 @@ func main() {
 	switch os.Args[1] {
 	case "--version", "-v":
 		fmt.Printf("aimux %s\n", version)
+	case "--web":
+		runBoth()
+	case "web":
+		runWeb()
 	case "sessions":
 		runSessions(os.Args[2:])
 	case "resume":
@@ -53,11 +58,46 @@ func runTUI() {
 	}
 }
 
+func runWeb() {
+	port := 3000
+	for i, arg := range os.Args {
+		if arg == "--port" && i+1 < len(os.Args) {
+			fmt.Sscanf(os.Args[i+1], "%d", &port)
+		}
+	}
+	s := web.NewServer(port)
+	fmt.Printf("aimux web dashboard: http://127.0.0.1:%d\n", port)
+	if err := s.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runBoth() {
+	port := 3000
+	for i, arg := range os.Args {
+		if arg == "--port" && i+1 < len(os.Args) {
+			fmt.Sscanf(os.Args[i+1], "%d", &port)
+		}
+	}
+	s := web.NewServer(port)
+	go func() {
+		fmt.Printf("aimux web dashboard: http://127.0.0.1:%d\n", port)
+		if err := s.Start(); err != nil {
+			debuglog.Log("web server error: %v", err)
+		}
+	}()
+	runTUI()
+}
+
 func printHelp() {
 	fmt.Println(`aimux — AI agent multiplexer
 
 Usage:
   aimux                    Launch the TUI dashboard
+  aimux --web              Launch TUI + web dashboard
+  aimux web                Launch web dashboard only (headless)
+  aimux web --port 8080    Custom port (default: 3000)
   aimux sessions           Browse past sessions (interactive)
   aimux sessions --list    List sessions as a table
   aimux sessions --export  Export sessions as JSONL
