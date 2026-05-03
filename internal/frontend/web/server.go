@@ -53,6 +53,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/history", s.handleHistory)
 	mux.HandleFunc("POST /api/trace/subscribe/{sessionId}", s.handleTraceSubscribe)
 	mux.HandleFunc("POST /api/trace/unsubscribe/{sessionId}", s.handleTraceUnsubscribe)
+	mux.HandleFunc("/api/terminal/{session}", s.handleTerminal)
 
 	sub, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
