@@ -11,7 +11,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/debuglog"
+	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/frontend/tui"
 	"github.com/zanetworker/aimux/internal/frontend/web"
 )
@@ -58,6 +61,43 @@ func runTUI() {
 	}
 }
 
+func createWebServer(port int) *web.Server {
+	cfg, _ := config.Load(config.DefaultPath())
+	disco := discovery.NewOrchestrator(
+		&provider.Claude{},
+		&provider.Codex{},
+		&provider.Gemini{},
+	)
+
+	s := web.NewServer(port)
+	s.SetDiscoverFunc(disco.Discover)
+	s.SetLaunchFunc(func(providerName, dir, model, mode string) error {
+		// Find the provider to build the spawn command
+		p := disco.ProviderFor(providerName)
+		if p == nil {
+			return fmt.Errorf("unknown provider: %s", providerName)
+		}
+
+		// Get the provider's spawn args interface to build the command
+		type spawner interface {
+			SpawnCommand(dir, model, mode string) *exec.Cmd
+		}
+		sp, ok := p.(spawner)
+		if !ok {
+			return fmt.Errorf("provider %s does not support spawning", providerName)
+		}
+
+		cmd := sp.SpawnCommand(dir, model, mode)
+		if cmd == nil {
+			return fmt.Errorf("failed to build spawn command for %s", providerName)
+		}
+
+		shell := cfg.ResolveShell()
+		return spawn.Launch(cmd, providerName, dir, "tmux", shell, "")
+	})
+	return s
+}
+
 func runWeb() {
 	port := 3000
 	for i, arg := range os.Args {
@@ -65,7 +105,7 @@ func runWeb() {
 			fmt.Sscanf(os.Args[i+1], "%d", &port)
 		}
 	}
-	s := web.NewServer(port)
+	s := createWebServer(port)
 	fmt.Printf("aimux web dashboard: http://127.0.0.1:%d\n", port)
 	if err := s.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
@@ -80,7 +120,7 @@ func runBoth() {
 			fmt.Sscanf(os.Args[i+1], "%d", &port)
 		}
 	}
-	s := web.NewServer(port)
+	s := createWebServer(port)
 	go func() {
 		fmt.Printf("aimux web dashboard: http://127.0.0.1:%d\n", port)
 		if err := s.Start(); err != nil {
