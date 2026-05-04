@@ -67,6 +67,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/trace/subscribe/{sessionId}", s.handleTraceSubscribe)
 	mux.HandleFunc("POST /api/trace/unsubscribe/{sessionId}", s.handleTraceUnsubscribe)
 	mux.HandleFunc("/api/terminal/{session}", s.handleTerminal)
+	mux.HandleFunc("/api/terminal-resume/{id}", s.handleTerminalResume)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 
 	sub, err := fs.Sub(staticFiles, "dist")
