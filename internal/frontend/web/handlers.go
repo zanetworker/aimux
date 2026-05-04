@@ -3,12 +3,12 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strings"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 type launchRequest struct {
@@ -115,24 +115,37 @@ func (s *Server) handleFastTrace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing file param", http.StatusBadRequest)
 		return
 	}
-	if !strings.HasSuffix(file, ".jsonl") {
+	if !strings.HasSuffix(file, ".jsonl") && !strings.HasSuffix(file, ".json") {
 		http.Error(w, "invalid file", http.StatusBadRequest)
 		return
 	}
-	turns, err := parseTailTurnsRetry(file)
+	providerName := r.URL.Query().Get("provider")
+	if providerName == "" {
+		providerName = "claude"
+	}
+	if s.providerLookupFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+	p := s.providerLookupFn(providerName)
+	if p == nil {
+		http.Error(w, "unknown provider", http.StatusInternalServerError)
+		return
+	}
+	turns, err := p.ParseTrace(file)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"turns": turns})
+	json.NewEncoder(w).Encode(map[string]any{"turns": turnsToJSON(turns)})
 }
 
 func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	if s.discoverFn == nil {
-		http.Error(w, "discovery not configured", http.StatusServiceUnavailable)
+	if s.discoverFn == nil || s.providerLookupFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
 		return
 	}
 	agents, err := s.discoverFn()
@@ -141,10 +154,11 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sessionFile string
+	var sessionFile, providerName string
 	for _, a := range agents {
 		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
 			sessionFile = a.SessionFile
+			providerName = a.ProviderName
 			break
 		}
 	}
@@ -153,278 +167,53 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	turns, err := parseTailTurns(sessionFile, 128*1024)
+	p := s.providerLookupFn(providerName)
+	if p == nil {
+		http.Error(w, "unknown provider", http.StatusInternalServerError)
+		return
+	}
+	turns, err := p.ParseTrace(sessionFile)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"turns": turns})
+	json.NewEncoder(w).Encode(map[string]any{"turns": turnsToJSON(turns)})
 }
 
-// parseTailTurns reads the last tailBytes of a JSONL session file and
-// extracts conversation turns directly, without the full provider parser.
-func parseTailTurnsRetry(sessionFile string) ([]map[string]any, error) {
-	turns, err := parseTailTurns(sessionFile, 512*1024)
-	if err != nil {
-		return nil, err
-	}
-	if len(turns) == 0 {
-		turns, err = parseTailTurns(sessionFile, 0)
-	}
-	return turns, err
-}
-
-func parseTailTurns(sessionFile string, tailBytes int64) ([]map[string]any, error) {
-	f, err := os.Open(sessionFile)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	seeked := false
-	if tailBytes > 0 && info.Size() > tailBytes {
-		f.Seek(info.Size()-tailBytes, io.SeekStart)
-		seeked = true
-	}
-
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	if seeked && len(lines) > 1 {
-		lines = lines[1:] // skip partial first line
-	}
-
-	type turn struct {
-		Number    int
-		Timestamp string
-		UserText  string
-		AgentText string
-		Tools     []map[string]string
-		TokensIn  int64
-		TokensOut int64
-		CostUSD   float64
-		Model     string
-	}
-
-	var turns []turn
-	var current *turn
-	turnNum := 0
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			continue
-		}
-
-		var entryType string
-		json.Unmarshal(raw["type"], &entryType)
-
-		var ts string
-		json.Unmarshal(raw["timestamp"], &ts)
-
-		msgRaw := raw["message"]
-		if msgRaw == nil {
-			continue
-		}
-		var msgObj map[string]json.RawMessage
-		if err := json.Unmarshal(msgRaw, &msgObj); err != nil {
-			continue
-		}
-
-		if entryType == "user" {
-			contentRaw := msgObj["content"]
-			if contentRaw == nil {
-				continue
-			}
-			userText := extractText(contentRaw)
-			if userText == "" {
-				continue
-			}
-			if current != nil {
-				turns = append(turns, *current)
-			}
-			turnNum++
-			current = &turn{Number: turnNum, Timestamp: ts, UserText: userText}
-		} else if entryType == "assistant" && current != nil {
-			var usage struct {
-				InputTokens  int64 `json:"input_tokens"`
-				OutputTokens int64 `json:"output_tokens"`
-			}
-			if usageRaw := msgObj["usage"]; usageRaw != nil {
-				json.Unmarshal(usageRaw, &usage)
-				current.TokensIn += usage.InputTokens
-				current.TokensOut += usage.OutputTokens
-			}
-
-			var model string
-			if modelRaw := msgObj["model"]; modelRaw != nil {
-				json.Unmarshal(modelRaw, &model)
-				if model != "" && current.Model == "" {
-					current.Model = model
-				}
-			}
-
-			contentRaw := msgObj["content"]
-			if contentRaw == nil {
-				continue
-			}
-
-			var blocks []map[string]interface{}
-			if err := json.Unmarshal(contentRaw, &blocks); err != nil {
-				continue
-			}
-
-			for _, block := range blocks {
-				blockType, _ := block["type"].(string)
-				switch blockType {
-				case "text":
-					text, _ := block["text"].(string)
-					text = strings.TrimSpace(text)
-					if text != "" {
-						if current.AgentText != "" {
-							current.AgentText += "\n" + text
-						} else {
-							current.AgentText = text
-						}
-					}
-				case "tool_use":
-					name, _ := block["name"].(string)
-					tool := map[string]string{
-						"name":    name,
-						"success": "true",
-					}
-					if input, ok := block["input"].(map[string]interface{}); ok {
-						tool["snippet"] = toolSnippet(name, input)
-						fillToolDetail(tool, name, input)
-					}
-					current.Tools = append(current.Tools, tool)
-				}
-			}
-		}
-	}
-
-	if current != nil {
-		turns = append(turns, *current)
-	}
-
-	if len(turns) > 30 {
-		turns = turns[len(turns)-30:]
-	}
-
+func turnsToJSON(turns []trace.Turn) []map[string]any {
 	result := make([]map[string]any, len(turns))
 	for i, t := range turns {
+		actions := make([]map[string]any, len(t.Actions))
+		for j, a := range t.Actions {
+			action := map[string]any{
+				"name":     a.Name,
+				"snippet":  a.Snippet,
+				"success":  a.Success,
+				"errorMsg": a.ErrorMsg,
+			}
+			if a.OldString != "" {
+				action["oldString"] = a.OldString
+			}
+			if a.NewString != "" {
+				action["newString"] = a.NewString
+			}
+			actions[j] = action
+		}
 		result[i] = map[string]any{
 			"number":     t.Number,
-			"timestamp":  t.Timestamp,
-			"userText":   t.UserText,
-			"outputText": t.AgentText,
-			"actions":    t.Tools,
+			"timestamp":  t.Timestamp.Format(time.RFC3339),
+			"userText":   strings.Join(t.UserLines, "\n"),
+			"outputText": strings.Join(t.OutputLines, "\n"),
+			"actions":    actions,
 			"tokensIn":   t.TokensIn,
 			"tokensOut":  t.TokensOut,
 			"costUSD":    t.CostUSD,
 			"model":      t.Model,
 		}
 	}
-	return result, nil
-}
-
-func toolSnippet(name string, input map[string]interface{}) string {
-	switch name {
-	case "Bash":
-		if cmd, ok := input["command"].(string); ok {
-			return "$ " + cmd
-		}
-	case "Read":
-		if p, ok := input["file_path"].(string); ok {
-			return p
-		}
-	case "Edit":
-		if p, ok := input["file_path"].(string); ok {
-			return p
-		}
-	case "Write":
-		if p, ok := input["file_path"].(string); ok {
-			return p
-		}
-	case "Glob":
-		if p, ok := input["pattern"].(string); ok {
-			return p
-		}
-	case "Grep":
-		if p, ok := input["pattern"].(string); ok {
-			return p
-		}
-	case "Agent":
-		if desc, ok := input["description"].(string); ok {
-			return desc
-		}
-	}
-	return ""
-}
-
-func fillToolDetail(tool map[string]string, name string, input map[string]interface{}) {
-	if fp, ok := input["file_path"].(string); ok {
-		tool["filePath"] = fp
-	}
-	switch name {
-	case "Edit":
-		if old, ok := input["old_string"].(string); ok {
-			tool["oldString"] = truncate(old, 500)
-		}
-		if ns, ok := input["new_string"].(string); ok {
-			tool["newString"] = truncate(ns, 500)
-		}
-	case "Write":
-		if c, ok := input["content"].(string); ok {
-			tool["content"] = truncate(c, 300)
-		}
-	case "Bash":
-		if cmd, ok := input["command"].(string); ok {
-			tool["command"] = cmd
-		}
-		if desc, ok := input["description"].(string); ok {
-			tool["description"] = desc
-		}
-	case "Grep":
-		if p, ok := input["pattern"].(string); ok {
-			tool["pattern"] = p
-		}
-		if p, ok := input["path"].(string); ok {
-			tool["searchPath"] = p
-		}
-	case "Glob":
-		if p, ok := input["pattern"].(string); ok {
-			tool["pattern"] = p
-		}
-	case "Agent":
-		if desc, ok := input["description"].(string); ok {
-			tool["description"] = desc
-		}
-		if p, ok := input["prompt"].(string); ok {
-			tool["prompt"] = truncate(p, 300)
-		}
-	}
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-3] + "..."
+	return result
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -449,30 +238,4 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"results": results})
-}
-
-func extractText(content json.RawMessage) string {
-	if len(content) == 0 {
-		return ""
-	}
-	// Try string first
-	var s string
-	if err := json.Unmarshal(content, &s); err == nil {
-		return s
-	}
-	// Try array of content blocks
-	var blocks []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(content, &blocks); err == nil {
-		var texts []string
-		for _, b := range blocks {
-			if b.Type == "text" && b.Text != "" {
-				texts = append(texts, b.Text)
-			}
-		}
-		return strings.Join(texts, "\n")
-	}
-	return ""
 }

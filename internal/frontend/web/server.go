@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 type Server struct {
@@ -18,8 +19,8 @@ type Server struct {
 	discoverFn   func() ([]agent.Agent, error)
 	launchFn     func(provider, dir, model, mode string) error
 	annotateFn   func(sessionID string, turn int, label, note string) error
-	traceParseFn func(sessionFile string) ([]map[string]any, error)
-	killFn       func(pid int, tmuxSession string) error
+	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
+	killFn           func(pid int, tmuxSession string) error
 }
 
 func NewServer(port int) *Server {
@@ -38,8 +39,8 @@ func (s *Server) SetAnnotateFunc(fn func(sessionID string, turn int, label, note
 	s.annotateFn = fn
 }
 
-func (s *Server) SetTraceParseFn(fn func(sessionFile string) ([]map[string]any, error)) {
-	s.traceParseFn = fn
+func (s *Server) SetProviderLookup(fn func(string) interface{ ParseTrace(string) ([]trace.Turn, error) }) {
+	s.providerLookupFn = fn
 }
 
 func (s *Server) SetKillFunc(fn func(pid int, tmuxSession string) error) {
