@@ -125,6 +125,29 @@ The codebase is split into **core packages** (UI-agnostic) and **TUI packages** 
 3. Never import `charmbracelet/*` from core packages
 4. If a function in `app.go` doesn't reference `tea.Model`, `tea.Cmd`, or `lipgloss`, it probably belongs in a core package
 
+## Thin Frontend Rule
+
+The web frontend (`web/src/`) is a rendering layer only. All business logic lives in Go core packages, exposed via HTTP API endpoints in `internal/frontend/web/`.
+
+**Backend owns:**
+- Trace parsing (via `provider.ParseTrace`)
+- Cost calculation (via `cost.Calculate`)
+- Token counting, model identification
+- Tool input extraction and snippet generation
+- Session discovery and matching
+- Search (via `history.SearchContent`)
+
+**Frontend owns:**
+- Rendering (React components, styles, layout)
+- UI state (expanded/collapsed, selected, fullscreen)
+- User interaction (click, keyboard, resize)
+
+**When adding a web feature:**
+1. If it needs data transformation, add a Go API endpoint using core packages
+2. The frontend fetches and renders; no parsing, no business logic
+3. If the TUI already does it, the web must use the same core function
+4. Never reimplement Go logic in TypeScript
+
 ## Provider Architecture
 
 All agent types implement `provider.Provider` (11 methods). This interface must remain the ONLY coupling point between the core system and individual agent backends. Current providers are local CLI agents (Claude, Codex, Gemini), but future providers include remote backends (Kubernetes pods, SSH hosts, cloud APIs).
