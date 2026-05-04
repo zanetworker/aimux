@@ -73,8 +73,6 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
   const borderLeftColor = agent.Status === 0 ? 'var(--green)' : 'var(--fg-4)';
   const borderLeftColorOverride = agent.Status === 2 ? 'var(--orange)' : agent.Status === 3 ? 'var(--accent)' : borderLeftColor;
 
-  const borderColor = selected ? 'var(--accent)' : 'var(--border)';
-
   const cardBg = agent.Status === 2
     ? 'var(--orange-dim)'
     : agent.Status === 3
@@ -91,29 +89,23 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
       tabIndex={0}
       aria-label={`${agent.ProviderName} session: ${agent.Name}, branch ${agent.GitBranch || 'main'}, status ${StatusLabel[agent.Status]}, cost $${(agent.EstCostUSD || 0).toFixed(2)}`}
       className="agent-card"
+      data-selected={selected || undefined}
       style={{
         position: 'relative',
         background: cardBg,
-        border: `1px solid ${borderColor}`,
-        borderLeft: `3px solid ${borderLeftColorOverride}`,
+        border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
+        borderLeft: `3px solid ${selected ? 'var(--accent)' : borderLeftColorOverride}`,
         borderRadius: 8,
         padding: '14px 16px',
         cursor: 'pointer',
         transition: 'border-color 0.15s ease, outline 0.1s ease',
         outline: 'none',
+        minHeight: 180,
+        display: 'flex',
+        flexDirection: 'column',
       }}
       onFocus={(e) => { e.currentTarget.style.outline = '2px solid var(--accent)'; e.currentTarget.style.outlineOffset = '2px'; }}
       onBlur={(e) => { e.currentTarget.style.outline = 'none'; }}
-      onMouseEnter={(e) => {
-        if (!selected) {
-          e.currentTarget.style.borderColor = 'var(--border-hover)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) {
-          e.currentTarget.style.borderColor = 'var(--border)';
-        }
-      }}
     >
       {/* Attention bell */}
       {showAttention && (
@@ -294,6 +286,9 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         </div>
       )}
 
+      {/* Spacer to push bottom row down */}
+      <div style={{ flex: 1 }} />
+
       {/* Bottom row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -321,6 +316,9 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        .agent-card:hover:not([data-selected]) {
+          border-color: var(--border-hover) !important;
         }
         .agent-card:hover .kill-btn {
           opacity: 1 !important;
