@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 type launchRequest struct {
@@ -191,27 +193,6 @@ func parseTailTurns(sessionFile string, tailBytes int64) ([]map[string]any, erro
 		lines = lines[1:] // skip partial first line
 	}
 
-	type contentBlock struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	type messageEntry struct {
-		Role       string          `json:"role"`
-		Content    json.RawMessage `json:"content"`
-		StopReason string          `json:"stop_reason"`
-	}
-	type toolEntry struct {
-		Name  string `json:"name"`
-		Input string `json:"input"`
-	}
-	type entry struct {
-		Type      string        `json:"type"`
-		Subtype   string        `json:"subtype"`
-		Message   *messageEntry `json:"message"`
-		Tool      *toolEntry    `json:"tool"`
-		Timestamp string        `json:"timestamp"`
-	}
-
 	type turn struct {
 		Number    int
 		Timestamp string
@@ -221,6 +202,7 @@ func parseTailTurns(sessionFile string, tailBytes int64) ([]map[string]any, erro
 		TokensIn  int64
 		TokensOut int64
 		CostUSD   float64
+		Model     string
 	}
 
 	var turns []turn
@@ -232,54 +214,104 @@ func parseTailTurns(sessionFile string, tailBytes int64) ([]map[string]any, erro
 		if line == "" {
 			continue
 		}
-		var e entry
-		if err := json.Unmarshal([]byte(line), &e); err != nil {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			continue
 		}
 
-		if e.Type == "user" && e.Message != nil && e.Message.Role == "user" {
+		var entryType string
+		json.Unmarshal(raw["type"], &entryType)
+
+		var ts string
+		json.Unmarshal(raw["timestamp"], &ts)
+
+		msgRaw := raw["message"]
+		if msgRaw == nil {
+			continue
+		}
+		var msgObj map[string]json.RawMessage
+		if err := json.Unmarshal(msgRaw, &msgObj); err != nil {
+			continue
+		}
+
+		if entryType == "user" {
+			contentRaw := msgObj["content"]
+			if contentRaw == nil {
+				continue
+			}
+			userText := extractText(contentRaw)
+			if userText == "" {
+				continue
+			}
+			if current != nil {
+				turns = append(turns, *current)
+			}
 			turnNum++
-			t := turn{Number: turnNum, Timestamp: e.Timestamp}
-			t.UserText = extractText(e.Message.Content)
-			turns = append(turns, t)
-			current = &turns[len(turns)-1]
-		} else if e.Type == "assistant" && e.Message != nil && current != nil {
-			text := extractText(e.Message.Content)
-			if text != "" {
-				current.AgentText = text
+			current = &turn{Number: turnNum, Timestamp: ts, UserText: userText}
+		} else if entryType == "assistant" && current != nil {
+			var usage struct {
+				InputTokens  int64 `json:"input_tokens"`
+				OutputTokens int64 `json:"output_tokens"`
 			}
-		} else if e.Type == "tool_use" && current != nil {
-			name := ""
-			snippet := ""
-			if e.Tool != nil {
-				name = e.Tool.Name
-				snippet = e.Tool.Input
+			if usageRaw := msgObj["usage"]; usageRaw != nil {
+				json.Unmarshal(usageRaw, &usage)
+				current.TokensIn += usage.InputTokens
+				current.TokensOut += usage.OutputTokens
 			}
-			// Also try extracting from raw line
-			if name == "" {
-				var raw map[string]any
-				json.Unmarshal([]byte(line), &raw)
-				if n, ok := raw["name"].(string); ok {
-					name = n
-				}
-				if s, ok := raw["input"].(string); ok && snippet == "" {
-					snippet = s
+
+			var model string
+			if modelRaw := msgObj["model"]; modelRaw != nil {
+				json.Unmarshal(modelRaw, &model)
+				if model != "" && current.Model == "" {
+					current.Model = model
 				}
 			}
-			if len(snippet) > 60 {
-				snippet = snippet[:57] + "..."
+
+			contentRaw := msgObj["content"]
+			if contentRaw == nil {
+				continue
 			}
-			current.Tools = append(current.Tools, map[string]string{
-				"name":    name,
-				"snippet": snippet,
-				"success": "true",
-			})
+
+			var blocks []map[string]interface{}
+			if err := json.Unmarshal(contentRaw, &blocks); err != nil {
+				continue
+			}
+
+			for _, block := range blocks {
+				blockType, _ := block["type"].(string)
+				switch blockType {
+				case "text":
+					text, _ := block["text"].(string)
+					text = strings.TrimSpace(text)
+					if text != "" {
+						if current.AgentText != "" {
+							current.AgentText += "\n" + text
+						} else {
+							current.AgentText = text
+						}
+					}
+				case "tool_use":
+					name, _ := block["name"].(string)
+					tool := map[string]string{
+						"name":    name,
+						"success": "true",
+					}
+					if input, ok := block["input"].(map[string]interface{}); ok {
+						tool["snippet"] = toolSnippet(name, input)
+						fillToolDetail(tool, name, input)
+					}
+					current.Tools = append(current.Tools, tool)
+				}
+			}
 		}
 	}
 
-	// Keep last 15 turns
-	if len(turns) > 15 {
-		turns = turns[len(turns)-15:]
+	if current != nil {
+		turns = append(turns, *current)
+	}
+
+	if len(turns) > 30 {
+		turns = turns[len(turns)-30:]
 	}
 
 	result := make([]map[string]any, len(turns))
@@ -293,9 +325,119 @@ func parseTailTurns(sessionFile string, tailBytes int64) ([]map[string]any, erro
 			"tokensIn":   t.TokensIn,
 			"tokensOut":  t.TokensOut,
 			"costUSD":    t.CostUSD,
+			"model":      t.Model,
 		}
 	}
 	return result, nil
+}
+
+func toolSnippet(name string, input map[string]interface{}) string {
+	switch name {
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok {
+			return "$ " + cmd
+		}
+	case "Read":
+		if p, ok := input["file_path"].(string); ok {
+			return p
+		}
+	case "Edit":
+		if p, ok := input["file_path"].(string); ok {
+			return p
+		}
+	case "Write":
+		if p, ok := input["file_path"].(string); ok {
+			return p
+		}
+	case "Glob":
+		if p, ok := input["pattern"].(string); ok {
+			return p
+		}
+	case "Grep":
+		if p, ok := input["pattern"].(string); ok {
+			return p
+		}
+	case "Agent":
+		if desc, ok := input["description"].(string); ok {
+			return desc
+		}
+	}
+	return ""
+}
+
+func fillToolDetail(tool map[string]string, name string, input map[string]interface{}) {
+	if fp, ok := input["file_path"].(string); ok {
+		tool["filePath"] = fp
+	}
+	switch name {
+	case "Edit":
+		if old, ok := input["old_string"].(string); ok {
+			tool["oldString"] = truncate(old, 500)
+		}
+		if ns, ok := input["new_string"].(string); ok {
+			tool["newString"] = truncate(ns, 500)
+		}
+	case "Write":
+		if c, ok := input["content"].(string); ok {
+			tool["content"] = truncate(c, 300)
+		}
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok {
+			tool["command"] = cmd
+		}
+		if desc, ok := input["description"].(string); ok {
+			tool["description"] = desc
+		}
+	case "Grep":
+		if p, ok := input["pattern"].(string); ok {
+			tool["pattern"] = p
+		}
+		if p, ok := input["path"].(string); ok {
+			tool["searchPath"] = p
+		}
+	case "Glob":
+		if p, ok := input["pattern"].(string); ok {
+			tool["pattern"] = p
+		}
+	case "Agent":
+		if desc, ok := input["description"].(string); ok {
+			tool["description"] = desc
+		}
+		if p, ok := input["prompt"].(string); ok {
+			tool["prompt"] = truncate(p, 300)
+		}
+	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+		return
+	}
+	matches, err := history.SearchContentWithSnippets(q, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	results := make([]map[string]string, len(matches))
+	for i, m := range matches {
+		results[i] = map[string]string{
+			"sessionId": m.SessionID,
+			"filePath":  m.FilePath,
+			"snippet":   m.Snippet,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"results": results})
 }
 
 func extractText(content json.RawMessage) string {

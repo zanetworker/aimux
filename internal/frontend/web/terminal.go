@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,12 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+type resizeMsg struct {
+	Type string `json:"type"`
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}
+
 func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	sessionName := r.PathValue("session")
 	if sessionName == "" {
@@ -22,7 +29,6 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate tmux session exists
 	if err := exec.Command("tmux", "has-session", "-t", sessionName).Run(); err != nil {
 		http.Error(w, fmt.Sprintf("tmux session %q not found", sessionName), http.StatusBadRequest)
 		return
@@ -34,7 +40,6 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Attach to tmux session via PTY
 	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
@@ -63,7 +68,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// WebSocket -> PTY
+	// WebSocket -> PTY (with resize handling)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -72,6 +77,13 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return
 			}
+
+			var rm resizeMsg
+			if json.Unmarshal(msg, &rm) == nil && rm.Type == "resize" && rm.Cols > 0 && rm.Rows > 0 {
+				pty.Setsize(ptmx, &pty.Winsize{Cols: rm.Cols, Rows: rm.Rows})
+				continue
+			}
+
 			if _, err := ptmx.Write(msg); err != nil {
 				return
 			}

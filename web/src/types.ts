@@ -32,6 +32,15 @@ export interface ToolSpan {
   snippet: string;
   success: boolean;
   errorMsg: string;
+  filePath?: string;
+  oldString?: string;
+  newString?: string;
+  command?: string;
+  description?: string;
+  content?: string;
+  pattern?: string;
+  searchPath?: string;
+  prompt?: string;
 }
 
 export interface Turn {
