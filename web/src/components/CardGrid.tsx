@@ -107,7 +107,7 @@ export function CardGrid({
         }}
       >
         {sorted.map(agent => (
-          <div key={agent.SessionID || agent.PID} role="listitem">
+          <div key={agent.SessionID || agent.PID} role="listitem" style={{ display: 'flex' }}>
             <AgentCard
               agent={agent}
               selected={selectedId === (agent.SessionID || agent.PID.toString())}

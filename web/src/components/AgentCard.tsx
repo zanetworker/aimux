@@ -100,9 +100,9 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         cursor: 'pointer',
         transition: 'border-color 0.15s ease, outline 0.1s ease',
         outline: 'none',
-        minHeight: 180,
         display: 'flex',
         flexDirection: 'column',
+        width: '100%',
       }}
       onFocus={(e) => { e.currentTarget.style.outline = '2px solid var(--accent)'; e.currentTarget.style.outlineOffset = '2px'; }}
       onBlur={(e) => { e.currentTarget.style.outline = 'none'; }}
