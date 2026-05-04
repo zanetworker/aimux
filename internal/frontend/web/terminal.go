@@ -43,6 +43,77 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
+	servePTY(conn, cmd)
+}
+
+func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	if s.discoverFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	agents, err := s.discoverFn()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var workingDir, providerName string
+	for _, a := range agents {
+		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
+			workingDir = a.WorkingDir
+			providerName = a.ProviderName
+			break
+		}
+	}
+
+	if providerName == "" {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	var cmd *exec.Cmd
+	switch providerName {
+	case "claude":
+		bin, _ := exec.LookPath("claude")
+		if bin == "" {
+			http.Error(w, "claude binary not found", http.StatusInternalServerError)
+			return
+		}
+		cmd = exec.Command(bin, "--resume", sessionID)
+	case "codex":
+		bin, _ := exec.LookPath("codex")
+		if bin == "" {
+			http.Error(w, "codex binary not found", http.StatusInternalServerError)
+			return
+		}
+		cmd = exec.Command(bin, "--resume", sessionID)
+	default:
+		http.Error(w, fmt.Sprintf("resume not supported for provider %q", providerName), http.StatusBadRequest)
+		return
+	}
+
+	if workingDir != "" {
+		cmd.Dir = workingDir
+	}
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	servePTY(conn, cmd)
+}
+
+func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
@@ -91,5 +162,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	wg.Wait()
-	cmd.Process.Kill()
+	if cmd.Process != nil {
+		cmd.Process.Kill()
+	}
 }

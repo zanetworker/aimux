@@ -245,40 +245,13 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
         {activeTab === 'trace' && (
           <TraceView turns={turns} sessionId={agent.SessionID} />
         )}
-        {activeTab === 'session' && agent.TMuxSession && (
+        {activeTab === 'session' && (
           <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
-            <SessionView tmuxSession={agent.TMuxSession} key={`${agent.TMuxSession}-${isFullscreen}`} />
-          </div>
-        )}
-        {activeTab === 'session' && !agent.TMuxSession && (
-          <div style={{
-            flex: 1, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 12,
-            padding: 24, background: 'var(--bg-0)',
-          }}>
-            <div style={{ fontSize: 13, color: 'var(--fg-3)', textAlign: 'center', lineHeight: 1.6 }}>
-              This session was started outside tmux, so live terminal embedding is not available.
-            </div>
-            <div style={{
-              display: 'flex', flexDirection: 'column', gap: 8,
-              background: 'var(--bg-1)', borderRadius: 6, padding: '12px 16px',
-              border: '1px solid var(--border)', width: '100%', maxWidth: 360,
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                Session info
-              </div>
-              <Row label="PID" value={String(agent.PID)} />
-              <Row label="Provider" value={agent.ProviderName} />
-              <Row label="Model" value={agent.Model} />
-              <Row label="Dir" value={agent.WorkingDir
-                ? agent.WorkingDir.replace(/\/Users\/[^/]+\/go\/src\/github\.com\/[^/]+\//g, '').replace(/\/Users\/[^/]+\//g, '~/')
-                : '-'} />
-              <Row label="Branch" value={agent.GitBranch || 'main'} />
-              <Row label="Session" value={agent.SessionID ? agent.SessionID.substring(0, 8) + '...' : '-'} />
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--fg-4)', textAlign: 'center' }}>
-              Use the Trace tab to view this session's conversation history.
-            </div>
+            <SessionView
+              tmuxSession={agent.TMuxSession || undefined}
+              sessionId={agent.SessionID || undefined}
+              key={`${agent.TMuxSession || agent.SessionID}-${isFullscreen}`}
+            />
           </div>
         )}
       </div>
@@ -313,15 +286,6 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
           50% { opacity: 0.4; }
         }
       `}</style>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-      <span style={{ color: 'var(--fg-3)' }}>{label}</span>
-      <span style={{ color: 'var(--fg)', fontFamily: 'var(--mono)', fontSize: 10 }}>{value}</span>
     </div>
   );
 }

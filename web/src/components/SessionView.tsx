@@ -4,17 +4,18 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
 interface Props {
-  tmuxSession: string;
+  tmuxSession?: string;
+  sessionId?: string;
 }
 
-export function SessionView({ tmuxSession }: Props) {
+export function SessionView({ tmuxSession, sessionId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current || !tmuxSession) return;
+    if (!containerRef.current || (!tmuxSession && !sessionId)) return;
 
     const container = containerRef.current;
 
@@ -66,9 +67,12 @@ export function SessionView({ tmuxSession }: Props) {
     setTimeout(doFit, 200);
     setTimeout(doFit, 500);
 
-    // WebSocket
+    // WebSocket: tmux attach or direct resume
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/terminal/${tmuxSession}`);
+    const wsPath = tmuxSession
+      ? `/api/terminal/${tmuxSession}`
+      : `/api/terminal-resume/${sessionId}`;
+    const ws = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
@@ -121,7 +125,7 @@ export function SessionView({ tmuxSession }: Props) {
       fitAddonRef.current = null;
       wsRef.current = null;
     };
-  }, [tmuxSession]);
+  }, [tmuxSession, sessionId]);
 
   return (
     <div
