@@ -119,7 +119,7 @@ func (s *Server) handleFastTrace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid file", http.StatusBadRequest)
 		return
 	}
-	turns, err := parseTailTurns(file, 128*1024)
+	turns, err := parseTailTurnsRetry(file)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -165,6 +165,17 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 
 // parseTailTurns reads the last tailBytes of a JSONL session file and
 // extracts conversation turns directly, without the full provider parser.
+func parseTailTurnsRetry(sessionFile string) ([]map[string]any, error) {
+	turns, err := parseTailTurns(sessionFile, 512*1024)
+	if err != nil {
+		return nil, err
+	}
+	if len(turns) == 0 {
+		turns, err = parseTailTurns(sessionFile, 0)
+	}
+	return turns, err
+}
+
 func parseTailTurns(sessionFile string, tailBytes int64) ([]map[string]any, error) {
 	f, err := os.Open(sessionFile)
 	if err != nil {
@@ -178,7 +189,7 @@ func parseTailTurns(sessionFile string, tailBytes int64) ([]map[string]any, erro
 	}
 
 	seeked := false
-	if info.Size() > tailBytes {
+	if tailBytes > 0 && info.Size() > tailBytes {
 		f.Seek(info.Size()-tailBytes, io.SeekStart)
 		seeked = true
 	}
