@@ -6,9 +6,10 @@ interface Props {
   selected: boolean;
   onClick: () => void;
   onKill?: (id: string) => void;
+  searchSnippet?: string;
 }
 
-export function AgentCard({ agent, selected, onClick, onKill }: Props) {
+export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: Props) {
   const providerColors = {
     claude: {
       background: 'var(--accent-dim)',
@@ -85,6 +86,10 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
   return (
     <div
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+      role="button"
+      tabIndex={0}
+      aria-label={`${agent.ProviderName} session: ${agent.Name}, branch ${agent.GitBranch || 'main'}, status ${StatusLabel[agent.Status]}, cost $${(agent.EstCostUSD || 0).toFixed(2)}`}
       className="agent-card"
       style={{
         position: 'relative',
@@ -94,8 +99,11 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
         borderRadius: 8,
         padding: '14px 16px',
         cursor: 'pointer',
-        transition: 'border-color 0.15s ease',
+        transition: 'border-color 0.15s ease, outline 0.1s ease',
+        outline: 'none',
       }}
+      onFocus={(e) => { e.currentTarget.style.outline = '2px solid var(--accent)'; e.currentTarget.style.outlineOffset = '2px'; }}
+      onBlur={(e) => { e.currentTarget.style.outline = 'none'; }}
       onMouseEnter={(e) => {
         if (!selected) {
           e.currentTarget.style.borderColor = 'var(--border-hover)';
@@ -191,8 +199,8 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
         {agent.Name}
       </div>
 
-      {/* Branch */}
-      <div style={{ marginBottom: 8 }}>
+      {/* Branch + Dir */}
+      <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <span style={{
           fontFamily: 'var(--mono)',
           fontSize: 10,
@@ -204,6 +212,21 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
         }}>
           {agent.GitBranch || 'main'}
         </span>
+        {agent.WorkingDir && (
+          <span style={{
+            fontFamily: 'var(--mono)',
+            fontSize: 9,
+            color: 'var(--fg-4)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            maxWidth: 200,
+          }}
+          title={agent.WorkingDir}
+          >
+            {shortenPath(agent.WorkingDir)}
+          </span>
+        )}
       </div>
 
       {/* Description: Title if available, else LastAction */}
@@ -249,6 +272,25 @@ export function AgentCard({ agent, selected, onClick, onKill }: Props) {
           <span style={{ color: 'var(--fg-2)' }}>
             {shortenPath(agent.LastAction)}
           </span>
+        </div>
+      )}
+
+      {/* Deep search snippet */}
+      {searchSnippet && (
+        <div style={{
+          fontSize: 10,
+          fontFamily: 'var(--mono)',
+          color: 'var(--purple)',
+          fontStyle: 'italic',
+          padding: '4px 8px',
+          background: 'var(--purple-dim)',
+          borderRadius: 3,
+          marginBottom: 8,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {searchSnippet}
         </div>
       )}
 

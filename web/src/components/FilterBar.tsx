@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import type { Agent } from '../types';
+import type { ContentSearchResult } from '../App';
 
 interface Props {
   agents: Agent[];
@@ -12,6 +14,10 @@ interface Props {
   onSearchChange: (q: string) => void;
   sortBy: string;
   onSortChange: (s: string) => void;
+  onContentSearch: (query: string) => void;
+  onClearContentSearch: () => void;
+  contentResults: ContentSearchResult[] | null;
+  isSearching: boolean;
 }
 
 export function FilterBar({
@@ -26,7 +32,13 @@ export function FilterBar({
   onSearchChange,
   sortBy,
   onSortChange,
+  onContentSearch,
+  onClearContentSearch,
+  contentResults,
+  isSearching,
 }: Props) {
+  const [deepQuery, setDeepQuery] = useState('');
+
   const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
   const recentCount = agents.filter(a => new Date(a.LastActivity).getTime() > thirtyMinAgo).length;
 
@@ -57,6 +69,17 @@ export function FilterBar({
     gemini: '#a78bfa',
   };
 
+  const handleDeepSearch = () => {
+    if (deepQuery.trim()) {
+      onContentSearch(deepQuery.trim());
+    }
+  };
+
+  const handleClearDeep = () => {
+    setDeepQuery('');
+    onClearContentSearch();
+  };
+
   return (
     <div style={{
       background: 'var(--bg-1)',
@@ -66,87 +89,35 @@ export function FilterBar({
       alignItems: 'center',
       gap: 12,
       flexShrink: 0,
+      flexWrap: 'wrap',
     }}>
       {/* Status filters */}
-      <FilterPill
-        label="All"
-        count={statusCounts.all}
-        active={statusFilter === null}
-        onClick={() => onStatusFilter(null)}
-      />
-      <FilterPill
-        label="Active"
-        count={statusCounts.active}
-        dotColor={statusDots.active}
-        active={statusFilter === 0}
-        onClick={() => onStatusFilter(0)}
-      />
-      <FilterPill
-        label="Idle"
-        count={statusCounts.idle}
-        dotColor={statusDots.idle}
-        active={statusFilter === 1}
-        onClick={() => onStatusFilter(1)}
-      />
-      <FilterPill
-        label="Waiting"
-        count={statusCounts.waiting}
-        dotColor={statusDots.waiting}
-        active={statusFilter === 2}
-        onClick={() => onStatusFilter(2)}
-      />
-      <FilterPill
-        label="Error"
-        count={statusCounts.error}
-        dotColor={statusDots.error}
-        active={statusFilter === 3}
-        onClick={() => onStatusFilter(3)}
-      />
+      <FilterPill label="All" count={statusCounts.all} active={statusFilter === null} onClick={() => onStatusFilter(null)} />
+      <FilterPill label="Active" count={statusCounts.active} dotColor={statusDots.active} active={statusFilter === 0} onClick={() => onStatusFilter(0)} />
+      <FilterPill label="Idle" count={statusCounts.idle} dotColor={statusDots.idle} active={statusFilter === 1} onClick={() => onStatusFilter(1)} />
+      <FilterPill label="Waiting" count={statusCounts.waiting} dotColor={statusDots.waiting} active={statusFilter === 2} onClick={() => onStatusFilter(2)} />
+      <FilterPill label="Error" count={statusCounts.error} dotColor={statusDots.error} active={statusFilter === 3} onClick={() => onStatusFilter(3)} />
 
       <Divider />
 
-      {/* Recent filter */}
-      <FilterPill
-        label="Recent"
-        count={recentCount}
-        dotColor="#34d399"
-        active={recentFilter}
-        onClick={() => onRecentFilter(!recentFilter)}
-      />
+      <FilterPill label="Recent" count={recentCount} dotColor="#34d399" active={recentFilter} onClick={() => onRecentFilter(!recentFilter)} />
 
       <Divider />
 
       {/* Provider filters */}
-      <FilterPill
-        label="Claude"
-        count={providerCounts.claude}
-        dotColor={providerDots.claude}
-        active={providerFilter === 'claude'}
-        onClick={() => onProviderFilter(providerFilter === 'claude' ? null : 'claude')}
-      />
-      <FilterPill
-        label="Codex"
-        count={providerCounts.codex}
-        dotColor={providerDots.codex}
-        active={providerFilter === 'codex'}
-        onClick={() => onProviderFilter(providerFilter === 'codex' ? null : 'codex')}
-      />
-      <FilterPill
-        label="Gemini"
-        count={providerCounts.gemini}
-        dotColor={providerDots.gemini}
-        active={providerFilter === 'gemini'}
-        onClick={() => onProviderFilter(providerFilter === 'gemini' ? null : 'gemini')}
-      />
+      <FilterPill label="Claude" count={providerCounts.claude} dotColor={providerDots.claude} active={providerFilter === 'claude'} onClick={() => onProviderFilter(providerFilter === 'claude' ? null : 'claude')} />
+      <FilterPill label="Codex" count={providerCounts.codex} dotColor={providerDots.codex} active={providerFilter === 'codex'} onClick={() => onProviderFilter(providerFilter === 'codex' ? null : 'codex')} />
+      <FilterPill label="Gemini" count={providerCounts.gemini} dotColor={providerDots.gemini} active={providerFilter === 'gemini'} onClick={() => onProviderFilter(providerFilter === 'gemini' ? null : 'gemini')} />
 
       <Divider />
 
-      {/* Search */}
+      {/* Metadata search */}
       <input
         type="text"
-        placeholder="Search repos, branches..."
+        placeholder="Filter repos, branches..."
         value={searchQuery}
         onChange={(e) => onSearchChange(e.target.value)}
+        aria-label="Filter by repo name or branch"
         style={{
           padding: '4px 10px',
           borderRadius: 4,
@@ -154,10 +125,70 @@ export function FilterBar({
           background: 'var(--bg-2)',
           color: 'var(--fg)',
           fontSize: 11,
-          width: 180,
+          width: 160,
           outline: 'none',
         }}
       />
+
+      <Divider />
+
+      {/* Deep content search */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input
+          type="text"
+          placeholder="Search inside sessions..."
+          value={deepQuery}
+          onChange={(e) => setDeepQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleDeepSearch(); }}
+          aria-label="Search inside session content using ripgrep"
+          style={{
+            padding: '4px 10px',
+            borderRadius: 4,
+            border: `1px solid ${contentResults ? 'var(--purple)' : 'var(--border)'}`,
+            background: 'var(--bg-2)',
+            color: 'var(--fg)',
+            fontSize: 11,
+            width: 180,
+            outline: 'none',
+          }}
+        />
+        <button
+          onClick={handleDeepSearch}
+          disabled={isSearching || !deepQuery.trim()}
+          aria-label="Run deep search"
+          style={{
+            padding: '4px 8px',
+            borderRadius: 4,
+            border: '1px solid var(--purple)',
+            background: 'transparent',
+            color: 'var(--purple)',
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: isSearching ? 'wait' : 'pointer',
+            opacity: !deepQuery.trim() ? 0.4 : 1,
+          }}
+        >
+          {isSearching ? '...' : 'Search'}
+        </button>
+        {contentResults && (
+          <button
+            onClick={handleClearDeep}
+            aria-label="Clear search results"
+            style={{
+              padding: '4px 6px',
+              borderRadius: 4,
+              border: 'none',
+              background: 'var(--purple-dim)',
+              color: 'var(--purple)',
+              fontSize: 9,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {contentResults.length} match{contentResults.length !== 1 ? 'es' : ''} ✕
+          </button>
+        )}
+      </div>
 
       <Divider />
 
@@ -165,6 +196,7 @@ export function FilterBar({
       <select
         value={sortBy}
         onChange={(e) => onSortChange(e.target.value)}
+        aria-label="Sort sessions"
         style={{
           padding: '4px 8px',
           borderRadius: 4,
@@ -201,6 +233,8 @@ function FilterPill({
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
+      aria-label={`${label}: ${count}`}
       style={{
         padding: '3px 10px',
         borderRadius: 12,
@@ -225,12 +259,7 @@ function FilterPill({
         }} />
       )}
       <span>{label}</span>
-      <span style={{
-        fontSize: 9,
-        color: 'var(--fg-4)',
-      }}>
-        {count}
-      </span>
+      <span style={{ fontSize: 9, color: 'var(--fg-4)' }}>{count}</span>
     </button>
   );
 }

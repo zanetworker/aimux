@@ -8,11 +8,13 @@ import { SessionView } from './SessionView';
 interface RightPanelProps {
   agent: Agent;
   onClose: () => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 type Tab = 'trace' | 'session';
 
-export function RightPanel({ agent, onClose }: RightPanelProps) {
+export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('trace');
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('aimux-panel-width');
@@ -69,52 +71,71 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
     <div
       ref={panelRef}
       style={{
-        width: `${width}px`,
+        width: isFullscreen ? '100%' : `${width}px`,
         height: '100%',
-        background: 'var(--bg-1)',
-        borderLeft: '1px solid var(--border)',
+        background: '#000000',
+        borderLeft: isFullscreen ? 'none' : '1px solid #111',
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
       }}
     >
-      {/* Resize handle */}
-      <div
-        onMouseDown={() => setIsResizing(true)}
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: '4px',
-          cursor: 'ew-resize',
-          background: isResizing ? 'var(--accent)' : 'transparent',
-          transition: 'background 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          if (!isResizing) e.currentTarget.style.background = 'var(--border-hover)';
-        }}
-        onMouseLeave={(e) => {
-          if (!isResizing) e.currentTarget.style.background = 'transparent';
-        }}
-      />
+      {/* Resize handle (hidden in fullscreen) */}
+      {!isFullscreen && (
+        <div
+          onMouseDown={() => setIsResizing(true)}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: '4px',
+            cursor: 'ew-resize',
+            background: isResizing ? 'var(--accent)' : 'transparent',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={(e) => {
+            if (!isResizing) e.currentTarget.style.background = 'var(--border-hover)';
+          }}
+          onMouseLeave={(e) => {
+            if (!isResizing) e.currentTarget.style.background = 'transparent';
+          }}
+        />
+      )}
 
       {/* Header */}
       <div style={{
         padding: '12px 16px',
-        borderBottom: '1px solid var(--border)',
+        borderBottom: '1px solid #111',
         display: 'flex',
         flexDirection: 'column',
         gap: '10px',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--fg)' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: '#e6e6e6' }}>
             {agent.Name}
             <span style={{ color: 'var(--fg-3)', marginLeft: '6px' }}>
               ({agent.GitBranch || 'main'})
             </span>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {onToggleFullscreen && (
+              <button
+                onClick={onToggleFullscreen}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #333',
+                  color: '#888',
+                  fontSize: 10,
+                  cursor: 'pointer',
+                  padding: '2px 8px',
+                  borderRadius: 3,
+                }}
+                title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              >
+                {isFullscreen ? 'Shrink' : 'Expand'}
+              </button>
+            )}
             <button
               onClick={() => {
                 if (confirm('Kill this session?')) {
@@ -154,10 +175,10 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
 
         {/* Tab switcher */}
         <div style={{
-          background: 'var(--bg-3)',
+          background: '#0a0a0a',
           borderRadius: '4px',
           padding: '2px',
-          border: '1px solid var(--border)',
+          border: '1px solid #1a1a1a',
           display: 'flex',
           gap: '2px',
         }}>
@@ -167,9 +188,9 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
               onClick={() => setActiveTab(tab)}
               style={{
                 flex: 1,
-                background: activeTab === tab ? 'var(--bg-0)' : 'transparent',
+                background: activeTab === tab ? '#000000' : 'transparent',
                 border: 'none',
-                color: activeTab === tab ? 'var(--fg)' : 'var(--fg-3)',
+                color: activeTab === tab ? '#e6e6e6' : '#555',
                 fontSize: '10px',
                 fontWeight: 600,
                 textTransform: 'uppercase',
@@ -189,49 +210,75 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
       {/* Stats ribbon */}
       <div style={{
         padding: '8px 16px',
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--bg-2)',
+        borderBottom: '1px solid #111',
+        background: '#050505',
         display: 'flex',
         justifyContent: 'space-between',
         fontSize: '11px',
       }}>
         <div style={{ display: 'flex', gap: '12px' }}>
           <div>
-            <span style={{ color: 'var(--fg-3)' }}>Status: </span>
+            <span style={{ color: '#555' }}>Status: </span>
             <span style={{ color: statusColor }}>{statusLabel}</span>
           </div>
           <div>
-            <span style={{ color: 'var(--fg-3)' }}>Turns: </span>
-            <span style={{ color: 'var(--fg-2)' }}>{turns.length}</span>
+            <span style={{ color: '#555' }}>Turns: </span>
+            <span style={{ color: '#b0b0b0' }}>{turns.length}</span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <div>
-            <span style={{ color: 'var(--fg-3)' }}>Tokens: </span>
-            <span style={{ color: 'var(--fg-2)' }}>
+            <span style={{ color: '#555' }}>Tokens: </span>
+            <span style={{ color: '#b0b0b0' }}>
               {formatTokens(agent.TokensIn)}/{formatTokens(agent.TokensOut)}
             </span>
           </div>
           <div>
-            <span style={{ color: 'var(--fg-3)' }}>Cost: </span>
-            <span style={{ color: 'var(--fg-2)' }}>{formatCost(agent.EstCostUSD)}</span>
+            <span style={{ color: '#555' }}>Cost: </span>
+            <span style={{ color: '#b0b0b0' }}>{formatCost(agent.EstCostUSD)}</span>
           </div>
         </div>
       </div>
 
       {/* Tab content */}
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {activeTab === 'trace' && (
           <TraceView turns={turns} sessionId={agent.SessionID} />
         )}
         {activeTab === 'session' && agent.TMuxSession && (
-          <div style={{ flex: 1, position: 'relative' }}>
-            <SessionView tmuxSession={agent.TMuxSession} />
+          <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
+            <SessionView tmuxSession={agent.TMuxSession} key={`${agent.TMuxSession}-${isFullscreen}`} />
           </div>
         )}
         {activeTab === 'session' && !agent.TMuxSession && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>No tmux session available for this agent.</p>
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 12,
+            padding: 24, background: 'var(--bg-0)',
+          }}>
+            <div style={{ fontSize: 13, color: 'var(--fg-3)', textAlign: 'center', lineHeight: 1.6 }}>
+              This session was started outside tmux, so live terminal embedding is not available.
+            </div>
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 8,
+              background: 'var(--bg-1)', borderRadius: 6, padding: '12px 16px',
+              border: '1px solid var(--border)', width: '100%', maxWidth: 360,
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Session info
+              </div>
+              <Row label="PID" value={String(agent.PID)} />
+              <Row label="Provider" value={agent.ProviderName} />
+              <Row label="Model" value={agent.Model} />
+              <Row label="Dir" value={agent.WorkingDir
+                ? agent.WorkingDir.replace(/\/Users\/[^/]+\/go\/src\/github\.com\/[^/]+\//g, '').replace(/\/Users\/[^/]+\//g, '~/')
+                : '-'} />
+              <Row label="Branch" value={agent.GitBranch || 'main'} />
+              <Row label="Session" value={agent.SessionID ? agent.SessionID.substring(0, 8) + '...' : '-'} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--fg-4)', textAlign: 'center' }}>
+              Use the Trace tab to view this session's conversation history.
+            </div>
           </div>
         )}
       </div>
@@ -239,8 +286,8 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
       {/* Live strip */}
       <div style={{
         padding: '6px 16px',
-        borderTop: '1px solid var(--border)',
-        background: 'var(--bg-2)',
+        borderTop: '1px solid #111',
+        background: '#050505',
         display: 'flex',
         alignItems: 'center',
         gap: '6px',
@@ -266,6 +313,15 @@ export function RightPanel({ agent, onClose }: RightPanelProps) {
           50% { opacity: 0.4; }
         }
       `}</style>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+      <span style={{ color: 'var(--fg-3)' }}>{label}</span>
+      <span style={{ color: 'var(--fg)', fontFamily: 'var(--mono)', fontSize: 10 }}>{value}</span>
     </div>
   );
 }
