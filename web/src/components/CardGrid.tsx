@@ -102,6 +102,7 @@ export function CardGrid({
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+          gridAutoRows: '1fr',
           gap: 10,
         }}
       >
