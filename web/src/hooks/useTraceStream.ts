@@ -15,7 +15,7 @@ export function useTraceStream(sessionId: string | null, sessionFile?: string): 
     async function fetchTrace() {
       try {
         const url = sessionFile
-          ? `/api/trace?file=${encodeURIComponent(sessionFile)}`
+          ? `/api/trace?file=${encodeURIComponent(sessionFile)}&provider=claude`
           : `/api/agents/${sessionId}/trace`;
         const resp = await fetch(url);
         if (!resp.ok) return;
@@ -26,21 +26,7 @@ export function useTraceStream(sessionId: string | null, sessionFile?: string): 
             timestamp: t.timestamp,
             userText: t.userText || '',
             outputText: t.outputText || '',
-            actions: (t.actions || []).map((a: any) => ({
-              name: a.name || '',
-              snippet: a.snippet || '',
-              success: a.success === true || a.success === 'true',
-              errorMsg: a.errorMsg || '',
-              filePath: a.filePath,
-              oldString: a.oldString,
-              newString: a.newString,
-              command: a.command,
-              description: a.description,
-              content: a.content,
-              pattern: a.pattern,
-              searchPath: a.searchPath,
-              prompt: a.prompt,
-            })),
+            actions: t.actions || [],
             tokensIn: t.tokensIn || 0,
             tokensOut: t.tokensOut || 0,
             costUSD: t.costUSD || 0,
