@@ -138,7 +138,7 @@ function DataTable({ columns, rows, sortable }: { columns: string[]; rows: Table
           <tr>
             {columns.map((col, ci) => (
               <th key={ci} onClick={() => handleSort(ci)} style={{
-                padding: '6px 10px', textAlign: 'left' as const, fontSize: 9, fontWeight: 700,
+                padding: '6px 10px', textAlign: ci > 0 ? 'right' as const : 'left' as const, fontSize: 9, fontWeight: 700,
                 textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
                 color: sortCol === ci ? 'var(--fg)' : 'var(--fg-3)', cursor: sortable ? 'pointer' : 'default',
                 userSelect: 'none' as const,
@@ -152,8 +152,8 @@ function DataTable({ columns, rows, sortable }: { columns: string[]; rows: Table
           {sorted.map((row, ri) => (
             <tr key={ri} onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-1)')} onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}>
               {row.cells.map((cell, ci) => (
-                <td key={ci} style={{ padding: '6px 10px', color: ci === 0 ? 'var(--fg)' : rowColor(row.color), fontFamily: ci > 0 ? 'var(--mono)' : 'inherit', borderBottom: '1px solid var(--bg-2)' }}>
-                  {cell}
+                <td key={ci} style={{ padding: '6px 10px', textAlign: ci > 0 ? 'right' as const : 'left' as const, color: ci === 0 ? 'var(--fg)' : rowColor(row.color), fontFamily: ci > 0 ? 'var(--mono)' : 'inherit', borderBottom: '1px solid var(--bg-2)' }}>
+                  {typeof cell === 'number' && columns[ci]?.toLowerCase().includes('rate') ? `${cell}%` : cell}
                 </td>
               ))}
             </tr>
