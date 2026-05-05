@@ -16,6 +16,7 @@ export interface HistorySession {
   resumable: boolean;
   annotation: string;
   tags: string[];
+  note: string;
   isSubagent: boolean;
 }
 
@@ -72,7 +73,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
         if (!resp.ok) return;
         const data = await resp.json();
         if (!cancelled) {
-          const s = data.sessions || [];
+          const s = (data.sessions || []).map((sess: any) => ({ ...sess, note: sess.note || '' }));
           setSessions(s);
           setLoading(false);
           onSessionCount?.(s.length);
@@ -115,6 +116,20 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
   }, [deepQuery]);
 
   const clearDeepSearch = () => { setDeepQuery(''); setDeepMatches(null); };
+
+  const annotationCycle = ['achieved', 'partial', 'failed', 'abandoned', ''];
+
+  const handleCycleAnnotation = async (session: HistorySession) => {
+    const current = session.annotation || '';
+    const idx = annotationCycle.indexOf(current);
+    const next = annotationCycle[(idx + 1) % annotationCycle.length];
+    await fetch('/api/sessions/meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath: session.filePath, annotation: next }),
+    });
+    setSessions(prev => prev.map(s => s.id === session.id ? { ...s, annotation: next } : s));
+  };
 
   // Filter
   let visible = sessions;
@@ -279,6 +294,13 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
               <SortHeader label="Turns" field="turns" width={60} align="right" />
               <SortHeader label="Cost" field="cost" width={70} align="right" />
               <th style={{
+                padding: '8px 10px', textAlign: 'center', fontSize: 9, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
+                borderBottom: '1px solid var(--border)', width: 70,
+              }}>
+                Eval
+              </th>
+              <th style={{
                 padding: '8px 10px', textAlign: 'right', fontSize: 9, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
                 borderBottom: '1px solid var(--border)', width: 70,
@@ -295,7 +317,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
           <tbody>
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: '40px 10px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
+                <td colSpan={8} style={{ padding: '40px 10px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
                   {isSearching ? 'No sessions match your search.' : 'No sessions found.'}
                 </td>
               </tr>
@@ -370,6 +392,22 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--green)' }}>
                     ${s.costUSD.toFixed(2)}
+                  </td>
+                  <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCycleAnnotation(s); }}
+                      title="Click to cycle: achieved, partial, failed, abandoned, clear"
+                      style={{
+                        background: 'transparent',
+                        border: `1px solid ${s.annotation ? annotationColor(s.annotation) : 'var(--border)'}`,
+                        color: s.annotation ? annotationColor(s.annotation) : 'var(--fg-4)',
+                        fontSize: 8, fontWeight: 700, textTransform: 'uppercase',
+                        padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {s.annotation || '+'}
+                    </button>
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-4)' }}>
                     {formatK(s.tokensIn)}/{formatK(s.tokensOut)}
