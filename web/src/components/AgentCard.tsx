@@ -110,19 +110,20 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (onKill && confirm('Kill this session?')) {
+            if (onKill && confirm('This will terminate the session. Are you sure?')) {
               onKill(agent.SessionID || String(agent.PID));
             }
           }}
           className="kill-btn"
           style={{
-            background: 'transparent', border: 'none', color: 'var(--fg-4)',
-            fontSize: 11, cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s',
-            padding: '0 2px', lineHeight: 1,
+            background: 'transparent', border: '1px solid var(--accent)',
+            color: 'var(--accent)', fontSize: 9, fontWeight: 600,
+            cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s',
+            padding: '1px 6px', borderRadius: 3, lineHeight: '1.4',
           }}
           title="Kill session"
         >
-          ✕
+          Kill
         </button>
       </div>
 
