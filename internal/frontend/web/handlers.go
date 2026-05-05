@@ -130,7 +130,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agents, err := s.discoverFn()
+	agents, err := s.cachedDiscover()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -244,7 +244,7 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not configured", http.StatusServiceUnavailable)
 		return
 	}
-	agents, err := s.discoverFn()
+	agents, err := s.cachedDiscover()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

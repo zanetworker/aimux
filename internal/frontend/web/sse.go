@@ -43,7 +43,7 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	if s.discoverFn == nil {
 		return
 	}
-	agents, err := s.discoverFn()
+	agents, err := s.cachedDiscover()
 	if err != nil {
 		return
 	}

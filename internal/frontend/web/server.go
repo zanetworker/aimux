@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
@@ -22,6 +23,11 @@ type Server struct {
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
 	ctrl             *controller.Controller
+
+	// Discovery cache to avoid redundant ps/tmux scans
+	cacheMu     sync.Mutex
+	cacheAgents []agent.Agent
+	cacheTime   time.Time
 }
 
 func NewServer(port int) *Server {
@@ -42,6 +48,23 @@ func (s *Server) SetProviderLookup(fn func(string) interface{ ParseTrace(string)
 
 func (s *Server) SetKillFunc(fn func(pid int, tmuxSession string) error) {
 	s.killFn = fn
+}
+
+func (s *Server) cachedDiscover() ([]agent.Agent, error) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	if time.Since(s.cacheTime) < 2*time.Second && s.cacheAgents != nil {
+		return s.cacheAgents, nil
+	}
+
+	agents, err := s.discoverFn()
+	if err != nil {
+		return nil, err
+	}
+	s.cacheAgents = agents
+	s.cacheTime = time.Now()
+	return agents, nil
 }
 
 func (s *Server) SetController(ctrl *controller.Controller) {
