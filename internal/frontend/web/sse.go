@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
@@ -47,10 +48,14 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 		return
 	}
 
-	// Dedup by SessionID: keep the agent with the earliest StartTime
+	// Dedup by SessionID and filter ephemeral subagent processes
 	seen := make(map[string]int) // sessionID -> index in deduped
 	var deduped []agent.Agent
 	for _, a := range agents {
+		// Filter ephemeral automation subagents (session analyzers, hooks)
+		if a.EstCostUSD == 0 && a.TokensIn < 1000 && !strings.Contains(a.Model, "opus") {
+			continue
+		}
 		if a.SessionID == "" {
 			deduped = append(deduped, a)
 			continue
