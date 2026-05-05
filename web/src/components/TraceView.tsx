@@ -5,12 +5,22 @@ import { Markdown } from './Markdown';
 interface TraceViewProps {
   turns: Turn[];
   sessionId: string;
+  sessionFile?: string;
+  provider?: string;
 }
 
-export function TraceView({ turns, sessionId }: TraceViewProps) {
+const labels = [
+  { key: 'good', text: 'Good', color: 'var(--green)', dim: 'var(--green-dim)' },
+  { key: 'bad', text: 'Bad', color: 'var(--accent)', dim: 'var(--accent-dim)' },
+  { key: 'waste', text: 'Waste', color: 'var(--orange)', dim: 'var(--orange-dim)' },
+  { key: 'error', text: 'Error', color: 'var(--purple)', dim: 'var(--purple-dim)' },
+];
+
+export function TraceView({ turns, sessionId, sessionFile, provider }: TraceViewProps) {
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set());
   const [annotations, setAnnotations] = useState<Map<number, Annotation>>(new Map());
-  const [noteInput, setNoteInput] = useState<{ turn: number; text: string } | null>(null);
+  const [notePopover, setNotePopover] = useState<{ turn: number; text: string } | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -39,7 +49,7 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
   const handleAnnotate = async (turnNumber: number, label: string) => {
     const current = annotations.get(turnNumber);
     const newLabel = current?.label === label ? '' : label;
-    const note = noteInput?.turn === turnNumber ? noteInput.text : (current?.note || '');
+    const note = current?.note || '';
     await fetch(`/api/sessions/${sessionId}/annotate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -54,6 +64,46 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
       }
       return next;
     });
+  };
+
+  const handleSaveNote = async (turnNumber: number, note: string) => {
+    const current = annotations.get(turnNumber);
+    const label = current?.label || 'good';
+    await fetch(`/api/sessions/${sessionId}/annotate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ turn: turnNumber, label, note }),
+    });
+    setAnnotations(prev => {
+      const next = new Map(prev);
+      next.set(turnNumber, { turn: turnNumber, label, note, timestamp: new Date().toISOString() });
+      return next;
+    });
+    setNotePopover(null);
+  };
+
+  const handleExport = async (format: 'jsonl' | 'otel') => {
+    if (!sessionId || !sessionFile) return;
+    setExportStatus('Exporting...');
+    try {
+      const params = new URLSearchParams();
+      params.set('file', sessionFile);
+      if (provider) params.set('provider', provider);
+      const resp = await fetch(`/api/sessions/${sessionId}/export/${format}?${params}`, { method: 'POST' });
+      if (!resp.ok) {
+        const text = await resp.text();
+        setExportStatus(`Failed: ${text}`);
+      } else {
+        const data = await resp.json();
+        setExportStatus(format === 'jsonl'
+          ? `Exported ${data.count} turns to ${data.path}`
+          : `Exported ${data.count} turns to ${data.endpoint}`
+        );
+      }
+    } catch (e: any) {
+      setExportStatus(`Error: ${e.message}`);
+    }
+    setTimeout(() => setExportStatus(null), 5000);
   };
 
   const labelColor = (label: string): string => {
@@ -195,7 +245,31 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
         <span style={{ fontSize: 10, color: 'var(--fg-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
           {turns.length} turn{turns.length !== 1 ? 's' : ''}
         </span>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {exportStatus && (
+            <span style={{ fontSize: 9, color: exportStatus.startsWith('Failed') || exportStatus.startsWith('Error') ? 'var(--accent)' : 'var(--green)', fontFamily: 'var(--mono)' }}>
+              {exportStatus}
+            </span>
+          )}
+          {sessionFile && (
+            <>
+              <button onClick={() => handleExport('jsonl')} title="Export annotated trace as JSONL to ~/.aimux/exports/" style={{
+                background: 'transparent', border: '1px solid var(--teal)', color: 'var(--teal)',
+                fontSize: 9, fontWeight: 600, padding: '2px 8px', borderRadius: 3,
+                cursor: 'pointer',
+              }}>
+                Export JSONL
+              </button>
+              <button onClick={() => handleExport('otel')} title="Export trace as OTEL spans to configured MLflow endpoint" style={{
+                background: 'transparent', border: '1px solid var(--purple)', color: 'var(--purple)',
+                fontSize: 9, fontWeight: 600, padding: '2px 8px', borderRadius: 3,
+                cursor: 'pointer',
+              }}>
+                Export OTEL
+              </button>
+            </>
+          )}
+          <div style={{ width: 1, height: 14, background: 'var(--border)' }} />
           {[{ label: 'Expand all', fn: expandAll }, { label: 'Collapse all', fn: collapseAll }].map(btn => (
             <button key={btn.label} onClick={btn.fn} style={{
               background: 'transparent', border: '1px solid var(--border)', color: 'var(--fg-3)',
@@ -215,9 +289,11 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
           const hasContent = (turn.outputText || '').trim().length > 0 || turn.actions.length > 0;
           const errorCount = turn.actions.filter(a => !a.success).length;
 
+          const ann = annotations.get(turn.number);
+
           return (
-            <div key={turn.number}>
-              {/* Collapsed summary row */}
+            <div key={turn.number} className="trace-turn" style={{ position: 'relative' }}>
+              {/* Summary row */}
               <div
                 onClick={() => toggleTurn(turn.number)}
                 className="trace-row"
@@ -242,14 +318,19 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
                   {turn.number}
                 </span>
 
-                {annotations.has(turn.number) && (
-                  <span style={{
-                    fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 2,
-                    color: labelColor(annotations.get(turn.number)!.label),
-                    border: `1px solid ${labelColor(annotations.get(turn.number)!.label)}`,
-                    textTransform: 'uppercase',
-                  }}>
-                    {annotations.get(turn.number)!.label}
+                {/* Active annotation badge (always visible) */}
+                {ann && (
+                  <span
+                    onClick={(e) => { e.stopPropagation(); setNotePopover(notePopover?.turn === turn.number ? null : { turn: turn.number, text: ann.note || '' }); }}
+                    title={ann.note ? `${ann.label}: "${ann.note}" (click to edit)` : `${ann.label} (click to add note)`}
+                    style={{
+                      fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 2,
+                      background: ann.label === 'good' ? 'var(--green-dim)' : ann.label === 'bad' ? 'var(--accent-dim)' : ann.label === 'waste' ? 'var(--orange-dim)' : 'var(--purple-dim)',
+                      color: labelColor(ann.label),
+                      textTransform: 'uppercase', cursor: 'pointer',
+                    }}
+                  >
+                    {ann.label}{ann.note ? ' *' : ''}
                   </span>
                 )}
 
@@ -280,7 +361,75 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
                 <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--fg-4)' }}>
                   {new Date(turn.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
+
+                {/* Hover annotation buttons */}
+                <div className="annot-btns" onClick={e => e.stopPropagation()} style={{
+                  display: 'none', gap: 2, alignItems: 'center', marginLeft: 4,
+                }}>
+                  {labels.map(l => (
+                    <button key={l.key}
+                      onClick={() => handleAnnotate(turn.number, l.key)}
+                      title={l.text}
+                      style={{
+                        background: ann?.label === l.key ? l.dim : 'transparent',
+                        border: `1px solid ${ann?.label === l.key ? l.color : 'var(--border)'}`,
+                        borderRadius: 3, padding: '1px 5px', fontSize: 9, fontWeight: 600,
+                        color: l.color, cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >{l.text}</button>
+                  ))}
+                  <button
+                    onClick={() => setNotePopover(notePopover?.turn === turn.number ? null : { turn: turn.number, text: ann?.note || '' })}
+                    title="Add a note to this turn"
+                    style={{
+                      background: ann?.note ? 'var(--teal-dim)' : 'var(--bg-2)',
+                      border: `1px solid ${ann?.note ? 'var(--teal)' : 'var(--fg-4)'}`,
+                      borderRadius: 3, padding: '1px 6px', fontSize: 9, fontWeight: 600,
+                      color: ann?.note ? 'var(--teal)' : 'var(--fg-2)', cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}
+                  >{ann?.note ? '\u270e Note' : '\u270e'}</button>
+                </div>
               </div>
+
+              {/* Note popover */}
+              {notePopover?.turn === turn.number && (
+                <div style={{
+                  position: 'absolute', right: 8, top: 32, zIndex: 10,
+                  background: 'var(--bg-1)', border: '1px solid var(--border)',
+                  borderRadius: 6, padding: '8px 10px', width: 260,
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                }}>
+                  <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Note for turn {turn.number}
+                  </div>
+                  <input
+                    type="text"
+                    value={notePopover.text}
+                    onChange={e => setNotePopover({ ...notePopover, text: e.target.value })}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleSaveNote(turn.number, notePopover.text);
+                      if (e.key === 'Escape') setNotePopover(null);
+                    }}
+                    placeholder="Add note..."
+                    autoFocus
+                    style={{
+                      padding: '5px 8px', fontSize: 11, fontFamily: 'var(--mono)',
+                      background: 'var(--bg-0)', border: '1px solid var(--border)',
+                      borderRadius: 3, color: 'var(--fg)', outline: 'none', width: '100%',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                    <button onClick={() => setNotePopover(null)} style={{
+                      background: 'transparent', border: '1px solid var(--border)', borderRadius: 3,
+                      padding: '2px 8px', fontSize: 9, color: 'var(--fg-3)', cursor: 'pointer',
+                    }}>Cancel</button>
+                    <button onClick={() => handleSaveNote(turn.number, notePopover.text)} style={{
+                      background: 'var(--teal-dim)', border: '1px solid var(--teal)', borderRadius: 3,
+                      padding: '2px 8px', fontSize: 9, color: 'var(--teal)', cursor: 'pointer', fontWeight: 600,
+                    }}>Save</button>
+                  </div>
+                </div>
+              )}
 
               {/* Expanded detail */}
               {isExpanded && hasContent && (
@@ -326,78 +475,19 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
                     </div>
                   )}
 
-                  {/* Footer */}
+                  {/* Footer stats */}
                   <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    display: 'flex', gap: 12, alignItems: 'center',
                     fontSize: 10, borderTop: '1px solid var(--border)', paddingTop: 8,
                   }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                      <span style={{ fontFamily: 'var(--mono)', color: 'var(--fg-3)' }}>
-                        {formatTokens(turn.tokensIn, turn.tokensOut)} tokens
-                      </span>
-                      <span style={{ fontFamily: 'var(--mono)', color: 'var(--green)' }}>
-                        {formatCost(turn.costUSD)}
-                      </span>
-                      {turn.model && (
-                        <span style={{ fontFamily: 'var(--mono)', color: 'var(--fg-4)' }}>{turn.model}</span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-                      {[
-                        { key: 'good', short: 'G', color: 'var(--green)', dim: 'var(--green-dim)' },
-                        { key: 'bad', short: 'B', color: 'var(--accent)', dim: 'var(--accent-dim)' },
-                        { key: 'waste', short: 'W', color: 'var(--orange)', dim: 'var(--orange-dim)' },
-                        { key: 'error', short: 'E', color: 'var(--purple)', dim: 'var(--purple-dim)' },
-                      ].map(l => {
-                        const active = annotations.get(turn.number)?.label === l.key;
-                        return (
-                          <button key={l.key}
-                            onClick={(e) => { e.stopPropagation(); handleAnnotate(turn.number, l.key); }}
-                            style={{
-                              background: active ? l.dim : 'transparent',
-                              border: `1px solid ${active ? l.color : 'var(--border)'}`,
-                              borderRadius: 3, padding: '2px 6px', fontSize: 10, fontWeight: 600,
-                              color: l.color, cursor: 'pointer',
-                            }}
-                          >{l.short}</button>
-                        );
-                      })}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setNoteInput(noteInput?.turn === turn.number ? null : { turn: turn.number, text: annotations.get(turn.number)?.note || '' }); }}
-                        style={{
-                          background: 'transparent', border: '1px solid var(--border)',
-                          borderRadius: 3, padding: '2px 6px', fontSize: 10, fontWeight: 600,
-                          color: annotations.get(turn.number)?.note ? 'var(--teal)' : 'var(--fg-4)', cursor: 'pointer',
-                        }}
-                      >Note</button>
-                      {annotations.get(turn.number)?.note && noteInput?.turn !== turn.number && (
-                        <span style={{ fontSize: 9, fontStyle: 'italic', color: 'var(--fg-3)', marginLeft: 4 }}>
-                          &ldquo;{annotations.get(turn.number)!.note}&rdquo;
-                        </span>
-                      )}
-                    </div>
-                    {noteInput?.turn === turn.number && (
-                      <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-                        <input
-                          type="text"
-                          value={noteInput.text}
-                          onChange={e => setNoteInput({ ...noteInput, text: e.target.value })}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              handleAnnotate(turn.number, annotations.get(turn.number)?.label || 'good');
-                              setNoteInput(null);
-                            }
-                            if (e.key === 'Escape') setNoteInput(null);
-                          }}
-                          placeholder="Add note..."
-                          autoFocus
-                          style={{
-                            flex: 1, padding: '4px 8px', fontSize: 10, fontFamily: 'var(--mono)',
-                            background: 'var(--bg-0)', border: '1px solid var(--border)',
-                            borderRadius: 3, color: 'var(--fg)', outline: 'none',
-                          }}
-                        />
-                      </div>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--fg-3)' }}>
+                      {formatTokens(turn.tokensIn, turn.tokensOut)} tokens
+                    </span>
+                    <span style={{ fontFamily: 'var(--mono)', color: 'var(--green)' }}>
+                      {formatCost(turn.costUSD)}
+                    </span>
+                    {turn.model && (
+                      <span style={{ fontFamily: 'var(--mono)', color: 'var(--fg-4)' }}>{turn.model}</span>
                     )}
                   </div>
                 </div>
@@ -422,6 +512,9 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
       <style>{`
         .trace-row:hover {
           background: var(--bg-1) !important;
+        }
+        .trace-turn:hover .annot-btns {
+          display: flex !important;
         }
       `}</style>
     </div>

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -332,4 +333,96 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"results": results})
+}
+
+func (s *Server) handleExportJSONL(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	sessionFile := r.URL.Query().Get("file")
+	providerName := r.URL.Query().Get("provider")
+	if providerName == "" {
+		providerName = "claude"
+	}
+
+	if s.ctrl == nil || s.providerLookupFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	p := s.providerLookupFn(providerName)
+	if p == nil {
+		http.Error(w, "unknown provider", http.StatusInternalServerError)
+		return
+	}
+	turns, err := p.ParseTrace(sessionFile)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := controller.ExportContext{
+		SessionID:    sessionID,
+		SessionFile:  sessionFile,
+		ProviderName: providerName,
+		Turns:        controller.TurnsToInputs(turns),
+		EvalStore:    evaluation.NewStore(sessionID),
+	}
+
+	result, err := s.ctrl.ExportJSONL(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status": "exported",
+		"path":   result.Path,
+		"count":  result.Count,
+	})
+}
+
+func (s *Server) handleExportOTEL(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	sessionFile := r.URL.Query().Get("file")
+	providerName := r.URL.Query().Get("provider")
+	if providerName == "" {
+		providerName = "claude"
+	}
+
+	if s.ctrl == nil || s.providerLookupFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	p := s.providerLookupFn(providerName)
+	if p == nil {
+		http.Error(w, "unknown provider", http.StatusInternalServerError)
+		return
+	}
+	turns, err := p.ParseTrace(sessionFile)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	ctx := controller.ExportContext{
+		SessionID:    sessionID,
+		SessionFile:  sessionFile,
+		ProviderName: providerName,
+		Turns:        controller.TurnsToInputs(turns),
+		EvalStore:    evaluation.NewStore(sessionID),
+	}
+
+	result, err := s.ctrl.ExportOTEL(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":   "exported",
+		"endpoint": result.Path,
+		"count":    result.Count,
+	})
 }
