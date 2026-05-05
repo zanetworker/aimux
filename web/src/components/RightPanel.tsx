@@ -16,6 +16,7 @@ type Tab = 'trace' | 'session';
 
 export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('trace');
+  const [sessionMounted, setSessionMounted] = useState(false);
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('aimux-panel-width');
     return saved ? parseInt(saved) : 440;
@@ -185,7 +186,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
           {(['trace', 'session'] as Tab[]).map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => { setActiveTab(tab); if (tab === 'session') setSessionMounted(true); }}
               style={{
                 flex: 1,
                 background: activeTab === tab ? '#000000' : 'transparent',
@@ -240,20 +241,20 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
         </div>
       </div>
 
-      {/* Tab content */}
+      {/* Tab content: both rendered, toggle visibility to preserve session WebSocket */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        {activeTab === 'trace' && (
+        <div style={{ flex: 1, display: activeTab === 'trace' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0 }}>
           <TraceView turns={turns} sessionId={agent.SessionID} />
-        )}
-        {activeTab === 'session' && (
-          <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
+        </div>
+        <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden', display: activeTab === 'session' ? 'block' : 'none' }}>
+          {sessionMounted && (
             <SessionView
               tmuxSession={agent.TMuxSession || undefined}
               sessionId={agent.SessionID || undefined}
               key={`${agent.TMuxSession || agent.SessionID}-${isFullscreen}`}
             />
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Live strip */}

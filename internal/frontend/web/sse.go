@@ -47,14 +47,32 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 		return
 	}
 
+	// Dedup by SessionID: keep the agent with the earliest StartTime
+	seen := make(map[string]int) // sessionID -> index in deduped
+	var deduped []agent.Agent
+	for _, a := range agents {
+		if a.SessionID == "" {
+			deduped = append(deduped, a)
+			continue
+		}
+		if idx, ok := seen[a.SessionID]; ok {
+			if a.StartTime.Before(deduped[idx].StartTime) {
+				deduped[idx] = a
+			}
+			continue
+		}
+		seen[a.SessionID] = len(deduped)
+		deduped = append(deduped, a)
+	}
+
 	// Enrich with titles
 	type enrichedAgent struct {
 		agent.Agent
 		Title string
 	}
 
-	enriched := make([]enrichedAgent, len(agents))
-	for i, a := range agents {
+	enriched := make([]enrichedAgent, len(deduped))
+	for i, a := range deduped {
 		enriched[i] = enrichedAgent{Agent: a}
 		if a.SessionFile != "" {
 			enriched[i].Title = history.TitleForSessionFile(a.SessionFile)
