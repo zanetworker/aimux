@@ -73,6 +73,12 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fall back to query params for history sessions not in running agents
+	if providerName == "" {
+		providerName = r.URL.Query().Get("provider")
+		workingDir = r.URL.Query().Get("dir")
+	}
+
 	if providerName == "" {
 		http.Error(w, "agent not found", http.StatusNotFound)
 		return
