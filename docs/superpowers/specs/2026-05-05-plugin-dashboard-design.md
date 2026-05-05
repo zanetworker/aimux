@@ -164,22 +164,59 @@ One tab per plugin. All panels rendered as scrollable sections within the tab:
 
 ## Config Integration
 
-Plugins are discovered by scanning `~/.aimux/plugins/`. No config.yaml changes needed to add a plugin. The plugins directory is created on first use.
+Two plugin sources, in priority order:
 
-Optional override in config:
+### 1. Built-in plugins (zero config)
+
+Aimux ships with built-in plugin definitions for known integrations. These are registered in Go code with auto-detection. If the data files exist, the plugin appears automatically.
+
+```go
+// internal/plugin/builtin.go
+var builtins = []Plugin{
+    {
+        Name: "skill-dashboard",
+        Tab:  "Skills",
+        Command: "python3 ~/.claude/scripts/skill-dashboard.py --format json",
+        AutoDetect: []string{
+            "~/.claude/skill-usage.jsonl",
+            "~/.claude/skill-effectiveness.jsonl",
+        },
+        // ... panels defined in code
+    },
+}
+```
+
+Auto-detect: if any file in `AutoDetect` exists, the plugin is available. Users can explicitly disable:
+
 ```yaml
 plugins:
-  dir: ~/.aimux/plugins  # default, can be overridden
-  disabled: []           # list of plugin names to skip
+  skill-dashboard:
+    enabled: false  # opt-out
 ```
+
+Or explicitly enable even if auto-detect fails:
+
+```yaml
+plugins:
+  skill-dashboard:
+    enabled: true
+```
+
+No manifest files to create. No command paths to configure.
+
+### 2. Custom plugins (`~/.aimux/plugins/`)
+
+For third-party or user-created plugins. Same manifest format as before. Scanned on startup. This is the extension point for anything aimux doesn't ship with.
 
 ## First Plugin: Skill Dashboard
 
-Delivered as a manifest + modifications to the existing `skill-dashboard.py` script.
+Shipped as a built-in plugin with auto-detection.
 
-**Manifest:** `~/.aimux/plugins/skill-dashboard/plugin.yaml`
+**Auto-detect files:** `~/.claude/skill-usage.jsonl`, `~/.claude/skill-effectiveness.jsonl`
 
-**Script change:** Add `--format json` flag to `skill-dashboard.py` that outputs the structured JSON format instead of terminal text. The existing terminal output remains the default for CLI usage.
+**Script change:** Add `--format json` flag to the existing `skill-dashboard.py` that outputs the structured JSON format instead of terminal text. The existing terminal output remains the default for CLI usage.
+
+**User experience:** Install aimux, open the web dashboard. If you have skill tracking files, the Skills tab appears. No config changes needed.
 
 ## Error Handling
 
