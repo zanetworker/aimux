@@ -10,6 +10,7 @@ import (
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -426,4 +427,31 @@ func (s *Server) handleExportOTEL(w http.ResponseWriter, r *http.Request) {
 		"endpoint": result.Path,
 		"count":    result.Count,
 	})
+}
+
+func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
+	var plugins []plugin.Plugin
+	if s.pluginExec != nil {
+		plugins = s.pluginExec.Plugins()
+	}
+	if plugins == nil {
+		plugins = []plugin.Plugin{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"plugins": plugins})
+}
+
+func (s *Server) handlePluginData(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if s.pluginExec == nil {
+		http.Error(w, "plugins not configured", http.StatusServiceUnavailable)
+		return
+	}
+	data, err := s.pluginExec.Execute(name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }

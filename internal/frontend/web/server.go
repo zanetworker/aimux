@@ -11,6 +11,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -23,6 +24,7 @@ type Server struct {
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
 	ctrl             *controller.Controller
+	pluginExec       *plugin.Executor
 
 	// Discovery cache to avoid redundant ps/tmux scans
 	cacheMu     sync.Mutex
@@ -71,6 +73,10 @@ func (s *Server) SetController(ctrl *controller.Controller) {
 	s.ctrl = ctrl
 }
 
+func (s *Server) SetPluginExecutor(exec *plugin.Executor) {
+	s.pluginExec = exec
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -99,6 +105,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("POST /api/sessions/{id}/export/jsonl", s.handleExportJSONL)
 	mux.HandleFunc("POST /api/sessions/{id}/export/otel", s.handleExportOTEL)
+
+	mux.HandleFunc("GET /api/plugins", s.handlePlugins)
+	mux.HandleFunc("GET /api/plugins/{name}/data", s.handlePluginData)
 
 	sub, err := fs.Sub(staticFiles, "dist")
 	if err != nil {

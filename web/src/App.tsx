@@ -8,6 +8,7 @@ import { RightPanel } from './components/RightPanel';
 import { SessionsTable } from './components/SessionsTable';
 import type { HistorySession } from './components/SessionsTable';
 import { LaunchDialog } from './components/LaunchDialog';
+import { PluginView } from './components/PluginView';
 import './styles/theme.css';
 
 export interface ContentSearchResult {
@@ -15,7 +16,7 @@ export interface ContentSearchResult {
   snippet: string;
 }
 
-type ViewTab = 'agents' | 'sessions';
+type ViewTab = 'agents' | 'sessions' | string;
 
 export default function App() {
   const { agents, loading: agentsLoading } = useAgentStream();
@@ -32,6 +33,7 @@ export default function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [sessionAgent, setSessionAgent] = useState<Agent | null>(null);
   const [sessionCount, setSessionCount] = useState<number | null>(null);
+  const [pluginTabs, setPluginTabs] = useState<{ name: string; tab: string; panels: { id: string; type: 'metric-row' | 'table' | 'bar-chart' | 'list'; title: string; sortable?: boolean; expandable?: boolean; width?: string }[] }[]>([]);
 
   useEffect(() => {
     if (activeTab !== 'sessions' && sessionCount !== null) return;
@@ -41,6 +43,13 @@ export default function App() {
       .then(d => { if (d?.sessions) setSessionCount(d.sessions.length); })
       .catch(() => {});
   }, [activeTab]);
+
+  useEffect(() => {
+    fetch('/api/plugins')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.plugins?.length) setPluginTabs(d.plugins); })
+      .catch(() => {});
+  }, []);
 
   const selectedAgent = activeTab === 'agents'
     ? agents.find(a => a.SessionID === selectedId || String(a.PID) === selectedId)
@@ -117,7 +126,7 @@ export default function App() {
         }}>
           {/* Tab switcher */}
           <div style={{ display: 'flex', padding: '0 18px', gap: 0 }}>
-            {(['agents', 'sessions'] as ViewTab[]).map(tab => (
+            {(['agents', 'sessions', ...pluginTabs.map(p => `plugin:${p.name}`)]).map(tab => (
               <button
                 key={tab}
                 onClick={() => { setActiveTab(tab); setSelectedId(null); setSessionAgent(null); }}
@@ -135,7 +144,9 @@ export default function App() {
                   transition: 'all 0.15s',
                 }}
               >
-                {tab === 'agents' ? `Agents (${agents.length})` : `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}`}
+                {tab === 'agents' ? `Agents (${agents.length})`
+                  : tab === 'sessions' ? `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}`
+                  : pluginTabs.find(p => `plugin:${p.name}` === tab)?.tab || tab}
               </button>
             ))}
           </div>
@@ -184,6 +195,10 @@ export default function App() {
             onSessionCount={setSessionCount}
           />
         )}
+        {!panelFullscreen && activeTab.startsWith('plugin:') && (() => {
+          const p = pluginTabs.find(pt => `plugin:${pt.name}` === activeTab);
+          return p ? <PluginView plugin={p} /> : null;
+        })()}
         {panelAgent && (
           <RightPanel
             agent={panelAgent}
