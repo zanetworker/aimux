@@ -76,8 +76,10 @@ export function SessionView({ tmuxSession, sessionId }: Props) {
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
+    terminal.writeln('\x1b[33mConnecting...\x1b[0m');
+
     ws.onopen = () => {
-      terminal.writeln('\x1b[32mConnected to session\x1b[0m');
+      terminal.writeln('\x1b[32mConnected\x1b[0m\n');
       // Send initial resize
       doFit();
       sendResize(ws, terminal);
