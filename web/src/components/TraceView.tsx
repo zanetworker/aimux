@@ -90,19 +90,12 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
 
         {/* Edit diff */}
         {tool.name === 'Edit' && (tool.oldString || tool.newString) && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 4 }}>
-            {tool.oldString && (
-              <div>
-                <div style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 600, marginBottom: 2 }}>- removed</div>
-                <pre style={{ ...codeBlock, borderColor: 'var(--accent-dim)', color: 'var(--fg-3)' }}>{tool.oldString}</pre>
-              </div>
-            )}
-            {tool.newString && (
-              <div>
-                <div style={{ fontSize: 9, color: 'var(--green)', fontWeight: 600, marginBottom: 2 }}>+ added</div>
-                <pre style={{ ...codeBlock, borderColor: 'var(--green-dim)', color: 'var(--fg)' }}>{tool.newString}</pre>
-              </div>
-            )}
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, lineHeight: '1.5',
+            borderRadius: 4, background: 'var(--bg-0)', border: '1px solid var(--border)',
+            overflow: 'auto', maxHeight: 300, marginBottom: 4,
+          }}>
+            {renderUnifiedDiff(tool.oldString || '', tool.newString || '')}
           </div>
         )}
 
@@ -344,6 +337,57 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
           background: var(--bg-1) !important;
         }
       `}</style>
+    </div>
+  );
+}
+
+function renderUnifiedDiff(oldStr: string, newStr: string): React.ReactNode {
+  const oldLines = oldStr.split('\n');
+  const newLines = newStr.split('\n');
+  const diffLines: { type: 'ctx' | 'del' | 'add'; text: string }[] = [];
+
+  // Simple LCS-based diff
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+
+  let oi = 0, ni = 0;
+  while (oi < oldLines.length || ni < newLines.length) {
+    if (oi < oldLines.length && ni < newLines.length && oldLines[oi] === newLines[ni]) {
+      diffLines.push({ type: 'ctx', text: oldLines[oi] });
+      oi++; ni++;
+    } else if (oi < oldLines.length && !newSet.has(oldLines[oi])) {
+      diffLines.push({ type: 'del', text: oldLines[oi] });
+      oi++;
+    } else if (ni < newLines.length && !oldSet.has(newLines[ni])) {
+      diffLines.push({ type: 'add', text: newLines[ni] });
+      ni++;
+    } else if (oi < oldLines.length) {
+      diffLines.push({ type: 'del', text: oldLines[oi] });
+      oi++;
+    } else {
+      diffLines.push({ type: 'add', text: newLines[ni] });
+      ni++;
+    }
+  }
+
+  return (
+    <div>
+      {diffLines.map((line, i) => {
+        const bg = line.type === 'del' ? 'rgba(255,49,49,0.08)' :
+                   line.type === 'add' ? 'rgba(105,223,115,0.08)' : 'transparent';
+        const color = line.type === 'del' ? 'var(--accent)' :
+                      line.type === 'add' ? 'var(--green)' : 'var(--fg-3)';
+        const prefix = line.type === 'del' ? '-' : line.type === 'add' ? '+' : ' ';
+        return (
+          <div key={i} style={{
+            padding: '0 8px', background: bg, whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all', minHeight: '1.5em',
+          }}>
+            <span style={{ color: 'var(--fg-4)', display: 'inline-block', width: 14, userSelect: 'none' }}>{prefix}</span>
+            <span style={{ color }}>{line.text}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
