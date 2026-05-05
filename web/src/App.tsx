@@ -92,6 +92,7 @@ export default function App() {
       TeamName: '',
       TaskSubject: '',
       Title: session.title || session.firstPrompt || '',
+      PermissionMode: session.permissionMode || '',
     });
   }, []);
 

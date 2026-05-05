@@ -84,6 +84,8 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	skipPerms := r.URL.Query().Get("skipPermissions") == "true"
+
 	var cmd *exec.Cmd
 	switch providerName {
 	case "claude":
@@ -92,7 +94,11 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "claude binary not found", http.StatusInternalServerError)
 			return
 		}
-		cmd = exec.Command(bin, "--resume", sessionID)
+		args := []string{"--resume", sessionID}
+		if skipPerms {
+			args = append(args, "--dangerously-skip-permissions")
+		}
+		cmd = exec.Command(bin, args...)
 	case "codex":
 		bin, _ := exec.LookPath("codex")
 		if bin == "" {

@@ -186,7 +186,8 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			"annotation":  s.Annotation,
 			"tags":        s.Tags,
 			"note":        s.Note,
-			"isSubagent":  s.IsSubagent,
+			"isSubagent":     s.IsSubagent,
+			"permissionMode": s.PermissionMode,
 		}
 	}
 

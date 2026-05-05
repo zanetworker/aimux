@@ -17,6 +17,7 @@ export interface Agent {
   TeamName: string;
   TaskSubject: string;
   Title: string;
+  PermissionMode?: string;
 }
 
 export const StatusLabel: Record<number, string> = {
