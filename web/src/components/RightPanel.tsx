@@ -19,7 +19,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
   const [sessionMounted, setSessionMounted] = useState(false);
   const [sessionMeta, setSessionMeta] = useState<{ annotation: string; tags: string[]; note: string }>({ annotation: '', tags: [], note: '' });
   const [showEvalHelp, setShowEvalHelp] = useState(false);
-  const wasBypass = agent.PermissionMode === 'bypassPermissions' || agent.PermissionMode === 'bypass';
+  const wasBypass = agent.PermissionMode === 'bypassPermissions' || agent.PermissionMode === 'bypass' || agent.PermissionMode === 'full-auto';
   const [skipPermissions, setSkipPermissions] = useState(wasBypass);
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('aimux-panel-width');
@@ -379,7 +379,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               )}
               {!wasBypass && skipPermissions && (
                 <span style={{ fontSize: 9, color: 'var(--orange)', fontStyle: 'italic' }}>
-                  Session will resume with --dangerously-skip-permissions
+                  {agent.ProviderName === 'codex' ? 'Session will resume with --full-auto' : 'Session will resume with --dangerously-skip-permissions'}
                 </span>
               )}
             </div>
