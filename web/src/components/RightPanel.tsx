@@ -18,6 +18,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
   const [activeTab, setActiveTab] = useState<Tab>('trace');
   const [sessionMounted, setSessionMounted] = useState(false);
   const [sessionMeta, setSessionMeta] = useState<{ annotation: string; tags: string[]; note: string }>({ annotation: '', tags: [], note: '' });
+  const [showEvalHelp, setShowEvalHelp] = useState(false);
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('aimux-panel-width');
     return saved ? parseInt(saved) : 440;
@@ -218,36 +219,63 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
         </div>
 
         {/* Session meta */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <button
-            onClick={handleCycleMeta}
-            title="Session outcome: click to cycle achieved / partial / failed / abandoned / clear"
-            style={{
-              background: sessionMeta.annotation ? metaDimColor(sessionMeta.annotation) : 'transparent',
-              border: `1px solid ${sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#333'}`,
-              color: sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#555',
-              fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
-              padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
-            }}
-          >
-            {sessionMeta.annotation || 'eval'}
-          </button>
-          <span
-            title="Rate the overall session outcome. Achieved = goal met. Partial = some progress. Failed = did not work. Abandoned = gave up."
-            style={{ fontSize: 10, color: '#555', cursor: 'help', userSelect: 'none' }}
-          >?</span>
-          {sessionMeta.tags?.map(t => (
-            <span key={t} style={{
-              fontSize: 8, padding: '1px 4px', borderRadius: 2,
-              background: 'var(--accent-dim)', color: 'var(--accent)',
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              onClick={handleCycleMeta}
+              style={{
+                background: sessionMeta.annotation ? metaDimColor(sessionMeta.annotation) : 'transparent',
+                border: `1px solid ${sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#333'}`,
+                color: sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#555',
+                fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+                padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
+              }}
+            >
+              {sessionMeta.annotation || 'eval'}
+            </button>
+            <button
+              onClick={() => setShowEvalHelp(v => !v)}
+              style={{
+                width: 16, height: 16, borderRadius: '50%', fontSize: 9, fontWeight: 700,
+                background: showEvalHelp ? 'var(--bg-3)' : 'transparent',
+                border: '1px solid #444', color: '#888',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 0, lineHeight: 1,
+              }}
+            >?</button>
+            {sessionMeta.tags?.map(t => (
+              <span key={t} style={{
+                fontSize: 8, padding: '1px 4px', borderRadius: 2,
+                background: 'var(--accent-dim)', color: 'var(--accent)',
+              }}>
+                {t}
+              </span>
+            ))}
+            {sessionMeta.note && (
+              <span style={{ fontSize: 9, fontStyle: 'italic', color: '#888' }}>
+                &ldquo;{sessionMeta.note}&rdquo;
+              </span>
+            )}
+          </div>
+          {showEvalHelp && (
+            <div style={{
+              background: 'var(--bg-2)', border: '1px solid var(--border)',
+              borderRadius: 4, padding: '8px 10px', fontSize: 10, lineHeight: '1.6',
+              color: 'var(--fg-2)',
             }}>
-              {t}
-            </span>
-          ))}
-          {sessionMeta.note && (
-            <span style={{ fontSize: 9, fontStyle: 'italic', color: '#888' }}>
-              &ldquo;{sessionMeta.note}&rdquo;
-            </span>
+              <div style={{ fontWeight: 600, color: 'var(--fg)', marginBottom: 4, fontSize: 11 }}>Session Evaluation</div>
+              <div>Click the badge to rate this session's overall outcome:</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 6, paddingLeft: 8 }}>
+                <div><span style={{ color: 'var(--green)', fontWeight: 600 }}>Achieved</span> &mdash; goal fully met, session succeeded</div>
+                <div><span style={{ color: 'var(--orange)', fontWeight: 600 }}>Partial</span> &mdash; some progress but not complete</div>
+                <div><span style={{ color: 'var(--accent)', fontWeight: 600 }}>Failed</span> &mdash; did not accomplish the goal</div>
+                <div><span style={{ color: 'var(--fg-3)', fontWeight: 600 }}>Abandoned</span> &mdash; gave up or switched approach</div>
+              </div>
+              <div style={{ marginTop: 6, color: 'var(--fg-3)', fontSize: 9 }}>
+                Turn-level labels (Good/Bad/Waste/Error) appear on hover over each trace row.
+                Use Export JSONL or Export OTEL in the trace toolbar to save annotated data.
+              </div>
+            </div>
           )}
         </div>
 
