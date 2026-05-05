@@ -8,9 +8,10 @@ interface Props {
   sessionId?: string;
   provider?: string;
   workingDir?: string;
+  skipPermissions?: boolean;
 }
 
-export function SessionView({ tmuxSession, sessionId, provider, workingDir }: Props) {
+export function SessionView({ tmuxSession, sessionId, provider, workingDir, skipPermissions }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -74,11 +75,12 @@ export function SessionView({ tmuxSession, sessionId, provider, workingDir }: Pr
     let wsPath = tmuxSession
       ? `/api/terminal/${tmuxSession}`
       : `/api/terminal-resume/${sessionId}`;
-    // Pass provider/dir for history sessions not in running agents list
-    if (!tmuxSession && (provider || workingDir)) {
+    // Pass provider/dir/permissions for history sessions not in running agents list
+    if (!tmuxSession && (provider || workingDir || skipPermissions)) {
       const params = new URLSearchParams();
       if (provider) params.set('provider', provider);
       if (workingDir) params.set('dir', workingDir);
+      if (skipPermissions) params.set('skipPermissions', 'true');
       wsPath += `?${params.toString()}`;
     }
     const ws = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);

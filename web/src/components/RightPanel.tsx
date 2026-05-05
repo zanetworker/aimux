@@ -19,6 +19,8 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
   const [sessionMounted, setSessionMounted] = useState(false);
   const [sessionMeta, setSessionMeta] = useState<{ annotation: string; tags: string[]; note: string }>({ annotation: '', tags: [], note: '' });
   const [showEvalHelp, setShowEvalHelp] = useState(false);
+  const wasBypass = agent.PermissionMode === 'bypassPermissions' || agent.PermissionMode === 'bypass';
+  const [skipPermissions, setSkipPermissions] = useState(wasBypass);
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('aimux-panel-width');
     return saved ? parseInt(saved) : 440;
@@ -351,16 +353,49 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
         <div style={{ flex: 1, display: activeTab === 'trace' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0 }}>
           <TraceView turns={turns} sessionId={agent.SessionID} sessionFile={agent.SessionFile} provider={agent.ProviderName} />
         </div>
-        <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden', display: activeTab === 'session' ? 'block' : 'none' }}>
-          {sessionMounted && (
-            <SessionView
-              tmuxSession={agent.TMuxSession || undefined}
-              sessionId={agent.SessionID || undefined}
-              provider={agent.ProviderName || undefined}
-              workingDir={agent.WorkingDir || undefined}
-              key={agent.TMuxSession || agent.SessionID}
-            />
+        <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden', display: activeTab === 'session' ? 'flex' : 'none', flexDirection: 'column' }}>
+          {/* Permission toggle bar */}
+          {activeTab === 'session' && (
+            <div style={{
+              padding: '6px 12px', borderBottom: '1px solid #111',
+              display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+              background: skipPermissions ? 'var(--orange-dim)' : 'var(--bg-0)',
+            }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 10 }}>
+                <input
+                  type="checkbox"
+                  checked={skipPermissions}
+                  onChange={e => setSkipPermissions(e.target.checked)}
+                  style={{ accentColor: 'var(--orange)' }}
+                />
+                <span style={{ color: skipPermissions ? 'var(--orange)' : 'var(--fg-3)', fontWeight: skipPermissions ? 600 : 400 }}>
+                  Skip permissions
+                </span>
+              </label>
+              {wasBypass && (
+                <span style={{ fontSize: 9, color: 'var(--fg-4)', fontStyle: 'italic' }}>
+                  (original session used bypass mode)
+                </span>
+              )}
+              {!wasBypass && skipPermissions && (
+                <span style={{ fontSize: 9, color: 'var(--orange)', fontStyle: 'italic' }}>
+                  Session will resume with --dangerously-skip-permissions
+                </span>
+              )}
+            </div>
           )}
+          <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
+            {sessionMounted && (
+              <SessionView
+                tmuxSession={agent.TMuxSession || undefined}
+                sessionId={agent.SessionID || undefined}
+                provider={agent.ProviderName || undefined}
+                workingDir={agent.WorkingDir || undefined}
+                skipPermissions={skipPermissions}
+                key={`${agent.TMuxSession || agent.SessionID}-${skipPermissions}`}
+              />
+            )}
+          </div>
         </div>
       </div>
 

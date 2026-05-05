@@ -18,6 +18,7 @@ export interface HistorySession {
   tags: string[];
   note: string;
   isSubagent: boolean;
+  permissionMode: string;
 }
 
 type SortField = 'lastActive' | 'cost' | 'turns' | 'title' | 'project';
