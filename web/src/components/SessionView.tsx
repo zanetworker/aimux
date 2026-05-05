@@ -100,7 +100,11 @@ export function SessionView({ tmuxSession, sessionId, provider, workingDir, skip
       terminal.write(data);
     };
 
-    ws.onclose = () => {};
+    ws.onclose = (e) => {
+      if (e.code !== 1000) {
+        terminal.writeln('\x1b[33mDisconnected. Refresh to reconnect.\x1b[0m');
+      }
+    };
     ws.onerror = () => {
       terminal.writeln('\x1b[31mConnection failed\x1b[0m');
     };
