@@ -34,11 +34,13 @@ export default function App() {
   const [sessionCount, setSessionCount] = useState<number | null>(null);
 
   useEffect(() => {
+    if (activeTab !== 'sessions' && sessionCount !== null) return;
+    if (activeTab !== 'sessions') return;
     fetch('/api/history')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.sessions) setSessionCount(d.sessions.length); })
       .catch(() => {});
-  }, []);
+  }, [activeTab]);
 
   const selectedAgent = activeTab === 'agents'
     ? agents.find(a => a.SessionID === selectedId || String(a.PID) === selectedId)
