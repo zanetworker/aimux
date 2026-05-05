@@ -86,6 +86,15 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
     }
   };
 
+  const metaDimColor = (a: string): string => {
+    switch (a) {
+      case 'achieved': return 'var(--green-dim)';
+      case 'partial': return 'var(--orange-dim)';
+      case 'failed': return 'var(--accent-dim)';
+      default: return 'transparent';
+    }
+  };
+
   const formatTokens = (tokens: number): string => {
     if (!tokens) return '0';
     if (tokens < 1000) return String(tokens);
@@ -212,9 +221,9 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <button
             onClick={handleCycleMeta}
-            title="Cycle annotation"
+            title="Session outcome: click to cycle achieved / partial / failed / abandoned / clear"
             style={{
-              background: 'transparent',
+              background: sessionMeta.annotation ? metaDimColor(sessionMeta.annotation) : 'transparent',
               border: `1px solid ${sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#333'}`,
               color: sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#555',
               fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
@@ -223,6 +232,10 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
           >
             {sessionMeta.annotation || 'eval'}
           </button>
+          <span
+            title="Rate the overall session outcome. Achieved = goal met. Partial = some progress. Failed = did not work. Abandoned = gave up."
+            style={{ fontSize: 10, color: '#555', cursor: 'help', userSelect: 'none' }}
+          >?</span>
           {sessionMeta.tags?.map(t => (
             <span key={t} style={{
               fontSize: 8, padding: '1px 4px', borderRadius: 2,
@@ -308,7 +321,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
       {/* Tab content: both rendered, toggle visibility to preserve session WebSocket */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: activeTab === 'trace' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0 }}>
-          <TraceView turns={turns} sessionId={agent.SessionID} />
+          <TraceView turns={turns} sessionId={agent.SessionID} sessionFile={agent.SessionFile} provider={agent.ProviderName} />
         </div>
         <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden', display: activeTab === 'session' ? 'block' : 'none' }}>
           {sessionMounted && (

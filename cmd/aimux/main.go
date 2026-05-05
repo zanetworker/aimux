@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/frontend/tui"
@@ -126,6 +127,8 @@ func createWebServer(port int) *web.Server {
 		}
 		return &provider.Claude{}
 	})
+
+	s.SetController(controller.New(cfg))
 
 	return s
 }

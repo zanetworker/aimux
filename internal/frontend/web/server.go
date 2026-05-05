@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -20,6 +21,7 @@ type Server struct {
 	launchFn     func(provider, dir, model, mode string) error
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
+	ctrl             *controller.Controller
 }
 
 func NewServer(port int) *Server {
@@ -40,6 +42,10 @@ func (s *Server) SetProviderLookup(fn func(string) interface{ ParseTrace(string)
 
 func (s *Server) SetKillFunc(fn func(pid int, tmuxSession string) error) {
 	s.killFn = fn
+}
+
+func (s *Server) SetController(ctrl *controller.Controller) {
+	s.ctrl = ctrl
 }
 
 func (s *Server) Start() error {
@@ -68,6 +74,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/terminal/{session}", s.handleTerminal)
 	mux.HandleFunc("/api/terminal-resume/{id}", s.handleTerminalResume)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
+	mux.HandleFunc("POST /api/sessions/{id}/export/jsonl", s.handleExportJSONL)
+	mux.HandleFunc("POST /api/sessions/{id}/export/otel", s.handleExportOTEL)
 
 	sub, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
