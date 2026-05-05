@@ -132,33 +132,35 @@ function DataTable({ columns, rows, sortable }: { columns: string[]; rows: Table
   const rowColor = (c?: string) => c ? toColor(c) : 'var(--fg-2)';
 
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-      <thead>
-        <tr>
-          {columns.map((col, ci) => (
-            <th key={ci} onClick={() => handleSort(ci)} style={{
-              padding: '6px 10px', textAlign: 'left' as const, fontSize: 9, fontWeight: 700,
-              textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
-              color: sortCol === ci ? 'var(--fg)' : 'var(--fg-3)', cursor: sortable ? 'pointer' : 'default',
-              userSelect: 'none' as const,
-            }}>
-              {col} {sortCol === ci ? (sortDir === 'asc' ? '\u25b2' : '\u25bc') : ''}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((row, ri) => (
-          <tr key={ri} onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-1)')} onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}>
-            {row.cells.map((cell, ci) => (
-              <td key={ci} style={{ padding: '6px 10px', color: ci === 0 ? 'var(--fg)' : rowColor(row.color), fontFamily: ci > 0 ? 'var(--mono)' : 'inherit', borderBottom: '1px solid var(--bg-2)' }}>
-                {cell}
-              </td>
+    <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 4 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-0)', zIndex: 1 }}>
+          <tr>
+            {columns.map((col, ci) => (
+              <th key={ci} onClick={() => handleSort(ci)} style={{
+                padding: '6px 10px', textAlign: 'left' as const, fontSize: 9, fontWeight: 700,
+                textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
+                color: sortCol === ci ? 'var(--fg)' : 'var(--fg-3)', cursor: sortable ? 'pointer' : 'default',
+                userSelect: 'none' as const,
+              }}>
+                {col} {sortCol === ci ? (sortDir === 'asc' ? '\u25b2' : '\u25bc') : ''}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {sorted.map((row, ri) => (
+            <tr key={ri} onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-1)')} onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}>
+              {row.cells.map((cell, ci) => (
+                <td key={ci} style={{ padding: '6px 10px', color: ci === 0 ? 'var(--fg)' : rowColor(row.color), fontFamily: ci > 0 ? 'var(--mono)' : 'inherit', borderBottom: '1px solid var(--bg-2)' }}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
