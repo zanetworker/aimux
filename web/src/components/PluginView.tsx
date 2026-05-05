@@ -7,6 +7,7 @@ interface PluginManifest {
     id: string;
     type: 'metric-row' | 'table' | 'bar-chart' | 'list';
     title: string;
+    description?: string;
     sortable?: boolean;
     expandable?: boolean;
     width?: string;
@@ -74,8 +75,15 @@ export function PluginView({ plugin }: Props) {
             const panelData = data[panel.id] as Record<string, unknown> | undefined;
             return (
               <div key={panel.id} style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase' as const, letterSpacing: '0.06em', marginBottom: 8 }}>
-                  {panel.title}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>
+                    {panel.title}
+                  </div>
+                  {panel.description && (
+                    <div style={{ fontSize: 9, color: 'var(--fg-4)', lineHeight: '1.4', marginTop: 2 }}>
+                      {panel.description}
+                    </div>
+                  )}
                 </div>
                 {!panelData ? (
                   <div style={{ color: 'var(--fg-4)', fontSize: 11, fontStyle: 'italic' }}>No data</div>
@@ -170,7 +178,7 @@ function BarChart({ items }: { items: BarItem[] }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {items.map((item, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10 }}>
-          <span style={{ width: 120, textAlign: 'right' as const, color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, fontFamily: 'var(--mono)', fontSize: 9 }}>
+          <span title={item.label} style={{ width: 200, minWidth: 200, textAlign: 'right' as const, color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, fontFamily: 'var(--mono)', fontSize: 9 }}>
             {item.label}
           </span>
           <div style={{ flex: 1, display: 'flex', height: 14, borderRadius: 2, overflow: 'hidden', background: 'var(--bg-2)' }}>
@@ -185,7 +193,7 @@ function BarChart({ items }: { items: BarItem[] }) {
         </div>
       ))}
       {items[0]?.legend && (
-        <div style={{ display: 'flex', gap: 12, marginTop: 4, paddingLeft: 128 }}>
+        <div style={{ display: 'flex', gap: 12, marginTop: 4, paddingLeft: 208 }}>
           {items[0].legend.map((l, i) => (
             <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--fg-4)' }}>
               <div style={{ width: 8, height: 8, borderRadius: 2, background: i === 0 ? 'var(--teal)' : 'var(--purple)' }} />
