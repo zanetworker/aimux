@@ -6,9 +6,11 @@ import '@xterm/xterm/css/xterm.css';
 interface Props {
   tmuxSession?: string;
   sessionId?: string;
+  provider?: string;
+  workingDir?: string;
 }
 
-export function SessionView({ tmuxSession, sessionId }: Props) {
+export function SessionView({ tmuxSession, sessionId, provider, workingDir }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -69,9 +71,16 @@ export function SessionView({ tmuxSession, sessionId }: Props) {
 
     // WebSocket: tmux attach or direct resume
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsPath = tmuxSession
+    let wsPath = tmuxSession
       ? `/api/terminal/${tmuxSession}`
       : `/api/terminal-resume/${sessionId}`;
+    // Pass provider/dir for history sessions not in running agents list
+    if (!tmuxSession && (provider || workingDir)) {
+      const params = new URLSearchParams();
+      if (provider) params.set('provider', provider);
+      if (workingDir) params.set('dir', workingDir);
+      wsPath += `?${params.toString()}`;
+    }
     const ws = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;

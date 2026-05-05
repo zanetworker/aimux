@@ -82,8 +82,7 @@ export function FilterBar({
 
   return (
     <div style={{
-      background: 'var(--bg-1)',
-      borderBottom: '1px solid var(--border)',
+      background: 'transparent',
       padding: '8px 20px',
       display: 'flex',
       alignItems: 'center',

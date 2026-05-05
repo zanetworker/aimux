@@ -95,8 +95,41 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]any{"sessions": []any{}})
+	dir := r.URL.Query().Get("dir")
+	opts := history.DiscoverOpts{Dir: dir}
+	sessions, err := history.Discover(opts, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if sessions == nil {
+		sessions = []history.Session{}
+	}
+
+	result := make([]map[string]any, len(sessions))
+	for i, s := range sessions {
+		result[i] = map[string]any{
+			"id":          s.ID,
+			"provider":    s.Provider,
+			"project":     s.Project,
+			"filePath":    s.FilePath,
+			"startTime":   s.StartTime.Format(time.RFC3339),
+			"lastActive":  s.LastActive.Format(time.RFC3339),
+			"turnCount":   s.TurnCount,
+			"tokensIn":    s.TokensIn,
+			"tokensOut":   s.TokensOut,
+			"costUSD":     s.CostUSD,
+			"firstPrompt": s.FirstPrompt,
+			"title":       s.Title,
+			"resumable":   s.Resumable,
+			"annotation":  s.Annotation,
+			"tags":        s.Tags,
+			"isSubagent":  s.IsSubagent,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"sessions": result})
 }
 
 func (s *Server) handleTraceSubscribe(w http.ResponseWriter, r *http.Request) {

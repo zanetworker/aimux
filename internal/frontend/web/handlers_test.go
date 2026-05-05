@@ -43,6 +43,46 @@ func TestLaunchHandler(t *testing.T) {
 	}
 }
 
+func TestHistoryHandler(t *testing.T) {
+	s := NewServer(0)
+
+	go s.Start()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/history")
+	if err != nil {
+		t.Fatalf("GET /api/history failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Should return a non-nil array (may be empty in test environment)
+	if payload.Sessions == nil {
+		t.Fatal("expected sessions array, got nil")
+	}
+
+	// If there are sessions, verify the shape
+	if len(payload.Sessions) > 0 {
+		s0 := payload.Sessions[0]
+		for _, field := range []string{"id", "provider", "project", "filePath", "lastActive", "turnCount", "costUSD"} {
+			if _, ok := s0[field]; !ok {
+				t.Errorf("session missing field %q", field)
+			}
+		}
+	}
+}
+
 func TestAnnotateHandler(t *testing.T) {
 	s := NewServer(0)
 	var annotated bool
