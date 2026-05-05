@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import type { Agent } from '../types';
 
-export function useAgentStream(): Agent[] {
+export function useAgentStream(): { agents: Agent[]; loading: boolean } {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [loading, setLoading] = useState(true);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -13,6 +14,7 @@ export function useAgentStream(): Agent[] {
       try {
         const data = JSON.parse(e.data);
         setAgents(data.agents || []);
+        setLoading(false);
       } catch {
         // ignore parse errors
       }
@@ -28,5 +30,5 @@ export function useAgentStream(): Agent[] {
     return () => es.close();
   }, []);
 
-  return agents;
+  return { agents, loading };
 }

@@ -18,7 +18,7 @@ export interface ContentSearchResult {
 type ViewTab = 'agents' | 'sessions';
 
 export default function App() {
-  const agents = useAgentStream();
+  const { agents, loading: agentsLoading } = useAgentStream();
   const [activeTab, setActiveTab] = useState<ViewTab>('agents');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
@@ -172,6 +172,7 @@ export default function App() {
             searchQuery={searchQuery}
             sortBy={sortBy}
             contentResults={contentResults}
+            loading={agentsLoading}
           />
         )}
         {!panelFullscreen && activeTab === 'sessions' && (
