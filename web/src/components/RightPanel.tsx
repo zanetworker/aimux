@@ -251,7 +251,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
             <SessionView
               tmuxSession={agent.TMuxSession || undefined}
               sessionId={agent.SessionID || undefined}
-              key={`${agent.TMuxSession || agent.SessionID}-${isFullscreen}`}
+              key={agent.TMuxSession || agent.SessionID}
             />
           )}
         </div>
