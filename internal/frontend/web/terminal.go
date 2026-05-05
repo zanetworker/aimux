@@ -24,40 +24,45 @@ type resizeMsg struct {
 }
 
 // cachedPTY holds a PTY process that outlives individual WebSocket connections.
+// A single reader goroutine forwards PTY output to the current WebSocket.
 type cachedPTY struct {
 	ptmx     *os.File
 	cmd      *exec.Cmd
 	lastUsed time.Time
-	mu       sync.Mutex
+
+	mu   sync.Mutex
+	conn *websocket.Conn // current active WebSocket (nil = no viewer)
+	done chan struct{}    // closed when the PTY process exits
 }
 
 var (
-	ptyCache   = make(map[string]*cachedPTY) // sessionID -> cached PTY
+	ptyCache   = make(map[string]*cachedPTY)
 	ptyCacheMu sync.Mutex
 )
 
 func getCachedPTY(sessionID string) *cachedPTY {
 	ptyCacheMu.Lock()
 	defer ptyCacheMu.Unlock()
-	if c, ok := ptyCache[sessionID]; ok {
-		c.mu.Lock()
-		c.lastUsed = time.Now()
-		c.mu.Unlock()
-		return c
+	c, ok := ptyCache[sessionID]
+	if !ok {
+		return nil
 	}
-	return nil
+	select {
+	case <-c.done:
+		delete(ptyCache, sessionID)
+		return nil
+	default:
+	}
+	c.mu.Lock()
+	c.lastUsed = time.Now()
+	c.mu.Unlock()
+	return c
 }
 
 func putCachedPTY(sessionID string, c *cachedPTY) {
 	ptyCacheMu.Lock()
 	defer ptyCacheMu.Unlock()
 	ptyCache[sessionID] = c
-}
-
-func removeCachedPTY(sessionID string) {
-	ptyCacheMu.Lock()
-	defer ptyCacheMu.Unlock()
-	delete(ptyCache, sessionID)
 }
 
 func init() {
@@ -67,16 +72,44 @@ func init() {
 			ptyCacheMu.Lock()
 			for id, c := range ptyCache {
 				c.mu.Lock()
-				if time.Since(c.lastUsed) > 5*time.Minute {
+				idle := time.Since(c.lastUsed) > 5*time.Minute
+				c.mu.Unlock()
+				if idle {
 					c.ptmx.Close()
 					if c.cmd.Process != nil {
 						c.cmd.Process.Kill()
 					}
 					delete(ptyCache, id)
 				}
-				c.mu.Unlock()
 			}
 			ptyCacheMu.Unlock()
+		}
+	}()
+}
+
+// startPTYReader runs a single goroutine that reads from the PTY and
+// forwards to whichever WebSocket is currently attached.
+func startPTYReader(c *cachedPTY) {
+	go func() {
+		defer close(c.done)
+		buf := make([]byte, 4096)
+		for {
+			n, err := c.ptmx.Read(buf)
+			if err != nil {
+				return
+			}
+			c.mu.Lock()
+			ws := c.conn
+			c.mu.Unlock()
+			if ws != nil {
+				if err := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+					c.mu.Lock()
+					if c.conn == ws {
+						c.conn = nil
+					}
+					c.mu.Unlock()
+				}
+			}
 		}
 	}()
 }
@@ -118,13 +151,17 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Try to reattach to a cached PTY for this session
+	// Try to reattach to a cached PTY
 	if cached := getCachedPTY(sessionID); cached != nil {
-		servePTYCached(conn, cached)
+		cached.mu.Lock()
+		cached.conn = conn
+		cached.lastUsed = time.Now()
+		cached.mu.Unlock()
+		serveWebSocketInput(conn, cached)
 		return
 	}
 
-	// No cache: discover agent and spawn claude --resume
+	// No cache: discover agent and spawn
 	if s.discoverFn == nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("not configured"))
 		return
@@ -182,66 +219,52 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cached := &cachedPTY{ptmx: ptmx, cmd: cmd, lastUsed: time.Now()}
+	cached := &cachedPTY{
+		ptmx:     ptmx,
+		cmd:      cmd,
+		lastUsed: time.Now(),
+		conn:     conn,
+		done:     make(chan struct{}),
+	}
 	putCachedPTY(sessionID, cached)
+	startPTYReader(cached)
 
-	servePTYCached(conn, cached)
+	serveWebSocketInput(conn, cached)
 }
 
-// servePTYCached bridges a WebSocket to an existing cached PTY.
-// When the WebSocket disconnects, the PTY stays alive for reuse.
-func servePTYCached(conn *websocket.Conn, cached *cachedPTY) {
-	var wg sync.WaitGroup
-
-	// PTY -> WebSocket
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, err := cached.ptmx.Read(buf)
-			if err != nil {
-				return
-			}
-			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-				return
-			}
+// serveWebSocketInput reads from the WebSocket and writes to the cached PTY.
+// Blocks until the WebSocket disconnects. Does NOT kill the PTY on exit.
+func serveWebSocketInput(conn *websocket.Conn, cached *cachedPTY) {
+	defer func() {
+		cached.mu.Lock()
+		if cached.conn == conn {
+			cached.conn = nil
 		}
+		cached.lastUsed = time.Now()
+		cached.mu.Unlock()
 	}()
 
-	// WebSocket -> PTY (with resize handling)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-
-			var rm resizeMsg
-			if json.Unmarshal(msg, &rm) == nil && rm.Type == "resize" && rm.Cols > 0 && rm.Rows > 0 {
-				cached.mu.Lock()
-				pty.Setsize(cached.ptmx, &pty.Winsize{Cols: rm.Cols, Rows: rm.Rows})
-				cached.mu.Unlock()
-				continue
-			}
-
-			if _, err := cached.ptmx.Write(msg); err != nil {
-				return
-			}
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			return
 		}
-	}()
 
-	wg.Wait()
-	// Don't close the PTY -- it stays cached for reconnection
-	cached.mu.Lock()
-	cached.lastUsed = time.Now()
-	cached.mu.Unlock()
+		var rm resizeMsg
+		if json.Unmarshal(msg, &rm) == nil && rm.Type == "resize" && rm.Cols > 0 && rm.Rows > 0 {
+			cached.mu.Lock()
+			pty.Setsize(cached.ptmx, &pty.Winsize{Cols: rm.Cols, Rows: rm.Rows})
+			cached.mu.Unlock()
+			continue
+		}
+
+		if _, err := cached.ptmx.Write(msg); err != nil {
+			return
+		}
+	}
 }
 
-// servePTYFresh bridges a WebSocket to a fresh PTY. When the WebSocket
-// disconnects, the PTY is killed (used for tmux attach).
+// servePTYFresh bridges a WebSocket to a fresh PTY (tmux attach).
 func servePTYFresh(conn *websocket.Conn, cmd *exec.Cmd) {
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
