@@ -79,26 +79,31 @@ export function CardGrid({
     filtered = filtered.filter(a => contentMatchMap.has(a.SessionID));
   }
 
+  // Stable sort: primary key from dropdown, SessionID as tiebreaker
   const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
     switch (sortBy) {
       case 'lastActive': {
         const aTime = a.LastActivity ? new Date(a.LastActivity).getTime() : 0;
         const bTime = b.LastActivity ? new Date(b.LastActivity).getTime() : 0;
-        return bTime - aTime;
+        cmp = bTime - aTime;
+        break;
       }
       case 'cost':
-        return (b.EstCostUSD || 0) - (a.EstCostUSD || 0);
+        cmp = (b.EstCostUSD || 0) - (a.EstCostUSD || 0);
+        break;
       case 'repo':
-        return a.Name.localeCompare(b.Name);
+        cmp = a.Name.localeCompare(b.Name);
+        break;
       case 'status':
-        return a.Status - b.Status;
-      default:
-        return 0;
+        cmp = a.Status - b.Status;
+        break;
     }
+    if (cmp !== 0) return cmp;
+    return (a.SessionID || '').localeCompare(b.SessionID || '');
   });
 
   // Group by project, preserving sort order within groups.
-  // Group order = most recent activity in the group.
   const groupMap = new Map<string, Agent[]>();
   for (const a of sorted) {
     const name = projectName(a);
@@ -106,10 +111,12 @@ export function CardGrid({
     groupMap.get(name)!.push(a);
   }
 
+  // Stable group order: sort by most recent activity, then project name as tiebreaker
   const groups = [...groupMap.entries()].sort((a, b) => {
     const aTime = a[1][0].LastActivity ? new Date(a[1][0].LastActivity).getTime() : 0;
     const bTime = b[1][0].LastActivity ? new Date(b[1][0].LastActivity).getTime() : 0;
-    return bTime - aTime;
+    if (aTime !== bTime) return bTime - aTime;
+    return a[0].localeCompare(b[0]);
   });
 
   if (sorted.length === 0) {
