@@ -17,6 +17,7 @@ import (
 	"github.com/zanetworker/aimux/internal/frontend/tui"
 	"github.com/zanetworker/aimux/internal/frontend/web"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -129,6 +130,14 @@ func createWebServer(port int) *web.Server {
 	})
 
 	s.SetController(controller.New(cfg))
+
+	allPlugins := plugin.Builtins()
+	if custom, err := plugin.ScanPlugins(plugin.DefaultPluginsDir()); err == nil {
+		allPlugins = append(allPlugins, custom...)
+	}
+	if len(allPlugins) > 0 {
+		s.SetPluginExecutor(plugin.NewExecutor(allPlugins))
+	}
 
 	return s
 }
