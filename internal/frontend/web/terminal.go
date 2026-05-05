@@ -105,7 +105,18 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "codex binary not found", http.StatusInternalServerError)
 			return
 		}
-		cmd = exec.Command(bin, "--resume", sessionID)
+		args := []string{"resume", "--no-alt-screen", sessionID}
+		if skipPerms {
+			args = append(args, "--full-auto")
+		}
+		cmd = exec.Command(bin, args...)
+	case "gemini":
+		bin, _ := exec.LookPath("gemini")
+		if bin == "" {
+			http.Error(w, "gemini binary not found", http.StatusInternalServerError)
+			return
+		}
+		cmd = exec.Command(bin, "--resume", "latest")
 	default:
 		http.Error(w, fmt.Sprintf("resume not supported for provider %q", providerName), http.StatusBadRequest)
 		return
