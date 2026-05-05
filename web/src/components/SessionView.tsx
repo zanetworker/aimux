@@ -76,11 +76,7 @@ export function SessionView({ tmuxSession, sessionId }: Props) {
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
-    terminal.writeln('\x1b[33mConnecting...\x1b[0m');
-
     ws.onopen = () => {
-      terminal.writeln('\x1b[32mConnected\x1b[0m\n');
-      // Send initial resize
       doFit();
       sendResize(ws, terminal);
     };
@@ -90,13 +86,8 @@ export function SessionView({ tmuxSession, sessionId }: Props) {
       terminal.write(data);
     };
 
-    ws.onclose = () => {
-      terminal.writeln('\x1b[31mDisconnected\x1b[0m');
-    };
-
-    ws.onerror = () => {
-      terminal.writeln('\x1b[31mConnection error\x1b[0m');
-    };
+    ws.onclose = () => {};
+    ws.onerror = () => {};
 
     terminal.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
