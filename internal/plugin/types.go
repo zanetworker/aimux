@@ -17,12 +17,13 @@ const (
 )
 
 type Panel struct {
-	ID         string    `json:"id" yaml:"id"`
-	Type       PanelType `json:"type" yaml:"type"`
-	Title      string    `json:"title" yaml:"title"`
-	Sortable   bool      `json:"sortable,omitempty" yaml:"sortable,omitempty"`
-	Expandable bool      `json:"expandable,omitempty" yaml:"expandable,omitempty"`
-	Width      string    `json:"width,omitempty" yaml:"width,omitempty"`
+	ID          string    `json:"id" yaml:"id"`
+	Type        PanelType `json:"type" yaml:"type"`
+	Title       string    `json:"title" yaml:"title"`
+	Description string    `json:"description,omitempty" yaml:"description,omitempty"`
+	Sortable    bool      `json:"sortable,omitempty" yaml:"sortable,omitempty"`
+	Expandable  bool      `json:"expandable,omitempty" yaml:"expandable,omitempty"`
+	Width       string    `json:"width,omitempty" yaml:"width,omitempty"`
 }
 
 type Plugin struct {
