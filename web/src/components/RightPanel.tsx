@@ -17,6 +17,7 @@ type Tab = 'trace' | 'session';
 export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('trace');
   const [sessionMounted, setSessionMounted] = useState(false);
+  const [sessionMeta, setSessionMeta] = useState<{ annotation: string; tags: string[]; note: string }>({ annotation: '', tags: [], note: '' });
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('aimux-panel-width');
     return saved ? parseInt(saved) : 440;
@@ -51,6 +52,39 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing, width]);
+
+  useEffect(() => {
+    if (!agent.SessionFile) return;
+    fetch(`/api/sessions/meta?file=${encodeURIComponent(agent.SessionFile)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d) setSessionMeta({ annotation: d.annotation || '', tags: d.tags || [], note: d.note || '' });
+      })
+      .catch(() => {});
+  }, [agent.SessionFile]);
+
+  const annotationCycle = ['achieved', 'partial', 'failed', 'abandoned', ''];
+  const handleCycleMeta = async () => {
+    if (!agent.SessionFile) return;
+    const idx = annotationCycle.indexOf(sessionMeta.annotation);
+    const next = annotationCycle[(idx + 1) % annotationCycle.length];
+    await fetch('/api/sessions/meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath: agent.SessionFile, annotation: next }),
+    });
+    setSessionMeta(prev => ({ ...prev, annotation: next }));
+  };
+
+  const metaColor = (a: string): string => {
+    switch (a) {
+      case 'achieved': return 'var(--green)';
+      case 'partial': return 'var(--orange)';
+      case 'failed': return 'var(--accent)';
+      case 'abandoned': return 'var(--fg-3)';
+      default: return 'var(--fg-4)';
+    }
+  };
 
   const formatTokens = (tokens: number): string => {
     if (!tokens) return '0';
@@ -172,6 +206,36 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               ✕
             </button>
           </div>
+        </div>
+
+        {/* Session meta */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            onClick={handleCycleMeta}
+            title="Cycle annotation"
+            style={{
+              background: 'transparent',
+              border: `1px solid ${sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#333'}`,
+              color: sessionMeta.annotation ? metaColor(sessionMeta.annotation) : '#555',
+              fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+              padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
+            }}
+          >
+            {sessionMeta.annotation || 'eval'}
+          </button>
+          {sessionMeta.tags?.map(t => (
+            <span key={t} style={{
+              fontSize: 8, padding: '1px 4px', borderRadius: 2,
+              background: 'var(--accent-dim)', color: 'var(--accent)',
+            }}>
+              {t}
+            </span>
+          ))}
+          {sessionMeta.note && (
+            <span style={{ fontSize: 9, fontStyle: 'italic', color: '#888' }}>
+              &ldquo;{sessionMeta.note}&rdquo;
+            </span>
+          )}
         </div>
 
         {/* Tab switcher */}

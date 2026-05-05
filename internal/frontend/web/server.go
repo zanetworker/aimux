@@ -18,7 +18,6 @@ type Server struct {
 	srv          *http.Server
 	discoverFn   func() ([]agent.Agent, error)
 	launchFn     func(provider, dir, model, mode string) error
-	annotateFn   func(sessionID string, turn int, label, note string) error
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
 }
@@ -33,10 +32,6 @@ func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
 
 func (s *Server) SetLaunchFunc(fn func(provider, dir, model, mode string) error) {
 	s.launchFn = fn
-}
-
-func (s *Server) SetAnnotateFunc(fn func(sessionID string, turn int, label, note string) error) {
-	s.annotateFn = fn
 }
 
 func (s *Server) SetProviderLookup(fn func(string) interface{ ParseTrace(string) ([]trace.Turn, error) }) {
@@ -58,8 +53,12 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/events", s.handleSSE)
 
 	mux.HandleFunc("POST /api/agents/launch", s.handleLaunch)
-	mux.HandleFunc("POST /api/agents/{id}/annotate", s.handleAnnotate)
+	mux.HandleFunc("POST /api/agents/{id}/annotate", s.handleAnnotateTurn)
 	mux.HandleFunc("POST /api/agents/{id}/archive", s.handleArchive)
+	mux.HandleFunc("POST /api/sessions/{id}/annotate", s.handleAnnotateTurn)
+	mux.HandleFunc("GET /api/sessions/{id}/annotations", s.handleGetAnnotations)
+	mux.HandleFunc("POST /api/sessions/meta", s.handleUpdateSessionMeta)
+	mux.HandleFunc("GET /api/sessions/meta", s.handleGetSessionMeta)
 	mux.HandleFunc("GET /api/agents/{id}/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/agents/{id}/trace", s.handleGetTrace)
 	mux.HandleFunc("GET /api/trace", s.handleFastTrace)

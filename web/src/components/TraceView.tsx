@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { Turn, ToolSpan } from '../types';
+import { useState, useEffect } from 'react';
+import type { Turn, ToolSpan, Annotation } from '../types';
 import { Markdown } from './Markdown';
 
 interface TraceViewProps {
@@ -9,6 +9,21 @@ interface TraceViewProps {
 
 export function TraceView({ turns, sessionId }: TraceViewProps) {
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set());
+  const [annotations, setAnnotations] = useState<Map<number, Annotation>>(new Map());
+  const [noteInput, setNoteInput] = useState<{ turn: number; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    fetch(`/api/sessions/${sessionId}/annotations`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d?.annotations) return;
+        const m = new Map<number, Annotation>();
+        for (const a of d.annotations) m.set(a.turn, a);
+        setAnnotations(m);
+      })
+      .catch(() => {});
+  }, [sessionId, turns.length]);
 
   const toggleTurn = (turnNumber: number) => {
     setExpandedTurns(prev => {
@@ -21,12 +36,34 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
   const expandAll = () => setExpandedTurns(new Set(turns.map(t => t.number)));
   const collapseAll = () => setExpandedTurns(new Set());
 
-  const handleAnnotate = async (turnNumber: number, label: 'G' | 'B' | 'W') => {
-    await fetch(`/api/agents/${sessionId}/annotate`, {
+  const handleAnnotate = async (turnNumber: number, label: string) => {
+    const current = annotations.get(turnNumber);
+    const newLabel = current?.label === label ? '' : label;
+    const note = noteInput?.turn === turnNumber ? noteInput.text : (current?.note || '');
+    await fetch(`/api/sessions/${sessionId}/annotate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ turn: turnNumber, label, note: '' }),
+      body: JSON.stringify({ turn: turnNumber, label: newLabel, note }),
     });
+    setAnnotations(prev => {
+      const next = new Map(prev);
+      if (newLabel) {
+        next.set(turnNumber, { turn: turnNumber, label: newLabel, note, timestamp: new Date().toISOString() });
+      } else {
+        next.delete(turnNumber);
+      }
+      return next;
+    });
+  };
+
+  const labelColor = (label: string): string => {
+    switch (label) {
+      case 'good': return 'var(--green)';
+      case 'bad': return 'var(--accent)';
+      case 'waste': return 'var(--orange)';
+      case 'error': return 'var(--purple)';
+      default: return 'var(--fg-3)';
+    }
   };
 
   const formatTokens = (tokensIn: number, tokensOut: number): string => {
@@ -205,6 +242,17 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
                   {turn.number}
                 </span>
 
+                {annotations.has(turn.number) && (
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '1px 4px', borderRadius: 2,
+                    color: labelColor(annotations.get(turn.number)!.label),
+                    border: `1px solid ${labelColor(annotations.get(turn.number)!.label)}`,
+                    textTransform: 'uppercase',
+                  }}>
+                    {annotations.get(turn.number)!.label}
+                  </span>
+                )}
+
                 <span style={{
                   fontSize: 12, color: 'var(--fg)', flex: 1,
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500,
@@ -294,24 +342,63 @@ export function TraceView({ turns, sessionId }: TraceViewProps) {
                         <span style={{ fontFamily: 'var(--mono)', color: 'var(--fg-4)' }}>{turn.model}</span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {(['G', 'B', 'W'] as const).map(label => {
-                        const c = label === 'G' ? 'var(--green)' : label === 'B' ? 'var(--accent)' : 'var(--orange)';
-                        const dc = label === 'G' ? 'var(--green-dim)' : label === 'B' ? 'var(--accent-dim)' : 'var(--orange-dim)';
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {[
+                        { key: 'good', short: 'G', color: 'var(--green)', dim: 'var(--green-dim)' },
+                        { key: 'bad', short: 'B', color: 'var(--accent)', dim: 'var(--accent-dim)' },
+                        { key: 'waste', short: 'W', color: 'var(--orange)', dim: 'var(--orange-dim)' },
+                        { key: 'error', short: 'E', color: 'var(--purple)', dim: 'var(--purple-dim)' },
+                      ].map(l => {
+                        const active = annotations.get(turn.number)?.label === l.key;
                         return (
-                          <button key={label}
-                            onClick={(e) => { e.stopPropagation(); handleAnnotate(turn.number, label); }}
+                          <button key={l.key}
+                            onClick={(e) => { e.stopPropagation(); handleAnnotate(turn.number, l.key); }}
                             style={{
-                              background: 'transparent', border: '1px solid var(--border)',
+                              background: active ? l.dim : 'transparent',
+                              border: `1px solid ${active ? l.color : 'var(--border)'}`,
                               borderRadius: 3, padding: '2px 6px', fontSize: 10, fontWeight: 600,
-                              color: c, cursor: 'pointer',
+                              color: l.color, cursor: 'pointer',
                             }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = dc; e.currentTarget.style.borderColor = c; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-                          >{label}</button>
+                          >{l.short}</button>
                         );
                       })}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setNoteInput(noteInput?.turn === turn.number ? null : { turn: turn.number, text: annotations.get(turn.number)?.note || '' }); }}
+                        style={{
+                          background: 'transparent', border: '1px solid var(--border)',
+                          borderRadius: 3, padding: '2px 6px', fontSize: 10, fontWeight: 600,
+                          color: annotations.get(turn.number)?.note ? 'var(--teal)' : 'var(--fg-4)', cursor: 'pointer',
+                        }}
+                      >Note</button>
+                      {annotations.get(turn.number)?.note && noteInput?.turn !== turn.number && (
+                        <span style={{ fontSize: 9, fontStyle: 'italic', color: 'var(--fg-3)', marginLeft: 4 }}>
+                          &ldquo;{annotations.get(turn.number)!.note}&rdquo;
+                        </span>
+                      )}
                     </div>
+                    {noteInput?.turn === turn.number && (
+                      <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                        <input
+                          type="text"
+                          value={noteInput.text}
+                          onChange={e => setNoteInput({ ...noteInput, text: e.target.value })}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              handleAnnotate(turn.number, annotations.get(turn.number)?.label || 'good');
+                              setNoteInput(null);
+                            }
+                            if (e.key === 'Escape') setNoteInput(null);
+                          }}
+                          placeholder="Add note..."
+                          autoFocus
+                          style={{
+                            flex: 1, padding: '4px 8px', fontSize: 10, fontFamily: 'var(--mono)',
+                            background: 'var(--bg-0)', border: '1px solid var(--border)',
+                            borderRadius: 3, color: 'var(--fg)', outline: 'none',
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/trace"
 )
@@ -36,29 +37,88 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "launched"})
 }
 
-type annotateRequest struct {
-	Turn  int    `json:"turn"`
-	Label string `json:"label"`
-	Note  string `json:"note"`
-}
-
-func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAnnotateTurn(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	var req annotateRequest
+	var req struct {
+		Turn  int    `json:"turn"`
+		Label string `json:"label"`
+		Note  string `json:"note"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if s.annotateFn == nil {
-		http.Error(w, "annotate not configured", http.StatusServiceUnavailable)
-		return
+	store := evaluation.NewStore(sessionID)
+	if req.Label == "" {
+		if err := store.Remove(req.Turn); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := store.Save(evaluation.Annotation{
+			Turn: req.Turn, Label: req.Label, Note: req.Note, Timestamp: time.Now(),
+		}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
-	if err := s.annotateFn(sessionID, req.Turn, req.Label, req.Note); err != nil {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleGetAnnotations(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	store := evaluation.NewStore(sessionID)
+	annotations, err := store.Load()
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "annotated"})
+	if annotations == nil {
+		annotations = []evaluation.Annotation{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"annotations": annotations})
+}
+
+func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		FilePath   string   `json:"filePath"`
+		Annotation string   `json:"annotation"`
+		Tags       []string `json:"tags"`
+		Note       string   `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.FilePath == "" {
+		http.Error(w, "filePath required", http.StatusBadRequest)
+		return
+	}
+	meta := history.LoadMeta(req.FilePath)
+	meta.Annotation = req.Annotation
+	if req.Tags != nil {
+		meta.Tags = req.Tags
+	}
+	meta.Note = req.Note
+	if err := history.SaveMeta(req.FilePath, meta); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleGetSessionMeta(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("file")
+	if filePath == "" {
+		http.Error(w, "missing file param", http.StatusBadRequest)
+		return
+	}
+	meta := history.LoadMeta(filePath)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(meta)
 }
 
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +184,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			"resumable":   s.Resumable,
 			"annotation":  s.Annotation,
 			"tags":        s.Tags,
+			"note":        s.Note,
 			"isSubagent":  s.IsSubagent,
 		}
 	}

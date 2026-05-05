@@ -54,3 +54,10 @@ export interface Turn {
   costUSD: number;
   model: string;
 }
+
+export interface Annotation {
+  turn: number;
+  label: string;
+  note: string;
+  timestamp: string;
+}
