@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
@@ -144,6 +145,31 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 	}
 	defer ptmx.Close()
 
+	// WebSocket keepalive: ping every 30s, close if no pong within 10s
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+	done := make(chan struct{})
+
+	// Ping ticker
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	var wg sync.WaitGroup
 
 	// PTY -> WebSocket
@@ -172,6 +198,9 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 				return
 			}
 
+			// Reset deadline on any incoming message
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
 			var rm resizeMsg
 			if json.Unmarshal(msg, &rm) == nil && rm.Type == "resize" && rm.Cols > 0 && rm.Rows > 0 {
 				pty.Setsize(ptmx, &pty.Winsize{Cols: rm.Cols, Rows: rm.Rows})
@@ -185,6 +214,7 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 	}()
 
 	wg.Wait()
+	close(done)
 	if cmd.Process != nil {
 		cmd.Process.Kill()
 	}
