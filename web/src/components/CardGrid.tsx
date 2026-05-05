@@ -13,6 +13,7 @@ interface Props {
   searchQuery: string;
   sortBy: string;
   contentResults?: ContentSearchResult[] | null;
+  loading?: boolean;
 }
 
 function projectName(agent: Agent): string {
@@ -29,6 +30,7 @@ export function CardGrid({
   searchQuery,
   sortBy,
   contentResults,
+  loading,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -123,7 +125,7 @@ export function CardGrid({
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ color: 'var(--fg-3)', fontSize: 13 }}>
-          {contentResults ? 'No sessions match your search.' : 'No sessions found.'}
+          {loading ? 'Discovering agents...' : contentResults ? 'No sessions match your search.' : 'No active agents.'}
         </div>
       </div>
     );
