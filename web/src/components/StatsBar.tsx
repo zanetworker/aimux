@@ -11,7 +11,7 @@ export function StatsBar({ agents, onLaunch }: Props) {
   const idle = agents.filter(a => a.Status === 1).length;
   const waiting = agents.filter(a => a.Status === 2).length;
   const errors = agents.filter(a => a.Status === 3).length;
-  const repos = new Set(agents.map(a => a.Name)).size;
+  const repos = new Set(agents.map(a => a.Name.replace(/ #\d+$/, ''))).size;
   const totalCost = agents.reduce((sum, a) => sum + (a.EstCostUSD || 0), 0);
   const totalTokensIn = agents.reduce((sum, a) => sum + (a.TokensIn || 0), 0);
   const totalTokensOut = agents.reduce((sum, a) => sum + (a.TokensOut || 0), 0);
