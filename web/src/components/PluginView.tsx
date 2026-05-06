@@ -123,24 +123,29 @@ export function PluginView({ plugin }: Props) {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Toolbar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>{plugin.panels.length} panels</span>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '8px 12px', background: 'var(--bg-1)', borderRadius: 6,
+        border: '1px solid var(--border)',
+      }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>{plugin.panels.length} sections</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {insightError && <span style={{ fontSize: 9, color: 'var(--accent)' }}>{insightError}</span>}
+          {insightError && <span style={{ fontSize: 10, color: 'var(--accent)' }}>{insightError}</span>}
           {insights && !insightLoading && (
             <button onClick={() => setInsights(null)} style={{
-              background: 'transparent', border: '1px solid var(--border)', borderRadius: 3,
-              padding: '3px 8px', fontSize: 9, color: 'var(--fg-3)', cursor: 'pointer',
+              background: 'transparent', border: '1px solid var(--border)', borderRadius: 4,
+              padding: '4px 10px', fontSize: 10, color: 'var(--fg-2)', cursor: 'pointer',
             }}>Clear Insights</button>
           )}
           <button
             onClick={handleGenerateInsights}
             disabled={insightLoading}
             style={{
-              background: insightLoading ? 'var(--purple-dim)' : 'transparent',
+              background: insightLoading ? 'var(--purple-dim)' : 'var(--purple-dim)',
               border: '1px solid var(--purple)', borderRadius: 4,
-              padding: '4px 12px', fontSize: 10, fontWeight: 600,
+              padding: '6px 16px', fontSize: 11, fontWeight: 700,
               color: 'var(--purple)', cursor: insightLoading ? 'wait' : 'pointer',
+              letterSpacing: '0.02em',
             }}
           >
             {insightLoading ? 'Analyzing...' : insights ? 'Refresh Insights' : 'Generate Insights'}
