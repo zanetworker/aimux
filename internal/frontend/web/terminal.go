@@ -143,7 +143,16 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
 		return
 	}
-	defer ptmx.Close()
+
+	// Cleanup: kill process and close PTY to unblock all goroutines
+	cleanup := sync.OnceFunc(func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+		ptmx.Close()
+		conn.Close()
+	})
+	defer cleanup()
 
 	// WebSocket keepalive: ping every 30s, close if no pong within 10s
 	conn.SetPongHandler(func(string) error {
@@ -180,9 +189,11 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 		for {
 			n, err := ptmx.Read(buf)
 			if err != nil {
+				cleanup()
 				return
 			}
 			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+				cleanup()
 				return
 			}
 		}
@@ -195,10 +206,10 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
+				cleanup()
 				return
 			}
 
-			// Reset deadline on any incoming message
 			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 			var rm resizeMsg
@@ -208,6 +219,7 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 			}
 
 			if _, err := ptmx.Write(msg); err != nil {
+				cleanup()
 				return
 			}
 		}
@@ -215,7 +227,4 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
 
 	wg.Wait()
 	close(done)
-	if cmd.Process != nil {
-		cmd.Process.Kill()
-	}
 }
