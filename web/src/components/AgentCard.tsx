@@ -103,6 +103,14 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         }}>
           {StatusLabel[agent.Status]}
         </span>
+        <span style={{
+          padding: '1px 4px', borderRadius: 2, fontSize: 8, fontWeight: 600,
+          letterSpacing: '0.04em', fontFamily: 'var(--mono)',
+          background: agent.TMuxSession ? 'var(--teal-dim)' : 'var(--bg-2)',
+          color: agent.TMuxSession ? 'var(--teal)' : 'var(--fg-4)',
+        }}>
+          {agent.TMuxSession ? 'tmux' : 'direct'}
+        </span>
         <span style={{ fontSize: 9, color: 'var(--fg-4)', marginLeft: 'auto' }}>
           {timeSinceActivity()}
         </span>
