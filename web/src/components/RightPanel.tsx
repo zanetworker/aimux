@@ -165,24 +165,15 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               ({agent.GitBranch || 'main'})
             </span>
           </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {onToggleFullscreen && (
-              <button
-                onClick={onToggleFullscreen}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #333',
-                  color: '#888',
-                  fontSize: 10,
-                  cursor: 'pointer',
-                  padding: '2px 8px',
-                  borderRadius: 3,
-                }}
-                title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              >
-                {isFullscreen ? 'Shrink' : 'Expand'}
-              </button>
-            )}
+          <div style={{ display: 'flex', gap: '7px', alignItems: 'center' }}>
+            <button
+              onClick={onClose}
+              title="Close panel"
+              style={{
+                width: 12, height: 12, borderRadius: '50%', border: 'none',
+                background: '#ff5f57', cursor: 'pointer', padding: 0,
+              }}
+            />
             <button
               onClick={() => {
                 if (confirm('Kill this session?')) {
@@ -190,33 +181,22 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
                   onClose();
                 }
               }}
-              style={{
-                background: 'transparent',
-                border: '1px solid var(--accent)',
-                color: 'var(--accent)',
-                fontSize: 10,
-                cursor: 'pointer',
-                padding: '2px 8px',
-                borderRadius: 3,
-              }}
               title="Kill session"
-            >
-              Kill
-            </button>
-            <button
-              onClick={onClose}
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--fg-3)',
-                fontSize: '14px',
-                cursor: 'pointer',
-                padding: '2px',
+                width: 12, height: 12, borderRadius: '50%', border: 'none',
+                background: '#febc2e', cursor: 'pointer', padding: 0,
               }}
-              title="Close"
-            >
-              ✕
-            </button>
+            />
+            {onToggleFullscreen && (
+              <button
+                onClick={onToggleFullscreen}
+                title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                style={{
+                  width: 12, height: 12, borderRadius: '50%', border: 'none',
+                  background: '#28c840', cursor: 'pointer', padding: 0,
+                }}
+              />
+            )}
           </div>
         </div>
 
