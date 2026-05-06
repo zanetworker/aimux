@@ -33,6 +33,9 @@ export function PluginView({ plugin }: Props) {
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [insights, setInsights] = useState<Record<string, string> | null>(null);
+  const [insightLoading, setInsightLoading] = useState(false);
+  const [insightError, setInsightError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -54,6 +57,45 @@ export function PluginView({ plugin }: Props) {
   }
   if (!data) return null;
 
+  const handleGenerateInsights = async () => {
+    setInsightLoading(true);
+    setInsightError(null);
+    try {
+      const resp = await fetch('/api/insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: JSON.stringify(data) }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text);
+      }
+      const result = await resp.json();
+      try {
+        const parsed = JSON.parse(result.insight);
+        setInsights(parsed);
+      } catch {
+        const byLine: Record<string, string> = {};
+        const lines = result.insight.split('\n').filter((l: string) => l.trim());
+        for (const line of lines) {
+          const match = line.match(/^[*-]?\s*\**([^:*]+)\**:\s*(.+)/);
+          if (match) {
+            byLine[match[1].trim().toLowerCase().replace(/\s+/g, '-')] = match[2].trim();
+          }
+        }
+        if (Object.keys(byLine).length > 0) {
+          setInsights(byLine);
+        } else {
+          setInsights({ _summary: result.insight });
+        }
+      }
+    } catch (e: any) {
+      setInsightError(e.message);
+    } finally {
+      setInsightLoading(false);
+    }
+  };
+
   const rows: { panels: typeof plugin.panels }[] = [];
   let i = 0;
   while (i < plugin.panels.length) {
@@ -67,8 +109,52 @@ export function PluginView({ plugin }: Props) {
     }
   }
 
+  const getInsight = (panelId: string): string | undefined => {
+    if (!insights) return undefined;
+    if (insights[panelId]) return insights[panelId];
+    if (insights[panelId.replace(/-/g, '_')]) return insights[panelId.replace(/-/g, '_')];
+    const titleKey = plugin.panels.find(p => p.id === panelId)?.title?.toLowerCase().replace(/\s+/g, '-');
+    if (titleKey && insights[titleKey]) return insights[titleKey];
+    const titleKeySpace = plugin.panels.find(p => p.id === panelId)?.title?.toLowerCase();
+    if (titleKeySpace && insights[titleKeySpace]) return insights[titleKeySpace];
+    return undefined;
+  };
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: 'var(--fg-4)' }}>{plugin.panels.length} panels</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {insightError && <span style={{ fontSize: 9, color: 'var(--accent)' }}>{insightError}</span>}
+          {insights && !insightLoading && (
+            <button onClick={() => setInsights(null)} style={{
+              background: 'transparent', border: '1px solid var(--border)', borderRadius: 3,
+              padding: '3px 8px', fontSize: 9, color: 'var(--fg-3)', cursor: 'pointer',
+            }}>Clear Insights</button>
+          )}
+          <button
+            onClick={handleGenerateInsights}
+            disabled={insightLoading}
+            style={{
+              background: insightLoading ? 'var(--purple-dim)' : 'transparent',
+              border: '1px solid var(--purple)', borderRadius: 4,
+              padding: '4px 12px', fontSize: 10, fontWeight: 600,
+              color: 'var(--purple)', cursor: insightLoading ? 'wait' : 'pointer',
+            }}
+          >
+            {insightLoading ? 'Analyzing...' : insights ? 'Refresh Insights' : 'Generate Insights'}
+          </button>
+        </div>
+      </div>
+      {insights?._summary && (
+        <div style={{
+          padding: '10px 12px', background: 'var(--purple-dim)', border: '1px solid var(--purple)',
+          borderRadius: 4, fontSize: 11, color: 'var(--fg)', lineHeight: '1.6', whiteSpace: 'pre-wrap',
+        }}>
+          {insights._summary}
+        </div>
+      )}
       {rows.map((row, ri) => (
         <div key={ri} style={{ display: 'flex', gap: 16 }}>
           {row.panels.map(panel => {
@@ -82,6 +168,15 @@ export function PluginView({ plugin }: Props) {
                   {panel.description && (
                     <div style={{ fontSize: 9, color: 'var(--fg-4)', lineHeight: '1.4', marginTop: 2 }}>
                       {panel.description}
+                    </div>
+                  )}
+                  {getInsight(panel.id) && (
+                    <div style={{
+                      fontSize: 10, color: 'var(--purple)', lineHeight: '1.5', marginTop: 4,
+                      padding: '6px 8px', background: 'var(--purple-dim)', borderRadius: 3,
+                      borderLeft: '2px solid var(--purple)',
+                    }}>
+                      {getInsight(panel.id)}
                     </div>
                   )}
                 </div>

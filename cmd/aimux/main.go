@@ -130,6 +130,7 @@ func createWebServer(port int) *web.Server {
 	})
 
 	s.SetController(controller.New(cfg))
+	s.SetConfig(cfg)
 
 	allPlugins := plugin.Builtins()
 	if custom, err := plugin.ScanPlugins(plugin.DefaultPluginsDir()); err == nil {
