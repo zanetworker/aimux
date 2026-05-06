@@ -152,12 +152,30 @@ export function PluginView({ plugin }: Props) {
           </button>
         </div>
       </div>
-      {insights?._summary && (
+      {insights && Object.keys(insights).length > 0 && (
         <div style={{
-          padding: '10px 12px', background: 'var(--purple-dim)', border: '1px solid var(--purple)',
-          borderRadius: 4, fontSize: 11, color: 'var(--fg)', lineHeight: '1.6', whiteSpace: 'pre-wrap',
+          padding: '12px 16px', background: 'var(--bg-1)', border: '1px solid var(--purple)',
+          borderRadius: 6, borderLeft: '4px solid var(--purple)',
         }}>
-          {insights._summary}
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--purple)', textTransform: 'uppercase' as const, letterSpacing: '0.04em', marginBottom: 10 }}>
+            LLM Insights
+          </div>
+          {insights._summary ? (
+            <div style={{ fontSize: 12, color: 'var(--fg)', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
+              {insights._summary}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {Object.entries(insights).map(([key, value]) => (
+                <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--purple)', minWidth: 140, fontFamily: 'var(--mono)' }}>
+                    {key.replace(/-/g, ' ').replace(/_/g, ' ')}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--fg)', lineHeight: '1.5' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {rows.map((row, ri) => (
