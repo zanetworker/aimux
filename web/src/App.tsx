@@ -118,6 +118,7 @@ export default function App() {
       <StatsBar
         agents={agents}
         onLaunch={() => setShowLaunch(true)}
+        onHome={() => { setActiveTab('agents'); setSelectedId(null); setSessionAgent(null); setPanelFullscreen(false); }}
       />
       {!panelFullscreen && (
         <div style={{

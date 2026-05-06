@@ -3,9 +3,10 @@ import type { Agent } from '../types';
 interface Props {
   agents: Agent[];
   onLaunch: () => void;
+  onHome?: () => void;
 }
 
-export function StatsBar({ agents, onLaunch }: Props) {
+export function StatsBar({ agents, onLaunch, onHome }: Props) {
   const sessions = agents.length;
   const active = agents.filter(a => a.Status === 0).length;
   const idle = agents.filter(a => a.Status === 1).length;
@@ -31,7 +32,11 @@ export function StatsBar({ agents, onLaunch }: Props) {
         borderBottom: '1px solid var(--border)', flexShrink: 0,
       }}
     >
-      <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em' }}>
+      <span
+        onClick={onHome}
+        style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em', cursor: 'pointer' }}
+        title="Home"
+      >
         <span style={{ color: 'var(--accent)' }}>ai</span><span style={{ color: 'var(--fg)' }}>mux</span>
       </span>
 
