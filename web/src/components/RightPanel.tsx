@@ -165,44 +165,30 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               ({agent.GitBranch || 'main'})
             </span>
           </div>
-          <div style={{ display: 'flex', gap: '7px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {onToggleFullscreen && (
+              <button
+                onClick={onToggleFullscreen}
+                title={isFullscreen ? 'Exit fullscreen' : 'Expand to fullscreen'}
+                style={{
+                  background: 'transparent', border: '1px solid var(--border)',
+                  color: 'var(--fg-3)', fontSize: 9, fontWeight: 600,
+                  cursor: 'pointer', padding: '2px 8px', borderRadius: 3,
+                }}
+              >
+                {isFullscreen ? 'Shrink' : 'Expand'}
+              </button>
+            )}
             <button
               onClick={onClose}
               title="Close panel"
               style={{
-                width: 13, height: 13, borderRadius: '50%', border: 'none',
+                width: 14, height: 14, borderRadius: '50%', border: 'none',
                 background: '#ff5f57', cursor: 'pointer', padding: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 9, fontWeight: 800, color: '#4a0002', lineHeight: 1,
+                fontSize: 10, fontWeight: 800, color: '#4a0002', lineHeight: 1,
               }}
             >&times;</button>
-            <button
-              onClick={() => {
-                if (confirm('Kill this session?')) {
-                  fetch(`/api/agents/${agent.SessionID || String(agent.PID)}/archive`, { method: 'POST' });
-                  onClose();
-                }
-              }}
-              title="Kill session"
-              style={{
-                width: 13, height: 13, borderRadius: '50%', border: 'none',
-                background: '#febc2e', cursor: 'pointer', padding: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, fontWeight: 800, color: '#5a4100', lineHeight: 1,
-              }}
-            >&ndash;</button>
-            {onToggleFullscreen && (
-              <button
-                onClick={onToggleFullscreen}
-                title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                style={{
-                  width: 13, height: 13, borderRadius: '50%', border: 'none',
-                  background: '#28c840', cursor: 'pointer', padding: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 8, fontWeight: 800, color: '#0a4a12', lineHeight: 1,
-                }}
-              >{isFullscreen ? '\u25a0' : '\u2922'}</button>
-            )}
           </div>
         </div>
 
