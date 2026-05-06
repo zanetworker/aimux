@@ -170,10 +170,12 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               onClick={onClose}
               title="Close panel"
               style={{
-                width: 12, height: 12, borderRadius: '50%', border: 'none',
+                width: 13, height: 13, borderRadius: '50%', border: 'none',
                 background: '#ff5f57', cursor: 'pointer', padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, fontWeight: 800, color: '#4a0002', lineHeight: 1,
               }}
-            />
+            >&times;</button>
             <button
               onClick={() => {
                 if (confirm('Kill this session?')) {
@@ -183,19 +185,23 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               }}
               title="Kill session"
               style={{
-                width: 12, height: 12, borderRadius: '50%', border: 'none',
+                width: 13, height: 13, borderRadius: '50%', border: 'none',
                 background: '#febc2e', cursor: 'pointer', padding: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, fontWeight: 800, color: '#5a4100', lineHeight: 1,
               }}
-            />
+            >&ndash;</button>
             {onToggleFullscreen && (
               <button
                 onClick={onToggleFullscreen}
                 title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
                 style={{
-                  width: 12, height: 12, borderRadius: '50%', border: 'none',
+                  width: 13, height: 13, borderRadius: '50%', border: 'none',
                   background: '#28c840', cursor: 'pointer', padding: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 8, fontWeight: 800, color: '#0a4a12', lineHeight: 1,
                 }}
-              />
+              >{isFullscreen ? '\u25c0\u25b6' : '\u25b6'}</button>
             )}
           </div>
         </div>
