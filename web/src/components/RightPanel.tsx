@@ -201,7 +201,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 8, fontWeight: 800, color: '#0a4a12', lineHeight: 1,
                 }}
-              >{isFullscreen ? '\u25c0\u25b6' : '\u25b6'}</button>
+              >{isFullscreen ? '\u25a0' : '\u2922'}</button>
             )}
           </div>
         </div>
