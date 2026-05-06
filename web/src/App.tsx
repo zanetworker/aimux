@@ -121,12 +121,13 @@ export default function App() {
         onHome={() => { setActiveTab('agents'); setSelectedId(null); setSessionAgent(null); setPanelFullscreen(false); }}
       />
       {!panelFullscreen && (
-        <div style={{
-          display: 'flex', alignItems: 'center',
-          borderBottom: '1px solid var(--border)', flexShrink: 0,
-        }}>
-          {/* Tab switcher */}
-          <div style={{ display: 'flex', padding: '0 18px', gap: 0 }}>
+        <>
+          {/* Tab row */}
+          <div style={{
+            display: 'flex', padding: '0 18px', gap: 0,
+            borderBottom: activeTab !== 'agents' ? '1px solid var(--border)' : 'none',
+            flexShrink: 0,
+          }}>
             {(['agents', 'sessions', ...pluginTabs.map(p => `plugin:${p.name}`)]).map(tab => (
               <button
                 key={tab}
@@ -152,7 +153,7 @@ export default function App() {
             ))}
           </div>
 
-          {/* Show filter bar only for agents tab */}
+          {/* Filter bar on its own row for agents tab */}
           {activeTab === 'agents' && (
             <FilterBar
               agents={agents}
@@ -172,7 +173,7 @@ export default function App() {
               isSearching={isSearching}
             />
           )}
-        </div>
+        </>
       )}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {!panelFullscreen && activeTab === 'agents' && (
