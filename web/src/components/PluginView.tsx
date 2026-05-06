@@ -124,7 +124,7 @@ export function PluginView({ plugin }: Props) {
     <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 10, color: 'var(--fg-4)' }}>{plugin.panels.length} panels</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>{plugin.panels.length} panels</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {insightError && <span style={{ fontSize: 9, color: 'var(--accent)' }}>{insightError}</span>}
           {insights && !insightLoading && (
@@ -161,27 +161,28 @@ export function PluginView({ plugin }: Props) {
             const panelData = data[panel.id] as Record<string, unknown> | undefined;
             return (
               <div key={panel.id} style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--fg-3)', textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--fg)', textTransform: 'uppercase' as const, letterSpacing: '0.04em' }}>
                     {panel.title}
                   </div>
                   {panel.description && (
-                    <div style={{ fontSize: 9, color: 'var(--fg-4)', lineHeight: '1.4', marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: 'var(--fg-2)', lineHeight: '1.5', marginTop: 3 }}>
                       {panel.description}
                     </div>
                   )}
                   {getInsight(panel.id) && (
                     <div style={{
-                      fontSize: 10, color: 'var(--purple)', lineHeight: '1.5', marginTop: 4,
-                      padding: '6px 8px', background: 'var(--purple-dim)', borderRadius: 3,
-                      borderLeft: '2px solid var(--purple)',
+                      fontSize: 11, color: 'var(--fg)', lineHeight: '1.6', marginTop: 6,
+                      padding: '8px 10px', background: 'var(--purple-dim)', borderRadius: 4,
+                      borderLeft: '3px solid var(--purple)',
                     }}>
+                      <span style={{ color: 'var(--purple)', fontWeight: 600, fontSize: 9, textTransform: 'uppercase' as const, letterSpacing: '0.04em' }}>Insight: </span>
                       {getInsight(panel.id)}
                     </div>
                   )}
                 </div>
                 {!panelData ? (
-                  <div style={{ color: 'var(--fg-4)', fontSize: 11, fontStyle: 'italic' }}>No data</div>
+                  <div style={{ color: 'var(--fg-3)', fontSize: 11, fontStyle: 'italic' }}>No data</div>
                 ) : panel.type === 'metric-row' ? (
                   <MetricRow items={(panelData.items || []) as MetricItem[]} />
                 ) : panel.type === 'table' ? (
@@ -232,7 +233,7 @@ function DataTable({ columns, rows, sortable }: { columns: string[]; rows: Table
     });
   }
 
-  const rowColor = (c?: string) => c ? toColor(c) : 'var(--fg-2)';
+  const rowColor = (c?: string) => c ? toColor(c) : 'var(--fg)';
 
   const isNumericCol = (ci: number): boolean => {
     if (rows.length === 0) return false;
@@ -250,7 +251,7 @@ function DataTable({ columns, rows, sortable }: { columns: string[]; rows: Table
                 <th key={ci} onClick={() => handleSort(ci)} style={{
                   padding: '6px 10px', textAlign: align, fontSize: 9, fontWeight: 700,
                   textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
-                  color: sortCol === ci ? 'var(--fg)' : 'var(--fg-3)', cursor: sortable ? 'pointer' : 'default',
+                  color: sortCol === ci ? 'var(--fg)' : 'var(--fg-2)', cursor: sortable ? 'pointer' : 'default',
                   userSelect: 'none' as const,
                 }}>
                   {col} {sortCol === ci ? (sortDir === 'asc' ? '\u25b2' : '\u25bc') : ''}
@@ -290,7 +291,7 @@ function BarChart({ items }: { items: BarItem[] }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {items.map((item, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10 }}>
-          <span title={item.label} style={{ width: 200, minWidth: 200, textAlign: 'right' as const, color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, fontFamily: 'var(--mono)', fontSize: 9 }}>
+          <span title={item.label} style={{ width: 200, minWidth: 200, textAlign: 'right' as const, color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, fontFamily: 'var(--mono)', fontSize: 10 }}>
             {item.label}
           </span>
           <div style={{ flex: 1, display: 'flex', height: 14, borderRadius: 2, overflow: 'hidden', background: 'var(--bg-2)' }}>
@@ -299,7 +300,7 @@ function BarChart({ items }: { items: BarItem[] }) {
               <div style={{ width: `${(item.secondary / max) * 100}%`, background: 'var(--purple)' }} />
             )}
           </div>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)', minWidth: 30 }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-2)', minWidth: 30 }}>
             {item.value}{item.secondary ? `+${item.secondary}` : ''}
           </span>
         </div>
@@ -307,7 +308,7 @@ function BarChart({ items }: { items: BarItem[] }) {
       {items[0]?.legend && (
         <div style={{ display: 'flex', gap: 12, marginTop: 4, paddingLeft: 208 }}>
           {items[0].legend.map((l, i) => (
-            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--fg-4)' }}>
+            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--fg-2)' }}>
               <div style={{ width: 8, height: 8, borderRadius: 2, background: i === 0 ? 'var(--teal)' : 'var(--purple)' }} />
               {l}
             </div>
@@ -349,8 +350,8 @@ function ExpandableList({ items, expandable }: { items: ListItem[]; expandable?:
                 <span style={{ fontSize: 8, color: 'var(--fg-4)', transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>{'\u25b6'}</span>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: 'var(--fg)', fontWeight: 600 }}>{item.title}</div>
-                {item.subtitle && <div style={{ fontSize: 9, color: 'var(--fg-3)', marginTop: 1 }}>{item.subtitle}</div>}
+                <div style={{ fontSize: 12, color: 'var(--fg)', fontWeight: 600 }}>{item.title}</div>
+                {item.subtitle && <div style={{ fontSize: 10, color: 'var(--fg-2)', marginTop: 2 }}>{item.subtitle}</div>}
               </div>
               {item.tags?.map(t => {
                 const tc = tagColor(t);
@@ -360,7 +361,7 @@ function ExpandableList({ items, expandable }: { items: ListItem[]; expandable?:
               })}
             </div>
             {isExpanded && item.body && (
-              <div style={{ padding: '4px 10px 10px 28px', fontSize: 10, color: 'var(--fg-2)', lineHeight: '1.5' }}>
+              <div style={{ padding: '4px 10px 10px 28px', fontSize: 11, color: 'var(--fg)', lineHeight: '1.6' }}>
                 {item.body}
               </div>
             )}
@@ -368,7 +369,7 @@ function ExpandableList({ items, expandable }: { items: ListItem[]; expandable?:
         );
       })}
       {items.length === 0 && (
-        <div style={{ color: 'var(--fg-4)', fontSize: 11, fontStyle: 'italic', padding: '8px 10px' }}>None</div>
+        <div style={{ color: 'var(--fg-3)', fontSize: 11, fontStyle: 'italic', padding: '8px 10px' }}>None</div>
       )}
     </div>
   );
