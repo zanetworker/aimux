@@ -10,6 +10,7 @@ import (
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/insight"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/trace"
 )
@@ -454,4 +455,44 @@ func (s *Server) handlePluginData(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Data   json.RawMessage `json:"data"`
+		Prompt string          `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	model := s.cfg.Sessions.TitleModel
+	if model == "" {
+		model = "flash"
+	}
+
+	cfg := insight.Config{
+		Model:  model,
+		APIKey: s.cfg.Sessions.APIKey,
+	}
+
+	prompt := req.Prompt
+	if prompt == "" {
+		prompt = "You are analyzing a skill analytics dashboard for an AI coding agent system. " +
+			"The data below shows skill invocations, correction rates, learning funnel metrics, and failure patterns. " +
+			"For each section with data, provide 1-2 sentences of actionable insight. " +
+			"Focus on: which skills need attention, what patterns indicate, and specific next steps. " +
+			"Format as a JSON object where keys are section names and values are insight strings.\n\n" +
+			"Dashboard data:\n" + string(req.Data)
+	}
+
+	result, err := insight.Generate(cfg, prompt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"insight": result})
 }

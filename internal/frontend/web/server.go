@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -25,6 +26,7 @@ type Server struct {
 	killFn           func(pid int, tmuxSession string) error
 	ctrl             *controller.Controller
 	pluginExec       *plugin.Executor
+	cfg              config.Config
 
 	// Discovery cache to avoid redundant ps/tmux scans
 	cacheMu     sync.Mutex
@@ -77,6 +79,10 @@ func (s *Server) SetPluginExecutor(exec *plugin.Executor) {
 	s.pluginExec = exec
 }
 
+func (s *Server) SetConfig(cfg config.Config) {
+	s.cfg = cfg
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -108,6 +114,7 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("GET /api/plugins", s.handlePlugins)
 	mux.HandleFunc("GET /api/plugins/{name}/data", s.handlePluginData)
+	mux.HandleFunc("POST /api/insight", s.handleInsight)
 
 	sub, err := fs.Sub(staticFiles, "dist")
 	if err != nil {
