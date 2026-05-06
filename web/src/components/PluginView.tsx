@@ -234,31 +234,48 @@ function DataTable({ columns, rows, sortable }: { columns: string[]; rows: Table
 
   const rowColor = (c?: string) => c ? toColor(c) : 'var(--fg-2)';
 
+  const isNumericCol = (ci: number): boolean => {
+    if (rows.length === 0) return false;
+    return rows.some(r => typeof r.cells[ci] === 'number');
+  };
+
   return (
     <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 4 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
         <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-0)', zIndex: 1 }}>
           <tr>
-            {columns.map((col, ci) => (
-              <th key={ci} onClick={() => handleSort(ci)} style={{
-                padding: '6px 10px', textAlign: ci > 0 ? 'right' as const : 'left' as const, fontSize: 9, fontWeight: 700,
-                textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
-                color: sortCol === ci ? 'var(--fg)' : 'var(--fg-3)', cursor: sortable ? 'pointer' : 'default',
-                userSelect: 'none' as const,
-              }}>
-                {col} {sortCol === ci ? (sortDir === 'asc' ? '\u25b2' : '\u25bc') : ''}
-              </th>
-            ))}
+            {columns.map((col, ci) => {
+              const align = isNumericCol(ci) ? 'right' as const : 'left' as const;
+              return (
+                <th key={ci} onClick={() => handleSort(ci)} style={{
+                  padding: '6px 10px', textAlign: align, fontSize: 9, fontWeight: 700,
+                  textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '1px solid var(--border)',
+                  color: sortCol === ci ? 'var(--fg)' : 'var(--fg-3)', cursor: sortable ? 'pointer' : 'default',
+                  userSelect: 'none' as const,
+                }}>
+                  {col} {sortCol === ci ? (sortDir === 'asc' ? '\u25b2' : '\u25bc') : ''}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
           {sorted.map((row, ri) => (
             <tr key={ri} onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-1)')} onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}>
-              {row.cells.map((cell, ci) => (
-                <td key={ci} style={{ padding: '6px 10px', textAlign: ci > 0 ? 'right' as const : 'left' as const, color: ci === 0 ? 'var(--fg)' : rowColor(row.color), fontFamily: ci > 0 ? 'var(--mono)' : 'inherit', borderBottom: '1px solid var(--bg-2)' }}>
-                  {typeof cell === 'number' && columns[ci]?.toLowerCase().includes('rate') ? `${cell}%` : cell}
-                </td>
-              ))}
+              {row.cells.map((cell, ci) => {
+                const numeric = isNumericCol(ci);
+                return (
+                  <td key={ci} style={{
+                    padding: '6px 10px',
+                    textAlign: numeric ? 'right' as const : 'left' as const,
+                    color: ci === 0 ? 'var(--fg)' : rowColor(row.color),
+                    fontFamily: numeric ? 'var(--mono)' : 'inherit',
+                    borderBottom: '1px solid var(--bg-2)',
+                  }}>
+                    {typeof cell === 'number' && columns[ci]?.toLowerCase().includes('rate') ? `${cell}%` : cell}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -304,12 +321,26 @@ function BarChart({ items }: { items: BarItem[] }) {
 function ExpandableList({ items, expandable }: { items: ListItem[]; expandable?: boolean }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
+  const tagColor = (tag: string) => {
+    if (tag === 'needs review' || tag === 'action needed') return { bg: 'var(--accent-dim)', fg: 'var(--accent)', border: 'var(--accent)' };
+    if (tag === 'low sample' || tag === 'monitor') return { bg: 'var(--orange-dim)', fg: 'var(--orange)', border: 'var(--orange)' };
+    if (tag === 'approved') return { bg: 'var(--green-dim)', fg: 'var(--green)', border: 'var(--green)' };
+    if (tag === 'pending') return { bg: 'var(--orange-dim)', fg: 'var(--orange)', border: 'var(--orange)' };
+    return { bg: 'var(--accent-dim)', fg: 'var(--accent)', border: 'var(--border)' };
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       {items.map((item, i) => {
         const isExpanded = expanded.has(i);
+        const hasTag = item.tags && item.tags.length > 0;
+        const borderColor = hasTag ? tagColor(item.tags![0]).border : 'var(--border)';
         return (
-          <div key={i} style={{ background: 'var(--bg-1)', borderRadius: 4, border: '1px solid var(--border)' }}>
+          <div key={i} style={{
+            background: 'var(--bg-1)', borderRadius: 4,
+            border: '1px solid var(--border)',
+            borderLeft: `3px solid ${borderColor}`,
+          }}>
             <div
               onClick={() => expandable && item.body ? setExpanded(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; }) : undefined}
               style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, cursor: expandable && item.body ? 'pointer' : 'default' }}
@@ -318,15 +349,18 @@ function ExpandableList({ items, expandable }: { items: ListItem[]; expandable?:
                 <span style={{ fontSize: 8, color: 'var(--fg-4)', transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>{'\u25b6'}</span>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: 'var(--fg)', fontWeight: 500 }}>{item.title}</div>
-                {item.subtitle && <div style={{ fontSize: 9, color: 'var(--fg-3)' }}>{item.subtitle}</div>}
+                <div style={{ fontSize: 11, color: 'var(--fg)', fontWeight: 600 }}>{item.title}</div>
+                {item.subtitle && <div style={{ fontSize: 9, color: 'var(--fg-3)', marginTop: 1 }}>{item.subtitle}</div>}
               </div>
-              {item.tags?.map(t => (
-                <span key={t} style={{ fontSize: 8, padding: '1px 4px', borderRadius: 2, background: 'var(--accent-dim)', color: 'var(--accent)' }}>{t}</span>
-              ))}
+              {item.tags?.map(t => {
+                const tc = tagColor(t);
+                return (
+                  <span key={t} style={{ fontSize: 8, fontWeight: 600, padding: '2px 6px', borderRadius: 3, background: tc.bg, color: tc.fg }}>{t}</span>
+                );
+              })}
             </div>
             {isExpanded && item.body && (
-              <div style={{ padding: '0 10px 10px 28px', fontSize: 10, color: 'var(--fg-2)', lineHeight: '1.5' }}>
+              <div style={{ padding: '4px 10px 10px 28px', fontSize: 10, color: 'var(--fg-2)', lineHeight: '1.5' }}>
                 {item.body}
               </div>
             )}
