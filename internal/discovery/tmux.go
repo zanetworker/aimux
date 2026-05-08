@@ -62,11 +62,18 @@ func MatchTmuxSession(sessions []TmuxSession, workingDir string) string {
 		return ""
 	}
 	project := filepath.Base(workingDir)
-	target := "claude-" + project
+	targets := []string{
+		"claude-" + project,
+		"aimux-claude-" + project,
+		"aimux-codex-" + project,
+		"aimux-gemini-" + project,
+	}
 
 	for _, s := range sessions {
-		if s.Name == target {
-			return s.Name
+		for _, t := range targets {
+			if s.Name == t {
+				return s.Name
+			}
 		}
 	}
 	return ""

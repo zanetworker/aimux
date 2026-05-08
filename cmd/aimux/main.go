@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/internal/spawn"
 )
@@ -75,7 +78,7 @@ func createWebServer(port int) *web.Server {
 
 	s := web.NewServer(port)
 	s.SetDiscoverFunc(disco.Discover)
-	s.SetLaunchFunc(func(providerName, dir, model, mode string) error {
+	s.SetLaunchFunc(func(providerName, dir, model, mode, prompt string) error {
 		// Find the provider to build the spawn command
 		p := disco.ProviderFor(providerName)
 		if p == nil {
@@ -94,6 +97,18 @@ func createWebServer(port int) *web.Server {
 		cmd := sp.SpawnCommand(dir, model, mode)
 		if cmd == nil {
 			return fmt.Errorf("failed to build spawn command for %s", providerName)
+		}
+
+		if prompt != "" {
+			// Claude takes prompt as positional arg, Codex uses --prompt, Gemini uses positional
+			switch providerName {
+			case "claude", "gemini":
+				cmd.Args = append(cmd.Args, prompt)
+			case "codex":
+				cmd.Args = append(cmd.Args, "--prompt", prompt)
+			default:
+				cmd.Args = append(cmd.Args, prompt)
+			}
 		}
 
 		shell := cfg.ResolveShell()
@@ -138,6 +153,68 @@ func createWebServer(port int) *web.Server {
 	}
 	if len(allPlugins) > 0 {
 		s.SetPluginExecutor(plugin.NewExecutor(allPlugins))
+	}
+
+	// Wire recent directories from all providers
+	s.SetRecentDirsFunc(func(max int) []web.RecentDirInfo {
+		type dirEntry struct {
+			path     string
+			lastUsed time.Time
+		}
+		byPath := make(map[string]*dirEntry)
+		providers := []provider.Provider{&provider.Claude{}, &provider.Codex{}, &provider.Gemini{}}
+		for _, p := range providers {
+			for _, rd := range p.RecentDirs(max) {
+				if existing, ok := byPath[rd.Path]; ok {
+					if rd.LastUsed.After(existing.lastUsed) {
+						existing.lastUsed = rd.LastUsed
+					}
+				} else {
+					byPath[rd.Path] = &dirEntry{path: rd.Path, lastUsed: rd.LastUsed}
+				}
+			}
+		}
+		sorted := make([]*dirEntry, 0, len(byPath))
+		for _, de := range byPath {
+			sorted = append(sorted, de)
+		}
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].lastUsed.After(sorted[j].lastUsed) })
+		if len(sorted) > max {
+			sorted = sorted[:max]
+		}
+		var result []web.RecentDirInfo
+		for _, de := range sorted {
+			display := filepath.Base(de.path)
+			if display == "" || display == "." {
+				display = de.path
+			}
+			age := ""
+			if !de.lastUsed.IsZero() {
+				d := time.Since(de.lastUsed)
+				switch {
+				case d < time.Minute:
+					age = fmt.Sprintf("%ds ago", int(d.Seconds()))
+				case d < time.Hour:
+					age = fmt.Sprintf("%dm ago", int(d.Minutes()))
+				case d < 24*time.Hour:
+					age = fmt.Sprintf("%dh ago", int(d.Hours()))
+				default:
+					age = fmt.Sprintf("%dd ago", int(d.Hours()/24))
+				}
+			}
+			result = append(result, web.RecentDirInfo{Path: de.path, Display: display, Age: age})
+		}
+		return result
+	})
+
+	// Best-effort tasks provider initialization
+	taskProvider, taskErr := tasks.NewProvider(cfg.Tasks.Backend, cfg.Tasks.MCPEndpoint)
+	if taskErr != nil {
+		// Log but don't fail — tasks panel will just be unavailable
+		debuglog.Log("tasks: %v (tasks panel will be unavailable)", taskErr)
+	}
+	if taskProvider != nil {
+		s.SetTaskProvider(taskProvider)
 	}
 
 	return s

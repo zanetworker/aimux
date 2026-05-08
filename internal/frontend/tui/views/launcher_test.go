@@ -275,3 +275,81 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+func TestLauncherQuickDirs(t *testing.T) {
+	quickDirs := []string{"/tmp/project-a", "/tmp/project-b"}
+	recent := []RecentDirEntry{{Path: "/tmp/other", Display: "other"}}
+	opts := testProviderOpts()
+	lv := NewLauncherView(recent, opts, false)
+	lv.SetQuickDirs(quickDirs)
+	lv.SetSize(80, 24)
+
+	// Advance past provider
+	sendEnter(lv)
+
+	// Should be on Quick tab by default when quickDirs set
+	if !lv.quickMode {
+		t.Error("expected quickMode to be true when quick dirs are set")
+	}
+
+	// View should contain Quick tab
+	view := lv.View()
+	if !containsStr(view, "Quick") {
+		t.Error("expected Quick tab in view")
+	}
+	if !containsStr(view, "project-a") {
+		t.Error("expected project-a in view")
+	}
+
+	// Navigate within Quick dirs
+	sendKey(lv, "j")
+	if lv.quickCursor != 1 {
+		t.Errorf("quickCursor = %d, want 1", lv.quickCursor)
+	}
+
+	// Select second quick dir
+	sendEnter(lv)
+	if lv.state != statePickOptions {
+		t.Errorf("state = %d, want statePickOptions", lv.state)
+	}
+
+	// Verify selected directory is the second quick dir
+	if lv.selectedDir() != "/tmp/project-b" {
+		t.Errorf("selectedDir = %q, want /tmp/project-b", lv.selectedDir())
+	}
+}
+
+func TestLauncherThreeTabCycling(t *testing.T) {
+	quickDirs := []string{"/tmp/quick-project"}
+	recent := []RecentDirEntry{{Path: "/tmp/recent-project", Display: "recent-project"}}
+	opts := testProviderOpts()
+	lv := NewLauncherView(recent, opts, false)
+	lv.SetQuickDirs(quickDirs)
+	lv.SetSize(80, 24)
+
+	// Advance past provider
+	sendEnter(lv)
+
+	// Should start on Quick tab
+	if !lv.quickMode || lv.browseMode {
+		t.Error("expected Quick mode initially")
+	}
+
+	// Tab to Recent
+	sendTab(lv)
+	if lv.quickMode || lv.browseMode {
+		t.Error("expected Recent mode after first Tab")
+	}
+
+	// Tab to Browse
+	sendTab(lv)
+	if lv.quickMode || !lv.browseMode {
+		t.Error("expected Browse mode after second Tab")
+	}
+
+	// Tab back to Quick
+	sendTab(lv)
+	if !lv.quickMode || lv.browseMode {
+		t.Error("expected Quick mode after third Tab")
+	}
+}

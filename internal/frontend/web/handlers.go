@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,14 +14,18 @@ import (
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/insight"
 	"github.com/zanetworker/aimux/internal/plugin"
+	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
 type launchRequest struct {
-	Provider string `json:"provider"`
-	Dir      string `json:"dir"`
-	Model    string `json:"model"`
-	Mode     string `json:"mode"`
+	Provider   string `json:"provider"`
+	Dir        string `json:"dir"`
+	Model      string `json:"model"`
+	Mode       string `json:"mode"`
+	TaskID     string `json:"task_id,omitempty"`
+	TaskListID string `json:"task_list_id,omitempty"`
+	UserPrompt string `json:"user_prompt,omitempty"`
 }
 
 func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +38,53 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "launch not configured", http.StatusServiceUnavailable)
 		return
 	}
-	if err := s.launchFn(req.Provider, req.Dir, req.Model, req.Mode); err != nil {
+	if req.Dir == "" {
+		http.Error(w, "directory is required", http.StatusBadRequest)
+		return
+	}
+	if info, err := os.Stat(req.Dir); err != nil || !info.IsDir() {
+		http.Error(w, fmt.Sprintf("directory does not exist: %s", req.Dir), http.StatusBadRequest)
+		return
+	}
+
+	// Assemble prompt: direct user prompt, or from task context
+	prompt := req.UserPrompt
+	if req.TaskID != "" && s.taskProvider != nil {
+		taskList, err := s.taskProvider.ListTasks(req.TaskListID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to fetch task: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Find the task by ID
+		var task *tasks.Task
+		for i := range taskList {
+			if taskList[i].ID == req.TaskID {
+				task = &taskList[i]
+				break
+			}
+		}
+		if task == nil {
+			http.Error(w, "task not found", http.StatusNotFound)
+			return
+		}
+
+		// Render the prompt using the task template
+		template := s.cfg.Tasks.PromptTemplate
+		if template == "" {
+			template = "Task: {title}\n\nNotes:\n{notes}\n\n{user_prompt}"
+		}
+		prompt = tasks.RenderPrompt(template, task.Title, task.Notes, req.UserPrompt)
+
+		// Add a started note to the task
+		note := "Session started by aimux at " + time.Now().Format(time.RFC3339)
+		if err := s.taskProvider.AddNote(req.TaskListID, req.TaskID, note); err != nil {
+			// Log but don't fail — note is nice-to-have
+			fmt.Fprintf(os.Stderr, "Warning: failed to add note to task %s: %v\n", req.TaskID, err)
+		}
+	}
+
+	if err := s.launchFn(req.Provider, req.Dir, req.Model, req.Mode, prompt); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -495,4 +547,68 @@ func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"insight": result})
+}
+
+func (s *Server) handleBrowseDir(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			http.Error(w, "unable to determine home directory", http.StatusInternalServerError)
+			return
+		}
+		path = homeDir
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	type dirEntry struct {
+		Name  string `json:"name"`
+		IsDir bool   `json:"isDir"`
+	}
+
+	var result []dirEntry
+	for _, e := range entries {
+		// Filter hidden files
+		if len(e.Name()) > 0 && e.Name()[0] == '.' {
+			continue
+		}
+		result = append(result, dirEntry{
+			Name:  e.Name(),
+			IsDir: e.IsDir(),
+		})
+	}
+
+	// Sort: directories first, then alphabetically
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IsDir != result[j].IsDir {
+			return result[i].IsDir
+		}
+		return result[i].Name < result[j].Name
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"path":    path,
+		"entries": result,
+	})
+}
+
+func (s *Server) handleRecentDirs(w http.ResponseWriter, r *http.Request) {
+	if s.recentDirsFn == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"directories": []RecentDirInfo{}})
+		return
+	}
+
+	dirs := s.recentDirsFn(20)
+	if dirs == nil {
+		dirs = []RecentDirInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"directories": dirs})
 }

@@ -13,7 +13,7 @@ import (
 func TestLaunchHandler(t *testing.T) {
 	s := NewServer(0)
 	var launched bool
-	s.SetLaunchFunc(func(provider, dir, model, mode string) error {
+	s.SetLaunchFunc(func(provider, dir, model, mode, prompt string) error {
 		launched = true
 		if provider != "claude" {
 			t.Errorf("expected provider claude, got %s", provider)
@@ -202,5 +202,79 @@ func TestSessionMetaHandler(t *testing.T) {
 	}
 	if meta.Note != "Great session" {
 		t.Errorf("expected 'Great session', got %s", meta.Note)
+	}
+}
+
+func TestHandleBrowseDirectory(t *testing.T) {
+	// Create temp dir with subdirectory, file, and hidden dir
+	tmpDir := t.TempDir()
+	os.Mkdir(filepath.Join(tmpDir, "subdir"), 0o755)
+	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("test"), 0o644)
+	os.Mkdir(filepath.Join(tmpDir, ".hidden"), 0o755)
+
+	s := NewServer(0)
+	go s.Start()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/directories/browse?path=" + tmpDir)
+	if err != nil {
+		t.Fatalf("GET /api/directories/browse failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Path    string `json:"path"`
+		Entries []struct {
+			Name  string `json:"name"`
+			IsDir bool   `json:"isDir"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Verify path
+	if payload.Path != tmpDir {
+		t.Errorf("expected path %s, got %s", tmpDir, payload.Path)
+	}
+
+	// Verify hidden dir is excluded
+	for _, e := range payload.Entries {
+		if e.Name == ".hidden" {
+			t.Error("hidden directory should be excluded")
+		}
+	}
+
+	// Verify subdirectory appears with isDir: true
+	foundSubdir := false
+	for _, e := range payload.Entries {
+		if e.Name == "subdir" {
+			foundSubdir = true
+			if !e.IsDir {
+				t.Error("subdir should have isDir: true")
+			}
+		}
+	}
+	if !foundSubdir {
+		t.Error("subdir should be in the results")
+	}
+
+	// Verify file appears
+	foundFile := false
+	for _, e := range payload.Entries {
+		if e.Name == "file.txt" {
+			foundFile = true
+			if e.IsDir {
+				t.Error("file.txt should have isDir: false")
+			}
+		}
+	}
+	if !foundFile {
+		t.Error("file.txt should be in the results")
 	}
 }

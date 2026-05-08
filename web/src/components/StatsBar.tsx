@@ -4,9 +4,12 @@ interface Props {
   agents: Agent[];
   onLaunch: () => void;
   onHome?: () => void;
+  onToggleTasks?: () => void;
+  taskCount?: number;
+  tasksOpen?: boolean;
 }
 
-export function StatsBar({ agents, onLaunch, onHome }: Props) {
+export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, tasksOpen }: Props) {
   const sessions = agents.length;
   const active = agents.filter(a => a.Status === 0).length;
   const idle = agents.filter(a => a.Status === 1).length;
@@ -56,17 +59,33 @@ export function StatsBar({ agents, onLaunch, onHome }: Props) {
         <StatChip value={`$${totalCost.toFixed(2)}`} label="total cost" color="var(--green)" />
       </div>
 
-      <button
-        onClick={onLaunch}
-        aria-label="Launch new agent session"
-        style={{
-          padding: '5px 14px', borderRadius: 4, border: '1px solid var(--accent)',
-          background: 'transparent', color: 'var(--accent)', fontSize: 11,
-          fontWeight: 600, cursor: 'pointer', letterSpacing: '0.02em',
-        }}
-      >
-        + Launch
-      </button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {onToggleTasks && (
+          <button
+            onClick={onToggleTasks}
+            style={{
+              padding: '5px 14px', borderRadius: 4,
+              border: tasksOpen ? '1px solid var(--accent)' : '1px solid var(--border)',
+              background: tasksOpen ? 'var(--accent-dim)' : 'transparent',
+              color: tasksOpen ? 'var(--accent)' : 'var(--fg-3)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Tasks{taskCount ? ` (${taskCount})` : ''}
+          </button>
+        )}
+        <button
+          onClick={onLaunch}
+          aria-label="Launch new agent session"
+          style={{
+            padding: '5px 14px', borderRadius: 4, border: '1px solid var(--accent)',
+            background: 'transparent', color: 'var(--accent)', fontSize: 11,
+            fontWeight: 600, cursor: 'pointer', letterSpacing: '0.02em',
+          }}
+        >
+          + Launch
+        </button>
+      </div>
     </header>
   );
 }

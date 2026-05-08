@@ -53,7 +53,9 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error
 	// so shell functions take precedence over the raw binary.
 	var cmdParts []string
 	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
-	cmdParts = append(cmdParts, cmd.Args[1:]...)
+	for _, arg := range cmd.Args[1:] {
+		cmdParts = append(cmdParts, shellQuote(arg))
+	}
 	innerCmd := strings.Join(cmdParts, " ")
 	shellCmd := config.ShellRCPrefix(shell) + envPrefix + innerCmd
 

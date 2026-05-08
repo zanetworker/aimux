@@ -44,7 +44,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
-	servePTY(conn, cmd)
+	servePTY(conn, cmd, true)
 }
 
 func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +77,8 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 	// Fall back to query params for history sessions not in running agents
 	if providerName == "" {
 		providerName = r.URL.Query().Get("provider")
+	}
+	if workingDir == "" {
 		workingDir = r.URL.Query().Get("dir")
 	}
 
@@ -134,19 +136,22 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	servePTY(conn, cmd)
+	servePTY(conn, cmd, false)
 }
 
-func servePTY(conn *websocket.Conn, cmd *exec.Cmd) {
+func servePTY(conn *websocket.Conn, cmd *exec.Cmd, killOnClose bool) {
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
 		return
 	}
 
-	// Cleanup: kill process and close PTY to unblock all goroutines
+	// Cleanup: close PTY and WebSocket to unblock all goroutines.
+	// Only kill the process for tmux attach (killOnClose=true) where the
+	// process is just a viewer. For resume sessions the PTY close sends
+	// SIGHUP so the agent can save state and exit gracefully.
 	cleanup := sync.OnceFunc(func() {
-		if cmd.Process != nil {
+		if killOnClose && cmd.Process != nil {
 			cmd.Process.Kill()
 		}
 		ptmx.Close()

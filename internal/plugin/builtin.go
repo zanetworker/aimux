@@ -3,8 +3,8 @@ package plugin
 var builtins = []Plugin{
 	{
 		Name:      "skill-dashboard",
-		Tab:       "Skills",
-		Command:   "python3 ~/.claude/scripts/skill-dashboard.py --format json",
+		Tab:       "Skill Dashboard",
+		Command:   "python3.11 ~/.claude/scripts/skill-dashboard.py --format json",
 		CacheSecs: 30,
 		AutoDetect: []string{
 			"~/.claude/skill-usage.jsonl",

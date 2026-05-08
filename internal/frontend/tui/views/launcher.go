@@ -98,8 +98,11 @@ type LauncherView struct {
 	// Directory selection
 	recentDirs  []RecentDirEntry
 	dirCursor   int
-	browseMode  bool   // false=recent, true=browse
-	browsePath  string // current browse directory
+	quickDirs   []string // configured quick launch directories
+	quickCursor int      // cursor position in quickDirs
+	quickMode   bool     // true when on Quick tab
+	browseMode  bool     // true when on Browse tab (false = Recent or Quick)
+	browsePath  string   // current browse directory
 	browseItems []browseEntry
 	filterText  string
 
@@ -193,6 +196,16 @@ func (l *LauncherView) SetSize(w, h int) {
 	l.height = h
 }
 
+// SetQuickDirs sets the quick launch directories.
+func (l *LauncherView) SetQuickDirs(dirs []string) {
+	l.quickDirs = dirs
+	// Default to Quick tab if we have quick dirs
+	if len(dirs) > 0 {
+		l.quickMode = true
+		l.browseMode = false
+	}
+}
+
 // Update handles key messages and returns a tea.Cmd if the launcher emits
 // a LaunchMsg or LaunchCancelMsg.
 func (l *LauncherView) Update(msg tea.Msg) tea.Cmd {
@@ -249,28 +262,66 @@ func (l *LauncherView) updateProvider(key string) tea.Cmd {
 func (l *LauncherView) updateDirectory(key string) tea.Cmd {
 	switch key {
 	case "tab":
-		l.browseMode = !l.browseMode
-		l.dirCursor = 0
-		l.filterText = ""
-		if l.browseMode {
-			l.loadBrowseDir()
+		// Cycle: Quick → Recent → Browse → Quick
+		if len(l.quickDirs) > 0 {
+			// Three-tab mode
+			if l.quickMode {
+				// Quick → Recent
+				l.quickMode = false
+				l.browseMode = false
+			} else if !l.browseMode {
+				// Recent → Browse
+				l.browseMode = true
+				l.loadBrowseDir()
+			} else {
+				// Browse → Quick
+				l.browseMode = false
+				l.quickMode = true
+			}
+		} else {
+			// Two-tab mode (no Quick dirs)
+			l.browseMode = !l.browseMode
+			if l.browseMode {
+				l.loadBrowseDir()
+			}
 		}
+		l.dirCursor = 0
+		l.quickCursor = 0
+		l.filterText = ""
 	case "j", "down":
-		max := l.dirListLen() - 1
-		if l.dirCursor < max {
-			l.dirCursor++
+		if l.quickMode {
+			if l.quickCursor < len(l.quickDirs)-1 {
+				l.quickCursor++
+			}
+		} else {
+			max := l.dirListLen() - 1
+			if l.dirCursor < max {
+				l.dirCursor++
+			}
 		}
 	case "k", "up":
-		if l.dirCursor > 0 {
-			l.dirCursor--
+		if l.quickMode {
+			if l.quickCursor > 0 {
+				l.quickCursor--
+			}
+		} else {
+			if l.dirCursor > 0 {
+				l.dirCursor--
+			}
 		}
 	case "enter":
-			if l.browseMode {
+		if l.quickMode {
+			// Quick mode: select directory and advance
+			if l.quickCursor < len(l.quickDirs) {
+				l.advanceFromDir()
+			}
+		} else if l.browseMode {
 			return l.handleBrowseEnter()
-		}
-		// Recent mode: select directory and advance
-		if l.dirCursor < len(l.filteredRecent()) {
-			l.advanceFromDir()
+		} else {
+			// Recent mode: select directory and advance
+			if l.dirCursor < len(l.filteredRecent()) {
+				l.advanceFromDir()
+			}
 		}
 	case "s":
 		// Select the current browse directory as the project dir
@@ -478,6 +529,12 @@ func (l *LauncherView) emitLaunch() tea.Cmd {
 }
 
 func (l *LauncherView) selectedDir() string {
+	if l.quickMode {
+		if l.quickCursor < len(l.quickDirs) {
+			return l.quickDirs[l.quickCursor]
+		}
+		return ""
+	}
 	if l.browseMode {
 		return l.browsePath
 	}
@@ -585,18 +642,36 @@ func (l *LauncherView) viewDirectory() string {
 	b.WriteString(launcherLabelStyle.Render(l.providers[l.providerCursor]))
 	b.WriteString("\n\n")
 
-	// Tabs
-	recentTab := launcherInactiveTabStyle.Render("Recent")
-	browseTab := launcherInactiveTabStyle.Render("Browse")
-	if !l.browseMode {
-		recentTab = launcherActiveTabStyle.Render("Recent")
+	// Tabs (Quick, Recent, Browse or just Recent, Browse)
+	if len(l.quickDirs) > 0 {
+		// Three-tab mode
+		quickTab := launcherInactiveTabStyle.Render("Quick")
+		recentTab := launcherInactiveTabStyle.Render("Recent")
+		browseTab := launcherInactiveTabStyle.Render("Browse")
+		if l.quickMode {
+			quickTab = launcherActiveTabStyle.Render("Quick")
+		} else if !l.browseMode {
+			recentTab = launcherActiveTabStyle.Render("Recent")
+		} else {
+			browseTab = launcherActiveTabStyle.Render("Browse")
+		}
+		b.WriteString(launcherLabelStyle.Render("Directory: ") + quickTab + " " + recentTab + " " + browseTab)
 	} else {
-		browseTab = launcherActiveTabStyle.Render("Browse")
+		// Two-tab mode (no Quick dirs)
+		recentTab := launcherInactiveTabStyle.Render("Recent")
+		browseTab := launcherInactiveTabStyle.Render("Browse")
+		if !l.browseMode {
+			recentTab = launcherActiveTabStyle.Render("Recent")
+		} else {
+			browseTab = launcherActiveTabStyle.Render("Browse")
+		}
+		b.WriteString(launcherLabelStyle.Render("Directory: ") + recentTab + " " + browseTab)
 	}
-	b.WriteString(launcherLabelStyle.Render("Directory: ") + recentTab + " " + browseTab)
 	b.WriteString("\n\n")
 
-	if l.browseMode {
+	if l.quickMode {
+		b.WriteString(l.viewQuick())
+	} else if l.browseMode {
 		b.WriteString(l.viewBrowse())
 	} else {
 		b.WriteString(l.viewRecent())
@@ -608,11 +683,44 @@ func (l *LauncherView) viewDirectory() string {
 		b.WriteString("\n")
 	}
 
-	hints := "j/k:select  Enter:pick  Tab:browse  Esc:cancel"
+	hints := "j/k:select  Enter:pick  Tab:next  Esc:cancel"
 	if l.browseMode {
-		hints = "j/k:nav  Enter:open  .:select  Backspace:up  Tab:recent  Esc:cancel"
+		hints = "j/k:nav  Enter:open  .:select  Backspace:up  Tab:next  Esc:cancel"
 	}
 	b.WriteString(launcherHintStyle.Render(hints))
+	return b.String()
+}
+
+func (l *LauncherView) viewQuick() string {
+	var b strings.Builder
+
+	if len(l.quickDirs) == 0 {
+		b.WriteString(launcherDimStyle.Render("  No quick launch directories configured.\n"))
+		b.WriteString(launcherDimStyle.Render("  Press Tab to browse recent.\n"))
+		return b.String()
+	}
+
+	for i, dir := range l.quickDirs {
+		cursor := "  "
+		style := launcherOptionStyle
+		if i == l.quickCursor {
+			cursor = "▸ "
+			style = launcherSelectedStyle
+		}
+
+		// Extract basename for display
+		basename := filepath.Base(dir)
+		// Truncate full path if too long
+		displayPath := dir
+		maxPathLen := 50
+		if len(displayPath) > maxPathLen {
+			displayPath = "..." + displayPath[len(displayPath)-(maxPathLen-3):]
+		}
+
+		line := style.Render(basename)
+		line += "  " + launcherDimStyle.Render(displayPath)
+		b.WriteString(cursor + line + "\n")
+	}
 	return b.String()
 }
 

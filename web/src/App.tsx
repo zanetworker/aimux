@@ -9,6 +9,8 @@ import { SessionsTable } from './components/SessionsTable';
 import type { HistorySession } from './components/SessionsTable';
 import { LaunchDialog } from './components/LaunchDialog';
 import { PluginView } from './components/PluginView';
+import TasksPanel from './components/TasksPanel';
+import { TaskLaunchDialog } from './components/TaskLaunchDialog';
 import './styles/theme.css';
 
 export interface ContentSearchResult {
@@ -34,6 +36,10 @@ export default function App() {
   const [sessionAgent, setSessionAgent] = useState<Agent | null>(null);
   const [sessionCount, setSessionCount] = useState<number | null>(null);
   const [pluginTabs, setPluginTabs] = useState<{ name: string; tab: string; panels: { id: string; type: 'metric-row' | 'table' | 'bar-chart' | 'list'; title: string; sortable?: boolean; expandable?: boolean; width?: string }[] }[]>([]);
+  const [showTasks, setShowTasks] = useState(false);
+  const [taskLaunchTarget, setTaskLaunchTarget] = useState<any | null>(null);
+  const [pendingTaskCount, setPendingTaskCount] = useState<number>(0);
+  const [pendingLaunch, setPendingLaunch] = useState<{ provider: string; dir: string; existingPIDs: Set<number> } | null>(null);
 
   useEffect(() => {
     if (activeTab !== 'sessions' && sessionCount !== null) return;
@@ -50,6 +56,45 @@ export default function App() {
       .then(d => { if (d?.plugins?.length) setPluginTabs(d.plugins); })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetch('/api/tasks/lists')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.lists?.length) {
+          const firstListId = d.lists[0].id;
+          fetch(`/api/tasks/lists/${firstListId}/tasks`)
+            .then(r => r.ok ? r.json() : null)
+            .then(td => {
+              if (td?.tasks) {
+                const needsAction = td.tasks.filter((t: any) => t.status === 'needsAction').length;
+                setPendingTaskCount(needsAction);
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!pendingLaunch) return;
+    const found = agents.find(a =>
+      a.ProviderName === pendingLaunch.provider &&
+      a.WorkingDir === pendingLaunch.dir &&
+      !pendingLaunch.existingPIDs.has(a.PID)
+    );
+    if (found) {
+      setSelectedId(found.SessionID || String(found.PID));
+      setPendingLaunch(null);
+    }
+  }, [agents, pendingLaunch]);
+
+  useEffect(() => {
+    if (!pendingLaunch) return;
+    const timeout = setTimeout(() => setPendingLaunch(null), 15000);
+    return () => clearTimeout(timeout);
+  }, [pendingLaunch]);
 
   const selectedAgent = activeTab === 'agents'
     ? agents.find(a => a.SessionID === selectedId || String(a.PID) === selectedId)
@@ -119,6 +164,9 @@ export default function App() {
         agents={agents}
         onLaunch={() => setShowLaunch(true)}
         onHome={() => { setActiveTab('agents'); setSelectedId(null); setSessionAgent(null); setPanelFullscreen(false); }}
+        onToggleTasks={() => setShowTasks(t => !t)}
+        taskCount={pendingTaskCount}
+        tasksOpen={showTasks}
       />
       {!panelFullscreen && (
         <>
@@ -209,8 +257,27 @@ export default function App() {
             onToggleFullscreen={() => setPanelFullscreen(f => !f)}
           />
         )}
+        <TasksPanel
+          open={showTasks}
+          onClose={() => setShowTasks(false)}
+          onLaunchFromTask={(task: any) => setTaskLaunchTarget(task)}
+        />
       </div>
-      <LaunchDialog open={showLaunch} onClose={() => setShowLaunch(false)} />
+      <LaunchDialog open={showLaunch} onClose={() => setShowLaunch(false)}
+        onLaunched={(provider, dir) => {
+          setActiveTab('agents');
+          setPendingLaunch({ provider, dir, existingPIDs: new Set(agents.map(a => a.PID)) });
+        }}
+      />
+      <TaskLaunchDialog
+        open={!!taskLaunchTarget}
+        task={taskLaunchTarget}
+        onClose={() => setTaskLaunchTarget(null)}
+        onLaunched={(provider, dir) => {
+          setActiveTab('agents');
+          setPendingLaunch({ provider, dir, existingPIDs: new Set(agents.map(a => a.PID)) });
+        }}
+      />
     </div>
   );
 }

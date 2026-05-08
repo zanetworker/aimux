@@ -20,6 +20,8 @@ type Config struct {
 	Sessions        SessionsConfig            `yaml:"sessions"`    // session history settings
 	Notifications   NotificationsConfig       `yaml:"notifications"` // macOS notification settings
 	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
+	QuickLaunch     QuickLaunchConfig         `yaml:"quick_launch"` // quick launch directories
+	Tasks           TasksConfig               `yaml:"tasks"`        // Google Tasks integration
 }
 
 // K8sProviderConfig holds connection settings for the Kubernetes agent provider.
@@ -88,6 +90,19 @@ type ProviderConfig struct {
 	Binary  string `yaml:"binary,omitempty"`
 }
 
+// QuickLaunchConfig holds directories for quick agent launch.
+type QuickLaunchConfig struct {
+	Directories []string `yaml:"directories"`
+}
+
+// TasksConfig holds settings for Google Tasks integration.
+type TasksConfig struct {
+	Backend        string `yaml:"backend"`         // "auto", "mcp", or "api"
+	MCPEndpoint    string `yaml:"mcp_endpoint"`    // MCP server endpoint URL
+	DefaultList    string `yaml:"default_list"`    // default task list ID
+	PromptTemplate string `yaml:"prompt_template"` // template for agent prompts
+}
+
 // Default returns the configuration used when no config file is present.
 // All known providers are enabled. The Kubernetes provider is disabled by
 // default because it requires a Redis URL and team ID to be useful.
@@ -116,6 +131,10 @@ func Default() Config {
 		Kubernetes: K8sProviderConfig{
 			Enabled:   false,
 			Namespace: "agents",
+		},
+		Tasks: TasksConfig{
+			Backend:        "auto",
+			PromptTemplate: "Work on the following task: {title}\n\nDetails: {notes}\n\nAdditional instructions: {user_prompt}\n\nWhen done, summarize what you did.",
 		},
 	}
 }
@@ -191,6 +210,12 @@ func Load(path string) (Config, error) {
 	}
 	if fileCfg.Kubernetes.Enabled {
 		cfg.Kubernetes = fileCfg.Kubernetes
+	}
+	if len(fileCfg.QuickLaunch.Directories) > 0 {
+		cfg.QuickLaunch = fileCfg.QuickLaunch
+	}
+	if fileCfg.Tasks.Backend != "" || fileCfg.Tasks.DefaultList != "" || fileCfg.Tasks.PromptTemplate != "" {
+		cfg.Tasks = fileCfg.Tasks
 	}
 
 	return cfg, nil
