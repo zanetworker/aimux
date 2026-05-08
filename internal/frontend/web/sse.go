@@ -53,7 +53,9 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	var deduped []agent.Agent
 	for _, a := range agents {
 		// Filter ephemeral automation subagents (session analyzers, hooks)
-		if a.EstCostUSD == 0 && a.TokensIn < 1000 && !strings.Contains(a.Model, "opus") {
+		// but keep sessions launched by aimux (tmux session starts with "aimux-")
+		if a.EstCostUSD == 0 && a.TokensIn < 1000 && !strings.Contains(a.Model, "opus") &&
+			!strings.HasPrefix(a.TMuxSession, "aimux-") {
 			continue
 		}
 		if a.SessionID == "" {

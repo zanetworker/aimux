@@ -264,3 +264,93 @@ providers:
 		t.Error("gemini should still be enabled from defaults")
 	}
 }
+
+func TestLoadQuickLaunchDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+quick_launch:
+  directories:
+    - /home/user/projects/foo
+    - /home/user/projects/bar
+    - /opt/workspace
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+
+	want := []string{
+		"/home/user/projects/foo",
+		"/home/user/projects/bar",
+		"/opt/workspace",
+	}
+
+	if len(cfg.QuickLaunch.Directories) != len(want) {
+		t.Fatalf("QuickLaunch.Directories len = %d, want %d", len(cfg.QuickLaunch.Directories), len(want))
+	}
+
+	for i, dir := range cfg.QuickLaunch.Directories {
+		if dir != want[i] {
+			t.Errorf("QuickLaunch.Directories[%d] = %q, want %q", i, dir, want[i])
+		}
+	}
+}
+
+func TestLoadTasksConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+tasks:
+  backend: mcp
+  mcp_endpoint: http://localhost:3000
+  default_list: my-task-list-123
+  prompt_template: "Custom task: {title}. Notes: {notes}. User: {user_prompt}. Go!"
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+
+	if cfg.Tasks.Backend != "mcp" {
+		t.Errorf("Tasks.Backend = %q, want %q", cfg.Tasks.Backend, "mcp")
+	}
+	if cfg.Tasks.MCPEndpoint != "http://localhost:3000" {
+		t.Errorf("Tasks.MCPEndpoint = %q, want %q", cfg.Tasks.MCPEndpoint, "http://localhost:3000")
+	}
+	if cfg.Tasks.DefaultList != "my-task-list-123" {
+		t.Errorf("Tasks.DefaultList = %q, want %q", cfg.Tasks.DefaultList, "my-task-list-123")
+	}
+	wantTemplate := "Custom task: {title}. Notes: {notes}. User: {user_prompt}. Go!"
+	if cfg.Tasks.PromptTemplate != wantTemplate {
+		t.Errorf("Tasks.PromptTemplate = %q, want %q", cfg.Tasks.PromptTemplate, wantTemplate)
+	}
+}
+
+func TestDefaultPromptTemplate(t *testing.T) {
+	cfg := Default()
+
+	if cfg.Tasks.Backend != "auto" {
+		t.Errorf("Tasks.Backend default = %q, want %q", cfg.Tasks.Backend, "auto")
+	}
+
+	if cfg.Tasks.PromptTemplate == "" {
+		t.Error("Tasks.PromptTemplate should have a non-empty default")
+	}
+
+	// Verify template contains expected placeholders
+	wantTemplate := "Work on the following task: {title}\n\nDetails: {notes}\n\nAdditional instructions: {user_prompt}\n\nWhen done, summarize what you did."
+	if cfg.Tasks.PromptTemplate != wantTemplate {
+		t.Errorf("Tasks.PromptTemplate = %q, want %q", cfg.Tasks.PromptTemplate, wantTemplate)
+	}
+}

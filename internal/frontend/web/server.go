@@ -13,6 +13,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/plugin"
+	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -21,12 +22,14 @@ type Server struct {
 	listener     net.Listener
 	srv          *http.Server
 	discoverFn   func() ([]agent.Agent, error)
-	launchFn     func(provider, dir, model, mode string) error
+	launchFn     func(provider, dir, model, mode, prompt string) error
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
 	ctrl             *controller.Controller
 	pluginExec       *plugin.Executor
 	cfg              config.Config
+	taskProvider     tasks.Provider
+	recentDirsFn     func(int) []RecentDirInfo
 
 	// Discovery cache to avoid redundant ps/tmux scans
 	cacheMu     sync.Mutex
@@ -42,7 +45,7 @@ func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
 	s.discoverFn = fn
 }
 
-func (s *Server) SetLaunchFunc(fn func(provider, dir, model, mode string) error) {
+func (s *Server) SetLaunchFunc(fn func(provider, dir, model, mode, prompt string) error) {
 	s.launchFn = fn
 }
 
@@ -83,6 +86,20 @@ func (s *Server) SetConfig(cfg config.Config) {
 	s.cfg = cfg
 }
 
+func (s *Server) SetTaskProvider(tp tasks.Provider) {
+	s.taskProvider = tp
+}
+
+type RecentDirInfo struct {
+	Path    string `json:"path"`
+	Display string `json:"display"`
+	Age     string `json:"age"`
+}
+
+func (s *Server) SetRecentDirsFunc(fn func(int) []RecentDirInfo) {
+	s.recentDirsFn = fn
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -115,6 +132,16 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/plugins", s.handlePlugins)
 	mux.HandleFunc("GET /api/plugins/{name}/data", s.handlePluginData)
 	mux.HandleFunc("POST /api/insight", s.handleInsight)
+
+	mux.HandleFunc("GET /api/directories/browse", s.handleBrowseDir)
+	mux.HandleFunc("GET /api/directories/recent", s.handleRecentDirs)
+
+	mux.HandleFunc("GET /api/quick-launch", s.handleQuickLaunchDirs)
+
+	mux.HandleFunc("GET /api/tasks/lists", s.handleTaskLists)
+	mux.HandleFunc("GET /api/tasks", s.handleTasks)
+	mux.HandleFunc("POST /api/tasks/{id}/complete", s.handleTaskComplete)
+	mux.HandleFunc("POST /api/tasks/{id}/reopen", s.handleTaskReopen)
 
 	sub, err := fs.Sub(staticFiles, "dist")
 	if err != nil {

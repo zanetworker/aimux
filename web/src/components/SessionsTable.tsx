@@ -64,6 +64,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
   const [deepMatches, setDeepMatches] = useState<Map<string, string> | null>(null);
   const [searching, setSearching] = useState(false);
   const [showSubagents, setShowSubagents] = useState(false);
+  const [showAnalyzers, setShowAnalyzers] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -137,6 +138,12 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
   if (!showSubagents) {
     visible = visible.filter(s => !s.isSubagent);
   }
+  const isAnalyzer = (s: HistorySession) =>
+    (s.firstPrompt || '').toUpperCase().includes('SESSION ANALYZER') ||
+    (s.title || '').toUpperCase().includes('SESSION ANALYZER');
+  if (!showAnalyzers) {
+    visible = visible.filter(s => !isAnalyzer(s));
+  }
   // Hide near-empty sessions unless searching
   const isSearching = filter !== '' || deepMatches !== null;
   if (!isSearching) {
@@ -182,6 +189,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
   });
 
   const subagentCount = sessions.filter(s => s.isSubagent).length;
+  const analyzerCount = sessions.filter(s => isAnalyzer(s)).length;
 
   const annotationColor = (a: string) => {
     switch (a) {
@@ -279,6 +287,20 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
         >
           Subagents {subagentCount > 0 && `(${subagentCount})`}
         </button>
+        {analyzerCount > 0 && (
+          <button
+            onClick={() => setShowAnalyzers(v => !v)}
+            style={{
+              padding: '3px 10px', borderRadius: 12,
+              border: `1px solid ${showAnalyzers ? 'var(--fg-3)' : 'var(--border)'}`,
+              background: showAnalyzers ? 'var(--bg-3)' : 'transparent',
+              color: showAnalyzers ? 'var(--fg)' : 'var(--fg-3)',
+              fontSize: 10, cursor: 'pointer',
+            }}
+          >
+            Analyzers ({analyzerCount})
+          </button>
+        )}
         <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--fg-4)' }}>
           {sorted.length} of {sessions.length} sessions
         </span>
@@ -417,12 +439,14 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        const cmd = `claude --resume ${s.id}`;
+                        const cmd = s.project
+                          ? `cd ${s.project} && claude --resume ${s.id}`
+                          : `claude --resume ${s.id}`;
                         navigator.clipboard.writeText(cmd);
                         setCopiedId(s.id);
                         setTimeout(() => setCopiedId(prev => prev === s.id ? null : prev), 1500);
                       }}
-                      title={`Copy: claude --resume ${s.id}`}
+                      title={s.project ? `Copy: cd ${s.project} && claude --resume ${s.id}` : `Copy: claude --resume ${s.id}`}
                       style={{
                         background: 'transparent',
                         border: `1px solid ${copiedId === s.id ? 'var(--green)' : 'var(--border)'}`,

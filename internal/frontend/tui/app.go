@@ -1522,6 +1522,9 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 	}
 
 	a.launcherView = views.NewLauncherView(entries, providerOpts, a.cfg.OTELReceiver.Enabled)
+	if len(a.cfg.QuickLaunch.Directories) > 0 {
+		a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
+	}
 	a.launcherView.SetSize(a.width, a.height)
 	a.launcherActive = true
 	return a, nil
@@ -1625,6 +1628,9 @@ func (a App) handleNewSession(msg views.NewSessionMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		a.launcherView = views.NewLauncherView(recentDirs, providerOpts, a.cfg.OTELReceiver.Enabled)
+		if len(a.cfg.QuickLaunch.Directories) > 0 {
+			a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
+		}
 		a.launcherView.SetSize(a.width, a.height)
 		a.launcherView.SkipToDirectory(msg.Provider)
 		a.launcherActive = true

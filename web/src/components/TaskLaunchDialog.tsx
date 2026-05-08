@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react';
 
+interface TaskItem {
+  id: string; title: string; notes: string; due: string; status: string; listID: string;
+}
+
 interface Props {
   open: boolean;
+  task: TaskItem | null;
   onClose: () => void;
   onLaunched?: (provider: string, dir: string) => void;
 }
@@ -12,12 +17,10 @@ interface BrowseEntry { name: string; isDir: boolean; }
 
 type DirTab = 'quick' | 'recent' | 'browse';
 
-export function LaunchDialog({ open, onClose, onLaunched }: Props) {
+export function TaskLaunchDialog({ open, task, onClose, onLaunched }: Props) {
   const [provider, setProvider] = useState('claude');
-  const [dir, setDir] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState('');
-  const [mode, setMode] = useState('auto');
+  const [selectedDir, setSelectedDir] = useState('');
+  const [userPrompt, setUserPrompt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [dirTab, setDirTab] = useState<DirTab>('recent');
   const [quickDirs, setQuickDirs] = useState<QuickDir[]>([]);
@@ -33,23 +36,20 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    setDir('');
+    setSelectedDir('');
     fetch('/api/quick-launch')
       .then(r => r.json())
       .then(d => {
         const dirs = (d.directories || []).filter((x: QuickDir) => x.exists);
         setQuickDirs(dirs);
-        if (dirs.length > 0) {
-          setDirTab('quick');
-          setDir(dirs[0].path);
-        }
+        if (dirs.length > 0) { setDirTab('quick'); setSelectedDir(dirs[0].path); }
       }).catch(() => {});
     fetch('/api/directories/recent')
       .then(r => r.json())
       .then(d => {
         const dirs = d.directories || [];
         setRecentDirs(dirs);
-        if (!dir && dirs.length > 0) setDir(dirs[0].path);
+        if (!selectedDir && dirs.length > 0) setSelectedDir(dirs[0].path);
       }).catch(() => {});
   }, [open]);
 
@@ -60,20 +60,20 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
       .catch(() => {});
   };
 
-  if (!open) return null;
+  if (!open || !task) return null;
 
   const handleSubmit = async () => {
-    if (!dir) return;
+    if (!selectedDir) return;
     setSubmitting(true);
     try {
       await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, dir, model, mode, user_prompt: prompt }),
+        body: JSON.stringify({ provider, dir: selectedDir, task_id: task.id,
+          task_list_id: task.listID, user_prompt: userPrompt }),
       });
-      onLaunched?.(provider, dir);
-      onClose();
-      setDir(''); setPrompt(''); setModel(''); setProvider('claude'); setMode('auto');
+      onLaunched?.(provider, selectedDir);
+      onClose(); setUserPrompt(''); setProvider('claude'); setSelectedDir('');
     } finally { setSubmitting(false); }
   };
 
@@ -100,11 +100,38 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
       display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border-hover)',
-        borderRadius: 10, padding: '28px 28px 24px', width: 420, maxHeight: '85vh', overflowY: 'auto' }}
+        borderRadius: 10, padding: '28px 28px 24px', width: 440, maxHeight: '85vh', overflowY: 'auto' }}
         onClick={e => e.stopPropagation()}>
 
         <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--fg)', marginBottom: 24 }}>
-          Launch New Agent
+          Launch from Task
+        </div>
+
+        {/* Task info */}
+        <div style={{ background: 'var(--bg-0)', border: '1px solid var(--border)',
+          borderRadius: 6, padding: 12, marginBottom: 20 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--fg)', marginBottom: 4 }}>{task.title}</div>
+          {task.notes && (
+            <div style={{ fontSize: 11, color: 'var(--fg-3)', maxHeight: 50, overflow: 'auto',
+              whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{task.notes}</div>
+          )}
+          {task.due && (
+            <div style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 6 }}>
+              Due: {new Date(task.due).toLocaleDateString()}
+            </div>
+          )}
+        </div>
+
+        {/* User prompt */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={label}>Additional Instructions</div>
+          <textarea value={userPrompt} onChange={e => setUserPrompt(e.target.value)}
+            placeholder="Add specific instructions..."
+            style={{ background: 'var(--bg-0)', border: '1px solid var(--border)', borderRadius: 6,
+              color: 'var(--fg)', padding: '8px 12px', width: '100%', fontSize: 12,
+              outline: 'none', resize: 'vertical', minHeight: 50, fontFamily: 'inherit' }}
+            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
+            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; }} />
         </div>
 
         {/* Provider */}
@@ -118,38 +145,35 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
           </div>
         </div>
 
-        {/* Directory */}
-        <div style={{ marginBottom: 20 }}>
+        {/* Directory — tabbed */}
+        <div style={{ marginBottom: 24 }}>
           <div style={label}>Directory</div>
           <div style={{ display: 'flex', gap: 0, marginBottom: 10 }}>
             {(['quick', 'recent', 'browse'] as const).map(tab => (
               <button key={tab}
-                onClick={() => { setDirTab(tab); if (tab === 'browse' && !browsePath) fetchBrowse(dir || '/'); }}
+                onClick={() => { setDirTab(tab); if (tab === 'browse' && !browsePath) fetchBrowse(selectedDir || '/'); }}
                 style={{ padding: '4px 12px', fontSize: 10, fontWeight: dirTab === tab ? 600 : 400,
                   textTransform: 'uppercase', letterSpacing: '0.06em', cursor: 'pointer', border: 'none',
                   borderBottom: dirTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
-                  background: 'transparent', color: dirTab === tab ? 'var(--fg)' : 'var(--fg-3)',
-                  transition: 'all 0.15s' }}>
+                  background: 'transparent', color: dirTab === tab ? 'var(--fg)' : 'var(--fg-3)' }}>
                 {tab}
               </button>
             ))}
           </div>
 
           <div style={{ background: 'var(--bg-0)', border: '1px solid var(--border)',
-            borderRadius: 6, padding: 10, minHeight: 80, maxHeight: 180, overflowY: 'auto' }}>
+            borderRadius: 6, padding: 10, minHeight: 60, maxHeight: 150, overflowY: 'auto' }}>
 
             {dirTab === 'quick' && (
               quickDirs.length > 0 ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {quickDirs.map(d => (
-                    <button key={d.path} title={d.path} onClick={() => setDir(d.path)}
-                      style={pill(dir === d.path)}>{d.basename}</button>
+                    <button key={d.path} title={d.path} onClick={() => setSelectedDir(d.path)}
+                      style={pill(selectedDir === d.path)}>{d.basename}</button>
                   ))}
                 </div>
               ) : (
-                <div style={{ color: 'var(--fg-4)', fontSize: 11, padding: 8 }}>
-                  No quick launch directories configured.
-                </div>
+                <div style={{ color: 'var(--fg-4)', fontSize: 11, padding: 4 }}>No quick dirs configured.</div>
               )
             )}
 
@@ -157,110 +181,67 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
               recentDirs.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {recentDirs.map(d => (
-                    <div key={d.path} onClick={() => setDir(d.path)}
-                      style={{ padding: '7px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12,
-                        background: dir === d.path ? 'var(--bg-2)' : 'transparent',
-                        color: dir === d.path ? 'var(--fg)' : 'var(--fg-2)',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        transition: 'background 0.1s' }}>
+                    <div key={d.path} onClick={() => setSelectedDir(d.path)}
+                      style={{ padding: '6px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+                        background: selectedDir === d.path ? 'var(--bg-2)' : 'transparent',
+                        color: selectedDir === d.path ? 'var(--fg)' : 'var(--fg-2)',
+                        display: 'flex', justifyContent: 'space-between', transition: 'background 0.1s' }}>
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{d.display}</span>
                       <span style={{ fontSize: 10, color: 'var(--fg-4)' }}>{d.age}</span>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div style={{ color: 'var(--fg-4)', fontSize: 11, padding: 8 }}>
-                  No recent directories found.
-                </div>
+                <div style={{ color: 'var(--fg-4)', fontSize: 11, padding: 4 }}>No recent directories.</div>
               )
             )}
 
             {dirTab === 'browse' && (
               <div>
                 <div style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--fg-3)',
-                  marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
-                  {browsePath}
-                </div>
+                  marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>{browsePath}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   {browsePath !== '/' && (
                     <div onClick={() => fetchBrowse(browsePath.split('/').slice(0, -1).join('/') || '/')}
-                      style={{ padding: '5px 8px', borderRadius: 3, cursor: 'pointer', fontSize: 12,
+                      style={{ padding: '5px 8px', cursor: 'pointer', fontSize: 12,
                         color: 'var(--fg-3)', fontFamily: 'var(--mono)' }}>..</div>
                   )}
                   {browseEntries.filter(e => e.isDir).map(e => (
                     <div key={e.name}
                       onClick={() => fetchBrowse(browsePath === '/' ? `/${e.name}` : `${browsePath}/${e.name}`)}
-                      style={{ padding: '5px 8px', borderRadius: 3, cursor: 'pointer', fontSize: 12,
+                      style={{ padding: '5px 8px', cursor: 'pointer', fontSize: 12,
                         color: 'var(--teal)', fontFamily: 'var(--mono)' }}>{e.name}/</div>
                   ))}
                 </div>
-                <button onClick={() => setDir(browsePath)}
+                <button onClick={() => setSelectedDir(browsePath)}
                   style={{ marginTop: 8, padding: '5px 0', borderRadius: 4, fontSize: 10,
-                    fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em',
-                    border: '1px solid var(--accent)', background: 'var(--accent-dim)',
-                    color: 'var(--accent)', cursor: 'pointer', width: '100%' }}>
+                    fontWeight: 600, textTransform: 'uppercase', border: '1px solid var(--accent)',
+                    background: 'var(--accent-dim)', color: 'var(--accent)', cursor: 'pointer', width: '100%' }}>
                   Select this directory
                 </button>
               </div>
             )}
           </div>
 
-          {dir && (
-            <div style={{ marginTop: 6, fontSize: 10, fontFamily: 'var(--mono)',
-              color: 'var(--fg-4)', padding: '4px 0' }}>
-              {dir}
+          {selectedDir && (
+            <div style={{ marginTop: 6, fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--fg-4)' }}>
+              {selectedDir}
             </div>
           )}
         </div>
 
-        {/* Prompt */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={label}>Prompt</div>
-          <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
-            placeholder="What should the agent work on?"
-            style={{ background: 'var(--bg-0)', border: '1px solid var(--border)', borderRadius: 6,
-              color: 'var(--fg)', padding: '8px 12px', width: '100%', fontSize: 12,
-              outline: 'none', resize: 'vertical', minHeight: 50, fontFamily: 'inherit' }}
-            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
-            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; }} />
-        </div>
-
-        {/* Model */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={label}>Model</div>
-          <input type="text" value={model} onChange={e => setModel(e.target.value)}
-            placeholder="opus, sonnet, haiku..."
-            style={{ background: 'var(--bg-0)', border: '1px solid var(--border)', borderRadius: 6,
-              color: 'var(--fg)', padding: '8px 12px', width: '100%', fontSize: 12,
-              fontFamily: 'var(--mono)', outline: 'none' }}
-            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
-            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; }} />
-        </div>
-
-        {/* Mode */}
-        <div style={{ marginBottom: 24 }}>
-          <div style={label}>Mode</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {[{ name: 'auto', label: 'Auto' }, { name: 'plan', label: 'Plan' },
-              { name: 'bypassPermissions', label: 'Bypass' }].map(m => (
-              <button key={m.name} onClick={() => setMode(m.name)}
-                style={pill(mode === m.name)}>{m.label}</button>
-            ))}
-          </div>
-        </div>
-
         {/* Submit */}
-        <button onClick={handleSubmit} disabled={!dir || submitting}
-          style={{ background: !dir || submitting ? 'var(--bg-3)' : 'var(--accent)',
-            color: !dir || submitting ? 'var(--fg-3)' : '#fff', border: 'none', borderRadius: 6,
+        <button onClick={handleSubmit} disabled={!selectedDir || submitting}
+          style={{ background: !selectedDir || submitting ? 'var(--bg-3)' : 'var(--accent)',
+            color: !selectedDir || submitting ? 'var(--fg-3)' : '#fff', border: 'none', borderRadius: 6,
             padding: '9px 16px', fontWeight: 600, fontSize: 12,
-            cursor: !dir || submitting ? 'not-allowed' : 'pointer', width: '100%' }}>
+            cursor: !selectedDir || submitting ? 'not-allowed' : 'pointer', width: '100%' }}>
           {submitting ? 'Launching...' : 'Launch Agent'}
         </button>
-
         <div onClick={onClose}
-          style={{ color: 'var(--fg-3)', fontSize: 11, textAlign: 'center', marginTop: 10,
-            cursor: 'pointer' }}>Cancel</div>
+          style={{ color: 'var(--fg-3)', fontSize: 11, textAlign: 'center', marginTop: 10, cursor: 'pointer' }}>
+          Cancel
+        </div>
       </div>
     </div>
   );
