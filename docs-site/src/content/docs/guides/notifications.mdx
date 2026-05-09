@@ -1,0 +1,35 @@
+---
+title: Notifications
+description: Terminal bell and macOS desktop notifications.
+---
+
+## Overview
+
+aimux can notify you when agents need attention: permission prompts, errors, completion, or idle state changes. Notifications work via terminal bell and macOS Notification Center.
+
+## Configuration
+
+```yaml
+notifications:
+  enabled: true       # master switch
+  on_waiting: true    # agent needs permission
+  on_error: true      # agent crashed
+  on_idle: false      # agent finished a turn
+  on_done: true       # agent finished
+  sound: false        # macOS notification sound
+  bell: true          # terminal bell
+  desktop: true       # macOS Notification Center
+```
+
+## Events
+
+| Event | Default | When |
+|-------|---------|------|
+| Waiting | On | Agent needs user permission (tool approval) |
+| Error | On | Agent process crashed or errored |
+| Idle | Off | Agent finished a turn (noisy if on) |
+| Done | On | Agent session completed |
+
+## Muting
+
+Press `m` in the TUI to mute all notifications for the current session. This does not change the config file.

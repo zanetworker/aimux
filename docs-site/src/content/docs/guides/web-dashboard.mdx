@@ -1,0 +1,73 @@
+---
+title: Web Dashboard
+description: Browser-based agent dashboard with cards, sessions, traces, and themes.
+---
+
+Launch the web dashboard:
+
+```bash
+aimux web              # default port 9090
+aimux web --port 8080  # custom port
+```
+
+## Card Grid
+
+The main view shows agent cards grouped by project. Each card displays:
+
+- **Provider badge** (Claude, Codex, Gemini) with color coding
+- **Status** (Active, Idle, Waiting, Error)
+- **Launch mode badge** (tmux or direct)
+- **Title** from the session's first prompt or auto-generated
+- **Project name** and git branch
+- **Last activity snippet** showing the most recent tool call
+- **Model**, token counts, and cost
+
+Click a card to toggle the trace panel. Click again to close it.
+
+## Views
+
+Toggle between views using the tab bar:
+
+- **Agents** - Live agent cards with filtering and sorting
+- **Sessions** - Historical session table with search
+- **Plugin tabs** - Custom dashboards from plugins (e.g., Skill Dashboard)
+
+### List vs Card View
+
+Toggle between card grid and compact list view using the view mode buttons in the filter bar (grid/list icons).
+
+## Filtering and Sorting
+
+The filter bar provides:
+
+- **Status filters**: All, Active, Idle, Waiting, Error
+- **Provider filters**: Claude, Codex, Gemini
+- **Recent filter**: Show only agents active in the last 5 minutes
+- **Text search**: Filter by project name or branch
+- **Content search**: Search inside session traces across all agents
+- **Sort**: Last Active, Cost, Tokens
+
+## Trace Panel
+
+Selecting an agent opens the right panel with:
+
+- **Trace view**: Turn-by-turn conversation with tool calls, diffs, and outputs
+- **Annotations**: Label turns as good/bad/waste with notes
+- **Export**: JSONL to `~/.aimux/exports/` or OTEL to configured endpoint
+- **Fullscreen**: Expand the trace panel to fill the viewport
+
+## Dark/Light Theme
+
+Toggle between dark and light themes using the sun/moon button in the header bar. The preference is saved to localStorage and persists across sessions.
+
+- **Dark**: Pure black base (`#000000`), red accent (`#FF3131`)
+- **Light**: Light grey base (`#F5F5F5`), Red Hat Red accent (`#EE0000`)
+
+## Stats Bar
+
+The header shows aggregate statistics:
+
+- Session count, active/idle/waiting/error counts
+- Repository count
+- Total tokens in/out
+- Total cost across all agents

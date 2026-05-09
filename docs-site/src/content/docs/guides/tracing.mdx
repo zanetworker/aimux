@@ -1,0 +1,86 @@
+---
+title: Tracing & Annotations
+description: View agent traces, annotate turns, and export to OTEL or JSONL.
+---
+
+## Trace View
+
+Every agent session produces a trace: a turn-by-turn record of prompts, responses, and tool calls. aimux parses provider-specific log formats (Claude JSONL, Codex JSONL, Gemini JSON) into a unified trace view.
+
+### What You See Per Turn
+
+- **User prompt** text
+- **Assistant response** text
+- **Tool calls** with name, input snippet, success/failure status
+- **Edit diffs** showing old/new strings for file edits
+- **Token counts** (in/out) and cost per turn
+- **Model** used for the turn
+
+### Live Streaming
+
+Traces update in real-time as agents work. The TUI tails the JSONL file; the web dashboard polls via SSE.
+
+## OTEL Dual Mode
+
+aimux has two trace data paths:
+
+1. **File-based** (display): Parses provider log files for full response text. This is what you see in the trace view.
+2. **OTEL receiver** (export): Collects live telemetry on port 4318 for re-export. Claude Code sends events via the OTEL logs protocol (no response text due to Anthropic privacy design).
+
+Enable the receiver:
+
+```yaml
+otel:
+  enabled: true
+  port: 4318
+```
+
+## Annotations
+
+Label turns to build evaluation datasets:
+
+| Label | Meaning |
+|-------|---------|
+| GOOD | Turn produced correct, useful output |
+| BAD | Turn produced incorrect or harmful output |
+| WASTE | Turn was unnecessary (redundant, off-topic) |
+
+Add free-text notes to any annotation for context.
+
+### TUI
+
+In split view, navigate to a turn and press `g` (good), `b` (bad), or `w` (waste). Press `n` to add a note.
+
+### Web Dashboard
+
+Click annotation buttons in the trace panel. Click the note icon to add notes.
+
+## Export
+
+### JSONL
+
+Exports the annotated trace as JSONL to `~/.aimux/exports/`. Each line is a turn with annotations attached.
+
+- TUI: Press `e` then `j`
+- Web: Click export button, select JSONL
+
+### OTEL
+
+Exports trace spans to the configured OTLP/HTTP endpoint. Annotations become span attributes.
+
+- TUI: Press `e` then `o`, or `:export-otel`
+- Web: Click export button, select OTEL
+
+Configure the endpoint:
+
+```yaml
+export:
+  endpoint: "localhost:5001"
+  insecure: true
+  mlflow:
+    experiment_id: "1"
+```
+
+### MLflow Integration
+
+When exporting to MLflow, traces appear as runs in the configured experiment. Each turn becomes a span. Annotations become feedback assessments.

@@ -1,0 +1,38 @@
+---
+title: Cost Tracking
+description: Per-agent and per-turn cost estimation with model-aware pricing.
+---
+
+## How It Works
+
+aimux tracks token usage (input, output, cache read, cache write) per agent and calculates cost using per-million-token pricing. Costs appear on agent cards, in the trace view per turn, and in the stats bar as a total.
+
+## Supported Models
+
+| Model | Input ($/M) | Output ($/M) | Cache Read | Cache Write |
+|-------|-------------|--------------|------------|-------------|
+| claude-opus-4-6 | $15.00 | $75.00 | $1.50 | $18.75 |
+| claude-sonnet-4-5 | $3.00 | $15.00 | $0.30 | $3.75 |
+| claude-haiku-3-5 | $0.80 | $4.00 | $0.08 | $1.00 |
+| o3 | $2.00 | $8.00 | - | - |
+| o4-mini | $1.10 | $4.40 | - | - |
+| gemini-2.5-pro | $1.25 | $10.00 | - | - |
+| gemini-2.5-flash | $0.15 | $0.60 | - | - |
+| gemini-3-pro | $1.25 | $10.00 | - | - |
+| gemini-3.1-flash | $0.15 | $0.60 | - | - |
+
+Short aliases: `opus` = claude-opus-4-6, `sonnet` = claude-sonnet-4-5, `haiku` = claude-haiku-3-5.
+
+Pricing data last verified: 2026-02-28.
+
+## TUI
+
+Press `$` to toggle cost-per-turn display in the trace view. The cost dashboard shows per-project breakdowns.
+
+## Web Dashboard
+
+Costs appear on agent cards and in the stats bar header. The trace panel shows per-turn cost when expanded.
+
+## Unknown Models
+
+Models not in the pricing table show `$0.00`. To add custom model pricing, submit a PR to `internal/cost/tracker.go`.

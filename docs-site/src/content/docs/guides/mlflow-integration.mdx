@@ -1,0 +1,57 @@
+---
+title: MLflow Integration
+description: Export agent traces with annotations to MLflow for evaluation and monitoring.
+---
+
+Export agent traces with human annotations from aimux to MLflow for evaluation, regression detection, and judge calibration.
+
+## Prerequisites
+
+- aimux installed
+- MLflow 3.6+ (`pip install mlflow>=3.6`)
+- Python 3.10+
+
+## Quick Start
+
+### 1. Start MLflow
+
+```bash
+mlflow server --host 127.0.0.1 --port 5000
+```
+
+### 2. Configure aimux
+
+Add the MLflow endpoint to `~/.aimux/config.yaml`:
+
+```yaml
+export:
+  endpoint: "localhost:5000"
+  insecure: true
+```
+
+### 3. Annotate and Export
+
+In aimux, open a trace and annotate turns (`g` for good, `b` for bad, `w` for waste). Add notes with `n`. Then export with `:export-otel`.
+
+### 4. View in MLflow
+
+Open `http://localhost:5000`. Navigate to your experiment's Traces tab to see session spans with turn-level attributes including token counts, cost, model, and your annotations.
+
+## Span Attribute Reference
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `aimux.session_id` | string | Session identifier |
+| `aimux.provider` | string | Provider name (claude, codex, gemini) |
+| `aimux.turn.number` | int | Turn number within the session |
+| `aimux.feedback.value` | string | Human annotation: good, bad, wasteful |
+| `aimux.feedback.rationale` | string | Free-text note explaining the label |
+| `gen_ai.request.model` | string | Model used for this turn |
+| `gen_ai.usage.input_tokens` | int64 | Input token count |
+| `gen_ai.usage.output_tokens` | int64 | Output token count |
+| `gen_ai.usage.cost` | float64 | Estimated cost in USD |
+| `tool.name` | string | Tool/function name (on tool call spans) |
+
+## Other OTEL Backends
+
+Works with any OTLP/HTTP-compatible backend (Jaeger, Grafana Tempo, Datadog via OTEL collector). Just change the `export.endpoint` in your config.

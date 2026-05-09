@@ -1,0 +1,59 @@
+---
+title: Getting Started
+description: Install aimux and run your first dashboard.
+---
+
+## Install
+
+```bash
+# Homebrew (macOS/Linux)
+brew install zanetworker/aimux/aimux
+
+# From source
+git clone https://github.com/zanetworker/aimux.git
+cd aimux
+make install       # builds and copies to /usr/local/bin
+```
+
+## Requirements
+
+- **tmux** - required for split-pane session embedding and agent launch
+- **Go 1.24+** - only if building from source
+- Running AI coding agents: Claude Code, Codex CLI, or Gemini CLI
+
+## Launch the TUI
+
+```bash
+aimux
+```
+
+aimux auto-discovers running Claude, Codex, and Gemini processes. The agent table refreshes every 2 seconds.
+
+## Launch the Web Dashboard
+
+```bash
+aimux web              # web dashboard on port 9090
+aimux web --port 8080  # custom port
+aimux --web            # both TUI and web simultaneously
+```
+
+Open `http://localhost:9090` in your browser.
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `aimux` | Launch TUI dashboard |
+| `aimux web` | Launch web dashboard (default port 9090) |
+| `aimux --web` | Launch both TUI and web |
+| `aimux sessions` | List/search session history |
+| `aimux resume` | Resume a previous session |
+| `aimux --version` | Print version |
+
+## Quick Tour
+
+1. **Start some agents** - Run Claude Code, Codex, or Gemini in other terminals
+2. **Open aimux** - They appear automatically in the dashboard
+3. **Select an agent** - Press Enter (TUI) or click a card (web) to see its trace
+4. **Annotate** - Mark turns as good/bad/waste to build eval datasets
+5. **Export** - Send traces to MLflow via OTEL, or save as JSONL

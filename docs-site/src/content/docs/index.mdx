@@ -1,0 +1,40 @@
+---
+title: aimux
+description: Tame the agent sprawl. See all your agents. Trace what they did. Judge if it was good.
+template: splash
+hero:
+  tagline: You're running 5 agents across 3 projects. One just edited 47 files. Was it right? Every other tool tells you which agents are running. aimux tells you what they actually did, and whether it was good.
+  actions:
+    - text: Get Started
+      link: /aimux/getting-started/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/zanetworker/aimux
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Three Differentiators
+
+<CardGrid stagger>
+  <Card title="Trace" icon="magnifier">
+    Turn-by-turn view of prompts, responses, and tool calls. Live streaming as agents work. Available in TUI split view and web dashboard.
+  </Card>
+  <Card title="Annotate" icon="pencil">
+    Label turns GOOD, BAD, or WASTE. Add notes. Build eval datasets from real agent sessions.
+  </Card>
+  <Card title="Export" icon="rocket">
+    OTEL to MLflow or Jaeger. JSONL to disk. Annotations become feedback assessments for model evaluation.
+  </Card>
+  <Card title="Multi-Provider" icon="list-format">
+    Auto-discovers Claude, Codex, and Gemini agents. Extensible provider interface for adding new agent types.
+  </Card>
+</CardGrid>
+
+## Two Interfaces
+
+**TUI Dashboard** (`aimux`) - Terminal-based dashboard with agent table, split-view trace, live PTY embedding, and keybinding-driven workflow.
+
+**Web Dashboard** (`aimux web`) - Browser-based dashboard with card grid, session history, trace panel, cost tracking, dark/light themes, and plugin system.

@@ -1,0 +1,69 @@
+---
+title: Launch Modes
+description: Direct and tmux launch modes, quick launch directories, and task-driven launches.
+---
+
+## Launch Modes
+
+When spawning a new agent, choose between two runtime modes:
+
+### Direct Mode
+
+The agent runs as a direct child process. Simpler, but the session dies if you close aimux.
+
+### Tmux Mode (default)
+
+The agent runs inside a tmux session named `aimux-<provider>-<timestamp>`. Benefits:
+
+- **Persistent**: Sessions survive aimux restarts
+- **Detachable**: Close aimux, reattach later
+- **Visible**: Sessions appear with `tmux ls`
+
+Set the default in config:
+
+```yaml
+default_runtime: "tmux"  # or "direct"
+```
+
+## Launching Agents
+
+### TUI
+
+Type `:new` to open the launcher. Steps:
+
+1. Pick a provider (Claude, Codex, Gemini)
+2. Choose a directory (recent dirs, browse filesystem, or quick launch)
+3. Select model and mode
+4. Choose runtime (tmux or direct)
+
+### Web Dashboard
+
+Click **+ Launch** in the header bar. The launch dialog provides:
+
+- Directory browser with recent directories
+- Quick launch directories from config
+- Provider, model, and mode selection
+
+## Quick Launch Directories
+
+Pre-configure directories for fast access:
+
+```yaml
+quick_launch:
+  directories:
+    - "~/projects/my-app"
+    - "~/projects/my-lib"
+```
+
+These appear at the top of the directory picker in both TUI and web launchers.
+
+## Task-Driven Launch
+
+With Google Tasks integration enabled, you can launch agents with task context:
+
+1. Open the Tasks panel in the web dashboard
+2. Click "Launch" on a task
+3. The task title and notes are injected into the agent's prompt
+4. A "Session started" note is added to the task automatically
+
+See [Tasks Integration](/aimux/guides/tasks/) for setup.

@@ -1,0 +1,43 @@
+/* aimux dark theme (Starlight default is dark) */
+:root {
+  --sl-color-accent-low: #3b1010;
+  --sl-color-accent: #FF3131;
+  --sl-color-accent-high: #FF6B6B;
+  --sl-color-white: #e6e6e6;
+  --sl-color-gray-1: #d4d4d4;
+  --sl-color-gray-2: #a6a6a6;
+  --sl-color-gray-3: #666666;
+  --sl-color-gray-4: #404040;
+  --sl-color-gray-5: #1a1a1a;
+  --sl-color-gray-6: #0d0d0d;
+  --sl-color-black: #000000;
+  --sl-color-bg-nav: #0d0d0d;
+  --sl-color-bg-sidebar: #0d0d0d;
+  --sl-color-hairline-light: #1a1a1a;
+  --sl-color-hairline-shade: #0d0d0d;
+  --sl-font: 'Inter', system-ui, -apple-system, sans-serif;
+  --sl-font-mono: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* aimux light theme */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #FCE3E3;
+  --sl-color-accent: #EE0000;
+  --sl-color-accent-high: #A60000;
+  --sl-color-white: #151515;
+  --sl-color-gray-1: #4D4D4D;
+  --sl-color-gray-2: #6B6B6B;
+  --sl-color-gray-3: #8A8A8A;
+  --sl-color-gray-4: #D4D4D4;
+  --sl-color-gray-5: #F5F5F5;
+  --sl-color-gray-6: #FFFFFF;
+  --sl-color-black: #FFFFFF;
+  --sl-color-bg-nav: #FFFFFF;
+  --sl-color-bg-sidebar: #FFFFFF;
+  --sl-color-hairline-light: #D4D4D4;
+  --sl-color-hairline-shade: #E0E0E0;
+}
+
+pre {
+  border: 1px solid var(--sl-color-hairline-light) !important;
+}

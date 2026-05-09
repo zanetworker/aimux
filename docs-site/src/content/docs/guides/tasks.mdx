@@ -1,0 +1,60 @@
+---
+title: Tasks Integration
+description: Google Tasks integration for task-driven agent launches.
+---
+
+## Overview
+
+aimux integrates with Google Tasks to enable task-driven agent workflows. View your task lists, launch agents with task context, and track progress.
+
+## Setup
+
+Configure the tasks backend in `~/.aimux/config.yaml`:
+
+```yaml
+tasks:
+  backend: "auto"        # "auto", "mcp", or "api"
+  default_list: ""       # default task list ID
+  prompt_template: "Work on the following task: {title}\n\nDetails: {notes}\n\nAdditional instructions: {user_prompt}\n\nWhen done, summarize what you did."
+```
+
+### Backends
+
+| Backend | Description |
+|---------|-------------|
+| `auto` | Tries MCP first, falls back to Google Workspace API |
+| `mcp` | Uses an MCP server endpoint for task operations |
+| `api` | Uses Google Workspace API directly |
+
+## Web Dashboard
+
+Click the **Tasks** button in the header to open the tasks panel. Features:
+
+- View task lists and tasks
+- See task status (needs action / completed)
+- Launch an agent directly from a task
+- Complete or reopen tasks
+
+### Task-Driven Launch
+
+1. Click "Launch" on a task in the tasks panel
+2. Select provider, directory, and model
+3. The task title and notes are injected into the agent prompt using the configured template
+4. A "Session started by aimux" note is automatically added to the task
+
+## Prompt Template
+
+Customize how task context is passed to agents:
+
+```yaml
+tasks:
+  prompt_template: "Task: {title}\n\nDetails:\n{notes}\n\nUser input: {user_prompt}"
+```
+
+Available placeholders:
+
+| Placeholder | Description |
+|-------------|-------------|
+| `{title}` | Task title |
+| `{notes}` | Task notes/description |
+| `{user_prompt}` | Additional user instructions from the launch dialog |

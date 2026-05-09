@@ -1,0 +1,156 @@
+---
+title: Configuration
+description: Full reference for ~/.aimux/config.yaml
+---
+
+All configuration lives in `~/.aimux/config.yaml`. Every setting is optional. Defaults are shown below.
+
+## Full Example
+
+```yaml
+providers:
+  claude:
+    enabled: true
+  codex:
+    enabled: true
+  gemini:
+    enabled: true
+
+refresh_interval: "2s"
+default_runtime: "tmux"
+shell: "/bin/zsh"
+
+sessions:
+  auto_title: false
+  title_model: "flash"
+
+notifications:
+  enabled: true
+  on_waiting: true
+  on_error: true
+  on_idle: false
+  on_done: true
+  sound: false
+  bell: true
+  desktop: true
+
+export:
+  endpoint: "localhost:5001"
+  insecure: true
+  mlflow:
+    experiment_id: "1"
+
+otel:
+  enabled: false
+  port: 4318
+
+quick_launch:
+  directories:
+    - "~/projects/my-app"
+    - "~/projects/my-lib"
+
+tasks:
+  backend: "auto"
+  default_list: ""
+  prompt_template: "Work on the following task: {title}\n\nDetails: {notes}\n\nAdditional instructions: {user_prompt}\n\nWhen done, summarize what you did."
+
+kubernetes:
+  enabled: false
+  redis_url: ""
+  team_id: ""
+  namespace: "agents"
+  kubeconfig: ""
+  otel_endpoint: ""
+```
+
+## Providers
+
+Enable or disable agent providers. Unknown providers default to enabled.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Whether to discover agents from this provider |
+| `binary` | string | auto-detect | Override the binary path for this provider |
+
+## General
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `refresh_interval` | string | `"2s"` | How often to scan for agents |
+| `default_runtime` | string | `"tmux"` | Default launch mode: `"tmux"` or `"direct"` |
+| `shell` | string | `$SHELL` | Login shell for spawning agents. Falls back to `$SHELL`, then `/bin/sh` |
+
+## Sessions
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auto_title` | bool | `false` | Generate titles via LLM on session discovery |
+| `title_model` | string | `"flash"` | LLM for title generation: `"flash"`, `"haiku"`, `"sonnet"`, `"opus"` |
+| `api_key` | string | env var | API key for title generation (overrides `GOOGLE_API_KEY` / `ANTHROPIC_API_KEY`) |
+
+## Notifications
+
+macOS notification settings. All default to sensible values.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Master switch for all notifications |
+| `on_waiting` | bool | `true` | Notify when agent needs permission |
+| `on_error` | bool | `true` | Notify when agent crashes |
+| `on_idle` | bool | `false` | Notify when agent finishes a turn |
+| `on_done` | bool | `true` | Notify when agent finishes |
+| `sound` | bool | `false` | Play macOS notification sound |
+| `bell` | bool | `true` | Terminal bell on attention events |
+| `desktop` | bool | `true` | macOS Notification Center alerts |
+
+## Export
+
+OTEL/HTTP export settings for sending traces to MLflow, Jaeger, or any OTLP-compatible backend.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `endpoint` | string | | OTLP/HTTP endpoint (e.g., `"localhost:5001"`) |
+| `insecure` | bool | `true` | Use HTTP instead of HTTPS |
+| `headers` | map | | Extra HTTP headers for the export endpoint |
+| `mlflow.experiment_id` | string | | MLflow experiment ID for trace grouping |
+
+## OTEL Receiver
+
+Embedded OTLP/HTTP receiver for collecting live telemetry from agents.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable the OTEL receiver |
+| `port` | int | `4318` | Port to listen on |
+
+## Quick Launch
+
+Pre-configured directories for the agent launcher.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `directories` | list | `[]` | Directories shown at the top of the launcher's directory picker |
+
+## Tasks
+
+Google Tasks integration for task-driven agent launches.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `backend` | string | `"auto"` | Task backend: `"auto"`, `"mcp"`, or `"api"` |
+| `mcp_endpoint` | string | | MCP server endpoint URL for tasks |
+| `default_list` | string | | Default task list ID |
+| `prompt_template` | string | see above | Template for agent prompts. Placeholders: `{title}`, `{notes}`, `{user_prompt}` |
+
+## Kubernetes
+
+See [Kubernetes Quickstart](/aimux/advanced/k8s-quickstart/) for full setup guide.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable K8s agent discovery |
+| `redis_url` | string | | Redis connection string (required when enabled) |
+| `team_id` | string | | Redis key prefix for team isolation |
+| `namespace` | string | `"agents"` | K8s namespace for agent deployments |
+| `kubeconfig` | string | auto | Path to kubeconfig (omit for in-cluster) |
+| `otel_endpoint` | string | | OTEL collector URL for remote agent traces |

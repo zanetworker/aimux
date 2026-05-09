@@ -1,0 +1,46 @@
+---
+title: Plugins
+description: Plugin system and skill dashboard.
+---
+
+## Overview
+
+aimux supports plugins that add custom dashboard tabs to the web UI. Plugins are defined in `~/.aimux/plugins/` and execute shell commands to collect data, which is rendered as tables, charts, and metric rows.
+
+## Skill Dashboard
+
+The built-in Skill Dashboard plugin tracks Claude Code skill usage, correction rates, and learning funnel metrics. It appears as a tab in the web dashboard when skill analytics data is available.
+
+## Plugin Structure
+
+Each plugin is a YAML file in `~/.aimux/plugins/`:
+
+```yaml
+name: my-dashboard
+tab: My Dashboard
+panels:
+  - id: metrics
+    type: metric-row
+    title: Key Metrics
+  - id: data-table
+    type: table
+    title: Data
+    sortable: true
+    expandable: true
+```
+
+## Panel Types
+
+| Type | Description |
+|------|-------------|
+| `metric-row` | Horizontal row of key-value metric chips |
+| `table` | Sortable, expandable data table |
+| `bar-chart` | Horizontal bar chart |
+| `list` | Simple list of items |
+
+## API
+
+Plugins are served via the web API:
+
+- `GET /api/plugins` - List all registered plugins
+- `GET /api/plugins/{name}/data` - Execute plugin and return data

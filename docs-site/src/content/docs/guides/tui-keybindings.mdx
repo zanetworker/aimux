@@ -1,0 +1,50 @@
+---
+title: TUI Keybindings
+description: Keyboard shortcuts for the terminal dashboard.
+---
+
+## Agent List
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Open split view (trace + session) |
+| `j` / `k` | Move selection down/up |
+| `Tab` / `x` | Expand/collapse process tree |
+| `/` | Search across agent traces |
+| `$` | Toggle cost-per-turn display |
+| `d` | Toggle diff view |
+| `s` | Cycle sort order |
+| `m` | Mute/unmute notifications |
+| `:new` | Open agent launcher |
+| `?` | Show help overlay |
+| `q` | Quit |
+
+## Split View (Trace + Session)
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Scroll trace up/down |
+| `g` | Annotate turn as GOOD |
+| `b` | Annotate turn as BAD |
+| `w` | Annotate turn as WASTE |
+| `n` | Add note to current turn |
+| `e` | Open export menu |
+| `Esc` | Close split view |
+| `Tab` | Switch focus between trace and session panes |
+
+## Export Menu
+
+| Key | Action |
+|-----|--------|
+| `j` | Export as JSONL to `~/.aimux/exports/` |
+| `o` | Export as OTEL to configured endpoint |
+| `Esc` | Cancel |
+
+## Command Palette
+
+Type `:` to open the command palette:
+
+| Command | Action |
+|---------|--------|
+| `:new` | Launch new agent session |
+| `:export-otel` | Export current trace via OTEL |
