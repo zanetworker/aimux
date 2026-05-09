@@ -14,6 +14,7 @@ interface Props {
   sortBy: string;
   contentResults?: ContentSearchResult[] | null;
   loading?: boolean;
+  viewMode?: 'cards' | 'list';
 }
 
 function projectName(agent: Agent): string {
@@ -31,6 +32,7 @@ export function CardGrid({
   sortBy,
   contentResults,
   loading,
+  viewMode = 'cards',
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -189,8 +191,8 @@ export function CardGrid({
               </span>
             </div>
 
-            {/* Cards */}
-            {!isCollapsed && (
+            {/* Agents */}
+            {!isCollapsed && viewMode === 'cards' && (
               <div
                 role="list"
                 style={{
@@ -211,6 +213,53 @@ export function CardGrid({
                     />
                   </div>
                 ))}
+              </div>
+            )}
+            {!isCollapsed && viewMode === 'list' && (
+              <div role="list">
+                {groupAgents.map(agent => {
+                  const id = agent.SessionID || agent.PID.toString();
+                  const isSelected = selectedId === id;
+                  const statusColors: Record<number, string> = { 0: 'var(--green)', 1: 'var(--fg-3)', 2: 'var(--orange)', 3: 'var(--accent)' };
+                  const statusLabels: Record<number, string> = { 0: 'ACTIVE', 1: 'IDLE', 2: 'WAITING', 3: 'ERROR' };
+                  const providerColors: Record<string, string> = { claude: 'var(--accent)', codex: 'var(--green)', gemini: 'var(--purple)' };
+                  const age = agent.LastActivity ? (() => {
+                    const ms = Date.now() - new Date(agent.LastActivity).getTime();
+                    if (ms < 60000) return `${Math.floor(ms/1000)}s ago`;
+                    if (ms < 3600000) return `${Math.floor(ms/60000)}m ago`;
+                    if (ms < 86400000) return `${Math.floor(ms/3600000)}h ago`;
+                    return `${Math.floor(ms/86400000)}d ago`;
+                  })() : '';
+                  return (
+                    <div key={id} role="listitem" onClick={() => onSelect(id)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '8px 10px', cursor: 'pointer', borderRadius: 4,
+                        background: isSelected ? 'var(--bg-2)' : 'transparent',
+                        borderBottom: '1px solid var(--border)',
+                        transition: 'background 0.1s',
+                      }}
+                      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-1)'; }}
+                      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: statusColors[agent.Status] || 'var(--fg-4)', flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: providerColors[agent.ProviderName] || 'var(--fg-3)', width: 50, flexShrink: 0 }}>
+                        {agent.ProviderName}
+                      </span>
+                      <span style={{ fontSize: 10, color: statusColors[agent.Status], width: 50, flexShrink: 0 }}>
+                        {statusLabels[agent.Status] || ''}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--fg)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {agent.Title || agent.Name}
+                      </span>
+                      <span style={{ fontSize: 10, color: 'var(--fg-4)', width: 60, textAlign: 'right', flexShrink: 0 }}>
+                        {age}
+                      </span>
+                      <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--green)', width: 70, textAlign: 'right', flexShrink: 0 }}>
+                        ${(agent.EstCostUSD || 0).toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
