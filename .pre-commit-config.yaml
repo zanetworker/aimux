@@ -16,3 +16,10 @@ repos:
         args: ['--maxkb=1000']  # block files > 1MB (catches accidental binary commits)
       - id: check-yaml
         args: ['--allow-multiple-documents']  # Kubernetes YAML uses multi-doc
+
+  # Go linting — runs golangci-lint on staged .go files
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.11.4
+    hooks:
+      - id: golangci-lint
+        args: ['--timeout=5m']
