@@ -36,7 +36,7 @@ func (s *Server) handleQuickLaunchDirs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"directories": entries})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"directories": entries})
 }
 
 func expandHomePath(path string) string {

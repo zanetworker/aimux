@@ -59,8 +59,8 @@ func (s *Session) Resize(cols, rows int) error {
 		return nil
 	}
 	return pty.Setsize(s.ptmx, &pty.Winsize{
-		Cols: uint16(cols),
-		Rows: uint16(rows),
+		Cols: uint16(cols), // #nosec G115 -- terminal size safe to convert
+		Rows: uint16(rows), // #nosec G115 -- terminal size safe to convert
 	})
 }
 

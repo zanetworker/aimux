@@ -21,23 +21,6 @@ func healthyInfra() *InfraHealth {
 	}
 }
 
-// defaultProviders returns the standard test provider support matrix.
-func defaultProviders() []ProviderSupport {
-	return []ProviderSupport{
-		{Name: "claude", LocalSession: true, LocalK8s: true, RemoteSession: true, RemoteTask: true},
-		{Name: "codex", LocalSession: true},
-		{Name: "gemini", LocalSession: true, RemoteTask: true},
-	}
-}
-
-// claudeGeminiProviders returns providers without codex.
-func claudeGeminiProviders() []ProviderSupport {
-	return []ProviderSupport{
-		{Name: "claude", LocalSession: true, LocalK8s: true, RemoteSession: true, RemoteTask: true},
-		{Name: "gemini", LocalSession: true, RemoteTask: true},
-	}
-}
-
 func specialKeyMsg(t tea.KeyType) tea.KeyMsg {
 	return tea.KeyMsg{Type: t}
 }

@@ -130,7 +130,7 @@ func handleSpawnAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 	if deploy.Spec.Replicas != nil {
 		newReplicas = *deploy.Spec.Replicas
 	}
-	targetReplicas := newReplicas + int32(count)
+	targetReplicas := newReplicas + int32(count) // #nosec G115 -- count validated > 0 at line 107
 	deploy.Spec.Replicas = &targetReplicas
 
 	_, err = k8s.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
@@ -567,12 +567,12 @@ func handleCleanupBranches(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		resp, err := http.DefaultClient.Do(checkReq)
 		if err != nil || resp.StatusCode == 404 {
 			if resp != nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 			skipped = append(skipped, branch+" (not found)")
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		// Delete the branch
 		delURL := fmt.Sprintf("https://api.github.com/repos/%s/git/refs/heads/%s", githubRepo, branch)
@@ -586,12 +586,12 @@ func handleCleanupBranches(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		delResp, err := http.DefaultClient.Do(delReq)
 		if err != nil || delResp.StatusCode != 204 {
 			if delResp != nil {
-				delResp.Body.Close()
+				_ = delResp.Body.Close()
 			}
 			skipped = append(skipped, branch+" (delete failed)")
 			continue
 		}
-		delResp.Body.Close()
+		_ = delResp.Body.Close()
 		deleted = append(deleted, branch)
 	}
 

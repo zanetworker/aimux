@@ -100,19 +100,19 @@ func Save(path string, agents []agent.Agent) error {
 
 	// Create parent directories
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return err
 	}
 
 	// Write to file
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 // Load reads and unmarshals agents from the cache file.
 // Returns an empty slice (not error) on missing file or corrupt JSON.
 func Load(path string) ([]agent.Agent, error) {
 	// Read the file
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		// Return empty slice for missing file
 		if os.IsNotExist(err) {

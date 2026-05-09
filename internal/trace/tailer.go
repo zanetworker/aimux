@@ -38,7 +38,7 @@ func NewTailer(path string, onLine func(string)) (*Tailer, error) {
 		return nil, err
 	}
 	if err := watcher.Add(path); err != nil {
-		watcher.Close()
+		_ = watcher.Close()
 		return nil, err
 	}
 
@@ -60,7 +60,7 @@ func NewTailer(path string, onLine func(string)) (*Tailer, error) {
 // Stop shuts down the tailer and waits for the goroutine to exit.
 func (t *Tailer) Stop() {
 	close(t.stop)
-	t.watcher.Close()
+	_ = t.watcher.Close()
 	t.done.Wait()
 }
 
@@ -97,11 +97,11 @@ func (t *Tailer) run() {
 
 // readNewLines reads new bytes from offset, parses lines, and calls onLine.
 func (t *Tailer) readNewLines() {
-	f, err := os.Open(t.path)
+	f, err := os.Open(t.path) // #nosec G304
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Seek to current offset
 	if _, err := f.Seek(t.offset, 0); err != nil {

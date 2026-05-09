@@ -73,7 +73,7 @@ func (tv *TermView) Write(data []byte) {
 	// Feed the VT emulator. SafeEmulator is internally thread-safe,
 	// so we must NOT hold tv.mu during this call to avoid deadlock
 	// with concurrent Render calls.
-	tv.term.Write(data)
+	_, _ = tv.term.Write(data)
 
 	tv.mu.Lock()
 	tv.dirty = true
@@ -98,9 +98,7 @@ func (tv *TermView) SnapshotHistory() {
 	tv.mu.Lock()
 	defer tv.mu.Unlock()
 
-	for _, line := range strings.Split(rendered, "\n") {
-		tv.history = append(tv.history, line)
-	}
+	tv.history = append(tv.history, strings.Split(rendered, "\n")...)
 	if len(tv.history) > 10000 {
 		tv.history = tv.history[len(tv.history)-10000:]
 	}

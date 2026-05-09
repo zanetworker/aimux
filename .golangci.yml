@@ -17,6 +17,3 @@ linters:
     gosec:
       excludes:
         - G104  # allow unhandled errors in deferred Close() calls
-
-issues:
-  new-from-rev: HEAD~1  # only flag issues introduced in the latest commit

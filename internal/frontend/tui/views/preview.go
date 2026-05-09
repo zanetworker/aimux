@@ -509,7 +509,7 @@ func renderTokenBar(label string, tokens int64, maxTokens int64, width int) stri
 // processInfo returns a short description of a process by PID: its command
 // name and RSS memory. Returns "" if the process can't be inspected.
 func processInfo(pid int) string {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "rss=,comm=").Output()
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "rss=,comm=").Output() // #nosec G204
 	if err != nil {
 		return ""
 	}
@@ -545,6 +545,7 @@ func fetchPodErrorLogs(a *agent.Agent) string {
 	defer cancel()
 
 	// Try init container logs first (most common failure point)
+	// #nosec G204
 	out, err := exec.CommandContext(ctx, "kubectl", "logs", podName,
 		"-n", namespace,
 		"--init-container=clone-repo",
@@ -555,6 +556,7 @@ func fetchPodErrorLogs(a *agent.Agent) string {
 	}
 
 	// Fall back to main container logs
+	// #nosec G204
 	out, err = exec.CommandContext(ctx, "kubectl", "logs", podName,
 		"-n", namespace,
 		"--tail=5",

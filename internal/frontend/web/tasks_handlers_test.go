@@ -42,7 +42,7 @@ func TestHandleTaskLists(t *testing.T) {
 	var resp struct {
 		Lists []tasks.TaskList `json:"lists"`
 	}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if len(resp.Lists) != 2 {
 		t.Fatalf("got %d lists, want 2", len(resp.Lists))
 	}
@@ -126,7 +126,7 @@ func TestLaunchHandlerWithTaskContext(t *testing.T) {
 		return nil
 	})
 
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
@@ -145,7 +145,7 @@ func TestLaunchHandlerWithTaskContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /api/agents/launch failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)

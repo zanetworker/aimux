@@ -91,6 +91,7 @@ func EnrichFromOTEL(agents []agent.Agent, store OTELLookup) []agent.Agent {
 			if existingBySubID[sub.ID] {
 				continue // already exists from process tree
 			}
+			// #nosec G602 -- i is guaranteed to be in range by the outer for loop
 			virtualAgents = append(virtualAgents, agent.Agent{
 				Name:         sub.Type,
 				ProviderName: agents[i].ProviderName,

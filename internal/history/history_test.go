@@ -14,15 +14,15 @@ import (
 func writeSessionJSONL(t *testing.T, dir, sessionID string, lines []map[string]interface{}) string {
 	t.Helper()
 	filePath := filepath.Join(dir, sessionID+".jsonl")
-	f, err := os.Create(filePath)
+	f, err := os.Create(filePath) // #nosec G304
 	if err != nil {
 		t.Fatalf("create session file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	for _, line := range lines {
 		data, _ := json.Marshal(line)
-		f.Write(data)
-		f.Write([]byte("\n"))
+		_, _ = f.Write(data)
+		_, _ = f.Write([]byte("\n"))
 	}
 	return filePath
 }
@@ -90,7 +90,7 @@ func TestSaveAndLoadMeta(t *testing.T) {
 	dir := t.TempDir()
 	sessionFile := filepath.Join(dir, "test-session.jsonl")
 	// Create a dummy session file so the path exists
-	os.WriteFile(sessionFile, []byte("{}"), 0o644)
+	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
 
 	meta := Meta{
 		Annotation: "failed",
@@ -127,7 +127,7 @@ func TestLoadMeta_NoFile(t *testing.T) {
 func TestSaveMeta_AtomicWrite(t *testing.T) {
 	dir := t.TempDir()
 	sessionFile := filepath.Join(dir, "session.jsonl")
-	os.WriteFile(sessionFile, []byte("{}"), 0o644)
+	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
 
 	// Write initial metadata
 	if err := SaveMeta(sessionFile, Meta{Annotation: "achieved"}); err != nil {
@@ -151,16 +151,16 @@ func TestSaveMeta_AtomicWrite(t *testing.T) {
 func TestCollectTags(t *testing.T) {
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-project")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 
 	// Create two meta files with overlapping tags
 	s1 := filepath.Join(projDir, "session1.jsonl")
-	os.WriteFile(s1, []byte("{}"), 0o644)
-	SaveMeta(s1, Meta{Tags: []string{"loop-on-error", "wrong-file"}})
+	_ = os.WriteFile(s1, []byte("{}"), 0o600)
+	_ = SaveMeta(s1, Meta{Tags: []string{"loop-on-error", "wrong-file"}})
 
 	s2 := filepath.Join(projDir, "session2.jsonl")
-	os.WriteFile(s2, []byte("{}"), 0o644)
-	SaveMeta(s2, Meta{Tags: []string{"wrong-file", "hallucinated-api"}})
+	_ = os.WriteFile(s2, []byte("{}"), 0o600)
+	_ = SaveMeta(s2, Meta{Tags: []string{"wrong-file", "hallucinated-api"}})
 
 	tags := CollectTags(dir)
 	if len(tags) != 3 {
@@ -239,7 +239,7 @@ func TestParseSessionLine_SkipsNoisePrompt(t *testing.T) {
 	}
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-proj")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 	writeSessionJSONL(t, projDir, "noise-test", lines)
 
 	sessions, err := Discover(DiscoverOpts{}, dir)
@@ -281,7 +281,7 @@ func TestParseSessionLine_ImageOnlyMessage(t *testing.T) {
 	}
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-proj2")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 	writeSessionJSONL(t, projDir, "img-test", lines)
 
 	sessions, err := Discover(DiscoverOpts{}, dir)
@@ -299,7 +299,7 @@ func TestParseSessionLine_ImageOnlyMessage(t *testing.T) {
 func TestDiscover_BasicSession(t *testing.T) {
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-myproject")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 
 	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
 	minimalSession(t, projDir, "abc-123", "fix the markdown rendering", ts)
@@ -339,7 +339,7 @@ func TestDiscover_BasicSession(t *testing.T) {
 func TestDiscover_MultipleSessions_SortedByLastActive(t *testing.T) {
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-project")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 
 	// Older session
 	ts1 := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
@@ -389,8 +389,8 @@ func TestDiscover_DirFilter(t *testing.T) {
 	// Two projects with Claude-style encoded dir names
 	proj1 := filepath.Join(dir, "-Users-test-project1")
 	proj2 := filepath.Join(dir, "-Users-test-project2")
-	os.MkdirAll(proj1, 0o755)
-	os.MkdirAll(proj2, 0o755)
+	_ = os.MkdirAll(proj1, 0o750)
+	_ = os.MkdirAll(proj2, 0o750)
 
 	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
 	minimalSession(t, proj1, "s1", "task one", ts)
@@ -412,7 +412,7 @@ func TestDiscover_DirFilter(t *testing.T) {
 func TestDiscover_Limit(t *testing.T) {
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-project")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 
 	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
 	for i := 0; i < 10; i++ {
@@ -452,13 +452,13 @@ func TestDiscover_EmptyDir(t *testing.T) {
 func TestDiscover_WithMetadata(t *testing.T) {
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-project")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 
 	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
 	sessionPath := minimalSession(t, projDir, "annotated", "some task", ts)
 
 	// Add metadata
-	SaveMeta(sessionPath, Meta{
+	_ = SaveMeta(sessionPath, Meta{
 		Annotation: "failed",
 		Note:       "kept looping",
 		Tags:       []string{"loop-on-error"},
@@ -498,7 +498,7 @@ func TestDiscover_UnsupportedProvider(t *testing.T) {
 func TestDiscover_CostCalculation(t *testing.T) {
 	dir := t.TempDir()
 	projDir := filepath.Join(dir, "-Users-test-project")
-	os.MkdirAll(projDir, 0o755)
+	_ = os.MkdirAll(projDir, 0o750)
 
 	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
 	lines := []map[string]interface{}{
@@ -565,7 +565,7 @@ func TestDiscover_CostCalculation(t *testing.T) {
 func TestTitleForSessionFile(t *testing.T) {
 	dir := t.TempDir()
 	sessionFile := filepath.Join(dir, "test.jsonl")
-	os.WriteFile(sessionFile, []byte("{}"), 0o644)
+	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
 
 	// No meta file — should return ""
 	if got := TitleForSessionFile(sessionFile); got != "" {
@@ -573,7 +573,7 @@ func TestTitleForSessionFile(t *testing.T) {
 	}
 
 	// With meta file
-	SaveMeta(sessionFile, Meta{Title: "Fix markdown rendering"})
+	_ = SaveMeta(sessionFile, Meta{Title: "Fix markdown rendering"})
 	if got := TitleForSessionFile(sessionFile); got != "Fix markdown rendering" {
 		t.Errorf("expected title, got %q", got)
 	}
@@ -873,7 +873,7 @@ func TestIsHumanMessage(t *testing.T) {
 func TestScanSession_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "empty.jsonl")
-	os.WriteFile(filePath, []byte(""), 0o644)
+	_ = os.WriteFile(filePath, []byte(""), 0o600)
 
 	s, err := scanSession("empty", filePath, "/test")
 	if err != nil {

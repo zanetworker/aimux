@@ -36,7 +36,7 @@ func DeleteSession(s history.Session) error {
 		return fmt.Errorf("delete session file: %w", err)
 	}
 	metaPath := history.MetaPath(s.FilePath)
-	os.Remove(metaPath) // ignore error — may not exist
+	_ = os.Remove(metaPath) // ignore error — may not exist
 	return nil
 }
 

@@ -62,88 +62,6 @@ func (c *Codex) discoverFromLines(lines []string, tmuxSessions []discovery.TmuxS
 	return agents, nil
 }
 
-// discoverRecentSessions finds Codex session files from the last 24 hours that
-// don't have a corresponding running process. These appear as idle/resumable.
-func (c *Codex) discoverRecentSessions(running []agent.Agent) []agent.Agent {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-
-	sessionsDir := filepath.Join(home, ".codex", "sessions")
-	cutoff := time.Now().Add(-24 * time.Hour)
-
-	// Collect session IDs and working dirs that are already running
-	runningIDs := make(map[string]bool)
-	runningDirs := make(map[string]bool)
-	for _, a := range running {
-		if a.SessionID != "" {
-			runningIDs[a.SessionID] = true
-		}
-		if a.WorkingDir != "" {
-			runningDirs[a.WorkingDir] = true
-		}
-	}
-
-	var agents []agent.Agent
-	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		if info.ModTime().Before(cutoff) {
-			return nil
-		}
-
-		meta := c.readSessionMeta(path)
-		if meta.sessionID == "" {
-			return nil
-		}
-		if runningIDs[meta.sessionID] {
-			return nil // already shown as running
-		}
-		if meta.cwd != "" && runningDirs[meta.cwd] {
-			return nil // running process in same directory
-		}
-
-		// Parse full session for last activity
-		sessionInfo := c.parseSession(path)
-
-		a := agent.Agent{
-			PID:          0,
-			SessionID:    meta.sessionID,
-			ProviderName: "codex",
-			WorkingDir:   meta.cwd,
-			SessionFile:  path,
-			Status:       agent.StatusIdle,
-			Source:       agent.SourceCLI,
-			GroupCount:   1,
-			GroupPIDs:    []int{},
-		}
-
-		if meta.cwd != "" {
-			a.Name = filepath.Base(meta.cwd)
-		} else {
-			a.Name = "codex"
-		}
-
-		if !sessionInfo.lastTimestamp.IsZero() {
-			a.LastActivity = sessionInfo.lastTimestamp
-			a.StartTime = sessionInfo.lastTimestamp
-		} else {
-			a.LastActivity = info.ModTime()
-			a.StartTime = info.ModTime()
-		}
-
-		agents = append(agents, a)
-		return nil
-	})
-
-	return agents
-}
-
 // isCodexProcess returns true if a ps line represents a Codex CLI process
 // worth tracking.
 func isCodexProcess(line string) bool {
@@ -258,6 +176,7 @@ func (c *Codex) dedup(agents []agent.Agent) []agent.Agent {
 	// First resolve CWDs
 	for i := range agents {
 		if agents[i].WorkingDir == "" {
+			// #nosec G204
 			if cwd, err := exec.Command("lsof", "-p", strconv.Itoa(agents[i].PID), "-Fn").Output(); err == nil {
 				for _, line := range strings.Split(string(cwd), "\n") {
 					if strings.HasPrefix(line, "n") && strings.HasPrefix(line[1:], "/") {
@@ -269,6 +188,7 @@ func (c *Codex) dedup(agents []agent.Agent) []agent.Agent {
 			}
 			// Fallback to /proc or pwdx-style
 			if agents[i].WorkingDir == "" {
+				// #nosec G204
 				if cwd, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(agents[i].PID)).Output(); err == nil {
 					if cd := codexExtractFlag(string(cwd), "-C"); cd != "" {
 						agents[i].WorkingDir = cd
@@ -391,7 +311,7 @@ func (c *Codex) enrichAgent(a *agent.Agent, tmuxSessions []discovery.TmuxSession
 
 // getCwd resolves the current working directory for a PID.
 func getCwd(pid int) (string, error) {
-	out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn").Output()
+	out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn").Output() // #nosec G204
 	if err != nil {
 		return "", err
 	}
@@ -470,11 +390,11 @@ func (c *Codex) findSessionFile(sessionsDir, workingDir string) string {
 
 // readSessionMeta reads just the first session_meta line from a Codex JSONL.
 func (c *Codex) readSessionMeta(path string) codexSessionInfo {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return codexSessionInfo{}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 512*1024), 512*1024)
@@ -502,11 +422,11 @@ func (c *Codex) readSessionMeta(path string) codexSessionInfo {
 
 // parseSession reads a Codex JSONL session for metadata including token usage.
 func (c *Codex) parseSession(path string) codexSessionInfo {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return codexSessionInfo{}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var info codexSessionInfo
 	scanner := bufio.NewScanner(f)
@@ -579,14 +499,14 @@ func (c *Codex) ResumeCommand(a agent.Agent) *exec.Cmd {
 	// --no-alt-screen prevents Codex's TUI from fighting with aimux's
 	// Bubble Tea for the alternate screen buffer.
 	if a.SessionID != "" {
-		cmd := exec.Command(bin, "resume", "--no-alt-screen", a.SessionID)
+		cmd := exec.Command(bin, "resume", "--no-alt-screen", a.SessionID) // #nosec G204
 		if a.WorkingDir != "" {
 			cmd.Dir = a.WorkingDir
 		}
 		return cmd
 	}
 	if a.WorkingDir != "" {
-		cmd := exec.Command(bin, "resume", "--no-alt-screen", "--last")
+		cmd := exec.Command(bin, "resume", "--no-alt-screen", "--last") // #nosec G204
 		cmd.Dir = a.WorkingDir
 		return cmd
 	}
@@ -711,7 +631,7 @@ func (c *Codex) SpawnCommand(dir, model, mode string) *exec.Cmd {
 		args = append(args, "--sandbox", "workspace-write")
 	}
 
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, args...) // #nosec G204
 	cmd.Dir = dir
 	return cmd
 }
@@ -758,7 +678,7 @@ func codexExtractFlag(args, flag string) string {
 
 // ParseTrace reads a Codex JSONL session file and parses it into trace turns.
 func (c *Codex) ParseTrace(filePath string) ([]trace.Turn, error) {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("read Codex trace %s: %w", filePath, err)
 	}
@@ -788,7 +708,7 @@ func parseCodexJSONL(data string) []trace.Turn {
 		}
 
 		var entryType string
-		json.Unmarshal(raw["type"], &entryType)
+		_ = json.Unmarshal(raw["type"], &entryType)
 
 		var ts time.Time
 		var tsStr string
@@ -808,7 +728,7 @@ func parseCodexJSONL(data string) []trace.Turn {
 					} `json:"total_token_usage"`
 				} `json:"info"`
 			}
-			json.Unmarshal(raw["payload"], &payload)
+			_ = json.Unmarshal(raw["payload"], &payload)
 
 			if payload.Type == "user_message" && payload.Message != "" {
 				if current != nil {
@@ -842,7 +762,7 @@ func parseCodexJSONL(data string) []trace.Turn {
 				Output    string          `json:"output"`
 				Content   json.RawMessage `json:"content"`
 			}
-			json.Unmarshal(raw["payload"], &payload)
+			_ = json.Unmarshal(raw["payload"], &payload)
 
 			if current == nil {
 				turnNum++

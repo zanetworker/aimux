@@ -24,7 +24,7 @@ type TeamConfig struct {
 
 // ReadTeamConfig reads and parses a team config from the given file path.
 func ReadTeamConfig(path string) (TeamConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return TeamConfig{}, fmt.Errorf("reading team config %s: %w", path, err)
 	}

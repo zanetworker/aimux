@@ -121,14 +121,14 @@ func TestSearchContent_MatchesTestFixture(t *testing.T) {
 	// Create temp dir with a fake session JSONL
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "test-project")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
+	if err := os.MkdirAll(projectDir, 0750); err != nil {
 		t.Fatal(err)
 	}
 
 	content := `{"type":"message","message":{"role":"user","content":"implement clipboard feature"}}
 {"type":"message","message":{"role":"assistant","content":"I'll add clipboard support now"}}
 `
-	if err := os.WriteFile(filepath.Join(projectDir, "test-session-123.jsonl"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "test-session-123.jsonl"), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,13 +147,13 @@ func TestSearchContent_MatchesTestFixture(t *testing.T) {
 func TestSearchContentWithSnippets_ExtractsSnippet(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "test-project")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
+	if err := os.MkdirAll(projectDir, 0750); err != nil {
 		t.Fatal(err)
 	}
 
 	content := `{"type":"message","message":{"role":"user","content":"please add ripgrep integration"}}
 `
-	if err := os.WriteFile(filepath.Join(projectDir, "sess-abc.jsonl"), []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "sess-abc.jsonl"), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -201,7 +201,7 @@ func TestSearchFile(t *testing.T) {
 {"role":"tool","name":"Read","input":"auth.go"}
 {"role":"assistant","content":"done with the fix"}
 `
-	os.WriteFile(path, []byte(content), 0644)
+	_ = os.WriteFile(path, []byte(content), 0600)
 
 	count, snippet := SearchFile(path, "auth.go")
 	if count != 3 {

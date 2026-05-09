@@ -192,26 +192,6 @@ func NewNewPickerView(cfg NewPickerConfig) *NewPickerView {
 	}
 }
 
-// infraReady returns true when the infra provider's infrastructure is healthy.
-func (v *NewPickerView) infraReady() bool {
-	return v.infraHealth != nil && v.infraHealth.CoordOK && v.infraHealth.ComputeOK
-}
-
-// infraBlockReason returns a user-facing reason why infra options are
-// unavailable, or empty string if everything is fine.
-func (v *NewPickerView) infraBlockReason() string {
-	if v.infraHealth == nil {
-		return "Infra provider not configured"
-	}
-	if !v.infraHealth.CoordOK {
-		return "Coordination layer unreachable: " + v.infraHealth.CoordErr
-	}
-	if !v.infraHealth.ComputeOK {
-		return "Compute layer unreachable: " + v.infraHealth.ComputeErr
-	}
-	return ""
-}
-
 // SetStatus sets a status/error message displayed in the picker.
 func (v *NewPickerView) SetStatus(msg string) {
 	v.statusMsg = msg

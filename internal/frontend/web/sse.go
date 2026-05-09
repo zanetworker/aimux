@@ -93,16 +93,16 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	if err != nil {
 		return
 	}
-	fmt.Fprintf(w, "event: agents\ndata: %s\n\n", data)
+	_, _ = fmt.Fprintf(w, "event: agents\ndata: %s\n\n", data)
 	flusher.Flush()
 }
 
 func firstPromptFromJSONL(sessionFile string) string {
-	f, err := os.Open(sessionFile)
+	f, err := os.Open(sessionFile) // #nosec G304
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {

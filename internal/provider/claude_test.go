@@ -240,7 +240,7 @@ func TestNewestFileModTime(t *testing.T) {
 
 	// Create two files, check newest is returned
 	f1 := filepath.Join(tmpDir, "old.jsonl")
-	if err := os.WriteFile(f1, []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(f1, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// Make it older
@@ -248,7 +248,7 @@ func TestNewestFileModTime(t *testing.T) {
 	_ = os.Chtimes(f1, oldTime, oldTime)
 
 	f2 := filepath.Join(tmpDir, "new.jsonl")
-	if err := os.WriteFile(f2, []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(f2, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,7 +283,7 @@ func TestDiscoverRecentSessions_NoRecentFiles(t *testing.T) {
 
 	// Create a subdir with an old .jsonl file (>24h)
 	subdir := filepath.Join(projectsDir, "-tmp-myproject")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(subdir, "session-old.jsonl")
@@ -307,7 +307,7 @@ func TestDiscoverRecentSessions_FindsRecentSession(t *testing.T) {
 
 	// Create a subdir with a recent .jsonl file
 	subdir := filepath.Join(projectsDir, "-tmp-myproject")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(subdir, "test-session-123.jsonl")
@@ -353,7 +353,7 @@ func TestDiscoverRecentSessions_SkipsRunningBySessionID(t *testing.T) {
 	projectsDir := t.TempDir()
 
 	subdir := filepath.Join(projectsDir, "-tmp-myproject")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(subdir, "running-session.jsonl")
@@ -378,7 +378,7 @@ func TestDiscoverRecentSessions_SkipsRunningByWorkingDir(t *testing.T) {
 	projectsDir := t.TempDir()
 
 	subdir := filepath.Join(projectsDir, "-tmp-myproject")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(subdir, "session-abc.jsonl")
@@ -403,12 +403,12 @@ func TestDiscoverRecentSessions_SkipsNonJSONL(t *testing.T) {
 	projectsDir := t.TempDir()
 
 	subdir := filepath.Join(projectsDir, "-tmp-myproject")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	// Create a non-JSONL file
 	txtFile := filepath.Join(subdir, "notes.txt")
-	if err := os.WriteFile(txtFile, []byte("not a session"), 0o644); err != nil {
+	if err := os.WriteFile(txtFile, []byte("not a session"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -423,7 +423,7 @@ func TestDiscoverRecentSessions_OnePerProjectDir(t *testing.T) {
 	projectsDir := t.TempDir()
 
 	subdir := filepath.Join(projectsDir, "-tmp-myproject")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -454,7 +454,7 @@ func TestDiscoverRecentSessions_TokensAndCost(t *testing.T) {
 	projectsDir := t.TempDir()
 
 	subdir := filepath.Join(projectsDir, "-tmp-myproject")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	sessionFile := filepath.Join(subdir, "session-cost.jsonl")
@@ -553,7 +553,7 @@ func writeTestSessionWithTokens(t *testing.T, path, sessionID, model string, tok
 	}
 
 	content := fmt.Sprintf("%s\n%s\n", string(b1), string(b2))
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -567,7 +567,7 @@ func TestClaudeParseTrace_BasicTurn(t *testing.T) {
 	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"fix the bug"}}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"I'll fix that."},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"main.go"}}],"usage":{"input_tokens":100,"output_tokens":50}}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -620,7 +620,7 @@ func TestClaudeParseTrace_MultipleTurns(t *testing.T) {
 {"type":"user","timestamp":"2026-01-01T10:01:00Z","message":{"role":"user","content":"second question"}}
 {"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"second answer"}],"usage":{"input_tokens":80,"output_tokens":40}}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -649,7 +649,7 @@ func TestClaudeParseTrace_ToolResultError(t *testing.T) {
 {"type":"assistant","timestamp":"2026-01-01T10:00:01Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"go build ./..."}}],"usage":{"input_tokens":50,"output_tokens":20}}}
 {"type":"user","timestamp":"2026-01-01T10:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu1","is_error":true,"content":"compilation failed: undefined variable"}]}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -685,7 +685,7 @@ func TestClaudeParseTrace_MissingFile(t *testing.T) {
 func TestClaudeParseTrace_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "empty.jsonl")
-	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -706,7 +706,7 @@ func TestClaudeParseTrace_CostCalculation(t *testing.T) {
 	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"hello"}}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1000,"output_tokens":500}}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -769,7 +769,7 @@ func TestClaudeParseTrace_PreservesIndentation(t *testing.T) {
 	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"show code"}}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Here is code:\n` + "```" + `go\nfunc main() {\n    fmt.Println(\"hello\")\n}\n` + "```" + `"}],"usage":{"input_tokens":10,"output_tokens":20}}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

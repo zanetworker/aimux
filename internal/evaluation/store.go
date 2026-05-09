@@ -83,7 +83,7 @@ func (s *Store) path() string {
 
 // ensureDir creates the evaluations directory if it does not exist.
 func (s *Store) ensureDir() error {
-	return os.MkdirAll(s.dir, 0o755)
+	return os.MkdirAll(s.dir, 0o750)
 }
 
 // Save appends an annotation as a single JSONL line. The directory is created
@@ -100,11 +100,11 @@ func (s *Store) Save(a Annotation) error {
 	}
 	data = append(data, '\n')
 
-	f, err := os.OpenFile(s.path(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(s.path(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("open annotations file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write annotation: %w", err)
@@ -122,7 +122,7 @@ func (s *Store) Load() ([]Annotation, error) {
 		}
 		return nil, fmt.Errorf("open annotations file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var annotations []Annotation
 	scanner := bufio.NewScanner(f)
@@ -207,8 +207,8 @@ func (s *Store) Remove(turn int) error {
 	success := false
 	defer func() {
 		if !success {
-			tmp.Close()
-			os.Remove(tmpPath)
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
 		}
 	}()
 
@@ -251,7 +251,7 @@ func ExportPath(sessionID string) string {
 // atomically via a temp file and rename.
 func WriteExport(path string, turns []ExportTurn, sessionMeta *ExportSessionMeta) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create export dir: %w", err)
 	}
 
@@ -264,8 +264,8 @@ func WriteExport(path string, turns []ExportTurn, sessionMeta *ExportSessionMeta
 	success := false
 	defer func() {
 		if !success {
-			tmp.Close()
-			os.Remove(tmpPath)
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
 		}
 	}()
 

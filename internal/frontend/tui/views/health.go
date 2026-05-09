@@ -86,10 +86,10 @@ func (v *HealthView) View() string {
 				} else {
 					agents = healthDimStyle.Render("  0 agents")
 				}
-				b.WriteString(fmt.Sprintf("%s  %s  %s %s%s", name, status, path, version, agents))
+				fmt.Fprintf(&b, "%s  %s  %s %s%s", name, status, path, version, agents)
 			} else {
 				status := healthFailStyle.Render("✗")
-				b.WriteString(fmt.Sprintf("%s  %s  %s", name, status, healthDimStyle.Render("not installed")))
+				fmt.Fprintf(&b, "%s  %s  %s", name, status, healthDimStyle.Render("not installed"))
 			}
 			b.WriteString("\n")
 		}

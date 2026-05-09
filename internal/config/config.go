@@ -157,7 +157,7 @@ func Load(path string) (Config, error) {
 		return cfg, nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path from user config
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil

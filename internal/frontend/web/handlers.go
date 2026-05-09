@@ -89,7 +89,7 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "launched"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "launched"})
 }
 
 func (s *Server) handleAnnotateTurn(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +118,7 @@ func (s *Server) handleAnnotateTurn(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleGetAnnotations(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +133,7 @@ func (s *Server) handleGetAnnotations(w http.ResponseWriter, r *http.Request) {
 		annotations = []evaluation.Annotation{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"annotations": annotations})
+	_ = json.NewEncoder(w).Encode(map[string]any{"annotations": annotations})
 }
 
 func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +162,7 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleGetSessionMeta(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +173,7 @@ func (s *Server) handleGetSessionMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	meta := history.LoadMeta(filePath)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(meta)
+	_ = json.NewEncoder(w).Encode(meta)
 }
 
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +197,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "killed"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "killed"})
 			return
 		}
 	}
@@ -206,7 +206,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "not implemented"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "not implemented"})
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -246,17 +246,17 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"sessions": result})
+	_ = json.NewEncoder(w).Encode(map[string]any{"sessions": result})
 }
 
 func (s *Server) handleTraceSubscribe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "subscribed"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "subscribed"})
 }
 
 func (s *Server) handleTraceUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "unsubscribed"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "unsubscribed"})
 }
 
 func (s *Server) handleFastTrace(w http.ResponseWriter, r *http.Request) {
@@ -288,7 +288,7 @@ func (s *Server) handleFastTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"turns": turnsToJSON(turns)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"turns": turnsToJSON(turns)})
 }
 
 func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
@@ -329,7 +329,7 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"turns": turnsToJSON(turns)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"turns": turnsToJSON(turns)})
 }
 
 func turnsToJSON(turns []trace.Turn) []map[string]any {
@@ -370,7 +370,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
 		return
 	}
 	matches, err := history.SearchContentWithSnippets(q, "")
@@ -387,7 +387,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"results": results})
+	_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
 }
 
 func (s *Server) handleExportJSONL(w http.ResponseWriter, r *http.Request) {
@@ -429,7 +429,7 @@ func (s *Server) handleExportJSONL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status": "exported",
 		"path":   result.Path,
 		"count":  result.Count,
@@ -475,7 +475,7 @@ func (s *Server) handleExportOTEL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":   "exported",
 		"endpoint": result.Path,
 		"count":    result.Count,
@@ -491,7 +491,7 @@ func (s *Server) handlePlugins(w http.ResponseWriter, r *http.Request) {
 		plugins = []plugin.Plugin{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"plugins": plugins})
+	_ = json.NewEncoder(w).Encode(map[string]any{"plugins": plugins})
 }
 
 func (s *Server) handlePluginData(w http.ResponseWriter, r *http.Request) {
@@ -506,7 +506,7 @@ func (s *Server) handlePluginData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
@@ -546,7 +546,7 @@ func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"insight": result})
+	_ = json.NewEncoder(w).Encode(map[string]string{"insight": result})
 }
 
 func (s *Server) handleBrowseDir(w http.ResponseWriter, r *http.Request) {
@@ -592,7 +592,7 @@ func (s *Server) handleBrowseDir(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"path":    path,
 		"entries": result,
 	})
@@ -601,7 +601,7 @@ func (s *Server) handleBrowseDir(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRecentDirs(w http.ResponseWriter, r *http.Request) {
 	if s.recentDirsFn == nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"directories": []RecentDirInfo{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"directories": []RecentDirInfo{}})
 		return
 	}
 
@@ -610,5 +610,5 @@ func (s *Server) handleRecentDirs(w http.ResponseWriter, r *http.Request) {
 		dirs = []RecentDirInfo{}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"directories": dirs})
+	_ = json.NewEncoder(w).Encode(map[string]any{"directories": dirs})
 }

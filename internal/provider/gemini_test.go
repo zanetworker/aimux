@@ -224,11 +224,11 @@ func TestNewestSessionJSON(t *testing.T) {
 
 	f1 := filepath.Join(tmpDir, "session-2026-02-28T09-00-aaa.json")
 	f2 := filepath.Join(tmpDir, "session-2026-02-28T10-00-bbb.json")
-	os.WriteFile(f1, []byte(s1), 0o644)
-	os.WriteFile(f2, []byte(s2), 0o644)
+	_ = os.WriteFile(f1, []byte(s1), 0o600)
+	_ = os.WriteFile(f2, []byte(s2), 0o600)
 	// Ensure f2 has a newer mod time (filesystem resolution may be 1s on Linux)
 	past := time.Now().Add(-10 * time.Second)
-	os.Chtimes(f1, past, past)
+	_ = os.Chtimes(f1, past, past)
 	// f2 keeps current mod time (newer)
 
 	path, mod = newestSessionJSON(tmpDir)
@@ -254,7 +254,7 @@ func TestGeminiParseTrace_BasicTurn(t *testing.T) {
 		{"sessionId":"s1","messageId":2,"type":"model","message":"Hi there! How can I help?","timestamp":"2026-01-01T10:00:05Z"}
 	]`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -291,7 +291,7 @@ func TestGeminiParseTrace_MultipleTurns(t *testing.T) {
 		{"sessionId":"s1","messageId":4,"type":"model","message":"second answer","timestamp":"2026-01-01T10:01:05Z"}
 	]`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -321,7 +321,7 @@ func TestGeminiParseTrace_InfoMessage(t *testing.T) {
 		{"sessionId":"s1","messageId":2,"type":"info","message":"session started","timestamp":"2026-01-01T10:00:01Z"}
 	]`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -353,7 +353,7 @@ func TestGeminiParseTrace_MissingFile(t *testing.T) {
 func TestGeminiParseTrace_InvalidJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "bad.json")
-	if err := os.WriteFile(path, []byte("not json"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -382,7 +382,7 @@ func TestGeminiParseTrace_FiltersToLatestSession(t *testing.T) {
 		{"sessionId":"s3","messageId":2,"type":"model","message":"current answer","timestamp":"2026-01-03T10:00:05Z"}
 	]`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -414,7 +414,7 @@ func TestGeminiParseTrace_NoSessionID_ReturnsAll(t *testing.T) {
 		{"messageId":3,"type":"user","message":"q2","timestamp":"2026-01-01T10:01:00Z"}
 	]`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -509,7 +509,7 @@ func TestGeminiParseTrace_SessionFile(t *testing.T) {
 		]
 	}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -547,7 +547,7 @@ func TestGeminiParseTrace_SessionFileMultipleTurns(t *testing.T) {
 		]
 	}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -573,7 +573,7 @@ func TestParseGeminiSessionID(t *testing.T) {
 	path := filepath.Join(tmpDir, "session.json")
 
 	data := `{"sessionId": "abc-123-def", "messages": []}`
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -619,7 +619,7 @@ func TestGeminiParseTrace_PreservesIndentation(t *testing.T) {
 		]
 	}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

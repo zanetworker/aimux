@@ -17,8 +17,8 @@ func TestExportJSONL_Success(t *testing.T) {
 
 	// Create a session file with metadata
 	sessionFile := filepath.Join(dir, "test-session.jsonl")
-	os.WriteFile(sessionFile, []byte("{}"), 0o644)
-	history.SaveMeta(sessionFile, history.Meta{
+	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
+	_ = history.SaveMeta(sessionFile, history.Meta{
 		Annotation: "failed",
 		Tags:       []string{"loop-on-error"},
 		Note:       "agent looped",
@@ -95,7 +95,7 @@ func TestExportJSONL_Success(t *testing.T) {
 	}
 
 	// Cleanup
-	os.Remove(result.Path)
+	_ = os.Remove(result.Path)
 }
 
 func TestExportJSONL_NoTurns(t *testing.T) {
@@ -137,7 +137,7 @@ func TestExportJSONL_NoMeta(t *testing.T) {
 		t.Errorf("expected 1 line (turn only, no meta), got %d", len(lines))
 	}
 
-	os.Remove(result.Path)
+	_ = os.Remove(result.Path)
 }
 
 func TestExportOTEL_NoEndpoint(t *testing.T) {

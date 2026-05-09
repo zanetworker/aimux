@@ -279,7 +279,7 @@ func (g *Gemini) ResumeCommand(a agent.Agent) *exec.Cmd {
 		return nil
 	}
 	bin := findBinary("gemini")
-	cmd := exec.Command(bin, "--resume", "latest")
+	cmd := exec.Command(bin, "--resume", "latest") // #nosec G204
 	cmd.Dir = a.WorkingDir
 	return cmd
 }
@@ -418,7 +418,7 @@ func (g *Gemini) SpawnCommand(dir, model, mode string) *exec.Cmd {
 		args = append(args, "--sandbox")
 	}
 
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, args...) // #nosec G204
 	cmd.Dir = dir
 	return cmd
 }
@@ -467,7 +467,7 @@ func readGeminiProjects() map[string]string {
 	if err != nil {
 		return nil
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".gemini", "projects.json"))
+	data, err := os.ReadFile(filepath.Join(home, ".gemini", "projects.json")) // #nosec G304
 	if err != nil {
 		return nil
 	}
@@ -518,7 +518,7 @@ func newestSessionJSON(chatsDir string) (string, time.Time) {
 
 // parseGeminiSessionTime reads lastUpdated from a Gemini session JSON file.
 func parseGeminiSessionTime(path string) time.Time {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return time.Time{}
 	}
@@ -537,7 +537,7 @@ func parseGeminiSessionTime(path string) time.Time {
 
 // parseGeminiSessionID reads sessionId from a Gemini session JSON file.
 func parseGeminiSessionID(path string) string {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return ""
 	}
@@ -552,7 +552,7 @@ func parseGeminiSessionID(path string) string {
 
 // geminiGetCwd resolves the current working directory for a PID.
 func geminiGetCwd(pid int) (string, error) {
-	out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn").Output()
+	out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn").Output() // #nosec G204
 	if err != nil {
 		return "", err
 	}
@@ -579,7 +579,7 @@ func geminiExtractFlag(args, flag string) string {
 // Supports both logs.json (array of log entries) and session-*.json (session
 // object with messages array) formats.
 func (g *Gemini) ParseTrace(filePath string) ([]trace.Turn, error) {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("read Gemini trace %s: %w", filePath, err)
 	}
@@ -715,7 +715,8 @@ func parseGeminiJSON(data string) []trace.Turn {
 			ts = time.Time{}
 		}
 
-		if e.Type == "user" {
+		switch e.Type {
+		case "user":
 			turnNum++
 			turn := trace.Turn{
 				Number:    turnNum,
@@ -724,13 +725,13 @@ func parseGeminiJSON(data string) []trace.Turn {
 				UserLines: []string{e.Message},
 			}
 			turns = append(turns, turn)
-		} else if e.Type == "model" || e.Type == "assistant" {
+		case "model", "assistant":
 			if len(turns) > 0 {
 				last := &turns[len(turns)-1]
 				last.OutputLines = append(last.OutputLines, e.Message)
 				last.EndTime = ts
 			}
-		} else if e.Type == "info" {
+		case "info":
 			if len(turns) > 0 {
 				last := &turns[len(turns)-1]
 				last.OutputLines = append(last.OutputLines, "[info] "+e.Message)

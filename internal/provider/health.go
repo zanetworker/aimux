@@ -110,16 +110,16 @@ func FormatHealth(sh SystemHealth) string {
 				if ver == "" {
 					ver = "unknown version"
 				}
-				b.WriteString(fmt.Sprintf("  %-10s  OK  %s %s    %d agents\n", p.Name, p.BinaryPath, ver, p.Agents))
+				fmt.Fprintf(&b, "  %-10s  OK  %s %s    %d agents\n", p.Name, p.BinaryPath, ver, p.Agents)
 			} else {
-				b.WriteString(fmt.Sprintf("  %-10s  --  not installed\n", p.Name))
+				fmt.Fprintf(&b, "  %-10s  --  not installed\n", p.Name)
 			}
 		}
 	}
 
 	// Infra providers.
 	for _, p := range infras {
-		b.WriteString(fmt.Sprintf("\nInfrastructure (%s)\n", p.Name))
+		fmt.Fprintf(&b, "\nInfrastructure (%s)\n", p.Name)
 		if p.Infra == nil {
 			b.WriteString("  not configured\n")
 			continue
@@ -138,21 +138,21 @@ func FormatHealth(sh SystemHealth) string {
 			if msg == "" {
 				msg = "unreachable"
 			}
-			b.WriteString(fmt.Sprintf("  Coordination:  FAIL  %s\n", msg))
+			fmt.Fprintf(&b, "  Coordination:  FAIL  %s\n", msg)
 		}
 
 		// Compute layer.
 		if h.ComputeOK {
-			b.WriteString(fmt.Sprintf("  Compute:       OK    %d workloads\n", len(h.Workloads)))
+			fmt.Fprintf(&b, "  Compute:       OK    %d workloads\n", len(h.Workloads))
 			for _, w := range h.Workloads {
-				b.WriteString(fmt.Sprintf("    - %s\n", w))
+				fmt.Fprintf(&b, "    - %s\n", w)
 			}
 		} else {
 			msg := h.ComputeErr
 			if msg == "" {
 				msg = "unreachable"
 			}
-			b.WriteString(fmt.Sprintf("  Compute:       FAIL  %s\n", msg))
+			fmt.Fprintf(&b, "  Compute:       FAIL  %s\n", msg)
 		}
 	}
 

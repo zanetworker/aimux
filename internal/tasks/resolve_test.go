@@ -122,11 +122,12 @@ func TestNewProviderAutoFallback(t *testing.T) {
 			}
 
 			// Simple type check based on interface implementation
-			if tt.wantType == "*tasks.GWSProvider" {
+			switch tt.wantType {
+			case "*tasks.GWSProvider":
 				if _, ok := p.(*GWSProvider); !ok {
 					t.Errorf("Expected *GWSProvider, got %T", p)
 				}
-			} else if tt.wantType == "*tasks.MCPProvider" {
+			case "*tasks.MCPProvider":
 				if _, ok := p.(*MCPProvider); !ok {
 					t.Errorf("Expected *MCPProvider, got %T", p)
 				}

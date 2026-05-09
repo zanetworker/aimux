@@ -22,15 +22,6 @@ const (
 	SortByFailureMode                 // tagged sessions first
 )
 
-// sortFieldNames maps sort fields to display names.
-var sortFieldNames = map[SortField]string{
-	SortByAge:         "AGE",
-	SortByCost:        "COST",
-	SortByTurns:       "TURNS",
-	SortByTitle:       "TITLE",
-	SortByFailureMode: "FAIL",
-}
-
 // sortFieldOrder defines the cycle order when pressing 's'.
 var sortFieldOrder = []SortField{SortByAge, SortByCost, SortByTurns, SortByTitle, SortByFailureMode}
 
@@ -53,8 +44,6 @@ var (
 			Foreground(lipgloss.Color("#6B7280"))
 	sessProjectStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#A78BFA"))
-	sessTagStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F59E0B")).Italic(true)
 
 	sessAnnotAchievedStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#111827")).
@@ -594,28 +583,6 @@ func (v *SessionsView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
 		v.noteInput.HandleKey(msg)
 	}
 	return nil
-}
-
-// autocompleteTag completes the current tag word from the vocabulary.
-func (v *SessionsView) autocompleteTag() {
-	if len(v.tagVocab) == 0 {
-		return
-	}
-	// Get the current partial tag (after the last comma)
-	parts := strings.Split(v.tagInput.Value(), ",")
-	current := strings.TrimSpace(parts[len(parts)-1])
-	if current == "" {
-		return
-	}
-
-	lower := strings.ToLower(current)
-	for _, tag := range v.tagVocab {
-		if strings.HasPrefix(strings.ToLower(tag), lower) && tag != current {
-			parts[len(parts)-1] = " " + tag
-			v.tagInput.SetValue(strings.Join(parts, ","))
-			return
-		}
-	}
 }
 
 // parseTags splits a comma-separated tag string into trimmed, non-empty tags.

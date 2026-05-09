@@ -176,10 +176,10 @@ func (r *K8sReader) fetchTraces(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetch traces from %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		io.ReadAll(resp.Body) // drain
+		_, _ = io.ReadAll(resp.Body) // drain
 		return fmt.Errorf("traces endpoint returned %d", resp.StatusCode)
 	}
 
@@ -218,10 +218,10 @@ func (r *K8sReader) fetchLogs(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("fetch logs from %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		io.ReadAll(resp.Body) // drain
+		_, _ = io.ReadAll(resp.Body) // drain
 		return fmt.Errorf("logs endpoint returned %d", resp.StatusCode)
 	}
 

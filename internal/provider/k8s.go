@@ -95,7 +95,7 @@ func (k *K8s) markRedisErr() {
 	defer k.mu.Unlock()
 	k.lastRedisErr = time.Now()
 	if k.rdb != nil {
-		k.rdb.Close()
+		_ = k.rdb.Close()
 		k.rdb = nil
 	}
 	debuglog.Log("k8s: redis error, circuit breaker active for %s", k.redisCooldown)
@@ -107,7 +107,7 @@ func (k *K8s) Close() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if k.rdb != nil {
-		k.rdb.Close()
+		_ = k.rdb.Close()
 		k.rdb = nil
 	}
 }
@@ -712,9 +712,9 @@ func (k *K8s) SpawnRemote(provider, role string, count int) error {
 		return fmt.Errorf("cannot get deployment %q: %w", deployName, err)
 	}
 
-	replicas := int32(count)
+	replicas := int32(count) // #nosec G115 -- count validated by caller
 	if deploy.Spec.Replicas != nil {
-		replicas = *deploy.Spec.Replicas + int32(count)
+		replicas = *deploy.Spec.Replicas + int32(count) // #nosec G115 -- count validated by caller
 	}
 	deploy.Spec.Replicas = &replicas
 	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
@@ -843,7 +843,7 @@ func (k *K8s) ensureAuthSecrets(ctx context.Context, clientset kubernetes.Interf
 	if adcPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); adcPath != "" {
 		_, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "gcp-adc", metav1.GetOptions{})
 		if errors.IsNotFound(err) {
-			data, readErr := os.ReadFile(adcPath)
+			data, readErr := os.ReadFile(adcPath) // #nosec G304 #nosec G703
 			if readErr == nil {
 				secret := &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{

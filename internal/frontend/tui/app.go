@@ -328,7 +328,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Save cache on discovery refresh
-		go cache.Save(cache.DefaultPath(), []agent.Agent(msg))
+		go func() { _ = cache.Save(cache.DefaultPath(), []agent.Agent(msg)) }()
 		a.staleAgents = make(map[int]bool)
 		a.agentsView.SetStalePIDs(a.staleAgents)
 
@@ -1096,7 +1096,8 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if a.currentView == viewAgents && a.previewFocused && a.previewPane != nil {
 		switch msg.String() {
 		case "j", "down":
-			if a.previewSection == "trace" {
+			switch a.previewSection {
+			case "trace":
 				if a.previewPane.TraceIsAtBottom() && a.previewPane.HasDiffChanges() {
 					a.previewSection = "diff"
 					a.previewPane.ToggleDiff()
@@ -1104,7 +1105,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else {
 					a.previewPane.TraceScrollDown()
 				}
-			} else if a.previewSection == "diff" {
+			case "diff":
 				if a.previewPane.IsDiffPickerMode() {
 					a.previewPane.DiffPickerDown()
 				} else if a.previewPane.IsDiffExpanded() {
@@ -1113,7 +1114,8 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case "k", "up":
-			if a.previewSection == "trace" {
+			switch a.previewSection {
+			case "trace":
 				if a.previewPane.TraceIsAtTop() && a.previewPane.HasDiffChanges() {
 					a.previewSection = "diff"
 					a.previewPane.ToggleDiff()
@@ -1121,7 +1123,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else {
 					a.previewPane.TraceScrollUp()
 				}
-			} else if a.previewSection == "diff" {
+			case "diff":
 				if a.previewPane.IsDiffPickerMode() {
 					a.previewPane.DiffPickerUp()
 				} else if a.previewPane.IsDiffExpanded() {
@@ -1908,7 +1910,7 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		time.Sleep(500 * time.Millisecond)
 
 		// Set TERM for color support.
-		backend.Write([]byte("export TERM=xterm-256color\n"))
+		_, _ = backend.Write([]byte("export TERM=xterm-256color\n"))
 		time.Sleep(100 * time.Millisecond)
 
 		// Forward non-secret config env vars from local shell.
@@ -1924,7 +1926,7 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		}
 		for _, key := range configEnvVars {
 			if val := os.Getenv(key); val != "" {
-				backend.Write([]byte(fmt.Sprintf("export %s=%q\n", key, val)))
+				_, _ = fmt.Fprintf(backend, "export %s=%q\n", key, val)
 				time.Sleep(50 * time.Millisecond)
 			}
 		}
@@ -1932,9 +1934,9 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		// Launch claude. Use exec to replace the shell so there's no
 		// command echo or leftover shell prompt. The clear removes
 		// any env export output from the screen.
-		backend.Write([]byte("cd /workspace 2>/dev/null\n"))
+		_, _ = backend.Write([]byte("cd /workspace 2>/dev/null\n"))
 		time.Sleep(100 * time.Millisecond)
-		backend.Write([]byte("clear && exec claude\n"))
+		_, _ = backend.Write([]byte("clear && exec claude\n"))
 	}()
 
 	a.zoomed = true
@@ -1951,11 +1953,6 @@ func (a App) providerFor(name string) provider.Provider {
 		}
 	}
 	return nil
-}
-
-// statusMsg is shown briefly in the status bar.
-type statusMsg struct {
-	text string
 }
 
 func (a App) handleJump() (tea.Model, tea.Cmd) {
@@ -2042,7 +2039,7 @@ func (a App) jumpToSession() (tea.Model, tea.Cmd) {
 		}
 	} else if jump.IsInsideTmux() {
 		// Create a tmux split pane
-		tmuxCmd := exec.Command("tmux", "split-window", "-h", cmdStr)
+		tmuxCmd := exec.Command("tmux", "split-window", "-h", cmdStr) // #nosec G204
 		if err := tmuxCmd.Run(); err != nil {
 			a.statusHint = fmt.Sprintf("tmux split failed: %v", err)
 		} else {
@@ -2065,7 +2062,7 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 		claudeBin = path
 	}
 
-	cmd := exec.Command(claudeBin, "--resume", sessionID)
+	cmd := exec.Command(claudeBin, "--resume", sessionID) // #nosec G204
 	if workingDir != "" {
 		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
 			cmd.Dir = workingDir
@@ -2204,7 +2201,7 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						debuglog.Log("tui: ScaleDownOne failed (non-fatal): %v", err)
 					}
 				}
-				exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--grace-period=3", "--wait=false").Run()
+				_ = exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--grace-period=3", "--wait=false").Run() // #nosec G204
 			}()
 			return a, nil
 		}
@@ -2618,9 +2615,7 @@ func (a App) renderSplitView() string {
 
 	if a.splitTrace != nil {
 		traceContent := a.splitTrace.View()
-		for _, line := range strings.Split(traceContent, "\n") {
-			leftLines = append(leftLines, line)
-		}
+		leftLines = append(leftLines, strings.Split(traceContent, "\n")...)
 	} else {
 		leftLines = append(leftLines, lipgloss.NewStyle().Foreground(colorMuted).Render("  No trace data"))
 	}

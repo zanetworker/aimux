@@ -16,7 +16,7 @@ func (s *Server) handleTaskLists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"lists": lists})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"lists": lists})
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +35,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"tasks": items})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"tasks": items})
 }
 
 func (s *Server) handleTaskComplete(w http.ResponseWriter, r *http.Request) {
@@ -57,10 +57,10 @@ func (s *Server) handleTaskComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Note != "" {
-		s.taskProvider.AddNote(req.ListID, taskID, req.Note)
+		_ = s.taskProvider.AddNote(req.ListID, taskID, req.Note)
 	}
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "completed"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "completed"})
 }
 
 func (s *Server) handleTaskReopen(w http.ResponseWriter, r *http.Request) {
@@ -81,5 +81,5 @@ func (s *Server) handleTaskReopen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "reopened"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "reopened"})
 }

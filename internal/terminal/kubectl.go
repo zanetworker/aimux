@@ -50,7 +50,7 @@ func NewKubectlExec(podName, namespace, container string, cols, rows int) (*Kube
 	// command's TTY allocation hasn't completed yet.
 	args = append(args, "--", "bash", "-l")
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.Command("kubectl", args...) // #nosec G204
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	// Create PTY pair manually WITHOUT Setctty. On macOS, Setctty (TIOCSCTTY)
@@ -61,9 +61,9 @@ func NewKubectlExec(podName, namespace, container string, cols, rows int) (*Kube
 	if err != nil {
 		return nil, fmt.Errorf("kubectl exec: pty open: %w", err)
 	}
-	if err := pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}); err != nil {
-		ptmx.Close()
-		tty.Close()
+	if err := pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}); err != nil { // #nosec G115 -- terminal size safe to convert
+		_ = ptmx.Close()
+		_ = tty.Close()
 		return nil, fmt.Errorf("kubectl exec: pty setsize: %w", err)
 	}
 	cmd.Stdin = tty
@@ -72,11 +72,11 @@ func NewKubectlExec(podName, namespace, container string, cols, rows int) (*Kube
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // new session, but NO Setctty
 
 	if err := cmd.Start(); err != nil {
-		ptmx.Close()
-		tty.Close()
+		_ = ptmx.Close()
+		_ = tty.Close()
 		return nil, fmt.Errorf("kubectl exec: start: %w", err)
 	}
-	tty.Close() // child has it, we don't need it
+	_ = tty.Close() // child has it, we don't need it
 
 	debuglog.Log("k8s: kubectl exec -it started for pod %s (cols=%d, rows=%d, pid=%d)", podName, cols, rows, cmd.Process.Pid)
 
@@ -132,8 +132,8 @@ func (kb *KubectlExecBackend) Resize(cols, rows int) error {
 	}
 
 	return pty.Setsize(kb.ptmx, &pty.Winsize{
-		Cols: uint16(cols),
-		Rows: uint16(rows),
+		Cols: uint16(cols), // #nosec G115 -- terminal size safe to convert
+		Rows: uint16(rows), // #nosec G115 -- terminal size safe to convert
 	})
 }
 
@@ -181,6 +181,7 @@ func (kb *KubectlExecBackend) Alive() bool {
 func podPhase(podName, namespace string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	// #nosec G204
 	out, err := exec.CommandContext(ctx, "kubectl", "get", "pod", podName,
 		"-n", namespace,
 		"-o", "jsonpath={.status.phase}").Output()

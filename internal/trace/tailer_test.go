@@ -13,7 +13,7 @@ func TestTailerDetectsNewLines(t *testing.T) {
 	path := filepath.Join(tmpDir, "test.jsonl")
 
 	// Create file with initial content
-	if err := os.WriteFile(path, []byte("initial line\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("initial line\n"), 0600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -34,14 +34,14 @@ func TestTailerDetectsNewLines(t *testing.T) {
 
 	// Append new content
 	time.Sleep(100 * time.Millisecond) // Let tailer initialize
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304
 	if err != nil {
 		t.Fatalf("OpenFile failed: %v", err)
 	}
 	if _, err := f.WriteString("new line\n"); err != nil {
 		t.Fatalf("WriteString failed: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	// Wait for tailer to detect (max 3 seconds)
 	deadline := time.Now().Add(3 * time.Second)
@@ -65,7 +65,7 @@ func TestTailerSkipsExistingContent(t *testing.T) {
 	path := filepath.Join(tmpDir, "test.jsonl")
 
 	// Create file with existing content
-	if err := os.WriteFile(path, []byte("existing line 1\nexisting line 2\n"), 0644); err != nil {
+	if err := os.WriteFile(path, []byte("existing line 1\nexisting line 2\n"), 0600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestTailerStopClean(t *testing.T) {
 	path := filepath.Join(tmpDir, "test.jsonl")
 
 	// Create empty file
-	if err := os.WriteFile(path, []byte{}, 0644); err != nil {
+	if err := os.WriteFile(path, []byte{}, 0600); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 

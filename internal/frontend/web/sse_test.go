@@ -19,7 +19,7 @@ func TestSSEStreamsAgentState(t *testing.T) {
 		}, nil
 	})
 
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
@@ -27,7 +27,7 @@ func TestSSEStreamsAgentState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SSE connect failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
 		t.Fatalf("expected text/event-stream, got %q", ct)

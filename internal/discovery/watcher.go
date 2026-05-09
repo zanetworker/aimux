@@ -101,6 +101,6 @@ func (w *Watcher) run() {
 // Stop shuts down the watcher.
 func (w *Watcher) Stop() {
 	close(w.stop)
-	w.watcher.Close()
+	_ = w.watcher.Close()
 	w.done.Wait()
 }

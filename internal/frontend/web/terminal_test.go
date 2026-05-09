@@ -11,7 +11,7 @@ import (
 
 func TestTerminalWebSocketRejectsMissingSession(t *testing.T) {
 	s := NewServer(0)
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 

@@ -33,11 +33,11 @@ type contentItem struct {
 // tailBytes controls how many bytes from the end of the file to read
 // (default recommendation: 8192). A value <= 0 reads the entire file.
 func DetectFromJSONL(sessionFile string, tailBytes int64) agent.Status {
-	f, err := os.Open(sessionFile)
+	f, err := os.Open(sessionFile) // #nosec G304
 	if err != nil {
 		return agent.StatusUnknown
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {

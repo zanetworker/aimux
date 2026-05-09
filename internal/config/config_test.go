@@ -73,7 +73,7 @@ providers:
     enabled: true
     binary: /opt/bin/claude
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,7 +113,7 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 
-	if err := os.WriteFile(cfgPath, []byte("{{invalid yaml"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("{{invalid yaml"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -219,7 +219,7 @@ notifications:
 `
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "config.yaml")
-	os.WriteFile(path, []byte(yamlContent), 0644)
+	_ = os.WriteFile(path, []byte(yamlContent), 0600)
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -242,7 +242,7 @@ providers:
   codex:
     enabled: false
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,7 +276,7 @@ quick_launch:
     - /home/user/projects/bar
     - /opt/workspace
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,7 +313,7 @@ tasks:
   default_list: my-task-list-123
   prompt_template: "Custom task: {title}. Notes: {notes}. User: {user_prompt}. Go!"
 `
-	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

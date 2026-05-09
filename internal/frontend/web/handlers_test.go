@@ -21,7 +21,7 @@ func TestLaunchHandler(t *testing.T) {
 		return nil
 	})
 
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
@@ -36,7 +36,7 @@ func TestLaunchHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /api/agents/launch failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -49,7 +49,7 @@ func TestLaunchHandler(t *testing.T) {
 func TestHistoryHandler(t *testing.T) {
 	s := NewServer(0)
 
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
@@ -57,7 +57,7 @@ func TestHistoryHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/history failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -89,13 +89,13 @@ func TestHistoryHandler(t *testing.T) {
 func TestAnnotateHandler(t *testing.T) {
 	s := NewServer(0)
 
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
 	t.Cleanup(func() {
 		home, _ := os.UserHomeDir()
-		os.Remove(filepath.Join(home, ".aimux", "evaluations", "abc-123.jsonl"))
+		_ = os.Remove(filepath.Join(home, ".aimux", "evaluations", "abc-123.jsonl"))
 	})
 
 	body, _ := json.Marshal(map[string]any{
@@ -107,7 +107,7 @@ func TestAnnotateHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -116,13 +116,13 @@ func TestAnnotateHandler(t *testing.T) {
 
 func TestGetAnnotationsHandler(t *testing.T) {
 	s := NewServer(0)
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
 	t.Cleanup(func() {
 		home, _ := os.UserHomeDir()
-		os.Remove(filepath.Join(home, ".aimux", "evaluations", "test-annot-session.jsonl"))
+		_ = os.Remove(filepath.Join(home, ".aimux", "evaluations", "test-annot-session.jsonl"))
 	})
 
 	// POST an annotation
@@ -131,7 +131,7 @@ func TestGetAnnotationsHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST expected 200, got %d", resp.StatusCode)
 	}
@@ -141,7 +141,7 @@ func TestGetAnnotationsHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET expected 200, got %d", resp.StatusCode)
 	}
@@ -149,7 +149,7 @@ func TestGetAnnotationsHandler(t *testing.T) {
 	var payload struct {
 		Annotations []map[string]any `json:"annotations"`
 	}
-	json.NewDecoder(resp.Body).Decode(&payload)
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
 	if len(payload.Annotations) == 0 {
 		t.Fatal("expected at least one annotation")
 	}
@@ -161,10 +161,10 @@ func TestGetAnnotationsHandler(t *testing.T) {
 func TestSessionMetaHandler(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionFile := filepath.Join(tmpDir, "test-meta-session.jsonl")
-	os.WriteFile(sessionFile, []byte("{\"type\":\"user\"}\n"), 0o644)
+	_ = os.WriteFile(sessionFile, []byte("{\"type\":\"user\"}\n"), 0o600)
 
 	s := NewServer(0)
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
@@ -177,7 +177,7 @@ func TestSessionMetaHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST expected 200, got %d", resp.StatusCode)
 	}
@@ -187,14 +187,14 @@ func TestSessionMetaHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var meta struct {
 		Annotation string   `json:"annotation"`
 		Tags       []string `json:"tags"`
 		Note       string   `json:"note"`
 	}
-	json.NewDecoder(resp.Body).Decode(&meta)
+	_ = json.NewDecoder(resp.Body).Decode(&meta)
 	if meta.Annotation != "achieved" {
 		t.Errorf("expected achieved, got %s", meta.Annotation)
 	}
@@ -209,12 +209,12 @@ func TestSessionMetaHandler(t *testing.T) {
 func TestHandleBrowseDirectory(t *testing.T) {
 	// Create temp dir with subdirectory, file, and hidden dir
 	tmpDir := t.TempDir()
-	os.Mkdir(filepath.Join(tmpDir, "subdir"), 0o755)
-	os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("test"), 0o644)
-	os.Mkdir(filepath.Join(tmpDir, ".hidden"), 0o755)
+	_ = os.Mkdir(filepath.Join(tmpDir, "subdir"), 0o750)
+	_ = os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("test"), 0o600)
+	_ = os.Mkdir(filepath.Join(tmpDir, ".hidden"), 0o750)
 
 	s := NewServer(0)
-	go s.Start()
+	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
@@ -222,7 +222,7 @@ func TestHandleBrowseDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/directories/browse failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)

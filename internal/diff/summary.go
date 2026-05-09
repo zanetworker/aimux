@@ -47,7 +47,7 @@ func GetFullDiff(dir string) (string, error) {
 
 // GetFileDiff runs `git diff --no-color -- <file>` in dir for a single file.
 func GetFileDiff(dir, file string) (string, error) {
-	cmd := exec.Command("git", "diff", "--no-color", "--", file)
+	cmd := exec.Command("git", "diff", "--no-color", "--", file) // #nosec G204
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -142,11 +142,11 @@ func FormatCompact(stat string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Uncommitted: %d files (+%d / -%d)\n",
-		total.FileCount, total.Insertions, total.Deletions))
+	fmt.Fprintf(&sb, "Uncommitted: %d files (+%d / -%d)\n",
+		total.FileCount, total.Insertions, total.Deletions)
 
 	for _, f := range files {
-		sb.WriteString(fmt.Sprintf("  M %s\n", f.Path))
+		fmt.Fprintf(&sb, "  M %s\n", f.Path)
 	}
 
 	return sb.String()

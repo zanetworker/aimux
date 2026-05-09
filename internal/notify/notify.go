@@ -27,7 +27,7 @@ func send(title, body string, sound bool) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = exec.CommandContext(ctx, "osascript", "-e", script).Run()
+		_ = exec.CommandContext(ctx, "osascript", "-e", script).Run() // #nosec G204
 	}()
 }
 

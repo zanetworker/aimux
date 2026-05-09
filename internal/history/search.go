@@ -43,7 +43,7 @@ func SearchContent(query, projectsDir string) ([]ContentMatch, error) {
 		return nil, fmt.Errorf("neither rg nor grep found in PATH")
 	}
 
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, args...) // #nosec G204
 	out, err := cmd.Output()
 	if err != nil {
 		// Exit code 1 = no matches (not an error)
@@ -127,11 +127,11 @@ func SearchContentWithSnippets(query, projectsDir string) ([]ContentMatch, error
 // extractSnippet finds the first line in a JSONL file containing the query
 // and returns a cleaned, truncated snippet for display.
 func extractSnippet(filePath, query string) string {
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) // #nosec G304
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	needle := strings.ToLower(query)
 	scanner := bufio.NewScanner(f)
@@ -204,11 +204,11 @@ func SearchFile(filePath, query string) (count int, snippet string) {
 	if filePath == "" || query == "" {
 		return 0, ""
 	}
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) // #nosec G304
 	if err != nil {
 		return 0, ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	needle := strings.ToLower(query)
 	scanner := bufio.NewScanner(f)

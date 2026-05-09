@@ -9,7 +9,7 @@ import (
 func TestScanPlugins_ValidManifest(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "my-plugin")
-	os.MkdirAll(pluginDir, 0o755)
+	_ = os.MkdirAll(pluginDir, 0o750)
 
 	manifest := `
 name: my-plugin
@@ -21,7 +21,7 @@ panels:
     type: metric-row
     title: Test Panel
 `
-	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0o644)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0o600)
 
 	plugins, err := ScanPlugins(dir)
 	if err != nil {
@@ -50,7 +50,7 @@ panels:
 func TestScanPlugins_DefaultCacheSecs(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "nocache")
-	os.MkdirAll(pluginDir, 0o755)
+	_ = os.MkdirAll(pluginDir, 0o750)
 
 	manifest := `
 name: nocache
@@ -61,7 +61,7 @@ panels:
     type: list
     title: X
 `
-	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0o644)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte(manifest), 0o600)
 
 	plugins, _ := ScanPlugins(dir)
 	if len(plugins) != 1 {
@@ -96,8 +96,8 @@ func TestScanPlugins_MissingDir(t *testing.T) {
 func TestScanPlugins_SkipsInvalidManifest(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "bad")
-	os.MkdirAll(pluginDir, 0o755)
-	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("not: valid: yaml: {{"), 0o644)
+	_ = os.MkdirAll(pluginDir, 0o750)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("not: valid: yaml: {{"), 0o600)
 
 	plugins, err := ScanPlugins(dir)
 	if err != nil {
@@ -111,8 +111,8 @@ func TestScanPlugins_SkipsInvalidManifest(t *testing.T) {
 func TestScanPlugins_SkipsMissingFields(t *testing.T) {
 	dir := t.TempDir()
 	pluginDir := filepath.Join(dir, "incomplete")
-	os.MkdirAll(pluginDir, 0o755)
-	os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: incomplete\ntab: X\n"), 0o644)
+	_ = os.MkdirAll(pluginDir, 0o750)
+	_ = os.WriteFile(filepath.Join(pluginDir, "plugin.yaml"), []byte("name: incomplete\ntab: X\n"), 0o600)
 
 	plugins, _ := ScanPlugins(dir)
 	if len(plugins) != 0 {

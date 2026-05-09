@@ -54,7 +54,7 @@ func (v *TeamsView) View() string {
 		for _, m := range t.Members {
 			name := memberStyle.Render(fmt.Sprintf("    %-20s", m.Name))
 			atype := agentTypeStyle.Render(m.AgentType)
-			b.WriteString(fmt.Sprintf("%s %s\n", name, atype))
+			fmt.Fprintf(&b, "%s %s\n", name, atype)
 		}
 		b.WriteString("\n")
 	}

@@ -105,7 +105,7 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`) )
 	})
 
 	mux.HandleFunc("GET /api/events", s.handleSSE)
@@ -155,7 +155,10 @@ func (s *Server) Start() error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	s.listener = ln
-	s.srv = &http.Server{Handler: mux}
+	s.srv = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	return s.srv.Serve(ln)
 }
@@ -164,7 +167,7 @@ func (s *Server) Stop() {
 	if s.srv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		s.srv.Shutdown(ctx)
+		_ = s.srv.Shutdown(ctx)
 	}
 }
 

@@ -12,8 +12,7 @@ import (
 // --- Styles ---
 
 var (
-	dimStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	textStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 
 	// Turn header
 	turnHeaderStyle = lipgloss.NewStyle().

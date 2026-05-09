@@ -33,7 +33,7 @@ func TestReceiver_StartAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/traces error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// GET should return 405 (we only accept POST)
 	if resp.StatusCode != http.StatusMethodNotAllowed {
@@ -66,7 +66,7 @@ func TestReceiver_InvalidPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Should return 400 for invalid/empty protobuf
 	// (empty body is valid empty protobuf, so this may return 200)
@@ -158,7 +158,7 @@ func TestReceiver_LogsEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /v1/logs error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST /v1/logs status = %d, want 200", resp.StatusCode)
@@ -286,7 +286,7 @@ func TestReceiver_FallbackEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST / error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST / status = %d, want 200", resp.StatusCode)
@@ -368,7 +368,7 @@ func TestHandleHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /v1/hooks error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST /v1/hooks status = %d, want 200", resp.StatusCode)
@@ -408,7 +408,7 @@ func TestHandleHooksMethodNotAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/hooks error: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("GET /v1/hooks status = %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)

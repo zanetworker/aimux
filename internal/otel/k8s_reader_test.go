@@ -48,7 +48,7 @@ func TestK8sReader_StartStop_NoPanic(t *testing.T) {
 	// Use a server that returns empty responses so the reader doesn't error
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 
@@ -77,7 +77,7 @@ func TestK8sReader_DoubleStart(t *testing.T) {
 	store := NewSpanStore()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 	}))
 	defer ts.Close()
 
@@ -141,10 +141,10 @@ func TestK8sReader_ParsesTraceResponse(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/traces" {
 			w.WriteHeader(http.StatusOK)
-			w.Write(respBytes)
+			_, _ = w.Write(respBytes)
 		} else {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 		}
 	}))
 	defer ts.Close()
@@ -216,10 +216,10 @@ func TestK8sReader_ParsesLogResponse(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/logs" {
 			w.WriteHeader(http.StatusOK)
-			w.Write(respBytes)
+			_, _ = w.Write(respBytes)
 		} else {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("{}"))
+			_, _ = w.Write([]byte("{}"))
 		}
 	}))
 	defer ts.Close()
@@ -248,7 +248,7 @@ func TestK8sReader_ParsesLogResponse(t *testing.T) {
 func TestK8sReader_HandlesServerError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		_, _ = w.Write([]byte("internal error"))
 	}))
 	defer ts.Close()
 

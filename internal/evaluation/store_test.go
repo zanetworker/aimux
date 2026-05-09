@@ -80,15 +80,15 @@ func TestSaveAppendsMultipleAnnotations(t *testing.T) {
 	store := &Store{sessionID: "append-test", dir: t.TempDir()}
 
 	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
-	store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
-	store.Save(Annotation{Turn: 2, Label: "bad", Timestamp: ts.Add(time.Minute)})
-	store.Save(Annotation{Turn: 3, Label: "wasteful", Timestamp: ts.Add(2 * time.Minute)})
+	_ = store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
+	_ = store.Save(Annotation{Turn: 2, Label: "bad", Timestamp: ts.Add(time.Minute)})
+	_ = store.Save(Annotation{Turn: 3, Label: "wasteful", Timestamp: ts.Add(2 * time.Minute)})
 
 	f, err := os.Open(store.path())
 	if err != nil {
 		t.Fatalf("failed to open JSONL file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	lineCount := 0
@@ -104,8 +104,8 @@ func TestLoadReturnsAnnotations(t *testing.T) {
 	store := &Store{sessionID: "load-test", dir: t.TempDir()}
 
 	ts := time.Date(2026, 2, 1, 8, 0, 0, 0, time.UTC)
-	store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
-	store.Save(Annotation{Turn: 2, Label: "bad", Note: "wrong tool", Timestamp: ts.Add(time.Second)})
+	_ = store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
+	_ = store.Save(Annotation{Turn: 2, Label: "bad", Note: "wrong tool", Timestamp: ts.Add(time.Second)})
 
 	annotations, err := store.Load()
 	if err != nil {
@@ -145,8 +145,8 @@ func TestLoadSkipsMalformedLines(t *testing.T) {
 not valid json
 {"turn":2,"label":"bad","timestamp":"2026-01-01T00:01:00Z"}
 `
-	os.MkdirAll(store.dir, 0o755)
-	os.WriteFile(store.path(), []byte(content), 0o644)
+	_ = os.MkdirAll(store.dir, 0o750)
+	_ = os.WriteFile(store.path(), []byte(content), 0o600)
 
 	annotations, err := store.Load()
 	if err != nil {
@@ -162,9 +162,9 @@ func TestGetForTurnReturnsLatestAnnotation(t *testing.T) {
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Save two annotations for turn 1 (latest should win)
-	store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
-	store.Save(Annotation{Turn: 1, Label: "bad", Timestamp: ts.Add(time.Minute)})
-	store.Save(Annotation{Turn: 2, Label: "wasteful", Timestamp: ts.Add(2 * time.Minute)})
+	_ = store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
+	_ = store.Save(Annotation{Turn: 1, Label: "bad", Timestamp: ts.Add(time.Minute)})
+	_ = store.Save(Annotation{Turn: 2, Label: "wasteful", Timestamp: ts.Add(2 * time.Minute)})
 
 	got := store.GetForTurn(1)
 	if got == nil {
@@ -178,7 +178,7 @@ func TestGetForTurnReturnsLatestAnnotation(t *testing.T) {
 func TestGetForTurnReturnsNilForMissingTurn(t *testing.T) {
 	store := &Store{sessionID: "getforturn-missing", dir: t.TempDir()}
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
+	_ = store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
 
 	got := store.GetForTurn(99)
 	if got != nil {
@@ -199,9 +199,9 @@ func TestRemoveDeletesAnnotationsForTurn(t *testing.T) {
 	store := &Store{sessionID: "remove-test", dir: t.TempDir()}
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
-	store.Save(Annotation{Turn: 2, Label: "bad", Timestamp: ts.Add(time.Second)})
-	store.Save(Annotation{Turn: 3, Label: "wasteful", Timestamp: ts.Add(2 * time.Second)})
+	_ = store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
+	_ = store.Save(Annotation{Turn: 2, Label: "bad", Timestamp: ts.Add(time.Second)})
+	_ = store.Save(Annotation{Turn: 3, Label: "wasteful", Timestamp: ts.Add(2 * time.Second)})
 
 	if err := store.Remove(2); err != nil {
 		t.Fatalf("Remove(2) error: %v", err)
@@ -225,7 +225,7 @@ func TestRemoveDeletesFileWhenEmpty(t *testing.T) {
 	store := &Store{sessionID: "remove-empty", dir: t.TempDir()}
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
+	_ = store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
 
 	if err := store.Remove(1); err != nil {
 		t.Fatalf("Remove(1) error: %v", err)
@@ -240,7 +240,7 @@ func TestRemoveNoOpForMissingTurn(t *testing.T) {
 	store := &Store{sessionID: "remove-noop", dir: t.TempDir()}
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
+	_ = store.Save(Annotation{Turn: 1, Label: "good", Timestamp: ts})
 
 	if err := store.Remove(99); err != nil {
 		t.Fatalf("Remove(99) error: %v", err)
@@ -307,7 +307,7 @@ func TestWriteExportCreatesDirectoriesAndWritesJSONL(t *testing.T) {
 	}
 
 	// Read back and verify
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 // #nosec G304
 	if err != nil {
 		t.Fatalf("failed to read export file: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestWriteExportEmptyTurns(t *testing.T) {
 		t.Fatalf("WriteExport(nil) error: %v", err)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		t.Fatalf("failed to read export file: %v", err)
 	}

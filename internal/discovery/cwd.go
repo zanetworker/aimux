@@ -17,7 +17,7 @@ func GetProcessCwd(pid int) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(pid), "-Fn").Output()
+	out, err := exec.CommandContext(ctx, "lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(pid), "-Fn").Output() // #nosec G204 -- pid is validated int
 	if err != nil {
 		return "", fmt.Errorf("lsof cwd for pid %d: %w", pid, err)
 	}

@@ -244,7 +244,7 @@ func (sv *SessionView) SetSize(w, h int) {
 func (sv *SessionView) Close() {
 	sv.active = false
 	if sv.session != nil {
-		sv.session.Close()
+		_ = sv.session.Close()
 		sv.session = nil
 	}
 }

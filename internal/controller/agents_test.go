@@ -72,13 +72,13 @@ func TestDeleteSession_NonexistentFile(t *testing.T) {
 func TestDeleteSession_Success(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
-	if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	// Also create a meta sidecar
 	metaPath := history.MetaPath(path)
-	if err := os.WriteFile(metaPath, []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(metaPath, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,7 +102,7 @@ func TestBulkDeleteSessions(t *testing.T) {
 	var sessions []history.Session
 	for i := 0; i < 3; i++ {
 		path := filepath.Join(dir, fmt.Sprintf("session-%d.jsonl", i))
-		os.WriteFile(path, []byte("{}"), 0o644)
+		_ = os.WriteFile(path, []byte("{}"), 0o600)
 		sessions = append(sessions, history.Session{ID: fmt.Sprintf("s%d", i), FilePath: path})
 	}
 
@@ -127,7 +127,7 @@ func TestBulkDeleteSessions_PartialFailure(t *testing.T) {
 
 	// One real file and one nonexistent
 	realPath := filepath.Join(dir, "real.jsonl")
-	os.WriteFile(realPath, []byte("{}"), 0o644)
+	_ = os.WriteFile(realPath, []byte("{}"), 0o600)
 
 	sessions := []history.Session{
 		{ID: "s0", FilePath: realPath},

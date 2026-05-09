@@ -12,7 +12,7 @@ func TestLogWritesToFile(t *testing.T) {
 	logPath := filepath.Join(dir, "debug.log")
 
 	// Manually open the file (bypassing Init's hardcoded path)
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304
 	if err != nil {
 		t.Fatalf("create log file: %v", err)
 	}
@@ -24,11 +24,11 @@ func TestLogWritesToFile(t *testing.T) {
 	Log("test message %s %d", "hello", 42)
 
 	mu.Lock()
-	file.Close()
+	_ = file.Close()
 	file = nil
 	mu.Unlock()
 
-	data, err := os.ReadFile(logPath)
+	data, err := os.ReadFile(logPath) // #nosec G304 -- test file path
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}

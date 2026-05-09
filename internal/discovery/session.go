@@ -45,11 +45,11 @@ type sessionLine struct {
 // ParseSessionFile reads a JSONL session file and aggregates token usage
 // across all messages.
 func ParseSessionFile(path string) (SessionInfo, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return SessionInfo{}, fmt.Errorf("open session file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var info SessionInfo
 	scanner := bufio.NewScanner(f)

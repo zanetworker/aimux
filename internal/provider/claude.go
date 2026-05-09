@@ -467,11 +467,11 @@ func (c *Claude) matchSessionFileByStartTime(pid int, workingDir string, assigne
 
 // sessionFirstTimestamp reads the first timestamp from a Claude JSONL file.
 func sessionFirstTimestamp(path string) time.Time {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return time.Time{}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 256*1024), 256*1024)
@@ -492,9 +492,9 @@ func (c *Claude) ResumeCommand(a agent.Agent) *exec.Cmd {
 	bin := findBinary("claude")
 	var cmd *exec.Cmd
 	if a.SessionID != "" {
-		cmd = exec.Command(bin, "--resume", a.SessionID)
+		cmd = exec.Command(bin, "--resume", a.SessionID) // #nosec G204
 	} else if a.WorkingDir != "" {
-		cmd = exec.Command(bin, "--continue")
+		cmd = exec.Command(bin, "--continue") // #nosec G204
 	} else {
 		return nil
 	}
@@ -606,7 +606,7 @@ func (c *Claude) SpawnCommand(dir, model, mode string) *exec.Cmd {
 		args = append(args, "--permission-mode", "dontAsk")
 	}
 
-	cmd := exec.Command(bin, args...)
+	cmd := exec.Command(bin, args...) // #nosec G204
 	cmd.Dir = dir
 	return cmd
 }
@@ -663,7 +663,7 @@ func findBinary(name string) string {
 
 // ParseTrace reads a Claude JSONL session file and parses it into trace turns.
 func (c *Claude) ParseTrace(filePath string) ([]trace.Turn, error) {
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304
 	if err != nil {
 		return nil, fmt.Errorf("read Claude trace %s: %w", filePath, err)
 	}
@@ -708,7 +708,7 @@ func parseClaudeRawEntry(line string) claudeJSONLEntry {
 	}
 
 	var e claudeJSONLEntry
-	json.Unmarshal(raw["type"], &e.entryType)
+	_ = json.Unmarshal(raw["type"], &e.entryType)
 
 	var tsStr string
 	if err := json.Unmarshal(raw["timestamp"], &tsStr); err == nil {
@@ -796,7 +796,7 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 
 	// Parse model name
 	if modelRaw := msgObj["model"]; modelRaw != nil {
-		json.Unmarshal(modelRaw, &e.model)
+		_ = json.Unmarshal(modelRaw, &e.model)
 	}
 
 	if usageRaw := msgObj["usage"]; usageRaw != nil {
@@ -804,7 +804,7 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 			InputTokens  int64 `json:"input_tokens"`
 			OutputTokens int64 `json:"output_tokens"`
 		}
-		json.Unmarshal(usageRaw, &usage)
+		_ = json.Unmarshal(usageRaw, &usage)
 		e.tokensIn = usage.InputTokens
 		e.tokensOut = usage.OutputTokens
 	}

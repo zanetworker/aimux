@@ -40,7 +40,7 @@ func TestDetectFromJSONL(t *testing.T) {
 func TestDetectFromJSONL_EmptyFile(t *testing.T) {
 	tmp := t.TempDir()
 	f := filepath.Join(tmp, "empty.jsonl")
-	os.WriteFile(f, []byte(""), 0644)
+	_ = os.WriteFile(f, []byte(""), 0600)
 	got := DetectFromJSONL(f, 8192)
 	if got != agent.StatusUnknown {
 		t.Errorf("DetectFromJSONL(empty) = %v, want StatusUnknown", got)
@@ -63,7 +63,7 @@ func TestDetectFromJSONL_LargeFileTailRead(t *testing.T) {
 	ending := `{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"All done."}]},"timestamp":"2026-03-29T12:00:05Z"}` + "\n"
 	data = append(data, []byte(ending)...)
 
-	os.WriteFile(f, data, 0644)
+	_ = os.WriteFile(f, data, 0600)
 
 	got := DetectFromJSONL(f, 4096)
 	if got != agent.StatusIdle {
@@ -74,7 +74,7 @@ func TestDetectFromJSONL_LargeFileTailRead(t *testing.T) {
 func TestDetectFromJSONL_MalformedJSON(t *testing.T) {
 	tmp := t.TempDir()
 	f := filepath.Join(tmp, "malformed.jsonl")
-	os.WriteFile(f, []byte("not json at all\n{bad json\n"), 0644)
+	_ = os.WriteFile(f, []byte("not json at all\n{bad json\n"), 0600)
 	got := DetectFromJSONL(f, 8192)
 	if got != agent.StatusUnknown {
 		t.Errorf("DetectFromJSONL(malformed) = %v, want StatusUnknown", got)

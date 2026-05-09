@@ -44,7 +44,7 @@ func TestKubectlExecBackend_AliveReturnsFalseWhenClosed(t *testing.T) {
 		podName:   "test-pod",
 		namespace: "default",
 	}
-	kb.Close()
+	_ = kb.Close()
 
 	if kb.Alive() {
 		t.Error("Alive() should return false when closed")

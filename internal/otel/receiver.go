@@ -109,25 +109,25 @@ func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
 	r.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprintf(w, "aimux OTEL receiver debug\n")
-	fmt.Fprintf(w, "port: %d\n", r.port)
-	fmt.Fprintf(w, "traces: %d, logs: %d, other: %d\n", traces, logs, other)
-	fmt.Fprintf(w, "store entries: %d\n", r.store.TraceCount())
-	fmt.Fprintf(w, "store conversations: %s\n", strings.Join(r.store.ConversationIDs(), ", "))
-	fmt.Fprintf(w, "\n--- recent requests (%d) ---\n", len(logCopy))
+	_, _ = fmt.Fprintf(w, "aimux OTEL receiver debug\n")
+	_, _ = fmt.Fprintf(w, "port: %d\n", r.port)
+	_, _ = fmt.Fprintf(w, "traces: %d, logs: %d, other: %d\n", traces, logs, other)
+	_, _ = fmt.Fprintf(w, "store entries: %d\n", r.store.TraceCount())
+	_, _ = fmt.Fprintf(w, "store conversations: %s\n", strings.Join(r.store.ConversationIDs(), ", "))
+	_, _ = fmt.Fprintf(w, "\n--- recent requests (%d) ---\n", len(logCopy))
 	for _, entry := range logCopy {
-		fmt.Fprintf(w, "%s\n", entry)
+		_, _ = fmt.Fprintf(w, "%s\n", entry)
 	}
 
 	// Dump events if requested
 	if req.URL.Query().Get("events") == "1" {
-		fmt.Fprintf(w, "\n--- stored events ---\n")
+		_, _ = fmt.Fprintf(w, "\n--- stored events ---\n")
 		for _, convID := range r.store.ConversationIDs() {
 			root := r.store.GetByConversation(convID)
 			if root == nil {
 				continue
 			}
-			fmt.Fprintf(w, "\nconversation: %s\n", convID)
+			_, _ = fmt.Fprintf(w, "\nconversation: %s\n", convID)
 			dumpSpan(w, root, 0)
 			for _, child := range root.Children {
 				dumpSpan(w, child, 1)
@@ -138,9 +138,9 @@ func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
 
 func dumpSpan(w http.ResponseWriter, s *Span, indent int) {
 	prefix := strings.Repeat("  ", indent)
-	fmt.Fprintf(w, "%s[%s] %s (id=%s)\n", prefix, s.Start.Format("15:04:05"), s.Name, s.SpanID)
+	_, _ = fmt.Fprintf(w, "%s[%s] %s (id=%s)\n", prefix, s.Start.Format("15:04:05"), s.Name, s.SpanID)
 	for k, v := range s.Attrs {
-		fmt.Fprintf(w, "%s  %s = %v\n", prefix, k, v)
+		_, _ = fmt.Fprintf(w, "%s  %s = %v\n", prefix, k, v)
 	}
 }
 
@@ -149,7 +149,7 @@ func (r *Receiver) Stop() {
 	if r.server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		r.server.Shutdown(ctx)
+		_ = r.server.Shutdown(ctx)
 	}
 }
 
@@ -176,7 +176,7 @@ func (r *Receiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
@@ -222,7 +222,7 @@ func (r *Receiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 
 	// Return success (empty ExportTraceServiceResponse)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("{}"))
+	_, _ = w.Write([]byte("{}"))
 }
 
 // protoSpanToSpan converts an OTLP protobuf span to our internal Span type.
@@ -254,8 +254,8 @@ func protoSpanToSpan(ps *tracepb.Span, resourceAttrs map[string]any) *Span {
 		TraceID:  hex.EncodeToString(ps.TraceId),
 		ParentID: hex.EncodeToString(ps.ParentSpanId),
 		Name:     ps.Name,
-		Start:    time.Unix(0, int64(ps.StartTimeUnixNano)),
-		End:      time.Unix(0, int64(ps.EndTimeUnixNano)),
+		Start:    time.Unix(0, int64(ps.StartTimeUnixNano)),   // #nosec G115 -- OTEL nanos won't overflow int64
+		End:      time.Unix(0, int64(ps.EndTimeUnixNano)),     // #nosec G115 -- OTEL nanos won't overflow int64
 		Status:   status,
 		Attrs:    attrs,
 	}
@@ -274,7 +274,7 @@ func (r *Receiver) handleLogs(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
@@ -308,7 +308,7 @@ func (r *Receiver) handleLogs(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("{}"))
+	_, _ = w.Write([]byte("{}"))
 }
 
 // logRecordToSpan converts a Claude Code OTEL log event into a Span.
@@ -346,7 +346,7 @@ func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
 		attrs["gen_ai.conversation.id"] = sessionID
 	}
 
-	ts := time.Unix(0, int64(lr.TimeUnixNano))
+	ts := time.Unix(0, int64(lr.TimeUnixNano)) // #nosec G115 -- OTEL nanos won't overflow int64
 
 	// Map Claude events to our span model
 	span := &Span{
@@ -412,11 +412,11 @@ func logRecordToSpan(lr *logspb.LogRecord, resourceAttrs map[string]any) *Span {
 // need to return 200 so the exporter doesn't error.
 func (r *Receiver) handleMetrics(w http.ResponseWriter, req *http.Request) {
 	if req.Method == http.MethodPost {
-		io.ReadAll(req.Body)
-		req.Body.Close()
+		_, _ = io.ReadAll(req.Body)
+		_ = req.Body.Close()
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("{}"))
+	_, _ = w.Write([]byte("{}"))
 }
 
 // handleFallback tries to parse the body as traces or logs.
@@ -433,7 +433,7 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusOK)
@@ -459,7 +459,7 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 		return
 	}
 
@@ -484,13 +484,13 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
+		_, _ = w.Write([]byte("{}"))
 		return
 	}
 
 	// Unknown format -- accept silently
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("{}"))
+	_, _ = w.Write([]byte("{}"))
 }
 
 // hasValidSpans checks if a trace request has actual spans (not cross-deserialized
@@ -553,7 +553,7 @@ func (r *Receiver) handleHooks(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
@@ -582,7 +582,7 @@ func (r *Receiver) handleHooks(w http.ResponseWriter, req *http.Request) {
 	}
 	r.store.Add(span)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("{}"))
+	_, _ = w.Write([]byte("{}"))
 }
 
 // extractValue converts an OTLP AnyValue to a Go value.

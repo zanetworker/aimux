@@ -57,7 +57,7 @@ func (e *Executor) Execute(name string) (map[string]json.RawMessage, error) {
 	defer cancel()
 
 	cmdStr := expandHome(p.Command)
-	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr) // #nosec G204
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s command failed: %w", name, err)

@@ -43,8 +43,8 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error
 	sessionName := TmuxSessionName(providerName, dir)
 
 	// If session already exists, kill it first (user is re-launching)
-	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil {
-		exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil { // #nosec G204
+		_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run() // #nosec G204
 	}
 
 	// Run through a login shell with RC file sourced so shell functions
@@ -62,7 +62,7 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error
 	args := []string{"new-session", "-d", "-s", sessionName, "-c", dir,
 		"--", shell, "-lc", shellCmd}
 
-	tmuxCmd := exec.Command("tmux", args...)
+	tmuxCmd := exec.Command("tmux", args...) // #nosec G204
 	if err := tmuxCmd.Run(); err != nil {
 		return fmt.Errorf("spawn: failed to create tmux session %q: %w", sessionName, err)
 	}

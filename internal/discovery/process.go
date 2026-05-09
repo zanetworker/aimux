@@ -234,7 +234,7 @@ var getParentPID = getParentPIDImpl
 func getParentPIDImpl(pid int) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output() // #nosec G204 -- pid is validated int
 	if err != nil {
 		return 0
 	}

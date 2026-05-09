@@ -44,7 +44,7 @@ func TestParserForProvider_FallsBackToFile(t *testing.T) {
 	path := filepath.Join(tmpDir, "session.jsonl")
 	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"hello"}}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":100,"output_tokens":50}}}`
-	os.WriteFile(path, []byte(data), 0o644)
+	_ = os.WriteFile(path, []byte(data), 0o600)
 
 	turns, err := parser(path)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestParserForProvider_OTELEmptyFallsBackToFile(t *testing.T) {
 	path := filepath.Join(tmpDir, "session.jsonl")
 	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"from file"}}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"file response"}],"usage":{"input_tokens":50,"output_tokens":25}}}`
-	os.WriteFile(path, []byte(data), 0o644)
+	_ = os.WriteFile(path, []byte(data), 0o600)
 
 	turns, err := parser(path)
 	if err != nil {
@@ -274,7 +274,7 @@ func TestLogsViewSetFilePath(t *testing.T) {
 	path := filepath.Join(tmpDir, "session.jsonl")
 	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"late discovery"}}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"found it"}],"usage":{"input_tokens":50,"output_tokens":25}}}`
-	os.WriteFile(path, []byte(data), 0o644)
+	_ = os.WriteFile(path, []byte(data), 0o600)
 
 	// Set the file path and reload
 	lv.SetFilePath(path)
@@ -569,7 +569,7 @@ func TestStartTraceTailer_SignalsChannel(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "session.jsonl")
 	// Create the file so the tailer can stat it.
-	os.WriteFile(path, []byte(`{"type":"user"}`+"\n"), 0o644)
+	_ = os.WriteFile(path, []byte(`{"type":"user"}"`+"\n"), 0o600)
 
 	ch := make(chan struct{}, 1)
 	tailer := startTraceTailer(path, ch)
@@ -579,9 +579,9 @@ func TestStartTraceTailer_SignalsChannel(t *testing.T) {
 	defer tailer.Stop()
 
 	// Append a line to trigger the tailer.
-	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
-	f.WriteString(`{"type":"assistant"}` + "\n")
-	f.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304
+	_, _ = f.WriteString(`{"type":"assistant"}` + "\n")
+	_ = f.Close()
 
 	// Wait for the channel signal (with timeout).
 	select {
@@ -597,7 +597,7 @@ func TestStartTraceTailer_SignalsChannel(t *testing.T) {
 func TestStartTraceTailer_NonBlockingChannel(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "session.jsonl")
-	os.WriteFile(path, []byte(`{"type":"user"}`+"\n"), 0o644)
+	_ = os.WriteFile(path, []byte(`{"type":"user"}"`+"\n"), 0o600)
 
 	ch := make(chan struct{}, 1)
 	// Pre-fill the channel.
@@ -610,9 +610,9 @@ func TestStartTraceTailer_NonBlockingChannel(t *testing.T) {
 	defer tailer.Stop()
 
 	// Append to trigger the tailer. It should NOT block even though channel is full.
-	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
-	f.WriteString(`{"type":"assistant"}` + "\n")
-	f.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304
+	_, _ = f.WriteString(`{"type":"assistant"}` + "\n")
+	_ = f.Close()
 
 	// The test passes if it doesn't deadlock/timeout.
 	// Drain the pre-existing signal.
@@ -635,7 +635,7 @@ func TestStartTraceTailer_InvalidFile(t *testing.T) {
 func TestStopActiveTailer_CleansUp(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "session.jsonl")
-	os.WriteFile(path, []byte(`{"type":"user"}`+"\n"), 0o644)
+	_ = os.WriteFile(path, []byte(`{"type":"user"}"`+"\n"), 0o600)
 
 	app := &App{
 		traceRefresh: make(chan struct{}, 1),
@@ -679,7 +679,7 @@ func TestTraceRefreshMsg_ReloadsTrace(t *testing.T) {
 	path := filepath.Join(tmpDir, "session.jsonl")
 	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"hello"}}
 {"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":100,"output_tokens":50}}}`
-	os.WriteFile(path, []byte(data), 0o644)
+	_ = os.WriteFile(path, []byte(data), 0o600)
 
 	p := &provider.Claude{}
 	splitTrace := views.NewLogsView(0, path, p.ParseTrace)
@@ -690,9 +690,9 @@ func TestTraceRefreshMsg_ReloadsTrace(t *testing.T) {
 	// Append a second turn to the file.
 	appendData := "\n" + `{"type":"user","timestamp":"2026-01-01T10:01:00Z","message":{"role":"user","content":"second"}}
 {"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"response two"}],"usage":{"input_tokens":200,"output_tokens":100}}}`
-	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
-	f.WriteString(appendData)
-	f.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304
+	_, _ = f.WriteString(appendData)
+	_ = f.Close()
 
 	app := App{
 		splitMode:    true,

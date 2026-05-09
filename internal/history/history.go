@@ -155,11 +155,11 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 // scanSession reads the first and last few lines of a session JSONL file
 // to extract metadata without parsing the entire file.
 func scanSession(id, filePath, project string) (Session, error) {
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) // #nosec G304
 	if err != nil {
 		return Session{}, fmt.Errorf("open session file %s: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	s := Session{
 		ID:        id,
@@ -695,7 +695,7 @@ func MetaPath(sessionFilePath string) string {
 // Returns an empty Meta if the file doesn't exist.
 func LoadMeta(sessionFilePath string) Meta {
 	metaPath := MetaPath(sessionFilePath)
-	data, err := os.ReadFile(metaPath)
+	data, err := os.ReadFile(metaPath) // #nosec G304
 	if err != nil {
 		return Meta{}
 	}
@@ -729,8 +729,8 @@ func SaveMeta(sessionFilePath string, m Meta) error {
 	success := false
 	defer func() {
 		if !success {
-			tmp.Close()
-			os.Remove(tmpPath)
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
 		}
 	}()
 
@@ -769,7 +769,7 @@ func CollectTags(projectsDir string) []string {
 	}
 
 	for _, metaPath := range matches {
-		data, err := os.ReadFile(metaPath)
+		data, err := os.ReadFile(metaPath) // #nosec G304
 		if err != nil {
 			continue
 		}

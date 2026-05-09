@@ -91,11 +91,11 @@ func callGemini(prompt, model, apiKey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Gemini API %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("gemini API %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -139,11 +139,11 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Anthropic API %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("anthropic API %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {

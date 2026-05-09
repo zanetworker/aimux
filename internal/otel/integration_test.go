@@ -47,7 +47,7 @@ func TestIntegration_SendAndReceive(t *testing.T) {
 		),
 		sdktrace.WithResource(res),
 	)
-	defer tp.Shutdown(ctx)
+	defer func() { _ = tp.Shutdown(ctx) }()
 
 	tracer := tp.Tracer("test")
 

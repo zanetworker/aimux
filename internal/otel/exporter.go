@@ -63,7 +63,7 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 	if err != nil {
 		return fmt.Errorf("otel: create exporter: %w", err)
 	}
-	defer exporter.Shutdown(ctx)
+	defer func() { _ = exporter.Shutdown(ctx) }()
 
 	// Create trace provider
 	res, err := resource.New(ctx,
@@ -81,7 +81,7 @@ func ExportTrace(cfg ExportConfig, turns []trace.Turn, store *evaluation.Store) 
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
 	)
-	defer tp.Shutdown(ctx)
+	defer func() { _ = tp.Shutdown(ctx) }()
 
 	tracer := tp.Tracer("aimux")
 

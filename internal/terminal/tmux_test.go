@@ -29,7 +29,7 @@ func TestStartTmux_CreateAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTmux error: %v", err)
 	}
-	defer ts.Close()
+	defer func() { _ = ts.Close() }()
 
 	if !ts.Alive() {
 		t.Error("session should be alive after creation")
@@ -40,7 +40,7 @@ func TestStartTmux_CreateAndClose(t *testing.T) {
 	}
 
 	// Close should kill the session since we created it
-	ts.Close()
+	_ = ts.Close()
 
 	if ts.Alive() {
 		t.Error("session should not be alive after Close")
@@ -57,7 +57,7 @@ func TestTmuxSession_Resize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTmux error: %v", err)
 	}
-	defer ts.Close()
+	defer func() { _ = ts.Close() }()
 
 	// Resize should not error
 	if err := ts.Resize(120, 40); err != nil {

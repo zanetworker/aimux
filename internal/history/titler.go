@@ -76,11 +76,11 @@ func extractConversationSummary(filePath string) string {
 		return ""
 	}
 
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) // #nosec G304
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 256*1024), 256*1024)
@@ -246,7 +246,7 @@ func callGemini(prompt, model, apiKey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("API request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -254,7 +254,7 @@ func callGemini(prompt, model, apiKey string) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Gemini API error %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("gemini API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -271,7 +271,7 @@ func callGemini(prompt, model, apiKey string) (string, error) {
 	}
 
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("empty response from Gemini")
+		return "", fmt.Errorf("empty response from gemini")
 	}
 
 	title := strings.TrimSpace(result.Candidates[0].Content.Parts[0].Text)
@@ -311,7 +311,7 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("API request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -319,7 +319,7 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Anthropic API error %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("anthropic API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {

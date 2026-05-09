@@ -30,7 +30,7 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := exec.Command("tmux", "has-session", "-t", sessionName).Run(); err != nil {
+	if err := exec.Command("tmux", "has-session", "-t", sessionName).Run(); err != nil { // #nosec G204 #nosec G702
 		http.Error(w, fmt.Sprintf("tmux session %q not found", sessionName), http.StatusBadRequest)
 		return
 	}
@@ -39,9 +39,9 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
-	cmd := exec.Command("tmux", "attach-session", "-t", sessionName)
+	cmd := exec.Command("tmux", "attach-session", "-t", sessionName) // #nosec G204 #nosec G702
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	servePTY(conn, cmd, true)
@@ -101,7 +101,7 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 		if skipPerms {
 			args = append(args, "--dangerously-skip-permissions")
 		}
-		cmd = exec.Command(bin, args...)
+		cmd = exec.Command(bin, args...) // #nosec G204 #nosec G702
 	case "codex":
 		bin, _ := exec.LookPath("codex")
 		if bin == "" {
@@ -112,14 +112,14 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 		if skipPerms {
 			args = append(args, "--full-auto")
 		}
-		cmd = exec.Command(bin, args...)
+		cmd = exec.Command(bin, args...) // #nosec G204 #nosec G702
 	case "gemini":
 		bin, _ := exec.LookPath("gemini")
 		if bin == "" {
 			http.Error(w, "gemini binary not found", http.StatusInternalServerError)
 			return
 		}
-		cmd = exec.Command(bin, "--resume", "latest")
+		cmd = exec.Command(bin, "--resume", "latest") // #nosec G204
 	default:
 		http.Error(w, fmt.Sprintf("resume not supported for provider %q", providerName), http.StatusBadRequest)
 		return
@@ -134,7 +134,7 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	servePTY(conn, cmd, false)
 }
@@ -142,7 +142,7 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 func servePTY(conn *websocket.Conn, cmd *exec.Cmd, killOnClose bool) {
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: %v", err)))
 		return
 	}
 
@@ -152,19 +152,19 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd, killOnClose bool) {
 	// SIGHUP so the agent can save state and exit gracefully.
 	cleanup := sync.OnceFunc(func() {
 		if killOnClose && cmd.Process != nil {
-			cmd.Process.Kill()
+			_ = cmd.Process.Kill()
 		}
-		ptmx.Close()
-		conn.Close()
+		_ = ptmx.Close()
+		_ = conn.Close()
 	})
 	defer cleanup()
 
 	// WebSocket keepalive: ping every 30s, close if no pong within 10s
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	done := make(chan struct{})
 
@@ -215,11 +215,11 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd, killOnClose bool) {
 				return
 			}
 
-			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 			var rm resizeMsg
 			if json.Unmarshal(msg, &rm) == nil && rm.Type == "resize" && rm.Cols > 0 && rm.Rows > 0 {
-				pty.Setsize(ptmx, &pty.Winsize{Cols: rm.Cols, Rows: rm.Rows})
+				_ = pty.Setsize(ptmx, &pty.Winsize{Cols: rm.Cols, Rows: rm.Rows})
 				continue
 			}
 

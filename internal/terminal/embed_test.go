@@ -11,7 +11,7 @@ func TestStartAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	buf := make([]byte, 1024)
 	n, _ := sess.Read(buf)
@@ -30,7 +30,7 @@ func TestResize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	if err := sess.Resize(120, 40); err != nil {
 		t.Errorf("Resize() error: %v", err)
@@ -43,7 +43,7 @@ func TestWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	data := []byte("hello\n")
 	n, err := sess.Write(data)
@@ -81,7 +81,7 @@ func TestAlive(t *testing.T) {
 		t.Error("Alive() should be true before close")
 	}
 
-	sess.Close()
+	_ = sess.Close()
 
 	if sess.Alive() {
 		t.Error("Alive() should be false after close")
@@ -94,7 +94,7 @@ func TestReadAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
-	sess.Close()
+	_ = sess.Close()
 
 	buf := make([]byte, 1024)
 	_, err = sess.Read(buf)
@@ -109,7 +109,7 @@ func TestWriteAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
-	sess.Close()
+	_ = sess.Close()
 
 	_, err = sess.Write([]byte("hello\n"))
 	if err == nil {

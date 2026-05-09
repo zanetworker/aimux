@@ -130,7 +130,7 @@ func TestLoadCorruptFile(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "corrupt.json")
 
 	// Write invalid JSON
-	if err := os.WriteFile(cachePath, []byte("not valid json {{{"), 0644); err != nil {
+	if err := os.WriteFile(cachePath, []byte("not valid json {{{"), 0600); err != nil {
 		t.Fatalf("Failed to write corrupt file: %v", err)
 	}
 

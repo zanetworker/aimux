@@ -20,8 +20,6 @@ var (
 			Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
 	mdHRStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#374151"))
-	mdCodeLangStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280")).Italic(true)
 	mdCodeGutterStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#4B5563"))
 	mdCodeLineStyle = lipgloss.NewStyle().

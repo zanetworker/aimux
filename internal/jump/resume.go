@@ -68,9 +68,9 @@ func ResumeCmd(sessionID, workingDir string) *exec.Cmd {
 
 	var cmd *exec.Cmd
 	if sessionID != "" {
-		cmd = exec.Command(claudeBin, "--resume", sessionID)
+		cmd = exec.Command(claudeBin, "--resume", sessionID) // #nosec G204 -- claude binary path from system
 	} else if workingDir != "" {
-		cmd = exec.Command(claudeBin, "--continue")
+		cmd = exec.Command(claudeBin, "--continue") // #nosec G204 -- claude binary path from system
 	} else {
 		return nil
 	}

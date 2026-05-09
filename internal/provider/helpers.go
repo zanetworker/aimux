@@ -44,7 +44,7 @@ var getProcessPPID = getProcessPPIDImpl
 func getProcessPPIDImpl(pid int) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(ctx, "ps", "-o", "ppid=", "-p", strconv.Itoa(pid)).Output() // #nosec G204
 	if err != nil {
 		return 0
 	}
@@ -94,7 +94,7 @@ var getProcessStartTime = getProcessStartTimeImpl
 func getProcessStartTimeImpl(pid int) time.Time {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	out, err := exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output() // #nosec G204
 	if err != nil {
 		return time.Time{}
 	}
@@ -113,11 +113,11 @@ func getProcessStartTimeImpl(pid int) time.Time {
 // extractCodexCWD reads the first few lines of a Codex session JSONL file
 // looking for a session_meta entry with a "cwd" field.
 func extractCodexCWD(path string) string {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	// Check the first 5 lines at most

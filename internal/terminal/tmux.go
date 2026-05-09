@@ -63,7 +63,7 @@ func StartTmux(cmd *exec.Cmd, cols, rows int, shell, envPrefix string) (*TmuxSes
 		"-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows),
 		"--", shell, "-lc", shellCmd}
 
-	tmuxCmd := exec.Command("tmux", args...)
+	tmuxCmd := exec.Command("tmux", args...) // #nosec G204
 	if cmd.Dir != "" {
 		tmuxCmd.Dir = cmd.Dir
 	}
@@ -90,7 +90,7 @@ func StartTmux(cmd *exec.Cmd, cols, rows int, shell, envPrefix string) (*TmuxSes
 // The session is left running when Close is called.
 func AttachTmux(sessionName string, cols, rows int) (*TmuxSession, error) {
 	// Verify the session exists
-	if err := exec.Command("tmux", "has-session", "-t", sessionName).Run(); err != nil {
+	if err := exec.Command("tmux", "has-session", "-t", sessionName).Run(); err != nil { // #nosec G204
 		return nil, fmt.Errorf("tmux session %q not found: %w", sessionName, err)
 	}
 
@@ -122,7 +122,7 @@ func (ts *TmuxSession) poll(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			out, err := exec.Command("tmux", "capture-pane", "-e", "-p", "-t", ts.sessionName).Output()
+			out, err := exec.Command("tmux", "capture-pane", "-e", "-p", "-t", ts.sessionName).Output() // #nosec G204
 			if err != nil {
 				continue
 			}
@@ -222,7 +222,7 @@ func (ts *TmuxSession) Write(data []byte) (int, error) {
 				key = "End"
 			}
 			if key != "" {
-				exec.Command("tmux", "send-keys", "-t", name, key).Run()
+				_ = exec.Command("tmux", "send-keys", "-t", name, key).Run() // #nosec G204
 				i += 2
 				continue
 			}
@@ -231,25 +231,25 @@ func (ts *TmuxSession) Write(data []byte) (int, error) {
 		// Single control characters
 		switch b {
 		case '\r':
-			exec.Command("tmux", "send-keys", "-t", name, "Enter").Run()
+			_ = exec.Command("tmux", "send-keys", "-t", name, "Enter").Run() // #nosec G204
 		case '\t':
-			exec.Command("tmux", "send-keys", "-t", name, "Tab").Run()
+			_ = exec.Command("tmux", "send-keys", "-t", name, "Tab").Run() // #nosec G204
 		case 0x7f:
-			exec.Command("tmux", "send-keys", "-t", name, "BSpace").Run()
+			_ = exec.Command("tmux", "send-keys", "-t", name, "BSpace").Run() // #nosec G204
 		case 0x1b:
-			exec.Command("tmux", "send-keys", "-t", name, "Escape").Run()
+			_ = exec.Command("tmux", "send-keys", "-t", name, "Escape").Run() // #nosec G204
 		case 0x03:
-			exec.Command("tmux", "send-keys", "-t", name, "C-c").Run()
+			_ = exec.Command("tmux", "send-keys", "-t", name, "C-c").Run() // #nosec G204
 		case 0x04:
-			exec.Command("tmux", "send-keys", "-t", name, "C-d").Run()
+			_ = exec.Command("tmux", "send-keys", "-t", name, "C-d").Run() // #nosec G204
 		default:
 			if b >= 1 && b <= 26 {
 				// Ctrl+A through Ctrl+Z
 				letter := string(rune('a' + b - 1))
-				exec.Command("tmux", "send-keys", "-t", name, "C-"+letter).Run()
+				_ = exec.Command("tmux", "send-keys", "-t", name, "C-"+letter).Run() // #nosec G204
 			} else if b >= 32 && b < 127 {
 				// Printable ASCII — use literal mode
-				exec.Command("tmux", "send-keys", "-t", name, "-l", string(b)).Run()
+				_ = exec.Command("tmux", "send-keys", "-t", name, "-l", string(b)).Run() // #nosec G204
 			}
 		}
 	}
@@ -268,8 +268,8 @@ func (ts *TmuxSession) Resize(cols, rows int) error {
 	ts.mu.Unlock()
 
 	// Resize both the window and the pane to ensure they match
-	exec.Command("tmux", "resize-window", "-t", name,
-		"-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows)).Run()
+	_ = exec.Command("tmux", "resize-window", "-t", name,
+		"-x", fmt.Sprintf("%d", cols), "-y", fmt.Sprintf("%d", rows)).Run() // #nosec G204
 
 	return nil
 }
@@ -293,7 +293,7 @@ func (ts *TmuxSession) Close() error {
 	}
 
 	if ts.created {
-		exec.Command("tmux", "kill-session", "-t", ts.sessionName).Run()
+		_ = exec.Command("tmux", "kill-session", "-t", ts.sessionName).Run() // #nosec G204
 	}
 	return nil
 }
@@ -308,7 +308,7 @@ func (ts *TmuxSession) Alive() bool {
 	name := ts.sessionName
 	ts.mu.Unlock()
 
-	err := exec.Command("tmux", "has-session", "-t", name).Run()
+	err := exec.Command("tmux", "has-session", "-t", name).Run() // #nosec G204
 	return err == nil
 }
 
@@ -327,6 +327,6 @@ func (ts *TmuxSession) Render() string {
 }
 
 // tmuxEscapeText escapes text for tmux send-keys literal mode.
-func tmuxEscapeText(s string) string {
-	return strings.ReplaceAll(s, ";", "\\;")
-}
+// func tmuxEscapeText(s string) string {
+// 	return strings.ReplaceAll(s, ";", "\\;")
+// }

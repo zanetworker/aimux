@@ -230,7 +230,7 @@ func TestK8sStatus(t *testing.T) {
 func TestK8sStatus_AfterError(t *testing.T) {
 	k := NewK8s(K8sConfig{RedisURL: "redis://localhost:19999"})
 	// Trigger a connection attempt that will fail
-	k.Discover()
+	_, _ = k.Discover()
 	status := k.Status()
 	if !strings.Contains(status, "disconnected") {
 		t.Errorf("K8s.Status() after error = %q, want it to contain 'disconnected'", status)
@@ -319,7 +319,7 @@ func TestMergeAgents_EmptySecondary(t *testing.T) {
 func TestNopRedisLogger(t *testing.T) {
 	// nopRedisLogger must implement the Logging interface and not panic.
 	var l nopRedisLogger
-	l.Printf(nil, "should not appear: %s %d", "test", 42)
+	l.Printf(context.TODO(), "should not appear: %s %d", "test", 42)
 }
 
 func TestNewRedisClient_PoolSettings(t *testing.T) {
@@ -329,7 +329,7 @@ func TestNewRedisClient_PoolSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRedisClient() error = %v", err)
 	}
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 	opts := rdb.Options()
 	if opts.PoolSize != 2 {
 		t.Errorf("PoolSize = %d, want 2", opts.PoolSize)

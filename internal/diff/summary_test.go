@@ -47,14 +47,14 @@ func TestGetDiffStatInGitRepo(t *testing.T) {
 
 	// Create and commit a file
 	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("initial content\n"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("initial content\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "test.txt")
 	runGitCmd(t, dir, "commit", "-m", "initial commit")
 
 	// Make an uncommitted change
-	if err := os.WriteFile(testFile, []byte("initial content\nmodified line\n"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("initial content\nmodified line\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,7 +84,7 @@ func TestGetDiffStatNoChanges(t *testing.T) {
 
 	// Create and commit a file
 	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("content\n"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("content\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "test.txt")
@@ -111,14 +111,14 @@ func TestGetFullDiff(t *testing.T) {
 
 	// Create and commit a file
 	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("initial content\n"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("initial content\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, dir, "add", "test.txt")
 	runGitCmd(t, dir, "commit", "-m", "initial commit")
 
 	// Make an uncommitted change
-	if err := os.WriteFile(testFile, []byte("initial content\nmodified line\n"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("initial content\nmodified line\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,7 +142,7 @@ func TestGetFullDiff(t *testing.T) {
 
 func runGitCmd(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) // #nosec G204
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, out)

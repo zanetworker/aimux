@@ -177,7 +177,7 @@ func TestExtractCodexCWD_Provider(t *testing.T) {
 	content = append(content, []byte(`{"type":"message","text":"hello"}`+"\n")...)
 
 	path := filepath.Join(tmpDir, "session.jsonl")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
+	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -191,7 +191,7 @@ func TestExtractCodexCWD_NoCWD(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	path := filepath.Join(tmpDir, "session.jsonl")
-	if err := os.WriteFile(path, []byte(`{"type":"message"}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"type":"message"}"`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,7 +218,7 @@ func TestCodexParseSessionTokens(t *testing.T) {
 		`{"timestamp":"2026-02-28T09:39:00.000Z","model":"o3","type":"response"}`,
 	}
 	content := []byte(strings.Join(lines, "\n") + "\n")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
+	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -250,7 +250,7 @@ func TestCodexParseSession_NoTokens(t *testing.T) {
 	path := filepath.Join(tmpDir, "session.jsonl")
 
 	content := `{"timestamp":"2026-02-28T09:37:29.758Z","type":"session_meta","payload":{"id":"test-456","cwd":"/tmp"}}` + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -280,7 +280,7 @@ func TestCodexParseTrace_BasicTurn(t *testing.T) {
 {"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{\"cmd\":\"cat main.go\"}"}}
 {"timestamp":"2026-01-01T10:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"file contents here"}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,7 +324,7 @@ func TestCodexParseTrace_FunctionCallError(t *testing.T) {
 {"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"c1","arguments":"{\"cmd\":\"go test\"}"}}
 {"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Process exited with code 1\nerror in test"}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -360,7 +360,7 @@ func TestCodexParseTrace_MissingFile(t *testing.T) {
 func TestCodexParseTrace_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "empty.jsonl")
-	if err := os.WriteFile(path, []byte(""), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(""), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -383,7 +383,7 @@ func TestCodexParseTrace_ToolNameMapping(t *testing.T) {
 {"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"function_call","name":"read_file","call_id":"c1","arguments":"{\"file_path\":\"main.go\"}"}}
 {"timestamp":"2026-01-01T10:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"package main"}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -455,7 +455,7 @@ func TestCodexParseTrace_PreservesIndentation(t *testing.T) {
 {"timestamp":"2026-01-01T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"show code"}}
 {"timestamp":"2026-01-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Here:\n` + "```" + `\nfunc main() {\n    fmt.Println(\"hi\")\n}\n` + "```" + `"}]}}`
 
-	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

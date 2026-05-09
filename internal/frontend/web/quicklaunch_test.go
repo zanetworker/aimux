@@ -30,7 +30,7 @@ func TestHandleQuickLaunchDirs(t *testing.T) {
 	var resp struct {
 		Directories []quickLaunchEntry `json:"directories"`
 	}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
 	if len(resp.Directories) != 2 {
 		t.Fatalf("got %d dirs, want 2", len(resp.Directories))
@@ -61,7 +61,7 @@ func TestHandleQuickLaunchDirsEmpty(t *testing.T) {
 	var resp struct {
 		Directories []quickLaunchEntry `json:"directories"`
 	}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 
 	if len(resp.Directories) != 0 {
 		t.Errorf("got %d dirs, want 0", len(resp.Directories))

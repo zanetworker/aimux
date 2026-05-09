@@ -21,5 +21,5 @@ tell application "iTerm2"
 	end tell
 end tell`, command)
 
-	return exec.Command("osascript", "-e", script).Run()
+	return exec.Command("osascript", "-e", script).Run() // #nosec G204 -- AppleScript for iTerm2 control
 }

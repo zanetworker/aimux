@@ -287,7 +287,7 @@ func TestLoadFromLocalFiles_SkipsNonJSON(t *testing.T) {
 		Status: "pending",
 	})
 	// Write a non-JSON file that should be skipped
-	if err := os.WriteFile(filepath.Join(dir, ".lock"), []byte{}, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".lock"), []byte{}, 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -302,7 +302,7 @@ func TestLoadFromLocalFiles_SkipsNonJSON(t *testing.T) {
 
 func TestLoadFromLocalFiles_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{invalid}"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{invalid}"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -314,7 +314,7 @@ func TestLoadFromLocalFiles_InvalidJSON(t *testing.T) {
 
 func TestLoadFromLocalFiles_SkipsSubdirectories(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0755); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -456,7 +456,7 @@ func writeLocalTask(t *testing.T, dir, filename string, lt localTaskJSON) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, filename), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, filename), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 }

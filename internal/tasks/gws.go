@@ -37,7 +37,7 @@ func (p *GWSProvider) ListTasks(listID string) ([]Task, error) {
 		"showCompleted": true,
 		"showHidden":    true,
 	})
-	out, err := exec.Command("gws", "tasks", "tasks", "list", "--params", string(params)).Output()
+	out, err := exec.Command("gws", "tasks", "tasks", "list", "--params", string(params)).Output() // #nosec G204
 	if err != nil {
 		return nil, fmt.Errorf("gws tasks list failed: %w", err)
 	}
@@ -47,6 +47,7 @@ func (p *GWSProvider) ListTasks(listID string) ([]Task, error) {
 func (p *GWSProvider) CompleteTask(listID, taskID string) error {
 	params, _ := json.Marshal(map[string]string{"tasklist": listID, "task": taskID})
 	body, _ := json.Marshal(map[string]string{"status": "completed"})
+	// #nosec G204
 	if err := exec.Command("gws", "tasks", "tasks", "patch", "--params", string(params), "--body", string(body)).Run(); err != nil {
 		return fmt.Errorf("gws tasks patch (complete) failed: %w", err)
 	}
@@ -56,6 +57,7 @@ func (p *GWSProvider) CompleteTask(listID, taskID string) error {
 func (p *GWSProvider) ReopenTask(listID, taskID string) error {
 	params, _ := json.Marshal(map[string]string{"tasklist": listID, "task": taskID})
 	body := `{"status":"needsAction","completed":null}`
+	// #nosec G204
 	if err := exec.Command("gws", "tasks", "tasks", "patch", "--params", string(params), "--body", body).Run(); err != nil {
 		return fmt.Errorf("gws tasks patch (reopen) failed: %w", err)
 	}
@@ -64,7 +66,7 @@ func (p *GWSProvider) ReopenTask(listID, taskID string) error {
 
 func (p *GWSProvider) AddNote(listID, taskID, note string) error {
 	params, _ := json.Marshal(map[string]string{"tasklist": listID, "task": taskID})
-	out, err := exec.Command("gws", "tasks", "tasks", "get", "--params", string(params)).Output()
+	out, err := exec.Command("gws", "tasks", "tasks", "get", "--params", string(params)).Output() // #nosec G204
 	if err != nil {
 		return fmt.Errorf("gws tasks get failed: %w", err)
 	}
@@ -83,6 +85,7 @@ func (p *GWSProvider) AddNote(listID, taskID, note string) error {
 	newNotes += note
 
 	body, _ := json.Marshal(map[string]string{"notes": newNotes})
+	// #nosec G204
 	if err := exec.Command("gws", "tasks", "tasks", "patch", "--params", string(params), "--body", string(body)).Run(); err != nil {
 		return fmt.Errorf("gws tasks patch (add note) failed: %w", err)
 	}

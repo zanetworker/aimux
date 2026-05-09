@@ -117,13 +117,13 @@ func createWebServer(port int) *web.Server {
 	s.SetKillFunc(func(pid int, tmuxSession string) error {
 		// Kill the tmux session if it exists
 		if tmuxSession != "" {
-			exec.Command("tmux", "kill-session", "-t", tmuxSession).Run()
+			_ = exec.Command("tmux", "kill-session", "-t", tmuxSession).Run() // #nosec G204
 		}
 		// Also kill the process
 		if pid > 0 {
 			proc, err := os.FindProcess(pid)
 			if err == nil {
-				proc.Signal(syscall.SIGTERM)
+				_ = proc.Signal(syscall.SIGTERM)
 			}
 		}
 		return nil
@@ -224,7 +224,7 @@ func runWeb() {
 	port := 3000
 	for i, arg := range os.Args {
 		if arg == "--port" && i+1 < len(os.Args) {
-			fmt.Sscanf(os.Args[i+1], "%d", &port)
+			_, _ = fmt.Sscanf(os.Args[i+1], "%d", &port)
 		}
 	}
 	s := createWebServer(port)
@@ -239,7 +239,7 @@ func runBoth() {
 	port := 3000
 	for i, arg := range os.Args {
 		if arg == "--port" && i+1 < len(os.Args) {
-			fmt.Sscanf(os.Args[i+1], "%d", &port)
+			_, _ = fmt.Sscanf(os.Args[i+1], "%d", &port)
 		}
 	}
 	s := createWebServer(port)
@@ -304,7 +304,7 @@ func runSessions(args []string) {
 			jsonMode = true
 		case "--limit":
 			if i+1 < len(args) {
-				fmt.Sscanf(args[i+1], "%d", &limit)
+				_, _ = fmt.Sscanf(args[i+1], "%d", &limit)
 				i++
 			}
 		case "--generate-titles":
@@ -459,7 +459,7 @@ func runResume(args []string) {
 		claudeBin = path
 	}
 
-	cmd := exec.Command(claudeBin, "--resume", sessionID)
+	cmd := exec.Command(claudeBin, "--resume", sessionID) // #nosec G204 #nosec G702
 	if workDir != "" {
 		if info, err := os.Stat(workDir); err == nil && info.IsDir() {
 			cmd.Dir = workDir

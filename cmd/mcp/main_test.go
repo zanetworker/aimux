@@ -168,11 +168,12 @@ func TestHandleCleanupBranches_SuccessfulDelete(t *testing.T) {
 			t.Errorf("expected Bearer test-token, got %q", auth)
 		}
 
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			// Branch exists
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"ref":"refs/heads/task-abc123"}`)
-		} else if r.Method == http.MethodDelete {
+			_, _ = fmt.Fprint(w, `{"ref":"refs/heads/task-abc123"}`)
+		case http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		}
 	}))
@@ -245,10 +246,11 @@ func TestHandleCleanupBranches_EmptyIDs(t *testing.T) {
 
 func TestHandleCleanupBranches_DeleteFailed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{"ref":"refs/heads/task-fail1"}`)
-		} else if r.Method == http.MethodDelete {
+			_, _ = fmt.Fprint(w, `{"ref":"refs/heads/task-fail1"}`)
+		case http.MethodDelete:
 			// Simulate a permission error
 			w.WriteHeader(http.StatusForbidden)
 		}

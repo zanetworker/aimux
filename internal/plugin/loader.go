@@ -23,7 +23,7 @@ func ScanPlugins(dir string) ([]Plugin, error) {
 			continue
 		}
 		manifestPath := filepath.Join(dir, e.Name(), "plugin.yaml")
-		data, err := os.ReadFile(manifestPath)
+		data, err := os.ReadFile(manifestPath) // #nosec G304 -- internal plugin directory
 		if err != nil {
 			continue
 		}
