@@ -30,6 +30,7 @@ export default function App() {
   const [recentFilter, setRecentFilter] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('lastActive');
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
   const [panelFullscreen, setPanelFullscreen] = useState(false);
   const [contentResults, setContentResults] = useState<ContentSearchResult[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -219,6 +220,8 @@ export default function App() {
               onClearContentSearch={clearContentSearch}
               contentResults={contentResults}
               isSearching={isSearching}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
             />
           )}
         </>
@@ -228,7 +231,7 @@ export default function App() {
           <CardGrid
             agents={agents}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={(id) => setSelectedId(prev => prev === id ? null : id)}
             statusFilter={statusFilter}
             providerFilter={providerFilter}
             recentFilter={recentFilter}
@@ -236,6 +239,7 @@ export default function App() {
             sortBy={sortBy}
             contentResults={contentResults}
             loading={agentsLoading}
+            viewMode={viewMode}
           />
         )}
         {!panelFullscreen && activeTab === 'sessions' && (

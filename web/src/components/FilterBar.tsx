@@ -18,6 +18,8 @@ interface Props {
   onClearContentSearch: () => void;
   contentResults: ContentSearchResult[] | null;
   isSearching: boolean;
+  viewMode?: 'cards' | 'list';
+  onViewModeChange?: (mode: 'cards' | 'list') => void;
 }
 
 export function FilterBar({
@@ -36,6 +38,8 @@ export function FilterBar({
   onClearContentSearch,
   contentResults,
   isSearching,
+  viewMode = 'cards',
+  onViewModeChange,
 }: Props) {
   const [deepQuery, setDeepQuery] = useState('');
 
@@ -213,6 +217,23 @@ export function FilterBar({
         <option value="repo">Repo Name</option>
         <option value="status">Status</option>
       </select>
+
+      {/* View mode toggle */}
+      {onViewModeChange && (
+        <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+          {(['cards', 'list'] as const).map(mode => (
+            <button key={mode} onClick={() => onViewModeChange(mode)}
+              title={mode === 'cards' ? 'Card view' : 'List view'}
+              style={{
+                padding: '4px 8px', border: 'none', cursor: 'pointer', fontSize: 12,
+                background: viewMode === mode ? 'var(--bg-3)' : 'var(--bg-1)',
+                color: viewMode === mode ? 'var(--fg)' : 'var(--fg-4)',
+              }}>
+              {mode === 'cards' ? '▦' : '☰'}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
