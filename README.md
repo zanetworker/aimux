@@ -18,50 +18,93 @@
   <img src="assets/demo.gif" alt="aimux demo" width="800">
 </p>
 
-You're running 5 agents across 3 projects. One just edited 47 files. Was it right? Every other tool tells you which agents are running. aimux tells you what they actually did, and whether it was good.
-
-**Trace** turn-by-turn prompts, responses, and tool calls. **Annotate** turns as GOOD, BAD, or WASTE. **Export** to MLflow, Jaeger, or JSONL.
+One agent just silently deleted your auth config. Another rewrote 47 files. aimux shows you exactly what happened, and lets you judge if it was good.
 
 ## Quick Start
 
 ```bash
-# Install
 brew install zanetworker/aimux/aimux
-
-# TUI dashboard
-aimux
-
-# Web dashboard
-aimux web
+aimux          # terminal dashboard
+aimux web      # browser dashboard at localhost:9090
 ```
 
 Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
 
+## What It Does
+
+**See everything.** Live trace of every prompt, response, and tool call as agents work. Watch file edits, bash commands, and API calls turn by turn.
+
+**Judge quality.** Label turns GOOD, BAD, or WASTE. Add notes. Build eval datasets from real production sessions, not synthetic benchmarks.
+
+**Export anywhere.** OTEL to MLflow or Jaeger for evaluation pipelines. JSONL to disk for offline analysis. Your annotations become feedback assessments.
+
+**Zero setup.** No config, no instrumentation, no SDK. Run `aimux` and it finds every running agent on your machine.
+
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| Multi-provider | Claude, Codex, Gemini auto-discovery |
-| TUI + Web | Terminal dashboard and browser-based UI |
-| Live tracing | Real-time turn-by-turn agent traces |
-| Annotations | Label turns GOOD/BAD/WASTE with notes |
-| Cost tracking | Per-agent, per-turn cost with model pricing |
-| Export | OTEL to MLflow/Jaeger, JSONL to disk |
-| Launch modes | Direct or tmux, with task-driven prompts |
-| Dark/light themes | Toggle in web dashboard |
-| Plugins | Extensible dashboard with custom tabs |
-| Kubernetes | Run agents on K8s, control from laptop |
+<table>
+<tr>
+<td width="50%">
+
+**Discovery & Monitoring**
+- Auto-discovers Claude, Codex, and Gemini agents
+- Live status: active, idle, waiting, error
+- Per-agent token usage and cost tracking
+- Model-aware pricing (Opus, Sonnet, Haiku, GPT, Gemini)
+- Cross-session search ("which agent edited auth.go?")
+
+</td>
+<td width="50%">
+
+**Tracing & Evaluation**
+- Turn-by-turn trace of prompts, responses, tool calls
+- Live streaming as agents work (JSONL tailing + SSE)
+- Annotate turns as GOOD / BAD / WASTE with notes
+- Export to MLflow, Jaeger, or any OTLP backend
+- JSONL export with annotations for offline eval
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Two Interfaces**
+- **TUI**: keyboard-driven, split-pane trace + live session
+- **Web**: card grid, filtering, session history, trace panel
+- Dark and light themes (web dashboard)
+- Plugin system for custom dashboard tabs
+
+</td>
+<td>
+
+**Agent Management**
+- Launch agents in tmux (persistent) or direct mode
+- Google Tasks integration for task-driven launches
+- macOS notifications on permission prompts, errors, completion
+- Session history with browse, search, and resume
+- Kubernetes support: run agents on K8s pods
+
+</td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="assets/annotations.png" alt="Trace with annotations" width="380">
+  <img src="assets/costs.png" alt="Cost tracking" width="380">
+</p>
 
 ## Documentation
 
 Full documentation at **[zanetworker.github.io/aimux](https://zanetworker.github.io/aimux/)**
 
-- [Getting Started](https://zanetworker.github.io/aimux/getting-started/)
-- [Configuration](https://zanetworker.github.io/aimux/configuration/)
-- [Web Dashboard](https://zanetworker.github.io/aimux/guides/web-dashboard/)
-- [TUI Keybindings](https://zanetworker.github.io/aimux/guides/tui-keybindings/)
-- [Adding a Provider](https://zanetworker.github.io/aimux/advanced/adding-a-provider/)
-- [Kubernetes Quickstart](https://zanetworker.github.io/aimux/advanced/k8s-quickstart/)
+- [Getting Started](https://zanetworker.github.io/aimux/getting-started/) - install, first run, CLI commands
+- [Configuration](https://zanetworker.github.io/aimux/configuration/) - full config.yaml reference
+- [Web Dashboard](https://zanetworker.github.io/aimux/guides/web-dashboard/) - cards, filters, sessions, themes
+- [TUI Keybindings](https://zanetworker.github.io/aimux/guides/tui-keybindings/) - keyboard shortcuts
+- [Tracing & Annotations](https://zanetworker.github.io/aimux/guides/tracing/) - trace view, OTEL, JSONL
+- [Launch Modes](https://zanetworker.github.io/aimux/guides/launch-modes/) - tmux, direct, task-driven
+- [Adding a Provider](https://zanetworker.github.io/aimux/advanced/adding-a-provider/) - extend with new agents
+- [Kubernetes](https://zanetworker.github.io/aimux/advanced/k8s-quickstart/) - run agents on K8s
 
 ## Built With
 
@@ -69,7 +112,8 @@ Full documentation at **[zanetworker.github.io/aimux](https://zanetworker.github
 [Lip Gloss](https://github.com/charmbracelet/lipgloss) |
 [charmbracelet/x/vt](https://github.com/charmbracelet/x) |
 [creack/pty](https://github.com/creack/pty) |
-[OpenTelemetry](https://opentelemetry.io/)
+[OpenTelemetry](https://opentelemetry.io/) |
+[Starlight](https://starlight.astro.build/)
 
 ## License
 
