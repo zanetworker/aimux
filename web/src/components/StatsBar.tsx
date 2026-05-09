@@ -7,9 +7,11 @@ interface Props {
   onToggleTasks?: () => void;
   taskCount?: number;
   tasksOpen?: boolean;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
-export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, tasksOpen }: Props) {
+export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, tasksOpen, theme, onToggleTheme }: Props) {
   const sessions = agents.length;
   const active = agents.filter(a => a.Status === 0).length;
   const idle = agents.filter(a => a.Status === 1).length;
@@ -72,6 +74,22 @@ export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, t
             }}
           >
             Tasks{taskCount ? ` (${taskCount})` : ''}
+          </button>
+        )}
+        {onToggleTheme && (
+          <button
+            onClick={onToggleTheme}
+            aria-label="Toggle theme"
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            style={{
+              padding: '5px 10px', borderRadius: 4,
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--fg-3)',
+              fontSize: 14, cursor: 'pointer',
+            }}
+          >
+            {theme === 'dark' ? '\u2600' : '\u263D'}
           </button>
         )}
         <button

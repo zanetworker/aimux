@@ -41,6 +41,15 @@ export default function App() {
   const [taskLaunchTarget, setTaskLaunchTarget] = useState<any | null>(null);
   const [pendingTaskCount, setPendingTaskCount] = useState<number>(0);
   const [pendingLaunch, setPendingLaunch] = useState<{ provider: string; dir: string; existingPIDs: Set<number> } | null>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const stored = localStorage.getItem('aimux-theme');
+    return stored === 'light' ? 'light' : 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('aimux-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     if (activeTab !== 'sessions' && sessionCount !== null) return;
@@ -168,6 +177,8 @@ export default function App() {
         onToggleTasks={() => setShowTasks(t => !t)}
         taskCount={pendingTaskCount}
         tasksOpen={showTasks}
+        theme={theme}
+        onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
       />
       {!panelFullscreen && (
         <>
