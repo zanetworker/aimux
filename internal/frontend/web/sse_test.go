@@ -15,7 +15,7 @@ func TestSSEStreamsAgentState(t *testing.T) {
 	s := NewServer(0)
 	s.SetDiscoverFunc(func() ([]agent.Agent, error) {
 		return []agent.Agent{
-			{PID: 123, Name: "test-repo", ProviderName: "claude", Status: agent.StatusActive},
+			{PID: 123, Name: "test-repo", ProviderName: "claude", Status: agent.StatusActive, TokensIn: 5000},
 		}, nil
 	})
 

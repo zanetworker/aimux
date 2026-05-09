@@ -25,9 +25,10 @@ func TestLaunchHandler(t *testing.T) {
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
+	tmpDir := t.TempDir()
 	body, _ := json.Marshal(map[string]string{
 		"provider": "claude",
-		"dir":      "/tmp/test",
+		"dir":      tmpDir,
 		"model":    "opus",
 		"mode":     "auto",
 	})

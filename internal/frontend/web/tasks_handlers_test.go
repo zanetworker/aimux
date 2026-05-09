@@ -131,9 +131,10 @@ func TestLaunchHandlerWithTaskContext(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Launch with task context
+	tmpDir := t.TempDir()
 	body, _ := json.Marshal(map[string]string{
 		"provider":     "claude",
-		"dir":          "/tmp/test",
+		"dir":          tmpDir,
 		"model":        "sonnet",
 		"mode":         "plan",
 		"task_id":      "task-123",
