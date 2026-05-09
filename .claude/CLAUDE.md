@@ -21,6 +21,8 @@ Before committing or pushing ANY code:
 
 Never push code that hasn't been built and tested. Never claim work is done without running the test suite.
 
+6. Update documentation: every new feature, config option, keybinding, API endpoint, or UX change MUST include updates to the relevant docs-site page(s) in `docs-site/src/content/docs/`. If a new guide page is needed, add it to the sidebar in `astro.config.mjs`. Rebuild with `cd docs-site && npm run build` to verify.
+
 ## Refactoring Rule: Tests Travel With the Code
 
 When moving logic from one package to another (e.g., extracting from `tui/app.go` to `controller/`):

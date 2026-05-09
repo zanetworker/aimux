@@ -3,7 +3,10 @@ title: aimux
 description: Tame the agent sprawl. See all your agents. Trace what they did. Judge if it was good.
 template: splash
 hero:
-  tagline: You're running 5 agents across 3 projects. One just edited 47 files. Was it right? Every other tool tells you which agents are running. aimux tells you what they actually did, and whether it was good.
+  tagline: One agent just silently deleted your auth config. Another rewrote 47 files. aimux shows you exactly what happened, and lets you judge if it was good.
+  image:
+    file: ../../assets/houston.webp
+    alt: aimux logo
   actions:
     - text: Get Started
       link: /aimux/getting-started/
@@ -16,25 +19,56 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Three Differentiators
+<p align="center">
+  <img src="https://raw.githubusercontent.com/zanetworker/aimux/main/assets/demo.gif" alt="aimux in action" width="720" style="border-radius: 8px; border: 1px solid var(--sl-color-hairline-light);" />
+</p>
 
-<CardGrid stagger>
-  <Card title="Trace" icon="magnifier">
-    Turn-by-turn view of prompts, responses, and tool calls. Live streaming as agents work. Available in TUI split view and web dashboard.
+## What It Does
+
+You run `aimux` and instantly see every AI agent running on your machine: Claude, Codex, Gemini. For each one, you get a live trace of what it's doing, turn by turn. Then you judge it.
+
+<CardGrid>
+  <Card title="See everything" icon="magnifier">
+    Live trace of every prompt, response, and tool call. Watch file edits, bash commands, and API calls as they happen.
   </Card>
-  <Card title="Annotate" icon="pencil">
-    Label turns GOOD, BAD, or WASTE. Add notes. Build eval datasets from real agent sessions.
+  <Card title="Judge quality" icon="pencil">
+    Label turns GOOD, BAD, or WASTE. Add notes. Build eval datasets from real production sessions.
   </Card>
-  <Card title="Export" icon="rocket">
-    OTEL to MLflow or Jaeger. JSONL to disk. Annotations become feedback assessments for model evaluation.
+  <Card title="Export anywhere" icon="rocket">
+    OTEL to MLflow or Jaeger. JSONL to disk. Your annotations become feedback assessments for model evaluation.
   </Card>
-  <Card title="Multi-Provider" icon="list-format">
-    Auto-discovers Claude, Codex, and Gemini agents. Extensible provider interface for adding new agent types.
+  <Card title="Zero setup" icon="list-format">
+    Auto-discovers running agents. No config, no instrumentation, no SDK. Just run `aimux` and it finds them.
   </Card>
 </CardGrid>
 
-## Two Interfaces
+## Terminal or Browser
 
-**TUI Dashboard** (`aimux`) - Terminal-based dashboard with agent table, split-view trace, live PTY embedding, and keybinding-driven workflow.
+Run `aimux` for a keyboard-driven TUI with split-pane trace and live session embedding. Or run `aimux web` for a browser dashboard with card grid, filtering, dark/light themes, and a plugin system.
 
-**Web Dashboard** (`aimux web`) - Browser-based dashboard with card grid, session history, trace panel, cost tracking, dark/light themes, and plugin system.
+<div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px;">
+  <img src="/aimux/annotations.png" alt="Trace with annotations" width="380" style="border-radius: 6px; border: 1px solid var(--sl-color-hairline-light);" />
+  <img src="/aimux/costs.png" alt="Cost tracking dashboard" width="380" style="border-radius: 6px; border: 1px solid var(--sl-color-hairline-light);" />
+</div>
+
+## Everything Else
+
+| Feature | Description |
+|---------|-------------|
+| **Cost tracking** | Per-turn pricing for Claude, Codex, Gemini models with project-level breakdowns |
+| **Session history** | Browse, search, and revisit past sessions across all providers |
+| **Launch agents** | Spawn agents in tmux (persistent) or direct mode from the dashboard |
+| **Google Tasks** | Launch agents with task context, track completion automatically |
+| **Cross-session search** | Find which agent edited a specific file across all sessions |
+| **Notifications** | Terminal bell + macOS desktop alerts on permission prompts, errors, completion |
+| **Plugins** | Custom dashboard tabs with metrics, tables, and charts (e.g., Skill Dashboard) |
+| **Dark/light themes** | Toggle in the web dashboard, persisted to localStorage |
+| **Kubernetes** | Run agents on K8s pods, control from your laptop via Redis coordination |
+
+## Quick Start
+
+```bash
+brew install zanetworker/aimux/aimux
+aimux          # TUI dashboard
+aimux web      # web dashboard
+```

@@ -56,6 +56,37 @@ Selecting an agent opens the right panel with:
 - **Export**: JSONL to `~/.aimux/exports/` or OTEL to configured endpoint
 - **Fullscreen**: Expand the trace panel to fill the viewport
 
+## Session History
+
+Click the **Sessions** tab to browse past agent sessions. The sessions table shows:
+
+- **Provider** and **project** name
+- **Title** (auto-generated or from first prompt)
+- **Age** since last activity
+- **Turn count**, token usage, and cost
+- **Resumable** indicator for sessions that can be continued
+
+Click any row to open its trace in the right panel. Use the search box to filter by project name, or the content search to find sessions where a specific file or term was mentioned.
+
+### CLI Session Commands
+
+You can also browse sessions from the terminal:
+
+```bash
+aimux sessions           # list all sessions
+aimux sessions --recent  # recent sessions only
+aimux resume <id>        # resume a session by ID
+```
+
+## Cross-Session Search
+
+Search across all agent traces to find specific files, functions, or topics:
+
+- **Web**: Use the "Search inside sessions..." input in the filter bar. Results show session ID, file path, and a snippet of the matching content.
+- **TUI**: Press `/` to search across all active agent traces.
+
+This is useful for questions like "which agent edited auth.go?" or "who ran the database migration?".
+
 ## Dark/Light Theme
 
 Toggle between dark and light themes using the sun/moon button in the header bar. The preference is saved to localStorage and persists across sessions.
