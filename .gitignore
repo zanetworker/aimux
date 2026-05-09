@@ -15,6 +15,7 @@
 dist/
 !web/dist/
 bin/
+runtime/**/k8s-agents-mcp
 
 # Web frontend embed copy (internal/frontend/web/dist is a copy of web/dist for embed)
 internal/frontend/web/dist/
