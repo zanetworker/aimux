@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/jump"
 )
 
@@ -44,7 +45,9 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error
 
 	// If session already exists, kill it first (user is re-launching)
 	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil { // #nosec G204
-		_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run() // #nosec G204
+		if err := exec.Command("tmux", "kill-session", "-t", sessionName).Run(); err != nil { // #nosec G204
+			debuglog.Log("failed to kill existing tmux session %q: %v", sessionName, err)
+		}
 	}
 
 	// Run through a login shell with RC file sourced so shell functions

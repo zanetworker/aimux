@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/debuglog"
 )
 
 // pollInterval returns the polling interval based on activity state.
@@ -293,7 +294,9 @@ func (ts *TmuxSession) Close() error {
 	}
 
 	if ts.created {
-		_ = exec.Command("tmux", "kill-session", "-t", ts.sessionName).Run() // #nosec G204
+		if err := exec.Command("tmux", "kill-session", "-t", ts.sessionName).Run(); err != nil { // #nosec G204
+			debuglog.Log("failed to kill tmux session %q on close: %v", ts.sessionName, err)
+		}
 	}
 	return nil
 }

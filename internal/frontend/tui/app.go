@@ -328,7 +328,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Save cache on discovery refresh
-		go func() { _ = cache.Save(cache.DefaultPath(), []agent.Agent(msg)) }()
+		go func() {
+			if err := cache.Save(cache.DefaultPath(), []agent.Agent(msg)); err != nil {
+				debuglog.Log("cache save failed: %v", err)
+			}
+		}()
 		a.staleAgents = make(map[int]bool)
 		a.agentsView.SetStalePIDs(a.staleAgents)
 
@@ -1910,7 +1914,9 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		time.Sleep(500 * time.Millisecond)
 
 		// Set TERM for color support.
-		_, _ = backend.Write([]byte("export TERM=xterm-256color\n"))
+		if _, err := backend.Write([]byte("export TERM=xterm-256color\n")); err != nil {
+			debuglog.Log("k8s setup: write TERM failed: %v", err)
+		}
 		time.Sleep(100 * time.Millisecond)
 
 		// Forward non-secret config env vars from local shell.
@@ -1934,9 +1940,13 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 		// Launch claude. Use exec to replace the shell so there's no
 		// command echo or leftover shell prompt. The clear removes
 		// any env export output from the screen.
-		_, _ = backend.Write([]byte("cd /workspace 2>/dev/null\n"))
+		if _, err := backend.Write([]byte("cd /workspace 2>/dev/null\n")); err != nil {
+			debuglog.Log("k8s setup: write cd failed: %v", err)
+		}
 		time.Sleep(100 * time.Millisecond)
-		_, _ = backend.Write([]byte("clear && exec claude\n"))
+		if _, err := backend.Write([]byte("clear && exec claude\n")); err != nil {
+			debuglog.Log("k8s setup: write claude launch failed: %v", err)
+		}
 	}()
 
 	a.zoomed = true
@@ -2201,7 +2211,9 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						debuglog.Log("tui: ScaleDownOne failed (non-fatal): %v", err)
 					}
 				}
-				_ = exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--grace-period=3", "--wait=false").Run() // #nosec G204
+				if err := exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--grace-period=3", "--wait=false").Run(); err != nil { // #nosec G204
+					debuglog.Log("kubectl delete pod %q failed: %v", podName, err)
+				}
 			}()
 			return a, nil
 		}

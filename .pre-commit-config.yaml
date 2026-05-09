@@ -17,9 +17,12 @@ repos:
       - id: check-yaml
         args: ['--allow-multiple-documents']  # Kubernetes YAML uses multi-doc
 
-  # Go linting — runs golangci-lint on staged .go files
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.11.4
+  # Go linting — uses locally installed golangci-lint
+  - repo: local
     hooks:
       - id: golangci-lint
-        args: ['--timeout=5m']
+        name: golangci-lint
+        entry: golangci-lint run --timeout=5m --new-from-rev=HEAD
+        language: system
+        types: [go]
+        pass_filenames: false

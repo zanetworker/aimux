@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zanetworker/aimux/internal/debuglog"
 )
 
 type quickLaunchEntry struct {
@@ -36,7 +38,9 @@ func (s *Server) handleQuickLaunchDirs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"directories": entries})
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"directories": entries}); err != nil {
+		debuglog.Log("encode quick launch dirs response: %v", err)
+	}
 }
 
 func expandHomePath(path string) string {
