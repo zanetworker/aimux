@@ -11,9 +11,7 @@
 .claude/
 
 # Build artifacts
-# Note: dist/ matches all dist dirs, but we exclude web/dist below
 dist/
-!web/dist/
 bin/
 runtime/**/k8s-agents-mcp
 
