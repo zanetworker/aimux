@@ -22,6 +22,7 @@ jobs:
       - name: Build web frontend
         run: |
           cd web && npm ci && npm run build
+          rm -rf ../internal/frontend/web/dist
           mkdir -p ../internal/frontend/web/dist
           cp -r dist/* ../internal/frontend/web/dist/
       - run: go build ./...
@@ -44,6 +45,7 @@ jobs:
       - name: Build web frontend
         run: |
           cd web && npm ci && npm run build
+          rm -rf ../internal/frontend/web/dist
           mkdir -p ../internal/frontend/web/dist
           cp -r dist/* ../internal/frontend/web/dist/
       - name: Load release notes

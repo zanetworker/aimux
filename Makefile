@@ -6,6 +6,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 
 web-build:
 	cd web && pnpm install && pnpm build
+	rm -rf internal/frontend/web/dist
+	mkdir -p internal/frontend/web/dist
 	cp -r web/dist/* internal/frontend/web/dist/
 
 web-dev:
