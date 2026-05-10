@@ -35,7 +35,7 @@ release:
     owner: zanetworker
     name: aimux
   header: |
-    ## aimux {{ .Version }}
+    {{ .Env.RELEASE_HEADER }}
 
     Install or upgrade:
     ```
