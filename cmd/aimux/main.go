@@ -23,6 +23,7 @@ import (
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/trace"
+	"github.com/zanetworker/aimux/internal/sessions"
 	"github.com/zanetworker/aimux/internal/spawn"
 )
 
@@ -260,7 +261,8 @@ Usage:
   aimux --web              Launch TUI + web dashboard
   aimux web                Launch web dashboard only (headless)
   aimux web --port 8080    Custom port (default: 3000)
-  aimux sessions           Browse past sessions (interactive)
+  aimux sessions           Browse sessions (interactive fuzzy finder)
+  aimux sessions <query>   Search sessions by title/prompt/content
   aimux sessions --list    List sessions as a table
   aimux sessions --export  Export sessions as JSONL
   aimux resume <id>        Resume a session by ID
@@ -268,22 +270,26 @@ Usage:
 
 Sessions flags:
   --dir <path>            Scope to a specific directory
+  --danger, -d            Resume with --dangerously-skip-permissions
   --list                  Plain table output (scriptable)
   --export                JSONL output for eval pipelines
   --json                  JSON output (with --list)
   --limit <n>             Max sessions to show (default: all)
   --generate-titles       Generate LLM titles for sessions without one
-  --title-model <model>   Model for titles: haiku (default), sonnet, opus`)
+  --title-model <model>   Model for titles: haiku (default), sonnet, opus
+
+Resume flags:
+  --danger, -d            Resume with --dangerously-skip-permissions`)
 }
 
 // runSessions handles the "aimux sessions" subcommand.
 func runSessions(args []string) {
-	// Load config for session defaults
 	appCfg, _ := config.Load(config.DefaultPath())
 
 	var dir string
-	var listMode, exportMode, jsonMode, generateTitles, regenerateTitles bool
+	var listMode, exportMode, jsonMode, generateTitles, regenerateTitles, danger bool
 	var limit int
+	var query string
 	titleModel := appCfg.Sessions.TitleModel
 	if titleModel == "" {
 		titleModel = "flash"
@@ -302,6 +308,8 @@ func runSessions(args []string) {
 			exportMode = true
 		case "--json":
 			jsonMode = true
+		case "--danger", "-d":
+			danger = true
 		case "--limit":
 			if i+1 < len(args) {
 				_, _ = fmt.Sscanf(args[i+1], "%d", &limit)
@@ -317,23 +325,30 @@ func runSessions(args []string) {
 				titleModel = args[i+1]
 				i++
 			}
+		default:
+			if !strings.HasPrefix(args[i], "-") && query == "" {
+				query = args[i]
+			}
 		}
 	}
 
 	opts := history.DiscoverOpts{Dir: dir, Limit: limit}
-	sessions, err := history.Discover(opts, "")
+	allSessions, err := history.Discover(opts, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error discovering sessions: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Filter out near-empty sessions
+	// Filter out near-empty and subagent sessions
 	var filtered []history.Session
-	for _, s := range sessions {
+	for _, s := range allSessions {
 		if s.TurnCount <= 5 && s.CostUSD == 0 {
 			continue
 		}
 		if s.LastActive.IsZero() {
+			continue
+		}
+		if s.IsSubagent {
 			continue
 		}
 		filtered = append(filtered, s)
@@ -353,10 +368,9 @@ func runSessions(args []string) {
 		} else {
 			fmt.Printf("Generated %d titles.\n", count)
 		}
-		// Reload sessions to show new titles
-		sessions, _ = history.Discover(opts, "")
+		allSessions, _ = history.Discover(opts, "")
 		filtered = nil
-		for _, s := range sessions {
+		for _, s := range allSessions {
 			if s.TurnCount <= 5 && s.CostUSD == 0 {
 				continue
 			}
@@ -381,9 +395,59 @@ func runSessions(args []string) {
 		return
 	}
 
-	// Interactive mode — launch a mini TUI (for now, print table)
-	// TODO: Replace with interactive bubbletea browser
-	printSessionsTable(filtered)
+	// Interactive mode: search + pick + resume
+	candidates := filtered
+	if query != "" {
+		candidates = searchSessions(filtered, query)
+		if len(candidates) == 0 {
+			fmt.Fprintf(os.Stderr, "No sessions matching %q\n", query)
+			os.Exit(1)
+		}
+	}
+
+	selected, err := sessions.PickSession(candidates)
+	if err != nil {
+		if err == sessions.ErrCancelled {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Picker error: %v\n", err)
+		os.Exit(1)
+	}
+
+	resumeSession(selected.ID, danger)
+}
+
+func searchSessions(allSessions []history.Session, query string) []history.Session {
+	matched := history.FilterByPrompt(allSessions, query)
+	if len(matched) >= 3 {
+		return matched
+	}
+
+	contentMatches, err := history.SearchContent(query, "")
+	if err != nil {
+		return matched
+	}
+
+	seen := make(map[string]bool)
+	for _, s := range matched {
+		seen[s.ID] = true
+	}
+
+	sessionByID := make(map[string]history.Session)
+	for _, s := range allSessions {
+		sessionByID[s.ID] = s
+	}
+	for _, cm := range contentMatches {
+		if seen[cm.SessionID] {
+			continue
+		}
+		if s, ok := sessionByID[cm.SessionID]; ok {
+			matched = append(matched, s)
+			seen[cm.SessionID] = true
+		}
+	}
+
+	return matched
 }
 
 func printSessionsTable(sessions []history.Session) {
@@ -439,12 +503,32 @@ func printSessionsJSONL(sessions []history.Session) {
 // runResume handles the "aimux resume <session-id>" subcommand.
 func runResume(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: aimux resume <session-id>")
+		fmt.Fprintln(os.Stderr, "Usage: aimux resume <session-id> [--danger|-d]")
 		os.Exit(1)
 	}
-	sessionID := args[0]
 
-	// Find the session to get its project directory
+	var sessionID string
+	var danger bool
+	for _, arg := range args {
+		switch arg {
+		case "--danger", "-d":
+			danger = true
+		default:
+			if sessionID == "" {
+				sessionID = arg
+			}
+		}
+	}
+
+	if sessionID == "" {
+		fmt.Fprintln(os.Stderr, "Usage: aimux resume <session-id> [--danger|-d]")
+		os.Exit(1)
+	}
+
+	resumeSession(sessionID, danger)
+}
+
+func resumeSession(sessionID string, danger bool) {
 	sessions, _ := history.Discover(history.DiscoverOpts{}, "")
 	var workDir string
 	for _, s := range sessions {
@@ -459,7 +543,12 @@ func runResume(args []string) {
 		claudeBin = path
 	}
 
-	cmd := exec.Command(claudeBin, "--resume", sessionID) // #nosec G204 #nosec G702
+	cmdArgs := []string{"--resume", sessionID}
+	if danger {
+		cmdArgs = append(cmdArgs, "--dangerously-skip-permissions")
+	}
+
+	cmd := exec.Command(claudeBin, cmdArgs...) // #nosec G204 G702
 	if workDir != "" {
 		if info, err := os.Stat(workDir); err == nil && info.IsDir() {
 			cmd.Dir = workDir

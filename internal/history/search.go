@@ -197,6 +197,25 @@ func cleanSnippet(line, needle string) string {
 	return snippet
 }
 
+// FilterByPrompt returns sessions whose Title or FirstPrompt contains the
+// query string (case-insensitive). An empty query returns all sessions.
+func FilterByPrompt(sessions []Session, query string) []Session {
+	if query == "" {
+		result := make([]Session, len(sessions))
+		copy(result, sessions)
+		return result
+	}
+	needle := strings.ToLower(query)
+	var result []Session
+	for _, s := range sessions {
+		if strings.Contains(strings.ToLower(s.Title), needle) ||
+			strings.Contains(strings.ToLower(s.FirstPrompt), needle) {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 // SearchFile counts matches of query in a single JSONL file.
 // Returns the count and a snippet from the first match.
 // Used by cross-session search to check each agent's session file individually.
