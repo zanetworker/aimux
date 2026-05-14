@@ -2,10 +2,16 @@
 /aimux
 /mcp
 *.exe
+*.test
+*.out
 
 # OS / IDE
 .DS_Store
 .idea/
+.vscode/
+*.swp
+*.swo
+*~
 
 # Claude Code local config
 .claude/
@@ -14,6 +20,14 @@
 dist/
 bin/
 runtime/**/k8s-agents-mcp
+vendor/
+
+# Go test/coverage
+coverage.out
+coverage.html
+*.prof
+cpu.prof
+mem.prof
 
 # Web frontend embed copy (internal/frontend/web/dist is a copy of web/dist for embed)
 internal/frontend/web/dist/

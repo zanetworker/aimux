@@ -162,6 +162,14 @@ All agent types implement `provider.Provider` (11 methods). This interface must 
 5. **Trace format is provider-owned.** Each provider implements `ParseTrace` for its own log format. Never add provider-specific parsing logic outside the provider's file.
 6. **New providers = one file + register.** Adding a provider should require only creating `internal/provider/yourprovider.go` and registering in `app.go` NewApp(). If it requires changes to other providers or core packages, the abstraction is leaking.
 
+## Single-File Verification
+
+```bash
+gofmt internal/agent/agent.go           # Check formatting for one file
+go vet ./internal/agent/                 # Vet a single package
+go test ./internal/agent/ -timeout 30s -run TestName  # Run one test
+```
+
 ## Building and Testing
 
 ```bash
@@ -170,6 +178,13 @@ go test ./... -timeout 30s              # All tests (120+ tests)
 make build                              # Build via Makefile
 make install                            # Build and copy to /usr/local/bin
 ```
+
+## Pattern References
+
+- New provider: follow the pattern in `internal/provider/claude.go` and see `docs/adding-a-provider.md` for the full guide
+- New TUI view: use `internal/tui/views/agents.go` as a template
+- New API endpoint: based on `internal/frontend/web/` existing handlers
+- New keybinding: see `internal/tui/app.go` Update() switch for examples
 
 ## Adding a New Provider
 
