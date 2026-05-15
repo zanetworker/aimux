@@ -1,0 +1,72 @@
+package cmd
+
+import (
+	"bytes"
+	"encoding/json"
+	"testing"
+)
+
+func TestSpawnCmd_DryRun_JSON(t *testing.T) {
+	var stdout bytes.Buffer
+	c := newSpawnCmd(
+		[]string{"claude", "codex", "gemini"},
+		func(provider, dir, model, mode, prompt string) (int, string, error) {
+			return 0, "", nil
+		},
+	)
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&bytes.Buffer{})
+	jsonOutput = true
+	defer func() { jsonOutput = false }()
+	rootCmd.SetArgs([]string{"spawn", "claude", "--dry-run"})
+	rootCmd.AddCommand(c)
+	defer rootCmd.RemoveCommand(c)
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if result["dry_run"] != true {
+		t.Error("expected dry_run=true")
+	}
+	if result["provider"] != "claude" {
+		t.Errorf("provider=%q, want %q", result["provider"], "claude")
+	}
+}
+
+func TestSpawnCmd_InvalidProvider(t *testing.T) {
+	c := newSpawnCmd(
+		[]string{"claude", "codex", "gemini"},
+		nil,
+	)
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetErr(&bytes.Buffer{})
+	rootCmd.SetArgs([]string{"spawn", "gpt"})
+	rootCmd.AddCommand(c)
+	defer rootCmd.RemoveCommand(c)
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid provider")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("claude")) {
+		t.Errorf("error should list valid providers, got: %s", err.Error())
+	}
+}
+
+func TestSpawnCmd_MissingProvider(t *testing.T) {
+	c := newSpawnCmd([]string{"claude", "codex", "gemini"}, nil)
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetErr(&bytes.Buffer{})
+	rootCmd.SetArgs([]string{"spawn"})
+	rootCmd.AddCommand(c)
+	defer rootCmd.RemoveCommand(c)
+
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing provider arg")
+	}
+}

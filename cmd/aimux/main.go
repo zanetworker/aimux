@@ -1,17 +1,17 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/spf13/cobra"
+	"github.com/zanetworker/aimux/cmd/aimux/cmd"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/debuglog"
@@ -21,54 +21,190 @@ import (
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/provider"
-	"github.com/zanetworker/aimux/internal/tasks"
-	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/internal/sessions"
 	"github.com/zanetworker/aimux/internal/spawn"
+	"github.com/zanetworker/aimux/internal/tasks"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // version is set via ldflags at build time: -X main.version=v0.3.0
 var version = "dev"
 
 func main() {
-	if len(os.Args) < 2 {
-		runTUI()
-		return
+	disco := discovery.NewOrchestrator(
+		&provider.Claude{},
+		&provider.Codex{},
+		&provider.Gemini{},
+	)
+
+	cfg, _ := config.Load(config.DefaultPath())
+
+	// Wire TUI launcher
+	cmd.SetRunTUI(func(_ *cobra.Command, _ []string) error {
+		debuglog.Init()
+		defer debuglog.Close()
+		debuglog.Log("aimux starting (version %s)", version)
+
+		app := tui.NewApp()
+		p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+		if _, err := p.Run(); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	// Wire TUI + web launcher
+	cmd.SetRunBoth(func(c *cobra.Command, _ []string) error {
+		port := 3000
+		if p, err := c.Flags().GetInt("port"); err == nil && p > 0 {
+			port = p
+		}
+		s := createWebServer(port)
+		go func() {
+			fmt.Printf("aimux web dashboard: http://127.0.0.1:%d\n", port)
+			if err := s.Start(); err != nil {
+				debuglog.Log("web server error: %v", err)
+			}
+		}()
+
+		debuglog.Init()
+		defer debuglog.Close()
+		debuglog.Log("aimux starting (version %s)", version)
+
+		app := tui.NewApp()
+		p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+		if _, err := p.Run(); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	deps := cmd.Deps{
+		Discover:         disco.Discover,
+		DiscoverSessions: history.Discover,
+		SearchContent:    history.SearchContent,
+		PickSession:      sessions.PickSession,
+		ResumeBuilder:    buildResumeBuilder(cfg),
+		ResumeExec:       resumeSession,
+		SpawnAgent:       buildSpawnFn(disco, cfg),
+		WebServer: func(port int) error {
+			return createWebServer(port).Start()
+		},
+		Providers: []string{"claude", "codex", "gemini"},
 	}
 
-	switch os.Args[1] {
-	case "--version", "-v":
-		fmt.Printf("aimux %s\n", version)
-	case "--web":
-		runBoth()
-	case "web":
-		runWeb()
-	case "sessions":
-		runSessions(os.Args[2:])
-	case "resume":
-		runResume(os.Args[2:])
-	case "--help", "-h", "help":
-		printHelp()
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
-		printHelp()
+	cmd.RegisterAll(deps)
+	cmd.Execute(version)
+}
+
+// buildResumeBuilder returns a function that looks up a session's work dir
+// and constructs the claude resume command string.
+func buildResumeBuilder(cfg config.Config) func(sessionID string, danger bool) (string, string, error) {
+	return func(sessionID string, danger bool) (string, string, error) {
+		allSessions, _ := history.Discover(history.DiscoverOpts{}, "")
+		var workDir string
+		for _, s := range allSessions {
+			if s.ID == sessionID {
+				workDir = s.Project
+				break
+			}
+		}
+
+		claudeBin := "claude"
+		if path, err := exec.LookPath("claude"); err == nil {
+			claudeBin = path
+		}
+
+		command := claudeBin + " --resume " + sessionID
+		if danger {
+			command += " --dangerously-skip-permissions"
+		}
+		return command, workDir, nil
+	}
+}
+
+// resumeSession executes the claude resume command directly.
+func resumeSession(sessionID string, danger bool) {
+	allSessions, _ := history.Discover(history.DiscoverOpts{}, "")
+	var workDir string
+	for _, s := range allSessions {
+		if s.ID == sessionID {
+			workDir = s.Project
+			break
+		}
+	}
+
+	claudeBin := "claude"
+	if path, err := exec.LookPath("claude"); err == nil {
+		claudeBin = path
+	}
+
+	cmdArgs := []string{"--resume", sessionID}
+	if danger {
+		cmdArgs = append(cmdArgs, "--dangerously-skip-permissions")
+	}
+
+	c := exec.Command(claudeBin, cmdArgs...) // #nosec G204
+	if workDir != "" {
+		if info, err := os.Stat(workDir); err == nil && info.IsDir() {
+			c.Dir = workDir
+		}
+	}
+
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+
+	if err := c.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Resume failed: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func runTUI() {
-	debuglog.Init()
-	defer debuglog.Close()
-	debuglog.Log("aimux starting (version %s)", version)
+// buildSpawnFn returns a function that spawns an agent via the provider's
+// SpawnCommand and the spawn.Launch helper.
+func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(providerName, dir, model, mode, prompt string) (int, string, error) {
+	return func(providerName, dir, model, mode, prompt string) (int, string, error) {
+		p := disco.ProviderFor(providerName)
+		if p == nil {
+			return 0, "", fmt.Errorf("unknown provider: %s", providerName)
+		}
 
-	app := tui.NewApp()
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		type spawner interface {
+			SpawnCommand(dir, model, mode string) *exec.Cmd
+		}
+		sp, ok := p.(spawner)
+		if !ok {
+			return 0, "", fmt.Errorf("provider %s does not support spawning", providerName)
+		}
+
+		c := sp.SpawnCommand(dir, model, mode)
+		if c == nil {
+			return 0, "", fmt.Errorf("failed to build spawn command for %s", providerName)
+		}
+
+		if prompt != "" {
+			switch providerName {
+			case "claude", "gemini":
+				c.Args = append(c.Args, prompt)
+			case "codex":
+				c.Args = append(c.Args, "--prompt", prompt)
+			default:
+				c.Args = append(c.Args, prompt)
+			}
+		}
+
+		shell := cfg.ResolveShell()
+		if err := spawn.Launch(c, providerName, dir, "tmux", shell, ""); err != nil {
+			return 0, "", err
+		}
+
+		tmuxSession := spawn.TmuxSessionName(providerName, dir)
+		return 0, tmuxSession, nil
 	}
 }
 
+// createWebServer builds and wires a web.Server with all dependencies.
 func createWebServer(port int) *web.Server {
 	cfg, _ := config.Load(config.DefaultPath())
 	disco := discovery.NewOrchestrator(
@@ -219,396 +355,4 @@ func createWebServer(port int) *web.Server {
 	}
 
 	return s
-}
-
-func runWeb() {
-	port := 3000
-	for i, arg := range os.Args {
-		if arg == "--port" && i+1 < len(os.Args) {
-			_, _ = fmt.Sscanf(os.Args[i+1], "%d", &port)
-		}
-	}
-	s := createWebServer(port)
-	fmt.Printf("aimux web dashboard: http://127.0.0.1:%d\n", port)
-	if err := s.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "Web server error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func runBoth() {
-	port := 3000
-	for i, arg := range os.Args {
-		if arg == "--port" && i+1 < len(os.Args) {
-			_, _ = fmt.Sscanf(os.Args[i+1], "%d", &port)
-		}
-	}
-	s := createWebServer(port)
-	go func() {
-		fmt.Printf("aimux web dashboard: http://127.0.0.1:%d\n", port)
-		if err := s.Start(); err != nil {
-			debuglog.Log("web server error: %v", err)
-		}
-	}()
-	runTUI()
-}
-
-func printHelp() {
-	fmt.Println(`aimux — AI agent multiplexer
-
-Usage:
-  aimux                    Launch the TUI dashboard
-  aimux --web              Launch TUI + web dashboard
-  aimux web                Launch web dashboard only (headless)
-  aimux web --port 8080    Custom port (default: 3000)
-  aimux sessions           Browse sessions (interactive fuzzy finder)
-  aimux sessions <query>   Search sessions by title/prompt/content
-  aimux sessions --list    List sessions as a table
-  aimux sessions --export  Export sessions as JSONL
-  aimux resume <id>        Resume a session by ID
-  aimux --version          Show version
-
-Sessions flags:
-  --dir <path>            Scope to a specific directory
-  --danger, -d            Resume with --dangerously-skip-permissions
-  --list                  Plain table output (scriptable)
-  --export                JSONL output for eval pipelines
-  --json                  JSON output (with --list)
-  --limit <n>             Max sessions to show (default: all)
-  --generate-titles       Generate LLM titles for sessions without one
-  --title-model <model>   Model for titles: haiku (default), sonnet, opus
-
-Resume flags:
-  --danger, -d            Resume with --dangerously-skip-permissions`)
-}
-
-// runSessions handles the "aimux sessions" subcommand.
-func runSessions(args []string) {
-	appCfg, _ := config.Load(config.DefaultPath())
-
-	var dir string
-	var listMode, exportMode, jsonMode, generateTitles, regenerateTitles, danger bool
-	var limit int
-	var query string
-	titleModel := appCfg.Sessions.TitleModel
-	if titleModel == "" {
-		titleModel = "flash"
-	}
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--dir":
-			if i+1 < len(args) {
-				dir = args[i+1]
-				i++
-			}
-		case "--list", "-l":
-			listMode = true
-		case "--export":
-			exportMode = true
-		case "--json":
-			jsonMode = true
-		case "--danger", "-d":
-			danger = true
-		case "--limit":
-			if i+1 < len(args) {
-				_, _ = fmt.Sscanf(args[i+1], "%d", &limit)
-				i++
-			}
-		case "--generate-titles":
-			generateTitles = true
-		case "--regenerate-titles":
-			generateTitles = true
-			regenerateTitles = true
-		case "--title-model":
-			if i+1 < len(args) {
-				titleModel = args[i+1]
-				i++
-			}
-		default:
-			if !strings.HasPrefix(args[i], "-") && query == "" {
-				query = args[i]
-			}
-		}
-	}
-
-	opts := history.DiscoverOpts{Dir: dir, Limit: limit}
-	allSessions, err := history.Discover(opts, "")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error discovering sessions: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Filter out near-empty and subagent sessions
-	var filtered []history.Session
-	for _, s := range allSessions {
-		if s.TurnCount <= 5 && s.CostUSD == 0 {
-			continue
-		}
-		if s.LastActive.IsZero() {
-			continue
-		}
-		if s.IsSubagent {
-			continue
-		}
-		filtered = append(filtered, s)
-	}
-
-	if generateTitles {
-		cfg := history.TitleConfig{
-			Enabled:    true,
-			Model:      titleModel,
-			APIKey:     appCfg.Sessions.APIKey,
-			Regenerate: regenerateTitles,
-		}
-		fmt.Printf("Generating titles using %s...\n", titleModel)
-		count, err := history.GenerateTitles(filtered, cfg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Stopped after %d titles: %v\n", count, err)
-		} else {
-			fmt.Printf("Generated %d titles.\n", count)
-		}
-		allSessions, _ = history.Discover(opts, "")
-		filtered = nil
-		for _, s := range allSessions {
-			if s.TurnCount <= 5 && s.CostUSD == 0 {
-				continue
-			}
-			if s.LastActive.IsZero() {
-				continue
-			}
-			filtered = append(filtered, s)
-		}
-	}
-
-	if exportMode {
-		printSessionsJSONL(filtered)
-		return
-	}
-
-	if listMode {
-		if jsonMode {
-			printSessionsJSON(filtered)
-		} else {
-			printSessionsTable(filtered)
-		}
-		return
-	}
-
-	// Interactive mode: search + pick + resume
-	candidates := filtered
-	if query != "" {
-		candidates = searchSessions(filtered, query)
-		if len(candidates) == 0 {
-			fmt.Fprintf(os.Stderr, "No sessions matching %q\n", query)
-			os.Exit(1)
-		}
-	}
-
-	selected, err := sessions.PickSession(candidates)
-	if err != nil {
-		if err == sessions.ErrCancelled {
-			return
-		}
-		fmt.Fprintf(os.Stderr, "Picker error: %v\n", err)
-		os.Exit(1)
-	}
-
-	resumeSession(selected.ID, danger)
-}
-
-func searchSessions(allSessions []history.Session, query string) []history.Session {
-	matched := history.FilterByPrompt(allSessions, query)
-	if len(matched) >= 3 {
-		return matched
-	}
-
-	contentMatches, err := history.SearchContent(query, "")
-	if err != nil {
-		return matched
-	}
-
-	seen := make(map[string]bool)
-	for _, s := range matched {
-		seen[s.ID] = true
-	}
-
-	sessionByID := make(map[string]history.Session)
-	for _, s := range allSessions {
-		sessionByID[s.ID] = s
-	}
-	for _, cm := range contentMatches {
-		if seen[cm.SessionID] {
-			continue
-		}
-		if s, ok := sessionByID[cm.SessionID]; ok {
-			matched = append(matched, s)
-			seen[cm.SessionID] = true
-		}
-	}
-
-	return matched
-}
-
-func printSessionsTable(sessions []history.Session) {
-	if len(sessions) == 0 {
-		fmt.Println("No sessions found.")
-		return
-	}
-
-	// Header
-	fmt.Printf("%-38s  %-14s  %-7s  %5s  %7s  %-10s  %s\n",
-		"ID", "PROJECT", "AGE", "TURNS", "COST", "ANNOTATION", "PROMPT")
-	fmt.Println(strings.Repeat("─", 120))
-
-	for _, s := range sessions {
-		proj := shortProjectName(s.Project)
-		age := shortAge(s.LastActive)
-		prompt := s.Title
-		if prompt == "" {
-			prompt = s.FirstPrompt
-		}
-		if len(prompt) > 40 {
-			prompt = prompt[:37] + "..."
-		}
-		if prompt == "" {
-			prompt = "-"
-		}
-		annot := s.Annotation
-		if annot == "" {
-			annot = "-"
-		}
-		tags := ""
-		if len(s.Tags) > 0 {
-			tags = " [" + strings.Join(s.Tags, ",") + "]"
-		}
-
-		fmt.Printf("%-38s  %-14s  %-7s  %5d  $%6.2f  %-10s  %s%s\n",
-			s.ID, truncStr(proj, 14), age, s.TurnCount, s.CostUSD, annot, prompt, tags)
-	}
-}
-
-func printSessionsJSON(sessions []history.Session) {
-	data, _ := json.MarshalIndent(sessions, "", "  ")
-	fmt.Println(string(data))
-}
-
-func printSessionsJSONL(sessions []history.Session) {
-	for _, s := range sessions {
-		data, _ := json.Marshal(s)
-		fmt.Println(string(data))
-	}
-}
-
-// runResume handles the "aimux resume <session-id>" subcommand.
-func runResume(args []string) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: aimux resume <session-id> [--danger|-d]")
-		os.Exit(1)
-	}
-
-	var sessionID string
-	var danger bool
-	for _, arg := range args {
-		switch arg {
-		case "--danger", "-d":
-			danger = true
-		default:
-			if sessionID == "" {
-				sessionID = arg
-			}
-		}
-	}
-
-	if sessionID == "" {
-		fmt.Fprintln(os.Stderr, "Usage: aimux resume <session-id> [--danger|-d]")
-		os.Exit(1)
-	}
-
-	resumeSession(sessionID, danger)
-}
-
-func resumeSession(sessionID string, danger bool) {
-	sessions, _ := history.Discover(history.DiscoverOpts{}, "")
-	var workDir string
-	for _, s := range sessions {
-		if s.ID == sessionID {
-			workDir = s.Project
-			break
-		}
-	}
-
-	claudeBin := "claude"
-	if path, err := exec.LookPath("claude"); err == nil {
-		claudeBin = path
-	}
-
-	cmdArgs := []string{"--resume", sessionID}
-	if danger {
-		cmdArgs = append(cmdArgs, "--dangerously-skip-permissions")
-	}
-
-	cmd := exec.Command(claudeBin, cmdArgs...) // #nosec G204 G702
-	if workDir != "" {
-		if info, err := os.Stat(workDir); err == nil && info.IsDir() {
-			cmd.Dir = workDir
-		}
-	}
-
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Resume failed: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func shortProjectName(path string) string {
-	if path == "" {
-		return "(unknown)"
-	}
-	path = strings.TrimPrefix(path, "/")
-	parts := strings.Split(path, "/")
-	if len(parts) > 0 {
-		last := parts[len(parts)-1]
-		if last != "" {
-			return last
-		}
-	}
-	parts = strings.Split(path, "-")
-	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] != "" {
-			return parts[i]
-		}
-	}
-	return path
-}
-
-func shortAge(t time.Time) string {
-	if t.IsZero() {
-		return "?"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	default:
-		return fmt.Sprintf("%dmo", int(d.Hours()/24/30))
-	}
-}
-
-func truncStr(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	if max <= 3 {
-		return s[:max]
-	}
-	return s[:max-3] + "..."
 }
