@@ -38,6 +38,30 @@
   --sl-color-hairline-shade: #E0E0E0;
 }
 
+/* Code blocks: accent top border, better spacing, let syntax highlighter control colors */
 pre {
   border: 1px solid var(--sl-color-hairline-light) !important;
+  border-top: 3px solid var(--sl-color-accent) !important;
+  border-radius: 6px !important;
+  padding: 1.25rem 1.5rem !important;
+  line-height: 1.65 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Inline code: accent-tinted, distinct from surrounding text */
+:not(pre) > code {
+  background: var(--sl-color-gray-5);
+  color: var(--sl-color-accent-high);
+  padding: 0.2em 0.45em;
+  border-radius: 4px;
+  border: 1px solid var(--sl-color-hairline-light);
+  font-weight: 500;
+  font-size: 0.875em;
+}
+
+/* Shiki dual-theme: dark mode uses CSS variables for proper syntax colors */
+:root[data-theme='dark'] .astro-code,
+:root[data-theme='dark'] .astro-code span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
 }

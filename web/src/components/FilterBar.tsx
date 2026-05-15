@@ -123,13 +123,13 @@ export function FilterBar({
         onChange={(e) => onSearchChange(e.target.value)}
         aria-label="Filter by repo name or branch"
         style={{
-          padding: '4px 10px',
+          padding: '5px 10px',
           borderRadius: 4,
           border: '1px solid var(--border)',
           background: 'var(--bg-2)',
           color: 'var(--fg)',
-          fontSize: 11,
-          width: 160,
+          fontSize: 12,
+          width: 170,
           outline: 'none',
         }}
       />
@@ -146,13 +146,13 @@ export function FilterBar({
           onKeyDown={(e) => { if (e.key === 'Enter') handleDeepSearch(); }}
           aria-label="Search inside session content using ripgrep"
           style={{
-            padding: '4px 10px',
+            padding: '5px 10px',
             borderRadius: 4,
             border: `1px solid ${contentResults ? 'var(--purple)' : 'var(--border)'}`,
             background: 'var(--bg-2)',
             color: 'var(--fg)',
-            fontSize: 11,
-            width: 180,
+            fontSize: 12,
+            width: 190,
             outline: 'none',
           }}
         />
@@ -161,12 +161,12 @@ export function FilterBar({
           disabled={isSearching || !deepQuery.trim()}
           aria-label="Run deep search"
           style={{
-            padding: '4px 8px',
+            padding: '5px 10px',
             borderRadius: 4,
             border: '1px solid var(--purple)',
             background: 'transparent',
             color: 'var(--purple)',
-            fontSize: 10,
+            fontSize: 12,
             fontWeight: 600,
             cursor: isSearching ? 'wait' : 'pointer',
             opacity: !deepQuery.trim() ? 0.4 : 1,
@@ -179,12 +179,12 @@ export function FilterBar({
             onClick={handleClearDeep}
             aria-label="Clear search results"
             style={{
-              padding: '4px 6px',
+              padding: '5px 8px',
               borderRadius: 4,
               border: 'none',
               background: 'var(--purple-dim)',
               color: 'var(--purple)',
-              fontSize: 9,
+              fontSize: 11,
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -202,12 +202,12 @@ export function FilterBar({
         onChange={(e) => onSortChange(e.target.value)}
         aria-label="Sort sessions"
         style={{
-          padding: '4px 8px',
+          padding: '5px 10px',
           borderRadius: 4,
           border: '1px solid var(--border)',
           background: 'var(--bg-2)',
           color: 'var(--fg)',
-          fontSize: 10,
+          fontSize: 12,
           outline: 'none',
           cursor: 'pointer',
         }}
@@ -257,12 +257,12 @@ function FilterPill({
       aria-pressed={active}
       aria-label={`${label}: ${count}`}
       style={{
-        padding: '3px 10px',
+        padding: '4px 12px',
         borderRadius: 12,
         border: `1px solid ${active ? 'var(--fg-3)' : 'var(--border)'}`,
         background: active ? 'var(--bg-3)' : 'transparent',
         color: active ? 'var(--fg)' : 'var(--fg-3)',
-        fontSize: 10,
+        fontSize: 12,
         fontWeight: active ? 600 : 400,
         cursor: 'pointer',
         display: 'flex',
@@ -273,14 +273,14 @@ function FilterPill({
     >
       {dotColor && (
         <div style={{
-          width: 6,
-          height: 6,
+          width: 7,
+          height: 7,
           borderRadius: '50%',
           background: dotColor,
         }} />
       )}
       <span>{label}</span>
-      <span style={{ fontSize: 9, color: 'var(--fg-4)' }}>{count}</span>
+      <span style={{ fontSize: 11, color: 'var(--fg-4)' }}>{count}</span>
     </button>
   );
 }

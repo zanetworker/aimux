@@ -72,7 +72,7 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         border: `1px solid ${selected ? 'var(--accent)' : 'var(--border)'}`,
         borderLeft: `3px solid ${selected ? 'var(--accent)' : borderLeftColor}`,
         borderRadius: 8,
-        padding: '12px 14px',
+        padding: '14px 16px',
         cursor: 'pointer',
         transition: 'border-color 0.15s ease',
         outline: 'none',
@@ -84,34 +84,34 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
       onBlur={(e) => { e.currentTarget.style.outline = 'none'; }}
     >
       {/* Row 1: status dot + provider + status badge + time */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <div style={{
-          width: 6, height: 6, borderRadius: '50%',
+          width: 8, height: 8, borderRadius: '50%',
           background: statusStyle.dot, flexShrink: 0,
           animation: agent.Status === 0 ? 'pulse 2s ease-in-out infinite' : 'none',
         }} />
         <span style={{
-          padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 600,
+          padding: '2px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600,
           textTransform: 'uppercase', letterSpacing: '0.04em', ...providerStyle,
         }}>
           {agent.ProviderName}
         </span>
         <span style={{
-          padding: '1px 4px', borderRadius: 2, fontSize: 8, fontWeight: 700,
+          padding: '2px 5px', borderRadius: 2, fontSize: 10, fontWeight: 700,
           textTransform: 'uppercase', letterSpacing: '0.06em',
           background: statusStyle.bg, color: statusStyle.color,
         }}>
           {StatusLabel[agent.Status]}
         </span>
         <span style={{
-          padding: '1px 4px', borderRadius: 2, fontSize: 8, fontWeight: 600,
+          padding: '2px 5px', borderRadius: 2, fontSize: 10, fontWeight: 600,
           letterSpacing: '0.04em', fontFamily: 'var(--mono)',
           background: agent.TMuxSession ? 'var(--teal-dim)' : 'var(--bg-2)',
           color: agent.TMuxSession ? 'var(--teal)' : 'var(--fg-4)',
         }}>
           {agent.TMuxSession ? 'tmux' : 'direct'}
         </span>
-        <span style={{ fontSize: 9, color: 'var(--fg-4)', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 'auto' }}>
           {timeSinceActivity()}
         </span>
         {/* Kill button */}
@@ -125,7 +125,7 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
           className="kill-btn"
           style={{
             background: 'transparent', border: '1px solid var(--accent)',
-            color: 'var(--accent)', fontSize: 9, fontWeight: 600,
+            color: 'var(--accent)', fontSize: 10, fontWeight: 600,
             cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s',
             padding: '1px 6px', borderRadius: 3, lineHeight: '1.4',
           }}
@@ -137,8 +137,8 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
 
       {/* Row 2: Title (the main visual anchor) */}
       <div style={{
-        fontSize: 13, fontWeight: 600, color: 'var(--fg)', lineHeight: '1.4',
-        marginBottom: 4,
+        fontSize: 14, fontWeight: 600, color: 'var(--fg)', lineHeight: '1.4',
+        marginBottom: 6,
         overflow: 'hidden', textOverflow: 'ellipsis',
         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
       }}>
@@ -146,12 +146,12 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
       </div>
 
       {/* Row 3: repo + branch context line */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)' }}>
           {agent.Name.replace(/ #\d+$/, '')}
         </span>
         <span style={{
-          fontFamily: 'var(--mono)', fontSize: 9, padding: '1px 4px',
+          fontFamily: 'var(--mono)', fontSize: 11, padding: '2px 5px',
           borderRadius: 2, background: 'var(--bg-3)', color: 'var(--accent)',
         }}>
           {agent.GitBranch || 'main'}
@@ -161,9 +161,9 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
       {/* Row 4: Last action */}
       {agent.LastAction && (
         <div style={{
-          fontFamily: 'var(--mono)', fontSize: 9, padding: '4px 6px',
+          fontFamily: 'var(--mono)', fontSize: 11, padding: '5px 8px',
           borderRadius: 3, background: 'var(--bg-1)', border: '1px solid var(--border)',
-          marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           color: 'var(--fg-3)',
         }}>
           {shortenPath(agent.LastAction)}
@@ -173,9 +173,9 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
       {/* Search snippet */}
       {searchSnippet && (
         <div style={{
-          fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--purple)',
-          fontStyle: 'italic', padding: '3px 6px', background: 'var(--purple-dim)',
-          borderRadius: 3, marginBottom: 6, overflow: 'hidden',
+          fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--purple)',
+          fontStyle: 'italic', padding: '4px 8px', background: 'var(--purple-dim)',
+          borderRadius: 3, marginBottom: 8, overflow: 'hidden',
           textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {searchSnippet}
@@ -187,14 +187,14 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
 
       {/* Footer: model + tokens + cost */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--fg-4)' }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-4)' }}>
           {agent.Model}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 8, color: 'var(--fg-4)' }}>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-4)' }}>
             {formatK(agent.TokensIn)} in / {formatK(agent.TokensOut)} out
           </span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green)' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>
             ${(agent.EstCostUSD || 0).toFixed(2)}
           </span>
         </div>

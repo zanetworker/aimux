@@ -154,7 +154,7 @@ export function CardGrid({
               }}
             >
               <span style={{
-                fontSize: 9, color: 'var(--fg-4)', width: 12,
+                fontSize: 11, color: 'var(--fg-4)', width: 12,
                 transition: 'transform 0.15s',
                 transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
                 display: 'inline-block',
@@ -163,28 +163,28 @@ export function CardGrid({
               </span>
               {hasActive && (
                 <div style={{
-                  width: 6, height: 6, borderRadius: '50%',
+                  width: 8, height: 8, borderRadius: '50%',
                   background: 'var(--green)', flexShrink: 0,
                   animation: 'pulse 2s ease-in-out infinite',
                 }} />
               )}
               {hasAttention && !hasActive && (
                 <div style={{
-                  width: 6, height: 6, borderRadius: '50%',
+                  width: 8, height: 8, borderRadius: '50%',
                   background: 'var(--orange)', flexShrink: 0,
                 }} />
               )}
               <span style={{
-                fontSize: 13, fontWeight: 600, color: 'var(--fg)',
+                fontSize: 14, fontWeight: 600, color: 'var(--fg)',
                 letterSpacing: '-0.01em',
               }}>
                 {name}
               </span>
-              <span style={{ fontSize: 10, color: 'var(--fg-4)' }}>
+              <span style={{ fontSize: 12, color: 'var(--fg-4)' }}>
                 {groupAgents.length} session{groupAgents.length !== 1 ? 's' : ''}
               </span>
               <span style={{
-                fontSize: 10, fontFamily: 'var(--mono)',
+                fontSize: 12, fontFamily: 'var(--mono)',
                 color: 'var(--green)', marginLeft: 'auto',
               }}>
                 ${groupCost.toFixed(2)}
@@ -241,20 +241,20 @@ export function CardGrid({
                       }}
                       onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-1)'; }}
                       onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
-                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: statusColors[agent.Status] || 'var(--fg-4)', flexShrink: 0 }} />
-                      <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: providerColors[agent.ProviderName] || 'var(--fg-3)', width: 50, flexShrink: 0 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColors[agent.Status] || 'var(--fg-4)', flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: providerColors[agent.ProviderName] || 'var(--fg-3)', width: 55, flexShrink: 0 }}>
                         {agent.ProviderName}
                       </span>
-                      <span style={{ fontSize: 10, color: statusColors[agent.Status], width: 50, flexShrink: 0 }}>
+                      <span style={{ fontSize: 11, color: statusColors[agent.Status], width: 55, flexShrink: 0 }}>
                         {statusLabels[agent.Status] || ''}
                       </span>
-                      <span style={{ fontSize: 12, color: 'var(--fg)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 13, color: 'var(--fg)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {agent.Title || agent.Name}
                       </span>
-                      <span style={{ fontSize: 10, color: 'var(--fg-4)', width: 60, textAlign: 'right', flexShrink: 0 }}>
+                      <span style={{ fontSize: 11, color: 'var(--fg-4)', width: 60, textAlign: 'right', flexShrink: 0 }}>
                         {age}
                       </span>
-                      <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--green)', width: 70, textAlign: 'right', flexShrink: 0 }}>
+                      <span style={{ fontSize: 13, fontFamily: 'var(--mono)', color: 'var(--green)', width: 80, textAlign: 'right', flexShrink: 0 }}>
                         ${(agent.EstCostUSD || 0).toFixed(2)}
                       </span>
                     </div>

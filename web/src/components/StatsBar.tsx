@@ -70,7 +70,7 @@ export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, t
               border: tasksOpen ? '1px solid var(--accent)' : '1px solid var(--border)',
               background: tasksOpen ? 'var(--accent-dim)' : 'transparent',
               color: tasksOpen ? 'var(--accent)' : 'var(--fg-3)',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
             }}
           >
             Tasks{taskCount ? ` (${taskCount})` : ''}
@@ -97,7 +97,7 @@ export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, t
           aria-label="Launch new agent session"
           style={{
             padding: '5px 14px', borderRadius: 4, border: '1px solid var(--accent)',
-            background: 'transparent', color: 'var(--accent)', fontSize: 11,
+            background: 'transparent', color: 'var(--accent)', fontSize: 12,
             fontWeight: 600, cursor: 'pointer', letterSpacing: '0.02em',
           }}
         >
@@ -123,7 +123,7 @@ function StatChip({ value, label, color, suffix }: {
       <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--mono)', color }}>
         {value}
       </span>
-      <span style={{ fontSize: 9, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+      <span style={{ fontSize: 11, color: 'var(--fg-4)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         {suffix ? label + suffix : label}
       </span>
     </div>
