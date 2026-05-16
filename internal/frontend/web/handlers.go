@@ -261,6 +261,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			"note":        s.Note,
 			"isSubagent":     s.IsSubagent,
 			"permissionMode": s.PermissionMode,
+			"starred":        s.Starred,
 		}
 	}
 
