@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/profile"
 )
 
 // Deps holds all injectable dependencies for cobra subcommands.
@@ -16,6 +17,7 @@ type Deps struct {
 	SpawnAgent       func(provider, dir, model, mode, prompt string) (pid int, tmuxSession string, err error)
 	WebServer        func(port int) error
 	Providers        []string
+	ProfileStore     *profile.Store
 }
 
 // RegisterAll wires all subcommands to rootCmd using the provided dependencies.
@@ -27,4 +29,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent))
 	rootCmd.AddCommand(newWebCmd(d.WebServer))
 	rootCmd.AddCommand(newAgentContextCmd(d.Providers))
+	if d.ProfileStore != nil {
+		rootCmd.AddCommand(newProfileCmd(d.ProfileStore))
+	}
 }

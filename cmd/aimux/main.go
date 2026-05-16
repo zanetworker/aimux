@@ -19,6 +19,7 @@ import (
 	"github.com/zanetworker/aimux/internal/frontend/tui"
 	"github.com/zanetworker/aimux/internal/frontend/web"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/sessions"
@@ -79,6 +80,9 @@ func main() {
 		return nil
 	})
 
+	profileStore := profile.NewStore(profile.DefaultPath())
+	_ = profileStore.Load()
+
 	deps := cmd.Deps{
 		Discover:         disco.Discover,
 		DiscoverSessions: history.Discover,
@@ -90,7 +94,8 @@ func main() {
 		WebServer: func(port int) error {
 			return createWebServer(port).Start()
 		},
-		Providers: []string{"claude", "codex", "gemini"},
+		Providers:    []string{"claude", "codex", "gemini"},
+		ProfileStore: profileStore,
 	}
 
 	cmd.RegisterAll(deps)
