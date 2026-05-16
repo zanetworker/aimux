@@ -658,6 +658,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return views.SessionTitlesGeneratedMsg{Count: count, Err: err}
 		}
 	case views.SessionTitlesGeneratedMsg:
+		a.sessionsView.SetGeneratingTitles(false)
+		a.starredView.SetGeneratingTitles(false)
 		if msg.Err != nil {
 			a.statusHint = fmt.Sprintf("Generated %d titles (stopped: %v)", msg.Count, msg.Err)
 		} else {

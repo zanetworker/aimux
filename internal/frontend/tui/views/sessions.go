@@ -184,6 +184,9 @@ type SessionsView struct {
 	// Pinned count (starred sessions at the top of visible list)
 	pinnedCount int
 
+	// Title generation
+	generatingTitles bool
+
 	// Subagent filtering
 	showSubagents bool
 
@@ -241,6 +244,10 @@ func (v *SessionsView) ShowAll() bool {
 
 func (v *SessionsView) SetShowAll(all bool) {
 	v.showAll = all
+}
+
+func (v *SessionsView) SetGeneratingTitles(g bool) {
+	v.generatingTitles = g
 }
 
 // SelectedSession returns the currently selected session, if any.
@@ -363,6 +370,10 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 		case "t":
+			if v.generatingTitles {
+				return nil
+			}
+			v.generatingTitles = true
 			return func() tea.Msg { return SessionGenerateTitlesMsg{} }
 		case "*":
 			s := v.SelectedSession()
