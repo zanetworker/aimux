@@ -337,14 +337,14 @@ func TestSessionsView_ColumnWidths(t *testing.T) {
 	v.SetSize(100, 40)
 
 	cols := v.columnWidths(100)
-	if cols.age != 7 {
-		t.Errorf("age width = %d, want 7", cols.age)
+	if cols.age != 9 {
+		t.Errorf("age width = %d, want 9", cols.age)
 	}
-	if cols.turns != 5 {
-		t.Errorf("turns width = %d, want 5", cols.turns)
+	if cols.turns != 6 {
+		t.Errorf("turns width = %d, want 6", cols.turns)
 	}
-	if cols.cost != 7 {
-		t.Errorf("cost width = %d, want 7", cols.cost)
+	if cols.cost != 8 {
+		t.Errorf("cost width = %d, want 8", cols.cost)
 	}
 	if cols.project != 0 {
 		t.Errorf("project width = %d, want 0 when not showing all", cols.project)
@@ -356,8 +356,8 @@ func TestSessionsView_ColumnWidths(t *testing.T) {
 	// With showAll
 	v.showAll = true
 	cols = v.columnWidths(100)
-	if cols.project != 12 {
-		t.Errorf("project width = %d, want 12 when showing all", cols.project)
+	if cols.project != 14 {
+		t.Errorf("project width = %d, want 14 when showing all", cols.project)
 	}
 }
 

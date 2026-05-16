@@ -156,6 +156,11 @@ type SessionsView struct {
 	cleanupItems  []cleanupItem
 	cleanupCursor int
 
+	// Directory filter
+	dirFilterMode  bool
+	dirFilterInput TextInput
+	dirFilterText  string
+
 	// Content search (deep search inside JSONL files)
 	contentSearchMode  bool
 	contentSearchInput TextInput
@@ -235,7 +240,7 @@ func (v *SessionsView) SelectedSession() *history.Session {
 
 // HasActiveInput returns true if the view has active text input or confirmation.
 func (v *SessionsView) HasActiveInput() bool {
-	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode || v.cleanupMode || v.contentSearchMode
+	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode || v.cleanupMode || v.contentSearchMode || v.dirFilterMode
 }
 
 // HasActiveFilter returns true if a search filter is currently applied.
@@ -265,6 +270,9 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 		if v.contentSearchMode {
 			return v.handleContentSearchKey(msg)
 		}
+		if v.dirFilterMode {
+			return v.handleDirFilterKey(msg)
+		}
 		if v.filterMode {
 			return v.handleFilterKey(msg)
 		}
@@ -291,7 +299,12 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 				v.previewLogs = nil
 			}
 		case "esc":
-			// Clear filter and content search together
+			// Clear directory filter first, then text filter
+			if v.dirFilterText != "" {
+				v.dirFilterText = ""
+				v.cursor = 0
+				return nil
+			}
 			if v.filterText != "" || v.contentSearchIDs != nil {
 				v.filterText = ""
 				v.contentSearchIDs = nil
@@ -307,6 +320,9 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			return func() tea.Msg {
 				return SessionToggleScopeMsg{ShowAll: v.showAll}
 			}
+		case "P":
+			v.dirFilterMode = true
+			v.dirFilterInput.Reset()
 		case "/":
 			v.filterMode = true
 			v.filterInput.Reset()
@@ -445,6 +461,23 @@ func (v *SessionsView) ContentSearchSnippet(sessionID string) string {
 // HasActiveContentSearch returns true if content search results are being displayed.
 func (v *SessionsView) HasActiveContentSearch() bool {
 	return v.contentSearchIDs != nil
+}
+
+func (v *SessionsView) handleDirFilterKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		v.dirFilterMode = false
+		v.dirFilterText = v.dirFilterInput.Value()
+		v.cursor = 0
+	case "esc":
+		v.dirFilterMode = false
+		v.dirFilterInput.Reset()
+		v.dirFilterText = ""
+		v.cursor = 0
+	default:
+		v.dirFilterInput.HandleKey(msg)
+	}
+	return nil
 }
 
 func (v *SessionsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
@@ -654,6 +687,13 @@ func (v *SessionsView) visibleSessions() []history.Session {
 		if !isSearching && s.LastActive.IsZero() {
 			continue
 		}
+		// Directory filter
+		if v.dirFilterText != "" {
+			needle := strings.ToLower(v.dirFilterText)
+			if !strings.Contains(strings.ToLower(s.Project), needle) {
+				continue
+			}
+		}
 		// When searching, a session passes if it matches metadata OR content
 		if isSearching {
 			metaMatch := false
@@ -798,6 +838,12 @@ func (v *SessionsView) View() string {
 	b.WriteString(sessDimStyle.Render(countStr) + "\n")
 	b.WriteString("\n")
 
+	// Directory filter indicator
+	if v.dirFilterText != "" {
+		dirBadge := lipgloss.NewStyle().Background(lipgloss.Color("#1E3A5F")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+		b.WriteString("  " + dirBadge.Render(" PATH: "+v.dirFilterText+" ") + sessDimStyle.Render("  Esc:clear") + "\n\n")
+	}
+
 	// Search/filter indicators
 	if v.filterText != "" {
 		var parts []string
@@ -845,14 +891,14 @@ func (v *SessionsView) View() string {
 	headerParts = append(headerParts, " ")
 	headerParts = append(headerParts, colHeader("AGE", SortByAge, cols.age+2, true))
 	if v.showAll {
-		headerParts = append(headerParts, "  ")
+		headerParts = append(headerParts, "   ")
 		headerParts = append(headerParts, fmt.Sprintf("%-*s", cols.project, "PROJECT"))
 	}
-	headerParts = append(headerParts, "  ")
+	headerParts = append(headerParts, "   ")
 	headerParts = append(headerParts, colHeader("TITLE", SortByTitle, cols.prompt, true))
-	headerParts = append(headerParts, "  ")
+	headerParts = append(headerParts, "   ")
 	headerParts = append(headerParts, colHeader("TURNS", SortByTurns, cols.turns+2, false))
-	headerParts = append(headerParts, "  ")
+	headerParts = append(headerParts, "   ")
 	headerParts = append(headerParts, colHeader("COST", SortByCost, cols.cost, false))
 	header := strings.Join(headerParts, "")
 	b.WriteString(sessDimStyle.Render(header) + "\n")
@@ -914,6 +960,12 @@ func (v *SessionsView) View() string {
 		cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA"))
 		b.WriteString("\n  " + searchStyle.Render("SEARCH CONTENT: ") + v.contentSearchInput.BeforeCursor() + cursorStyle.Render("█") + v.contentSearchInput.AfterCursor())
 		b.WriteString("\n  " + sessDimStyle.Render("  Enter:search  Esc:cancel — searches inside session files using ripgrep"))
+	}
+	if v.dirFilterMode {
+		dirStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Bold(true)
+		cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA"))
+		b.WriteString("\n  " + dirStyle.Render("PATH: ") + v.dirFilterInput.BeforeCursor() + cursorStyle.Render("█") + v.dirFilterInput.AfterCursor())
+		b.WriteString("\n  " + sessDimStyle.Render("  Enter:filter  Esc:cancel — filters by directory path"))
 	}
 	if v.filterMode {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Bold(true).Render("/") + v.filterInput.BeforeCursor() + lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("█") + v.filterInput.AfterCursor())
@@ -1005,17 +1057,17 @@ type colLayout struct {
 // columnWidths computes fixed column widths based on available width.
 func (v *SessionsView) columnWidths(w int) colLayout {
 	c := colLayout{
-		age:   7,
-		turns: 5,
-		cost:  7,
+		age:   9,
+		turns: 6,
+		cost:  8,
 	}
 	if v.showAll {
-		c.project = 12
+		c.project = 14
 	}
-	// marker(3) + spacing between columns(2*4=8 for non-project, 2*5=10 for project)
-	fixed := 3 + c.age + c.turns + c.cost + 8
+	// marker(3) + spacing between columns(3*4=12 for non-project, 3*5=15 for project)
+	fixed := 3 + c.age + c.turns + c.cost + 12
 	if v.showAll {
-		fixed += c.project + 2
+		fixed += c.project + 3
 	}
 	c.prompt = w - fixed
 	if c.prompt < 15 {
@@ -1075,14 +1127,14 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	} else {
 		b.WriteString(sessAgeStyle.Render(ageStr))
 	}
-	b.WriteString("  ")
+	b.WriteString("   ")
 
 	// Project column (all-projects mode only, fixed width)
 	if v.showAll {
 		proj := shortProject(s.Project)
 		projStr := fmt.Sprintf("%-*s", cols.project, truncate(proj, cols.project))
 		b.WriteString(sessProjectStyle.Render(projStr))
-		b.WriteString("  ")
+		b.WriteString("   ")
 	}
 
 	// Prompt column (fixed width, padded)
@@ -1109,7 +1161,7 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 			b.WriteString(sessPromptStyle.Render(truncPrompt))
 		}
 	}
-	b.WriteString("  ")
+	b.WriteString("   ")
 
 	// Turns column (right-aligned, fixed width)
 	turnStr := fmt.Sprintf("%*s", cols.turns, fmt.Sprintf("%dt", s.TurnCount))
@@ -1118,7 +1170,7 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	} else {
 		b.WriteString(sessTurnStyle.Render(turnStr))
 	}
-	b.WriteString("  ")
+	b.WriteString("   ")
 
 	// Cost column (right-aligned, fixed width)
 	costStr := fmt.Sprintf("%*s", cols.cost, fmt.Sprintf("$%.2f", s.CostUSD))
