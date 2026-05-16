@@ -56,8 +56,10 @@ type ToolSpan struct {
 	Snippet   string // short description of the input
 	Success   bool   // true if tool succeeded
 	ErrorMsg  string // error message if failed
+	FilePath  string // for Edit/Write/Read: the file path
 	OldString string // for Edit: the old text
 	NewString string // for Edit: the new text
+	Content   string // for Write: the file content
 	ToolUseID string // for matching tool_result entries
 }
 

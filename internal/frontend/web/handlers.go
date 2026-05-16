@@ -373,11 +373,17 @@ func turnsToJSON(turns []trace.Turn) []map[string]any {
 				"success":  a.Success,
 				"errorMsg": a.ErrorMsg,
 			}
+			if a.FilePath != "" {
+				action["filePath"] = a.FilePath
+			}
 			if a.OldString != "" {
 				action["oldString"] = a.OldString
 			}
 			if a.NewString != "" {
 				action["newString"] = a.NewString
+			}
+			if a.Content != "" {
+				action["content"] = a.Content
 			}
 			actions[j] = action
 		}

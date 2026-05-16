@@ -790,56 +790,54 @@ func (v *LogsView) renderTurn(t TraceTurn, selected, expanded bool) []string {
 		lines = append(lines, "") // spacer
 	}
 
-	// -- DIFF section (for Edit actions with old/new strings) --
-	hasEdits := false
+	// -- DIFF section (for Edit/Write actions) --
+	hasDiffs := false
 	for _, a := range t.Actions {
-		if a.OldString != "" && a.NewString != "" {
-			hasEdits = true
+		if a.Name == "Edit" && (a.OldString != "" || a.NewString != "") {
+			hasDiffs = true
+			break
+		}
+		if a.Name == "Write" && a.Content != "" {
+			hasDiffs = true
 			break
 		}
 	}
-	if hasEdits {
+	if hasDiffs {
 		lines = append(lines, v.sectionHeader("DIFF", diffLabelStyle, innerW))
 		for _, a := range t.Actions {
-			if a.OldString == "" && a.NewString == "" {
+			isEdit := a.Name == "Edit" && (a.OldString != "" || a.NewString != "")
+			isWrite := a.Name == "Write" && a.Content != ""
+			if !isEdit && !isWrite {
 				continue
 			}
-			// Show which Edit action
-			label := "Ed"
-			snippet := a.Snippet
-			if len(snippet) > 40 {
-				snippet = snippet[:37] + "..."
-			}
-			lines = append(lines, "    "+toolNameStyle.Render(label)+" "+dimStyle.Render(snippet))
 
-			// Removed lines
-			maxDiffLen := innerW - 6
-			oldStr := a.OldString
-			if len(oldStr) > maxDiffLen {
-				oldStr = oldStr[:maxDiffLen-3] + "..."
+			filePath := a.FilePath
+			if filePath == "" {
+				filePath = a.Snippet
 			}
-			for _, dl := range strings.Split(oldStr, "\n") {
-				dl = strings.TrimRight(dl, "\r")
-				if len(dl) > maxDiffLen {
-					dl = dl[:maxDiffLen-3] + "..."
-				}
-				lines = append(lines, "    "+diffRemoveStyle.Render("- "+dl))
+			if len(filePath) > innerW-10 {
+				filePath = "..." + filePath[len(filePath)-innerW+13:]
 			}
 
-			// Added lines
-			newStr := a.NewString
-			if len(newStr) > maxDiffLen {
-				newStr = newStr[:maxDiffLen-3] + "..."
-			}
-			for _, dl := range strings.Split(newStr, "\n") {
-				dl = strings.TrimRight(dl, "\r")
-				if len(dl) > maxDiffLen {
-					dl = dl[:maxDiffLen-3] + "..."
+			if isWrite {
+				lines = append(lines, "    "+toolNameStyle.Render("Wr")+" "+diffAddStyle.Render(filePath)+" "+dimStyle.Render("(new file)"))
+				for _, dl := range strings.Split(a.Content, "\n") {
+					dl = strings.TrimRight(dl, "\r")
+					lines = append(lines, "    "+diffAddStyle.Render("+ "+dl))
 				}
-				lines = append(lines, "    "+diffAddStyle.Render("+ "+dl))
+			} else {
+				lines = append(lines, "    "+toolNameStyle.Render("Ed")+" "+dimStyle.Render(filePath))
+				for _, dl := range strings.Split(a.OldString, "\n") {
+					dl = strings.TrimRight(dl, "\r")
+					lines = append(lines, "    "+diffRemoveStyle.Render("- "+dl))
+				}
+				for _, dl := range strings.Split(a.NewString, "\n") {
+					dl = strings.TrimRight(dl, "\r")
+					lines = append(lines, "    "+diffAddStyle.Render("+ "+dl))
+				}
 			}
+			lines = append(lines, "") // spacer between files
 		}
-		lines = append(lines, "") // spacer
 	}
 
 	// -- OUTPUT section --

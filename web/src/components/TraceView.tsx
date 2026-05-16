@@ -191,9 +191,26 @@ export function TraceView({ turns, sessionId, sessionFile, provider }: TraceView
           <pre style={{ ...codeBlock, marginBottom: 4, color: 'var(--teal)' }}><span style={{ color: 'var(--fg-4)' }}>$ </span>{tool.command}</pre>
         )}
 
-        {/* Write */}
+        {/* Write (new file) */}
         {tool.name === 'Write' && tool.content && (
-          <pre style={{ ...codeBlock, marginBottom: 4 }}>{tool.content}</pre>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, lineHeight: '1.5',
+            borderRadius: 4, background: 'var(--bg-0)', border: '1px solid var(--border)',
+            overflow: 'auto', maxHeight: 300, marginBottom: 4,
+          }}>
+            <div style={{ padding: '2px 8px', borderBottom: '1px solid var(--border)', color: 'var(--green)', fontSize: 9, fontWeight: 600 }}>
+              new file
+            </div>
+            {tool.content.split('\n').map((line, i) => (
+              <div key={i} style={{
+                padding: '0 8px', background: 'rgba(105,223,115,0.08)',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-all', minHeight: '1.5em',
+              }}>
+                <span style={{ color: 'var(--fg-4)', display: 'inline-block', width: 14, userSelect: 'none' }}>+</span>
+                <span style={{ color: 'var(--green)' }}>{line}</span>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Grep/Glob */}

@@ -678,8 +678,10 @@ type claudeContentBlock struct {
 	toolName      string
 	toolSnippet   string
 	toolUseID     string
+	toolFilePath  string
 	editOldString string
 	editNewString string
+	writeContent  string
 }
 
 type claudeToolResultEntry struct {
@@ -830,9 +832,12 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 			name, _ := block["name"].(string)
 			id, _ := block["id"].(string)
 			snippet := ""
-			var editOld, editNew string
+			var editOld, editNew, filePath, writeContent string
 			if input, ok := block["input"].(map[string]interface{}); ok {
 				snippet = claudeToolInputSnippet(name, input)
+				if fp, ok := input["file_path"].(string); ok {
+					filePath = fp
+				}
 				if name == "Edit" {
 					if old, ok := input["old_string"].(string); ok {
 						editOld = old
@@ -841,14 +846,21 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 						editNew = ns
 					}
 				}
+				if name == "Write" {
+					if c, ok := input["content"].(string); ok {
+						writeContent = c
+					}
+				}
 			}
 			e.blocks = append(e.blocks, claudeContentBlock{
 				blockType:     "tool_use",
 				toolName:      name,
 				toolSnippet:   snippet,
 				toolUseID:     id,
+				toolFilePath:  filePath,
 				editOldString: editOld,
 				editNewString: editNew,
+				writeContent:  writeContent,
 			})
 		}
 	}
@@ -942,8 +954,10 @@ func parseClaudeJSONL(data string) []trace.Turn {
 						Snippet:   block.toolSnippet,
 						Success:   true,
 						ToolUseID: block.toolUseID,
+						FilePath:  block.toolFilePath,
 						OldString: block.editOldString,
 						NewString: block.editNewString,
+						Content:   block.writeContent,
 					}
 					current.Actions = append(current.Actions, span)
 					if block.toolUseID != "" {
