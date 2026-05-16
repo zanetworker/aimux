@@ -5,6 +5,16 @@ description: Using aimux from AI coding agents and scripts
 
 aimux supports structured output for consumption by AI coding agents (Claude Code, Codex, Gemini CLI) and scripts.
 
+## Introspection
+
+Call once per session to learn the full CLI contract:
+
+```bash
+aimux agent-context
+```
+
+Returns every command, flag, type, default, and valid enum as JSON. Agents use this to avoid guessing flag names or values.
+
 ## Structured Output
 
 Add `--json` to any command for machine-parseable JSON output:
@@ -15,6 +25,8 @@ aimux sessions --list --json
 aimux version --json
 aimux spawn claude --dry-run --json
 aimux resume <id> --dry-run --json
+aimux profile list --json
+aimux feedback "message" --json
 ```
 
 ## Exit Codes
@@ -57,6 +69,51 @@ aimux spawn claude --dir ./myproject --dry-run --json
 aimux resume <id> --dry-run --json
 ```
 
+## Profiles
+
+Save named configuration bundles for reuse:
+
+```bash
+aimux profile save work --provider claude --model opus --dir ~/project
+aimux spawn --profile work
+aimux profile list --json
+aimux profile get work --json
+aimux profile delete work
+```
+
+Explicit flags override profile values.
+
+## Delivery Targets
+
+Route spawn output to different sinks:
+
+```bash
+aimux spawn claude --json --deliver=file:./result.json
+aimux spawn claude --json --deliver=webhook:https://hooks.example.com/agents
+```
+
+Valid schemes: `stdout` (default), `file:<path>`, `webhook:<url>`.
+
+## Waiting for Completion
+
+Block until a spawned agent session finishes:
+
+```bash
+aimux spawn claude --dir ./project --wait --json
+```
+
+Returns duration on completion. Eliminates the need for agents to write polling loops.
+
+## Feedback
+
+Report CLI friction for maintainer review:
+
+```bash
+aimux feedback "the --limit flag silently ignores values over 100"
+```
+
+Writes to `~/.aimux/feedback.jsonl`.
+
 ## Error Messages
 
 Errors include valid values when applicable:
@@ -70,4 +127,13 @@ With `--json`, errors go to stderr as structured JSON:
 
 ```json
 {"error": "invalid provider \"gpt\"", "code": 2, "valid_values": ["claude", "codex", "gemini"]}
+```
+
+## Configuration
+
+Add to `~/.aimux/config.yaml`:
+
+```yaml
+resume:
+  skip_permissions: true    # always pass --dangerously-skip-permissions on resume
 ```

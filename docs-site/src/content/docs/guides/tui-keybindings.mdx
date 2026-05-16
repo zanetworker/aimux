@@ -40,6 +40,28 @@ description: Keyboard shortcuts for the terminal dashboard.
 | `o` | Export as OTEL to configured endpoint |
 | `Esc` | Cancel |
 
+## Sessions View
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move selection down/up |
+| `g` / `G` | Jump to top/bottom |
+| `Enter` | Resume selected session |
+| `/` | Filter by title, prompt, project, tags |
+| `P` | Filter by directory path |
+| `F` | Deep content search (ripgrep inside session files) |
+| `s` | Cycle sort order (age, cost, turns, title, failure mode) |
+| `A` | Toggle between current directory and all projects |
+| `a` / `v` | Cycle annotation (achieved, partial, failed, abandoned) |
+| `f` | Set failure-mode tag |
+| `N` | Add/edit note |
+| `C` | Copy session ID to clipboard |
+| `p` | Toggle trace preview pane |
+| `d` | Delete session (with confirmation) |
+| `D` | Cleanup mode (find duplicates/empty sessions) |
+| `H` | Show/hide subagent sessions |
+| `Esc` | Clear filters (path first, then text), then exit view |
+
 ## Cross-Session Search
 
 Press `/` from the agent list to search across all active agent traces. Type a query (file name, function, error message) and aimux highlights matching sessions. This searches inside the trace content, not just session titles.

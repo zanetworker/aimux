@@ -66,16 +66,24 @@ Click the **Sessions** tab to browse past agent sessions. The sessions table sho
 - **Turn count**, token usage, and cost
 - **Resumable** indicator for sessions that can be continued
 
-Click any row to open its trace in the right panel. Use the search box to filter by project name, or the content search to find sessions where a specific file or term was mentioned.
+Click any row to open its trace in the right panel. The toolbar provides two filter inputs:
+
+- **Filter sessions**: Search by title, prompt, project, annotation, or tags
+- **Filter by path**: Narrow to sessions in a specific directory (type a directory name like "research" or "aimux")
+
+Both filters stack: filter by path first, then search within those results. Use the content search (ripgrep) for deep matches inside session files.
 
 ### CLI Session Commands
 
 You can also browse sessions from the terminal:
 
 ```bash
-aimux sessions           # list all sessions
-aimux sessions --recent  # recent sessions only
-aimux resume <id>        # resume a session by ID
+aimux sessions --list              # table output
+aimux sessions --list --json       # JSON output
+aimux sessions "query" --list      # search by keyword
+aimux sessions --export            # JSONL for pipelines
+aimux resume <id>                  # resume a session
+aimux resume <id> --dry-run --json # preview resume command
 ```
 
 ## Cross-Session Search
