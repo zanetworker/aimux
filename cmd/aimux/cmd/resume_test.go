@@ -10,7 +10,7 @@ func TestResumeCmd_DryRun_JSON(t *testing.T) {
 	var stdout bytes.Buffer
 	c := newResumeCmd(func(id string, danger bool) (string, string, error) {
 		return "claude --resume " + id, "/tmp/project", nil
-	}, nil)
+	}, nil, false)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
 	jsonOutput = true
@@ -35,7 +35,7 @@ func TestResumeCmd_DryRun_JSON(t *testing.T) {
 }
 
 func TestResumeCmd_MissingID(t *testing.T) {
-	c := newResumeCmd(nil, nil)
+	c := newResumeCmd(nil, nil, false)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"resume"})
@@ -52,7 +52,7 @@ func TestResumeCmd_DryRun_Text(t *testing.T) {
 	var stdout bytes.Buffer
 	c := newResumeCmd(func(id string, danger bool) (string, string, error) {
 		return "claude --resume " + id, "/tmp/proj", nil
-	}, nil)
+	}, nil, false)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
 	jsonOutput = false

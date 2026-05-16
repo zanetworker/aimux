@@ -17,6 +17,7 @@ type Config struct {
 	Shell           string                    `yaml:"shell"`       // login shell for spawning agents
 	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
 	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
+	Resume          ResumeConfig              `yaml:"resume"`      // resume defaults
 	Sessions        SessionsConfig            `yaml:"sessions"`    // session history settings
 	Notifications   NotificationsConfig       `yaml:"notifications"` // macOS notification settings
 	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
@@ -42,6 +43,11 @@ type K8sProviderConfig struct {
 // Requires both enabled flag and a Redis URL.
 func (c K8sProviderConfig) IsActive() bool {
 	return c.Enabled && c.RedisURL != ""
+}
+
+// ResumeConfig holds defaults for the resume command.
+type ResumeConfig struct {
+	SkipPermissions bool `yaml:"skip_permissions"` // always pass --dangerously-skip-permissions
 }
 
 // SessionsConfig holds settings for the session history feature.

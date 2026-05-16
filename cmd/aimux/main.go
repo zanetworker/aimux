@@ -94,7 +94,8 @@ func main() {
 		WebServer: func(port int) error {
 			return createWebServer(port).Start()
 		},
-		Providers:    []string{"claude", "codex", "gemini"},
+		SkipPermissions: cfg.Resume.SkipPermissions,
+		Providers:       []string{"claude", "codex", "gemini"},
 		ProfileStore: profileStore,
 	}
 

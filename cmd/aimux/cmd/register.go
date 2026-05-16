@@ -18,6 +18,7 @@ type Deps struct {
 	WebServer        func(port int) error
 	Providers        []string
 	ProfileStore     *profile.Store
+	SkipPermissions  bool
 	FeedbackPath     string
 }
 
@@ -26,7 +27,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newAgentsCmd(d.Discover))
 	rootCmd.AddCommand(newSessionsCmd(d.DiscoverSessions, d.SearchContent, d.PickSession, d.ResumeExec))
-	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec))
+	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec, d.SkipPermissions))
 	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent))
 	rootCmd.AddCommand(newWebCmd(d.WebServer))
 	rootCmd.AddCommand(newAgentContextCmd(d.Providers))

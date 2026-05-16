@@ -9,8 +9,9 @@ import (
 
 type resumeBuilderFn func(sessionID string, danger bool) (command, workDir string, err error)
 
-func newResumeCmd(builder resumeBuilderFn, execFn func(sessionID string, danger bool)) *cobra.Command {
-	var danger, dryRun bool
+func newResumeCmd(builder resumeBuilderFn, execFn func(sessionID string, danger bool), skipPermissions bool) *cobra.Command {
+	danger := skipPermissions
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "resume <session-id>",
@@ -54,7 +55,7 @@ func newResumeCmd(builder resumeBuilderFn, execFn func(sessionID string, danger 
 		},
 	}
 
-	cmd.Flags().BoolVarP(&danger, "danger", "d", false, "Resume with --dangerously-skip-permissions")
+	cmd.Flags().BoolVarP(&danger, "danger", "d", skipPermissions, "Resume with --dangerously-skip-permissions")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show the resume command without executing")
 	return cmd
 }
