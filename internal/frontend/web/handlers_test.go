@@ -86,6 +86,44 @@ func TestHistoryHandler(t *testing.T) {
 	}
 }
 
+func TestHistoryHandler_AllSessionFieldsMapped(t *testing.T) {
+	expectedFields := []string{
+		"id", "provider", "project", "filePath", "startTime", "lastActive",
+		"turnCount", "tokensIn", "tokensOut", "costUSD", "firstPrompt",
+		"title", "resumable", "annotation", "tags", "note",
+		"isSubagent", "permissionMode", "starred",
+	}
+
+	s := NewServer(0)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/history")
+	if err != nil {
+		t.Fatalf("GET /api/history failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var payload struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(payload.Sessions) == 0 {
+		t.Skip("no sessions in test environment")
+	}
+
+	s0 := payload.Sessions[0]
+	for _, field := range expectedFields {
+		if _, ok := s0[field]; !ok {
+			t.Errorf("session missing field %q in /api/history response", field)
+		}
+	}
+}
+
 func TestAnnotateHandler(t *testing.T) {
 	s := NewServer(0)
 
