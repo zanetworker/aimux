@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/deliver"
@@ -15,6 +17,7 @@ type spawnFn func(provider, dir, model, mode, prompt string) (pid int, tmuxSessi
 func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 	var dir, model, mode, prompt string
 	var dryRun bool
+	var wait bool
 	var deliverTarget string
 
 	cmd := &cobra.Command{
@@ -49,6 +52,7 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 						"mode":     mode,
 						"prompt":   prompt,
 						"dry_run":  true,
+						"wait":     wait,
 					}
 					b, _ := json.MarshalIndent(result, "", "  ")
 					if deliverTarget != "" && deliverTarget != "stdout" {
@@ -96,6 +100,32 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 			} else {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Spawned %s (tmux: %s)\n", provider, tmuxSession)
 			}
+
+			if wait && tmuxSession != "" {
+				start := time.Now()
+				for {
+					time.Sleep(5 * time.Second)
+					// #nosec G204
+					checkCmd := exec.Command("tmux", "has-session", "-t", tmuxSession)
+					if err := checkCmd.Run(); err != nil {
+						break
+					}
+				}
+				duration := time.Since(start)
+				if jsonOutput {
+					waitResult := map[string]any{
+						"provider":     provider,
+						"tmux_session": tmuxSession,
+						"waited":       true,
+						"duration_s":   int(duration.Seconds()),
+					}
+					b, _ := json.MarshalIndent(waitResult, "", "  ")
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+				} else {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Session %s exited after %s\n", tmuxSession, duration.Round(time.Second))
+				}
+			}
+
 			return nil
 		},
 	}
@@ -105,6 +135,7 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 	cmd.Flags().StringVar(&mode, "mode", "", "Mode (e.g., plan, auto)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Initial prompt")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show spawn command without executing")
+	cmd.Flags().BoolVar(&wait, "wait", false, "Block until the spawned session exits")
 	cmd.Flags().StringVar(&deliverTarget, "deliver", "", "Delivery target: stdout (default), file:<path>, webhook:<url>")
 	return cmd
 }

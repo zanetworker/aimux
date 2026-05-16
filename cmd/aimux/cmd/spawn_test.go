@@ -57,6 +57,34 @@ func TestSpawnCmd_InvalidProvider(t *testing.T) {
 	}
 }
 
+func TestSpawnCmd_DryRun_Wait(t *testing.T) {
+	var stdout bytes.Buffer
+	c := newSpawnCmd(
+		[]string{"claude", "codex", "gemini"},
+		func(provider, dir, model, mode, prompt string) (int, string, error) {
+			return 0, "", nil
+		},
+	)
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&bytes.Buffer{})
+	jsonOutput = true
+	defer func() { jsonOutput = false }()
+	rootCmd.SetArgs([]string{"spawn", "claude", "--dry-run", "--wait"})
+	rootCmd.AddCommand(c)
+	defer rootCmd.RemoveCommand(c)
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if result["wait"] != true {
+		t.Error("expected wait=true in dry-run output")
+	}
+}
+
 func TestSpawnCmd_MissingProvider(t *testing.T) {
 	c := newSpawnCmd([]string{"claude", "codex", "gemini"}, nil)
 	rootCmd.SetOut(&bytes.Buffer{})
