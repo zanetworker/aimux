@@ -13,6 +13,7 @@ import (
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/sessiondiff"
 	"github.com/zanetworker/aimux/internal/insight"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/tasks"
@@ -666,6 +667,44 @@ func (s *Server) handleRecentDirs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"directories": dirs}); err != nil {
 		debuglog.Log("encode recent dirs response: %v", err)
+	}
+}
+
+func (s *Server) handleSessionDiffs(w http.ResponseWriter, r *http.Request) {
+	sessionFile := r.URL.Query().Get("file")
+	if sessionFile == "" {
+		http.Error(w, "file parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if s.providerLookupFn == nil {
+		http.Error(w, "trace parser not configured", http.StatusInternalServerError)
+		return
+	}
+
+	parser := s.providerLookupFn("claude")
+	turns, err := parser.ParseTrace(sessionFile)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("parse trace: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	diffs := sessiondiff.Extract(turns)
+
+	totalAdded, totalRemoved := 0, 0
+	for _, d := range diffs {
+		totalAdded += d.Added
+		totalRemoved += d.Removed
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"files":        diffs,
+		"totalFiles":   len(diffs),
+		"totalAdded":   totalAdded,
+		"totalRemoved": totalRemoved,
+	}); err != nil {
+		debuglog.Log("encode session diffs: %v", err)
 	}
 }
 

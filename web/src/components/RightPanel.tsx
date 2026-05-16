@@ -4,6 +4,7 @@ import { StatusLabel } from '../types';
 import { useTraceStream } from '../hooks/useTraceStream';
 import { TraceView } from './TraceView';
 import { SessionView } from './SessionView';
+import { DiffReview } from './DiffReview';
 
 interface RightPanelProps {
   agent: Agent;
@@ -12,7 +13,7 @@ interface RightPanelProps {
   onToggleFullscreen?: () => void;
 }
 
-type Tab = 'trace' | 'session';
+type Tab = 'trace' | 'diffs' | 'session';
 
 export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('trace');
@@ -262,7 +263,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
           display: 'flex',
           gap: '2px',
         }}>
-          {(['trace', 'session'] as Tab[]).map(tab => (
+          {(['trace', 'diffs', 'session'] as Tab[]).map(tab => (
             <button
               key={tab}
               onClick={() => { setActiveTab(tab); if (tab === 'session') setSessionMounted(true); }}
@@ -324,6 +325,9 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: activeTab === 'trace' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0 }}>
           <TraceView turns={turns} sessionId={agent.SessionID} sessionFile={agent.SessionFile} provider={agent.ProviderName} />
+        </div>
+        <div style={{ flex: 1, display: activeTab === 'diffs' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0 }}>
+          <DiffReview sessionFile={agent.SessionFile} />
         </div>
         <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden', display: activeTab === 'session' ? 'flex' : 'none', flexDirection: 'column' }}>
           {/* Permission toggle bar */}
