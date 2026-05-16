@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Agent } from '../types';
 import type { ContentSearchResult } from '../App';
 import { AgentCard } from './AgentCard';
@@ -36,6 +36,22 @@ export function CardGrid({
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [starredFiles, setStarredFiles] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    async function loadStarred() {
+      try {
+        const resp = await fetch('/api/history');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const starred = new Set<string>();
+        for (const s of data.sessions || []) {
+          if (s.starred && s.filePath) starred.add(s.filePath);
+        }
+        setStarredFiles(starred);
+      } catch { /* ignore */ }
+    }
+    loadStarred();
+  }, []);
 
   const handleToggleStar = async (sessionFile: string) => {
     const isStarred = starredFiles.has(sessionFile);

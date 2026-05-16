@@ -394,6 +394,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.headerView.SetAttentionCount(attention)
 
 		a.agentsView.SetAgents(a.instances)
+		starredMap := make(map[string]bool)
+		for _, ag := range a.instances {
+			if ag.SessionFile != "" {
+				meta := history.LoadMeta(ag.SessionFile)
+				if meta.Starred {
+					starredMap[ag.SessionFile] = true
+				}
+			}
+		}
+		a.agentsView.SetStarredFiles(starredMap)
 		a.headerView.SetAgents(a.instances)
 		a.headerView.SetSilenced(a.silenced)
 		a.costsView.SetAgents(a.instances)
@@ -997,6 +1007,16 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				meta := history.LoadMeta(selected.SessionFile)
 				meta.Starred = !meta.Starred
 				_ = history.SaveMeta(selected.SessionFile, meta)
+				starredMap := make(map[string]bool)
+				for _, ag := range a.instances {
+					if ag.SessionFile != "" {
+						m := history.LoadMeta(ag.SessionFile)
+						if m.Starred {
+							starredMap[ag.SessionFile] = true
+						}
+					}
+				}
+				a.agentsView.SetStarredFiles(starredMap)
 				if meta.Starred {
 					a.statusHint = "Session pinned ★"
 				} else {

@@ -75,14 +75,16 @@ type AgentsView struct {
 	height      int
 	filter      string
 	sortField   string        // "", "name", "cost", "age", "model"
-	stalePIDs   map[int]bool  // PIDs that came from cache (stale)
+	stalePIDs    map[int]bool    // PIDs that came from cache (stale)
+	starredFiles map[string]bool // session file paths that are starred
 }
 
 // NewAgentsView creates a new AgentsView.
 func NewAgentsView() *AgentsView {
 	return &AgentsView{
-		expanded:  make(map[int]bool),
-		stalePIDs: make(map[int]bool),
+		expanded:     make(map[int]bool),
+		stalePIDs:    make(map[int]bool),
+		starredFiles: make(map[string]bool),
 	}
 }
 
@@ -198,6 +200,10 @@ func (v *AgentsView) SetFilter(f string) {
 }
 
 // SetStalePIDs sets the map of PIDs that came from cache (stale).
+func (v *AgentsView) SetStarredFiles(files map[string]bool) {
+	v.starredFiles = files
+}
+
 func (v *AgentsView) SetStalePIDs(pids map[int]bool) {
 	v.stalePIDs = pids
 }
@@ -379,6 +385,11 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	a := r.agent
 	icon := v.renderStatusIcon(a.Status)
 
+	starPrefix := " "
+	if v.starredFiles[a.SessionFile] {
+		starPrefix = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("★")
+	}
+
 	name := a.Name
 	if name == "" {
 		name = a.ShortProject()
@@ -389,7 +400,7 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	} else {
 		name = truncate(name, colName-3)
 	}
-	nameCol := "▸" + icon + " " + name
+	nameCol := starPrefix + "▸" + icon + " " + name
 
 	costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
 
