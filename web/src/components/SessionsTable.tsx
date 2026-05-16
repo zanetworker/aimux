@@ -60,6 +60,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
   const [sortField, setSortField] = useState<SortField>('lastActive');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [filter, setFilter] = useState('');
+  const [dirFilter, setDirFilter] = useState('');
   const [deepQuery, setDeepQuery] = useState('');
   const [deepMatches, setDeepMatches] = useState<Map<string, string> | null>(null);
   const [searching, setSearching] = useState(false);
@@ -149,6 +150,10 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
   if (!isSearching) {
     visible = visible.filter(s => s.costUSD > 0 || s.turnCount > 5);
   }
+  if (dirFilter) {
+    const dq = dirFilter.toLowerCase();
+    visible = visible.filter(s => (s.project || '').toLowerCase().includes(dq));
+  }
   if (filter) {
     const q = filter.toLowerCase();
     visible = visible.filter(s =>
@@ -206,7 +211,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
       onClick={() => handleSort(field)}
       style={{
         padding: '8px 10px', textAlign: (align as any) || 'left', cursor: 'pointer',
-        fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+        fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
         color: sortField === field ? 'var(--fg)' : 'var(--fg-3)',
         borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
         width: width || 'auto', userSelect: 'none',
@@ -237,11 +242,31 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
           value={filter}
           onChange={e => setFilter(e.target.value)}
           style={{
-            padding: '4px 10px', borderRadius: 4,
+            padding: '5px 10px', borderRadius: 4,
             border: '1px solid var(--border)', background: 'var(--bg-2)',
-            color: 'var(--fg)', fontSize: 11, width: 180, outline: 'none',
+            color: 'var(--fg)', fontSize: 12, width: 180, outline: 'none',
           }}
         />
+        <input
+          type="text"
+          placeholder="Filter by path..."
+          value={dirFilter}
+          onChange={e => setDirFilter(e.target.value)}
+          style={{
+            padding: '5px 10px', borderRadius: 4,
+            border: `1px solid ${dirFilter ? 'var(--blue)' : 'var(--border)'}`,
+            background: 'var(--bg-2)',
+            color: 'var(--fg)', fontSize: 12, width: 160, outline: 'none',
+          }}
+        />
+        {dirFilter && (
+          <button onClick={() => setDirFilter('')} style={{
+            padding: '4px 6px', borderRadius: 4, border: 'none',
+            background: 'var(--bg-3)', color: 'var(--fg-3)', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+          }}>
+            ✕
+          </button>
+        )}
         <div style={{ width: 1, height: 16, background: 'var(--border)' }} />
         <input
           type="text"
@@ -269,7 +294,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
         {deepMatches && (
           <button onClick={clearDeepSearch} style={{
             padding: '4px 6px', borderRadius: 4, border: 'none',
-            background: 'var(--purple-dim)', color: 'var(--purple)', fontSize: 9, fontWeight: 600, cursor: 'pointer',
+            background: 'var(--purple-dim)', color: 'var(--purple)', fontSize: 10, fontWeight: 600, cursor: 'pointer',
           }}>
             {deepMatches.size} match{deepMatches.size !== 1 ? 'es' : ''} ✕
           </button>
@@ -308,7 +333,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
 
       {/* Table */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-1)', zIndex: 1 }}>
             <tr>
               <SortHeader label="Age" field="lastActive" width={70} />
@@ -317,21 +342,21 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
               <SortHeader label="Turns" field="turns" width={60} align="right" />
               <SortHeader label="Cost" field="cost" width={70} align="right" />
               <th style={{
-                padding: '8px 10px', textAlign: 'center', fontSize: 9, fontWeight: 700,
+                padding: '8px 10px', textAlign: 'center', fontSize: 10, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
                 borderBottom: '1px solid var(--border)', width: 70,
               }}>
                 Eval
               </th>
               <th style={{
-                padding: '8px 10px', textAlign: 'right', fontSize: 9, fontWeight: 700,
+                padding: '8px 10px', textAlign: 'right', fontSize: 10, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
                 borderBottom: '1px solid var(--border)', width: 70,
               }}>
                 Tokens
               </th>
               <th style={{
-                padding: '8px 10px', textAlign: 'center', fontSize: 9, fontWeight: 700,
+                padding: '8px 10px', textAlign: 'center', fontSize: 10, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
                 borderBottom: '1px solid var(--border)', width: 50,
               }} />
@@ -361,10 +386,10 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                   onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-1)'; }}
                   onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
                 >
-                  <td style={{ padding: '8px 10px', color: 'var(--fg-3)', fontSize: 10, whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '8px 10px', color: 'var(--fg-3)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     {formatAge(s.lastActive)}
                   </td>
-                  <td style={{ padding: '8px 10px', fontSize: 10 }}>
+                  <td style={{ padding: '8px 10px', fontSize: 12 }}>
                     <span style={{ color: 'var(--purple)', fontFamily: 'var(--mono)' }}>
                       {shortProject(s.project)}
                     </span>
@@ -402,7 +427,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                       </div>
                       {snippet && (
                         <span style={{
-                          fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--purple)',
+                          fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--purple)',
                           fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }}>
                           {snippet}
@@ -410,10 +435,10 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                       )}
                     </div>
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--teal)' }}>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--teal)' }}>
                     {s.turnCount}t
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--green)' }}>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--green)' }}>
                     ${s.costUSD.toFixed(2)}
                   </td>
                   <td style={{ padding: '4px 8px', textAlign: 'center' }}>
@@ -432,7 +457,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                       {s.annotation || '+'}
                     </button>
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-4)' }}>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--fg-4)' }}>
                     {formatK(s.tokensIn)}/{formatK(s.tokensOut)}
                   </td>
                   <td style={{ padding: '4px 8px', textAlign: 'center' }}>
@@ -451,7 +476,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                         background: 'transparent',
                         border: `1px solid ${copiedId === s.id ? 'var(--green)' : 'var(--border)'}`,
                         color: copiedId === s.id ? 'var(--green)' : 'var(--fg-3)',
-                        fontSize: 9, fontWeight: 600, cursor: 'pointer',
+                        fontSize: 10, fontWeight: 600, cursor: 'pointer',
                         padding: '2px 6px', borderRadius: 3,
                         transition: 'all 0.15s',
                       }}

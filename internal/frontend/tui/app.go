@@ -2494,7 +2494,7 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		hint := "j/k:nav  Enter:resume  C:copy-id  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
+		hint := "j/k:nav  Enter:resume  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
 		if a.sessionsView.ShowSubagents() {
 			hint += "  H:hide-agents"
 		} else {
