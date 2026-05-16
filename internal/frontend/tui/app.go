@@ -1020,6 +1020,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					}
 				}
 				a.agentsView.SetStarredFiles(starredMap)
+				a.cachedSessions = nil
 				if meta.Starred {
 					a.statusHint = "Session pinned ★"
 				} else {
