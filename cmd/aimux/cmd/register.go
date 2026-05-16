@@ -18,6 +18,7 @@ type Deps struct {
 	WebServer        func(port int) error
 	Providers        []string
 	ProfileStore     *profile.Store
+	FeedbackPath     string
 }
 
 // RegisterAll wires all subcommands to rootCmd using the provided dependencies.
@@ -32,4 +33,5 @@ func RegisterAll(d Deps) {
 	if d.ProfileStore != nil {
 		rootCmd.AddCommand(newProfileCmd(d.ProfileStore))
 	}
+	rootCmd.AddCommand(newFeedbackCmd(d.FeedbackPath))
 }
