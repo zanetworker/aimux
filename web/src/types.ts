@@ -18,6 +18,7 @@ export interface Agent {
   TaskSubject: string;
   Title: string;
   PermissionMode?: string;
+  Starred?: boolean;
 }
 
 export const StatusLabel: Record<number, string> = {

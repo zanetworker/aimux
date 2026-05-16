@@ -75,17 +75,20 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	// Enrich with titles
 	type enrichedAgent struct {
 		agent.Agent
-		Title string
+		Title   string
+		Starred bool
 	}
 
 	enriched := make([]enrichedAgent, len(deduped))
 	for i, a := range deduped {
 		enriched[i] = enrichedAgent{Agent: a}
 		if a.SessionFile != "" {
-			enriched[i].Title = history.TitleForSessionFile(a.SessionFile)
+			meta := history.LoadMeta(a.SessionFile)
+			enriched[i].Title = meta.Title
 			if enriched[i].Title == "" {
 				enriched[i].Title = firstPromptFromJSONL(a.SessionFile)
 			}
+			enriched[i].Starred = meta.Starred
 		}
 	}
 

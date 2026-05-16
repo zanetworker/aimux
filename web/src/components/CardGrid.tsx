@@ -38,20 +38,15 @@ export function CardGrid({
   const [starredFiles, setStarredFiles] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    async function loadStarred() {
-      try {
-        const resp = await fetch('/api/history');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const starred = new Set<string>();
-        for (const s of data.sessions || []) {
-          if (s.starred && s.filePath) starred.add(s.filePath);
-        }
-        setStarredFiles(starred);
-      } catch { /* ignore */ }
+    const starred = new Set<string>();
+    for (const a of agents) {
+      if (a.Starred && a.SessionFile) starred.add(a.SessionFile);
     }
-    loadStarred();
-  }, []);
+    setStarredFiles(prev => {
+      if (prev.size === starred.size && [...prev].every(f => starred.has(f))) return prev;
+      return starred;
+    });
+  }, [agents]);
 
   const handleToggleStar = async (sessionFile: string) => {
     const isStarred = starredFiles.has(sessionFile);
