@@ -615,6 +615,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Annotation == "" {
 			a.statusHint = "Session: annotation removed"
 		}
+	case views.SessionStarMsg:
+		meta := history.LoadMeta(msg.Session.FilePath)
+		meta.Starred = msg.Starred
+		_ = history.SaveMeta(msg.Session.FilePath, meta)
+		if msg.Starred {
+			a.statusHint = "Session pinned ★"
+		} else {
+			a.statusHint = "Session unpinned"
+		}
 	case views.SessionTagMsg:
 		meta := history.LoadMeta(msg.Session.FilePath)
 		meta.Tags = msg.Tags
@@ -2494,7 +2503,7 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		hint := "j/k:nav  Enter:resume  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
+		hint := "j/k:nav  Enter:resume  *:pin  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
 		if a.sessionsView.ShowSubagents() {
 			hint += "  H:hide-agents"
 		} else {

@@ -39,6 +39,7 @@ type Session struct {
 	Tags        []string  `json:"tags"`          // failure mode tags
 	IsSubagent     bool   `json:"is_subagent"`
 	PermissionMode string `json:"permission_mode"`
+	Starred        bool   `json:"starred"`
 }
 
 // Meta holds session-level annotation data stored in sidecar .meta.json files.
@@ -46,7 +47,8 @@ type Meta struct {
 	Annotation string   `json:"annotation,omitempty"`
 	Note       string   `json:"note,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
-	Title      string   `json:"title,omitempty"` // LLM-generated summary title
+	Title      string   `json:"title,omitempty"`
+	Starred    bool     `json:"starred,omitempty"`
 	UpdatedAt  string   `json:"updated_at,omitempty"`
 }
 
@@ -135,6 +137,7 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 			s.Note = meta.Note
 			s.Tags = meta.Tags
 			s.Title = meta.Title
+			s.Starred = meta.Starred
 
 			sessions = append(sessions, s)
 		}

@@ -149,6 +149,7 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 		Annotation string   `json:"annotation"`
 		Tags       []string `json:"tags"`
 		Note       string   `json:"note"`
+		Starred    *bool    `json:"starred"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -164,6 +165,9 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 		meta.Tags = req.Tags
 	}
 	meta.Note = req.Note
+	if req.Starred != nil {
+		meta.Starred = *req.Starred
+	}
 	if err := history.SaveMeta(req.FilePath, meta); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

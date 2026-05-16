@@ -77,6 +77,12 @@ type SessionAnnotateMsg struct {
 	Annotation string
 }
 
+// SessionStarMsg is emitted when the user toggles the star on a session.
+type SessionStarMsg struct {
+	Session history.Session
+	Starred bool
+}
+
 // SessionTagMsg is emitted when the user updates tags on a session.
 type SessionTagMsg struct {
 	Session history.Session
@@ -165,6 +171,9 @@ type SessionsView struct {
 	contentSearchMode  bool
 	contentSearchInput TextInput
 	contentSearchIDs   map[string]string // session ID -> snippet (nil = no active search)
+
+	// Pinned count (starred sessions at the top of visible list)
+	pinnedCount int
 
 	// Subagent filtering
 	showSubagents bool
@@ -339,6 +348,15 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 						FilePath:   s.FilePath,
 					}
 				}
+			}
+		case "*":
+			s := v.SelectedSession()
+			if s == nil {
+				return nil
+			}
+			s.Starred = !s.Starred
+			return func() tea.Msg {
+				return SessionStarMsg{Session: *s, Starred: s.Starred}
 			}
 		case "a", "v":
 			// Cycle annotation
@@ -718,16 +736,29 @@ func (v *SessionsView) visibleSessions() []history.Session {
 		result = append(result, s)
 	}
 
-	// Apply sort
-	sort.SliceStable(result, func(i, j int) bool {
-		less := v.compareSessions(result[i], result[j])
-		if v.sortAsc {
-			return less
+	// Split into starred and unstarred, sort each independently
+	var starred, unstarred []history.Session
+	for _, s := range result {
+		if s.Starred {
+			starred = append(starred, s)
+		} else {
+			unstarred = append(unstarred, s)
 		}
-		return !less
-	})
+	}
+	sortFn := func(items []history.Session) {
+		sort.SliceStable(items, func(i, j int) bool {
+			less := v.compareSessions(items[i], items[j])
+			if v.sortAsc {
+				return less
+			}
+			return !less
+		})
+	}
+	sortFn(starred)
+	sortFn(unstarred)
 
-	return result
+	v.pinnedCount = len(starred)
+	return append(starred, unstarred...)
 }
 
 // compareSessions returns true if a should appear before b in ascending order.
@@ -870,6 +901,11 @@ func (v *SessionsView) View() string {
 		return b.String()
 	}
 
+	if v.pinnedCount > 0 {
+		pinLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+		b.WriteString("  " + pinLabel.Render(fmt.Sprintf("★ Pinned (%d)", v.pinnedCount)) + "\n")
+	}
+
 	// Column header with sort indicator
 	cols := v.columnWidths(w)
 	colHeader := func(name string, field SortField, width int, leftAlign bool) string {
@@ -930,7 +966,15 @@ func (v *SessionsView) View() string {
 		end = len(visible)
 	}
 
+	pinnedDividerRendered := false
 	for i := start; i < end; i++ {
+		// Render divider between pinned and unpinned sections
+		if !pinnedDividerRendered && v.pinnedCount > 0 && i == v.pinnedCount {
+			divStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
+			b.WriteString(divStyle.Render("  " + strings.Repeat("─", w-4)) + "\n")
+			pinnedDividerRendered = true
+		}
+
 		s := visible[i]
 		selected := i == v.cursor
 
@@ -1081,10 +1125,15 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	isEmpty := s.TurnCount <= 1 && s.CostUSD == 0
 	cols := v.columnWidths(w)
 
-	marker := "  "
-	if selected {
-		marker = " \u25b8"
+	starIcon := " "
+	if s.Starred {
+		starIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("\u2605")
 	}
+	pointer := " "
+	if selected {
+		pointer = "\u25b8"
+	}
+	marker := starIcon + pointer
 
 	age := formatAge(s.LastActive)
 

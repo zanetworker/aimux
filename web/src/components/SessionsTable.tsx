@@ -19,6 +19,7 @@ export interface HistorySession {
   note: string;
   isSubagent: boolean;
   permissionMode: string;
+  starred: boolean;
 }
 
 type SortField = 'lastActive' | 'cost' | 'turns' | 'title' | 'project';
@@ -120,6 +121,16 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
 
   const clearDeepSearch = () => { setDeepQuery(''); setDeepMatches(null); };
 
+  const handleToggleStar = async (session: HistorySession) => {
+    const newStarred = !session.starred;
+    await fetch('/api/sessions/meta', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath: session.filePath, starred: newStarred }),
+    });
+    setSessions(prev => prev.map(s => s.id === session.id ? { ...s, starred: newStarred } : s));
+  };
+
   const annotationCycle = ['achieved', 'partial', 'failed', 'abandoned', ''];
 
   const handleCycleAnnotation = async (session: HistorySession) => {
@@ -175,8 +186,9 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
     }
   }
 
-  // Sort
+  // Sort (starred first, then by selected field)
   const sorted = [...visible].sort((a, b) => {
+    if (a.starred !== b.starred) return a.starred ? -1 : 1;
     let cmp = 0;
     switch (sortField) {
       case 'lastActive': {
@@ -461,6 +473,17 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
                     {formatK(s.tokensIn)}/{formatK(s.tokensOut)}
                   </td>
                   <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleToggleStar(s); }}
+                      title={s.starred ? 'Unpin session' : 'Pin session'}
+                      style={{
+                        background: 'transparent', border: 'none',
+                        color: s.starred ? 'var(--orange)' : 'var(--fg-4)',
+                        fontSize: 14, cursor: 'pointer', padding: '2px 4px',
+                      }}
+                    >
+                      {s.starred ? '★' : '☆'}
+                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
