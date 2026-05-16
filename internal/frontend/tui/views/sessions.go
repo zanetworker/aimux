@@ -111,6 +111,15 @@ type SessionBulkDeleteMsg struct {
 	Sessions []history.Session
 }
 
+// SessionGenerateTitlesMsg requests title generation for untitled sessions.
+type SessionGenerateTitlesMsg struct{}
+
+// SessionTitlesGeneratedMsg is the result of title generation.
+type SessionTitlesGeneratedMsg struct {
+	Count int
+	Err   error
+}
+
 // SessionContentSearchResultMsg carries the results of a deep content search.
 type SessionContentSearchResultMsg struct {
 	Matches []history.ContentMatch
@@ -353,6 +362,8 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 					}
 				}
 			}
+		case "t":
+			return func() tea.Msg { return SessionGenerateTitlesMsg{} }
 		case "*":
 			s := v.SelectedSession()
 			if s == nil {

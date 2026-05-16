@@ -645,6 +645,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		meta.Tags = msg.Tags
 		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = fmt.Sprintf("Session: tags updated (%d)", len(msg.Tags))
+	case views.SessionGenerateTitlesMsg:
+		a.statusHint = "Generating titles..."
+		return a, func() tea.Msg {
+			cfg := history.TitleConfig{
+				Enabled: true,
+				Model:   a.cfg.Sessions.TitleModel,
+				APIKey:  a.cfg.Sessions.APIKey,
+			}
+			sessions, _ := history.Discover(history.DiscoverOpts{}, "")
+			count, err := history.GenerateTitles(sessions, cfg)
+			return views.SessionTitlesGeneratedMsg{Count: count, Err: err}
+		}
+	case views.SessionTitlesGeneratedMsg:
+		if msg.Err != nil {
+			a.statusHint = fmt.Sprintf("Generated %d titles (stopped: %v)", msg.Count, msg.Err)
+		} else {
+			a.statusHint = fmt.Sprintf("Generated %d titles", msg.Count)
+		}
+		a.cachedSessions = nil
+		sessions, _ := history.Discover(history.DiscoverOpts{}, "")
+		a.cachedSessions = sessions
+		a.sessionsView.SetSessions(sessions)
 	case views.SessionDeleteMsg:
 		if err := controller.DeleteSession(msg.Session); err != nil {
 			a.statusHint = fmt.Sprintf("Delete failed: %v", err)
@@ -2582,7 +2604,7 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		hint := "j/k:nav  Enter:resume  *:pin  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
+		hint := "j/k:nav  Enter:resume  *:pin  t:titles  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
 		if a.sessionsView.ShowSubagents() {
 			hint += "  H:hide-agents"
 		} else {

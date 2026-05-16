@@ -68,6 +68,8 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
   const [deepQuery, setDeepQuery] = useState('');
   const [deepMatches, setDeepMatches] = useState<Map<string, string> | null>(null);
   const [searching, setSearching] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [genResult, setGenResult] = useState<string | null>(null);
   const [showSubagents, setShowSubagents] = useState(false);
   const [showAnalyzers, setShowAnalyzers] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -130,6 +132,30 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
   }, [deepQuery]);
 
   const clearDeepSearch = () => { setDeepQuery(''); setDeepMatches(null); };
+
+  const handleGenerateTitles = async () => {
+    setGenerating(true);
+    setGenResult(null);
+    try {
+      const resp = await fetch('/api/sessions/generate-titles', { method: 'POST' });
+      const data = await resp.json();
+      setGenResult(`Generated ${data.generated} title${data.generated !== 1 ? 's' : ''}`);
+      if (data.generated > 0) {
+        const histResp = await fetch('/api/history');
+        if (histResp.ok) {
+          const histData = await histResp.json();
+          const s = (histData.sessions || []).map((sess: any) => ({ ...sess, note: sess.note || '' }));
+          setSessions(s);
+          onSessionsLoaded?.(s);
+        }
+      }
+    } catch {
+      setGenResult('Failed to generate titles');
+    } finally {
+      setGenerating(false);
+      setTimeout(() => setGenResult(null), 3000);
+    }
+  };
 
   const handleToggleStar = async (session: HistorySession) => {
     const newStarred = !session.starred;
@@ -352,6 +378,22 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
           >
             Analyzers ({analyzerCount})
           </button>
+        )}
+        <button
+          onClick={handleGenerateTitles}
+          disabled={generating}
+          style={{
+            padding: '3px 10px', borderRadius: 12,
+            border: '1px solid var(--border)',
+            background: 'transparent',
+            color: generating ? 'var(--fg-4)' : 'var(--fg-3)',
+            fontSize: 10, cursor: generating ? 'wait' : 'pointer',
+          }}
+        >
+          {generating ? 'Generating...' : 'Generate Titles'}
+        </button>
+        {genResult && (
+          <span style={{ fontSize: 10, color: 'var(--green)' }}>{genResult}</span>
         )}
         <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--fg-4)' }}>
           {sorted.length} of {sessions.length} sessions

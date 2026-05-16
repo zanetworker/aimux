@@ -662,3 +662,29 @@ func (s *Server) handleRecentDirs(w http.ResponseWriter, r *http.Request) {
 		debuglog.Log("encode recent dirs response: %v", err)
 	}
 }
+
+func (s *Server) handleGenerateTitles(w http.ResponseWriter, r *http.Request) {
+	sessions, err := history.Discover(history.DiscoverOpts{}, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	cfg := history.TitleConfig{
+		Enabled: true,
+		Model:   s.cfg.Sessions.TitleModel,
+		APIKey:  s.cfg.Sessions.APIKey,
+	}
+
+	count, err := history.GenerateTitles(sessions, cfg)
+
+	result := map[string]any{"generated": count}
+	if err != nil {
+		result["error"] = err.Error()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(result); encErr != nil {
+		debuglog.Log("encode generate-titles response: %v", encErr)
+	}
+}
