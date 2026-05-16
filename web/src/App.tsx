@@ -36,6 +36,8 @@ export default function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [sessionAgent, setSessionAgent] = useState<Agent | null>(null);
   const [sessionCount, setSessionCount] = useState<number | null>(null);
+  const [cachedSessions, setCachedSessions] = useState<HistorySession[] | null>(null);
+  const [starredCount, setStarredCount] = useState(0);
   const [pluginTabs, setPluginTabs] = useState<{ name: string; tab: string; panels: { id: string; type: 'metric-row' | 'table' | 'bar-chart' | 'list'; title: string; sortable?: boolean; expandable?: boolean; width?: string }[] }[]>([]);
   const [showTasks, setShowTasks] = useState(false);
   const [taskLaunchTarget, setTaskLaunchTarget] = useState<any | null>(null);
@@ -52,13 +54,20 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (activeTab !== 'sessions' && sessionCount !== null) return;
-    if (activeTab !== 'sessions') return;
+    if (cachedSessions !== null) return;
+    if (activeTab !== 'sessions' && activeTab !== 'starred') return;
     fetch('/api/history')
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.sessions) setSessionCount(d.sessions.length); })
+      .then(d => {
+        if (d?.sessions) {
+          const s = (d.sessions as HistorySession[]).map(sess => ({ ...sess, note: sess.note || '' }));
+          setCachedSessions(s);
+          setSessionCount(s.length);
+          setStarredCount(s.filter(sess => sess.starred).length);
+        }
+      })
       .catch(() => {});
-  }, [activeTab]);
+  }, [activeTab, cachedSessions]);
 
   useEffect(() => {
     fetch('/api/plugins')
@@ -208,7 +217,7 @@ export default function App() {
               >
                 {tab === 'agents' ? `Agents (${agents.length})`
                   : tab === 'sessions' ? `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}`
-                  : tab === 'starred' ? '★ Starred'
+                  : tab === 'starred' ? `★ Starred${starredCount > 0 ? ` (${starredCount})` : ''}`
                   : pluginTabs.find(p => `plugin:${p.name}` === tab)?.tab || tab}
               </button>
             ))}
@@ -259,6 +268,8 @@ export default function App() {
             onSelectSession={handleSessionSelect}
             selectedId={selectedId}
             onSessionCount={setSessionCount}
+            initialSessions={cachedSessions}
+            onSessionsLoaded={(s) => { setCachedSessions(s); setStarredCount(s.filter(x => x.starred).length); }}
           />
         )}
         {!panelFullscreen && activeTab === 'starred' && (
@@ -266,6 +277,8 @@ export default function App() {
             onSelectSession={handleSessionSelect}
             selectedId={selectedId}
             starredOnly
+            initialSessions={cachedSessions}
+            onSessionsLoaded={(s) => { setCachedSessions(s); setStarredCount(s.filter(x => x.starred).length); }}
           />
         )}
         {!panelFullscreen && activeTab.startsWith('plugin:') && (() => {

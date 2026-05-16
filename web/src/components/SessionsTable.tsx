@@ -30,6 +30,8 @@ interface Props {
   selectedId: string | null;
   onSessionCount?: (count: number) => void;
   starredOnly?: boolean;
+  initialSessions?: HistorySession[] | null;
+  onSessionsLoaded?: (sessions: HistorySession[]) => void;
 }
 
 function shortProject(path: string): string {
@@ -56,7 +58,7 @@ function formatK(n: number): string {
   return (n / 1000).toFixed(1) + 'k';
 }
 
-export function SessionsTable({ onSelectSession, selectedId, onSessionCount, starredOnly }: Props) {
+export function SessionsTable({ onSelectSession, selectedId, onSessionCount, starredOnly, initialSessions, onSessionsLoaded }: Props) {
   const [sessions, setSessions] = useState<HistorySession[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState<SortField>('lastActive');
@@ -71,6 +73,12 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (initialSessions) {
+      setSessions(initialSessions);
+      setLoading(false);
+      onSessionCount?.(initialSessions.length);
+      return;
+    }
     let cancelled = false;
     async function load() {
       try {
@@ -82,6 +90,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
           setSessions(s);
           setLoading(false);
           onSessionCount?.(s.length);
+          onSessionsLoaded?.(s);
         }
       } catch {
         if (!cancelled) setLoading(false);
@@ -89,7 +98,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [initialSessions]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -129,7 +138,9 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filePath: session.filePath, starred: newStarred }),
     });
-    setSessions(prev => prev.map(s => s.id === session.id ? { ...s, starred: newStarred } : s));
+    const updated = sessions.map(s => s.id === session.id ? { ...s, starred: newStarred } : s);
+    setSessions(updated);
+    onSessionsLoaded?.(updated);
   };
 
   const annotationCycle = ['achieved', 'partial', 'failed', 'abandoned', ''];
