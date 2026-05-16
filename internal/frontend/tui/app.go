@@ -987,6 +987,21 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "?":
 		return a.navigateTo(viewHelp, "Help")
+	case "*":
+		if a.currentView == viewAgents {
+			selected := a.agentsView.Selected()
+			if selected != nil && selected.SessionFile != "" {
+				meta := history.LoadMeta(selected.SessionFile)
+				meta.Starred = !meta.Starred
+				_ = history.SaveMeta(selected.SessionFile, meta)
+				if meta.Starred {
+					a.statusHint = "Session pinned ★"
+				} else {
+					a.statusHint = "Session unpinned"
+				}
+			}
+			return a, nil
+		}
 	case "x":
 		if a.currentView == viewAgents {
 			return a.promptKill()
@@ -2493,7 +2508,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  *:pin  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  $:costs  :export  :export-otel  Esc:back")
 	case viewCosts:

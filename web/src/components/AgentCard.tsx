@@ -4,12 +4,14 @@ import { StatusLabel } from '../types';
 interface Props {
   agent: Agent;
   selected: boolean;
+  starred?: boolean;
   onClick: () => void;
   onKill?: (id: string) => void;
+  onToggleStar?: (sessionFile: string) => void;
   searchSnippet?: string;
 }
 
-export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: Props) {
+export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleStar, searchSnippet }: Props) {
   const providerColors: Record<string, { background: string; color: string }> = {
     claude: { background: 'var(--accent-dim)', color: 'var(--accent)' },
     codex: { background: 'rgba(74,222,128,0.15)', color: '#4ade80' },
@@ -114,6 +116,23 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         <span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 'auto' }}>
           {timeSinceActivity()}
         </span>
+        {/* Star button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onToggleStar && agent.SessionFile) onToggleStar(agent.SessionFile);
+          }}
+          style={{
+            background: 'transparent', border: 'none',
+            color: starred ? 'var(--orange)' : 'var(--fg-4)',
+            fontSize: 14, cursor: 'pointer', padding: '0 4px',
+            opacity: starred ? 1 : 0, transition: 'opacity 0.15s',
+          }}
+          className="star-btn"
+          title={starred ? 'Unpin session' : 'Pin session'}
+        >
+          {starred ? '★' : '☆'}
+        </button>
         {/* Kill button */}
         <button
           onClick={(e) => {
@@ -207,6 +226,9 @@ export function AgentCard({ agent, selected, onClick, onKill, searchSnippet }: P
         }
         .agent-card:hover:not([data-selected]) {
           border-color: var(--border-hover) !important;
+        }
+        .agent-card:hover .star-btn {
+          opacity: 1 !important;
         }
         .agent-card:hover .kill-btn {
           opacity: 1 !important;

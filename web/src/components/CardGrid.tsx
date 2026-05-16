@@ -35,6 +35,23 @@ export function CardGrid({
   viewMode = 'cards',
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [starredFiles, setStarredFiles] = useState<Set<string>>(new Set());
+
+  const handleToggleStar = async (sessionFile: string) => {
+    const isStarred = starredFiles.has(sessionFile);
+    try {
+      await fetch('/api/sessions/meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filePath: sessionFile, starred: !isStarred }),
+      });
+      setStarredFiles(prev => {
+        const next = new Set(prev);
+        if (isStarred) { next.delete(sessionFile); } else { next.add(sessionFile); }
+        return next;
+      });
+    } catch { /* ignore */ }
+  };
 
   const handleKill = async (id: string) => {
     try {
@@ -207,8 +224,10 @@ export function CardGrid({
                     <AgentCard
                       agent={agent}
                       selected={selectedId === (agent.SessionID || agent.PID.toString())}
+                      starred={starredFiles.has(agent.SessionFile)}
                       onClick={() => onSelect(agent.SessionID || agent.PID.toString())}
                       onKill={handleKill}
+                      onToggleStar={handleToggleStar}
                       searchSnippet={contentMatchMap.get(agent.SessionID)}
                     />
                   </div>
