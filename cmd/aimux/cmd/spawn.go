@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zanetworker/aimux/internal/deliver"
 )
 
 type spawnFn func(provider, dir, model, mode, prompt string) (pid int, tmuxSession string, err error)
@@ -14,6 +15,7 @@ type spawnFn func(provider, dir, model, mode, prompt string) (pid int, tmuxSessi
 func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 	var dir, model, mode, prompt string
 	var dryRun bool
+	var deliverTarget string
 
 	cmd := &cobra.Command{
 		Use:   "spawn <provider>",
@@ -49,7 +51,14 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 						"dry_run":  true,
 					}
 					b, _ := json.MarshalIndent(result, "", "  ")
-					_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+					if deliverTarget != "" && deliverTarget != "stdout" {
+						if err := deliver.Deliver(b, deliverTarget); err != nil {
+							return err
+						}
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Delivered to %s\n", deliverTarget)
+					} else {
+						_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+					}
 				} else {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Would spawn %s in %s\n", provider, dir)
 					if model != "" {
@@ -76,7 +85,14 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 					"dir":          dir,
 				}
 				b, _ := json.MarshalIndent(result, "", "  ")
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+				if deliverTarget != "" && deliverTarget != "stdout" {
+					if err := deliver.Deliver(b, deliverTarget); err != nil {
+						return err
+					}
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Delivered to %s\n", deliverTarget)
+				} else {
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+				}
 			} else {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Spawned %s (tmux: %s)\n", provider, tmuxSession)
 			}
@@ -89,5 +105,6 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 	cmd.Flags().StringVar(&mode, "mode", "", "Mode (e.g., plan, auto)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Initial prompt")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show spawn command without executing")
+	cmd.Flags().StringVar(&deliverTarget, "deliver", "", "Delivery target: stdout (default), file:<path>, webhook:<url>")
 	return cmd
 }
