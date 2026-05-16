@@ -90,9 +90,10 @@ type App struct {
 	logsView    *views.LogsView
 	costsView    *views.CostsView
 	teamsView    *views.TeamsView
-	sessionsView *views.SessionsView
-	starredView  *views.SessionsView
-	helpView     *views.HelpView
+	sessionsView   *views.SessionsView
+	starredView    *views.SessionsView
+	cachedSessions []history.Session
+	helpView       *views.HelpView
 	healthView   *views.HealthView
 
 	// Layout
@@ -617,6 +618,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			dir = a.sessionsView.CurrentDir()
 		}
 		sessions, _ := history.Discover(history.DiscoverOpts{Dir: dir}, "")
+		a.cachedSessions = sessions
 		a.sessionsView.SetSessions(sessions)
 		a.sessionsView.SetTagVocab(history.CollectTags(""))
 	case views.SessionAnnotateMsg:
@@ -632,6 +634,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		meta := history.LoadMeta(msg.Session.FilePath)
 		meta.Starred = msg.Starred
 		_ = history.SaveMeta(msg.Session.FilePath, meta)
+		a.cachedSessions = nil
 		if msg.Starred {
 			a.statusHint = "Session pinned ★"
 		} else {
@@ -2482,9 +2485,9 @@ func (a App) openSessions() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Discover sessions in background
 	opts := history.DiscoverOpts{Dir: dir}
 	sessions, _ := history.Discover(opts, "")
+	a.cachedSessions = sessions
 	a.sessionsView.SetSessions(sessions)
 	a.sessionsView.SetTagVocab(history.CollectTags(""))
 
@@ -2499,7 +2502,11 @@ func (a App) openStarred() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	allSessions, _ := history.Discover(history.DiscoverOpts{}, "")
+	allSessions := a.cachedSessions
+	if len(allSessions) == 0 {
+		allSessions, _ = history.Discover(history.DiscoverOpts{}, "")
+		a.cachedSessions = allSessions
+	}
 	var starred []history.Session
 	for _, s := range allSessions {
 		if s.Starred {
