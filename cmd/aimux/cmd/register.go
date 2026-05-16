@@ -26,4 +26,5 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec))
 	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent))
 	rootCmd.AddCommand(newWebCmd(d.WebServer))
+	rootCmd.AddCommand(newAgentContextCmd(d.Providers))
 }
