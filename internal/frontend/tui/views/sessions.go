@@ -245,7 +245,7 @@ func (v *SessionsView) HasActiveInput() bool {
 
 // HasActiveFilter returns true if a search filter is currently applied.
 func (v *SessionsView) HasActiveFilter() bool {
-	return v.filterText != ""
+	return v.filterText != "" || v.dirFilterText != "" || v.contentSearchIDs != nil
 }
 
 // Annotation cycle for sessions
