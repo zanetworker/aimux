@@ -188,7 +188,7 @@ export default function App() {
             borderBottom: activeTab !== 'agents' ? '1px solid var(--border)' : 'none',
             flexShrink: 0,
           }}>
-            {(['agents', 'sessions', ...pluginTabs.map(p => `plugin:${p.name}`)]).map(tab => (
+            {(['agents', 'sessions', 'starred', ...pluginTabs.map(p => `plugin:${p.name}`)]).map(tab => (
               <button
                 key={tab}
                 onClick={() => { setActiveTab(tab); setSelectedId(null); setSessionAgent(null); }}
@@ -208,6 +208,7 @@ export default function App() {
               >
                 {tab === 'agents' ? `Agents (${agents.length})`
                   : tab === 'sessions' ? `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}`
+                  : tab === 'starred' ? '★ Starred'
                   : pluginTabs.find(p => `plugin:${p.name}` === tab)?.tab || tab}
               </button>
             ))}
@@ -258,6 +259,13 @@ export default function App() {
             onSelectSession={handleSessionSelect}
             selectedId={selectedId}
             onSessionCount={setSessionCount}
+          />
+        )}
+        {!panelFullscreen && activeTab === 'starred' && (
+          <SessionsTable
+            onSelectSession={handleSessionSelect}
+            selectedId={selectedId}
+            starredOnly
           />
         )}
         {!panelFullscreen && activeTab.startsWith('plugin:') && (() => {

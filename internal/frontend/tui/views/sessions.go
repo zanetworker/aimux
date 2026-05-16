@@ -230,6 +230,10 @@ func (v *SessionsView) ShowAll() bool {
 	return v.showAll
 }
 
+func (v *SessionsView) SetShowAll(all bool) {
+	v.showAll = all
+}
+
 // SelectedSession returns the currently selected session, if any.
 // Returns a pointer into the original sessions slice so mutations persist.
 func (v *SessionsView) SelectedSession() *history.Session {

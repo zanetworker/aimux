@@ -29,6 +29,7 @@ interface Props {
   onSelectSession: (session: HistorySession) => void;
   selectedId: string | null;
   onSessionCount?: (count: number) => void;
+  starredOnly?: boolean;
 }
 
 function shortProject(path: string): string {
@@ -55,7 +56,7 @@ function formatK(n: number): string {
   return (n / 1000).toFixed(1) + 'k';
 }
 
-export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: Props) {
+export function SessionsTable({ onSelectSession, selectedId, onSessionCount, starredOnly }: Props) {
   const [sessions, setSessions] = useState<HistorySession[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState<SortField>('lastActive');
@@ -147,6 +148,9 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount }: P
 
   // Filter
   let visible = sessions;
+  if (starredOnly) {
+    visible = visible.filter(s => s.starred);
+  }
   if (!showSubagents) {
     visible = visible.filter(s => !s.isSubagent);
   }

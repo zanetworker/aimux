@@ -43,6 +43,7 @@ const (
 	viewCosts
 	viewTeams
 	viewSessions
+	viewStarred
 	viewHelp
 	viewTasks
 	viewHealth
@@ -90,6 +91,7 @@ type App struct {
 	costsView    *views.CostsView
 	teamsView    *views.TeamsView
 	sessionsView *views.SessionsView
+	starredView  *views.SessionsView
 	helpView     *views.HelpView
 	healthView   *views.HealthView
 
@@ -244,6 +246,7 @@ func NewApp() App {
 		sessionView:  views.NewSessionView(),
 		costsView:     views.NewCostsView(),
 		sessionsView:  views.NewSessionsView(),
+		starredView:   views.NewSessionsView(),
 		teamsView:    views.NewTeamsView(),
 		helpView:     views.NewHelpView(),
 		healthView:   views.NewHealthView(),
@@ -1018,6 +1021,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			return a.navigateTo(viewTasks, "Tasks")
 		}
+	case "B":
+		if a.currentView == viewAgents {
+			return a.openStarred()
+		}
 	case "S":
 		if a.currentView == viewAgents {
 			return a.openSessions()
@@ -1073,6 +1080,12 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewSessions {
 			if a.sessionsView.HasActiveInput() || a.sessionsView.HasActiveFilter() {
 				cmd := a.sessionsView.Update(msg)
+				return a, cmd
+			}
+		}
+		if a.currentView == viewStarred {
+			if a.starredView.HasActiveInput() || a.starredView.HasActiveFilter() {
+				cmd := a.starredView.Update(msg)
 				return a, cmd
 			}
 		}
@@ -1248,6 +1261,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case viewSessions:
 		cmd := a.sessionsView.Update(msg)
+		return a, cmd
+	case viewStarred:
+		cmd := a.starredView.Update(msg)
 		return a, cmd
 	case viewTasks:
 		if a.tasksView != nil {
@@ -2455,6 +2471,26 @@ func (a App) openSessions() (tea.Model, tea.Cmd) {
 	return a.navigateTo(viewSessions, "Sessions")
 }
 
+func (a App) openStarred() (tea.Model, tea.Cmd) {
+	for _, p := range a.providers {
+		if p.Name() == "claude" {
+			a.starredView.SetTraceParser(p.ParseTrace)
+			break
+		}
+	}
+
+	allSessions, _ := history.Discover(history.DiscoverOpts{}, "")
+	var starred []history.Session
+	for _, s := range allSessions {
+		if s.Starred {
+			starred = append(starred, s)
+		}
+	}
+	a.starredView.SetSessions(starred)
+	a.starredView.SetShowAll(true)
+	return a.navigateTo(viewStarred, "Starred")
+}
+
 func (a App) navigateBack() (tea.Model, tea.Cmd) {
 	a.ctrl.Nav.NavigateBack()
 	a.currentView = viewType(a.ctrl.Nav.CurrentView)
@@ -2508,7 +2544,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  *:pin  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  $:costs  :export  :export-otel  Esc:back")
 	case viewCosts:
@@ -2526,6 +2562,8 @@ func (a App) View() string {
 		}
 		hint += "  Esc:back"
 		a.headerView.SetHint(hint)
+	case viewStarred:
+		a.headerView.SetHint("j/k:nav  Enter:resume  *:unpin  C:copy-id  /:filter  s:sort  p:preview  Esc:back")
 	case viewHealth:
 		a.headerView.SetHint("Esc:back  :health to refresh")
 	case viewHelp:
@@ -2567,6 +2605,9 @@ func (a App) View() string {
 	case viewSessions:
 		a.sessionsView.SetSize(a.width, contentHeight)
 		content = a.sessionsView.View()
+	case viewStarred:
+		a.starredView.SetSize(a.width, contentHeight)
+		content = a.starredView.View()
 	case viewHealth:
 		a.healthView.SetSize(a.width, contentHeight)
 		content = a.healthView.View()
