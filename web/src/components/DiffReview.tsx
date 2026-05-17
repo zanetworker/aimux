@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface DiffLine {
   type: 'add' | 'del' | 'ctx' | 'collapse';
@@ -36,6 +36,9 @@ export function DiffReview({ sessionFile, refreshInterval, compact }: Props) {
   const [fileFilter, setFileFilter] = useState('');
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
+  const [treeWidth, setTreeWidth] = useState(compact ? 240 : 280);
+  const [isTreeResizing, setIsTreeResizing] = useState(false);
+  const treeContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!sessionFile) return;
@@ -65,6 +68,23 @@ export function DiffReview({ sessionFile, refreshInterval, compact }: Props) {
       return () => clearInterval(id);
     }
   }, [sessionFile, refreshInterval]);
+
+  useEffect(() => {
+    if (!isTreeResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!treeContainerRef.current) return;
+      const rect = treeContainerRef.current.getBoundingClientRect();
+      const newWidth = e.clientX - rect.left;
+      if (newWidth >= 120 && newWidth <= 500) setTreeWidth(newWidth);
+    };
+    const handleMouseUp = () => setIsTreeResizing(false);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isTreeResizing]);
 
   if (loading) {
     return (
@@ -119,11 +139,10 @@ export function DiffReview({ sessionFile, refreshInterval, compact }: Props) {
         <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--mono)' }}>-{totalRemoved}</span>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div ref={treeContainerRef} style={{ flex: 1, display: 'flex', overflow: 'hidden', userSelect: isTreeResizing ? 'none' : 'auto' }}>
         {/* File tree */}
         <div style={{
-          width: compact ? 240 : 280, borderRight: '1px solid var(--border)',
-          overflowY: 'auto', flexShrink: 0,
+          width: treeWidth, overflowY: 'auto', flexShrink: 0,
         }}>
           <input
             type="text"
@@ -139,6 +158,18 @@ export function DiffReview({ sessionFile, refreshInterval, compact }: Props) {
           />
           {renderFileTree(filtered, selectedFile, collapsedDirs, setCollapsedDirs, setSelectedFile, statusIcon)}
         </div>
+
+        {/* Drag handle between file tree and diff content */}
+        <div
+          onMouseDown={() => setIsTreeResizing(true)}
+          style={{
+            width: 4, cursor: 'col-resize', flexShrink: 0,
+            background: isTreeResizing ? 'var(--accent)' : 'var(--border)',
+            transition: isTreeResizing ? 'none' : 'background 0.15s',
+          }}
+          onMouseEnter={e => { if (!isTreeResizing) (e.currentTarget as HTMLElement).style.background = 'var(--fg-4)'; }}
+          onMouseLeave={e => { if (!isTreeResizing) (e.currentTarget as HTMLElement).style.background = 'var(--border)'; }}
+        />
 
         {/* Diff content */}
         <div style={{ flex: 1, overflowY: 'auto', fontFamily: 'var(--mono)', fontSize: 12, lineHeight: '1.6' }}>
