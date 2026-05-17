@@ -28,6 +28,9 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
   });
   const [isResizing, setIsResizing] = useState(false);
   const [showSessionDiffs, setShowSessionDiffs] = useState(false);
+  const [diffSplitPercent, setDiffSplitPercent] = useState(50);
+  const [isDiffResizing, setIsDiffResizing] = useState(false);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const turns = useTraceStream(agent.SessionID, agent.SessionFile);
@@ -57,6 +60,23 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing, width]);
+
+  useEffect(() => {
+    if (!isDiffResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      if (pct >= 20 && pct <= 80) setDiffSplitPercent(pct);
+    };
+    const handleMouseUp = () => setIsDiffResizing(false);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDiffResizing]);
 
   useEffect(() => {
     if (!agent.SessionFile) return;
@@ -373,8 +393,8 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               </button>
             </div>
           )}
-          <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
-            <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
+          <div ref={splitContainerRef} style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden', userSelect: isDiffResizing ? 'none' : 'auto' }}>
+            <div style={{ width: showSessionDiffs ? `${diffSplitPercent}%` : '100%', position: 'relative', minHeight: 0, overflow: 'hidden' }}>
               {sessionMounted && (
                 <SessionView
                   tmuxSession={agent.TMuxSession || undefined}
@@ -387,9 +407,21 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               )}
             </div>
             {showSessionDiffs && (
-              <div style={{ width: '50%', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <DiffReview sessionFile={agent.SessionFile} refreshInterval={5000} compact />
-              </div>
+              <>
+                <div
+                  onMouseDown={() => setIsDiffResizing(true)}
+                  style={{
+                    width: 5, cursor: 'col-resize', flexShrink: 0,
+                    background: isDiffResizing ? 'var(--accent)' : 'var(--border)',
+                    transition: isDiffResizing ? 'none' : 'background 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!isDiffResizing) (e.currentTarget as HTMLElement).style.background = 'var(--fg-4)'; }}
+                  onMouseLeave={e => { if (!isDiffResizing) (e.currentTarget as HTMLElement).style.background = 'var(--border)'; }}
+                />
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <DiffReview sessionFile={agent.SessionFile} refreshInterval={5000} compact />
+                </div>
+              </>
             )}
           </div>
         </div>
