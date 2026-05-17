@@ -269,8 +269,8 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     <th
       onClick={() => handleSort(field)}
       style={{
-        padding: '8px 10px', textAlign: (align as any) || 'left', cursor: 'pointer',
-        fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+        padding: '10px 12px', textAlign: (align as any) || 'left', cursor: 'pointer',
+        fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
         color: sortField === field ? 'var(--fg)' : 'var(--fg-3)',
         borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
         width: width || 'auto', userSelect: 'none',
@@ -411,29 +411,29 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-1)', zIndex: 1 }}>
             <tr>
-              <SortHeader label="Age" field="lastActive" width={70} />
-              <SortHeader label="Project" field="project" width={100} />
+              <SortHeader label="Age" field="lastActive" width={80} />
+              <SortHeader label="Project" field="project" width={110} />
               <SortHeader label="Title" field="title" />
-              <SortHeader label="Turns" field="turns" width={60} align="right" />
-              <SortHeader label="Cost" field="cost" width={70} align="right" />
+              <SortHeader label="Turns" field="turns" width={70} align="right" />
+              <SortHeader label="Cost" field="cost" width={90} align="right" />
               <th style={{
-                padding: '8px 10px', textAlign: 'center', fontSize: 10, fontWeight: 700,
+                padding: '10px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
                 borderBottom: '1px solid var(--border)', width: 70,
               }}>
                 Eval
               </th>
               <th style={{
-                padding: '8px 10px', textAlign: 'right', fontSize: 10, fontWeight: 700,
+                padding: '10px 12px', textAlign: 'right', fontSize: 11, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
-                borderBottom: '1px solid var(--border)', width: 70,
+                borderBottom: '1px solid var(--border)', width: 110,
               }}>
                 Tokens
               </th>
               <th style={{
-                padding: '8px 10px', textAlign: 'center', fontSize: 10, fontWeight: 700,
+                padding: '10px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
-                borderBottom: '1px solid var(--border)', width: 50,
+                borderBottom: '1px solid var(--border)', width: 60,
               }} />
             </tr>
           </thead>
@@ -461,21 +461,32 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                   onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-1)'; }}
                   onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
                 >
-                  <td style={{ padding: '8px 10px', color: 'var(--fg-3)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '12px 12px', color: 'var(--fg-3)', fontSize: 13, whiteSpace: 'nowrap' }}>
                     {formatAge(s.lastActive)}
                   </td>
-                  <td style={{ padding: '8px 10px', fontSize: 12 }}>
-                    <span style={{ color: 'var(--purple)', fontFamily: 'var(--mono)' }}>
-                      {shortProject(s.project)}
-                    </span>
+                  <td style={{ padding: '12px 12px', fontSize: 13 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: 'var(--purple)', fontFamily: 'var(--mono)', fontWeight: 600 }}>
+                        {shortProject(s.project)}
+                      </span>
+                      {s.gitBranch && s.gitBranch !== 'main' && s.gitBranch !== 'master' && (
+                        <span style={{
+                          fontFamily: 'var(--mono)', fontSize: 11, padding: '2px 6px',
+                          borderRadius: 3, background: 'rgba(167, 139, 250, 0.12)',
+                          color: '#C4B5FD', border: '1px solid rgba(167, 139, 250, 0.25)',
+                        }}>
+                          {s.gitBranch.length > 16 ? s.gitBranch.slice(0, 14) + '…' : s.gitBranch}
+                        </span>
+                      )}
+                    </div>
                   </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <td style={{ padding: '12px 12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {s.annotation && (
                           <span style={{
-                            fontSize: 8, fontWeight: 700, textTransform: 'uppercase',
-                            padding: '1px 4px', borderRadius: 2,
+                            fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+                            padding: '2px 5px', borderRadius: 3,
                             color: annotationColor(s.annotation),
                             border: `1px solid ${annotationColor(s.annotation)}`,
                           }}>
@@ -484,43 +495,33 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                         )}
                         {s.tags?.map(t => (
                           <span key={t} style={{
-                            fontSize: 8, padding: '1px 4px', borderRadius: 2,
+                            fontSize: 9, padding: '2px 5px', borderRadius: 3,
                             background: 'var(--accent-dim)', color: 'var(--accent)',
                           }}>
                             {t}
                           </span>
                         ))}
                         <span style={{
-                          color: 'var(--fg)', fontSize: 12,
+                          color: 'var(--fg)', fontSize: 13,
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }}>
                           {title}
                         </span>
                         {s.isSubagent && (
-                          <span style={{ fontSize: 9, color: 'var(--fg-4)', fontStyle: 'italic' }}>agent</span>
-                        )}
-                        {s.lastAction && (
-                          <span style={{
-                            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)',
-                            marginLeft: 'auto', flexShrink: 0,
-                          }}>
-                            {s.lastAction.length > 22 ? s.lastAction.slice(0, 20) + '…' : s.lastAction}
-                          </span>
-                        )}
-                        {s.gitBranch && s.gitBranch !== 'main' && s.gitBranch !== 'master' && (
-                          <span style={{
-                            fontFamily: 'var(--mono)', fontSize: 11, padding: '2px 8px',
-                            borderRadius: 3, background: 'rgba(167, 139, 250, 0.15)',
-                            color: '#C4B5FD', flexShrink: 0,
-                            border: '1px solid rgba(167, 139, 250, 0.3)',
-                          }}>
-                            {s.gitBranch.length > 20 ? s.gitBranch.slice(0, 18) + '…' : s.gitBranch}
-                          </span>
+                          <span style={{ fontSize: 10, color: 'var(--fg-4)', fontStyle: 'italic' }}>agent</span>
                         )}
                       </div>
+                      {s.lastAction && (
+                        <span style={{
+                          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-4)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {s.lastAction.length > 40 ? s.lastAction.slice(0, 38) + '…' : s.lastAction}
+                        </span>
+                      )}
                       {snippet && (
                         <span style={{
-                          fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--purple)',
+                          fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--purple)',
                           fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }}>
                           {snippet}
@@ -528,13 +529,13 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                       )}
                     </div>
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--teal)' }}>
-                    {s.turnCount}t
+                  <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--teal)', fontWeight: 600 }}>
+                    {s.turnCount}
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--green)' }}>
+                  <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>
                     ${s.costUSD.toFixed(2)}
                   </td>
-                  <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                  <td style={{ padding: '6px 10px', textAlign: 'center' }}>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCycleAnnotation(s); }}
                       title="Click to cycle: achieved, partial, failed, abandoned, clear"
@@ -542,51 +543,55 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                         background: 'transparent',
                         border: `1px solid ${s.annotation ? annotationColor(s.annotation) : 'var(--border)'}`,
                         color: s.annotation ? annotationColor(s.annotation) : 'var(--fg-4)',
-                        fontSize: 8, fontWeight: 700, textTransform: 'uppercase',
-                        padding: '2px 6px', borderRadius: 3, cursor: 'pointer',
+                        fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+                        padding: '3px 8px', borderRadius: 3, cursor: 'pointer',
                         transition: 'all 0.15s',
                       }}
                     >
                       {s.annotation || '+'}
                     </button>
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--fg-4)' }}>
-                    {formatK(s.tokensIn)}/{formatK(s.tokensOut)}
+                  <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 12 }}>
+                    <span style={{ color: 'var(--fg-3)' }}>{formatK(s.tokensIn)}</span>
+                    <span style={{ color: 'var(--fg-4)', margin: '0 2px' }}>/</span>
+                    <span style={{ color: 'var(--fg-3)' }}>{formatK(s.tokensOut)}</span>
                   </td>
-                  <td style={{ padding: '4px 8px', textAlign: 'center' }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleToggleStar(s); }}
-                      title={s.starred ? 'Unpin session' : 'Pin session'}
-                      style={{
-                        background: 'transparent', border: 'none',
-                        color: s.starred ? 'var(--orange)' : 'var(--fg-4)',
-                        fontSize: 14, cursor: 'pointer', padding: '2px 4px',
-                      }}
-                    >
-                      {s.starred ? '★' : '☆'}
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const cmd = s.project
-                          ? `cd ${s.project} && claude --resume ${s.id}`
-                          : `claude --resume ${s.id}`;
-                        navigator.clipboard.writeText(cmd);
-                        setCopiedId(s.id);
-                        setTimeout(() => setCopiedId(prev => prev === s.id ? null : prev), 1500);
-                      }}
-                      title={s.project ? `Copy: cd ${s.project} && claude --resume ${s.id}` : `Copy: claude --resume ${s.id}`}
-                      style={{
-                        background: 'transparent',
-                        border: `1px solid ${copiedId === s.id ? 'var(--green)' : 'var(--border)'}`,
-                        color: copiedId === s.id ? 'var(--green)' : 'var(--fg-3)',
-                        fontSize: 10, fontWeight: 600, cursor: 'pointer',
-                        padding: '2px 6px', borderRadius: 3,
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      {copiedId === s.id ? 'Copied' : 'Copy'}
-                    </button>
+                  <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggleStar(s); }}
+                        title={s.starred ? 'Unpin session' : 'Pin session'}
+                        style={{
+                          background: 'transparent', border: 'none',
+                          color: s.starred ? 'var(--orange)' : 'var(--fg-4)',
+                          fontSize: 16, cursor: 'pointer', padding: '2px 4px',
+                        }}
+                      >
+                        {s.starred ? '★' : '☆'}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const cmd = s.project
+                            ? `cd ${s.project} && claude --resume ${s.id}`
+                            : `claude --resume ${s.id}`;
+                          navigator.clipboard.writeText(cmd);
+                          setCopiedId(s.id);
+                          setTimeout(() => setCopiedId(prev => prev === s.id ? null : prev), 1500);
+                        }}
+                        title={s.project ? `Copy: cd ${s.project} && claude --resume ${s.id}` : `Copy: claude --resume ${s.id}`}
+                        style={{
+                          background: 'transparent',
+                          border: `1px solid ${copiedId === s.id ? 'var(--green)' : 'var(--border)'}`,
+                          color: copiedId === s.id ? 'var(--green)' : 'var(--fg-3)',
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                          padding: '3px 8px', borderRadius: 3,
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {copiedId === s.id ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
