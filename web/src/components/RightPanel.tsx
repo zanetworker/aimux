@@ -361,14 +361,15 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               <button
                 onClick={() => setShowSessionDiffs(prev => !prev)}
                 style={{
-                  marginLeft: 'auto', padding: '2px 8px', borderRadius: 3,
-                  border: `1px solid ${showSessionDiffs ? 'var(--green)' : 'var(--border)'}`,
-                  background: showSessionDiffs ? 'rgba(105,223,115,0.1)' : 'transparent',
-                  color: showSessionDiffs ? 'var(--green)' : 'var(--fg-3)',
-                  fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                  marginLeft: 'auto', padding: '5px 14px', borderRadius: 4,
+                  border: `1px solid ${showSessionDiffs ? 'var(--green)' : 'var(--accent)'}`,
+                  background: showSessionDiffs ? 'var(--green)' : 'var(--accent)',
+                  color: '#000',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  letterSpacing: '0.03em',
                 }}
               >
-                {showSessionDiffs ? '✓ Diffs' : 'Show Diffs'}
+                {showSessionDiffs ? '✓ Diffs' : '◈ Review Diffs'}
               </button>
             </div>
           )}
