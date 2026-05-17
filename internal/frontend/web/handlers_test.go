@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 func TestLaunchHandler(t *testing.T) {
@@ -315,5 +318,62 @@ func TestHandleBrowseDirectory(t *testing.T) {
 	}
 	if !foundFile {
 		t.Error("file.txt should be in the results")
+	}
+}
+
+func TestSessionDiffsHandler_MissingFile(t *testing.T) {
+	s := NewServer(0)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/sessions/diffs")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestSessionDiffsHandler_WithSessionFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "test-diff.jsonl")
+
+	content := `{"type":"summary","session_id":"test-123"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu1","name":"Edit","input":{"file_path":"main.go","old_string":"old","new_string":"new"}}]}}
+{"type":"result","tool_use_id":"tu1","content":"OK"}
+`
+	_ = os.WriteFile(sessionFile, []byte(content), 0o600)
+
+	s := NewServer(0)
+	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
+		return &provider.Claude{}
+	})
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/sessions/diffs?file=" + sessionFile)
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Files      []map[string]any `json:"files"`
+		TotalFiles int              `json:"totalFiles"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if payload.TotalFiles < 0 {
+		t.Errorf("totalFiles should be >= 0, got %d", payload.TotalFiles)
 	}
 }
