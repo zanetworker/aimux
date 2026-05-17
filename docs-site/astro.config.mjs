@@ -3,8 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-	site: 'https://zanetworker.github.io',
-	base: '/aimux',
+	site: 'https://aimux.ai',
 	integrations: [
 		starlight({
 			title: 'aimux',
