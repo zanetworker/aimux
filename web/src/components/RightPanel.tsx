@@ -268,7 +268,6 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
               key={tab}
               onClick={() => { setActiveTab(tab); if (tab === 'session') setSessionMounted(true); }}
               style={{
-                flex: 1,
                 background: activeTab === tab ? '#000000' : 'transparent',
                 border: 'none',
                 color: activeTab === tab ? '#e6e6e6' : '#555',
