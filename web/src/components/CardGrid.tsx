@@ -281,6 +281,25 @@ export function CardGrid({
                       <span style={{ fontSize: 13, color: 'var(--fg)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {agent.Title || agent.Name}
                       </span>
+                      {agent.LastAction && (
+                        <span style={{
+                          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)',
+                          flexShrink: 0, maxWidth: 160, overflow: 'hidden',
+                          textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {agent.LastAction}
+                        </span>
+                      )}
+                      {agent.GitBranch && agent.GitBranch !== 'main' && agent.GitBranch !== 'master' && (
+                        <span style={{
+                          fontFamily: 'var(--mono)', fontSize: 11, padding: '2px 8px',
+                          borderRadius: 3, background: 'rgba(167, 139, 250, 0.15)',
+                          color: '#C4B5FD', flexShrink: 0,
+                          border: '1px solid rgba(167, 139, 250, 0.3)',
+                        }}>
+                          {agent.GitBranch.length > 18 ? agent.GitBranch.slice(0, 16) + '…' : agent.GitBranch}
+                        </span>
+                      )}
                       <span style={{ fontSize: 11, color: 'var(--fg-4)', width: 60, textAlign: 'right', flexShrink: 0 }}>
                         {age}
                       </span>

@@ -20,6 +20,10 @@ export interface HistorySession {
   isSubagent: boolean;
   permissionMode: string;
   starred: boolean;
+  gitBranch?: string;
+  lastPrompt?: string;
+  lastAction?: string;
+  model?: string;
 }
 
 type SortField = 'lastActive' | 'cost' | 'turns' | 'title' | 'project';
@@ -211,6 +215,8 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     visible = visible.filter(s =>
       (s.title || '').toLowerCase().includes(q) ||
       (s.firstPrompt || '').toLowerCase().includes(q) ||
+      (s.lastPrompt || '').toLowerCase().includes(q) ||
+      (s.gitBranch || '').toLowerCase().includes(q) ||
       (s.project || '').toLowerCase().includes(q) ||
       (s.annotation || '').toLowerCase().includes(q) ||
       (s.tags || []).some(t => t.toLowerCase().includes(q))
@@ -240,7 +246,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
       }
       case 'cost': cmp = a.costUSD - b.costUSD; break;
       case 'turns': cmp = a.turnCount - b.turnCount; break;
-      case 'title': cmp = (a.title || a.firstPrompt || '').localeCompare(b.title || b.firstPrompt || ''); break;
+      case 'title': cmp = (a.title || a.lastPrompt || a.firstPrompt || '').localeCompare(b.title || b.lastPrompt || b.firstPrompt || ''); break;
       case 'project': cmp = shortProject(a.project).localeCompare(shortProject(b.project)); break;
     }
     return sortDir === 'asc' ? cmp : -cmp;
@@ -442,7 +448,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
             {sorted.map(s => {
               const isSelected = selectedId === s.id;
               const snippet = deepMatches?.get(s.id);
-              const title = s.title || s.firstPrompt || '(no prompt)';
+              const title = s.title || s.lastPrompt || s.firstPrompt || '(no prompt)';
               return (
                 <tr
                   key={s.id}
@@ -485,13 +491,31 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                           </span>
                         ))}
                         <span style={{
-                          color: 'var(--fg)', fontSize: 11,
+                          color: 'var(--fg)', fontSize: 12,
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }}>
                           {title}
                         </span>
                         {s.isSubagent && (
-                          <span style={{ fontSize: 8, color: 'var(--fg-4)', fontStyle: 'italic' }}>agent</span>
+                          <span style={{ fontSize: 9, color: 'var(--fg-4)', fontStyle: 'italic' }}>agent</span>
+                        )}
+                        {s.lastAction && (
+                          <span style={{
+                            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)',
+                            marginLeft: 'auto', flexShrink: 0,
+                          }}>
+                            {s.lastAction.length > 22 ? s.lastAction.slice(0, 20) + '…' : s.lastAction}
+                          </span>
+                        )}
+                        {s.gitBranch && s.gitBranch !== 'main' && s.gitBranch !== 'master' && (
+                          <span style={{
+                            fontFamily: 'var(--mono)', fontSize: 11, padding: '2px 8px',
+                            borderRadius: 3, background: 'rgba(167, 139, 250, 0.15)',
+                            color: '#C4B5FD', flexShrink: 0,
+                            border: '1px solid rgba(167, 139, 250, 0.3)',
+                          }}>
+                            {s.gitBranch.length > 20 ? s.gitBranch.slice(0, 18) + '…' : s.gitBranch}
+                          </span>
                         )}
                       </div>
                       {snippet && (

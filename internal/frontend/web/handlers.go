@@ -263,6 +263,10 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			"isSubagent":     s.IsSubagent,
 			"permissionMode": s.PermissionMode,
 			"starred":        s.Starred,
+			"gitBranch":  s.GitBranch,
+			"lastPrompt": s.LastPrompt,
+			"lastAction": s.LastAction,
+			"model":      s.Model,
 		}
 	}
 

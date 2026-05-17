@@ -51,7 +51,7 @@ func testSessions() []history.Session {
 func TestSessionsView_InitialState(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	if v.SelectedSession() == nil {
 		t.Fatal("expected selected session")
@@ -64,7 +64,7 @@ func TestSessionsView_InitialState(t *testing.T) {
 func TestSessionsView_Navigation(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	// Move down
 	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
@@ -100,7 +100,7 @@ func TestSessionsView_Navigation(t *testing.T) {
 func TestSessionsView_AnnotationCycle(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	// First press: achieved
 	cmd := v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
@@ -128,7 +128,7 @@ func TestSessionsView_AnnotationCycle(t *testing.T) {
 func TestSessionsView_ResumeEmitsMessage(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	cmd := v.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -147,7 +147,7 @@ func TestSessionsView_ResumeEmitsMessage(t *testing.T) {
 func TestSessionsView_FilterByPrompt(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	// Apply filter
 	v.filterText = "OTEL"
@@ -163,7 +163,7 @@ func TestSessionsView_FilterByPrompt(t *testing.T) {
 func TestSessionsView_FilterByTag(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	v.filterText = "loop"
 	visible := v.visibleSessions()
@@ -178,7 +178,7 @@ func TestSessionsView_FilterByTag(t *testing.T) {
 func TestSessionsView_FilterByAnnotation(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	v.filterText = "achieved"
 	visible := v.visibleSessions()
@@ -193,7 +193,7 @@ func TestSessionsView_FilterByAnnotation(t *testing.T) {
 func TestSessionsView_ToggleAllProjects(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	if v.ShowAll() {
 		t.Error("expected showAll = false initially")
@@ -213,7 +213,7 @@ func TestSessionsView_ToggleAllProjects(t *testing.T) {
 func TestSessionsView_ViewRenders(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 	v.SetCurrentDir("/Users/test/aimux")
 
 	output := v.View()
@@ -231,7 +231,7 @@ func TestSessionsView_ViewRenders(t *testing.T) {
 func TestSessionsView_ColumnHeaders(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	output := v.View()
 	if !strings.Contains(output, "AGE") {
@@ -251,7 +251,7 @@ func TestSessionsView_ColumnHeaders(t *testing.T) {
 func TestSessionsView_ColumnHeadersAllProjects(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 	v.showAll = true
 
 	output := v.View()
@@ -263,7 +263,7 @@ func TestSessionsView_ColumnHeadersAllProjects(t *testing.T) {
 func TestSessionsView_SortCycle(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	// Default: SortByAge descending (newest first)
 	if v.sortField != SortByAge {
@@ -316,7 +316,7 @@ func TestSessionsView_SortCycle(t *testing.T) {
 func TestSessionsView_SortIndicator(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	output := v.View()
 	// Default sort is by AGE, should show arrow
@@ -334,11 +334,17 @@ func TestSessionsView_SortIndicator(t *testing.T) {
 
 func TestSessionsView_ColumnWidths(t *testing.T) {
 	v := NewSessionsView()
-	v.SetSize(100, 40)
+	v.SetSize(200, 40)
 
-	cols := v.columnWidths(100)
+	cols := v.columnWidths(200)
 	if cols.age != 9 {
 		t.Errorf("age width = %d, want 9", cols.age)
+	}
+	if cols.branch != 16 {
+		t.Errorf("branch width = %d, want 16", cols.branch)
+	}
+	if cols.action != 20 {
+		t.Errorf("action width = %d, want 20", cols.action)
 	}
 	if cols.turns != 6 {
 		t.Errorf("turns width = %d, want 6", cols.turns)
@@ -355,7 +361,7 @@ func TestSessionsView_ColumnWidths(t *testing.T) {
 
 	// With showAll
 	v.showAll = true
-	cols = v.columnWidths(100)
+	cols = v.columnWidths(200)
 	if cols.project != 14 {
 		t.Errorf("project width = %d, want 14 when showing all", cols.project)
 	}
@@ -364,7 +370,7 @@ func TestSessionsView_ColumnWidths(t *testing.T) {
 func TestSessionsView_AnnotationBadgeRendered(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	output := v.View()
 	if !strings.Contains(output, "ACHIEVED") {
@@ -378,7 +384,7 @@ func TestSessionsView_AnnotationBadgeRendered(t *testing.T) {
 func TestSessionsView_TagsRendered(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 
 	output := v.View()
 	if !strings.Contains(output, "loop-on-error") {
@@ -389,7 +395,7 @@ func TestSessionsView_TagsRendered(t *testing.T) {
 func TestSessionsView_EmptySessions(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(nil)
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	output := v.View()
 	if !strings.Contains(output, "No sessions found") {
@@ -502,7 +508,7 @@ func TestSessionMatchesFilter(t *testing.T) {
 func TestSessionsView_FailureModeIndicator(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 
 	output := v.View()
 	for _, line := range strings.Split(output, "\n") {
@@ -522,7 +528,7 @@ func TestSessionsView_FailureModeIndicator(t *testing.T) {
 func TestSessionsView_SortByFailureMode(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessions())
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	// Cycle to SortByFailureMode: Age -> Cost -> Turns -> Title -> FailureMode
 	for i := 0; i < 4; i++ {
@@ -550,7 +556,7 @@ func TestSessionsView_CleanupMode(t *testing.T) {
 		{ID: "d", Project: "/proj", FirstPrompt: "another task", TurnCount: 8, CostUSD: 0.5, LastActive: now},
 	}
 	v.SetSessions(sessions)
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	// Enter cleanup mode — "b" is a duplicate of "a" (fewer turns),
 	// "c" is hidden by visibleSessions, so only "b" should appear
@@ -591,7 +597,7 @@ func TestSessionsView_CleanupModeConfirm(t *testing.T) {
 		{ID: "b", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 2, CostUSD: 0.1, LastActive: now},
 	}
 	v.SetSessions(sessions)
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
 	if !v.cleanupMode {
@@ -621,7 +627,7 @@ func TestSessionsView_CleanupModeNoItems(t *testing.T) {
 		{ID: "a", Project: "/proj", FirstPrompt: "unique task", TurnCount: 20, CostUSD: 1.0, LastActive: time.Now()},
 	}
 	v.SetSessions(sessions)
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
 	if v.cleanupMode {
@@ -637,7 +643,7 @@ func TestSessionsView_CleanupRender(t *testing.T) {
 		{ID: "b", Project: "/proj", FirstPrompt: "fix bug", TurnCount: 2, CostUSD: 0.1, LastActive: now},
 	}
 	v.SetSessions(sessions)
-	v.SetSize(100, 40)
+	v.SetSize(160, 40)
 
 	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
 	output := v.View()
@@ -721,7 +727,7 @@ func testSessionsWithSubagent() []history.Session {
 func TestSessionsView_SubagentHiddenByDefault(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessionsWithSubagent())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 
 	visible := v.visibleSessions()
 	for _, s := range visible {
@@ -737,7 +743,7 @@ func TestSessionsView_SubagentHiddenByDefault(t *testing.T) {
 func TestSessionsView_SubagentToggle(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessionsWithSubagent())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 
 	visible := v.visibleSessions()
 	if len(visible) != 2 {
@@ -760,7 +766,7 @@ func TestSessionsView_SubagentToggle(t *testing.T) {
 func TestSessionsView_SubagentBadge(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessionsWithSubagent())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 
 	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
 
@@ -773,7 +779,7 @@ func TestSessionsView_SubagentBadge(t *testing.T) {
 func TestSessionsView_SubagentCount(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessionsWithSubagent())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 
 	output := v.View()
 	if !strings.Contains(output, "+2 agent") {
@@ -784,7 +790,7 @@ func TestSessionsView_SubagentCount(t *testing.T) {
 func TestSessionsView_SubagentVisibleDuringSearch(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(testSessionsWithSubagent())
-	v.SetSize(120, 40)
+	v.SetSize(180, 40)
 
 	v.filterMode = true
 	v.filterText = "session analyzer"
@@ -798,5 +804,55 @@ func TestSessionsView_SubagentVisibleDuringSearch(t *testing.T) {
 	}
 	if !found {
 		t.Error("subagent session should be visible when filter matches it")
+	}
+}
+
+func TestSessionsView_BranchBadge(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSize(140, 30)
+	sessions := testSessions()
+	sessions[0].GitBranch = "feat/resize-handle"
+	sessions[1].GitBranch = "main"
+	v.SetSessions(sessions)
+
+	output := v.View()
+	if !strings.Contains(output, "feat/resize") {
+		t.Error("expected branch badge containing 'feat/resize' in output")
+	}
+}
+
+func TestSessionsView_LastAction(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSize(160, 30)
+	sessions := testSessions()
+	sessions[0].LastAction = "Ed config.go"
+	v.SetSessions(sessions)
+
+	output := v.View()
+	if !strings.Contains(output, "Ed config.go") {
+		t.Error("expected last action 'Ed config.go' in output")
+	}
+}
+
+func TestSessionsView_TitlePrefersLastPrompt(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSize(140, 30)
+	sessions := []history.Session{
+		{
+			ID:          "test-1",
+			Provider:    "claude",
+			FirstPrompt: "initial question",
+			LastPrompt:  "final refined question",
+			LastActive:  time.Now().Add(-1 * time.Hour),
+			TurnCount:   10,
+			CostUSD:     0.50,
+			Resumable:   true,
+		},
+	}
+	v.SetSessions(sessions)
+
+	output := v.View()
+	if !strings.Contains(output, "final refined") {
+		t.Errorf("expected last prompt in output, got:\n%s", output)
 	}
 }

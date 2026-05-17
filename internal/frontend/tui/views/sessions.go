@@ -44,6 +44,12 @@ var (
 			Foreground(lipgloss.Color("#6B7280"))
 	sessProjectStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#A78BFA"))
+	sessBranchStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#A78BFA"))
+	sessBranchDimStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6B7280"))
+	sessActionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6B7280"))
 
 	sessAnnotAchievedStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#111827")).
@@ -710,6 +716,9 @@ func sessionTitle(s history.Session) string {
 	if s.Title != "" {
 		return strings.ToLower(s.Title)
 	}
+	if s.LastPrompt != "" {
+		return strings.ToLower(s.LastPrompt)
+	}
 	return strings.ToLower(s.FirstPrompt)
 }
 
@@ -819,10 +828,16 @@ func sessionMatchesFilter(s history.Session, needle string) bool {
 	if strings.Contains(strings.ToLower(s.FirstPrompt), needle) {
 		return true
 	}
+	if strings.Contains(strings.ToLower(s.LastPrompt), needle) {
+		return true
+	}
 	if strings.Contains(strings.ToLower(s.Project), needle) {
 		return true
 	}
 	if strings.Contains(strings.ToLower(s.Annotation), needle) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(s.GitBranch), needle) {
 		return true
 	}
 	for _, tag := range s.Tags {
@@ -952,12 +967,16 @@ func (v *SessionsView) View() string {
 	var headerParts []string
 	headerParts = append(headerParts, " ")
 	headerParts = append(headerParts, colHeader("AGE", SortByAge, cols.age+2, true))
+	headerParts = append(headerParts, "   ")
+	headerParts = append(headerParts, fmt.Sprintf("%-*s", cols.branch, "BRANCH"))
 	if v.showAll {
 		headerParts = append(headerParts, "   ")
 		headerParts = append(headerParts, fmt.Sprintf("%-*s", cols.project, "PROJECT"))
 	}
 	headerParts = append(headerParts, "   ")
 	headerParts = append(headerParts, colHeader("TITLE", SortByTitle, cols.prompt, true))
+	headerParts = append(headerParts, "   ")
+	headerParts = append(headerParts, fmt.Sprintf("%-*s", cols.action, "LAST ACTION"))
 	headerParts = append(headerParts, "   ")
 	headerParts = append(headerParts, colHeader("TURNS", SortByTurns, cols.turns+2, false))
 	headerParts = append(headerParts, "   ")
@@ -1118,8 +1137,10 @@ func (v *SessionsView) tagSuggestions() []string {
 // colLayout holds the computed column widths for consistent alignment.
 type colLayout struct {
 	age     int
+	branch  int
 	project int
 	prompt  int
+	action  int
 	turns   int
 	cost    int
 }
@@ -1127,17 +1148,24 @@ type colLayout struct {
 // columnWidths computes fixed column widths based on available width.
 func (v *SessionsView) columnWidths(w int) colLayout {
 	c := colLayout{
-		age:   9,
-		turns: 6,
-		cost:  8,
+		age:    9,
+		branch: 16,
+		action: 20,
+		turns:  6,
+		cost:   8,
 	}
 	if v.showAll {
 		c.project = 14
 	}
-	// marker(3) + spacing between columns(3*4=12 for non-project, 3*5=15 for project)
-	fixed := 3 + c.age + c.turns + c.cost + 12
+	// marker(3) + spacing between columns (3 per gap)
+	// gaps: age|branch|prompt|action|turns|cost = 6 gaps = 18
+	gaps := 6 * 3
 	if v.showAll {
-		fixed += c.project + 3
+		gaps += 3
+	}
+	fixed := 3 + c.age + c.branch + c.action + c.turns + c.cost + gaps
+	if v.showAll {
+		fixed += c.project
 	}
 	c.prompt = w - fixed
 	if c.prompt < 15 {
@@ -1163,8 +1191,11 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 
 	age := formatAge(s.LastActive)
 
-	// Use LLM-generated title if available, fall back to first prompt
+	// Use LLM-generated title if available, fall back to last prompt, then first prompt
 	prompt := s.Title
+	if prompt == "" {
+		prompt = s.LastPrompt
+	}
 	if prompt == "" {
 		prompt = s.FirstPrompt
 	}
@@ -1204,6 +1235,19 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	}
 	b.WriteString("   ")
 
+	// Branch column
+	branch := s.GitBranch
+	branchStr := fmt.Sprintf("%-*s", cols.branch, truncate(branch, cols.branch))
+	switch branch {
+	case "":
+		b.WriteString(sessDimStyle.Render(branchStr))
+	case "main", "master":
+		b.WriteString(sessBranchDimStyle.Render(branchStr))
+	default:
+		b.WriteString(sessBranchStyle.Render(branchStr))
+	}
+	b.WriteString("   ")
+
 	// Project column (all-projects mode only, fixed width)
 	if v.showAll {
 		proj := shortProject(s.Project)
@@ -1220,8 +1264,12 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 			tagPart := prompt[:tagEnd+1]
 			restPart := prompt[tagEnd+2:]
 			prefixLen := len(tagPart) + 1 // +1 for space after bracket
-			truncRest := truncate(restPart, cols.prompt-prefixLen)
-			padded := fmt.Sprintf("%-*s", cols.prompt-prefixLen, truncRest)
+			restWidth := cols.prompt - prefixLen
+			if restWidth < 0 {
+				restWidth = 0
+			}
+			truncRest := truncate(restPart, restWidth)
+			padded := fmt.Sprintf("%-*s", restWidth, truncRest)
 			// Color the prefix based on content
 			prefixStyle := sessAnnotStyle(s.Annotation, len(s.Tags) > 0)
 			b.WriteString(prefixStyle.Render(tagPart) + " " + sessPromptStyle.Render(padded))
@@ -1235,6 +1283,15 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 		} else {
 			b.WriteString(sessPromptStyle.Render(truncPrompt))
 		}
+	}
+	b.WriteString("   ")
+
+	// Last action column
+	actionStr := fmt.Sprintf("%-*s", cols.action, truncate(s.LastAction, cols.action))
+	if s.LastAction == "" || isEmpty {
+		b.WriteString(sessDimStyle.Render(actionStr))
+	} else {
+		b.WriteString(sessActionStyle.Render(actionStr))
 	}
 	b.WriteString("   ")
 

@@ -12,14 +12,15 @@ import (
 
 // Column widths for the agents table.
 const (
-	colName  = 22
-	colAgent = 8
-	colModel = 12
-	colLoc   = 8  // location: "local" or "k8s"
-	colDir   = 12
-	colLast  = 14
-	colAge   = 6
-	colCostA = 8
+	colName   = 22
+	colAgent  = 8
+	colModel  = 12
+	colLoc    = 8  // location: "local" or "k8s"
+	colDir    = 10
+	colBranch = 14
+	colLast   = 14
+	colAge    = 6
+	colCostA  = 8
 )
 
 var (
@@ -327,6 +328,7 @@ func (v *AgentsView) View() string {
 		padRight(modelHeader, colModel) + " " +
 		padRight("LOC", colLoc) + " " +
 		padRight("DIR", colDir) + " " +
+		padRight("BRANCH", colBranch) + " " +
 		padRight("LAST", colLast) + " " +
 		padRight(ageHeader, colAge) + " " +
 		padRight(costHeader, colCostA)
@@ -406,11 +408,21 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 
 	loc := agentLocation(a)
 
+	branchDisplay := truncate(a.GitBranch, colBranch)
+	if branchDisplay == "" {
+		branchDisplay = padRight("", colBranch)
+	} else if a.GitBranch == "main" || a.GitBranch == "master" {
+		branchDisplay = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(padRight(branchDisplay, colBranch))
+	} else {
+		branchDisplay = lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Render(padRight(branchDisplay, colBranch))
+	}
+
 	row := " " + padRight(nameCol, colName) + " " +
 		padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
 		padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
 		padRight(truncate(loc, colLoc), colLoc) + " " +
 		padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
+		branchDisplay + " " +
 		padRight(truncate(a.LastAction, colLast), colLast) + " " +
 		padRight(a.FormatAge(), colAge) + " " +
 		padRight(costRendered, colCostA)

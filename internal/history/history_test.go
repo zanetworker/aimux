@@ -886,3 +886,185 @@ func TestScanSession_EmptyFile(t *testing.T) {
 		t.Errorf("TurnCount = %d, want 0 for empty file", s.TurnCount)
 	}
 }
+
+func TestParseSessionLine_ExtractsGitBranch(t *testing.T) {
+	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	lines := []map[string]interface{}{
+		{
+			"type":      "human",
+			"timestamp": ts.Format(time.RFC3339),
+			"gitBranch": "feat/resize-handle",
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "fix the bug"},
+				},
+			},
+		},
+		{
+			"type":      "assistant",
+			"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+			"gitBranch": "feat/resize-handle",
+			"message": map[string]interface{}{
+				"role":  "assistant",
+				"model": "claude-sonnet-4-6",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "I'll fix that."},
+				},
+				"usage": map[string]interface{}{
+					"input_tokens":  1000,
+					"output_tokens": 200,
+				},
+			},
+		},
+	}
+	dir := t.TempDir()
+	projDir := filepath.Join(dir, "-Users-test-proj")
+	_ = os.MkdirAll(projDir, 0o750)
+	writeSessionJSONL(t, projDir, "branch-test", lines)
+
+	sessions, err := Discover(DiscoverOpts{}, dir)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].GitBranch != "feat/resize-handle" {
+		t.Errorf("GitBranch = %q, want %q", sessions[0].GitBranch, "feat/resize-handle")
+	}
+	if sessions[0].Model != "claude-sonnet-4-6" {
+		t.Errorf("Model = %q, want %q", sessions[0].Model, "claude-sonnet-4-6")
+	}
+}
+
+func TestParseSessionLine_ExtractsLastPrompt(t *testing.T) {
+	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	lines := []map[string]interface{}{
+		{
+			"type":      "human",
+			"timestamp": ts.Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "fix the markdown rendering"},
+				},
+			},
+		},
+		{
+			"type":      "assistant",
+			"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "assistant",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "Done."},
+				},
+				"usage": map[string]interface{}{
+					"input_tokens":  1000,
+					"output_tokens": 200,
+				},
+			},
+		},
+		{
+			"type":      "human",
+			"timestamp": ts.Add(60 * time.Second).Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "now add table support"},
+				},
+			},
+		},
+		{
+			"type":      "assistant",
+			"timestamp": ts.Add(90 * time.Second).Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "assistant",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "Sure."},
+				},
+				"usage": map[string]interface{}{
+					"input_tokens":  1200,
+					"output_tokens": 400,
+				},
+			},
+		},
+	}
+	dir := t.TempDir()
+	projDir := filepath.Join(dir, "-Users-test-proj")
+	_ = os.MkdirAll(projDir, 0o750)
+	writeSessionJSONL(t, projDir, "lastprompt-test", lines)
+
+	sessions, err := Discover(DiscoverOpts{}, dir)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].FirstPrompt != "fix the markdown rendering" {
+		t.Errorf("FirstPrompt = %q, want %q", sessions[0].FirstPrompt, "fix the markdown rendering")
+	}
+	if sessions[0].LastPrompt != "now add table support" {
+		t.Errorf("LastPrompt = %q, want %q", sessions[0].LastPrompt, "now add table support")
+	}
+}
+
+func TestParseSessionLine_ExtractsLastAction(t *testing.T) {
+	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	lines := []map[string]interface{}{
+		{
+			"type":      "human",
+			"timestamp": ts.Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "fix the bug"},
+				},
+			},
+		},
+		{
+			"type":      "assistant",
+			"timestamp": ts.Add(30 * time.Second).Format(time.RFC3339),
+			"message": map[string]interface{}{
+				"role": "assistant",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": "I'll edit the file."},
+					{
+						"type": "tool_use",
+						"name": "Read",
+						"input": map[string]interface{}{
+							"file_path": "/Users/test/main.go",
+						},
+					},
+					{
+						"type": "tool_use",
+						"name": "Edit",
+						"input": map[string]interface{}{
+							"file_path": "/Users/test/config.go",
+						},
+					},
+				},
+				"usage": map[string]interface{}{
+					"input_tokens":  1500,
+					"output_tokens": 300,
+				},
+			},
+		},
+	}
+	dir := t.TempDir()
+	projDir := filepath.Join(dir, "-Users-test-proj")
+	_ = os.MkdirAll(projDir, 0o750)
+	writeSessionJSONL(t, projDir, "action-test", lines)
+
+	sessions, err := Discover(DiscoverOpts{}, dir)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].LastAction != "Ed config.go" {
+		t.Errorf("LastAction = %q, want %q", sessions[0].LastAction, "Ed config.go")
+	}
+}

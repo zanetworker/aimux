@@ -40,6 +40,10 @@ type Session struct {
 	IsSubagent     bool   `json:"is_subagent"`
 	PermissionMode string `json:"permission_mode"`
 	Starred        bool   `json:"starred"`
+	GitBranch      string `json:"git_branch"`
+	LastPrompt     string `json:"last_prompt"`
+	LastAction     string `json:"last_action"`
+	Model          string `json:"model"`
 }
 
 // Meta holds session-level annotation data stored in sidecar .meta.json files.
@@ -215,6 +219,8 @@ func scanSession(id, filePath, project string) (Session, error) {
 		s.CostUSD = cost.Calculate(model, s.TokensIn, s.TokensOut, s.CacheReadTokens, s.CacheWriteTokens)
 	}
 
+	s.Model = model
+
 	// Approximate turn count from message count (rough: ~2 messages per turn)
 	s.TurnCount = lineCount / 4
 	if s.TurnCount < 1 && lineCount > 0 {
@@ -309,6 +315,10 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (stri
 		s.PermissionMode = entry.PermissionMode
 	}
 
+	if entry.GitBranch != "" {
+		s.GitBranch = entry.GitBranch
+	}
+
 	if entry.Message == nil {
 		return "", false
 	}
@@ -334,6 +344,20 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (stri
 	if extractPrompt && (s.FirstPrompt == "" || s.FirstPrompt == "(no prompt)") && entry.Message.Role == "user" {
 		if text := extractUserText(entry.Message.Content); text != "" && text != "(no prompt)" {
 			s.FirstPrompt = text
+		}
+	}
+
+	// Track last user prompt (always overwrite — last one wins)
+	if entry.Message.Role == "user" {
+		if text := extractUserText(entry.Message.Content); text != "" && text != "(no prompt)" {
+			s.LastPrompt = text
+		}
+	}
+
+	// Track last tool action from assistant messages
+	if entry.Message.Role == "assistant" {
+		if action := extractLastToolAction(entry.Message.Content); action != "" {
+			s.LastAction = action
 		}
 	}
 
@@ -502,6 +526,93 @@ func isNoiseLine(line string) bool {
 		}
 	}
 	return false
+}
+
+func extractLastToolAction(content json.RawMessage) string {
+	if content == nil {
+		return ""
+	}
+	var blocks []struct {
+		Type  string                 `json:"type"`
+		Name  string                 `json:"name"`
+		Input map[string]interface{} `json:"input"`
+	}
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return ""
+	}
+	var lastTool string
+	var lastInput map[string]interface{}
+	for _, b := range blocks {
+		if b.Type == "tool_use" && b.Name != "" {
+			lastTool = b.Name
+			lastInput = b.Input
+		}
+	}
+	if lastTool == "" {
+		return ""
+	}
+	short := shortToolLabel(lastTool)
+	snippet := toolSnippetForAction(lastTool, lastInput)
+	if snippet != "" {
+		return short + " " + snippet
+	}
+	return short
+}
+
+func shortToolLabel(name string) string {
+	switch name {
+	case "Read":
+		return "Rd"
+	case "Write":
+		return "Wr"
+	case "Edit":
+		return "Ed"
+	case "Bash":
+		return "Sh"
+	case "Grep":
+		return "Gr"
+	case "Glob":
+		return "Gl"
+	case "Task":
+		return "Tk"
+	default:
+		if len(name) > 3 {
+			return name[:3]
+		}
+		return name
+	}
+}
+
+func toolSnippetForAction(name string, input map[string]interface{}) string {
+	if input == nil {
+		return ""
+	}
+	switch name {
+	case "Read", "Write", "Edit":
+		if path, ok := input["file_path"].(string); ok {
+			return filepath.Base(path)
+		}
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok {
+			cmd = strings.TrimSpace(cmd)
+			if len(cmd) > 20 {
+				cmd = cmd[:17] + "..."
+			}
+			return cmd
+		}
+	case "Grep":
+		if p, ok := input["pattern"].(string); ok {
+			if len(p) > 15 {
+				p = p[:12] + "..."
+			}
+			return "/" + p + "/"
+		}
+	case "Glob":
+		if p, ok := input["pattern"].(string); ok {
+			return p
+		}
+	}
+	return ""
 }
 
 // encodeProjectDir converts an absolute path to a Claude project directory name.
