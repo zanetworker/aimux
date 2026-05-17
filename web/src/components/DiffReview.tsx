@@ -122,7 +122,7 @@ export function DiffReview({ sessionFile, refreshInterval, compact }: Props) {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* File tree */}
         <div style={{
-          width: compact ? 180 : 240, borderRight: '1px solid var(--border)',
+          width: compact ? 240 : 280, borderRight: '1px solid var(--border)',
           overflowY: 'auto', flexShrink: 0,
         }}>
           <input
@@ -328,7 +328,7 @@ function renderFileTree(
             {isCollapsed ? '▸' : '▾'}
           </span>
           <span style={{ fontSize: 9, opacity: 0.5, flexShrink: 0 }}>📁</span>
-          <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span title={node.path} style={{ fontFamily: 'var(--mono)', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {node.name}
           </span>
           <span style={{ fontSize: 9, color: 'var(--fg-4)', flexShrink: 0 }}>
@@ -372,7 +372,7 @@ function renderFileTree(
           <span style={{ fontSize: 9, fontWeight: 700, color: si.color, width: 12, textAlign: 'center', flexShrink: 0 }}>
             {si.label}
           </span>
-          <span style={{
+          <span title={f.path} style={{
             fontSize: 11, color: isSelected ? 'var(--fg)' : 'var(--fg-2)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
             fontFamily: 'var(--mono)',
