@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface DiffLine {
   type: 'add' | 'del' | 'ctx' | 'collapse';
@@ -33,6 +33,7 @@ export function DiffReview({ sessionFile }: Props) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileFilter, setFileFilter] = useState('');
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!sessionFile) return;
@@ -109,7 +110,7 @@ export function DiffReview({ sessionFile }: Props) {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* File tree */}
         <div style={{
-          width: 220, borderRight: '1px solid var(--border)',
+          width: 240, borderRight: '1px solid var(--border)',
           overflowY: 'auto', flexShrink: 0,
         }}>
           <input
@@ -124,44 +125,7 @@ export function DiffReview({ sessionFile }: Props) {
               boxSizing: 'border-box',
             }}
           />
-          {filtered.map(f => {
-            const si = statusIcon(f.status);
-            const isSelected = f.path === selectedFile;
-            return (
-              <div
-                key={f.path}
-                onClick={() => setSelectedFile(f.path)}
-                style={{
-                  padding: '6px 10px', cursor: 'pointer',
-                  background: isSelected ? 'var(--bg-2)' : 'transparent',
-                  borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                }}
-              >
-                <span style={{
-                  fontSize: 9, fontWeight: 700, color: si.color,
-                  width: 14, textAlign: 'center', flexShrink: 0,
-                }}>
-                  {si.label}
-                </span>
-                <span style={{
-                  fontSize: 11, color: isSelected ? 'var(--fg)' : 'var(--fg-2)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-                  fontFamily: 'var(--mono)',
-                }}>
-                  {f.shortPath}
-                </span>
-                <span style={{ fontSize: 9, color: 'var(--green)', fontFamily: 'var(--mono)', flexShrink: 0 }}>
-                  +{f.added}
-                </span>
-                {f.removed > 0 && (
-                  <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--mono)', flexShrink: 0 }}>
-                    -{f.removed}
-                  </span>
-                )}
-              </div>
-            );
-          })}
+          {renderFileTree(filtered, selectedFile, collapsedDirs, setCollapsedDirs, setSelectedFile, statusIcon)}
         </div>
 
         {/* Diff content */}
@@ -265,4 +229,167 @@ export function DiffReview({ sessionFile }: Props) {
       </div>
     </div>
   );
+}
+
+interface TreeNode {
+  name: string;
+  path: string;
+  isDir: boolean;
+  children: TreeNode[];
+  file?: FileDiff;
+}
+
+function buildTree(files: FileDiff[]): TreeNode[] {
+  const root: TreeNode = { name: '', path: '', isDir: true, children: [] };
+
+  for (const f of files) {
+    const parts = f.path.split('/');
+    let current = root;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+      const partPath = parts.slice(0, i + 1).join('/');
+
+      if (isLast) {
+        current.children.push({ name: part, path: f.path, isDir: false, children: [], file: f });
+      } else {
+        let dir = current.children.find(c => c.isDir && c.name === part);
+        if (!dir) {
+          dir = { name: part, path: partPath, isDir: true, children: [] };
+          current.children.push(dir);
+        }
+        current = dir;
+      }
+    }
+  }
+
+  return flattenSingleChildDirs(root.children);
+}
+
+function flattenSingleChildDirs(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map(node => {
+    if (!node.isDir) return node;
+    node.children = flattenSingleChildDirs(node.children);
+    if (node.children.length === 1 && node.children[0].isDir) {
+      const child = node.children[0];
+      return { ...child, name: node.name + '/' + child.name, path: child.path };
+    }
+    return node;
+  });
+}
+
+function renderFileTree(
+  files: FileDiff[],
+  selectedFile: string | null,
+  collapsedDirs: Set<string>,
+  setCollapsedDirs: (fn: (prev: Set<string>) => Set<string>) => void,
+  setSelectedFile: (path: string) => void,
+  statusIcon: (status: string) => { label: string; color: string },
+) {
+  const tree = buildTree(files);
+
+  const rows: React.ReactNode[] = [];
+
+  function renderNode(node: TreeNode, depth: number) {
+    if (node.isDir) {
+      const isCollapsed = collapsedDirs.has(node.path);
+      const dirFiles = collectFiles(node);
+      const dirAdded = dirFiles.reduce((s, f) => s + f.added, 0);
+      const dirRemoved = dirFiles.reduce((s, f) => s + f.removed, 0);
+
+      rows.push(
+        <div
+          key={'dir-' + node.path}
+          onClick={() => setCollapsedDirs(prev => {
+            const next = new Set(prev);
+            if (next.has(node.path)) next.delete(node.path); else next.add(node.path);
+            return next;
+          })}
+          style={{
+            padding: '4px 8px', paddingLeft: 8 + depth * 12,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            color: 'var(--fg-3)', fontSize: 11,
+          }}
+        >
+          <span style={{ fontSize: 10, width: 12, flexShrink: 0, userSelect: 'none' }}>
+            {isCollapsed ? '▸' : '▾'}
+          </span>
+          <span style={{ fontSize: 9, opacity: 0.5, flexShrink: 0 }}>📁</span>
+          <span style={{ fontFamily: 'var(--mono)', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {node.name}
+          </span>
+          <span style={{ fontSize: 9, color: 'var(--fg-4)', flexShrink: 0 }}>
+            {dirFiles.length}
+          </span>
+          <span style={{ fontSize: 9, color: 'var(--green)', fontFamily: 'var(--mono)', flexShrink: 0 }}>
+            +{dirAdded}
+          </span>
+          {dirRemoved > 0 && (
+            <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--mono)', flexShrink: 0 }}>
+              -{dirRemoved}
+            </span>
+          )}
+        </div>
+      );
+
+      if (!isCollapsed) {
+        const dirs = node.children.filter(c => c.isDir).sort((a, b) => a.name.localeCompare(b.name));
+        const nodeFiles = node.children.filter(c => !c.isDir).sort((a, b) => a.name.localeCompare(b.name));
+        for (const child of [...dirs, ...nodeFiles]) {
+          renderNode(child, depth + 1);
+        }
+      }
+    } else {
+      const f = node.file!;
+      const si = statusIcon(f.status);
+      const isSelected = f.path === selectedFile;
+
+      rows.push(
+        <div
+          key={'file-' + f.path}
+          onClick={() => setSelectedFile(f.path)}
+          style={{
+            padding: '4px 8px', paddingLeft: 20 + depth * 12,
+            cursor: 'pointer',
+            background: isSelected ? 'var(--bg-2)' : 'transparent',
+            borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+            display: 'flex', alignItems: 'center', gap: 5,
+          }}
+        >
+          <span style={{ fontSize: 9, fontWeight: 700, color: si.color, width: 12, textAlign: 'center', flexShrink: 0 }}>
+            {si.label}
+          </span>
+          <span style={{
+            fontSize: 11, color: isSelected ? 'var(--fg)' : 'var(--fg-2)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+            fontFamily: 'var(--mono)',
+          }}>
+            {node.name}
+          </span>
+          <span style={{ fontSize: 9, color: 'var(--green)', fontFamily: 'var(--mono)', flexShrink: 0 }}>
+            +{f.added}
+          </span>
+          {f.removed > 0 && (
+            <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'var(--mono)', flexShrink: 0 }}>
+              -{f.removed}
+            </span>
+          )}
+        </div>
+      );
+    }
+  }
+
+  const topDirs = tree.filter(n => n.isDir).sort((a, b) => a.name.localeCompare(b.name));
+  const topFiles = tree.filter(n => !n.isDir).sort((a, b) => a.name.localeCompare(b.name));
+  for (const node of [...topDirs, ...topFiles]) {
+    renderNode(node, 0);
+  }
+
+  return <>{rows}</>;
+}
+
+function collectFiles(node: TreeNode): FileDiff[] {
+  if (!node.isDir) return node.file ? [node.file] : [];
+  return node.children.flatMap(c => collectFiles(c));
 }
