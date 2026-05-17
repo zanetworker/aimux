@@ -89,6 +89,26 @@ aimux feedback "the --limit flag silently ignores values over 100"
 
 Writes to `~/.aimux/feedback.jsonl` for maintainer review.
 
+## Starring sessions
+
+Pin important sessions so they survive cleanup and are easy to find:
+
+```bash
+# Sessions with starred=true sort to the top in --json output
+aimux sessions --list --json | jq '[.sessions[] | select(.starred)]'
+```
+
+In the TUI, press `*` on any agent or session to pin/unpin. Press `B` to open the starred tab.
+
+## Reviewing code changes
+
+The web UI has a "Diffs" tab in the right panel showing PR-style diff review:
+- Hierarchical file tree with collapsible directories
+- Line-numbered diffs with green/red coloring
+- Per-file and total +/- stats
+
+In the Session tab, click "Review Diffs" to see changes alongside the live terminal.
+
 ## Workflow: parallel agents
 
 1. `aimux spawn claude --dir ./frontend --json` (returns immediately)

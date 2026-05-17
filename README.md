@@ -56,12 +56,13 @@ Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
 </td>
 <td width="50%">
 
-**Tracing & Evaluation**
+**Tracing & Code Review**
 - Turn-by-turn trace of prompts, responses, tool calls
-- Live streaming as agents work (JSONL tailing + SSE)
+- PR-style diff review panel with file tree hierarchy
+- Inline diffs for Edit/Write tool calls with syntax coloring
+- Live diff pane alongside session terminal (auto-refreshes)
 - Annotate turns as GOOD / BAD / WASTE with notes
 - Export to MLflow, Jaeger, or any OTLP backend
-- JSONL export with annotations for offline eval
 
 </td>
 </tr>
@@ -70,7 +71,7 @@ Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
 
 **Two Interfaces**
 - **TUI**: keyboard-driven, split-pane trace + live session
-- **Web**: card grid, filtering, session history, trace panel
+- **Web**: card grid, filtering, session history, trace + diff panels
 - Dark and light themes (web dashboard)
 - Plugin system for custom dashboard tabs
 
@@ -78,10 +79,11 @@ Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
 <td>
 
 **Agent Management**
-- Launch agents in tmux (persistent) or direct mode
-- Google Tasks integration for task-driven launches
-- macOS notifications on permission prompts, errors, completion
-- Session history with browse, search, and resume
+- Launch and spawn agents from CLI or UI
+- Star/pin sessions to find them later across restarts
+- Profiles: save named flag bundles for repeated use
+- Session history with browse, search, path filter, and resume
+- LLM-powered title generation for untitled sessions
 - Kubernetes support: run agents on K8s pods
 
 </td>
@@ -93,13 +95,29 @@ Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
   <img src="assets/costs.png" alt="Cost tracking" width="380">
 </p>
 
+## Agent-Ready CLI
+
+aimux is built for AI agents. Every command supports `--json` for structured output, errors include valid values, and `agent-context` dumps the full CLI contract.
+
+```bash
+aimux agents --json                              # discover running agents
+aimux sessions --list --json --limit 5           # search past sessions
+aimux spawn claude --dir ./proj --wait --json    # start and wait for completion
+aimux agent-context                              # full CLI schema for agents
+aimux profile save work --provider claude        # save reusable config
+aimux feedback "the X flag doesn't work"         # report friction
+```
+
+See [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) for the full guide and [SKILL.md](SKILL.md) for agent workflow recipes.
+
 ## Documentation
 
 Full documentation at **[zanetworker.github.io/aimux](https://zanetworker.github.io/aimux/)**
 
 - [Getting Started](https://zanetworker.github.io/aimux/getting-started/) - install, first run, CLI commands
 - [Configuration](https://zanetworker.github.io/aimux/configuration/) - full config.yaml reference
-- [Web Dashboard](https://zanetworker.github.io/aimux/guides/web-dashboard/) - cards, filters, sessions, themes
+- [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) - structured output, profiles, feedback
+- [Web Dashboard](https://zanetworker.github.io/aimux/guides/web-dashboard/) - cards, filters, sessions, diff review
 - [TUI Keybindings](https://zanetworker.github.io/aimux/guides/tui-keybindings/) - keyboard shortcuts
 - [Tracing & Annotations](https://zanetworker.github.io/aimux/guides/tracing/) - trace view, OTEL, JSONL
 - [Launch Modes](https://zanetworker.github.io/aimux/guides/launch-modes/) - tmux, direct, task-driven

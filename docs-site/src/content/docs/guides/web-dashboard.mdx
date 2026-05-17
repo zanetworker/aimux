@@ -47,14 +47,19 @@ The filter bar provides:
 - **Content search**: Search inside session traces across all agents
 - **Sort**: Last Active, Cost, Tokens
 
-## Trace Panel
+## Right Panel
 
-Selecting an agent opens the right panel with:
+Selecting an agent opens the right panel with three tabs:
 
-- **Trace view**: Turn-by-turn conversation with tool calls, diffs, and outputs
+- **Trace**: Turn-by-turn conversation with tool calls, inline diffs, and outputs
+- **Diffs**: PR-style diff review with hierarchical file tree, line-numbered diffs, and per-file stats
+- **Session**: Live terminal with "Review Diffs" split view (diffs auto-refresh alongside the session)
+
+Additional features:
 - **Annotations**: Label turns as good/bad/waste with notes
 - **Export**: JSONL to `~/.aimux/exports/` or OTEL to configured endpoint
-- **Fullscreen**: Expand the trace panel to fill the viewport
+- **Fullscreen**: Expand the panel to fill the viewport
+- **Resizable**: Drag the panel border or the split divider to resize
 
 ## Session History
 
@@ -65,6 +70,19 @@ Click the **Sessions** tab to browse past agent sessions. The sessions table sho
 - **Age** since last activity
 - **Turn count**, token usage, and cost
 - **Resumable** indicator for sessions that can be continued
+- **Star icon**: Click to pin/unpin sessions for quick access
+
+### Starring Sessions
+
+Click the star icon (☆/★) on any session row or agent card to pin it. Starred sessions:
+- Sort to the top of the sessions list
+- Appear in the dedicated **★ Starred** tab (with count)
+- Persist across restarts (stored in `.meta.json` sidecar files)
+- Show on agent cards in the Agents tab
+
+### Title Generation
+
+Click **Generate Titles** in the sessions toolbar to auto-generate LLM titles for untitled sessions.
 
 Click any row to open its trace in the right panel. The toolbar provides two filter inputs:
 

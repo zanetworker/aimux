@@ -44,11 +44,19 @@ Open `http://localhost:9090` in your browser.
 | Command | Description |
 |---------|-------------|
 | `aimux` | Launch TUI dashboard |
-| `aimux web` | Launch web dashboard (default port 9090) |
+| `aimux web` | Launch web dashboard (default port 3000) |
 | `aimux --web` | Launch both TUI and web |
-| `aimux sessions` | List/search session history |
-| `aimux resume` | Resume a previous session |
-| `aimux --version` | Print version |
+| `aimux agents --json` | List running agents (structured output) |
+| `aimux sessions --list` | List session history |
+| `aimux sessions "query" --list` | Search sessions by keyword |
+| `aimux spawn claude --dir ./proj` | Start a new agent session |
+| `aimux resume <id>` | Resume a previous session |
+| `aimux agent-context` | Machine-readable CLI schema for agents |
+| `aimux profile save <name>` | Save a named configuration bundle |
+| `aimux feedback "text"` | Report CLI friction |
+| `aimux version --json` | Print version info |
+
+All data commands support `--json` for structured output. See [Agent Usage](/aimux/guides/agent-usage/) for the full reference.
 
 ## Quick Tour
 

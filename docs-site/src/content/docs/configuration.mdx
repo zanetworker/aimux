@@ -20,6 +20,9 @@ refresh_interval: "2s"
 default_runtime: "tmux"
 shell: "/bin/zsh"
 
+resume:
+  skip_permissions: false
+
 sessions:
   auto_title: false
   title_model: "flash"
@@ -79,6 +82,12 @@ Enable or disable agent providers. Unknown providers default to enabled.
 | `refresh_interval` | string | `"2s"` | How often to scan for agents |
 | `default_runtime` | string | `"tmux"` | Default launch mode: `"tmux"` or `"direct"` |
 | `shell` | string | `$SHELL` | Login shell for spawning agents. Falls back to `$SHELL`, then `/bin/sh` |
+
+## Resume
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `skip_permissions` | bool | `false` | Always pass `--dangerously-skip-permissions` on resume |
 
 ## Sessions
 
