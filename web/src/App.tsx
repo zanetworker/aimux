@@ -158,6 +158,8 @@ export default function App() {
       WorkingDir: session.project,
       Status: 1,
       GitBranch: '',
+      CPUPercent: 0,
+      MemoryMB: 0,
       TokensIn: session.tokensIn,
       TokensOut: session.tokensOut,
       EstCostUSD: session.costUSD,
@@ -215,7 +217,7 @@ export default function App() {
                   transition: 'all 0.15s',
                 }}
               >
-                {tab === 'agents' ? `Agents (${agents.length})`
+                {tab === 'agents' ? `Live Agents (${agents.length})`
                   : tab === 'sessions' ? `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}`
                   : tab === 'starred' ? `★ Starred${starredCount > 0 ? ` (${starredCount})` : ''}`
                   : pluginTabs.find(p => `plugin:${p.name}` === tab)?.tab || tab}

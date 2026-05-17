@@ -13,9 +13,10 @@ import (
 
 // rawProcess holds fields parsed from ps output.
 type rawProcess struct {
-	PID      int
-	MemoryKB uint64
-	Command  string
+	PID        int
+	CPUPercent float64
+	MemoryKB   uint64
+	Command    string
 }
 
 // parseProcessLine parses one line of `ps aux` output.
@@ -29,6 +30,11 @@ func parseProcessLine(line string) (rawProcess, error) {
 	pid, err := strconv.Atoi(fields[1])
 	if err != nil {
 		return rawProcess{}, fmt.Errorf("invalid PID %q: %w", fields[1], err)
+	}
+
+	cpu, err := strconv.ParseFloat(fields[2], 64)
+	if err != nil {
+		cpu = 0
 	}
 
 	rss, err := strconv.ParseUint(fields[5], 10, 64)
@@ -52,9 +58,10 @@ func parseProcessLine(line string) (rawProcess, error) {
 	cmd := line[cmdStart:]
 
 	return rawProcess{
-		PID:      pid,
-		MemoryKB: rss,
-		Command:  cmd,
+		PID:        pid,
+		CPUPercent: cpu,
+		MemoryKB:   rss,
+		Command:    cmd,
 	}, nil
 }
 
@@ -261,6 +268,7 @@ func buildInstance(proc rawProcess) agent.Agent {
 
 	return agent.Agent{
 		PID:            proc.PID,
+		CPUPercent:     proc.CPUPercent,
 		MemoryMB:       proc.MemoryKB / 1024,
 		Source:         classifySource(proc.Command),
 		Model:          extractFlag(proc.Command, "--model"),

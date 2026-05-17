@@ -204,12 +204,24 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
-      {/* Footer: model + tokens + cost */}
+      {/* Footer: model + cpu/mem + tokens + cost */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-4)' }}>
           {agent.Model}
         </span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10,
+            color: (agent.CPUPercent || 0) >= 50 ? 'var(--accent)' : (agent.CPUPercent || 0) >= 10 ? 'var(--orange)' : 'var(--fg-4)',
+          }}>
+            {Math.round(agent.CPUPercent || 0)}%
+          </span>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 10,
+            color: (agent.MemoryMB || 0) >= 1000 ? 'var(--accent)' : (agent.MemoryMB || 0) >= 500 ? 'var(--orange)' : 'var(--fg-4)',
+          }}>
+            {(agent.MemoryMB || 0) >= 1000 ? ((agent.MemoryMB || 0) / 1000).toFixed(1) + 'G' : (agent.MemoryMB || 0) + 'M'}
+          </span>
           <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-4)' }}>
             {formatK(agent.TokensIn)} in / {formatK(agent.TokensOut)} out
           </span>

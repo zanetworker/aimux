@@ -91,6 +91,7 @@ type Agent struct {
 	StartTime      time.Time
 	Status         Status
 	TMuxSession    string
+	CPUPercent     float64
 	MemoryMB       uint64
 	GitBranch      string
 	TokensIn       int64
@@ -190,6 +191,11 @@ func (a Agent) FormatMemory() string {
 		return fmt.Sprintf("%.1fG", gb)
 	}
 	return fmt.Sprintf("%dM", a.MemoryMB)
+}
+
+// FormatCPU returns a human-friendly CPU percentage string.
+func (a Agent) FormatCPU() string {
+	return fmt.Sprintf("%.0f%%", a.CPUPercent)
 }
 
 // FormatCost returns the estimated cost formatted as a dollar amount.

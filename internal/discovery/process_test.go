@@ -16,6 +16,9 @@ func TestParseProcessLine(t *testing.T) {
 	if proc.PID != 12345 {
 		t.Errorf("PID = %d, want 12345", proc.PID)
 	}
+	if proc.CPUPercent != 0.5 {
+		t.Errorf("CPUPercent = %f, want 0.5", proc.CPUPercent)
+	}
 	if proc.MemoryKB != 102400 {
 		t.Errorf("MemoryKB = %d, want 102400", proc.MemoryKB)
 	}
@@ -138,17 +141,57 @@ func TestIsClaudeProcess(t *testing.T) {
 	}
 }
 
+func TestParseProcessLineCPUPercent(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		wantCPU float64
+	}{
+		{
+			"zero CPU",
+			"user 123 0.0 1.2 500000 102400 s001 S+ 10:30AM 0:05.00 /usr/local/bin/claude",
+			0.0,
+		},
+		{
+			"high CPU",
+			"user 123 99.5 1.2 500000 102400 s001 R+ 10:30AM 0:05.00 /usr/local/bin/claude",
+			99.5,
+		},
+		{
+			"invalid CPU defaults to zero",
+			"user 123 N/A 1.2 500000 102400 s001 S+ 10:30AM 0:05.00 /usr/local/bin/claude",
+			0.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proc, err := parseProcessLine(tt.line)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if proc.CPUPercent != tt.wantCPU {
+				t.Errorf("CPUPercent = %f, want %f", proc.CPUPercent, tt.wantCPU)
+			}
+		})
+	}
+}
+
 func TestBuildInstance(t *testing.T) {
 	proc := rawProcess{
-		PID:      42,
-		MemoryKB: 512000,
-		Command:  "/usr/local/bin/claude --model opus --permission-mode plan --resume sess-123",
+		PID:        42,
+		CPUPercent: 12.5,
+		MemoryKB:   512000,
+		Command:    "/usr/local/bin/claude --model opus --permission-mode plan --resume sess-123",
 	}
 
 	inst := buildInstance(proc)
 
 	if inst.PID != 42 {
 		t.Errorf("PID = %d, want 42", inst.PID)
+	}
+	if inst.CPUPercent != 12.5 {
+		t.Errorf("CPUPercent = %f, want 12.5", inst.CPUPercent)
 	}
 	if inst.MemoryMB != 500 {
 		t.Errorf("MemoryMB = %d, want 500", inst.MemoryMB)

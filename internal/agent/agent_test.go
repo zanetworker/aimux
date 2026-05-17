@@ -122,6 +122,25 @@ func TestFormatMemory(t *testing.T) {
 	}
 }
 
+func TestFormatCPU(t *testing.T) {
+	tests := []struct {
+		cpu  float64
+		want string
+	}{
+		{0, "0%"},
+		{0.5, "0%"},
+		{12.3, "12%"},
+		{99.9, "100%"},
+		{100, "100%"},
+	}
+	for _, tt := range tests {
+		a := Agent{CPUPercent: tt.cpu}
+		if got := a.FormatCPU(); got != tt.want {
+			t.Errorf("FormatCPU(%f) = %q, want %q", tt.cpu, got, tt.want)
+		}
+	}
+}
+
 func TestFormatCost(t *testing.T) {
 	tests := []struct {
 		cost float64

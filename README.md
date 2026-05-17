@@ -49,7 +49,7 @@ Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
 **Discovery & Monitoring**
 - Auto-discovers Claude, Codex, and Gemini agents
 - Live status: active, idle, waiting, error
-- Per-agent token usage and cost tracking
+- Per-agent CPU%, memory, token usage, and cost tracking
 - Model-aware pricing (Opus, Sonnet, Haiku, GPT, Gemini)
 - Cross-session search ("which agent edited auth.go?")
 

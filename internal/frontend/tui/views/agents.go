@@ -16,9 +16,11 @@ const (
 	colAgent  = 8
 	colModel  = 12
 	colLoc    = 8  // location: "local" or "k8s"
-	colDir    = 10
-	colBranch = 14
+	colDir    = 8
+	colBranch = 12
 	colLast   = 14
+	colCPU    = 5
+	colMem    = 6
 	colAge    = 6
 	colCostA  = 8
 )
@@ -52,6 +54,28 @@ func costColor(cost float64) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")) // yellow
 	default:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")) // red
+	}
+}
+
+func cpuColor(pct float64) lipgloss.Style {
+	switch {
+	case pct < 10:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	case pct < 50:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+	}
+}
+
+func memColor(mb uint64) lipgloss.Style {
+	switch {
+	case mb < 500:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	case mb < 1000:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+	default:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
 	}
 }
 
@@ -102,6 +126,14 @@ func (v *AgentsView) SetAgents(agents []agent.Agent) {
 	case "cost":
 		sort.SliceStable(agents, func(i, j int) bool {
 			return agents[i].EstCostUSD > agents[j].EstCostUSD
+		})
+	case "cpu":
+		sort.SliceStable(agents, func(i, j int) bool {
+			return agents[i].CPUPercent > agents[j].CPUPercent
+		})
+	case "mem":
+		sort.SliceStable(agents, func(i, j int) bool {
+			return agents[i].MemoryMB > agents[j].MemoryMB
 		})
 	case "age":
 		sort.SliceStable(agents, func(i, j int) bool {
@@ -274,6 +306,10 @@ func (v *AgentsView) Update(msg tea.Msg) {
 			case "name":
 				v.sortField = "cost"
 			case "cost":
+				v.sortField = "cpu"
+			case "cpu":
+				v.sortField = "mem"
+			case "mem":
 				v.sortField = "age"
 			case "age":
 				v.sortField = "model"
@@ -316,6 +352,14 @@ func (v *AgentsView) View() string {
 	if v.sortField == "age" {
 		ageHeader = "AGE \u25bc"
 	}
+	cpuHeader := "CPU"
+	if v.sortField == "cpu" {
+		cpuHeader = "CPU\u25bc"
+	}
+	memHeader := "MEM"
+	if v.sortField == "mem" {
+		memHeader = "MEM\u25bc"
+	}
 	costHeader := "COST"
 	if v.sortField == "cost" {
 		costHeader = "COST \u25bc"
@@ -330,6 +374,8 @@ func (v *AgentsView) View() string {
 		padRight("DIR", colDir) + " " +
 		padRight("BRANCH", colBranch) + " " +
 		padRight("LAST", colLast) + " " +
+		padRight(cpuHeader, colCPU) + " " +
+		padRight(memHeader, colMem) + " " +
 		padRight(ageHeader, colAge) + " " +
 		padRight(costHeader, colCostA)
 	// Pad header to full width
@@ -417,6 +463,9 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 		branchDisplay = lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Render(padRight(branchDisplay, colBranch))
 	}
 
+	cpuRendered := cpuColor(a.CPUPercent).Render(a.FormatCPU())
+	memRendered := memColor(a.MemoryMB).Render(a.FormatMemory())
+
 	row := " " + padRight(nameCol, colName) + " " +
 		padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
 		padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
@@ -424,6 +473,8 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 		padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
 		branchDisplay + " " +
 		padRight(truncate(a.LastAction, colLast), colLast) + " " +
+		padRight(cpuRendered, colCPU) + " " +
+		padRight(memRendered, colMem) + " " +
 		padRight(a.FormatAge(), colAge) + " " +
 		padRight(costRendered, colCostA)
 

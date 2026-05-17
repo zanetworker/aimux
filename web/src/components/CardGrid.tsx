@@ -300,12 +300,38 @@ export function CardGrid({
                           {agent.GitBranch.length > 18 ? agent.GitBranch.slice(0, 16) + '…' : agent.GitBranch}
                         </span>
                       )}
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 11, width: 40, textAlign: 'right', flexShrink: 0,
+                        color: (agent.CPUPercent || 0) >= 50 ? 'var(--accent)' : (agent.CPUPercent || 0) >= 10 ? 'var(--orange)' : 'var(--fg-4)',
+                      }}>
+                        {Math.round(agent.CPUPercent || 0)}%
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--mono)', fontSize: 11, width: 50, textAlign: 'right', flexShrink: 0,
+                        color: (agent.MemoryMB || 0) >= 1000 ? 'var(--accent)' : (agent.MemoryMB || 0) >= 500 ? 'var(--orange)' : 'var(--fg-4)',
+                      }}>
+                        {(agent.MemoryMB || 0) >= 1000 ? ((agent.MemoryMB || 0) / 1000).toFixed(1) + 'G' : (agent.MemoryMB || 0) + 'M'}
+                      </span>
                       <span style={{ fontSize: 11, color: 'var(--fg-4)', width: 60, textAlign: 'right', flexShrink: 0 }}>
                         {age}
                       </span>
                       <span style={{ fontSize: 13, fontFamily: 'var(--mono)', color: 'var(--green)', width: 80, textAlign: 'right', flexShrink: 0 }}>
                         ${(agent.EstCostUSD || 0).toFixed(2)}
                       </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleKill(agent.SessionID || agent.PID.toString()); }}
+                        title="Kill agent (SIGTERM)"
+                        style={{
+                          padding: '2px 8px', borderRadius: 3, fontSize: 10, fontWeight: 600,
+                          border: '1px solid var(--border)', background: 'transparent',
+                          color: 'var(--fg-3)', cursor: 'pointer', flexShrink: 0,
+                          transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
+                      >
+                        kill
+                      </button>
                     </div>
                   );
                 })}

@@ -20,6 +20,7 @@ The main view shows agent cards grouped by project. Each card displays:
 - **Title** from the session's first prompt or auto-generated
 - **Project name** and git branch
 - **Last activity snippet** showing the most recent tool call
+- **CPU%** and **memory** usage with color-coded thresholds
 - **Model**, token counts, and cost
 
 Click a card to toggle the trace panel. Click again to close it.
@@ -28,13 +29,13 @@ Click a card to toggle the trace panel. Click again to close it.
 
 Toggle between views using the tab bar:
 
-- **Agents** - Live agent cards with filtering and sorting
+- **Live Agents** - Live agent cards with filtering and sorting
 - **Sessions** - Historical session table with search
 - **Plugin tabs** - Custom dashboards from plugins (e.g., Skill Dashboard)
 
 ### List vs Card View
 
-Toggle between card grid and compact list view using the view mode buttons in the filter bar (grid/list icons).
+Toggle between card grid and compact list view using the view mode buttons in the filter bar (grid/list icons). Both views show CPU%, memory, token counts, and cost per agent.
 
 ## Filtering and Sorting
 

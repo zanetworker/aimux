@@ -115,6 +115,7 @@ func (c *Codex) parseProcess(line string) *agent.Agent {
 		return nil
 	}
 
+	cpu, _ := strconv.ParseFloat(fields[2], 64)
 	rss, _ := strconv.ParseUint(fields[5], 10, 64)
 
 	cmd := strings.Join(fields[10:], " ")
@@ -152,6 +153,7 @@ func (c *Codex) parseProcess(line string) *agent.Agent {
 
 	return &agent.Agent{
 		PID:            pid,
+		CPUPercent:     cpu,
 		MemoryMB:       rss / 1024,
 		Source:         source,
 		Model:          model,

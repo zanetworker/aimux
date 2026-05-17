@@ -8,6 +8,8 @@ export interface Agent {
   WorkingDir: string;
   Status: number; // 0=Active, 1=Idle, 2=WaitingPermission, 3=Error, 4=Unknown
   GitBranch: string;
+  CPUPercent: number;
+  MemoryMB: number;
   TokensIn: number;
   TokensOut: number;
   EstCostUSD: number;

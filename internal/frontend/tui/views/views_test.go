@@ -459,8 +459,8 @@ func TestAgentsViewSortCycle(t *testing.T) {
 	}
 	v.SetAgents(agents)
 
-	// Expected cycle: "" -> "name" -> "cost" -> "age" -> "model" -> ""
-	expectedCycle := []string{"name", "cost", "age", "model", ""}
+	// Expected cycle: "" -> "name" -> "cost" -> "cpu" -> "mem" -> "age" -> "model" -> ""
+	expectedCycle := []string{"name", "cost", "cpu", "mem", "age", "model", ""}
 	for _, expected := range expectedCycle {
 		v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 		if v.SortField() != expected {
@@ -556,10 +556,10 @@ func TestAgentsViewSortByAge(t *testing.T) {
 
 	v.SetAgents(agents)
 
-	// Press 's' three times to reach "age" sort: "" -> "name" -> "cost" -> "age".
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	// Press 's' five times to reach "age" sort: "" -> "name" -> "cost" -> "cpu" -> "mem" -> "age".
+	for range 5 {
+		v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	}
 	if v.SortField() != "age" {
 		t.Fatalf("SortField() = %q, want %q", v.SortField(), "age")
 	}
@@ -595,10 +595,10 @@ func TestAgentsViewSortByAgeFallback(t *testing.T) {
 
 	v.SetAgents(agents)
 
-	// Press 's' three times to reach "age" sort.
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	// Press 's' five times to reach "age" sort: "" -> "name" -> "cost" -> "cpu" -> "mem" -> "age".
+	for range 5 {
+		v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	}
 
 	freshAgents := []agent.Agent{
 		{PID: 10, WorkingDir: "/tmp/onlyActivity", LastActivity: now.Add(-3 * time.Hour)},
