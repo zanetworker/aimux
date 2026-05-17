@@ -23,9 +23,11 @@ interface FileDiff {
 
 interface Props {
   sessionFile: string;
+  refreshInterval?: number;
+  compact?: boolean;
 }
 
-export function DiffReview({ sessionFile }: Props) {
+export function DiffReview({ sessionFile, refreshInterval, compact }: Props) {
   const [files, setFiles] = useState<FileDiff[]>([]);
   const [totalAdded, setTotalAdded] = useState(0);
   const [totalRemoved, setTotalRemoved] = useState(0);
@@ -37,22 +39,32 @@ export function DiffReview({ sessionFile }: Props) {
 
   useEffect(() => {
     if (!sessionFile) return;
-    setLoading(true);
-    fetch(`/api/sessions/diffs?file=${encodeURIComponent(sessionFile)}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data) {
-          setFiles(data.files || []);
-          setTotalAdded(data.totalAdded || 0);
-          setTotalRemoved(data.totalRemoved || 0);
-          if (data.files?.length > 0) {
-            setSelectedFile(data.files[0].path);
+
+    const fetchDiffs = (isInitial: boolean) => {
+      if (isInitial) setLoading(true);
+      fetch(`/api/sessions/diffs?file=${encodeURIComponent(sessionFile)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data) {
+            setFiles(data.files || []);
+            setTotalAdded(data.totalAdded || 0);
+            setTotalRemoved(data.totalRemoved || 0);
+            if (isInitial && data.files?.length > 0) {
+              setSelectedFile(data.files[0].path);
+            }
           }
-        }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [sessionFile]);
+          if (isInitial) setLoading(false);
+        })
+        .catch(() => { if (isInitial) setLoading(false); });
+    };
+
+    fetchDiffs(true);
+
+    if (refreshInterval && refreshInterval > 0) {
+      const id = setInterval(() => fetchDiffs(false), refreshInterval);
+      return () => clearInterval(id);
+    }
+  }, [sessionFile, refreshInterval]);
 
   if (loading) {
     return (
@@ -110,7 +122,7 @@ export function DiffReview({ sessionFile }: Props) {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* File tree */}
         <div style={{
-          width: 240, borderRight: '1px solid var(--border)',
+          width: compact ? 180 : 240, borderRight: '1px solid var(--border)',
           overflowY: 'auto', flexShrink: 0,
         }}>
           <input

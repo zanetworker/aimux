@@ -27,6 +27,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
     return saved ? parseInt(saved) : 440;
   });
   const [isResizing, setIsResizing] = useState(false);
+  const [showSessionDiffs, setShowSessionDiffs] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const turns = useTraceStream(agent.SessionID, agent.SessionFile);
@@ -357,18 +358,37 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
                   {agent.ProviderName === 'codex' ? 'Session will resume with --full-auto' : 'Session will resume with --dangerously-skip-permissions'}
                 </span>
               )}
+              <button
+                onClick={() => setShowSessionDiffs(prev => !prev)}
+                style={{
+                  marginLeft: 'auto', padding: '2px 8px', borderRadius: 3,
+                  border: `1px solid ${showSessionDiffs ? 'var(--green)' : 'var(--border)'}`,
+                  background: showSessionDiffs ? 'rgba(105,223,115,0.1)' : 'transparent',
+                  color: showSessionDiffs ? 'var(--green)' : 'var(--fg-3)',
+                  fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                {showSessionDiffs ? '✓ Diffs' : 'Show Diffs'}
+              </button>
             </div>
           )}
-          <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
-            {sessionMounted && (
-              <SessionView
-                tmuxSession={agent.TMuxSession || undefined}
-                sessionId={agent.SessionID || undefined}
-                provider={agent.ProviderName || undefined}
-                workingDir={agent.WorkingDir || undefined}
-                skipPermissions={skipPermissions}
-                key={`${agent.TMuxSession || agent.SessionID}-${skipPermissions}`}
-              />
+          <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+            <div style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}>
+              {sessionMounted && (
+                <SessionView
+                  tmuxSession={agent.TMuxSession || undefined}
+                  sessionId={agent.SessionID || undefined}
+                  provider={agent.ProviderName || undefined}
+                  workingDir={agent.WorkingDir || undefined}
+                  skipPermissions={skipPermissions}
+                  key={`${agent.TMuxSession || agent.SessionID}-${skipPermissions}`}
+                />
+              )}
+            </div>
+            {showSessionDiffs && (
+              <div style={{ width: '50%', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <DiffReview sessionFile={agent.SessionFile} refreshInterval={5000} compact />
+              </div>
             )}
           </div>
         </div>
