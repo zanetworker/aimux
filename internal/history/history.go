@@ -182,6 +182,11 @@ func scanSession(id, filePath, project string) (Session, error) {
 	lineCount := 0
 	humanTurnCount := 0
 
+	// Defer expensive content parsing for LastPrompt and LastAction:
+	// save the last raw content bytes and extract once after the loop.
+	var lastUserContent json.RawMessage
+	var lastAssistantContent json.RawMessage
+
 	// Parse all lines to accumulate tokens/cost accurately.
 	// First 10 lines also extract the first user prompt.
 	var model string
@@ -191,13 +196,31 @@ func scanSession(id, filePath, project string) (Session, error) {
 		copy(raw, scanner.Bytes())
 
 		extractPrompt := lineCount <= 10
-		m, isHuman := parseSessionLine(raw, &s, extractPrompt)
+		m, isHuman, role, content := parseSessionLine(raw, &s, extractPrompt)
 		if m != "" {
 			model = m
 		}
 		if isHuman {
 			humanTurnCount++
 		}
+
+		// Track last content per role for deferred extraction (no extra unmarshal)
+		if content != nil {
+			switch role {
+			case "user":
+				lastUserContent = content
+			case "assistant":
+				lastAssistantContent = content
+			}
+		}
+	}
+
+	// Extract last prompt and action once (not per-line)
+	if text := extractUserText(lastUserContent); text != "" && text != "(no prompt)" {
+		s.LastPrompt = text
+	}
+	if action := extractLastToolAction(lastAssistantContent); action != "" {
+		s.LastAction = action
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -294,11 +317,12 @@ func isHumanMessage(content json.RawMessage) bool {
 
 // parseSessionLine extracts metadata from a single JSONL entry.
 // If extractPrompt is true, it also looks for the first user message.
-// Returns the model name if found in this entry, and a boolean indicating if this is a human message.
-func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (string, bool) {
+// Returns the model name, whether this is a human message, the message role,
+// and the raw content bytes (for deferred LastPrompt/LastAction extraction).
+func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (string, bool, string, json.RawMessage) {
 	var entry sessionEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
-		return "", false
+		return "", false, "", nil
 	}
 
 	if !entry.Timestamp.IsZero() {
@@ -320,7 +344,7 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (stri
 	}
 
 	if entry.Message == nil {
-		return "", false
+		return "", false, "", nil
 	}
 
 	var isHuman bool
@@ -347,21 +371,14 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (stri
 		}
 	}
 
-	// Track last user prompt (always overwrite — last one wins)
-	if entry.Message.Role == "user" {
-		if text := extractUserText(entry.Message.Content); text != "" && text != "(no prompt)" {
-			s.LastPrompt = text
-		}
+	// Return content for deferred extraction by the caller
+	var content json.RawMessage
+	if entry.Message.Content != nil {
+		content = make(json.RawMessage, len(entry.Message.Content))
+		copy(content, entry.Message.Content)
 	}
 
-	// Track last tool action from assistant messages
-	if entry.Message.Role == "assistant" {
-		if action := extractLastToolAction(entry.Message.Content); action != "" {
-			s.LastAction = action
-		}
-	}
-
-	return model, isHuman
+	return model, isHuman, entry.Message.Role, content
 }
 
 // extractUserText pulls the text from a user message content array.

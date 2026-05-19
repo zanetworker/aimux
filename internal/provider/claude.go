@@ -58,16 +58,19 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 		}
 	}
 
-	// Session file matching and JSONL parsing must be sequential because
-	// assignedFiles tracks which files are already claimed.
+	// Phase 1: match session files sequentially (cheap glob + stat calls,
+	// needs assignedFiles tracking to avoid double-claiming).
 	assignedFiles := make(map[string]bool)
 	for i := range agents {
-		c.enrichSession(&agents[i], projectsDir, assignedFiles)
+		c.matchSessionFile(&agents[i], projectsDir, assignedFiles)
 		agents[i].ProviderName = "claude"
 		if agents[i].Name == "" {
 			agents[i].Name = agents[i].ShortProject()
 		}
 	}
+
+	// Phase 2: parse all matched session files in parallel (expensive I/O).
+	c.batchParseSessionFiles(agents)
 
 	// Tag subagent relationships from process tree before dedup.
 	correlator.TagFromProcessTree(agents, discovery.GetParentPID)
@@ -109,9 +112,9 @@ func (c *Claude) batchResolveProcessInfo(agents []agent.Agent) {
 	}
 }
 
-// enrichSession matches a session file and parses JSONL data for an agent.
+// matchSessionFile finds the session file for an agent (cheap: glob + stat).
 // Must be called sequentially to respect assignedFiles tracking.
-func (c *Claude) enrichSession(inst *agent.Agent, projectsDir string, assignedFiles map[string]bool) {
+func (c *Claude) matchSessionFile(inst *agent.Agent, projectsDir string, assignedFiles map[string]bool) {
 	sessionFile := ""
 	if inst.SessionID != "" {
 		sessionFile = discovery.FindSessionFile(inst.SessionID, projectsDir)
@@ -123,33 +126,65 @@ func (c *Claude) enrichSession(inst *agent.Agent, projectsDir string, assignedFi
 	if sessionFile != "" {
 		assignedFiles[sessionFile] = true
 		inst.SessionFile = sessionFile
-		info, err := discovery.ParseSessionFile(sessionFile)
-		if err == nil {
-			if inst.SessionID == "" {
-				inst.SessionID = info.SessionID
-			}
-			inst.GitBranch = info.GitBranch
-			if inst.Model == "" && info.Model != "" {
-				inst.Model = info.Model
-			}
-			inst.TokensIn = info.TokensIn
-			inst.TokensOut = info.TokensOut
-			inst.LastAction = info.LastAction
-			inst.LastActivity = info.LastTimestamp
-			inst.EstCostUSD = cost.Calculate(
-				inst.Model,
-				info.TokensIn,
-				info.TokensOut,
-				info.CacheReadTokens,
-				info.CacheWriteTokens,
-			)
-
-			if inst.SessionFile != "" {
-				inst.Status = statusdetect.DetectFromJSONL(inst.SessionFile, 8192)
-			}
-		}
 	} else {
 		inst.Status = agent.StatusActive
+	}
+}
+
+// batchParseSessionFiles parses all matched session files in parallel.
+func (c *Claude) batchParseSessionFiles(agents []agent.Agent) {
+	type parseResult struct {
+		idx    int
+		info   discovery.SessionInfo
+		status agent.Status
+	}
+
+	// Count agents that need parsing
+	var toparse []int
+	for i := range agents {
+		if agents[i].SessionFile != "" {
+			toparse = append(toparse, i)
+		}
+	}
+
+	ch := make(chan parseResult, len(toparse))
+	for _, idx := range toparse {
+		go func(i int) {
+			r := parseResult{idx: i}
+			info, err := discovery.ParseSessionFile(agents[i].SessionFile)
+			if err == nil {
+				r.info = info
+				r.status = statusdetect.DetectFromJSONL(agents[i].SessionFile, 8192)
+			}
+			ch <- r
+		}(idx)
+	}
+
+	for range toparse {
+		r := <-ch
+		inst := &agents[r.idx]
+		if r.info.SessionID == "" && r.info.MessageCount == 0 {
+			continue
+		}
+		if inst.SessionID == "" {
+			inst.SessionID = r.info.SessionID
+		}
+		inst.GitBranch = r.info.GitBranch
+		if inst.Model == "" && r.info.Model != "" {
+			inst.Model = r.info.Model
+		}
+		inst.TokensIn = r.info.TokensIn
+		inst.TokensOut = r.info.TokensOut
+		inst.LastAction = r.info.LastAction
+		inst.LastActivity = r.info.LastTimestamp
+		inst.EstCostUSD = cost.Calculate(
+			inst.Model,
+			r.info.TokensIn,
+			r.info.TokensOut,
+			r.info.CacheReadTokens,
+			r.info.CacheWriteTokens,
+		)
+		inst.Status = r.status
 	}
 }
 
@@ -180,7 +215,14 @@ func (c *Claude) discoverRecentSessions(running []agent.Agent, projectsDir strin
 		return nil
 	}
 
-	var agents []agent.Agent
+	// Collect candidate files (cheap: just stat calls, no parsing)
+	type candidate struct {
+		dirKey     string
+		derivedDir string
+		filePath   string
+		modTime    time.Time
+	}
+	var candidates []candidate
 
 	for _, dirEntry := range entries {
 		if !dirEntry.IsDir() {
@@ -188,30 +230,48 @@ func (c *Claude) discoverRecentSessions(running []agent.Agent, projectsDir strin
 		}
 		dirKey := dirEntry.Name()
 
-		// Skip projects that already have a running agent
 		derivedDir := decodeDirKey(dirKey)
 		if derivedDir != "" && runningDirs[derivedDir] {
 			continue
 		}
 
-		// Find the single newest JSONL file in this project dir
 		subdir := filepath.Join(projectsDir, dirKey)
 		newestPath, newestMod := newestJSONL(subdir, cutoff)
-		if newestPath == "" {
+		if newestPath == "" || runningFiles[newestPath] {
 			continue
 		}
 
-		// Skip if this exact file is already used by a running agent
-		if runningFiles[newestPath] {
+		candidates = append(candidates, candidate{dirKey, derivedDir, newestPath, newestMod})
+	}
+
+	// Parse all candidate session files in parallel
+	type parseResult struct {
+		idx  int
+		info discovery.SessionInfo
+		err  error
+	}
+	ch := make(chan parseResult, len(candidates))
+	for i, c := range candidates {
+		go func(idx int, path string) {
+			info, err := discovery.ParseSessionFile(path)
+			ch <- parseResult{idx, info, err}
+		}(i, c.filePath)
+	}
+
+	results := make([]parseResult, len(candidates))
+	for range candidates {
+		r := <-ch
+		results[r.idx] = r
+	}
+
+	var agents []agent.Agent
+	for i, c := range candidates {
+		r := results[i]
+		if r.err != nil {
 			continue
 		}
+		info := r.info
 
-		info, err := discovery.ParseSessionFile(newestPath)
-		if err != nil {
-			continue
-		}
-
-		// Skip if session ID matches a running agent
 		if info.SessionID != "" && runningIDs[info.SessionID] {
 			continue
 		}
@@ -220,7 +280,7 @@ func (c *Claude) discoverRecentSessions(running []agent.Agent, projectsDir strin
 			PID:          0,
 			SessionID:    info.SessionID,
 			ProviderName: "claude",
-			SessionFile:  newestPath,
+			SessionFile:  c.filePath,
 			Status:       agent.StatusIdle,
 			Source:       agent.SourceCLI,
 			GroupCount:   1,
@@ -240,19 +300,19 @@ func (c *Claude) discoverRecentSessions(running []agent.Agent, projectsDir strin
 			info.CacheWriteTokens,
 		)
 
-		if derivedDir != "" {
-			a.WorkingDir = derivedDir
-			a.Name = filepath.Base(derivedDir)
+		if c.derivedDir != "" {
+			a.WorkingDir = c.derivedDir
+			a.Name = filepath.Base(c.derivedDir)
 		} else {
-			a.Name = dirKey
+			a.Name = c.dirKey
 		}
 
 		if !info.LastTimestamp.IsZero() {
 			a.LastActivity = info.LastTimestamp
 			a.StartTime = info.LastTimestamp
 		} else {
-			a.LastActivity = newestMod
-			a.StartTime = newestMod
+			a.LastActivity = c.modTime
+			a.StartTime = c.modTime
 		}
 
 		agents = append(agents, a)

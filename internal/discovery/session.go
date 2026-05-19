@@ -55,6 +55,10 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
+	// Defer expensive content parsing: save the last assistant content
+	// and only call extractLastToolAction once after the loop.
+	var lastContent json.RawMessage
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var entry sessionLine
@@ -85,11 +89,15 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 				info.CacheReadTokens += u.CacheReadInputTokens
 				info.CacheWriteTokens += u.CacheCreationInputTokens
 			}
-			// Extract last tool call for LastAction
-			if action := extractLastToolAction(entry.Message.Content); action != "" {
-				info.LastAction = action
+			if entry.Message.Content != nil {
+				lastContent = make(json.RawMessage, len(entry.Message.Content))
+				copy(lastContent, entry.Message.Content)
 			}
 		}
+	}
+
+	if action := extractLastToolAction(lastContent); action != "" {
+		info.LastAction = action
 	}
 
 	if err := scanner.Err(); err != nil {

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/zanetworker/aimux/internal/agent"
 )
@@ -31,13 +32,22 @@ type Snapshot struct {
 	TmuxSessions []TmuxSession  // parsed tmux sessions
 }
 
-// TakeSnapshot captures a process snapshot (ps aux + tmux) once.
+// TakeSnapshot captures a process snapshot (ps aux + tmux) in parallel.
 func TakeSnapshot() *Snapshot {
 	snap := &Snapshot{}
-	if out, err := exec.Command("ps", "aux").Output(); err == nil {
-		snap.PsOutput = string(out)
-	}
-	snap.TmuxSessions = ListTmuxSessions()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if out, err := exec.Command("ps", "aux").Output(); err == nil {
+			snap.PsOutput = string(out)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		snap.TmuxSessions = ListTmuxSessions()
+	}()
+	wg.Wait()
 	return snap
 }
 

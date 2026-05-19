@@ -179,10 +179,9 @@ func (c *Codex) dedup(agents []agent.Agent) []agent.Agent {
 	for i := range agents {
 		if agents[i].WorkingDir == "" {
 			// #nosec G204
-			if cwd, err := exec.Command("lsof", "-p", strconv.Itoa(agents[i].PID), "-Fn").Output(); err == nil {
+			if cwd, err := exec.Command("lsof", "-a", "-d", "cwd", "-p", strconv.Itoa(agents[i].PID), "-Fn").Output(); err == nil {
 				for _, line := range strings.Split(string(cwd), "\n") {
-					if strings.HasPrefix(line, "n") && strings.HasPrefix(line[1:], "/") {
-						// lsof cwd line
+					if strings.HasPrefix(line, "n/") {
 						agents[i].WorkingDir = line[1:]
 						break
 					}
