@@ -9,30 +9,112 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/jump"
+	"github.com/zanetworker/aimux/internal/runtime"
 )
 
-// Launch runs a pre-built exec.Cmd in the specified runtime environment
-// (tmux session or iTerm2 split pane). The provider name and directory
-// are used to derive the tmux session name. The shell parameter specifies
-// the login shell to use (e.g., "/bin/zsh"); use config.ResolveShell().
+// Launch runs a pre-built exec.Cmd in the specified session manager
+// (tmux or iTerm2). The provider name and directory are used to derive
+// the tmux session name. The shell parameter specifies the login shell
+// to use (e.g., "/bin/zsh"); use config.ResolveShell().
 // The envPrefix is prepended to the command (e.g., OTEL env vars).
-func Launch(cmd *exec.Cmd, providerName, dir, runtime, shell, envPrefix string) error {
+func Launch(cmd *exec.Cmd, providerName, dir, sessionMgr, shell, envPrefix string) error {
 	if cmd == nil {
 		return fmt.Errorf("spawn: nil command")
 	}
 
-	if runtime == "" {
-		runtime = "tmux"
+	if sessionMgr == "" {
+		sessionMgr = "tmux"
 	}
 
-	switch runtime {
+	switch sessionMgr {
 	case "tmux":
 		return launchTmux(cmd, providerName, dir, shell, envPrefix)
 	case "iterm":
 		return launchITerm(cmd, dir)
 	default:
-		return fmt.Errorf("spawn: unsupported runtime %q (want \"tmux\" or \"iterm\")", runtime)
+		return fmt.Errorf("spawn: unsupported session manager %q (want \"tmux\" or \"iterm\")", sessionMgr)
 	}
+}
+
+// LaunchInContainer creates a container, then launches the agent inside it
+// via tmux. The container runs `sleep infinity` and the agent command is
+// executed inside it via `podman exec`. The tmux session wraps the podman
+// exec so the user can attach/detach normally.
+//
+// Flow: podman create → podman start → tmux new-session "podman exec ... agent"
+func LaunchInContainer(cmd *exec.Cmd, providerName, dir, shell, envPrefix string, opts ContainerOpts) error {
+	if cmd == nil {
+		return fmt.Errorf("spawn: nil command")
+	}
+
+	name := ContainerName(providerName, dir)
+	c := runtime.NewContainer(name, opts.Engine)
+
+	env := parseEnvPrefix(envPrefix)
+
+	image := opts.Image
+	if image == "" {
+		image = "fedora:41"
+	}
+	if err := c.Create(runtime.CreateOpts{
+		WorkDir: dir,
+		Image:   image,
+		Env:     env,
+	}); err != nil {
+		return fmt.Errorf("spawn: container create: %w", err)
+	}
+
+	// Build the agent command to run inside the container
+	var cmdParts []string
+	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
+	for _, arg := range cmd.Args[1:] {
+		cmdParts = append(cmdParts, shellQuote(arg))
+	}
+	innerCmd := strings.Join(cmdParts, " ")
+
+	// Wrap in tmux: the tmux session runs "podman exec -it <name> <shell> -lc <agent>"
+	engine := opts.Engine
+	if engine == "" {
+		engine = "podman"
+	}
+	execCmd := fmt.Sprintf("%s exec -it %s %s -lc %s",
+		engine, shellQuote(name), shell, shellQuote(innerCmd))
+
+	sessionName := TmuxSessionName(providerName, dir)
+	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil { // #nosec G204
+		_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run() // #nosec G204
+	}
+
+	tmuxArgs := []string{"new-session", "-d", "-s", sessionName, "-c", dir,
+		"--", shell, "-lc", execCmd}
+	tmuxCmd := exec.Command("tmux", tmuxArgs...) // #nosec G204
+	if err := tmuxCmd.Run(); err != nil {
+		return fmt.Errorf("spawn: failed to create tmux session for container %q: %w", name, err)
+	}
+	return nil
+}
+
+// ContainerOpts configures container-based agent launch.
+type ContainerOpts struct {
+	Engine string // "podman" or "docker", defaults to "podman"
+	Image  string // container image, defaults to "fedora:41"
+}
+
+// ContainerName returns the container name for a given provider and directory.
+func ContainerName(provider, dir string) string {
+	base := filepath.Base(dir)
+	base = strings.ReplaceAll(base, " ", "-")
+	return fmt.Sprintf("aimux-%s-%s", provider, base)
+}
+
+func parseEnvPrefix(envPrefix string) map[string]string {
+	env := make(map[string]string)
+	for _, part := range strings.Fields(envPrefix) {
+		if k, v, ok := strings.Cut(part, "="); ok {
+			env[k] = v
+		}
+	}
+	return env
 }
 
 // launchTmux creates a new tmux session running the command.

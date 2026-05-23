@@ -54,3 +54,44 @@ func TestLaunch_UnsupportedRuntime(t *testing.T) {
 		t.Error("Launch with unsupported runtime should return error")
 	}
 }
+
+func TestContainerName(t *testing.T) {
+	tests := []struct {
+		provider string
+		dir      string
+		want     string
+	}{
+		{"claude", "/Users/me/projects/blog", "aimux-claude-blog"},
+		{"codex", "/tmp/my project", "aimux-codex-my-project"},
+	}
+	for _, tt := range tests {
+		got := ContainerName(tt.provider, tt.dir)
+		if got != tt.want {
+			t.Errorf("ContainerName(%q, %q) = %q, want %q", tt.provider, tt.dir, got, tt.want)
+		}
+	}
+}
+
+func TestLaunchInContainer_NilCmd(t *testing.T) {
+	err := LaunchInContainer(nil, "claude", "/tmp", "/bin/sh", "", ContainerOpts{})
+	if err == nil {
+		t.Error("LaunchInContainer(nil) should return error")
+	}
+}
+
+func TestParseEnvPrefix(t *testing.T) {
+	env := parseEnvPrefix("FOO=bar BAZ=qux")
+	if env["FOO"] != "bar" {
+		t.Errorf("expected FOO=bar, got %q", env["FOO"])
+	}
+	if env["BAZ"] != "qux" {
+		t.Errorf("expected BAZ=qux, got %q", env["BAZ"])
+	}
+}
+
+func TestParseEnvPrefix_Empty(t *testing.T) {
+	env := parseEnvPrefix("")
+	if len(env) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(env))
+	}
+}

@@ -537,9 +537,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			endpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
 			envPrefix = p.OTELEnv(endpoint)
 		}
-		if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), envPrefix); err != nil {
-			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
-			return a, nil
+		if msg.Container {
+			if err := spawn.LaunchInContainer(cmd, msg.Provider, msg.Dir, a.cfg.ResolveShell(), envPrefix, spawn.ContainerOpts{}); err != nil {
+				a.statusHint = fmt.Sprintf("Container launch failed: %v", err)
+				return a, nil
+			}
+		} else {
+			if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), envPrefix); err != nil {
+				a.statusHint = fmt.Sprintf("Launch failed: %v", err)
+				return a, nil
+			}
 		}
 
 		name := filepath.Base(msg.Dir)

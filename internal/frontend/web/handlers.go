@@ -19,6 +19,7 @@ import (
 	"github.com/zanetworker/aimux/internal/insight"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/tasks"
+	"github.com/zanetworker/aimux/internal/team"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -942,5 +943,62 @@ func (s *Server) handleGenerateTitles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(result); encErr != nil {
 		debuglog.Log("encode generate-titles response: %v", encErr)
+	}
+}
+
+func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
+	teams, err := team.ListTeamsDefault()
+	if err != nil {
+		// No teams directory or unreadable is not an error for the API;
+		// just return an empty list.
+		teams = nil
+	}
+
+	type teamResp struct {
+		Name        string        `json:"name"`
+		Description string        `json:"description"`
+		Members     []team.Member `json:"members"`
+	}
+
+	items := make([]teamResp, len(teams))
+	for i, t := range teams {
+		members := t.Members
+		if members == nil {
+			members = []team.Member{}
+		}
+		items[i] = teamResp{
+			Name:        t.Name,
+			Description: t.Description,
+			Members:     members,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"teams": items}); err != nil {
+		debuglog.Log("encode teams response: %v", err)
+	}
+}
+
+func (s *Server) handleProviderHealth(w http.ResponseWriter, r *http.Request) {
+	type providerStatus struct {
+		Name      string `json:"name"`
+		Enabled   bool   `json:"enabled"`
+		Installed bool   `json:"installed"`
+	}
+
+	names := []string{"claude", "codex", "gemini"}
+	providers := make([]providerStatus, 0, len(names))
+	for _, name := range names {
+		_, err := exec.LookPath(name)
+		providers = append(providers, providerStatus{
+			Name:      name,
+			Enabled:   s.cfg.IsProviderEnabled(name),
+			Installed: err == nil,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"providers": providers}); err != nil {
+		debuglog.Log("encode provider health response: %v", err)
 	}
 }

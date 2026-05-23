@@ -145,6 +145,9 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("GET /api/quick-launch", s.handleQuickLaunchDirs)
 
+	mux.HandleFunc("GET /api/teams", s.handleTeams)
+	mux.HandleFunc("GET /api/health/providers", s.handleProviderHealth)
+
 	mux.HandleFunc("GET /api/tasks/lists", s.handleTaskLists)
 	mux.HandleFunc("GET /api/tasks", s.handleTasks)
 	mux.HandleFunc("POST /api/tasks/{id}/complete", s.handleTaskComplete)

@@ -52,8 +52,9 @@ type LaunchMsg struct {
 	Dir         string
 	Model       string
 	Mode        string
-	Runtime     string
-	OTELEnabled bool // true if OTEL tracing should be injected
+	Runtime     string // session manager: "tmux" or "iterm"
+	Container   bool   // true = run inside a container (tmux wraps podman exec)
+	OTELEnabled bool   // true if OTEL tracing should be injected
 }
 
 // LaunchResumeMsg is emitted when the user picks a session to resume from the launcher.
@@ -113,9 +114,10 @@ type LauncherView struct {
 	modeCursor   int
 	runtimes     []string
 	runtimeCursor int
-	otelEnabled  bool // toggle for OTEL tracing on spawned session
-	otelAvailable bool // true if OTEL receiver is running
-	optionField  int // 0=model, 1=mode, 2=runtime, 3=otel
+	otelEnabled      bool // toggle for OTEL tracing on spawned session
+	otelAvailable    bool // true if OTEL receiver is running
+	containerEnabled bool // run agent inside a container
+	optionField      int  // 0=model, 1=mode, 2=runtime, 3=otel, 4=container
 	providerOpts map[string]ProviderOptions
 
 	// Resume step
@@ -376,9 +378,9 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 }
 
 func (l *LauncherView) updateOptions(key string) tea.Cmd {
-	maxField := 2
+	maxField := 3 // 0=model, 1=mode, 2=runtime, 3=container
 	if l.otelAvailable {
-		maxField = 3
+		maxField = 4 // 0=model, 1=mode, 2=runtime, 3=otel, 4=container
 	}
 	switch key {
 	case "j", "down":
@@ -392,46 +394,39 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 	case "l", "right":
 		switch l.optionField {
 		case 0:
-			if l.modelCursor < len(l.models)-1 {
-				l.modelCursor++
-			}
+			if l.modelCursor < len(l.models)-1 { l.modelCursor++ }
 		case 1:
-			if l.modeCursor < len(l.modes)-1 {
-				l.modeCursor++
-			}
+			if l.modeCursor < len(l.modes)-1 { l.modeCursor++ }
 		case 2:
-			if l.runtimeCursor < len(l.runtimes)-1 {
-				l.runtimeCursor++
-			}
-		case 3:
-			l.otelEnabled = !l.otelEnabled
+			if l.runtimeCursor < len(l.runtimes)-1 { l.runtimeCursor++ }
+		default:
+			l.toggleFieldAtCursor(maxField)
 		}
 	case "h", "left":
 		switch l.optionField {
 		case 0:
-			if l.modelCursor > 0 {
-				l.modelCursor--
-			}
+			if l.modelCursor > 0 { l.modelCursor-- }
 		case 1:
-			if l.modeCursor > 0 {
-				l.modeCursor--
-			}
+			if l.modeCursor > 0 { l.modeCursor-- }
 		case 2:
-			if l.runtimeCursor > 0 {
-				l.runtimeCursor--
-			}
-		case 3:
-			l.otelEnabled = !l.otelEnabled
+			if l.runtimeCursor > 0 { l.runtimeCursor-- }
+		default:
+			l.toggleFieldAtCursor(maxField)
 		}
 	case " ":
-		// Space toggles OTEL when on that field
-		if l.optionField == 3 {
-			l.otelEnabled = !l.otelEnabled
-		}
+		l.toggleFieldAtCursor(maxField)
 	case "enter":
 		return l.emitLaunch()
 	}
 	return nil
+}
+
+func (l *LauncherView) toggleFieldAtCursor(maxField int) {
+	if l.optionField == maxField {
+		l.containerEnabled = !l.containerEnabled
+	} else if l.otelAvailable && l.optionField == 3 {
+		l.otelEnabled = !l.otelEnabled
+	}
 }
 
 // advanceFromDir transitions from directory selection to the resume step.
@@ -523,6 +518,7 @@ func (l *LauncherView) emitLaunch() tea.Cmd {
 		Model:       model,
 		Mode:        mode,
 		Runtime:     l.runtimes[l.runtimeCursor],
+		Container:   l.containerEnabled,
 		OTELEnabled: l.otelEnabled,
 	}
 	return func() tea.Msg { return msg }
@@ -899,6 +895,28 @@ func (l *LauncherView) viewOptions() string {
 		}
 		b.WriteString(otelLabel + otelValue + "\n")
 	}
+
+	// Container toggle
+	containerField := 4
+	if !l.otelAvailable {
+		containerField = 3
+	}
+	ctrLabel := launcherLabelStyle.Render(fmt.Sprintf("%-10s", "Container:"))
+	var ctrValue string
+	if l.containerEnabled {
+		if l.optionField == containerField {
+			ctrValue = launcherSelectedStyle.Render(" ON ")
+		} else {
+			ctrValue = launcherOptionStyle.Render("ON")
+		}
+	} else {
+		if l.optionField == containerField {
+			ctrValue = launcherSelectedStyle.Render(" OFF ")
+		} else {
+			ctrValue = launcherOptionStyle.Render("OFF")
+		}
+	}
+	b.WriteString(ctrLabel + ctrValue + "\n")
 
 	b.WriteString("\n")
 	b.WriteString(launcherHintStyle.Render("j/k:field  h/l:option  Space:toggle  Enter:launch  Esc:cancel"))

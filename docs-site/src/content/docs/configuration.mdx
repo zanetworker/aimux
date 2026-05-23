@@ -57,6 +57,24 @@ tasks:
   default_list: ""
   prompt_template: "Work on the following task: {title}\n\nDetails: {notes}\n\nAdditional instructions: {user_prompt}\n\nWhen done, summarize what you did."
 
+auto_archive_after: "1h"
+
+badges:
+  - path: "package.json"
+    json_path: "$.version"
+    label: "v"
+    color: "#22C55E"
+  - path: "Cargo.toml"
+    json_path: ""
+    label: "rust"
+    color: "#F5921B"
+
+runtimes:
+  devbox:
+    type: container
+    engine: podman
+    image: "ghcr.io/my-org/agent-sandbox:latest"
+
 kubernetes:
   enabled: false
   redis_url: ""
@@ -151,6 +169,56 @@ Google Tasks integration for task-driven agent launches.
 | `default_list` | string | | Default task list ID |
 | `prompt_template` | string | see above | Template for agent prompts. Placeholders: `{title}`, `{notes}`, `{user_prompt}` |
 
+## Auto Archive
+
+Automatically archive idle sessions after a duration of inactivity.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auto_archive_after` | string | `""` (disabled) | Idle duration before auto-archiving (e.g., `"1h"`, `"30m"`) |
+
+## Badges
+
+Project file badge rules. Badges extract values from project files and display them alongside session names.
+
+```yaml
+badges:
+  - path: "package.json"
+    json_path: "$.version"
+    label: "v"
+    color: "#22C55E"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | string | | File path relative to the project root |
+| `json_path` | string | | JSONPath expression to extract the badge value |
+| `label` | string | | Prefix label shown before the extracted value |
+| `color` | string | | Hex color for the badge (e.g., `"#22C55E"`) |
+
+## Runtimes
+
+Named runtime environments for launching agents in containers or sandboxed modes.
+
+```yaml
+runtimes:
+  devbox:
+    type: container
+    engine: podman
+    image: "ghcr.io/my-org/agent-sandbox:latest"
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `type` | string | | Runtime type: `"local"`, `"container"`, or `"openshell"` |
+| `engine` | string | | Container engine: `"podman"` or `"docker"` (container type only) |
+| `image` | string | | Container image to use (container type only) |
+| `sandbox` | bool | `false` | Enable sandbox policy (openshell type only) |
+
+## Project-Local Config
+
+You can place a `.aimux/config.yaml` inside any project directory. Project-local settings override the global `~/.aimux/config.yaml` for sessions running in that directory. This is useful for per-project badge rules, runtime overrides, or notification preferences.
+
 ## Kubernetes
 
 See [Kubernetes Quickstart](/advanced/k8s-quickstart/) for full setup guide.
@@ -163,3 +231,94 @@ See [Kubernetes Quickstart](/advanced/k8s-quickstart/) for full setup guide.
 | `namespace` | string | `"agents"` | K8s namespace for agent deployments |
 | `kubeconfig` | string | auto | Path to kubeconfig (omit for in-cluster) |
 | `otel_endpoint` | string | | OTEL collector URL for remote agent traces |
+
+## API Endpoints
+
+The web dashboard exposes a REST API on `http://127.0.0.1:<port>`. All endpoints return JSON.
+
+### Agents and Discovery
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/agents` | List active agents. Query params: `filter`, `sort` |
+| `POST` | `/api/agents/launch` | Launch a new agent session |
+| `POST` | `/api/agents/{id}/kill` | Kill an agent by session ID or PID |
+| `POST` | `/api/agents/{id}/archive` | Archive an agent session |
+| `GET` | `/api/agents/{id}/trace` | Get trace for an agent |
+| `GET` | `/api/agents/{id}/diff` | Get file diffs for an agent session |
+
+### Sessions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/history` | List session history with metadata |
+| `GET` | `/api/search` | Search session content |
+| `DELETE` | `/api/sessions/{id}` | Delete a session |
+| `POST` | `/api/sessions/{id}/annotate` | Add an annotation to a session turn |
+| `GET` | `/api/sessions/{id}/annotations` | Get annotations for a session |
+| `POST` | `/api/sessions/meta` | Update session metadata (tags, notes) |
+| `GET` | `/api/sessions/meta` | Get session metadata |
+| `GET` | `/api/sessions/diffs` | Get file diffs from a session file |
+| `POST` | `/api/sessions/generate-titles` | Generate LLM titles for sessions |
+| `POST` | `/api/sessions/{id}/export/jsonl` | Export session as JSONL |
+| `POST` | `/api/sessions/{id}/export/otel` | Export session traces via OTEL |
+
+### Traces
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/trace` | Fast trace lookup |
+| `POST` | `/api/trace/subscribe/{sessionId}` | Subscribe to live trace updates |
+| `POST` | `/api/trace/unsubscribe/{sessionId}` | Unsubscribe from trace updates |
+
+### Costs and Health
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/costs` | Cost breakdown by project |
+| `GET` | `/api/health` | Basic health check |
+| `GET` | `/api/health/providers` | Provider health: enabled status and binary availability |
+
+### Teams
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/teams` | List team configurations from `~/.claude/teams/` |
+
+### Plugins
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/plugins` | List loaded plugins |
+| `GET` | `/api/plugins/{name}/data` | Get plugin data |
+| `POST` | `/api/insight` | Run a plugin insight |
+
+### Tasks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/tasks/lists` | List Google Tasks lists |
+| `GET` | `/api/tasks` | List tasks |
+| `POST` | `/api/tasks/{id}/complete` | Mark a task as complete |
+| `POST` | `/api/tasks/{id}/reopen` | Reopen a completed task |
+
+### Directories and Launch
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/directories/browse` | Browse filesystem directories |
+| `GET` | `/api/directories/recent` | List recently used directories |
+| `GET` | `/api/quick-launch` | Get quick launch directory list |
+
+### Terminal
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET/POST` | `/api/terminal/{session}` | WebSocket terminal connection |
+| `GET/POST` | `/api/terminal-resume/{id}` | Resume a terminal session |
+
+### Events
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/events` | Server-Sent Events stream for live updates |
