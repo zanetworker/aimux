@@ -25,6 +25,8 @@ type Config struct {
 	QuickLaunch      QuickLaunchConfig         `yaml:"quick_launch"`       // quick launch directories
 	Tasks            TasksConfig               `yaml:"tasks"`              // Google Tasks integration
 	AutoArchiveAfter string                    `yaml:"auto_archive_after"` // idle duration before auto-archiving (e.g. "1h", "30m")
+	Badges           []BadgeRule               `yaml:"badges"`             // project file badge rules
+	Runtimes         map[string]RuntimeConfig  `yaml:"runtimes"`           // named runtime environments
 }
 
 // K8sProviderConfig holds connection settings for the Kubernetes agent provider.
@@ -101,6 +103,22 @@ type ProviderConfig struct {
 // QuickLaunchConfig holds directories for quick agent launch.
 type QuickLaunchConfig struct {
 	Directories []string `yaml:"directories"`
+}
+
+// BadgeRule maps a project file path to a badge display.
+type BadgeRule struct {
+	Path     string `yaml:"path"`
+	JSONPath string `yaml:"json_path"`
+	Label    string `yaml:"label"`
+	Color    string `yaml:"color"`
+}
+
+// RuntimeConfig holds settings for a named runtime environment.
+type RuntimeConfig struct {
+	Type    string `yaml:"type"`              // "local", "container", "openshell"
+	Engine  string `yaml:"engine,omitempty"`  // container engine: "podman" or "docker"
+	Image   string `yaml:"image,omitempty"`   // container image
+	Sandbox bool   `yaml:"sandbox,omitempty"` // enable sandbox policy (openshell)
 }
 
 // TasksConfig holds settings for Google Tasks integration.
@@ -227,6 +245,17 @@ func Load(path string) (Config, error) {
 	}
 	if fileCfg.AutoArchiveAfter != "" {
 		cfg.AutoArchiveAfter = fileCfg.AutoArchiveAfter
+	}
+	if len(fileCfg.Badges) > 0 {
+		cfg.Badges = fileCfg.Badges
+	}
+	if len(fileCfg.Runtimes) > 0 {
+		if cfg.Runtimes == nil {
+			cfg.Runtimes = make(map[string]RuntimeConfig)
+		}
+		for name, rc := range fileCfg.Runtimes {
+			cfg.Runtimes[name] = rc
+		}
 	}
 
 	return cfg, nil

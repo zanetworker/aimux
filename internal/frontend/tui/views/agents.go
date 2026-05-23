@@ -431,6 +431,17 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	}
 	nameCol := starPrefix + "▸" + icon + " " + name
 
+	// Render project badges after the name column.
+	var badgeStr string
+	for _, b := range a.Badges {
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+		if b.Color != "" {
+			style = style.Foreground(lipgloss.Color(b.Color))
+		}
+		badgeStr += style.Render(" [" + b.Value + "]")
+	}
+	nameCol += badgeStr
+
 	costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
 
 	loc := agentLocation(a)

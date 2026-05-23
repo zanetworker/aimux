@@ -77,6 +77,13 @@ func (s Status) Icon() string {
 	}
 }
 
+// BadgeValue is an evaluated badge for display.
+type BadgeValue struct {
+	Label string
+	Value string
+	Color string
+}
+
 // Agent represents a running AI coding agent session.
 type Agent struct {
 	PID            int
@@ -106,6 +113,7 @@ type Agent struct {
 	LastAction     string         // most recent tool call, e.g. "Ed main.go", "Sh go test"
 	ParentPID      int            // process tree parent (0 = top-level)
 	Subagent       subagent.Info  // from OTEL correlation
+	Badges         []BadgeValue   // evaluated badge results from project files
 }
 
 // IsSubagent returns true if this agent is nested under another agent.

@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/cache"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
@@ -344,6 +345,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.otelStore.LastUpdate().After(a.lastEnrichTime) {
 			a.instances = correlator.EnrichFromOTEL(a.instances, a.otelStore)
 			a.lastEnrichTime = a.otelStore.LastUpdate()
+		}
+
+		// Evaluate configurable badges for each agent.
+		if len(a.cfg.Badges) > 0 {
+			rules := make([]badge.Rule, len(a.cfg.Badges))
+			for i, b := range a.cfg.Badges {
+				rules[i] = badge.Rule{Path: b.Path, JSONPath: b.JSONPath, Label: b.Label, Color: b.Color}
+			}
+			for i := range a.instances {
+				if a.instances[i].WorkingDir != "" {
+					badges := badge.Evaluate(a.instances[i].WorkingDir, rules)
+					a.instances[i].Badges = make([]agent.BadgeValue, len(badges))
+					for j, b := range badges {
+						a.instances[i].Badges[j] = agent.BadgeValue{
+							Label: b.Label, Value: b.Value, Color: b.Color,
+						}
+					}
+				}
+			}
 		}
 
 		// Save cache on discovery refresh

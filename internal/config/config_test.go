@@ -381,6 +381,105 @@ func TestArchiveThreshold(t *testing.T) {
 	}
 }
 
+func TestLoadBadgesConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+badges:
+  - path: "package.json"
+    json_path: "name"
+    label: "pkg"
+  - path: ".python-version"
+    label: "py"
+    color: "#3776AB"
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+
+	if len(cfg.Badges) != 2 {
+		t.Fatalf("expected 2 badges, got %d", len(cfg.Badges))
+	}
+	if cfg.Badges[0].Path != "package.json" {
+		t.Errorf("Badges[0].Path = %q, want %q", cfg.Badges[0].Path, "package.json")
+	}
+	if cfg.Badges[0].JSONPath != "name" {
+		t.Errorf("Badges[0].JSONPath = %q, want %q", cfg.Badges[0].JSONPath, "name")
+	}
+	if cfg.Badges[0].Label != "pkg" {
+		t.Errorf("Badges[0].Label = %q, want %q", cfg.Badges[0].Label, "pkg")
+	}
+	if cfg.Badges[1].Color != "#3776AB" {
+		t.Errorf("Badges[1].Color = %q, want %q", cfg.Badges[1].Color, "#3776AB")
+	}
+}
+
+func TestLoadRuntimes(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `
+runtimes:
+  sandbox:
+    type: openshell
+    sandbox: true
+  dev-container:
+    type: container
+    engine: podman
+    image: quay.io/aimux/agent:latest
+`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+
+	if len(cfg.Runtimes) != 2 {
+		t.Fatalf("Runtimes len = %d, want 2", len(cfg.Runtimes))
+	}
+
+	sandbox, ok := cfg.Runtimes["sandbox"]
+	if !ok {
+		t.Fatal("missing 'sandbox' runtime")
+	}
+	if sandbox.Type != "openshell" {
+		t.Errorf("sandbox.Type = %q, want %q", sandbox.Type, "openshell")
+	}
+	if !sandbox.Sandbox {
+		t.Error("sandbox.Sandbox should be true")
+	}
+
+	dev, ok := cfg.Runtimes["dev-container"]
+	if !ok {
+		t.Fatal("missing 'dev-container' runtime")
+	}
+	if dev.Type != "container" {
+		t.Errorf("dev-container.Type = %q, want %q", dev.Type, "container")
+	}
+	if dev.Engine != "podman" {
+		t.Errorf("dev-container.Engine = %q, want %q", dev.Engine, "podman")
+	}
+	if dev.Image != "quay.io/aimux/agent:latest" {
+		t.Errorf("dev-container.Image = %q, want %q", dev.Image, "quay.io/aimux/agent:latest")
+	}
+}
+
+func TestLoadRuntimes_Empty(t *testing.T) {
+	cfg := Default()
+	if cfg.Runtimes != nil {
+		t.Errorf("Default().Runtimes = %v, want nil", cfg.Runtimes)
+	}
+}
+
 func TestArchiveThreshold_FromFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.yaml")

@@ -1,4 +1,4 @@
-.PHONY: build run clean test install lint build-mcp build-agent-claude push-agent-claude build-agent-gemini push-agent-gemini web-build web-dev build-all
+.PHONY: build run clean test test-integration test-all install lint build-mcp build-agent-claude push-agent-claude build-agent-gemini push-agent-gemini web-build web-dev build-all
 
 BINARY=aimux
 REGISTRY=quay.io/azaalouk
@@ -22,7 +22,13 @@ run: build
 	./$(BINARY)
 
 test:
-	go test ./... -v
+	go test ./... -timeout 30s
+
+test-integration:
+	go test -tags integration ./... -timeout 30s
+
+test-all:
+	go test -tags "integration e2e" ./... -timeout 60s
 
 install: build
 	cp $(BINARY) /usr/local/bin/
