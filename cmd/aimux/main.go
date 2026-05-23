@@ -39,6 +39,10 @@ func main() {
 	)
 
 	cfg, _ := config.Load(config.DefaultPath())
+	// Merge project-local config if running from a project directory
+	if cwd, err := os.Getwd(); err == nil {
+		cfg, _ = config.LoadProject(cwd, cfg)
+	}
 
 	// Wire TUI launcher
 	cmd.SetRunTUI(func(_ *cobra.Command, _ []string) error {
@@ -96,7 +100,12 @@ func main() {
 		},
 		SkipPermissions: cfg.Resume.SkipPermissions,
 		Providers:       []string{"claude", "codex", "gemini"},
-		ProfileStore: profileStore,
+		ProfileStore:    profileStore,
+		TraceParsers: map[string]func(filePath string) ([]trace.Turn, error){
+			"claude": (&provider.Claude{}).ParseTrace,
+			"codex":  (&provider.Codex{}).ParseTrace,
+			"gemini": (&provider.Gemini{}).ParseTrace,
+		},
 	}
 
 	cmd.RegisterAll(deps)
@@ -213,6 +222,10 @@ func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(provide
 // createWebServer builds and wires a web.Server with all dependencies.
 func createWebServer(port int) *web.Server {
 	cfg, _ := config.Load(config.DefaultPath())
+	// Merge project-local config if running from a project directory
+	if cwd, err := os.Getwd(); err == nil {
+		cfg, _ = config.LoadProject(cwd, cfg)
+	}
 	disco := discovery.NewOrchestrator(
 		&provider.Claude{},
 		&provider.Codex{},

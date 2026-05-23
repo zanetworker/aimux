@@ -734,6 +734,64 @@ func TestTraceRefreshMsg_NoTailer(t *testing.T) {
 	}
 }
 
+// TestProjectConfigMerge verifies that LoadProject correctly merges
+// project-local badge rules over global config, which is the mechanism
+// used by NewApp() and createWebServer() at startup.
+func TestProjectConfigMerge(t *testing.T) {
+	// Create a temp project directory with .aimux/config.yaml
+	projDir := t.TempDir()
+	aimuxDir := filepath.Join(projDir, ".aimux")
+	_ = os.MkdirAll(aimuxDir, 0o750)
+	_ = os.WriteFile(filepath.Join(aimuxDir, "config.yaml"), []byte(`
+badges:
+  - path: "package.json"
+    json_path: "version"
+    label: "ver"
+    color: "#00ff00"
+`), 0o600)
+
+	global := config.Default()
+	if len(global.Badges) != 0 {
+		t.Fatal("default config should have no badges")
+	}
+
+	merged, err := config.LoadProject(projDir, global)
+	if err != nil {
+		t.Fatalf("LoadProject: %v", err)
+	}
+	if len(merged.Badges) != 1 {
+		t.Fatalf("expected 1 badge rule after merge, got %d", len(merged.Badges))
+	}
+	if merged.Badges[0].Label != "ver" {
+		t.Errorf("badge label = %q, want %q", merged.Badges[0].Label, "ver")
+	}
+	if merged.Badges[0].JSONPath != "version" {
+		t.Errorf("badge json_path = %q, want %q", merged.Badges[0].JSONPath, "version")
+	}
+	if merged.Badges[0].Color != "#00ff00" {
+		t.Errorf("badge color = %q, want %q", merged.Badges[0].Color, "#00ff00")
+	}
+	// Global providers should be preserved
+	if !merged.IsProviderEnabled("claude") {
+		t.Error("project config should not wipe global claude provider")
+	}
+}
+
+// TestProjectConfigMerge_NoDirReturnsGlobal verifies that LoadProject
+// returns the global config unchanged when no .aimux/ directory exists.
+func TestProjectConfigMerge_NoDirReturnsGlobal(t *testing.T) {
+	global := config.Default()
+	global.Shell = "/bin/zsh"
+
+	merged, err := config.LoadProject("/nonexistent/path", global)
+	if err != nil {
+		t.Fatalf("LoadProject should not error: %v", err)
+	}
+	if merged.Shell != "/bin/zsh" {
+		t.Errorf("shell = %q, want /bin/zsh", merged.Shell)
+	}
+}
+
 // TestAllProvidersOTELEnvIncludeProtocol verifies that ALL providers'
 // OTELEnv methods include the http/protobuf protocol setting.
 // This is the root cause test -- without this protocol setting,

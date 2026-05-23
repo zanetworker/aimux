@@ -103,70 +103,134 @@ internal/
 
 - **Header hint bar and view logic must stay in sync.** When adding, removing, or renaming a keybinding in any view (`Update()` method), always update the corresponding `SetHint()` call in `tui/app.go` `updateHints()`. The hint bar is the user's only discoverability mechanism for keybindings.
 
-## Architecture Rules (UI-Agnostic Core)
+## Reusability and Extensibility
 
-The codebase is split into **core packages** (UI-agnostic) and **TUI packages** (Bubble Tea specific). This separation exists to support future alternative frontends (web UI, API server).
+aimux has three frontends (TUI, Web, CLI) and must prevent feature divergence. Every
+user-visible operation lives in a shared core layer; frontends are thin adapters that
+wire keys, HTTP endpoints, or CLI flags to the same function.
 
-**Core packages** (MUST NOT import `tui/`, `bubbletea`, or `lipgloss`):
-- `agent/`, `config/`, `cost/`, `correlator/`, `subagent/` — data types and utilities
-- `discovery/`, `provider/` — agent discovery and process scanning
-- `history/` — session scanning, metadata, titles, cleanup
-- `evaluation/` — annotation storage, JSONL export
-- `otel/` — receiver, exporter, converter
-- `trace/` — shared turn/span types
-- `terminal/` — PTY backends (embed, tmux), VT emulator
-- `spawn/`, `jump/`, `team/` — agent launching and session management
+### Layer Model
 
-**TUI packages** (Bubble Tea specific, thin adapter layer):
-- `tui/app.go` — wires core logic to Bubble Tea; should NOT contain business logic
-- `tui/views/` — rendering and key handling
+```
+Frontends (thin adapters, rendering + input only)
+  TUI:  internal/frontend/tui/    — Bubble Tea keybindings, lipgloss rendering
+  Web:  internal/frontend/web/    — HTTP handlers, SSE, WebSocket
+  CLI:  cmd/aimux/cmd/            — Cobra flags, JSON output
 
-**When adding new features:**
-1. Put business logic in core packages (e.g., `history.FindDuplicates`, `cost.Calculate`)
-2. Put only UI wiring in `tui/` (event handling, rendering, navigation)
-3. Never import `charmbracelet/*` from core packages
-4. If a function in `app.go` doesn't reference `tea.Model`, `tea.Cmd`, or `lipgloss`, it probably belongs in a core package
+Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
+  controller/  — operations: sort, filter, attend, archive, kill, notify, export, session_meta
+  agent/       — data types, status enum, fade colors
+  badge/       — project file badge evaluation
+  config/      — global + project-local config, runtime/sandbox profiles
+  cost/        — per-model pricing, token counting
+  discovery/   — multi-provider orchestrator, process scanning
+  history/     — session scanning, metadata, titles, search
+  evaluation/  — annotation persistence, JSONL export
+  otel/        — OTLP receiver, span store, exporter
+  provider/    — Provider interface, Claude/Codex/Gemini/K8s implementations
+  runtime/     — Runtime interface (local/container/k8s), PolicyEnforcer, OpenShell stub
+  trace/       — shared Turn/ToolSpan types, file tailer
+  terminal/    — SessionBackend (PTY embed, tmux mirror)
+  spawn/       — agent launch into tmux/direct
+  team/        — team config reader
+```
 
-## Thin Frontend Rule
-
-The web frontend (`web/src/`) is a rendering layer only. All business logic lives in Go core packages, exposed via HTTP API endpoints in `internal/frontend/web/`.
-
-**Backend owns:**
-- Trace parsing (via `provider.ParseTrace`)
-- Cost calculation (via `cost.Calculate`)
-- Token counting, model identification
-- Tool input extraction and snippet generation
-- Session discovery and matching
-- Search (via `history.SearchContent`)
-
-**Frontend owns:**
-- Rendering (React components, styles, layout)
-- UI state (expanded/collapsed, selected, fullscreen)
-- User interaction (click, keyboard, resize)
-
-**When adding a web feature:**
-1. If it needs data transformation, add a Go API endpoint using core packages
-2. The frontend fetches and renders; no parsing, no business logic
-3. If the TUI already does it, the web must use the same core function
-4. Never reimplement Go logic in TypeScript
-
-## Frontend Parity Rule
+### The Rule: Controller First, Frontend Second
 
 Every new feature that involves user-visible behavior MUST follow this pattern:
 
-1. **Business logic in `controller/`** (or another core package) -- the pure function that does the work. No bubbletea, no lipgloss, no HTTP types.
-2. **TUI wires the key** -- `app.go` calls the controller function on keypress
-3. **Web API wires the endpoint** -- `handlers.go` calls the same controller function on HTTP request
-4. **CLI wires the flag** -- `cmd/*.go` calls the same controller function on flag
+1. **Core function in `controller/`** — pure logic, no UI types. Tested independently.
+2. **TUI wires the key** — `app.go` calls the controller function on keypress.
+3. **Web API wires the endpoint** — `handlers.go` calls the same controller function on HTTP request.
+4. **CLI wires the flag** — `cmd/*.go` calls the same controller function on flag.
 
-If a feature exists in only one frontend, it's tech debt. Track it.
+If a feature exists in only one frontend, it is tech debt. Track it.
 
-Before merging any PR that adds a keybinding to `app.go`, verify:
-- The logic is in `controller/` (or another core package), not inline in `app.go`
+**Pre-merge checklist for any new keybinding in `app.go`:**
+- The logic is in `controller/` (or another core package), not inline
 - There is a corresponding web API endpoint (even if the React UI doesn't consume it yet)
 - The controller function has tests independent of any UI framework
 
-**Operations already in `controller/`:** ExportJSONL, ExportOTEL, FilterHidden, DeleteSession, BulkDeleteSessions, NextAttend, PartitionByArchive, SortAgents, FilterAgents, ShouldNotify, DetermineKillAction, ToggleStar, SetAnnotation, SetTags, SetNote.
+### Operations in `controller/` (shared across frontends)
+
+| Operation | Function | TUI | Web API | CLI |
+|-----------|----------|-----|---------|-----|
+| Sort agents | `SortAgents()` | `s` key | -- TODO | -- TODO |
+| Filter agents | `FilterAgents()` | `/` key | -- TODO | -- TODO |
+| Smart attend | `NextAttend()` | `a` key | -- TODO | -- |
+| Auto-archive | `PartitionByArchive()` | `o` key | -- TODO | -- |
+| Notify decision | `ShouldNotify()` | `maybeNotify` | -- TODO (SSE) | -- |
+| Kill action | `DetermineKillAction()` | `x` key | `POST /archive` | -- TODO |
+| Toggle star | `ToggleStar()` | `*` key | `POST /sessions/meta` | -- TODO |
+| Set annotation | `SetAnnotation()` | sessions view | `POST /sessions/meta` | -- TODO |
+| Set tags | `SetTags()` | sessions view | `POST /sessions/meta` | -- TODO |
+| Set note | `SetNote()` | sessions view | `POST /sessions/meta` | -- TODO |
+| Export JSONL | `ExportJSONL()` | `:export` | `POST /export/jsonl` | -- TODO |
+| Export OTEL | `ExportOTEL()` | `:export-otel` | `POST /export/otel` | -- TODO |
+| Delete session | `DeleteSession()` | `d` key | -- TODO | -- TODO |
+| Filter hidden | `FilterHidden()` | auto | auto | -- |
+
+"-- TODO" means the controller function exists but the frontend hasn't wired it yet.
+
+### What Frontends Own (and nothing else)
+
+**TUI owns:** lipgloss styling, Bubble Tea `tea.Cmd`/`tea.Model` wiring, key routing, terminal rendering, PTY embedding, VT emulator display.
+
+**Web owns:** HTTP routing, SSE streaming, WebSocket terminal, React components, CSS, browser layout, CORS.
+
+**CLI owns:** Cobra command tree, flag parsing, `--json` output formatting, `--dry-run` simulation, delivery targets.
+
+**None of these should contain business logic.** If a function in `app.go` doesn't reference `tea.Model`, `tea.Cmd`, or `lipgloss`, it belongs in a core package.
+
+### Runtime Layer (new)
+
+Sessions can run locally or in containers (Podman, K8s). Sandboxing is a separate
+policy layer that wraps the runtime. The runtime package uses the optional-capability
+pattern.
+
+```
+Runtime interface (internal/runtime/)
+  Local          — process on host (current default, no-op lifecycle)
+  Container      — Podman/Docker container
+  OpenShellRuntime — NVIDIA OpenShell sandbox (stub, implements Runtime + PolicyEnforcer)
+
+PolicyEnforcer interface (optional capability)
+  ApplyPolicy()   — apply network/filesystem/process policy
+  UpdatePolicy()  — hot-reload policy
+  CurrentPolicy() — inspect active policy
+```
+
+**Not yet wired:** The runtime package defines interfaces and implementations but
+`spawn.Launch()` still uses the old direct path. Wiring runtime selection into the
+launcher is a future task.
+
+### Config Layering
+
+```
+~/.aimux/config.yaml        — global defaults
+.aimux/config.yaml          — project-local overrides (committed to git, shared with team)
+CLI flags                   — per-invocation overrides
+```
+
+`config.LoadProject(dir, global)` merges project-local over global. Non-zero values win.
+Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't called).
+
+### Parity Gaps to Close (tech debt)
+
+**TUI has, Web API missing:**
+- Cost dashboard (`/api/costs`)
+- Teams view (`/api/teams`)
+- Health check (`/api/health/providers`)
+- Agent filter/sort query params on `/api/events`
+- Trace search within turns
+- Session delete/bulk cleanup endpoints
+- Spawn with OTEL toggle
+
+**TUI has, CLI missing:**
+- Trace viewing, annotations, cost tracking, kill agent, export
+
+**Web has, TUI missing:**
+- Plugin listing/execution, AI insights, task complete/reopen
 
 ## Provider Architecture
 

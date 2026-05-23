@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/controller"
 )
 
 type agentJSON struct {
@@ -23,9 +24,14 @@ type agentJSON struct {
 
 type discoverFunc func() ([]agent.Agent, error)
 
+// validSortFields lists the accepted values for --sort.
+var validSortFields = []string{"name", "cost", "cpu", "mem", "age", "model"}
+
 func newAgentsCmd(discover discoverFunc) *cobra.Command {
 	var limit int
 	var fields string
+	var sortField string
+	var filterQuery string
 
 	cmd := &cobra.Command{
 		Use:   "agents",
@@ -36,6 +42,28 @@ func newAgentsCmd(discover discoverFunc) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("discovery failed: %w", err)
 			}
+
+			// Validate --sort value if provided.
+			if sortField != "" {
+				validSort := false
+				for _, v := range validSortFields {
+					if sortField == v {
+						validSort = true
+						break
+					}
+				}
+				if !validSort {
+					return fmt.Errorf("invalid sort field %q (must be one of: %s)", sortField, strings.Join(validSortFields, ", "))
+				}
+			}
+
+			// Apply filter before sort and limit.
+			if filterQuery != "" {
+				agents = controller.FilterAgents(agents, filterQuery)
+			}
+
+			// Apply sort.
+			controller.SortAgents(agents, sortField)
 
 			total := len(agents)
 			truncated := false
@@ -84,6 +112,8 @@ func newAgentsCmd(discover discoverFunc) *cobra.Command {
 
 	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum number of agents to show")
 	cmd.Flags().StringVar(&fields, "fields", "", "Comma-separated fields: pid,provider,status,project,model,session_id,tmux_session,working_dir")
+	cmd.Flags().StringVar(&sortField, "sort", "", "Sort agents by field: name, cost, cpu, mem, age, model")
+	cmd.Flags().StringVar(&filterQuery, "filter", "", "Filter agents by case-insensitive text match")
 	return cmd
 }
 

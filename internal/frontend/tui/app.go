@@ -191,6 +191,12 @@ type App struct {
 // NewApp creates a new root TUI application.
 func NewApp() App {
 	cfg, _ := config.Load(config.DefaultPath())
+
+	// Merge project-local config if running from a project directory
+	if cwd, err := os.Getwd(); err == nil {
+		cfg, _ = config.LoadProject(cwd, cfg)
+	}
+
 	ctrl := controller.New(cfg)
 
 	allProviders := []provider.Provider{

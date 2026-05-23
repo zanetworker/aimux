@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/trace"
 )
@@ -375,5 +376,411 @@ func TestSessionDiffsHandler_WithSessionFile(t *testing.T) {
 
 	if payload.TotalFiles < 0 {
 		t.Errorf("totalFiles should be >= 0, got %d", payload.TotalFiles)
+	}
+}
+
+func makeTestAgents() []agent.Agent {
+	return []agent.Agent{
+		{
+			PID: 1001, SessionID: "sess-1", Name: "aimux",
+			ProviderName: "claude", Model: "claude-opus-4-6[1m]",
+			WorkingDir: "/home/user/projects/aimux",
+			Status: agent.StatusActive, TokensIn: 5000, TokensOut: 2000,
+			EstCostUSD: 0.85, CPUPercent: 12.5, MemoryMB: 400,
+			StartTime: time.Now().Add(-10 * time.Minute),
+			LastActivity: time.Now().Add(-1 * time.Minute),
+			GitBranch: "main", LastAction: "Ed main.go",
+		},
+		{
+			PID: 1002, SessionID: "sess-2", Name: "showtime",
+			ProviderName: "codex", Model: "o4-mini",
+			WorkingDir: "/home/user/projects/showtime",
+			Status: agent.StatusIdle, TokensIn: 3000, TokensOut: 1000,
+			EstCostUSD: 0.25, CPUPercent: 0.5, MemoryMB: 200,
+			StartTime: time.Now().Add(-30 * time.Minute),
+			LastActivity: time.Now().Add(-5 * time.Minute),
+			GitBranch: "feat/record", LastAction: "Sh go test",
+		},
+		{
+			PID: 1003, SessionID: "sess-3", Name: "aimux",
+			ProviderName: "claude", Model: "claude-sonnet-4-5",
+			WorkingDir: "/home/user/projects/aimux",
+			Status: agent.StatusActive, TokensIn: 8000, TokensOut: 4000,
+			EstCostUSD: 0.42, CPUPercent: 8.0, MemoryMB: 350,
+			StartTime: time.Now().Add(-5 * time.Minute),
+			LastActivity: time.Now(),
+			GitBranch: "main", LastAction: "Rd config.go",
+		},
+	}
+}
+
+func newServerWithAgents(agents []agent.Agent) *Server {
+	s := NewServer(0)
+	s.SetDiscoverFunc(func() ([]agent.Agent, error) {
+		return agents, nil
+	})
+	s.SetKillFunc(func(pid int, tmux string) error {
+		return nil
+	})
+	return s
+}
+
+func TestHandleCosts(t *testing.T) {
+	agents := makeTestAgents()
+	s := newServerWithAgents(agents)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/costs")
+	if err != nil {
+		t.Fatalf("GET /api/costs failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Costs []struct {
+			Project    string  `json:"project"`
+			Provider   string  `json:"provider"`
+			TokensIn   int64   `json:"tokens_in"`
+			TokensOut  int64   `json:"tokens_out"`
+			CostUSD    float64 `json:"cost"`
+			AgentCount int     `json:"agent_count"`
+		} `json:"costs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Two projects: aimux (2 agents) and showtime (1 agent)
+	if len(payload.Costs) != 2 {
+		t.Fatalf("expected 2 cost entries, got %d", len(payload.Costs))
+	}
+
+	// Sorted by cost desc: aimux (0.85+0.42=1.27) > showtime (0.25)
+	if payload.Costs[0].Project != "aimux" {
+		t.Errorf("expected first entry to be aimux, got %s", payload.Costs[0].Project)
+	}
+	if payload.Costs[0].AgentCount != 2 {
+		t.Errorf("expected 2 agents for aimux, got %d", payload.Costs[0].AgentCount)
+	}
+	if payload.Costs[0].TokensIn != 13000 {
+		t.Errorf("expected 13000 tokens_in for aimux, got %d", payload.Costs[0].TokensIn)
+	}
+	if payload.Costs[1].Project != "showtime" {
+		t.Errorf("expected second entry to be showtime, got %s", payload.Costs[1].Project)
+	}
+}
+
+func TestHandleCosts_NotConfigured(t *testing.T) {
+	s := NewServer(0)
+	// No discoverFn set
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/costs")
+	if err != nil {
+		t.Fatalf("GET /api/costs failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleAgents(t *testing.T) {
+	agents := makeTestAgents()
+	s := newServerWithAgents(agents)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/agents")
+	if err != nil {
+		t.Fatalf("GET /api/agents failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Agents) != 3 {
+		t.Fatalf("expected 3 agents, got %d", len(payload.Agents))
+	}
+
+	// Verify required fields present
+	for _, field := range []string{"pid", "sessionId", "provider", "model", "project", "status", "costUSD"} {
+		if _, ok := payload.Agents[0][field]; !ok {
+			t.Errorf("agent missing field %q", field)
+		}
+	}
+}
+
+func TestHandleAgents_Filter(t *testing.T) {
+	agents := makeTestAgents()
+	s := newServerWithAgents(agents)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/agents?filter=codex")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var payload struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+
+	if len(payload.Agents) != 1 {
+		t.Fatalf("expected 1 agent matching 'codex', got %d", len(payload.Agents))
+	}
+	if payload.Agents[0]["provider"] != "codex" {
+		t.Errorf("expected provider codex, got %v", payload.Agents[0]["provider"])
+	}
+}
+
+func TestHandleAgents_Sort(t *testing.T) {
+	agents := makeTestAgents()
+	s := newServerWithAgents(agents)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/agents?sort=cost")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var payload struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+
+	if len(payload.Agents) != 3 {
+		t.Fatalf("expected 3 agents, got %d", len(payload.Agents))
+	}
+
+	// Sort by cost descending: first should have highest cost (0.85)
+	firstCost := payload.Agents[0]["costUSD"].(float64)
+	secondCost := payload.Agents[1]["costUSD"].(float64)
+	if firstCost < secondCost {
+		t.Errorf("expected descending cost order, got first=%.2f second=%.2f", firstCost, secondCost)
+	}
+}
+
+func TestHandleDeleteSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "test-delete-session.jsonl")
+	_ = os.WriteFile(sessionFile, []byte("{\"type\":\"summary\",\"session_id\":\"del-123\"}\n"), 0o600)
+
+	// Verify file exists before delete
+	if _, err := os.Stat(sessionFile); err != nil {
+		t.Fatalf("session file should exist before delete: %v", err)
+	}
+
+	s := NewServer(0)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	// Try deleting a non-existent session
+	req, _ := http.NewRequest("DELETE", s.URL()+"/api/sessions/nonexistent-id", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE failed: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for nonexistent session, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleKill_ProcessAgent(t *testing.T) {
+	var killedPID int
+	agents := []agent.Agent{
+		{
+			PID: 9999, SessionID: "kill-sess-1",
+			ProviderName: "claude", Status: agent.StatusActive,
+			WorkingDir: "/tmp/test",
+		},
+	}
+	s := NewServer(0)
+	s.SetDiscoverFunc(func() ([]agent.Agent, error) {
+		return agents, nil
+	})
+	s.SetKillFunc(func(pid int, tmux string) error {
+		killedPID = pid
+		return nil
+	})
+
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Post(s.URL()+"/api/agents/kill-sess-1/kill", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if killedPID != 9999 {
+		t.Errorf("expected kill PID 9999, got %d", killedPID)
+	}
+
+	var payload struct {
+		Status   string `json:"status"`
+		KillType int    `json:"killType"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+	if payload.Status != "killed" {
+		t.Errorf("expected status 'killed', got %q", payload.Status)
+	}
+}
+
+func TestHandleKill_NotFound(t *testing.T) {
+	s := newServerWithAgents(nil)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Post(s.URL()+"/api/agents/nonexistent/kill", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleKill_ByPID(t *testing.T) {
+	var killedPID int
+	agents := []agent.Agent{
+		{
+			PID: 42, SessionID: "pid-sess",
+			ProviderName: "claude", Status: agent.StatusActive,
+			WorkingDir: "/tmp/test",
+		},
+	}
+	s := NewServer(0)
+	s.SetDiscoverFunc(func() ([]agent.Agent, error) {
+		return agents, nil
+	})
+	s.SetKillFunc(func(pid int, tmux string) error {
+		killedPID = pid
+		return nil
+	})
+
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Post(s.URL()+"/api/agents/42/kill", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if killedPID != 42 {
+		t.Errorf("expected kill PID 42, got %d", killedPID)
+	}
+}
+
+func TestHandleKill_RemoveOnly(t *testing.T) {
+	agents := []agent.Agent{
+		{
+			PID: 0, SessionID: "remove-only-sess",
+			ProviderName: "claude", Status: agent.StatusUnknown,
+			WorkingDir: "/tmp/test",
+		},
+	}
+	s := newServerWithAgents(agents)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Post(s.URL()+"/api/agents/remove-only-sess/kill", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		KillType int `json:"killType"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+	// KillRemoveOnly = 2
+	if payload.KillType != 2 {
+		t.Errorf("expected killType 2 (RemoveOnly), got %d", payload.KillType)
+	}
+}
+
+func TestHandleCosts_NoAgents(t *testing.T) {
+	s := newServerWithAgents(nil)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/costs")
+	if err != nil {
+		t.Fatalf("GET /api/costs failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Costs []map[string]any `json:"costs"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+	if len(payload.Costs) != 0 {
+		t.Errorf("expected empty costs array, got %d entries", len(payload.Costs))
+	}
+}
+
+func TestHandleAgents_NotConfigured(t *testing.T) {
+	s := NewServer(0)
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/agents")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", resp.StatusCode)
 	}
 }

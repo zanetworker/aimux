@@ -135,6 +135,11 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/plugins/{name}/data", s.handlePluginData)
 	mux.HandleFunc("POST /api/insight", s.handleInsight)
 
+	mux.HandleFunc("GET /api/costs", s.handleCosts)
+	mux.HandleFunc("GET /api/agents", s.handleAgents)
+	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	mux.HandleFunc("POST /api/agents/{id}/kill", s.handleKill)
+
 	mux.HandleFunc("GET /api/directories/browse", s.handleBrowseDir)
 	mux.HandleFunc("GET /api/directories/recent", s.handleRecentDirs)
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/history"
 )
 
@@ -89,6 +90,25 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 				enriched[i].Title = firstPromptFromJSONL(a.SessionFile)
 			}
 			enriched[i].Starred = meta.Starred
+		}
+	}
+
+	// Evaluate configurable badges for each agent.
+	if len(s.cfg.Badges) > 0 {
+		rules := make([]badge.Rule, len(s.cfg.Badges))
+		for i, b := range s.cfg.Badges {
+			rules[i] = badge.Rule{Path: b.Path, JSONPath: b.JSONPath, Label: b.Label, Color: b.Color}
+		}
+		for i := range enriched {
+			if enriched[i].WorkingDir != "" {
+				badges := badge.Evaluate(enriched[i].WorkingDir, rules)
+				enriched[i].Badges = make([]agent.BadgeValue, len(badges))
+				for j, b := range badges {
+					enriched[i].Badges[j] = agent.BadgeValue{
+						Label: b.Label, Value: b.Value, Color: b.Color,
+					}
+				}
+			}
 		}
 	}
 

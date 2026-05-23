@@ -4,6 +4,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // Deps holds all injectable dependencies for cobra subcommands.
@@ -20,6 +21,7 @@ type Deps struct {
 	ProfileStore     *profile.Store
 	SkipPermissions  bool
 	FeedbackPath     string
+	TraceParsers     map[string]func(filePath string) ([]trace.Turn, error)
 }
 
 // RegisterAll wires all subcommands to rootCmd using the provided dependencies.
@@ -35,4 +37,12 @@ func RegisterAll(d Deps) {
 		rootCmd.AddCommand(newProfileCmd(d.ProfileStore))
 	}
 	rootCmd.AddCommand(newFeedbackCmd(d.FeedbackPath))
+	rootCmd.AddCommand(newKillCmd(d.Discover))
+
+	// Build trace parser map for export command, converting function types.
+	parsers := make(map[string]traceParserFn)
+	for name, fn := range d.TraceParsers {
+		parsers[name] = fn
+	}
+	rootCmd.AddCommand(newExportCmd(d.DiscoverSessions, parsers))
 }

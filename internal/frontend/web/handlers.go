@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/evaluation"
@@ -709,6 +711,211 @@ func (s *Server) handleSessionDiffs(w http.ResponseWriter, r *http.Request) {
 		"totalRemoved": totalRemoved,
 	}); err != nil {
 		debuglog.Log("encode session diffs: %v", err)
+	}
+}
+
+func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
+	if s.discoverFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+	agents, err := s.cachedDiscover()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	type costEntry struct {
+		Project    string  `json:"project"`
+		Provider   string  `json:"provider"`
+		Model      string  `json:"model"`
+		TokensIn   int64   `json:"tokens_in"`
+		TokensOut  int64   `json:"tokens_out"`
+		CostUSD    float64 `json:"cost"`
+		AgentCount int     `json:"agent_count"`
+	}
+
+	// Group by project
+	groups := make(map[string]*costEntry)
+	for _, a := range agents {
+		proj := a.ShortProject()
+		if proj == "" {
+			proj = "(unknown)"
+		}
+		e, ok := groups[proj]
+		if !ok {
+			e = &costEntry{
+				Project:  proj,
+				Provider: a.ProviderName,
+				Model:    a.ShortModel(),
+			}
+			groups[proj] = e
+		}
+		e.TokensIn += a.TokensIn
+		e.TokensOut += a.TokensOut
+		e.CostUSD += a.EstCostUSD
+		e.AgentCount++
+	}
+
+	result := make([]costEntry, 0, len(groups))
+	for _, e := range groups {
+		result = append(result, *e)
+	}
+	// Sort by cost descending
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CostUSD > result[j].CostUSD
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"costs": result}); err != nil {
+		debuglog.Log("encode costs response: %v", err)
+	}
+}
+
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
+	if s.discoverFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+	agents, err := s.cachedDiscover()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Copy to avoid mutating cached slice
+	result := make([]agent.Agent, len(agents))
+	copy(result, agents)
+
+	if q := r.URL.Query().Get("filter"); q != "" {
+		result = controller.FilterAgents(result, q)
+	}
+	if sortField := r.URL.Query().Get("sort"); sortField != "" {
+		controller.SortAgents(result, sortField)
+	}
+
+	// Serialize
+	items := make([]map[string]any, len(result))
+	for i, a := range result {
+		items[i] = map[string]any{
+			"pid":          a.PID,
+			"sessionId":    a.SessionID,
+			"name":         a.Name,
+			"provider":     a.ProviderName,
+			"model":        a.Model,
+			"shortModel":   a.ShortModel(),
+			"project":      a.ShortProject(),
+			"workingDir":   a.WorkingDir,
+			"status":       a.Status.String(),
+			"source":       a.Source.String(),
+			"sessionFile":  a.SessionFile,
+			"tmuxSession":  a.TMuxSession,
+			"tokensIn":     a.TokensIn,
+			"tokensOut":    a.TokensOut,
+			"costUSD":      a.EstCostUSD,
+			"cpuPercent":   a.CPUPercent,
+			"memoryMB":     a.MemoryMB,
+			"gitBranch":    a.GitBranch,
+			"lastAction":   a.LastAction,
+			"startTime":    a.StartTime.Format(time.RFC3339),
+			"lastActivity": a.LastActivity.Format(time.RFC3339),
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"agents": items}); err != nil {
+		debuglog.Log("encode agents response: %v", err)
+	}
+}
+
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if sessionID == "" {
+		http.Error(w, "session ID required", http.StatusBadRequest)
+		return
+	}
+
+	sessions, err := history.Discover(history.DiscoverOpts{}, "")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("discover sessions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	for _, sess := range sessions {
+		if sess.ID == sessionID {
+			if err := controller.DeleteSession(sess); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]string{"status": "deleted"}); err != nil {
+				debuglog.Log("encode delete session response: %v", err)
+			}
+			return
+		}
+	}
+	http.Error(w, "session not found", http.StatusNotFound)
+}
+
+func (s *Server) handleKill(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	if agentID == "" {
+		http.Error(w, "agent ID required", http.StatusBadRequest)
+		return
+	}
+
+	if s.discoverFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+	agents, err := s.cachedDiscover()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Find the agent by PID or session ID
+	var target *agent.Agent
+	for i := range agents {
+		if agents[i].SessionID == agentID || fmt.Sprintf("%d", agents[i].PID) == agentID {
+			target = &agents[i]
+			break
+		}
+	}
+	if target == nil {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+
+	action := controller.DetermineKillAction(*target)
+
+	switch action.Type {
+	case controller.KillProcess:
+		if s.killFn == nil {
+			http.Error(w, "kill not configured", http.StatusServiceUnavailable)
+			return
+		}
+		if err := s.killFn(target.PID, target.TMuxSession); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	case controller.KillPod:
+		// Use kubectl to delete the pod
+		cmd := exec.Command("kubectl", "delete", "pod", action.PodName, "-n", action.Namespace) // #nosec G204
+		if out, err := cmd.CombinedOutput(); err != nil {
+			http.Error(w, fmt.Sprintf("kubectl delete: %s: %v", string(out), err), http.StatusInternalServerError)
+			return
+		}
+	case controller.KillRemoveOnly:
+		// Session-only entry, nothing to kill
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"status":   "killed",
+		"killType": action.Type,
+	}); err != nil {
+		debuglog.Log("encode kill response: %v", err)
 	}
 }
 
