@@ -538,7 +538,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			envPrefix = p.OTELEnv(endpoint)
 		}
 		if msg.Container {
-			if err := spawn.LaunchInContainer(cmd, msg.Provider, msg.Dir, a.cfg.ResolveShell(), envPrefix, spawn.ContainerOpts{}); err != nil {
+			cOpts := spawn.ContainerOpts{}
+			for _, rt := range a.cfg.Runtimes {
+				if rt.Type == "container" {
+					cOpts.Engine = rt.Engine
+					cOpts.Image = rt.Image
+					break
+				}
+			}
+			if err := spawn.LaunchInContainer(cmd, msg.Provider, msg.Dir, a.cfg.ResolveShell(), envPrefix, cOpts); err != nil {
 				a.statusHint = fmt.Sprintf("Container launch failed: %v", err)
 				return a, nil
 			}

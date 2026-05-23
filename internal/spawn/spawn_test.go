@@ -2,6 +2,7 @@ package spawn
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,17 @@ func TestLaunchInContainer_NilCmd(t *testing.T) {
 	err := LaunchInContainer(nil, "claude", "/tmp", "/bin/sh", "", ContainerOpts{})
 	if err == nil {
 		t.Error("LaunchInContainer(nil) should return error")
+	}
+}
+
+func TestLaunchInContainer_EngineMissing(t *testing.T) {
+	cmd := exec.Command("echo", "test")
+	err := LaunchInContainer(cmd, "claude", "/tmp", "/bin/sh", "", ContainerOpts{Engine: "nonexistent-engine-xyz"})
+	if err == nil {
+		t.Error("expected error when engine binary not found")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found', got: %s", err.Error())
 	}
 }
 

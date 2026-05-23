@@ -47,6 +47,14 @@ func LaunchInContainer(cmd *exec.Cmd, providerName, dir, shell, envPrefix string
 		return fmt.Errorf("spawn: nil command")
 	}
 
+	engine := opts.Engine
+	if engine == "" {
+		engine = "podman"
+	}
+	if _, err := exec.LookPath(engine); err != nil {
+		return fmt.Errorf("spawn: %s not found in PATH (required for container runtime)", engine)
+	}
+
 	name := ContainerName(providerName, dir)
 	backend := runtime.NewPodmanBackend(opts.Engine)
 	c := runtime.NewContainer(name, backend)
@@ -74,10 +82,6 @@ func LaunchInContainer(cmd *exec.Cmd, providerName, dir, shell, envPrefix string
 	innerCmd := strings.Join(cmdParts, " ")
 
 	// Wrap in tmux: the tmux session runs "podman exec -it <name> <shell> -lc <agent>"
-	engine := opts.Engine
-	if engine == "" {
-		engine = "podman"
-	}
 	execCmd := fmt.Sprintf("%s exec -it %s %s -lc %s",
 		engine, shellQuote(name), shell, shellQuote(innerCmd))
 

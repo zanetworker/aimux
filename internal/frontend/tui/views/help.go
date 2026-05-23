@@ -66,6 +66,13 @@ func (v *HelpView) View() string {
 	writeHelp(&b, "Esc", "Clear filter / go back")
 	writeHelp(&b, "g/G", "Jump to top / bottom")
 	writeHelp(&b, "?", "This help screen")
+	writeHelp(&b, "a", "Attend: jump to next agent needing attention")
+	writeHelp(&b, "o", "Toggle archived agents visibility")
+	writeHelp(&b, "*", "Star/pin selected session")
+	writeHelp(&b, "B", "Starred sessions view")
+	writeHelp(&b, "C", "Copy session ID to clipboard")
+	writeHelp(&b, "d", "Toggle git diff preview in right panel")
+	writeHelp(&b, "Tab", "Switch focus to preview panel")
 	writeHelp(&b, "q", "Quit aimux")
 	b.WriteString("\n")
 
@@ -113,9 +120,10 @@ func (v *HelpView) View() string {
 
 	b.WriteString(helpTitleStyle.Render("Providers"))
 	b.WriteString("\n")
-	writeHelp(&b, "Claude", "Full support (discover, resume, trace, eval)")
-	writeHelp(&b, "Codex", "Discovery, resume, session files")
-	writeHelp(&b, "Gemini", "Planned")
+	writeHelp(&b, "Claude", "Full support (discover, embed, resume, trace, eval)")
+	writeHelp(&b, "Codex", "Full support (discover, resume, trace)")
+	writeHelp(&b, "Gemini", "Full support (discover, resume, trace)")
+	writeHelp(&b, "K8s", "Discovery via Redis, spawn, tasks, health")
 
 	return b.String()
 }
