@@ -52,9 +52,8 @@ type LaunchMsg struct {
 	Dir         string
 	Model       string
 	Mode        string
-	Runtime     string // session manager: "tmux" or "iterm"
-	Container   bool   // true = run inside a container (tmux wraps podman exec)
-	OTELEnabled bool   // true if OTEL tracing should be injected
+	Runtime     string // "local" or "container"
+	OTELEnabled bool
 }
 
 // LaunchResumeMsg is emitted when the user picks a session to resume from the launcher.
@@ -114,10 +113,9 @@ type LauncherView struct {
 	modeCursor   int
 	runtimes     []string
 	runtimeCursor int
-	otelEnabled      bool // toggle for OTEL tracing on spawned session
-	otelAvailable    bool // true if OTEL receiver is running
-	containerEnabled bool // run agent inside a container
-	optionField      int  // 0=model, 1=mode, 2=runtime, 3=otel, 4=container
+	otelEnabled   bool // toggle for OTEL tracing on spawned session
+	otelAvailable bool // true if OTEL receiver is running
+	optionField   int  // 0=model, 1=mode, 2=runtime, 3=otel
 	providerOpts map[string]ProviderOptions
 
 	// Resume step
@@ -173,7 +171,7 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		browsePath:    home,
 		models:        models,
 		modes:         modes,
-		runtimes:      []string{"tmux", "iterm"},
+		runtimes:      []string{"local", "container"},
 		otelAvailable: otelAvailable,
 		otelEnabled:   otelAvailable, // default on if receiver is running
 		providerOpts:  providerOpts,
@@ -378,9 +376,9 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 }
 
 func (l *LauncherView) updateOptions(key string) tea.Cmd {
-	maxField := 3 // 0=model, 1=mode, 2=runtime, 3=container
+	maxField := 2 // 0=model, 1=mode, 2=runtime
 	if l.otelAvailable {
-		maxField = 4 // 0=model, 1=mode, 2=runtime, 3=otel, 4=container
+		maxField = 3 // 0=model, 1=mode, 2=runtime, 3=otel
 	}
 	switch key {
 	case "j", "down":
@@ -399,8 +397,8 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 			if l.modeCursor < len(l.modes)-1 { l.modeCursor++ }
 		case 2:
 			if l.runtimeCursor < len(l.runtimes)-1 { l.runtimeCursor++ }
-		default:
-			l.toggleFieldAtCursor(maxField)
+		case 3:
+			l.otelEnabled = !l.otelEnabled
 		}
 	case "h", "left":
 		switch l.optionField {
@@ -410,23 +408,17 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 			if l.modeCursor > 0 { l.modeCursor-- }
 		case 2:
 			if l.runtimeCursor > 0 { l.runtimeCursor-- }
-		default:
-			l.toggleFieldAtCursor(maxField)
+		case 3:
+			l.otelEnabled = !l.otelEnabled
 		}
 	case " ":
-		l.toggleFieldAtCursor(maxField)
+		if l.optionField == 3 {
+			l.otelEnabled = !l.otelEnabled
+		}
 	case "enter":
 		return l.emitLaunch()
 	}
 	return nil
-}
-
-func (l *LauncherView) toggleFieldAtCursor(maxField int) {
-	if l.optionField == maxField {
-		l.containerEnabled = !l.containerEnabled
-	} else if l.otelAvailable && l.optionField == 3 {
-		l.otelEnabled = !l.otelEnabled
-	}
 }
 
 // advanceFromDir transitions from directory selection to the resume step.
@@ -518,7 +510,6 @@ func (l *LauncherView) emitLaunch() tea.Cmd {
 		Model:       model,
 		Mode:        mode,
 		Runtime:     l.runtimes[l.runtimeCursor],
-		Container:   l.containerEnabled,
 		OTELEnabled: l.otelEnabled,
 	}
 	return func() tea.Msg { return msg }
@@ -895,28 +886,6 @@ func (l *LauncherView) viewOptions() string {
 		}
 		b.WriteString(otelLabel + otelValue + "\n")
 	}
-
-	// Container toggle
-	containerField := 4
-	if !l.otelAvailable {
-		containerField = 3
-	}
-	ctrLabel := launcherLabelStyle.Render(fmt.Sprintf("%-10s", "Container:"))
-	var ctrValue string
-	if l.containerEnabled {
-		if l.optionField == containerField {
-			ctrValue = launcherSelectedStyle.Render(" ON ")
-		} else {
-			ctrValue = launcherOptionStyle.Render("ON")
-		}
-	} else {
-		if l.optionField == containerField {
-			ctrValue = launcherSelectedStyle.Render(" OFF ")
-		} else {
-			ctrValue = launcherOptionStyle.Render("OFF")
-		}
-	}
-	b.WriteString(ctrLabel + ctrValue + "\n")
 
 	b.WriteString("\n")
 	b.WriteString(launcherHintStyle.Render("j/k:field  h/l:option  Space:toggle  Enter:launch  Esc:cancel"))

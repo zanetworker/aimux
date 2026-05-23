@@ -186,8 +186,8 @@ func TestLauncherEmitLaunch(t *testing.T) {
 	if launch.Model != "" {
 		t.Errorf("Model = %q, want empty (default)", launch.Model)
 	}
-	if launch.Runtime != "tmux" {
-		t.Errorf("Runtime = %q, want tmux", launch.Runtime)
+	if launch.Runtime != "local" {
+		t.Errorf("Runtime = %q, want local", launch.Runtime)
 	}
 }
 

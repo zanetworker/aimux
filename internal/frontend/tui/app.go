@@ -537,7 +537,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			endpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
 			envPrefix = p.OTELEnv(endpoint)
 		}
-		if msg.Container {
+		if msg.Runtime == "container" {
 			cOpts := spawn.ContainerOpts{}
 			for _, rt := range a.cfg.Runtimes {
 				if rt.Type == "container" {
@@ -551,7 +551,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 		} else {
-			if err := spawn.Launch(cmd, msg.Provider, msg.Dir, msg.Runtime, a.cfg.ResolveShell(), envPrefix); err != nil {
+			if err := spawn.Launch(cmd, msg.Provider, msg.Dir, "tmux", a.cfg.ResolveShell(), envPrefix); err != nil {
 				a.statusHint = fmt.Sprintf("Launch failed: %v", err)
 				return a, nil
 			}
@@ -559,8 +559,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		name := filepath.Base(msg.Dir)
 
-		// Immediately open split view for the new tmux session
-		if msg.Runtime == "tmux" {
+		// Immediately open split view (both local and container use tmux)
+		if msg.Runtime == "local" || msg.Runtime == "container" {
 			tmuxName := spawn.TmuxSessionName(msg.Provider, msg.Dir)
 
 			// Size the session view
