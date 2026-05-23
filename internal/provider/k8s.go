@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -14,18 +13,13 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/debuglog"
+	aimuxrt "github.com/zanetworker/aimux/internal/runtime"
 	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/trace"
 	"github.com/zanetworker/aimux/pkg/rediskeys"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // K8sConfig holds connection settings for the Kubernetes provider.
@@ -42,9 +36,10 @@ type K8sConfig struct {
 // Agents are discovered via Redis heartbeats rather than local process scanning.
 // This provider never embeds a PTY — agents run in pods and are viewed trace-only.
 type K8s struct {
-	cfg K8sConfig
-	mu  sync.Mutex
-	rdb *redis.Client
+	cfg     K8sConfig
+	mu      sync.Mutex
+	rdb     *redis.Client
+	backend *aimuxrt.K8sBackend
 
 	// Circuit breaker: skip Redis calls for a cooldown period after failure.
 	// Prevents the TUI from freezing when Redis is unreachable.
@@ -54,7 +49,11 @@ type K8s struct {
 
 // NewK8s constructs a K8s provider with the given configuration.
 func NewK8s(cfg K8sConfig) *K8s {
-	return &K8s{cfg: cfg, redisCooldown: 30 * time.Second}
+	return &K8s{
+		cfg:           cfg,
+		redisCooldown: 30 * time.Second,
+		backend:       aimuxrt.NewK8sBackend(cfg.Namespace, cfg.Kubeconfig),
+	}
 }
 
 // redisClient returns the shared Redis client, creating it lazily on first use.
@@ -145,13 +144,17 @@ func (k *K8s) CheckHealth() HealthStatus {
 	}
 
 	// Check compute layer (K8s API)
-	client, err := k.kubeClient()
+	client, err := k.backend.KubeClient()
 	if err != nil {
 		status.ComputeErr = "cannot connect — check kubeconfig"
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
-		deploys, err := client.AppsV1().Deployments(k.cfg.Namespace).List(ctx, metav1.ListOptions{
+		namespace := k.cfg.Namespace
+		if namespace == "" {
+			namespace = "agents"
+		}
+		deploys, err := client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "team-component in (agent,session)",
 		})
 		if err != nil {
@@ -322,7 +325,7 @@ func (k *K8s) discoverFromRedis() []agent.Agent {
 // available capacity for new sessions. Status is set to Idle for pods
 // without an active tmux session, Active for pods with one.
 func (k *K8s) discoverSessionPods() []agent.Agent {
-	client, err := k.kubeClient()
+	client, err := k.backend.KubeClient()
 	if err != nil {
 		debuglog.Log("k8s: pod discover skipped (no kube client): %v", err)
 		return nil
@@ -681,207 +684,29 @@ func (k *K8s) GetTaskResult(taskID string) (string, error) {
 }
 
 // SpawnRemote scales up the Kubernetes Deployment named "agent-{provider}-{role}"
-// to the specified replica count. Returns an error if the kube client cannot be
-// constructed or the deployment does not exist.
+// by the specified count. Returns an error if the kube client cannot be
+// constructed or the deployment cannot be created/scaled.
 // Implements the optional Spawner interface.
 func (k *K8s) SpawnRemote(provider, role string, count int) error {
-	clientset, err := k.kubeClient()
-	if err != nil {
-		return fmt.Errorf("cannot connect to cluster — check kubeconfig")
-	}
-
-	namespace := k.cfg.Namespace
-	if namespace == "" {
-		namespace = "agents"
-	}
-
 	deployName := spawnDeploymentName(provider, role)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
-		// Auto-create the deployment if it doesn't exist.
-		debuglog.Log("k8s: deployment %q not found, creating automatically", deployName)
-		deploy, err = k.createAgentDeployment(ctx, clientset, namespace, provider, role)
-		if err != nil {
-			return fmt.Errorf("cannot create deployment %q: %w", deployName, err)
+	image := k.imageForProvider(provider)
+	opts := aimuxrt.BackendCreateOpts{
+		Image: image,
+		Labels: map[string]string{
+			"team-component": role,
+			"provider":       provider,
+		},
+	}
+	for i := 0; i < count; i++ {
+		if err := k.backend.Create(deployName, opts); err != nil {
+			return fmt.Errorf("cannot scale %q: %w", deployName, err)
 		}
-	} else if err != nil {
-		return fmt.Errorf("cannot get deployment %q: %w", deployName, err)
-	}
-
-	replicas := int32(count) // #nosec G115 -- count validated by caller
-	if deploy.Spec.Replicas != nil {
-		replicas = *deploy.Spec.Replicas + int32(count) // #nosec G115 -- count validated by caller
-	}
-	deploy.Spec.Replicas = &replicas
-	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("cannot scale %q — check RBAC permissions", deployName)
 	}
 	return nil
 }
 
-// createAgentDeployment builds and creates a Deployment for the given provider
-// and role. The deployment starts at 0 replicas (SpawnRemote scales it up).
-//
-// The deployment is minimal — no service accounts, no repo cloning, no Redis.
-// Auth secrets (llm-keys, gcp-adc) are referenced as optional so the pod
-// starts even if they don't exist. For Vertex AI, env vars are forwarded
-// by aimux at attach time (sessions) or baked in (tasks via ensureAuthSecret).
-func (k *K8s) createAgentDeployment(ctx context.Context, clientset kubernetes.Interface, namespace, provider, role string) (*appsv1.Deployment, error) {
-	deployName := spawnDeploymentName(provider, role)
-	image := k.imageForProvider(provider)
-	replicas := int32(0)
-
-	// Ensure the namespace exists.
-	k.ensureNamespace(ctx, clientset, namespace)
-
-	// Ensure auth secrets exist from local env vars.
-	k.ensureAuthSecrets(ctx, clientset, namespace)
-
-	deploy := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      deployName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"app":                          deployName,
-				"team-component":               role,
-				"provider":                     provider,
-				"app.kubernetes.io/part-of":    "k8s-agents",
-				"app.kubernetes.io/managed-by": "aimux",
-			},
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &replicas,
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": deployName},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app":                       deployName,
-						"team-component":            role,
-						"provider":                  provider,
-						"app.kubernetes.io/part-of": "k8s-agents",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{
-						Name:    role,
-						Image:   image,
-						Command: []string{"sleep", "infinity"},
-						Env: []corev1.EnvVar{
-							// Vertex AI auth via mounted ADC file
-							{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: "/var/secrets/gcp/adc.json"},
-							// API key auth via secret
-							{Name: "ANTHROPIC_API_KEY", ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "llm-keys"},
-									Key:                  "anthropic",
-									Optional:             boolPtr(true),
-								},
-							}},
-							{Name: "TERM", Value: "xterm-256color"},
-						},
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceMemory: resource.MustParse("1Gi"),
-								corev1.ResourceCPU:    resource.MustParse("500m"),
-							},
-							Limits: corev1.ResourceList{
-								corev1.ResourceMemory: resource.MustParse("2Gi"),
-								corev1.ResourceCPU:    resource.MustParse("1000m"),
-							},
-						},
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "gcp-adc", MountPath: "/var/secrets/gcp", ReadOnly: true},
-						},
-					}},
-					Volumes: []corev1.Volume{
-						{Name: "gcp-adc", VolumeSource: corev1.VolumeSource{
-							Secret: &corev1.SecretVolumeSource{
-								SecretName: "gcp-adc",
-								Optional:   boolPtr(true),
-							},
-						}},
-					},
-				},
-			},
-		},
-	}
-
-	debuglog.Log("k8s: creating deployment %s/%s (image=%s)", namespace, deployName, image)
-	return clientset.AppsV1().Deployments(namespace).Create(ctx, deploy, metav1.CreateOptions{})
-}
-
-// ensureNamespace creates the namespace if it doesn't exist.
-func (k *K8s) ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namespace string) {
-	_, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   namespace,
-				Labels: map[string]string{"app.kubernetes.io/managed-by": "aimux"},
-			},
-		}
-		if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil {
-			debuglog.Log("k8s: failed to create namespace %s: %v", namespace, err)
-		} else {
-			debuglog.Log("k8s: created namespace %s", namespace)
-		}
-	}
-}
-
-// ensureAuthSecrets creates auth secrets from local environment if they don't
-// already exist in the cluster. This lets users point at a bare cluster
-// without manual kubectl create secret commands.
-func (k *K8s) ensureAuthSecrets(ctx context.Context, clientset kubernetes.Interface, namespace string) {
-	// GCP ADC: copy local credentials file into a secret
-	if adcPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); adcPath != "" {
-		_, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "gcp-adc", metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			data, readErr := os.ReadFile(adcPath) // #nosec G304 #nosec G703
-			if readErr == nil {
-				secret := &corev1.Secret{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "gcp-adc",
-						Namespace: namespace,
-						Labels:    map[string]string{"app.kubernetes.io/managed-by": "aimux"},
-					},
-					Data: map[string][]byte{"adc.json": data},
-				}
-				if _, err := clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-					debuglog.Log("k8s: failed to create gcp-adc secret: %v", err)
-				} else {
-					debuglog.Log("k8s: created gcp-adc secret from %s", adcPath)
-				}
-			}
-		}
-	}
-
-	// API key: create llm-keys secret from env
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		_, err := clientset.CoreV1().Secrets(namespace).Get(ctx, "llm-keys", metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			secret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "llm-keys",
-					Namespace: namespace,
-					Labels:    map[string]string{"app.kubernetes.io/managed-by": "aimux"},
-				},
-				Data: map[string][]byte{"anthropic": []byte(apiKey)},
-			}
-			if _, err := clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-				debuglog.Log("k8s: failed to create llm-keys secret: %v", err)
-			} else {
-				debuglog.Log("k8s: created llm-keys secret from ANTHROPIC_API_KEY")
-			}
-		}
-	}
-}
+// NOTE: createAgentDeployment, ensureNamespace, ensureAuthSecrets moved to
+// internal/runtime/k8s.go (K8sBackend).
 
 // imageForProvider returns the container image for the given provider.
 func (k *K8s) imageForProvider(provider string) string {
@@ -895,138 +720,27 @@ func (k *K8s) imageForProvider(provider string) string {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
-
-// SpawnSession scales up the session deployment by one replica, waits for the
-// new pod to be Running, and returns its name and namespace. The caller uses
-// the pod name to attach via KubectlExecBackend.
+// SpawnSession delegates to the K8sBackend to create a session pod and wait
+// for it to become ready. Returns the pod name and namespace.
 func (k *K8s) SpawnSession(providerName string) (podName, namespace string, err error) {
-	clientset, err := k.kubeClient()
-	if err != nil {
-		return "", "", fmt.Errorf("cannot connect to cluster: %w", err)
-	}
-
-	namespace = k.cfg.Namespace
-	if namespace == "" {
-		namespace = "agents"
-	}
-
 	deployName := spawnDeploymentName(providerName, "session")
-
-	// Snapshot existing pod names before scaling up.
-	existingPods := make(map[string]bool)
-	podList, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
-		LabelSelector: "app=" + deployName,
-	})
-	if err == nil {
-		for _, p := range podList.Items {
-			existingPods[p.Name] = true
-		}
+	image := k.imageForProvider(providerName)
+	pod, createErr := k.backend.CreateAndWait(deployName, aimuxrt.BackendCreateOpts{Image: image})
+	if createErr != nil {
+		return "", "", createErr
 	}
-
-	// Scale up by 1.
-	if err := k.SpawnRemote(providerName, "session", 1); err != nil {
-		return "", "", err
-	}
-	debuglog.Log("k8s: SpawnSession scaled up %s, waiting for new pod...", deployName)
-
-	// Poll for the new pod (one that wasn't in the snapshot).
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", "", fmt.Errorf("timed out waiting for pod to start (60s)")
-		case <-ticker.C:
-			pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-				LabelSelector: "app=" + deployName,
-				FieldSelector: "status.phase=Running",
-			})
-			if err != nil {
-				continue
-			}
-			for _, p := range pods.Items {
-				if !existingPods[p.Name] {
-					debuglog.Log("k8s: SpawnSession new pod ready: %s", p.Name)
-					return p.Name, namespace, nil
-				}
-			}
-		}
-	}
+	ns := k.backend.Namespace()
+	return pod, ns, nil
 }
 
-// ScaleDown scales the Kubernetes Deployment named "agent-{provider}-{role}"
-// to 0 replicas. Returns an error if the kube client cannot be constructed
-// or the deployment does not exist.
-// Implements the optional Spawner interface.
+// ScaleDown delegates to K8sBackend to scale the deployment to 0.
 func (k *K8s) ScaleDown(provider, role string) error {
-	clientset, err := k.kubeClient()
-	if err != nil {
-		return fmt.Errorf("cannot connect to cluster — check kubeconfig")
-	}
-
-	namespace := k.cfg.Namespace
-	if namespace == "" {
-		namespace = "agents"
-	}
-
-	deployName := spawnDeploymentName(provider, role)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("deployment %q not found — run: kubectl apply -f deploy/k8s/", deployName)
-	}
-
-	zero := int32(0)
-	deploy.Spec.Replicas = &zero
-	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("cannot scale down %q — check RBAC permissions", deployName)
-	}
-	return nil
+	return k.backend.Stop(spawnDeploymentName(provider, role))
 }
 
-// ScaleDownOne decrements the replica count of the deployment by 1 (min 0).
-// Used when deleting a single session pod.
+// ScaleDownOne delegates to K8sBackend to decrement the deployment by 1.
 func (k *K8s) ScaleDownOne(providerName, role string) error {
-	clientset, err := k.kubeClient()
-	if err != nil {
-		return fmt.Errorf("cannot connect to cluster: %w", err)
-	}
-
-	namespace := k.cfg.Namespace
-	if namespace == "" {
-		namespace = "agents"
-	}
-
-	deployName := spawnDeploymentName(providerName, role)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	current := int32(1)
-	if deploy.Spec.Replicas != nil {
-		current = *deploy.Spec.Replicas
-	}
-	desired := current - 1
-	if desired < 0 {
-		desired = 0
-	}
-	deploy.Spec.Replicas = &desired
-	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
-	return err
+	return k.backend.ScaleDownOne(spawnDeploymentName(providerName, role))
 }
 
 // spawnDeploymentName constructs the Kubernetes deployment name for spawning.
@@ -1046,48 +760,9 @@ func (k *K8s) OTELServiceName() string { return "k8s-agent" }
 // identity attributes in the format aimux's OTEL receiver understands.
 func (k *K8s) SubagentAttrKeys() subagent.AttrKeys { return subagent.AttrKeys{} }
 
-// Kill scales down the Kubernetes deployment that runs the target agent.
-// The deployment name is derived from "agent-" + provider + "-" + role.
-// If no matching deployment is found, the error is returned to the caller.
-// If the K8s client cannot be constructed (bad kubeconfig), the error is
-// returned rather than panicking.
+// Kill delegates to K8sBackend to scale down the agent's deployment by 1.
 func (k *K8s) Kill(a agent.Agent) error {
-	clientset, err := k.kubeClient()
-	if err != nil {
-		return fmt.Errorf("k8s Kill: build kube client: %w", err)
-	}
-
-	namespace := k.cfg.Namespace
-	if namespace == "" {
-		namespace = "agents"
-	}
-
-	// Derive deployment name from role (Name field holds the role).
-	deployName := k.deploymentName(a)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 11*time.Second)
-	defer cancel()
-
-	deploy, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("k8s Kill: get deployment %q in namespace %q: %w", deployName, namespace, err)
-	}
-
-	current := int32(1)
-	if deploy.Spec.Replicas != nil {
-		current = *deploy.Spec.Replicas
-	}
-	desired := current - 1
-	if desired < 0 {
-		desired = 0
-	}
-
-	deploy.Spec.Replicas = &desired
-	_, err = clientset.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
-	if err != nil {
-		return fmt.Errorf("k8s Kill: scale deployment %q to %d: %w", deployName, desired, err)
-	}
-	return nil
+	return k.backend.Delete(k.deploymentName(a))
 }
 
 // deploymentName derives the Kubernetes deployment name from agent metadata.
@@ -1103,36 +778,7 @@ func (k *K8s) deploymentName(a agent.Agent) string {
 	return "agent-" + a.Name
 }
 
-// kubeClient builds a Kubernetes clientset from the configured kubeconfig path.
-// Falls back to in-cluster config when Kubeconfig is empty and the process is
-// running inside a pod.
-func (k *K8s) kubeClient() (*kubernetes.Clientset, error) {
-	var restCfg *rest.Config
-	var err error
-
-	if k.cfg.Kubeconfig != "" {
-		restCfg, err = clientcmd.BuildConfigFromFlags("", k.cfg.Kubeconfig)
-	} else {
-		// Try in-cluster first, then fall back to default kubeconfig locations.
-		restCfg, err = rest.InClusterConfig()
-		if err != nil {
-			loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-			restCfg, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-				loadingRules,
-				&clientcmd.ConfigOverrides{},
-			).ClientConfig()
-		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load kubeconfig: %w", err)
-	}
-
-	clientset, err := kubernetes.NewForConfig(restCfg)
-	if err != nil {
-		return nil, fmt.Errorf("create kubernetes clientset: %w", err)
-	}
-	return clientset, nil
-}
+// NOTE: kubeClient() moved to internal/runtime/k8s.go (K8sBackend.KubeClient).
 
 // newRedisClient parses a Redis URL and returns a connected client.
 // Returns an error when the URL is malformed or the server is unreachable.

@@ -2,61 +2,44 @@ package runtime
 
 import "fmt"
 
-// Container represents a containerized runtime environment using
-// podman or docker. Agents run inside a container with volume mounts
-// for the working directory.
+// Container represents a containerized runtime environment.
+// It delegates all lifecycle operations to a Backend (podman, docker, or kubernetes).
 type Container struct {
-	name   string
-	engine string // "podman" or "docker"
+	name    string
+	backend Backend
 }
 
-// NewContainer creates a Container runtime. If engine is empty, it
-// defaults to "podman".
-func NewContainer(name, engine string) *Container {
-	if engine == "" {
-		engine = "podman"
-	}
-	return &Container{name: name, engine: engine}
+// NewContainer creates a Container runtime backed by the given Backend.
+func NewContainer(name string, backend Backend) *Container {
+	return &Container{name: name, backend: backend}
 }
 
 func (c *Container) Type() string { return "container" }
 func (c *Container) Name() string { return c.name }
 
-// Create provisions the container: pulls the image and runs a detached
-// container with the given options.
 func (c *Container) Create(opts CreateOpts) error {
 	if opts.Image == "" {
 		return fmt.Errorf("container runtime requires an image")
 	}
-	// Build: engine run -d --name <name> [-v workdir:workdir] [-e K=V]
-	//        [--cpus limit] [--memory limit] <image>
-	// Actual exec is deferred to spawn layer; this records intent.
-	return nil
+	return c.backend.Create(c.name, BackendCreateOpts{
+		Image:     opts.Image,
+		WorkDir:   opts.WorkDir,
+		Env:       opts.Env,
+		Resources: &opts.Resources,
+	})
 }
 
-// Start starts a stopped container.
-func (c *Container) Start() error { return nil }
+func (c *Container) Start() error              { return c.backend.Start(c.name) }
+func (c *Container) Stop() error               { return c.backend.Stop(c.name) }
+func (c *Container) Delete() error             { return c.backend.Delete(c.name) }
 
-// Stop stops the running container.
-func (c *Container) Stop() error { return nil }
-
-// Delete removes the container.
-func (c *Container) Delete() error { return nil }
-
-// Status inspects the container state. In production this would shell
-// out to: engine inspect --format {{.State.Status}} <name>.
 func (c *Container) Status() RuntimeStatus {
-	return RuntimeStatus{State: StateStopped, Message: "not inspected"}
+	state, _ := c.backend.Status(c.name)
+	return RuntimeStatus{State: state}
 }
 
-// ExecPrefix returns the command prefix to execute a command inside the
-// container: [engine, "exec", "-it", name].
-func (c *Container) ExecPrefix() []string {
-	return []string{c.engine, "exec", "-it", c.name}
-}
+func (c *Container) ExecPrefix() []string { return c.backend.ExecPrefix(c.name) }
+func (c *Container) Attach() error        { return nil }
 
-// Attach execs into the container interactively.
-func (c *Container) Attach() error { return nil }
-
-// Engine returns the container engine name ("podman" or "docker").
-func (c *Container) Engine() string { return c.engine }
+// Backend returns the underlying backend.
+func (c *Container) Backend() Backend { return c.backend }

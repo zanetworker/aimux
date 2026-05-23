@@ -48,7 +48,8 @@ func LaunchInContainer(cmd *exec.Cmd, providerName, dir, shell, envPrefix string
 	}
 
 	name := ContainerName(providerName, dir)
-	c := runtime.NewContainer(name, opts.Engine)
+	backend := runtime.NewPodmanBackend(opts.Engine)
+	c := runtime.NewContainer(name, backend)
 
 	env := parseEnvPrefix(envPrefix)
 

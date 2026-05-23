@@ -27,7 +27,7 @@ func TestK8sName(t *testing.T) {
 func TestK8sDiscover_NotConfigured(t *testing.T) {
 	// When RedisURL is empty the provider must not panic or return an error.
 	// It may still discover session pods via the K8s API if a kubeconfig is available.
-	k := &K8s{}
+	k := NewK8s(K8sConfig{})
 	_, err := k.Discover()
 	if err != nil {
 		t.Errorf("K8s.Discover() with no config: error = %v, want nil", err)
@@ -342,207 +342,72 @@ func TestNewRedisClient_PoolSettings(t *testing.T) {
 	}
 }
 
-// --- Auto-provisioning tests (fake K8s clientset) ---
+// --- Auto-provisioning tests (via K8sBackend with fake clientset) ---
+// Low-level provisioning (createDeployment, ensureNamespace, ensureAuthSecrets)
+// moved to internal/runtime/k8s.go. These tests exercise the provider's thin
+// delegation layer via SpawnRemote, which calls backend.Create internally.
 
-func TestCreateAgentDeployment_AutoCreates(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+func TestSpawnRemote_ViaBackend(t *testing.T) {
+	cs := fake.NewSimpleClientset()
 	k := NewK8s(K8sConfig{Namespace: "test-ns"})
+	k.backend.SetClientset(cs)
+
+	// SpawnRemote delegates to backend.Create, which auto-creates the deployment.
+	if err := k.SpawnRemote("claude", "session", 1); err != nil {
+		t.Fatalf("SpawnRemote() error: %v", err)
+	}
+
 	ctx := context.Background()
-
-	// Namespace doesn't exist yet — createAgentDeployment should create it.
-	deploy, err := k.createAgentDeployment(ctx, clientset, "test-ns", "claude", "task")
+	deploy, err := cs.AppsV1().Deployments("test-ns").Get(ctx, "agent-claude-session", metav1.GetOptions{})
 	if err != nil {
-		t.Fatalf("createAgentDeployment() error: %v", err)
+		t.Fatalf("deployment not found after SpawnRemote: %v", err)
 	}
-	if deploy.Name != "agent-claude-task" {
-		t.Errorf("deployment name = %q, want %q", deploy.Name, "agent-claude-task")
+	if *deploy.Spec.Replicas != 1 {
+		t.Errorf("deployment replicas = %d, want 1", *deploy.Spec.Replicas)
 	}
-
-	// Verify namespace was created.
-	ns, err := clientset.CoreV1().Namespaces().Get(ctx, "test-ns", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("namespace not created: %v", err)
-	}
-	if ns.Labels["app.kubernetes.io/managed-by"] != "aimux" {
-		t.Error("namespace missing managed-by label")
-	}
-
-	// Verify deployment exists with correct labels.
-	got, err := clientset.AppsV1().Deployments("test-ns").Get(ctx, "agent-claude-task", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("deployment not found after create: %v", err)
-	}
-	if got.Labels["provider"] != "claude" {
-		t.Errorf("deployment label provider = %q, want %q", got.Labels["provider"], "claude")
-	}
-	if got.Labels["team-component"] != "task" {
-		t.Errorf("deployment label team-component = %q, want %q", got.Labels["team-component"], "task")
-	}
-	if *got.Spec.Replicas != 0 {
-		t.Errorf("deployment replicas = %d, want 0", *got.Spec.Replicas)
-	}
-}
-
-func TestEnsureNamespace_Idempotent(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
-	k := NewK8s(K8sConfig{})
-	ctx := context.Background()
-
-	// First call creates.
-	k.ensureNamespace(ctx, clientset, "my-ns")
-	_, err := clientset.CoreV1().Namespaces().Get(ctx, "my-ns", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("namespace not created: %v", err)
-	}
-
-	// Second call is a no-op (doesn't error).
-	k.ensureNamespace(ctx, clientset, "my-ns")
-}
-
-func TestEnsureAuthSecrets_CreatesFromEnv(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
-	k := NewK8s(K8sConfig{})
-	ctx := context.Background()
-
-	// Create namespace first.
-	k.ensureNamespace(ctx, clientset, "test-ns")
-
-	// Set env var for API key.
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-key-123")
-
-	k.ensureAuthSecrets(ctx, clientset, "test-ns")
-
-	// Verify llm-keys secret was created.
-	secret, err := clientset.CoreV1().Secrets("test-ns").Get(ctx, "llm-keys", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("llm-keys secret not created: %v", err)
-	}
-	if string(secret.Data["anthropic"]) != "sk-test-key-123" {
-		t.Errorf("secret data = %q, want %q", string(secret.Data["anthropic"]), "sk-test-key-123")
-	}
-}
-
-func TestEnsureAuthSecrets_SkipsExisting(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
-	k := NewK8s(K8sConfig{})
-	ctx := context.Background()
-
-	k.ensureNamespace(ctx, clientset, "test-ns")
-
-	// Pre-create the secret with different data.
-	t.Setenv("ANTHROPIC_API_KEY", "sk-new-key")
-	k.ensureAuthSecrets(ctx, clientset, "test-ns")
-
-	// Change env and call again — should NOT overwrite.
-	t.Setenv("ANTHROPIC_API_KEY", "sk-overwrite-attempt")
-	k.ensureAuthSecrets(ctx, clientset, "test-ns")
-
-	secret, _ := clientset.CoreV1().Secrets("test-ns").Get(ctx, "llm-keys", metav1.GetOptions{})
-	if string(secret.Data["anthropic"]) != "sk-new-key" {
-		t.Errorf("secret was overwritten: got %q, want %q", string(secret.Data["anthropic"]), "sk-new-key")
-	}
-}
-
-func TestSpawnRemote_AutoCreatesDeployment(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
-	k := NewK8s(K8sConfig{Namespace: "test-ns"})
-
-	// Inject the fake clientset by overriding kubeClient.
-	// We can't easily do this without refactoring, so test via createAgentDeployment directly.
-	ctx := context.Background()
-	k.ensureNamespace(ctx, clientset, "test-ns")
-
-	// Create deployment (simulating what SpawnRemote does internally).
-	_, err := k.createAgentDeployment(ctx, clientset, "test-ns", "claude", "session")
-	if err != nil {
-		t.Fatalf("createAgentDeployment() error: %v", err)
-	}
-
-	// Verify it was created with correct image.
-	deploy, _ := clientset.AppsV1().Deployments("test-ns").Get(ctx, "agent-claude-session", metav1.GetOptions{})
 	image := deploy.Spec.Template.Spec.Containers[0].Image
 	if !strings.Contains(image, "claude-session") {
 		t.Errorf("deployment image = %q, want it to contain %q", image, "claude-session")
 	}
 }
 
-func TestCreateAgentDeployment_SecretsViaMounts(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+func TestScaleDown_ViaBackend(t *testing.T) {
+	cs := fake.NewSimpleClientset()
 	k := NewK8s(K8sConfig{Namespace: "test-ns"})
-	ctx := context.Background()
+	k.backend.SetClientset(cs)
 
-	// Set env vars so ensureAuthSecrets creates secrets.
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-secret")
-	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "") // unset so file read doesn't fail
-
-	deploy, err := k.createAgentDeployment(ctx, clientset, "test-ns", "claude", "session")
-	if err != nil {
-		t.Fatalf("createAgentDeployment() error: %v", err)
+	// Create via SpawnRemote first.
+	if err := k.SpawnRemote("claude", "coder", 1); err != nil {
+		t.Fatalf("SpawnRemote() error: %v", err)
 	}
 
-	container := deploy.Spec.Template.Spec.Containers[0]
-
-	// Verify ANTHROPIC_API_KEY comes from secretKeyRef, not a literal value.
-	for _, env := range container.Env {
-		if env.Name == "ANTHROPIC_API_KEY" {
-			if env.Value != "" {
-				t.Error("ANTHROPIC_API_KEY has a literal Value; should use secretKeyRef")
-			}
-			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
-				t.Error("ANTHROPIC_API_KEY missing secretKeyRef")
-			} else {
-				if env.ValueFrom.SecretKeyRef.Name != "llm-keys" {
-					t.Errorf("secretKeyRef.Name = %q, want %q", env.ValueFrom.SecretKeyRef.Name, "llm-keys")
-				}
-				if *env.ValueFrom.SecretKeyRef.Optional != true {
-					t.Error("secretKeyRef should be optional")
-				}
-			}
-		}
+	// ScaleDown to 0.
+	if err := k.ScaleDown("claude", "coder"); err != nil {
+		t.Fatalf("ScaleDown() error: %v", err)
 	}
 
-	// Verify GOOGLE_APPLICATION_CREDENTIALS points to a mounted path, not a forwarded value.
-	foundGAC := false
-	for _, env := range container.Env {
-		if env.Name == "GOOGLE_APPLICATION_CREDENTIALS" {
-			foundGAC = true
-			if env.Value != "/var/secrets/gcp/adc.json" {
-				t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q, want mount path", env.Value)
-			}
-		}
+	deploy, _ := cs.AppsV1().Deployments("test-ns").Get(context.Background(), "agent-claude-coder", metav1.GetOptions{})
+	if *deploy.Spec.Replicas != 0 {
+		t.Errorf("after ScaleDown() replicas = %d, want 0", *deploy.Spec.Replicas)
 	}
-	if !foundGAC {
-		t.Error("GOOGLE_APPLICATION_CREDENTIALS env var missing from deployment")
+}
+
+func TestKill_ViaBackend(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	k := NewK8s(K8sConfig{Namespace: "test-ns"})
+	k.backend.SetClientset(cs)
+
+	// Create 2 replicas.
+	_ = k.SpawnRemote("claude", "coder", 2)
+
+	a := agent.Agent{SessionID: "claude-coder-abc123", Name: "coder"}
+	if err := k.Kill(a); err != nil {
+		t.Fatalf("Kill() error: %v", err)
 	}
 
-	// Verify gcp-adc volume mount exists.
-	foundMount := false
-	for _, vm := range container.VolumeMounts {
-		if vm.Name == "gcp-adc" {
-			foundMount = true
-			if !vm.ReadOnly {
-				t.Error("gcp-adc volume mount should be read-only")
-			}
-		}
-	}
-	if !foundMount {
-		t.Error("gcp-adc volume mount missing from deployment")
-	}
-
-	// Verify gcp-adc volume references the secret.
-	foundVol := false
-	for _, vol := range deploy.Spec.Template.Spec.Volumes {
-		if vol.Name == "gcp-adc" {
-			foundVol = true
-			if vol.Secret == nil {
-				t.Error("gcp-adc volume should reference a secret")
-			} else if vol.Secret.SecretName != "gcp-adc" {
-				t.Errorf("volume secretName = %q, want %q", vol.Secret.SecretName, "gcp-adc")
-			}
-		}
-	}
-	if !foundVol {
-		t.Error("gcp-adc volume missing from deployment")
+	deploy, _ := cs.AppsV1().Deployments("test-ns").Get(context.Background(), "agent-claude-coder", metav1.GetOptions{})
+	if *deploy.Spec.Replicas != 1 {
+		t.Errorf("after Kill() replicas = %d, want 1", *deploy.Spec.Replicas)
 	}
 }
 

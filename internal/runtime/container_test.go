@@ -2,25 +2,24 @@ package runtime
 
 import "testing"
 
-// Compile-time interface check.
 var _ Runtime = (*Container)(nil)
 
 func TestContainer_Type(t *testing.T) {
-	c := NewContainer("web", "docker")
+	c := NewContainer("web", NewPodmanBackend("docker"))
 	if got := c.Type(); got != "container" {
 		t.Errorf("Type() = %q, want %q", got, "container")
 	}
 }
 
 func TestContainer_Name(t *testing.T) {
-	c := NewContainer("web", "docker")
+	c := NewContainer("web", NewPodmanBackend("docker"))
 	if got := c.Name(); got != "web" {
 		t.Errorf("Name() = %q, want %q", got, "web")
 	}
 }
 
 func TestContainer_ExecPrefix(t *testing.T) {
-	c := NewContainer("agent-1", "podman")
+	c := NewContainer("agent-1", NewPodmanBackend("podman"))
 	prefix := c.ExecPrefix()
 	if len(prefix) != 4 {
 		t.Fatalf("ExecPrefix() len = %d, want 4", len(prefix))
@@ -34,14 +33,14 @@ func TestContainer_ExecPrefix(t *testing.T) {
 }
 
 func TestContainer_DefaultEngine(t *testing.T) {
-	c := NewContainer("test", "")
-	if c.Engine() != "podman" {
-		t.Errorf("default engine = %q, want %q", c.Engine(), "podman")
+	c := NewContainer("test", NewPodmanBackend(""))
+	if c.Backend().Name() != "podman" {
+		t.Errorf("default backend = %q, want %q", c.Backend().Name(), "podman")
 	}
 }
 
 func TestContainer_DockerEngine(t *testing.T) {
-	c := NewContainer("test", "docker")
+	c := NewContainer("test", NewPodmanBackend("docker"))
 	prefix := c.ExecPrefix()
 	if prefix[0] != "docker" {
 		t.Errorf("ExecPrefix()[0] = %q, want %q", prefix[0], "docker")
@@ -49,17 +48,17 @@ func TestContainer_DockerEngine(t *testing.T) {
 }
 
 func TestContainer_Create_RequiresImage(t *testing.T) {
-	c := NewContainer("test", "podman")
+	c := NewContainer("test", NewPodmanBackend("podman"))
 	err := c.Create(CreateOpts{})
 	if err == nil {
 		t.Error("Create() with empty image should return error")
 	}
 }
 
-func TestContainer_Create_WithImage(t *testing.T) {
-	c := NewContainer("test", "podman")
-	err := c.Create(CreateOpts{Image: "ubuntu:22.04"})
-	if err != nil {
-		t.Errorf("Create() with image = %v, want nil", err)
+func TestContainer_Backend(t *testing.T) {
+	b := NewPodmanBackend("podman")
+	c := NewContainer("test", b)
+	if c.Backend() != b {
+		t.Error("Backend() should return the backend passed to constructor")
 	}
 }
