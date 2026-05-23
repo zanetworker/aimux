@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDefault(t *testing.T) {
@@ -352,5 +353,50 @@ func TestDefaultPromptTemplate(t *testing.T) {
 	wantTemplate := "Work on the following task: {title}\n\nDetails: {notes}\n\nAdditional instructions: {user_prompt}\n\nWhen done, summarize what you did."
 	if cfg.Tasks.PromptTemplate != wantTemplate {
 		t.Errorf("Tasks.PromptTemplate = %q, want %q", cfg.Tasks.PromptTemplate, wantTemplate)
+	}
+}
+
+func TestArchiveThreshold(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  time.Duration
+	}{
+		{"one hour", "1h", 1 * time.Hour},
+		{"thirty minutes", "30m", 30 * time.Minute},
+		{"empty string", "", 0},
+		{"invalid string", "invalid", 0},
+		{"zero duration", "0", 0},
+		{"negative duration", "-5m", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{AutoArchiveAfter: tt.input}
+			got := cfg.ArchiveThreshold()
+			if got != tt.want {
+				t.Errorf("ArchiveThreshold(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestArchiveThreshold_FromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+
+	yaml := `auto_archive_after: "2h"`
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+
+	want := 2 * time.Hour
+	if got := cfg.ArchiveThreshold(); got != want {
+		t.Errorf("ArchiveThreshold from file = %v, want %v", got, want)
 	}
 }

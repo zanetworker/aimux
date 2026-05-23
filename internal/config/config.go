@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,8 +22,9 @@ type Config struct {
 	Sessions        SessionsConfig            `yaml:"sessions"`    // session history settings
 	Notifications   NotificationsConfig       `yaml:"notifications"` // macOS notification settings
 	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
-	QuickLaunch     QuickLaunchConfig         `yaml:"quick_launch"` // quick launch directories
-	Tasks           TasksConfig               `yaml:"tasks"`        // Google Tasks integration
+	QuickLaunch      QuickLaunchConfig         `yaml:"quick_launch"`       // quick launch directories
+	Tasks            TasksConfig               `yaml:"tasks"`              // Google Tasks integration
+	AutoArchiveAfter string                    `yaml:"auto_archive_after"` // idle duration before auto-archiving (e.g. "1h", "30m")
 }
 
 // K8sProviderConfig holds connection settings for the Kubernetes agent provider.
@@ -223,6 +225,9 @@ func Load(path string) (Config, error) {
 	if fileCfg.Tasks.Backend != "" || fileCfg.Tasks.DefaultList != "" || fileCfg.Tasks.PromptTemplate != "" {
 		cfg.Tasks = fileCfg.Tasks
 	}
+	if fileCfg.AutoArchiveAfter != "" {
+		cfg.AutoArchiveAfter = fileCfg.AutoArchiveAfter
+	}
 
 	return cfg, nil
 }
@@ -280,4 +285,17 @@ func (c Config) IsProviderEnabled(name string) bool {
 		return true // unknown providers enabled by default
 	}
 	return pc.Enabled
+}
+
+// ArchiveThreshold returns the parsed auto-archive duration. Returns 0 if
+// the field is empty, unparseable, or explicitly set to "0".
+func (c Config) ArchiveThreshold() time.Duration {
+	if c.AutoArchiveAfter == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(c.AutoArchiveAfter)
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }

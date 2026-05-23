@@ -156,6 +156,10 @@ type App struct {
 	killTarget   *agent.Agent    // agent to kill
 	hiddenAgents map[string]bool // session IDs hidden from view (session-only entries removed by user)
 
+	// Auto-archive: hide agents idle beyond the configured threshold
+	showArchived  bool // toggle to show/hide archived agents
+	archivedCount int  // number of currently archived agents
+
 	// Evaluation: annotation persistence
 	evalStore      *evaluation.Store
 	evalSessionID  string
@@ -326,6 +330,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case instancesMsg:
 		a.instances = controller.FilterHidden([]agent.Agent(msg), a.hiddenAgents)
+
+		// Auto-archive idle agents past the configured threshold.
+		threshold := a.cfg.ArchiveThreshold()
+		if threshold > 0 && !a.showArchived {
+			active, archived := controller.PartitionByArchive(a.instances, threshold)
+			a.instances = active
+			a.archivedCount = len(archived)
+		} else {
+			a.archivedCount = 0
+		}
+
 		if a.otelStore.LastUpdate().After(a.lastEnrichTime) {
 			a.instances = correlator.EnrichFromOTEL(a.instances, a.otelStore)
 			a.lastEnrichTime = a.otelStore.LastUpdate()
@@ -1031,9 +1046,11 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			selected := a.agentsView.Selected()
 			if selected != nil && selected.SessionFile != "" {
-				meta := history.LoadMeta(selected.SessionFile)
-				meta.Starred = !meta.Starred
-				_ = history.SaveMeta(selected.SessionFile, meta)
+				starred, err := controller.ToggleStar(selected.SessionFile)
+				if err != nil {
+					a.statusHint = fmt.Sprintf("Star toggle failed: %v", err)
+					return a, nil
+				}
 				starredMap := make(map[string]bool)
 				for _, ag := range a.instances {
 					if ag.SessionFile != "" {
@@ -1045,7 +1062,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				a.agentsView.SetStarredFiles(starredMap)
 				a.cachedSessions = nil
-				if meta.Starred {
+				if starred {
 					a.statusHint = "Session pinned ★"
 				} else {
 					a.statusHint = "Session unpinned"
@@ -1094,6 +1111,28 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.statusHint = "Notifications enabled"
 			}
 			a.stickyHint = false
+			return a, nil
+		}
+	case "o":
+		if a.currentView == viewAgents {
+			a.showArchived = !a.showArchived
+			if a.showArchived {
+				a.statusHint = "Showing all agents (including archived)"
+			} else {
+				a.statusHint = fmt.Sprintf("Hiding %d archived agents", a.archivedCount)
+			}
+			return a, nil
+		}
+	case "a":
+		if a.currentView == viewAgents {
+			idx := controller.NextAttend(a.instances, a.agentsView.Cursor())
+			if idx >= 0 {
+				a.agentsView.SetCursor(idx)
+				ag := a.instances[idx]
+				a.statusHint = fmt.Sprintf("Attend: %s (%s)", ag.ShortProject(), ag.Status)
+			} else {
+				a.statusHint = "No agents need attention"
+			}
 			return a, nil
 		}
 	case "H":
@@ -2256,12 +2295,14 @@ func (a App) promptKill() (tea.Model, tea.Cmd) {
 	}
 	a.killConfirm = true
 	a.killTarget = selected
-	if strings.HasPrefix(selected.SessionID, "pod-") {
-		podName := strings.TrimPrefix(selected.SessionID, "pod-")
-		a.statusHint = fmt.Sprintf("Delete pod %s? y:confirm  n:cancel", podName)
-	} else if selected.PID == 0 {
+
+	action := controller.DetermineKillAction(*selected)
+	switch action.Type {
+	case controller.KillPod:
+		a.statusHint = fmt.Sprintf("Delete pod %s? y:confirm  n:cancel", action.PodName)
+	case controller.KillRemoveOnly:
 		a.statusHint = fmt.Sprintf("Remove %s? y:remove  d:remove+delete trace  n:cancel", selected.ShortProject())
-	} else {
+	default:
 		a.statusHint = fmt.Sprintf("Kill %s (PID %d)? y:confirm  n:cancel", selected.ShortProject(), selected.PID)
 	}
 	return a, nil
@@ -2277,18 +2318,16 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
+	action := controller.DetermineKillAction(*target)
+
 	switch msg.String() {
 	case "y", "Y":
-		if strings.HasPrefix(target.SessionID, "pod-") {
+		switch action.Type {
+		case controller.KillPod:
 			// K8s session pod: scale down deployment (so it doesn't respawn)
 			// and delete the pod. Run async to avoid blocking the TUI.
-			podName := strings.TrimPrefix(target.SessionID, "pod-")
-			namespace := "agents"
-			if parts := strings.SplitN(strings.TrimPrefix(target.WorkingDir, "k8s://"), "/", 2); len(parts) == 2 {
-				namespace = parts[0]
-			}
 			a.hideAgent(target)
-			a.statusHint = fmt.Sprintf("Deleting pod %s...", podName)
+			a.statusHint = fmt.Sprintf("Deleting pod %s...", action.PodName)
 			k8s := a.infraProvider
 			go func() {
 				// Decrement replicas by 1 so the deployment doesn't recreate the pod.
@@ -2299,17 +2338,16 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						debuglog.Log("tui: ScaleDownOne failed (non-fatal): %v", err)
 					}
 				}
-				if err := exec.Command("kubectl", "delete", "pod", podName, "-n", namespace, "--grace-period=3", "--wait=false").Run(); err != nil { // #nosec G204
-					debuglog.Log("kubectl delete pod %q failed: %v", podName, err)
+				if err := exec.Command("kubectl", "delete", "pod", action.PodName, "-n", action.Namespace, "--grace-period=3", "--wait=false").Run(); err != nil { // #nosec G204
+					debuglog.Log("kubectl delete pod %q failed: %v", action.PodName, err)
 				}
 			}()
 			return a, nil
-		}
-		if target.PID == 0 {
+		case controller.KillRemoveOnly:
 			// Session-only: hide from view by adding to hidden set
 			a.hideAgent(target)
 			a.statusHint = fmt.Sprintf("Removed %s from view", target.ShortProject())
-		} else {
+		default:
 			p := a.providerFor(target.ProviderName)
 			var err error
 			if p != nil {
@@ -2359,37 +2397,21 @@ func (a *App) hideAgent(ag *agent.Agent) {
 
 
 // maybeNotify fires a macOS notification for an agent that changed state.
+// The decision logic lives in controller.ShouldNotify; this method only
+// delivers the notification via the platform-specific notify package.
 func (a *App) maybeNotify(inst agent.Agent) {
 	name := inst.ShortProject()
 	if name == "" {
 		name = inst.ProviderName
 	}
-	title := "aimux: " + name
-
-	switch inst.Status {
-	case agent.StatusWaitingPermission:
-		if !a.cfg.Notifications.OnWaiting {
-			return
-		}
-		if a.cfg.Notifications.Sound {
-			notify.SendWithSound(title, "Needs permission")
-		} else {
-			notify.Send(title, "Needs permission")
-		}
-	case agent.StatusError:
-		if !a.cfg.Notifications.OnError {
-			return
-		}
-		if a.cfg.Notifications.Sound {
-			notify.SendWithSound(title, "Agent error")
-		} else {
-			notify.Send(title, "Agent error")
-		}
-	case agent.StatusIdle:
-		if !a.cfg.Notifications.OnIdle {
-			return
-		}
-		notify.Send(title, "Finished")
+	n := controller.ShouldNotify(inst.Status, name, a.cfg.Notifications)
+	if n == nil {
+		return
+	}
+	if n.Sound {
+		notify.SendWithSound(n.Title, n.Message)
+	} else {
+		notify.Send(n.Title, n.Message)
 	}
 }
 
@@ -2596,7 +2618,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  a:attend  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  $:costs  :export  :export-otel  Esc:back")
 	case viewCosts:

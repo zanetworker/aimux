@@ -2,12 +2,13 @@ package views
 
 import (
 	"fmt"
-	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/controller"
 )
 
 // Column widths for the agents table.
@@ -117,42 +118,7 @@ func NewAgentsView() *AgentsView {
 // Preserves cursor position by tracking the selected PID across refreshes.
 func (v *AgentsView) SetAgents(agents []agent.Agent) {
 	// Sort with stable sort to prevent flickering between ticks.
-	// Default: active agents first, then by name alphabetically.
-	switch v.sortField {
-	case "name":
-		sort.SliceStable(agents, func(i, j int) bool {
-			return strings.ToLower(agents[i].ShortProject()) < strings.ToLower(agents[j].ShortProject())
-		})
-	case "cost":
-		sort.SliceStable(agents, func(i, j int) bool {
-			return agents[i].EstCostUSD > agents[j].EstCostUSD
-		})
-	case "cpu":
-		sort.SliceStable(agents, func(i, j int) bool {
-			return agents[i].CPUPercent > agents[j].CPUPercent
-		})
-	case "mem":
-		sort.SliceStable(agents, func(i, j int) bool {
-			return agents[i].MemoryMB > agents[j].MemoryMB
-		})
-	case "age":
-		sort.SliceStable(agents, func(i, j int) bool {
-			return agents[i].AgeTime().Before(agents[j].AgeTime())
-		})
-	case "model":
-		sort.SliceStable(agents, func(i, j int) bool {
-			return agents[i].ShortModel() < agents[j].ShortModel()
-		})
-	default:
-		// Default: status priority (active > waiting > idle > unknown), then name
-		sort.SliceStable(agents, func(i, j int) bool {
-			si, sj := agents[i].Status, agents[j].Status
-			if si != sj {
-				return si < sj // Active=0, Idle=1, Waiting=2, Error=3, Unknown=4
-			}
-			return strings.ToLower(agents[i].ShortProject()) < strings.ToLower(agents[j].ShortProject())
-		})
-	}
+	controller.SortAgents(agents, v.sortField)
 	v.agents = agents
 	v.buildTreeRows()
 
@@ -254,6 +220,21 @@ func (v *AgentsView) Selected() *agent.Agent {
 // Cursor returns the current cursor position.
 func (v *AgentsView) Cursor() int {
 	return v.cursor
+}
+
+// SetCursor moves the cursor to the given index, clamping to valid bounds,
+// and updates the selected PID for cursor preservation across refreshes.
+func (v *AgentsView) SetCursor(idx int) {
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(v.rows) {
+		idx = len(v.rows) - 1
+	}
+	v.cursor = idx
+	if idx >= 0 && idx < len(v.rows) {
+		v.selectedPID = v.rows[idx].agent.PID
+	}
 }
 
 // SortField returns the current sort field name.
@@ -431,7 +412,7 @@ func (v *AgentsView) View() string {
 // renderParentRow renders a session row with status icon, name, and columns.
 func (v *AgentsView) renderParentRow(r treeRow) string {
 	a := r.agent
-	icon := v.renderStatusIcon(a.Status)
+	icon := v.renderStatusIcon(a.Status, a.LastActivity)
 
 	starPrefix := " "
 	if v.starredFiles[a.SessionFile] {
@@ -523,8 +504,14 @@ func (v *AgentsView) renderChildRow(r treeRow) string {
 	return treeGlyph + pidStr + info
 }
 
-func (v *AgentsView) renderStatusIcon(s agent.Status) string {
+func (v *AgentsView) renderStatusIcon(s agent.Status, lastActivity time.Time) string {
 	icon := s.Icon()
+
+	// Check for fading status color first.
+	if fadeColor := agent.StatusFadeColor(s, lastActivity); fadeColor != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(fadeColor)).Render(icon)
+	}
+
 	switch s {
 	case agent.StatusActive:
 		return agentActiveIcon.Render(icon)
@@ -540,23 +527,7 @@ func (v *AgentsView) renderStatusIcon(s agent.Status) string {
 }
 
 func (v *AgentsView) filtered() []agent.Agent {
-	if v.filter == "" {
-		return v.agents
-	}
-	f := strings.ToLower(v.filter)
-	var out []agent.Agent
-	for _, a := range v.agents {
-		if strings.Contains(strings.ToLower(a.ShortProject()), f) ||
-			strings.Contains(strings.ToLower(a.ShortModel()), f) ||
-			strings.Contains(strings.ToLower(a.Status.String()), f) ||
-			strings.Contains(strings.ToLower(a.Source.String()), f) ||
-			strings.Contains(strings.ToLower(a.ProviderName), f) ||
-			strings.Contains(strings.ToLower(a.ShortDir()), f) ||
-			strings.Contains(strings.ToLower(a.LastAction), f) {
-			out = append(out, a)
-		}
-	}
-	return out
+	return controller.FilterAgents(v.agents, v.filter)
 }
 
 // agentLocation returns "k8s" for Kubernetes-hosted agents (WorkingDir

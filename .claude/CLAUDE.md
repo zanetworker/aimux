@@ -150,6 +150,24 @@ The web frontend (`web/src/`) is a rendering layer only. All business logic live
 3. If the TUI already does it, the web must use the same core function
 4. Never reimplement Go logic in TypeScript
 
+## Frontend Parity Rule
+
+Every new feature that involves user-visible behavior MUST follow this pattern:
+
+1. **Business logic in `controller/`** (or another core package) -- the pure function that does the work. No bubbletea, no lipgloss, no HTTP types.
+2. **TUI wires the key** -- `app.go` calls the controller function on keypress
+3. **Web API wires the endpoint** -- `handlers.go` calls the same controller function on HTTP request
+4. **CLI wires the flag** -- `cmd/*.go` calls the same controller function on flag
+
+If a feature exists in only one frontend, it's tech debt. Track it.
+
+Before merging any PR that adds a keybinding to `app.go`, verify:
+- The logic is in `controller/` (or another core package), not inline in `app.go`
+- There is a corresponding web API endpoint (even if the React UI doesn't consume it yet)
+- The controller function has tests independent of any UI framework
+
+**Operations already in `controller/`:** ExportJSONL, ExportOTEL, FilterHidden, DeleteSession, BulkDeleteSessions, NextAttend, PartitionByArchive, SortAgents, FilterAgents, ShouldNotify, DetermineKillAction, ToggleStar, SetAnnotation, SetTags, SetNote.
+
 ## Provider Architecture
 
 All agent types implement `provider.Provider` (11 methods). This interface must remain the ONLY coupling point between the core system and individual agent backends. Current providers are local CLI agents (Claude, Codex, Gemini), but future providers include remote backends (Kubernetes pods, SSH hosts, cloud APIs).
