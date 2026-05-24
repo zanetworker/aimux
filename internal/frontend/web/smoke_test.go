@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -15,7 +16,12 @@ import (
 
 // TestAPISmoke_AllEndpoints boots a real server and hits every registered endpoint.
 // This is the single test that catches regressions across the entire API surface.
-// If this test passes, every endpoint responds without panicking or 500-ing.
+//
+// Status code semantics:
+//   500 = FAIL (real server error / panic)
+//   503 = LOG  (feature not configured — blind spot warning)
+//   404 = OK   (resource not found, expected for nonexistent IDs)
+//   200 = OK   (success, validate JSON)
 //
 // Run with: go test ./internal/frontend/web/ -run Smoke -timeout 60s -v
 func TestAPISmoke_AllEndpoints(t *testing.T) {
@@ -37,7 +43,21 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 
 	addr := s.URL()
 
-	// --- GET endpoints: expect 200 + valid JSON ---
+	var unconfigured []string
+
+	checkResponse := func(t *testing.T, method, path string, status int, body []byte) {
+		t.Helper()
+		switch {
+		case status == 500:
+			t.Errorf("%s %s: status 500 (SERVER ERROR — this is a bug)\n%s", method, path, body)
+		case status == 503:
+			unconfigured = append(unconfigured, fmt.Sprintf("%s %s: 503 — %s", method, path, strings.TrimSpace(string(body))))
+		case status == 200 && !json.Valid(body) && len(body) > 0:
+			t.Errorf("%s %s: 200 but response is not valid JSON: %.100s", method, path, body)
+		}
+	}
+
+	// --- GET endpoints ---
 	gets := []string{
 		"/api/health",
 		"/api/agents",
@@ -53,6 +73,11 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		"/api/quick-launch",
 		"/api/sessions/nonexistent/annotations",
 		"/api/sessions/diffs?file=/nonexistent",
+		"/api/trace?file=/nonexistent/path.jsonl",
+		"/api/agents/nonexistent/trace",
+		"/api/agents/nonexistent/diff",
+		"/api/tasks/lists",
+		"/api/tasks?list=default",
 	}
 
 	for _, path := range gets {
@@ -63,20 +88,11 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 			}
 			defer func() { _ = resp.Body.Close() }()
 			body, _ := io.ReadAll(resp.Body)
-
-			// 500 = real server error (bug). 503 = not configured. 404 = not found.
-			// Only 500 is a test failure.
-			if resp.StatusCode == 500 {
-				t.Errorf("GET %s: status 500 (server error)\n%s", path, body)
-				return
-			}
-			if resp.StatusCode == 200 && !json.Valid(body) && len(body) > 0 {
-				t.Errorf("GET %s: 200 but not valid JSON: %.100s", path, body)
-			}
+			checkResponse(t, "GET", path, resp.StatusCode, body)
 		})
 	}
 
-	// --- SSE endpoint: check content type ---
+	// --- SSE endpoint ---
 	t.Run("GET /api/events (SSE)", func(t *testing.T) {
 		client := &http.Client{Timeout: 1 * time.Second}
 		resp, err := client.Get(addr + "/api/events") // #nosec G107
@@ -91,30 +107,7 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		}
 	})
 
-	// --- GET endpoints that may return non-200 (graceful error handling) ---
-	gracefulGets := []string{
-		"/api/trace?file=/nonexistent/path.jsonl",
-		"/api/agents/nonexistent/trace",
-		"/api/agents/nonexistent/diff",
-		"/api/tasks/lists",
-		"/api/tasks?list=default",
-	}
-
-	for _, path := range gracefulGets {
-		t.Run("GET "+path+" (graceful)", func(t *testing.T) {
-			resp, err := http.Get(addr + path) // #nosec G107
-			if err != nil {
-				t.Fatalf("GET %s: %v", path, err)
-			}
-			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode == 500 {
-				body, _ := io.ReadAll(resp.Body)
-				t.Errorf("GET %s: status 500 (server error)\n%s", path, body)
-			}
-		})
-	}
-
-	// --- POST endpoints: test with minimal/empty bodies ---
+	// --- POST endpoints ---
 	posts := []struct {
 		path string
 		body interface{}
@@ -145,10 +138,8 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 				t.Fatalf("POST %s: %v", p.path, err)
 			}
 			defer func() { _ = resp.Body.Close() }()
-			if resp.StatusCode == 500 {
-				body, _ := io.ReadAll(resp.Body)
-				t.Errorf("POST %s: status 500 (server error)\n%s", p.path, body)
-			}
+			body, _ := io.ReadAll(resp.Body)
+			checkResponse(t, "POST", p.path, resp.StatusCode, body)
 		})
 	}
 
@@ -160,15 +151,24 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 			t.Fatalf("DELETE: %v", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode == 500 {
-			body, _ := io.ReadAll(resp.Body)
-			t.Errorf("DELETE: status 500 (server error)\n%s", body)
-		}
+		body, _ := io.ReadAll(resp.Body)
+		checkResponse(t, "DELETE", "/api/sessions/nonexistent", resp.StatusCode, body)
 	})
 
-	// --- Skipped endpoints ---
-	// POST /api/agents/launch — requires LaunchFunc (tested separately in handlers_test.go)
+	// --- Report unconfigured endpoints (blind spots) ---
+	if len(unconfigured) > 0 {
+		t.Logf("\n=== UNCONFIGURED ENDPOINTS (503 — blind spots) ===")
+		for _, msg := range unconfigured {
+			t.Logf("  %s", msg)
+		}
+		t.Logf("These endpoints return 503 because their backing service is not wired in the test server.")
+		t.Logf("To fix: add SetXxxFunc/SetXxxProvider calls in the smoke test setup.")
+		t.Logf("=== %d endpoint(s) unconfigured ===\n", len(unconfigured))
+	}
+
+	// --- Skipped endpoints (documented) ---
+	// POST /api/agents/launch — requires LaunchFunc (tested in handlers_test.go)
 	// POST /api/sessions/generate-titles — calls LLM API (requires API key)
 	// /api/terminal/* — WebSocket (requires WS client)
-	// GET /api/sessions/meta — requires file query param with real file
+	// GET /api/sessions/meta — requires real file path
 }
