@@ -13,8 +13,8 @@ func TestDefault(t *testing.T) {
 	if cfg.RefreshInterval != "2s" {
 		t.Errorf("RefreshInterval = %q, want %q", cfg.RefreshInterval, "2s")
 	}
-	if cfg.DefaultRuntime != "local" {
-		t.Errorf("DefaultRuntime = %q, want %q", cfg.DefaultRuntime, "local")
+	if cfg.Runtime != "local" {
+		t.Errorf("Runtime = %q, want %q", cfg.Runtime, "local")
 	}
 
 	for _, name := range []string{"claude", "codex", "gemini"} {
@@ -66,7 +66,7 @@ func TestLoad_OverridesDefaults(t *testing.T) {
 
 	yaml := `
 refresh_interval: "5s"
-default_runtime: "iterm"
+runtime: "iterm"
 providers:
   codex:
     enabled: false
@@ -86,8 +86,8 @@ providers:
 	if cfg.RefreshInterval != "5s" {
 		t.Errorf("RefreshInterval = %q, want %q", cfg.RefreshInterval, "5s")
 	}
-	if cfg.DefaultRuntime != "iterm" {
-		t.Errorf("DefaultRuntime = %q, want %q", cfg.DefaultRuntime, "iterm")
+	if cfg.Runtime != "iterm" {
+		t.Errorf("Runtime = %q, want %q", cfg.Runtime, "iterm")
 	}
 
 	// Codex disabled

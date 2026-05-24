@@ -41,8 +41,11 @@ func mergeOver(base, overlay Config) Config {
 	if overlay.RefreshInterval != "" {
 		base.RefreshInterval = overlay.RefreshInterval
 	}
-	if overlay.DefaultRuntime != "" {
-		base.DefaultRuntime = overlay.DefaultRuntime
+	if overlay.Runtime != "" {
+		base.Runtime = overlay.Runtime
+	}
+	if overlay.SessionManager != "" {
+		base.SessionManager = overlay.SessionManager
 	}
 	if overlay.AutoArchiveAfter != "" {
 		base.AutoArchiveAfter = overlay.AutoArchiveAfter

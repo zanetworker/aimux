@@ -14,8 +14,9 @@ import (
 type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
-	DefaultRuntime  string                    `yaml:"default_runtime"` // "local" or "container" (default: local)
-	Shell           string                    `yaml:"shell"`       // login shell for spawning agents
+	Runtime         string                    `yaml:"runtime"`          // WHERE: "local" or "container" (default: local)
+	Shell           string                    `yaml:"shell"`            // WHICH shell: e.g. "/bin/zsh" (default: $SHELL)
+	SessionManager  string                    `yaml:"session_manager"`  // SESSION: "tmux" (default: tmux)
 	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
 	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
 	Resume          ResumeConfig              `yaml:"resume"`      // resume defaults
@@ -140,7 +141,8 @@ func Default() Config {
 			"gemini": {Enabled: true},
 		},
 		RefreshInterval: "2s",
-		DefaultRuntime:  "local",
+		Runtime:        "local",
+		SessionManager: "tmux",
 		Sessions: SessionsConfig{
 			TitleModel: "flash",
 		},
@@ -200,8 +202,11 @@ func Load(path string) (Config, error) {
 	if fileCfg.RefreshInterval != "" {
 		cfg.RefreshInterval = fileCfg.RefreshInterval
 	}
-	if fileCfg.DefaultRuntime != "" {
-		cfg.DefaultRuntime = fileCfg.DefaultRuntime
+	if fileCfg.Runtime != "" {
+		cfg.Runtime = fileCfg.Runtime
+	}
+	if fileCfg.SessionManager != "" {
+		cfg.SessionManager = fileCfg.SessionManager
 	}
 	if fileCfg.Shell != "" {
 		cfg.Shell = fileCfg.Shell
