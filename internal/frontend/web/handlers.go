@@ -685,14 +685,14 @@ func (s *Server) handleSessionDiffs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.providerLookupFn == nil {
-		http.Error(w, "trace parser not configured", http.StatusInternalServerError)
+		http.Error(w, "trace parser not configured", http.StatusServiceUnavailable)
 		return
 	}
 
 	parser := s.providerLookupFn("claude")
 	turns, err := parser.ParseTrace(sessionFile)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("parse trace: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("parse trace: %v", err), http.StatusNotFound)
 		return
 	}
 
