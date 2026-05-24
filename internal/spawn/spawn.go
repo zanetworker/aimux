@@ -119,6 +119,12 @@ func LaunchInContainer(cmd *exec.Cmd, providerName, dir, shell, envPrefix string
 	return nil
 }
 
+// LaunchResult carries information about a successfully launched session.
+type LaunchResult struct {
+	TmuxSession string `json:"tmux_session,omitempty"`
+	PID         int    `json:"pid,omitempty"`
+}
+
 // ContainerOpts configures container-based agent launch.
 type ContainerOpts struct {
 	Engine string // "podman" or "docker", defaults to "podman"

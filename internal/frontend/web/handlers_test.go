@@ -19,12 +19,12 @@ import (
 func TestLaunchHandler(t *testing.T) {
 	s := NewServer(0)
 	var launched bool
-	s.SetLaunchFunc(func(opts spawn.LaunchOpts) error {
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
 		launched = true
 		if opts.Provider != "claude" {
 			t.Errorf("expected provider claude, got %s", opts.Provider)
 		}
-		return nil
+		return spawn.LaunchResult{TmuxSession: "aimux-claude-test"}, nil
 	})
 
 	go func() { _ = s.Start() }()

@@ -107,12 +107,16 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		SessionManager: req.SessionManager,
 		OTELEnabled:    req.OTELEnabled,
 	}
-	if err := s.launchFn(opts); err != nil {
+	result, err := s.launchFn(opts)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "launched"}); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "launched",
+		"tmux_session": result.TmuxSession,
+	}); err != nil {
 		debuglog.Log("encode launch response: %v", err)
 	}
 }

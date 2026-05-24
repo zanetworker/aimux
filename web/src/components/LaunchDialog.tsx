@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 interface Props {
   open: boolean;
   onClose: () => void;
-  onLaunched?: (provider: string, dir: string) => void;
+  onLaunched?: (provider: string, dir: string, tmuxSession?: string) => void;
 }
 
 interface QuickDir { path: string; basename: string; exists: boolean; }
@@ -71,7 +71,7 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
     if (!dir) return;
     setSubmitting(true);
     try {
-      await fetch('/api/agents/launch', {
+      const resp = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -80,7 +80,8 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
           otel_enabled: otelEnabled, user_prompt: prompt,
         }),
       });
-      onLaunched?.(provider, dir);
+      const data = await resp.json();
+      onLaunched?.(provider, dir, data.tmux_session);
       onClose();
       setDir(''); setPrompt(''); setModel(''); setProvider('claude');
       setMode('default'); setRuntime('local'); setExecution('local');

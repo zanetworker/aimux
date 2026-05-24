@@ -258,11 +258,11 @@ func createWebServer(port int) *web.Server {
 
 	s := web.NewServer(port)
 	s.SetDiscoverFunc(disco.Discover)
-	s.SetLaunchFunc(func(opts spawn.LaunchOpts) error {
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
 		// Find the provider to build the spawn command
 		p := disco.ProviderFor(opts.Provider)
 		if p == nil {
-			return fmt.Errorf("unknown provider: %s", opts.Provider)
+			return spawn.LaunchResult{}, fmt.Errorf("unknown provider: %s", opts.Provider)
 		}
 
 		// Get the provider's spawn args interface to build the command
@@ -271,12 +271,12 @@ func createWebServer(port int) *web.Server {
 		}
 		sp, ok := p.(spawner)
 		if !ok {
-			return fmt.Errorf("provider %s does not support spawning", opts.Provider)
+			return spawn.LaunchResult{}, fmt.Errorf("provider %s does not support spawning", opts.Provider)
 		}
 
 		cmd := sp.SpawnCommand(opts.Dir, opts.Model, opts.Mode)
 		if cmd == nil {
-			return fmt.Errorf("failed to build spawn command for %s", opts.Provider)
+			return spawn.LaunchResult{}, fmt.Errorf("failed to build spawn command for %s", opts.Provider)
 		}
 
 		if opts.Prompt != "" {
@@ -320,9 +320,16 @@ func createWebServer(port int) *web.Server {
 					}
 				}
 			}
-			return spawn.LaunchInContainer(cmd, opts.Provider, opts.Dir, shell, envPrefix, cOpts)
+			if err := spawn.LaunchInContainer(cmd, opts.Provider, opts.Dir, shell, envPrefix, cOpts); err != nil {
+				return spawn.LaunchResult{}, err
+			}
+		} else {
+			if err := spawn.Launch(cmd, opts.Provider, opts.Dir, sessionMgr, shell, envPrefix); err != nil {
+				return spawn.LaunchResult{}, err
+			}
 		}
-		return spawn.Launch(cmd, opts.Provider, opts.Dir, sessionMgr, shell, envPrefix)
+		tmuxSession := spawn.TmuxSessionName(opts.Provider, opts.Dir)
+		return spawn.LaunchResult{TmuxSession: tmuxSession}, nil
 	})
 	s.SetKillFunc(func(pid int, tmuxSession string) error {
 		// Kill the tmux session if it exists

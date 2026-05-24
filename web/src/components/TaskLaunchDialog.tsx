@@ -8,7 +8,7 @@ interface Props {
   open: boolean;
   task: TaskItem | null;
   onClose: () => void;
-  onLaunched?: (provider: string, dir: string) => void;
+  onLaunched?: (provider: string, dir: string, tmuxSession?: string) => void;
 }
 
 interface QuickDir { path: string; basename: string; exists: boolean; }
@@ -66,13 +66,14 @@ export function TaskLaunchDialog({ open, task, onClose, onLaunched }: Props) {
     if (!selectedDir) return;
     setSubmitting(true);
     try {
-      await fetch('/api/agents/launch', {
+      const resp = await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider, dir: selectedDir, task_id: task.id,
           task_list_id: task.listID, user_prompt: userPrompt }),
       });
-      onLaunched?.(provider, selectedDir);
+      const data = await resp.json();
+      onLaunched?.(provider, selectedDir, data.tmux_session);
       onClose(); setUserPrompt(''); setProvider('claude'); setSelectedDir('');
     } finally { setSubmitting(false); }
   };

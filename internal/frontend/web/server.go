@@ -23,7 +23,7 @@ type Server struct {
 	listener     net.Listener
 	srv          *http.Server
 	discoverFn   func() ([]agent.Agent, error)
-	launchFn     func(opts spawn.LaunchOpts) error
+	launchFn     func(opts spawn.LaunchOpts) (spawn.LaunchResult, error)
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
 	ctrl             *controller.Controller
@@ -46,7 +46,7 @@ func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
 	s.discoverFn = fn
 }
 
-func (s *Server) SetLaunchFunc(fn func(opts spawn.LaunchOpts) error) {
+func (s *Server) SetLaunchFunc(fn func(opts spawn.LaunchOpts) (spawn.LaunchResult, error)) {
 	s.launchFn = fn
 }
 

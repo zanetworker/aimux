@@ -42,7 +42,7 @@ export default function App() {
   const [showTasks, setShowTasks] = useState(false);
   const [taskLaunchTarget, setTaskLaunchTarget] = useState<any | null>(null);
   const [pendingTaskCount, setPendingTaskCount] = useState<number>(0);
-  const [pendingLaunch, setPendingLaunch] = useState<{ provider: string; dir: string; existingPIDs: Set<number> } | null>(null);
+  const [pendingLaunch, setPendingLaunch] = useState<{ provider: string; dir: string; tmuxSession?: string; existingPIDs: Set<number> } | null>(null);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const stored = localStorage.getItem('aimux-theme');
     return stored === 'light' ? 'light' : 'dark';
@@ -99,9 +99,10 @@ export default function App() {
   useEffect(() => {
     if (!pendingLaunch) return;
     const found = agents.find(a =>
-      a.ProviderName === pendingLaunch.provider &&
-      a.WorkingDir === pendingLaunch.dir &&
-      !pendingLaunch.existingPIDs.has(a.PID)
+      (pendingLaunch.tmuxSession && a.TMuxSession === pendingLaunch.tmuxSession) ||
+      (a.ProviderName === pendingLaunch.provider &&
+       a.WorkingDir === pendingLaunch.dir &&
+       !pendingLaunch.existingPIDs.has(a.PID))
     );
     if (found) {
       setSelectedId(found.SessionID || String(found.PID));
@@ -301,19 +302,34 @@ export default function App() {
           onLaunchFromTask={(task: any) => setTaskLaunchTarget(task)}
         />
       </div>
+      {pendingLaunch && (
+        <div style={{
+          position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--bg-1)', border: '1px solid var(--accent)',
+          borderRadius: 8, padding: '10px 20px', zIndex: 999,
+          display: 'flex', alignItems: 'center', gap: 10,
+          fontSize: 12, color: 'var(--fg-2)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        }}>
+          <span style={{
+            display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+            background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite',
+          }} />
+          Launching {pendingLaunch.provider} in {pendingLaunch.dir.split('/').pop()}...
+        </div>
+      )}
       <LaunchDialog open={showLaunch} onClose={() => setShowLaunch(false)}
-        onLaunched={(provider, dir) => {
+        onLaunched={(provider, dir, tmuxSession) => {
           setActiveTab('agents');
-          setPendingLaunch({ provider, dir, existingPIDs: new Set(agents.map(a => a.PID)) });
+          setPendingLaunch({ provider, dir, tmuxSession, existingPIDs: new Set(agents.map(a => a.PID)) });
         }}
       />
       <TaskLaunchDialog
         open={!!taskLaunchTarget}
         task={taskLaunchTarget}
         onClose={() => setTaskLaunchTarget(null)}
-        onLaunched={(provider, dir) => {
+        onLaunched={(provider, dir, tmuxSession) => {
           setActiveTab('agents');
-          setPendingLaunch({ provider, dir, existingPIDs: new Set(agents.map(a => a.PID)) });
+          setPendingLaunch({ provider, dir, tmuxSession, existingPIDs: new Set(agents.map(a => a.PID)) });
         }}
       />
     </div>

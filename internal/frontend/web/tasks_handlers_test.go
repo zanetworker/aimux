@@ -122,9 +122,9 @@ func TestLaunchHandlerWithTaskContext(t *testing.T) {
 
 	// Capture launch arguments
 	var capturedPrompt string
-	s.SetLaunchFunc(func(opts spawn.LaunchOpts) error {
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
 		capturedPrompt = opts.Prompt
-		return nil
+		return spawn.LaunchResult{TmuxSession: "aimux-claude-test"}, nil
 	})
 
 	go func() { _ = s.Start() }()
