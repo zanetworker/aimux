@@ -182,6 +182,12 @@ type App struct {
 	// Startup cache: tracks which PIDs came from cache (stale) vs fresh discovery
 	staleAgents map[int]bool
 
+	// Pending launched agents: injected immediately on spawn, preserved
+	// in the instances list until discovery finds the real process.
+	// Keyed by tmux session name. Removed once a discovered agent
+	// matches the same tmux session or working dir.
+	pendingAgents map[string]agent.Agent
+
 	// Live trace streaming: tailer watches the session JSONL and signals
 	// traceRefresh when new lines are appended.
 	activeTailer *trace.Tailer
@@ -276,6 +282,7 @@ func NewApp() App {
 		infraProvider:  infraProv,
 		instances:      cachedAgents,
 		staleAgents:    staleAgents,
+		pendingAgents:  make(map[string]agent.Agent),
 		traceRefresh:   make(chan struct{}, 1),
 	}
 
@@ -337,6 +344,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case instancesMsg:
 		a.instances = controller.FilterHidden([]agent.Agent(msg), a.hiddenAgents)
+
+		// Merge pending launched agents that discovery hasn't found yet.
+		// Once a discovered agent matches the same tmux session or working
+		// dir + provider, the pending entry is removed.
+		for key, pending := range a.pendingAgents {
+			found := false
+			for _, discovered := range a.instances {
+				if (discovered.TMuxSession != "" && discovered.TMuxSession == pending.TMuxSession) ||
+					(discovered.WorkingDir == pending.WorkingDir && discovered.ProviderName == pending.ProviderName) {
+					found = true
+					break
+				}
+			}
+			if found {
+				delete(a.pendingAgents, key)
+			} else {
+				a.instances = append(a.instances, pending)
+			}
+		}
 
 		// Auto-archive idle agents past the configured threshold.
 		threshold := a.cfg.ArchiveThreshold()
@@ -634,8 +660,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				GroupPIDs:     []int{},
 			}
 
-			// Add to instances immediately so it appears in the dashboard
-			// without waiting for the next discovery tick.
+			// Track as pending so it survives instancesMsg replacements
+			// until discovery finds the real process.
+			a.pendingAgents[tmuxName] = *newAgent
 			a.instances = append(a.instances, *newAgent)
 			a.agentsView.SetAgents(a.instances)
 
