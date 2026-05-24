@@ -14,7 +14,7 @@ import (
 type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
-	DefaultRuntime  string                    `yaml:"default_runtime"`
+	DefaultRuntime  string                    `yaml:"default_runtime"` // "local" or "container" (default: local)
 	Shell           string                    `yaml:"shell"`       // login shell for spawning agents
 	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
 	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
@@ -140,7 +140,7 @@ func Default() Config {
 			"gemini": {Enabled: true},
 		},
 		RefreshInterval: "2s",
-		DefaultRuntime:  "tmux",
+		DefaultRuntime:  "local",
 		Sessions: SessionsConfig{
 			TitleModel: "flash",
 		},

@@ -137,7 +137,7 @@ type browseEntry struct {
 // NewLauncherView creates a new launcher overlay. providerOpts maps provider
 // names to their available models and modes. otelAvailable is true if the
 // OTEL receiver is running (shows toggle in options).
-func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]ProviderOptions, otelAvailable bool) *LauncherView {
+func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]ProviderOptions, otelAvailable bool, defaultRuntime string) *LauncherView {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		home = "/"
@@ -164,6 +164,15 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		modes = []string{"default"}
 	}
 
+	runtimes := []string{"local", "container"}
+	runtimeCursor := 0
+	for i, r := range runtimes {
+		if r == defaultRuntime {
+			runtimeCursor = i
+			break
+		}
+	}
+
 	return &LauncherView{
 		state:         statePickProvider,
 		providers:     providers,
@@ -171,9 +180,10 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		browsePath:    home,
 		models:        models,
 		modes:         modes,
-		runtimes:      []string{"local", "container"},
+		runtimes:      runtimes,
+		runtimeCursor: runtimeCursor,
 		otelAvailable: otelAvailable,
-		otelEnabled:   otelAvailable, // default on if receiver is running
+		otelEnabled:   otelAvailable,
 		providerOpts:  providerOpts,
 	}
 }

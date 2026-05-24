@@ -1695,7 +1695,7 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	a.launcherView = views.NewLauncherView(entries, providerOpts, a.cfg.OTELReceiver.Enabled)
+	a.launcherView = views.NewLauncherView(entries, providerOpts, a.cfg.OTELReceiver.Enabled, a.cfg.DefaultRuntime)
 	if len(a.cfg.QuickLaunch.Directories) > 0 {
 		a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
 	}
@@ -1801,7 +1801,7 @@ func (a App) handleNewSession(msg views.NewSessionMsg) (tea.Model, tea.Cmd) {
 				Modes:  sa.Modes,
 			}
 		}
-		a.launcherView = views.NewLauncherView(recentDirs, providerOpts, a.cfg.OTELReceiver.Enabled)
+		a.launcherView = views.NewLauncherView(recentDirs, providerOpts, a.cfg.OTELReceiver.Enabled, a.cfg.DefaultRuntime)
 		if len(a.cfg.QuickLaunch.Directories) > 0 {
 			a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
 		}

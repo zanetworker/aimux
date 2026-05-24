@@ -13,8 +13,8 @@ func TestDefault(t *testing.T) {
 	if cfg.RefreshInterval != "2s" {
 		t.Errorf("RefreshInterval = %q, want %q", cfg.RefreshInterval, "2s")
 	}
-	if cfg.DefaultRuntime != "tmux" {
-		t.Errorf("DefaultRuntime = %q, want %q", cfg.DefaultRuntime, "tmux")
+	if cfg.DefaultRuntime != "local" {
+		t.Errorf("DefaultRuntime = %q, want %q", cfg.DefaultRuntime, "local")
 	}
 
 	for _, name := range []string{"claude", "codex", "gemini"} {
