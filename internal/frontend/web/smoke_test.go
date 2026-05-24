@@ -12,7 +12,17 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/tasks"
+	"github.com/zanetworker/aimux/internal/trace"
 )
+
+// stubParser returns empty turns for any file (avoids 503 on trace endpoints).
+type stubParser struct{}
+
+func (p *stubParser) ParseTrace(_ string) ([]trace.Turn, error) {
+	return nil, nil
+}
 
 // TestAPISmoke_AllEndpoints boots a real server and hits every registered endpoint.
 // This is the single test that catches regressions across the entire API surface.
@@ -35,6 +45,15 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 	})
 	s.SetRecentDirsFunc(func(max int) []RecentDirInfo {
 		return []RecentDirInfo{{Path: "/tmp/test", Display: "test", Age: "1m"}}
+	})
+	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
+		return &stubParser{}
+	})
+	s.SetKillFunc(func(pid int, tmuxSession string) error { return nil })
+	s.SetController(controller.New(cfg))
+	s.SetTaskProvider(&mockTaskProvider{
+		lists: []tasks.TaskList{{ID: "test-list", Name: "Test"}},
+		items: []tasks.Task{{ID: "task-1", Title: "Test task", Status: "needsAction"}},
 	})
 
 	go func() { _ = s.Start() }()

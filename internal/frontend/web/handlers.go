@@ -453,12 +453,12 @@ func (s *Server) handleExportJSONL(w http.ResponseWriter, r *http.Request) {
 
 	p := s.providerLookupFn(providerName)
 	if p == nil {
-		http.Error(w, "unknown provider", http.StatusInternalServerError)
+		http.Error(w, "unknown provider", http.StatusBadRequest)
 		return
 	}
 	turns, err := p.ParseTrace(sessionFile)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -472,7 +472,7 @@ func (s *Server) handleExportJSONL(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.ctrl.ExportJSONL(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -501,12 +501,12 @@ func (s *Server) handleExportOTEL(w http.ResponseWriter, r *http.Request) {
 
 	p := s.providerLookupFn(providerName)
 	if p == nil {
-		http.Error(w, "unknown provider", http.StatusInternalServerError)
+		http.Error(w, "unknown provider", http.StatusBadRequest)
 		return
 	}
 	turns, err := p.ParseTrace(sessionFile)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -520,7 +520,7 @@ func (s *Server) handleExportOTEL(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.ctrl.ExportOTEL(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
