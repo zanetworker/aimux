@@ -489,12 +489,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						if sf != "" {
 							a.splitTrace.SetFilePath(sf)
-							// Start tailer now that we have a file to watch.
 							if a.activeTailer == nil {
 								a.activeTailer = startTraceTailer(sf, a.traceRefresh)
-								if a.activeTailer != nil {
-									return a, tea.Batch(a.waitForTraceRefresh())
-								}
+							}
+							a.splitTrace.Reload()
+							if a.activeTailer != nil {
+								return a, tea.Batch(a.waitForTraceRefresh())
 							}
 						}
 					}
@@ -538,11 +538,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.splitTrace.SetFilePath(sf)
 						if a.activeTailer == nil {
 							a.activeTailer = startTraceTailer(sf, a.traceRefresh)
-							if a.activeTailer != nil {
-								return a, tea.Batch(a.waitForTraceRefresh(), a.pollSessionFile(msg.deadline))
-							}
 						}
 						a.splitTrace.Reload()
+						if a.activeTailer != nil {
+							return a, a.waitForTraceRefresh()
+						}
 						return a, nil
 					}
 				}
@@ -621,7 +621,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			// Create a temporary agent for the session view
 			newAgent := &agent.Agent{
 				Name:         name,
 				ProviderName: msg.Provider,
@@ -629,9 +628,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				TMuxSession:  tmuxName,
 				Status:       agent.StatusActive,
 				Model:        msg.Model,
+				StartTime:    time.Now(),
+				LastActivity: time.Now(),
 				GroupCount:    1,
 				GroupPIDs:     []int{},
 			}
+
+			// Add to instances immediately so it appears in the dashboard
+			// without waiting for the next discovery tick.
+			a.instances = append(a.instances, *newAgent)
+			a.agentsView.SetAgents(a.instances)
 
 			teaCmd, err := a.sessionView.Open(newAgent, backend)
 			if err != nil {
