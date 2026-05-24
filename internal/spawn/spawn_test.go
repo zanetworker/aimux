@@ -91,6 +91,14 @@ func TestLaunchInContainer_EngineMissing(t *testing.T) {
 	}
 }
 
+func TestLaunch_DirectSessionManager(t *testing.T) {
+	cmd := exec.Command("sleep", "0.1")
+	err := Launch(cmd, "claude", t.TempDir(), "direct", "/bin/sh", "")
+	if err != nil {
+		t.Errorf("Launch with direct session manager should succeed, got: %v", err)
+	}
+}
+
 func TestParseEnvPrefix(t *testing.T) {
 	env := parseEnvPrefix("FOO=bar BAZ=qux")
 	if env["FOO"] != "bar" {

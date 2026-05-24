@@ -12,6 +12,24 @@ import (
 	"github.com/zanetworker/aimux/internal/runtime"
 )
 
+// LaunchOpts carries all axes needed to launch an agent session.
+// Zero values for new fields default to safe values:
+// Runtime="local", Execution="local", Shell=$SHELL, SessionManager="tmux".
+type LaunchOpts struct {
+	Provider       string        // which agent: claude, codex, gemini
+	Dir            string        // working directory
+	Model          string        // model override
+	Mode           string        // permission mode
+	Prompt         string        // initial prompt
+	Runtime        string        // "local" or "container"
+	Execution      string        // "local" or "hybrid"
+	Shell          string        // e.g. "/bin/zsh"
+	SessionManager string        // "tmux" or "direct"
+	OTELEnabled    bool          // whether to inject OTEL env vars
+	OTELEndpoint   string        // for building env prefix
+	ContainerOpts  ContainerOpts // container engine/image if Runtime == "container"
+}
+
 // Launch runs a pre-built exec.Cmd in the specified session manager
 // (tmux or iTerm2). The provider name and directory are used to derive
 // the tmux session name. The shell parameter specifies the login shell
@@ -31,8 +49,10 @@ func Launch(cmd *exec.Cmd, providerName, dir, sessionMgr, shell, envPrefix strin
 		return launchTmux(cmd, providerName, dir, shell, envPrefix)
 	case "iterm":
 		return launchITerm(cmd, dir)
+	case "direct":
+		return launchDirect(cmd, dir, shell, envPrefix)
 	default:
-		return fmt.Errorf("spawn: unsupported session manager %q (want \"tmux\" or \"iterm\")", sessionMgr)
+		return fmt.Errorf("spawn: unsupported session manager %q (want \"tmux\", \"direct\", or \"iterm\")", sessionMgr)
 	}
 }
 
@@ -156,6 +176,26 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error
 	if err := tmuxCmd.Run(); err != nil {
 		return fmt.Errorf("spawn: failed to create tmux session %q: %w", sessionName, err)
 	}
+	return nil
+}
+
+// launchDirect runs the agent as a background process without a session manager.
+// The process dies when aimux exits. No detach/reattach support.
+func launchDirect(cmd *exec.Cmd, dir, shell, envPrefix string) error {
+	var cmdParts []string
+	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
+	for _, arg := range cmd.Args[1:] {
+		cmdParts = append(cmdParts, shellQuote(arg))
+	}
+	innerCmd := strings.Join(cmdParts, " ")
+	shellCmd := config.ShellRCPrefix(shell) + envPrefix + innerCmd
+
+	proc := exec.Command(shell, "-lc", shellCmd) // #nosec G204
+	proc.Dir = dir
+	if err := proc.Start(); err != nil {
+		return fmt.Errorf("spawn: direct launch failed: %w", err)
+	}
+	go func() { _ = proc.Wait() }()
 	return nil
 }
 

@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/zanetworker/aimux/internal/spawn"
 )
 
 func TestSpawnCmd_DryRun_JSON(t *testing.T) {
 	var stdout bytes.Buffer
 	c := newSpawnCmd(
 		[]string{"claude", "codex", "gemini"},
-		func(provider, dir, model, mode, prompt string) (int, string, error) {
+		func(opts spawn.LaunchOpts) (int, string, error) {
 			return 0, "", nil
 		},
 	)
@@ -61,7 +63,7 @@ func TestSpawnCmd_DryRun_Wait(t *testing.T) {
 	var stdout bytes.Buffer
 	c := newSpawnCmd(
 		[]string{"claude", "codex", "gemini"},
-		func(provider, dir, model, mode, prompt string) (int, string, error) {
+		func(opts spawn.LaunchOpts) (int, string, error) {
 			return 0, "", nil
 		},
 	)

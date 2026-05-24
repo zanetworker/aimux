@@ -16,10 +16,11 @@ providers:
   gemini:
     enabled: true
 
-# Four orthogonal axes
+# Six orthogonal axes
 runtime: "local"              # WHERE: local | container
+execution: "local"            # WHERE tools run: local | hybrid
 shell: "/bin/zsh"             # WHICH: shell binary
-session_manager: "tmux"       # SESSION: tmux
+session_manager: "tmux"       # SESSION: tmux | direct
 # terminal emulator: auto-detected (not configurable)
 
 refresh_interval: "2s"
@@ -99,7 +100,7 @@ Enable or disable agent providers. Unknown providers default to enabled.
 
 ## Config Axes
 
-aimux has four orthogonal configuration axes:
+aimux has six orthogonal configuration axes:
 
 ### Runtime (WHERE the agent runs)
 
@@ -116,13 +117,19 @@ aimux has four orthogonal configuration axes:
 | `/bin/bash` | **Supported** | |
 | `/bin/fish` | **Supported** | |
 
+### Execution (WHERE tool calls run)
+
+| Value | Status | Description |
+|-------|--------|-------------|
+| `local` | **Supported** | Default. Tools execute on the same machine as the agent |
+| `hybrid` | **Planned** | Agent runs locally, tool calls forwarded to remote host (K8s pod or SSH) |
+
 ### Session Manager (HOW terminal sessions are managed)
 
 | Value | Status | Description |
 |-------|--------|-------------|
 | `tmux` | **Supported** | Default. Sessions persist after detach |
-| `screen` | Planned | Not yet implemented |
-| `zellij` | Planned | Not yet implemented |
+| `direct` | **Supported** | Agent runs in foreground, dies when terminal closes |
 
 ### Terminal Emulator (auto-detected, not configurable)
 
@@ -138,6 +145,7 @@ aimux has four orthogonal configuration axes:
 | `refresh_interval` | string | `"2s"` | How often to scan for agents |
 | `runtime` | string | `"local"` | WHERE: `"local"` or `"container"` |
 | `shell` | string | `$SHELL` | WHICH shell for agent sessions. Falls back to `$SHELL`, then `/bin/sh` |
+| `execution` | string | `"local"` | WHERE tools run: `"local"` or `"hybrid"` |
 | `session_manager` | string | `"tmux"` | HOW terminal sessions are managed |
 
 ## Resume

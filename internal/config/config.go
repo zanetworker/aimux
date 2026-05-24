@@ -15,8 +15,9 @@ type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	RefreshInterval string                    `yaml:"refresh_interval"`
 	Runtime         string                    `yaml:"runtime"`          // WHERE: "local" or "container" (default: local)
+	Execution       string                    `yaml:"execution"`        // WHERE tools run: "local" or "hybrid" (default: local)
 	Shell           string                    `yaml:"shell"`            // WHICH shell: e.g. "/bin/zsh" (default: $SHELL)
-	SessionManager  string                    `yaml:"session_manager"`  // SESSION: "tmux" (default: tmux)
+	SessionManager  string                    `yaml:"session_manager"`  // SESSION: "tmux" or "direct" (default: tmux)
 	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
 	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
 	Resume          ResumeConfig              `yaml:"resume"`      // resume defaults

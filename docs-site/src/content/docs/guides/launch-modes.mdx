@@ -1,48 +1,84 @@
 ---
-title: Launch Modes
-description: Direct and tmux launch modes, quick launch directories, and task-driven launches.
+title: Launching Agents
+description: Six-axis agent launcher, quick launch directories, and task-driven launches.
 ---
 
-## Launch Modes
+## The Launcher
 
-When spawning a new agent, choose between two runtime modes:
+The launcher (`:new` in TUI, **+ Launch** in web dashboard, `aimux spawn` on CLI) configures a new agent session across six axes:
 
-### Direct Mode
-
-The agent runs as a direct child process. Simpler, but the session dies if you close aimux.
-
-### Tmux Mode (default)
-
-The agent runs inside a tmux session named `aimux-<provider>-<timestamp>`. Benefits:
-
-- **Persistent**: Sessions survive aimux restarts
-- **Detachable**: Close aimux, reattach later
-- **Visible**: Sessions appear with `tmux ls`
-
-Set the default in config:
-
-```yaml
-default_runtime: "tmux"  # or "direct"
-```
-
-## Launching Agents
+| Axis | Config key | Values | Default |
+|------|-----------|--------|---------|
+| **Provider** | (per-launch) | claude, codex, gemini | claude |
+| **Model** | (per-launch) | default, opus, sonnet, haiku, o3, o4-mini, gemini-2.5-pro | default |
+| **Permissions** | (per-launch) | default, bypass, plan, acceptEdits, dontAsk | default |
+| **Runtime** | `runtime` | local, container | local |
+| **Execution** | `execution` | local, hybrid | local |
+| **Shell** | `shell` | /bin/zsh, /bin/bash, /bin/sh | $SHELL |
+| **Session** | `session_manager` | tmux, direct | tmux |
+| **Tracing** | (per-launch) | ON, OFF | ON if OTEL receiver is running |
 
 ### TUI
 
-Type `:new` to open the launcher. Steps:
-
-1. Pick a provider (Claude, Codex, Gemini)
-2. Choose a directory (recent dirs, browse filesystem, or quick launch)
-3. Select model and mode
-4. Choose runtime (tmux or direct)
+Type `:new` to open the launcher overlay. Navigate with:
+- `j/k` to move between fields
+- `h/l` to cycle options within a field
+- `Space` to toggle tracing
+- `Enter` to launch
+- `Esc` to cancel
 
 ### Web Dashboard
 
-Click **+ Launch** in the header bar. The launch dialog provides:
+Click **+ Launch** in the header bar. The launch API accepts all axes:
 
-- Directory browser with recent directories
-- Quick launch directories from config
-- Provider, model, and mode selection
+```json
+{
+  "provider": "claude",
+  "dir": "/path/to/project",
+  "model": "opus",
+  "mode": "plan",
+  "runtime": "local",
+  "execution": "local",
+  "shell": "/bin/zsh",
+  "session_manager": "tmux",
+  "otel_enabled": true
+}
+```
+
+### CLI
+
+```bash
+aimux spawn claude \
+  --dir ~/projects/myapp \
+  --model opus \
+  --mode plan \
+  --runtime local \
+  --execution local \
+  --shell /bin/zsh \
+  --session tmux \
+  --otel
+```
+
+## Runtime vs Execution
+
+These are the two most commonly confused axes:
+
+- **Runtime** = WHERE the agent CLI binary runs (your laptop or a container)
+- **Execution** = WHERE the agent's tool calls run (locally or forwarded to a remote host)
+
+```
+              Agent process    Tool calls (edit, shell, test)
+local:        laptop           laptop
+container:    container        container
+hybrid:       laptop           remote (K8s pod / SSH host)
+```
+
+**Hybrid** means the agent runs on your laptop but its Edit/Bash/Write calls are forwarded to a remote machine. The session is local; the work is remote.
+
+## Session Manager
+
+- **tmux** (default): Sessions persist after detach. You can close aimux and reattach later. Sessions appear with `tmux ls`.
+- **direct**: Agent runs in the foreground. When you close the terminal, the agent dies. Good for quick one-shot tasks.
 
 ## Quick Launch Directories
 
@@ -55,15 +91,8 @@ quick_launch:
     - "~/projects/my-lib"
 ```
 
-These appear at the top of the directory picker in both TUI and web launchers.
+These appear at the top of the directory picker.
 
 ## Task-Driven Launch
 
-With Google Tasks integration enabled, you can launch agents with task context:
-
-1. Open the Tasks panel in the web dashboard
-2. Click "Launch" on a task
-3. The task title and notes are injected into the agent's prompt
-4. A "Session started" note is added to the task automatically
-
-See [Tasks Integration](/guides/tasks/) for setup.
+With Google Tasks integration enabled, launch agents with task context. See [Tasks Integration](/guides/tasks/) for setup.

@@ -450,39 +450,40 @@ func TestResolveCommand_Tasks(t *testing.T) {
 	}
 }
 
-// TestOpenNewPicker_SetsState verifies that openNewPicker activates the picker.
-func TestOpenNewPicker_SetsState(t *testing.T) {
+// TestNewCommand_OpensLauncher verifies that :new opens the Launcher directly.
+func TestNewCommand_OpensLauncher(t *testing.T) {
 	app := App{
 		currentView: viewAgents,
 		providers:   []provider.Provider{&provider.Claude{}},
+		cfg:         config.Config{},
 	}
 
-	result, _ := app.openNewPicker()
+	result, _ := app.openLauncher()
 	a := result.(App)
-	if !a.newPickerActive {
-		t.Error("expected newPickerActive = true after openNewPicker")
+	if !a.launcherActive {
+		t.Error("expected launcherActive = true after openLauncher")
 	}
-	if a.newPicker == nil {
-		t.Error("expected newPicker != nil after openNewPicker")
+	if a.launcherView == nil {
+		t.Error("expected launcherView != nil after openLauncher")
 	}
 }
 
-// TestNewPickerCancel_ClearsState verifies that NewPickerCancelMsg clears the overlay.
-func TestNewPickerCancel_ClearsState(t *testing.T) {
+// TestLaunchCancel_ClearsState verifies that LaunchCancelMsg clears the launcher overlay.
+func TestLaunchCancel_ClearsState(t *testing.T) {
 	app := App{
-		newPickerActive: true,
-		newPicker:       &views.NewPickerView{},
-		agentsView:      views.NewAgentsView(),
-		otelStore:       aimuxotel.NewSpanStore(),
+		launcherActive: true,
+		launcherView:   &views.LauncherView{},
+		agentsView:     views.NewAgentsView(),
+		otelStore:      aimuxotel.NewSpanStore(),
 	}
 
-	result, _ := app.Update(views.NewPickerCancelMsg{})
+	result, _ := app.Update(views.LaunchCancelMsg{})
 	a := result.(App)
-	if a.newPickerActive {
-		t.Error("expected newPickerActive = false after cancel")
+	if a.launcherActive {
+		t.Error("expected launcherActive = false after LaunchCancelMsg")
 	}
-	if a.newPicker != nil {
-		t.Error("expected newPicker = nil after cancel")
+	if a.launcherView != nil {
+		t.Error("expected launcherView = nil after LaunchCancelMsg")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/spawn"
 )
 
 var bannedVerbs = map[string]string{
@@ -51,7 +52,7 @@ func registerTestCommands(t *testing.T) func() {
 		PickSession:      func(_ []history.Session) (history.Session, error) { return history.Session{}, nil },
 		ResumeBuilder:    func(_ string, _ bool) (string, string, error) { return "", "", nil },
 		ResumeExec:       func(_ string, _ bool) {},
-		SpawnAgent:       func(_, _, _, _, _ string) (int, string, error) { return 0, "", nil },
+		SpawnAgent:       func(_ spawn.LaunchOpts) (int, string, error) { return 0, "", nil },
 		WebServer:        func(_ int) error { return nil },
 		Providers:        []string{"claude", "codex", "gemini"},
 	}

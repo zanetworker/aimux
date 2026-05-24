@@ -19,9 +19,9 @@ import (
 // Active (content changing) uses 100ms, idle (no changes) uses 500ms.
 func pollInterval(active bool) time.Duration {
 	if active {
-		return 100 * time.Millisecond
+		return 50 * time.Millisecond
 	}
-	return 500 * time.Millisecond
+	return 200 * time.Millisecond
 }
 
 // TmuxSession mirrors a tmux session's pane content. It polls
@@ -192,6 +192,8 @@ func (ts *TmuxSession) Read(buf []byte) (int, error) {
 }
 
 // Write sends input to the tmux session via send-keys.
+// Batches consecutive printable characters into a single tmux send-keys -l
+// call to avoid spawning one subprocess per keystroke.
 func (ts *TmuxSession) Write(data []byte) (int, error) {
 	ts.mu.Lock()
 	if ts.closed {
@@ -201,12 +203,22 @@ func (ts *TmuxSession) Write(data []byte) (int, error) {
 	name := ts.sessionName
 	ts.mu.Unlock()
 
-	// Handle special control characters that need tmux key names
+	var printBuf []byte
+
+	flush := func() {
+		if len(printBuf) == 0 {
+			return
+		}
+		_ = exec.Command("tmux", "send-keys", "-t", name, "-l", string(printBuf)).Run() // #nosec G204
+		printBuf = printBuf[:0]
+	}
+
 	for i := 0; i < len(data); i++ {
 		b := data[i]
 
 		// Check for escape sequences
 		if b == 0x1b && i+2 < len(data) && data[i+1] == '[' {
+			flush()
 			var key string
 			switch data[i+2] {
 			case 'A':
@@ -229,7 +241,12 @@ func (ts *TmuxSession) Write(data []byte) (int, error) {
 			}
 		}
 
-		// Single control characters
+		if b >= 32 && b < 127 {
+			printBuf = append(printBuf, b)
+			continue
+		}
+
+		flush()
 		switch b {
 		case '\r':
 			_ = exec.Command("tmux", "send-keys", "-t", name, "Enter").Run() // #nosec G204
@@ -245,15 +262,12 @@ func (ts *TmuxSession) Write(data []byte) (int, error) {
 			_ = exec.Command("tmux", "send-keys", "-t", name, "C-d").Run() // #nosec G204
 		default:
 			if b >= 1 && b <= 26 {
-				// Ctrl+A through Ctrl+Z
 				letter := string(rune('a' + b - 1))
 				_ = exec.Command("tmux", "send-keys", "-t", name, "C-"+letter).Run() // #nosec G204
-			} else if b >= 32 && b < 127 {
-				// Printable ASCII — use literal mode
-				_ = exec.Command("tmux", "send-keys", "-t", name, "-l", string(b)).Run() // #nosec G204
 			}
 		}
 	}
+	flush()
 
 	return len(data), nil
 }

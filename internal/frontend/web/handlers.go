@@ -15,22 +15,28 @@ import (
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/evaluation"
 	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/sessiondiff"
 	"github.com/zanetworker/aimux/internal/insight"
 	"github.com/zanetworker/aimux/internal/plugin"
+	"github.com/zanetworker/aimux/internal/sessiondiff"
+	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/team"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
 type launchRequest struct {
-	Provider   string `json:"provider"`
-	Dir        string `json:"dir"`
-	Model      string `json:"model"`
-	Mode       string `json:"mode"`
-	TaskID     string `json:"task_id,omitempty"`
-	TaskListID string `json:"task_list_id,omitempty"`
-	UserPrompt string `json:"user_prompt,omitempty"`
+	Provider       string `json:"provider"`
+	Dir            string `json:"dir"`
+	Model          string `json:"model"`
+	Mode           string `json:"mode"`
+	Runtime        string `json:"runtime"`
+	Execution      string `json:"execution"`
+	Shell          string `json:"shell"`
+	SessionManager string `json:"session_manager"`
+	OTELEnabled    bool   `json:"otel_enabled"`
+	TaskID         string `json:"task_id,omitempty"`
+	TaskListID     string `json:"task_list_id,omitempty"`
+	UserPrompt     string `json:"user_prompt,omitempty"`
 }
 
 func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +95,19 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.launchFn(req.Provider, req.Dir, req.Model, req.Mode, prompt); err != nil {
+	opts := spawn.LaunchOpts{
+		Provider:       req.Provider,
+		Dir:            req.Dir,
+		Model:          req.Model,
+		Mode:           req.Mode,
+		Prompt:         prompt,
+		Runtime:        req.Runtime,
+		Execution:      req.Execution,
+		Shell:          req.Shell,
+		SessionManager: req.SessionManager,
+		OTELEnabled:    req.OTELEnabled,
+	}
+	if err := s.launchFn(opts); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

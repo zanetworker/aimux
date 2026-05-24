@@ -1,0 +1,44 @@
+{
+  "sessionId": "gemini-test-session-abc123",
+  "lastUpdated": "2026-02-20T15:05:30.123456789Z",
+  "messages": [
+    {
+      "timestamp": "2026-02-20T15:00:00.000000000Z",
+      "type": "user",
+      "content": "explain the project structure"
+    },
+    {
+      "timestamp": "2026-02-20T15:00:15.123456789Z",
+      "type": "gemini",
+      "content": "This project follows a standard Go layout with cmd/ for entry points and internal/ for private packages."
+    },
+    {
+      "timestamp": "2026-02-20T15:01:00.234567890Z",
+      "type": "info",
+      "content": "Model: gemini-2.5-pro, Temperature: 0.7"
+    },
+    {
+      "timestamp": "2026-02-20T15:02:00.345678901Z",
+      "type": "user",
+      "content": "show me the main function"
+    },
+    {
+      "timestamp": "2026-02-20T15:02:20.456789012Z",
+      "type": "gemini",
+      "content": [
+        {"text": "The main function is in cmd/app/main.go:"},
+        {"text": "```go\nfunc main() {\n    fmt.Println(\"hello\")\n}\n```"}
+      ]
+    },
+    {
+      "timestamp": "2026-02-20T15:04:00.567890123Z",
+      "type": "user",
+      "content": "add error handling to the HTTP server"
+    },
+    {
+      "timestamp": "2026-02-20T15:05:30.123456789Z",
+      "type": "gemini",
+      "content": "I've added comprehensive error handling including graceful shutdown, request timeouts, and proper error response formatting."
+    }
+  ]
+}

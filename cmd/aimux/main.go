@@ -178,11 +178,11 @@ func resumeSession(sessionID string, danger bool) {
 
 // buildSpawnFn returns a function that spawns an agent via the provider's
 // SpawnCommand and the spawn.Launch helper.
-func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(providerName, dir, model, mode, prompt string) (int, string, error) {
-	return func(providerName, dir, model, mode, prompt string) (int, string, error) {
-		p := disco.ProviderFor(providerName)
+func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(opts spawn.LaunchOpts) (int, string, error) {
+	return func(opts spawn.LaunchOpts) (int, string, error) {
+		p := disco.ProviderFor(opts.Provider)
 		if p == nil {
-			return 0, "", fmt.Errorf("unknown provider: %s", providerName)
+			return 0, "", fmt.Errorf("unknown provider: %s", opts.Provider)
 		}
 
 		type spawner interface {
@@ -190,31 +190,55 @@ func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(provide
 		}
 		sp, ok := p.(spawner)
 		if !ok {
-			return 0, "", fmt.Errorf("provider %s does not support spawning", providerName)
+			return 0, "", fmt.Errorf("provider %s does not support spawning", opts.Provider)
 		}
 
-		c := sp.SpawnCommand(dir, model, mode)
+		c := sp.SpawnCommand(opts.Dir, opts.Model, opts.Mode)
 		if c == nil {
-			return 0, "", fmt.Errorf("failed to build spawn command for %s", providerName)
+			return 0, "", fmt.Errorf("failed to build spawn command for %s", opts.Provider)
 		}
 
-		if prompt != "" {
-			switch providerName {
+		if opts.Prompt != "" {
+			switch opts.Provider {
 			case "claude", "gemini":
-				c.Args = append(c.Args, prompt)
+				c.Args = append(c.Args, opts.Prompt)
 			case "codex":
-				c.Args = append(c.Args, "--prompt", prompt)
+				c.Args = append(c.Args, "--prompt", opts.Prompt)
 			default:
-				c.Args = append(c.Args, prompt)
+				c.Args = append(c.Args, opts.Prompt)
 			}
 		}
 
-		shell := cfg.ResolveShell()
-		if err := spawn.Launch(c, providerName, dir, "tmux", shell, ""); err != nil {
-			return 0, "", err
+		shell := opts.Shell
+		if shell == "" {
+			shell = cfg.ResolveShell()
+		}
+		sessionMgr := opts.SessionManager
+		if sessionMgr == "" {
+			sessionMgr = "tmux"
 		}
 
-		tmuxSession := spawn.TmuxSessionName(providerName, dir)
+		if opts.Runtime == "container" {
+			cOpts := opts.ContainerOpts
+			if cOpts.Engine == "" {
+				for _, rt := range cfg.Runtimes {
+					if rt.Type == "container" {
+						cOpts.Engine = rt.Engine
+						cOpts.Image = rt.Image
+						break
+					}
+				}
+			}
+			if err := spawn.LaunchInContainer(c, opts.Provider, opts.Dir, shell, "", cOpts); err != nil {
+				return 0, "", err
+			}
+		} else {
+			if err := spawn.Launch(c, opts.Provider, opts.Dir, sessionMgr, shell, ""); err != nil {
+				return 0, "", err
+			}
+		}
+
+		tmuxSession := spawn.TmuxSessionName(opts.Provider, opts.Dir)
 		return 0, tmuxSession, nil
 	}
 }
@@ -234,11 +258,11 @@ func createWebServer(port int) *web.Server {
 
 	s := web.NewServer(port)
 	s.SetDiscoverFunc(disco.Discover)
-	s.SetLaunchFunc(func(providerName, dir, model, mode, prompt string) error {
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) error {
 		// Find the provider to build the spawn command
-		p := disco.ProviderFor(providerName)
+		p := disco.ProviderFor(opts.Provider)
 		if p == nil {
-			return fmt.Errorf("unknown provider: %s", providerName)
+			return fmt.Errorf("unknown provider: %s", opts.Provider)
 		}
 
 		// Get the provider's spawn args interface to build the command
@@ -247,28 +271,58 @@ func createWebServer(port int) *web.Server {
 		}
 		sp, ok := p.(spawner)
 		if !ok {
-			return fmt.Errorf("provider %s does not support spawning", providerName)
+			return fmt.Errorf("provider %s does not support spawning", opts.Provider)
 		}
 
-		cmd := sp.SpawnCommand(dir, model, mode)
+		cmd := sp.SpawnCommand(opts.Dir, opts.Model, opts.Mode)
 		if cmd == nil {
-			return fmt.Errorf("failed to build spawn command for %s", providerName)
+			return fmt.Errorf("failed to build spawn command for %s", opts.Provider)
 		}
 
-		if prompt != "" {
-			// Claude takes prompt as positional arg, Codex uses --prompt, Gemini uses positional
-			switch providerName {
+		if opts.Prompt != "" {
+			switch opts.Provider {
 			case "claude", "gemini":
-				cmd.Args = append(cmd.Args, prompt)
+				cmd.Args = append(cmd.Args, opts.Prompt)
 			case "codex":
-				cmd.Args = append(cmd.Args, "--prompt", prompt)
+				cmd.Args = append(cmd.Args, "--prompt", opts.Prompt)
 			default:
-				cmd.Args = append(cmd.Args, prompt)
+				cmd.Args = append(cmd.Args, opts.Prompt)
 			}
 		}
 
-		shell := cfg.ResolveShell()
-		return spawn.Launch(cmd, providerName, dir, "tmux", shell, "")
+		shell := opts.Shell
+		if shell == "" {
+			shell = cfg.ResolveShell()
+		}
+		sessionMgr := opts.SessionManager
+		if sessionMgr == "" {
+			sessionMgr = "tmux"
+		}
+
+		envPrefix := ""
+		if opts.OTELEnabled && opts.OTELEndpoint != "" {
+			type otelEnver interface {
+				OTELEnv(endpoint string) string
+			}
+			if oe, ok := p.(otelEnver); ok {
+				envPrefix = oe.OTELEnv(opts.OTELEndpoint)
+			}
+		}
+
+		if opts.Runtime == "container" {
+			cOpts := opts.ContainerOpts
+			if cOpts.Engine == "" {
+				for _, rt := range cfg.Runtimes {
+					if rt.Type == "container" {
+						cOpts.Engine = rt.Engine
+						cOpts.Image = rt.Image
+						break
+					}
+				}
+			}
+			return spawn.LaunchInContainer(cmd, opts.Provider, opts.Dir, shell, envPrefix, cOpts)
+		}
+		return spawn.Launch(cmd, opts.Provider, opts.Dir, sessionMgr, shell, envPrefix)
 	})
 	s.SetKillFunc(func(pid int, tmuxSession string) error {
 		// Kill the tmux session if it exists

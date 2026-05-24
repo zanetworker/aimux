@@ -4,6 +4,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
+	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -15,7 +16,7 @@ type Deps struct {
 	PickSession      func(sessions []history.Session) (history.Session, error)
 	ResumeBuilder    func(sessionID string, danger bool) (command, workDir string, err error)
 	ResumeExec       func(sessionID string, danger bool)
-	SpawnAgent       func(provider, dir, model, mode, prompt string) (pid int, tmuxSession string, err error)
+	SpawnAgent       func(opts spawn.LaunchOpts) (pid int, tmuxSession string, err error)
 	WebServer        func(port int) error
 	Providers        []string
 	ProfileStore     *profile.Store

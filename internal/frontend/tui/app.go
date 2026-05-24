@@ -56,6 +56,10 @@ type tickMsg time.Time
 // traceRefreshMsg signals that the tailer detected new content in the session file.
 type traceRefreshMsg struct{}
 
+// sessionFilePollMsg is a fast-poll tick for discovering the session file
+// after launching a new agent. Fires every 200ms for 10s, then stops.
+type sessionFilePollMsg struct{ deadline time.Time }
+
 // instancesMsg carries discovered instances.
 type instancesMsg []agent.Agent
 
@@ -139,10 +143,6 @@ type App struct {
 	// Launcher overlay
 	launcherActive bool
 	launcherView   *views.LauncherView
-
-	// New picker overlay (:new command)
-	newPickerActive bool
-	newPicker       *views.NewPickerView
 
 	// Tasks view
 	tasksView *views.TasksView
@@ -513,11 +513,42 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.splitMode && a.splitTrace != nil {
 			a.splitTrace.Reload()
 		}
-		// Re-arm the channel listener for the next change.
 		if a.activeTailer != nil {
 			return a, a.waitForTraceRefresh()
 		}
 		return a, nil
+
+	case sessionFilePollMsg:
+		if !a.splitMode || a.splitTrace == nil || a.splitTrace.FilePath() != "" {
+			return a, nil
+		}
+		if time.Now().After(msg.deadline) {
+			return a, nil
+		}
+		if a.sessionView != nil && a.sessionView.Agent() != nil {
+			ag := a.sessionView.Agent()
+			if p := a.providerFor(ag.ProviderName); p != nil {
+				if sf := p.FindSessionFile(*ag); sf != "" {
+					if !a.splitLaunchTime.IsZero() {
+						if info, err := os.Stat(sf); err == nil && info.ModTime().Before(a.splitLaunchTime) {
+							sf = ""
+						}
+					}
+					if sf != "" {
+						a.splitTrace.SetFilePath(sf)
+						if a.activeTailer == nil {
+							a.activeTailer = startTraceTailer(sf, a.traceRefresh)
+							if a.activeTailer != nil {
+								return a, tea.Batch(a.waitForTraceRefresh(), a.pollSessionFile(msg.deadline))
+							}
+						}
+						a.splitTrace.Reload()
+						return a, nil
+					}
+				}
+			}
+		}
+		return a, a.pollSessionFile(msg.deadline)
 
 	case views.LaunchResumeMsg:
 		a.launcherActive = false
@@ -537,6 +568,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			endpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
 			envPrefix = p.OTELEnv(endpoint)
 		}
+		shell := msg.Shell
+		if shell == "" {
+			shell = a.cfg.ResolveShell()
+		}
+		sessionMgr := msg.SessionManager
+		if sessionMgr == "" {
+			sessionMgr = "tmux"
+		}
 		if msg.Runtime == "container" {
 			cOpts := spawn.ContainerOpts{}
 			for _, rt := range a.cfg.Runtimes {
@@ -546,12 +585,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			if err := spawn.LaunchInContainer(cmd, msg.Provider, msg.Dir, a.cfg.ResolveShell(), envPrefix, cOpts); err != nil {
+			if err := spawn.LaunchInContainer(cmd, msg.Provider, msg.Dir, shell, envPrefix, cOpts); err != nil {
 				a.statusHint = fmt.Sprintf("Container launch failed: %v", err)
 				return a, nil
 			}
 		} else {
-			if err := spawn.Launch(cmd, msg.Provider, msg.Dir, "tmux", a.cfg.ResolveShell(), envPrefix); err != nil {
+			if err := spawn.Launch(cmd, msg.Provider, msg.Dir, sessionMgr, shell, envPrefix); err != nil {
 				a.statusHint = fmt.Sprintf("Launch failed: %v", err)
 				return a, nil
 			}
@@ -622,12 +661,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			a.zoomed = true
-			a.splitMode = true       // always split -- trace fills in as data arrives
-			a.splitFocus = "session" // focus on session so user can type
-			a.splitLoading = true    // show loading placeholder until first PTY output
+			a.splitMode = true
+			a.splitFocus = "session"
+			a.splitLoading = true
 			a.layout.SetZoomed(true)
 			a.statusHint = fmt.Sprintf("Launched %s in %s", msg.Provider, name)
-			return a, teaCmd
+			pollDeadline := time.Now().Add(10 * time.Second)
+			return a, tea.Batch(teaCmd, a.pollSessionFile(pollDeadline))
 		}
 
 		a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, msg.Runtime)
@@ -808,16 +848,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case views.NewSessionMsg:
-		return a.handleNewSession(msg)
-	case views.NewTaskMsg:
-		return a.handleNewTask(msg)
-	case views.NewPickerCancelMsg:
-		a.newPickerActive = false
-		a.newPicker = nil
-		a.statusHint = "Cancelled"
-		return a, nil
-
 	case k8sSessionReadyMsg:
 		a.stickyHint = false
 		if msg.err != nil {
@@ -836,11 +866,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.openK8sSession(podAgent)
 
 	case tea.KeyMsg:
-		// New picker overlay active — route all keys to it
-		if a.newPickerActive && a.newPicker != nil {
-			_, cmd := a.newPicker.Update(msg)
-			return a, cmd
-		}
 		// Launcher overlay active — route all keys to it
 		if a.launcherActive && a.launcherView != nil {
 			cmd := a.launcherView.Update(msg)
@@ -1576,7 +1601,7 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 	case "kill":
 		return a.promptKill()
 	case "new":
-		return a.openNewPicker()
+		return a.openLauncher()
 	case "export-otel":
 		return a.exportOTEL()
 	case "quit":
@@ -1685,9 +1710,13 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 		})
 	}
 
-	// Build provider options from registered providers
+	// Build provider options from CLI agent providers only.
+	// K8s is a runtime (where agents run), not a provider (which agent).
 	providerOpts := make(map[string]views.ProviderOptions)
 	for _, p := range a.providers {
+		if p.Name() == "k8s" {
+			continue
+		}
 		sa := p.SpawnArgs()
 		providerOpts[p.Name()] = views.ProviderOptions{
 			Models: sa.Models,
@@ -1695,7 +1724,12 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	a.launcherView = views.NewLauncherView(entries, providerOpts, a.cfg.OTELReceiver.Enabled, a.cfg.Runtime)
+	a.launcherView = views.NewLauncherView(entries, providerOpts, a.cfg.OTELReceiver.Enabled, views.LauncherConfig{
+			DefaultRuntime:        a.cfg.Runtime,
+			DefaultExecution:      a.cfg.Execution,
+			DefaultShell:          a.cfg.ResolveShell(),
+			DefaultSessionManager: a.cfg.SessionManager,
+		})
 	if len(a.cfg.QuickLaunch.Directories) > 0 {
 		a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
 	}
@@ -1704,190 +1738,16 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// openNewPicker shows the :new picker overlay for creating sessions or tasks.
-func (a App) openNewPicker() (tea.Model, tea.Cmd) {
-	var ps []views.ProviderSupport
-	for _, p := range a.providers {
-		name := p.Name()
-		ps = append(ps, views.ProviderSupport{
-			Name:          name,
-			LocalSession:  true,
-			LocalK8s:      name == "claude",
-			RemoteSession: name == "claude",
-			RemoteTask:    name == "claude" || name == "gemini",
-		})
-	}
-	// Health check is lazy — runs when user first selects a K8s option,
-	// not here. This keeps :new instant.
-
-	a.newPicker = views.NewNewPickerView(views.NewPickerConfig{
-		K8sEnabled: a.cfg.Kubernetes.IsActive(),
-		Providers:  ps,
-	})
-	a.newPicker.SetSize(a.width, a.height)
-	a.newPickerActive = true
-	return a, nil
-}
-
-// handleNewSession processes a NewSessionMsg from the :new picker.
-// For "local" sessions, it delegates to the existing launcher flow.
-// For "remote" sessions, it calls SpawnRemote on the K8s provider.
-func (a App) buildRecentDirs() []views.RecentDirEntry {
-	type dirEntry struct {
-		path     string
-		lastUsed time.Time
-		provider string
-	}
-	byPath := make(map[string]*dirEntry)
-	for _, p := range a.providers {
-		for _, rd := range p.RecentDirs(20) {
-			if existing, ok := byPath[rd.Path]; ok {
-				existing.provider = "both"
-				if rd.LastUsed.After(existing.lastUsed) {
-					existing.lastUsed = rd.LastUsed
-				}
-			} else {
-				byPath[rd.Path] = &dirEntry{path: rd.Path, lastUsed: rd.LastUsed, provider: p.Name()}
-			}
-		}
-	}
-	sorted := make([]*dirEntry, 0, len(byPath))
-	for _, de := range byPath {
-		sorted = append(sorted, de)
-	}
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].lastUsed.After(sorted[j].lastUsed) })
-	if len(sorted) > 20 {
-		sorted = sorted[:20]
-	}
-	var entries []views.RecentDirEntry
-	for _, de := range sorted {
-		display := filepath.Base(de.path)
-		if display == "" || display == "." {
-			display = de.path
-		}
-		age := ""
-		if !de.lastUsed.IsZero() {
-			age = formatDurationShort(time.Since(de.lastUsed))
-		}
-		entries = append(entries, views.RecentDirEntry{Path: de.path, Display: display, Provider: de.provider, Age: age})
-	}
-	return entries
-}
-
-func (a *App) dismissPicker() {
-	a.newPickerActive = false
-	a.newPicker = nil
-}
-
-func (a *App) pickerError(msg string) {
-	if a.newPicker != nil {
-		a.newPicker.SetStatus(msg)
-	}
-}
-
-func (a App) handleNewSession(msg views.NewSessionMsg) (tea.Model, tea.Cmd) {
-	switch msg.Where {
-	case "local", "hybrid":
-		// Dismiss picker, then open the full launcher at directory step.
-		a.newPickerActive = false
-		a.newPicker = nil
-		// Build the launcher directly (avoid chained value-receiver copies)
-		recentDirs := a.buildRecentDirs()
-		providerOpts := make(map[string]views.ProviderOptions)
-		for _, p := range a.providers {
-			sa := p.SpawnArgs()
-			providerOpts[p.Name()] = views.ProviderOptions{
-				Models: sa.Models,
-				Modes:  sa.Modes,
-			}
-		}
-		a.launcherView = views.NewLauncherView(recentDirs, providerOpts, a.cfg.OTELReceiver.Enabled, a.cfg.Runtime)
-		if len(a.cfg.QuickLaunch.Directories) > 0 {
-			a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
-		}
-		a.launcherView.SetSize(a.width, a.height)
-		a.launcherView.SkipToDirectory(msg.Provider)
-		a.launcherActive = true
-		return a, nil
-
-	case "remote":
-		if a.infraProvider == nil {
-			a.pickerError("K8s not configured — set kubernetes.enabled and kubeconfig in ~/.aimux/config.yaml")
-			return a, nil
-		}
-		a.dismissPicker()
-		a.statusHint = fmt.Sprintf("Spawning remote %s session — pod starting...", msg.Provider)
-		a.stickyHint = true
-		// Run spawn + wait async so the TUI stays responsive.
-		k8s := a.infraProvider
-		provName := msg.Provider
-		return a, func() tea.Msg {
-			podName, namespace, err := k8s.SpawnSession(provName)
-			if err != nil {
-				return k8sSessionReadyMsg{err: err}
-			}
-			return k8sSessionReadyMsg{podName: podName, namespace: namespace, provider: provName}
-		}
-
-	default:
-		a.newPickerActive = false
-		a.newPicker = nil
-		return a.openLauncher()
-	}
-}
-
-// handleNewTask processes a NewTaskMsg from the :new picker.
-// For "local" tasks, it runs the prompt as a local command.
-// For "remote" tasks, it creates a task via TaskLister/Spawner.
-func (a App) handleNewTask(msg views.NewTaskMsg) (tea.Model, tea.Cmd) {
-	if msg.Prompt == "" {
-		a.pickerError("Task prompt cannot be empty")
-		return a, nil
-	}
-
-	switch msg.Where {
-	case "remote":
-		if a.infraProvider == nil {
-			a.pickerError("K8s not configured — set kubernetes.enabled and kubeconfig in ~/.aimux/config.yaml")
-			return a, nil
-		}
-		// Spawn directly — auto-provisioning inside SpawnRemote handles
-		// namespace, secrets, and deployment creation if needed.
-		// No health check gate: Redis is for coordination (optional),
-		// not a prerequisite for creating pods.
-		if err := a.infraProvider.SpawnRemote(msg.Provider, "task", 1); err != nil {
-			a.pickerError(fmt.Sprintf("Remote task failed: %v", err))
-			return a, nil
-		}
-		a.dismissPicker()
-		a.statusHint = fmt.Sprintf("Created remote task for %s", msg.Provider)
-		return a, nil
-	default:
-		p := a.providerFor(msg.Provider)
-		if p == nil {
-			a.pickerError(fmt.Sprintf("Unknown provider: %s", msg.Provider))
-			return a, nil
-		}
-		cmd := p.SpawnCommand(".", "", "")
-		if cmd == nil {
-			a.pickerError(fmt.Sprintf("Provider %s cannot spawn locally", msg.Provider))
-			return a, nil
-		}
-		cmd.Args = append(cmd.Args, "-p", msg.Prompt)
-		envPrefix := ""
-		if a.cfg.OTELReceiver.Enabled {
-			endpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
-			envPrefix = p.OTELEnv(endpoint)
-		}
-		if err := spawn.Launch(cmd, msg.Provider, ".", "tmux", a.cfg.ResolveShell(), envPrefix); err != nil {
-			a.pickerError(fmt.Sprintf("Task launch failed: %v", err))
-			return a, nil
-		}
-		a.dismissPicker()
-		a.statusHint = fmt.Sprintf("Launched %s task locally", msg.Provider)
-		return a, nil
-	}
-}
+// NOTE: The former NewPicker overlay (openNewPicker, handleNewSession, handleNewTask,
+// dismissPicker, pickerError, buildRecentDirs) has been removed. The :new command now
+// opens the Launcher directly. The NewPicker view file (views/newpicker.go) is kept
+// for reference but is no longer wired.
+//
+// Capabilities that existed in the NewPicker but are NOT yet in the Launcher:
+//   - Task mode: fire-and-forget prompt execution (local + remote via K8s)
+//   - Remote (pod) session launch via infraProvider.SpawnSession
+//   - K8s health status bar display
+// These should be added as new Launcher states/axes in a future pass.
 
 func formatDurationShort(d time.Duration) string {
 	if d < time.Minute {
@@ -2748,12 +2608,6 @@ func (a App) View() string {
 
 	result := header + "\n" + content + "\n" + statusBar
 
-	// Overlay the new picker if active
-	if a.newPickerActive && a.newPicker != nil {
-		a.newPicker.SetSize(a.width, a.height)
-		return a.newPicker.View()
-	}
-
 	// Overlay the launcher if active
 	if a.launcherActive && a.launcherView != nil {
 		a.launcherView.SetSize(a.width, a.height)
@@ -3027,6 +2881,13 @@ func (a App) activeTraceFilePath() string {
 		return a.sessionView.Agent().SessionFile
 	}
 	return ""
+}
+
+// pollSessionFile returns a tea.Cmd that fires a sessionFilePollMsg after 200ms.
+func (a App) pollSessionFile(deadline time.Time) tea.Cmd {
+	return tea.Tick(200*time.Millisecond, func(_ time.Time) tea.Msg {
+		return sessionFilePollMsg{deadline: deadline}
+	})
 }
 
 // activeTraceSessionID returns the session ID for the active trace context.

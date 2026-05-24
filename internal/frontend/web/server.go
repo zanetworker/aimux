@@ -13,6 +13,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/plugin"
+	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/trace"
 )
@@ -22,7 +23,7 @@ type Server struct {
 	listener     net.Listener
 	srv          *http.Server
 	discoverFn   func() ([]agent.Agent, error)
-	launchFn     func(provider, dir, model, mode, prompt string) error
+	launchFn     func(opts spawn.LaunchOpts) error
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
 	ctrl             *controller.Controller
@@ -45,7 +46,7 @@ func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
 	s.discoverFn = fn
 }
 
-func (s *Server) SetLaunchFunc(fn func(provider, dir, model, mode, prompt string) error) {
+func (s *Server) SetLaunchFunc(fn func(opts spawn.LaunchOpts) error) {
 	s.launchFn = fn
 }
 

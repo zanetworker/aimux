@@ -48,12 +48,15 @@ var (
 
 // LaunchMsg is emitted when the user confirms the launch configuration.
 type LaunchMsg struct {
-	Provider    string
-	Dir         string
-	Model       string
-	Mode        string
-	Runtime     string // "local" or "container"
-	OTELEnabled bool
+	Provider       string
+	Dir            string
+	Model          string
+	Mode           string // permission mode: "default", "bypass", "plan", etc.
+	Runtime        string // "local" or "container"
+	Execution      string // "local" or "hybrid"
+	Shell          string // e.g. "/bin/zsh"
+	SessionManager string // "tmux" or "direct"
+	OTELEnabled    bool
 }
 
 // LaunchResumeMsg is emitted when the user picks a session to resume from the launcher.
@@ -113,9 +116,15 @@ type LauncherView struct {
 	modeCursor   int
 	runtimes     []string
 	runtimeCursor int
+	executions    []string
+	executionCursor int
+	shells        []string
+	shellCursor   int
+	sessionMgrs   []string
+	sessionMgrCursor int
 	otelEnabled   bool // toggle for OTEL tracing on spawned session
 	otelAvailable bool // true if OTEL receiver is running
-	optionField   int  // 0=model, 1=mode, 2=runtime, 3=otel
+	optionField   int  // 0=model, 1=permissions, 2=runtime, 3=execution, 4=shell, 5=session, 6=otel
 	providerOpts map[string]ProviderOptions
 
 	// Resume step
@@ -134,10 +143,18 @@ type browseEntry struct {
 	isDir bool
 }
 
+// LauncherConfig holds defaults for the launcher's six axes.
+type LauncherConfig struct {
+	DefaultRuntime        string // "local" or "container"
+	DefaultExecution      string // "local" or "hybrid"
+	DefaultShell          string // e.g. "/bin/zsh"
+	DefaultSessionManager string // "tmux" or "direct"
+}
+
 // NewLauncherView creates a new launcher overlay. providerOpts maps provider
 // names to their available models and modes. otelAvailable is true if the
 // OTEL receiver is running (shows toggle in options).
-func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]ProviderOptions, otelAvailable bool, defaultRuntime string) *LauncherView {
+func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]ProviderOptions, otelAvailable bool, lCfg LauncherConfig) *LauncherView {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		home = "/"
@@ -147,10 +164,8 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 	for name := range providerOpts {
 		providers = append(providers, name)
 	}
-	// Sort for consistent order
 	sort.Strings(providers)
 
-	// Default to first provider's options
 	var models, modes []string
 	if len(providers) > 0 {
 		opts := providerOpts[providers[0]]
@@ -167,24 +182,63 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 	runtimes := []string{"local", "container"}
 	runtimeCursor := 0
 	for i, r := range runtimes {
-		if r == defaultRuntime {
+		if r == lCfg.DefaultRuntime {
 			runtimeCursor = i
 			break
 		}
 	}
 
+	executions := []string{"local", "hybrid"}
+	executionCursor := 0
+	for i, e := range executions {
+		if e == lCfg.DefaultExecution {
+			executionCursor = i
+			break
+		}
+	}
+
+	defaultShell := lCfg.DefaultShell
+	if defaultShell == "" {
+		if sh := os.Getenv("SHELL"); sh != "" {
+			defaultShell = sh
+		} else {
+			defaultShell = "/bin/sh"
+		}
+	}
+	shells := []string{defaultShell}
+	for _, candidate := range []string{"/bin/zsh", "/bin/bash", "/bin/sh"} {
+		if candidate != defaultShell {
+			shells = append(shells, candidate)
+		}
+	}
+
+	sessionMgrs := []string{"tmux", "direct"}
+	sessionMgrCursor := 0
+	for i, s := range sessionMgrs {
+		if s == lCfg.DefaultSessionManager {
+			sessionMgrCursor = i
+			break
+		}
+	}
+
 	return &LauncherView{
-		state:         statePickProvider,
-		providers:     providers,
-		recentDirs:    recentDirs,
-		browsePath:    home,
-		models:        models,
-		modes:         modes,
-		runtimes:      runtimes,
-		runtimeCursor: runtimeCursor,
-		otelAvailable: otelAvailable,
-		otelEnabled:   otelAvailable,
-		providerOpts:  providerOpts,
+		state:            statePickProvider,
+		providers:        providers,
+		recentDirs:       recentDirs,
+		browsePath:       home,
+		models:           models,
+		modes:            modes,
+		runtimes:         runtimes,
+		runtimeCursor:    runtimeCursor,
+		executions:       executions,
+		executionCursor:  executionCursor,
+		shells:           shells,
+		shellCursor:      0,
+		sessionMgrs:      sessionMgrs,
+		sessionMgrCursor: sessionMgrCursor,
+		otelAvailable:    otelAvailable,
+		otelEnabled:      otelAvailable,
+		providerOpts:     providerOpts,
 	}
 }
 
@@ -386,9 +440,10 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 }
 
 func (l *LauncherView) updateOptions(key string) tea.Cmd {
-	maxField := 2 // 0=model, 1=mode, 2=runtime
+	// 0=model, 1=permissions, 2=runtime, 3=execution, 4=shell, 5=session, 6=otel
+	maxField := 5
 	if l.otelAvailable {
-		maxField = 3 // 0=model, 1=mode, 2=runtime, 3=otel
+		maxField = 6
 	}
 	switch key {
 	case "j", "down":
@@ -408,6 +463,12 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 		case 2:
 			if l.runtimeCursor < len(l.runtimes)-1 { l.runtimeCursor++ }
 		case 3:
+			if l.executionCursor < len(l.executions)-1 { l.executionCursor++ }
+		case 4:
+			if l.shellCursor < len(l.shells)-1 { l.shellCursor++ }
+		case 5:
+			if l.sessionMgrCursor < len(l.sessionMgrs)-1 { l.sessionMgrCursor++ }
+		case 6:
 			l.otelEnabled = !l.otelEnabled
 		}
 	case "h", "left":
@@ -419,10 +480,16 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 		case 2:
 			if l.runtimeCursor > 0 { l.runtimeCursor-- }
 		case 3:
+			if l.executionCursor > 0 { l.executionCursor-- }
+		case 4:
+			if l.shellCursor > 0 { l.shellCursor-- }
+		case 5:
+			if l.sessionMgrCursor > 0 { l.sessionMgrCursor-- }
+		case 6:
 			l.otelEnabled = !l.otelEnabled
 		}
 	case " ":
-		if l.optionField == 3 {
+		if l.optionField == 6 {
 			l.otelEnabled = !l.otelEnabled
 		}
 	case "enter":
@@ -515,12 +582,15 @@ func (l *LauncherView) emitLaunch() tea.Cmd {
 	}
 
 	msg := LaunchMsg{
-		Provider:    l.providers[l.providerCursor],
-		Dir:         dir,
-		Model:       model,
-		Mode:        mode,
-		Runtime:     l.runtimes[l.runtimeCursor],
-		OTELEnabled: l.otelEnabled,
+		Provider:       l.providers[l.providerCursor],
+		Dir:            dir,
+		Model:          model,
+		Mode:           mode,
+		Runtime:        l.runtimes[l.runtimeCursor],
+		Execution:      l.executions[l.executionCursor],
+		Shell:          l.shells[l.shellCursor],
+		SessionManager: l.sessionMgrs[l.sessionMgrCursor],
+		OTELEnabled:    l.otelEnabled,
 	}
 	return func() tea.Msg { return msg }
 }
@@ -867,28 +937,27 @@ func (l *LauncherView) viewOptions() string {
 	b.WriteString(launcherPathStyle.Render(dir))
 	b.WriteString("\n\n")
 
-	// Model row
 	b.WriteString(l.renderOptionRow("Model:", l.models, l.modelCursor, l.optionField == 0))
-	// Mode row
-	b.WriteString(l.renderOptionRow("Mode:", l.modes, l.modeCursor, l.optionField == 1))
-	// Runtime row
+	b.WriteString(l.renderOptionRow("Permissions:", l.modes, l.modeCursor, l.optionField == 1))
 	b.WriteString(l.renderOptionRow("Runtime:", l.runtimes, l.runtimeCursor, l.optionField == 2))
+	b.WriteString(l.renderOptionRow("Execution:", l.executions, l.executionCursor, l.optionField == 3))
+	b.WriteString(l.renderOptionRow("Shell:", l.shells, l.shellCursor, l.optionField == 4))
+	b.WriteString(l.renderOptionRow("Session:", l.sessionMgrs, l.sessionMgrCursor, l.optionField == 5))
 
-	// OTEL tracing toggle (only if receiver is available)
 	if l.otelAvailable {
-		otelLabel := launcherLabelStyle.Render(fmt.Sprintf("%-10s", "Tracing:"))
+		otelLabel := launcherLabelStyle.Render(fmt.Sprintf("%-13s", "Tracing:"))
 		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
 		var otelValue string
 		if l.otelEnabled {
 			onText := "ON"
 			warn := warnStyle.Render(" (no assistant responses in trace view)")
-			if l.optionField == 3 {
+			if l.optionField == 6 {
 				otelValue = launcherSelectedStyle.Render(" "+onText+" ") + warn
 			} else {
 				otelValue = launcherOptionStyle.Render(onText) + warn
 			}
 		} else {
-			if l.optionField == 3 {
+			if l.optionField == 6 {
 				otelValue = launcherSelectedStyle.Render(" OFF ")
 			} else {
 				otelValue = launcherOptionStyle.Render("OFF")
@@ -903,7 +972,7 @@ func (l *LauncherView) viewOptions() string {
 }
 
 func (l *LauncherView) renderOptionRow(label string, options []string, cursor int, active bool) string {
-	row := launcherLabelStyle.Render(fmt.Sprintf("%-10s", label))
+	row := launcherLabelStyle.Render(fmt.Sprintf("%-13s", label))
 	for i, opt := range options {
 		if i == cursor {
 			if active {

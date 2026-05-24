@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/evaluation"
+	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
 )
 
@@ -273,4 +276,139 @@ func TestIntegration_EndToEnd_ParseSortFilterExport(t *testing.T) {
 
 	t.Logf("End-to-end: parsed %d turns, sorted %d agents, filtered to %d, exported %d turns to %s",
 		len(turns), len(agents), len(filtered), result.Count, result.Path)
+}
+
+func TestIntegration_CostFromFixture(t *testing.T) {
+	file := fixtureFile(t)
+	p := &provider.Claude{}
+	turns, err := p.ParseTrace(file)
+	if err != nil {
+		t.Fatalf("ParseTrace: %v", err)
+	}
+
+	totalCost := 0.0
+	for _, turn := range turns {
+		if turn.Model != "" {
+			c := cost.Calculate(turn.Model, turn.TokensIn, turn.TokensOut, 0, 0)
+			totalCost += c
+		}
+	}
+	if totalCost <= 0 {
+		t.Error("expected positive cost from fixture with token data")
+	}
+	t.Logf("Total cost from fixture: $%.6f (%d turns)", totalCost, len(turns))
+}
+
+func TestIntegration_HistoryDiscover(t *testing.T) {
+	// 1. Create temp dir structure mimicking ~/.claude/projects/
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "-Users-test-myproject")
+	if err := os.MkdirAll(projectDir, 0o750); err != nil { // #nosec G301
+		t.Fatal(err)
+	}
+
+	// 2. Copy the fixture JSONL into the temp project dir with a UUID-like name
+	fixtureData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "sample_session.jsonl"))
+	if err != nil {
+		t.Skipf("fixture not found: %v", err)
+	}
+	sessionFile := filepath.Join(projectDir, "test-session-id.jsonl")
+	if err := os.WriteFile(sessionFile, fixtureData, 0o600); err != nil { // #nosec G703
+		t.Fatal(err)
+	}
+
+	// 3. Call history.Discover scoped to the temp dir as projectsDir
+	sessions, err := history.Discover(history.DiscoverOpts{}, dir)
+	if err != nil {
+		t.Fatalf("history.Discover: %v", err)
+	}
+
+	// 4. Verify: at least one session found
+	if len(sessions) == 0 {
+		t.Fatal("expected at least 1 session from temp directory")
+	}
+
+	// 5. Verify metadata: turn count > 0, ID present
+	found := false
+	for _, s := range sessions {
+		if s.TurnCount > 0 {
+			found = true
+			if s.ID == "" {
+				t.Error("session ID should not be empty")
+			}
+			if s.FilePath == "" {
+				t.Error("session FilePath should not be empty")
+			}
+			if s.Provider != "claude" {
+				t.Errorf("expected provider 'claude', got %q", s.Provider)
+			}
+			t.Logf("Discovered session: id=%s turns=%d cost=$%.4f project=%s",
+				s.ID, s.TurnCount, s.CostUSD, s.Project)
+		}
+	}
+	if !found {
+		t.Error("no session had turn count > 0")
+	}
+
+	// 6. Verify filtering by provider works (non-claude returns empty)
+	nonClaude, err := history.Discover(history.DiscoverOpts{Provider: "codex"}, dir)
+	if err != nil {
+		t.Fatalf("history.Discover with codex filter: %v", err)
+	}
+	if len(nonClaude) != 0 {
+		t.Errorf("expected 0 sessions for codex provider, got %d", len(nonClaude))
+	}
+}
+
+func TestIntegration_BadgeEvaluation(t *testing.T) {
+	dir := t.TempDir()
+
+	// 1. Create package.json with name field
+	pkgJSON := `{"name":"test-app","version":"1.0.0"}`
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkgJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create .python-version with version string
+	if err := os.WriteFile(filepath.Join(dir, ".python-version"), []byte("3.11\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Configure badge rules
+	rules := []badge.Rule{
+		{Path: "package.json", JSONPath: "name", Label: "app", Color: "#CB3837"},
+		{Path: ".python-version", Label: "python", Color: "#3776AB"},
+	}
+
+	// 4. Evaluate badges against the temp project dir
+	badges := badge.Evaluate(dir, rules)
+
+	// Verify count
+	if len(badges) != 2 {
+		t.Fatalf("expected 2 badges, got %d", len(badges))
+	}
+
+	// Verify JSON-path extraction from package.json
+	if badges[0].Label != "app" {
+		t.Errorf("badge[0].Label = %q, want %q", badges[0].Label, "app")
+	}
+	if badges[0].Value != "test-app" {
+		t.Errorf("badge[0].Value = %q, want %q", badges[0].Value, "test-app")
+	}
+	if badges[0].Color != "#CB3837" {
+		t.Errorf("badge[0].Color = %q, want %q", badges[0].Color, "#CB3837")
+	}
+
+	// Verify plain-text first-line extraction from .python-version
+	if badges[1].Label != "python" {
+		t.Errorf("badge[1].Label = %q, want %q", badges[1].Label, "python")
+	}
+	if badges[1].Value != "3.11" {
+		t.Errorf("badge[1].Value = %q, want %q", badges[1].Value, "3.11")
+	}
+	if badges[1].Color != "#3776AB" {
+		t.Errorf("badge[1].Color = %q, want %q", badges[1].Color, "#3776AB")
+	}
+
+	t.Logf("Badge evaluation: %d badges from %s", len(badges), dir)
 }

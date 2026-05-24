@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/tasks"
 )
 
@@ -121,8 +122,8 @@ func TestLaunchHandlerWithTaskContext(t *testing.T) {
 
 	// Capture launch arguments
 	var capturedPrompt string
-	s.SetLaunchFunc(func(provider, dir, model, mode, prompt string) error {
-		capturedPrompt = prompt
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) error {
+		capturedPrompt = opts.Prompt
 		return nil
 	})
 

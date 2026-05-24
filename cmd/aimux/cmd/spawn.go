@@ -10,12 +10,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/deliver"
+	"github.com/zanetworker/aimux/internal/spawn"
 )
 
-type spawnFn func(provider, dir, model, mode, prompt string) (pid int, tmuxSession string, err error)
+type spawnFn func(opts spawn.LaunchOpts) (pid int, tmuxSession string, err error)
 
-func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
+func newSpawnCmd(validProviders []string, spawnAgent spawnFn) *cobra.Command {
 	var dir, model, mode, prompt string
+	var runtime, execution, shell, sessionMgr string
+	var otel bool
 	var dryRun bool
 	var wait bool
 	var deliverTarget string
@@ -46,13 +49,18 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 			if dryRun {
 				if jsonOutput {
 					result := map[string]any{
-						"provider": provider,
-						"dir":      dir,
-						"model":    model,
-						"mode":     mode,
-						"prompt":   prompt,
-						"dry_run":  true,
-						"wait":     wait,
+						"provider":        provider,
+						"dir":             dir,
+						"model":           model,
+						"mode":            mode,
+						"prompt":          prompt,
+						"runtime":         runtime,
+						"execution":       execution,
+						"shell":           shell,
+						"session_manager": sessionMgr,
+						"otel":            otel,
+						"dry_run":         true,
+						"wait":            wait,
 					}
 					b, _ := json.MarshalIndent(result, "", "  ")
 					if deliverTarget != "" && deliverTarget != "stdout" {
@@ -72,11 +80,23 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 				return nil
 			}
 
-			if spawn == nil {
+			if spawnAgent == nil {
 				return fmt.Errorf("spawn not configured")
 			}
 
-			pid, tmuxSession, err := spawn(provider, dir, model, mode, prompt)
+			opts := spawn.LaunchOpts{
+				Provider:       provider,
+				Dir:            dir,
+				Model:          model,
+				Mode:           mode,
+				Prompt:         prompt,
+				Runtime:        runtime,
+				Execution:      execution,
+				Shell:          shell,
+				SessionManager: sessionMgr,
+				OTELEnabled:    otel,
+			}
+			pid, tmuxSession, err := spawnAgent(opts)
 			if err != nil {
 				return fmt.Errorf("spawn failed: %w", err)
 			}
@@ -134,6 +154,11 @@ func newSpawnCmd(validProviders []string, spawn spawnFn) *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "Model override")
 	cmd.Flags().StringVar(&mode, "mode", "", "Mode (e.g., plan, auto)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Initial prompt")
+	cmd.Flags().StringVar(&runtime, "runtime", "", "Runtime: local (default) or container")
+	cmd.Flags().StringVar(&execution, "execution", "", "Execution: local (default) or hybrid")
+	cmd.Flags().StringVar(&shell, "shell", "", "Login shell (default: $SHELL)")
+	cmd.Flags().StringVar(&sessionMgr, "session", "", "Session manager: tmux (default) or direct")
+	cmd.Flags().BoolVar(&otel, "otel", false, "Enable OTEL telemetry")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show spawn command without executing")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until the spawned session exits")
 	cmd.Flags().StringVar(&deliverTarget, "deliver", "", "Delivery target: stdout (default), file:<path>, webhook:<url>")

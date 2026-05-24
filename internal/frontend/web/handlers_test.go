@@ -12,16 +12,17 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
 func TestLaunchHandler(t *testing.T) {
 	s := NewServer(0)
 	var launched bool
-	s.SetLaunchFunc(func(provider, dir, model, mode, prompt string) error {
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) error {
 		launched = true
-		if provider != "claude" {
-			t.Errorf("expected provider claude, got %s", provider)
+		if opts.Provider != "claude" {
+			t.Errorf("expected provider claude, got %s", opts.Provider)
 		}
 		return nil
 	})

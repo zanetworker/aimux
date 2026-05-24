@@ -24,38 +24,38 @@ func TestParseSessionFile(t *testing.T) {
 		t.Errorf("SessionID = %q, want %q", info.SessionID, "abc-123")
 	}
 
-	// Last git branch seen should be "feature" (from the 4th entry).
+	// Last git branch seen should be "feature" (from the 4th entry onward).
 	if info.GitBranch != "feature" {
 		t.Errorf("GitBranch = %q, want %q", info.GitBranch, "feature")
 	}
 
-	// TokensIn: 100 + 200 = 300
-	if info.TokensIn != 300 {
-		t.Errorf("TokensIn = %d, want 300", info.TokensIn)
+	// TokensIn: 100 + 200 + 300 + 250 + 180 = 1030
+	if info.TokensIn != 1030 {
+		t.Errorf("TokensIn = %d, want 1030", info.TokensIn)
 	}
 
-	// TokensOut: 50 + 100 = 150
-	if info.TokensOut != 150 {
-		t.Errorf("TokensOut = %d, want 150", info.TokensOut)
+	// TokensOut: 50 + 100 + 150 + 120 + 60 = 480
+	if info.TokensOut != 480 {
+		t.Errorf("TokensOut = %d, want 480", info.TokensOut)
 	}
 
-	// CacheReadTokens: 500 + 1000 = 1500
-	if info.CacheReadTokens != 1500 {
-		t.Errorf("CacheReadTokens = %d, want 1500", info.CacheReadTokens)
+	// CacheReadTokens: 500 + 1000 + 800 + 900 + 700 = 3900
+	if info.CacheReadTokens != 3900 {
+		t.Errorf("CacheReadTokens = %d, want 3900", info.CacheReadTokens)
 	}
 
-	// CacheWriteTokens: 200 + 0 = 200
+	// CacheWriteTokens: 200 + 0 + 0 + 0 + 0 = 200
 	if info.CacheWriteTokens != 200 {
 		t.Errorf("CacheWriteTokens = %d, want 200", info.CacheWriteTokens)
 	}
 
-	// 5 lines total = 5 messages (progress + 2 user + 2 assistant)
-	if info.MessageCount != 5 {
-		t.Errorf("MessageCount = %d, want 5", info.MessageCount)
+	// 11 lines total (1 progress + 4 user + 5 assistant + 1 user/tool_result)
+	if info.MessageCount != 11 {
+		t.Errorf("MessageCount = %d, want 11", info.MessageCount)
 	}
 
-	// Last timestamp should be from the last assistant entry.
-	expected, _ := time.Parse(time.RFC3339, "2026-02-20T16:35:10.000Z")
+	// Last timestamp should be from the final assistant entry.
+	expected, _ := time.Parse(time.RFC3339, "2026-02-20T16:36:15.000Z")
 	if !info.LastTimestamp.Equal(expected) {
 		t.Errorf("LastTimestamp = %v, want %v", info.LastTimestamp, expected)
 	}
