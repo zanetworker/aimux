@@ -602,6 +602,11 @@ func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
 		model = "flash"
 	}
 
+	if s.cfg.Sessions.APIKey == "" {
+		http.Error(w, "insight requires an API key (set sessions.api_key in config)", http.StatusServiceUnavailable)
+		return
+	}
+
 	cfg := insight.Config{
 		Model:  model,
 		APIKey: s.cfg.Sessions.APIKey,
