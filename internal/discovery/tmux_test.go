@@ -50,6 +50,39 @@ func TestParseTmuxLine(t *testing.T) {
 	}
 }
 
+func TestMatchTmuxSessionByPID_ZeroPID(t *testing.T) {
+	sessions := []TmuxSession{{Name: "aimux-claude-test"}}
+	got := MatchTmuxSessionByPID(sessions, 0)
+	if got != "" {
+		t.Errorf("expected empty for PID=0, got %q", got)
+	}
+}
+
+func TestMatchTmuxSessionByPID_NegativePID(t *testing.T) {
+	got := MatchTmuxSessionByPID(nil, -1)
+	if got != "" {
+		t.Errorf("expected empty for negative PID, got %q", got)
+	}
+}
+
+func TestMatchTmuxSessionByPID_NoAimuxSessions(t *testing.T) {
+	sessions := []TmuxSession{
+		{Name: "claude-project"},
+		{Name: "main"},
+	}
+	got := MatchTmuxSessionByPID(sessions, 12345)
+	if got != "" {
+		t.Errorf("expected empty when no aimux- sessions, got %q", got)
+	}
+}
+
+func TestMatchTmuxSessionByPID_EmptySessions(t *testing.T) {
+	got := MatchTmuxSessionByPID(nil, 12345)
+	if got != "" {
+		t.Errorf("expected empty for nil sessions, got %q", got)
+	}
+}
+
 func TestMatchTmuxSession(t *testing.T) {
 	sessions := []TmuxSession{
 		{Name: "claude-myproject", Attached: true},

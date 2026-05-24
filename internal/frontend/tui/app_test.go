@@ -793,6 +793,136 @@ func TestProjectConfigMerge_NoDirReturnsGlobal(t *testing.T) {
 	}
 }
 
+// newTestAppForPending creates a minimal App with all views initialized so that
+// Update(instancesMsg{...}) can run without nil pointer panics.
+func newTestAppForPending(pending map[string]agent.Agent) App {
+	app := App{
+		pendingAgents:  pending,
+		instances:      []agent.Agent{},
+		hiddenAgents:   make(map[string]bool),
+		prevStatuses:   make(map[int]agent.Status),
+		doneTimestamps: make(map[int]time.Time),
+		staleAgents:    make(map[int]bool),
+		otelStore:      aimuxotel.NewSpanStore(),
+		agentsView:     views.NewAgentsView(),
+		headerView:     views.NewHeaderView(),
+		costsView:      views.NewCostsView(),
+		previewPane:    views.NewPreviewPane(),
+		sessionsView:   views.NewSessionsView(),
+		tasksView:      views.NewTasksView(),
+		teamsView:      views.NewTeamsView(),
+		healthView:     views.NewHealthView(),
+		helpView:       views.NewHelpView(),
+		cfg:            config.Default(),
+		traceRefresh:   make(chan struct{}, 1),
+	}
+	app.ctrl = newTestController()
+	return app
+}
+
+// TestPendingAgents_SurvivesDiscoveryTick verifies that pending agents
+// are appended to instances when discovery returns no matching tmux session.
+func TestPendingAgents_SurvivesDiscoveryTick(t *testing.T) {
+	app := newTestAppForPending(map[string]agent.Agent{
+		"aimux-claude-newproject": {
+			Name:         "newproject",
+			ProviderName: "claude",
+			TMuxSession:  "aimux-claude-newproject",
+			WorkingDir:   "/tmp/newproject",
+			Status:       agent.StatusActive,
+		},
+	})
+
+	// Simulate instancesMsg with a different discovered agent (no tmux session match).
+	discovered := instancesMsg{
+		{PID: 1, Name: "other", ProviderName: "claude", WorkingDir: "/tmp/other", TMuxSession: "aimux-claude-other"},
+	}
+
+	result, _ := app.Update(discovered)
+	a := result.(App)
+
+	// Pending agent should be appended since no discovered agent had TMuxSession "aimux-claude-newproject".
+	found := false
+	for _, inst := range a.instances {
+		if inst.Name == "newproject" && inst.TMuxSession == "aimux-claude-newproject" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("pending agent 'newproject' should survive when no discovery match")
+	}
+	// Should still have 2 total: 1 discovered + 1 pending.
+	if len(a.instances) != 2 {
+		t.Errorf("expected 2 instances (1 discovered + 1 pending), got %d", len(a.instances))
+	}
+}
+
+// TestPendingAgents_RemovedWhenDiscovered verifies that a pending agent is
+// removed once discovery finds an agent with the same TMuxSession.
+func TestPendingAgents_RemovedWhenDiscovered(t *testing.T) {
+	app := newTestAppForPending(map[string]agent.Agent{
+		"aimux-claude-myproject": {
+			Name:         "myproject",
+			ProviderName: "claude",
+			TMuxSession:  "aimux-claude-myproject",
+			WorkingDir:   "/tmp/myproject",
+			Status:       agent.StatusActive,
+		},
+	})
+
+	// Discovery finds an agent with the SAME TMuxSession.
+	discovered := instancesMsg{
+		{PID: 99, Name: "myproject", ProviderName: "claude", WorkingDir: "/tmp/myproject", TMuxSession: "aimux-claude-myproject"},
+	}
+
+	result, _ := app.Update(discovered)
+	a := result.(App)
+
+	// Pending should have been removed from the map.
+	if len(a.pendingAgents) != 0 {
+		t.Errorf("expected 0 pending agents after discovery match, got %d", len(a.pendingAgents))
+	}
+	// Only 1 instance (the discovered one).
+	if len(a.instances) != 1 {
+		t.Errorf("expected 1 instance (discovered only), got %d", len(a.instances))
+	}
+}
+
+// TestPendingAgents_NotRemovedByWorkingDirMatch is a regression test verifying
+// that pending agents are NOT removed when a discovered agent merely shares the
+// same WorkingDir and provider. Only TMuxSession matching should trigger removal.
+// Bug: previously WorkingDir+Provider matching would falsely remove pending agents
+// when an old idle session in the same directory was discovered.
+func TestPendingAgents_NotRemovedByWorkingDirMatch(t *testing.T) {
+	app := newTestAppForPending(map[string]agent.Agent{
+		"aimux-claude-myproject": {
+			Name:         "myproject",
+			ProviderName: "claude",
+			TMuxSession:  "aimux-claude-myproject",
+			WorkingDir:   "/tmp/myproject",
+			Status:       agent.StatusActive,
+		},
+	})
+
+	// Discovery finds an old session with same WorkingDir but DIFFERENT TMuxSession.
+	discovered := instancesMsg{
+		{PID: 50, Name: "myproject", ProviderName: "claude", WorkingDir: "/tmp/myproject", TMuxSession: "claude-myproject"},
+	}
+
+	result, _ := app.Update(discovered)
+	a := result.(App)
+
+	// Pending agent must NOT be removed (TMuxSession doesn't match).
+	if len(a.pendingAgents) != 1 {
+		t.Errorf("expected 1 pending agent (not removed by WorkingDir-only match), got %d", len(a.pendingAgents))
+	}
+	// Should have 2 instances: 1 discovered + 1 pending appended.
+	if len(a.instances) != 2 {
+		t.Errorf("expected 2 instances, got %d", len(a.instances))
+	}
+}
+
 // TestAllProvidersOTELEnvIncludeProtocol verifies that ALL providers'
 // OTELEnv methods include the http/protobuf protocol setting.
 // This is the root cause test -- without this protocol setting,

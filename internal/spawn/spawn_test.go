@@ -1,9 +1,12 @@
 package spawn
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTmuxSessionName(t *testing.T) {
@@ -96,6 +99,24 @@ func TestLaunch_DirectSessionManager(t *testing.T) {
 	err := Launch(cmd, "claude", t.TempDir(), "direct", "/bin/sh", "")
 	if err != nil {
 		t.Errorf("Launch with direct session manager should succeed, got: %v", err)
+	}
+}
+
+func TestLaunchDirect_ProcessRuns(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "marker.txt")
+
+	cmd := exec.Command("touch", marker) // #nosec G204
+	err := Launch(cmd, "claude", dir, "direct", "/bin/sh", "")
+	if err != nil {
+		t.Fatalf("Launch direct: %v", err)
+	}
+
+	// Wait briefly for the background process to run.
+	time.Sleep(200 * time.Millisecond)
+
+	if _, err := os.Stat(marker); err != nil {
+		t.Error("direct launch process did not run (marker file not created)")
 	}
 }
 
