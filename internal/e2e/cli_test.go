@@ -122,6 +122,42 @@ func TestAgentContext(t *testing.T) {
 	}
 }
 
+func TestKillNoArgs(t *testing.T) {
+	err := exec.Command(binaryPath, "kill").Run()
+	if err == nil {
+		t.Error("kill without args should fail")
+	}
+}
+
+func TestExportNoArgs(t *testing.T) {
+	err := exec.Command(binaryPath, "export").Run()
+	if err == nil {
+		t.Error("export without args should fail")
+	}
+}
+
+func TestAgentsSortFlag(t *testing.T) {
+	out, err := exec.Command(binaryPath, "agents", "--json", "--sort", "name").CombinedOutput()
+	if err != nil {
+		t.Fatalf("agents --sort name failed: %v\n%s", err, out)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+}
+
+func TestAgentsFilterFlag(t *testing.T) {
+	out, err := exec.Command(binaryPath, "agents", "--json", "--filter", "nonexistent").CombinedOutput()
+	if err != nil {
+		t.Fatalf("agents --filter failed: %v\n%s", err, out)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, out)
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	cmd := exec.Command(binaryPath, "nonexistent-cmd")
 	err := cmd.Run()

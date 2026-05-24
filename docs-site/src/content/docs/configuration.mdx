@@ -16,9 +16,13 @@ providers:
   gemini:
     enabled: true
 
+# Four orthogonal axes
+runtime: "local"              # WHERE: local | container
+shell: "/bin/zsh"             # WHICH: shell binary
+session_manager: "tmux"       # SESSION: tmux
+# terminal emulator: auto-detected (not configurable)
+
 refresh_interval: "2s"
-default_runtime: "tmux"
-shell: "/bin/zsh"
 
 resume:
   skip_permissions: false
@@ -93,13 +97,48 @@ Enable or disable agent providers. Unknown providers default to enabled.
 | `enabled` | bool | `true` | Whether to discover agents from this provider |
 | `binary` | string | auto-detect | Override the binary path for this provider |
 
+## Config Axes
+
+aimux has four orthogonal configuration axes:
+
+### Runtime (WHERE the agent runs)
+
+| Value | Status | Description |
+|-------|--------|-------------|
+| `local` | **Supported** | Default. Agent runs as a process on your machine |
+| `container` | **Supported** | Agent runs inside a Podman/Docker container |
+
+### Shell (WHICH shell interprets commands)
+
+| Value | Status | Description |
+|-------|--------|-------------|
+| `/bin/zsh` | **Supported** | Default if `$SHELL` is zsh |
+| `/bin/bash` | **Supported** | |
+| `/bin/fish` | **Supported** | |
+
+### Session Manager (HOW terminal sessions are managed)
+
+| Value | Status | Description |
+|-------|--------|-------------|
+| `tmux` | **Supported** | Default. Sessions persist after detach |
+| `screen` | Planned | Not yet implemented |
+| `zellij` | Planned | Not yet implemented |
+
+### Terminal Emulator (auto-detected, not configurable)
+
+| Emulator | Detection | Used for |
+|----------|-----------|----------|
+| iTerm2 | `$TERM_PROGRAM == "iTerm.app"` | Jump-to-session via split pane |
+| Others | Fallback | tmux pane |
+
 ## General
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `refresh_interval` | string | `"2s"` | How often to scan for agents |
-| `default_runtime` | string | `"tmux"` | Default launch mode: `"tmux"` or `"direct"` |
-| `shell` | string | `$SHELL` | Login shell for spawning agents. Falls back to `$SHELL`, then `/bin/sh` |
+| `runtime` | string | `"local"` | WHERE: `"local"` or `"container"` |
+| `shell` | string | `$SHELL` | WHICH shell for agent sessions. Falls back to `$SHELL`, then `/bin/sh` |
+| `session_manager` | string | `"tmux"` | HOW terminal sessions are managed |
 
 ## Resume
 
