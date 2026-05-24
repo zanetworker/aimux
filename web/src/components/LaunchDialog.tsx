@@ -17,7 +17,12 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   const [dir, setDir] = useState('');
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState('');
-  const [mode, setMode] = useState('auto');
+  const [mode, setMode] = useState('default');
+  const [runtime, setRuntime] = useState('local');
+  const [execution, setExecution] = useState('local');
+  const [shell, setShell] = useState('');
+  const [sessionMgr, setSessionMgr] = useState('tmux');
+  const [otelEnabled, setOtelEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [dirTab, setDirTab] = useState<DirTab>('recent');
   const [quickDirs, setQuickDirs] = useState<QuickDir[]>([]);
@@ -69,11 +74,17 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
       await fetch('/api/agents/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, dir, model, mode, user_prompt: prompt }),
+        body: JSON.stringify({
+          provider, dir, model, mode,
+          runtime, execution, shell, session_manager: sessionMgr,
+          otel_enabled: otelEnabled, user_prompt: prompt,
+        }),
       });
       onLaunched?.(provider, dir);
       onClose();
-      setDir(''); setPrompt(''); setModel(''); setProvider('claude'); setMode('auto');
+      setDir(''); setPrompt(''); setModel(''); setProvider('claude');
+      setMode('default'); setRuntime('local'); setExecution('local');
+      setShell(''); setSessionMgr('tmux'); setOtelEnabled(false);
     } finally { setSubmitting(false); }
   };
 
@@ -226,26 +237,89 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         </div>
 
         {/* Model */}
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 16 }}>
           <div style={label}>Model</div>
-          <input type="text" value={model} onChange={e => setModel(e.target.value)}
-            placeholder="opus, sonnet, haiku..."
-            style={{ background: 'var(--bg-0)', border: '1px solid var(--border)', borderRadius: 6,
-              color: 'var(--fg)', padding: '8px 12px', width: '100%', fontSize: 12,
-              fontFamily: 'var(--mono)', outline: 'none' }}
-            onFocus={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
-            onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; }} />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(provider === 'codex'
+              ? ['default', 'o3', 'o4-mini']
+              : provider === 'gemini'
+              ? ['default', 'gemini-2.5-pro', 'gemini-2.5-flash']
+              : ['default', 'opus', 'sonnet', 'haiku']
+            ).map(m => (
+              <button key={m} onClick={() => setModel(m === 'default' ? '' : m)}
+                style={pill(model === (m === 'default' ? '' : m))}>{m}</button>
+            ))}
+          </div>
         </div>
 
-        {/* Mode */}
-        <div style={{ marginBottom: 24 }}>
-          <div style={label}>Mode</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {[{ name: 'auto', label: 'Auto' }, { name: 'plan', label: 'Plan' },
-              { name: 'bypassPermissions', label: 'Bypass' }].map(m => (
-              <button key={m.name} onClick={() => setMode(m.name)}
-                style={pill(mode === m.name)}>{m.label}</button>
+        {/* Permissions */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={label}>Permissions</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(provider === 'codex'
+              ? ['default', 'full-auto', 'full-access', 'read-only']
+              : provider === 'gemini'
+              ? ['default', 'yolo', 'auto_edit', 'plan']
+              : ['default', 'plan', 'acceptEdits', 'bypass', 'dontAsk']
+            ).map(m => (
+              <button key={m} onClick={() => setMode(m)}
+                style={pill(mode === m)}>{m}</button>
             ))}
+          </div>
+        </div>
+
+        {/* Runtime */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={label}>Runtime</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['local', 'container'].map(r => (
+              <button key={r} onClick={() => setRuntime(r)}
+                style={pill(runtime === r)}>{r}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Execution */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={label}>Execution</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['local', 'hybrid'].map(e => (
+              <button key={e} onClick={() => setExecution(e)}
+                style={pill(execution === e)}>{e}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Shell + Session (compact row) */}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={label}>Shell</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['/bin/zsh', '/bin/bash'].map(s => (
+                <button key={s} onClick={() => setShell(s)}
+                  style={pill(shell === s)}>{s.split('/').pop()}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={label}>Session</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['tmux', 'direct'].map(s => (
+                <button key={s} onClick={() => setSessionMgr(s)}
+                  style={pill(sessionMgr === s)}>{s}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* OTEL toggle */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={label}>Tracing</div>
+            <button onClick={() => setOtelEnabled(!otelEnabled)}
+              style={{ ...pill(otelEnabled), fontSize: 10 }}>
+              {otelEnabled ? 'ON' : 'OFF'}
+            </button>
           </div>
         </div>
 
