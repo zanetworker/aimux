@@ -346,13 +346,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.instances = controller.FilterHidden([]agent.Agent(msg), a.hiddenAgents)
 
 		// Merge pending launched agents that discovery hasn't found yet.
-		// Once a discovered agent matches the same tmux session or working
-		// dir + provider, the pending entry is removed.
+		// A pending agent is removed only when a discovered agent has the
+		// exact same tmux session name (meaning discovery found the real
+		// process). WorkingDir matching is too broad — existing idle sessions
+		// from previous runs in the same directory would falsely match.
 		for key, pending := range a.pendingAgents {
 			found := false
 			for _, discovered := range a.instances {
-				if (discovered.TMuxSession != "" && discovered.TMuxSession == pending.TMuxSession) ||
-					(discovered.WorkingDir == pending.WorkingDir && discovered.ProviderName == pending.ProviderName) {
+				if discovered.TMuxSession != "" && discovered.TMuxSession == pending.TMuxSession {
 					found = true
 					break
 				}

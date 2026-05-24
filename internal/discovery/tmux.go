@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,31 @@ func MatchTmuxSession(sessions []TmuxSession, workingDir string) string {
 	for _, s := range sessions {
 		for _, t := range targets {
 			if s.Name == t {
+				return s.Name
+			}
+		}
+	}
+	return ""
+}
+
+// MatchTmuxSessionByPID finds an aimux-prefixed tmux session whose pane
+// contains the given PID. Falls back to this when MatchTmuxSession fails
+// because the process CWD changed after launch.
+func MatchTmuxSessionByPID(sessions []TmuxSession, pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	pidStr := fmt.Sprintf("%d", pid)
+	for _, s := range sessions {
+		if !strings.HasPrefix(s.Name, "aimux-") {
+			continue
+		}
+		out, err := exec.Command("tmux", "list-panes", "-t", s.Name, "-F", "#{pane_pid}").Output() // #nosec G204
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.TrimSpace(line) == pidStr {
 				return s.Name
 			}
 		}

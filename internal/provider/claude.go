@@ -51,10 +51,14 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	// call (~50-100ms) that blocks when done sequentially per agent.
 	c.batchResolveProcessInfo(agents)
 
-	// Match tmux sessions (cheap string matching, no subprocesses).
+	// Match tmux sessions: try name-based first (cheap), then PID-based
+	// fallback for aimux-launched sessions where the CWD changed.
 	for i := range agents {
 		if agents[i].WorkingDir != "" {
 			agents[i].TMuxSession = discovery.MatchTmuxSession(tmuxSessions, agents[i].WorkingDir)
+		}
+		if agents[i].TMuxSession == "" && agents[i].PID > 0 {
+			agents[i].TMuxSession = discovery.MatchTmuxSessionByPID(tmuxSessions, agents[i].PID)
 		}
 	}
 
