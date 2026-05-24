@@ -23,6 +23,34 @@ Never push code that hasn't been built and tested. Never claim work is done with
 
 6. Update documentation: every new feature, config option, keybinding, API endpoint, or UX change MUST include updates to the relevant docs-site page(s) in `docs-site/src/content/docs/`. If a new guide page is needed, add it to the sidebar in `astro.config.mjs`. Rebuild with `cd docs-site && npm run build` to verify.
 
+## Three-Tier Testing Policy
+
+Every change must pass all applicable tiers before merge:
+
+**Tier 1: Unit tests** (`go test ./...`, always)
+- Every function/method has tests (happy path, error path, boundary)
+- Controller functions tested independently of TUI/web
+- Build tags separate integration tests (`//go:build integration`)
+
+**Tier 2: E2E CLI tests** (`go test -tags e2e ./internal/e2e/`, on feature changes)
+- Binary compiled and run as subprocess
+- Tests every CLI command with `--json` output validation
+- Catches: flag parsing, cobra registration, output format bugs
+
+**Tier 3: API smoke tests** (`go test ./internal/frontend/web/ -run Smoke`, on API changes)
+- Boots real Server, hits every endpoint, validates status + JSON
+- Every new API endpoint MUST have a corresponding handler test AND a smoke test entry
+- Catches: route registration, handler wiring, response format
+
+**Endpoint coverage rule:** Before merging any PR that adds or modifies a web API endpoint:
+1. Add a handler test in `handlers_test.go` (tests the handler logic)
+2. Add the endpoint to the smoke test in `smoke_test.go` (tests the wiring)
+3. Run the full smoke test to verify all endpoints still respond
+
+**Benchmark baseline:** Performance-sensitive code (fade colors, discovery, trace parsing) has
+benchmarks in `*_bench_test.go`. Run `go test -bench=. -benchmem` before and after changes to
+detect regressions.
+
 ## Refactoring Rule: Tests Travel With the Code
 
 When moving logic from one package to another (e.g., extracting from `tui/app.go` to `controller/`):
