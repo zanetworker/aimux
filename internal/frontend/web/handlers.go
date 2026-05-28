@@ -171,11 +171,13 @@ func (s *Server) handleGetAnnotations(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		FilePath   string   `json:"filePath"`
-		Annotation string   `json:"annotation"`
-		Tags       []string `json:"tags"`
-		Note       string   `json:"note"`
-		Starred    *bool    `json:"starred"`
+		FilePath      string   `json:"filePath"`
+		Annotation    string   `json:"annotation"`
+		Tags          []string `json:"tags"`
+		Note          string   `json:"note"`
+		Starred       *bool    `json:"starred"`
+		ROIMultiplier *float64 `json:"roiMultiplier"`
+		TaskType      *string  `json:"taskType"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -193,6 +195,12 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 	meta.Note = req.Note
 	if req.Starred != nil {
 		meta.Starred = *req.Starred
+	}
+	if req.ROIMultiplier != nil {
+		meta.ROIMultiplier = *req.ROIMultiplier
+	}
+	if req.TaskType != nil {
+		meta.TaskType = *req.TaskType
 	}
 	if err := history.SaveMeta(req.FilePath, meta); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -288,10 +296,13 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			"isSubagent":     s.IsSubagent,
 			"permissionMode": s.PermissionMode,
 			"starred":        s.Starred,
-			"gitBranch":  s.GitBranch,
-			"lastPrompt": s.LastPrompt,
-			"lastAction": s.LastAction,
-			"model":      s.Model,
+			"gitBranch":      s.GitBranch,
+			"lastPrompt":     s.LastPrompt,
+			"lastAction":     s.LastAction,
+			"model":          s.Model,
+			"roiMultiplier":  s.ROIMultiplier,
+			"taskType":       s.TaskType,
+			"durationMin":    s.DurationMin,
 		}
 	}
 
@@ -1028,4 +1039,16 @@ func (s *Server) handleProviderHealth(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]any{"providers": providers}); err != nil {
 		debuglog.Log("encode provider health response: %v", err)
 	}
+}
+
+func (s *Server) handleGetROIConfig(w http.ResponseWriter, _ *http.Request) {
+	rate := s.cfg.ROI.HourlyRate
+	if rate <= 0 {
+		rate = 150.0
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"hourlyRate":  rate,
+		"multipliers": history.TaskMultiplier,
+	})
 }

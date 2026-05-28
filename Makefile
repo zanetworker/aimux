@@ -41,19 +41,24 @@ build-mcp:
 
 build-agent-claude:
 	podman build --platform linux/amd64 \
+		-t $(REGISTRY)/agent-claude:$(VERSION) \
 		-t $(REGISTRY)/agent-claude:latest \
 		-f runtime/agents/claude/Dockerfile .
 
 push-agent-claude: build-agent-claude
+	podman push $(REGISTRY)/agent-claude:$(VERSION)
 	podman push $(REGISTRY)/agent-claude:latest
 
 build-agent-gemini:
 	podman build --platform linux/amd64 \
+		-t $(REGISTRY)/agent-gemini:$(VERSION) \
 		-t $(REGISTRY)/agent-gemini:latest \
 		-f runtime/agents/gemini/Dockerfile .
 
 push-agent-gemini: build-agent-gemini
+	podman push $(REGISTRY)/agent-gemini:$(VERSION)
 	podman push $(REGISTRY)/agent-gemini:latest
 
 clean:
 	rm -f $(BINARY) bin/k8s-agents-mcp
+	rm -rf internal/frontend/web/dist

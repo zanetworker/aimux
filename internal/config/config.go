@@ -29,6 +29,7 @@ type Config struct {
 	AutoArchiveAfter string                    `yaml:"auto_archive_after"` // idle duration before auto-archiving (e.g. "1h", "30m")
 	Badges           []BadgeRule               `yaml:"badges"`             // project file badge rules
 	Runtimes         map[string]RuntimeConfig  `yaml:"runtimes"`           // named runtime environments
+	ROI              ROIConfig                 `yaml:"roi"`                // per-session ROI settings
 }
 
 // K8sProviderConfig holds connection settings for the Kubernetes agent provider.
@@ -123,6 +124,11 @@ type RuntimeConfig struct {
 	Sandbox bool   `yaml:"sandbox,omitempty"` // enable sandbox policy (openshell)
 }
 
+// ROIConfig holds settings for per-session ROI calculation.
+type ROIConfig struct {
+	HourlyRate float64 `yaml:"hourly_rate"` // developer hourly rate in USD (default: 150)
+}
+
 // TasksConfig holds settings for Google Tasks integration.
 type TasksConfig struct {
 	Backend        string `yaml:"backend"`         // "auto", "mcp", or "api"
@@ -160,6 +166,9 @@ func Default() Config {
 		Kubernetes: K8sProviderConfig{
 			Enabled:   false,
 			Namespace: "agents",
+		},
+		ROI: ROIConfig{
+			HourlyRate: 150.0,
 		},
 		Tasks: TasksConfig{
 			Backend:        "auto",

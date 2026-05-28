@@ -84,6 +84,86 @@ func TestAgentsView_BranchMasterDimmed(t *testing.T) {
 	}
 }
 
+func TestAgentsView_SetFilterRebuildsRows(t *testing.T) {
+	v := NewAgentsView()
+	v.SetSize(160, 30)
+	v.SetAgents([]agent.Agent{
+		{PID: 1, Name: "alpha", ProviderName: "claude", WorkingDir: "/src/alpha"},
+		{PID: 2, Name: "beta", ProviderName: "gemini", WorkingDir: "/src/beta"},
+		{PID: 3, Name: "gamma", ProviderName: "claude", WorkingDir: "/src/gamma"},
+	})
+
+	// Before filter: all 3 agents visible
+	output := v.View()
+	if !strings.Contains(output, "alpha") {
+		t.Error("expected alpha before filter")
+	}
+	if !strings.Contains(output, "beta") {
+		t.Error("expected beta before filter")
+	}
+
+	// Apply filter: only "alpha" should remain immediately (no tick needed)
+	v.SetFilter("alpha")
+	output = v.View()
+	if !strings.Contains(output, "alpha") {
+		t.Error("expected alpha after filter")
+	}
+	if strings.Contains(output, "beta") {
+		t.Error("beta should be hidden after filter for 'alpha'")
+	}
+	if strings.Contains(output, "gamma") {
+		t.Error("gamma should be hidden after filter for 'alpha'")
+	}
+
+	// Clear filter: all agents should reappear immediately
+	v.SetFilter("")
+	output = v.View()
+	if !strings.Contains(output, "alpha") {
+		t.Error("expected alpha after clearing filter")
+	}
+	if !strings.Contains(output, "beta") {
+		t.Error("expected beta after clearing filter")
+	}
+	if !strings.Contains(output, "gamma") {
+		t.Error("expected gamma after clearing filter")
+	}
+}
+
+func TestAgentsView_SetFilterNoMatch(t *testing.T) {
+	v := NewAgentsView()
+	v.SetSize(160, 30)
+	v.SetAgents([]agent.Agent{
+		{PID: 1, Name: "alpha", ProviderName: "claude", WorkingDir: "/src/alpha"},
+	})
+
+	v.SetFilter("nonexistent")
+	output := v.View()
+	if strings.Contains(output, "alpha") {
+		t.Error("alpha should not appear when filter matches nothing")
+	}
+	if !strings.Contains(output, "No agents found") {
+		t.Error("expected 'No agents found' when filter matches nothing")
+	}
+}
+
+func TestAgentsView_SetFilterByProvider(t *testing.T) {
+	v := NewAgentsView()
+	v.SetSize(160, 30)
+	v.SetAgents([]agent.Agent{
+		{PID: 1, Name: "proj-a", ProviderName: "claude", WorkingDir: "/src/a"},
+		{PID: 2, Name: "proj-b", ProviderName: "gemini", WorkingDir: "/src/b"},
+	})
+
+	v.SetFilter("gemini")
+	output := v.View()
+	if strings.Contains(output, "proj-a") {
+		t.Error("proj-a (claude) should be hidden when filtering by 'gemini'")
+	}
+	if !strings.Contains(output, "proj-b") {
+		t.Error("expected proj-b (gemini) to be visible when filtering by 'gemini'")
+	}
+}
+
 func TestAgentsView_BranchTruncatesLongName(t *testing.T) {
 	v := NewAgentsView()
 	v.SetSize(200, 30)

@@ -41,19 +41,24 @@ type Session struct {
 	PermissionMode string `json:"permission_mode"`
 	Starred        bool   `json:"starred"`
 	GitBranch      string `json:"git_branch"`
-	LastPrompt     string `json:"last_prompt"`
-	LastAction     string `json:"last_action"`
-	Model          string `json:"model"`
+	LastPrompt     string  `json:"last_prompt"`
+	LastAction     string  `json:"last_action"`
+	Model          string  `json:"model"`
+	ROIMultiplier  float64 `json:"roi_multiplier"`
+	TaskType       string  `json:"task_type"`
+	DurationMin    float64 `json:"duration_min"`
 }
 
 // Meta holds session-level annotation data stored in sidecar .meta.json files.
 type Meta struct {
-	Annotation string   `json:"annotation,omitempty"`
-	Note       string   `json:"note,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Title      string   `json:"title,omitempty"`
-	Starred    bool     `json:"starred,omitempty"`
-	UpdatedAt  string   `json:"updated_at,omitempty"`
+	Annotation    string   `json:"annotation,omitempty"`
+	Note          string   `json:"note,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Starred       bool     `json:"starred,omitempty"`
+	ROIMultiplier float64  `json:"roi_multiplier,omitempty"`
+	TaskType      string   `json:"task_type,omitempty"`
+	UpdatedAt     string   `json:"updated_at,omitempty"`
 }
 
 // DiscoverOpts controls the scope of session discovery.
@@ -142,10 +147,15 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 			s.Tags = meta.Tags
 			s.Title = meta.Title
 			s.Starred = meta.Starred
+			s.ROIMultiplier = meta.ROIMultiplier
+			s.TaskType = meta.TaskType
 
 			sessions = append(sessions, s)
 		}
 	}
+
+	// Auto-infer ROI from skill-usage data for sessions without user-set values
+	ApplyAutoROI(sessions)
 
 	// Sort by LastActive descending
 	sort.Slice(sessions, func(i, j int) bool {
@@ -187,6 +197,14 @@ func scanSession(id, filePath, project string) (Session, error) {
 	var lastUserContent json.RawMessage
 	var lastAssistantContent json.RawMessage
 
+	// Active time tracking: sum inter-entry gaps < 5 minutes.
+	// Wall clock (LastActive - StartTime) inflates duration by including
+	// idle periods (breaks, meetings). Active time is what the AI was
+	// actually engaged on.
+	var prevTimestamp time.Time
+	var activeSeconds float64
+	const activeGapThreshold = 5 * time.Minute
+
 	// Parse all lines to accumulate tokens/cost accurately.
 	// First 10 lines also extract the first user prompt.
 	var model string
@@ -196,12 +214,23 @@ func scanSession(id, filePath, project string) (Session, error) {
 		copy(raw, scanner.Bytes())
 
 		extractPrompt := lineCount <= 10
-		m, isHuman, role, content := parseSessionLine(raw, &s, extractPrompt)
+		entryTS, m, isHuman, role, content := parseSessionLine(raw, &s, extractPrompt)
 		if m != "" {
 			model = m
 		}
 		if isHuman {
 			humanTurnCount++
+		}
+
+		// Accumulate active time from inter-entry gaps
+		if !entryTS.IsZero() && !prevTimestamp.IsZero() {
+			gap := entryTS.Sub(prevTimestamp)
+			if gap > 0 && gap < activeGapThreshold {
+				activeSeconds += gap.Seconds()
+			}
+		}
+		if !entryTS.IsZero() {
+			prevTimestamp = entryTS
 		}
 
 		// Track last content per role for deferred extraction (no extra unmarshal)
@@ -241,6 +270,9 @@ func scanSession(id, filePath, project string) (Session, error) {
 	if model != "" {
 		s.CostUSD = cost.Calculate(model, s.TokensIn, s.TokensOut, s.CacheReadTokens, s.CacheWriteTokens)
 	}
+
+	// Set active duration (excludes idle gaps > 5 min)
+	s.DurationMin = activeSeconds / 60.0
 
 	s.Model = model
 
@@ -317,12 +349,12 @@ func isHumanMessage(content json.RawMessage) bool {
 
 // parseSessionLine extracts metadata from a single JSONL entry.
 // If extractPrompt is true, it also looks for the first user message.
-// Returns the model name, whether this is a human message, the message role,
-// and the raw content bytes (for deferred LastPrompt/LastAction extraction).
-func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (string, bool, string, json.RawMessage) {
+// Returns the entry timestamp, model name, whether this is a human message,
+// the message role, and the raw content bytes (for deferred extraction).
+func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (time.Time, string, bool, string, json.RawMessage) {
 	var entry sessionEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
-		return "", false, "", nil
+		return time.Time{}, "", false, "", nil
 	}
 
 	if !entry.Timestamp.IsZero() {
@@ -344,7 +376,7 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (stri
 	}
 
 	if entry.Message == nil {
-		return "", false, "", nil
+		return entry.Timestamp, "", false, "", nil
 	}
 
 	var isHuman bool
@@ -378,7 +410,7 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (stri
 		copy(content, entry.Message.Content)
 	}
 
-	return model, isHuman, entry.Message.Role, content
+	return entry.Timestamp, model, isHuman, entry.Message.Role, content
 }
 
 // extractUserText pulls the text from a user message content array.

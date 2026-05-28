@@ -24,6 +24,7 @@ const (
 	colMem    = 6
 	colAge    = 6
 	colCostA  = 8
+	colROIA   = 8
 )
 
 var (
@@ -103,6 +104,7 @@ type AgentsView struct {
 	sortField   string        // "", "name", "cost", "age", "model"
 	stalePIDs    map[int]bool    // PIDs that came from cache (stale)
 	starredFiles map[string]bool // session file paths that are starred
+	hourlyRate   float64
 }
 
 // NewAgentsView creates a new AgentsView.
@@ -192,15 +194,22 @@ func (v *AgentsView) SetSize(w, h int) {
 	v.height = h
 }
 
-// SetFilter sets a filter string for agents.
+// SetFilter sets a filter string for agents and rebuilds the visible rows
+// immediately so the table reflects the filter without waiting for the next
+// discovery tick.
 func (v *AgentsView) SetFilter(f string) {
 	v.filter = f
 	v.cursor = 0
+	v.buildTreeRows()
 }
 
 // SetStalePIDs sets the map of PIDs that came from cache (stale).
 func (v *AgentsView) SetStarredFiles(files map[string]bool) {
 	v.starredFiles = files
+}
+
+func (v *AgentsView) SetHourlyRate(rate float64) {
+	v.hourlyRate = rate
 }
 
 func (v *AgentsView) SetStalePIDs(pids map[int]bool) {
@@ -358,7 +367,8 @@ func (v *AgentsView) View() string {
 		padRight(cpuHeader, colCPU) + " " +
 		padRight(memHeader, colMem) + " " +
 		padRight(ageHeader, colAge) + " " +
-		padRight(costHeader, colCostA)
+		padRight(costHeader, colCostA) + " " +
+		padRight("ROI", colROIA)
 	// Pad header to full width
 	if lipgloss.Width(header) < v.width {
 		header += strings.Repeat(" ", v.width-lipgloss.Width(header))
@@ -468,7 +478,8 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 		padRight(cpuRendered, colCPU) + " " +
 		padRight(memRendered, colMem) + " " +
 		padRight(a.FormatAge(), colAge) + " " +
-		padRight(costRendered, colCostA)
+		padRight(costRendered, colCostA) + " " +
+		padRight(v.renderAgentROI(a), colROIA)
 
 	// Apply dim styling if this agent is stale (from cache)
 	if v.stalePIDs[a.PID] {
@@ -477,6 +488,33 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	}
 
 	return row
+}
+
+// renderAgentROI computes and renders the ROI value for an active agent.
+// Uses baseline 1.5x multiplier and active time from StartTime.
+func (v *AgentsView) renderAgentROI(a agent.Agent) string {
+	if a.EstCostUSD <= 0 || a.StartTime.IsZero() {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("--")
+	}
+	rate := v.hourlyRate
+	if rate <= 0 {
+		rate = 150.0
+	}
+	durationMin := time.Since(a.StartTime).Minutes()
+	mult := 1.5
+	timeSavedMin := durationMin*mult - durationMin
+	valueUSD := timeSavedMin * (rate / 60.0)
+	netROI := valueUSD - a.EstCostUSD
+	var roiStr string
+	if netROI >= 1000 {
+		roiStr = fmt.Sprintf("$%.1fK", netROI/1000)
+	} else {
+		roiStr = fmt.Sprintf("$%.0f", netROI)
+	}
+	if netROI >= 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399")).Render(roiStr)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(roiStr)
 }
 
 // renderChildRow renders a sub-process row with tree glyphs and process info.

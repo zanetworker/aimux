@@ -33,3 +33,11 @@ func SetNote(sessionFile, note string) error {
 	meta.Note = note
 	return history.SaveMeta(sessionFile, meta)
 }
+
+// SetROI updates the ROI multiplier and task type for a session.
+func SetROI(sessionFile string, multiplier float64, taskType string) error {
+	meta := history.LoadMeta(sessionFile)
+	meta.ROIMultiplier = multiplier
+	meta.TaskType = taskType
+	return history.SaveMeta(sessionFile, meta)
+}

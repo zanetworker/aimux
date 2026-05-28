@@ -4,6 +4,7 @@ package clipboard
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -31,12 +32,23 @@ func Copy(text string) error {
 	return cmd.Run()
 }
 
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // ResumeCommand returns the full CLI command to resume a session.
 // If workingDir is provided, the command includes a cd prefix so the
 // resume works regardless of the caller's current directory.
+// Both arguments are shell-quoted to prevent injection.
 func ResumeCommand(sessionID, workingDir string) string {
-	if workingDir != "" {
-		return "cd " + workingDir + " && claude --resume " + sessionID
+	if !validSessionID.MatchString(sessionID) {
+		return ""
 	}
-	return "claude --resume " + sessionID
+	quoted := shellQuote(sessionID)
+	if workingDir != "" {
+		return "cd " + shellQuote(workingDir) + " && claude --resume " + quoted
+	}
+	return "claude --resume " + quoted
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

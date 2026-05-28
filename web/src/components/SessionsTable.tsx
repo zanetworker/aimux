@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 export interface HistorySession {
   id: string;
@@ -24,9 +24,12 @@ export interface HistorySession {
   lastPrompt?: string;
   lastAction?: string;
   model?: string;
+  roiMultiplier?: number;
+  taskType?: string;
+  durationMin?: number;
 }
 
-type SortField = 'lastActive' | 'cost' | 'turns' | 'title' | 'project';
+type SortField = 'lastActive' | 'cost' | 'turns' | 'title' | 'project' | 'roi';
 type SortDir = 'asc' | 'desc';
 
 interface Props {
@@ -77,6 +80,8 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
   const [showSubagents, setShowSubagents] = useState(false);
   const [showAnalyzers, setShowAnalyzers] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [hourlyRate, setHourlyRate] = useState(150);
+  const [roiDetailId, setRoiDetailId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialSessions) {
@@ -105,6 +110,23 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     load();
     return () => { cancelled = true; };
   }, [initialSessions]);
+
+  useEffect(() => {
+    fetch('/api/config/roi').then(r => r.json()).then(d => {
+      if (d.hourlyRate > 0) setHourlyRate(d.hourlyRate);
+    }).catch(() => {});
+  }, []);
+
+  function computeROI(s: HistorySession): { netROI: number; timeSavedMin: number; valueUSD: number; ratio: number } | null {
+    const mult = s.roiMultiplier || 0;
+    const dur = s.durationMin || 0;
+    if (mult <= 0 || dur <= 0) return null;
+    const timeSavedMin = dur * mult - dur;
+    const valueUSD = timeSavedMin * (hourlyRate / 60);
+    const netROI = valueUSD - s.costUSD;
+    const ratio = s.costUSD > 0 ? netROI / s.costUSD : 0;
+    return { netROI, timeSavedMin, valueUSD, ratio };
+  }
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -248,6 +270,12 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
       case 'turns': cmp = a.turnCount - b.turnCount; break;
       case 'title': cmp = (a.title || a.lastPrompt || a.firstPrompt || '').localeCompare(b.title || b.lastPrompt || b.firstPrompt || ''); break;
       case 'project': cmp = shortProject(a.project).localeCompare(shortProject(b.project)); break;
+      case 'roi': {
+        const ar = computeROI(a)?.netROI || 0;
+        const br = computeROI(b)?.netROI || 0;
+        cmp = ar - br;
+        break;
+      }
     }
     return sortDir === 'asc' ? cmp : -cmp;
   });
@@ -416,6 +444,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
               <SortHeader label="Title" field="title" />
               <SortHeader label="Turns" field="turns" width={70} align="right" />
               <SortHeader label="Cost" field="cost" width={90} align="right" />
+              <SortHeader label="ROI" field="roi" width={90} align="right" />
               <th style={{
                 padding: '10px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--fg-4)',
@@ -440,7 +469,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
           <tbody>
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ padding: '40px 10px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
+                <td colSpan={9} style={{ padding: '40px 10px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 13 }}>
                   {isSearching ? 'No sessions match your search.' : 'No sessions found.'}
                 </td>
               </tr>
@@ -450,8 +479,8 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
               const snippet = deepMatches?.get(s.id);
               const title = s.title || s.lastPrompt || s.firstPrompt || '(no prompt)';
               return (
+                <React.Fragment key={s.id}>
                 <tr
-                  key={s.id}
                   onClick={() => onSelectSession(s)}
                   style={{
                     cursor: 'pointer',
@@ -535,6 +564,22 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                   <td style={{ padding: '12px 12px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--green)', fontWeight: 700 }}>
                     ${s.costUSD.toFixed(2)}
                   </td>
+                  <td
+                    onClick={(e) => { e.stopPropagation(); setRoiDetailId(prev => prev === s.id ? null : s.id); }}
+                    title="Click for ROI breakdown"
+                    style={{
+                      padding: '12px 12px', textAlign: 'right', fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700,
+                      cursor: 'pointer',
+                      color: (() => { const r = computeROI(s); if (!r) return 'var(--fg-4)'; return r.netROI >= 0 ? 'var(--green)' : 'var(--accent)'; })(),
+                    }}
+                  >
+                    {(() => {
+                      const r = computeROI(s);
+                      if (!r) return '--';
+                      if (Math.abs(r.netROI) >= 1000) return `$${(r.netROI / 1000).toFixed(1)}K`;
+                      return `$${Math.round(r.netROI)}`;
+                    })()}
+                  </td>
                   <td style={{ padding: '6px 10px', textAlign: 'center' }}>
                     <button
                       onClick={(e) => { e.stopPropagation(); handleCycleAnnotation(s); }}
@@ -594,6 +639,65 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                     </div>
                   </td>
                 </tr>
+                {roiDetailId === s.id && (() => {
+                  const r = computeROI(s);
+                  if (!r) return null;
+                  const dur = s.durationMin || 0;
+                  const mult = s.roiMultiplier || 0;
+                  const taskLabel = s.taskType || 'general';
+                  void 0;
+                  return (
+                    <tr style={{ background: 'var(--bg-2)' }}>
+                      <td colSpan={9} style={{ padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', fontSize: 12, fontFamily: 'var(--mono)' }}>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Duration </span>
+                            <span style={{ color: 'var(--fg)' }}>{Math.round(dur)}min</span>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Multiplier </span>
+                            <span style={{ color: 'var(--teal)' }}>{mult.toFixed(1)}x</span>
+                            <span style={{ color: 'var(--fg-4)', marginLeft: 4, fontSize: 10 }}>({taskLabel})</span>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Rate </span>
+                            <span style={{ color: 'var(--fg)' }}>${hourlyRate}/hr</span>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Time saved </span>
+                            <span style={{ color: 'var(--green)' }}>{Math.round(r.timeSavedMin)}min</span>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Value </span>
+                            <span style={{ color: 'var(--green)' }}>${r.valueUSD.toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Cost </span>
+                            <span style={{ color: 'var(--orange)' }}>${s.costUSD.toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Net ROI </span>
+                            <span style={{ color: r.netROI >= 0 ? 'var(--green)' : 'var(--accent)', fontWeight: 700 }}>
+                              ${r.netROI.toFixed(2)}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--fg-4)' }}>Ratio </span>
+                            <span style={{ color: 'var(--fg)' }}>{Math.round(r.ratio)}x</span>
+                          </div>
+                        </div>
+                        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--fg-4)', lineHeight: 1.5 }}>
+                          {taskLabel === 'general'
+                            ? 'Baseline 1.5x multiplier (enterprise floor from Google RCT: 21-26% speedup).'
+                            : `${taskLabel} multiplier (${mult}x) inferred from skill usage. Source: McKinsey/DX/GitHub RCT data with enterprise discount.`
+                          }
+                          {' '}Formula: (duration x multiplier x rate) - cost.
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()}
+                </React.Fragment>
               );
             })}
           </tbody>

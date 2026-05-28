@@ -33,6 +33,7 @@ import (
 	"github.com/zanetworker/aimux/internal/clipboard"
 	"github.com/zanetworker/aimux/internal/terminal"
 	"github.com/zanetworker/aimux/internal/trace"
+	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/frontend/tui/views"
 )
 
@@ -48,6 +49,7 @@ const (
 	viewHelp
 	viewTasks
 	viewHealth
+	viewPlugin
 )
 
 // tickMsg triggers periodic refresh.
@@ -146,6 +148,12 @@ type App struct {
 
 	// Tasks view
 	tasksView *views.TasksView
+
+	// Plugin system
+	pluginExec       *plugin.Executor
+	pluginView       *views.PluginTUIView
+	pluginPicker     *views.PluginPickerView
+	pluginPickerMode bool
 
 	// Remote provider (e.g., K8s): stored separately from polling providers.
 	// Only queried on-demand (tasks view, :new spawn) — never on every tick.
@@ -294,6 +302,7 @@ func NewApp() App {
 
 	// Set cached agents as initial instances and mark them stale in AgentsView
 	app.agentsView.SetStalePIDs(staleAgents)
+	app.agentsView.SetHourlyRate(cfg.ROI.HourlyRate)
 
 	return app
 }
@@ -813,6 +822,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		meta.Note = msg.Note
 		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = "Session: note saved"
+	case views.SessionROIMsg:
+		meta := history.LoadMeta(msg.Session.FilePath)
+		meta.ROIMultiplier = msg.Multiplier
+		meta.TaskType = msg.TaskType
+		_ = history.SaveMeta(msg.Session.FilePath, meta)
+		if msg.Multiplier > 0 {
+			a.statusHint = fmt.Sprintf("Session: ROI set to %.1fx", msg.Multiplier)
+		} else {
+			a.statusHint = "Session: ROI cleared"
+		}
 	case views.SessionContentSearchResultMsg:
 		a.sessionsView.HandleContentSearchResult(msg)
 		count := len(msg.Matches)
@@ -904,6 +923,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.launcherActive && a.launcherView != nil {
 			cmd := a.launcherView.Update(msg)
 			return a, cmd
+		}
+		// Plugin picker overlay
+		if a.pluginPickerMode && a.pluginPicker != nil {
+			switch msg.String() {
+			case "j", "down":
+				a.pluginPicker.CursorDown()
+			case "k", "up":
+				a.pluginPicker.CursorUp()
+			case "enter":
+				if sel := a.pluginPicker.Selected(); sel != nil {
+					return a.openPlugin(*sel)
+				}
+			case "esc":
+				a.pluginPickerMode = false
+				a.statusHint = ""
+			}
+			return a, nil
 		}
 		// Kill confirmation prompt
 		if a.killConfirm {
@@ -1190,6 +1226,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewAgents {
 			return a.openStarred()
 		}
+	case "P":
+		if a.currentView == viewAgents {
+			return a.openPlugins()
+		}
 	case "S":
 		if a.currentView == viewAgents {
 			return a.openSessions()
@@ -1401,7 +1441,6 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.statusHint = ""
 			return a, nil
 		}
-		return a, nil
 	}
 
 	// Intercept j/k for diff scrolling when diff is expanded in preview pane
@@ -1455,6 +1494,21 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case viewTasks:
 		if a.tasksView != nil {
 			a.tasksView.HandleKey(msg.String())
+		}
+	case viewPlugin:
+		if a.pluginView != nil {
+			switch msg.String() {
+			case "j", "down":
+				a.pluginView.ScrollDown(1)
+			case "k", "up":
+				a.pluginView.ScrollUp(1)
+			case "d":
+				a.pluginView.ScrollDown(10)
+			case "u":
+				a.pluginView.ScrollUp(10)
+			case "r":
+				return a.refreshPlugin()
+			}
 		}
 	}
 	return a, nil
@@ -1626,6 +1680,8 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		return a.navigateTo(viewTasks, "Tasks")
 	case "costs":
 		return a.navigateTo(viewCosts, "Costs")
+	case "plugins":
+		return a.openPlugins()
 	case "health":
 		return a.openHealth()
 	case "help":
@@ -2450,6 +2506,63 @@ func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// SetPluginExecutor wires the plugin executor into the TUI for rendering plugin tabs.
+func (a *App) SetPluginExecutor(exec *plugin.Executor) {
+	a.pluginExec = exec
+}
+
+// openPlugins opens the plugin picker or goes directly to a single plugin.
+func (a App) openPlugins() (tea.Model, tea.Cmd) {
+	if a.pluginExec == nil {
+		a.statusHint = "No plugins configured"
+		return a, nil
+	}
+	plugins := a.pluginExec.Plugins()
+	if len(plugins) == 0 {
+		a.statusHint = "No plugins available"
+		return a, nil
+	}
+
+	views.SortPlugins(plugins)
+
+	if len(plugins) == 1 {
+		return a.openPlugin(plugins[0])
+	}
+
+	a.pluginPicker = views.NewPluginPickerView(plugins)
+	a.pluginPickerMode = true
+	a.statusHint = "Select a plugin"
+	return a, nil
+}
+
+// openPlugin opens a specific plugin, executes its command, and navigates to its view.
+func (a App) openPlugin(p plugin.Plugin) (tea.Model, tea.Cmd) {
+	data, err := a.pluginExec.Execute(p.Name)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Plugin error: %v", err)
+		return a, nil
+	}
+	a.pluginView = views.NewPluginTUIView(p)
+	a.pluginView.SetData(data)
+	a.pluginPickerMode = false
+	return a.navigateTo(viewPlugin, p.Tab)
+}
+
+// refreshPlugin re-executes the current plugin's command and updates the view.
+func (a App) refreshPlugin() (tea.Model, tea.Cmd) {
+	if a.pluginView == nil || a.pluginExec == nil {
+		return a, nil
+	}
+	data, err := a.pluginExec.Execute(a.pluginView.Manifest().Name)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Refresh error: %v", err)
+		return a, nil
+	}
+	a.pluginView.SetData(data)
+	a.statusHint = "Refreshed"
+	return a, nil
+}
+
 // openSessions discovers past sessions and navigates to the sessions browser.
 func (a App) openSessions() (tea.Model, tea.Cmd) {
 	// Determine scope directory from selected agent (if any)
@@ -2472,6 +2585,7 @@ func (a App) openSessions() (tea.Model, tea.Cmd) {
 	a.cachedSessions = sessions
 	a.sessionsView.SetSessions(sessions)
 	a.sessionsView.SetTagVocab(history.CollectTags(""))
+	a.sessionsView.SetHourlyRate(a.cfg.ROI.HourlyRate)
 
 	return a.navigateTo(viewSessions, "Sessions")
 }
@@ -2553,7 +2667,7 @@ func (a App) View() string {
 	// Set contextual hints based on current view
 	switch a.currentView {
 	case viewAgents:
-		a.headerView.SetHint("Enter:open  a:attend  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
+		a.headerView.SetHint("Enter:open  a:attend  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  P:plugins  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
 		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  $:costs  :export  :export-otel  Esc:back")
 	case viewCosts:
@@ -2563,7 +2677,7 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		hint := "j/k:nav  Enter:resume  *:pin  t:titles  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview"
+		hint := "j/k:nav  Enter:resume  *:pin  t:titles  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  R:roi  I:roi-detail  d:delete  D:cleanup  p:preview"
 		if a.sessionsView.ShowSubagents() {
 			hint += "  H:hide-agents"
 		} else {
@@ -2575,6 +2689,8 @@ func (a App) View() string {
 		a.headerView.SetHint("j/k:nav  Enter:resume  *:unpin  C:copy-id  /:filter  s:sort  p:preview  Esc:back")
 	case viewHealth:
 		a.headerView.SetHint("Esc:back  :health to refresh")
+	case viewPlugin:
+		a.headerView.SetHint("j/k:scroll  d/u:page  r:refresh  Esc:back")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
 	}
@@ -2620,6 +2736,13 @@ func (a App) View() string {
 	case viewHealth:
 		a.healthView.SetSize(a.width, contentHeight)
 		content = a.healthView.View()
+	case viewPlugin:
+		if a.pluginView != nil {
+			a.pluginView.SetSize(a.width, contentHeight)
+			content = a.pluginView.View()
+		} else {
+			content = "  No plugin selected"
+		}
 	case viewHelp:
 		content = a.helpView.View()
 	}
@@ -2646,6 +2769,12 @@ func (a App) View() string {
 	if a.launcherActive && a.launcherView != nil {
 		a.launcherView.SetSize(a.width, a.height)
 		return a.launcherView.View()
+	}
+
+	// Overlay the plugin picker if active
+	if a.pluginPickerMode && a.pluginPicker != nil {
+		a.pluginPicker.SetSize(a.width, a.height)
+		return header + "\n" + a.pluginPicker.View()
 	}
 
 	return result

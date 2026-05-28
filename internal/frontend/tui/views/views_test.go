@@ -114,8 +114,8 @@ func TestEstimateTurnCost(t *testing.T) {
 			model:   "claude-opus-4-6",
 			tokIn:   1000,
 			tokOut:  500,
-			wantMin: 0.05,  // (1000*15 + 500*75) / 1M = 0.0525
-			wantMax: 0.06,
+			wantMin: 0.017, // (1000*5 + 500*25) / 1M = 0.0175
+			wantMax: 0.018,
 		},
 		{
 			name:    "sonnet model",

@@ -163,3 +163,73 @@ func TestSetNote_PreservesOtherFields(t *testing.T) {
 		t.Errorf("expected note %q, got %q", "my note", meta.Note)
 	}
 }
+
+func TestSetROI(t *testing.T) {
+	sf := tempSessionFile(t)
+
+	if err := SetROI(sf, 3.5, "research"); err != nil {
+		t.Fatalf("SetROI: %v", err)
+	}
+
+	meta := history.LoadMeta(sf)
+	if meta.ROIMultiplier != 3.5 {
+		t.Errorf("expected ROIMultiplier 3.5, got %f", meta.ROIMultiplier)
+	}
+	if meta.TaskType != "research" {
+		t.Errorf("expected TaskType %q, got %q", "research", meta.TaskType)
+	}
+}
+
+func TestSetROI_PreservesOtherFields(t *testing.T) {
+	sf := tempSessionFile(t)
+
+	if _, err := ToggleStar(sf); err != nil {
+		t.Fatalf("ToggleStar: %v", err)
+	}
+	if err := SetAnnotation(sf, "achieved"); err != nil {
+		t.Fatalf("SetAnnotation: %v", err)
+	}
+	if err := SetNote(sf, "important session"); err != nil {
+		t.Fatalf("SetNote: %v", err)
+	}
+
+	if err := SetROI(sf, 5.0, "feature"); err != nil {
+		t.Fatalf("SetROI: %v", err)
+	}
+
+	meta := history.LoadMeta(sf)
+	if !meta.Starred {
+		t.Error("SetROI clobbered starred field")
+	}
+	if meta.Annotation != "achieved" {
+		t.Errorf("SetROI clobbered annotation: got %q", meta.Annotation)
+	}
+	if meta.Note != "important session" {
+		t.Errorf("SetROI clobbered note: got %q", meta.Note)
+	}
+	if meta.ROIMultiplier != 5.0 {
+		t.Errorf("expected ROIMultiplier 5.0, got %f", meta.ROIMultiplier)
+	}
+	if meta.TaskType != "feature" {
+		t.Errorf("expected TaskType %q, got %q", "feature", meta.TaskType)
+	}
+}
+
+func TestSetROI_ZeroClears(t *testing.T) {
+	sf := tempSessionFile(t)
+
+	if err := SetROI(sf, 3.0, "bug_fix"); err != nil {
+		t.Fatalf("SetROI: %v", err)
+	}
+	if err := SetROI(sf, 0, ""); err != nil {
+		t.Fatalf("SetROI (clear): %v", err)
+	}
+
+	meta := history.LoadMeta(sf)
+	if meta.ROIMultiplier != 0 {
+		t.Errorf("expected ROIMultiplier 0, got %f", meta.ROIMultiplier)
+	}
+	if meta.TaskType != "" {
+		t.Errorf("expected empty TaskType, got %q", meta.TaskType)
+	}
+}

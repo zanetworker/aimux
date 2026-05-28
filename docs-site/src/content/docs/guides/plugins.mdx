@@ -1,46 +1,196 @@
 ---
 title: Plugins
-description: Plugin system and skill dashboard.
+description: Extend aimux with custom dashboard tabs using the plugin system.
 ---
 
 ## Overview
 
-aimux supports plugins that add custom dashboard tabs to the web UI. Plugins are defined in `~/.aimux/plugins/` and execute shell commands to collect data, which is rendered as tables, charts, and metric rows.
+aimux supports plugins that add custom dashboard tabs to both the **TUI** and **web UI**. A plugin is a shell command that outputs JSON, rendered as tables, charts, metric rows, and lists. No Go code or recompilation required.
 
-## Skill Dashboard
+Plugins live in `~/.aimux/plugins/<name>/plugin.yaml`. Built-in plugins are compiled into the binary with auto-detection gates.
 
-The built-in Skill Dashboard plugin tracks Claude Code skill usage, correction rates, and learning funnel metrics. It appears as a tab in the web dashboard when skill analytics data is available.
+## Quick Start
 
-## Plugin Structure
+Create a plugin in three steps:
 
-Each plugin is a YAML file in `~/.aimux/plugins/`:
+```bash
+# 1. Create the plugin directory
+mkdir -p ~/.aimux/plugins/my-dashboard
 
-```yaml
+# 2. Write the manifest
+cat > ~/.aimux/plugins/my-dashboard/plugin.yaml << 'EOF'
 name: my-dashboard
 tab: My Dashboard
+command: python3 ~/.aimux/plugins/my-dashboard/dashboard.py
+cache_seconds: 30
 panels:
   - id: metrics
     type: metric-row
     title: Key Metrics
-  - id: data-table
+  - id: data
     type: table
-    title: Data
+    title: Data Table
     sortable: true
-    expandable: true
+EOF
+
+# 3. Write the script (must output JSON with keys matching panel IDs)
+cat > ~/.aimux/plugins/my-dashboard/dashboard.py << 'PYEOF'
+import json, sys
+json.dump({
+    "metrics": {"items": [
+        {"label": "Count", "value": 42, "color": "teal"},
+        {"label": "Rate", "value": "95%", "color": "green"},
+    ]},
+    "data": {
+        "columns": ["Name", "Score"],
+        "rows": [
+            {"cells": ["Alice", 95], "color": "teal"},
+            {"cells": ["Bob", 87]},
+        ],
+    },
+}, sys.stdout)
+PYEOF
 ```
 
-## Panel Types
+Restart aimux. Press `P` in the TUI or visit the web dashboard to see your plugin.
 
-| Type | Description |
-|------|-------------|
-| `metric-row` | Horizontal row of key-value metric chips |
-| `table` | Sortable, expandable data table |
-| `bar-chart` | Horizontal bar chart |
-| `list` | Simple list of items |
+## plugin.yaml Schema
 
-## API
+```yaml
+name: string          # Unique plugin identifier (required)
+tab: string           # Display name in the tab bar (required)
+command: string       # Shell command to execute (required, ~ expanded)
+cache_seconds: int    # Cache TTL in seconds (default: 30)
+panels:               # List of panels to render (required, at least 1)
+  - id: string        # Must match a top-level key in the JSON output
+    type: string      # metric-row | table | bar-chart | list
+    title: string     # Panel heading
+    description: string  # Explanatory text below the heading (optional)
+    sortable: bool    # Enable column sorting for tables (optional)
+    expandable: bool  # Enable expand/collapse for lists (optional)
+    width: string     # "half" to render two panels side-by-side (optional)
+```
 
-Plugins are served via the web API:
+Two consecutive panels with `width: "half"` are rendered side-by-side.
 
-- `GET /api/plugins` - List all registered plugins
-- `GET /api/plugins/{name}/data` - Execute plugin and return data
+## JSON Output Contract
+
+The command must print a single JSON object to stdout. Each top-level key must match a panel `id` from the manifest. The value's shape depends on the panel type.
+
+### metric-row
+
+Horizontal row of metric chips.
+
+```json
+{
+  "items": [
+    {"label": "Users", "value": 1200, "color": "teal"},
+    {"label": "Errors", "value": 3, "color": "accent"}
+  ]
+}
+```
+
+Colors: `green`, `accent` (red), `orange`, `purple`, `teal`, `fg-3` (gray).
+
+### table
+
+Columnar data table with optional sorting.
+
+```json
+{
+  "columns": ["Name", "Score", "Status"],
+  "rows": [
+    {"cells": ["Alice", 95, "Active"], "color": "green"},
+    {"cells": ["Bob", 87, "Idle"]}
+  ]
+}
+```
+
+`color` on a row tints non-header cells. Omit for default text color.
+
+### bar-chart
+
+Horizontal bar chart with optional secondary values and legend.
+
+```json
+{
+  "items": [
+    {"label": "Bash", "value": 100, "secondary": 5, "legend": ["tokens", "calls"]},
+    {"label": "Read", "value": 50, "secondary": 12}
+  ]
+}
+```
+
+Primary bars render in teal, secondary in purple. `legend` on the first item adds a key below the chart.
+
+### list
+
+Expandable item list with tags.
+
+```json
+{
+  "items": [
+    {
+      "title": "High token usage",
+      "subtitle": "344k tokens in 21 calls",
+      "body": "The Edit tool is consuming 34% of context. Consider smaller edits.",
+      "tags": ["action needed"]
+    }
+  ]
+}
+```
+
+Tag colors: `action needed`/`needs review` = red, `low sample`/`monitor` = orange, `approved` = green, `pending` = orange.
+
+## Auto-Detect (Built-in Plugins)
+
+Built-in plugins use `AutoDetect` paths to conditionally appear. If none of the marker files exist on disk, the plugin is hidden.
+
+```go
+// internal/plugin/builtin.go
+AutoDetect: []string{
+    "~/.claude/skill-usage.jsonl",
+    "~/.claude/skill-effectiveness.jsonl",
+},
+```
+
+User plugins in `~/.aimux/plugins/` are always visible (no auto-detect).
+
+## Built-in Plugins
+
+**Skill Dashboard** tracks Claude Code skill usage, correction rates, trigger breakdown, learning funnel, and combo analysis. Auto-detected from `~/.claude/skill-*.jsonl` files.
+
+## TUI Usage
+
+Press **P** from the agents view to open the plugin picker. If only one plugin is registered, it opens directly. Navigation:
+
+| Key | Action |
+|-----|--------|
+| `j/k` | Scroll up/down |
+| `d/u` | Page down/up (10 lines) |
+| `r` | Refresh (re-execute command) |
+| `Esc` | Back to agents |
+
+The `:plugins` command also opens the picker.
+
+## Web API
+
+```
+GET /api/plugins              # List all registered plugins and their panels
+GET /api/plugins/{name}/data  # Execute plugin command and return JSON
+```
+
+The web UI renders plugins as tabs with auto-refresh. The "Generate Insights" button sends panel data to the LLM insight endpoint for AI-powered analysis.
+
+## Execution Model
+
+1. The executor runs the command via `sh -c` with a 10-second timeout
+2. stdout is parsed as JSON
+3. Results are cached for `cache_seconds`
+4. On cache miss (or `r` refresh in TUI), the command runs again
+
+Commands can be any language (Python, bash, Go binary, etc.) as long as they output valid JSON.
+
+## Data Directory
+
+Plugins that collect data over time should write to `~/.aimux/data/<plugin-name>/`. This directory persists across reboots (unlike `/tmp/`). The context-dashboard plugin uses `~/.aimux/data/context/` for its tracker files.

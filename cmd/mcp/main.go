@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ var (
 	maxCost     float64
 	githubToken string // for cleanup_branches
 	githubRepo  string // "owner/repo"
+
+	validTaskID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 )
 
 func main() {
@@ -146,10 +149,20 @@ func handleSpawnAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 		if err != nil {
 			return mcp.NewToolResultText(fmt.Sprintf("Error polling heartbeat: %v", err)), nil
 		}
-		if len(current) >= int(targetReplicas) {
+		matching := 0
+		for agentID := range current {
+			meta, err := rdb.HGetAll(ctx, teamKey("agent:"+agentID)).Result()
+			if err != nil {
+				continue
+			}
+			if meta["provider"] == provider && meta["role"] == role {
+				matching++
+			}
+		}
+		if matching >= count {
 			return mcp.NewToolResultText(fmt.Sprintf(
-				"Scaled %s to %d replicas. %d agents registered and ready.",
-				deployName, targetReplicas, len(current))), nil
+				"Scaled %s to %d replicas. %d matching agents registered and ready.",
+				deployName, targetReplicas, matching)), nil
 		}
 	}
 	return mcp.NewToolResultText(fmt.Sprintf(
@@ -495,6 +508,9 @@ func handleWaitForTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		if err != nil {
 			return mcp.NewToolResultText(fmt.Sprintf("Error reading task: %v", err)), nil
 		}
+		if len(t) == 0 {
+			return mcp.NewToolResultText(fmt.Sprintf("Task %s not found", taskID)), nil
+		}
 		status := t["status"]
 		if status == "completed" || status == "failed" || status == "dead" {
 			return mcp.NewToolResultText(fmt.Sprintf("Task %s: status=%s summary=%s",
@@ -551,6 +567,10 @@ func handleCleanupBranches(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if id == "" {
+			continue
+		}
+		if !validTaskID.MatchString(id) {
+			skipped = append(skipped, id+" (invalid task ID)")
 			continue
 		}
 		branch := "task-" + id

@@ -323,6 +323,63 @@ func TestHandleCleanupBranches_URLConstruction(t *testing.T) {
 	}
 }
 
+func TestHandleCleanupBranches_InvalidTaskIDs(t *testing.T) {
+	var requestLog []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestLog = append(requestLog, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	origToken, origRepo := githubToken, githubRepo
+	origTransport := http.DefaultClient.Transport
+	defer func() {
+		githubToken, githubRepo = origToken, origRepo
+		http.DefaultClient.Transport = origTransport
+	}()
+
+	githubToken = "test-token"
+	githubRepo = "owner/repo"
+	http.DefaultClient.Transport = &testTransport{server: server}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]interface{}{
+		"task_ids": "release/foo,../main,abc123",
+	}
+
+	result, err := handleCleanupBranches(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := result.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(text, "release/foo (invalid task ID)") {
+		t.Errorf("expected 'release/foo (invalid task ID)' in Skipped, got: %s", text)
+	}
+	if !strings.Contains(text, "../main (invalid task ID)") {
+		t.Errorf("expected '../main (invalid task ID)' in Skipped, got: %s", text)
+	}
+	if len(requestLog) != 1 {
+		t.Errorf("expected 1 request (only valid abc123), got %d: %v", len(requestLog), requestLog)
+	}
+}
+
+func TestValidTaskID(t *testing.T) {
+	valid := []string{"abc123", "a3f2bc", "abc-def", "0123456789abcdef"}
+	for _, id := range valid {
+		if !validTaskID.MatchString(id) {
+			t.Errorf("expected %q to be valid", id)
+		}
+	}
+
+	invalid := []string{"release/foo", "../main", "abc def", "abc;rm", "$(whoami)", "abc`id`", ""}
+	for _, id := range invalid {
+		if validTaskID.MatchString(id) {
+			t.Errorf("expected %q to be invalid", id)
+		}
+	}
+}
+
 // testTransport redirects all requests to the test server.
 type testTransport struct {
 	server *httptest.Server

@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,10 +21,11 @@ const (
 	SortByTurns                       // most turns first
 	SortByTitle                       // alphabetical by title/prompt
 	SortByFailureMode                 // tagged sessions first
+	SortByROI                         // highest ROI multiplier first
 )
 
 // sortFieldOrder defines the cycle order when pressing 's'.
-var sortFieldOrder = []SortField{SortByAge, SortByCost, SortByTurns, SortByTitle, SortByFailureMode}
+var sortFieldOrder = []SortField{SortByAge, SortByCost, SortByTurns, SortByTitle, SortByFailureMode, SortByROI}
 
 // --- Styles ---
 
@@ -50,6 +52,10 @@ var (
 				Foreground(lipgloss.Color("#6B7280"))
 	sessActionStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280"))
+	sessROIStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#34D399"))
+	sessROIDetailStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#9CA3AF")).Italic(true)
 
 	sessAnnotAchievedStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#111827")).
@@ -99,6 +105,13 @@ type SessionTagMsg struct {
 type SessionNoteMsg struct {
 	Session history.Session
 	Note    string
+}
+
+// SessionROIMsg is emitted when the user sets the ROI multiplier.
+type SessionROIMsg struct {
+	Session    history.Session
+	Multiplier float64
+	TaskType   string
 }
 
 // SessionDeleteMsg is emitted when the user confirms deleting a session.
@@ -196,6 +209,16 @@ type SessionsView struct {
 	// Subagent filtering
 	showSubagents bool
 
+	// ROI input
+	roiMode  bool
+	roiInput TextInput
+
+	// ROI detail overlay
+	roiDetailMode bool
+
+	// Hourly rate from config (used for ROI calculation display)
+	hourlyRate float64
+
 	// Trace preview (reused LogsView)
 	previewLogs  *LogsView
 	traceParser  TraceParser
@@ -273,9 +296,14 @@ func (v *SessionsView) SelectedSession() *history.Session {
 	return nil
 }
 
+// SetHourlyRate sets the hourly rate used for ROI value calculations.
+func (v *SessionsView) SetHourlyRate(rate float64) {
+	v.hourlyRate = rate
+}
+
 // HasActiveInput returns true if the view has active text input or confirmation.
 func (v *SessionsView) HasActiveInput() bool {
-	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode || v.cleanupMode || v.contentSearchMode || v.dirFilterMode
+	return v.filterMode || v.tagMode || v.noteMode || v.deleteMode || v.cleanupMode || v.contentSearchMode || v.dirFilterMode || v.roiMode
 }
 
 // HasActiveFilter returns true if a search filter is currently applied.
@@ -295,6 +323,9 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 		}
 		if v.deleteMode {
 			return v.handleDeleteKey(msg)
+		}
+		if v.roiMode {
+			return v.handleRoiKey(msg)
 		}
 		if v.tagMode {
 			return v.handleTagKey(msg)
@@ -459,6 +490,19 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			v.showSubagents = !v.showSubagents
 			v.cursor = 0
 			v.previewLogs = nil
+		case "R":
+			s := v.SelectedSession()
+			if s == nil {
+				return nil
+			}
+			v.roiMode = true
+			if s.ROIMultiplier > 0 {
+				v.roiInput.SetValue(fmt.Sprintf("%.1f", s.ROIMultiplier))
+			} else {
+				v.roiInput.Reset()
+			}
+		case "I":
+			v.roiDetailMode = !v.roiDetailMode
 		}
 	}
 	return nil
@@ -668,6 +712,38 @@ func (v *SessionsView) handleNoteKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (v *SessionsView) handleRoiKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		v.roiMode = false
+		s := v.SelectedSession()
+		if s == nil {
+			return nil
+		}
+		val := strings.TrimSpace(v.roiInput.Value())
+		if val == "" {
+			s.ROIMultiplier = 0
+			return func() tea.Msg {
+				return SessionROIMsg{Session: *s, Multiplier: 0}
+			}
+		}
+		mult, err := strconv.ParseFloat(val, 64)
+		if err != nil || mult < 0 {
+			return nil
+		}
+		s.ROIMultiplier = mult
+		return func() tea.Msg {
+			return SessionROIMsg{Session: *s, Multiplier: mult}
+		}
+	case "esc":
+		v.roiMode = false
+		v.roiInput.Reset()
+	default:
+		v.roiInput.HandleKey(msg)
+	}
+	return nil
+}
+
 // parseTags splits a comma-separated tag string into trimmed, non-empty tags.
 func parseTags(input string) []string {
 	parts := strings.Split(input, ",")
@@ -704,6 +780,8 @@ func (v *SessionsView) cycleSortField() {
 					v.sortAsc = true // A-Z
 				case SortByFailureMode:
 					v.sortAsc = false // tagged first
+				case SortByROI:
+					v.sortAsc = false // highest ROI first
 				}
 			}
 			return
@@ -819,6 +897,10 @@ func (v *SessionsView) compareSessions(a, b history.Session) bool {
 			bTag = strings.ToLower(b.Tags[0])
 		}
 		return aTag < bTag
+	case SortByROI:
+		aROI := a.DurationMin * (a.ROIMultiplier - 1) * (150.0 / 60.0) - a.CostUSD
+		bROI := b.DurationMin * (b.ROIMultiplier - 1) * (150.0 / 60.0) - b.CostUSD
+		return aROI < bROI
 	default: // SortByAge
 		return a.LastActive.Before(b.LastActive)
 	}
@@ -981,6 +1063,8 @@ func (v *SessionsView) View() string {
 	headerParts = append(headerParts, colHeader("TURNS", SortByTurns, cols.turns+2, false))
 	headerParts = append(headerParts, "   ")
 	headerParts = append(headerParts, colHeader("COST", SortByCost, cols.cost, false))
+	headerParts = append(headerParts, "   ")
+	headerParts = append(headerParts, colHeader("ROI", SortByROI, cols.roi, false))
 	header := strings.Join(headerParts, "")
 	b.WriteString(sessDimStyle.Render(header) + "\n")
 
@@ -988,6 +1072,10 @@ func (v *SessionsView) View() string {
 	listHeight := v.height - 7 // header + column header + padding
 	if v.previewLogs != nil {
 		listHeight = v.height / 2
+	}
+	// Reserve space for filter/search input line
+	if v.filterMode || v.dirFilterMode || v.contentSearchMode {
+		listHeight -= 2
 	}
 	// Reserve space for tag input + suggestions dropdown
 	if v.tagMode {
@@ -1032,6 +1120,11 @@ func (v *SessionsView) View() string {
 				snippetStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA")).Italic(true)
 				b.WriteString("     " + snippetStyle.Render(truncate(snippet, w-8)) + "\n")
 			}
+		}
+
+		// Show ROI detail breakdown below the selected row when toggled
+		if selected && v.roiDetailMode && s.ROIMultiplier > 0 {
+			b.WriteString(v.renderROIDetail(s))
 		}
 	}
 
@@ -1088,6 +1181,12 @@ func (v *SessionsView) View() string {
 	if v.noteMode {
 		b.WriteString("\n  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("Note: ") + v.noteInput.BeforeCursor() + lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render("█") + v.noteInput.AfterCursor())
 	}
+	if v.roiMode {
+		roiLabelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399")).Bold(true)
+		roiCursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#34D399"))
+		b.WriteString("\n  " + roiLabelStyle.Render("ROI multiplier: ") + v.roiInput.BeforeCursor() + roiCursorStyle.Render("█") + v.roiInput.AfterCursor() + sessDimStyle.Render("x"))
+		b.WriteString("\n  " + sessDimStyle.Render("  Enter:save  Esc:cancel  (e.g. 3 = 3x faster, 0 = clear)"))
+	}
 	if v.deleteMode {
 		s := v.SelectedSession()
 		if s != nil {
@@ -1143,6 +1242,7 @@ type colLayout struct {
 	action  int
 	turns   int
 	cost    int
+	roi     int
 }
 
 // columnWidths computes fixed column widths based on available width.
@@ -1153,17 +1253,18 @@ func (v *SessionsView) columnWidths(w int) colLayout {
 		action: 20,
 		turns:  6,
 		cost:   8,
+		roi:    8,
 	}
 	if v.showAll {
 		c.project = 14
 	}
 	// marker(3) + spacing between columns (3 per gap)
-	// gaps: age|branch|prompt|action|turns|cost = 6 gaps = 18
-	gaps := 6 * 3
+	// gaps: age|branch|prompt|action|turns|cost|roi = 7 gaps = 21
+	gaps := 7 * 3
 	if v.showAll {
 		gaps += 3
 	}
-	fixed := 3 + c.age + c.branch + c.action + c.turns + c.cost + gaps
+	fixed := 3 + c.age + c.branch + c.action + c.turns + c.cost + c.roi + gaps
 	if v.showAll {
 		fixed += c.project
 	}
@@ -1310,6 +1411,26 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 		b.WriteString(sessDimStyle.Render(costStr))
 	} else {
 		b.WriteString(sessCostStyle.Render(costStr))
+	}
+	b.WriteString("   ")
+
+	// ROI column (right-aligned, fixed width) — shows net dollar value
+	if s.ROIMultiplier > 0 && s.DurationMin > 0 {
+		rate := v.hourlyRate
+		if rate <= 0 {
+			rate = 150.0
+		}
+		timeSavedMin := s.DurationMin*s.ROIMultiplier - s.DurationMin
+		valueUSD := timeSavedMin * (rate / 60.0)
+		netROI := valueUSD - s.CostUSD
+		roiStr := fmt.Sprintf("%*s", cols.roi, formatDollar(netROI))
+		if netROI > 0 {
+			b.WriteString(sessROIStyle.Render(roiStr))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(roiStr))
+		}
+	} else {
+		b.WriteString(sessDimStyle.Render(fmt.Sprintf("%*s", cols.roi, "--")))
 	}
 
 	// Badges (annotation, view-only) after fixed columns
@@ -1577,6 +1698,52 @@ func shortProject(path string) string {
 		}
 	}
 	return path
+}
+
+// renderROIDetail renders the ROI breakdown below a selected session row.
+func (v *SessionsView) renderROIDetail(s history.Session) string {
+	var b strings.Builder
+	rate := v.hourlyRate
+	if rate <= 0 {
+		rate = 150.0
+	}
+	durationMin := s.DurationMin
+	timeSavedMin := durationMin*s.ROIMultiplier - durationMin
+	valueUSD := timeSavedMin * (rate / 60.0)
+	netROI := valueUSD - s.CostUSD
+	roiRatio := 0.0
+	if s.CostUSD > 0 {
+		roiRatio = netROI / s.CostUSD
+	}
+
+	label := sessROIDetailStyle
+	val := sessROIStyle
+
+	fmt.Fprintf(&b, "     %s %s", label.Render("Duration:"), val.Render(fmt.Sprintf("%.0f min", durationMin)))
+	fmt.Fprintf(&b, "  %s %s", label.Render("Multiplier:"), val.Render(fmt.Sprintf("%.1fx", s.ROIMultiplier)))
+	if s.TaskType != "" {
+		fmt.Fprintf(&b, "  %s %s", label.Render("Type:"), val.Render(s.TaskType))
+	}
+	fmt.Fprintf(&b, "  %s %s", label.Render("Rate:"), val.Render(fmt.Sprintf("$%.0f/hr", rate)))
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "     %s %s", label.Render("Time saved:"), val.Render(fmt.Sprintf("%.0f min", timeSavedMin)))
+	fmt.Fprintf(&b, "  %s %s", label.Render("Value:"), val.Render(fmt.Sprintf("$%.2f", valueUSD)))
+	fmt.Fprintf(&b, "  %s %s", label.Render("Net ROI:"), val.Render(fmt.Sprintf("$%.2f", netROI)))
+	fmt.Fprintf(&b, "  %s %s", label.Render("Ratio:"), val.Render(fmt.Sprintf("%.0fx", roiRatio)))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// formatDollar formats a dollar amount compactly for column display.
+func formatDollar(v float64) string {
+	if v >= 1000 {
+		return fmt.Sprintf("$%.0fK", v/1000)
+	}
+	if v >= 100 {
+		return fmt.Sprintf("$%.0f", v)
+	}
+	return fmt.Sprintf("$%.0f", v)
 }
 
 // SubagentCount returns the number of subagent sessions in the sessions list.

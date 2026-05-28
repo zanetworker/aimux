@@ -51,6 +51,9 @@ func main() {
 		debuglog.Log("aimux starting (version %s)", version)
 
 		app := tui.NewApp()
+		if exec := createPluginExecutor(); exec != nil {
+			app.SetPluginExecutor(exec)
+		}
 		p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := p.Run(); err != nil {
 			return err
@@ -77,6 +80,9 @@ func main() {
 		debuglog.Log("aimux starting (version %s)", version)
 
 		app := tui.NewApp()
+		if exec := createPluginExecutor(); exec != nil {
+			app.SetPluginExecutor(exec)
+		}
 		p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := p.Run(); err != nil {
 			return err
@@ -244,6 +250,17 @@ func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(opts sp
 }
 
 // createWebServer builds and wires a web.Server with all dependencies.
+func createPluginExecutor() *plugin.Executor {
+	allPlugins := plugin.Builtins()
+	if custom, err := plugin.ScanPlugins(plugin.DefaultPluginsDir()); err == nil {
+		allPlugins = append(allPlugins, custom...)
+	}
+	if len(allPlugins) == 0 {
+		return nil
+	}
+	return plugin.NewExecutor(allPlugins)
+}
+
 func createWebServer(port int) *web.Server {
 	cfg, _ := config.Load(config.DefaultPath())
 	// Merge project-local config if running from a project directory

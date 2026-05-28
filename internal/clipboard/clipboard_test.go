@@ -1,10 +1,6 @@
-//go:build integration
-
 package clipboard
 
 import (
-	"os/exec"
-	"runtime"
 	"testing"
 )
 
@@ -14,10 +10,10 @@ func TestResumeCommand(t *testing.T) {
 		workingDir string
 		want       string
 	}{
-		{"abc-123", "", "claude --resume abc-123"},
-		{"abc-123", "/home/user/project", "cd /home/user/project && claude --resume abc-123"},
-		{"session-with-dashes", "", "claude --resume session-with-dashes"},
-		{"sess-1", "/tmp/test", "cd /tmp/test && claude --resume sess-1"},
+		{"abc-123", "", "claude --resume 'abc-123'"},
+		{"abc-123", "/home/user/project", "cd '/home/user/project' && claude --resume 'abc-123'"},
+		{"session-with-dashes", "", "claude --resume 'session-with-dashes'"},
+		{"sess-1", "/tmp/test", "cd '/tmp/test' && claude --resume 'sess-1'"},
 	}
 	for _, tt := range tests {
 		got := ResumeCommand(tt.sessionID, tt.workingDir)
@@ -27,25 +23,51 @@ func TestResumeCommand(t *testing.T) {
 	}
 }
 
-func TestCopy_Integration(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("clipboard integration test only runs on macOS")
-	}
-	if _, err := exec.LookPath("pbcopy"); err != nil {
-		t.Skip("pbcopy not available")
-	}
-
-	err := Copy("aimux-clipboard-test")
-	if err != nil {
-		t.Fatalf("Copy() returned error: %v", err)
+func TestResumeCommand_ShellQuoting(t *testing.T) {
+	got := ResumeCommand("abc-123", "/path with spaces/project")
+	want := "cd '/path with spaces/project' && claude --resume 'abc-123'"
+	if got != want {
+		t.Errorf("spaces: got %q, want %q", got, want)
 	}
 
-	// Verify with pbpaste
-	out, err := exec.Command("pbpaste").Output()
-	if err != nil {
-		t.Fatalf("pbpaste failed: %v", err)
+	got = ResumeCommand("abc-123", "/path/with'quote")
+	want = "cd '/path/with'\"'\"'quote' && claude --resume 'abc-123'"
+	if got != want {
+		t.Errorf("quote: got %q, want %q", got, want)
 	}
-	if string(out) != "aimux-clipboard-test" {
-		t.Errorf("clipboard content = %q, want %q", string(out), "aimux-clipboard-test")
+}
+
+func TestResumeCommand_RejectsInvalidSessionID(t *testing.T) {
+	tests := []string{
+		"abc; touch /tmp/pwned",
+		"$(whoami)",
+		"abc`id`",
+		"abc 123",
+		"abc/def",
+		"",
+	}
+	for _, id := range tests {
+		got := ResumeCommand(id, "/tmp")
+		if got != "" {
+			t.Errorf("ResumeCommand(%q, ...) = %q, want empty for invalid ID", id, got)
+		}
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"simple", "'simple'"},
+		{"with spaces", "'with spaces'"},
+		{"with'quote", "'with'\"'\"'quote'"},
+		{"/normal/path", "'/normal/path'"},
+	}
+	for _, tt := range tests {
+		got := shellQuote(tt.in)
+		if got != tt.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }

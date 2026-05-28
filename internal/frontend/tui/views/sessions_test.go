@@ -246,6 +246,9 @@ func TestSessionsView_ColumnHeaders(t *testing.T) {
 	if !strings.Contains(output, "COST") {
 		t.Error("expected COST column header")
 	}
+	if !strings.Contains(output, "ROI") {
+		t.Error("expected ROI column header")
+	}
 }
 
 func TestSessionsView_ColumnHeadersAllProjects(t *testing.T) {
@@ -306,10 +309,16 @@ func TestSessionsView_SortCycle(t *testing.T) {
 		t.Errorf("after fourth s: sortField = %d, want SortByFailureMode", v.sortField)
 	}
 
+	// Press 's' → SortByROI
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if v.sortField != SortByROI {
+		t.Errorf("after fifth s: sortField = %d, want SortByROI", v.sortField)
+	}
+
 	// Press 's' → back to SortByAge
 	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
 	if v.sortField != SortByAge {
-		t.Errorf("after fifth s: sortField = %d, want SortByAge (cycle back)", v.sortField)
+		t.Errorf("after sixth s: sortField = %d, want SortByAge (cycle back)", v.sortField)
 	}
 }
 

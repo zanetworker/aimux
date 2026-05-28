@@ -4,9 +4,9 @@ import "strings"
 
 // pricingLastVerified records when the pricing data was last checked against
 // provider pricing pages. Update this date whenever you verify pricing.
-// Claude: https://docs.anthropic.com/en/docs/about-claude/models
+// Claude: https://platform.claude.com/docs/en/about-claude/pricing
 // OpenAI: https://openai.com/api/pricing/
-const pricingLastVerified = "2026-02-28"
+const pricingLastVerified = "2026-05-27"
 
 // ModelPricing holds per-million-token pricing in USD.
 type ModelPricing struct {
@@ -18,18 +18,36 @@ type ModelPricing struct {
 
 // pricing stores per-million-token costs keyed by canonical model name.
 var pricing = map[string]ModelPricing{
-	// Anthropic Claude models
+	// Anthropic Claude models (verified 2026-05-27)
+	"claude-opus-4-7": {
+		Input:      5.00,
+		Output:     25.00,
+		CacheRead:  0.50,
+		CacheWrite: 6.25,
+	},
 	"claude-opus-4-6": {
-		Input:      15.00,
-		Output:     75.00,
-		CacheRead:  1.50,
-		CacheWrite: 18.75,
+		Input:      5.00,
+		Output:     25.00,
+		CacheRead:  0.50,
+		CacheWrite: 6.25,
+	},
+	"claude-sonnet-4-6": {
+		Input:      3.00,
+		Output:     15.00,
+		CacheRead:  0.30,
+		CacheWrite: 3.75,
 	},
 	"claude-sonnet-4-5": {
 		Input:      3.00,
 		Output:     15.00,
 		CacheRead:  0.30,
 		CacheWrite: 3.75,
+	},
+	"claude-haiku-4-5": {
+		Input:      1.00,
+		Output:     5.00,
+		CacheRead:  0.10,
+		CacheWrite: 1.25,
 	},
 	"claude-haiku-3-5": {
 		Input:      0.80,
@@ -71,9 +89,9 @@ var pricing = map[string]ModelPricing{
 
 // aliases maps short names to canonical model names.
 var aliases = map[string]string{
-	"opus":   "claude-opus-4-6",
-	"sonnet": "claude-sonnet-4-5",
-	"haiku":  "claude-haiku-3-5",
+	"opus":   "claude-opus-4-7",
+	"sonnet": "claude-sonnet-4-6",
+	"haiku":  "claude-haiku-4-5",
 }
 
 // normalizeModel strips version/context suffixes (e.g. [1m], @20250929)
