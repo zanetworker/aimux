@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -791,6 +792,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Enabled: true,
 				Model:   a.cfg.Sessions.TitleModel,
 				APIKey:  a.cfg.Sessions.APIKey,
+				Output:  io.Discard,
 			}
 			sessions, _ := history.Discover(history.DiscoverOpts{}, "")
 			count, err := history.GenerateTitles(sessions, cfg)
