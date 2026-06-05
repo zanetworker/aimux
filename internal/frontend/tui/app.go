@@ -1088,6 +1088,12 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.splitTrace.ToggleCostPerTurn()
 			return a, nil
 		}
+		if key == "*" {
+			return a.starFromTrace(a.splitTrace.FilePath())
+		}
+		if key == "C" {
+			return a.copySessionIDFromTrace()
+		}
 		cmd := a.splitTrace.Update(msg)
 		return a, cmd
 	}
@@ -1208,6 +1214,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
+		if a.currentView == viewLogs && a.logsView != nil {
+			return a.starFromTrace(a.logsView.FilePath())
+		}
 	case "x":
 		if a.currentView == viewAgents {
 			return a.promptKill()
@@ -1242,6 +1251,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if a.currentView == viewSessions {
 			return a.copySessionIDFromSessions()
+		}
+		if a.currentView == viewLogs {
+			return a.copySessionIDFromTrace()
 		}
 	case "m":
 		if a.currentView == viewAgents {
@@ -2671,7 +2683,7 @@ func (a App) View() string {
 	case viewAgents:
 		a.headerView.SetHint("Enter:open  a:attend  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  P:plugins  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
 	case viewLogs:
-		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  $:costs  :export  :export-otel  Esc:back")
+		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  *:pin  C:copy-id  $:costs  :export  :export-otel  Esc:back")
 	case viewCosts:
 		a.headerView.SetHint("Esc:back  ?:help")
 	case viewTeams:
@@ -3157,4 +3169,61 @@ func (a App) copySessionIDFromSessions() (tea.Model, tea.Cmd) {
 	}
 	a.statusHint = fmt.Sprintf("Copied: %s", cmd)
 	return a, nil
+}
+
+// starFromTrace toggles star on a session identified by its file path.
+// Used from both the standalone trace view (viewLogs) and the split-mode trace pane.
+func (a App) starFromTrace(filePath string) (tea.Model, tea.Cmd) {
+	if filePath == "" {
+		a.statusHint = "No session file available"
+		return a, nil
+	}
+	starred, err := controller.ToggleStar(filePath)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Star toggle failed: %v", err)
+		return a, nil
+	}
+	a.cachedSessions = nil
+	if starred {
+		a.statusHint = "Session pinned ★"
+	} else {
+		a.statusHint = "Session unpinned"
+	}
+	return a, nil
+}
+
+// copySessionIDFromTrace copies the session ID from the currently viewed trace.
+// Works in both standalone trace view and split-mode trace pane.
+func (a App) copySessionIDFromTrace() (tea.Model, tea.Cmd) {
+	var ag *agent.Agent
+	if a.sessionView != nil && a.sessionView.Agent() != nil {
+		ag = a.sessionView.Agent()
+	} else {
+		ag = a.agentForLogsView()
+	}
+	if ag == nil || ag.SessionID == "" {
+		a.statusHint = "No session ID available"
+		return a, nil
+	}
+	cmd := clipboard.ResumeCommand(ag.SessionID, ag.WorkingDir)
+	if err := clipboard.Copy(cmd); err != nil {
+		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
+		return a, nil
+	}
+	a.statusHint = fmt.Sprintf("Copied: %s", cmd)
+	return a, nil
+}
+
+// agentForLogsView finds the agent matching the current logsView by session file path.
+func (a *App) agentForLogsView() *agent.Agent {
+	if a.logsView == nil {
+		return nil
+	}
+	fp := a.logsView.FilePath()
+	for i := range a.instances {
+		if a.instances[i].SessionFile == fp {
+			return &a.instances[i]
+		}
+	}
+	return nil
 }

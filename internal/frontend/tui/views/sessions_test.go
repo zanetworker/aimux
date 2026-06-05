@@ -17,7 +17,8 @@ func testSessions() []history.Session {
 			Provider:    "claude",
 			Project:     "/Users-test-aimux",
 			FirstPrompt: "fix markdown rendering",
-			LastActive:  now.Add(-2 * time.Hour),
+			StartTime:   now.Add(-2 * time.Hour),
+			LastActive:  now.Add(-1 * time.Hour),
 			TurnCount:   16,
 			CostUSD:     0.42,
 			Resumable:   true,
@@ -27,7 +28,8 @@ func testSessions() []history.Session {
 			Provider:    "claude",
 			Project:     "/Users-test-aimux",
 			FirstPrompt: "add table support",
-			LastActive:  now.Add(-5 * time.Hour),
+			StartTime:   now.Add(-5 * time.Hour),
+			LastActive:  now.Add(-4 * time.Hour),
 			TurnCount:   8,
 			CostUSD:     0.18,
 			Resumable:   true,
@@ -38,7 +40,8 @@ func testSessions() []history.Session {
 			Provider:    "claude",
 			Project:     "/Users-test-conductor",
 			FirstPrompt: "OTEL export to MLflow",
-			LastActive:  now.Add(-24 * time.Hour),
+			StartTime:   now.Add(-24 * time.Hour),
+			LastActive:  now.Add(-23 * time.Hour),
 			TurnCount:   34,
 			CostUSD:     1.23,
 			Resumable:   true,
@@ -273,52 +276,66 @@ func TestSessionsView_SortCycle(t *testing.T) {
 		t.Errorf("default sortField = %d, want SortByAge", v.sortField)
 	}
 
-	// Press 's' → SortByCost
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	pressS := func() { v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}) }
+
+	// 1st 's': toggles Age direction (desc→asc)
+	pressS()
+	if v.sortField != SortByAge {
+		t.Errorf("after 1st s: field = %d, want SortByAge", v.sortField)
+	}
+	if !v.sortAsc {
+		t.Error("after 1st s: sortAsc should be true (oldest first)")
+	}
+
+	// 2nd 's': advances to SortByCost
+	pressS()
 	if v.sortField != SortByCost {
-		t.Errorf("after first s: sortField = %d, want SortByCost", v.sortField)
+		t.Errorf("after 2nd s: field = %d, want SortByCost", v.sortField)
 	}
 
 	visible := v.visibleSessions()
-	// Highest cost first (descending by default)
-	if visible[0].ID != "ghi-789" { // $1.23
+	if visible[0].ID != "ghi-789" {
 		t.Errorf("cost sort: first = %q, want ghi-789 ($1.23)", visible[0].ID)
 	}
 
-	// Press 's' → SortByTurns
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	// 3rd 's': toggles Cost direction, 4th: advances to Turns
+	pressS()
+	pressS()
 	if v.sortField != SortByTurns {
-		t.Errorf("after second s: sortField = %d, want SortByTurns", v.sortField)
+		t.Errorf("after 4th s: field = %d, want SortByTurns", v.sortField)
 	}
 
-	// Press 's' → SortByTitle
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	// 5th: toggle Turns, 6th: advance to Title
+	pressS()
+	pressS()
 	if v.sortField != SortByTitle {
-		t.Errorf("after third s: sortField = %d, want SortByTitle", v.sortField)
+		t.Errorf("after 6th s: field = %d, want SortByTitle", v.sortField)
 	}
 
-	// Title sort ascending by default
 	visible = v.visibleSessions()
-	if visible[0].ID != "def-456" { // "add table support"
+	if visible[0].ID != "def-456" {
 		t.Errorf("title sort: first = %q, want def-456 ('add table support')", visible[0].ID)
 	}
 
-	// Press 's' → SortByFailureMode
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	// 7th: toggle Title, 8th: advance to FailureMode
+	pressS()
+	pressS()
 	if v.sortField != SortByFailureMode {
-		t.Errorf("after fourth s: sortField = %d, want SortByFailureMode", v.sortField)
+		t.Errorf("after 8th s: field = %d, want SortByFailureMode", v.sortField)
 	}
 
-	// Press 's' → SortByROI
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	// 9th: toggle FailureMode, 10th: advance to ROI
+	pressS()
+	pressS()
 	if v.sortField != SortByROI {
-		t.Errorf("after fifth s: sortField = %d, want SortByROI", v.sortField)
+		t.Errorf("after 10th s: field = %d, want SortByROI", v.sortField)
 	}
 
-	// Press 's' → back to SortByAge
-	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	// 11th: toggle ROI, 12th: back to Age
+	pressS()
+	pressS()
 	if v.sortField != SortByAge {
-		t.Errorf("after sixth s: sortField = %d, want SortByAge (cycle back)", v.sortField)
+		t.Errorf("after 12th s: field = %d, want SortByAge (cycle back)", v.sortField)
 	}
 }
 
@@ -346,8 +363,8 @@ func TestSessionsView_ColumnWidths(t *testing.T) {
 	v.SetSize(200, 40)
 
 	cols := v.columnWidths(200)
-	if cols.age != 9 {
-		t.Errorf("age width = %d, want 9", cols.age)
+	if cols.age != 12 {
+		t.Errorf("age width = %d, want 12", cols.age)
 	}
 	if cols.branch != 16 {
 		t.Errorf("branch width = %d, want 16", cols.branch)
@@ -455,20 +472,137 @@ func TestParseTags(t *testing.T) {
 func TestFormatAge(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
+		name string
 		t    time.Time
 		want string
 	}{
-		{now.Add(-30 * time.Second), "now"},
-		{now.Add(-15 * time.Minute), "15m ago"},
-		{now.Add(-3 * time.Hour), "3h ago"},
-		{now.Add(-48 * time.Hour), "2d ago"},
-		{time.Time{}, "?"},
+		{"just now", now.Add(-30 * time.Second), "now"},
+		{"minutes", now.Add(-15 * time.Minute), "15m ago"},
+		{"hours", now.Add(-3 * time.Hour), "3h ago"},
+		{"hours_rounds_down", now.Add(-3*time.Hour - 25*time.Minute), "3h ago"},
+		{"zero", time.Time{}, "?"},
 	}
 	for _, tt := range tests {
-		got := formatAge(tt.t)
-		if got != tt.want {
-			t.Errorf("formatAge(%v) = %q, want %q", tt.t, got, tt.want)
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatAge(tt.t)
+			if got != tt.want {
+				t.Errorf("formatAge(%v) = %q, want %q", tt.t, got, tt.want)
+			}
+		})
+	}
+
+	// 2 days ago: shows weekday + time (e.g., "Mon 14:30")
+	t.Run("days_shows_weekday", func(t *testing.T) {
+		twoDaysAgo := now.Add(-48 * time.Hour)
+		got := formatAge(twoDaysAgo)
+		expected := twoDaysAgo.Local().Format("Mon 15:04")
+		if got != expected {
+			t.Errorf("formatAge(2d ago) = %q, want %q", got, expected)
 		}
+	})
+
+	// 14 days ago: shows month+day+time (e.g., "May 22 14:30")
+	t.Run("weeks_shows_date_and_time", func(t *testing.T) {
+		twoWeeksAgo := now.Add(-14 * 24 * time.Hour)
+		got := formatAge(twoWeeksAgo)
+		expected := twoWeeksAgo.Local().Format("Jan _2 15:04")
+		if got != expected {
+			t.Errorf("formatAge(14d ago) = %q, want %q", got, expected)
+		}
+	})
+
+	// 400 days ago: shows full date (e.g., "Apr 27 2025")
+	t.Run("years_shows_full_date", func(t *testing.T) {
+		longAgo := now.Add(-400 * 24 * time.Hour)
+		got := formatAge(longAgo)
+		expected := longAgo.Local().Format("Jan 02 2006")
+		if got != expected {
+			t.Errorf("formatAge(400d ago) = %q, want %q", got, expected)
+		}
+	})
+}
+
+func TestSessionsSortByAge(t *testing.T) {
+	now := time.Now()
+	sessions := []history.Session{
+		{ID: "old", StartTime: now.Add(-72 * time.Hour), LastActive: now.Add(-70 * time.Hour), TurnCount: 10, CostUSD: 0.5},
+		{ID: "new", StartTime: now.Add(-1 * time.Hour), LastActive: now.Add(-30 * time.Minute), TurnCount: 10, CostUSD: 0.5},
+		{ID: "mid", StartTime: now.Add(-24 * time.Hour), LastActive: now.Add(-22 * time.Hour), TurnCount: 10, CostUSD: 0.5},
+	}
+
+	v := NewSessionsView()
+	v.SetSessions(sessions)
+	v.SetSize(160, 40)
+
+	visible := v.visibleSessions()
+	if len(visible) != 3 {
+		t.Fatalf("expected 3 visible, got %d", len(visible))
+	}
+	// Default sort: newest first (sortAsc=false)
+	if visible[0].ID != "new" {
+		t.Errorf("expected newest first, got %q", visible[0].ID)
+	}
+	if visible[1].ID != "mid" {
+		t.Errorf("expected mid second, got %q", visible[1].ID)
+	}
+	if visible[2].ID != "old" {
+		t.Errorf("expected oldest last, got %q", visible[2].ID)
+	}
+
+	// Toggle sort direction (press 's' 6 times to cycle back to Age, or set directly)
+	v.sortAsc = true
+	visible = v.visibleSessions()
+	if visible[0].ID != "old" {
+		t.Errorf("ascending: expected oldest first, got %q", visible[0].ID)
+	}
+	if visible[2].ID != "new" {
+		t.Errorf("ascending: expected newest last, got %q", visible[2].ID)
+	}
+}
+
+func TestCycleSortField_TogglesDirectionThenAdvances(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(testSessions())
+	v.SetSize(160, 40)
+
+	if v.sortField != SortByAge {
+		t.Fatalf("initial sort field = %d, want SortByAge(%d)", v.sortField, SortByAge)
+	}
+	if v.sortAsc {
+		t.Fatal("initial sortAsc = true, want false (newest first)")
+	}
+
+	// 1st press: toggles direction (Age desc -> Age asc)
+	v.cycleSortField()
+	if v.sortField != SortByAge {
+		t.Errorf("after 1st press: field = %d, want SortByAge(%d)", v.sortField, SortByAge)
+	}
+	if !v.sortAsc {
+		t.Error("after 1st press: sortAsc should be true (oldest first)")
+	}
+
+	// 2nd press: advances to Cost
+	v.cycleSortField()
+	if v.sortField != SortByCost {
+		t.Errorf("after 2nd press: field = %d, want SortByCost(%d)", v.sortField, SortByCost)
+	}
+	if v.sortAsc {
+		t.Error("after 2nd press: sortAsc should be false (highest cost first)")
+	}
+
+	// 3rd press: toggles Cost direction
+	v.cycleSortField()
+	if v.sortField != SortByCost {
+		t.Errorf("after 3rd press: field should still be SortByCost")
+	}
+	if !v.sortAsc {
+		t.Error("after 3rd press: sortAsc should be true (lowest cost first)")
+	}
+
+	// 4th press: advances to Turns
+	v.cycleSortField()
+	if v.sortField != SortByTurns {
+		t.Errorf("after 4th press: field = %d, want SortByTurns(%d)", v.sortField, SortByTurns)
 	}
 }
 
@@ -539,8 +673,8 @@ func TestSessionsView_SortByFailureMode(t *testing.T) {
 	v.SetSessions(testSessions())
 	v.SetSize(160, 40)
 
-	// Cycle to SortByFailureMode: Age -> Cost -> Turns -> Title -> FailureMode
-	for i := 0; i < 4; i++ {
+	// Cycle to SortByFailureMode: (toggle+advance) x 4 = 8 presses
+	for i := 0; i < 8; i++ {
 		v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
 	}
 	if v.sortField != SortByFailureMode {

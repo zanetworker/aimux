@@ -113,6 +113,7 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 	cmd.Flags().BoolVarP(&danger, "danger", "d", false, "Resume with --dangerously-skip-permissions")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Max sessions to show (0 = all)")
 	cmd.Flags().StringVar(&fields, "fields", "", "Comma-separated fields: id,provider,project,age,turns,cost,annotation,prompt,tags")
+	cmd.AddCommand(newSessionsStarCmd(discover))
 	return cmd
 }
 

@@ -948,3 +948,82 @@ func TestAllProvidersOTELEnvIncludeProtocol(t *testing.T) {
 		}
 	}
 }
+
+func TestStarFromTrace(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "session.jsonl")
+	_ = os.WriteFile(sessionFile, []byte(`{"type":"user"}`), 0o600)
+
+	app := App{
+		agentsView: views.NewAgentsView(),
+	}
+
+	result, _ := app.starFromTrace(sessionFile)
+	a := result.(App)
+	if a.statusHint != "Session pinned ★" {
+		t.Errorf("expected pinned hint, got %q", a.statusHint)
+	}
+
+	result, _ = a.starFromTrace(sessionFile)
+	a = result.(App)
+	if a.statusHint != "Session unpinned" {
+		t.Errorf("expected unpinned hint, got %q", a.statusHint)
+	}
+}
+
+func TestStarFromTrace_EmptyPath(t *testing.T) {
+	app := App{}
+	result, _ := app.starFromTrace("")
+	a := result.(App)
+	if a.statusHint != "No session file available" {
+		t.Errorf("expected error hint, got %q", a.statusHint)
+	}
+}
+
+func TestAgentForLogsView(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "session.jsonl")
+	_ = os.WriteFile(sessionFile, []byte(`{"type":"user"}`), 0o600)
+
+	dummyParser := func(string) ([]trace.Turn, error) { return nil, nil }
+	lv := views.NewLogsView(42, sessionFile, dummyParser)
+
+	app := &App{
+		logsView: lv,
+		instances: []agent.Agent{
+			{PID: 99, SessionFile: "/other/file.jsonl", SessionID: "other-id"},
+			{PID: 42, SessionFile: sessionFile, SessionID: "matched-id", WorkingDir: "/project"},
+		},
+	}
+
+	ag := app.agentForLogsView()
+	if ag == nil {
+		t.Fatal("expected agent, got nil")
+	}
+	if ag.SessionID != "matched-id" {
+		t.Errorf("expected matched-id, got %q", ag.SessionID)
+	}
+}
+
+func TestAgentForLogsView_NoMatch(t *testing.T) {
+	dummyParser := func(string) ([]trace.Turn, error) { return nil, nil }
+	lv := views.NewLogsView(42, "/nonexistent.jsonl", dummyParser)
+
+	app := &App{
+		logsView:  lv,
+		instances: []agent.Agent{{PID: 99, SessionFile: "/other/file.jsonl"}},
+	}
+
+	ag := app.agentForLogsView()
+	if ag != nil {
+		t.Errorf("expected nil, got agent with PID %d", ag.PID)
+	}
+}
+
+func TestAgentForLogsView_NilLogsView(t *testing.T) {
+	app := &App{}
+	ag := app.agentForLogsView()
+	if ag != nil {
+		t.Errorf("expected nil, got agent")
+	}
+}

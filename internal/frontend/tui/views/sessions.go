@@ -179,8 +179,9 @@ type SessionsView struct {
 	noteInput TextInput
 
 	// Sort
-	sortField SortField // current sort column
-	sortAsc   bool      // true = ascending, false = descending
+	sortField      SortField // current sort column
+	sortAsc        bool      // true = ascending, false = descending
+	sortDirToggled bool      // true after first 's' press toggled direction
 
 	// Delete confirmation
 	deleteMode bool // true when showing delete confirmation
@@ -757,32 +758,33 @@ func parseTags(input string) []string {
 	return tags
 }
 
-// cycleSortField advances to the next sort field, or toggles direction
-// if the current field is pressed again.
+// cycleSortField toggles direction on the first press, then advances to the
+// next field on the second press. This lets users reverse Age sort (oldest
+// first) without cycling through every field.
 func (v *SessionsView) cycleSortField() {
-	// Find current position in the cycle
+	if !v.sortDirToggled {
+		v.sortAsc = !v.sortAsc
+		v.sortDirToggled = true
+		return
+	}
+	v.sortDirToggled = false
 	for i, f := range sortFieldOrder {
 		if f == v.sortField {
 			next := sortFieldOrder[(i+1)%len(sortFieldOrder)]
-			if next == v.sortField {
-				v.sortAsc = !v.sortAsc
-			} else {
-				v.sortField = next
-				// Default direction per field
-				switch next {
-				case SortByAge:
-					v.sortAsc = false // newest first
-				case SortByCost:
-					v.sortAsc = false // highest first
-				case SortByTurns:
-					v.sortAsc = false // most turns first
-				case SortByTitle:
-					v.sortAsc = true // A-Z
-				case SortByFailureMode:
-					v.sortAsc = false // tagged first
-				case SortByROI:
-					v.sortAsc = false // highest ROI first
-				}
+			v.sortField = next
+			switch next {
+			case SortByAge:
+				v.sortAsc = false
+			case SortByCost:
+				v.sortAsc = false
+			case SortByTurns:
+				v.sortAsc = false
+			case SortByTitle:
+				v.sortAsc = true
+			case SortByFailureMode:
+				v.sortAsc = false
+			case SortByROI:
+				v.sortAsc = false
 			}
 			return
 		}
@@ -815,7 +817,7 @@ func (v *SessionsView) visibleSessions() []history.Session {
 			continue
 		}
 		// Hide sessions with no timestamps (broken/incomplete files)
-		if !isSearching && s.LastActive.IsZero() {
+		if !isSearching && s.StartTime.IsZero() && s.LastActive.IsZero() {
 			continue
 		}
 		// Directory filter
@@ -860,11 +862,10 @@ func (v *SessionsView) visibleSessions() []history.Session {
 	}
 	sortFn := func(items []history.Session) {
 		sort.SliceStable(items, func(i, j int) bool {
-			less := v.compareSessions(items[i], items[j])
 			if v.sortAsc {
-				return less
+				return v.compareSessions(items[i], items[j])
 			}
-			return !less
+			return v.compareSessions(items[j], items[i])
 		})
 	}
 	sortFn(starred)
@@ -902,7 +903,7 @@ func (v *SessionsView) compareSessions(a, b history.Session) bool {
 		bROI := b.DurationMin * (b.ROIMultiplier - 1) * (150.0 / 60.0) - b.CostUSD
 		return aROI < bROI
 	default: // SortByAge
-		return a.LastActive.Before(b.LastActive)
+		return a.StartTime.Before(b.StartTime)
 	}
 }
 
@@ -1248,7 +1249,7 @@ type colLayout struct {
 // columnWidths computes fixed column widths based on available width.
 func (v *SessionsView) columnWidths(w int) colLayout {
 	c := colLayout{
-		age:    9,
+		age:    12,
 		branch: 16,
 		action: 20,
 		turns:  6,
@@ -1290,7 +1291,11 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	}
 	marker := starIcon + pointer
 
-	age := formatAge(s.LastActive)
+	ageTime := s.StartTime
+	if ageTime.IsZero() {
+		ageTime = s.LastActive
+	}
+	age := formatAge(ageTime)
 
 	// Use LLM-generated title if available, fall back to last prompt, then first prompt
 	prompt := s.Title
@@ -1639,7 +1644,11 @@ func (v *SessionsView) renderCleanupView(w int) string {
 		}
 
 		turnStr := sessTurnStyle.Render(fmt.Sprintf("%dt", item.session.TurnCount))
-		age := sessAgeStyle.Render(formatAge(item.session.LastActive))
+		cleanupAge := item.session.StartTime
+		if cleanupAge.IsZero() {
+			cleanupAge = item.session.LastActive
+		}
+		age := sessAgeStyle.Render(formatAge(cleanupAge))
 		costStr := sessCostStyle.Render(fmt.Sprintf("$%.2f", item.session.CostUSD))
 
 		line := fmt.Sprintf("  %s %s  %s  %-50s  %s  %s", check, reason, age, prompt, turnStr, costStr)
@@ -1652,7 +1661,8 @@ func (v *SessionsView) renderCleanupView(w int) string {
 	return b.String()
 }
 
-// formatAge returns a human-readable age string like "2h ago", "3d ago".
+// formatAge returns a human-readable age string with enough precision
+// to locate a session after a restart.
 func formatAge(t time.Time) string {
 	if t.IsZero() {
 		return "?"
@@ -1665,10 +1675,12 @@ func formatAge(t time.Time) string {
 		return fmt.Sprintf("%dm ago", int(d.Minutes()))
 	case d < 24*time.Hour:
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	case d < 7*24*time.Hour:
+		return t.Local().Format("Mon 15:04")
+	case d < 365*24*time.Hour:
+		return t.Local().Format("Jan _2 15:04")
 	default:
-		return fmt.Sprintf("%dmo ago", int(d.Hours()/24/30))
+		return t.Local().Format("Jan 02 2006")
 	}
 }
 
