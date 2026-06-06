@@ -200,3 +200,20 @@ func TestCodexDedup_TwoSessionsSameDir(t *testing.T) {
 		t.Fatalf("expected 2 entries (separate sessions), got %d", len(result))
 	}
 }
+
+func TestKillLocalAgent_NoTmux(t *testing.T) {
+	a := agent.Agent{PID: 999999}
+	err := KillLocalAgent(a)
+	if err == nil {
+		t.Log("no error for non-existent PID (expected on some OSes)")
+	}
+}
+
+func TestKillLocalAgent_WithTmuxSession(t *testing.T) {
+	a := agent.Agent{PID: 999999, TMuxSession: "aimux-test-nonexistent"}
+	err := KillLocalAgent(a)
+	// tmux kill-session on a non-existent session is a no-op (error ignored)
+	if err == nil {
+		t.Log("no error for non-existent PID (expected on some OSes)")
+	}
+}

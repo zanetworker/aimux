@@ -68,6 +68,9 @@ export function CardGrid({
   const handleKill = async (id: string) => {
     try {
       await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
+      if (selectedId === id) {
+        onSelect('');
+      }
     } catch { /* ignore */ }
   };
 

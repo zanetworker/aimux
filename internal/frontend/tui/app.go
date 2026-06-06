@@ -375,6 +375,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Clean up orphaned aimux tmux sessions (from crashed aimux instances)
+		liveTmux := make(map[string]bool)
+		for _, ag := range a.instances {
+			if ag.TMuxSession != "" {
+				liveTmux[ag.TMuxSession] = true
+			}
+		}
+		spawn.CleanupOrphanedSessions(liveTmux)
+
 		// Auto-archive idle agents past the configured threshold.
 		threshold := a.cfg.ArchiveThreshold()
 		if threshold > 0 && !a.showArchived {
@@ -1153,6 +1162,24 @@ func (a App) exitZoom() (tea.Model, tea.Cmd) {
 	a.splitLoading = false
 	a.layout.SetZoomed(false)
 	a.sessionView.Close()
+	return a, nil
+}
+
+// returnToAgentsIfZoomed exits zoom/split mode after a kill and returns to the
+// agents list. If the user is already on the agents list, it's a no-op.
+func (a App) returnToAgentsIfZoomed() (tea.Model, tea.Cmd) {
+	if a.zoomed || a.splitMode || a.splitTrace != nil {
+		a.stopActiveTailer()
+		a.zoomed = false
+		a.splitMode = false
+		a.splitTrace = nil
+		a.splitLaunchTime = time.Time{}
+		a.splitLoading = false
+		a.layout.SetZoomed(false)
+		a.sessionView.Close()
+	}
+	a.currentView = viewAgents
+	a.stickyHint = true
 	return a, nil
 }
 
@@ -2347,9 +2374,8 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					debuglog.Log("kubectl delete pod %q failed: %v", action.PodName, err)
 				}
 			}()
-			return a, nil
+			return a.returnToAgentsIfZoomed()
 		case controller.KillRemoveOnly:
-			// Session-only: hide from view by adding to hidden set
 			a.hideAgent(target)
 			a.statusHint = fmt.Sprintf("Removed %s from view", target.ShortProject())
 		default:
@@ -2363,14 +2389,12 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				a.statusHint = fmt.Sprintf("Kill failed: %v", err)
 			} else {
-				// Also hide so the idle session file doesn't reappear
 				a.hideAgent(target)
 				a.statusHint = fmt.Sprintf("Killed %s (PID %d)", target.ShortProject(), target.PID)
 			}
 		}
-		return a, nil
+		return a.returnToAgentsIfZoomed()
 	case "d", "D":
-		// Remove + delete trace file
 		a.hideAgent(target)
 		if target.SessionFile != "" {
 			if err := os.Remove(target.SessionFile); err != nil {
@@ -2381,7 +2405,7 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			a.statusHint = fmt.Sprintf("Removed %s (no trace file to delete)", target.ShortProject())
 		}
-		return a, nil
+		return a.returnToAgentsIfZoomed()
 	default:
 		a.statusHint = "Cancelled"
 		return a, nil
