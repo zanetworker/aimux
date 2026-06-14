@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -17,16 +18,19 @@ type sessionsResumeFn func(sessionID string, danger bool)
 
 func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker sessionsPickerFn, resume sessionsResumeFn) *cobra.Command {
 	var dir string
-	var listMode, exportMode, danger bool
+	var listMode, exportMode, danger, allProjects bool
 	var limit int
 	var fields string
 
 	cmd := &cobra.Command{
 		Use:   "sessions [query]",
 		Short: "Browse and search past sessions",
-		Long:  "List, search, and resume past AI agent sessions. Without --list, launches interactive picker (TTY only).",
+		Long:  "List, search, and resume past AI agent sessions. Scopes to the current directory by default; use --all for all projects.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !allProjects && dir == "" {
+				dir, _ = os.Getwd()
+			}
 			opts := history.DiscoverOpts{Dir: dir, Limit: 0}
 			allSessions, err := discover(opts, "")
 			if err != nil {
@@ -107,7 +111,8 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "", "Scope to a specific directory")
+	cmd.Flags().StringVar(&dir, "dir", "", "Scope to a specific directory (default: current directory)")
+	cmd.Flags().BoolVarP(&allProjects, "all", "a", false, "Show sessions from all projects")
 	cmd.Flags().BoolVarP(&listMode, "list", "l", false, "Table output (scriptable)")
 	cmd.Flags().BoolVar(&exportMode, "export", false, "JSONL output for eval pipelines")
 	cmd.Flags().BoolVarP(&danger, "danger", "d", false, "Resume with --dangerously-skip-permissions")

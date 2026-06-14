@@ -81,6 +81,7 @@ type SessionResumeMsg struct {
 	SessionID  string
 	WorkingDir string
 	FilePath   string // path to the session JSONL (for trace pane)
+	Mode       string // permission mode override ("bypass", "default", etc.)
 }
 
 // SessionAnnotateMsg is emitted when the user changes a session annotation.
@@ -220,6 +221,9 @@ type SessionsView struct {
 	// Hourly rate from config (used for ROI calculation display)
 	hourlyRate float64
 
+	// Resume mode: permission mode applied when resuming a session
+	resumeMode string // "bypass", "default", "plan", etc.
+
 	// Trace preview (reused LogsView)
 	previewLogs  *LogsView
 	traceParser  TraceParser
@@ -265,6 +269,16 @@ func (v *SessionsView) SetTraceParser(parser TraceParser) {
 // SetTagVocab sets the autocomplete vocabulary for tag input.
 func (v *SessionsView) SetTagVocab(vocab []string) {
 	v.tagVocab = vocab
+}
+
+// SetResumeMode sets the permission mode used when resuming sessions.
+func (v *SessionsView) SetResumeMode(mode string) {
+	v.resumeMode = mode
+}
+
+// ResumeMode returns the current permission mode for resume.
+func (v *SessionsView) ResumeMode() string {
+	return v.resumeMode
 }
 
 // ShowAll returns whether the view is showing all projects.
@@ -399,13 +413,21 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 		case "enter":
 			s := v.SelectedSession()
 			if s != nil && s.Resumable {
+				mode := v.resumeMode
 				return func() tea.Msg {
 					return SessionResumeMsg{
 						SessionID:  s.ID,
 						WorkingDir: s.Project,
 						FilePath:   s.FilePath,
+						Mode:       mode,
 					}
 				}
+			}
+		case "B":
+			if v.resumeMode == "bypass" {
+				v.resumeMode = "default"
+			} else {
+				v.resumeMode = "bypass"
 			}
 		case "t":
 			if v.generatingTitles {
@@ -989,7 +1011,14 @@ func (v *SessionsView) View() string {
 	if !v.showAll && v.currentDir != "" {
 		countStr += sessDimStyle.Render("  press A for all projects")
 	}
-	b.WriteString(sessHeaderStyle.Render(headerLine) + "\n")
+	// Mode badge
+	var modeBadge string
+	if v.resumeMode == "bypass" {
+		modeBadge = lipgloss.NewStyle().Background(lipgloss.Color("#B91C1C")).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Render(" SKIP PERMS ")
+	} else {
+		modeBadge = lipgloss.NewStyle().Background(lipgloss.Color("#1E3A5F")).Foreground(lipgloss.Color("#FFFFFF")).Render(" SAFE ")
+	}
+	b.WriteString(sessHeaderStyle.Render(headerLine) + "  " + modeBadge + "\n")
 	b.WriteString(sessDimStyle.Render(countStr) + "\n")
 	b.WriteString("\n")
 

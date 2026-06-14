@@ -15,7 +15,7 @@ import (
 
 type spawnFn func(opts spawn.LaunchOpts) (pid int, tmuxSession string, err error)
 
-func newSpawnCmd(validProviders []string, spawnAgent spawnFn) *cobra.Command {
+func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string) *cobra.Command {
 	var dir, model, mode, prompt string
 	var runtime, execution, shell, sessionMgr string
 	var otel bool
@@ -44,6 +44,9 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn) *cobra.Command {
 
 			if dir == "" {
 				dir, _ = os.Getwd()
+			}
+			if mode == "" && defaultMode != "" {
+				mode = defaultMode
 			}
 
 			if dryRun {

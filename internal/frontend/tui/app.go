@@ -180,8 +180,9 @@ type App struct {
 	doneTimestamps map[int]time.Time    // PID -> timestamp when agent finished
 
 	// Config
-	cfg  config.Config
-	ctrl *controller.Controller
+	cfg       config.Config
+	ctrl      *controller.Controller
+	launchDir string // CWD when aimux was started; used as default session scope
 
 	// OTEL receiver (optional)
 	otelReceiver    *aimuxotel.Receiver
@@ -207,9 +208,10 @@ type App struct {
 func NewApp() App {
 	cfg, _ := config.Load(config.DefaultPath())
 
-	// Merge project-local config if running from a project directory
-	if cwd, err := os.Getwd(); err == nil {
-		cfg, _ = config.LoadProject(cwd, cfg)
+	// Capture launch directory for session scoping and project-local config
+	launchDir, _ := os.Getwd()
+	if launchDir != "" {
+		cfg, _ = config.LoadProject(launchDir, cfg)
 	}
 
 	ctrl := controller.New(cfg)
@@ -287,6 +289,7 @@ func NewApp() App {
 		doneTimestamps: make(map[int]time.Time),
 		cfg:            cfg,
 		ctrl:           ctrl,
+		launchDir:      launchDir,
 		otelStore:      aimuxotel.NewSpanStore(),
 		infraProvider:  infraProv,
 		instances:      cachedAgents,
@@ -599,7 +602,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case views.LaunchResumeMsg:
 		a.launcherActive = false
 		a.launcherView = nil
-		return a.resumeSession(msg.SessionID, msg.Dir, msg.FilePath)
+		return a.resumeSession(msg.SessionID, msg.Dir, msg.FilePath, a.cfg.DefaultMode)
 	case views.LaunchMsg:
 		a.launcherActive = false
 		a.launcherView = nil
@@ -761,6 +764,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case views.SessionTogglePermsMsg:
+		if a.sessionView == nil || !a.sessionView.Active() {
+			return a, nil
+		}
+		ag := a.sessionView.Agent()
+		if ag == nil || ag.SessionID == "" {
+			a.statusHint = "Cannot toggle: no session ID"
+			return a, nil
+		}
+		newMode := "default"
+		if a.sessionView.PermMode() != "bypass" {
+			newMode = "bypass"
+		}
+		a.sessionView.Close()
+		sessionFile := ""
+		if a.splitTrace != nil {
+			sessionFile = a.splitTrace.FilePath()
+		}
+		return a.resumeSession(ag.SessionID, ag.WorkingDir, sessionFile, newMode)
+
 	case views.SessionToggleScopeMsg:
 		dir := ""
 		if !msg.ShowAll {
@@ -853,12 +876,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case views.SessionResumeMsg:
-		debuglog.Log("tui: SessionResumeMsg received: id=%q dir=%q file=%q", msg.SessionID, msg.WorkingDir, msg.FilePath)
+		debuglog.Log("tui: SessionResumeMsg received: id=%q dir=%q file=%q mode=%q", msg.SessionID, msg.WorkingDir, msg.FilePath, msg.Mode)
 		if msg.SessionID == "" {
 			a.statusHint = "No session ID to resume"
 			return a, nil
 		}
-		return a.resumeSession(msg.SessionID, msg.WorkingDir, msg.FilePath)
+		return a.resumeSession(msg.SessionID, msg.WorkingDir, msg.FilePath, msg.Mode)
 	case views.AnnotationMsg:
 		// Persist annotation to disk and update views
 		if a.evalStore != nil {
@@ -1032,6 +1055,11 @@ func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Forward Esc to PTY (needed for Ctrl+R cancel, vim escape, etc.)
 		a.sessionView.SendKey(key)
 		return a, nil
+	}
+
+	// Ctrl+b toggles permission mode: close PTY, relaunch with toggled mode
+	if key == "ctrl+b" {
+		return a, func() tea.Msg { return views.SessionTogglePermsMsg{} }
 	}
 
 	// Ctrl+f toggles split/fullscreen — zooms whichever pane is focused
@@ -1860,6 +1888,7 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 			DefaultExecution:      a.cfg.Execution,
 			DefaultShell:          a.cfg.ResolveShell(),
 			DefaultSessionManager: a.cfg.SessionManager,
+			DefaultMode:           a.cfg.DefaultMode,
 		})
 	if len(a.cfg.QuickLaunch.Directories) > 0 {
 		a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
@@ -1974,6 +2003,13 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 	}
+
+	// Set perm mode indicator from the running agent's known mode
+	permMode := selected.PermissionMode
+	if permMode == "" || permMode == "default" {
+		permMode = "default"
+	}
+	a.sessionView.SetPermMode(permMode)
 
 	teaCmd, err := a.sessionView.Open(selected, backend)
 	if err != nil {
@@ -2223,15 +2259,23 @@ func (a App) jumpToSession() (tea.Model, tea.Cmd) {
 
 // resumeSession opens a past session in split view: trace on left, live Claude on right.
 // Mirrors handleEnter() but builds the command from session history instead of a running agent.
-func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.Model, tea.Cmd) {
-	debuglog.Log("tui: resumeSession start: id=%q dir=%q file=%q", sessionID, workingDir, sessionFilePath)
+// The mode parameter controls permission mode ("bypass", "plan", etc.); empty or "default" means no flag.
+func (a App) resumeSession(sessionID, workingDir, sessionFilePath, mode string) (tea.Model, tea.Cmd) {
+	debuglog.Log("tui: resumeSession start: id=%q dir=%q file=%q mode=%q", sessionID, workingDir, sessionFilePath, mode)
 
 	claudeBin := "claude"
 	if path, err := exec.LookPath("claude"); err == nil {
 		claudeBin = path
 	}
 
-	cmd := exec.Command(claudeBin, "--resume", sessionID) // #nosec G204
+	resumeArgs := []string{"--resume", sessionID}
+	switch mode {
+	case "bypass":
+		resumeArgs = append(resumeArgs, "--dangerously-skip-permissions")
+	case "plan", "acceptEdits", "dontAsk":
+		resumeArgs = append(resumeArgs, "--permission-mode", mode)
+	}
+	cmd := exec.Command(claudeBin, resumeArgs...) // #nosec G204
 	if workingDir != "" {
 		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
 			cmd.Dir = workingDir
@@ -2263,6 +2307,7 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath string) (tea.M
 		WorkingDir:   workingDir,
 	}
 
+	a.sessionView.SetPermMode(mode)
 	teaCmd, err := a.sessionView.Open(resumeAgent, sess)
 	if err != nil {
 		debuglog.Log("tui: resumeSession: session view open failed: %v", err)
@@ -2603,9 +2648,9 @@ func (a App) refreshPlugin() (tea.Model, tea.Cmd) {
 
 // openSessions discovers past sessions and navigates to the sessions browser.
 func (a App) openSessions() (tea.Model, tea.Cmd) {
-	// Determine scope directory from selected agent (if any)
-	dir := ""
-	if sel := a.agentsView.Selected(); sel != nil {
+	// Scope to selected agent's directory, or fall back to aimux's launch directory
+	dir := a.launchDir
+	if sel := a.agentsView.Selected(); sel != nil && sel.WorkingDir != "" {
 		dir = sel.WorkingDir
 	}
 	a.sessionsView.SetCurrentDir(dir)
@@ -2624,6 +2669,13 @@ func (a App) openSessions() (tea.Model, tea.Cmd) {
 	a.sessionsView.SetSessions(sessions)
 	a.sessionsView.SetTagVocab(history.CollectTags(""))
 	a.sessionsView.SetHourlyRate(a.cfg.ROI.HourlyRate)
+	if a.sessionsView.ResumeMode() == "" {
+		mode := a.cfg.DefaultMode
+		if mode == "" {
+			mode = "default"
+		}
+		a.sessionsView.SetResumeMode(mode)
+	}
 
 	return a.navigateTo(viewSessions, "Sessions")
 }
@@ -2715,7 +2767,7 @@ func (a App) View() string {
 	case viewTasks:
 		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
 	case viewSessions:
-		hint := "j/k:nav  Enter:resume  *:pin  t:titles  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  R:roi  I:roi-detail  d:delete  D:cleanup  p:preview"
+		hint := "j/k:nav  Enter:resume  B:toggle-perms  *:pin  t:titles  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  R:roi  I:roi-detail  d:delete  D:cleanup  p:preview"
 		if a.sessionsView.ShowSubagents() {
 			hint += "  H:hide-agents"
 		} else {
@@ -2950,7 +3002,7 @@ func (a App) renderSplitView() string {
 	} else {
 		focusHint = " [SESSION] typing goes to agent"
 	}
-	hints := hintStyle.Render(focusHint + "  Tab:switch  Ctrl+f:fullscreen  Esc:exit")
+	hints := hintStyle.Render(focusHint + "  Tab:switch  Ctrl+b:toggle-perms  Ctrl+f:fullscreen  Esc:exit")
 	statusGap := a.width - lipgloss.Width(badge) - lipgloss.Width(hints)
 	if statusGap < 0 {
 		statusGap = 0
