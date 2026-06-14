@@ -834,6 +834,9 @@ func (v *SessionsView) visibleSessions() []history.Session {
 		if !v.showSubagents && !isSearching && s.IsSubagent {
 			continue
 		}
+		if !isSearching && isHookSession(s) {
+			continue
+		}
 		// Hide near-empty sessions (auto-memory, system operations) unless searching
 		if !isSearching && s.CostUSD == 0 && s.TurnCount <= 5 {
 			continue
@@ -927,6 +930,21 @@ func (v *SessionsView) compareSessions(a, b history.Session) bool {
 	default: // SortByAge
 		return a.StartTime.Before(b.StartTime)
 	}
+}
+
+var hookSessionPrefixes = []string{
+	"YOU ARE A SESSION ANALYZER",
+	"YOU ARE A ",
+	"Analyze the session transcript",
+}
+
+func isHookSession(s history.Session) bool {
+	for _, prefix := range hookSessionPrefixes {
+		if strings.HasPrefix(s.FirstPrompt, prefix) || strings.HasPrefix(s.Title, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionMatchesFilter(s history.Session, needle string) bool {

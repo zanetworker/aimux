@@ -836,7 +836,7 @@ func testSessionsWithSubagent() []history.Session {
 			ID:          "sub-001",
 			Provider:    "claude",
 			Project:     "/test",
-			FirstPrompt: "YOU ARE A SESSION ANALYZER",
+			FirstPrompt: "Research alternative implementations",
 			LastActive:  now.Add(-3 * time.Hour),
 			TurnCount:   6,
 			CostUSD:     0.05,
@@ -936,7 +936,7 @@ func TestSessionsView_SubagentVisibleDuringSearch(t *testing.T) {
 	v.SetSize(180, 40)
 
 	v.filterMode = true
-	v.filterText = "session analyzer"
+	v.filterText = "alternative implementations"
 
 	visible := v.visibleSessions()
 	found := false
