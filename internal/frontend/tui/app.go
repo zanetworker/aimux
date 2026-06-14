@@ -773,10 +773,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusHint = "Cannot toggle: no session ID"
 			return a, nil
 		}
-		newMode := "default"
-		if a.sessionView.PermMode() != "bypass" {
-			newMode = "bypass"
-		}
+		newMode := controller.ToggleBypass(a.sessionView.PermMode())
 		a.sessionView.Close()
 		sessionFile := ""
 		if a.splitTrace != nil {
@@ -2268,23 +2265,16 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath, mode string) 
 		claudeBin = path
 	}
 
-	resumeArgs := []string{"--resume", sessionID}
-	switch mode {
-	case "bypass":
-		resumeArgs = append(resumeArgs, "--dangerously-skip-permissions")
-	case "plan", "acceptEdits", "dontAsk":
-		resumeArgs = append(resumeArgs, "--permission-mode", mode)
-	}
-	cmd := exec.Command(claudeBin, resumeArgs...) // #nosec G204
 	if workingDir != "" {
 		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
-			cmd.Dir = workingDir
+			// valid
 		} else {
 			debuglog.Log("tui: resumeSession: workingDir %q not found", workingDir)
 			a.statusHint = "Cannot resolve project directory for resume"
 			return a, nil
 		}
 	}
+	cmd := controller.ResumeCommand(claudeBin, sessionID, workingDir, mode)
 
 	// Size the session view for the right half
 	rightW := a.width * 60 / 100
@@ -2648,11 +2638,11 @@ func (a App) refreshPlugin() (tea.Model, tea.Cmd) {
 
 // openSessions discovers past sessions and navigates to the sessions browser.
 func (a App) openSessions() (tea.Model, tea.Cmd) {
-	// Scope to selected agent's directory, or fall back to aimux's launch directory
-	dir := a.launchDir
-	if sel := a.agentsView.Selected(); sel != nil && sel.WorkingDir != "" {
-		dir = sel.WorkingDir
+	agentDir := ""
+	if sel := a.agentsView.Selected(); sel != nil {
+		agentDir = sel.WorkingDir
 	}
+	dir := controller.DefaultSessionDir(agentDir, a.launchDir)
 	a.sessionsView.SetCurrentDir(dir)
 
 	// Set up trace parser (use Claude's parser as default)
@@ -2670,11 +2660,7 @@ func (a App) openSessions() (tea.Model, tea.Cmd) {
 	a.sessionsView.SetTagVocab(history.CollectTags(""))
 	a.sessionsView.SetHourlyRate(a.cfg.ROI.HourlyRate)
 	if a.sessionsView.ResumeMode() == "" {
-		mode := a.cfg.DefaultMode
-		if mode == "" {
-			mode = "default"
-		}
-		a.sessionsView.SetResumeMode(mode)
+		a.sessionsView.SetResumeMode(controller.ResolveMode("", a.cfg.DefaultMode))
 	}
 
 	return a.navigateTo(viewSessions, "Sessions")

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/deliver"
 	"github.com/zanetworker/aimux/internal/spawn"
 )
@@ -45,9 +46,7 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 			if dir == "" {
 				dir, _ = os.Getwd()
 			}
-			if mode == "" && defaultMode != "" {
-				mode = defaultMode
-			}
+			mode = controller.ResolveMode(mode, defaultMode)
 
 			if dryRun {
 				if jsonOutput {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/history"
 )
 
@@ -29,7 +30,8 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !allProjects && dir == "" {
-				dir, _ = os.Getwd()
+				cwd, _ := os.Getwd()
+				dir = controller.DefaultSessionDir("", cwd)
 			}
 			opts := history.DiscoverOpts{Dir: dir, Limit: 0}
 			allSessions, err := discover(opts, "")

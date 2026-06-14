@@ -322,6 +322,23 @@ func (c Config) OTELEndpoint() string {
 	return fmt.Sprintf("http://localhost:%d", c.OTELReceiverPort())
 }
 
+// ModeFlags returns the CLI flags for a given permission mode.
+// Used by provider.SpawnCommand, controller.ResumeCommand, and CLI spawn.
+func ModeFlags(mode string) []string {
+	switch mode {
+	case "bypass":
+		return []string{"--dangerously-skip-permissions"}
+	case "plan":
+		return []string{"--permission-mode", "plan"}
+	case "acceptEdits":
+		return []string{"--permission-mode", "acceptEdits"}
+	case "dontAsk":
+		return []string{"--permission-mode", "dontAsk"}
+	default:
+		return nil
+	}
+}
+
 // IsProviderEnabled returns true if the named provider is enabled in the config.
 // Unknown providers (not in the map) are enabled by default.
 func (c Config) IsProviderEnabled(name string) bool {
