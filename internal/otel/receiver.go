@@ -34,6 +34,7 @@ type Receiver struct {
 	logsCount  int        // number of /v1/logs requests received
 	otherCount int        // number of other requests received
 	debugLog   []string   // recent request log for diagnostics
+	bindAll    bool       // bind to 0.0.0.0 instead of 127.0.0.1 (for remote sandbox access)
 }
 
 // NewReceiverWithKeys creates a new OTLP/HTTP receiver with per-service
@@ -51,6 +52,13 @@ func NewReceiver(store *SpanStore, port int) *Receiver {
 	return NewReceiverWithKeys(store, port, nil)
 }
 
+// SetBindAll configures the receiver to listen on all interfaces (0.0.0.0)
+// instead of localhost only. Required when remote sandboxes send OTEL data
+// via host.openshell.internal.
+func (r *Receiver) SetBindAll(v bool) {
+	r.bindAll = v
+}
+
 // Start begins listening for OTLP/HTTP trace data on the configured port.
 // Non-blocking -- runs the server in a goroutine.
 func (r *Receiver) Start() error {
@@ -64,8 +72,12 @@ func (r *Receiver) Start() error {
 	// (known bug: github.com/google-gemini/gemini-cli/issues/15581)
 	mux.HandleFunc("/", r.handleFallback)
 
+	bindAddr := "127.0.0.1"
+	if r.bindAll {
+		bindAddr = "0.0.0.0"
+	}
 	r.server = &http.Server{
-		Addr:         fmt.Sprintf("127.0.0.1:%d", r.port),
+		Addr:         fmt.Sprintf("%s:%d", bindAddr, r.port),
 		Handler:      r.loggingMiddleware(mux),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,

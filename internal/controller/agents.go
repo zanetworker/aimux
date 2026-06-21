@@ -17,6 +17,9 @@ func FilterHidden(agents []agent.Agent, hidden map[string]bool) []agent.Agent {
 	var result []agent.Agent
 	for _, ag := range agents {
 		key := ag.SessionID
+		if key == "" && ag.SandboxName != "" {
+			key = "sandbox-" + ag.SandboxName
+		}
 		if key == "" && ag.SessionFile != "" {
 			key = ag.SessionFile
 		}

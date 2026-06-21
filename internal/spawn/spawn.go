@@ -123,6 +123,8 @@ func LaunchInContainer(cmd *exec.Cmd, providerName, dir, shell, envPrefix string
 type LaunchResult struct {
 	TmuxSession string `json:"tmux_session,omitempty"`
 	PID         int    `json:"pid,omitempty"`
+	SandboxName   string `json:"sandbox_name,omitempty"`
+	OTELSessionID string `json:"otel_session_id,omitempty"`
 }
 
 // ContainerOpts configures container-based agent launch.

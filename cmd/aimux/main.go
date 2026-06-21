@@ -44,6 +44,8 @@ func main() {
 		cfg, _ = config.LoadProject(cwd, cfg)
 	}
 
+	cmd.AutoRegisterMCP(cfg)
+
 	// Wire TUI launcher
 	cmd.SetRunTUI(func(_ *cobra.Command, _ []string) error {
 		debuglog.Init()
@@ -327,7 +329,16 @@ func createWebServer(port int) *web.Server {
 			}
 		}
 
-		if opts.Runtime == "container" {
+		if opts.Runtime == "remote" {
+			sOpts := spawn.SandboxOpts{
+				Image: cfg.Remote.Image,
+			}
+			result, err := spawn.LaunchInSandbox(opts.Provider, opts.Dir, sOpts)
+			if err != nil {
+				return spawn.LaunchResult{}, err
+			}
+			return *result, nil
+		} else if opts.Runtime == "container" {
 			cOpts := opts.ContainerOpts
 			if cOpts.Engine == "" {
 				for _, rt := range cfg.Runtimes {

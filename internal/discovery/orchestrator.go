@@ -53,12 +53,18 @@ func TakeSnapshot() *Snapshot {
 
 // Orchestrator coordinates multiple providers to produce a unified list of agents.
 type Orchestrator struct {
-	providers []AgentProvider
+	providers       []AgentProvider
+	discoverRemote  bool
 }
 
 // NewOrchestrator creates an orchestrator that iterates the given providers.
 func NewOrchestrator(providers ...AgentProvider) *Orchestrator {
 	return &Orchestrator{providers: providers}
+}
+
+// EnableRemoteDiscovery enables sandbox discovery via openshell sandbox list.
+func (o *Orchestrator) EnableRemoteDiscovery() {
+	o.discoverRemote = true
 }
 
 // Discover queries every registered provider and merges the results.
@@ -93,6 +99,22 @@ func (o *Orchestrator) Discover() ([]agent.Agent, error) {
 	for range len(o.providers) {
 		r := <-ch
 		all = append(all, r.agents...)
+	}
+
+	if o.discoverRemote {
+		sandboxAgents := DiscoverSandboxes()
+		// Avoid duplicates: skip sandboxes that match a pending/local agent by tmux session name
+		existing := make(map[string]bool)
+		for _, a := range all {
+			if a.SandboxName != "" {
+				existing[a.SandboxName] = true
+			}
+		}
+		for _, sa := range sandboxAgents {
+			if !existing[sa.SandboxName] {
+				all = append(all, sa)
+			}
+		}
 	}
 
 	assignUniqueSuffixes(all)

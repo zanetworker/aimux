@@ -25,6 +25,7 @@ type Config struct {
 	Sessions        SessionsConfig            `yaml:"sessions"`    // session history settings
 	Notifications   NotificationsConfig       `yaml:"notifications"` // macOS notification settings
 	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
+	Remote          RemoteConfig              `yaml:"remote"`      // Remote backend (OpenShell or K8s)
 	QuickLaunch      QuickLaunchConfig         `yaml:"quick_launch"`       // quick launch directories
 	Tasks            TasksConfig               `yaml:"tasks"`              // Google Tasks integration
 	AutoArchiveAfter string                    `yaml:"auto_archive_after"` // idle duration before auto-archiving (e.g. "1h", "30m")
@@ -45,12 +46,28 @@ type K8sProviderConfig struct {
 	Namespace    string `yaml:"namespace"`      // K8s namespace, e.g. "agents"
 	Kubeconfig   string `yaml:"kubeconfig"`     // path to kubeconfig; empty = KUBECONFIG env or in-cluster
 	OTELEndpoint string `yaml:"otel_endpoint"`  // e.g. "http://<elb>:4318" — OTel Collector for remote agent traces
+	MaxAgents    int            `yaml:"max_agents"`
+	MaxCostUSD   float64        `yaml:"max_cost_usd"`
+	MCP          K8sMCPConfig   `yaml:"mcp"`
+}
+
+// K8sMCPConfig holds settings for auto-registering the MCP server.
+type K8sMCPConfig struct {
+	AutoRegister bool `yaml:"auto_register"`
 }
 
 // IsActive returns true when K8s is configured and usable.
 // Requires both enabled flag and a Redis URL.
 func (c K8sProviderConfig) IsActive() bool {
 	return c.Enabled && c.RedisURL != ""
+}
+
+// RemoteConfig holds settings for the remote agent backend.
+type RemoteConfig struct {
+	Backend  string `yaml:"backend"`   // "openshell" or "k8s"
+	Gateway  string `yaml:"gateway"`   // OpenShell gateway URL
+	Image    string `yaml:"image"`     // default sandbox image
+	WarmPool int    `yaml:"warm_pool"` // number of pre-created sandboxes
 }
 
 // ResumeConfig holds defaults for the resume command.
@@ -252,6 +269,9 @@ func Load(path string) (Config, error) {
 	}
 	if fileCfg.Kubernetes.Enabled {
 		cfg.Kubernetes = fileCfg.Kubernetes
+	}
+	if fileCfg.Remote.Backend != "" {
+		cfg.Remote = fileCfg.Remote
 	}
 	if len(fileCfg.QuickLaunch.Directories) > 0 {
 		cfg.QuickLaunch = fileCfg.QuickLaunch

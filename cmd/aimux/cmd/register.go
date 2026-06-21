@@ -41,6 +41,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newFeedbackCmd(d.FeedbackPath))
 	rootCmd.AddCommand(newKillCmd(d.Discover))
 	rootCmd.AddCommand(newCollectCmd())
+	rootCmd.AddCommand(newMCPCmd())
 
 	// Build trace parser map for export command, converting function types.
 	parsers := make(map[string]traceParserFn)

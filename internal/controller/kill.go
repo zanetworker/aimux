@@ -1,9 +1,13 @@
 package controller
 
 import (
+	"context"
 	"strings"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/openshell"
+	"github.com/zanetworker/aimux/internal/spawn"
 )
 
 // KillType describes how an agent should be terminated.
@@ -13,22 +17,29 @@ const (
 	KillProcess    KillType = iota // local process: SIGTERM via provider
 	KillPod                       // K8s pod: kubectl delete + scale down
 	KillRemoveOnly                // session-only entry: hide from view
+	KillSandbox                   // OpenShell sandbox: delete + kill tmux
 )
 
 // KillAction holds the determined kill strategy and any provider-specific
 // parameters (e.g., pod name and namespace for K8s agents).
 type KillAction struct {
-	Type      KillType
-	PodName   string
-	Namespace string
+	Type        KillType
+	PodName     string
+	Namespace   string
+	SandboxName string // OpenShell sandbox name
+	TmuxSession string // tmux session to kill
 }
 
 // DetermineKillAction inspects an agent and returns the appropriate kill
-// strategy. The logic is:
-//   - SessionID starting with "pod-" indicates a Kubernetes pod.
-//   - PID == 0 with no pod prefix is a session-only entry (no live process).
-//   - Otherwise it is a local process to be terminated via SIGTERM.
+// strategy.
 func DetermineKillAction(ag agent.Agent) KillAction {
+	if ag.Location == "remote" && ag.SandboxName != "" {
+		return KillAction{
+			Type:        KillSandbox,
+			SandboxName: ag.SandboxName,
+			TmuxSession: ag.TMuxSession,
+		}
+	}
 	if strings.HasPrefix(ag.SessionID, "pod-") {
 		podName := strings.TrimPrefix(ag.SessionID, "pod-")
 		namespace := "agents"
@@ -43,4 +54,20 @@ func DetermineKillAction(ag agent.Agent) KillAction {
 		return KillAction{Type: KillRemoveOnly}
 	}
 	return KillAction{Type: KillProcess}
+}
+
+// ExecuteKillSandbox kills the tmux session (closing the SSH connection),
+// waits for the connection to close, then deletes the OpenShell sandbox.
+func ExecuteKillSandbox(action KillAction) error {
+	if action.TmuxSession != "" {
+		spawn.KillTmuxSession(action.TmuxSession)
+		time.Sleep(2 * time.Second)
+	}
+	if action.SandboxName != "" {
+		client := openshell.NewClient(openshell.Config{})
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return client.DeleteSandbox(ctx, action.SandboxName)
+	}
+	return nil
 }
