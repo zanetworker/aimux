@@ -114,10 +114,14 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"status":       "launched",
 		"tmux_session": result.TmuxSession,
-	}); err != nil {
+	}
+	if result.SandboxName != "" {
+		resp["sandbox_name"] = result.SandboxName
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		debuglog.Log("encode launch response: %v", err)
 	}
 }

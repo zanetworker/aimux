@@ -205,6 +205,14 @@ type App struct {
 }
 
 // NewApp creates a new root TUI application.
+func newOrchestrator(providers []discovery.AgentProvider, cfg config.Config) *discovery.Orchestrator {
+	o := discovery.NewOrchestrator(providers...)
+	if cfg.Remote.Backend == "openshell" {
+		o.EnableRemoteDiscovery()
+	}
+	return o
+}
+
 func NewApp() App {
 	cfg, _ := config.Load(config.DefaultPath())
 
@@ -281,7 +289,7 @@ func NewApp() App {
 		healthView:   views.NewHealthView(),
 		tasksView:    views.NewTasksView(),
 		layout:       NewLayout(0, 0),
-		orchestrator: discovery.NewOrchestrator(agentProviders...),
+		orchestrator: newOrchestrator(agentProviders, cfg),
 		providers:    providers,
 		breadcrumbs:    []string{"Agents"},
 		hiddenAgents:   make(map[string]bool),
@@ -301,6 +309,9 @@ func NewApp() App {
 	// Start OTEL receiver if enabled
 	if cfg.OTELReceiver.Enabled {
 		app.otelReceiver = aimuxotel.NewReceiverWithKeys(app.otelStore, cfg.OTELReceiverPort(), keysByService)
+		if cfg.Remote.Backend == "openshell" {
+			app.otelReceiver.SetBindAll(true)
+		}
 		_ = app.otelReceiver.Start()
 	}
 
@@ -499,9 +510,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.headerView.SetSilenced(a.silenced)
 		a.costsView.SetAgents(a.instances)
 
-		// Update K8s status in header
+		// Update infra status in header
 		if a.infraProvider != nil {
 			a.headerView.SetK8sStatus(a.infraProvider.Status())
+		}
+		if a.cfg.Remote.Backend == "openshell" {
+			out, err := exec.Command("openshell", "status").CombinedOutput()
+			if err != nil {
+				a.headerView.SetOpenShellStatus("disconnected")
+			} else if strings.Contains(strings.ToLower(string(out)), "connected") {
+				a.headerView.SetOpenShellStatus("connected")
+			} else {
+				a.headerView.SetOpenShellStatus("disconnected")
+			}
 		}
 
 		// Refresh tasks only when viewing the tasks tab
@@ -625,7 +646,86 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if sessionMgr == "" {
 			sessionMgr = "tmux"
 		}
-		if msg.Runtime == "container" {
+		if msg.Runtime == "remote" {
+			// Always inject OTEL for remote sessions since file-based tracing
+			// doesn't work (no local session file).
+			otelPort := a.cfg.OTELReceiverPort()
+			otelEndpoint := fmt.Sprintf("http://localhost:%d", otelPort)
+			debuglog.Log("remote launch: otel_enabled=%v port=%d endpoint=%s",
+				a.cfg.OTELReceiver.Enabled, otelPort, otelEndpoint)
+			sOpts := spawn.SandboxOpts{
+				Image:        a.cfg.Remote.Image,
+				OTELEndpoint: otelEndpoint,
+			}
+			result, err := spawn.LaunchInSandbox(msg.Provider, msg.Dir, sOpts)
+			if err != nil {
+				a.statusHint = fmt.Sprintf("Remote launch failed: %v", err)
+				return a, nil
+			}
+
+			name := filepath.Base(msg.Dir)
+			rightW := a.width * 60 / 100
+			a.sessionView.SetSize(rightW, a.height)
+
+			contentH := a.height - 2
+			if contentH < 1 {
+				contentH = 24
+			}
+			contentW := rightW
+			if contentW < 1 {
+				contentW = 80
+			}
+
+			backend, err := terminal.AttachTmux(result.TmuxSession, contentW, contentH)
+			if err != nil {
+				a.statusHint = fmt.Sprintf("Launched %s remotely in %s but mirror failed: %v", msg.Provider, name, err)
+				return a, nil
+			}
+
+			newAgent := &agent.Agent{
+				Name:         result.SandboxName,
+				ProviderName: msg.Provider,
+				WorkingDir:   msg.Dir,
+				TMuxSession:  result.TmuxSession,
+				Status:       agent.StatusActive,
+				Model:        msg.Model,
+				StartTime:    time.Now(),
+				LastActivity: time.Now(),
+				GroupCount:    1,
+				GroupPIDs:     []int{},
+				Location:     "remote",
+				SandboxName:  result.SandboxName,
+			}
+
+			a.pendingAgents[result.TmuxSession] = *newAgent
+			a.instances = append(a.instances, *newAgent)
+			a.agentsView.SetAgents(a.instances)
+
+			teaCmd, err := a.sessionView.Open(newAgent, backend)
+			if err != nil {
+				a.statusHint = fmt.Sprintf("Launched %s remotely in %s", msg.Provider, name)
+				return a, nil
+			}
+
+			leftW := a.width - rightW - 1
+			a.splitLaunchTime = time.Now()
+			a.evalSessionID = result.TmuxSession
+
+			// Use OTEL-aware parser for remote sessions (no local session file).
+			// The parser falls back to OTEL store using the tmux session name
+			// as the conversation ID lookup key.
+			remoteParser := a.parserForRemote(result.OTELSessionID)
+			a.splitTrace = views.NewLogsView(0, "", remoteParser)
+			a.splitTrace.SetSize(leftW, a.height-1)
+
+			a.zoomed = true
+			a.splitMode = true
+			a.splitFocus = "session"
+			a.splitLoading = true
+			a.layout.SetZoomed(true)
+			a.statusHint = fmt.Sprintf("Launched %s remotely in sandbox %s", msg.Provider, result.SandboxName)
+			return a, teaCmd
+		} else if msg.Runtime == "container" {
 			cOpts := spawn.ContainerOpts{}
 			for _, rt := range a.cfg.Runtimes {
 				if rt.Type == "container" {
@@ -1688,6 +1788,34 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 	}
 }
 
+// parserForRemote returns a TraceParser that reads from the OTEL store
+// using a known session ID. The session ID is injected into the sandbox
+// as OTEL_RESOURCE_ATTRIBUTES=aimux.session_id=<id> at creation time,
+// so the OTEL store can index spans by this ID.
+func (a App) parserForRemote(otelSessionID string) views.TraceParser {
+	return func(_ string) ([]trace.Turn, error) {
+		if a.otelStore == nil || !a.otelStore.HasData() {
+			return nil, nil
+		}
+
+		// Direct lookup by our injected session ID
+		if otelSessionID != "" {
+			if root := a.otelStore.GetByConversation(otelSessionID); root != nil {
+				turns := aimuxotel.SpansToTurns(root)
+				if len(turns) > 0 {
+					return turns, nil
+				}
+			}
+		}
+
+		// The store now aliases aimux.session_id -> gen_ai.conversation.id,
+		// so the direct lookup above should work once spans arrive.
+		// No fallback needed.
+
+		return nil, nil
+	}
+}
+
 func (a App) handleCommandInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -1804,7 +1932,10 @@ func (a App) openHealth() (tea.Model, tea.Cmd) {
 		counts[ag.ProviderName]++
 	}
 
-	health := provider.GatherHealth(a.providers, a.infraProvider, counts)
+	health := provider.GatherHealthWithRemote(a.providers, a.infraProvider, counts, provider.RemoteHealthConfig{
+		Backend: a.cfg.Remote.Backend,
+		Gateway: a.cfg.Remote.Gateway,
+	})
 	a.healthView.SetHealth(health)
 	a.healthView.SetSize(a.width, a.height)
 	return a.navigateTo(viewHealth, "Health")
@@ -2365,6 +2496,8 @@ func (a App) promptKill() (tea.Model, tea.Cmd) {
 
 	action := controller.DetermineKillAction(*selected)
 	switch action.Type {
+	case controller.KillSandbox:
+		a.statusHint = fmt.Sprintf("Delete sandbox %s? y:confirm  n:cancel", action.SandboxName)
 	case controller.KillPod:
 		a.statusHint = fmt.Sprintf("Delete pod %s? y:confirm  n:cancel", action.PodName)
 	case controller.KillRemoveOnly:
@@ -2390,16 +2523,20 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
 		switch action.Type {
+		case controller.KillSandbox:
+			a.hideAgent(target)
+			a.statusHint = fmt.Sprintf("Deleting sandbox %s...", action.SandboxName)
+			go func() {
+				if err := controller.ExecuteKillSandbox(action); err != nil {
+					debuglog.Log("tui: sandbox delete failed: %v", err)
+				}
+			}()
+			return a.returnToAgentsIfZoomed()
 		case controller.KillPod:
-			// K8s session pod: scale down deployment (so it doesn't respawn)
-			// and delete the pod. Run async to avoid blocking the TUI.
 			a.hideAgent(target)
 			a.statusHint = fmt.Sprintf("Deleting pod %s...", action.PodName)
 			k8s := a.infraProvider
 			go func() {
-				// Decrement replicas by 1 so the deployment doesn't recreate the pod.
-				// ScaleDown failure is non-fatal: the pod is deleted regardless,
-				// and the deployment will just recreate it (harmless).
 				if k8s != nil {
 					if err := k8s.ScaleDownOne(target.ProviderName, "session"); err != nil {
 						debuglog.Log("tui: ScaleDownOne failed (non-fatal): %v", err)
@@ -2450,6 +2587,9 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // hideAgent adds an agent to the hidden set so it doesn't appear in the list.
 func (a *App) hideAgent(ag *agent.Agent) {
 	key := ag.SessionID
+	if key == "" && ag.SandboxName != "" {
+		key = "sandbox-" + ag.SandboxName
+	}
 	if key == "" && ag.SessionFile != "" {
 		key = ag.SessionFile
 	}
@@ -2889,7 +3029,15 @@ func (a App) renderSplitView() string {
 	}
 	// Show data source indicator in trace header
 	traceLabel := " TRACE [FILE] "
-	if a.otelReceiver != nil {
+	if a.sessionView != nil && a.sessionView.Agent() != nil && a.sessionView.Agent().Location == "remote" {
+		traceLabel = " TRACE [OTEL] "
+		if a.otelReceiver != nil {
+			_, logs, _ := a.otelReceiver.Stats()
+			if logs > 0 {
+				traceLabel = fmt.Sprintf(" TRACE [OTEL] (%d spans) ", logs)
+			}
+		}
+	} else if a.otelReceiver != nil {
 		_, logs, _ := a.otelReceiver.Stats()
 		if logs > 0 {
 			traceLabel = fmt.Sprintf(" TRACE [FILE] (otel:%d) ", logs)

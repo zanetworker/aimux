@@ -181,7 +181,7 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		modes = []string{"default"}
 	}
 
-	runtimes := []string{"local", "container"}
+	runtimes := []string{"local", "container", "remote"}
 	runtimeCursor := 0
 	for i, r := range runtimes {
 		if r == lCfg.DefaultRuntime {
