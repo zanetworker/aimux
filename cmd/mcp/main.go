@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/mcpserver"
 )
 
@@ -24,6 +25,18 @@ func main() {
 		MaxCost:         maxCost,
 		GithubToken:     os.Getenv("GITHUB_TOKEN"),
 		GithubRepo:      os.Getenv("GITHUB_REPO"),
+	}
+
+	if opts.Backend == "openshell" {
+		engine, err := aimuxcompose.New(aimuxcompose.Options{
+			Gateway: opts.GatewayEndpoint,
+			Image:   opts.Image,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "compose engine: %v\n", err)
+			os.Exit(1)
+		}
+		opts.ExternalBackend = aimuxcompose.NewBackend(engine)
 	}
 
 	s, err := mcpserver.NewServer(opts)

@@ -3,8 +3,8 @@ package controller
 import (
 	"context"
 
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/mcpserver"
-	"github.com/zanetworker/aimux/internal/spawn"
 )
 
 // RemoteStatus holds the result of a remote backend health check.
@@ -17,17 +17,17 @@ type RemoteStatus struct {
 
 // RemoteBackendStatus queries the remote backend for its current state.
 // Returns sandbox list and idle count. Usable from TUI, Web, and CLI.
-func RemoteBackendStatus(ctx context.Context, backend mcpserver.Backend) RemoteStatus {
-	if backend == nil {
+func RemoteBackendStatus(ctx context.Context, b mcpserver.Backend) RemoteStatus {
+	if b == nil {
 		return RemoteStatus{Error: "no remote backend configured"}
 	}
 
-	sandboxes, err := backend.ListSandboxes(ctx)
+	sandboxes, err := b.ListSandboxes(ctx)
 	if err != nil {
 		return RemoteStatus{Error: err.Error()}
 	}
 
-	idle, _ := backend.IdleCount(ctx)
+	idle, _ := b.IdleCount(ctx)
 
 	return RemoteStatus{
 		Sandboxes: sandboxes,
@@ -37,14 +37,14 @@ func RemoteBackendStatus(ctx context.Context, backend mcpserver.Backend) RemoteS
 
 // RemoteSpawn creates count sandboxes via the backend and returns their names.
 // This is the controller function that TUI, Web, and CLI call.
-func RemoteSpawn(ctx context.Context, backend mcpserver.Backend, provider string, count int) ([]string, error) {
-	if backend == nil {
+func RemoteSpawn(ctx context.Context, b mcpserver.Backend, provider string, count int) ([]string, error) {
+	if b == nil {
 		return nil, nil
 	}
 
 	var names []string
 	for i := 0; i < count; i++ {
-		name, err := backend.CreateSandbox(ctx, mcpserver.SandboxOpts{
+		name, err := b.CreateSandbox(ctx, mcpserver.SandboxOpts{
 			Mode: "worker",
 			Labels: map[string]string{
 				"provider": provider,
@@ -67,11 +67,10 @@ type RemoteSession struct {
 // RemoteLaunchSession creates a sandbox and opens an interactive terminal
 // session via tmux. This is the controller function for interactive remote
 // agents. Returns the sandbox and tmux session names.
-func RemoteLaunchSession(provider, dir string, opts RemoteSessionOpts) (*RemoteSession, error) {
-	result, err := spawn.LaunchInSandbox(provider, dir, spawn.SandboxOpts{
-		Name:   opts.Name,
-		Image:  opts.Image,
-		Binary: opts.Binary,
+func RemoteLaunchSession(engine *aimuxcompose.Engine, provider, dir string, opts RemoteSessionOpts) (*RemoteSession, error) {
+	result, err := engine.LaunchInSandbox(provider, dir, aimuxcompose.LaunchOpts{
+		Name:  opts.Name,
+		Image: opts.Image,
 	})
 	if err != nil {
 		return nil, err
@@ -90,19 +89,19 @@ type RemoteSessionOpts struct {
 }
 
 // RemoteScaleDown deletes all sandboxes via the backend. Returns names deleted.
-func RemoteScaleDown(ctx context.Context, backend mcpserver.Backend) ([]string, error) {
-	if backend == nil {
+func RemoteScaleDown(ctx context.Context, b mcpserver.Backend) ([]string, error) {
+	if b == nil {
 		return nil, nil
 	}
 
-	sandboxes, err := backend.ListSandboxes(ctx)
+	sandboxes, err := b.ListSandboxes(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var deleted []string
 	for _, sb := range sandboxes {
-		if err := backend.DeleteSandbox(ctx, sb.Name); err != nil {
+		if err := b.DeleteSandbox(ctx, sb.Name); err != nil {
 			return deleted, err
 		}
 		deleted = append(deleted, sb.Name)

@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/cmd/aimux/cmd"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/debuglog"
@@ -276,6 +277,16 @@ func createWebServer(port int) *web.Server {
 		&provider.Gemini{},
 	)
 
+	// Initialize compose engine for OpenShell sandbox operations
+	var composeEngine *aimuxcompose.Engine
+	if cfg.Remote.Backend == "openshell" {
+		composeEngine, _ = aimuxcompose.New(aimuxcompose.Options{
+			Gateway:  cfg.Remote.Gateway,
+			Insecure: true,
+			Image:    cfg.Remote.Image,
+		})
+	}
+
 	s := web.NewServer(port)
 	s.SetDiscoverFunc(disco.Discover)
 	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
@@ -330,14 +341,19 @@ func createWebServer(port int) *web.Server {
 		}
 
 		if opts.Runtime == "remote" {
-			sOpts := spawn.SandboxOpts{
+			if composeEngine == nil {
+				return spawn.LaunchResult{}, fmt.Errorf("remote runtime requires openshell backend configured")
+			}
+			sOpts := aimuxcompose.LaunchOpts{
 				Image: cfg.Remote.Image,
 			}
-			result, err := spawn.LaunchInSandbox(opts.Provider, opts.Dir, sOpts)
+			result, err := composeEngine.LaunchInSandbox(opts.Provider, opts.Dir, sOpts)
 			if err != nil {
 				return spawn.LaunchResult{}, err
 			}
-			return *result, nil
+			return spawn.LaunchResult{
+				TmuxSession: result.TmuxSession,
+			}, nil
 		} else if opts.Runtime == "container" {
 			cOpts := opts.ContainerOpts
 			if cOpts.Engine == "" {

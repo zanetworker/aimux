@@ -26,7 +26,10 @@ var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 type Options struct {
 	// Backend selection: "openshell" or "k8s" (default: "k8s")
 	Backend         string
-	// OpenShell config
+	// ExternalBackend allows the caller to inject a pre-built Backend,
+	// avoiding import cycles. When set, Backend field is ignored.
+	ExternalBackend Backend
+	// OpenShell config (used when Backend=="openshell" and ExternalBackend is nil)
 	GatewayEndpoint string
 	GatewayInsecure bool
 	OpenShellBinary string
@@ -96,15 +99,16 @@ func NewServer(opts Options) (*Server, error) {
 		githubRepo:  opts.GithubRepo,
 	}
 
-	switch opts.Backend {
-	case "openshell":
-		s.backend = NewOpenShellBackend(OpenShellBackendConfig{
-			Binary:   opts.OpenShellBinary,
-			Gateway:  opts.GatewayEndpoint,
-			Insecure: opts.GatewayInsecure,
-			Image:    opts.Image,
-		})
-	case "k8s", "":
+	if opts.ExternalBackend != nil {
+		s.backend = opts.ExternalBackend
+	}
+
+	switch {
+	case s.backend != nil:
+		// Already set via ExternalBackend
+	case opts.Backend == "openshell":
+		return nil, fmt.Errorf("openshell backend requires ExternalBackend (create compose.NewBackend in caller)")
+	case opts.Backend == "k8s" || opts.Backend == "":
 		k8sBackend, err := NewK8sBackend(K8sConfig{
 			RedisURL:   opts.RedisURL,
 			Kubeconfig: opts.Kubeconfig,
@@ -256,14 +260,20 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 	return s.createTaskRedis(ctx, taskID, prompt, req)
 }
 
+// PoolBackend is an optional interface for backends that support idle pool management.
+type PoolBackend interface {
+	ClaimIdle() string
+	Release(name string)
+}
+
 // createTaskExec dispatches a task by exec'ing into an available sandbox.
 func (s *Server) createTaskExec(ctx context.Context, taskID, prompt string) (*mcp.CallToolResult, error) {
-	osBackend, ok := s.backend.(*OpenShellBackend)
+	poolBackend, ok := s.backend.(PoolBackend)
 	if !ok {
-		return mcp.NewToolResultText("Error: exec dispatch requires OpenShell backend"), nil
+		return mcp.NewToolResultText("Error: exec dispatch requires a pool-capable backend"), nil
 	}
 
-	sandbox := osBackend.claimIdle()
+	sandbox := poolBackend.ClaimIdle()
 	if sandbox == "" {
 		return mcp.NewToolResultText("Error: no idle sandboxes available. Call spawn_agent first."), nil
 	}
@@ -275,7 +285,7 @@ func (s *Server) createTaskExec(ctx context.Context, taskID, prompt string) (*mc
 	start := time.Now()
 	result, err := s.backend.ExecStream(ctx, sandbox, []string{"sh", "-c", prompt})
 	duration := int(time.Since(start).Seconds())
-	osBackend.release(sandbox)
+	poolBackend.Release(sandbox)
 
 	summary := result.Output
 	if len(summary) > 200 {

@@ -3,12 +3,18 @@ package discovery
 import (
 	"context"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
-	"github.com/zanetworker/aimux/internal/openshell"
 )
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripAnsi(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
+}
 
 // DiscoverSandboxes returns agents for running OpenShell sandboxes.
 // Uses a 3-second timeout so a stuck gateway never blocks the
@@ -31,7 +37,7 @@ func DiscoverSandboxes() []agent.Agent {
 }
 
 func parseSandboxAgents(output string) []agent.Agent {
-	output = openshell.StripAnsi(output)
+	output = stripAnsi(output)
 	var agents []agent.Agent
 
 	for _, line := range strings.Split(output, "\n") {

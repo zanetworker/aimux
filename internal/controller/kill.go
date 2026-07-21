@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
-	"github.com/zanetworker/aimux/internal/openshell"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/spawn"
 )
 
@@ -58,16 +58,15 @@ func DetermineKillAction(ag agent.Agent) KillAction {
 
 // ExecuteKillSandbox kills the tmux session (closing the SSH connection),
 // waits for the connection to close, then deletes the OpenShell sandbox.
-func ExecuteKillSandbox(action KillAction) error {
+func ExecuteKillSandbox(action KillAction, engine *aimuxcompose.Engine) error {
 	if action.TmuxSession != "" {
 		spawn.KillTmuxSession(action.TmuxSession)
 		time.Sleep(2 * time.Second)
 	}
-	if action.SandboxName != "" {
-		client := openshell.NewClient(openshell.Config{})
+	if action.SandboxName != "" && engine != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return client.DeleteSandbox(ctx, action.SandboxName)
+		return engine.KillSandbox(ctx, action.SandboxName)
 	}
 	return nil
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/cache"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/debuglog"
@@ -160,6 +161,9 @@ type App struct {
 	// Only queried on-demand (tasks view, :new spawn) — never on every tick.
 	// Uses the InfraProvider interface to avoid coupling to a concrete type.
 	infraProvider provider.InfraProvider
+
+	// Compose engine for OpenShell sandbox operations
+	composeEngine *aimuxcompose.Engine
 
 	// Kill confirmation
 	killConfirm  bool            // true when waiting for y/n confirmation
@@ -313,6 +317,18 @@ func NewApp() App {
 			app.otelReceiver.SetBindAll(true)
 		}
 		_ = app.otelReceiver.Start()
+	}
+
+	// Initialize compose engine for OpenShell sandbox operations
+	if cfg.Remote.Backend == "openshell" {
+		composeEngine, err := aimuxcompose.New(aimuxcompose.Options{
+			Gateway:  cfg.Remote.Gateway,
+			Insecure: true, // Remote config doesn't expose insecure flag; default to true
+			Image:    cfg.Remote.Image,
+		})
+		if err == nil {
+			app.composeEngine = composeEngine
+		}
 	}
 
 	// Set cached agents as initial instances and mark them stale in AgentsView
@@ -653,11 +669,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			otelEndpoint := fmt.Sprintf("http://localhost:%d", otelPort)
 			debuglog.Log("remote launch: otel_enabled=%v port=%d endpoint=%s",
 				a.cfg.OTELReceiver.Enabled, otelPort, otelEndpoint)
-			sOpts := spawn.SandboxOpts{
+			sOpts := aimuxcompose.LaunchOpts{
 				Image:        a.cfg.Remote.Image,
 				OTELEndpoint: otelEndpoint,
 			}
-			result, err := spawn.LaunchInSandbox(msg.Provider, msg.Dir, sOpts)
+			result, err := a.composeEngine.LaunchInSandbox(msg.Provider, msg.Dir, sOpts)
 			if err != nil {
 				a.statusHint = fmt.Sprintf("Remote launch failed: %v", err)
 				return a, nil
@@ -2527,7 +2543,7 @@ func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.hideAgent(target)
 			a.statusHint = fmt.Sprintf("Deleting sandbox %s...", action.SandboxName)
 			go func() {
-				if err := controller.ExecuteKillSandbox(action); err != nil {
+				if err := controller.ExecuteKillSandbox(action, a.composeEngine); err != nil {
 					debuglog.Log("tui: sandbox delete failed: %v", err)
 				}
 			}()

@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/mcpserver"
 )
@@ -65,6 +66,19 @@ func newMCPServeCmd() *cobra.Command {
 				TeamID:          firstNonEmpty(teamID, cfg.Kubernetes.TeamID),
 				MaxAgents:       maxAgents,
 				MaxCost:         maxCost,
+			}
+
+			if resolvedBackend == "openshell" {
+				engine, err := aimuxcompose.New(aimuxcompose.Options{
+					Binary:   "openshell",
+					Gateway:  opts.GatewayEndpoint,
+					Insecure: false,
+					Image:    opts.Image,
+				})
+				if err != nil {
+					return fmt.Errorf("compose engine: %w", err)
+				}
+				opts.ExternalBackend = aimuxcompose.NewBackend(engine)
 			}
 
 			// K8s backend requires Redis URL

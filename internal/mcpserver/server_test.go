@@ -116,6 +116,7 @@ func TestNewServer_NoPanic(t *testing.T) {
 func TestNewServer_OpenShellBackend(t *testing.T) {
 	opts := Options{
 		Backend:         "openshell",
+		ExternalBackend: &fakeBackend{},
 		GatewayEndpoint: "http://localhost:8090",
 		Image:           "agent-worker:latest",
 		MaxAgents:       10,
