@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/subagent"
-	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	collectorlogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectorpb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
@@ -96,9 +96,13 @@ func (r *Receiver) Start() error {
 // loggingMiddleware records every incoming request for diagnostics.
 func (r *Receiver) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		urlStr := req.URL.Path
+		if req.URL.RawQuery != "" {
+			urlStr += "?" + req.URL.RawQuery
+		}
 		entry := fmt.Sprintf("%s %s %s cl=%d proto=%s",
 			time.Now().Format("15:04:05"),
-			req.Method, req.URL.Path,
+			req.Method, urlStr,
 			req.ContentLength, req.Proto)
 		r.mu.Lock()
 		r.debugLog = append(r.debugLog, entry)
@@ -129,6 +133,28 @@ func (r *Receiver) handleDebug(w http.ResponseWriter, req *http.Request) {
 	_, _ = fmt.Fprintf(w, "\n--- recent requests (%d) ---\n", len(logCopy))
 	for _, entry := range logCopy {
 		_, _ = fmt.Fprintf(w, "%s\n", entry)
+	}
+
+	// Show SpansToTurns output for each conversation
+	if req.URL.Query().Get("turns") == "1" {
+		_, _ = fmt.Fprintf(w, "\n--- SpansToTurns diagnostic ---\n")
+		for _, convID := range r.store.ConversationIDs() {
+			root := r.store.GetByConversation(convID)
+			if root == nil {
+				continue
+			}
+			turns := SpansToTurns(root)
+			_, _ = fmt.Fprintf(w, "\n%s: root=%s children=%d → %d turns\n",
+				convID, root.Name, len(root.Children), len(turns))
+			for i, t := range turns {
+				prompt := strings.Join(t.UserLines, " ")
+				if len(prompt) > 60 {
+					prompt = prompt[:57] + "..."
+				}
+				_, _ = fmt.Fprintf(w, "  turn %d: prompt=%q model=%s in=%d out=%d actions=%d\n",
+					i, prompt, t.Model, t.TokensIn, t.TokensOut, len(t.Actions))
+			}
+		}
 	}
 
 	// Dump events if requested
@@ -203,13 +229,11 @@ func (r *Receiver) handleTraces(w http.ResponseWriter, req *http.Request) {
 
 	// Process and store spans
 	for _, resourceSpans := range traceReq.ResourceSpans {
-		// Extract resource attributes (service name, etc.)
-		resourceAttrs := make(map[string]any)
+		var protoAttrs []*commonpb.KeyValue
 		if resourceSpans.Resource != nil {
-			for _, kv := range resourceSpans.Resource.Attributes {
-				resourceAttrs[kv.Key] = extractValue(kv.Value)
-			}
+			protoAttrs = resourceSpans.Resource.Attributes
 		}
+		resourceAttrs := extractResourceAttrs(protoAttrs, req)
 
 		for _, scopeSpans := range resourceSpans.ScopeSpans {
 			for _, protoSpan := range scopeSpans.Spans {
@@ -266,8 +290,8 @@ func protoSpanToSpan(ps *tracepb.Span, resourceAttrs map[string]any) *Span {
 		TraceID:  hex.EncodeToString(ps.TraceId),
 		ParentID: hex.EncodeToString(ps.ParentSpanId),
 		Name:     ps.Name,
-		Start:    time.Unix(0, int64(ps.StartTimeUnixNano)),   // #nosec G115 -- OTEL nanos won't overflow int64
-		End:      time.Unix(0, int64(ps.EndTimeUnixNano)),     // #nosec G115 -- OTEL nanos won't overflow int64
+		Start:    time.Unix(0, int64(ps.StartTimeUnixNano)), // #nosec G115 -- OTEL nanos won't overflow int64
+		End:      time.Unix(0, int64(ps.EndTimeUnixNano)),   // #nosec G115 -- OTEL nanos won't overflow int64
 		Status:   status,
 		Attrs:    attrs,
 	}
@@ -300,13 +324,11 @@ func (r *Receiver) handleLogs(w http.ResponseWriter, req *http.Request) {
 	}
 
 	for _, resourceLogs := range logsReq.ResourceLogs {
-		// Extract resource attributes
-		resourceAttrs := make(map[string]any)
+		var protoAttrs []*commonpb.KeyValue
 		if resourceLogs.Resource != nil {
-			for _, kv := range resourceLogs.Resource.Attributes {
-				resourceAttrs[kv.Key] = extractValue(kv.Value)
-			}
+			protoAttrs = resourceLogs.Resource.Attributes
 		}
+		resourceAttrs := extractResourceAttrs(protoAttrs, req)
 
 		for _, scopeLogs := range resourceLogs.ScopeLogs {
 			for _, logRecord := range scopeLogs.LogRecords {
@@ -456,12 +478,11 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 	var traceReq collectorpb.ExportTraceServiceRequest
 	if err := proto.Unmarshal(body, &traceReq); err == nil && hasValidSpans(&traceReq) {
 		for _, rs := range traceReq.ResourceSpans {
-			resourceAttrs := make(map[string]any)
+			var protoAttrs []*commonpb.KeyValue
 			if rs.Resource != nil {
-				for _, kv := range rs.Resource.Attributes {
-					resourceAttrs[kv.Key] = extractValue(kv.Value)
-				}
+				protoAttrs = rs.Resource.Attributes
 			}
+			resourceAttrs := extractResourceAttrs(protoAttrs, req)
 			for _, ss := range rs.ScopeSpans {
 				for _, ps := range ss.Spans {
 					span := protoSpanToSpan(ps, resourceAttrs)
@@ -479,12 +500,11 @@ func (r *Receiver) handleFallback(w http.ResponseWriter, req *http.Request) {
 	var logsReq collectorlogspb.ExportLogsServiceRequest
 	if err := proto.Unmarshal(body, &logsReq); err == nil && hasValidLogRecords(&logsReq) {
 		for _, rl := range logsReq.ResourceLogs {
-			resourceAttrs := make(map[string]any)
+			var protoAttrs []*commonpb.KeyValue
 			if rl.Resource != nil {
-				for _, kv := range rl.Resource.Attributes {
-					resourceAttrs[kv.Key] = extractValue(kv.Value)
-				}
+				protoAttrs = rl.Resource.Attributes
 			}
+			resourceAttrs := extractResourceAttrs(protoAttrs, req)
 			for _, sl := range rl.ScopeLogs {
 				for _, lr := range sl.LogRecords {
 					span := logRecordToSpan(lr, resourceAttrs)
@@ -595,6 +615,26 @@ func (r *Receiver) handleHooks(w http.ResponseWriter, req *http.Request) {
 	r.store.Add(span)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("{}"))
+}
+
+// extractResourceAttrs builds the resource attribute map from a protobuf
+// resource. When aimux.session_id is not in the resource (Claude Code's
+// OTEL SDK ignores OTEL_RESOURCE_ATTRIBUTES), it falls back to:
+//  1. ?aimux_session= query parameter (proxy-proof, survives egress proxy)
+//  2. X-Aimux-Session-Id HTTP header (may be stripped by egress proxy)
+func extractResourceAttrs(attrs []*commonpb.KeyValue, req *http.Request) map[string]any {
+	m := make(map[string]any, len(attrs))
+	for _, kv := range attrs {
+		m[kv.Key] = extractValue(kv.Value)
+	}
+	if _, ok := m["aimux.session_id"]; !ok && req != nil {
+		if sid := req.URL.Query().Get("aimux_session"); sid != "" {
+			m["aimux.session_id"] = sid
+		} else if sid := req.Header.Get("X-Aimux-Session-Id"); sid != "" {
+			m["aimux.session_id"] = sid
+		}
+	}
+	return m
 }
 
 // extractValue converts an OTLP AnyValue to a Go value.

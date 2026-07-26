@@ -675,9 +675,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			result, err := a.composeEngine.LaunchInSandbox(msg.Provider, msg.Dir, sOpts)
 			if err != nil {
+				debuglog.Log("remote launch FAILED: %v", err)
 				a.statusHint = fmt.Sprintf("Remote launch failed: %v", err)
 				return a, nil
 			}
+			debuglog.Log("remote launch OK: sandbox=%s tmux=%s otel=%s",
+				result.SandboxName, result.TmuxSession, result.OTELSessionID)
 
 			name := filepath.Base(msg.Dir)
 			rightW := a.width * 60 / 100
@@ -694,6 +697,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			backend, err := terminal.AttachTmux(result.TmuxSession, contentW, contentH)
 			if err != nil {
+				debuglog.Log("remote launch: tmux mirror FAILED for %s: %v", result.TmuxSession, err)
 				a.statusHint = fmt.Sprintf("Launched %s remotely in %s but mirror failed: %v", msg.Provider, name, err)
 				return a, nil
 			}

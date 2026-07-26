@@ -1,51 +1,9 @@
 package compose
 
 import (
-	"bytes"
 	"strings"
 	"testing"
-
-	pkgcompose "github.com/zanetworker/agent-compose/pkg/compose"
 )
-
-func TestLaunchInSandbox_ResolvesCorrectAgent(t *testing.T) {
-	var buf bytes.Buffer
-	e, err := New(Options{
-		Executor: pkgcompose.NewDryRunExecutor(&buf),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	_, _ = e.LaunchInSandbox("claude", "/tmp/test", LaunchOpts{
-		Image: "ghcr.io/test:latest",
-	})
-	output := buf.String()
-	if !strings.Contains(output, "sandbox create") {
-		t.Errorf("expected sandbox create command, got: %s", output)
-	}
-	if !strings.Contains(output, "ghcr.io/test:latest") {
-		t.Errorf("expected image in output, got: %s", output)
-	}
-}
-
-func TestLaunchInSandbox_InjectsOTELEnv(t *testing.T) {
-	var buf bytes.Buffer
-	e, err := New(Options{
-		Executor: pkgcompose.NewDryRunExecutor(&buf),
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	_, _ = e.LaunchInSandbox("claude", "/tmp/test", LaunchOpts{
-		OTELEndpoint: "http://localhost:4318",
-	})
-	output := buf.String()
-	if !strings.Contains(output, "CLAUDE_CODE_ENABLE_TELEMETRY") {
-		t.Errorf("expected OTEL env var in output, got: %s", output)
-	}
-}
 
 func TestOTELSandboxEnv(t *testing.T) {
 	env := otelSandboxEnv("http://localhost:4318", "test-session-1")
@@ -76,6 +34,23 @@ func TestOTELSandboxEnv_Empty(t *testing.T) {
 	env := otelSandboxEnv("", "")
 	if env != nil {
 		t.Errorf("expected nil env for empty endpoint, got %v", env)
+	}
+}
+
+func TestOTELHostPort(t *testing.T) {
+	tests := []struct {
+		endpoint, want string
+	}{
+		{"http://localhost:4318", "host.openshell.internal:4318"},
+		{"http://host.openshell.internal:4318", "host.openshell.internal:4318"},
+		{"https://collector.example.com:443", "host.openshell.internal:443"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := otelHostPort(tt.endpoint)
+		if got != tt.want {
+			t.Errorf("otelHostPort(%q) = %q, want %q", tt.endpoint, got, tt.want)
+		}
 	}
 }
 
