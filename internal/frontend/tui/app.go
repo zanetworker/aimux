@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/cache"
@@ -214,6 +215,13 @@ type App struct {
 	// matches the same tmux session or working dir.
 	pendingAgents map[string]agent.Agent
 
+	// remoteSessionIDs maps a remote sandbox name to the Claude session UUID
+	// pinned at launch. Re-entry selects the orchestrator-discovered agent
+	// record, which lacks that UUID, so this map recovers it to resume the
+	// same session (traces + conversation continuity) instead of starting a
+	// fresh one. In-memory: survives re-entry within one aimux run.
+	remoteSessionIDs map[string]string
+
 	// Live trace streaming: tailer watches the session JSONL and signals
 	// traceRefresh when new lines are appended.
 	activeTailer *trace.Tailer
@@ -318,7 +326,8 @@ func NewApp() App {
 		infraProvider:  infraProv,
 		instances:      cachedAgents,
 		staleAgents:    staleAgents,
-		pendingAgents:  make(map[string]agent.Agent),
+		pendingAgents:    make(map[string]agent.Agent),
+		remoteSessionIDs: make(map[string]string),
 		traceRefresh:   make(chan struct{}, 1),
 	}
 
@@ -1086,6 +1095,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		a.pendingAgents[result.SandboxName] = *newAgent
+		a.remoteSessionIDs[result.SandboxName] = result.OTELSessionID
 		a.instances = append(a.instances, *newAgent)
 		a.agentsView.SetAgents(a.instances)
 
@@ -1095,8 +1105,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Auto-start the agent inside the sandbox once the shell is ready.
-		go sendAgentCommand(backend, msg.provider)
+		// Auto-start the agent inside the sandbox once the shell is ready,
+		// pinning the Claude session id to the OTEL session id for trace
+		// continuity across reconnects.
+		go sendAgentCommand(backend, remoteAgentCommand(msg.provider, result.OTELSessionID, false))
 
 		leftW := a.width - rightW - 1
 		a.splitLaunchTime = time.Now()
@@ -2428,23 +2440,45 @@ func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	}
 	debuglog.Log("remote session: connected to sandbox %s", sandboxName)
 
+	// Resolve the pinned Claude session UUID. The selected agent is usually the
+	// orchestrator-discovered record, which lacks it, so recover it from the
+	// launch-time map keyed by sandbox name.
+	sessionID := selected.SessionID
+	if !uuidValid(sessionID) {
+		if mapped := a.remoteSessionIDs[sandboxName]; mapped != "" {
+			sessionID = mapped
+			debuglog.Log("remote session: recovered pinned session id %s for %s", sessionID, sandboxName)
+		}
+	}
+
 	teaCmd, err := a.sessionView.Open(selected, backend)
 	if err != nil {
 		a.statusHint = fmt.Sprintf("Error: %v", err)
 		return a, nil
 	}
 
-	// Reattaching to a possibly-running full-screen agent leaves a stale
-	// screen; nudge a redraw once the reconnect settles.
+	// A fresh connect gives a bare shell (the previous agent process ended
+	// when the last connection closed). Resume the same Claude session so the
+	// conversation and telemetry session.id continue, keeping the trace pane's
+	// history. With the pinned UUID we resume it explicitly; without it we fall
+	// back to --continue (Claude resumes its most recent conversation on disk).
+	resumeCmd := remoteAgentCommand(selected.ProviderName, sessionID, true)
+	if resumeCmd == selected.ProviderName && selected.ProviderName == "claude" {
+		resumeCmd = "claude --continue"
+	}
+	go sendAgentCommand(backend, resumeCmd)
+
+	// Reattaching to a full-screen agent leaves a stale screen; nudge a
+	// redraw once the reconnect settles.
 	go nudgeRedraw(backend, contentW, contentH)
 
 	// Set up split view with trace pane on the left
 	leftW := a.width - rightW - 1
 	a.splitLaunchTime = time.Now()
-	a.evalSessionID = selected.SessionID
+	a.evalSessionID = sessionID
 
 	// Use OTEL parser for remote sessions (no local session file)
-	remoteParser := a.parserForRemote(selected.SessionID)
+	remoteParser := a.parserForRemote(sessionID)
 	a.splitTrace = views.NewLogsView(0, "", remoteParser)
 	a.splitTrace.SetSize(leftW, a.height-1)
 
@@ -2457,16 +2491,37 @@ func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	return a, teaCmd
 }
 
+// remoteAgentCommand builds the shell command that starts the agent inside the
+// sandbox. For Claude, the session id is pinned to sessionID so telemetry and
+// conversation stay continuous across reconnects: --session-id creates it on
+// first launch, --resume reattaches to it on re-entry (same session.id, so the
+// trace pane accumulates all turns). Other providers, or a missing/invalid
+// UUID, fall back to the bare command.
+func remoteAgentCommand(provider, sessionID string, resume bool) string {
+	if provider == "claude" && uuidValid(sessionID) {
+		if resume {
+			return "claude --resume " + sessionID
+		}
+		return "claude --session-id " + sessionID
+	}
+	return provider
+}
+
+func uuidValid(s string) bool {
+	_, err := uuid.Parse(s)
+	return err == nil
+}
+
 // sendAgentCommand waits briefly for the sandbox shell to be ready, then types
-// the agent command (e.g. "claude") into the PTY. Runs in its own goroutine so
-// the TUI stays responsive while the connection establishes.
-func sendAgentCommand(backend terminal.SessionBackend, provider string) {
+// the given command into the PTY. Runs in its own goroutine so the TUI stays
+// responsive while the connection establishes.
+func sendAgentCommand(backend terminal.SessionBackend, cmd string) {
 	time.Sleep(3 * time.Second)
-	if _, err := backend.Write([]byte(provider + "\n")); err != nil {
-		debuglog.Log("remote: failed to send agent command %q: %v", provider, err)
+	if _, err := backend.Write([]byte(cmd + "\n")); err != nil {
+		debuglog.Log("remote: failed to send agent command %q: %v", cmd, err)
 		return
 	}
-	debuglog.Log("remote: sent agent command %q", provider)
+	debuglog.Log("remote: sent agent command %q", cmd)
 }
 
 // nudgeRedraw forces a full repaint of a full-screen TUI (e.g. claude) that is

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	pkgcompose "github.com/zanetworker/agent-compose/pkg/compose"
 )
@@ -101,7 +102,12 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 		image = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 	}
 
-	otelSessionID := fmt.Sprintf("aimux-remote-%s-%d", provider, time.Now().UnixNano())
+	// Use a UUID so it can double as the agent's pinned Claude session id
+	// (claude --session-id requires a valid UUID). Pinning the session id
+	// keeps Claude's telemetry session.id stable across reconnects, so the
+	// trace pane accumulates all turns under one conversation instead of
+	// resetting each time the agent restarts.
+	otelSessionID := uuid.NewString()
 	env := otelSandboxEnv(opts.OTELEndpoint, otelSessionID)
 	if env == nil {
 		env = make(map[string]string)
