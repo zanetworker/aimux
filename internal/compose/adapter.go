@@ -74,16 +74,18 @@ type LaunchOpts struct {
 	OTELEndpoint string
 }
 
-// LaunchResult carries information about a successfully launched sandbox session.
+// LaunchResult carries information about a successfully provisioned sandbox.
+// The interactive terminal is established separately by the caller via
+// terminal.NewOpenShellExec(SandboxName, ...).
 type LaunchResult struct {
-	TmuxSession   string
 	SandboxName   string
 	OTELSessionID string
 }
 
-// LaunchInSandbox creates an OpenShell sandbox, wraps "openshell sandbox
-// connect" in a tmux session, and starts the agent inside it. The tmux
-// session is what the TUI mirrors for the live terminal view.
+// LaunchInSandbox provisions an OpenShell sandbox (create, inject OTEL env,
+// set egress policy) and returns its name. It does not open the interactive
+// terminal; the caller does that via terminal.NewOpenShellExec(SandboxName),
+// which runs "openshell sandbox connect" in a real PTY.
 func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*LaunchResult, error) {
 	if strings.HasPrefix(dir, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
@@ -104,20 +106,31 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 	if env == nil {
 		env = make(map[string]string)
 	}
-	// TODO(azaalouk): revert to "https://inference.local" once NVIDIA/OpenShell#2444 merges.
-	// Workaround: host-side proxy strips context_management before forwarding to Vertex.
-	// Start the proxy with: node /tmp/strip-proxy.js
-	env["ANTHROPIC_BASE_URL"] = "http://host.openshell.internal:8081"
+	// The agent inside the sandbox routes model traffic through the gateway's
+	// in-sandbox inference proxy (inference.local), configured by
+	// --auto-providers at create time. Do NOT pass the host's Vertex
+	// credentials (CLAUDE_CODE_USE_VERTEX, GOOGLE_APPLICATION_CREDENTIALS,
+	// etc.): CLAUDE_CODE_USE_VERTEX makes Claude Code ignore ANTHROPIC_BASE_URL
+	// and dial Vertex directly, which then fails because the host's gcloud ADC
+	// file does not exist inside the sandbox.
+	env["ANTHROPIC_BASE_URL"] = "https://inference.local"
 	env["CLAUDE_MODEL"] = "claude-sonnet-4-6"
 	env["CLAUDE_CODE_MODEL"] = "claude-sonnet-4-6"
 	env["ANTHROPIC_API_KEY"] = "placeholder"
 
-	sandboxName := fmt.Sprintf("ax-%s-%d", provider[:min(len(provider), 5)], time.Now().Unix())
+	// OpenShell sandbox names are limited to 19 characters.
+	sandboxName := sandboxName(provider, time.Now().Unix())
 
 	debuglog.Log("compose: launching sandbox %s for %s (image=%s, otel=%s)",
 		sandboxName, provider, image, otelSessionID)
 
 	// Step 1: Create sandbox via openshell CLI.
+	// --provider vertex configures the gateway's in-sandbox inference proxy
+	// (inference.local) to route model traffic to Vertex using the GATEWAY's
+	// own credentials. This is distinct from the client-side CLAUDE_CODE_USE_VERTEX
+	// env (deliberately not set): the agent still dials inference.local, and the
+	// gateway does the Vertex auth. Without this flag inference.local has no
+	// backend and the agent's requests fail and retry.
 	createArgs := []string{"sandbox", "create", "--name", sandboxName, "--from", image, "--no-tty", "--auto-providers", "--provider", "vertex"}
 	for k, v := range env {
 		createArgs = append(createArgs, "--env", k+"="+v)
@@ -126,8 +139,9 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 
 	cmd := exec.Command("openshell", createArgs...) // #nosec G204
 	if out, err := cmd.CombinedOutput(); err != nil {
-		debuglog.Log("compose: sandbox create FAILED: %v: %s", err, strings.TrimSpace(string(out)))
-		return nil, fmt.Errorf("compose: sandbox create: %s: %w", strings.TrimSpace(string(out)), err)
+		raw := strings.TrimSpace(string(out))
+		debuglog.Log("compose: sandbox create FAILED: %v: %s", err, raw)
+		return nil, fmt.Errorf("sandbox create failed: %s", firstErrorLine(raw))
 	}
 	debuglog.Log("compose: sandbox %s created", sandboxName)
 
@@ -150,8 +164,6 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 			endpoints = append(endpoints, hp)
 		}
 	}
-	// TODO(azaalouk): remove host.openshell.internal:8081 once NVIDIA/OpenShell#2444 merges.
-	endpoints = append(endpoints, "host.openshell.internal:8081")
 
 	for _, ep := range endpoints {
 		if err := allowOTELEndpoint(sandboxName, ep); err != nil {
@@ -159,29 +171,15 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 		}
 	}
 
-	// Step 4: Create tmux session wrapping "openshell sandbox connect"
-	sessionName := SandboxSessionName(provider, sandboxName)
-	if exec.Command("tmux", "has-session", "-t", sessionName).Run() == nil { // #nosec G204
-		_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run() // #nosec G204
-	}
-
-	connectArgs := []string{"new-session", "-d", "-s", sessionName, "--",
-		"openshell", "sandbox", "connect", sandboxName}
-	if err := exec.Command("tmux", connectArgs...).Run(); err != nil { // #nosec G204
-		debuglog.Log("compose: tmux session FAILED for %s: %v", sandboxName, err)
-		_ = exec.Command("openshell", "sandbox", "delete", sandboxName).Run() // #nosec G204
-		return nil, fmt.Errorf("compose: tmux session: %w", err)
-	}
-	debuglog.Log("compose: tmux session %s created", sessionName)
-
-	// Step 3: Wait for shell, then start the agent
-	agentCmd := agentBinary(provider)
-	time.Sleep(3 * time.Second)
-	_ = exec.Command("tmux", "send-keys", "-t", sessionName, agentCmd, "Enter").Run() // #nosec G204
-	debuglog.Log("compose: sent %q to %s", agentCmd, sessionName)
+	// The sandbox is provisioned and ready. The interactive terminal is
+	// established by the caller via terminal.NewOpenShellExec, which runs
+	// "openshell sandbox connect" in a real PTY. We deliberately do NOT use
+	// tmux here: a real PTY gives the connect process a controlling terminal
+	// and there is no detached session to die, which is what made the
+	// previous tmux-based approach unreliable.
+	debuglog.Log("compose: sandbox %s provisioned and ready for connect", sandboxName)
 
 	return &LaunchResult{
-		TmuxSession:   sessionName,
 		SandboxName:   sandboxName,
 		OTELSessionID: otelSessionID,
 	}, nil
@@ -192,33 +190,67 @@ func (e *Engine) KillSandbox(ctx context.Context, name string) error {
 	return e.inner.Stop(ctx, name)
 }
 
-// SandboxSessionName returns the tmux session name for a remote sandbox.
-func SandboxSessionName(provider, sandboxName string) string {
-	return fmt.Sprintf("aimux-remote-%s-%s", provider, sandboxName)
+// sandboxName generates a name that fits within OpenShell's 19-character limit.
+func sandboxName(provider string, ts int64) string {
+	short := provider
+	if len(short) > 2 {
+		short = short[:2]
+	}
+	suffix := fmt.Sprintf("%x", ts%0xFFFF)
+	return fmt.Sprintf("ax-%s-%s", short, suffix)
 }
 
-func agentBinary(provider string) string {
-	switch provider {
-	case "claude":
-		return "claude"
-	case "codex":
-		return "codex"
-	case "gemini":
-		return "gemini"
-	default:
-		return provider
+// firstErrorLine extracts the first meaningful error line from openshell CLI output.
+// openshell prints a tree-structured error (│, ├─▶, ╰─▶) that's hard to read
+// in a single-line status hint. This finds the "Error:" line or the first
+// non-decorative line containing the actual error message.
+func firstErrorLine(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "│ ")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip ANSI color codes and log-level prefixes
+		line = stripAnsi(line)
+		if strings.HasPrefix(line, "WARN") || strings.HasPrefix(line, "[20") {
+			continue
+		}
+		// Return the first error-bearing line
+		if strings.Contains(line, "Error") || strings.Contains(line, "error") || strings.Contains(line, "failed") {
+			return line
+		}
 	}
+	// Fallback: return the last non-empty, non-decorative line
+	for i := len(strings.Split(raw, "\n")) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(strings.Split(raw, "\n")[i])
+		line = stripAnsi(line)
+		if line != "" && !strings.HasPrefix(line, "[20") && !strings.HasPrefix(line, "WARN") {
+			return line
+		}
+	}
+	return raw
 }
 
-func openshellProviderName(provider string) string {
-	switch provider {
-	case "claude":
-		return "claude"
-	case "codex":
-		return "codex"
-	default:
-		return ""
+// stripAnsi removes ANSI escape sequences from a string.
+func stripAnsi(s string) string {
+	var b strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == 0x1b {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEscape = false
+			}
+			continue
+		}
+		b.WriteRune(r)
 	}
+	return b.String()
 }
 
 // allowOTELEndpoint updates the sandbox egress policy to permit OTEL

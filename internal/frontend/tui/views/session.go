@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/terminal"
 )
 
@@ -137,10 +138,12 @@ func (sv *SessionView) HandleOutput(data []byte) tea.Cmd {
 // key names to their actual terminal byte sequences.
 func (sv *SessionView) SendKey(key string) {
 	if sv.session == nil || !sv.active {
+		debuglog.Log("session: SendKey %q SKIPPED (session=%v active=%v)", key, sv.session != nil, sv.active)
 		return
 	}
 	data := keyToBytes(key)
 	if len(data) > 0 {
+		debuglog.Log("session: SendKey %q -> %d bytes", key, len(data))
 		_, _ = sv.session.Write(data)
 	}
 }

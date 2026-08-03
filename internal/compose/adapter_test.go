@@ -54,17 +54,24 @@ func TestOTELHostPort(t *testing.T) {
 	}
 }
 
-func TestSandboxSessionName(t *testing.T) {
-	tests := []struct {
-		provider, sandbox, want string
-	}{
-		{"claude", "sb-123", "aimux-remote-claude-sb-123"},
-		{"codex", "my-box", "aimux-remote-codex-my-box"},
-	}
-	for _, tt := range tests {
-		got := SandboxSessionName(tt.provider, tt.sandbox)
-		if got != tt.want {
-			t.Errorf("SandboxSessionName(%q, %q) = %q, want %q", tt.provider, tt.sandbox, got, tt.want)
+func TestSandboxNameLength(t *testing.T) {
+	providers := []string{"claude", "codex", "gemini", "go"}
+	for _, p := range providers {
+		name := sandboxName(p, 1785668746)
+		if len(name) > 19 {
+			t.Errorf("sandboxName(%q) = %q (%d chars), exceeds 19-char OpenShell limit",
+				p, name, len(name))
 		}
+		if len(name) < 5 {
+			t.Errorf("sandboxName(%q) = %q, too short", p, name)
+		}
+	}
+}
+
+func TestSandboxNameUniqueness(t *testing.T) {
+	a := sandboxName("claude", 1785668746)
+	b := sandboxName("claude", 1785668747)
+	if a == b {
+		t.Errorf("consecutive timestamps produced same name: %q", a)
 	}
 }

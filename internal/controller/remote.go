@@ -58,15 +58,15 @@ func RemoteSpawn(ctx context.Context, b mcpserver.Backend, provider string, coun
 	return names, nil
 }
 
-// RemoteSession holds the result of launching an interactive remote session.
+// RemoteSession holds the result of provisioning an interactive remote session.
 type RemoteSession struct {
-	SandboxName string
-	TmuxSession string
+	SandboxName   string
+	OTELSessionID string
 }
 
-// RemoteLaunchSession creates a sandbox and opens an interactive terminal
-// session via tmux. This is the controller function for interactive remote
-// agents. Returns the sandbox and tmux session names.
+// RemoteLaunchSession provisions a sandbox for an interactive remote session.
+// The interactive terminal itself is established by the caller via
+// terminal.NewOpenShellExec(SandboxName, ...).
 func RemoteLaunchSession(engine *aimuxcompose.Engine, provider, dir string, opts RemoteSessionOpts) (*RemoteSession, error) {
 	result, err := engine.LaunchInSandbox(provider, dir, aimuxcompose.LaunchOpts{
 		Name:  opts.Name,
@@ -76,8 +76,8 @@ func RemoteLaunchSession(engine *aimuxcompose.Engine, provider, dir string, opts
 		return nil, err
 	}
 	return &RemoteSession{
-		SandboxName: result.SandboxName,
-		TmuxSession: result.TmuxSession,
+		SandboxName:   result.SandboxName,
+		OTELSessionID: result.OTELSessionID,
 	}, nil
 }
 

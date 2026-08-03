@@ -226,6 +226,11 @@ func (v *AgentsView) Selected() *agent.Agent {
 	return nil
 }
 
+// Agents returns the current unfiltered agents list.
+func (v *AgentsView) Agents() []agent.Agent {
+	return v.agents
+}
+
 // Cursor returns the current cursor position.
 func (v *AgentsView) Cursor() int {
 	return v.cursor

@@ -78,6 +78,18 @@ type k8sSessionReadyMsg struct {
 	err       error
 }
 
+// openshellStatusMsg carries the result of an async openshell status check.
+type openshellStatusMsg struct{ connected bool }
+
+// remoteLaunchResultMsg is sent when an async remote sandbox launch completes.
+type remoteLaunchResultMsg struct {
+	provider string
+	dir      string
+	model    string
+	result   *aimuxcompose.LaunchResult
+	err      error
+}
+
 // App is the root Bubble Tea model that wires all views together.
 // It implements a three-state layout machine:
 //   - Split view (default): agents table on left (~35%) + preview pane on right (~65%)
@@ -357,6 +369,14 @@ func (a App) discoverInstances() tea.Msg {
 	return instancesMsg(instances)
 }
 
+func (a App) checkOpenShellStatus() tea.Msg {
+	out, err := exec.Command("openshell", "status").CombinedOutput()
+	if err != nil {
+		return openshellStatusMsg{connected: false}
+	}
+	return openshellStatusMsg{connected: strings.Contains(strings.ToLower(string(out)), "connected")}
+}
+
 func (a App) discoverTeams() tea.Msg {
 	teams, _ := team.ListTeamsDefault()
 	return teamsMsg(teams)
@@ -380,20 +400,39 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tickMsg:
-		return a, tea.Batch(a.discoverInstances, a.tick())
+		cmds := []tea.Cmd{a.discoverInstances, a.tick()}
+		if a.cfg.Remote.Backend == "openshell" {
+			cmds = append(cmds, a.checkOpenShellStatus)
+		}
+		return a, tea.Batch(cmds...)
+
+	case openshellStatusMsg:
+		if msg.connected {
+			a.headerView.SetOpenShellStatus("connected")
+		} else {
+			a.headerView.SetOpenShellStatus("disconnected")
+		}
+		return a, nil
 
 	case instancesMsg:
 		a.instances = controller.FilterHidden([]agent.Agent(msg), a.hiddenAgents)
 
 		// Merge pending launched agents that discovery hasn't found yet.
-		// A pending agent is removed only when a discovered agent has the
-		// exact same tmux session name (meaning discovery found the real
-		// process). WorkingDir matching is too broad — existing idle sessions
-		// from previous runs in the same directory would falsely match.
+		// Match by TMuxSession OR SandboxName. When a discovered agent
+		// matches by SandboxName but lacks TMuxSession, copy it from
+		// the pending agent so re-entry works without creating a new session.
 		for key, pending := range a.pendingAgents {
 			found := false
-			for _, discovered := range a.instances {
-				if discovered.TMuxSession != "" && discovered.TMuxSession == pending.TMuxSession {
+			for i, discovered := range a.instances {
+				matchTmux := discovered.TMuxSession != "" && discovered.TMuxSession == pending.TMuxSession
+				matchSandbox := discovered.SandboxName != "" && discovered.SandboxName == pending.SandboxName
+				if matchTmux || matchSandbox {
+					if discovered.TMuxSession == "" && pending.TMuxSession != "" {
+						a.instances[i].TMuxSession = pending.TMuxSession
+					}
+					if discovered.SessionID == "" && pending.SessionID != "" {
+						a.instances[i].SessionID = pending.SessionID
+					}
 					found = true
 					break
 				}
@@ -530,16 +569,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.infraProvider != nil {
 			a.headerView.SetK8sStatus(a.infraProvider.Status())
 		}
-		if a.cfg.Remote.Backend == "openshell" {
-			out, err := exec.Command("openshell", "status").CombinedOutput()
-			if err != nil {
-				a.headerView.SetOpenShellStatus("disconnected")
-			} else if strings.Contains(strings.ToLower(string(out)), "connected") {
-				a.headerView.SetOpenShellStatus("connected")
-			} else {
-				a.headerView.SetOpenShellStatus("disconnected")
-			}
-		}
+		// OpenShell status check is dispatched as an async command
+		// so it never blocks the TUI event loop.
 
 		// Refresh tasks only when viewing the tasks tab
 		if a.currentView == viewTasks {
@@ -669,82 +700,31 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			otelEndpoint := fmt.Sprintf("http://localhost:%d", otelPort)
 			debuglog.Log("remote launch: otel_enabled=%v port=%d endpoint=%s",
 				a.cfg.OTELReceiver.Enabled, otelPort, otelEndpoint)
+
+			// Show loading state immediately so user sees feedback
+			a.splitMode = true
+			a.zoomed = true
+			a.splitLoading = true
+			a.layout.SetZoomed(true)
+			a.statusHint = fmt.Sprintf("Launching %s remotely...", msg.Provider)
+
 			sOpts := aimuxcompose.LaunchOpts{
 				Image:        a.cfg.Remote.Image,
 				OTELEndpoint: otelEndpoint,
 			}
-			result, err := a.composeEngine.LaunchInSandbox(msg.Provider, msg.Dir, sOpts)
-			if err != nil {
-				debuglog.Log("remote launch FAILED: %v", err)
-				a.statusHint = fmt.Sprintf("Remote launch failed: %v", err)
-				return a, nil
+
+			// Run launch async so the TUI stays responsive
+			provider, dir, model := msg.Provider, msg.Dir, msg.Model
+			return a, func() tea.Msg {
+				result, err := a.composeEngine.LaunchInSandbox(provider, dir, sOpts)
+				return remoteLaunchResultMsg{
+					provider: provider,
+					dir:      dir,
+					model:    model,
+					result:   result,
+					err:      err,
+				}
 			}
-			debuglog.Log("remote launch OK: sandbox=%s tmux=%s otel=%s",
-				result.SandboxName, result.TmuxSession, result.OTELSessionID)
-
-			name := filepath.Base(msg.Dir)
-			rightW := a.width * 60 / 100
-			a.sessionView.SetSize(rightW, a.height)
-
-			contentH := a.height - 2
-			if contentH < 1 {
-				contentH = 24
-			}
-			contentW := rightW
-			if contentW < 1 {
-				contentW = 80
-			}
-
-			backend, err := terminal.AttachTmux(result.TmuxSession, contentW, contentH)
-			if err != nil {
-				debuglog.Log("remote launch: tmux mirror FAILED for %s: %v", result.TmuxSession, err)
-				a.statusHint = fmt.Sprintf("Launched %s remotely in %s but mirror failed: %v", msg.Provider, name, err)
-				return a, nil
-			}
-
-			newAgent := &agent.Agent{
-				Name:         result.SandboxName,
-				ProviderName: msg.Provider,
-				WorkingDir:   msg.Dir,
-				TMuxSession:  result.TmuxSession,
-				Status:       agent.StatusActive,
-				Model:        msg.Model,
-				StartTime:    time.Now(),
-				LastActivity: time.Now(),
-				GroupCount:    1,
-				GroupPIDs:     []int{},
-				Location:     "remote",
-				SandboxName:  result.SandboxName,
-			}
-
-			a.pendingAgents[result.TmuxSession] = *newAgent
-			a.instances = append(a.instances, *newAgent)
-			a.agentsView.SetAgents(a.instances)
-
-			teaCmd, err := a.sessionView.Open(newAgent, backend)
-			if err != nil {
-				a.statusHint = fmt.Sprintf("Launched %s remotely in %s", msg.Provider, name)
-				return a, nil
-			}
-
-			leftW := a.width - rightW - 1
-			a.splitLaunchTime = time.Now()
-			a.evalSessionID = result.TmuxSession
-
-			// Use OTEL-aware parser for remote sessions (no local session file).
-			// The parser falls back to OTEL store using the tmux session name
-			// as the conversation ID lookup key.
-			remoteParser := a.parserForRemote(result.OTELSessionID)
-			a.splitTrace = views.NewLogsView(0, "", remoteParser)
-			a.splitTrace.SetSize(leftW, a.height-1)
-
-			a.zoomed = true
-			a.splitMode = true
-			a.splitFocus = "session"
-			a.splitLoading = true
-			a.layout.SetZoomed(true)
-			a.statusHint = fmt.Sprintf("Launched %s remotely in sandbox %s", msg.Provider, result.SandboxName)
-			return a, teaCmd
 		} else if msg.Runtime == "container" {
 			cOpts := spawn.ContainerOpts{}
 			for _, rt := range a.cfg.Runtimes {
@@ -1051,6 +1031,88 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+
+	case remoteLaunchResultMsg:
+		if msg.err != nil {
+			debuglog.Log("remote launch FAILED: %v", msg.err)
+			a.splitLoading = false
+			a.splitMode = false
+			a.zoomed = false
+			a.layout.SetZoomed(false)
+			a.statusHint = fmt.Sprintf("Remote launch failed: %v", msg.err)
+			return a, nil
+		}
+
+		result := msg.result
+		debuglog.Log("remote launch OK: sandbox=%s otel=%s", result.SandboxName, result.OTELSessionID)
+
+		name := filepath.Base(msg.dir)
+		rightW := a.width * 60 / 100
+		a.sessionView.SetSize(rightW, a.height)
+
+		contentH := a.height - 2
+		if contentH < 1 {
+			contentH = 24
+		}
+		contentW := rightW
+		if contentW < 1 {
+			contentW = 80
+		}
+
+		// Establish the interactive terminal by running "openshell sandbox
+		// connect" in a real PTY (no tmux). Gateway is resolved by the
+		// openshell CLI's own config, matching how create/delete work.
+		backend, err := terminal.NewOpenShellExec(result.SandboxName, "", false, contentW, contentH)
+		if err != nil {
+			debuglog.Log("remote launch: openshell connect FAILED for %s: %v", result.SandboxName, err)
+			a.splitLoading = false
+			a.statusHint = fmt.Sprintf("Launched %s in %s but connect failed: %v", msg.provider, name, err)
+			return a, nil
+		}
+
+		newAgent := &agent.Agent{
+			Name:         result.SandboxName,
+			ProviderName: msg.provider,
+			WorkingDir:   msg.dir,
+			SessionID:    result.OTELSessionID,
+			Status:       agent.StatusActive,
+			Model:        msg.model,
+			StartTime:    time.Now(),
+			LastActivity: time.Now(),
+			GroupCount:   1,
+			GroupPIDs:    []int{},
+			Location:     "remote",
+			SandboxName:  result.SandboxName,
+		}
+
+		a.pendingAgents[result.SandboxName] = *newAgent
+		a.instances = append(a.instances, *newAgent)
+		a.agentsView.SetAgents(a.instances)
+
+		teaCmd, err := a.sessionView.Open(newAgent, backend)
+		if err != nil {
+			a.statusHint = fmt.Sprintf("Launched %s remotely in %s", msg.provider, name)
+			return a, nil
+		}
+
+		// Auto-start the agent inside the sandbox once the shell is ready.
+		go sendAgentCommand(backend, msg.provider)
+
+		leftW := a.width - rightW - 1
+		a.splitLaunchTime = time.Now()
+		a.evalSessionID = result.OTELSessionID
+
+		remoteParser := a.parserForRemote(result.OTELSessionID)
+		a.splitTrace = views.NewLogsView(0, "", remoteParser)
+		a.splitTrace.SetSize(leftW, a.height-1)
+
+		a.zoomed = true
+		a.splitMode = true
+		a.splitFocus = "session"
+		a.splitLoading = true
+		a.layout.SetZoomed(true)
+		a.statusHint = fmt.Sprintf("Launched %s remotely in sandbox %s", msg.provider, result.SandboxName)
+		return a, teaCmd
 
 	case k8sSessionReadyMsg:
 		a.stickyHint = false
@@ -1828,9 +1890,33 @@ func (a App) parserForRemote(otelSessionID string) views.TraceParser {
 			}
 		}
 
-		// The store now aliases aimux.session_id -> gen_ai.conversation.id,
-		// so the direct lookup above should work once spans arrive.
-		// No fallback needed.
+		// Fallback: Claude Code's SDK ignores OTEL_RESOURCE_ATTRIBUTES,
+		// may strip query params from OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+		// and may not honor OTEL_EXPORTER_OTLP_HEADERS. When all three
+		// injection channels fail, aimux.session_id never reaches the
+		// store, so the alias is never created. Scan all conversations
+		// and exclude known local sessions to find the remote one.
+		localIDs := make(map[string]bool)
+		if a.agentsView != nil {
+			for _, ag := range a.agentsView.Agents() {
+				if ag.Location != "remote" && ag.SessionID != "" {
+					localIDs[ag.SessionID] = true
+				}
+			}
+		}
+		for _, convID := range a.otelStore.ConversationIDs() {
+			if localIDs[convID] {
+				continue
+			}
+			root := a.otelStore.GetByConversation(convID)
+			if root == nil {
+				continue
+			}
+			turns := aimuxotel.SpansToTurns(root)
+			if len(turns) > 0 {
+				return turns, nil
+			}
+		}
 
 		return nil, nil
 	}
@@ -2084,6 +2170,20 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		return a.openK8sSession(selected)
 	}
 
+	// Remote sandbox sessions: re-enter the tmux session.
+	// Guard against racing an in-flight launch: while a remote launch is
+	// still setting up (splitLoading), the sandbox already shows up as a
+	// discovered agent. Opening it here would create a second tmux session
+	// that competes with the launch's session, and the two stomp each other
+	// (orphaned backends, killed sessions, "no current target" on keys).
+	if selected.Location == "remote" {
+		if a.splitLoading {
+			a.statusHint = "Sandbox is still launching, please wait..."
+			return a, nil
+		}
+		return a.openRemoteSession(selected)
+	}
+
 	p := a.providerFor(selected.ProviderName)
 	if p == nil {
 		a.statusHint = "No provider for " + selected.ProviderName
@@ -2296,6 +2396,93 @@ func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	a.splitMode = false
 	a.layout.SetZoomed(true)
 	return a, teaCmd
+}
+
+// openRemoteSession re-enters a remote sandbox by opening a fresh
+// "openshell sandbox connect" PTY (no tmux). The sandbox is a gateway
+// resource that persists across connects, so a new connection reattaches to
+// the same sandbox each time.
+func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
+	rightW := a.width * 60 / 100
+	a.sessionView.SetSize(rightW, a.height)
+
+	contentH := a.height - 2
+	if contentH < 1 {
+		contentH = 24
+	}
+	contentW := rightW
+	if contentW < 1 {
+		contentW = 80
+	}
+
+	sandboxName := selected.SandboxName
+	if sandboxName == "" {
+		sandboxName = selected.Name
+	}
+
+	backend, err := terminal.NewOpenShellExec(sandboxName, "", false, contentW, contentH)
+	if err != nil {
+		debuglog.Log("remote session: openshell connect FAILED for %s: %v", sandboxName, err)
+		a.statusHint = fmt.Sprintf("Cannot connect to %s: %v", selected.Name, err)
+		return a, nil
+	}
+	debuglog.Log("remote session: connected to sandbox %s", sandboxName)
+
+	teaCmd, err := a.sessionView.Open(selected, backend)
+	if err != nil {
+		a.statusHint = fmt.Sprintf("Error: %v", err)
+		return a, nil
+	}
+
+	// Reattaching to a possibly-running full-screen agent leaves a stale
+	// screen; nudge a redraw once the reconnect settles.
+	go nudgeRedraw(backend, contentW, contentH)
+
+	// Set up split view with trace pane on the left
+	leftW := a.width - rightW - 1
+	a.splitLaunchTime = time.Now()
+	a.evalSessionID = selected.SessionID
+
+	// Use OTEL parser for remote sessions (no local session file)
+	remoteParser := a.parserForRemote(selected.SessionID)
+	a.splitTrace = views.NewLogsView(0, "", remoteParser)
+	a.splitTrace.SetSize(leftW, a.height-1)
+
+	a.zoomed = true
+	a.splitMode = true
+	a.splitFocus = "session"
+	a.splitLoading = true
+	a.layout.SetZoomed(true)
+	a.statusHint = fmt.Sprintf("Attached to %s", selected.Name)
+	return a, teaCmd
+}
+
+// sendAgentCommand waits briefly for the sandbox shell to be ready, then types
+// the agent command (e.g. "claude") into the PTY. Runs in its own goroutine so
+// the TUI stays responsive while the connection establishes.
+func sendAgentCommand(backend terminal.SessionBackend, provider string) {
+	time.Sleep(3 * time.Second)
+	if _, err := backend.Write([]byte(provider + "\n")); err != nil {
+		debuglog.Log("remote: failed to send agent command %q: %v", provider, err)
+		return
+	}
+	debuglog.Log("remote: sent agent command %q", provider)
+}
+
+// nudgeRedraw forces a full repaint of a full-screen TUI (e.g. claude) that is
+// being reattached to after a reconnect. Reattaching to a running TUI leaves a
+// stale/garbled screen until the app receives a window-size change; toggling
+// the PTY size by one column and back delivers two SIGWINCHs that trigger a
+// clean redraw. Runs in its own goroutine after the connection settles.
+func nudgeRedraw(backend terminal.SessionBackend, cols, rows int) {
+	if cols < 2 || rows < 1 {
+		return
+	}
+	time.Sleep(1500 * time.Millisecond)
+	_ = backend.Resize(cols-1, rows)
+	time.Sleep(150 * time.Millisecond)
+	_ = backend.Resize(cols, rows)
+	debuglog.Log("remote: sent redraw nudge (%dx%d)", cols, rows)
 }
 
 // providerFor returns the full provider.Provider whose Name() matches, or nil.

@@ -1027,3 +1027,156 @@ func TestAgentForLogsView_NilLogsView(t *testing.T) {
 		t.Errorf("expected nil, got agent")
 	}
 }
+
+// TestParserForRemote_DirectLookup verifies that parserForRemote returns
+// turns when the aimux.session_id alias exists in the OTEL store.
+func TestParserForRemote_DirectLookup(t *testing.T) {
+	store := aimuxotel.NewSpanStore()
+
+	// Add a root span under Claude's session.id
+	root := &aimuxotel.Span{
+		SpanID:  "root-1",
+		TraceID: "claude-uuid-abc",
+		Name:    "claude_code.user_prompt",
+		Attrs: map[string]any{
+			"gen_ai.conversation.id": "claude-uuid-abc",
+			"gen_ai.input.messages":  "remote prompt",
+			"prompt.id":             "p1",
+			"aimux.session_id":      "aimux-remote-claude-12345",
+		},
+		Children: []*aimuxotel.Span{
+			{
+				SpanID: "api-1",
+				Name:   "claude_code.api_request",
+				Attrs: map[string]any{
+					"gen_ai.request.model":      "claude-sonnet-4-6",
+					"gen_ai.usage.input_tokens": int64(200),
+					"prompt.id":                "p1",
+				},
+			},
+		},
+	}
+	store.Add(root)
+
+	app := App{
+		otelStore:  store,
+		agentsView: views.NewAgentsView(),
+	}
+
+	parser := app.parserForRemote("aimux-remote-claude-12345")
+	turns, err := parser("")
+	if err != nil {
+		t.Fatalf("parser error: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn via direct lookup, got %d", len(turns))
+	}
+	if turns[0].UserLines[0] != "remote prompt" {
+		t.Errorf("UserLines = %v, want [remote prompt]", turns[0].UserLines)
+	}
+}
+
+// TestParserForRemote_FallbackFindsRemote verifies that when
+// aimux.session_id is NOT in the span attributes (Claude SDK didn't
+// forward it), the fallback scan finds the remote session's data.
+func TestParserForRemote_FallbackFindsRemote(t *testing.T) {
+	store := aimuxotel.NewSpanStore()
+
+	// Add spans under Claude's own session.id (no aimux.session_id)
+	root := &aimuxotel.Span{
+		SpanID:  "root-1",
+		TraceID: "claude-uuid-xyz",
+		Name:    "claude_code.user_prompt",
+		Attrs: map[string]any{
+			"gen_ai.conversation.id": "claude-uuid-xyz",
+			"gen_ai.input.messages":  "remote fallback",
+			"prompt.id":             "p1",
+		},
+		Children: []*aimuxotel.Span{
+			{
+				SpanID: "api-1",
+				Name:   "claude_code.api_request",
+				Attrs: map[string]any{
+					"gen_ai.request.model":      "claude-sonnet-4-6",
+					"gen_ai.usage.input_tokens": int64(100),
+					"prompt.id":                "p1",
+				},
+			},
+		},
+	}
+	store.Add(root)
+
+	agentsView := views.NewAgentsView()
+	agentsView.SetAgents([]agent.Agent{
+		{SessionID: "local-session-111", ProviderName: "claude", Location: ""},
+	})
+
+	app := App{
+		otelStore:  store,
+		agentsView: agentsView,
+	}
+
+	// Direct lookup for our generated ID will fail (no alias)
+	parser := app.parserForRemote("aimux-remote-claude-99999")
+	turns, err := parser("")
+	if err != nil {
+		t.Fatalf("parser error: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn via fallback, got %d", len(turns))
+	}
+	if turns[0].UserLines[0] != "remote fallback" {
+		t.Errorf("UserLines = %v, want [remote fallback]", turns[0].UserLines)
+	}
+}
+
+// TestParserForRemote_FallbackSkipsLocal verifies that the fallback scan
+// excludes conversations matching known local agent session IDs.
+func TestParserForRemote_FallbackSkipsLocal(t *testing.T) {
+	store := aimuxotel.NewSpanStore()
+
+	// Add LOCAL session data to the OTEL store
+	localRoot := &aimuxotel.Span{
+		SpanID:  "local-root",
+		TraceID: "local-session-aaa",
+		Name:    "claude_code.user_prompt",
+		Attrs: map[string]any{
+			"gen_ai.conversation.id": "local-session-aaa",
+			"gen_ai.input.messages":  "local prompt",
+			"prompt.id":             "p-local",
+		},
+		Children: []*aimuxotel.Span{
+			{
+				SpanID: "local-api",
+				Name:   "claude_code.api_request",
+				Attrs: map[string]any{
+					"gen_ai.request.model":      "claude-opus-4-6",
+					"gen_ai.usage.input_tokens": int64(500),
+					"prompt.id":                "p-local",
+				},
+			},
+		},
+	}
+	store.Add(localRoot)
+
+	// Register the local session in agents view
+	agentsView := views.NewAgentsView()
+	agentsView.SetAgents([]agent.Agent{
+		{SessionID: "local-session-aaa", ProviderName: "claude", Location: ""},
+	})
+
+	app := App{
+		otelStore:  store,
+		agentsView: agentsView,
+	}
+
+	// Fallback should skip the local session and return nothing
+	parser := app.parserForRemote("aimux-remote-claude-nonexistent")
+	turns, err := parser("")
+	if err != nil {
+		t.Fatalf("parser error: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Errorf("expected 0 turns (local session should be excluded), got %d", len(turns))
+	}
+}

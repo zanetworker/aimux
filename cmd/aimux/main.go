@@ -352,7 +352,8 @@ func createWebServer(port int) *web.Server {
 				return spawn.LaunchResult{}, err
 			}
 			return spawn.LaunchResult{
-				TmuxSession: result.TmuxSession,
+				SandboxName:   result.SandboxName,
+				OTELSessionID: result.OTELSessionID,
 			}, nil
 		} else if opts.Runtime == "container" {
 			cOpts := opts.ContainerOpts
