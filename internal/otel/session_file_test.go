@@ -5,10 +5,11 @@ import (
 )
 
 func TestParseSessionJSONL_UserAndAssistant(t *testing.T) {
+	// Real Claude Code format: user has promptId, assistant does NOT
 	data := []byte(`{"type":"user","message":{"role":"user","content":"hello"},"promptId":"p1","sessionId":"s1"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]},"promptId":"p1","sessionId":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]},"sessionId":"s1"}
 {"type":"user","message":{"role":"user","content":"what is 2+2?"},"promptId":"p2","sessionId":"s1"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"2+2 is 4."}]},"promptId":"p2","sessionId":"s1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"2+2 is 4."}]},"sessionId":"s1"}
 `)
 	replies := ParseSessionReplies(data)
 	if len(replies) != 2 {
@@ -23,7 +24,8 @@ func TestParseSessionJSONL_UserAndAssistant(t *testing.T) {
 }
 
 func TestParseSessionJSONL_MultiBlock(t *testing.T) {
-	data := []byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"let me think"},{"type":"text","text":"First part."},{"type":"text","text":"Second part."}]},"promptId":"p1"}
+	data := []byte(`{"type":"user","message":{"role":"user","content":"test"},"promptId":"p1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"let me think"},{"type":"text","text":"First part."},{"type":"text","text":"Second part."}]}}
 `)
 	replies := ParseSessionReplies(data)
 	if replies["p1"] != "First part.\nSecond part." {
