@@ -1114,7 +1114,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.splitLaunchTime = time.Now()
 		a.evalSessionID = result.OTELSessionID
 
-		remoteParser := a.parserForRemote(result.OTELSessionID)
+		remoteParser := a.parserForRemote(result.OTELSessionID, result.SandboxName)
 		a.splitTrace = views.NewLogsView(0, "", remoteParser)
 		a.splitTrace.SetSize(leftW, a.height-1)
 
@@ -1886,10 +1886,22 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 // using a known session ID. The session ID is injected into the sandbox
 // as OTEL_RESOURCE_ATTRIBUTES=aimux.session_id=<id> at creation time,
 // so the OTEL store can index spans by this ID.
-func (a App) parserForRemote(otelSessionID string) views.TraceParser {
+func (a App) parserForRemote(otelSessionID, sandboxName string) views.TraceParser {
 	return func(_ string) ([]trace.Turn, error) {
 		if a.otelStore == nil || !a.otelStore.HasData() {
 			return nil, nil
+		}
+
+		// Enrich turns with assistant replies from the sandbox's session file.
+		// Claude Code's OTEL telemetry does not emit model responses, but the
+		// session JSONL file contains the full transcript. This is a lazy
+		// fetch: nil if the file doesn't exist or the sandbox is gone.
+		enrich := func(turns []trace.Turn) []trace.Turn {
+			if len(turns) > 0 && sandboxName != "" {
+				replies := aimuxotel.FetchSessionReplies(sandboxName, otelSessionID)
+				aimuxotel.EnrichTurnsWithReplies(turns, replies)
+			}
+			return turns
 		}
 
 		// Direct lookup by our injected session ID
@@ -1897,7 +1909,7 @@ func (a App) parserForRemote(otelSessionID string) views.TraceParser {
 			if root := a.otelStore.GetByConversation(otelSessionID); root != nil {
 				turns := aimuxotel.SpansToTurns(root)
 				if len(turns) > 0 {
-					return turns, nil
+					return enrich(turns), nil
 				}
 			}
 		}
@@ -1926,7 +1938,7 @@ func (a App) parserForRemote(otelSessionID string) views.TraceParser {
 			}
 			turns := aimuxotel.SpansToTurns(root)
 			if len(turns) > 0 {
-				return turns, nil
+				return enrich(turns), nil
 			}
 		}
 
@@ -2478,7 +2490,7 @@ func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	a.evalSessionID = sessionID
 
 	// Use OTEL parser for remote sessions (no local session file)
-	remoteParser := a.parserForRemote(sessionID)
+	remoteParser := a.parserForRemote(sessionID, sandboxName)
 	a.splitTrace = views.NewLogsView(0, "", remoteParser)
 	a.splitTrace.SetSize(leftW, a.height-1)
 

@@ -1063,7 +1063,7 @@ func TestParserForRemote_DirectLookup(t *testing.T) {
 		agentsView: views.NewAgentsView(),
 	}
 
-	parser := app.parserForRemote("aimux-remote-claude-12345")
+	parser := app.parserForRemote("aimux-remote-claude-12345", "")
 	turns, err := parser("")
 	if err != nil {
 		t.Fatalf("parser error: %v", err)
@@ -1117,7 +1117,7 @@ func TestParserForRemote_FallbackFindsRemote(t *testing.T) {
 	}
 
 	// Direct lookup for our generated ID will fail (no alias)
-	parser := app.parserForRemote("aimux-remote-claude-99999")
+	parser := app.parserForRemote("aimux-remote-claude-99999", "")
 	turns, err := parser("")
 	if err != nil {
 		t.Fatalf("parser error: %v", err)
@@ -1171,7 +1171,7 @@ func TestParserForRemote_FallbackSkipsLocal(t *testing.T) {
 	}
 
 	// Fallback should skip the local session and return nothing
-	parser := app.parserForRemote("aimux-remote-claude-nonexistent")
+	parser := app.parserForRemote("aimux-remote-claude-nonexistent", "")
 	turns, err := parser("")
 	if err != nil {
 		t.Fatalf("parser error: %v", err)

@@ -93,6 +93,7 @@ func logEventsToTurns(root *Span) []trace.Turn {
 		if len(turn.UserLines) > 0 || len(turn.Actions) > 0 || turn.TokensIn > 0 {
 			turnNum++
 			turn.Number = turnNum
+			turn.PromptID = g.promptID
 			turns = append(turns, turn)
 		}
 	}
