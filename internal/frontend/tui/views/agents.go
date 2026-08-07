@@ -452,6 +452,11 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	}
 	nameCol += badgeStr
 
+	// Clamp nameCol to colName visual width so subsequent columns align.
+	if lipgloss.Width(nameCol) > colName {
+		nameCol = lipgloss.NewStyle().MaxWidth(colName).Render(nameCol)
+	}
+
 	costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
 
 	loc := agentLocation(a)

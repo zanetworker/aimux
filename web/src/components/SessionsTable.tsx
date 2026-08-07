@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { formatAge } from '../utils';
 
 export interface HistorySession {
   id: string;
@@ -50,15 +51,6 @@ function shortProject(path: string): string {
   return '(global)';
 }
 
-function formatAge(dateStr: string): string {
-  if (!dateStr) return '?';
-  const d = Date.now() - new Date(dateStr).getTime();
-  if (d < 60_000) return 'now';
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m ago`;
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h ago`;
-  if (d < 30 * 86_400_000) return `${Math.floor(d / 86_400_000)}d ago`;
-  return `${Math.floor(d / (30 * 86_400_000))}mo ago`;
-}
 
 function formatK(n: number): string {
   if (n < 1000) return String(n);
@@ -261,8 +253,8 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     let cmp = 0;
     switch (sortField) {
       case 'lastActive': {
-        const at = a.lastActive ? new Date(a.lastActive).getTime() : 0;
-        const bt = b.lastActive ? new Date(b.lastActive).getTime() : 0;
+        const at = (a.startTime || a.lastActive) ? new Date(a.startTime || a.lastActive).getTime() : 0;
+        const bt = (b.startTime || b.lastActive) ? new Date(b.startTime || b.lastActive).getTime() : 0;
         cmp = at - bt;
         break;
       }
@@ -491,7 +483,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                   onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
                 >
                   <td style={{ padding: '12px 12px', color: 'var(--fg-3)', fontSize: 13, whiteSpace: 'nowrap' }}>
-                    {formatAge(s.lastActive)}
+                    {formatAge(s.startTime || s.lastActive)}
                   </td>
                   <td style={{ padding: '12px 12px', fontSize: 13 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
