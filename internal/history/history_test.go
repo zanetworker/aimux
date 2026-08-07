@@ -1068,3 +1068,44 @@ func TestParseSessionLine_ExtractsLastAction(t *testing.T) {
 		t.Errorf("LastAction = %q, want %q", sessions[0].LastAction, "Ed config.go")
 	}
 }
+
+func TestScanSession_FilesystemFallback_NoTimestamps(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "no-ts.jsonl")
+	_ = os.WriteFile(filePath, []byte(`{"type":"permission-mode","permissionMode":"default"}
+{"type":"last-prompt"}
+`), 0o600)
+
+	s, err := scanSession("no-ts", filePath, "/test")
+	if err != nil {
+		t.Fatalf("scanSession: %v", err)
+	}
+	if s.StartTime.IsZero() {
+		t.Error("StartTime should not be zero; filesystem fallback should have filled it")
+	}
+	if s.LastActive.IsZero() {
+		t.Error("LastActive should not be zero; filesystem fallback should have filled it")
+	}
+}
+
+func TestScanSession_TimestampsFromJSONL(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "with-ts.jsonl")
+	start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 1, 11, 30, 0, 0, time.UTC)
+	data := `{"type":"user","timestamp":"` + start.Format(time.RFC3339) + `","message":{"role":"user","content":"hello"}}
+{"type":"assistant","timestamp":"` + end.Format(time.RFC3339) + `","message":{"role":"assistant","content":"hi"}}
+`
+	_ = os.WriteFile(filePath, []byte(data), 0o600)
+
+	s, err := scanSession("with-ts", filePath, "/test")
+	if err != nil {
+		t.Fatalf("scanSession: %v", err)
+	}
+	if !s.StartTime.Equal(start) {
+		t.Errorf("StartTime = %v, want %v", s.StartTime, start)
+	}
+	if !s.LastActive.Equal(end) {
+		t.Errorf("LastActive = %v, want %v", s.LastActive, end)
+	}
+}

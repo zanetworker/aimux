@@ -105,6 +105,58 @@ func TestSessionsCmd_Limit(t *testing.T) {
 	}
 }
 
+func TestSessionsCmd_AllFlag(t *testing.T) {
+	sessions := fakeSessions()
+	var capturedDir string
+	c := newSessionsCmd(
+		func(opts history.DiscoverOpts, dir string) ([]history.Session, error) {
+			capturedDir = opts.Dir
+			return sessions, nil
+		},
+		nil, nil, nil,
+	)
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetErr(&bytes.Buffer{})
+	jsonOutput = true
+	defer func() { jsonOutput = false }()
+	rootCmd.SetArgs([]string{"sessions", "--list", "--all"})
+	rootCmd.AddCommand(c)
+	defer rootCmd.RemoveCommand(c)
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedDir != "" {
+		t.Errorf("--all should set dir to empty, got %q", capturedDir)
+	}
+}
+
+func TestSessionsCmd_DefaultScopesToCWD(t *testing.T) {
+	sessions := fakeSessions()
+	var capturedDir string
+	c := newSessionsCmd(
+		func(opts history.DiscoverOpts, dir string) ([]history.Session, error) {
+			capturedDir = opts.Dir
+			return sessions, nil
+		},
+		nil, nil, nil,
+	)
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetErr(&bytes.Buffer{})
+	jsonOutput = true
+	defer func() { jsonOutput = false }()
+	rootCmd.SetArgs([]string{"sessions", "--list"})
+	rootCmd.AddCommand(c)
+	defer rootCmd.RemoveCommand(c)
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedDir == "" {
+		t.Error("without --all, dir should default to CWD, got empty")
+	}
+}
+
 func TestSessionsCmd_Export(t *testing.T) {
 	var stdout bytes.Buffer
 	sessions := fakeSessions()

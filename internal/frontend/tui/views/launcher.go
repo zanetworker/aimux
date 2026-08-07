@@ -126,6 +126,7 @@ type LauncherView struct {
 	otelAvailable bool // true if OTEL receiver is running
 	optionField   int  // 0=model, 1=permissions, 2=runtime, 3=execution, 4=shell, 5=session, 6=otel
 	providerOpts map[string]ProviderOptions
+	defaultMode  string // configured default mode (persists across provider switches)
 
 	// Resume step
 	resumeSessions []history.Session // recent sessions for selected directory
@@ -149,6 +150,7 @@ type LauncherConfig struct {
 	DefaultExecution      string // "local" or "hybrid"
 	DefaultShell          string // e.g. "/bin/zsh"
 	DefaultSessionManager string // "tmux" or "direct"
+	DefaultMode           string // "default", "bypass", "plan", "acceptEdits", "dontAsk"
 }
 
 // NewLauncherView creates a new launcher overlay. providerOpts maps provider
@@ -221,6 +223,16 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		}
 	}
 
+	modeCursor := 0
+	if lCfg.DefaultMode != "" {
+		for i, m := range modes {
+			if m == lCfg.DefaultMode {
+				modeCursor = i
+				break
+			}
+		}
+	}
+
 	return &LauncherView{
 		state:            statePickProvider,
 		providers:        providers,
@@ -228,6 +240,7 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		browsePath:       home,
 		models:           models,
 		modes:            modes,
+		modeCursor:       modeCursor,
 		runtimes:         runtimes,
 		runtimeCursor:    runtimeCursor,
 		executions:       executions,
@@ -239,6 +252,7 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		otelAvailable:    otelAvailable,
 		otelEnabled:      otelAvailable,
 		providerOpts:     providerOpts,
+		defaultMode:      lCfg.DefaultMode,
 	}
 }
 
@@ -315,6 +329,14 @@ func (l *LauncherView) updateProvider(key string) tea.Cmd {
 		}
 		l.modelCursor = 0
 		l.modeCursor = 0
+		if l.defaultMode != "" {
+			for i, m := range l.modes {
+				if m == l.defaultMode {
+					l.modeCursor = i
+					break
+				}
+			}
+		}
 		l.state = statePickDirectory
 		if l.browseMode {
 			l.loadBrowseDir()

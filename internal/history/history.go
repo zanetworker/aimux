@@ -256,6 +256,19 @@ func scanSession(id, filePath, project string) (Session, error) {
 		return Session{}, fmt.Errorf("scan session file %s: %w", filePath, err)
 	}
 
+	// Filesystem fallback: if JSONL entries had no timestamps, use file mtime/ctime.
+	if s.StartTime.IsZero() || s.LastActive.IsZero() {
+		if info, err := os.Stat(filePath); err == nil {
+			mtime := info.ModTime()
+			if s.LastActive.IsZero() {
+				s.LastActive = mtime
+			}
+			if s.StartTime.IsZero() {
+				s.StartTime = mtime
+			}
+		}
+	}
+
 	// Apply subagent detection logic
 	if humanTurnCount == 0 {
 		if s.PermissionMode == "bypassPermissions" {
