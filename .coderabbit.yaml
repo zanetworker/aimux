@@ -1,0 +1,65 @@
+language: en-US
+tone_instructions: >-
+  Be direct and technical. Focus on correctness, security, and Go idioms.
+  Flag missing tests, separation-of-concern violations (core packages importing
+  bubbletea/lipgloss), and provider parity gaps (Claude/Codex/Gemini).
+early_access: true
+
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  collapse_walkthrough: false
+  sequence_diagrams: true
+  labeling_instructions:
+    - label: "needs-tests"
+      instructions: "Apply when new code lacks corresponding test coverage."
+    - label: "architecture"
+      instructions: "Apply when a change violates the controller-first or separation-of-concerns rules."
+  path_instructions:
+    - path: "internal/controller/**"
+      instructions: >-
+        Controller layer is UI-agnostic. Must NOT import bubbletea, lipgloss,
+        or net/http. Flag any such import as a blocking issue.
+    - path: "internal/frontend/tui/**"
+      instructions: >-
+        TUI is a thin adapter. Business logic belongs in controller/ or other
+        core packages. Flag inline logic that doesn't reference tea.Model,
+        tea.Cmd, or lipgloss.
+    - path: "internal/provider/**"
+      instructions: >-
+        Each provider is self-contained. No type assertions to concrete
+        providers outside their own file. Changes to one provider should be
+        checked against all three (Claude, Codex, Gemini).
+    - path: "internal/frontend/web/**"
+      instructions: >-
+        Every new API endpoint must have a handler test in handlers_test.go
+        AND a smoke test entry in smoke_test.go.
+    - path: "internal/runtime/**"
+      instructions: >-
+        Runtime layer uses optional-capability pattern. Implementations must
+        satisfy the Runtime interface. PolicyEnforcer is optional. No direct
+        provider imports.
+    - path: "docs-site/**"
+      instructions: >-
+        Documentation site. Check for broken links and consistent formatting.
+        New features, config options, keybindings, or API endpoints must have
+        corresponding doc updates.
+  path_filters:
+    - "!dist/**"
+    - "!vendor/**"
+    - "!docs-site/node_modules/**"
+    - "!docs-site/dist/**"
+    - "!**/*.sum"
+    - "!assets/**"
+    - "!**/*.png"
+    - "!**/*.gif"
+    - "!**/*.mp4"
+
+chat:
+  auto_reply: true
