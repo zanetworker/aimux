@@ -125,10 +125,3 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
-
-func TestPodPhase_NonexistentPod(t *testing.T) {
-	_, err := podPhase("nonexistent-pod-xyz", "default")
-	if err == nil {
-		t.Log("podPhase returned nil error — pod may actually exist")
-	}
-}
