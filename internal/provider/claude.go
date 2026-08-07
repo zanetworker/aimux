@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/discovery"
@@ -659,16 +660,7 @@ func (c *Claude) SpawnCommand(dir, model, mode string) *exec.Cmd {
 		args = append(args, "--model", model)
 	}
 
-	switch mode {
-	case "bypass":
-		args = append(args, "--dangerously-skip-permissions")
-	case "plan":
-		args = append(args, "--permission-mode", "plan")
-	case "acceptEdits":
-		args = append(args, "--permission-mode", "acceptEdits")
-	case "dontAsk":
-		args = append(args, "--permission-mode", "dontAsk")
-	}
+	args = append(args, config.ModeFlags(mode)...)
 
 	cmd := exec.Command(bin, args...) // #nosec G204
 	cmd.Dir = dir

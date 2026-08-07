@@ -14,10 +14,11 @@ import (
 
 // TitleConfig controls LLM-based session title generation.
 type TitleConfig struct {
-	Enabled    bool   // generate titles automatically
-	Model      string // "flash" (default), "haiku", "sonnet", "opus"
-	APIKey     string // API key (from env or config)
-	Regenerate bool   // regenerate titles even if they already exist
+	Enabled    bool      // generate titles automatically
+	Model      string    // "flash" (default), "haiku", "sonnet", "opus"
+	APIKey     string    // API key (from env or config)
+	Regenerate bool      // regenerate titles even if they already exist
+	Output     io.Writer // progress output destination (nil defaults to os.Stderr)
 }
 
 // DefaultTitleConfig returns sensible defaults for title generation.
@@ -349,6 +350,11 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 		}
 	}
 
+	out := cfg.Output
+	if out == nil {
+		out = os.Stderr
+	}
+
 	count := 0
 	for _, s := range sessions {
 		if s.Title != "" && !cfg.Regenerate {
@@ -365,7 +371,7 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 		if len(prompt) > 40 {
 			prompt = prompt[:37] + "..."
 		}
-		fmt.Fprintf(os.Stderr, "  [%d/%d] %s %s... ", count+1, total, s.ID[:8], prompt)
+		_, _ = fmt.Fprintf(out, "  [%d/%d] %s %s... ", count+1, total, s.ID[:8], prompt)
 
 		title, err := GenerateTitle(s, cfg)
 		if err != nil {
@@ -373,10 +379,10 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 			// but stop on auth/network errors
 			errStr := err.Error()
 			if strings.Contains(errStr, "API key") {
-				fmt.Fprintln(os.Stderr, "FAILED (auth)")
+				_, _ = fmt.Fprintln(out, "FAILED (auth)")
 				return count, fmt.Errorf("session %s: %w", s.ID, err)
 			}
-			fmt.Fprintf(os.Stderr, "skipped (%v)\n", err)
+			_, _ = fmt.Fprintf(out, "skipped (%v)\n", err)
 			continue
 		}
 
@@ -387,7 +393,7 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 			return count, fmt.Errorf("save meta for %s: %w", s.ID, err)
 		}
 		count++
-		fmt.Fprintf(os.Stderr, "→ %q\n", title)
+		_, _ = fmt.Fprintf(out, "→ %q\n", title)
 	}
 	return count, nil
 }

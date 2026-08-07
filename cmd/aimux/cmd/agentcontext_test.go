@@ -13,7 +13,7 @@ func TestAgentContextCmd_Output(t *testing.T) {
 
 	// Register a few commands so the tree has content
 	agentsCmd := newAgentsCmd(func() ([]agent.Agent, error) { return nil, nil })
-	spawnCmd := newSpawnCmd([]string{"claude", "codex", "gemini"}, nil)
+	spawnCmd := newSpawnCmd([]string{"claude", "codex", "gemini"}, nil, "")
 	versionCmd := newVersionCmd()
 	rootCmd.AddCommand(agentsCmd)
 	rootCmd.AddCommand(spawnCmd)
@@ -109,7 +109,7 @@ func TestAgentContextCmd_ExcludesHelp(t *testing.T) {
 func TestAgentContextCmd_FlagTypes(t *testing.T) {
 	var stdout bytes.Buffer
 
-	spawnCmd := newSpawnCmd([]string{"claude"}, nil)
+	spawnCmd := newSpawnCmd([]string{"claude"}, nil, "")
 	rootCmd.AddCommand(spawnCmd)
 	defer rootCmd.RemoveCommand(spawnCmd)
 

@@ -54,3 +54,9 @@ upload_sheets.py
 # Environment files (may contain secrets)
 .env
 .env.*
+
+# Generated tool artifacts
+.clawpatch/
+.codex/
+AGENTS.md
+clawpatch-report.md

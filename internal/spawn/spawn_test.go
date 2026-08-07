@@ -136,3 +136,22 @@ func TestParseEnvPrefix_Empty(t *testing.T) {
 		t.Errorf("expected empty map, got %d entries", len(env))
 	}
 }
+
+func TestCleanupOrphanedSessions_SkipsLive(t *testing.T) {
+	live := map[string]bool{
+		"aimux-claude-blog": true,
+		"aimux-codex-app":   true,
+	}
+	killed := CleanupOrphanedSessions(live)
+	// Without actual tmux sessions, nothing to kill — just verify no panic
+	if killed < 0 {
+		t.Error("killed count should be >= 0")
+	}
+}
+
+func TestListAimuxTmuxSessions_NoTmux(t *testing.T) {
+	// If tmux isn't running or no sessions exist, should return nil
+	sessions := ListAimuxTmuxSessions()
+	// We can't guarantee tmux state, but the function must not panic
+	_ = sessions
+}

@@ -120,6 +120,15 @@ export default function App() {
     ? agents.find(a => a.SessionID === selectedId || String(a.PID) === selectedId)
     : undefined;
 
+  // When the selected agent disappears (exited/killed), deselect and close panel
+  useEffect(() => {
+    if (selectedId && activeTab === 'agents' && agents.length > 0 && !selectedAgent && !pendingLaunch) {
+      setSelectedId(null);
+      setSessionAgent(null);
+      setPanelFullscreen(false);
+    }
+  }, [selectedId, activeTab, agents, selectedAgent, pendingLaunch]);
+
   const panelAgent = selectedAgent || sessionAgent;
 
   const handleContentSearch = useCallback(async (query: string) => {

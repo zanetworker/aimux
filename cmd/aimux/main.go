@@ -105,6 +105,7 @@ func main() {
 			return createWebServer(port).Start()
 		},
 		SkipPermissions: cfg.Resume.SkipPermissions,
+		DefaultMode:     cfg.DefaultMode,
 		Providers:       []string{"claude", "codex", "gemini"},
 		ProfileStore:    profileStore,
 		TraceParsers: map[string]func(filePath string) ([]trace.Turn, error){

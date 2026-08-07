@@ -137,9 +137,14 @@ func extractCodexCWD(path string) string {
 }
 
 // KillLocalAgent sends SIGTERM to the agent's process tree, waits 3 seconds,
-// then SIGKILL if still alive. Used by all local providers (Claude, Codex, Gemini).
+// then SIGKILL if still alive. Also kills the associated tmux session if one
+// exists. Used by all local providers (Claude, Codex, Gemini).
 // Remote providers (e.g., Kubernetes) should implement their own Kill method.
 func KillLocalAgent(a agent.Agent) error {
+	if a.TMuxSession != "" {
+		_ = exec.Command("tmux", "kill-session", "-t", a.TMuxSession).Run() // #nosec G204
+	}
+
 	pids := []int{a.PID}
 	if len(a.GroupPIDs) > 0 {
 		pids = a.GroupPIDs
