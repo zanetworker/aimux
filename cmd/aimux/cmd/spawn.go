@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/deliver"
 	"github.com/zanetworker/aimux/internal/spawn"
 )
 
 type spawnFn func(opts spawn.LaunchOpts) (pid int, tmuxSession string, err error)
 
-func newSpawnCmd(validProviders []string, spawnAgent spawnFn) *cobra.Command {
+func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string) *cobra.Command {
 	var dir, model, mode, prompt string
 	var runtime, execution, shell, sessionMgr string
 	var otel bool
@@ -45,6 +46,7 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn) *cobra.Command {
 			if dir == "" {
 				dir, _ = os.Getwd()
 			}
+			mode = controller.ResolveMode(mode, defaultMode)
 
 			if dryRun {
 				if jsonOutput {

@@ -40,6 +40,9 @@ type PTYOutputMsg struct {
 // PTYExitMsg signals that the PTY subprocess has exited.
 type PTYExitMsg struct{}
 
+// SessionTogglePermsMsg requests the app to restart the session with toggled permission mode.
+type SessionTogglePermsMsg struct{}
+
 // SessionView provides a full-screen interactive terminal view. It wraps a
 // session backend (direct PTY or tmux mirror) and a VT terminal emulator to
 // render output within the Bubble Tea TUI. The user interacts with the
@@ -52,6 +55,7 @@ type SessionView struct {
 	height   int
 	active   bool
 	dataCh   chan []byte // goroutine-based reader pushes data here
+	permMode string     // "bypass" or "default"; shown in status bar
 }
 
 // NewSessionView creates a new SessionView in an inactive state.
@@ -259,6 +263,16 @@ func (sv *SessionView) Agent() *agent.Agent {
 	return sv.agent
 }
 
+// SetPermMode sets the permission mode label shown in the status bar.
+func (sv *SessionView) SetPermMode(mode string) {
+	sv.permMode = mode
+}
+
+// PermMode returns the current permission mode.
+func (sv *SessionView) PermMode() string {
+	return sv.permMode
+}
+
 // TermView returns the underlying terminal view, or nil for DirectRenderer backends.
 func (sv *SessionView) TermView() *terminal.TermView {
 	return sv.termView
@@ -354,15 +368,29 @@ func (sv *SessionView) renderStatusBar() string {
 		mode = sessionModeStyle.Render(" INTERACTIVE ")
 	}
 
-	hint := sessionHintStyle.Render(" Shift+↑↓:scroll  PgUp/PgDn:page  Ctrl+f:split  Ctrl+]:exit ")
+	// Permission mode badge
+	var permBadge string
+	if sv.permMode == "bypass" {
+		permBadge = lipgloss.NewStyle().Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#B91C1C")).
+			Render(" SKIP PERMS ")
+	} else {
+		permBadge = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#1E3A5F")).
+			Render(" SAFE ")
+	}
 
-	gap := sv.width - lipgloss.Width(badge) - lipgloss.Width(mode) - lipgloss.Width(hint)
+	hint := sessionHintStyle.Render(" Ctrl+b:toggle-perms  Shift+↑↓:scroll  Ctrl+f:split  Ctrl+]:exit ")
+
+	gap := sv.width - lipgloss.Width(badge) - lipgloss.Width(mode) - lipgloss.Width(permBadge) - lipgloss.Width(hint)
 	if gap < 0 {
 		gap = 0
 	}
 	fill := sessionStatusStyle.Render(strings.Repeat(" ", gap))
 
-	return badge + mode + fill + hint
+	return badge + mode + " " + permBadge + fill + hint
 }
 
 // readPTY returns a tea.Cmd that reads the next chunk from the PTY. When the

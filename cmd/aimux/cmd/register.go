@@ -21,6 +21,7 @@ type Deps struct {
 	Providers        []string
 	ProfileStore     *profile.Store
 	SkipPermissions  bool
+	DefaultMode      string
 	FeedbackPath     string
 	TraceParsers     map[string]func(filePath string) ([]trace.Turn, error)
 }
@@ -31,7 +32,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newAgentsCmd(d.Discover))
 	rootCmd.AddCommand(newSessionsCmd(d.DiscoverSessions, d.SearchContent, d.PickSession, d.ResumeExec))
 	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec, d.SkipPermissions))
-	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent))
+	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent, d.DefaultMode))
 	rootCmd.AddCommand(newWebCmd(d.WebServer))
 	rootCmd.AddCommand(newAgentContextCmd(d.Providers))
 	if d.ProfileStore != nil {
@@ -39,6 +40,7 @@ func RegisterAll(d Deps) {
 	}
 	rootCmd.AddCommand(newFeedbackCmd(d.FeedbackPath))
 	rootCmd.AddCommand(newKillCmd(d.Discover))
+	rootCmd.AddCommand(newCollectCmd())
 
 	// Build trace parser map for export command, converting function types.
 	parsers := make(map[string]traceParserFn)

@@ -18,6 +18,7 @@ type Config struct {
 	Execution       string                    `yaml:"execution"`        // WHERE tools run: "local" or "hybrid" (default: local)
 	Shell           string                    `yaml:"shell"`            // WHICH shell: e.g. "/bin/zsh" (default: $SHELL)
 	SessionManager  string                    `yaml:"session_manager"`  // SESSION: "tmux" or "direct" (default: tmux)
+	DefaultMode     string                    `yaml:"default_mode"`     // PERMISSIONS: "default", "bypass", "plan", "acceptEdits", "dontAsk"
 	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
 	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
 	Resume          ResumeConfig              `yaml:"resume"`      // resume defaults
@@ -319,6 +320,23 @@ func (c Config) OTELEndpoint() string {
 		return ""
 	}
 	return fmt.Sprintf("http://localhost:%d", c.OTELReceiverPort())
+}
+
+// ModeFlags returns the CLI flags for a given permission mode.
+// Used by provider.SpawnCommand, controller.ResumeCommand, and CLI spawn.
+func ModeFlags(mode string) []string {
+	switch mode {
+	case "bypass":
+		return []string{"--dangerously-skip-permissions"}
+	case "plan":
+		return []string{"--permission-mode", "plan"}
+	case "acceptEdits":
+		return []string{"--permission-mode", "acceptEdits"}
+	case "dontAsk":
+		return []string{"--permission-mode", "dontAsk"}
+	default:
+		return nil
+	}
 }
 
 // IsProviderEnabled returns true if the named provider is enabled in the config.

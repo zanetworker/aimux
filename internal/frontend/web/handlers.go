@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -969,6 +970,7 @@ func (s *Server) handleGenerateTitles(w http.ResponseWriter, r *http.Request) {
 		Enabled: true,
 		Model:   s.cfg.Sessions.TitleModel,
 		APIKey:  s.cfg.Sessions.APIKey,
+		Output:  io.Discard,
 	}
 
 	count, err := history.GenerateTitles(sessions, cfg)

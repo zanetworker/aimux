@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/spawn"
 )
 
 func newKillCmd(discover discoverFunc) *cobra.Command {
@@ -41,12 +42,15 @@ func newKillCmd(discover discoverFunc) *cobra.Command {
 
 			action := controller.DetermineKillAction(*target)
 
+			if target.TMuxSession != "" {
+				spawn.KillTmuxSession(target.TMuxSession)
+			}
+
 			var killErr error
 			switch action.Type {
 			case controller.KillProcess:
 				killErr = syscall.Kill(target.PID, syscall.SIGTERM)
 			case controller.KillPod:
-				// Pod kills are logged but not executed from CLI (requires kubectl).
 				killErr = fmt.Errorf("pod kill not implemented in CLI; use kubectl delete pod %s -n %s", action.PodName, action.Namespace)
 			case controller.KillRemoveOnly:
 				// Session-only entry: nothing to kill.
