@@ -520,3 +520,29 @@ func TestSessionManagerFromFile(t *testing.T) {
 		t.Errorf("SessionManager = %q, want zellij", cfg.SessionManager)
 	}
 }
+
+func TestModeFlags(t *testing.T) {
+	tests := []struct {
+		mode string
+		want []string
+	}{
+		{"bypass", []string{"--dangerously-skip-permissions"}},
+		{"plan", []string{"--permission-mode", "plan"}},
+		{"acceptEdits", []string{"--permission-mode", "acceptEdits"}},
+		{"dontAsk", []string{"--permission-mode", "dontAsk"}},
+		{"default", nil},
+		{"", nil},
+	}
+	for _, tt := range tests {
+		got := ModeFlags(tt.mode)
+		if len(got) != len(tt.want) {
+			t.Errorf("ModeFlags(%q) = %v, want %v", tt.mode, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("ModeFlags(%q)[%d] = %q, want %q", tt.mode, i, got[i], tt.want[i])
+			}
+		}
+	}
+}

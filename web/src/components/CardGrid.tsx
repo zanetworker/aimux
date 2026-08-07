@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { Agent } from '../types';
 import type { ContentSearchResult } from '../App';
 import { AgentCard } from './AgentCard';
+import { formatAge } from '../utils';
 
 interface Props {
   agents: Agent[];
@@ -67,6 +68,9 @@ export function CardGrid({
   const handleKill = async (id: string) => {
     try {
       await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
+      if (selectedId === id) {
+        onSelect('');
+      }
     } catch { /* ignore */ }
   };
 
@@ -253,13 +257,7 @@ export function CardGrid({
                   const statusColors: Record<number, string> = { 0: 'var(--green)', 1: 'var(--fg-3)', 2: 'var(--orange)', 3: 'var(--accent)' };
                   const statusLabels: Record<number, string> = { 0: 'ACTIVE', 1: 'IDLE', 2: 'WAITING', 3: 'ERROR' };
                   const providerColors: Record<string, string> = { claude: 'var(--accent)', codex: 'var(--green)', gemini: 'var(--purple)' };
-                  const age = agent.LastActivity ? (() => {
-                    const ms = Date.now() - new Date(agent.LastActivity).getTime();
-                    if (ms < 60000) return `${Math.floor(ms/1000)}s ago`;
-                    if (ms < 3600000) return `${Math.floor(ms/60000)}m ago`;
-                    if (ms < 86400000) return `${Math.floor(ms/3600000)}h ago`;
-                    return `${Math.floor(ms/86400000)}d ago`;
-                  })() : '';
+                  const age = agent.LastActivity ? formatAge(agent.LastActivity) : '';
                   return (
                     <div key={id} role="listitem" onClick={() => onSelect(id)}
                       style={{

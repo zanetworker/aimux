@@ -233,3 +233,41 @@ func TmuxSessionName(provider, dir string) string {
 	base = strings.ReplaceAll(base, " ", "-")
 	return fmt.Sprintf("aimux-%s-%s", provider, base)
 }
+
+// ListAimuxTmuxSessions returns the names of all tmux sessions with the
+// "aimux-" prefix. Returns nil (not an error) when tmux is not installed
+// or no sessions exist.
+func ListAimuxTmuxSessions() []string {
+	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output() // #nosec G204
+	if err != nil {
+		return nil
+	}
+	var sessions []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.HasPrefix(line, "aimux-") {
+			sessions = append(sessions, line)
+		}
+	}
+	return sessions
+}
+
+// KillTmuxSession kills a single tmux session by name. No-op if the session
+// doesn't exist.
+func KillTmuxSession(name string) {
+	_ = exec.Command("tmux", "kill-session", "-t", name).Run() // #nosec G204
+}
+
+// CleanupOrphanedSessions kills aimux tmux sessions whose agent process is
+// no longer running. liveSessions is the set of tmux session names with a
+// known live agent. Any aimux-* session not in that set is killed.
+func CleanupOrphanedSessions(liveSessions map[string]bool) int {
+	killed := 0
+	for _, name := range ListAimuxTmuxSessions() {
+		if liveSessions[name] {
+			continue
+		}
+		KillTmuxSession(name)
+		killed++
+	}
+	return killed
+}
