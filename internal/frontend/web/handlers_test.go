@@ -11,6 +11,8 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/controller"
+	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -948,5 +950,91 @@ func TestHandleProviderHealth_DisabledProvider(t *testing.T) {
 		if p.Name == "claude" && !p.Enabled {
 			t.Error("claude should be enabled")
 		}
+	}
+}
+
+func TestHandleGetTrace_RemoteAgent(t *testing.T) {
+	otelStore := aimuxotel.NewSpanStore()
+	sessionStore := controller.NewSessionStore(t.TempDir())
+	sessionStore.Put("my-sandbox", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+
+	agents := []agent.Agent{
+		{
+			PID:          0,
+			SessionID:    "my-sandbox",
+			Name:         "my-sandbox",
+			SandboxName:  "my-sandbox",
+			Location:     "remote",
+			ProviderName: "claude",
+		},
+	}
+
+	s := NewServer(0)
+	s.SetDiscoverFunc(func() ([]agent.Agent, error) { return agents, nil })
+	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
+		return &provider.Claude{}
+	})
+	s.SetSessionStore(sessionStore)
+	s.SetOTELStore(otelStore)
+
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/agents/my-sandbox/trace")
+	if err != nil {
+		t.Fatalf("GET trace failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for remote agent trace, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Turns []map[string]any `json:"turns"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.Turns == nil {
+		t.Fatal("expected turns array, got nil")
+	}
+}
+
+func TestHandleGetTrace_LocalAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "local-session.jsonl")
+	_ = os.WriteFile(sessionFile, []byte(`{"type":"summary","session_id":"local-123"}`+"\n"), 0o600)
+
+	agents := []agent.Agent{
+		{
+			PID:          1234,
+			SessionID:    "local-123",
+			Name:         "aimux",
+			Location:     "local",
+			SessionFile:  sessionFile,
+			ProviderName: "claude",
+		},
+	}
+
+	s := NewServer(0)
+	s.SetDiscoverFunc(func() ([]agent.Agent, error) { return agents, nil })
+	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
+		return &provider.Claude{}
+	})
+
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/agents/local-123/trace")
+	if err != nil {
+		t.Fatalf("GET trace failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for local agent trace, got %d", resp.StatusCode)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
+	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/frontend/tui"
@@ -409,6 +410,10 @@ func createWebServer(port int) *web.Server {
 
 	s.SetController(controller.New(cfg))
 	s.SetConfig(cfg)
+
+	configDir := filepath.Join(os.Getenv("HOME"), ".aimux")
+	s.SetSessionStore(controller.NewSessionStore(configDir))
+	s.SetOTELStore(aimuxotel.NewSpanStore())
 
 	allPlugins := plugin.Builtins()
 	if custom, err := plugin.ScanPlugins(plugin.DefaultPluginsDir()); err == nil {

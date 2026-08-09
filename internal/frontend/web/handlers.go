@@ -378,28 +378,48 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sessionFile, providerName string
-	for _, a := range agents {
-		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
-			sessionFile = a.SessionFile
-			providerName = a.ProviderName
+	var matched *agent.Agent
+	for i := range agents {
+		if agents[i].SessionID == sessionID || fmt.Sprintf("%d", agents[i].PID) == sessionID {
+			matched = &agents[i]
 			break
 		}
 	}
-	if sessionFile == "" {
+	if matched == nil {
 		http.Error(w, "agent not found", http.StatusNotFound)
 		return
 	}
 
-	p := s.providerLookupFn(providerName)
-	if p == nil {
-		http.Error(w, "unknown provider", http.StatusInternalServerError)
-		return
-	}
-	turns, err := p.ParseTrace(sessionFile)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var turns []trace.Turn
+
+	if matched.Location == "remote" && matched.SessionFile == "" {
+		sandboxName := matched.SandboxName
+		if sandboxName == "" {
+			sandboxName = matched.Name
+		}
+		sid := matched.SessionID
+		if !controller.UUIDValid(sid) {
+			if s.sessionStore != nil {
+				if mapped := s.sessionStore.Get(sandboxName); mapped != "" {
+					sid = mapped
+				}
+			}
+		}
+		turns = controller.RemoteTraceParser(s.otelStore, sid, sandboxName)
+	} else {
+		sessionFile := matched.SessionFile
+		providerName := matched.ProviderName
+		p := s.providerLookupFn(providerName)
+		if p == nil {
+			http.Error(w, "unknown provider", http.StatusInternalServerError)
+			return
+		}
+		var parseErr error
+		turns, parseErr = p.ParseTrace(sessionFile)
+		if parseErr != nil {
+			http.Error(w, parseErr.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -31,6 +31,8 @@ type Server struct {
 	cfg              config.Config
 	taskProvider     tasks.Provider
 	recentDirsFn     func(int) []RecentDirInfo
+	sessionStore     *controller.SessionStore
+	otelStore        controller.OTELLookup
 
 	// Discovery cache to avoid redundant ps/tmux scans
 	cacheMu     sync.Mutex
@@ -99,6 +101,14 @@ type RecentDirInfo struct {
 
 func (s *Server) SetRecentDirsFunc(fn func(int) []RecentDirInfo) {
 	s.recentDirsFn = fn
+}
+
+func (s *Server) SetSessionStore(store *controller.SessionStore) {
+	s.sessionStore = store
+}
+
+func (s *Server) SetOTELStore(store controller.OTELLookup) {
+	s.otelStore = store
 }
 
 func (s *Server) Start() error {
