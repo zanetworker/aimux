@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+	"github.com/zanetworker/aimux/internal/terminal"
 )
 
 var upgrader = websocket.Upgrader{
@@ -224,6 +226,126 @@ func servePTY(conn *websocket.Conn, cmd *exec.Cmd, killOnClose bool) {
 			}
 
 			if _, err := ptmx.Write(msg); err != nil {
+				cleanup()
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(done)
+}
+
+func parseTermSize(r *http.Request) (cols, rows int) {
+	cols, rows = 120, 40
+	if v := r.URL.Query().Get("cols"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cols = n
+		}
+	}
+	if v := r.URL.Query().Get("rows"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			rows = n
+		}
+	}
+	return cols, rows
+}
+
+func (s *Server) handleTerminalSandbox(w http.ResponseWriter, r *http.Request) {
+	sandboxName := r.PathValue("sandbox")
+	if sandboxName == "" {
+		http.Error(w, "missing sandbox name", http.StatusBadRequest)
+		return
+	}
+
+	cols, rows := parseTermSize(r)
+
+	backend, err := terminal.NewOpenShellExec(sandboxName, "", false, cols, rows)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		_ = backend.Close()
+		return
+	}
+
+	servePTYBackend(conn, backend)
+}
+
+func servePTYBackend(conn *websocket.Conn, backend terminal.SessionBackend) {
+	cleanup := sync.OnceFunc(func() {
+		_ = backend.Close()
+		_ = conn.Close()
+	})
+	defer cleanup()
+
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+	done := make(chan struct{})
+
+	// Ping ticker
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+
+	// Backend -> WebSocket
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, err := backend.Read(buf)
+			if err != nil {
+				cleanup()
+				return
+			}
+			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
+				cleanup()
+				return
+			}
+		}
+	}()
+
+	// WebSocket -> Backend (with resize handling)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				cleanup()
+				return
+			}
+
+			_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+			var rm resizeMsg
+			if json.Unmarshal(msg, &rm) == nil && rm.Type == "resize" && rm.Cols > 0 && rm.Rows > 0 {
+				_ = backend.Resize(int(rm.Cols), int(rm.Rows))
+				continue
+			}
+
+			if _, err := backend.Write(msg); err != nil {
 				cleanup()
 				return
 			}

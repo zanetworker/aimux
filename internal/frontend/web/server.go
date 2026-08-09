@@ -135,6 +135,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/trace/subscribe/{sessionId}", s.handleTraceSubscribe)
 	mux.HandleFunc("POST /api/trace/unsubscribe/{sessionId}", s.handleTraceUnsubscribe)
 	mux.HandleFunc("/api/terminal/{session}", s.handleTerminal)
+	mux.HandleFunc("GET /api/terminal/sandbox/{sandbox}", s.handleTerminalSandbox)
 	mux.HandleFunc("/api/terminal-resume/{id}", s.handleTerminalResume)
 	mux.HandleFunc("POST /api/sessions/generate-titles", s.handleGenerateTitles)
 	mux.HandleFunc("GET /api/sessions/diffs", s.handleSessionDiffs)
