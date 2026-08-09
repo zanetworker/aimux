@@ -66,3 +66,29 @@ func splitNonEmpty(s string) []string {
 	}
 	return out
 }
+
+// FetchSessionTurns reads the session JSONL from inside a sandbox and builds
+// trace.Turn entries directly from it, without needing OTEL data. This is the
+// fallback for the preview/trace pane when the OTEL store is empty (e.g., after
+// an aimux restart).
+func FetchSessionTurns(sandboxName, sessionID string) []trace.Turn {
+	if sandboxName == "" || sessionID == "" {
+		return nil
+	}
+
+	path := fmt.Sprintf("/sandbox/.claude/projects/-sandbox/%s.jsonl", sessionID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "openshell", "sandbox", "exec",
+		"--name", sandboxName, "--", "cat", path).Output() // #nosec G204
+	if err != nil || len(out) == 0 {
+		return nil
+	}
+
+	turns := ParseSessionTurns(out)
+	if len(turns) > 0 {
+		debuglog.Log("session-file: built %d turns from %s/%s (OTEL fallback)", len(turns), sandboxName, sessionID)
+	}
+	return turns
+}

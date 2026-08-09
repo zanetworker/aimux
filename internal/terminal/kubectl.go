@@ -1,14 +1,12 @@
 package terminal
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/creack/pty"
 	"github.com/zanetworker/aimux/internal/debuglog"
@@ -175,20 +173,6 @@ func (kb *KubectlExecBackend) Alive() bool {
 		return false
 	}
 	return true
-}
-
-// podPhase queries the pod's status.phase via kubectl.
-func podPhase(podName, namespace string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	// #nosec G204
-	out, err := exec.CommandContext(ctx, "kubectl", "get", "pod", podName,
-		"-n", namespace,
-		"-o", "jsonpath={.status.phase}").Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
 }
 
 // PodName returns the pod name for external reference.

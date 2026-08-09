@@ -215,12 +215,9 @@ type App struct {
 	// matches the same tmux session or working dir.
 	pendingAgents map[string]agent.Agent
 
-	// remoteSessionIDs maps a remote sandbox name to the Claude session UUID
-	// pinned at launch. Re-entry selects the orchestrator-discovered agent
-	// record, which lacks that UUID, so this map recovers it to resume the
-	// same session (traces + conversation continuity) instead of starting a
-	// fresh one. In-memory: survives re-entry within one aimux run.
-	remoteSessionIDs map[string]string
+	// remoteSessionIDs maps sandbox name → Claude session UUID, persisted to
+	// disk (~/.aimux/remote-sessions.json) so it survives aimux restarts.
+	remoteSessionIDs *remoteSessionStore
 
 	// Live trace streaming: tailer watches the session JSONL and signals
 	// traceRefresh when new lines are appended.
@@ -327,7 +324,7 @@ func NewApp() App {
 		instances:      cachedAgents,
 		staleAgents:    staleAgents,
 		pendingAgents:    make(map[string]agent.Agent),
-		remoteSessionIDs: make(map[string]string),
+		remoteSessionIDs: newRemoteSessionStore(aimuxConfigDir()),
 		traceRefresh:   make(chan struct{}, 1),
 	}
 
@@ -1095,7 +1092,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		a.pendingAgents[result.SandboxName] = *newAgent
-		a.remoteSessionIDs[result.SandboxName] = result.OTELSessionID
+		a.remoteSessionIDs.Put(result.SandboxName, result.OTELSessionID)
 		a.instances = append(a.instances, *newAgent)
 		a.agentsView.SetAgents(a.instances)
 
@@ -1778,7 +1775,22 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a *App) syncPreview() {
 	selected := a.agentsView.Selected()
 	if selected != nil {
-		if p := a.providerFor(selected.ProviderName); p != nil {
+		if selected.Location == "remote" {
+			sandboxName := selected.SandboxName
+			if sandboxName == "" {
+				sandboxName = selected.Name
+			}
+			sessionID := selected.SessionID
+			if !uuidValid(sessionID) {
+				if mapped := a.remoteSessionIDs.Get(sandboxName); mapped != "" {
+					sessionID = mapped
+					debuglog.Log("syncPreview: recovered session %s for sandbox %s", sessionID, sandboxName)
+				} else {
+					debuglog.Log("syncPreview: no session in map for sandbox %q", sandboxName)
+				}
+			}
+			a.previewPane.SetParser(a.parserForRemote(sessionID, sandboxName))
+		} else if p := a.providerFor(selected.ProviderName); p != nil {
 			a.previewPane.SetParser(a.parserForProvider(p))
 		}
 	}
@@ -1889,7 +1901,10 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 func (a App) parserForRemote(otelSessionID, sandboxName string) views.TraceParser {
 	return func(_ string) ([]trace.Turn, error) {
 		if a.otelStore == nil || !a.otelStore.HasData() {
-			return nil, nil
+			// No OTEL data (e.g., aimux restarted, in-memory store is empty).
+			// Fall back to building turns directly from the sandbox's session
+			// file, which persists on disk inside the sandbox.
+			return aimuxotel.FetchSessionTurns(sandboxName, otelSessionID), nil
 		}
 
 		// Enrich turns with assistant replies from the sandbox's session file.
@@ -1942,7 +1957,9 @@ func (a App) parserForRemote(otelSessionID, sandboxName string) views.TraceParse
 			}
 		}
 
-		return nil, nil
+		// OTEL store exists but has no matching conversation for this
+		// session. Fall back to the session file.
+		return aimuxotel.FetchSessionTurns(sandboxName, otelSessionID), nil
 	}
 }
 
@@ -2457,7 +2474,7 @@ func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	// launch-time map keyed by sandbox name.
 	sessionID := selected.SessionID
 	if !uuidValid(sessionID) {
-		if mapped := a.remoteSessionIDs[sandboxName]; mapped != "" {
+		if mapped := a.remoteSessionIDs.Get(sandboxName); mapped != "" {
 			sessionID = mapped
 			debuglog.Log("remote session: recovered pinned session id %s for %s", sessionID, sandboxName)
 		}

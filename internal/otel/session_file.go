@@ -3,6 +3,8 @@ package otel
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 // ParseSessionReplies extracts assistant reply text from a Claude Code session
@@ -63,6 +65,73 @@ type sessionMessage struct {
 type contentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+// ParseSessionTurns builds complete trace.Turn entries directly from a Claude
+// Code session JSONL file, without needing any OTEL data. This is the fallback
+// for the preview/trace pane when the OTEL store has no spans (e.g., after an
+// aimux restart — the in-memory OTEL store is empty but the session file on
+// the sandbox's disk is persistent).
+func ParseSessionTurns(data []byte) []trace.Turn {
+	if len(data) == 0 {
+		return nil
+	}
+
+	var turns []trace.Turn
+	var currentUserText string
+	var currentPromptID string
+	turnNum := 0
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		var entry sessionEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+
+		if entry.Type == "user" {
+			currentPromptID = entry.PromptID
+			currentUserText = parseUserText(entry.Message)
+			continue
+		}
+
+		if entry.Type == "assistant" && currentUserText != "" {
+			turnNum++
+			t := trace.Turn{
+				Number:   turnNum,
+				PromptID: currentPromptID,
+			}
+			for _, line := range strings.Split(currentUserText, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					t.UserLines = append(t.UserLines, line)
+				}
+			}
+			if text := parseAssistantText(entry.Message); text != "" {
+				t.OutputLines = []string{text}
+			}
+			turns = append(turns, t)
+			currentUserText = ""
+			currentPromptID = ""
+		}
+	}
+	return turns
+}
+
+// parseUserText extracts the text content from a user message.
+func parseUserText(raw json.RawMessage) string {
+	var msg struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return ""
+	}
+	return msg.Content
 }
 
 // parseAssistantText extracts text from an assistant message's content blocks.
