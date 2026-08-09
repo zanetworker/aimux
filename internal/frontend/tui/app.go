@@ -13,7 +13,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/google/uuid"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/cache"
@@ -1103,7 +1102,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Auto-start the agent inside the sandbox once the shell is ready,
 		// pinning the Claude session id to the OTEL session id for trace
 		// continuity across reconnects.
-		go sendAgentCommand(backend, remoteAgentCommand(msg.provider, result.OTELSessionID, false))
+		go sendAgentCommand(backend, controller.RemoteAgentCommand(msg.provider, result.OTELSessionID, false))
 
 		leftW := a.width - rightW - 1
 		a.splitLaunchTime = time.Now()
@@ -1779,7 +1778,7 @@ func (a *App) syncPreview() {
 				sandboxName = selected.Name
 			}
 			sessionID := selected.SessionID
-			if !uuidValid(sessionID) {
+			if !controller.UUIDValid(sessionID) {
 				if mapped := a.remoteSessionIDs.Get(sandboxName); mapped != "" {
 					sessionID = mapped
 					debuglog.Log("syncPreview: recovered session %s for sandbox %s", sessionID, sandboxName)
@@ -2471,7 +2470,7 @@ func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	// orchestrator-discovered record, which lacks it, so recover it from the
 	// launch-time map keyed by sandbox name.
 	sessionID := selected.SessionID
-	if !uuidValid(sessionID) {
+	if !controller.UUIDValid(sessionID) {
 		if mapped := a.remoteSessionIDs.Get(sandboxName); mapped != "" {
 			sessionID = mapped
 			debuglog.Log("remote session: recovered pinned session id %s for %s", sessionID, sandboxName)
@@ -2489,7 +2488,7 @@ func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	// conversation and telemetry session.id continue, keeping the trace pane's
 	// history. With the pinned UUID we resume it explicitly; without it we fall
 	// back to --continue (Claude resumes its most recent conversation on disk).
-	resumeCmd := remoteAgentCommand(selected.ProviderName, sessionID, true)
+	resumeCmd := controller.RemoteAgentCommand(selected.ProviderName, sessionID, true)
 	if resumeCmd == selected.ProviderName && selected.ProviderName == "claude" {
 		resumeCmd = "claude --continue"
 	}
@@ -2516,27 +2515,6 @@ func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
 	a.layout.SetZoomed(true)
 	a.statusHint = fmt.Sprintf("Attached to %s", selected.Name)
 	return a, teaCmd
-}
-
-// remoteAgentCommand builds the shell command that starts the agent inside the
-// sandbox. For Claude, the session id is pinned to sessionID so telemetry and
-// conversation stay continuous across reconnects: --session-id creates it on
-// first launch, --resume reattaches to it on re-entry (same session.id, so the
-// trace pane accumulates all turns). Other providers, or a missing/invalid
-// UUID, fall back to the bare command.
-func remoteAgentCommand(provider, sessionID string, resume bool) string {
-	if provider == "claude" && uuidValid(sessionID) {
-		if resume {
-			return "claude --resume " + sessionID
-		}
-		return "claude --session-id " + sessionID
-	}
-	return provider
-}
-
-func uuidValid(s string) bool {
-	_, err := uuid.Parse(s)
-	return err == nil
 }
 
 // sendAgentCommand waits briefly for the sandbox shell to be ready, then types
