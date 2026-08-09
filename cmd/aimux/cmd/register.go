@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"github.com/zanetworker/aimux/internal/agent"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -24,6 +25,7 @@ type Deps struct {
 	DefaultMode      string
 	FeedbackPath     string
 	TraceParsers     map[string]func(filePath string) ([]trace.Turn, error)
+	ComposeEngine    *aimuxcompose.Engine
 }
 
 // RegisterAll wires all subcommands to rootCmd using the provided dependencies.
@@ -39,7 +41,7 @@ func RegisterAll(d Deps) {
 		rootCmd.AddCommand(newProfileCmd(d.ProfileStore))
 	}
 	rootCmd.AddCommand(newFeedbackCmd(d.FeedbackPath))
-	rootCmd.AddCommand(newKillCmd(d.Discover))
+	rootCmd.AddCommand(newKillCmd(d.Discover, d.ComposeEngine))
 	rootCmd.AddCommand(newCollectCmd())
 	rootCmd.AddCommand(newMCPCmd())
 

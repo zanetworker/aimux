@@ -113,6 +113,9 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if result.SandboxName != "" && result.OTELSessionID != "" && s.sessionStore != nil {
+		s.sessionStore.Put(result.SandboxName, result.OTELSessionID)
+	}
 	w.WriteHeader(http.StatusOK)
 	resp := map[string]interface{}{
 		"status":       "launched",
@@ -120,6 +123,9 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 	if result.SandboxName != "" {
 		resp["sandbox_name"] = result.SandboxName
+	}
+	if result.OTELSessionID != "" {
+		resp["otel_session_id"] = result.OTELSessionID
 	}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		debuglog.Log("encode launch response: %v", err)
@@ -972,6 +978,13 @@ func (s *Server) handleKill(w http.ResponseWriter, r *http.Request) {
 		}
 	case controller.KillRemoveOnly:
 		// Session-only entry, nothing to kill
+	case controller.KillSandbox:
+		if s.composeEngine != nil {
+			if err := controller.ExecuteKillSandbox(action, s.composeEngine); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

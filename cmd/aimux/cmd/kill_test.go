@@ -9,7 +9,7 @@ import (
 )
 
 func TestKillCmd_InvalidPID(t *testing.T) {
-	c := newKillCmd(func() ([]agent.Agent, error) { return nil, nil })
+	c := newKillCmd(func() ([]agent.Agent, error) { return nil, nil }, nil)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"kill", "notanumber"})
@@ -29,7 +29,7 @@ func TestKillCmd_AgentNotFound(t *testing.T) {
 	agents := []agent.Agent{
 		{PID: 1000, ProviderName: "claude", Name: "test"},
 	}
-	c := newKillCmd(func() ([]agent.Agent, error) { return agents, nil })
+	c := newKillCmd(func() ([]agent.Agent, error) { return agents, nil }, nil)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"kill", "9999"})
@@ -52,7 +52,7 @@ func TestKillCmd_RemoveOnly_JSON(t *testing.T) {
 		{PID: 0, ProviderName: "claude", Name: "stale-session", SessionID: "abc123"},
 	}
 	var stdout bytes.Buffer
-	c := newKillCmd(func() ([]agent.Agent, error) { return agents, nil })
+	c := newKillCmd(func() ([]agent.Agent, error) { return agents, nil }, nil)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
 	jsonOutput = true
@@ -82,7 +82,7 @@ func TestKillCmd_PodKill_Error(t *testing.T) {
 	agents := []agent.Agent{
 		{PID: 5555, ProviderName: "claude", Name: "k8s-agent", SessionID: "pod-my-agent-pod"},
 	}
-	c := newKillCmd(func() ([]agent.Agent, error) { return agents, nil })
+	c := newKillCmd(func() ([]agent.Agent, error) { return agents, nil }, nil)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"kill", "5555"})
@@ -99,7 +99,7 @@ func TestKillCmd_PodKill_Error(t *testing.T) {
 }
 
 func TestKillCmd_MissingArgs(t *testing.T) {
-	c := newKillCmd(func() ([]agent.Agent, error) { return nil, nil })
+	c := newKillCmd(func() ([]agent.Agent, error) { return nil, nil }, nil)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"kill"})

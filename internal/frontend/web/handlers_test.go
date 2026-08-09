@@ -54,6 +54,93 @@ func TestLaunchHandler(t *testing.T) {
 	}
 }
 
+func TestLaunchHandler_StoresSessionAndReturnsUUID(t *testing.T) {
+	sessionStore := controller.NewSessionStore(t.TempDir())
+	s := NewServer(0)
+	s.SetSessionStore(sessionStore)
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
+		return spawn.LaunchResult{
+			TmuxSession:   "aimux-claude-test",
+			SandboxName:   "test-sandbox",
+			OTELSessionID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		}, nil
+	})
+
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	tmpDir := t.TempDir()
+	body, _ := json.Marshal(map[string]string{
+		"provider": "claude",
+		"dir":      tmpDir,
+	})
+	resp, err := http.Post(s.URL()+"/api/agents/launch", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if payload["sandbox_name"] != "test-sandbox" {
+		t.Errorf("expected sandbox_name=test-sandbox, got %v", payload["sandbox_name"])
+	}
+	if payload["otel_session_id"] != "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" {
+		t.Errorf("expected otel_session_id in response, got %v", payload["otel_session_id"])
+	}
+
+	stored := sessionStore.Get("test-sandbox")
+	if stored != "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" {
+		t.Errorf("sessionStore should contain the UUID, got %q", stored)
+	}
+}
+
+func TestLaunchHandler_NoStoreWithoutSandbox(t *testing.T) {
+	sessionStore := controller.NewSessionStore(t.TempDir())
+	s := NewServer(0)
+	s.SetSessionStore(sessionStore)
+	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
+		return spawn.LaunchResult{TmuxSession: "aimux-claude-local"}, nil
+	})
+
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	tmpDir := t.TempDir()
+	body, _ := json.Marshal(map[string]string{
+		"provider": "claude",
+		"dir":      tmpDir,
+	})
+	resp, err := http.Post(s.URL()+"/api/agents/launch", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&payload)
+
+	if _, ok := payload["sandbox_name"]; ok {
+		t.Error("should not include sandbox_name when empty")
+	}
+	if _, ok := payload["otel_session_id"]; ok {
+		t.Error("should not include otel_session_id when empty")
+	}
+}
+
 func TestHistoryHandler(t *testing.T) {
 	s := NewServer(0)
 

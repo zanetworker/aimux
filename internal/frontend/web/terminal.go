@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/terminal"
 )
 
@@ -67,11 +69,12 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var workingDir, providerName string
+	var workingDir, providerName, location string
 	for _, a := range agents {
 		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
 			workingDir = a.WorkingDir
 			providerName = a.ProviderName
+			location = a.Location
 			break
 		}
 	}
@@ -92,39 +95,50 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 	skipPerms := r.URL.Query().Get("skipPermissions") == "true"
 
 	var cmd *exec.Cmd
-	switch providerName {
-	case "claude":
-		bin, _ := exec.LookPath("claude")
+	if location == "remote" {
+		cmdStr := controller.RemoteAgentCommand(providerName, sessionID, true)
+		parts := strings.Fields(cmdStr)
+		bin, _ := exec.LookPath(parts[0])
 		if bin == "" {
-			http.Error(w, "claude binary not found", http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("%s binary not found", parts[0]), http.StatusInternalServerError)
 			return
 		}
-		args := []string{"--resume", sessionID}
-		if skipPerms {
-			args = append(args, "--dangerously-skip-permissions")
-		}
-		cmd = exec.Command(bin, args...) // #nosec G204 #nosec G702
-	case "codex":
-		bin, _ := exec.LookPath("codex")
-		if bin == "" {
-			http.Error(w, "codex binary not found", http.StatusInternalServerError)
+		cmd = exec.Command(bin, parts[1:]...) // #nosec G204 G702
+	} else {
+		switch providerName {
+		case "claude":
+			bin, _ := exec.LookPath("claude")
+			if bin == "" {
+				http.Error(w, "claude binary not found", http.StatusInternalServerError)
+				return
+			}
+			args := []string{"--resume", sessionID}
+			if skipPerms {
+				args = append(args, "--dangerously-skip-permissions")
+			}
+			cmd = exec.Command(bin, args...) // #nosec G204 #nosec G702
+		case "codex":
+			bin, _ := exec.LookPath("codex")
+			if bin == "" {
+				http.Error(w, "codex binary not found", http.StatusInternalServerError)
+				return
+			}
+			args := []string{"resume", "--no-alt-screen", sessionID}
+			if skipPerms {
+				args = append(args, "--full-auto")
+			}
+			cmd = exec.Command(bin, args...) // #nosec G204 #nosec G702
+		case "gemini":
+			bin, _ := exec.LookPath("gemini")
+			if bin == "" {
+				http.Error(w, "gemini binary not found", http.StatusInternalServerError)
+				return
+			}
+			cmd = exec.Command(bin, "--resume", "latest") // #nosec G204
+		default:
+			http.Error(w, fmt.Sprintf("resume not supported for provider %q", providerName), http.StatusBadRequest)
 			return
 		}
-		args := []string{"resume", "--no-alt-screen", sessionID}
-		if skipPerms {
-			args = append(args, "--full-auto")
-		}
-		cmd = exec.Command(bin, args...) // #nosec G204 #nosec G702
-	case "gemini":
-		bin, _ := exec.LookPath("gemini")
-		if bin == "" {
-			http.Error(w, "gemini binary not found", http.StatusInternalServerError)
-			return
-		}
-		cmd = exec.Command(bin, "--resume", "latest") // #nosec G204
-	default:
-		http.Error(w, fmt.Sprintf("resume not supported for provider %q", providerName), http.StatusBadRequest)
-		return
 	}
 
 	if workingDir != "" {

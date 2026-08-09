@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/plugin"
@@ -31,6 +32,7 @@ type Server struct {
 	cfg              config.Config
 	taskProvider     tasks.Provider
 	recentDirsFn     func(int) []RecentDirInfo
+	composeEngine    *aimuxcompose.Engine
 	sessionStore     *controller.SessionStore
 	otelStore        controller.OTELLookup
 
@@ -101,6 +103,10 @@ type RecentDirInfo struct {
 
 func (s *Server) SetRecentDirsFunc(fn func(int) []RecentDirInfo) {
 	s.recentDirsFn = fn
+}
+
+func (s *Server) SetComposeEngine(engine *aimuxcompose.Engine) {
+	s.composeEngine = engine
 }
 
 func (s *Server) SetSessionStore(store *controller.SessionStore) {

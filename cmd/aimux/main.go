@@ -97,6 +97,15 @@ func main() {
 	profileStore := profile.NewStore(profile.DefaultPath())
 	_ = profileStore.Load()
 
+	var cliComposeEngine *aimuxcompose.Engine
+	if cfg.Remote.Backend == "openshell" {
+		cliComposeEngine, _ = aimuxcompose.New(aimuxcompose.Options{
+			Gateway:  cfg.Remote.Gateway,
+			Insecure: true,
+			Image:    cfg.Remote.Image,
+		})
+	}
+
 	deps := cmd.Deps{
 		Discover:         disco.Discover,
 		DiscoverSessions: history.Discover,
@@ -117,6 +126,7 @@ func main() {
 			"codex":  (&provider.Codex{}).ParseTrace,
 			"gemini": (&provider.Gemini{}).ParseTrace,
 		},
+		ComposeEngine: cliComposeEngine,
 	}
 
 	cmd.RegisterAll(deps)
@@ -289,6 +299,9 @@ func createWebServer(port int) *web.Server {
 	}
 
 	s := web.NewServer(port)
+	if composeEngine != nil {
+		s.SetComposeEngine(composeEngine)
+	}
 	s.SetDiscoverFunc(disco.Discover)
 	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
 		// Find the provider to build the spawn command

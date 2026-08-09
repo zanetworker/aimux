@@ -8,11 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/agent"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/spawn"
 )
 
-func newKillCmd(discover discoverFunc) *cobra.Command {
+func newKillCmd(discover discoverFunc, composeEngine *aimuxcompose.Engine) *cobra.Command {
 	return &cobra.Command{
 		Use:   "kill <pid>",
 		Short: "Kill a running agent",
@@ -42,7 +43,8 @@ func newKillCmd(discover discoverFunc) *cobra.Command {
 
 			action := controller.DetermineKillAction(*target)
 
-			if target.TMuxSession != "" {
+			// KillSandbox handles its own tmux cleanup via ExecuteKillSandbox.
+			if action.Type != controller.KillSandbox && target.TMuxSession != "" {
 				spawn.KillTmuxSession(target.TMuxSession)
 			}
 
@@ -54,6 +56,10 @@ func newKillCmd(discover discoverFunc) *cobra.Command {
 				killErr = fmt.Errorf("pod kill not implemented in CLI; use kubectl delete pod %s -n %s", action.PodName, action.Namespace)
 			case controller.KillRemoveOnly:
 				// Session-only entry: nothing to kill.
+			case controller.KillSandbox:
+				if composeEngine != nil {
+					killErr = controller.ExecuteKillSandbox(action, composeEngine)
+				}
 			}
 
 			if killErr != nil {
@@ -71,6 +77,9 @@ func newKillCmd(discover discoverFunc) *cobra.Command {
 				if action.Type == controller.KillPod {
 					result["pod_name"] = action.PodName
 					result["namespace"] = action.Namespace
+				}
+				if action.Type == controller.KillSandbox {
+					result["sandbox_name"] = action.SandboxName
 				}
 				b, _ := json.MarshalIndent(result, "", "  ")
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
@@ -91,6 +100,8 @@ func killTypeString(kt controller.KillType) string {
 		return "pod"
 	case controller.KillRemoveOnly:
 		return "remove_only"
+	case controller.KillSandbox:
+		return "sandbox"
 	default:
 		return "unknown"
 	}
