@@ -273,7 +273,7 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         <div style={{ marginBottom: 16 }}>
           <div style={label}>Runtime</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {['local', 'container'].map(r => (
+            {['local', 'container', 'remote'].map(r => (
               <button key={r} onClick={() => setRuntime(r)}
                 style={pill(runtime === r)}>{r}</button>
             ))}
