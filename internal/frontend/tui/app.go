@@ -1891,72 +1891,46 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 	}
 }
 
-// parserForRemote returns a TraceParser that reads from the OTEL store
-// using a known session ID. The session ID is injected into the sandbox
-// as OTEL_RESOURCE_ATTRIBUTES=aimux.session_id=<id> at creation time,
-// so the OTEL store can index spans by this ID.
 func (a App) parserForRemote(otelSessionID, sandboxName string) views.TraceParser {
 	return func(_ string) ([]trace.Turn, error) {
-		if a.otelStore == nil || !a.otelStore.HasData() {
-			// No OTEL data (e.g., aimux restarted, in-memory store is empty).
-			// Fall back to building turns directly from the sandbox's session
-			// file, which persists on disk inside the sandbox.
-			return aimuxotel.FetchSessionTurns(sandboxName, otelSessionID), nil
+		// Shared path: direct OTEL lookup + session-file fallback.
+		turns := controller.RemoteTraceParser(a.otelStore, otelSessionID, sandboxName)
+		if len(turns) > 0 {
+			return turns, nil
 		}
 
-		// Enrich turns with assistant replies from the sandbox's session file.
-		// Claude Code's OTEL telemetry does not emit model responses, but the
-		// session JSONL file contains the full transcript. This is a lazy
-		// fetch: nil if the file doesn't exist or the sandbox is gone.
-		enrich := func(turns []trace.Turn) []trace.Turn {
-			if len(turns) > 0 && sandboxName != "" {
-				replies := aimuxotel.FetchSessionReplies(sandboxName, otelSessionID)
-				aimuxotel.EnrichTurnsWithReplies(turns, replies)
+		// TUI-specific: when the session ID injection failed, scan all
+		// conversations and exclude known local sessions to find the
+		// remote one by elimination.
+		if a.otelStore != nil && a.otelStore.HasData() {
+			localIDs := make(map[string]bool)
+			if a.agentsView != nil {
+				for _, ag := range a.agentsView.Agents() {
+					if ag.Location != "remote" && ag.SessionID != "" {
+						localIDs[ag.SessionID] = true
+					}
+				}
 			}
-			return turns
-		}
-
-		// Direct lookup by our injected session ID
-		if otelSessionID != "" {
-			if root := a.otelStore.GetByConversation(otelSessionID); root != nil {
+			for _, convID := range a.otelStore.ConversationIDs() {
+				if localIDs[convID] {
+					continue
+				}
+				root := a.otelStore.GetByConversation(convID)
+				if root == nil {
+					continue
+				}
 				turns := aimuxotel.SpansToTurns(root)
 				if len(turns) > 0 {
-					return enrich(turns), nil
+					if sandboxName != "" {
+						replies := aimuxotel.FetchSessionReplies(sandboxName, otelSessionID)
+						aimuxotel.EnrichTurnsWithReplies(turns, replies)
+					}
+					return turns, nil
 				}
 			}
 		}
 
-		// Fallback: Claude Code's SDK ignores OTEL_RESOURCE_ATTRIBUTES,
-		// may strip query params from OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
-		// and may not honor OTEL_EXPORTER_OTLP_HEADERS. When all three
-		// injection channels fail, aimux.session_id never reaches the
-		// store, so the alias is never created. Scan all conversations
-		// and exclude known local sessions to find the remote one.
-		localIDs := make(map[string]bool)
-		if a.agentsView != nil {
-			for _, ag := range a.agentsView.Agents() {
-				if ag.Location != "remote" && ag.SessionID != "" {
-					localIDs[ag.SessionID] = true
-				}
-			}
-		}
-		for _, convID := range a.otelStore.ConversationIDs() {
-			if localIDs[convID] {
-				continue
-			}
-			root := a.otelStore.GetByConversation(convID)
-			if root == nil {
-				continue
-			}
-			turns := aimuxotel.SpansToTurns(root)
-			if len(turns) > 0 {
-				return enrich(turns), nil
-			}
-		}
-
-		// OTEL store exists but has no matching conversation for this
-		// session. Fall back to the session file.
-		return aimuxotel.FetchSessionTurns(sandboxName, otelSessionID), nil
+		return turns, nil
 	}
 }
 
