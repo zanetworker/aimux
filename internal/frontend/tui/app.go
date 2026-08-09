@@ -215,9 +215,7 @@ type App struct {
 	// matches the same tmux session or working dir.
 	pendingAgents map[string]agent.Agent
 
-	// remoteSessionIDs maps sandbox name → Claude session UUID, persisted to
-	// disk (~/.aimux/remote-sessions.json) so it survives aimux restarts.
-	remoteSessionIDs *remoteSessionStore
+	remoteSessionIDs *controller.SessionStore
 
 	// Live trace streaming: tailer watches the session JSONL and signals
 	// traceRefresh when new lines are appended.
@@ -324,7 +322,7 @@ func NewApp() App {
 		instances:      cachedAgents,
 		staleAgents:    staleAgents,
 		pendingAgents:    make(map[string]agent.Agent),
-		remoteSessionIDs: newRemoteSessionStore(aimuxConfigDir()),
+		remoteSessionIDs: controller.NewSessionStore(aimuxConfigDir()),
 		traceRefresh:   make(chan struct{}, 1),
 	}
 
@@ -3727,4 +3725,11 @@ func (a *App) agentForLogsView() *agent.Agent {
 		}
 	}
 	return nil
+}
+
+func aimuxConfigDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".aimux")
+	}
+	return ".aimux"
 }
