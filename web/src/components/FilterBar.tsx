@@ -8,6 +8,8 @@ interface Props {
   onStatusFilter: (s: number | null) => void;
   providerFilter: string | null;
   onProviderFilter: (p: string | null) => void;
+  locationFilter: string | null;
+  onLocationFilter: (l: string | null) => void;
   recentFilter: boolean;
   onRecentFilter: (v: boolean) => void;
   searchQuery: string;
@@ -28,6 +30,8 @@ export function FilterBar({
   onStatusFilter,
   providerFilter,
   onProviderFilter,
+  locationFilter,
+  onLocationFilter,
   recentFilter,
   onRecentFilter,
   searchQuery,
@@ -73,6 +77,16 @@ export function FilterBar({
     gemini: '#a78bfa',
   };
 
+  const locationCounts = {
+    local: agents.filter(a => !a.Location || a.Location === 'local').length,
+    remote: agents.filter(a => a.Location === 'remote').length,
+  };
+
+  const locationDots = {
+    local: '#94a3b8',
+    remote: '#38bdf8',
+  };
+
   const handleDeepSearch = () => {
     if (deepQuery.trim()) {
       onContentSearch(deepQuery.trim());
@@ -112,6 +126,12 @@ export function FilterBar({
       <FilterPill label="Claude" count={providerCounts.claude} dotColor={providerDots.claude} active={providerFilter === 'claude'} onClick={() => onProviderFilter(providerFilter === 'claude' ? null : 'claude')} />
       <FilterPill label="Codex" count={providerCounts.codex} dotColor={providerDots.codex} active={providerFilter === 'codex'} onClick={() => onProviderFilter(providerFilter === 'codex' ? null : 'codex')} />
       <FilterPill label="Gemini" count={providerCounts.gemini} dotColor={providerDots.gemini} active={providerFilter === 'gemini'} onClick={() => onProviderFilter(providerFilter === 'gemini' ? null : 'gemini')} />
+
+      <Divider />
+
+      {/* Location filters */}
+      <FilterPill label="Local" count={locationCounts.local} dotColor={locationDots.local} active={locationFilter === 'local'} onClick={() => onLocationFilter(locationFilter === 'local' ? null : 'local')} />
+      <FilterPill label="Remote" count={locationCounts.remote} dotColor={locationDots.remote} active={locationFilter === 'remote'} onClick={() => onLocationFilter(locationFilter === 'remote' ? null : 'remote')} />
 
       <Divider />
 

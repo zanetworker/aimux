@@ -10,6 +10,7 @@ interface Props {
   onSelect: (id: string) => void;
   statusFilter: number | null;
   providerFilter: string | null;
+  locationFilter: string | null;
   recentFilter: boolean;
   searchQuery: string;
   sortBy: string;
@@ -28,6 +29,7 @@ export function CardGrid({
   onSelect,
   statusFilter,
   providerFilter,
+  locationFilter,
   recentFilter,
   searchQuery,
   sortBy,
@@ -96,6 +98,12 @@ export function CardGrid({
   }
   if (providerFilter !== null) {
     filtered = filtered.filter(a => a.ProviderName.toLowerCase() === providerFilter.toLowerCase());
+  }
+  if (locationFilter !== null) {
+    filtered = filtered.filter(a => {
+      const loc = a.Location || 'local';
+      return loc === locationFilter;
+    });
   }
   if (recentFilter) {
     const thirtyMinAgo = Date.now() - 30 * 60 * 1000;

@@ -19,6 +19,8 @@ export interface Agent {
   TeamName: string;
   TaskSubject: string;
   Title: string;
+  Location?: string;     // "local", "remote", "k8s"
+  SandboxName?: string;  // OpenShell sandbox name (remote only)
   PermissionMode?: string;
   Starred?: boolean;
 }

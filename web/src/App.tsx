@@ -27,6 +27,7 @@ export default function App() {
   const [showLaunch, setShowLaunch] = useState(false);
   const [statusFilter, setStatusFilter] = useState<number | null>(null);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [locationFilter, setLocationFilter] = useState<string | null>(null);
   const [recentFilter, setRecentFilter] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('lastActive');
@@ -243,6 +244,8 @@ export default function App() {
               onStatusFilter={setStatusFilter}
               providerFilter={providerFilter}
               onProviderFilter={setProviderFilter}
+              locationFilter={locationFilter}
+              onLocationFilter={setLocationFilter}
               recentFilter={recentFilter}
               onRecentFilter={setRecentFilter}
               searchQuery={searchQuery}
@@ -267,6 +270,7 @@ export default function App() {
             onSelect={(id) => setSelectedId(prev => prev === id ? null : id)}
             statusFilter={statusFilter}
             providerFilter={providerFilter}
+            locationFilter={locationFilter}
             recentFilter={recentFilter}
             searchQuery={searchQuery}
             sortBy={sortBy}
