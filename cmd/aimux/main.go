@@ -288,6 +288,11 @@ func createWebServer(port int) *web.Server {
 		&provider.Gemini{},
 	)
 
+	// Enable remote sandbox discovery so sandboxes appear in the web agent list
+	if cfg.Remote.Backend == "openshell" {
+		disco.EnableRemoteDiscovery()
+	}
+
 	// Initialize compose engine for OpenShell sandbox operations
 	var composeEngine *aimuxcompose.Engine
 	if cfg.Remote.Backend == "openshell" {
