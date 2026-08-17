@@ -128,13 +128,6 @@ func (s *Server) handleTerminalResume(w http.ResponseWriter, r *http.Request) {
 				args = append(args, "--full-auto")
 			}
 			cmd = exec.Command(bin, args...) // #nosec G204 #nosec G702
-		case "gemini":
-			bin, _ := exec.LookPath("gemini")
-			if bin == "" {
-				http.Error(w, "gemini binary not found", http.StatusInternalServerError)
-				return
-			}
-			cmd = exec.Command(bin, "--resume", "latest") // #nosec G204
 		default:
 			http.Error(w, fmt.Sprintf("resume not supported for provider %q", providerName), http.StatusBadRequest)
 			return
@@ -280,7 +273,7 @@ func (s *Server) handleTerminalSandbox(w http.ResponseWriter, r *http.Request) {
 	// RemoteAgentCommand and path traversal via RemoteTraceParser.
 	if provider != "" {
 		switch provider {
-		case "claude", "codex", "gemini":
+		case "claude", "codex":
 			// allowed
 		default:
 			http.Error(w, "invalid provider", http.StatusBadRequest)

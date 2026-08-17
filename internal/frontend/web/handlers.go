@@ -659,7 +659,7 @@ func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
 
 	model := s.cfg.Sessions.TitleModel
 	if model == "" {
-		model = "flash"
+		model = "haiku"
 	}
 
 	if s.cfg.Sessions.APIKey == "" {
@@ -1080,7 +1080,7 @@ func (s *Server) handleProviderHealth(w http.ResponseWriter, r *http.Request) {
 		Installed bool   `json:"installed"`
 	}
 
-	names := []string{"claude", "codex", "gemini"}
+	names := []string{"claude", "codex"}
 	providers := make([]providerStatus, 0, len(names))
 	for _, name := range names {
 		_, err := exec.LookPath(name)

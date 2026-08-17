@@ -12,7 +12,7 @@ import (
 //
 // Handles two data formats:
 //  1. Claude Code log events: flat events with prompt.id, grouped into turns
-//  2. Codex/Gemini trace spans: hierarchical spans where each child is a turn
+//  2. Codex trace spans: hierarchical spans where each child is a turn
 //
 // Auto-detects the format by checking for prompt.id attributes.
 func SpansToTurns(root *Span) []trace.Turn {
@@ -25,7 +25,7 @@ func SpansToTurns(root *Span) []trace.Turn {
 		return logEventsToTurns(root)
 	}
 
-	// Legacy path: each direct child of root is a turn (Codex/Gemini traces)
+	// Legacy path: each direct child of root is a turn (Codex traces)
 	return spanTreeToTurns(root)
 }
 
@@ -209,7 +209,7 @@ func eventsToTurn(events []*Span, num int) trace.Turn {
 	return t
 }
 
-// spanTreeToTurns converts a hierarchical span tree (Codex/Gemini format)
+// spanTreeToTurns converts a hierarchical span tree (Codex format)
 // where each direct child of root represents a turn.
 func spanTreeToTurns(root *Span) []trace.Turn {
 	var turns []trace.Turn

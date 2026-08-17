@@ -187,11 +187,11 @@ func (s *Server) spawnAgentTool() mcp.Tool {
 	return mcp.NewTool("spawn_agent",
 		mcp.WithDescription("Ensure remote agents are available for parallel work. "+
 			"Pre-creates sandboxed execution environments on remote infrastructure. "+
-			"Use when tasks need dedicated compute, cross-provider execution (Claude, Codex, Gemini), "+
+			"Use when tasks need dedicated compute, cross-provider execution (Claude, Codex), "+
 			"or isolation from your local session. For simple parallel tasks on the same machine, "+
 			"prefer Claude's built-in Agent tool instead. "+
 			"Call before create_task to ensure capacity."),
-		mcp.WithString("provider", mcp.Required(), mcp.Description("Agent provider: claude, codex, or gemini")),
+		mcp.WithString("provider", mcp.Required(), mcp.Description("Agent provider: claude or codex")),
 		mcp.WithString("role", mcp.Required(), mcp.Description("Agent role: coder, researcher, or reviewer")),
 		mcp.WithNumber("count", mcp.Description("Number of remote agents to ensure are available (default 1)")),
 	)

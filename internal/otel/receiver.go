@@ -21,7 +21,7 @@ import (
 )
 
 // Receiver is an OTLP/HTTP trace receiver that listens for incoming spans
-// from Claude Code, Codex CLI, Gemini CLI, or any OTEL-instrumented agent.
+// from Claude Code, Codex CLI, or any OTEL-instrumented agent.
 // It stores spans in a SpanStore for the TUI to display.
 type Receiver struct {
 	store         *SpanStore
@@ -68,8 +68,7 @@ func (r *Receiver) Start() error {
 	mux.HandleFunc("/v1/metrics", r.handleMetrics) // accept but ignore metrics
 	mux.HandleFunc("/debug", r.handleDebug)        // diagnostic endpoint
 	mux.HandleFunc("/v1/hooks", r.handleHooks)     // hook events from agents
-	// Catch-all: Gemini may send to "/" instead of signal-specific paths
-	// (known bug: github.com/google-gemini/gemini-cli/issues/15581)
+	// Catch-all: some agents may send to "/" instead of signal-specific paths.
 	mux.HandleFunc("/", r.handleFallback)
 
 	bindAddr := "127.0.0.1"
@@ -454,7 +453,7 @@ func (r *Receiver) handleMetrics(w http.ResponseWriter, req *http.Request) {
 }
 
 // handleFallback tries to parse the body as traces or logs.
-// Gemini CLI may send to "/" instead of signal-specific paths.
+// Some agents may send to "/" instead of signal-specific paths.
 // We detect the actual type by checking for non-empty inner records,
 // since protobuf can cross-deserialize between trace and log request
 // types (same field numbers) but only the correct type has inner data.

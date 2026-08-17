@@ -350,7 +350,7 @@ func (k *K8s) discoverSessionPods() []agent.Agent {
 
 	var agents []agent.Agent
 	for _, pod := range pods.Items {
-		// ProviderName is the agent type (claude, gemini), not "k8s".
+		// ProviderName is the agent type (claude, codex), not "k8s".
 		// The LOC column derives "k8s" from the WorkingDir prefix.
 		providerLabel := pod.Labels["provider"]
 		if providerLabel == "" {
@@ -506,7 +506,7 @@ func (k *K8s) SpawnCommand(_, _, _ string) *exec.Cmd { return nil }
 // SpawnArgs describes the models and modes available when launching a K8s agent.
 func (k *K8s) SpawnArgs() SpawnArgs {
 	return SpawnArgs{
-		Models: []string{"claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5", "gemini-2.0-flash"},
+		Models: []string{"claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5"},
 		Modes:  []string{"coder", "researcher", "reviewer"},
 	}
 }
@@ -713,8 +713,6 @@ func (k *K8s) imageForProvider(provider string) string {
 	switch provider {
 	case "claude":
 		return "quay.io/azaalouk/claude-session:latest"
-	case "gemini":
-		return "quay.io/azaalouk/gemini-session:latest"
 	default:
 		return "quay.io/azaalouk/" + provider + "-session:latest"
 	}
