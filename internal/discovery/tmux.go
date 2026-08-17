@@ -67,7 +67,6 @@ func MatchTmuxSession(sessions []TmuxSession, workingDir string) string {
 		"claude-" + project,
 		"aimux-claude-" + project,
 		"aimux-codex-" + project,
-		"aimux-gemini-" + project,
 	}
 
 	for _, s := range sessions {

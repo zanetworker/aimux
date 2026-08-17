@@ -17,7 +17,7 @@ func TestDefault(t *testing.T) {
 		t.Errorf("Runtime = %q, want %q", cfg.Runtime, "local")
 	}
 
-	for _, name := range []string{"claude", "codex", "gemini"} {
+	for _, name := range []string{"claude", "codex"} {
 		pc, ok := cfg.Providers[name]
 		if !ok {
 			t.Errorf("provider %q missing from defaults", name)
@@ -102,11 +102,6 @@ providers:
 	}
 	if claude.Binary != "/opt/bin/claude" {
 		t.Errorf("claude.Binary = %q, want %q", claude.Binary, "/opt/bin/claude")
-	}
-
-	// Gemini should still be enabled (from defaults, not overridden)
-	if !cfg.Providers["gemini"].Enabled {
-		t.Error("gemini should remain enabled from defaults")
 	}
 }
 

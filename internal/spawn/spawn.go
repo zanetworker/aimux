@@ -16,7 +16,7 @@ import (
 // Zero values for new fields default to safe values:
 // Runtime="local", Execution="local", Shell=$SHELL, SessionManager="tmux".
 type LaunchOpts struct {
-	Provider       string        // which agent: claude, codex, gemini
+	Provider       string        // which agent: claude, codex
 	Dir            string        // working directory
 	Model          string        // model override
 	Mode           string        // permission mode
@@ -166,9 +166,9 @@ func launchTmux(cmd *exec.Cmd, providerName, dir, shell, envPrefix string) error
 	}
 
 	// Run through a login shell with RC file sourced so shell functions
-	// and env vars are available (e.g., gemini() wrapper with Vertex AI config).
-	// Use Args[0] (the command name) instead of Path (absolute binary path)
-	// so shell functions take precedence over the raw binary.
+	// and env vars are available. Use Args[0] (the command name) instead of
+	// Path (absolute binary path) so shell functions take precedence over
+	// the raw binary.
 	var cmdParts []string
 	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
 	for _, arg := range cmd.Args[1:] {

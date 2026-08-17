@@ -163,7 +163,6 @@ func Default() Config {
 		Providers: map[string]ProviderConfig{
 			"claude": {Enabled: true},
 			"codex":  {Enabled: true},
-			"gemini": {Enabled: true},
 		},
 		RefreshInterval: "2s",
 		Runtime:        "local",
