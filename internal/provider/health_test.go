@@ -6,13 +6,13 @@ import (
 )
 
 func TestGatherHealth_LocalProviders(t *testing.T) {
-	providers := []Provider{&Claude{}, &Codex{}, &Gemini{}}
-	counts := map[string]int{"claude": 3, "codex": 0, "gemini": 1}
+	providers := []Provider{&Claude{}, &Codex{}}
+	counts := map[string]int{"claude": 3, "codex": 0}
 
 	sh := GatherHealth(providers, nil, counts)
 
-	if len(sh.Providers) != 3 {
-		t.Fatalf("GatherHealth() returned %d providers, want 3", len(sh.Providers))
+	if len(sh.Providers) != 2 {
+		t.Fatalf("GatherHealth() returned %d providers, want 2", len(sh.Providers))
 	}
 
 	// Claude should have agents counted.
