@@ -2,7 +2,7 @@
 
 aimux runs AI coding agents on remote infrastructure: isolated OpenShell sandboxes or Kubernetes pods. Two use cases, one codebase.
 
-**Interactive sessions**: A human picks "remote" in the TUI or web launcher, aimux creates a sandbox, connects via a real PTY (`openshell sandbox connect`), and the user works with Claude/Codex/Gemini inside the sandbox as if it were local.
+**Interactive sessions**: A human picks "remote" in the TUI or web launcher, aimux creates a sandbox, connects via a real PTY (`openshell sandbox connect`), and the user works with Claude/Codex inside the sandbox as if it were local.
 
 **Headless task workers**: A lead agent (running locally) dispatches coding tasks to remote workers via MCP tools. Workers execute the task, return structured results, and the lead continues.
 
@@ -81,7 +81,7 @@ Both implement the same `Backend` interface (5 methods), so all MCP tools and co
 
 ### Interactive Session (human attaches)
 
-1. **Launcher**: User presses `n` in the TUI (or clicks "Launch Agent" in the web dashboard), picks a provider (Claude/Codex/Gemini), and selects Runtime: **remote**
+1. **Launcher**: User presses `n` in the TUI (or clicks "Launch Agent" in the web dashboard), picks a provider (Claude/Codex), and selects Runtime: **remote**
 2. **Sandbox creation**: `compose.Engine.LaunchInSandbox()` provisions the sandbox: creates it via `openshell sandbox create`, injects OTEL env vars, sets egress policy for telemetry, and configures the inference proxy via `--provider vertex`
 3. **Terminal connect**: A real PTY is opened via `terminal.NewOpenShellExec()`, which runs `openshell sandbox connect <name>` with a controlling terminal. No tmux is involved
 4. **Session pinning**: Claude is started with `--session-id <uuid>` (a UUID generated at sandbox creation time). This pins the OTEL telemetry `session.id` to a stable value so traces persist across reconnects

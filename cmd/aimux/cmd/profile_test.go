@@ -60,7 +60,7 @@ func TestProfileSaveCmd_Text(t *testing.T) {
 	store := testStore(t)
 	jsonOutput = false
 
-	out, err := runProfileCmd(t, store, []string{"profile", "save", "dev", "--provider", "gemini"})
+	out, err := runProfileCmd(t, store, []string{"profile", "save", "dev", "--provider", "codex"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestProfileListCmd_Empty(t *testing.T) {
 
 func TestProfileGetCmd(t *testing.T) {
 	store := testStore(t)
-	_ = store.Save(profile.Profile{Name: "dev", Provider: "gemini", Dir: "/tmp"})
+	_ = store.Save(profile.Profile{Name: "dev", Provider: "codex", Dir: "/tmp"})
 	jsonOutput = true
 	defer func() { jsonOutput = false }()
 
@@ -121,8 +121,8 @@ func TestProfileGetCmd(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("not valid JSON: %v\noutput: %s", err, out)
 	}
-	if got.Provider != "gemini" {
-		t.Errorf("Provider=%q, want %q", got.Provider, "gemini")
+	if got.Provider != "codex" {
+		t.Errorf("Provider=%q, want %q", got.Provider, "codex")
 	}
 }
 

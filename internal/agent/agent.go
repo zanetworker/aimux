@@ -89,7 +89,7 @@ type Agent struct {
 	PID            int
 	SessionID      string
 	Name           string     // project name, derived from WorkingDir
-	ProviderName   string     // "claude", "codex", "gemini"
+	ProviderName   string     // "claude", "codex"
 	SessionFile    string     // path to conversation log
 	Model          string     // e.g. "claude-opus-4-6[1m]"
 	PermissionMode string

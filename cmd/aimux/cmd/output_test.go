@@ -51,7 +51,7 @@ func TestOutputWriter_WriteError_JSON(t *testing.T) {
 	w := &OutputWriter{JSON: true, Stdout: &stdout, Stderr: &stderr}
 
 	code := w.WriteError("invalid provider", ExitUsage, map[string]any{
-		"valid_values": []string{"claude", "codex", "gemini"},
+		"valid_values": []string{"claude", "codex"},
 	})
 	if code != ExitUsage {
 		t.Errorf("WriteError returned %d, want %d", code, ExitUsage)
@@ -77,7 +77,7 @@ func TestOutputWriter_WriteError_Text(t *testing.T) {
 	w := &OutputWriter{JSON: false, Stdout: &stdout, Stderr: &stderr}
 
 	code := w.WriteError("invalid provider \"gpt\"", ExitUsage, map[string]any{
-		"valid_values": []string{"claude", "codex", "gemini"},
+		"valid_values": []string{"claude", "codex"},
 	})
 	if code != ExitUsage {
 		t.Errorf("WriteError returned %d, want %d", code, ExitUsage)
@@ -89,7 +89,7 @@ func TestOutputWriter_WriteError_Text(t *testing.T) {
 	if !bytes.Contains(stderr.Bytes(), []byte("invalid provider")) {
 		t.Errorf("stderr missing error message, got %q", got)
 	}
-	if !bytes.Contains(stderr.Bytes(), []byte("claude, codex, gemini")) {
+	if !bytes.Contains(stderr.Bytes(), []byte("claude, codex")) {
 		t.Errorf("stderr missing valid values, got %q", got)
 	}
 }

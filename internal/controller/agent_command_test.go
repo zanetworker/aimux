@@ -16,7 +16,6 @@ func TestRemoteAgentCommand(t *testing.T) {
 		{"claude without uuid falls back", "claude", "", false, "claude"},
 		{"claude with non-uuid falls back", "claude", "aimux-remote-claude-123", true, "claude"},
 		{"non-claude provider is bare", "codex", validUUID, false, "codex"},
-		{"gemini provider is bare", "gemini", validUUID, true, "gemini"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

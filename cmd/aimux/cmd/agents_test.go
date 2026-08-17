@@ -126,7 +126,7 @@ func TestAgentsCmd_Filter(t *testing.T) {
 	agents := []agent.Agent{
 		{PID: 1, ProviderName: "claude", Name: "aimux", Status: agent.StatusActive, WorkingDir: "/tmp/aimux"},
 		{PID: 2, ProviderName: "codex", Name: "showtime", Status: agent.StatusIdle, WorkingDir: "/tmp/showtime"},
-		{PID: 3, ProviderName: "gemini", Name: "other", Status: agent.StatusActive, WorkingDir: "/tmp/other"},
+		{PID: 3, ProviderName: "codex", Name: "other", Status: agent.StatusActive, WorkingDir: "/tmp/other"},
 	}
 	c := newAgentsCmd(func() ([]agent.Agent, error) { return agents, nil })
 	rootCmd.SetOut(&stdout)
@@ -226,7 +226,7 @@ func TestAgentsCmd_Limit(t *testing.T) {
 	agents := []agent.Agent{
 		{PID: 1, ProviderName: "claude", Name: "a", Status: agent.StatusActive},
 		{PID: 2, ProviderName: "codex", Name: "b", Status: agent.StatusActive},
-		{PID: 3, ProviderName: "gemini", Name: "c", Status: agent.StatusActive},
+		{PID: 3, ProviderName: "codex", Name: "c", Status: agent.StatusActive},
 	}
 	c := newAgentsCmd(func() ([]agent.Agent, error) { return agents, nil })
 	rootCmd.SetOut(&stdout)

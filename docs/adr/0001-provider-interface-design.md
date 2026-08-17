@@ -6,13 +6,13 @@ Accepted
 
 ## Context
 
-aimux needs to support multiple AI coding agent backends (Claude, Codex, Gemini) with different process models, session formats, and terminal embedding strategies. The system should allow adding new providers without modifying core packages.
+aimux needs to support multiple AI coding agent backends (Claude, Codex) with different process models, session formats, and terminal embedding strategies. The system should allow adding new providers without modifying core packages.
 
 ## Decision
 
 Define a `Provider` interface with 11 methods covering discovery, session management, trace parsing, and OTEL configuration. Each provider is a single Go file implementing this interface. Providers are registered at startup; the orchestrator calls `Discover()` on each and merges results.
 
-Two `SessionBackend` implementations handle terminal I/O: direct PTY embedding (Claude) and tmux mirroring (Codex, Gemini). The provider signals its capability via `CanEmbed()`.
+Two `SessionBackend` implementations handle terminal I/O: direct PTY embedding (Claude) and tmux mirroring (Codex). The provider signals its capability via `CanEmbed()`.
 
 ## Consequences
 

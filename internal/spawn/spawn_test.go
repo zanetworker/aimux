@@ -17,7 +17,7 @@ func TestTmuxSessionName(t *testing.T) {
 	}{
 		{"claude", "/Users/me/projects/blog-concept", "aimux-claude-blog-concept"},
 		{"codex", "/tmp/my project", "aimux-codex-my-project"},
-		{"gemini", "/home/user/app", "aimux-gemini-app"},
+		{"codex", "/home/user/app", "aimux-codex-app"},
 	}
 	for _, tt := range tests {
 		got := TmuxSessionName(tt.provider, tt.dir)

@@ -11,7 +11,7 @@ import (
 func TestSpawnCmd_DryRun_JSON(t *testing.T) {
 	var stdout bytes.Buffer
 	c := newSpawnCmd(
-		[]string{"claude", "codex", "gemini"},
+		[]string{"claude", "codex"},
 		func(opts spawn.LaunchOpts) (int, string, error) {
 			return 0, "", nil
 		},
@@ -42,7 +42,7 @@ func TestSpawnCmd_DryRun_JSON(t *testing.T) {
 
 func TestSpawnCmd_InvalidProvider(t *testing.T) {
 	c := newSpawnCmd(
-		[]string{"claude", "codex", "gemini"},
+		[]string{"claude", "codex"},
 		nil,
 		"",
 	)
@@ -64,7 +64,7 @@ func TestSpawnCmd_InvalidProvider(t *testing.T) {
 func TestSpawnCmd_DryRun_Wait(t *testing.T) {
 	var stdout bytes.Buffer
 	c := newSpawnCmd(
-		[]string{"claude", "codex", "gemini"},
+		[]string{"claude", "codex"},
 		func(opts spawn.LaunchOpts) (int, string, error) {
 			return 0, "", nil
 		},
@@ -149,7 +149,7 @@ func TestSpawnCmd_ExplicitModeOverridesDefault(t *testing.T) {
 }
 
 func TestSpawnCmd_MissingProvider(t *testing.T) {
-	c := newSpawnCmd([]string{"claude", "codex", "gemini"}, nil, "")
+	c := newSpawnCmd([]string{"claude", "codex"}, nil, "")
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"spawn"})

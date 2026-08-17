@@ -6,7 +6,7 @@ aimux is a unified dashboard for managing multiple AI coding agent sessions. It 
 
 ## Preconditions
 
-- Users run multiple AI coding agents (Claude, Codex, Gemini) simultaneously
+- Users run multiple AI coding agents (Claude, Codex) simultaneously
 - Agents run in tmux sessions or as direct processes
 - Users need visibility into what agents are doing without switching terminals
 
@@ -21,4 +21,4 @@ aimux is a unified dashboard for managing multiple AI coding agent sessions. It 
 
 - **Single binary vs plugin system**: Providers are compiled in, not loaded as plugins. Simpler distribution at the cost of recompilation for new providers.
 - **Process scanning vs agent registration**: aimux discovers agents by scanning processes rather than requiring agents to register. More resilient but less precise.
-- **PTY embedding vs tmux mirroring**: Claude gets direct PTY for lower latency; Codex/Gemini use tmux mirroring for compatibility. Two backends to maintain.
+- **PTY embedding vs tmux mirroring**: Claude gets direct PTY for lower latency; Codex uses tmux mirroring for compatibility. Two backends to maintain.

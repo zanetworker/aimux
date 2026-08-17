@@ -73,9 +73,6 @@ shell: /bin/bash
 	if !merged.IsProviderEnabled("codex") {
 		t.Error("project config should not wipe global codex provider")
 	}
-	if !merged.IsProviderEnabled("gemini") {
-		t.Error("project config should not wipe global gemini provider")
-	}
 }
 
 func TestLoadProject_OverridesProviders(t *testing.T) {

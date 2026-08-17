@@ -13,7 +13,7 @@ func TestAgentContextCmd_Output(t *testing.T) {
 
 	// Register a few commands so the tree has content
 	agentsCmd := newAgentsCmd(func() ([]agent.Agent, error) { return nil, nil })
-	spawnCmd := newSpawnCmd([]string{"claude", "codex", "gemini"}, nil, "")
+	spawnCmd := newSpawnCmd([]string{"claude", "codex"}, nil, "")
 	versionCmd := newVersionCmd()
 	rootCmd.AddCommand(agentsCmd)
 	rootCmd.AddCommand(spawnCmd)
@@ -22,7 +22,7 @@ func TestAgentContextCmd_Output(t *testing.T) {
 	defer rootCmd.RemoveCommand(spawnCmd)
 	defer rootCmd.RemoveCommand(versionCmd)
 
-	c := newAgentContextCmd([]string{"claude", "codex", "gemini"})
+	c := newAgentContextCmd([]string{"claude", "codex"})
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"agent-context"})
@@ -64,14 +64,14 @@ func TestAgentContextCmd_Output(t *testing.T) {
 	}
 	firstArg := args[0].(map[string]any)
 	vals, ok := firstArg["values"].([]any)
-	if !ok || len(vals) != 3 {
-		t.Errorf("spawn provider arg should have 3 values, got %v", vals)
+	if !ok || len(vals) != 2 {
+		t.Errorf("spawn provider arg should have 2 values, got %v", vals)
 	}
 
 	// Verify providers list
 	providers, ok := result["providers"].([]any)
-	if !ok || len(providers) != 3 {
-		t.Errorf("providers should have 3 entries, got %v", providers)
+	if !ok || len(providers) != 2 {
+		t.Errorf("providers should have 2 entries, got %v", providers)
 	}
 }
 

@@ -14,7 +14,7 @@ aimux web --port 8080  # custom port
 
 The main view shows agent cards grouped by project. Each card displays:
 
-- **Provider badge** (Claude, Codex, Gemini) with color coding
+- **Provider badge** (Claude, Codex) with color coding
 - **Status** (Active, Idle, Waiting, Error)
 - **Launch mode badge** (tmux or direct)
 - **Title** from the session's first prompt or auto-generated
@@ -42,7 +42,7 @@ Toggle between card grid and compact list view using the view mode buttons in th
 The filter bar provides:
 
 - **Status filters**: All, Active, Idle, Waiting, Error
-- **Provider filters**: Claude, Codex, Gemini
+- **Provider filters**: Claude, Codex
 - **Location filter**: Local, Remote — show only local agents or only remote sandboxes
 - **Recent filter**: Show only agents active in the last 5 minutes
 - **Text search**: Filter by project name or branch

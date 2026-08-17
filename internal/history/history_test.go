@@ -486,7 +486,7 @@ func TestDiscover_WithMetadata(t *testing.T) {
 
 func TestDiscover_UnsupportedProvider(t *testing.T) {
 	dir := t.TempDir()
-	sessions, err := Discover(DiscoverOpts{Provider: "gemini"}, dir)
+	sessions, err := Discover(DiscoverOpts{Provider: "unknown-provider"}, dir)
 	if err != nil {
 		t.Fatalf("expected no error for unsupported provider, got %v", err)
 	}

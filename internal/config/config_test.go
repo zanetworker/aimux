@@ -290,12 +290,9 @@ providers:
 		t.Error("codex should be disabled")
 	}
 
-	// Claude and gemini should remain from defaults
+	// Claude should remain from defaults
 	if !cfg.IsProviderEnabled("claude") {
 		t.Error("claude should still be enabled from defaults")
-	}
-	if !cfg.IsProviderEnabled("gemini") {
-		t.Error("gemini should still be enabled from defaults")
 	}
 }
 

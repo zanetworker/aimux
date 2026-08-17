@@ -19,7 +19,7 @@ make install       # builds and copies to /usr/local/bin
 
 - **tmux** - required for split-pane session embedding and agent launch
 - **Go 1.24+** - only if building from source
-- Running AI coding agents: Claude Code, Codex CLI, or Gemini CLI
+- Running AI coding agents: Claude Code or Codex CLI
 
 ## Launch the TUI
 
@@ -27,7 +27,7 @@ make install       # builds and copies to /usr/local/bin
 aimux
 ```
 
-aimux auto-discovers running Claude, Codex, and Gemini processes. The agent table refreshes every 2 seconds.
+aimux auto-discovers running Claude and Codex processes. The agent table refreshes every 2 seconds.
 
 ## Launch the Web Dashboard
 
@@ -60,7 +60,7 @@ All data commands support `--json` for structured output. See [Agent Usage](/gui
 
 ## Quick Tour
 
-1. **Start some agents** - Run Claude Code, Codex, or Gemini in other terminals
+1. **Start some agents** - Run Claude Code or Codex in other terminals
 2. **Open aimux** - They appear automatically in the dashboard
 3. **Select an agent** - Press Enter (TUI) or click a card (web) to see its trace
 4. **Annotate** - Mark turns as good/bad/waste to build eval datasets

@@ -401,7 +401,7 @@ func TestReceiver_LogsResourceSessionTakesPrecedenceOverHeader(t *testing.T) {
 }
 
 // TestReceiver_FallbackEndToEnd verifies that the "/" fallback handler
-// correctly processes log payloads (for Gemini CLI which may send to "/" ).
+// correctly processes log payloads (for agents which may send to "/" ).
 func TestReceiver_FallbackEndToEnd(t *testing.T) {
 	store := NewSpanStore()
 	port := 14321
@@ -413,7 +413,7 @@ func TestReceiver_FallbackEndToEnd(t *testing.T) {
 	defer receiver.Stop()
 	time.Sleep(50 * time.Millisecond)
 
-	sessionID := "gemini-fallback-session"
+	sessionID := "codex-fallback-session"
 	now := time.Now()
 
 	req := &collectorlogspb.ExportLogsServiceRequest{
@@ -469,7 +469,7 @@ func TestReceiver_FallbackEndToEnd(t *testing.T) {
 func TestReceiver_FallbackHeaderSessionAlias(t *testing.T) {
 	store := NewSpanStore()
 	receiver := NewReceiver(store, 0)
-	aimuxSessionID := "aimux-remote-gemini-456"
+	aimuxSessionID := "aimux-remote-codex-456"
 
 	payload := &collectorlogspb.ExportLogsServiceRequest{
 		ResourceLogs: []*logspb.ResourceLogs{{
@@ -478,7 +478,7 @@ func TestReceiver_FallbackHeaderSessionAlias(t *testing.T) {
 					TimeUnixNano: uint64(time.Now().UnixNano()),
 					EventName:    "user_prompt",
 					Attributes: []*commonpb.KeyValue{
-						{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "gemini-internal-id"}}},
+						{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "codex-internal-id"}}},
 					},
 				}},
 			}},

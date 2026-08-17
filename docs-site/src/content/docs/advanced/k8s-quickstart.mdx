@@ -159,12 +159,6 @@ Build the Claude worker image:
 docker build -t agent-claude:latest -f runtime/agents/claude/Dockerfile .
 ```
 
-Build the Gemini worker image (uses a separate Dockerfile and requires a `google` key in the `llm-keys` secret):
-
-```bash
-docker build -t agent-gemini:latest -f runtime/agents/gemini/Dockerfile .
-```
-
 Push to your registry:
 
 ```bash
