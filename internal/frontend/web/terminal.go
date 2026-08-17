@@ -272,6 +272,8 @@ func (s *Server) handleTerminalSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	provider := r.URL.Query().Get("provider")
+	sessionID := r.URL.Query().Get("session_id")
 	cols, rows := parseTermSize(r)
 
 	backend, err := terminal.NewOpenShellExec(sandboxName, "", false, cols, rows)
@@ -284,6 +286,18 @@ func (s *Server) handleTerminalSandbox(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		_ = backend.Close()
 		return
+	}
+
+	// Auto-start or resume the agent inside the sandbox.
+	// If a prior conversation exists for this session ID, resume it; otherwise
+	// start fresh with --session-id so OTEL traces are pinned to this UUID.
+	if provider != "" && sessionID != "" {
+		resume := len(controller.RemoteTraceParser(s.otelStore, sessionID, sandboxName)) > 0
+		cmd := controller.RemoteAgentCommand(provider, sessionID, resume)
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			_, _ = backend.Write([]byte(cmd + "\n"))
+		}()
 	}
 
 	servePTYBackend(conn, backend)

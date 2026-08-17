@@ -114,7 +114,11 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.SandboxName != "" && result.OTELSessionID != "" && s.sessionStore != nil {
-		s.sessionStore.Put(result.SandboxName, result.OTELSessionID)
+		s.sessionStore.PutMeta(result.SandboxName, controller.LaunchMeta{
+			SessionID: result.OTELSessionID,
+			Provider:  opts.Provider,
+			Dir:       opts.Dir,
+		})
 	}
 	w.WriteHeader(http.StatusOK)
 	resp := map[string]interface{}{
@@ -239,7 +243,7 @@ func (s *Server) handleGetSessionMeta(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	if s.discoverFn == nil || s.killFn == nil {
+	if s.discoverFn == nil {
 		http.Error(w, "not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -249,19 +253,33 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	for _, a := range agents {
-		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
-			if err := s.killFn(a.PID, a.TMuxSession); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(map[string]string{"status": "killed"}); err != nil {
-				debuglog.Log("encode kill response: %v", err)
-			}
-			return
+	for i := range agents {
+		a := agents[i]
+		if a.SessionID != sessionID && fmt.Sprintf("%d", a.PID) != sessionID {
+			continue
 		}
+		action := controller.DetermineKillAction(a)
+		switch action.Type {
+		case controller.KillProcess:
+			if s.killFn != nil {
+				if err := s.killFn(a.PID, a.TMuxSession); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		case controller.KillSandbox:
+			if s.composeEngine != nil {
+				if err := controller.ExecuteKillSandbox(action, s.composeEngine); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "killed"}); err != nil {
+			debuglog.Log("encode archive response: %v", err)
+		}
+		return
 	}
 	http.Error(w, "agent not found", http.StatusNotFound)
 }
@@ -852,7 +870,6 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	// Copy to avoid mutating cached slice
 	result := make([]agent.Agent, len(agents))
 	copy(result, agents)

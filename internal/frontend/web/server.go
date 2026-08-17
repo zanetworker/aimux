@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -74,6 +75,7 @@ func (s *Server) cachedDiscover() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.enrichRemoteAgents(agents)
 	s.cacheAgents = agents
 	s.cacheTime = time.Now()
 	return agents, nil
@@ -81,6 +83,31 @@ func (s *Server) cachedDiscover() ([]agent.Agent, error) {
 
 func (s *Server) SetController(ctrl *controller.Controller) {
 	s.ctrl = ctrl
+}
+
+// enrichRemoteAgents fills SessionID, ProviderName, WorkingDir, and Name for
+// remote sandbox agents using metadata stored at launch time. It is called by
+// both the SSE handler and any request handler that needs accurate agent state.
+func (s *Server) enrichRemoteAgents(agents []agent.Agent) {
+	if s.sessionStore == nil {
+		return
+	}
+	for i := range agents {
+		if agents[i].Location != "remote" || agents[i].SandboxName == "" {
+			continue
+		}
+		meta := s.sessionStore.GetMeta(agents[i].SandboxName)
+		if meta.SessionID != "" {
+			agents[i].SessionID = meta.SessionID
+		}
+		if meta.Provider != "" {
+			agents[i].ProviderName = meta.Provider
+		}
+		if meta.Dir != "" {
+			agents[i].WorkingDir = meta.Dir
+			agents[i].Name = filepath.Base(meta.Dir)
+		}
+	}
 }
 
 func (s *Server) SetPluginExecutor(exec *plugin.Executor) {

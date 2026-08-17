@@ -1045,10 +1045,11 @@ func TestHandleGetTrace_RemoteAgent(t *testing.T) {
 	sessionStore := controller.NewSessionStore(t.TempDir())
 	sessionStore.Put("my-sandbox", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
+	// DiscoverSandboxes returns agents with empty SessionID — enrichment fills it.
 	agents := []agent.Agent{
 		{
 			PID:          0,
-			SessionID:    "my-sandbox",
+			SessionID:    "",
 			Name:         "my-sandbox",
 			SandboxName:  "my-sandbox",
 			Location:     "remote",
@@ -1068,7 +1069,8 @@ func TestHandleGetTrace_RemoteAgent(t *testing.T) {
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
 
-	resp, err := http.Get(s.URL() + "/api/agents/my-sandbox/trace")
+	// Request by the enriched session ID (from the session store), not the sandbox name.
+	resp, err := http.Get(s.URL() + "/api/agents/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/trace")
 	if err != nil {
 		t.Fatalf("GET trace failed: %v", err)
 	}
