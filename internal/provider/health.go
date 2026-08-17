@@ -22,10 +22,22 @@ type SystemHealth struct {
 	Providers []ProviderHealth
 }
 
+// RemoteHealthConfig carries enough info to check OpenShell gateway health
+// without importing the config package.
+type RemoteHealthConfig struct {
+	Backend string // "openshell" or ""
+	Gateway string // gateway endpoint URL
+}
+
 // GatherHealth collects health from all providers and an optional infra
 // provider. Each local provider's binary is checked via exec.LookPath.
 // Agent counts come from the most recent discovery results.
 func GatherHealth(providers []Provider, infra InfraProvider, agentCounts map[string]int) SystemHealth {
+	return GatherHealthWithRemote(providers, infra, agentCounts, RemoteHealthConfig{})
+}
+
+// GatherHealthWithRemote extends GatherHealth with OpenShell gateway status.
+func GatherHealthWithRemote(providers []Provider, infra InfraProvider, agentCounts map[string]int, remote RemoteHealthConfig) SystemHealth {
 	var sh SystemHealth
 
 	for _, p := range providers {
@@ -35,7 +47,6 @@ func GatherHealth(providers []Provider, infra InfraProvider, agentCounts map[str
 			Agents: agentCounts[p.Name()],
 		}
 
-		// Derive binary path from SpawnCommand.
 		cmd := p.SpawnCommand(".", "", "")
 		if cmd != nil && len(cmd.Args) > 0 {
 			binary := cmd.Args[0]
@@ -46,8 +57,6 @@ func GatherHealth(providers []Provider, infra InfraProvider, agentCounts map[str
 			}
 		}
 
-		// If this is the infra provider, mark it as such and include
-		// infra health. Skip adding it again below.
 		if infra != nil && p.Name() == infra.Name() {
 			ph.Kind = "infra"
 			h := infra.CheckHealth()
@@ -57,7 +66,75 @@ func GatherHealth(providers []Provider, infra InfraProvider, agentCounts map[str
 		sh.Providers = append(sh.Providers, ph)
 	}
 
+	if remote.Backend == "openshell" {
+		sh.Providers = append(sh.Providers, checkOpenShellHealth(remote.Gateway))
+	}
+
 	return sh
+}
+
+func checkOpenShellHealth(gateway string) ProviderHealth {
+	ph := ProviderHealth{
+		Name: "openshell",
+		Kind: "infra",
+	}
+
+	path, err := exec.LookPath("openshell")
+	if err != nil {
+		ph.Infra = &HealthStatus{
+			Configured: true,
+			CoordErr:   "openshell CLI not found in PATH",
+		}
+		return ph
+	}
+	ph.BinaryOK = true
+	ph.BinaryPath = path
+	ph.Version = getBinaryVersion(path)
+
+	out, err := exec.Command("openshell", "status").CombinedOutput()
+	if err != nil {
+		ph.Infra = &HealthStatus{
+			Configured: true,
+			CoordErr:   "gateway unreachable",
+		}
+		return ph
+	}
+
+	output := strings.ToLower(string(out))
+	connected := strings.Contains(output, "connected")
+
+	if connected {
+		// Get sandbox count
+		listOut, _ := exec.Command("openshell", "sandbox", "list").CombinedOutput()
+		lines := strings.Split(strings.TrimSpace(string(listOut)), "\n")
+		sandboxCount := 0
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "NAME") && !strings.HasPrefix(line, "No sandbox") {
+				sandboxCount++
+			}
+		}
+
+		ph.Infra = &HealthStatus{
+			Configured: true,
+			CoordOK:    true,
+			ComputeOK:  true,
+		}
+		if gateway != "" {
+			ph.Infra.Workloads = []string{fmt.Sprintf("gateway: %s", gateway)}
+		}
+		if sandboxCount > 0 {
+			ph.Infra.Workloads = append(ph.Infra.Workloads, fmt.Sprintf("%d sandbox(es) running", sandboxCount))
+		}
+		ph.Agents = sandboxCount
+	} else {
+		ph.Infra = &HealthStatus{
+			Configured: true,
+			CoordErr:   "gateway not connected",
+		}
+	}
+
+	return ph
 }
 
 // getBinaryVersion runs "<binary> --version" and returns the first line.

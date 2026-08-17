@@ -134,24 +134,24 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
           {starred ? '★' : '☆'}
         </button>
         {/* Kill button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onKill && confirm('This will terminate the session. Are you sure?')) {
-              onKill(agent.SessionID || String(agent.PID));
-            }
-          }}
-          className="kill-btn"
-          style={{
-            background: 'transparent', border: '1px solid var(--accent)',
-            color: 'var(--accent)', fontSize: 10, fontWeight: 600,
-            cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s',
-            padding: '1px 6px', borderRadius: 3, lineHeight: '1.4',
-          }}
-          title="Kill session"
-        >
-          Kill
-        </button>
+        {agent.LastAction !== 'Deleting' && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onKill) onKill(agent.SessionID || String(agent.PID));
+            }}
+            className="kill-btn"
+            style={{
+              background: 'transparent', border: '1px solid var(--accent)',
+              color: 'var(--accent)', fontSize: 10, fontWeight: 600,
+              cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s',
+              padding: '1px 6px', borderRadius: 3, lineHeight: '1.4',
+            }}
+            title="Kill session"
+          >
+            Kill
+          </button>
+        )}
       </div>
 
       {/* Row 2: Title (the main visual anchor) */}

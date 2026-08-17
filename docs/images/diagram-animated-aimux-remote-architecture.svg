@@ -1,0 +1,290 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 620" font-family="RedHatDisplay, 'Red Hat Display', system-ui, sans-serif">
+  <style>
+    :root {
+      --bg: #1a1a1a;
+      --bg-card: #2d2d2d;
+      --bg-item: #3a3a3a;
+      --accent: #ee0000;
+      --accent-dark: #a30000;
+      --text-primary: #e0e0e0;
+      --text-secondary: #a3a3a3;
+      --text-muted: #6b6b6b;
+      --border-card: #404040;
+      --col-divider: #333333;
+      --flow-stroke: #a30000;
+      --flow-dot: #ee0000;
+      --conn-opacity: 0.6;
+      --teal: #37a3a3;
+      --purple: #5e40be;
+      --orange: #f5921b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f5f5;
+        --bg-card: #ffffff;
+        --bg-item: #f0f0f0;
+        --accent: #cc0000;
+        --accent-dark: #a30000;
+        --text-primary: #151515;
+        --text-secondary: #4d4d4d;
+        --text-muted: #6b6b6b;
+        --border-card: #d2d2d2;
+        --col-divider: #d2d2d2;
+        --flow-stroke: #a30000;
+        --flow-dot: #cc0000;
+        --conn-opacity: 0.7;
+      }
+    }
+  </style>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#ee0000"/>
+    </marker>
+    <marker id="arrow-teal" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#37a3a3"/>
+    </marker>
+    <marker id="arrow-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#5e40be"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#f5921b"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="620" fill="#1a1a1a"/>
+
+  <!-- Title -->
+  <text x="600" y="30" text-anchor="middle" fill="#e0e0e0" font-size="18" font-weight="700">aimux Remote Agents Architecture</text>
+
+  <!-- Column labels -->
+  <text x="130" y="58" text-anchor="middle" fill="#6b6b6b" font-size="10" font-weight="700" letter-spacing="1.5">FRONTENDS</text>
+  <text x="370" y="58" text-anchor="middle" fill="#6b6b6b" font-size="10" font-weight="700" letter-spacing="1.5">CONTROLLER</text>
+  <text x="600" y="58" text-anchor="middle" fill="#6b6b6b" font-size="10" font-weight="700" letter-spacing="1.5">MCP · SERVER</text>
+  <text x="830" y="58" text-anchor="middle" fill="#6b6b6b" font-size="10" font-weight="700" letter-spacing="1.5">BACKENDS</text>
+  <text x="1060" y="58" text-anchor="middle" fill="#6b6b6b" font-size="10" font-weight="700" letter-spacing="1.5">COMPUTE</text>
+
+  <!-- Column dividers -->
+  <line x1="250" y1="48" x2="250" y2="560" stroke="#333333" stroke-width="1" opacity="0.3"/>
+  <line x1="480" y1="48" x2="480" y2="560" stroke="#333333" stroke-width="1" opacity="0.3"/>
+  <line x1="720" y1="48" x2="720" y2="560" stroke="#333333" stroke-width="1" opacity="0.3"/>
+  <line x1="950" y1="48" x2="950" y2="560" stroke="#333333" stroke-width="1" opacity="0.3"/>
+
+  <!-- COL 1: Frontends -->
+  <!-- TUI Card -->
+  <rect x="40" y="80" width="180" height="90" fill="#2d2d2d" stroke="#ee0000" stroke-width="2" rx="6" filter="url(#shadow)"/>
+  <rect x="40" y="80" width="180" height="28" fill="#ee0000" rx="6"/>
+  <rect x="40" y="96" width="180" height="12" fill="#ee0000"/>
+  <text x="130" y="99" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">TUI (Bubble Tea)</text>
+  <rect x="50" y="118" width="75" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="88" y="133" text-anchor="middle" fill="#a3a3a3" font-size="9">Launcher</text>
+  <rect x="135" y="118" width="75" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="173" y="133" text-anchor="middle" fill="#a3a3a3" font-size="9">Split View</text>
+  <rect x="50" y="144" width="160" height="18" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="130" y="157" text-anchor="middle" fill="#a3a3a3" font-size="9">local | container | remote</text>
+
+  <!-- Web API Card -->
+  <rect x="40" y="185" width="180" height="65" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="130" y="207" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">Web API</text>
+  <rect x="50" y="215" width="160" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="130" y="230" text-anchor="middle" fill="#a3a3a3" font-size="9">POST /api/launch {runtime: "remote"}</text>
+
+  <!-- CLI Card -->
+  <rect x="40" y="265" width="180" height="65" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="130" y="287" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">CLI</text>
+  <rect x="50" y="295" width="160" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="130" y="310" text-anchor="middle" fill="#a3a3a3" font-size="9">aimux mcp serve --backend openshell</text>
+
+  <!-- Lead Agent Card -->
+  <rect x="40" y="355" width="180" height="65" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="130" y="377" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">Lead Agent</text>
+  <rect x="50" y="385" width="160" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="130" y="400" text-anchor="middle" fill="#a3a3a3" font-size="9">Claude / Codex / Gemini (local)</text>
+
+  <!-- COL 2: Controller -->
+  <rect x="275" y="80" width="190" height="170" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="370" y="103" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">controller/remote.go</text>
+  <line x1="285" y1="112" x2="455" y2="112" stroke="#404040" stroke-width="0.5" opacity="0.5"/>
+  <rect x="285" y="120" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="370" y="135" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="500">RemoteLaunchSession()</text>
+  <rect x="285" y="148" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="370" y="163" text-anchor="middle" fill="#a3a3a3" font-size="10">RemoteSpawn()</text>
+  <rect x="285" y="176" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="370" y="191" text-anchor="middle" fill="#a3a3a3" font-size="10">RemoteScaleDown()</text>
+  <rect x="285" y="204" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="370" y="219" text-anchor="middle" fill="#a3a3a3" font-size="10">RemoteBackendStatus()</text>
+
+  <!-- Spawn Card -->
+  <rect x="275" y="270" width="190" height="65" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="370" y="293" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">spawn/sandbox.go</text>
+  <rect x="285" y="301" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="370" y="316" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="500">LaunchInSandbox()</text>
+
+  <!-- COL 3: MCP Server -->
+  <rect x="500" y="80" width="200" height="200" fill="#2d2d2d" stroke="#ee0000" stroke-width="2" rx="6" filter="url(#shadow)"/>
+  <rect x="500" y="80" width="200" height="28" fill="#ee0000" rx="6"/>
+  <rect x="500" y="96" width="200" height="12" fill="#ee0000"/>
+  <text x="600" y="99" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">MCP Server (stdio)</text>
+  <rect x="510" y="118" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="553" y="133" text-anchor="middle" fill="#a3a3a3" font-size="9">spawn_agent</text>
+  <rect x="605" y="118" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="648" y="133" text-anchor="middle" fill="#a3a3a3" font-size="9">create_task</text>
+  <rect x="510" y="146" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="553" y="161" text-anchor="middle" fill="#a3a3a3" font-size="9">list_agents</text>
+  <rect x="605" y="146" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="648" y="161" text-anchor="middle" fill="#a3a3a3" font-size="9">scale_down</text>
+  <rect x="510" y="174" width="180" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="600" y="189" text-anchor="middle" fill="#a3a3a3" font-size="9">wait_for_task · get_task · get_costs</text>
+  <rect x="510" y="202" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="553" y="217" text-anchor="middle" fill="#f5921b" font-size="9" font-weight="500">Journal</text>
+  <rect x="605" y="202" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="648" y="217" text-anchor="middle" fill="#f5921b" font-size="9" font-weight="500">Warm Pool</text>
+  <text x="600" y="260" text-anchor="middle" fill="#6b6b6b" font-size="9" font-style="italic">tasks.jsonl (durable state)</text>
+
+  <!-- Shared Client -->
+  <rect x="500" y="300" width="200" height="50" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="600" y="323" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">openshell/client.go</text>
+  <text x="600" y="340" text-anchor="middle" fill="#6b6b6b" font-size="9">Shared CLI adapter (injectable runner)</text>
+
+  <!-- COL 4: Backends -->
+  <rect x="740" y="80" width="190" height="110" fill="#2d2d2d" stroke="#37a3a3" stroke-width="2" rx="6" filter="url(#shadow)"/>
+  <rect x="740" y="80" width="190" height="28" fill="#37a3a3" rx="6"/>
+  <rect x="740" y="96" width="190" height="12" fill="#37a3a3"/>
+  <text x="835" y="99" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">OpenShell Backend</text>
+  <rect x="750" y="118" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="835" y="133" text-anchor="middle" fill="#a3a3a3" font-size="9">CreateSandbox · DeleteSandbox</text>
+  <rect x="750" y="146" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="835" y="161" text-anchor="middle" fill="#a3a3a3" font-size="9">ExecStream · claimIdle · release</text>
+  <text x="835" y="180" text-anchor="middle" fill="#6b6b6b" font-size="9">Sync exec, in-memory pool</text>
+
+  <rect x="740" y="210" width="190" height="110" fill="#2d2d2d" stroke="#5e40be" stroke-width="2" rx="6" filter="url(#shadow)"/>
+  <rect x="740" y="210" width="190" height="28" fill="#5e40be" rx="6"/>
+  <rect x="740" y="226" width="190" height="12" fill="#5e40be"/>
+  <text x="835" y="229" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">K8s Backend</text>
+  <rect x="750" y="248" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="835" y="263" text-anchor="middle" fill="#a3a3a3" font-size="9">Scale Deployments · Redis heartbeat</text>
+  <rect x="750" y="276" width="170" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="835" y="291" text-anchor="middle" fill="#a3a3a3" font-size="9">Task queue · wait_for_task</text>
+  <text x="835" y="310" text-anchor="middle" fill="#6b6b6b" font-size="9">Async Redis, K8s Deployments</text>
+
+  <!-- Backend Interface label -->
+  <rect x="745" y="345" width="180" height="26" fill="#2d2d2d" stroke="#404040" stroke-width="1" rx="4"/>
+  <text x="835" y="362" text-anchor="middle" fill="#6b6b6b" font-size="9" font-weight="600" letter-spacing="0.5">Backend interface (5 methods)</text>
+
+  <!-- COL 5: Compute -->
+  <!-- OpenShell Gateway -->
+  <rect x="970" y="80" width="200" height="100" fill="#2d2d2d" stroke="#37a3a3" stroke-width="2" rx="6" filter="url(#shadow)"/>
+  <text x="1070" y="103" text-anchor="middle" fill="#e0e0e0" font-size="12" font-weight="600">OpenShell Gateway</text>
+  <line x1="980" y1="112" x2="1160" y2="112" stroke="#404040" stroke-width="0.5" opacity="0.5"/>
+  <rect x="980" y="120" width="85" height="36" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="1023" y="136" text-anchor="middle" fill="#a3a3a3" font-size="9">Podman</text>
+  <text x="1023" y="149" text-anchor="middle" fill="#6b6b6b" font-size="8">driver</text>
+  <rect x="1075" y="120" width="85" height="36" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="1118" y="136" text-anchor="middle" fill="#a3a3a3" font-size="9">Docker / K8s</text>
+  <text x="1118" y="149" text-anchor="middle" fill="#6b6b6b" font-size="8">driver</text>
+  <text x="1070" y="172" text-anchor="middle" fill="#6b6b6b" font-size="8">JWT + Landlock + Seccomp</text>
+
+  <!-- Sandbox containers -->
+  <rect x="970" y="200" width="200" height="80" fill="#2d2d2d" stroke="#37a3a3" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="1070" y="222" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Sandbox Containers</text>
+  <rect x="980" y="232" width="55" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="1008" y="247" text-anchor="middle" fill="#37a3a3" font-size="9">Claude</text>
+  <rect x="1041" y="232" width="55" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="1069" y="247" text-anchor="middle" fill="#37a3a3" font-size="9">Codex</text>
+  <rect x="1102" y="232" width="55" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="1130" y="247" text-anchor="middle" fill="#37a3a3" font-size="9">Gemini</text>
+  <text x="1070" y="272" text-anchor="middle" fill="#6b6b6b" font-size="8">Isolated per-task/session</text>
+
+  <!-- K8s cluster -->
+  <rect x="970" y="300" width="200" height="70" fill="#2d2d2d" stroke="#5e40be" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="1070" y="322" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">K8s Cluster</text>
+  <rect x="980" y="332" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="1023" y="347" text-anchor="middle" fill="#5e40be" font-size="9">Deployments</text>
+  <rect x="1075" y="332" width="85" height="22" fill="#3a3a3a" stroke="#404040" stroke-width="0.5" rx="3"/>
+  <text x="1118" y="347" text-anchor="middle" fill="#5e40be" font-size="9">Redis</text>
+
+  <!-- ===== CONNECTIONS ===== -->
+
+  <!-- Frontends -> Controller (teal, interactive path) -->
+  <path id="p-tui-ctrl" d="M220,130 L275,130" stroke="#37a3a3" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-teal)"/>
+  <circle r="4" fill="#37a3a3" opacity="0.9"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#p-tui-ctrl"/></animateMotion></circle>
+
+  <path id="p-web-ctrl" d="M220,217 L275,165" stroke="#37a3a3" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-teal)"/>
+  <circle r="4" fill="#37a3a3" opacity="0.7"><animateMotion dur="1.6s" repeatCount="indefinite" begin="0.3s"><mpath href="#p-web-ctrl"/></animateMotion></circle>
+
+  <!-- Lead Agent -> MCP (red, headless path) -->
+  <path id="p-lead-mcp" d="M220,390 L500,180" stroke="#a30000" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-red)"/>
+  <circle r="4" fill="#ee0000" opacity="0.9"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#p-lead-mcp"/></animateMotion></circle>
+  <circle r="4" fill="#ee0000" opacity="0.6"><animateMotion dur="1.6s" repeatCount="indefinite" begin="0.5s"><mpath href="#p-lead-mcp"/></animateMotion></circle>
+  <!-- MCP stdio label -->
+  <rect x="300" y="278" width="60" height="16" fill="#1a1a1a" opacity="0.8" rx="2"/>
+  <text x="330" y="290" text-anchor="middle" fill="#ee0000" font-size="8" font-weight="600">MCP stdio</text>
+
+  <!-- Controller -> Spawn -->
+  <path id="p-ctrl-spawn" d="M370,250 L370,270" stroke="#37a3a3" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-teal)"/>
+  <circle r="4" fill="#37a3a3" opacity="0.8"><animateMotion dur="1.0s" repeatCount="indefinite"><mpath href="#p-ctrl-spawn"/></animateMotion></circle>
+
+  <!-- Spawn -> Shared Client -->
+  <path id="p-spawn-client" d="M465,310 L500,325" stroke="#37a3a3" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-teal)"/>
+  <circle r="4" fill="#37a3a3" opacity="0.8"><animateMotion dur="1.6s" repeatCount="indefinite" begin="0.4s"><mpath href="#p-spawn-client"/></animateMotion></circle>
+
+  <!-- MCP -> OpenShell Backend (red) -->
+  <path id="p-mcp-os" d="M700,135 L740,135" stroke="#a30000" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-red)"/>
+  <circle r="4" fill="#ee0000" opacity="0.9"><animateMotion dur="1.0s" repeatCount="indefinite"><mpath href="#p-mcp-os"/></animateMotion></circle>
+
+  <!-- MCP -> K8s Backend (purple) -->
+  <path id="p-mcp-k8s" d="M700,200 L740,265" stroke="#5e40be" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-purple)"/>
+  <circle r="4" fill="#5e40be" opacity="0.9"><animateMotion dur="1.6s" repeatCount="indefinite" begin="0.2s"><mpath href="#p-mcp-k8s"/></animateMotion></circle>
+
+  <!-- OpenShell Backend -> Shared Client -->
+  <path id="p-os-client" d="M740,170 L700,310" stroke="#37a3a3" stroke-width="2" stroke-dasharray="4,3" fill="none" opacity="0.4"/>
+
+  <!-- Shared Client -> Gateway (teal) -->
+  <path id="p-client-gw" d="M700,325 L830,325 L830,190 L835,190 L950,140" stroke="#37a3a3" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-teal)"/>
+  <circle r="4" fill="#37a3a3" opacity="0.9"><animateMotion dur="2.0s" repeatCount="indefinite"><mpath href="#p-client-gw"/></animateMotion></circle>
+
+  <!-- OpenShell Backend -> Gateway (exec, red) -->
+  <path id="p-os-gw" d="M930,135 L970,135" stroke="#a30000" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-red)"/>
+  <circle r="4" fill="#ee0000" opacity="0.9"><animateMotion dur="1.0s" repeatCount="indefinite" begin="0.3s"><mpath href="#p-os-gw"/></animateMotion></circle>
+
+  <!-- Gateway -> Sandboxes (teal) -->
+  <path id="p-gw-sb" d="M1070,180 L1070,200" stroke="#37a3a3" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-teal)"/>
+  <circle r="4" fill="#37a3a3" opacity="0.9"><animateMotion dur="1.0s" repeatCount="indefinite"><mpath href="#p-gw-sb"/></animateMotion></circle>
+
+  <!-- K8s Backend -> K8s Cluster (purple) -->
+  <path id="p-k8s-cluster" d="M930,265 L970,335" stroke="#5e40be" stroke-width="2.5" stroke-dasharray="4,3" fill="none" opacity="0.6" marker-end="url(#arrow-purple)"/>
+  <circle r="4" fill="#5e40be" opacity="0.9"><animateMotion dur="1.6s" repeatCount="indefinite" begin="0.4s"><mpath href="#p-k8s-cluster"/></animateMotion></circle>
+
+  <!-- ===== USE CASE LABELS ===== -->
+  <rect x="40" y="440" width="520" height="26" fill="#2d2d2d" stroke="#37a3a3" stroke-width="1" rx="4"/>
+  <text x="300" y="457" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="600">INTERACTIVE: Launcher -> Controller -> Spawn -> openshell sandbox connect -> tmux session</text>
+
+  <rect x="40" y="475" width="520" height="26" fill="#2d2d2d" stroke="#ee0000" stroke-width="1" rx="4"/>
+  <text x="300" y="492" text-anchor="middle" fill="#ee0000" font-size="10" font-weight="600">HEADLESS: Lead Agent -> MCP stdio -> Backend -> exec / Redis queue -> result</text>
+
+  <!-- Legend -->
+  <g transform="translate(120, 530)">
+    <rect x="0" y="0" width="960" height="30" rx="6" fill="#2d2d2d" stroke="#404040" stroke-width="1"/>
+    <circle cx="20" cy="15" r="5" fill="#37a3a3"/>
+    <text x="32" y="19" fill="#a3a3a3" font-size="9" font-weight="500">Interactive session (TUI/Web)</text>
+    <circle cx="220" cy="15" r="5" fill="#ee0000"/>
+    <text x="232" y="19" fill="#a3a3a3" font-size="9" font-weight="500">Headless task (MCP)</text>
+    <circle cx="380" cy="15" r="5" fill="#5e40be"/>
+    <text x="392" y="19" fill="#a3a3a3" font-size="9" font-weight="500">K8s backend (async Redis)</text>
+    <circle cx="570" cy="15" r="5" fill="#f5921b"/>
+    <text x="582" y="19" fill="#a3a3a3" font-size="9" font-weight="500">Durable state (journal/pool)</text>
+    <rect x="740" y="8" width="14" height="14" rx="3" fill="none" stroke="#ee0000" stroke-width="1.5" opacity="0.7">
+      <animate attributeName="opacity" values="0.3;0.7;0.3" dur="3s" repeatCount="indefinite"/>
+    </rect>
+    <text x="760" y="19" fill="#a3a3a3" font-size="9" font-weight="500">Core component</text>
+  </g>
+
+  <!-- Footer -->
+  <text x="600" y="600" text-anchor="middle" fill="#6b6b6b" font-size="9" font-style="italic">aimux Remote Agents · OpenShell + K8s backends · All frontends share controller layer</text>
+</svg>

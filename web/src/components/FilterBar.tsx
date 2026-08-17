@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Agent } from '../types';
 import type { ContentSearchResult } from '../App';
+import { normalizeLocation } from '../utils';
 
 interface Props {
   agents: Agent[];
@@ -8,6 +9,8 @@ interface Props {
   onStatusFilter: (s: number | null) => void;
   providerFilter: string | null;
   onProviderFilter: (p: string | null) => void;
+  locationFilter: string | null;
+  onLocationFilter: (l: string | null) => void;
   recentFilter: boolean;
   onRecentFilter: (v: boolean) => void;
   searchQuery: string;
@@ -28,6 +31,8 @@ export function FilterBar({
   onStatusFilter,
   providerFilter,
   onProviderFilter,
+  locationFilter,
+  onLocationFilter,
   recentFilter,
   onRecentFilter,
   searchQuery,
@@ -73,6 +78,18 @@ export function FilterBar({
     gemini: '#a78bfa',
   };
 
+  const locationCounts = {
+    local: agents.filter(a => normalizeLocation(a) === 'local').length,
+    remote: agents.filter(a => normalizeLocation(a) === 'remote').length,
+    k8s: agents.filter(a => normalizeLocation(a) === 'k8s').length,
+  };
+
+  const locationDots = {
+    local: '#94a3b8',
+    remote: '#38bdf8',
+    k8s: '#a78bfa',
+  };
+
   const handleDeepSearch = () => {
     if (deepQuery.trim()) {
       onContentSearch(deepQuery.trim());
@@ -112,6 +129,15 @@ export function FilterBar({
       <FilterPill label="Claude" count={providerCounts.claude} dotColor={providerDots.claude} active={providerFilter === 'claude'} onClick={() => onProviderFilter(providerFilter === 'claude' ? null : 'claude')} />
       <FilterPill label="Codex" count={providerCounts.codex} dotColor={providerDots.codex} active={providerFilter === 'codex'} onClick={() => onProviderFilter(providerFilter === 'codex' ? null : 'codex')} />
       <FilterPill label="Gemini" count={providerCounts.gemini} dotColor={providerDots.gemini} active={providerFilter === 'gemini'} onClick={() => onProviderFilter(providerFilter === 'gemini' ? null : 'gemini')} />
+
+      <Divider />
+
+      {/* Location filters */}
+      <FilterPill label="Local" count={locationCounts.local} dotColor={locationDots.local} active={locationFilter === 'local'} onClick={() => onLocationFilter(locationFilter === 'local' ? null : 'local')} />
+      <FilterPill label="Remote" count={locationCounts.remote} dotColor={locationDots.remote} active={locationFilter === 'remote'} onClick={() => onLocationFilter(locationFilter === 'remote' ? null : 'remote')} />
+      {locationCounts.k8s > 0 && (
+        <FilterPill label="K8s" count={locationCounts.k8s} dotColor={locationDots.k8s} active={locationFilter === 'k8s'} onClick={() => onLocationFilter(locationFilter === 'k8s' ? null : 'k8s')} />
+      )}
 
       <Divider />
 

@@ -55,7 +55,9 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	for _, a := range agents {
 		// Filter ephemeral automation subagents (session analyzers, hooks)
 		// but keep sessions launched by aimux (tmux session starts with "aimux-")
-		if a.EstCostUSD == 0 && a.TokensIn < 1000 && !strings.Contains(a.Model, "opus") &&
+		// and always keep remote sandbox agents (no cost/token data by design).
+		if a.Location != "remote" && a.EstCostUSD == 0 && a.TokensIn < 1000 &&
+			!strings.Contains(a.Model, "opus") &&
 			!strings.HasPrefix(a.TMuxSession, "aimux-") {
 			continue
 		}

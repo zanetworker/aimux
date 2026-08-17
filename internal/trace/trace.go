@@ -24,6 +24,7 @@ type Turn struct {
 	TokensOut   int64
 	CostUSD     float64 // calculated from tokens + model
 	Model       string        // model used for this turn
+	PromptID    string        // Claude Code prompt.id; used to join session-file replies
 	Subagent    subagent.Info // subagent identity (empty for main thread)
 }
 

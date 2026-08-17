@@ -12,8 +12,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/cmd/aimux/cmd"
+	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
+	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/frontend/tui"
@@ -43,6 +45,8 @@ func main() {
 	if cwd, err := os.Getwd(); err == nil {
 		cfg, _ = config.LoadProject(cwd, cfg)
 	}
+
+	cmd.AutoRegisterMCP(cfg)
 
 	// Wire TUI launcher
 	cmd.SetRunTUI(func(_ *cobra.Command, _ []string) error {
@@ -93,6 +97,15 @@ func main() {
 	profileStore := profile.NewStore(profile.DefaultPath())
 	_ = profileStore.Load()
 
+	var cliComposeEngine *aimuxcompose.Engine
+	if cfg.Remote.Backend == "openshell" {
+		cliComposeEngine, _ = aimuxcompose.New(aimuxcompose.Options{
+			Gateway:  cfg.Remote.Gateway,
+			Insecure: true,
+			Image:    cfg.Remote.Image,
+		})
+	}
+
 	deps := cmd.Deps{
 		Discover:         disco.Discover,
 		DiscoverSessions: history.Discover,
@@ -113,6 +126,7 @@ func main() {
 			"codex":  (&provider.Codex{}).ParseTrace,
 			"gemini": (&provider.Gemini{}).ParseTrace,
 		},
+		ComposeEngine: cliComposeEngine,
 	}
 
 	cmd.RegisterAll(deps)
@@ -274,7 +288,25 @@ func createWebServer(port int) *web.Server {
 		&provider.Gemini{},
 	)
 
+	// Enable remote sandbox discovery so sandboxes appear in the web agent list
+	if cfg.Remote.Backend == "openshell" {
+		disco.EnableRemoteDiscovery()
+	}
+
+	// Initialize compose engine for OpenShell sandbox operations
+	var composeEngine *aimuxcompose.Engine
+	if cfg.Remote.Backend == "openshell" {
+		composeEngine, _ = aimuxcompose.New(aimuxcompose.Options{
+			Gateway:  cfg.Remote.Gateway,
+			Insecure: true,
+			Image:    cfg.Remote.Image,
+		})
+	}
+
 	s := web.NewServer(port)
+	if composeEngine != nil {
+		s.SetComposeEngine(composeEngine)
+	}
 	s.SetDiscoverFunc(disco.Discover)
 	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
 		// Find the provider to build the spawn command
@@ -327,7 +359,22 @@ func createWebServer(port int) *web.Server {
 			}
 		}
 
-		if opts.Runtime == "container" {
+		if opts.Runtime == "remote" {
+			if composeEngine == nil {
+				return spawn.LaunchResult{}, fmt.Errorf("remote runtime requires openshell backend configured")
+			}
+			sOpts := aimuxcompose.LaunchOpts{
+				Image: cfg.Remote.Image,
+			}
+			result, err := composeEngine.LaunchInSandbox(opts.Provider, opts.Dir, sOpts)
+			if err != nil {
+				return spawn.LaunchResult{}, err
+			}
+			return spawn.LaunchResult{
+				SandboxName:   result.SandboxName,
+				OTELSessionID: result.OTELSessionID,
+			}, nil
+		} else if opts.Runtime == "container" {
 			cOpts := opts.ContainerOpts
 			if cOpts.Engine == "" {
 				for _, rt := range cfg.Runtimes {
@@ -381,6 +428,10 @@ func createWebServer(port int) *web.Server {
 
 	s.SetController(controller.New(cfg))
 	s.SetConfig(cfg)
+
+	configDir := filepath.Join(os.Getenv("HOME"), ".aimux")
+	s.SetSessionStore(controller.NewSessionStore(configDir))
+	s.SetOTELStore(aimuxotel.NewSpanStore())
 
 	allPlugins := plugin.Builtins()
 	if custom, err := plugin.ScanPlugins(plugin.DefaultPluginsDir()); err == nil {

@@ -1,3 +1,16 @@
+import type { Agent } from './types';
+
+/**
+ * Normalize an agent's location to one of 'local' | 'remote' | 'k8s'.
+ * Treats missing/empty Location as 'local', and detects k8s either from
+ * the Location field or a 'k8s://' working-directory prefix.
+ */
+export function normalizeLocation(agent: Agent): string {
+  if (agent.Location === 'remote') return 'remote';
+  if (agent.Location === 'k8s' || agent.WorkingDir?.startsWith('k8s://')) return 'k8s';
+  return 'local';
+}
+
 /**
  * Format a date string into a human-readable age with enough precision
  * to locate a session after a restart.

@@ -56,6 +56,40 @@ func TestDetermineKillAction_K8sPod_DefaultNamespace(t *testing.T) {
 	}
 }
 
+func TestDetermineKillAction_Sandbox(t *testing.T) {
+	ag := agent.Agent{
+		PID:         0,
+		Location:    "remote",
+		SandboxName: "happy-fox",
+		TMuxSession: "aimux-remote-claude-happy-fox",
+	}
+	action := DetermineKillAction(ag)
+
+	if action.Type != KillSandbox {
+		t.Errorf("expected KillSandbox, got %d", action.Type)
+	}
+	if action.SandboxName != "happy-fox" {
+		t.Errorf("SandboxName: got %q", action.SandboxName)
+	}
+	if action.TmuxSession != "aimux-remote-claude-happy-fox" {
+		t.Errorf("TmuxSession: got %q", action.TmuxSession)
+	}
+}
+
+func TestDetermineKillAction_Sandbox_TakesPriority(t *testing.T) {
+	ag := agent.Agent{
+		PID:         0,
+		Location:    "remote",
+		SandboxName: "test-box",
+		SessionID:   "pod-fake",
+	}
+	action := DetermineKillAction(ag)
+
+	if action.Type != KillSandbox {
+		t.Errorf("sandbox should take priority over pod prefix, got %d", action.Type)
+	}
+}
+
 func TestDetermineKillAction_SessionOnly(t *testing.T) {
 	ag := agent.Agent{PID: 0, SessionID: "some-session-id"}
 	action := DetermineKillAction(ag)

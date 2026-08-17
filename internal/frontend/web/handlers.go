@@ -113,11 +113,25 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if result.SandboxName != "" && result.OTELSessionID != "" && s.sessionStore != nil {
+		s.sessionStore.PutMeta(result.SandboxName, controller.LaunchMeta{
+			SessionID: result.OTELSessionID,
+			Provider:  opts.Provider,
+			Dir:       opts.Dir,
+		})
+	}
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"status":       "launched",
 		"tmux_session": result.TmuxSession,
-	}); err != nil {
+	}
+	if result.SandboxName != "" {
+		resp["sandbox_name"] = result.SandboxName
+	}
+	if result.OTELSessionID != "" {
+		resp["otel_session_id"] = result.OTELSessionID
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		debuglog.Log("encode launch response: %v", err)
 	}
 }
@@ -229,7 +243,7 @@ func (s *Server) handleGetSessionMeta(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 
-	if s.discoverFn == nil || s.killFn == nil {
+	if s.discoverFn == nil {
 		http.Error(w, "not configured", http.StatusServiceUnavailable)
 		return
 	}
@@ -239,19 +253,33 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	for _, a := range agents {
-		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
-			if err := s.killFn(a.PID, a.TMuxSession); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			if err := json.NewEncoder(w).Encode(map[string]string{"status": "killed"}); err != nil {
-				debuglog.Log("encode kill response: %v", err)
-			}
-			return
+	for i := range agents {
+		a := agents[i]
+		if a.SessionID != sessionID && fmt.Sprintf("%d", a.PID) != sessionID {
+			continue
 		}
+		action := controller.DetermineKillAction(a)
+		switch action.Type {
+		case controller.KillProcess:
+			if s.killFn != nil {
+				if err := s.killFn(a.PID, a.TMuxSession); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		case controller.KillSandbox:
+			if s.composeEngine != nil {
+				if err := controller.ExecuteKillSandbox(action, s.composeEngine); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "killed"}); err != nil {
+			debuglog.Log("encode archive response: %v", err)
+		}
+		return
 	}
 	http.Error(w, "agent not found", http.StatusNotFound)
 }
@@ -374,28 +402,48 @@ func (s *Server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sessionFile, providerName string
-	for _, a := range agents {
-		if a.SessionID == sessionID || fmt.Sprintf("%d", a.PID) == sessionID {
-			sessionFile = a.SessionFile
-			providerName = a.ProviderName
+	var matched *agent.Agent
+	for i := range agents {
+		if agents[i].SessionID == sessionID || fmt.Sprintf("%d", agents[i].PID) == sessionID {
+			matched = &agents[i]
 			break
 		}
 	}
-	if sessionFile == "" {
+	if matched == nil {
 		http.Error(w, "agent not found", http.StatusNotFound)
 		return
 	}
 
-	p := s.providerLookupFn(providerName)
-	if p == nil {
-		http.Error(w, "unknown provider", http.StatusInternalServerError)
-		return
-	}
-	turns, err := p.ParseTrace(sessionFile)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var turns []trace.Turn
+
+	if matched.Location == "remote" && matched.SessionFile == "" {
+		sandboxName := matched.SandboxName
+		if sandboxName == "" {
+			sandboxName = matched.Name
+		}
+		sid := matched.SessionID
+		if !controller.UUIDValid(sid) {
+			if s.sessionStore != nil {
+				if mapped := s.sessionStore.Get(sandboxName); mapped != "" {
+					sid = mapped
+				}
+			}
+		}
+		turns = controller.RemoteTraceParser(s.otelStore, sid, sandboxName)
+	} else {
+		sessionFile := matched.SessionFile
+		providerName := matched.ProviderName
+		p := s.providerLookupFn(providerName)
+		if p == nil {
+			http.Error(w, "unknown provider", http.StatusInternalServerError)
+			return
+		}
+		var parseErr error
+		turns, parseErr = p.ParseTrace(sessionFile)
+		if parseErr != nil {
+			http.Error(w, parseErr.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -822,7 +870,6 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	// Copy to avoid mutating cached slice
 	result := make([]agent.Agent, len(agents))
 	copy(result, agents)
@@ -948,6 +995,13 @@ func (s *Server) handleKill(w http.ResponseWriter, r *http.Request) {
 		}
 	case controller.KillRemoveOnly:
 		// Session-only entry, nothing to kill
+	case controller.KillSandbox:
+		if s.composeEngine != nil {
+			if err := controller.ExecuteKillSandbox(action, s.composeEngine); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

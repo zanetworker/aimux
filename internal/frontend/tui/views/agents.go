@@ -226,6 +226,11 @@ func (v *AgentsView) Selected() *agent.Agent {
 	return nil
 }
 
+// Agents returns the current unfiltered agents list.
+func (v *AgentsView) Agents() []agent.Agent {
+	return v.agents
+}
+
 // Cursor returns the current cursor position.
 func (v *AgentsView) Cursor() int {
 	return v.cursor
@@ -584,9 +589,10 @@ func (v *AgentsView) filtered() []agent.Agent {
 	return controller.FilterAgents(v.agents, v.filter)
 }
 
-// agentLocation returns "k8s" for Kubernetes-hosted agents (WorkingDir
-// starting with "k8s://") and "local" for all local agents.
 func agentLocation(a agent.Agent) string {
+	if a.Location != "" {
+		return a.Location
+	}
 	if strings.HasPrefix(a.WorkingDir, "k8s://") {
 		return "k8s"
 	}

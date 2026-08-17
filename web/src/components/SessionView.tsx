@@ -9,16 +9,18 @@ interface Props {
   provider?: string;
   workingDir?: string;
   skipPermissions?: boolean;
+  sandboxName?: string;
+  autoStart?: boolean;
 }
 
-export function SessionView({ tmuxSession, sessionId, provider, workingDir, skipPermissions }: Props) {
+export function SessionView({ tmuxSession, sessionId, provider, workingDir, skipPermissions, sandboxName, autoStart }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current || (!tmuxSession && !sessionId)) return;
+    if (!containerRef.current || (!tmuxSession && !sessionId && !sandboxName)) return;
 
     const container = containerRef.current;
 
@@ -70,18 +72,27 @@ export function SessionView({ tmuxSession, sessionId, provider, workingDir, skip
     setTimeout(doFit, 200);
     setTimeout(doFit, 500);
 
-    // WebSocket: tmux attach or direct resume
+    // WebSocket: sandbox, tmux attach, or direct resume
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let wsPath = tmuxSession
-      ? `/api/terminal/${tmuxSession}`
-      : `/api/terminal-resume/${sessionId}`;
-    // Pass provider/dir/permissions for history sessions not in running agents list
-    if (!tmuxSession && (provider || workingDir || skipPermissions)) {
+    let wsPath: string;
+    if (sandboxName) {
       const params = new URLSearchParams();
       if (provider) params.set('provider', provider);
-      if (workingDir) params.set('dir', workingDir);
-      if (skipPermissions) params.set('skipPermissions', 'true');
-      wsPath += `?${params.toString()}`;
+      if (sessionId) params.set('session_id', sessionId);
+      if (autoStart) params.set('autostart', '1');
+      wsPath = `/api/terminal/sandbox/${sandboxName}?${params.toString()}`;
+    } else if (tmuxSession) {
+      wsPath = `/api/terminal/${tmuxSession}`;
+    } else {
+      wsPath = `/api/terminal-resume/${sessionId}`;
+      // Pass provider/dir/permissions for history sessions not in running agents list
+      if (provider || workingDir || skipPermissions) {
+        const params = new URLSearchParams();
+        if (provider) params.set('provider', provider);
+        if (workingDir) params.set('dir', workingDir);
+        if (skipPermissions) params.set('skipPermissions', 'true');
+        wsPath += `?${params.toString()}`;
+      }
     }
     const ws = new WebSocket(`${protocol}//${window.location.host}${wsPath}`);
     ws.binaryType = 'arraybuffer';

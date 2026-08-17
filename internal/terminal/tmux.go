@@ -117,16 +117,25 @@ func (ts *TmuxSession) poll(ctx context.Context) {
 	defer ticker.Stop()
 
 	var prevHash uint64
+	var loggedErr bool
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			out, err := exec.Command("tmux", "capture-pane", "-e", "-p", "-t", ts.sessionName).Output() // #nosec G204
+			out, err := exec.Command("tmux", "capture-pane", "-e", "-p", "-t", ts.sessionName).CombinedOutput() // #nosec G204
 			if err != nil {
+				if !loggedErr {
+					debuglog.Log("tmux: poll capture-pane FAILED for %q: %v out=%q", ts.sessionName, err, string(out))
+					// Diagnostic: is the session gone, or just the pane dead?
+					hs := exec.Command("tmux", "has-session", "-t", ts.sessionName).Run() // #nosec G204
+					debuglog.Log("tmux: poll diagnostic for %q: has-session err=%v", ts.sessionName, hs)
+					loggedErr = true
+				}
 				continue
 			}
+			loggedErr = false
 
 			// Compute FNV-1a hash for efficient change detection
 			h := fnv.New64a()
@@ -203,13 +212,18 @@ func (ts *TmuxSession) Write(data []byte) (int, error) {
 	name := ts.sessionName
 	ts.mu.Unlock()
 
+	debuglog.Log("tmux: Write %d bytes to session %q", len(data), name)
+
 	var printBuf []byte
 
 	flush := func() {
 		if len(printBuf) == 0 {
 			return
 		}
-		_ = exec.Command("tmux", "send-keys", "-t", name, "-l", string(printBuf)).Run() // #nosec G204
+		out, err := exec.Command("tmux", "send-keys", "-t", name, "-l", string(printBuf)).CombinedOutput() // #nosec G204
+		if err != nil {
+			debuglog.Log("tmux: send-keys -l FAILED for session %q: %v stderr=%q", name, err, string(out))
+		}
 		printBuf = printBuf[:0]
 	}
 

@@ -114,6 +114,8 @@ type Agent struct {
 	ParentPID      int            // process tree parent (0 = top-level)
 	Subagent       subagent.Info  // from OTEL correlation
 	Badges         []BadgeValue   // evaluated badge results from project files
+	Location       string         // "local", "container", or "remote"
+	SandboxName    string         // OpenShell sandbox name (remote only)
 }
 
 // IsSubagent returns true if this agent is nested under another agent.

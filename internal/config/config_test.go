@@ -124,6 +124,44 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestRemoteConfig(t *testing.T) {
+	yamlContent := `
+remote:
+  backend: openshell
+  gateway: "https://gateway.example.com"
+  image: "quay.io/azaalouk/agent-worker:latest"
+  warm_pool: 3
+`
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Remote.Backend != "openshell" {
+		t.Errorf("backend: got %q, want 'openshell'", cfg.Remote.Backend)
+	}
+	if cfg.Remote.Gateway != "https://gateway.example.com" {
+		t.Errorf("gateway: got %q", cfg.Remote.Gateway)
+	}
+	if cfg.Remote.Image != "quay.io/azaalouk/agent-worker:latest" {
+		t.Errorf("image: got %q", cfg.Remote.Image)
+	}
+	if cfg.Remote.WarmPool != 3 {
+		t.Errorf("warm_pool: got %d, want 3", cfg.Remote.WarmPool)
+	}
+}
+
+func TestRemoteConfig_NotSet(t *testing.T) {
+	cfg := Default()
+	if cfg.Remote.Backend != "" {
+		t.Errorf("expected empty backend by default, got %q", cfg.Remote.Backend)
+	}
+}
+
 func TestIsProviderEnabled(t *testing.T) {
 	cfg := Default()
 
@@ -504,6 +542,36 @@ func TestSessionManagerDefault(t *testing.T) {
 	cfg := Default()
 	if cfg.SessionManager != "tmux" {
 		t.Errorf("SessionManager = %q, want tmux", cfg.SessionManager)
+	}
+}
+
+func TestK8sConfigMCPFields(t *testing.T) {
+	yamlContent := `
+kubernetes:
+  enabled: true
+  redis_url: "redis://:pass@host:6379"
+  team_id: "my-team"
+  namespace: "agents"
+  max_agents: 10
+  max_cost_usd: 50
+  mcp:
+    auto_register: true
+`
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	_ = os.WriteFile(tmpFile, []byte(yamlContent), 0o600)
+
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Kubernetes.MaxAgents != 10 {
+		t.Errorf("expected max_agents 10, got %d", cfg.Kubernetes.MaxAgents)
+	}
+	if cfg.Kubernetes.MaxCostUSD != 50 {
+		t.Errorf("expected max_cost_usd 50, got %f", cfg.Kubernetes.MaxCostUSD)
+	}
+	if !cfg.Kubernetes.MCP.AutoRegister {
+		t.Error("expected mcp.auto_register to be true")
 	}
 }
 

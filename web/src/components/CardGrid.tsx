@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import type { Agent } from '../types';
 import type { ContentSearchResult } from '../App';
 import { AgentCard } from './AgentCard';
-import { formatAge } from '../utils';
+import { formatAge, normalizeLocation } from '../utils';
 
 interface Props {
   agents: Agent[];
@@ -10,6 +10,7 @@ interface Props {
   onSelect: (id: string) => void;
   statusFilter: number | null;
   providerFilter: string | null;
+  locationFilter: string | null;
   recentFilter: boolean;
   searchQuery: string;
   sortBy: string;
@@ -28,6 +29,7 @@ export function CardGrid({
   onSelect,
   statusFilter,
   providerFilter,
+  locationFilter,
   recentFilter,
   searchQuery,
   sortBy,
@@ -96,6 +98,9 @@ export function CardGrid({
   }
   if (providerFilter !== null) {
     filtered = filtered.filter(a => a.ProviderName.toLowerCase() === providerFilter.toLowerCase());
+  }
+  if (locationFilter !== null) {
+    filtered = filtered.filter(a => normalizeLocation(a) === locationFilter);
   }
   if (recentFilter) {
     const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
@@ -316,20 +321,22 @@ export function CardGrid({
                       <span style={{ fontSize: 13, fontFamily: 'var(--mono)', color: 'var(--green)', width: 80, textAlign: 'right', flexShrink: 0 }}>
                         ${(agent.EstCostUSD || 0).toFixed(2)}
                       </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleKill(agent.SessionID || agent.PID.toString()); }}
-                        title="Kill agent (SIGTERM)"
-                        style={{
-                          padding: '2px 8px', borderRadius: 3, fontSize: 10, fontWeight: 600,
-                          border: '1px solid var(--border)', background: 'transparent',
-                          color: 'var(--fg-3)', cursor: 'pointer', flexShrink: 0,
-                          transition: 'all 0.15s',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
-                      >
-                        kill
-                      </button>
+                      {agent.LastAction !== 'Deleting' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleKill(agent.SessionID || agent.PID.toString()); }}
+                          title="Kill agent (SIGTERM)"
+                          style={{
+                            padding: '2px 8px', borderRadius: 3, fontSize: 10, fontWeight: 600,
+                            border: '1px solid var(--border)', background: 'transparent',
+                            color: 'var(--fg-3)', cursor: 'pointer', flexShrink: 0,
+                            transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
+                        >
+                          kill
+                        </button>
+                      )}
                     </div>
                   );
                 })}

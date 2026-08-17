@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 500" font-family="RedHatDisplay, 'Red Hat Display', system-ui, sans-serif">
+  <style>
+    :root {
+      --bg: #1a1a1a; --bg-card: #2d2d2d; --bg-item: #3a3a3a;
+      --accent: #ee0000; --text-primary: #e0e0e0; --text-secondary: #a3a3a3;
+      --text-muted: #6b6b6b; --border-card: #404040; --col-divider: #333333;
+      --flow-stroke: #a30000; --flow-dot: #ee0000; --conn-opacity: 0.6;
+      --teal: #37a3a3; --purple: #5e40be;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f5f5; --bg-card: #ffffff; --bg-item: #f0f0f0;
+        --accent: #cc0000; --text-primary: #151515; --text-secondary: #4d4d4d;
+        --text-muted: #6b6b6b; --border-card: #d2d2d2; --col-divider: #d2d2d2;
+        --flow-stroke: #a30000; --flow-dot: #cc0000; --conn-opacity: 0.7;
+      }
+    }
+    @keyframes flow { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -24; } }
+    .flow-1 { stroke-dasharray: 6 6; animation: flow 1.4s linear infinite; }
+    .flow-2 { stroke-dasharray: 6 6; animation: flow 1.4s linear infinite; animation-delay: 0.3s; }
+    .flow-3 { stroke-dasharray: 6 6; animation: flow 1.4s linear infinite; animation-delay: 0.6s; }
+    .flow-4 { stroke-dasharray: 6 6; animation: flow 1.4s linear infinite; animation-delay: 0.9s; }
+    .flow-5 { stroke-dasharray: 6 6; animation: flow 1.4s linear infinite; animation-delay: 1.2s; }
+  </style>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#37a3a3"/>
+    </marker>
+    <marker id="arr-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#ee0000"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="500" fill="#1a1a1a"/>
+
+  <!-- Title -->
+  <text x="550" y="28" text-anchor="middle" fill="#e0e0e0" font-size="16" font-weight="700">User Experience: Two Paths to Remote Agents</text>
+
+  <!-- ===== INTERACTIVE PATH (top) ===== -->
+  <text x="40" y="60" fill="#37a3a3" font-size="11" font-weight="700" letter-spacing="1">INTERACTIVE SESSION</text>
+  <line x1="40" y1="66" x2="1060" y2="66" stroke="#37a3a3" stroke-width="1" opacity="0.3"/>
+
+  <!-- Step 1: Launcher -->
+  <rect x="40" y="80" width="150" height="100" fill="#2d2d2d" stroke="#37a3a3" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="115" y="100" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="700">1. LAUNCHER</text>
+  <text x="115" y="118" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Pick Provider</text>
+  <text x="115" y="135" text-anchor="middle" fill="#a3a3a3" font-size="9">Claude / Codex / Gemini</text>
+  <text x="115" y="150" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Pick Runtime</text>
+  <rect x="55" y="155" width="110" height="18" fill="#3a3a3a" stroke="#37a3a3" stroke-width="1" rx="3"/>
+  <text x="115" y="168" text-anchor="middle" fill="#37a3a3" font-size="9" font-weight="600">local | container | remote</text>
+
+  <!-- Step 2: Spawn -->
+  <line x1="190" y1="130" x2="228" y2="130" stroke="#37a3a3" stroke-width="2.5" class="flow-1" marker-end="url(#arr)"/>
+  <rect x="230" y="80" width="140" height="100" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="300" y="100" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="700">2. SANDBOX</text>
+  <text x="300" y="120" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">openshell create</text>
+  <text x="300" y="137" text-anchor="middle" fill="#a3a3a3" font-size="9">Gateway provisions</text>
+  <text x="300" y="150" text-anchor="middle" fill="#a3a3a3" font-size="9">container with sandbox</text>
+  <text x="300" y="163" text-anchor="middle" fill="#a3a3a3" font-size="9">user + isolation</text>
+  <text x="300" y="175" text-anchor="middle" fill="#6b6b6b" font-size="8">~12s first time</text>
+
+  <!-- Step 3: Connect -->
+  <line x1="370" y1="130" x2="408" y2="130" stroke="#37a3a3" stroke-width="2.5" class="flow-2" marker-end="url(#arr)"/>
+  <rect x="410" y="80" width="140" height="100" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="480" y="100" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="700">3. CONNECT</text>
+  <text x="480" y="120" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">openshell connect</text>
+  <text x="480" y="137" text-anchor="middle" fill="#a3a3a3" font-size="9">SSH tunnel to sandbox</text>
+  <text x="480" y="152" text-anchor="middle" fill="#a3a3a3" font-size="9">Full PTY terminal</text>
+  <text x="480" y="167" text-anchor="middle" fill="#a3a3a3" font-size="9">Wraps in tmux session</text>
+
+  <!-- Step 4: TUI Mirror -->
+  <line x1="550" y1="130" x2="588" y2="130" stroke="#37a3a3" stroke-width="2.5" class="flow-3" marker-end="url(#arr)"/>
+  <rect x="590" y="80" width="150" height="100" fill="#2d2d2d" stroke="#37a3a3" stroke-width="2" rx="6" filter="url(#shadow)"/>
+  <text x="665" y="100" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="700">4. TUI SPLIT VIEW</text>
+  <text x="665" y="118" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">tmux mirror</text>
+  <text x="665" y="135" text-anchor="middle" fill="#a3a3a3" font-size="9">Left: trace viewer</text>
+  <text x="665" y="150" text-anchor="middle" fill="#a3a3a3" font-size="9">Right: live terminal</text>
+  <text x="665" y="167" text-anchor="middle" fill="#a3a3a3" font-size="9">Tab: switch focus</text>
+
+  <!-- Step 5: Agent runs -->
+  <line x1="740" y1="130" x2="778" y2="130" stroke="#37a3a3" stroke-width="2.5" class="flow-4" marker-end="url(#arr)"/>
+  <rect x="780" y="80" width="160" height="100" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="860" y="100" text-anchor="middle" fill="#37a3a3" font-size="10" font-weight="700">5. CODING AGENT</text>
+  <text x="860" y="120" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Claude Code runs</text>
+  <text x="860" y="137" text-anchor="middle" fill="#a3a3a3" font-size="9">API key via provider</text>
+  <text x="860" y="152" text-anchor="middle" fill="#a3a3a3" font-size="9">Edits files in sandbox</text>
+  <text x="860" y="167" text-anchor="middle" fill="#a3a3a3" font-size="9">Landlock + Seccomp isolation</text>
+
+  <!-- ===== HEADLESS PATH (bottom) ===== -->
+  <text x="40" y="230" fill="#ee0000" font-size="11" font-weight="700" letter-spacing="1">HEADLESS TASK WORKER</text>
+  <line x1="40" y1="236" x2="1060" y2="236" stroke="#ee0000" stroke-width="1" opacity="0.3"/>
+
+  <!-- Step 1: Lead Agent -->
+  <rect x="40" y="250" width="150" height="90" fill="#2d2d2d" stroke="#ee0000" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="115" y="270" text-anchor="middle" fill="#ee0000" font-size="10" font-weight="700">1. LEAD AGENT</text>
+  <text x="115" y="290" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Local Claude session</text>
+  <text x="115" y="307" text-anchor="middle" fill="#a3a3a3" font-size="9">Calls MCP tools:</text>
+  <text x="115" y="320" text-anchor="middle" fill="#a3a3a3" font-size="9">spawn_agent, create_task</text>
+
+  <!-- Step 2: MCP Server -->
+  <line x1="190" y1="295" x2="228" y2="295" stroke="#a30000" stroke-width="2.5" class="flow-1" marker-end="url(#arr-red)"/>
+  <rect x="230" y="250" width="140" height="90" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="300" y="270" text-anchor="middle" fill="#ee0000" font-size="10" font-weight="700">2. MCP SERVER</text>
+  <text x="300" y="290" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">aimux mcp serve</text>
+  <text x="300" y="307" text-anchor="middle" fill="#a3a3a3" font-size="9">Claims idle sandbox</text>
+  <text x="300" y="322" text-anchor="middle" fill="#a3a3a3" font-size="9">Records to journal</text>
+
+  <!-- Step 3: Exec -->
+  <line x1="370" y1="295" x2="408" y2="295" stroke="#a30000" stroke-width="2.5" class="flow-2" marker-end="url(#arr-red)"/>
+  <rect x="410" y="250" width="140" height="90" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="480" y="270" text-anchor="middle" fill="#ee0000" font-size="10" font-weight="700">3. EXEC IN SANDBOX</text>
+  <text x="480" y="290" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">sh -c "prompt"</text>
+  <text x="480" y="307" text-anchor="middle" fill="#a3a3a3" font-size="9">Runs inside sandbox</text>
+  <text x="480" y="322" text-anchor="middle" fill="#a3a3a3" font-size="9">Captures stdout + exit code</text>
+
+  <!-- Step 4: Result -->
+  <line x1="550" y1="295" x2="588" y2="295" stroke="#a30000" stroke-width="2.5" class="flow-3" marker-end="url(#arr-red)"/>
+  <rect x="590" y="250" width="150" height="90" fill="#2d2d2d" stroke="#404040" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="665" y="270" text-anchor="middle" fill="#ee0000" font-size="10" font-weight="700">4. STRUCTURED RESULT</text>
+  <text x="665" y="290" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">TaskResult JSON</text>
+  <text x="665" y="307" text-anchor="middle" fill="#a3a3a3" font-size="9">type: text | branch</text>
+  <text x="665" y="322" text-anchor="middle" fill="#a3a3a3" font-size="9">summary + full output</text>
+
+  <!-- Step 5: Continue -->
+  <line x1="740" y1="295" x2="778" y2="295" stroke="#a30000" stroke-width="2.5" class="flow-4" marker-end="url(#arr-red)"/>
+  <rect x="780" y="250" width="160" height="90" fill="#2d2d2d" stroke="#ee0000" stroke-width="1.5" rx="6" filter="url(#shadow)"/>
+  <text x="860" y="270" text-anchor="middle" fill="#ee0000" font-size="10" font-weight="700">5. LEAD CONTINUES</text>
+  <text x="860" y="290" text-anchor="middle" fill="#e0e0e0" font-size="11" font-weight="600">Result in context</text>
+  <text x="860" y="307" text-anchor="middle" fill="#a3a3a3" font-size="9">Dispatches more tasks</text>
+  <text x="860" y="322" text-anchor="middle" fill="#a3a3a3" font-size="9">or calls scale_down</text>
+
+  <!-- ===== K8s variant note ===== -->
+  <rect x="40" y="370" width="900" height="55" fill="#2d2d2d" stroke="#5e40be" stroke-width="1" rx="6"/>
+  <text x="50" y="390" fill="#5e40be" font-size="10" font-weight="700" letter-spacing="0.5">K8S VARIANT</text>
+  <text x="50" y="407" fill="#a3a3a3" font-size="10">Step 2: spawn_agent scales a K8s Deployment (0 -> 1). Step 3: create_task pushes to Redis queue; agent pod polls and claims.</text>
+  <text x="50" y="420" fill="#a3a3a3" font-size="10">Step 4: wait_for_task blocks until agent writes result to Redis. Agent uses Claude Code SDK (not shell exec).</text>
+
+  <!-- Legend -->
+  <g transform="translate(120, 445)">
+    <rect x="0" y="0" width="860" height="30" rx="6" fill="#2d2d2d" stroke="#404040" stroke-width="1"/>
+    <circle cx="20" cy="15" r="5" fill="#37a3a3"/>
+    <text x="32" y="19" fill="#a3a3a3" font-size="9" font-weight="500">Interactive (human attaches)</text>
+    <circle cx="230" cy="15" r="5" fill="#ee0000"/>
+    <text x="242" y="19" fill="#a3a3a3" font-size="9" font-weight="500">Headless (agent dispatches)</text>
+    <circle cx="440" cy="15" r="5" fill="#5e40be"/>
+    <text x="452" y="19" fill="#a3a3a3" font-size="9" font-weight="500">K8s async variant</text>
+    <text x="640" y="19" fill="#6b6b6b" font-size="9">Both paths share the same Backend interface and controller layer</text>
+  </g>
+
+  <text x="550" y="495" text-anchor="middle" fill="#6b6b6b" font-size="9" font-style="italic">aimux · Two paths, one codebase · Controller first, frontend second</text>
+</svg>

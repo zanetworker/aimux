@@ -27,6 +27,7 @@ export default function App() {
   const [showLaunch, setShowLaunch] = useState(false);
   const [statusFilter, setStatusFilter] = useState<number | null>(null);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [locationFilter, setLocationFilter] = useState<string | null>(null);
   const [recentFilter, setRecentFilter] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('lastActive');
@@ -42,7 +43,8 @@ export default function App() {
   const [showTasks, setShowTasks] = useState(false);
   const [taskLaunchTarget, setTaskLaunchTarget] = useState<any | null>(null);
   const [pendingTaskCount, setPendingTaskCount] = useState<number>(0);
-  const [pendingLaunch, setPendingLaunch] = useState<{ provider: string; dir: string; tmuxSession?: string; existingPIDs: Set<number> } | null>(null);
+  const [pendingLaunch, setPendingLaunch] = useState<{ provider: string; dir: string; tmuxSession?: string; sandboxName?: string; existingPIDs: Set<number> } | null>(null);
+  const [openSessionOnSelect, setOpenSessionOnSelect] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const stored = localStorage.getItem('aimux-theme');
     return stored === 'light' ? 'light' : 'dark';
@@ -99,6 +101,7 @@ export default function App() {
   useEffect(() => {
     if (!pendingLaunch) return;
     const found = agents.find(a =>
+      (pendingLaunch.sandboxName && a.SandboxName === pendingLaunch.sandboxName) ||
       (pendingLaunch.tmuxSession && a.TMuxSession === pendingLaunch.tmuxSession) ||
       (a.ProviderName === pendingLaunch.provider &&
        a.WorkingDir === pendingLaunch.dir &&
@@ -106,6 +109,7 @@ export default function App() {
     );
     if (found) {
       setSelectedId(found.SessionID || String(found.PID));
+      setOpenSessionOnSelect(true);
       setPendingLaunch(null);
     }
   }, [agents, pendingLaunch]);
@@ -243,6 +247,8 @@ export default function App() {
               onStatusFilter={setStatusFilter}
               providerFilter={providerFilter}
               onProviderFilter={setProviderFilter}
+              locationFilter={locationFilter}
+              onLocationFilter={setLocationFilter}
               recentFilter={recentFilter}
               onRecentFilter={setRecentFilter}
               searchQuery={searchQuery}
@@ -267,6 +273,7 @@ export default function App() {
             onSelect={(id) => setSelectedId(prev => prev === id ? null : id)}
             statusFilter={statusFilter}
             providerFilter={providerFilter}
+            locationFilter={locationFilter}
             recentFilter={recentFilter}
             searchQuery={searchQuery}
             sortBy={sortBy}
@@ -303,6 +310,8 @@ export default function App() {
             onClose={handleClosePanel}
             isFullscreen={panelFullscreen}
             onToggleFullscreen={() => setPanelFullscreen(f => !f)}
+            defaultTab={openSessionOnSelect ? 'session' : undefined}
+            onDefaultTabConsumed={() => setOpenSessionOnSelect(false)}
           />
         )}
         <TasksPanel
@@ -327,9 +336,9 @@ export default function App() {
         </div>
       )}
       <LaunchDialog open={showLaunch} onClose={() => setShowLaunch(false)}
-        onLaunched={(provider, dir, tmuxSession) => {
+        onLaunched={(provider, dir, tmuxSession, sandboxName) => {
           setActiveTab('agents');
-          setPendingLaunch({ provider, dir, tmuxSession, existingPIDs: new Set(agents.map(a => a.PID)) });
+          setPendingLaunch({ provider, dir, tmuxSession, sandboxName, existingPIDs: new Set(agents.map(a => a.PID)) });
         }}
       />
       <TaskLaunchDialog

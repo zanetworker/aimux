@@ -12,7 +12,7 @@ The launcher (`:new` in TUI, **+ Launch** in web dashboard, `aimux spawn` on CLI
 | **Provider** | (per-launch) | claude, codex, gemini | claude |
 | **Model** | (per-launch) | default, opus, sonnet, haiku, o3, o4-mini, gemini-2.5-pro | default |
 | **Permissions** | (per-launch) | default, bypass, plan, acceptEdits, dontAsk | default |
-| **Runtime** | `runtime` | local, container | local |
+| **Runtime** | `runtime` | local, container, remote | local |
 | **Execution** | `execution` | local, hybrid | local |
 | **Shell** | `shell` | /bin/zsh, /bin/bash, /bin/sh | $SHELL |
 | **Session** | `session_manager` | tmux, direct | tmux |
@@ -79,6 +79,20 @@ hybrid:       laptop           remote (K8s pod / SSH host)
 
 - **tmux** (default): Sessions persist after detach. You can close aimux and reattach later. Sessions appear with `tmux ls`.
 - **direct**: Agent runs in the foreground. When you close the terminal, the agent dies. Good for quick one-shot tasks.
+
+## Remote Sandboxes
+
+Setting **Runtime: remote** provisions an isolated OpenShell sandbox for the agent instead of running it locally. This requires the OpenShell gateway to be running first — see [Remote Sandboxes](/guides/remote-sandboxes/) for the full setup guide.
+
+When you launch with runtime `remote`:
+
+1. aimux provisions a sandbox via the OpenShell gateway
+2. The agent starts inside the sandbox with model traffic routed through the gateway's inference proxy — no API keys enter the sandbox
+3. The session tab opens automatically so you can interact with the agent immediately
+4. The sandbox name (e.g., `ax-cl-33d0`) and your selected directory are tracked so the dashboard shows the real project name
+
+**TUI**: Use `h/l` on the Runtime row to select `remote`.
+**Web**: Select **remote** in the Runtime option group of the launch dialog.
 
 ## Quick Launch Directories
 

@@ -11,12 +11,17 @@ interface RightPanelProps {
   onClose: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  defaultTab?: Tab;
+  onDefaultTabConsumed?: () => void;
 }
 
 type Tab = 'trace' | 'diffs' | 'session';
 
-export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }: RightPanelProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('trace');
+export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen, defaultTab, onDefaultTabConsumed }: RightPanelProps) {
+  // Capture autoStart at mount time in a ref — immune to re-renders caused by
+  // React 18 batching openSessionOnSelect=false alongside sessionMounted=true.
+  const autoStartRef = useRef(defaultTab === 'session' && !!agent.SandboxName);
+  const [activeTab, setActiveTab] = useState<Tab>(defaultTab || 'trace');
   const [sessionMounted, setSessionMounted] = useState(false);
   const [sessionMeta, setSessionMeta] = useState<{ annotation: string; tags: string[]; note: string }>({ annotation: '', tags: [], note: '' });
   const [showEvalHelp, setShowEvalHelp] = useState(false);
@@ -34,6 +39,14 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
   const panelRef = useRef<HTMLDivElement>(null);
 
   const turns = useTraceStream(agent.SessionID, agent.SessionFile);
+
+  useEffect(() => {
+    if (defaultTab === 'session') {
+      setSessionMounted(true);
+      onDefaultTabConsumed?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -402,7 +415,9 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen }:
                   provider={agent.ProviderName || undefined}
                   workingDir={agent.WorkingDir || undefined}
                   skipPermissions={skipPermissions}
-                  key={`${agent.TMuxSession || agent.SessionID}-${skipPermissions}`}
+                  sandboxName={agent.SandboxName || undefined}
+                  autoStart={autoStartRef.current}
+                  key={`${agent.SandboxName || agent.TMuxSession || agent.SessionID}-${skipPermissions}`}
                 />
               )}
             </div>

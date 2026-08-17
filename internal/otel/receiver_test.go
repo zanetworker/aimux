@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/subagent"
-	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	collectorlogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/protobuf/proto"
@@ -236,6 +237,169 @@ func TestReceiver_LogsEndToEnd(t *testing.T) {
 	}
 }
 
+func TestReceiver_LogsQueryParamSessionAlias(t *testing.T) {
+	store := NewSpanStore()
+	receiver := NewReceiver(store, 0)
+	claudeSessionID := "claude-session-qp"
+	aimuxSessionID := "aimux-remote-claude-qp-test"
+
+	payload := &collectorlogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{{
+			ScopeLogs: []*logspb.ScopeLogs{{
+				LogRecords: []*logspb.LogRecord{{
+					TimeUnixNano: uint64(time.Now().UnixNano()),
+					EventName:    "claude_code.user_prompt",
+					Attributes: []*commonpb.KeyValue{
+						{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: claudeSessionID}}},
+						{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "prompt-1"}}},
+						{Key: "prompt", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "proxy-proof test"}}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, err := proto.Marshal(payload)
+	if err != nil {
+		t.Fatalf("proto.Marshal error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/logs?aimux_session="+aimuxSessionID, bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	receiver.handleLogs(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("POST /v1/logs status = %d, want 200", recorder.Code)
+	}
+	root := store.GetByConversation(aimuxSessionID)
+	if root == nil {
+		t.Fatal("GetByConversation returned nil for the query param session ID")
+	}
+	if got := root.AttrStr("aimux.session_id"); got != aimuxSessionID {
+		t.Errorf("aimux.session_id = %q, want %q", got, aimuxSessionID)
+	}
+	turns := SpansToTurns(root)
+	if len(turns) != 1 || len(turns[0].UserLines) != 1 || turns[0].UserLines[0] != "proxy-proof test" {
+		t.Errorf("SpansToTurns = %#v, want one turn with 'proxy-proof test'", turns)
+	}
+}
+
+func TestReceiver_LogsQueryParamTakesPrecedenceOverHeader(t *testing.T) {
+	store := NewSpanStore()
+	receiver := NewReceiver(store, 0)
+
+	payload := &collectorlogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{{
+			ScopeLogs: []*logspb.ScopeLogs{{
+				LogRecords: []*logspb.LogRecord{{
+					TimeUnixNano: uint64(time.Now().UnixNano()),
+					EventName:    "claude_code.user_prompt",
+					Attributes: []*commonpb.KeyValue{
+						{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "claude-x"}}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, err := proto.Marshal(payload)
+	if err != nil {
+		t.Fatalf("proto.Marshal error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/logs?aimux_session=from-query", bytes.NewReader(body))
+	req.Header.Set("X-Aimux-Session-Id", "from-header")
+	recorder := httptest.NewRecorder()
+
+	receiver.handleLogs(recorder, req)
+
+	if store.GetByConversation("from-query") == nil {
+		t.Fatal("query param session ID should be indexed")
+	}
+	if store.GetByConversation("from-header") != nil {
+		t.Fatal("header should not override query param")
+	}
+}
+
+func TestReceiver_LogsHeaderSessionAlias(t *testing.T) {
+	store := NewSpanStore()
+	receiver := NewReceiver(store, 0)
+	claudeSessionID := "claude-session"
+	aimuxSessionID := "aimux-remote-claude-123"
+
+	payload := &collectorlogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{{
+			ScopeLogs: []*logspb.ScopeLogs{{
+				LogRecords: []*logspb.LogRecord{{
+					TimeUnixNano: uint64(time.Now().UnixNano()),
+					EventName:    "claude_code.user_prompt",
+					Attributes: []*commonpb.KeyValue{
+						{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: claudeSessionID}}},
+						{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "prompt-1"}}},
+						{Key: "prompt", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "show remote traces"}}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, err := proto.Marshal(payload)
+	if err != nil {
+		t.Fatalf("proto.Marshal error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/logs", bytes.NewReader(body))
+	req.Header.Set("X-Aimux-Session-Id", aimuxSessionID)
+	recorder := httptest.NewRecorder()
+
+	receiver.handleLogs(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("POST /v1/logs status = %d, want 200", recorder.Code)
+	}
+	root := store.GetByConversation(aimuxSessionID)
+	if root == nil {
+		t.Fatal("GetByConversation returned nil for the header session ID")
+	}
+	if got := root.AttrStr("aimux.session_id"); got != aimuxSessionID {
+		t.Errorf("aimux.session_id = %q, want %q", got, aimuxSessionID)
+	}
+	turns := SpansToTurns(root)
+	if len(turns) != 1 || len(turns[0].UserLines) != 1 || turns[0].UserLines[0] != "show remote traces" {
+		t.Errorf("SpansToTurns(root) = %#v, want one remote prompt turn", turns)
+	}
+}
+
+func TestReceiver_LogsResourceSessionTakesPrecedenceOverHeader(t *testing.T) {
+	store := NewSpanStore()
+	receiver := NewReceiver(store, 0)
+	payload := &collectorlogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{{
+			Resource: &resourcepb.Resource{Attributes: []*commonpb.KeyValue{
+				{Key: "aimux.session_id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "resource-session"}}},
+			}},
+			ScopeLogs: []*logspb.ScopeLogs{{LogRecords: []*logspb.LogRecord{{
+				TimeUnixNano: uint64(time.Now().UnixNano()),
+				EventName:    "claude_code.user_prompt",
+				Attributes: []*commonpb.KeyValue{
+					{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "claude-session"}}},
+				},
+			}}}},
+		}},
+	}
+	body, err := proto.Marshal(payload)
+	if err != nil {
+		t.Fatalf("proto.Marshal error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/logs", bytes.NewReader(body))
+	req.Header.Set("X-Aimux-Session-Id", "header-session")
+	recorder := httptest.NewRecorder()
+
+	receiver.handleLogs(recorder, req)
+
+	if store.GetByConversation("resource-session") == nil {
+		t.Fatal("resource session alias was not indexed")
+	}
+	if store.GetByConversation("header-session") != nil {
+		t.Fatal("header session must not override the resource session")
+	}
+}
+
 // TestReceiver_FallbackEndToEnd verifies that the "/" fallback handler
 // correctly processes log payloads (for Gemini CLI which may send to "/" ).
 func TestReceiver_FallbackEndToEnd(t *testing.T) {
@@ -299,6 +463,176 @@ func TestReceiver_FallbackEndToEnd(t *testing.T) {
 	root := store.GetByConversation(sessionID)
 	if root == nil {
 		t.Fatal("GetByConversation returned nil after fallback processing")
+	}
+}
+
+func TestReceiver_FallbackHeaderSessionAlias(t *testing.T) {
+	store := NewSpanStore()
+	receiver := NewReceiver(store, 0)
+	aimuxSessionID := "aimux-remote-gemini-456"
+
+	payload := &collectorlogspb.ExportLogsServiceRequest{
+		ResourceLogs: []*logspb.ResourceLogs{{
+			ScopeLogs: []*logspb.ScopeLogs{{
+				LogRecords: []*logspb.LogRecord{{
+					TimeUnixNano: uint64(time.Now().UnixNano()),
+					EventName:    "user_prompt",
+					Attributes: []*commonpb.KeyValue{
+						{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "gemini-internal-id"}}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, err := proto.Marshal(payload)
+	if err != nil {
+		t.Fatalf("proto.Marshal error: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("X-Aimux-Session-Id", aimuxSessionID)
+	recorder := httptest.NewRecorder()
+
+	receiver.handleFallback(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("POST / status = %d, want 200", recorder.Code)
+	}
+	if store.GetByConversation(aimuxSessionID) == nil {
+		t.Fatal("fallback handler did not create alias from X-Aimux-Session-Id header")
+	}
+}
+
+// TestReceiver_RemoteSandboxE2E simulates the full aimux remote agent flow:
+// 1. Receiver starts on a port (like aimux does on startup)
+// 2. A sandbox sends OTEL logs with ?aimux_session= query param (proxy-proof)
+// 3. The store indexes by Claude's session.id AND creates an alias for aimux_session
+// 4. parserForRemote looks up by aimux_session → gets root → SpansToTurns → turns
+// This is the exact chain that the TUI trace pane relies on.
+func TestReceiver_RemoteSandboxE2E(t *testing.T) {
+	store := NewSpanStore()
+	port := 14325
+	receiver := NewReceiver(store, port)
+	receiver.SetBindAll(true)
+
+	if err := receiver.Start(); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer receiver.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	aimuxSessionID := "aimux-remote-claude-1234567890"
+	claudeSessionID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	now := time.Now()
+
+	// Simulate two turns from a sandbox Claude session
+	for i, turn := range []struct {
+		promptID string
+		prompt   string
+		model    string
+		inTok    int64
+		outTok   int64
+		tool     string
+	}{
+		{"p1", "fix the auth bug", "claude-sonnet-4-6", 3000, 800, "Read"},
+		{"p2", "now write tests", "claude-sonnet-4-6", 5000, 1500, "Write"},
+	} {
+		payload := &collectorlogspb.ExportLogsServiceRequest{
+			ResourceLogs: []*logspb.ResourceLogs{{
+				ScopeLogs: []*logspb.ScopeLogs{{
+					LogRecords: []*logspb.LogRecord{
+						{
+							TimeUnixNano: uint64(now.Add(time.Duration(i*10) * time.Second).UnixNano()),
+							EventName:    "claude_code.user_prompt",
+							Attributes: []*commonpb.KeyValue{
+								{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: claudeSessionID}}},
+								{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: turn.promptID}}},
+								{Key: "prompt", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: turn.prompt}}},
+							},
+						},
+						{
+							TimeUnixNano: uint64(now.Add(time.Duration(i*10+1) * time.Second).UnixNano()),
+							EventName:    "claude_code.api_request",
+							Attributes: []*commonpb.KeyValue{
+								{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: claudeSessionID}}},
+								{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: turn.promptID}}},
+								{Key: "model", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: turn.model}}},
+								{Key: "input_tokens", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: turn.inTok}}},
+								{Key: "output_tokens", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: turn.outTok}}},
+							},
+						},
+						{
+							TimeUnixNano: uint64(now.Add(time.Duration(i*10+2) * time.Second).UnixNano()),
+							EventName:    "claude_code.tool_result",
+							Attributes: []*commonpb.KeyValue{
+								{Key: "session.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: claudeSessionID}}},
+								{Key: "prompt.id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: turn.promptID}}},
+								{Key: "tool_name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: turn.tool}}},
+								{Key: "success", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "true"}}},
+							},
+						},
+					},
+				}},
+			}},
+		}
+
+		body, err := proto.Marshal(payload)
+		if err != nil {
+			t.Fatalf("turn %d: proto.Marshal error: %v", i, err)
+		}
+		url := fmt.Sprintf("http://127.0.0.1:%d/v1/logs?aimux_session=%s", port, aimuxSessionID)
+		resp, err := http.Post(url, "application/x-protobuf", bytes.NewReader(body)) //nolint:gosec // test URL from localhost
+		if err != nil {
+			t.Fatalf("turn %d: POST error: %v", i, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("turn %d: status = %d", i, resp.StatusCode)
+		}
+	}
+
+	// Verify: lookup by aimux session ID (what parserForRemote does)
+	root := store.GetByConversation(aimuxSessionID)
+	if root == nil {
+		t.Fatal("store.GetByConversation(aimuxSessionID) returned nil — alias not created")
+	}
+
+	// Verify: also reachable by Claude's own session ID
+	rootByClaudeID := store.GetByConversation(claudeSessionID)
+	if rootByClaudeID == nil {
+		t.Fatal("store.GetByConversation(claudeSessionID) returned nil")
+	}
+
+	// Verify: SpansToTurns produces 2 turns with correct data
+	turns := SpansToTurns(root)
+	if len(turns) != 2 {
+		t.Fatalf("SpansToTurns returned %d turns, want 2", len(turns))
+	}
+	if turns[0].UserLines[0] != "fix the auth bug" {
+		t.Errorf("turn 0 prompt = %q, want 'fix the auth bug'", turns[0].UserLines[0])
+	}
+	if turns[1].UserLines[0] != "now write tests" {
+		t.Errorf("turn 1 prompt = %q, want 'now write tests'", turns[1].UserLines[0])
+	}
+	if turns[0].Model != "claude-sonnet-4-6" {
+		t.Errorf("turn 0 model = %q, want claude-sonnet-4-6", turns[0].Model)
+	}
+	if turns[0].TokensIn != 3000 {
+		t.Errorf("turn 0 tokens_in = %d, want 3000", turns[0].TokensIn)
+	}
+	if turns[1].TokensIn != 5000 {
+		t.Errorf("turn 1 tokens_in = %d, want 5000", turns[1].TokensIn)
+	}
+	if len(turns[0].Actions) != 1 || turns[0].Actions[0].Name != "Read" {
+		t.Errorf("turn 0 actions = %v, want [Read]", turns[0].Actions)
+	}
+	if len(turns[1].Actions) != 1 || turns[1].Actions[0].Name != "Write" {
+		t.Errorf("turn 1 actions = %v, want [Write]", turns[1].Actions)
+	}
+
+	// Verify receiver stats
+	_, logs, _ := receiver.Stats()
+	if logs != 2 {
+		t.Errorf("receiver logged %d requests, want 2", logs)
 	}
 }
 

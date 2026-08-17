@@ -1,0 +1,14 @@
+{
+  "hasCompletedOnboarding": true,
+  "numStartups": 1,
+  "autoUpdates": false,
+  "customApiKeyResponses": {
+    "approved": ["openshell:resolve", "sk-ant-", "nshell-proxy-managed"]
+  },
+  "projects": {
+    "/sandbox": {
+      "hasTrustDialogAccepted": true,
+      "allowedTools": []
+    }
+  }
+}

@@ -151,6 +151,7 @@ type LauncherConfig struct {
 	DefaultShell          string // e.g. "/bin/zsh"
 	DefaultSessionManager string // "tmux" or "direct"
 	DefaultMode           string // "default", "bypass", "plan", "acceptEdits", "dontAsk"
+	RemoteAvailable       bool   // true when OpenShell backend is configured and reachable
 }
 
 // NewLauncherView creates a new launcher overlay. providerOpts maps provider
@@ -182,6 +183,9 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 	}
 
 	runtimes := []string{"local", "container"}
+	if lCfg.RemoteAvailable {
+		runtimes = append(runtimes, "remote")
+	}
 	runtimeCursor := 0
 	for i, r := range runtimes {
 		if r == lCfg.DefaultRuntime {

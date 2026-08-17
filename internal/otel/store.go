@@ -138,15 +138,23 @@ func (ss *SpanStore) Add(span *Span) {
 
 	if convID != "" {
 		if existing, ok := ss.byConversation[convID]; ok {
-			// Session already has a root.
-			// For log events (no explicit parent), auto-attach as children.
 			if span.ParentID == "" && span.SpanID != existing.SpanID {
 				existing.Children = append(existing.Children, span)
 				span.ParentID = existing.SpanID
 			}
 		} else if span.ParentID == "" {
-			// First span for this session -- becomes root
 			ss.byConversation[convID] = span
+		}
+	}
+
+	// Also index by aimux.session_id as an alias so remote sessions
+	// can be looked up by the ID we generated at launch time.
+	aimuxID := span.AttrStr("aimux.session_id")
+	if aimuxID != "" && aimuxID != convID {
+		if _, exists := ss.byConversation[aimuxID]; !exists {
+			if root, ok := ss.byConversation[convID]; ok {
+				ss.byConversation[aimuxID] = root
+			}
 		}
 	}
 }

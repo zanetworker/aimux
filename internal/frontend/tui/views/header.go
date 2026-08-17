@@ -46,6 +46,9 @@ type HeaderView struct {
 	// K8s status
 	k8sStatus string // e.g. "connected", "disconnected (retry in 25s)", ""
 
+	// OpenShell status
+	openshellStatus string // e.g. "connected v0.0.66", "disconnected", ""
+
 	// Notification state
 	silenced bool
 
@@ -83,6 +86,11 @@ func (h *HeaderView) SetHint(hint string) {
 // SetK8sStatus updates the K8s connection status displayed in the header.
 func (h *HeaderView) SetK8sStatus(status string) {
 	h.k8sStatus = status
+}
+
+// SetOpenShellStatus updates the OpenShell gateway status in the header.
+func (h *HeaderView) SetOpenShellStatus(status string) {
+	h.openshellStatus = status
 }
 
 // SetTaskSummary updates the task counts displayed in the header.
@@ -243,6 +251,10 @@ func (h *HeaderView) renderInfoBoxes() string {
 
 	boxes := lipgloss.JoinHorizontal(lipgloss.Top, agentBox, " ", costBox, " ", providerBox)
 
+	if h.openshellStatus != "" {
+		osBox := boxStyle.Render(h.renderOpenShellStatus())
+		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", osBox)
+	}
 	if h.k8sStatus != "" {
 		k8sBox := boxStyle.Render(h.renderK8sStatus())
 		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", k8sBox)
@@ -310,6 +322,22 @@ func (h *HeaderView) renderK8sStatus() string {
 	}
 	return labelStyle.Render("K8s") + "\n" +
 		lipgloss.NewStyle().Foreground(statusColor).Render(icon+" "+h.k8sStatus)
+}
+
+func (h *HeaderView) renderOpenShellStatus() string {
+	labelStyle := lipgloss.NewStyle().Foreground(colorMutedText)
+	var statusColor lipgloss.Color
+	var icon string
+	switch {
+	case strings.HasPrefix(h.openshellStatus, "connected"):
+		statusColor = colorActive
+		icon = "●"
+	default:
+		statusColor = lipgloss.Color("#EF4444")
+		icon = "○"
+	}
+	return labelStyle.Render("OpenShell") + "\n" +
+		lipgloss.NewStyle().Foreground(statusColor).Render(icon+" "+h.openshellStatus)
 }
 
 func (h *HeaderView) renderLogo() string {
