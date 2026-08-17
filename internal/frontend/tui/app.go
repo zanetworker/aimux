@@ -1089,7 +1089,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		a.pendingAgents[result.SandboxName] = *newAgent
-		a.remoteSessionIDs.Put(result.SandboxName, result.OTELSessionID)
+		a.remoteSessionIDs.PutMeta(result.SandboxName, controller.LaunchMeta{
+			SessionID: result.OTELSessionID,
+			Provider:  msg.provider,
+			Dir:       msg.dir,
+		})
 		a.instances = append(a.instances, *newAgent)
 		a.agentsView.SetAgents(a.instances)
 
