@@ -39,4 +39,4 @@ Example: see `internal/provider/claude.go` for a complete implementation.
 1. Check if the bug exists in both providers (Claude, Codex)
 2. Fix in shared helpers (`provider/helpers.go`) if possible
 3. If provider-specific, fix in each provider file
-4. Run `go test ./internal/provider/... -timeout 30s` to verify all three
+4. Run `go test ./internal/provider/... -timeout 30s` to verify both

@@ -219,8 +219,6 @@ func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(opts sp
 
 		if opts.Prompt != "" {
 			switch opts.Provider {
-			case "claude":
-				c.Args = append(c.Args, opts.Prompt)
 			case "codex":
 				c.Args = append(c.Args, "--prompt", opts.Prompt)
 			default:
@@ -328,8 +326,6 @@ func createWebServer(port int) *web.Server {
 
 		if opts.Prompt != "" {
 			switch opts.Provider {
-			case "claude":
-				cmd.Args = append(cmd.Args, opts.Prompt)
 			case "codex":
 				cmd.Args = append(cmd.Args, "--prompt", opts.Prompt)
 			default:

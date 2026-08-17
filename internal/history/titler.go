@@ -15,7 +15,7 @@ import (
 // TitleConfig controls LLM-based session title generation.
 type TitleConfig struct {
 	Enabled    bool      // generate titles automatically
-	Model      string    // "flash" (default), "haiku", "sonnet", "opus"
+	Model      string    // "haiku" (default), "sonnet", "opus"
 	APIKey     string    // API key (from env or config)
 	Regenerate bool      // regenerate titles even if they already exist
 	Output     io.Writer // progress output destination (nil defaults to os.Stderr)

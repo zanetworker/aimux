@@ -78,7 +78,7 @@ type ResumeConfig struct {
 // SessionsConfig holds settings for the session history feature.
 type SessionsConfig struct {
 	AutoTitle  bool   `yaml:"auto_title"`  // generate titles via LLM on discovery
-	TitleModel string `yaml:"title_model"` // "flash" (default), "haiku", "sonnet", "opus"
+	TitleModel string `yaml:"title_model"` // "haiku" (default), "sonnet", "opus"
 	APIKey     string `yaml:"api_key"`     // API key for title generation (overrides env vars)
 }
 
@@ -168,7 +168,7 @@ func Default() Config {
 		Runtime:        "local",
 		SessionManager: "tmux",
 		Sessions: SessionsConfig{
-			TitleModel: "flash",
+			TitleModel: "haiku",
 		},
 		Notifications: NotificationsConfig{
 			Enabled:   true,
