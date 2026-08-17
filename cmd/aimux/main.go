@@ -37,7 +37,6 @@ func main() {
 	disco := discovery.NewOrchestrator(
 		&provider.Claude{},
 		&provider.Codex{},
-		&provider.Gemini{},
 	)
 
 	cfg, _ := config.Load(config.DefaultPath())
@@ -119,12 +118,11 @@ func main() {
 		},
 		SkipPermissions: cfg.Resume.SkipPermissions,
 		DefaultMode:     cfg.DefaultMode,
-		Providers:       []string{"claude", "codex", "gemini"},
+		Providers:       []string{"claude", "codex"},
 		ProfileStore:    profileStore,
 		TraceParsers: map[string]func(filePath string) ([]trace.Turn, error){
 			"claude": (&provider.Claude{}).ParseTrace,
 			"codex":  (&provider.Codex{}).ParseTrace,
-			"gemini": (&provider.Gemini{}).ParseTrace,
 		},
 		ComposeEngine: cliComposeEngine,
 	}
@@ -221,7 +219,7 @@ func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(opts sp
 
 		if opts.Prompt != "" {
 			switch opts.Provider {
-			case "claude", "gemini":
+			case "claude":
 				c.Args = append(c.Args, opts.Prompt)
 			case "codex":
 				c.Args = append(c.Args, "--prompt", opts.Prompt)
@@ -285,7 +283,6 @@ func createWebServer(port int) *web.Server {
 	disco := discovery.NewOrchestrator(
 		&provider.Claude{},
 		&provider.Codex{},
-		&provider.Gemini{},
 	)
 
 	// Enable remote sandbox discovery so sandboxes appear in the web agent list
@@ -331,7 +328,7 @@ func createWebServer(port int) *web.Server {
 
 		if opts.Prompt != "" {
 			switch opts.Provider {
-			case "claude", "gemini":
+			case "claude":
 				cmd.Args = append(cmd.Args, opts.Prompt)
 			case "codex":
 				cmd.Args = append(cmd.Args, "--prompt", opts.Prompt)
@@ -448,7 +445,7 @@ func createWebServer(port int) *web.Server {
 			lastUsed time.Time
 		}
 		byPath := make(map[string]*dirEntry)
-		providers := []provider.Provider{&provider.Claude{}, &provider.Codex{}, &provider.Gemini{}}
+		providers := []provider.Provider{&provider.Claude{}, &provider.Codex{}}
 		for _, p := range providers {
 			for _, rd := range p.RecentDirs(max) {
 				if existing, ok := byPath[rd.Path]; ok {

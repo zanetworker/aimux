@@ -36,7 +36,7 @@ func newAgentsCmd(discover discoverFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
 		Short: "List running AI agents",
-		Long:  "Discover and list all running AI coding agent sessions (Claude, Codex, Gemini)",
+		Long:  "Discover and list all running AI coding agent sessions (Claude, Codex)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agents, err := discover()
 			if err != nil {

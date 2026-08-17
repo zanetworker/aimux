@@ -931,7 +931,6 @@ func TestAllProvidersOTELEnvIncludeProtocol(t *testing.T) {
 	providers := []provider.Provider{
 		&provider.Claude{},
 		&provider.Codex{},
-		&provider.Gemini{},
 	}
 
 	endpoint := "http://localhost:4318"

@@ -245,7 +245,6 @@ func NewApp() App {
 	allProviders := []provider.Provider{
 		&provider.Claude{},
 		&provider.Codex{},
-		&provider.Gemini{},
 	}
 
 	// K8s provider participates in discovery (agents table) but is also
