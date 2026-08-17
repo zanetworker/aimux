@@ -15,7 +15,6 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
   const providerColors: Record<string, { background: string; color: string }> = {
     claude: { background: 'var(--accent-dim)', color: 'var(--accent)' },
     codex: { background: 'rgba(74,222,128,0.15)', color: '#4ade80' },
-    gemini: { background: 'rgba(167,139,250,0.15)', color: '#a78bfa' },
   };
 
   const providerStyle = providerColors[agent.ProviderName.toLowerCase()] || providerColors.claude;
