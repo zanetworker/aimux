@@ -26,3 +26,21 @@ repos:
         language: system
         types: [go]
         pass_filenames: false
+
+      # Layer discipline: core packages must not import frontend libraries.
+      # A bubbletea/lipgloss import in controller/ or any non-tui package is always wrong.
+      - id: layer-discipline
+        name: layer-discipline
+        language: script
+        entry: scripts/check-layer-discipline.sh
+        pass_filenames: false
+        types: [go]
+
+      # Frontend parity hint: warn when only one frontend (TUI or web) changes.
+      # Advisory only — exits 0 always. Add "# parity: N/A" to commit to suppress.
+      - id: frontend-parity-hint
+        name: frontend-parity-hint
+        language: script
+        entry: scripts/check-frontend-parity.sh
+        pass_filenames: false
+        types: [go]

@@ -10,6 +10,35 @@ Always invoke the `development-tools:crafted-code` skill before writing the firs
 
 Separation of concerns is non-negotiable: core packages (everything under `internal/` except `tui/`) MUST NOT import `bubbletea`, `lipgloss`, or anything from `tui/`. Business logic belongs in core packages; `tui/` is a thin adapter layer for rendering and key handling only. When in doubt, ask: "does this function reference `tea.Model`, `tea.Cmd`, or `lipgloss`?" If no, it belongs in a core package.
 
+## Frontend Parity
+
+aimux has three frontends: TUI, web dashboard, CLI. **Every user-visible feature MUST be reachable from all three, or the gap must be explicitly recorded in the parity tech-debt table.**
+
+**Before implementing any feature that lives in a frontend:**
+1. Read `.claude/skills/frontend-parity.md` — name the shared controller function first
+2. Implement in `internal/controller/` with zero frontend imports
+3. Wire TUI (keypress → controller call)
+4. Wire web (HTTP handler → same controller call)
+5. Update `smoke_test.go` with the new endpoint
+
+**Before committing any change to `internal/frontend/`:**
+- Use the `frontend-parity` skill to run the parity audit
+- If only one frontend changed, either fix the other or add `# parity: N/A` to the commit message explaining why
+
+Skipping the controller layer and writing business logic directly in `handlers.go` or `app.go` is a parity violation: it means the feature can never be ported without rewriting.
+
+## Code Reuse vs New Dependencies
+
+**Before adding any package to go.mod:**
+- Check if an existing dependency covers the use case (`go.mod` lists them)
+- Check if a core package already implements it (`internal/controller/`, `internal/otel/`, etc.)
+
+**Before writing a new function in a frontend file:**
+- Use the `code-reuse` skill to check if the function belongs in `internal/controller/`
+- A handler method > 30 lines is a signal to extract a controller function
+
+The pre-commit hook `layer-discipline` enforces the hard constraint (no TUI imports in core). The `frontend-parity-hint` hook reminds you when only one frontend changes.
+
 ## Pre-Commit Checklist
 
 Before committing or pushing ANY code:
