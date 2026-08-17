@@ -55,11 +55,15 @@ func parseSandboxAgents(output string) []agent.Agent {
 		phase := fields[len(fields)-1]
 
 		var status agent.Status
+		var lastAction string
 		switch phase {
 		case "Ready":
 			status = agent.StatusActive
 		case "Error":
 			status = agent.StatusError
+		case "Deleting", "Terminating":
+			status = agent.StatusError
+			lastAction = "Deleting"
 		default:
 			status = agent.StatusIdle
 		}
@@ -69,6 +73,7 @@ func parseSandboxAgents(output string) []agent.Agent {
 			ProviderName: "claude",
 			WorkingDir:   "/sandbox",
 			Status:       status,
+			LastAction:   lastAction,
 			Location:     "remote",
 			SandboxName:  name,
 			StartTime:    time.Now(),
