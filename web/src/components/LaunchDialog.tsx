@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 interface Props {
   open: boolean;
   onClose: () => void;
-  onLaunched?: (provider: string, dir: string, tmuxSession?: string) => void;
+  onLaunched?: (provider: string, dir: string, tmuxSession?: string, sandboxName?: string) => void;
 }
 
 interface QuickDir { path: string; basename: string; exists: boolean; }
@@ -81,7 +81,7 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         }),
       });
       const data = await resp.json();
-      onLaunched?.(provider, dir, data.tmux_session);
+      onLaunched?.(provider, dir, data.tmux_session, data.sandbox_name);
       onClose();
       setDir(''); setPrompt(''); setModel(''); setProvider('claude');
       setMode('default'); setRuntime('local'); setExecution('local');
