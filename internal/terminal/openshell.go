@@ -45,6 +45,18 @@ func openshellConnectArgs(sandbox, gatewayEndpoint string, insecure bool) []stri
 	return args
 }
 
+// clampDim clamps a terminal dimension to a valid uint16 range [1, 65535].
+func clampDim(v int) uint16 {
+	switch {
+	case v < 1:
+		return 1
+	case v > 65535:
+		return 65535
+	default:
+		return uint16(v) // #nosec G115 -- bounds checked above
+	}
+}
+
 // NewOpenShellExec starts `openshell sandbox connect <sandbox>` in a real PTY.
 // gatewayEndpoint is optional; when empty, the openshell CLI resolves its
 // configured/selected gateway. cols/rows set the initial terminal size.
@@ -66,7 +78,7 @@ func NewOpenShellExec(sandbox, gatewayEndpoint string, insecure bool, cols, rows
 	if err != nil {
 		return nil, fmt.Errorf("openshell exec: pty open: %w", err)
 	}
-	if err := pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)}); err != nil { // #nosec G115 -- terminal size safe to convert
+	if err := pty.Setsize(ptmx, &pty.Winsize{Cols: clampDim(cols), Rows: clampDim(rows)}); err != nil {
 		_ = ptmx.Close()
 		_ = tty.Close()
 		return nil, fmt.Errorf("openshell exec: pty setsize: %w", err)
@@ -128,8 +140,8 @@ func (ob *OpenShellExecBackend) Resize(cols, rows int) error {
 		return nil
 	}
 	return pty.Setsize(ob.ptmx, &pty.Winsize{
-		Cols: uint16(cols), // #nosec G115 -- terminal size safe to convert
-		Rows: uint16(rows), // #nosec G115 -- terminal size safe to convert
+		Cols: clampDim(cols),
+		Rows: clampDim(rows),
 	})
 }
 

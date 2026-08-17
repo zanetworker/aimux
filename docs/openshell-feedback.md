@@ -16,7 +16,7 @@ aimux orchestrates AI coding agents on remote infrastructure. It uses OpenShell 
 Any command passed to `sandbox exec` that contains a literal newline (`\n`) or carriage return (`\r`) in any argument is rejected immediately. The command never reaches the sandbox.
 
 **Error message:**
-```
+```text
 Error: × code: 'Client specified an invalid argument', message: "command argument 2
   │ contains newline or carriage return characters"
 ```
@@ -128,7 +128,7 @@ We spent 8+ hours trying every approach to get OTEL env vars into Claude Code's 
 
 **Root cause (diagram):**
 
-```
+```text
 openshell sandbox create --env OTEL_*=http://...
     │
     ▼
@@ -503,7 +503,7 @@ These aren't bugs but each cost us 30-60 minutes of debugging. Better error mess
 
 Without `[openshell.gateway.gateway_jwt]` in the gateway config, sandboxes crash with an error that appears in the SANDBOX logs (not the gateway logs):
 
-```
+```text
 Error: × Policy fetch failed after 5 attempts: no sandbox token source available
 ```
 

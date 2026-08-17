@@ -10,7 +10,7 @@
 
 The TUI launcher presents two axes:
 
-```
+```text
 Provider:  [Claude]  Codex  Gemini
 Where:     [my machine]  remote
 Sandboxed: [no]  yes
@@ -28,7 +28,7 @@ Sandboxed: [no]  yes
 
 The launcher adapts to what's available:
 
-```
+```text
 # Nothing configured (today's aimux)
 Provider:  [Claude]  Codex  Gemini
 Where:     [my machine]
@@ -54,7 +54,7 @@ Zero new complexity for users who don't configure remote or sandbox. The launche
 
 The lead agent calls MCP tools. It doesn't know or care about OpenShell, K8s, or Docker. It sees:
 
-```
+```text
 spawn_agent(count=3)               → "3 agents ready"
 create_task(prompt="...", ...)     → structured result
 wait_for_task(task_id="abc")       → structured result
@@ -65,7 +65,7 @@ Whether workers run on the user's machine (sandboxed) or on a cluster depends on
 
 ### `aimux status`
 
-```
+```text
 $ aimux status
 
 Local
@@ -94,7 +94,7 @@ Both use the same universal image, same OpenShell gateway, same config. The entr
 
 ### Component Ownership
 
-```
+```text
 User-facing (aimux owns)
   TUI launcher        "my machine" / "remote" / "sandboxed" options
   aimux status         health checks for gateway, warm pool, MCP registration
@@ -121,7 +121,7 @@ Infrastructure (user/platform team owns)
 
 The MCP server is fully self-contained. Backend interface and implementation live inside the mcpserver package:
 
-```
+```text
 internal/mcpserver/
   server.go              MCP tools, calls Backend interface
   backend.go             Backend interface definition
@@ -138,7 +138,7 @@ Zero imports from any other aimux package. Two entry points:
 
 ### How It Works (Task Workers)
 
-```
+```text
 Lead agent → MCP spawn_agent(count=3)
                    ↓
              MCP server calls gateway.CreateSandbox() x3
@@ -161,7 +161,7 @@ No Redis. No queue. No Lua. The MCP server pushes tasks to specific sandboxes. S
 
 ### How It Works (Interactive Sessions)
 
-```
+```text
 User → aimux launcher → picks Claude + remote → Enter
                    ↓
          aimux calls gateway.CreateSandbox(AIMUX_MODE=session)
@@ -380,7 +380,7 @@ The MCP server orchestrates tasks in-memory. No distributed coordination.
 
 **Dependencies:**
 
-```
+```text
 create_task(id="A", prompt="write tests")
 create_task(id="B", prompt="refactor handler", depends_on=["A"])
 
@@ -397,7 +397,7 @@ MCP server:
 
 `create_task` accepts an optional `repo` field:
 
-```
+```text
 create_task(prompt="write tests for auth.go", repo="github.com/org/project", provider="claude")
 ```
 
@@ -419,7 +419,7 @@ With the OpenShell backend, the egress proxy can inject git credentials on outbo
 
 The `RemoteExec` session backend wraps the OpenShell supervisor relay:
 
-```
+```text
 SessionBackend interface
   DirectPTY      local process (existing)
   TmuxMirror     local tmux mirror (existing)

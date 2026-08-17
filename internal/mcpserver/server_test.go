@@ -308,11 +308,9 @@ func TestHandleCleanupBranches_BranchNotFound(t *testing.T) {
 	if !strings.Contains(text, "task-def456 (not found)") {
 		t.Errorf("expected 'task-def456 (not found)' in output, got: %s", text)
 	}
-	if !strings.Contains(text, "Deleted: \n") || !strings.HasPrefix(text, "Deleted: \n") {
-		lines := strings.Split(text, "\n")
-		if len(lines) > 0 && strings.TrimPrefix(lines[0], "Deleted: ") != "" {
-			t.Errorf("expected empty Deleted list, got: %s", lines[0])
-		}
+	firstLine := strings.SplitN(text, "\n", 2)[0]
+	if firstLine != "Deleted: " {
+		t.Errorf("expected empty Deleted list, got: %q", firstLine)
 	}
 }
 

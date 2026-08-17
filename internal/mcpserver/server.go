@@ -287,10 +287,7 @@ func (s *Server) createTaskExec(ctx context.Context, taskID, prompt string) (*mc
 	duration := int(time.Since(start).Seconds())
 	poolBackend.Release(sandbox)
 
-	summary := result.Output
-	if len(summary) > 200 {
-		summary = summary[:200] + "..."
-	}
+	summary := truncate(result.Output, 200)
 
 	tr := TaskResult{
 		Type:     "text",
@@ -415,16 +412,10 @@ func (s *Server) handleListTasks(ctx context.Context, req mcp.CallToolRequest) (
 		if t["assignee"] != "" {
 			line += fmt.Sprintf(" assigned=%s", t["assignee"])
 		}
-		prompt := t["prompt"]
-		if len(prompt) > 60 {
-			prompt = prompt[:60] + "..."
-		}
+		prompt := truncate(t["prompt"], 60)
 		line += " " + prompt
 		if t["status"] == "completed" && t["result_summary"] != "" {
-			result := t["result_summary"]
-			if len(result) > 60 {
-				result = result[:60] + "..."
-			}
+			result := truncate(t["result_summary"], 60)
 			line += "\n         result: " + result
 		}
 		lines = append(lines, line)
@@ -756,5 +747,25 @@ func joinLines(lines []string) string {
 }
 
 func splitComma(s string) []string {
-	return strings.Split(s, ",")
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// truncate shortens s to at most max runes, appending "..." if truncated.
+// Uses rune-safe slicing to avoid splitting multi-byte UTF-8 sequences.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "..."
 }

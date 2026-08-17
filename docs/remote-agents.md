@@ -12,6 +12,7 @@ aimux runs AI coding agents on remote infrastructure: isolated OpenShell sandbox
 
 ```bash
 # Install OpenShell v0.0.96+
+# Tested with v0.0.96; earlier versions may lack required sandbox connect features
 gh release download <tag> -R NVIDIA/OpenShell -p '*aarch64-apple-darwin*' -C /tmp
 tar -xzf /tmp/openshell-aarch64-apple-darwin.tar.gz -C ~/go/bin/
 tar -xzf /tmp/openshell-gateway-aarch64-apple-darwin.tar.gz -C ~/go/bin/

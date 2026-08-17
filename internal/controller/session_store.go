@@ -68,7 +68,9 @@ func (s *SessionStore) load() {
 		return
 	}
 	// Try new format {sandboxName: LaunchMeta} first.
-	if json.Unmarshal(raw, &s.data) == nil {
+	fresh := make(map[string]LaunchMeta)
+	if json.Unmarshal(raw, &fresh) == nil {
+		s.data = fresh
 		debuglog.Log("session-store: loaded %d entries from %s", len(s.data), s.path)
 		return
 	}
@@ -80,7 +82,9 @@ func (s *SessionStore) load() {
 		}
 		debuglog.Log("session-store: migrated %d legacy entries from %s", len(old), s.path)
 		s.save()
+		return
 	}
+	debuglog.Log("session-store: unparsable store at %s; starting empty", s.path)
 }
 
 func (s *SessionStore) save() {

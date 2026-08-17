@@ -254,7 +254,8 @@ func (h *HeaderView) renderInfoBoxes() string {
 	if h.openshellStatus != "" {
 		osBox := boxStyle.Render(h.renderOpenShellStatus())
 		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", osBox)
-	} else if h.k8sStatus != "" {
+	}
+	if h.k8sStatus != "" {
 		k8sBox := boxStyle.Render(h.renderK8sStatus())
 		boxes = lipgloss.JoinHorizontal(lipgloss.Top, boxes, " ", k8sBox)
 	}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Agent } from '../types';
 import type { ContentSearchResult } from '../App';
+import { normalizeLocation } from '../utils';
 
 interface Props {
   agents: Agent[];
@@ -78,13 +79,15 @@ export function FilterBar({
   };
 
   const locationCounts = {
-    local: agents.filter(a => !a.Location || a.Location === 'local').length,
-    remote: agents.filter(a => a.Location === 'remote').length,
+    local: agents.filter(a => normalizeLocation(a) === 'local').length,
+    remote: agents.filter(a => normalizeLocation(a) === 'remote').length,
+    k8s: agents.filter(a => normalizeLocation(a) === 'k8s').length,
   };
 
   const locationDots = {
     local: '#94a3b8',
     remote: '#38bdf8',
+    k8s: '#a78bfa',
   };
 
   const handleDeepSearch = () => {
@@ -132,6 +135,9 @@ export function FilterBar({
       {/* Location filters */}
       <FilterPill label="Local" count={locationCounts.local} dotColor={locationDots.local} active={locationFilter === 'local'} onClick={() => onLocationFilter(locationFilter === 'local' ? null : 'local')} />
       <FilterPill label="Remote" count={locationCounts.remote} dotColor={locationDots.remote} active={locationFilter === 'remote'} onClick={() => onLocationFilter(locationFilter === 'remote' ? null : 'remote')} />
+      {locationCounts.k8s > 0 && (
+        <FilterPill label="K8s" count={locationCounts.k8s} dotColor={locationDots.k8s} active={locationFilter === 'k8s'} onClick={() => onLocationFilter(locationFilter === 'k8s' ? null : 'k8s')} />
+      )}
 
       <Divider />
 

@@ -148,7 +148,11 @@ func (b *K8sBackend) DeleteSandbox(ctx context.Context, name string) error {
 // Convention: deployment-<replicaset-hash>-<pod-hash>
 func deploymentNameFromPod(podName string) string {
 	parts := strings.Split(podName, "-")
-	if len(parts) <= 2 {
+	// A Kubernetes pod name is <deployment>-<rs-hash>-<pod-hash>.
+	// We need at least 4 segments to reliably strip the two hash suffixes;
+	// a 3-segment name is ambiguous (could be a 3-word deployment name) and
+	// is returned unchanged.
+	if len(parts) < 4 {
 		return podName
 	}
 	// Remove last two segments (replicaset hash + pod hash)

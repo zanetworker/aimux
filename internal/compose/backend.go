@@ -67,11 +67,13 @@ func (b *Backend) CreateSandbox(ctx context.Context, opts mcpserver.SandboxOpts)
 }
 
 func (b *Backend) DeleteSandbox(ctx context.Context, name string) error {
-	err := b.engine.KillSandbox(ctx, name)
+	if err := b.engine.KillSandbox(ctx, name); err != nil {
+		return err
+	}
 	b.mu.Lock()
 	delete(b.pool, name)
 	b.mu.Unlock()
-	return err
+	return nil
 }
 
 func (b *Backend) ListSandboxes(ctx context.Context) ([]mcpserver.SandboxStatus, error) {

@@ -72,6 +72,8 @@ func TestDeploymentNameFromPod(t *testing.T) {
 	}{
 		{"agent-claude-coder-78564fdf75-4rxlk", "agent-claude-coder"},
 		{"agent-gemini-researcher-abc123-xyz", "agent-gemini-researcher"},
+		// 3-segment deployment name: must pass through unchanged (not treated as RS+pod suffix)
+		{"agent-claude-coder", "agent-claude-coder"},
 		{"simple-pod", "simple-pod"},
 		{"two-parts", "two-parts"},
 	}

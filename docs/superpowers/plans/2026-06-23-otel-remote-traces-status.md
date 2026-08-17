@@ -13,7 +13,7 @@ it was hardcoded to localhost:4318. The real issue was simpler:
 
 1. **Missing egress policy update**: The compose adapter set OTEL env vars pointing at
    `host.openshell.internal:4318` but never updated the sandbox egress policy to allow
-   the traffic. The old `spawn/sandbox.go` had `allowOTELEndpoint()` but it was lost
+   the traffic. The old `compose/adapter.go` had `allowOTELEndpoint()` but it was lost
    during the agent-compose refactor.
 
 2. **Port collision in testing**: The running aimux held `127.0.0.1:4318`, so test
@@ -129,7 +129,7 @@ echo "say pong" | openshell sandbox exec --name <sandbox> -- claude -p
 All receiver pipeline code is implemented and tested. Once sandbox OTEL data arrives, it will work:
 
 - `internal/otel/receiver.go`: `extractResourceAttrs` with query param + header fallback
-- `internal/spawn/sandbox.go`: OTEL env vars with `?aimux_session=` in logs endpoint URL
+- `internal/compose/adapter.go`: OTEL env vars with `?aimux_session=` in logs endpoint URL
 - `internal/otel/receiver_test.go`: E2E test simulating full sandbox → receiver → SpansToTurns chain
 - `runtime/agents/universal/Dockerfile`: Multi-arch image from OpenShell community base
 
