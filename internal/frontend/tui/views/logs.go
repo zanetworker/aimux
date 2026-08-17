@@ -563,7 +563,7 @@ func (v *LogsView) View() string {
 	// Render all lines, tracking where the cursor turn starts
 	var allLines []string
 
-	// Provider warning (e.g., Gemini trace limitations)
+	// Provider warning
 	if v.warning != "" {
 		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
 		allLines = append(allLines, warnStyle.Render("  "+v.warning))

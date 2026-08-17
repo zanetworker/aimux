@@ -821,9 +821,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			a.splitTrace = views.NewLogsView(0, sessionFile, a.parserForProvider(p))
 			a.splitTrace.SetSize(leftW, a.height-1)
-			if msg.Provider == "gemini" {
-				a.splitTrace.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
-			}
 
 			a.zoomed = true
 			a.splitMode = true
@@ -1845,7 +1842,7 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 			turns, err := p.ParseTrace(filePath)
 			if err == nil && len(turns) > 0 {
 				// For :new launches, filter out turns from before the launch
-				// (Gemini's logs.json accumulates across sessions in same dir)
+				// to avoid showing traces from previous sessions in the same dir.
 				if !a.splitLaunchTime.IsZero() {
 					var filtered []trace.Turn
 					for _, t := range turns {
@@ -2294,9 +2291,6 @@ func (a App) handleEnter() (tea.Model, tea.Cmd) {
 		a.splitTrace = views.NewLogsView(selected.PID, sessionFile, a.parserForProvider(p))
 		a.splitTrace.SetSessionCost(selected.EstCostUSD)
 		a.splitTrace.SetSize(leftW, a.height-1)
-		if selected.ProviderName == "gemini" {
-			a.splitTrace.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
-		}
 
 		// Set up evaluation store and load annotations into split trace
 		sessionID := selected.SessionID
@@ -2881,9 +2875,6 @@ func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, t
 	}
 	a.logsView = views.NewLogsView(ag.PID, sessionFile, parser)
 	a.logsView.SetSessionCost(ag.EstCostUSD)
-	if ag.ProviderName == "gemini" {
-		a.logsView.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
-	}
 	contentHeight := a.height - a.headerView.Height()
 	if contentHeight < 1 {
 		contentHeight = 10
@@ -2932,9 +2923,6 @@ func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
 	}
 	a.logsView = views.NewLogsView(selected.PID, sessionFile, parser)
 	a.logsView.SetSessionCost(selected.EstCostUSD)
-	if selected.ProviderName == "gemini" {
-		a.logsView.SetWarning("Gemini traces only include user prompts (no assistant responses or tool calls)")
-	}
 	contentHeight := a.height - a.headerView.Height()
 	if contentHeight < 1 {
 		contentHeight = 10

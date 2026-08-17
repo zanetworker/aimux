@@ -89,7 +89,7 @@ func TestAgentsView_SetFilterRebuildsRows(t *testing.T) {
 	v.SetSize(160, 30)
 	v.SetAgents([]agent.Agent{
 		{PID: 1, Name: "alpha", ProviderName: "claude", WorkingDir: "/src/alpha"},
-		{PID: 2, Name: "beta", ProviderName: "gemini", WorkingDir: "/src/beta"},
+		{PID: 2, Name: "beta", ProviderName: "codex", WorkingDir: "/src/beta"},
 		{PID: 3, Name: "gamma", ProviderName: "claude", WorkingDir: "/src/gamma"},
 	})
 
@@ -151,16 +151,16 @@ func TestAgentsView_SetFilterByProvider(t *testing.T) {
 	v.SetSize(160, 30)
 	v.SetAgents([]agent.Agent{
 		{PID: 1, Name: "proj-a", ProviderName: "claude", WorkingDir: "/src/a"},
-		{PID: 2, Name: "proj-b", ProviderName: "gemini", WorkingDir: "/src/b"},
+		{PID: 2, Name: "proj-b", ProviderName: "codex", WorkingDir: "/src/b"},
 	})
 
-	v.SetFilter("gemini")
+	v.SetFilter("codex")
 	output := v.View()
 	if strings.Contains(output, "proj-a") {
-		t.Error("proj-a (claude) should be hidden when filtering by 'gemini'")
+		t.Error("proj-a (claude) should be hidden when filtering by 'codex'")
 	}
 	if !strings.Contains(output, "proj-b") {
-		t.Error("expected proj-b (gemini) to be visible when filtering by 'gemini'")
+		t.Error("expected proj-b (codex) to be visible when filtering by 'codex'")
 	}
 }
 
