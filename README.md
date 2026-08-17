@@ -28,7 +28,7 @@ aimux          # terminal dashboard
 aimux web      # browser dashboard at localhost:9090
 ```
 
-Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
+Requires **tmux**. Auto-discovers running Claude and Codex agents.
 
 ## What It Does
 
@@ -47,10 +47,10 @@ Requires **tmux**. Auto-discovers running Claude, Codex, and Gemini agents.
 <td width="50%">
 
 **Discovery & Monitoring**
-- Auto-discovers Claude, Codex, and Gemini agents
+- Auto-discovers Claude and Codex agents
 - Live status: active, idle, waiting, error
 - Per-agent CPU%, memory, token usage, and cost tracking
-- Model-aware pricing (Opus, Sonnet, Haiku, GPT, Gemini)
+- Model-aware pricing (Opus, Sonnet, Haiku, GPT)
 - Cross-session search ("which agent edited auth.go?")
 
 </td>

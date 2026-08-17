@@ -19,9 +19,6 @@ runtime/
     claude/
       Dockerfile            # UBI9 + Claude Code CLI + coordinator
       main.py               # Worker loop: claim task -> claude-code-sdk -> store result
-    gemini/
-      Dockerfile            # UBI9 + google-genai SDK + coordinator
-      main.py               # Worker loop: claim task -> Gemini API -> store result
     codex/                  # (placeholder, not yet implemented)
     session/
       Dockerfile            # Ubuntu + Claude Code CLI + tmux (interactive pod)
@@ -45,13 +42,6 @@ All Dockerfiles use the repo root as build context so they can COPY the coordina
 ```bash
 docker build -t agent-claude -f runtime/agents/claude/Dockerfile .
 docker push quay.io/your-org/agent-claude:latest
-```
-
-### Gemini Worker
-
-```bash
-docker build -t agent-gemini -f runtime/agents/gemini/Dockerfile .
-docker push quay.io/your-org/agent-gemini:latest
 ```
 
 ### Session Pod
@@ -78,14 +68,3 @@ Two variants from the same image:
 | `ROLE` | no | Agent role: `coder`, `reviewer`, `researcher` (default: `coder`) |
 | `ALLOWED_TOOLS` | no | Comma-separated Claude Code tools (default: `Read,Grep,Glob`) |
 | `ANTHROPIC_API_KEY` | yes | Anthropic API key for Claude Code SDK |
-
-### Gemini Worker (`agents/gemini/main.py`)
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `REDIS_URL` | yes | Redis connection string |
-| `TEAM_ID` | yes | Team identifier for Redis key namespace |
-| `AGENT_ID` | yes | Unique agent identifier |
-| `ROLE` | no | Agent role (default: `researcher`) |
-| `MODEL` | no | Gemini model name (default: `gemini-2.0-flash`) |
-| `GOOGLE_API_KEY` | yes | Google AI API key |
