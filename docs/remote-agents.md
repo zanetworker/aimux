@@ -106,7 +106,7 @@ When the OTEL store is empty (e.g., after aimux restart), `FetchSessionTurns()` 
 
 ### Session UUID Persistence
 
-The sandbox-to-UUID mapping is persisted to `~/.aimux/remote-sessions.json` so it survives aimux restarts. Both TUI and web dashboard read/write this store via the shared `controller.SessionStore`.
+Launch metadata is persisted to `~/.aimux/remote-sessions.json` via `controller.SessionStore`. Each entry stores `{session_id, provider, dir}` (`LaunchMeta`) so both TUI and web dashboard can enrich sandbox agents with their real working directory and provider after a restart. The file format is migrated transparently from the older `map[string]string` schema.
 
 ### Headless Task Worker (agent dispatches)
 
@@ -239,7 +239,12 @@ Sandboxes show with:
 | Traces show "(no output)" | Claude Code OTEL doesn't emit replies | Fixed: session-file enrichment reads replies from sandbox JSONL |
 | Scrambled terminal on re-entry | Full-screen TUI needs redraw after reattach | Resize nudge sends SIGWINCH to force repaint |
 | Web dashboard missing "remote" option | LaunchDialog.tsx only listed local/container | Fixed: added 'remote' to options array |
-| Web/CLI kill doesn't delete sandbox | KillSandbox case missing from switch | Fixed: added controller.ExecuteKillSandbox to both |
+| Web/CLI kill doesn't delete sandbox | handleArchive called killFn(PID=0) — no-op for sandboxes | Fixed: handleArchive uses DetermineKillAction → ExecuteKillSandbox |
+| Kill button does nothing visible | Sandbox enters "Deleting" phase but card stayed Active | Fixed: Deleting/Terminating phases map to StatusError + LastAction="Deleting"; Kill button hidden while deleting |
+| Web sandbox card shows `ax-cl-xxxx` as name/dir | LaunchMeta stored no provider or dir (old Put API) | Fixed: PutMeta stores provider+dir; enrichRemoteAgents fills Name/WorkingDir from store |
+| TUI-launched sandboxes show wrong name in web | TUI used Put instead of PutMeta | Fixed: TUI now calls PutMeta with provider and dir at launch |
+| claude --resume on fresh sandbox (no conversation) | autoStart flag lost to React 18 batching | Fixed: useRef captures autoStart at RightPanel mount; backend uses RemoteTraceParser to decide resume vs fresh start |
+| Trace/kill/archive 404 for sandbox agents | cachedDiscover returns raw agents without SessionID | Fixed: enrichRemoteAgents runs inside cachedDiscover so every handler gets enriched agents |
 
 ## Testing
 

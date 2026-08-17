@@ -1,0 +1,167 @@
+---
+title: Remote Sandboxes
+description: Run agents in isolated OpenShell sandboxes with full terminal access, traces, and kill support.
+---
+
+Remote sandboxes let you run Claude, Codex, or Gemini inside an isolated [OpenShell](https://github.com/NVIDIA/OpenShell) container managed by a local gateway. The agent gets a clean workspace, model traffic is routed through the gateway's inference proxy (no API keys enter the sandbox), and aimux provides a live terminal, trace view, and kill button — just like local agents.
+
+## Prerequisites
+
+### 1. Install OpenShell
+
+Download the OpenShell CLI and gateway binary from GitHub releases (v0.0.96 or later):
+
+```bash
+# macOS ARM64 example — adjust tag and arch for your platform
+TAG=v0.0.96
+gh release download $TAG -R NVIDIA/OpenShell \
+  -p '*aarch64-apple-darwin*' -C /tmp
+
+tar -xzf /tmp/openshell-aarch64-apple-darwin.tar.gz     -C ~/go/bin/
+tar -xzf /tmp/openshell-gateway-aarch64-apple-darwin.tar.gz -C ~/go/bin/
+
+openshell --version    # should print 0.0.96+
+```
+
+> **Note:** Prefer GitHub releases over Homebrew — the Homebrew formula lags several versions behind.
+
+### 2. Start the Podman machine (macOS)
+
+OpenShell uses Podman to run sandboxes locally:
+
+```bash
+podman machine start
+```
+
+### 3. Start the OpenShell gateway
+
+Run the gateway natively (not inside a container) so it can reach the Podman socket:
+
+```bash
+OPENSHELL_PODMAN_SOCKET=$(podman machine inspect \
+  --format '{{.ConnectionInfo.PodmanSocket.Path}}') \
+openshell-gateway \
+  --config ~/.config/openshell/gateway-podman.toml \
+  --db-url "sqlite:$HOME/.config/openshell/gateway-podman.db?mode=rwc"
+```
+
+Leave this running in a terminal or configure it as a background service.
+
+### 4. Register and select the gateway
+
+```bash
+openshell gateway add podman-test http://127.0.0.1:8090
+openshell gateway select podman-test
+openshell status    # should show: Connected
+```
+
+### 5. Configure inference routing
+
+Claude Code inside the sandbox routes model calls through the gateway's inference proxy (`inference.local`). You need to configure a provider once:
+
+```bash
+# Create a Vertex AI provider from your local gcloud ADC
+openshell provider create \
+  --name vertex \
+  --type google-vertex-ai \
+  --from-gcloud-adc
+
+openshell provider update vertex \
+  --config VERTEX_AI_PROJECT_ID=<your-gcp-project> \
+  --config VERTEX_AI_REGION=us-east5
+
+# Set the inference route (both user and system routes)
+openshell inference set --provider vertex --model claude-sonnet-4-6
+openshell inference set --provider vertex --model claude-sonnet-4-6 --system
+
+openshell inference get    # verify: should show provider + model for both routes
+```
+
+Without this step, Claude's API calls inside the sandbox fail with `503 "cluster inference is not configured"` and retry indefinitely.
+
+### 6. Configure aimux
+
+Add the `remote` block to `~/.aimux/config.yaml`:
+
+```yaml
+remote:
+  backend: openshell
+  gateway: "http://127.0.0.1:8090"
+  image: "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+```
+
+## Launching a Remote Sandbox
+
+### From the web dashboard
+
+1. Click **+ Launch** in the header bar
+2. Pick a **Provider** (Claude, Codex, Gemini)
+3. Choose a **Directory** — this is where the agent works inside the sandbox
+4. Set **Runtime** to **remote**
+5. Click **Launch Agent**
+
+The dashboard navigates directly to the new agent's session terminal. Claude starts automatically with a pinned session ID for trace continuity.
+
+### From the TUI
+
+1. Press `:` and type `new`, then Enter (or press `n`)
+2. Arrow right on the **Runtime** row to select `remote`
+3. Choose your directory and provider
+4. Press Enter to launch
+
+The TUI opens a split view: terminal on the right, trace pane on the left. Claude starts automatically.
+
+## Dashboard Behaviour
+
+After launching, the sandbox card shows:
+
+- **Name**: your project directory (e.g., `research`) — not the raw sandbox ID
+- **Working dir**: the directory you selected at launch
+- **Status**: Active (green dot) while the sandbox is ready
+- **Session tab**: live PTY terminal connected to the sandbox shell
+
+### Kill
+
+Click the **Kill** button on the card. The card immediately switches to **ERROR / Deleting** state and disappears once the sandbox is fully deleted (typically a few seconds).
+
+### Re-entry
+
+Click any existing sandbox card to re-open its session terminal. aimux reconnects and runs `claude --resume <session-id>` to continue the same conversation.
+
+### Traces
+
+The **Trace** tab shows turns from the session. Replies are read from the sandbox's session JSONL file via `openshell sandbox exec`. If the OTEL receiver is running, turns are populated in real-time; otherwise they appear after Claude responds.
+
+## Sandbox Lifecycle
+
+```
+Launch → Ready (Active) → user works → Kill → Deleting → gone
+                        ↑                                   ↓
+                      Re-entry ──────────────────────────────
+```
+
+Sandboxes persist until explicitly killed — they survive aimux restarts, reconnects, and network interruptions. The sandbox-to-session mapping is saved in `~/.aimux/remote-sessions.json`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Claude retries indefinitely (503) | Inference not configured | Run `openshell inference set` for both `--user` and `--system` routes |
+| "No conversation found with session ID" on reconnect | Session file doesn't exist yet | The sandbox may have been deleted; launch a fresh one |
+| Sandbox card shows `ax-cl-xxxx` as name | Sandbox launched before aimux was updated | Kill and re-launch — new launches store the real directory |
+| Kill button does nothing | Browser serving stale JS bundle | Hard-refresh (`Cmd+Shift+R`) |
+| Gateway unreachable | Podman machine stopped | Run `podman machine start`, then restart the gateway |
+| DB migration error on gateway start | Upgraded OpenShell major version | Move aside old DB: `mv ~/.config/openshell/gateway-podman.db{,.bak}` |
+
+## Environment Variables in the Sandbox
+
+aimux injects these into every sandbox at launch:
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `ANTHROPIC_BASE_URL` | `https://inference.local` | Routes model traffic through gateway proxy |
+| `ANTHROPIC_API_KEY` | `placeholder` | Required by SDK but not used (gateway authenticates) |
+| `CLAUDE_CODE_ENABLE_TELEMETRY` | `1` | Enables OTEL export for trace view |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://host.openshell.internal:4318` | aimux's OTEL receiver on the host |
+
+Do **not** set `CLAUDE_CODE_USE_VERTEX` or inject host Vertex credentials — the gateway's inference proxy handles authentication, and leaking host credentials into the sandbox would bypass it.

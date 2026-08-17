@@ -20,6 +20,7 @@ export default defineConfig({
 						{ label: 'Web Dashboard', slug: 'guides/web-dashboard' },
 						{ label: 'TUI Keybindings', slug: 'guides/tui-keybindings' },
 						{ label: 'Launch Modes', slug: 'guides/launch-modes' },
+					{ label: 'Remote Sandboxes', slug: 'guides/remote-sandboxes' },
 						{ label: 'Tracing & Annotations', slug: 'guides/tracing' },
 						{ label: 'Cost Tracking', slug: 'guides/cost-tracking' },
 						{ label: 'Notifications', slug: 'guides/notifications' },

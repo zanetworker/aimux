@@ -43,6 +43,7 @@ The filter bar provides:
 
 - **Status filters**: All, Active, Idle, Waiting, Error
 - **Provider filters**: Claude, Codex, Gemini
+- **Location filter**: Local, Remote — show only local agents or only remote sandboxes
 - **Recent filter**: Show only agents active in the last 5 minutes
 - **Text search**: Filter by project name or branch
 - **Content search**: Search inside session traces across all agents
@@ -120,6 +121,33 @@ Toggle between dark and light themes using the sun/moon button in the header bar
 
 - **Dark**: Pure black base (`#000000`), red accent (`#FF3131`)
 - **Light**: Light grey base (`#F5F5F5`), Red Hat Red accent (`#EE0000`)
+
+## Remote Sandboxes
+
+The web dashboard has full support for [OpenShell remote sandboxes](/guides/remote-sandboxes/). Remote agents appear alongside local agents in the card grid.
+
+### Launching
+
+Click **+ Launch**, set **Runtime: remote**, choose a directory, and click **Launch Agent**. The dashboard navigates directly to the new sandbox's session terminal and starts Claude automatically.
+
+### Card appearance
+
+Remote sandbox cards show:
+- **LOC**: `remote` badge in the location column
+- **Name**: your project directory (e.g., `research`) — not the raw sandbox ID
+- **Status**: Active (green) while ready; **ERROR / Deleting** immediately after Kill
+
+### Session terminal
+
+The **Session** tab connects to a live PTY inside the sandbox. Claude starts with `--session-id <uuid>` on first connect and `--resume <uuid>` on reconnect, keeping the same conversation thread.
+
+### Kill
+
+Click **Kill** on the card — no confirmation dialog. The card switches to **Deleting** state immediately and disappears once the sandbox is fully removed.
+
+### Traces
+
+The **Trace** tab shows turn-by-turn conversation with assistant replies read from the sandbox's session file. Replies refresh every 5 seconds.
 
 ## Stats Bar
 
