@@ -338,10 +338,12 @@ func NewApp() App {
 	if cfg.Remote.Backend == "openshell" {
 		composeEngine, err := aimuxcompose.New(aimuxcompose.Options{
 			Gateway:  cfg.Remote.Gateway,
-			Insecure: true, // Remote config doesn't expose insecure flag; default to true
+			Insecure: true,
 			Image:    cfg.Remote.Image,
 		})
-		if err == nil {
+		if err != nil {
+			debuglog.Log("compose: failed to initialize OpenShell engine: %v", err)
+		} else {
 			app.composeEngine = composeEngine
 		}
 	}
@@ -697,6 +699,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sessionMgr = "tmux"
 		}
 		if msg.Runtime == "remote" {
+			if a.composeEngine == nil {
+				a.statusHint = "Remote launch requires OpenShell backend — check config remote.backend and gateway"
+				return a, nil
+			}
+
 			// Always inject OTEL for remote sessions since file-based tracing
 			// doesn't work (no local session file).
 			otelPort := a.cfg.OTELReceiverPort()
@@ -2139,6 +2146,7 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 			DefaultShell:          a.cfg.ResolveShell(),
 			DefaultSessionManager: a.cfg.SessionManager,
 			DefaultMode:           a.cfg.DefaultMode,
+			RemoteAvailable:       a.composeEngine != nil,
 		})
 	if len(a.cfg.QuickLaunch.Directories) > 0 {
 		a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)

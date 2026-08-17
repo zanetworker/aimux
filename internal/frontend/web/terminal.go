@@ -274,6 +274,24 @@ func (s *Server) handleTerminalSandbox(w http.ResponseWriter, r *http.Request) {
 
 	provider := r.URL.Query().Get("provider")
 	sessionID := r.URL.Query().Get("session_id")
+
+	// Validate before opening the backend: provider must be a known value and
+	// sessionID must be a well-formed UUID to prevent command injection via
+	// RemoteAgentCommand and path traversal via RemoteTraceParser.
+	if provider != "" {
+		switch provider {
+		case "claude", "codex", "gemini":
+			// allowed
+		default:
+			http.Error(w, "invalid provider", http.StatusBadRequest)
+			return
+		}
+	}
+	if sessionID != "" && !controller.UUIDValid(sessionID) {
+		http.Error(w, "invalid session_id", http.StatusBadRequest)
+		return
+	}
+
 	cols, rows := parseTermSize(r)
 
 	backend, err := terminal.NewOpenShellExec(sandboxName, "", false, cols, rows)
