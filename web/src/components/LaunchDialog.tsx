@@ -24,6 +24,7 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   const [sessionMgr, setSessionMgr] = useState('tmux');
   const [otelEnabled, setOtelEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [launchError, setLaunchError] = useState('');
   const [dirTab, setDirTab] = useState<DirTab>('recent');
   const [quickDirs, setQuickDirs] = useState<QuickDir[]>([]);
   const [recentDirs, setRecentDirs] = useState<RecentDir[]>([]);
@@ -70,6 +71,7 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   const handleSubmit = async () => {
     if (!dir) return;
     setSubmitting(true);
+    setLaunchError('');
     try {
       const resp = await fetch('/api/agents/launch', {
         method: 'POST',
@@ -81,11 +83,17 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         }),
       });
       const data = await resp.json();
+      if (!resp.ok) {
+        setLaunchError(data?.error || `Launch failed (${resp.status})`);
+        return;
+      }
       onLaunched?.(provider, dir, data.tmux_session, data.sandbox_name);
       onClose();
       setDir(''); setPrompt(''); setModel(''); setProvider('claude');
       setMode('default'); setRuntime('local'); setExecution('local');
       setShell(''); setSessionMgr('tmux'); setOtelEnabled(false);
+    } catch (e) {
+      setLaunchError(e instanceof Error ? e.message : 'Launch failed — check server');
     } finally { setSubmitting(false); }
   };
 
@@ -320,6 +328,12 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         </div>
 
         {/* Submit */}
+        {launchError && (
+          <div style={{ color: 'var(--accent)', fontSize: 11, marginBottom: 8, padding: '6px 8px',
+            background: 'var(--accent-dim)', borderRadius: 4 }}>
+            {launchError}
+          </div>
+        )}
         <button onClick={handleSubmit} disabled={!dir || submitting}
           style={{ background: !dir || submitting ? 'var(--bg-3)' : 'var(--accent)',
             color: !dir || submitting ? 'var(--fg-3)' : '#fff', border: 'none', borderRadius: 6,
