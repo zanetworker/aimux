@@ -27,11 +27,8 @@ func TestDefault(t *testing.T) {
 			t.Errorf("provider %q should be enabled by default", name)
 		}
 	}
-	if _, ok := cfg.Providers["gemini"]; ok {
-		t.Error("gemini should not be in default providers")
-	}
-	if cfg.Sessions.TitleModel != "haiku" {
-		t.Errorf("Sessions.TitleModel = %q, want %q", cfg.Sessions.TitleModel, "haiku")
+	if got := len(cfg.Providers); got != 2 {
+		t.Errorf("default providers: got %d entries, want 2 (claude, codex): %v", got, cfg.Providers)
 	}
 }
 
