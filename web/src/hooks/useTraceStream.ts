@@ -5,7 +5,7 @@ export function useTraceStream(sessionId: string | null, sessionFile?: string): 
   const [turns, setTurns] = useState<Turn[]>([]);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId && !sessionFile) {
       setTurns([]);
       return;
     }
