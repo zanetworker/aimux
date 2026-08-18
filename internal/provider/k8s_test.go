@@ -589,7 +589,7 @@ func TestSpawnDeploymentName(t *testing.T) {
 		want     string
 	}{
 		{"claude", "coder", "agent-claude-coder"},
-		{"gemini", "researcher", "agent-gemini-researcher"},
+		{"claude", "researcher", "agent-claude-researcher"},
 		{"codex", "reviewer", "agent-codex-reviewer"},
 	}
 	for _, tt := range tests {

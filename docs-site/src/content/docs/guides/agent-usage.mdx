@@ -3,7 +3,7 @@ title: Agent Usage
 description: Using aimux from AI coding agents and scripts
 ---
 
-aimux supports structured output for consumption by AI coding agents (Claude Code, Codex, Gemini CLI) and scripts.
+aimux supports structured output for consumption by AI coding agents (Claude Code, Codex) and scripts.
 
 ## Introspection
 
@@ -120,13 +120,13 @@ Errors include valid values when applicable:
 
 ```bash
 $ aimux spawn gpt
-Error: invalid provider "gpt" (must be one of: claude, codex, gemini)
+Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
 With `--json`, errors go to stderr as structured JSON:
 
 ```json
-{"error": "invalid provider \"gpt\"", "code": 2, "valid_values": ["claude", "codex", "gemini"]}
+{"error": "invalid provider \"gpt\"", "code": 2, "valid_values": ["claude", "codex"]}
 ```
 
 ## Configuration

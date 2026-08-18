@@ -986,19 +986,19 @@ func TestHandleProviderHealth(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if len(payload.Providers) != 3 {
-		t.Fatalf("expected 3 providers, got %d", len(payload.Providers))
+	if len(payload.Providers) != 2 {
+		t.Fatalf("expected 2 providers, got %d", len(payload.Providers))
 	}
 
-	// Verify names are claude, codex, gemini in order
-	expectedNames := []string{"claude", "codex", "gemini"}
+	// Verify names are claude, codex in order
+	expectedNames := []string{"claude", "codex"}
 	for i, name := range expectedNames {
 		if payload.Providers[i].Name != name {
 			t.Errorf("provider[%d]: expected name %q, got %q", i, name, payload.Providers[i].Name)
 		}
 	}
 
-	// All three should be enabled with default config
+	// All should be enabled with default config
 	for _, p := range payload.Providers {
 		if !p.Enabled {
 			t.Errorf("provider %q should be enabled with default config", p.Name)

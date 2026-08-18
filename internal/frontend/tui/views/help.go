@@ -122,7 +122,6 @@ func (v *HelpView) View() string {
 	b.WriteString("\n")
 	writeHelp(&b, "Claude", "Full support (discover, embed, resume, trace, eval)")
 	writeHelp(&b, "Codex", "Full support (discover, resume, trace)")
-	writeHelp(&b, "Gemini", "Full support (discover, resume, trace)")
 	writeHelp(&b, "K8s", "Discovery via Redis, spawn, tasks, health")
 
 	return b.String()

@@ -86,7 +86,6 @@ var skillToTaskType = map[string]string{
 	"source-driven-development":                    "learning",
 
 	"superpowers:writing-skills":                   "automation",
-	"development-tools:gemini-skill-creator":       "automation",
 	"development-tools:autoimprove":                 "automation",
 	"development-tools:agentic-cli-builder":         "automation",
 }

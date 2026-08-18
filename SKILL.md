@@ -1,6 +1,6 @@
 # aimux — Agent Skill Manifest
 
-aimux is a CLI for managing multiple AI coding agent sessions (Claude, Codex, Gemini). This manifest teaches agents how to compose aimux commands into workflows.
+aimux is a CLI for managing multiple AI coding agent sessions (Claude, Codex). This manifest teaches agents how to compose aimux commands into workflows.
 
 ## Introspection
 
@@ -48,7 +48,7 @@ aimux spawn claude --dir ./project --model opus --wait --json
 aimux spawn claude --dry-run --json
 ```
 
-Valid providers: `claude`, `codex`, `gemini`. Use `--wait` to block until the session finishes. Use `--dry-run` to preview without executing.
+Valid providers: `claude`, `codex`. Use `--wait` to block until the session finishes. Use `--dry-run` to preview without executing.
 
 ## Delivering output
 
@@ -128,7 +128,7 @@ All errors include valid values when applicable:
 
 ```bash
 aimux spawn gpt
-# Error: invalid provider "gpt" (must be one of: claude, codex, gemini)
+# Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
 Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config.
@@ -136,7 +136,7 @@ Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config.
 With `--json`, errors go to stderr as structured JSON:
 
 ```json
-{"error": "...", "code": 2, "valid_values": ["claude", "codex", "gemini"]}
+{"error": "...", "code": 2, "valid_values": ["claude", "codex"]}
 ```
 
 ## Non-interactive mode

@@ -26,7 +26,7 @@ func pollInterval(active bool) time.Duration {
 
 // TmuxSession mirrors a tmux session's pane content. It polls
 // `tmux capture-pane` for output and forwards keystrokes via
-// `tmux send-keys`. This allows embedding any TUI (Codex, Gemini)
+// `tmux send-keys`. This allows embedding any TUI (Codex)
 // inside aimux's split view.
 type TmuxSession struct {
 	sessionName string
@@ -53,7 +53,7 @@ func StartTmux(cmd *exec.Cmd, cols, rows int, shell, envPrefix string) (*TmuxSes
 
 	// Build the command string for the user's shell with RC file sourced.
 	// Use the command name (not absolute path) so shell functions take
-	// precedence over the raw binary (e.g., gemini() wrapper).
+	// precedence over the raw binary.
 	var cmdParts []string
 	cmdParts = append(cmdParts, filepath.Base(cmd.Args[0]))
 	cmdParts = append(cmdParts, cmd.Args[1:]...)

@@ -92,7 +92,6 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   const providerColors: Record<string, { bg: string; fg: string; border: string }> = {
     claude: { bg: 'var(--accent-dim)', fg: 'var(--accent)', border: 'var(--accent)' },
     codex: { bg: 'var(--green-dim)', fg: 'var(--green)', border: 'rgba(105,223,115,0.3)' },
-    gemini: { bg: 'var(--purple-dim)', fg: 'var(--purple)', border: 'rgba(167,114,239,0.3)' },
   };
 
   const label = { display: 'block' as const, fontSize: 10, textTransform: 'uppercase' as const,
@@ -123,7 +122,7 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         <div style={{ marginBottom: 20 }}>
           <div style={label}>Provider</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {(['claude', 'codex', 'gemini'] as const).map(name => (
+            {(['claude', 'codex'] as const).map(name => (
               <button key={name} onClick={() => setProvider(name)}
                 style={pill(provider === name, providerColors[name])}>{name}</button>
             ))}
@@ -243,8 +242,6 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {(provider === 'codex'
               ? ['default', 'o3', 'o4-mini']
-              : provider === 'gemini'
-              ? ['default', 'gemini-2.5-pro', 'gemini-2.5-flash']
               : ['default', 'opus', 'sonnet', 'haiku']
             ).map(m => (
               <button key={m} onClick={() => setModel(m === 'default' ? '' : m)}
@@ -259,8 +256,6 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {(provider === 'codex'
               ? ['default', 'full-auto', 'full-access', 'read-only']
-              : provider === 'gemini'
-              ? ['default', 'yolo', 'auto_edit', 'plan']
               : ['default', 'plan', 'acceptEdits', 'bypass', 'dontAsk']
             ).map(m => (
               <button key={m} onClick={() => setMode(m)}

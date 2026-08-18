@@ -320,8 +320,8 @@ func TestNewPickerView_TaskRemoteWhereValue(t *testing.T) {
 func TestNewPickerView_TaskProvidersIncludeAll(t *testing.T) {
 	v := NewNewPickerView(defaultTestConfig())
 	// Task providers should include all providers (greying handled at render time)
-	if len(v.taskProviders) != 3 {
-		t.Errorf("expected 3 task providers, got %d: %v", len(v.taskProviders), v.taskProviders)
+	if len(v.taskProviders) != 2 {
+		t.Errorf("expected 2 task providers, got %d: %v", len(v.taskProviders), v.taskProviders)
 	}
 }
 
@@ -379,15 +379,10 @@ func TestNewPickerView_ProviderCycling(t *testing.T) {
 		t.Errorf("expected provCursor 1, got %d", v.sessionProvCursor)
 	}
 
-	v.Update(keyMsg("l"))
-	if v.sessionProvCursor != 2 {
-		t.Errorf("expected provCursor 2, got %d", v.sessionProvCursor)
-	}
-
 	// Left back
 	v.Update(keyMsg("h"))
-	if v.sessionProvCursor != 1 {
-		t.Errorf("expected provCursor 1 after left, got %d", v.sessionProvCursor)
+	if v.sessionProvCursor != 0 {
+		t.Errorf("expected provCursor 0 after left, got %d", v.sessionProvCursor)
 	}
 }
 
@@ -445,7 +440,7 @@ func TestNewPickerView_GreyedOutSessionProvider_EnterIsNoop(t *testing.T) {
 }
 
 func TestNewPickerView_GreyedOutSessionProvider_RemotePod(t *testing.T) {
-	// Gemini on Remote (pod) is unsupported
+	// Codex on Remote (pod) is unsupported
 	v := NewNewPickerView(NewPickerConfig{
 		K8sEnabled: true, Health: healthyInfra(),
 		Providers:  DefaultProviderSupport(),
@@ -456,18 +451,17 @@ func TestNewPickerView_GreyedOutSessionProvider_RemotePod(t *testing.T) {
 	v.Update(keyMsg("l"))
 	v.Update(keyMsg("l"))
 
-	// Move to provider, select gemini (index 2)
+	// Move to provider, select codex (index 1)
 	v.Update(specialKeyMsg(tea.KeyTab))
-	v.Update(keyMsg("l"))
 	v.Update(keyMsg("l"))
 
 	// Enter should be a no-op
 	_, cmd := v.Update(specialKeyMsg(tea.KeyEnter))
 	if cmd != nil {
-		t.Errorf("expected nil command for unsupported gemini+Remote, got non-nil")
+		t.Errorf("expected nil command for unsupported codex+Remote, got non-nil")
 	}
-	if !strings.Contains(v.StatusMsg(), "gemini") {
-		t.Errorf("expected status to mention gemini, got: %s", v.StatusMsg())
+	if !strings.Contains(v.StatusMsg(), "codex") {
+		t.Errorf("expected status to mention codex, got: %s", v.StatusMsg())
 	}
 }
 
@@ -643,12 +637,11 @@ func TestNewPickerView_ProviderSupportFiltering(t *testing.T) {
 		Providers: []ProviderSupport{
 			{Name: "claude", LocalSession: true, LocalK8s: true, RemoteSession: true, RemoteTask: true},
 			{Name: "codex", LocalSession: true, LocalK8s: false, RemoteSession: false, RemoteTask: false},
-			{Name: "gemini", LocalSession: true, LocalK8s: false, RemoteSession: false, RemoteTask: true},
 		},
 	})
 
 	// All providers support Local session
-	for _, p := range []string{"claude", "codex", "gemini"} {
+	for _, p := range []string{"claude", "codex"} {
 		if !v.isSessionProviderSupported(p, "Local") {
 			t.Errorf("expected %s to support Local session", p)
 		}
@@ -661,9 +654,6 @@ func TestNewPickerView_ProviderSupportFiltering(t *testing.T) {
 	if v.isSessionProviderSupported("codex", "Hybrid") {
 		t.Error("expected codex NOT to support Hybrid")
 	}
-	if v.isSessionProviderSupported("gemini", "Hybrid") {
-		t.Error("expected gemini NOT to support Hybrid")
-	}
 
 	// Only claude supports Remote (pod) session
 	if !v.isSessionProviderSupported("claude", "Remote (pod)") {
@@ -673,12 +663,9 @@ func TestNewPickerView_ProviderSupportFiltering(t *testing.T) {
 		t.Error("expected codex NOT to support Remote (pod)")
 	}
 
-	// Remote task: claude and gemini
+	// Remote task: only claude
 	if !v.isTaskProviderSupported("claude", "Remote") {
 		t.Error("expected claude to support Remote task")
-	}
-	if !v.isTaskProviderSupported("gemini", "Remote") {
-		t.Error("expected gemini to support Remote task")
 	}
 	if v.isTaskProviderSupported("codex", "Remote") {
 		t.Error("expected codex NOT to support Remote task")
@@ -713,8 +700,8 @@ func TestNewPickerView_HintLineContent(t *testing.T) {
 
 func TestNewPickerView_DefaultProviderSupport(t *testing.T) {
 	defaults := DefaultProviderSupport()
-	if len(defaults) != 3 {
-		t.Fatalf("expected 3 default providers, got %d", len(defaults))
+	if len(defaults) != 2 {
+		t.Fatalf("expected 2 default providers, got %d", len(defaults))
 	}
 
 	// Verify claude
@@ -727,12 +714,6 @@ func TestNewPickerView_DefaultProviderSupport(t *testing.T) {
 	codex := defaults[1]
 	if codex.Name != "codex" || !codex.LocalSession || codex.LocalK8s || codex.RemoteSession || codex.RemoteTask {
 		t.Errorf("codex should only support LocalSession, got %+v", codex)
-	}
-
-	// Verify gemini
-	gemini := defaults[2]
-	if gemini.Name != "gemini" || !gemini.LocalSession || gemini.LocalK8s || gemini.RemoteSession || !gemini.RemoteTask {
-		t.Errorf("gemini should support LocalSession and RemoteTask, got %+v", gemini)
 	}
 }
 

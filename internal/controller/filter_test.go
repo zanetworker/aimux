@@ -72,9 +72,9 @@ func TestFilterAgents_ByStatus(t *testing.T) {
 func TestFilterAgents_ByProviderName(t *testing.T) {
 	agents := []agent.Agent{
 		{WorkingDir: "/src/a", ProviderName: "claude"},
-		{WorkingDir: "/src/b", ProviderName: "gemini"},
+		{WorkingDir: "/src/b", ProviderName: "codex"},
 	}
-	got := FilterAgents(agents, "gemini")
+	got := FilterAgents(agents, "codex")
 	if len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}

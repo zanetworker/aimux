@@ -2,7 +2,7 @@ language: en-US
 tone_instructions: >-
   Be direct and technical. Focus on correctness, security, and Go idioms.
   Flag missing tests, separation-of-concern violations (core packages importing
-  bubbletea/lipgloss), and provider parity gaps (Claude/Codex/Gemini).
+  bubbletea/lipgloss), and provider parity gaps (Claude/Codex).
 early_access: true
 
 reviews:
@@ -35,7 +35,7 @@ reviews:
       instructions: >-
         Each provider is self-contained. No type assertions to concrete
         providers outside their own file. Changes to one provider should be
-        checked against all three (Claude, Codex, Gemini).
+        checked against both (Claude, Codex).
     - path: "internal/frontend/web/**"
       instructions: >-
         Every new API endpoint must have a handler test in handlers_test.go

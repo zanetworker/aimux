@@ -22,7 +22,7 @@ type ExportConfig struct {
 	Endpoint     string            // e.g., "localhost:5001" (MLflow) or "localhost:4318" (collector)
 	Insecure     bool              // true for HTTP (no TLS)
 	SessionID    string            // session identifier
-	Provider     string            // "claude", "codex", "gemini"
+	Provider     string            // "claude", "codex"
 	ExperimentID string            // MLflow experiment ID (required by MLflow OTLP endpoint)
 	Headers      map[string]string // extra HTTP headers
 

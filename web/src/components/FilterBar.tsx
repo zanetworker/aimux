@@ -62,7 +62,6 @@ export function FilterBar({
   const providerCounts = {
     claude: agents.filter(a => a.ProviderName.toLowerCase() === 'claude').length,
     codex: agents.filter(a => a.ProviderName.toLowerCase() === 'codex').length,
-    gemini: agents.filter(a => a.ProviderName.toLowerCase() === 'gemini').length,
   };
 
   const statusDots = {
@@ -75,7 +74,6 @@ export function FilterBar({
   const providerDots = {
     claude: 'var(--accent)',
     codex: '#4ade80',
-    gemini: '#a78bfa',
   };
 
   const locationCounts = {
@@ -128,7 +126,6 @@ export function FilterBar({
       {/* Provider filters */}
       <FilterPill label="Claude" count={providerCounts.claude} dotColor={providerDots.claude} active={providerFilter === 'claude'} onClick={() => onProviderFilter(providerFilter === 'claude' ? null : 'claude')} />
       <FilterPill label="Codex" count={providerCounts.codex} dotColor={providerDots.codex} active={providerFilter === 'codex'} onClick={() => onProviderFilter(providerFilter === 'codex' ? null : 'codex')} />
-      <FilterPill label="Gemini" count={providerCounts.gemini} dotColor={providerDots.gemini} active={providerFilter === 'gemini'} onClick={() => onProviderFilter(providerFilter === 'gemini' ? null : 'gemini')} />
 
       <Divider />
 

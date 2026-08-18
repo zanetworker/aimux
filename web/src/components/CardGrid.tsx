@@ -261,7 +261,7 @@ export function CardGrid({
                   const isSelected = selectedId === id;
                   const statusColors: Record<number, string> = { 0: 'var(--green)', 1: 'var(--fg-3)', 2: 'var(--orange)', 3: 'var(--accent)' };
                   const statusLabels: Record<number, string> = { 0: 'ACTIVE', 1: 'IDLE', 2: 'WAITING', 3: 'ERROR' };
-                  const providerColors: Record<string, string> = { claude: 'var(--accent)', codex: 'var(--green)', gemini: 'var(--purple)' };
+                  const providerColors: Record<string, string> = { claude: 'var(--accent)', codex: 'var(--green)' };
                   const age = agent.LastActivity ? formatAge(agent.LastActivity) : '';
                   return (
                     <div key={id} role="listitem" onClick={() => onSelect(id)}

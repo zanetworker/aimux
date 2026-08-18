@@ -26,7 +26,7 @@ func TestAssignUniqueSuffixes_Duplicates(t *testing.T) {
 	agents := []agent.Agent{
 		{Name: "myapp", WorkingDir: "/src/myapp", ProviderName: "claude"},
 		{Name: "myapp", WorkingDir: "/src/myapp", ProviderName: "claude"},
-		{Name: "myapp", WorkingDir: "/src/myapp", ProviderName: "gemini"},
+		{Name: "myapp", WorkingDir: "/src/myapp", ProviderName: "codex"},
 	}
 	assignUniqueSuffixes(agents)
 

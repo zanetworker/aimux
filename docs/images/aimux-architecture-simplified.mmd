@@ -1,0 +1,80 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#FFFFFF",
+    "primaryTextColor": "#151515",
+    "primaryBorderColor": "#D0D0D0",
+    "lineColor": "#888888",
+    "secondaryColor": "#FFF5F5",
+    "tertiaryColor": "#F8F8F8",
+    "fontSize": "14px",
+    "fontFamily": "Arial, sans-serif"
+  }
+}}%%
+graph TD
+
+  subgraph FE["  Entry Points  "]
+    direction LR
+    TUI["**TUI**\nBubble Tea · keyboard-driven\nSplit pane: trace ↔ terminal\nClaude PTY · Codex tmux · Remote PTY"]
+    WEB["**Web Dashboard**\nHTTP server · ~35 routes\nReact SPA embedded\nSSE · WebSocket PTY · REST"]
+    CLI["**CLI**\nCobra commands\n--json everywhere\nMachine-readable for agents"]
+    MCP["**MCP Server**\nstdio MCP tools\nspawn_agent · create_task\nwait_for_task · scale_down"]
+  end
+
+  CTRL["**Controller Layer**  ·  internal/controller/  ·  no frontend imports\nKill · Sort/Filter · Export · Remote Launch · Session Store · Resume · Annotate · Navigate · Notify · Correlate"]
+
+  subgraph CORE["  Execution & Telemetry  "]
+    direction LR
+    DISC["**Discovery**\nOrchestrator fans out every 2s\nps aux · tmux · openshell list\n~/.claude/projects/ · lsof"]
+    PROV["**Providers**\nProvider interface (13 methods)\nClaude: PTY embed · JSONL parse\nCodex: tmux mirror · JSONL parse\nK8s: Redis heartbeats · Deployments"]
+    TERM["**Terminal & Spawn**\nEmbedSession — Claude direct PTY\nTmuxSession — Codex mirror\nOpenShellExecBackend — remote\nKubectlExecBackend — K8s pod\nspawn.Launch: tmux/iTerm/container"]
+    REM["**Remote Sandboxes**\ncompose.Engine → agent-compose lib\nLaunchInSandbox → {SandboxName, UUID}\ncompose.Backend: warm pool, ExecStream\nruntime/: PodmanBackend · K8sBackend"]
+    OTEL["**OTEL Pipeline**\nReceiver :4318 — traces · logs · hooks\nSpanStore — byConversation, dedup\nConverter — SpansToTurns\nExporter → MLflow / Jaeger\nsession_fetch via openshell exec"]
+  end
+
+  DATA["**Data & Support**\nagent.Agent · trace.Turn · history.Session · evaluation.Store · task.Task\nconfig.Config · cost.Calculate · profile · insight → Anthropic API\nplugin · badge · statusdetect · notify · team · tasks · jump · correlator"]
+
+  subgraph EXT["  External Systems  "]
+    direction LR
+    E1["Redis\ntask queue\nheartbeats"]
+    E2["Kubernetes\nDeployments\nclient-go"]
+    E3["OpenShell\nGateway\nagent-compose"]
+    E4["MLflow\nJaeger\nOTLP/HTTP"]
+    E5["Anthropic\nAPI\ntitles"]
+    E6["Podman\nDocker\ncontainers"]
+    E7["GitHub\nREST\nbranches"]
+    E8["Google\nTasks\ngws CLI"]
+  end
+
+  TUI & WEB & CLI & MCP -->|"all frontends\nshare controller"| CTRL
+  CTRL --> DISC & PROV & TERM & REM & OTEL
+  CTRL -.->|"read/persist"| DATA
+  DISC --> PROV
+  OTEL -.-> DATA
+  PROV --> E1 & E2
+  REM --> E3
+  OTEL --> E4
+  DATA -.-> E5
+  TERM --> E6
+  MCP -.-> E7
+  DATA -.-> E8
+
+  style CTRL fill:#FFF5F5,stroke:#EE0000,stroke-width:2px
+  style TUI fill:#FFFFFF,stroke:#D0D0D0
+  style WEB fill:#FFFFFF,stroke:#D0D0D0
+  style CLI fill:#FFFFFF,stroke:#D0D0D0
+  style MCP fill:#FFFFFF,stroke:#D0D0D0
+  style DISC fill:#FFFFFF,stroke:#D0D0D0
+  style PROV fill:#FFFFFF,stroke:#D0D0D0
+  style TERM fill:#FFFFFF,stroke:#D0D0D0
+  style REM fill:#FFFFFF,stroke:#D0D0D0
+  style OTEL fill:#FFFFFF,stroke:#D0D0D0
+  style DATA fill:#FAFAFA,stroke:#D0D0D0
+  style E1 fill:#FAFAFA,stroke:#D0D0D0
+  style E2 fill:#FAFAFA,stroke:#D0D0D0
+  style E3 fill:#FAFAFA,stroke:#D0D0D0
+  style E4 fill:#FAFAFA,stroke:#D0D0D0
+  style E5 fill:#FAFAFA,stroke:#D0D0D0
+  style E6 fill:#FAFAFA,stroke:#D0D0D0
+  style E7 fill:#FAFAFA,stroke:#D0D0D0
+  style E8 fill:#FAFAFA,stroke:#D0D0D0

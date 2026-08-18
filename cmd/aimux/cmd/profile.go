@@ -50,7 +50,7 @@ func newProfileSaveCmd(store *profile.Store) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "", "Provider (claude, codex, gemini)")
+	cmd.Flags().StringVar(&provider, "provider", "", "Provider (claude, codex)")
 	cmd.Flags().StringVar(&dir, "dir", "", "Working directory")
 	cmd.Flags().StringVar(&model, "model", "", "Model override")
 	cmd.Flags().StringVar(&mode, "mode", "", "Mode (plan, auto)")

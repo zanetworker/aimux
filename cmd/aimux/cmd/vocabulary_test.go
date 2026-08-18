@@ -54,7 +54,7 @@ func registerTestCommands(t *testing.T) func() {
 		ResumeExec:       func(_ string, _ bool) {},
 		SpawnAgent:       func(_ spawn.LaunchOpts) (int, string, error) { return 0, "", nil },
 		WebServer:        func(_ int) error { return nil },
-		Providers:        []string{"claude", "codex", "gemini"},
+		Providers:        []string{"claude", "codex"},
 	}
 	RegisterAll(deps)
 	return func() {

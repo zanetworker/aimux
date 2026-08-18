@@ -55,7 +55,7 @@ func TestOTELHostPort(t *testing.T) {
 }
 
 func TestSandboxNameLength(t *testing.T) {
-	providers := []string{"claude", "codex", "gemini", "go"}
+	providers := []string{"claude", "codex", "go"}
 	for _, p := range providers {
 		name := sandboxName(p, 1785668746)
 		if len(name) > 19 {

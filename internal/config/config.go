@@ -10,6 +10,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SupportedProviders is the canonical list of provider names aimux recognises.
+// Add a new entry here when onboarding a new provider — tests and validation
+// derive from this list automatically.
+var SupportedProviders = []string{"claude", "codex"}
+
 // Config holds the aimux configuration.
 type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
@@ -78,7 +83,7 @@ type ResumeConfig struct {
 // SessionsConfig holds settings for the session history feature.
 type SessionsConfig struct {
 	AutoTitle  bool   `yaml:"auto_title"`  // generate titles via LLM on discovery
-	TitleModel string `yaml:"title_model"` // "flash" (default), "haiku", "sonnet", "opus"
+	TitleModel string `yaml:"title_model"` // "haiku" (default), "sonnet", "opus"
 	APIKey     string `yaml:"api_key"`     // API key for title generation (overrides env vars)
 }
 
@@ -160,16 +165,18 @@ type TasksConfig struct {
 // default because it requires a Redis URL and team ID to be useful.
 func Default() Config {
 	return Config{
-		Providers: map[string]ProviderConfig{
-			"claude": {Enabled: true},
-			"codex":  {Enabled: true},
-			"gemini": {Enabled: true},
-		},
+		Providers: func() map[string]ProviderConfig {
+			m := make(map[string]ProviderConfig, len(SupportedProviders))
+			for _, name := range SupportedProviders {
+				m[name] = ProviderConfig{Enabled: true}
+			}
+			return m
+		}(),
 		RefreshInterval: "2s",
 		Runtime:        "local",
 		SessionManager: "tmux",
 		Sessions: SessionsConfig{
-			TitleModel: "flash",
+			TitleModel: "haiku",
 		},
 		Notifications: NotificationsConfig{
 			Enabled:   true,

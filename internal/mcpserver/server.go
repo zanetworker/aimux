@@ -187,11 +187,11 @@ func (s *Server) spawnAgentTool() mcp.Tool {
 	return mcp.NewTool("spawn_agent",
 		mcp.WithDescription("Ensure remote agents are available for parallel work. "+
 			"Pre-creates sandboxed execution environments on remote infrastructure. "+
-			"Use when tasks need dedicated compute, cross-provider execution (Claude, Codex, Gemini), "+
+			"Use when tasks need dedicated compute, cross-provider execution (Claude, Codex), "+
 			"or isolation from your local session. For simple parallel tasks on the same machine, "+
 			"prefer Claude's built-in Agent tool instead. "+
 			"Call before create_task to ensure capacity."),
-		mcp.WithString("provider", mcp.Required(), mcp.Description("Agent provider: claude, codex, or gemini")),
+		mcp.WithString("provider", mcp.Required(), mcp.Description("Agent provider: claude or codex")),
 		mcp.WithString("role", mcp.Required(), mcp.Description("Agent role: coder, researcher, or reviewer")),
 		mcp.WithNumber("count", mcp.Description("Number of remote agents to ensure are available (default 1)")),
 	)
@@ -206,6 +206,13 @@ func (s *Server) handleSpawnAgent(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultText("Error: role is required"), nil
 	}
+	switch provider {
+	case "claude", "codex":
+		// allowed
+	default:
+		return mcp.NewToolResultText(fmt.Sprintf("Error: unsupported provider %q (must be claude or codex)", provider)), nil
+	}
+
 	count := req.GetInt("count", 1)
 	if count < 1 {
 		return mcp.NewToolResultText("Error: count must be at least 1"), nil

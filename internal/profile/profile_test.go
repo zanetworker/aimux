@@ -69,7 +69,7 @@ func TestStore_LoadPersistence(t *testing.T) {
 	path := filepath.Join(dir, "profiles.json")
 
 	s1 := NewStore(path)
-	_ = s1.Save(Profile{Name: "test", Provider: "gemini"})
+	_ = s1.Save(Profile{Name: "test", Provider: "codex"})
 
 	s2 := NewStore(path)
 	if err := s2.Load(); err != nil {
@@ -79,8 +79,8 @@ func TestStore_LoadPersistence(t *testing.T) {
 	if !ok {
 		t.Fatal("profile not found after reload")
 	}
-	if got.Provider != "gemini" {
-		t.Errorf("Provider=%q, want %q", got.Provider, "gemini")
+	if got.Provider != "codex" {
+		t.Errorf("Provider=%q, want %q", got.Provider, "codex")
 	}
 }
 

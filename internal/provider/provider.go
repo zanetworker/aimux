@@ -40,7 +40,7 @@ type Provider interface {
 
 	// ParseTrace reads a session/trace file and parses it into a
 	// provider-specific structured trace. Each provider knows its own
-	// log format (Claude JSONL, Codex JSONL, Gemini JSON).
+	// log format (Claude JSONL, Codex JSONL).
 	ParseTrace(filePath string) ([]trace.Turn, error)
 
 	// OTELEnv returns the shell env var prefix needed to enable OTEL

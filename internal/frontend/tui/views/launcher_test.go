@@ -10,7 +10,6 @@ func testProviderOpts() map[string]ProviderOptions {
 	return map[string]ProviderOptions{
 		"claude": {Models: []string{"default", "opus", "sonnet", "haiku"}, Modes: []string{"default", "plan", "acceptEdits", "bypass", "dontAsk"}},
 		"codex":  {Models: []string{"default", "o3", "o4-mini"}, Modes: []string{"default", "full-auto", "full-access", "read-only"}},
-		"gemini": {Models: []string{"default", "gemini-2.5-pro"}, Modes: []string{"default", "yolo", "plan"}},
 	}
 }
 
@@ -35,8 +34,8 @@ func TestLauncherInitialState(t *testing.T) {
 	if l.state != statePickProvider {
 		t.Errorf("initial state = %d, want statePickProvider", l.state)
 	}
-	if len(l.providers) != 3 {
-		t.Errorf("providers count = %d, want 3", len(l.providers))
+	if len(l.providers) != 2 {
+		t.Errorf("providers count = %d, want 2", len(l.providers))
 	}
 }
 
@@ -49,19 +48,19 @@ func TestLauncherProviderNavigation(t *testing.T) {
 	}
 
 	sendKey(l, "j")
-	if l.providerCursor != 2 {
-		t.Errorf("after j×2, cursor = %d, want 2", l.providerCursor)
+	if l.providerCursor != 1 {
+		t.Errorf("after j×2, cursor = %d, want 1", l.providerCursor)
 	}
 
 	// Can't go past last
 	sendKey(l, "j")
-	if l.providerCursor != 2 {
-		t.Errorf("after j×3, cursor = %d, want 2 (clamped)", l.providerCursor)
+	if l.providerCursor != 1 {
+		t.Errorf("after j×3, cursor = %d, want 1 (clamped)", l.providerCursor)
 	}
 
 	sendKey(l, "k")
-	if l.providerCursor != 1 {
-		t.Errorf("after k, cursor = %d, want 1", l.providerCursor)
+	if l.providerCursor != 0 {
+		t.Errorf("after k, cursor = %d, want 0", l.providerCursor)
 	}
 }
 

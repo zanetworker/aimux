@@ -13,14 +13,14 @@ import (
 // NewSessionMsg is emitted when the user confirms a new session launch.
 type NewSessionMsg struct {
 	Where    string // "local", "hybrid", "remote"
-	Provider string // "claude", "codex", "gemini"
+	Provider string // "claude", "codex"
 	Dir      string
 }
 
 // NewTaskMsg is emitted when the user confirms a new task launch.
 type NewTaskMsg struct {
 	Where    string // "local", "remote"
-	Provider string // "claude", "gemini"
+	Provider string // "claude"
 	Prompt   string
 }
 
@@ -80,7 +80,7 @@ type ProviderSupport struct {
 	LocalSession  bool // always true for all providers
 	LocalK8s      bool // true for claude only (needs MCP)
 	RemoteSession bool // true for claude only (session pod exists)
-	RemoteTask    bool // true for claude, gemini (worker images exist)
+	RemoteTask    bool // true for claude only (worker images exist)
 }
 
 // NewPickerView renders the :new picker overlay.
@@ -142,7 +142,6 @@ func DefaultProviderSupport() []ProviderSupport {
 	return []ProviderSupport{
 		{Name: "claude", LocalSession: true, LocalK8s: true, RemoteSession: true, RemoteTask: true},
 		{Name: "codex", LocalSession: true, LocalK8s: false, RemoteSession: false, RemoteTask: false},
-		{Name: "gemini", LocalSession: true, LocalK8s: false, RemoteSession: false, RemoteTask: true},
 	}
 }
 

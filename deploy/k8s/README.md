@@ -22,8 +22,6 @@ kubectl apply -f deploy/k8s/
 | `agent-claude-researcher.yaml` | Deployment (replicas: 0) | Claude Code SDK worker, role=researcher (haiku) |
 | `agent-claude-reviewer.yaml` | Deployment (replicas: 0) | Claude Code SDK worker, role=reviewer |
 | `agent-claude-session.yaml` | Deployment (replicas: 0) | Interactive Claude Code CLI pod, attach via kubectl exec |
-| `agent-gemini-coder.yaml` | Deployment (replicas: 0) | Gemini worker, gemini-2.5-pro |
-| `agent-gemini-researcher.yaml` | Deployment (replicas: 0) | Gemini worker, gemini-2.0-flash |
 | `hook-config.json` | (not a manifest) | Claude Code hook to block local Agent tool when using K8s mode |
 
 All agent Deployments start at replicas: 0. The `spawn_agent` MCP tool scales them up on demand.

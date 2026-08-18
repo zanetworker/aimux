@@ -54,11 +54,14 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	var deduped []agent.Agent
 	for _, a := range agents {
 		// Filter ephemeral automation subagents (session analyzers, hooks)
-		// but keep sessions launched by aimux (tmux session starts with "aimux-")
-		// and always keep remote sandbox agents (no cost/token data by design).
-		if a.Location != "remote" && a.EstCostUSD == 0 && a.TokensIn < 1000 &&
+		// but keep sessions launched by aimux (tmux session starts with "aimux-"),
+		// remote sandbox agents (no cost/token data by design), and any session
+		// that has been running for more than 5 minutes (never ephemeral).
+		if a.Location != "remote" &&
+			a.EstCostUSD == 0 && a.TokensIn < 1000 &&
 			!strings.Contains(a.Model, "opus") &&
-			!strings.HasPrefix(a.TMuxSession, "aimux-") {
+			!strings.HasPrefix(a.TMuxSession, "aimux-") &&
+			time.Since(a.StartTime) < 5*time.Minute {
 			continue
 		}
 		if a.SessionID == "" {
