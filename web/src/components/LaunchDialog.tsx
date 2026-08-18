@@ -82,11 +82,12 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
           otel_enabled: otelEnabled, user_prompt: prompt,
         }),
       });
-      const data = await resp.json();
       if (!resp.ok) {
-        setLaunchError(data?.error || `Launch failed (${resp.status})`);
+        const text = await resp.text();
+        setLaunchError(text.trim() || `Launch failed (${resp.status})`);
         return;
       }
+      const data = await resp.json();
       onLaunched?.(provider, dir, data.tmux_session, data.sandbox_name);
       onClose();
       setDir(''); setPrompt(''); setModel(''); setProvider('claude');
