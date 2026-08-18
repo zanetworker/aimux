@@ -689,7 +689,10 @@ func (k *K8s) GetTaskResult(taskID string) (string, error) {
 // Implements the optional Spawner interface.
 func (k *K8s) SpawnRemote(provider, role string, count int) error {
 	deployName := spawnDeploymentName(provider, role)
-	image := k.imageForProvider(provider)
+	image, err := k.imageForProvider(provider)
+	if err != nil {
+		return err
+	}
 	opts := aimuxrt.BackendCreateOpts{
 		Image: image,
 		Labels: map[string]string{
@@ -709,12 +712,14 @@ func (k *K8s) SpawnRemote(provider, role string, count int) error {
 // internal/runtime/k8s.go (K8sBackend).
 
 // imageForProvider returns the container image for the given provider.
-func (k *K8s) imageForProvider(provider string) string {
+// Only "claude" has a published image; all other providers are rejected
+// to prevent pods entering ImagePullBackOff with a non-existent image.
+func (k *K8s) imageForProvider(provider string) (string, error) {
 	switch provider {
 	case "claude":
-		return "quay.io/azaalouk/claude-session:latest"
+		return "quay.io/azaalouk/claude-session:latest", nil
 	default:
-		return "quay.io/azaalouk/" + provider + "-session:latest"
+		return "", fmt.Errorf("provider %q has no Kubernetes image — only claude is supported for K8s sessions", provider)
 	}
 }
 
@@ -722,7 +727,10 @@ func (k *K8s) imageForProvider(provider string) string {
 // for it to become ready. Returns the pod name and namespace.
 func (k *K8s) SpawnSession(providerName string) (podName, namespace string, err error) {
 	deployName := spawnDeploymentName(providerName, "session")
-	image := k.imageForProvider(providerName)
+	image, err := k.imageForProvider(providerName)
+	if err != nil {
+		return "", "", err
+	}
 	pod, createErr := k.backend.CreateAndWait(deployName, aimuxrt.BackendCreateOpts{Image: image})
 	if createErr != nil {
 		return "", "", createErr

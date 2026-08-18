@@ -26,7 +26,7 @@ graph TD
   subgraph CORE["  Execution & Telemetry  "]
     direction LR
     DISC["**Discovery**\nOrchestrator fans out every 2s\nps aux · tmux · openshell list\n~/.claude/projects/ · lsof"]
-    PROV["**Providers**\nProvider interface (10 methods)\nClaude: PTY embed · JSONL parse\nCodex: tmux mirror · JSONL parse\nK8s: Redis heartbeats · Deployments"]
+    PROV["**Providers**\nProvider interface (13 methods)\nClaude: PTY embed · JSONL parse\nCodex: tmux mirror · JSONL parse\nK8s: Redis heartbeats · Deployments"]
     TERM["**Terminal & Spawn**\nEmbedSession — Claude direct PTY\nTmuxSession — Codex mirror\nOpenShellExecBackend — remote\nKubectlExecBackend — K8s pod\nspawn.Launch: tmux/iTerm/container"]
     REM["**Remote Sandboxes**\ncompose.Engine → agent-compose lib\nLaunchInSandbox → {SandboxName, UUID}\ncompose.Backend: warm pool, ExecStream\nruntime/: PodmanBackend · K8sBackend"]
     OTEL["**OTEL Pipeline**\nReceiver :4318 — traces · logs · hooks\nSpanStore — byConversation, dedup\nConverter — SpansToTurns\nExporter → MLflow / Jaeger\nsession_fetch via openshell exec"]

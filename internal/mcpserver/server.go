@@ -206,6 +206,13 @@ func (s *Server) handleSpawnAgent(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultText("Error: role is required"), nil
 	}
+	switch provider {
+	case "claude", "codex":
+		// allowed
+	default:
+		return mcp.NewToolResultText(fmt.Sprintf("Error: unsupported provider %q (must be claude or codex)", provider)), nil
+	}
+
 	count := req.GetInt("count", 1)
 	if count < 1 {
 		return mcp.NewToolResultText("Error: count must be at least 1"), nil

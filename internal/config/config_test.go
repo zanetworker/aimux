@@ -27,6 +27,12 @@ func TestDefault(t *testing.T) {
 			t.Errorf("provider %q should be enabled by default", name)
 		}
 	}
+	if _, ok := cfg.Providers["gemini"]; ok {
+		t.Error("gemini should not be in default providers")
+	}
+	if cfg.Sessions.TitleModel != "haiku" {
+		t.Errorf("Sessions.TitleModel = %q, want %q", cfg.Sessions.TitleModel, "haiku")
+	}
 }
 
 func TestDefaultPath(t *testing.T) {

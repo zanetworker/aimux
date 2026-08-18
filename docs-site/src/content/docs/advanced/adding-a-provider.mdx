@@ -58,7 +58,7 @@ func (a *Aider) SpawnArgs() SpawnArgs {
 }
 ```
 
-**2. Register in `internal/tui/app.go` -- add to the `allProviders` slice in `NewApp()`:**
+**2. Register in `internal/frontend/tui/app.go` -- add to the `allProviders` slice in `NewApp()`:**
 
 ```go
 allProviders := []provider.Provider{
@@ -325,7 +325,7 @@ func (a *Aider) SpawnArgs() SpawnArgs {
 
 Two files need a one-line change each:
 
-### 1. `internal/tui/app.go` -- `NewApp()`
+### 1. `internal/frontend/tui/app.go` -- `NewApp()`
 
 Add your provider to the `allProviders` slice:
 
@@ -781,7 +781,7 @@ func extractFlag(args, flag string) string {
 }
 ```
 
-### Step 2: Register in `internal/tui/app.go`
+### Step 2: Register in `internal/frontend/tui/app.go`
 
 In `NewApp()`, add to the `allProviders` slice:
 

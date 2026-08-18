@@ -66,12 +66,36 @@ func TestAgentContextCmd_Output(t *testing.T) {
 	vals, ok := firstArg["values"].([]any)
 	if !ok || len(vals) != 2 {
 		t.Errorf("spawn provider arg should have 2 values, got %v", vals)
+	} else {
+		wantVals := []string{"claude", "codex"}
+		for i, want := range wantVals {
+			if got, _ := vals[i].(string); got != want {
+				t.Errorf("spawn provider values[%d] = %q, want %q", i, got, want)
+			}
+		}
+		for _, v := range vals {
+			if s, _ := v.(string); s == "gemini" {
+				t.Error("spawn provider values must not contain gemini")
+			}
+		}
 	}
 
 	// Verify providers list
 	providers, ok := result["providers"].([]any)
 	if !ok || len(providers) != 2 {
 		t.Errorf("providers should have 2 entries, got %v", providers)
+	} else {
+		wantProviders := []string{"claude", "codex"}
+		for i, want := range wantProviders {
+			if got, _ := providers[i].(string); got != want {
+				t.Errorf("providers[%d] = %q, want %q", i, got, want)
+			}
+		}
+		for _, p := range providers {
+			if s, _ := p.(string); s == "gemini" {
+				t.Error("providers must not contain gemini")
+			}
+		}
 	}
 }
 
