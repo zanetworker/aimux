@@ -10,6 +10,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// SupportedProviders is the canonical list of provider names aimux recognises.
+// Add a new entry here when onboarding a new provider — tests and validation
+// derive from this list automatically.
+var SupportedProviders = []string{"claude", "codex"}
+
 // Config holds the aimux configuration.
 type Config struct {
 	Providers       map[string]ProviderConfig `yaml:"providers"`
@@ -160,10 +165,13 @@ type TasksConfig struct {
 // default because it requires a Redis URL and team ID to be useful.
 func Default() Config {
 	return Config{
-		Providers: map[string]ProviderConfig{
-			"claude": {Enabled: true},
-			"codex":  {Enabled: true},
-		},
+		Providers: func() map[string]ProviderConfig {
+			m := make(map[string]ProviderConfig, len(SupportedProviders))
+			for _, name := range SupportedProviders {
+				m[name] = ProviderConfig{Enabled: true}
+			}
+			return m
+		}(),
 		RefreshInterval: "2s",
 		Runtime:        "local",
 		SessionManager: "tmux",

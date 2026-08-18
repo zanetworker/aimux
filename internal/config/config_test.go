@@ -17,7 +17,7 @@ func TestDefault(t *testing.T) {
 		t.Errorf("Runtime = %q, want %q", cfg.Runtime, "local")
 	}
 
-	for _, name := range []string{"claude", "codex"} {
+	for _, name := range SupportedProviders {
 		pc, ok := cfg.Providers[name]
 		if !ok {
 			t.Errorf("provider %q missing from defaults", name)
@@ -27,8 +27,8 @@ func TestDefault(t *testing.T) {
 			t.Errorf("provider %q should be enabled by default", name)
 		}
 	}
-	if got := len(cfg.Providers); got != 2 {
-		t.Errorf("default providers: got %d entries, want 2 (claude, codex): %v", got, cfg.Providers)
+	if got, want := len(cfg.Providers), len(SupportedProviders); got != want {
+		t.Errorf("default providers count = %d, want %d (SupportedProviders): %v", got, want, cfg.Providers)
 	}
 }
 
