@@ -49,12 +49,19 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
-  const borderLeftColor = agent.Status === 0 ? 'var(--green)' :
+  const isRemote = agent.Location === 'remote';
+  const isK8s = agent.Location === 'k8s';
+
+  const borderLeftColor = agent.Status === 3 ? 'var(--accent)' :
     agent.Status === 2 ? 'var(--orange)' :
-    agent.Status === 3 ? 'var(--accent)' : 'var(--fg-4)';
+    isRemote ? 'var(--teal)' :
+    isK8s ? 'var(--purple)' :
+    agent.Status === 0 ? 'var(--green)' : 'var(--fg-4)';
 
   const cardBg = agent.Status === 2 ? 'var(--orange-dim)' :
-    agent.Status === 3 ? 'var(--accent-dim)' : 'var(--bg-0)';
+    agent.Status === 3 ? 'var(--accent-dim)' :
+    isRemote ? 'rgba(55,163,163,0.04)' :
+    isK8s ? 'rgba(167,114,239,0.04)' : 'var(--bg-0)';
 
   const title = agent.Title || '';
 
@@ -112,6 +119,17 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
         }}>
           {agent.TMuxSession ? 'tmux' : 'direct'}
         </span>
+        {(isRemote || isK8s) && (
+          <span style={{
+            padding: '2px 6px', borderRadius: 2, fontSize: 10, fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+            background: isRemote ? 'rgba(55,163,163,0.15)' : 'rgba(167,114,239,0.15)',
+            color: isRemote ? 'var(--teal)' : 'var(--purple)',
+            border: `1px solid ${isRemote ? 'rgba(55,163,163,0.3)' : 'rgba(167,114,239,0.3)'}`,
+          }}>
+            {isRemote ? '⬡ sandbox' : 'k8s'}
+          </span>
+        )}
         <span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 'auto' }}>
           {timeSinceActivity()}
         </span>

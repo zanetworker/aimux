@@ -332,6 +332,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			"roiMultiplier":  s.ROIMultiplier,
 			"taskType":       s.TaskType,
 			"durationMin":    s.DurationMin,
+			// Infer location from file path: sandbox sessions run in /sandbox
+			// so their project hash is "-sandbox".
+			"location": func() string {
+				if strings.Contains(s.FilePath, "/-sandbox/") {
+					return "remote"
+				}
+				return "local"
+			}(),
 		}
 	}
 
