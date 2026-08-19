@@ -41,16 +41,18 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
 
   useEffect(() => {
     if (!open || runtime !== 'remote') { setGatewayOk(null); setGatewayMsg(''); return; }
-    let cancelled = false;
+    let controller = new AbortController();
     const check = () => {
-      fetch('/api/health/remote')
+      controller.abort();
+      controller = new AbortController();
+      fetch('/api/health/remote', { signal: controller.signal })
         .then(r => r.json())
-        .then(d => { if (!cancelled) { setGatewayOk(d.available); setGatewayMsg(d.message || ''); } })
-        .catch(() => { if (!cancelled) { setGatewayOk(false); setGatewayMsg('Could not reach health endpoint'); } });
+        .then(d => { setGatewayOk(d.available); setGatewayMsg(d.message || ''); })
+        .catch(e => { if (e.name !== 'AbortError') { setGatewayOk(false); setGatewayMsg('Could not reach health endpoint'); } });
     };
     check();
     const interval = setInterval(check, 10_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => { controller.abort(); clearInterval(interval); };
   }, [open, runtime]);
 
   useEffect(() => {

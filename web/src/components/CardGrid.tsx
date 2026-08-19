@@ -73,15 +73,15 @@ export function CardGrid({
     try {
       const resp = await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
       if (!resp.ok) {
-        // Remove from killing set on failure so button reappears
         setKilling(prev => { const n = new Set(prev); n.delete(id); return n; });
         return;
       }
       if (selectedId === id) onSelect('');
+      // Safety net: clear killing state after 15s if SSE never removes the agent.
+      // Only on success — failure already cleared it above.
+      setTimeout(() => setKilling(prev => { const n = new Set(prev); n.delete(id); return n; }), 15_000);
     } catch {
       setKilling(prev => { const n = new Set(prev); n.delete(id); return n; });
-    } finally {
-      setTimeout(() => setKilling(prev => { const n = new Set(prev); n.delete(id); return n; }), 15_000);
     }
   };
 
