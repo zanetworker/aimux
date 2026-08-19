@@ -25,6 +25,8 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   const [otelEnabled, setOtelEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [launchError, setLaunchError] = useState('');
+  const [gatewayOk, setGatewayOk] = useState<boolean | null>(null);
+  const [gatewayMsg, setGatewayMsg] = useState('');
   const [dirTab, setDirTab] = useState<DirTab>('recent');
   const [quickDirs, setQuickDirs] = useState<QuickDir[]>([]);
   const [recentDirs, setRecentDirs] = useState<RecentDir[]>([]);
@@ -36,6 +38,15 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
     if (open) window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (runtime !== 'remote') { setGatewayOk(null); setGatewayMsg(''); return; }
+    setGatewayOk(null);
+    fetch('/api/health/remote')
+      .then(r => r.json())
+      .then(d => { setGatewayOk(d.available); setGatewayMsg(d.message || ''); })
+      .catch(() => { setGatewayOk(false); setGatewayMsg('Could not reach health endpoint'); });
+  }, [runtime]);
 
   useEffect(() => {
     if (!open) return;
@@ -286,6 +297,24 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
                 style={pill(runtime === r)}>{r}</button>
             ))}
           </div>
+          {runtime === 'remote' && gatewayOk !== null && (
+            <div style={{
+              marginTop: 8, padding: '6px 10px', borderRadius: 4, fontSize: 11,
+              background: gatewayOk ? 'rgba(55,163,163,0.08)' : 'var(--accent-dim)',
+              border: `1px solid ${gatewayOk ? 'var(--teal)' : 'var(--accent)'}`,
+              color: gatewayOk ? 'var(--teal)' : 'var(--accent)',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                background: gatewayOk ? 'var(--teal)' : 'var(--accent)' }} />
+              {gatewayOk
+                ? 'Gateway connected — sandbox will launch'
+                : (gatewayMsg || 'Gateway unreachable — start openshell-gateway first')}
+            </div>
+          )}
+          {runtime === 'remote' && gatewayOk === null && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--fg-4)' }}>Checking gateway…</div>
+          )}
         </div>
 
         {/* Execution */}
