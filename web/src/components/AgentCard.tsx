@@ -121,13 +121,12 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
         </span>
         {(isRemote || isK8s) && (
           <span style={{
-            padding: '2px 6px', borderRadius: 2, fontSize: 10, fontWeight: 700,
-            textTransform: 'uppercase', letterSpacing: '0.05em',
-            background: isRemote ? 'rgba(55,163,163,0.15)' : 'rgba(167,114,239,0.15)',
+            padding: '2px 5px', borderRadius: 2, fontSize: 10, fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '0.06em',
+            background: isRemote ? 'rgba(55,163,163,0.18)' : 'rgba(167,114,239,0.18)',
             color: isRemote ? 'var(--teal)' : 'var(--purple)',
-            border: `1px solid ${isRemote ? 'rgba(55,163,163,0.3)' : 'rgba(167,114,239,0.3)'}`,
           }}>
-            {isRemote ? '⬡ sandbox' : 'k8s'}
+            {isRemote ? 'sandbox' : 'k8s'}
           </span>
         )}
         <span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 'auto' }}>

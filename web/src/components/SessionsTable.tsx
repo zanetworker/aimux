@@ -536,10 +536,9 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                         {s.location === 'remote' && (
                           <span style={{
                             fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
-                            letterSpacing: '0.05em', padding: '1px 5px', borderRadius: 3, flexShrink: 0,
-                            background: 'rgba(55,163,163,0.15)', color: 'var(--teal)',
-                            border: '1px solid rgba(55,163,163,0.3)',
-                          }}>⬡ sandbox</span>
+                            letterSpacing: '0.06em', padding: '1px 5px', borderRadius: 2, flexShrink: 0,
+                            background: 'rgba(55,163,163,0.18)', color: 'var(--teal)',
+                          }}>sandbox</span>
                         )}
                       </div>
                       {s.lastAction && (

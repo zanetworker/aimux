@@ -464,7 +464,16 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 
 	costRendered := costColor(a.EstCostUSD).Render(a.FormatCost())
 
-	loc := agentLocation(a)
+	locRaw := agentLocation(a)
+	var loc string
+	switch locRaw {
+	case "remote":
+		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#37A3A3")).Render(locRaw)
+	case "k8s":
+		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#A772EF")).Render(locRaw)
+	default:
+		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(locRaw)
+	}
 
 	branchDisplay := truncate(a.GitBranch, colBranch)
 	if branchDisplay == "" {
