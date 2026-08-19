@@ -99,10 +99,6 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         return;
       }
       const data = await resp.json();
-      if (!resp.ok) {
-        setLaunchError(data?.error || `Launch failed (${resp.status})`);
-        return;
-      }
       onLaunched?.(provider, dir, data.tmux_session, data.sandbox_name);
       onClose();
       setDir(''); setPrompt(''); setModel(''); setProvider('claude');
