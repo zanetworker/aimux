@@ -39,6 +39,7 @@ export function CardGrid({
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [starredFiles, setStarredFiles] = useState<Set<string>>(new Set());
+  const [killing, setKilling] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const starred = new Set<string>();
@@ -68,12 +69,15 @@ export function CardGrid({
   };
 
   const handleKill = async (id: string) => {
+    setKilling(prev => new Set(prev).add(id));
     try {
       await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
-      if (selectedId === id) {
-        onSelect('');
-      }
-    } catch { /* ignore */ }
+      if (selectedId === id) onSelect('');
+    } catch { /* ignore */ } finally {
+      // Keep in killing set — SSE will remove the agent when it's gone.
+      // Clear after 15s as a safety net if SSE doesn't update.
+      setTimeout(() => setKilling(prev => { const n = new Set(prev); n.delete(id); return n; }), 15_000);
+    }
   };
 
   const toggleGroup = (name: string) => {
@@ -242,7 +246,9 @@ export function CardGrid({
                 {groupAgents.map(agent => (
                   <div key={agent.SessionID || agent.PID} role="listitem" style={{ display: 'flex' }}>
                     <AgentCard
-                      agent={agent}
+                      agent={killing.has(agent.SessionID || agent.PID.toString())
+                        ? { ...agent, LastAction: 'Deleting' }
+                        : agent}
                       selected={selectedId === (agent.SessionID || agent.PID.toString())}
                       starred={starredFiles.has(agent.SessionFile)}
                       onClick={() => onSelect(agent.SessionID || agent.PID.toString())}
