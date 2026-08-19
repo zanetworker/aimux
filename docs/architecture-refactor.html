@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux Architecture Refactor</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #13161b;
+    --text: #d6dae2;
+    --text-dim: #9aa1ad;
+    --head: #f2f4f8;
+    --accent: #8fbf88;
+    --accent2: #cea451;
+    --border: #262b34;
+    --code-bg: #1a1e25;
+    --link: #8ab4d8;
+    --figure-bg: #13161b;
+    --figure-border: #262b34;
+    --hairline: #1d222b;
+    --faint: #6d727e;
+    --code-text: #c8cfda;
+    --red: #c96f6f;
+    --red-dim: rgba(201,111,111,.12);
+    --green-dim: rgba(143,191,136,.08);
+    color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    --bg: #f7f6f3;
+    --panel: #ffffff;
+    --text: #2c313a;
+    --text-dim: #5d6572;
+    --head: #171b22;
+    --accent: #477a40;
+    --accent2: #97701f;
+    --border: #dedbd4;
+    --code-bg: #efede8;
+    --link: #2e6b9e;
+    --hairline: #e6e3dc;
+    --faint: #8a8f98;
+    --code-text: #3a414d;
+    --figure-bg: #ffffff;
+    --figure-border: #dedbd4;
+    --red: #b04848;
+    --red-dim: rgba(176,72,72,.08);
+    --green-dim: rgba(71,122,64,.06);
+    color-scheme: light;
+  }
+
+  /* === SVG THEME SELECTORS === */
+  html[data-theme="light"] figure svg [fill="#f2f4f8"] { fill: #171b22; }
+  html[data-theme="light"] figure svg [fill="#c8cfda"] { fill: #3a414d; }
+  html[data-theme="light"] figure svg [fill="#9aa1ad"] { fill: #555d69; }
+  html[data-theme="light"] figure svg [fill="#8a9099"] { fill: #6d747f; }
+  html[data-theme="light"] figure svg [fill="#8fbf88"] { fill: #477a40; }
+  html[data-theme="light"] figure svg [fill="#cea451"] { fill: #97701f; }
+  html[data-theme="light"] figure svg [fill="#7ea7d8"] { fill: #2e6b9e; }
+  html[data-theme="light"] figure svg [fill="#c96f6f"] { fill: #b04848; }
+  html[data-theme="light"] figure svg [fill="#6d727e"] { fill: #8a8f98; }
+  html[data-theme="light"] figure svg [fill="#20242c"] { fill: #f2f0eb; }
+  html[data-theme="light"] figure svg [fill="#1a1e25"] { fill: #f2f0eb; }
+  html[data-theme="light"] figure svg [fill="#181c23"] { fill: #faf8f4; }
+  html[data-theme="light"] figure svg [fill="#14171c"] { fill: #f6f4ef; }
+  html[data-theme="light"] figure svg [fill="#101318"] { fill: #ece9e2; }
+  html[data-theme="light"] figure svg [stroke="#2c313b"] { stroke: #d9d5cc; }
+  html[data-theme="light"] figure svg [stroke="#262b34"] { stroke: #ddd9d0; }
+  html[data-theme="light"] figure svg [stroke="#3a404c"] { stroke: #c7c2b8; }
+  html[data-theme="light"] figure svg [stroke="#8fbf88"] { stroke: #477a40; }
+  html[data-theme="light"] figure svg [stroke="#cea451"] { stroke: #97701f; }
+  html[data-theme="light"] figure svg [stroke="#7ea7d8"] { stroke: #2e6b9e; }
+  html[data-theme="light"] figure svg [stroke="#9aa1ad"] { stroke: #767c87; }
+  html[data-theme="light"] figure svg [stroke="#565b66"] { stroke: #a09a90; }
+  html[data-theme="light"] figure svg [stroke="#c96f6f"] { stroke: #b04848; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16.5px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 64px 40px 96px; }
+
+  .kicker {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; letter-spacing: 3px; color: var(--accent);
+    text-transform: uppercase; margin-bottom: 14px;
+  }
+  h1 {
+    color: var(--head); font-size: 34px; line-height: 1.25;
+    font-weight: 750; letter-spacing: -.3px; margin: 0 0 10px;
+  }
+  .subtitle { color: var(--text-dim); font-size: 17px; margin: 0 0 8px; }
+  .meta {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; color: var(--faint); letter-spacing: .5px;
+    padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 40px;
+  }
+
+  h2 {
+    color: var(--head); font-size: 23px; font-weight: 700; letter-spacing: -.2px;
+    margin: 52px 0 14px; padding-top: 26px; border-top: 1px solid var(--border);
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; margin-top: 36px; }
+  h3 { color: var(--head); font-size: 17.5px; font-weight: 700; margin: 30px 0 8px; }
+
+  p { margin: 0 0 15px; }
+  b, strong { color: var(--head); font-weight: 650; }
+  a { color: var(--link); }
+  code {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: .86em; background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; color: var(--code-text);
+  }
+
+  ul, ol { margin: 0 0 15px; padding-left: 26px; }
+  li { margin-bottom: 7px; }
+  li::marker { color: var(--accent); }
+  ol li::marker { color: var(--text-dim); font-weight: 600; }
+
+  .claim {
+    margin: 26px 0; padding: 18px 22px;
+    background: var(--panel); border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0; color: var(--head); font-size: 17px;
+  }
+  .claim p { margin: 0; }
+  .claim-red {
+    margin: 26px 0; padding: 18px 22px;
+    background: var(--panel); border-left: 3px solid var(--red);
+    border-radius: 0 8px 8px 0; color: var(--head); font-size: 17px;
+  }
+  .claim-red p { margin: 0; }
+
+  dl.terms { margin: 0 0 15px; }
+  dl.terms div {
+    display: grid; grid-template-columns: 150px 1fr; gap: 14px;
+    padding: 8px 0; border-bottom: 1px dashed var(--hairline);
+  }
+  dl.terms div:last-child { border-bottom: none; }
+  dl.terms dt {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 14px; color: var(--accent); font-weight: 600; padding-top: 2px;
+  }
+  dl.terms dd { margin: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 18px 0 22px; font-size: 14.5px; }
+  th {
+    text-align: left; color: var(--text-dim); font-weight: 600; font-size: 12.5px;
+    letter-spacing: 1px; text-transform: uppercase; padding: 8px 14px 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px 10px 0; border-bottom: 1px solid var(--hairline);
+    vertical-align: top;
+  }
+
+  ol.principles { padding-left: 0; counter-reset: pr; list-style: none; }
+  ol.principles li {
+    counter-increment: pr; margin-bottom: 12px; padding: 13px 17px 13px 48px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; position: relative;
+  }
+  ol.principles li::before {
+    content: counter(pr); position: absolute; left: 17px; top: 14px;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px; color: var(--accent); font-weight: 700;
+  }
+  ol.principles li b { color: var(--head); }
+
+  figure { margin: 26px 0 30px; }
+  figure svg {
+    width: 100%; height: auto; display: block; background: var(--figure-bg);
+    border: 1px solid var(--figure-border); border-radius: 10px;
+  }
+  figcaption {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11.5px; color: var(--faint); letter-spacing: .6px; margin-top: 9px;
+  }
+  figure text {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  figure .m {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 4px;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  .badge-red { background: var(--red-dim); color: var(--red); }
+  .badge-green { background: var(--green-dim); color: var(--accent); }
+
+  html { scroll-behavior: smooth; }
+  h2[id] { scroll-margin-top: 24px; }
+  nav.toc { display: none; }
+  @media (min-width: 1320px) {
+    nav.toc {
+      display: block; position: fixed; top: 72px; left: 28px; width: 210px;
+      max-height: calc(100vh - 110px); overflow-y: auto;
+      font-size: 12.5px; line-height: 1.5;
+    }
+    nav.toc .toc-title {
+      font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+      font-size: 10.5px; letter-spacing: 2px; color: var(--faint);
+      text-transform: uppercase; margin: 0 0 10px 12px;
+    }
+    nav.toc a {
+      display: block; color: var(--text-dim); text-decoration: none;
+      padding: 3px 10px; border-left: 2px solid var(--border);
+    }
+    nav.toc a:hover { color: var(--text); }
+    nav.toc a.active { color: var(--accent); border-left-color: var(--accent); }
+  }
+
+  .theme-toggle {
+    position: fixed; top: 18px; right: 20px; z-index: 10;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 1.5px; cursor: pointer;
+    color: var(--text-dim); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 6px 14px;
+  }
+  .theme-toggle:hover { color: var(--head); }
+
+  footer {
+    margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--border);
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; color: var(--faint); letter-spacing: .4px;
+  }
+
+  .stats-row {
+    display: flex; gap: 16px; margin: 18px 0 22px; flex-wrap: wrap;
+  }
+  .stat-card {
+    flex: 1; min-width: 120px; padding: 14px 18px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .stat-val {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 26px; font-weight: 700; color: var(--head); line-height: 1.2;
+  }
+  .stat-val.red { color: var(--red); }
+  .stat-label {
+    font-size: 12px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: 1px; margin-top: 4px;
+  }
+</style>
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('aimux-arch-theme');
+    if (!t && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) t = 'light';
+    if (t) document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+})();
+</script>
+</head>
+<body>
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle color scheme">MODE</button>
+<nav class="toc" aria-label="Sections">
+  <div class="toc-title">Sections</div>
+  <a href="#vision">Vision</a>
+  <a href="#three-axes">Three Axes</a>
+  <a href="#before">Before (Current)</a>
+  <a href="#after">After (Proposed)</a>
+  <a href="#binder">agent-compose Binder</a>
+  <a href="#tiers">Progressive Disclosure</a>
+  <a href="#cma">CMA Equivalence</a>
+  <a href="#packages">Package Structure</a>
+  <a href="#phases">Implementation Phases</a>
+</nav>
+<div class="page">
+
+  <div class="kicker">AIMUX &middot; PLATFORM ARCHITECTURE</div>
+  <h1>Self-Hosted Agent Management Platform</h1>
+  <p class="subtitle">Three axes: Provider (what) &times; Environment (where) &times; Coordination (how)</p>
+  <div class="meta">AUGUST 2026 &middot; COMPANION TO docs/superpowers/specs/2026-08-19-aimux-platform-architecture.md</div>
+
+  <!-- ============================================================ -->
+  <h2 id="vision">Vision</h2>
+
+  <div class="claim"><p><b>aimux is a self-hosted Claude Managed Agents (CMA) equivalent.</b> Anthropic runs the agent loop and hosts the sandbox. aimux does the same, but on your infrastructure: OpenShell runs the sandbox, agent-compose binds agent configs to environments, Redis coordinates tasks and messaging.</p></div>
+
+  <p>The current codebase conflates three concerns: what an agent is (Claude vs Codex), where it runs (local vs K8s vs OpenShell), and how tasks flow (Redis queues, messaging, heartbeat). Untangling these into three clean axes is the refactor.</p>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-val red">3,686</div><div class="stat-label">Lines in app.go</div></div>
+    <div class="stat-card"><div class="stat-val red">5</div><div class="stat-label">Packages with OpenShell</div></div>
+    <div class="stat-card"><div class="stat-val red">100%</div><div class="stat-label">Nil stubs in openshell.go</div></div>
+    <div class="stat-card"><div class="stat-val">146</div><div class="stat-label">Test files</div></div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- ============================================================ -->
+  <h2 id="three-axes">Three Axes</h2>
+
+  <figure>
+    <svg viewBox="0 0 980 340" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Three orthogonal axes: Provider (what), Environment (where), Coordination (how)">
+      <defs>
+        <marker id="mGx" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#8fbf88"/>
+        </marker>
+        <marker id="mOx" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#cea451"/>
+        </marker>
+        <marker id="mBx" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#7ea7d8"/>
+        </marker>
+      </defs>
+
+      <text class="m" x="490" y="28" font-size="11" fill="#6d727e"
+            letter-spacing="3" text-anchor="middle">THREE ORTHOGONAL AXES</text>
+
+      <!-- Axis 1: Provider (WHAT) -->
+      <rect x="30" y="50" width="290" height="250" rx="9"
+            fill="#14171c" stroke="#8fbf88" stroke-width="1.5"/>
+      <text class="m" x="70" y="72" font-size="9" fill="#8fbf88" letter-spacing="1.5">AXIS 1</text>
+      <text x="175" y="92" fill="#f2f4f8" font-size="16" font-weight="700" text-anchor="middle">Provider</text>
+      <text x="175" y="108" fill="#8fbf88" font-size="10" text-anchor="middle">WHAT kind of agent</text>
+
+      <rect x="55" y="122" width="110" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="110" y="140" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">Claude</text>
+      <text x="110" y="153" fill="#9aa1ad" font-size="8" text-anchor="middle">JSONL, PTY embed</text>
+
+      <rect x="185" y="122" width="110" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="240" y="140" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">Codex</text>
+      <text x="240" y="153" fill="#9aa1ad" font-size="8" text-anchor="middle">JSONL, tmux</text>
+
+      <text x="175" y="180" fill="#9aa1ad" font-size="9" text-anchor="middle">Trace format</text>
+      <text x="175" y="194" fill="#9aa1ad" font-size="9" text-anchor="middle">Session files</text>
+      <text x="175" y="208" fill="#9aa1ad" font-size="9" text-anchor="middle">Models / spawn commands</text>
+      <text x="175" y="222" fill="#9aa1ad" font-size="9" text-anchor="middle">OTEL configuration</text>
+      <text x="175" y="236" fill="#9aa1ad" font-size="9" text-anchor="middle">Embed capability</text>
+      <text x="175" y="256" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">No infrastructure. No discovery.</text>
+      <text x="175" y="268" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">No nil stubs. Every method meaningful.</text>
+
+      <!-- Axis 2: Environment (WHERE) -->
+      <rect x="345" y="50" width="290" height="250" rx="9"
+            fill="#14171c" stroke="#cea451" stroke-width="1.5"/>
+      <text class="m" x="385" y="72" font-size="9" fill="#cea451" letter-spacing="1.5">AXIS 2</text>
+      <text x="490" y="92" fill="#f2f4f8" font-size="16" font-weight="700" text-anchor="middle">Environment</text>
+      <text x="490" y="108" fill="#cea451" font-size="10" text-anchor="middle">WHERE it runs (OpenShell / Local / K8s)</text>
+
+      <rect x="360" y="122" width="80" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="400" y="140" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">Local</text>
+      <text x="400" y="153" fill="#9aa1ad" font-size="8" text-anchor="middle">fork</text>
+
+      <rect x="450" y="122" width="95" height="36" rx="5" fill="#20242c" stroke="#cea451" stroke-width="1"/>
+      <text x="497" y="140" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">OpenShell</text>
+      <text x="497" y="153" fill="#cea451" font-size="8" text-anchor="middle">gateway</text>
+
+      <rect x="555" y="122" width="60" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="585" y="140" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">K8s</text>
+      <text x="585" y="153" fill="#9aa1ad" font-size="8" text-anchor="middle">pods</text>
+
+      <text x="490" y="180" fill="#9aa1ad" font-size="9" text-anchor="middle">Sandbox lifecycle</text>
+      <text x="490" y="194" fill="#9aa1ad" font-size="9" text-anchor="middle">Network policy</text>
+      <text x="490" y="208" fill="#9aa1ad" font-size="9" text-anchor="middle">Provider backends</text>
+      <text x="490" y="222" fill="#9aa1ad" font-size="9" text-anchor="middle">Compute resources</text>
+      <text x="490" y="236" fill="#9aa1ad" font-size="9" text-anchor="middle">Discovery transport</text>
+      <text x="490" y="256" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">Tags agents with real ProviderName.</text>
+      <text x="490" y="268" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">OpenShell IS the environment.</text>
+
+      <!-- Axis 3: Coordination (HOW) -->
+      <rect x="660" y="50" width="290" height="250" rx="9"
+            fill="#14171c" stroke="#7ea7d8" stroke-width="1.5"/>
+      <text class="m" x="700" y="72" font-size="9" fill="#7ea7d8" letter-spacing="1.5">AXIS 3</text>
+      <text x="805" y="92" fill="#f2f4f8" font-size="16" font-weight="700" text-anchor="middle">Coordination</text>
+      <text x="805" y="108" fill="#7ea7d8" font-size="10" text-anchor="middle">HOW tasks flow (Redis)</text>
+
+      <rect x="690" y="122" width="100" height="36" rx="5" fill="#20242c" stroke="#7ea7d8" stroke-width="1"/>
+      <text x="740" y="140" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">Redis</text>
+      <text x="740" y="153" fill="#7ea7d8" font-size="8" text-anchor="middle">full</text>
+
+      <rect x="810" y="122" width="100" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="860" y="140" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">Local</text>
+      <text x="860" y="153" fill="#9aa1ad" font-size="8" text-anchor="middle">in-memory</text>
+
+      <text x="805" y="180" fill="#9aa1ad" font-size="9" text-anchor="middle">Task queue</text>
+      <text x="805" y="194" fill="#9aa1ad" font-size="9" text-anchor="middle">Inbox messaging</text>
+      <text x="805" y="208" fill="#9aa1ad" font-size="9" text-anchor="middle">Heartbeat</text>
+      <text x="805" y="222" fill="#9aa1ad" font-size="9" text-anchor="middle">Cost tracking</text>
+      <text x="805" y="236" fill="#9aa1ad" font-size="9" text-anchor="middle">Event broadcast</text>
+      <text x="805" y="256" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">Infrastructure-agnostic.</text>
+      <text x="805" y="268" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">Optional. Zero-config fallback.</text>
+
+      <!-- Legend -->
+      <g font-size="10" fill="#9aa1ad">
+        <rect x="200" y="318" width="12" height="12" rx="2" fill="none" stroke="#8fbf88" stroke-width="1.5"/>
+        <text x="218" y="328">Provider (what)</text>
+        <rect x="370" y="318" width="12" height="12" rx="2" fill="none" stroke="#cea451" stroke-width="1.5"/>
+        <text x="388" y="328">Environment (where)</text>
+        <rect x="560" y="318" width="12" height="12" rx="2" fill="none" stroke="#7ea7d8" stroke-width="1.5"/>
+        <text x="578" y="328">Coordination (how)</text>
+      </g>
+    </svg>
+    <figcaption>FIGURE 1 &middot; Three orthogonal axes. Each has one job. A Claude agent (Provider) can run locally or in an OpenShell sandbox (Environment) with or without Redis coordination.</figcaption>
+  </figure>
+
+  <!-- ============================================================ -->
+  <h2 id="before">Before (Current Architecture)</h2>
+
+  <figure>
+    <svg viewBox="0 0 980 720" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Current aimux architecture showing monolithic app.go, separate compose and runtime packages, and K8s god object">
+      <defs>
+        <marker id="mG" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#8fbf88"/>
+        </marker>
+        <marker id="mA" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#9aa1ad"/>
+        </marker>
+        <marker id="mR" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#c96f6f"/>
+        </marker>
+        <marker id="mB" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#7ea7d8"/>
+        </marker>
+      </defs>
+
+      <!-- Title -->
+      <text class="m" x="490" y="30" font-size="11" fill="#6d727e"
+            letter-spacing="3" text-anchor="middle">CURRENT ARCHITECTURE</text>
+
+      <!-- ===== FRONTENDS ROW ===== -->
+      <text class="m" x="490" y="60" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">FRONTENDS</text>
+
+      <!-- TUI -->
+      <rect x="60" y="74" width="240" height="50" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="180" y="97" fill="#f2f4f8" font-size="13" font-weight="700" text-anchor="middle">TUI</text>
+      <text x="180" y="112" fill="#9aa1ad" font-size="9" text-anchor="middle">Bubble Tea</text>
+
+      <!-- Web -->
+      <rect x="370" y="74" width="240" height="50" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="490" y="97" fill="#f2f4f8" font-size="13" font-weight="700" text-anchor="middle">Web Dashboard</text>
+      <text x="490" y="112" fill="#9aa1ad" font-size="9" text-anchor="middle">HTTP + SSE + WebSocket</text>
+
+      <!-- CLI -->
+      <rect x="680" y="74" width="240" height="50" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="800" y="97" fill="#f2f4f8" font-size="13" font-weight="700" text-anchor="middle">CLI</text>
+      <text x="800" y="112" fill="#9aa1ad" font-size="9" text-anchor="middle">Cobra commands</text>
+
+      <!-- ===== APP.GO MONOLITH (the problem) ===== -->
+      <rect x="60" y="155" width="860" height="130" rx="9"
+            fill="#1a1e25" stroke="#c96f6f" stroke-width="2" stroke-dasharray="6 4"/>
+      <text class="m" x="105" y="175" font-size="9" fill="#c96f6f" letter-spacing="1.5">MONOLITH</text>
+      <text x="490" y="195" fill="#f2f4f8" font-size="15" font-weight="700" text-anchor="middle">app.go</text>
+      <text x="490" y="212" fill="#c96f6f" font-size="10" text-anchor="middle">3,686 lines &middot; 830-line Update() &middot; event router + session manager + trace viewer + launcher</text>
+
+      <!-- Inner blocks of app.go -->
+      <rect x="85" y="228" width="148" height="40" rx="5" fill="#181c23" stroke="#2c313b"/>
+      <text x="159" y="252" fill="#c8cfda" font-size="10" text-anchor="middle">Agent coordination</text>
+
+      <rect x="248" y="228" width="148" height="40" rx="5" fill="#181c23" stroke="#2c313b"/>
+      <text x="322" y="252" fill="#c8cfda" font-size="10" text-anchor="middle">Session management</text>
+
+      <rect x="411" y="228" width="148" height="40" rx="5" fill="#181c23" stroke="#2c313b"/>
+      <text x="485" y="252" fill="#c8cfda" font-size="10" text-anchor="middle">Trace viewing</text>
+
+      <rect x="574" y="228" width="148" height="40" rx="5" fill="#181c23" stroke="#2c313b"/>
+      <text x="648" y="252" fill="#c8cfda" font-size="10" text-anchor="middle">Launch + spawn</text>
+
+      <rect x="737" y="228" width="148" height="40" rx="5" fill="#181c23" stroke="#2c313b"/>
+      <text x="811" y="252" fill="#c8cfda" font-size="10" text-anchor="middle">Kill + filter + sort</text>
+
+      <!-- Arrows from frontends to monolith -->
+      <line x1="180" y1="124" x2="180" y2="149" fill="none" stroke="#c96f6f" stroke-width="1.4" marker-end="url(#mR)"/>
+      <line x1="490" y1="124" x2="490" y2="149" fill="none" stroke="#9aa1ad" stroke-width="1.4" marker-end="url(#mA)"/>
+      <line x1="800" y1="124" x2="800" y2="149" fill="none" stroke="#9aa1ad" stroke-width="1.4" marker-end="url(#mA)"/>
+
+      <!-- ===== CONTROLLER ===== -->
+      <text class="m" x="490" y="315" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">SHARED CORE</text>
+
+      <rect x="300" y="328" width="380" height="46" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="490" y="349" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">controller/</text>
+      <text x="490" y="364" fill="#8fbf88" font-size="9" text-anchor="middle">1,082 lines &middot; 18 files &middot; well-tested</text>
+
+      <line x1="490" y1="285" x2="490" y2="322" fill="none" stroke="#8fbf88" stroke-width="1.4" marker-end="url(#mG)"/>
+
+      <!-- ===== PROVIDER LAYER ===== -->
+      <text class="m" x="490" y="405" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">PROVIDERS</text>
+
+      <rect x="60" y="418" width="180" height="46" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="150" y="439" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">Claude</text>
+      <text x="150" y="454" fill="#9aa1ad" font-size="9" text-anchor="middle">1,088 lines</text>
+
+      <rect x="270" y="418" width="180" height="46" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="360" y="439" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">Codex</text>
+      <text x="360" y="454" fill="#9aa1ad" font-size="9" text-anchor="middle">887 lines</text>
+
+      <!-- K8s God Object -->
+      <rect x="480" y="418" width="460" height="46" rx="7"
+            fill="#1a1e25" stroke="#c96f6f" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <text x="710" y="439" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">K8s Provider (god object)</text>
+      <text x="710" y="454" fill="#c96f6f" font-size="9" text-anchor="middle">824 lines &middot; discovery + Redis + tasks + spawn + scale + messages</text>
+
+      <line x1="490" y1="374" x2="490" y2="412" fill="none" stroke="#9aa1ad" stroke-width="1.2" marker-end="url(#mA)"/>
+
+      <!-- ===== SANDBOX LAYER (the split) ===== -->
+      <text class="m" x="490" y="500" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">SANDBOX / RUNTIME</text>
+
+      <!-- compose/ -->
+      <rect x="100" y="515" width="340" height="60" rx="7"
+            fill="#1a1e25" stroke="#cea451" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <text class="m" x="130" y="533" font-size="9" fill="#cea451" letter-spacing="1">OVERLAP</text>
+      <text x="270" y="549" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">compose/</text>
+      <text x="270" y="565" fill="#9aa1ad" font-size="9" text-anchor="middle">496 lines &middot; agent-compose wrapper &middot; MCP server uses this</text>
+
+      <!-- runtime/ -->
+      <rect x="520" y="515" width="340" height="60" rx="7"
+            fill="#1a1e25" stroke="#cea451" stroke-width="1.5" stroke-dasharray="5 3"/>
+      <text class="m" x="550" y="533" font-size="9" fill="#cea451" letter-spacing="1">OVERLAP</text>
+      <text x="690" y="549" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">runtime/</text>
+      <text x="690" y="565" fill="#9aa1ad" font-size="9" text-anchor="middle">805 lines &middot; Backend interface + Podman/K8s/Local &middot; TUI uses this</text>
+
+      <!-- Dashed overlap arrow between them -->
+      <line x1="440" y1="545" x2="514" y2="545"
+            fill="none" stroke="#cea451" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <text x="477" y="538" fill="#cea451" font-size="8" text-anchor="middle">same concept</text>
+
+      <!-- ===== INFRA ===== -->
+      <text class="m" x="490" y="610" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">INFRASTRUCTURE</text>
+
+      <rect x="80" y="623" width="170" height="42" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="165" y="648" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">discovery/</text>
+
+      <rect x="280" y="623" width="140" height="42" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="350" y="648" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">otel/</text>
+
+      <rect x="450" y="623" width="140" height="42" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="520" y="648" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">terminal/</text>
+
+      <rect x="620" y="623" width="140" height="42" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="690" y="648" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">mcpserver/</text>
+
+      <rect x="790" y="623" width="130" height="42" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="855" y="648" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">history/</text>
+
+      <!-- Legend -->
+      <g font-size="10" fill="#9aa1ad">
+        <rect x="200" y="692" width="12" height="12" rx="2" fill="none" stroke="#c96f6f" stroke-width="1.5" stroke-dasharray="4 2"/>
+        <text x="218" y="702">Problem area</text>
+        <rect x="340" y="692" width="12" height="12" rx="2" fill="none" stroke="#cea451" stroke-width="1.5" stroke-dasharray="4 2"/>
+        <text x="358" y="702">Overlapping concepts</text>
+        <rect x="520" y="692" width="12" height="12" rx="2" fill="#20242c" stroke="#2c313b"/>
+        <text x="538" y="702">Healthy package</text>
+        <line x1="648" y1="698" x2="678" y2="698" fill="none" stroke="#8fbf88" stroke-width="1.4" marker-end="url(#mG)"/>
+        <text x="686" y="702">Clean dependency</text>
+      </g>
+    </svg>
+    <figcaption>FIGURE 1 &middot; Current architecture. Red dashed borders mark the three problem areas: monolithic app.go, K8s god object, and compose/runtime overlap.</figcaption>
+  </figure>
+
+  <!-- ============================================================ -->
+  <h2 id="after">After (Proposed Architecture)</h2>
+
+  <figure>
+    <svg viewBox="0 0 980 900" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Proposed aimux platform architecture with three axes: Provider, Environment, Coordination, and agent-compose as the binder">
+      <defs>
+        <marker id="mGn" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#8fbf88"/>
+        </marker>
+        <marker id="mOn" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#cea451"/>
+        </marker>
+        <marker id="mBn" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#7ea7d8"/>
+        </marker>
+        <marker id="mAn" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="#9aa1ad"/>
+        </marker>
+      </defs>
+
+      <text class="m" x="490" y="28" font-size="11" fill="#6d727e"
+            letter-spacing="3" text-anchor="middle">PROPOSED PLATFORM ARCHITECTURE</text>
+
+      <!-- ===== FRONTENDS ===== -->
+      <text class="m" x="490" y="56" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">FRONTENDS (THIN ADAPTERS)</text>
+
+      <rect x="60" y="68" width="230" height="40" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="175" y="92" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">TUI</text>
+
+      <rect x="375" y="68" width="230" height="40" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="490" y="92" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">Web Dashboard</text>
+
+      <rect x="690" y="68" width="230" height="40" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="805" y="92" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">CLI</text>
+
+      <!-- ===== CONTROLLER ===== -->
+      <rect x="250" y="130" width="480" height="38" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="490" y="151" fill="#f2f4f8" font-size="12" font-weight="700" text-anchor="middle">controller/ + session/manager</text>
+      <text x="490" y="163" fill="#9aa1ad" font-size="8" text-anchor="middle">shared business logic + session lifecycle</text>
+
+      <line x1="175" y1="108" x2="400" y2="124" fill="none" stroke="#9aa1ad" stroke-width="1" marker-end="url(#mAn)"/>
+      <line x1="490" y1="108" x2="490" y2="124" fill="none" stroke="#9aa1ad" stroke-width="1" marker-end="url(#mAn)"/>
+      <line x1="805" y1="108" x2="580" y2="124" fill="none" stroke="#9aa1ad" stroke-width="1" marker-end="url(#mAn)"/>
+
+      <!-- ===== AGENT-COMPOSE BINDER ===== -->
+      <rect x="120" y="196" width="740" height="90" rx="9"
+            fill="#14171c" stroke="#9aa1ad" stroke-width="1.5"/>
+      <text class="m" x="165" y="216" font-size="9" fill="#9aa1ad" letter-spacing="1.5">BINDER</text>
+      <text x="490" y="236" fill="#f2f4f8" font-size="15" font-weight="700" text-anchor="middle">agent-compose Engine</text>
+      <text x="490" y="253" fill="#9aa1ad" font-size="10" text-anchor="middle">Agent config + Environment -> Resolve() -> ResolvedSpec -> Run()</text>
+
+      <rect x="145" y="260" width="145" height="18" rx="4" fill="#20242c" stroke="#2c313b"/>
+      <text x="217" y="273" fill="#c8cfda" font-size="8.5" text-anchor="middle">RuntimeProfile</text>
+
+      <rect x="305" y="260" width="120" height="18" rx="4" fill="#20242c" stroke="#2c313b"/>
+      <text x="365" y="273" fill="#c8cfda" font-size="8.5" text-anchor="middle">InferenceSpec</text>
+
+      <rect x="440" y="260" width="100" height="18" rx="4" fill="#20242c" stroke="#2c313b"/>
+      <text x="490" y="273" fill="#c8cfda" font-size="8.5" text-anchor="middle">MCPSpec[]</text>
+
+      <rect x="555" y="260" width="85" height="18" rx="4" fill="#20242c" stroke="#2c313b"/>
+      <text x="597" y="273" fill="#c8cfda" font-size="8.5" text-anchor="middle">Policy</text>
+
+      <rect x="655" y="260" width="85" height="18" rx="4" fill="#20242c" stroke="#2c313b"/>
+      <text x="697" y="273" fill="#c8cfda" font-size="8.5" text-anchor="middle">Skill[]</text>
+
+      <line x1="490" y1="168" x2="490" y2="190" fill="none" stroke="#9aa1ad" stroke-width="1.2" marker-end="url(#mAn)"/>
+
+      <!-- ===== THREE AXES ROW ===== -->
+
+      <!-- Provider (WHAT) -->
+      <rect x="30" y="320" width="280" height="200" rx="9"
+            fill="#14171c" stroke="#8fbf88" stroke-width="1.5"/>
+      <text class="m" x="70" y="342" font-size="9" fill="#8fbf88" letter-spacing="1.5">PROVIDER (WHAT)</text>
+      <text x="170" y="362" fill="#f2f4f8" font-size="13" font-weight="700" text-anchor="middle">Agent Identity</text>
+
+      <rect x="55" y="378" width="110" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="110" y="396" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">Claude</text>
+      <text x="110" y="409" fill="#9aa1ad" font-size="8" text-anchor="middle">JSONL, PTY embed</text>
+
+      <rect x="180" y="378" width="110" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="235" y="396" fill="#f2f4f8" font-size="11" font-weight="600" text-anchor="middle">Codex</text>
+      <text x="235" y="409" fill="#9aa1ad" font-size="8" text-anchor="middle">JSONL, tmux</text>
+
+      <text x="170" y="438" fill="#9aa1ad" font-size="8.5" text-anchor="middle">ParseTrace, FindSessionFile</text>
+      <text x="170" y="452" fill="#9aa1ad" font-size="8.5" text-anchor="middle">SpawnCommand, CanEmbed</text>
+      <text x="170" y="466" fill="#9aa1ad" font-size="8.5" text-anchor="middle">OTELEnv, SpawnArgs</text>
+      <text x="170" y="486" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">No infra methods. No nil stubs.</text>
+      <text x="170" y="498" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">No Discover(). No Kill().</text>
+
+      <!-- Environment (WHERE) -->
+      <rect x="340" y="320" width="310" height="200" rx="9"
+            fill="#14171c" stroke="#cea451" stroke-width="1.5"/>
+      <text class="m" x="380" y="342" font-size="9" fill="#cea451" letter-spacing="1.5">ENVIRONMENT (WHERE)</text>
+      <text x="495" y="362" fill="#f2f4f8" font-size="13" font-weight="700" text-anchor="middle">Compute + Policy</text>
+
+      <rect x="358" y="378" width="80" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="398" y="396" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">Local</text>
+      <text x="398" y="409" fill="#9aa1ad" font-size="7.5" text-anchor="middle">fork + ps scan</text>
+
+      <rect x="448" y="378" width="100" height="36" rx="5" fill="#20242c" stroke="#cea451" stroke-width="1"/>
+      <text x="498" y="396" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">OpenShell</text>
+      <text x="498" y="409" fill="#cea451" font-size="7.5" text-anchor="middle">gateway + policy</text>
+
+      <rect x="558" y="378" width="70" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="593" y="396" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">K8s</text>
+      <text x="593" y="409" fill="#9aa1ad" font-size="7.5" text-anchor="middle">raw pods</text>
+
+      <text x="495" y="438" fill="#9aa1ad" font-size="8.5" text-anchor="middle">Discover(), CreateSandbox()</text>
+      <text x="495" y="452" fill="#9aa1ad" font-size="8.5" text-anchor="middle">DeleteSandbox(), Kill()</text>
+      <text x="495" y="466" fill="#9aa1ad" font-size="8.5" text-anchor="middle">CheckHealth(), ListSandboxes()</text>
+      <text x="495" y="486" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">Tags agents with real ProviderName.</text>
+      <text x="495" y="498" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">OpenShell IS the environment.</text>
+
+      <!-- Coordination (HOW) -->
+      <rect x="680" y="320" width="270" height="200" rx="9"
+            fill="#14171c" stroke="#7ea7d8" stroke-width="1.5"/>
+      <text class="m" x="720" y="342" font-size="9" fill="#7ea7d8" letter-spacing="1.5">COORDINATION (HOW)</text>
+      <text x="815" y="362" fill="#f2f4f8" font-size="13" font-weight="700" text-anchor="middle">Task Flow</text>
+
+      <rect x="700" y="378" width="100" height="36" rx="5" fill="#20242c" stroke="#7ea7d8" stroke-width="1"/>
+      <text x="750" y="396" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">Redis</text>
+      <text x="750" y="409" fill="#7ea7d8" font-size="7.5" text-anchor="middle">full coordination</text>
+
+      <rect x="815" y="378" width="100" height="36" rx="5" fill="#20242c" stroke="#2c313b"/>
+      <text x="865" y="396" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">Local</text>
+      <text x="865" y="409" fill="#9aa1ad" font-size="7.5" text-anchor="middle">in-memory fallback</text>
+
+      <text x="815" y="438" fill="#9aa1ad" font-size="8.5" text-anchor="middle">CreateTask, ListTasks</text>
+      <text x="815" y="452" fill="#9aa1ad" font-size="8.5" text-anchor="middle">SendMessage, Heartbeat</text>
+      <text x="815" y="466" fill="#9aa1ad" font-size="8.5" text-anchor="middle">GetCosts, Events</text>
+      <text x="815" y="486" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">Infrastructure-agnostic.</text>
+      <text x="815" y="498" fill="#6d727e" font-size="8" text-anchor="middle" font-style="italic">Optional. Both K8s + OpenShell use it.</text>
+
+      <!-- Arrows from binder to three axes -->
+      <line x1="310" y1="286" x2="170" y2="314" fill="none" stroke="#8fbf88" stroke-width="1.2" marker-end="url(#mGn)"/>
+      <line x1="490" y1="286" x2="490" y2="314" fill="none" stroke="#cea451" stroke-width="1.2" marker-end="url(#mOn)"/>
+      <line x1="670" y1="286" x2="815" y2="314" fill="none" stroke="#7ea7d8" stroke-width="1.2" marker-end="url(#mBn)"/>
+
+      <!-- ===== SESSION LIFECYCLE ===== -->
+      <rect x="120" y="555" width="740" height="75" rx="9"
+            fill="#14171c" stroke="#9aa1ad" stroke-width="1"/>
+      <text class="m" x="165" y="575" font-size="9" fill="#9aa1ad" letter-spacing="1.5">SESSION</text>
+      <text x="490" y="595" fill="#f2f4f8" font-size="14" font-weight="700" text-anchor="middle">Session = Agent Config + Environment + Coordination</text>
+      <text x="490" y="613" fill="#9aa1ad" font-size="10" text-anchor="middle">created -> running &lt;-> idle -> terminated &middot; survives aimux restarts</text>
+
+      <!-- ===== INFRASTRUCTURE ===== -->
+      <text class="m" x="490" y="665" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">INFRASTRUCTURE (UNCHANGED)</text>
+
+      <rect x="50" y="678" width="130" height="38" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="115" y="701" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">terminal/</text>
+
+      <rect x="200" y="678" width="130" height="38" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="265" y="701" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">otel/</text>
+
+      <rect x="350" y="678" width="130" height="38" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="415" y="701" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">mcpserver/</text>
+
+      <rect x="500" y="678" width="130" height="38" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="565" y="701" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">history/</text>
+
+      <rect x="650" y="678" width="130" height="38" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="715" y="701" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">cost/</text>
+
+      <rect x="800" y="678" width="130" height="38" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="865" y="701" fill="#f2f4f8" font-size="10" font-weight="600" text-anchor="middle">controller/</text>
+
+      <!-- ===== PROGRESSIVE DISCLOSURE ===== -->
+      <text class="m" x="490" y="750" font-size="10" fill="#6d727e"
+            letter-spacing="2" text-anchor="middle">PROGRESSIVE DISCLOSURE (THREE TIERS)</text>
+
+      <!-- Tier 1 -->
+      <rect x="30" y="765" width="290" height="56" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="175" y="787" fill="#f2f4f8" font-size="11" font-weight="700" text-anchor="middle">Tier 1: Solo Developer</text>
+      <text x="175" y="802" fill="#9aa1ad" font-size="9" text-anchor="middle">Pick harness -> run locally. Zero config.</text>
+      <text x="175" y="814" fill="#6d727e" font-size="8" text-anchor="middle">Identical to today.</text>
+
+      <!-- Tier 2 -->
+      <rect x="345" y="765" width="290" height="56" rx="7" fill="#20242c" stroke="#cea451" stroke-width="1"/>
+      <text x="490" y="787" fill="#f2f4f8" font-size="11" font-weight="700" text-anchor="middle">Tier 2: Team + OpenShell</text>
+      <text x="490" y="802" fill="#cea451" font-size="9" text-anchor="middle">Pick harness + environment. Governed sandbox.</text>
+      <text x="490" y="814" fill="#6d727e" font-size="8" text-anchor="middle">Add gateway config. No Redis required.</text>
+
+      <!-- Tier 3 -->
+      <rect x="660" y="765" width="290" height="56" rx="7" fill="#20242c" stroke="#7ea7d8" stroke-width="1"/>
+      <text x="805" y="787" fill="#f2f4f8" font-size="11" font-weight="700" text-anchor="middle">Tier 3: Platform Operator</text>
+      <text x="805" y="802" fill="#7ea7d8" font-size="9" text-anchor="middle">Named agents + environments + Redis.</text>
+      <text x="805" y="814" fill="#6d727e" font-size="8" text-anchor="middle">Self-hosted CMA equivalent.</text>
+
+      <!-- Legend -->
+      <g font-size="10" fill="#9aa1ad">
+        <rect x="140" y="852" width="12" height="12" rx="2" fill="none" stroke="#8fbf88" stroke-width="1.5"/>
+        <text x="158" y="862">Provider</text>
+        <rect x="250" y="852" width="12" height="12" rx="2" fill="none" stroke="#cea451" stroke-width="1.5"/>
+        <text x="268" y="862">Environment</text>
+        <rect x="370" y="852" width="12" height="12" rx="2" fill="none" stroke="#7ea7d8" stroke-width="1.5"/>
+        <text x="388" y="862">Coordination</text>
+        <rect x="490" y="852" width="12" height="12" rx="2" fill="#14171c" stroke="#9aa1ad"/>
+        <text x="508" y="862">Binder / Session</text>
+        <rect x="620" y="852" width="12" height="12" rx="2" fill="#20242c" stroke="#2c313b"/>
+        <text x="638" y="862">Unchanged</text>
+      </g>
+    </svg>
+    <figcaption>FIGURE 3 &middot; Proposed platform architecture. Three axes (green, gold, blue) are connected by agent-compose (gray binder). Sessions bind all three. Progressive disclosure at the bottom shows three user tiers.</figcaption>
+  </figure>
+
+  <!-- ============================================================ -->
+  <h2 id="binder">agent-compose as the Binder</h2>
+
+  <div class="claim"><p><b>agent-compose connects Agent configs to Environments.</b> It resolves declarative references (runtime, inference, MCP, policy, skills) into a concrete <code>ResolvedSpec</code> that the Environment's Executor can create a sandbox from. aimux currently bypasses this pipeline. The refactor promotes it to the primary launch path.</p></div>
+
+  <h3>Resolution Flow</h3>
+
+  <dl class="terms" style="grid-template-columns: 140px 1fr;">
+    <div><dt>Agent YAML</dt><dd>Declarative config: runtime: claude, inference: anthropic, mcp: [github], skills: [code-review], policy: restricted</dd></div>
+    <div><dt>Engine.Resolve()</dt><dd>Flattens references into a ResolvedSpec: concrete image, entrypoint, env vars, egress endpoints, MCP configs, skill mounts</dd></div>
+    <div><dt>Executor</dt><dd>Creates the sandbox from the ResolvedSpec. LocalExecutor forks a process. CLIExecutor calls <code>openshell sandbox create</code>. K8sExecutor creates a pod.</dd></div>
+  </dl>
+
+  <h3>What OpenShell Owns</h3>
+
+  <p>OpenShell IS the environment. It creates and manages sandboxes with deny-by-default networking, provider backends (Podman, K8s, remote), and policy enforcement. agent-compose injects the agent config INTO the OpenShell sandbox: env vars, MCP config file, skill mounts, egress rules, and the entrypoint.</p>
+
+  <!-- ============================================================ -->
+  <h2 id="tiers">Progressive Disclosure</h2>
+
+  <ol class="principles">
+    <li><b>Tier 1: Solo Developer (zero config).</b> Pick a harness (Claude, Codex) in the launcher, press enter. LocalExecutor forks a process. Sessions tracked via process scan + JSONL files. No environments config, no agents.yaml, no Redis. Identical to today's experience.</li>
+    <li><b>Tier 2: Team with OpenShell (add gateway config).</b> Add an <code>environments</code> section to config with a named OpenShell gateway. The launcher shows environment selection alongside harness selection. agent-compose resolves the runtime + policy into the sandbox. Sessions tracked locally + via <code>openshell sandbox list</code>.</li>
+    <li><b>Tier 3: Platform Operator (full config).</b> Add named agent configs in <code>agents.yaml</code> (prompt, skills, MCP, inference, policy). Add Redis coordination. Named agent configs appear in the launcher alongside raw harness names. Sessions persist in Redis. MCP server exposes <code>spawn_agent</code>, <code>create_task</code>, <code>send_message</code>. Self-hosted CMA equivalent.</li>
+  </ol>
+
+  <!-- ============================================================ -->
+  <h2 id="cma">CMA Equivalence</h2>
+
+  <table>
+    <tr><th>CMA Resource</th><th>aimux Equivalent</th><th>Backed By</th></tr>
+    <tr><td><b>Agent</b></td><td>agent-compose <code>Agent</code> config</td><td><code>agents.yaml</code></td></tr>
+    <tr><td><b>Environment</b></td><td>Named environment config</td><td><code>config.yaml</code> environments section (OpenShell gateway + policy)</td></tr>
+    <tr><td><b>Session</b></td><td>Managed <code>Session</code> object</td><td>Local store + Redis</td></tr>
+    <tr><td><b>Deployment</b></td><td>Cron schedule + agent + environment</td><td>Future (launchd/cron wrapper)</td></tr>
+    <tr><td><b>Vault</b></td><td>agent-compose <code>Env</code> + K8s Secrets</td><td>Environment-specific</td></tr>
+    <tr><td><b>Memory Store</b></td><td>Per-agent memory directory</td><td>Filesystem (future: registry)</td></tr>
+    <tr><td><b>Skills</b></td><td>agent-compose <code>Skill</code></td><td>Skill files (future: registry)</td></tr>
+    <tr><td><b><code>ant beta:worker poll</code></b></td><td>Redis inbox + worker</td><td><code>coordination/</code> package</td></tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <h2 id="packages">Package Structure</h2>
+
+  <dl class="terms" style="grid-template-columns: 170px 1fr;">
+    <div><dt>provider/</dt><dd><b>Identity only.</b> Claude, Codex. ParseTrace, FindSessionFile, SpawnCommand, CanEmbed, OTELEnv. No Discover(), no Kill(). <code>openshell.go</code> deleted.</dd></div>
+    <div><dt>environment/</dt><dd><b>Compute + discovery.</b> Local (fork + ps scan), OpenShell (default remote; CLI executor upgradeable to Go SDK / RPC), Raw K8s (opt-in, no sandbox governance). Implements <code>Environment</code> interface.</dd></div>
+    <div><dt>coordination/</dt><dd><b>Task flow.</b> Redis implementation (extracted from k8s.go + mcpserver). Local fallback (in-memory). Implements <code>Coordinator</code> interface.</dd></div>
+    <div><dt>session/</dt><dd><b>Lifecycle management.</b> Session struct, store, manager. Replaces 3-field LaunchMeta. Create/track/resume/archive.</dd></div>
+    <div><dt>frontend/tui/</dt><dd><b>Thin adapter.</b> app.go as thin router (~500 lines). Sub-coordinators: AgentCoord, SessionCoord, TraceCoord, LaunchCoord.</dd></div>
+    <div><dt>mcpserver/</dt><dd><b>MCP tools.</b> Talks to Coordinator interface, not Redis directly. spawn_agent, create_task, send_message, list_agents.</dd></div>
+    <div><dt>controller/</dt><dd><b>Unchanged.</b> Shared business logic: sort, filter, attend, export, etc.</dd></div>
+    <div><dt>terminal/</dt><dd><b>Unchanged.</b> SessionBackend: PTY embed, tmux mirror, openshell connect.</dd></div>
+  </dl>
+
+  <!-- ============================================================ -->
+  <h2 id="phases">Implementation Phases</h2>
+
+  <div class="claim"><p><b>One branch per phase.</b> Each is self-contained and independently reviewable. Tests pass at every phase boundary.</p></div>
+
+  <ol class="principles">
+    <li><b>Phase 1: Extract Environment from Provider.</b> Create <code>environment/</code> with the interface. Move K8s infra into <code>environment/k8s.go</code>. Consolidate OpenShell scatter (5 packages) into <code>environment/openshell.go</code>. Create <code>environment/local.go</code>. Delete <code>provider/openshell.go</code>. Remove infra methods from Provider.</li>
+    <li><b>Phase 2: Extract Coordination.</b> Create <code>coordination/</code> with Redis + Local implementations. Move Redis from <code>provider/k8s.go</code> and <code>mcpserver/server.go</code>. Update MCP server to use Coordinator interface. Wire both K8s and OpenShell environments to register in Redis.</li>
+    <li><b>Phase 3: Promote agent-compose.</b> Route all launches through <code>Engine.Resolve() + Engine.Run()</code>. Add LocalExecutor. Add named environment configs. Update launcher with environment selection.</li>
+    <li><b>Phase 4: Managed Sessions.</b> Create <code>session/</code> with Session struct + lifecycle. Replace LaunchMeta. Wire through agent-compose pipeline. Add persistence (local + Redis).</li>
+    <li><b>Phase 5: Named Agent Configs.</b> Add <code>agents.yaml</code> loading. Show named configs in launcher alongside raw harness names. Wire agent-compose resolution. Expose through MCP server and web API.</li>
+    <li><b>Phase 6: Decompose app.go.</b> Extract AgentCoordinator, SessionCoordinator, TraceCoordinator, LaunchCoordinator. app.go becomes thin router (~500 lines).</li>
+  </ol>
+
+  <footer>AIMUX &middot; PLATFORM ARCHITECTURE</footer>
+
+
+</div>
+(function () {
+  var KEY = 'aimux-arch-theme';
+  var btn = document.getElementById('themeToggle');
+  function label() {
+    btn.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? '☀ LIGHT' : '☾ DARK';
+  }
+  label();
+  btn.addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    label();
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+  });
+})();
+(function () {
+  var heads = [].slice.call(document.querySelectorAll('h2[id]'));
+  var links = {};
+  [].slice.call(document.querySelectorAll('nav.toc a')).forEach(function (a) {
+    links[a.getAttribute('href').slice(1)] = a;
+  });
+  var current = null;
+  function spy() {
+    var y = window.scrollY + 130, cur = heads[0];
+    for (var i = 0; i < heads.length; i++) if (heads[i].offsetTop <= y) cur = heads[i];
+    if (!cur || cur === current) return;
+    current = cur;
+    for (var id in links) links[id].className = '';
+    if (links[cur.id]) links[cur.id].className = 'active';
+  }
+  window.addEventListener('scroll', spy, { passive: true });
+  window.addEventListener('resize', spy);
+  spy();
+})();
+</script>
+</body>
+</html>
