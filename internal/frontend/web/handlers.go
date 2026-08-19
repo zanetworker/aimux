@@ -1097,6 +1097,50 @@ func (s *Server) handleProviderHealth(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleRemoteHealth(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if s.composeEngine == nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":    "unconfigured",
+			"available": false,
+			"message":   "remote backend not configured — set remote.backend: openshell in ~/.aimux/config.yaml",
+		})
+		return
+	}
+
+	gatewayURL := s.cfg.Remote.Gateway
+	if gatewayURL == "" {
+		gatewayURL = "http://127.0.0.1:8090"
+	}
+
+	// Probe the gateway with a short timeout. Any HTTP response (even 404)
+	// means the gateway process is up. Connection refused means it's down.
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(gatewayURL) // #nosec G107
+	if err != nil {
+		msg := "gateway unreachable"
+		if strings.Contains(err.Error(), "connection refused") {
+			msg = fmt.Sprintf("gateway not running at %s — start with: openshell-gateway --config ~/.config/openshell/gateway-podman.toml", gatewayURL)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":    "error",
+			"available": false,
+			"gateway":   gatewayURL,
+			"message":   msg,
+		})
+		return
+	}
+	_ = resp.Body.Close()
+
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":    "connected",
+		"available": true,
+		"gateway":   gatewayURL,
+		"message":   "",
+	})
+}
+
 func (s *Server) handleGetROIConfig(w http.ResponseWriter, _ *http.Request) {
 	rate := s.cfg.ROI.HourlyRate
 	if rate <= 0 {
