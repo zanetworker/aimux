@@ -150,26 +150,44 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
         >
           {starred ? '★' : '☆'}
         </button>
-        {/* Kill button */}
-        {agent.LastAction !== 'Deleting' && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onKill) onKill(agent.SessionID || String(agent.PID));
-            }}
-            className="kill-btn"
-            style={{
-              background: 'transparent', border: '1px solid var(--accent)',
-              color: 'var(--accent)', fontSize: 10, fontWeight: 600,
-              cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s',
-              padding: '1px 6px', borderRadius: 3, lineHeight: '1.4',
-            }}
-            title="Kill session"
-          >
-            Kill
-          </button>
-        )}
       </div>
+
+      {/* Kill button — top-right, appears on card hover */}
+      {agent.LastAction === 'Deleting' ? (
+        <div style={{
+          position: 'absolute', top: 8, right: 8,
+          fontSize: 10, fontWeight: 600, color: 'var(--accent)',
+          background: 'var(--accent-dim)', padding: '2px 7px', borderRadius: 3,
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+        }}>
+          Deleting…
+        </div>
+      ) : onKill && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onKill(agent.SessionID || String(agent.PID)); }}
+          className="kill-btn"
+          title="Kill session"
+          style={{
+            position: 'absolute', top: 8, right: 8,
+            background: 'var(--bg-1)', border: '1px solid var(--border)',
+            color: 'var(--fg-3)', fontSize: 10, fontWeight: 600,
+            cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s, color 0.15s, border-color 0.15s',
+            padding: '2px 8px', borderRadius: 3, lineHeight: '1.4',
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent)';
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-dim)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-3)';
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-1)';
+          }}
+        >
+          Kill
+        </button>
+      )}
 
       {/* Row 2: Title (the main visual anchor) */}
       <div style={{
