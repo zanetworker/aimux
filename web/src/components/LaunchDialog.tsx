@@ -40,13 +40,18 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   }, [open, onClose]);
 
   useEffect(() => {
-    if (runtime !== 'remote') { setGatewayOk(null); setGatewayMsg(''); return; }
-    setGatewayOk(null);
-    fetch('/api/health/remote')
-      .then(r => r.json())
-      .then(d => { setGatewayOk(d.available); setGatewayMsg(d.message || ''); })
-      .catch(() => { setGatewayOk(false); setGatewayMsg('Could not reach health endpoint'); });
-  }, [runtime]);
+    if (!open || runtime !== 'remote') { setGatewayOk(null); setGatewayMsg(''); return; }
+    let cancelled = false;
+    const check = () => {
+      fetch('/api/health/remote')
+        .then(r => r.json())
+        .then(d => { if (!cancelled) { setGatewayOk(d.available); setGatewayMsg(d.message || ''); } })
+        .catch(() => { if (!cancelled) { setGatewayOk(false); setGatewayMsg('Could not reach health endpoint'); } });
+    };
+    check();
+    const interval = setInterval(check, 10_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [open, runtime]);
 
   useEffect(() => {
     if (!open) return;

@@ -1,5 +1,6 @@
 import type { Agent } from '../types';
 import { StatusLabel } from '../types';
+import { normalizeLocation } from '../utils';
 
 interface Props {
   agent: Agent;
@@ -49,8 +50,9 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
-  const isRemote = agent.Location === 'remote';
-  const isK8s = agent.Location === 'k8s';
+  const loc = normalizeLocation(agent);
+  const isRemote = loc === 'remote';
+  const isK8s = loc === 'k8s';
 
   const borderLeftColor = agent.Status === 3 ? 'var(--accent)' :
     agent.Status === 2 ? 'var(--orange)' :
@@ -135,7 +137,11 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
       </div>
 
       {/* Top-right action cluster: star + kill, both absolutely positioned */}
-      <div style={{ position: 'absolute', top: 8, right: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div
+        role="presentation"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
+        style={{ position: 'absolute', top: 8, right: 10, display: 'flex', alignItems: 'center', gap: 4 }}
+      >
         {agent.LastAction === 'Deleting' ? (
           <span style={{
             fontSize: 10, fontWeight: 600, color: 'var(--accent)',

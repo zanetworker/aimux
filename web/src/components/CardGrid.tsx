@@ -71,11 +71,16 @@ export function CardGrid({
   const handleKill = async (id: string) => {
     setKilling(prev => new Set(prev).add(id));
     try {
-      await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
+      const resp = await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
+      if (!resp.ok) {
+        // Remove from killing set on failure so button reappears
+        setKilling(prev => { const n = new Set(prev); n.delete(id); return n; });
+        return;
+      }
       if (selectedId === id) onSelect('');
-    } catch { /* ignore */ } finally {
-      // Keep in killing set — SSE will remove the agent when it's gone.
-      // Clear after 15s as a safety net if SSE doesn't update.
+    } catch {
+      setKilling(prev => { const n = new Set(prev); n.delete(id); return n; });
+    } finally {
       setTimeout(() => setKilling(prev => { const n = new Set(prev); n.delete(id); return n; }), 15_000);
     }
   };
@@ -327,7 +332,15 @@ export function CardGrid({
                       <span style={{ fontSize: 13, fontFamily: 'var(--mono)', color: 'var(--green)', width: 80, textAlign: 'right', flexShrink: 0 }}>
                         ${(agent.EstCostUSD || 0).toFixed(2)}
                       </span>
-                      {agent.LastAction !== 'Deleting' && (
+                      {(agent.LastAction === 'Deleting' || killing.has(id)) ? (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, color: 'var(--accent)',
+                          background: 'var(--accent-dim)', padding: '2px 7px', borderRadius: 3,
+                          letterSpacing: '0.04em', textTransform: 'uppercase', flexShrink: 0,
+                        }}>
+                          Deleting…
+                        </span>
+                      ) : (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleKill(agent.SessionID || agent.PID.toString()); }}
                           title="Kill agent (SIGTERM)"

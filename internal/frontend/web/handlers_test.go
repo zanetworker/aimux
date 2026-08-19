@@ -1091,6 +1091,39 @@ func TestHandleGetTrace_RemoteAgent(t *testing.T) {
 	}
 }
 
+func TestHandleRemoteHealth_Unconfigured(t *testing.T) {
+	s := NewServer(0)
+	// No composeEngine set — should return unconfigured status with available=false.
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/health/remote")
+	if err != nil {
+		t.Fatalf("GET /api/health/remote failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Status    string `json:"status"`
+		Available bool   `json:"available"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if payload.Status != "unconfigured" {
+		t.Errorf("expected status 'unconfigured', got %q", payload.Status)
+	}
+	if payload.Available {
+		t.Error("expected available=false when composeEngine is nil")
+	}
+}
+
 func TestHandleGetTrace_LocalAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionFile := filepath.Join(tmpDir, "local-session.jsonl")
