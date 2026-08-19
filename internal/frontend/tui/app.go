@@ -710,12 +710,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			debuglog.Log("remote launch: otel_enabled=%v port=%d endpoint=%s",
 				a.cfg.OTELReceiver.Enabled, otelPort, otelEndpoint)
 
-			// Show loading state immediately so user sees feedback
+			// Show loading state immediately so user sees feedback.
+			// Don't zoom yet — keep the agent list visible so the user has context.
 			a.splitMode = true
-			a.zoomed = true
 			a.splitLoading = true
-			a.layout.SetZoomed(true)
-			a.statusHint = fmt.Sprintf("Launching %s remotely...", msg.Provider)
+			a.statusHint = fmt.Sprintf("⏳ Creating sandbox for %s in %s — please wait...", msg.Provider, filepath.Base(msg.Dir))
 
 			sOpts := aimuxcompose.LaunchOpts{
 				Image:        a.cfg.Remote.Image,
@@ -3304,11 +3303,11 @@ func (a App) renderSplitView() string {
 	// Right pane: session (rendered by SessionView with its own header/status)
 	var sessionContent string
 	if a.splitLoading {
-		// Show loading placeholder while session is connecting
+		loadMsg := "⏳  Creating sandbox…\n\nThis may take 10–30 seconds.\nThe terminal will open automatically when ready."
 		sessionContent = lipgloss.Place(
 			rightW, contentH,
 			lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Loading session..."),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Align(lipgloss.Center).Render(loadMsg),
 		)
 	} else {
 		sessionContent = a.sessionView.View()
