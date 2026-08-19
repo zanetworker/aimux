@@ -468,11 +468,11 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	var loc string
 	switch locRaw {
 	case "remote":
-		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#37A3A3")).Render(locRaw)
+		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#37A3A3")).Render(padRight(locRaw, colLoc))
 	case "k8s":
-		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#A772EF")).Render(locRaw)
+		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#A772EF")).Render(padRight(locRaw, colLoc))
 	default:
-		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(locRaw)
+		loc = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(padRight(locRaw, colLoc))
 	}
 
 	branchDisplay := truncate(a.GitBranch, colBranch)
@@ -490,7 +490,7 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	row := " " + padRight(nameCol, colName) + " " +
 		padRight(truncate(a.ProviderName, colAgent), colAgent) + " " +
 		padRight(truncate(a.ShortModel(), colModel), colModel) + " " +
-		padRight(truncate(loc, colLoc), colLoc) + " " +
+		loc + " " +
 		padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
 		branchDisplay + " " +
 		padRight(truncate(a.LastAction, colLast), colLast) + " " +

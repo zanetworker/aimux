@@ -188,10 +188,10 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
         </button>
       )}
 
-      {/* Row 2: Title (the main visual anchor) */}
+      {/* Row 2: Title (the main visual anchor) — paddingRight leaves room for the Kill button */}
       <div style={{
         fontSize: 14, fontWeight: 600, color: 'var(--fg)', lineHeight: '1.4',
-        marginBottom: 6,
+        marginBottom: 6, paddingRight: 36,
         overflow: 'hidden', textOverflow: 'ellipsis',
         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
       }}>
