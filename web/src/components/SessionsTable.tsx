@@ -28,6 +28,7 @@ export interface HistorySession {
   roiMultiplier?: number;
   taskType?: string;
   durationMin?: number;
+  location?: string; // "local" | "remote"
 }
 
 type SortField = 'lastActive' | 'cost' | 'turns' | 'title' | 'project' | 'roi';
@@ -477,7 +478,8 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                   style={{
                     cursor: 'pointer',
                     background: isSelected ? 'var(--bg-2)' : 'transparent',
-                    borderLeft: isSelected ? '3px solid var(--accent)' : '3px solid transparent',
+                    borderLeft: isSelected ? '3px solid var(--accent)' :
+                      s.location === 'remote' ? '3px solid rgba(55,163,163,0.5)' : '3px solid transparent',
                   }}
                   onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-1)'; }}
                   onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
@@ -530,6 +532,13 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
                         </span>
                         {s.isSubagent && (
                           <span style={{ fontSize: 10, color: 'var(--fg-4)', fontStyle: 'italic' }}>agent</span>
+                        )}
+                        {s.location === 'remote' && (
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+                            letterSpacing: '0.06em', padding: '1px 5px', borderRadius: 2, flexShrink: 0,
+                            background: 'rgba(55,163,163,0.18)', color: 'var(--teal)',
+                          }}>sandbox</span>
                         )}
                       </div>
                       {s.lastAction && (

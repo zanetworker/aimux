@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import type { Agent } from '../types';
 
 interface Props {
@@ -12,6 +13,20 @@ interface Props {
 }
 
 export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, tasksOpen, theme, onToggleTheme }: Props) {
+  const [gatewayStatus, setGatewayStatus] = useState<{ available: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    const check = () => {
+      fetch('/api/health/remote')
+        .then(r => r.json())
+        .then(d => setGatewayStatus({ available: d.available, message: d.message || '' }))
+        .catch(() => setGatewayStatus({ available: false, message: 'health check failed' }));
+    };
+    check();
+    const interval = setInterval(check, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
   const sessions = agents.length;
   const active = agents.filter(a => a.Status === 0).length;
   const idle = agents.filter(a => a.Status === 1).length;
@@ -91,6 +106,25 @@ export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, t
           >
             {theme === 'dark' ? '\u2600' : '\u263D'}
           </button>
+        )}
+        {gatewayStatus && (
+          <div
+            title={gatewayStatus.available ? 'OpenShell gateway connected' : (gatewayStatus.message || 'OpenShell gateway unreachable')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '4px 10px', borderRadius: 4, fontSize: 11, fontWeight: 500,
+              border: `1px solid ${gatewayStatus.available ? 'var(--teal)' : 'var(--accent)'}`,
+              color: gatewayStatus.available ? 'var(--teal)' : 'var(--accent)',
+              background: gatewayStatus.available ? 'rgba(55,163,163,0.08)' : 'var(--accent-dim)',
+              cursor: gatewayStatus.available ? 'default' : 'help',
+            }}
+          >
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+              background: gatewayStatus.available ? 'var(--teal)' : 'var(--accent)',
+            }} />
+            {gatewayStatus.available ? 'Gateway' : 'Gateway down'}
+          </div>
         )}
         <button
           onClick={onLaunch}

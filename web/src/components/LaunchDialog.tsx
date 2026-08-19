@@ -24,6 +24,9 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   const [sessionMgr, setSessionMgr] = useState('tmux');
   const [otelEnabled, setOtelEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [launchError, setLaunchError] = useState('');
+  const [gatewayOk, setGatewayOk] = useState<boolean | null>(null);
+  const [gatewayMsg, setGatewayMsg] = useState('');
   const [dirTab, setDirTab] = useState<DirTab>('recent');
   const [quickDirs, setQuickDirs] = useState<QuickDir[]>([]);
   const [recentDirs, setRecentDirs] = useState<RecentDir[]>([]);
@@ -35,6 +38,22 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
     if (open) window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || runtime !== 'remote') { setGatewayOk(null); setGatewayMsg(''); return; }
+    let controller = new AbortController();
+    const check = () => {
+      controller.abort();
+      controller = new AbortController();
+      fetch('/api/health/remote', { signal: controller.signal })
+        .then(r => r.json())
+        .then(d => { setGatewayOk(d.available); setGatewayMsg(d.message || ''); })
+        .catch(e => { if (e.name !== 'AbortError') { setGatewayOk(false); setGatewayMsg('Could not reach health endpoint'); } });
+    };
+    check();
+    const interval = setInterval(check, 10_000);
+    return () => { controller.abort(); clearInterval(interval); };
+  }, [open, runtime]);
 
   useEffect(() => {
     if (!open) return;
@@ -70,6 +89,7 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
   const handleSubmit = async () => {
     if (!dir) return;
     setSubmitting(true);
+    setLaunchError('');
     try {
       const resp = await fetch('/api/agents/launch', {
         method: 'POST',
@@ -80,12 +100,19 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
           otel_enabled: otelEnabled, user_prompt: prompt,
         }),
       });
+      if (!resp.ok) {
+        const text = await resp.text();
+        setLaunchError(text.trim() || `Launch failed (${resp.status})`);
+        return;
+      }
       const data = await resp.json();
       onLaunched?.(provider, dir, data.tmux_session, data.sandbox_name);
       onClose();
       setDir(''); setPrompt(''); setModel(''); setProvider('claude');
       setMode('default'); setRuntime('local'); setExecution('local');
       setShell(''); setSessionMgr('tmux'); setOtelEnabled(false);
+    } catch (e) {
+      setLaunchError(e instanceof Error ? e.message : 'Launch failed — check server');
     } finally { setSubmitting(false); }
   };
 
@@ -273,6 +300,24 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
                 style={pill(runtime === r)}>{r}</button>
             ))}
           </div>
+          {runtime === 'remote' && gatewayOk !== null && (
+            <div style={{
+              marginTop: 8, padding: '6px 10px', borderRadius: 4, fontSize: 11,
+              background: gatewayOk ? 'rgba(55,163,163,0.08)' : 'var(--accent-dim)',
+              border: `1px solid ${gatewayOk ? 'var(--teal)' : 'var(--accent)'}`,
+              color: gatewayOk ? 'var(--teal)' : 'var(--accent)',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                background: gatewayOk ? 'var(--teal)' : 'var(--accent)' }} />
+              {gatewayOk
+                ? 'Gateway connected — sandbox will launch'
+                : (gatewayMsg || 'Gateway unreachable — start openshell-gateway first')}
+            </div>
+          )}
+          {runtime === 'remote' && gatewayOk === null && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--fg-4)' }}>Checking gateway…</div>
+          )}
         </div>
 
         {/* Execution */}
@@ -320,6 +365,12 @@ export function LaunchDialog({ open, onClose, onLaunched }: Props) {
         </div>
 
         {/* Submit */}
+        {launchError && (
+          <div style={{ color: 'var(--accent)', fontSize: 11, marginBottom: 8, padding: '6px 8px',
+            background: 'var(--accent-dim)', borderRadius: 4 }}>
+            {launchError}
+          </div>
+        )}
         <button onClick={handleSubmit} disabled={!dir || submitting}
           style={{ background: !dir || submitting ? 'var(--bg-3)' : 'var(--accent)',
             color: !dir || submitting ? 'var(--fg-3)' : '#fff', border: 'none', borderRadius: 6,

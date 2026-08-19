@@ -85,6 +85,7 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		"/api/costs",
 		"/api/teams",
 		"/api/health/providers",
+		"/api/health/remote",
 		"/api/history",
 		"/api/search?q=test",
 		"/api/plugins",

@@ -1,5 +1,6 @@
 import type { Agent } from '../types';
 import { StatusLabel } from '../types';
+import { normalizeLocation } from '../utils';
 
 interface Props {
   agent: Agent;
@@ -49,12 +50,20 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
-  const borderLeftColor = agent.Status === 0 ? 'var(--green)' :
+  const loc = normalizeLocation(agent);
+  const isRemote = loc === 'remote';
+  const isK8s = loc === 'k8s';
+
+  const borderLeftColor = agent.Status === 3 ? 'var(--accent)' :
     agent.Status === 2 ? 'var(--orange)' :
-    agent.Status === 3 ? 'var(--accent)' : 'var(--fg-4)';
+    isRemote ? 'var(--teal)' :
+    isK8s ? 'var(--purple)' :
+    agent.Status === 0 ? 'var(--green)' : 'var(--fg-4)';
 
   const cardBg = agent.Status === 2 ? 'var(--orange-dim)' :
-    agent.Status === 3 ? 'var(--accent-dim)' : 'var(--bg-0)';
+    agent.Status === 3 ? 'var(--accent-dim)' :
+    isRemote ? 'rgba(55,163,163,0.04)' :
+    isK8s ? 'rgba(167,114,239,0.04)' : 'var(--bg-0)';
 
   const title = agent.Title || '';
 
@@ -112,51 +121,82 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
         }}>
           {agent.TMuxSession ? 'tmux' : 'direct'}
         </span>
+        {(isRemote || isK8s) && (
+          <span style={{
+            padding: '2px 5px', borderRadius: 2, fontSize: 10, fontWeight: 700,
+            textTransform: 'uppercase', letterSpacing: '0.06em',
+            background: isRemote ? 'rgba(55,163,163,0.18)' : 'rgba(167,114,239,0.18)',
+            color: isRemote ? 'var(--teal)' : 'var(--purple)',
+          }}>
+            {isRemote ? 'sandbox' : 'k8s'}
+          </span>
+        )}
         <span style={{ fontSize: 11, color: 'var(--fg-4)', marginLeft: 'auto' }}>
           {timeSinceActivity()}
         </span>
-        {/* Star button */}
+      </div>
+
+      {/* Top-right action cluster: star + kill, both absolutely positioned */}
+      <div
+        role="presentation"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
+        style={{ position: 'absolute', top: 8, right: 10, display: 'flex', alignItems: 'center', gap: 4 }}
+      >
+        {agent.LastAction === 'Deleting' ? (
+          <span style={{
+            fontSize: 10, fontWeight: 600, color: 'var(--accent)',
+            background: 'var(--accent-dim)', padding: '2px 7px', borderRadius: 3,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+          }}>
+            Deleting…
+          </span>
+        ) : onKill && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onKill(agent.SessionID || String(agent.PID)); }}
+            className="kill-btn"
+            title="Kill session"
+            style={{
+              background: 'var(--bg-1)', border: '1px solid var(--border)',
+              color: 'var(--fg-3)', fontSize: 10, fontWeight: 600,
+              cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s, color 0.15s, border-color 0.15s',
+              padding: '2px 8px', borderRadius: 3, lineHeight: '1.4',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent)';
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-dim)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-3)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
+              (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-1)';
+            }}
+          >
+            Kill
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();
             if (onToggleStar && agent.SessionFile) onToggleStar(agent.SessionFile);
           }}
+          className="star-btn"
+          title={starred ? 'Unpin session' : 'Pin session'}
           style={{
             background: 'transparent', border: 'none',
             color: starred ? 'var(--orange)' : 'var(--fg-4)',
-            fontSize: 14, cursor: 'pointer', padding: '0 4px',
+            fontSize: 14, cursor: 'pointer', padding: '0 2px',
             opacity: starred ? 1 : 0, transition: 'opacity 0.15s',
           }}
-          className="star-btn"
-          title={starred ? 'Unpin session' : 'Pin session'}
         >
           {starred ? '★' : '☆'}
         </button>
-        {/* Kill button */}
-        {agent.LastAction !== 'Deleting' && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onKill) onKill(agent.SessionID || String(agent.PID));
-            }}
-            className="kill-btn"
-            style={{
-              background: 'transparent', border: '1px solid var(--accent)',
-              color: 'var(--accent)', fontSize: 10, fontWeight: 600,
-              cursor: 'pointer', opacity: 0, transition: 'opacity 0.15s',
-              padding: '1px 6px', borderRadius: 3, lineHeight: '1.4',
-            }}
-            title="Kill session"
-          >
-            Kill
-          </button>
-        )}
       </div>
 
-      {/* Row 2: Title (the main visual anchor) */}
+      {/* Row 2: Title (the main visual anchor) — paddingRight leaves room for the Kill button */}
       <div style={{
         fontSize: 14, fontWeight: 600, color: 'var(--fg)', lineHeight: '1.4',
-        marginBottom: 6,
+        marginBottom: 6, paddingRight: 36,
         overflow: 'hidden', textOverflow: 'ellipsis',
         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
       }}>

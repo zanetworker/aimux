@@ -39,6 +39,7 @@ export function CardGrid({
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [starredFiles, setStarredFiles] = useState<Set<string>>(new Set());
+  const [killing, setKilling] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const starred = new Set<string>();
@@ -68,12 +69,20 @@ export function CardGrid({
   };
 
   const handleKill = async (id: string) => {
+    setKilling(prev => new Set(prev).add(id));
     try {
-      await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
-      if (selectedId === id) {
-        onSelect('');
+      const resp = await fetch(`/api/agents/${id}/archive`, { method: 'POST' });
+      if (!resp.ok) {
+        setKilling(prev => { const n = new Set(prev); n.delete(id); return n; });
+        return;
       }
-    } catch { /* ignore */ }
+      if (selectedId === id) onSelect('');
+      // Safety net: clear killing state after 15s if SSE never removes the agent.
+      // Only on success — failure already cleared it above.
+      setTimeout(() => setKilling(prev => { const n = new Set(prev); n.delete(id); return n; }), 15_000);
+    } catch {
+      setKilling(prev => { const n = new Set(prev); n.delete(id); return n; });
+    }
   };
 
   const toggleGroup = (name: string) => {
@@ -242,7 +251,9 @@ export function CardGrid({
                 {groupAgents.map(agent => (
                   <div key={agent.SessionID || agent.PID} role="listitem" style={{ display: 'flex' }}>
                     <AgentCard
-                      agent={agent}
+                      agent={killing.has(agent.SessionID || agent.PID.toString())
+                        ? { ...agent, LastAction: 'Deleting' }
+                        : agent}
                       selected={selectedId === (agent.SessionID || agent.PID.toString())}
                       starred={starredFiles.has(agent.SessionFile)}
                       onClick={() => onSelect(agent.SessionID || agent.PID.toString())}
@@ -321,7 +332,15 @@ export function CardGrid({
                       <span style={{ fontSize: 13, fontFamily: 'var(--mono)', color: 'var(--green)', width: 80, textAlign: 'right', flexShrink: 0 }}>
                         ${(agent.EstCostUSD || 0).toFixed(2)}
                       </span>
-                      {agent.LastAction !== 'Deleting' && (
+                      {(agent.LastAction === 'Deleting' || killing.has(id)) ? (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, color: 'var(--accent)',
+                          background: 'var(--accent-dim)', padding: '2px 7px', borderRadius: 3,
+                          letterSpacing: '0.04em', textTransform: 'uppercase', flexShrink: 0,
+                        }}>
+                          Deleting…
+                        </span>
+                      ) : (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleKill(agent.SessionID || agent.PID.toString()); }}
                           title="Kill agent (SIGTERM)"
