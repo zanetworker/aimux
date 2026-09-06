@@ -21,6 +21,18 @@ func (m *Manager) Store() Store {
 	return m.store
 }
 
+// TransitionSession validates and applies a status transition for a session.
+func (m *Manager) TransitionSession(id string, to SessionStatus) error {
+	sess, err := m.store.Get(id)
+	if err != nil {
+		return err
+	}
+	if err := Transition(sess, to); err != nil {
+		return err
+	}
+	return m.store.Update(sess)
+}
+
 // CreateSession creates a new session with a generated UUID and persists it.
 func (m *Manager) CreateSession(provider, env, dir, model, sandboxName string) (*Session, error) {
 	now := time.Now()
