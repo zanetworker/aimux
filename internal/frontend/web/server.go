@@ -192,6 +192,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("PUT /api/agent-configs/{name}", s.handleUpdateAgentConfig)
 	mux.HandleFunc("DELETE /api/agent-configs/{name}", s.handleDeleteAgentConfig)
 	mux.HandleFunc("GET /api/environments", s.handleEnvironments)
+	mux.HandleFunc("POST /api/environments", s.handleCreateEnvironment)
+	mux.HandleFunc("DELETE /api/environments/{name}", s.handleDeleteEnvironment)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/agents/{id}/kill", s.handleKill)
 

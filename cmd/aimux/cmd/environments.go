@@ -89,7 +89,78 @@ func newEnvironmentsCmd(environments map[string]config.EnvironmentConfig) *cobra
 	}
 
 	cmd.Flags().BoolVar(&check, "check", false, "Test connectivity to each environment")
+
+	cmd.AddCommand(newEnvironmentAddCmd())
+	cmd.AddCommand(newEnvironmentRemoveCmd())
+
 	return cmd
+}
+
+func newEnvironmentAddCmd() *cobra.Command {
+	var envType, gateway, image, namespace string
+	cmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add a new environment",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			cfgPath := config.DefaultPath()
+			if cfgPath == "" {
+				return fmt.Errorf("cannot determine config path")
+			}
+
+			env := config.EnvironmentConfig{
+				Type:      envType,
+				Gateway:   gateway,
+				Image:     image,
+				Namespace: namespace,
+			}
+			if err := controller.AddEnvironment(cfgPath, name, env); err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				b, _ := json.MarshalIndent(map[string]any{"created": name, "type": envType}, "", "  ")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+			} else {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Added environment %q (type=%s)\n", name, envType)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&envType, "type", "local", "Environment type (local, openshell, k8s)")
+	cmd.Flags().StringVar(&gateway, "gateway", "", "OpenShell gateway URL")
+	cmd.Flags().StringVar(&image, "image", "", "Container image")
+	cmd.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace")
+	return cmd
+}
+
+func newEnvironmentRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "remove <name>",
+		Aliases: []string{"rm", "delete"},
+		Short:   "Remove an environment",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			cfgPath := config.DefaultPath()
+			if cfgPath == "" {
+				return fmt.Errorf("cannot determine config path")
+			}
+
+			if err := controller.RemoveEnvironment(cfgPath, name); err != nil {
+				return err
+			}
+
+			if jsonOutput {
+				b, _ := json.MarshalIndent(map[string]any{"removed": name}, "", "  ")
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+			} else {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Removed environment %q\n", name)
+			}
+			return nil
+		},
+	}
 }
 
 func checkEnvironmentHealth(ec config.EnvironmentConfig) string {

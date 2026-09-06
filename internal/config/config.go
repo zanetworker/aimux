@@ -436,6 +436,98 @@ func (c Config) IsProviderEnabled(name string) bool {
 	return pc.Enabled
 }
 
+// ValidEnvironmentTypes is the canonical list of environment types.
+var ValidEnvironmentTypes = []string{"local", "openshell", "k8s"}
+
+// ValidateEnvironmentName checks that a name is non-empty and alphanumeric+hyphens.
+func ValidateEnvironmentName(name string) error {
+	if name == "" {
+		return fmt.Errorf("environment name must not be empty")
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
+			return fmt.Errorf("environment name %q must contain only alphanumeric characters and hyphens", name)
+		}
+	}
+	if name[0] == '-' {
+		return fmt.Errorf("environment name %q must start with a letter or digit", name)
+	}
+	return nil
+}
+
+// ValidateEnvironmentConfig checks that an environment config has a valid type
+// and required fields for that type.
+func ValidateEnvironmentConfig(env EnvironmentConfig) error {
+	valid := false
+	for _, t := range ValidEnvironmentTypes {
+		if env.Type == t {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("environment type %q must be one of: %s", env.Type, strings.Join(ValidEnvironmentTypes, ", "))
+	}
+	if env.Type == "openshell" && env.Gateway == "" {
+		return fmt.Errorf("openshell environment requires a gateway URL")
+	}
+	if env.Type == "k8s" && env.Namespace == "" {
+		return fmt.Errorf("k8s environment requires a namespace")
+	}
+	return nil
+}
+
+// AddEnvironmentToConfig loads a config file, adds the named environment, and
+// writes the config back. It creates the file and parent directory if needed.
+func AddEnvironmentToConfig(path, name string, env EnvironmentConfig) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg.Environments == nil {
+		cfg.Environments = make(map[string]EnvironmentConfig)
+	}
+	cfg.Environments[name] = env
+	return saveConfigField(path, "environments", cfg.Environments)
+}
+
+// RemoveEnvironmentFromConfig loads a config file, removes the named environment,
+// and writes the config back.
+func RemoveEnvironmentFromConfig(path, name string) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if _, ok := cfg.Environments[name]; !ok {
+		return fmt.Errorf("environment %q not found", name)
+	}
+	delete(cfg.Environments, name)
+	return saveConfigField(path, "environments", cfg.Environments)
+}
+
+// saveConfigField reads the raw YAML as a map, updates a single top-level key,
+// and writes the file back. This preserves all other config untouched.
+func saveConfigField(path, key string, value interface{}) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	raw := make(map[string]interface{})
+	data, err := os.ReadFile(path) // #nosec G304
+	if err == nil {
+		_ = yaml.Unmarshal(data, &raw)
+	}
+
+	raw[key] = value
+
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	return os.WriteFile(path, out, 0o600)
+}
+
 // ArchiveThreshold returns the parsed auto-archive duration. Returns 0 if
 // the field is empty, unparseable, or explicitly set to "0".
 func (c Config) ArchiveThreshold() time.Duration {

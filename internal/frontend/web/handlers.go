@@ -1058,6 +1058,57 @@ func (s *Server) handleDeleteAgentConfig(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(map[string]any{"removed": name})
 }
 
+func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name      string `json:"name"`
+		Type      string `json:"type"`
+		Gateway   string `json:"gateway"`
+		Image     string `json:"image"`
+		Namespace string `json:"namespace"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	cfgPath := config.DefaultPath()
+	if cfgPath == "" {
+		http.Error(w, "cannot determine config path", http.StatusInternalServerError)
+		return
+	}
+	env := config.EnvironmentConfig{
+		Type:      req.Type,
+		Gateway:   req.Gateway,
+		Image:     req.Image,
+		Namespace: req.Namespace,
+	}
+	if err := controller.AddEnvironment(cfgPath, req.Name, env); err != nil {
+		http.Error(w, fmt.Sprintf("add environment: %v", err), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{"created": req.Name})
+}
+
+func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "environment name required", http.StatusBadRequest)
+		return
+	}
+	cfgPath := config.DefaultPath()
+	if cfgPath == "" {
+		http.Error(w, "cannot determine config path", http.StatusInternalServerError)
+		return
+	}
+	if err := controller.RemoveEnvironment(cfgPath, name); err != nil {
+		http.Error(w, fmt.Sprintf("remove environment: %v", err), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"removed": name})
+}
+
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	if sessionID == "" {

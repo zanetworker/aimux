@@ -137,6 +137,7 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		{"/api/agents/1/archive", nil},
 		{"/api/agents/1/annotate", map[string]interface{}{"turn": 1, "label": "GOOD"}},
 		{"/api/agent-configs", map[string]interface{}{"name": "smoke-test-agent", "harness": "claude"}},
+		{"/api/environments", map[string]interface{}{"name": "smoke-env", "type": "local"}},
 		{"/api/sessions/nonexistent/export/jsonl", nil},
 		{"/api/sessions/nonexistent/export/otel", nil},
 		{"/api/sessions/meta", map[string]interface{}{"file": "/nonexistent", "starred": true}},
@@ -190,6 +191,18 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(resp.Body)
 		checkResponse(t, "PUT", "/api/agent-configs/nonexistent", resp.StatusCode, body)
+	})
+
+	// --- DELETE environment ---
+	t.Run("DELETE /api/environments/nonexistent", func(t *testing.T) {
+		req, _ := http.NewRequest("DELETE", addr+"/api/environments/nonexistent", nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("DELETE: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+		checkResponse(t, "DELETE", "/api/environments/nonexistent", resp.StatusCode, body)
 	})
 
 	// --- DELETE agent-config ---
