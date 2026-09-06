@@ -21,6 +21,7 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 	var dir, model, mode, prompt string
 	var runtime, execution, shell, sessionMgr string
 	var envFlag string
+	var harness string
 	var otel bool
 	var dryRun bool
 	var wait bool
@@ -84,6 +85,10 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 				runtime = controller.ResolveLaunchRuntime(envCfg)
 			}
 
+			if harness == "" && matchedConfig != nil && matchedConfig.Harness != "" {
+				harness = matchedConfig.Harness
+			}
+
 			if dryRun {
 				if jsonOutput {
 					result := map[string]any{
@@ -96,6 +101,7 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 						"execution":       execution,
 						"shell":           shell,
 						"session_manager": sessionMgr,
+						"harness":         harness,
 						"otel":            otel,
 						"dry_run":         true,
 						"wait":            wait,
@@ -198,6 +204,7 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 	cmd.Flags().StringVar(&shell, "shell", "", "Login shell (default: $SHELL)")
 	cmd.Flags().StringVar(&sessionMgr, "session", "", "Session manager: tmux (default) or direct")
 	cmd.Flags().BoolVar(&otel, "otel", false, "Enable OTEL telemetry")
+	cmd.Flags().StringVar(&harness, "harness", "", "Launch harness: native (default) or claude-sdk")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show spawn command without executing")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until the spawned session exits")
 	cmd.Flags().StringVar(&deliverTarget, "deliver", "", "Delivery target: stdout (default), file:<path>, webhook:<url>")

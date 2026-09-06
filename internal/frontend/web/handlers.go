@@ -36,6 +36,7 @@ type launchRequest struct {
 	Execution      string `json:"execution"`
 	Shell          string `json:"shell"`
 	SessionManager string `json:"session_manager"`
+	Harness        string `json:"harness,omitempty"`
 	OTELEnabled    bool   `json:"otel_enabled"`
 	TaskID         string `json:"task_id,omitempty"`
 	TaskListID     string `json:"task_list_id,omitempty"`
@@ -138,6 +139,7 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"status":       "launched",
 		"tmux_session": result.TmuxSession,
+		"harness":      req.Harness,
 	}
 	if result.SandboxName != "" {
 		resp["sandbox_name"] = result.SandboxName
