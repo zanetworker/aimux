@@ -3,6 +3,7 @@ package session
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -42,7 +43,7 @@ CREATE TABLE IF NOT EXISTS session_events (
   timestamp TEXT NOT NULL,
   type TEXT NOT NULL,
   data TEXT,
-  FOREIGN KEY (session_id) REFERENCES sessions(id)
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
@@ -83,11 +84,6 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 // Close closes the underlying database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
-}
-
-// DB returns the underlying database connection for migration use.
-func (s *SQLiteStore) DB() *sql.DB {
-	return s.db
 }
 
 func (s *SQLiteStore) Create(sess *Session) error {
@@ -238,7 +234,11 @@ func (s *SQLiteStore) ListEvents(sessionID string) ([]SessionEvent, error) {
 		if err := rows.Scan(&evt.ID, &evt.SessionID, &ts, &evt.Type, &data); err != nil {
 			return nil, fmt.Errorf("sqlite store: scan event: %w", err)
 		}
-		evt.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
+		var parseErr error
+		evt.Timestamp, parseErr = time.Parse(time.RFC3339Nano, ts)
+		if parseErr != nil {
+			return nil, fmt.Errorf("sqlite store: parse event timestamp %q: %w", ts, parseErr)
+		}
 		if data.Valid {
 			evt.Data = data.String
 		}
@@ -276,8 +276,15 @@ func scanFromRow(s scanner) (*Session, error) {
 	}
 
 	sess.Status = SessionStatus(status)
-	sess.StartTime, _ = time.Parse(time.RFC3339Nano, startTime)
-	sess.LastActivity, _ = time.Parse(time.RFC3339Nano, lastActivity)
+	var parseErr error
+	sess.StartTime, parseErr = time.Parse(time.RFC3339Nano, startTime)
+	if parseErr != nil {
+		return nil, fmt.Errorf("sqlite store: parse start_time %q: %w", startTime, parseErr)
+	}
+	sess.LastActivity, parseErr = time.Parse(time.RFC3339Nano, lastActivity)
+	if parseErr != nil {
+		return nil, fmt.Errorf("sqlite store: parse last_activity %q: %w", lastActivity, parseErr)
+	}
 	if agentConfig.Valid {
 		sess.AgentConfig = agentConfig.String
 	}
@@ -311,18 +318,5 @@ func scanSessionRows(rows *sql.Rows) (*Session, error) {
 }
 
 func isUniqueViolation(err error) bool {
-	return err != nil && contains(err.Error(), "UNIQUE constraint failed")
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

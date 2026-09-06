@@ -273,6 +273,51 @@ func TestSQLiteStore_NewFields(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_DeleteCascadesEvents(t *testing.T) {
+	store := tempSQLiteStore(t)
+	if err := store.Create(testSession("s1", "claude", "local", "/tmp")); err != nil {
+		t.Fatal(err)
+	}
+
+	evt1 := &session.SessionEvent{
+		SessionID: "s1",
+		Timestamp: time.Now(),
+		Type:      "started",
+	}
+	evt2 := &session.SessionEvent{
+		SessionID: "s1",
+		Timestamp: time.Now(),
+		Type:      "tool_call",
+		Data:      `{"tool": "bash"}`,
+	}
+	if err := store.AddEvent("s1", evt1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddEvent("s1", evt2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete session should cascade to events
+	if err := store.Delete("s1"); err != nil {
+		t.Fatalf("Delete session with events: %v", err)
+	}
+
+	// Session should be gone
+	_, err := store.Get("s1")
+	if err == nil {
+		t.Fatal("expected not-found after delete")
+	}
+
+	// Events should also be gone
+	events, err := store.ListEvents("s1")
+	if err != nil {
+		t.Fatalf("ListEvents after cascade delete: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected 0 events after cascade delete, got %d", len(events))
+	}
+}
+
 func TestSQLiteStore_CompileTimeCheck(t *testing.T) {
 	var _ session.Store = (*session.SQLiteStore)(nil)
 }

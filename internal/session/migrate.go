@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -37,5 +38,6 @@ func MigrateFromJSON(jsonPath string, store *SQLiteStore) error {
 		}
 	}
 
+	log.Printf("migrate: imported %d sessions from %s", len(data), jsonPath)
 	return nil
 }
