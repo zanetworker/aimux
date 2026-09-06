@@ -108,8 +108,8 @@ func TestSubprocess_SendReceive(t *testing.T) {
 	}
 	defer sub.Stop()
 
-	// Send a prompt, expect a tool_call back.
-	err = sub.Send(Event{Type: EventPrompt, Content: "Fix the bug"})
+	// Send a prompt (mock-sdk uses this as bash command), expect a tool_call back.
+	err = sub.Send(Event{Type: EventPrompt, Content: "echo protocol-test"})
 	if err != nil {
 		t.Fatalf("Send prompt: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestSubprocess_SendReceive(t *testing.T) {
 	}
 
 	// Send tool_result, expect text + completion.
-	err = sub.Send(Event{Type: EventToolResult, ID: "tc_1", Output: "hello from mock"})
+	err = sub.Send(Event{Type: EventToolResult, ID: "tc_1", Output: "protocol-test-output"})
 	if err != nil {
 		t.Fatalf("Send tool_result: %v", err)
 	}
@@ -141,8 +141,8 @@ func TestSubprocess_SendReceive(t *testing.T) {
 	if ev.Type != EventText {
 		t.Fatalf("expected text, got %q", ev.Type)
 	}
-	if ev.Content != "Mock analysis: hello from mock" {
-		t.Errorf("text content = %q, want %q", ev.Content, "Mock analysis: hello from mock")
+	if ev.Content != "protocol-test-output" {
+		t.Errorf("text content = %q, want %q", ev.Content, "protocol-test-output")
 	}
 
 	ev, err = sub.Receive()

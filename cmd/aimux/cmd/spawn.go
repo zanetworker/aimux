@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +14,8 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/deliver"
+	"github.com/zanetworker/aimux/internal/environment"
+	"github.com/zanetworker/aimux/internal/sdk"
 	"github.com/zanetworker/aimux/internal/spawn"
 )
 
@@ -124,6 +128,11 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 				return nil
 			}
 
+			// SDK mode: interactive session with tool dispatch
+			if harness == "claude-sdk" || harness == "sdk" {
+				return runSDKSession(cmd, provider, dir, prompt, envFlag, environments)
+			}
+
 			if spawnAgent == nil {
 				return fmt.Errorf("spawn not configured")
 			}
@@ -209,4 +218,61 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until the spawned session exits")
 	cmd.Flags().StringVar(&deliverTarget, "deliver", "", "Delivery target: stdout (default), file:<path>, webhook:<url>")
 	return cmd
+}
+
+func runSDKSession(cmd *cobra.Command, provider, dir, prompt string, envName string, environments map[string]config.EnvironmentConfig) error {
+	sdkBinary, err := exec.LookPath("mock-sdk")
+	if err != nil {
+		sdkBinary, err = exec.LookPath("aimux-mock-sdk")
+		if err != nil {
+			return fmt.Errorf("SDK mode requires mock-sdk binary in PATH (build with: go build -o ~/go/bin/mock-sdk ./cmd/mock-sdk)")
+		}
+	}
+
+	env := environment.NewLocalEnvironment()
+	sandbox := ""
+
+	ctx := context.Background()
+	sess, err := sdk.NewSDKSession(ctx, sdkBinary, env, sandbox)
+	if err != nil {
+		return fmt.Errorf("start SDK session: %w", err)
+	}
+	defer sess.Stop()
+
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "SDK session started (binary: %s, env: local)\n", sdkBinary)
+
+	if prompt != "" {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n> %s\n", prompt)
+		output, err := sess.Run(ctx, prompt)
+		if err != nil {
+			return fmt.Errorf("SDK session error: %w", err)
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", output)
+	}
+
+	// Interactive loop: read prompts from stdin
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		_, _ = fmt.Fprint(cmd.OutOrStdout(), "\n> ")
+		if !scanner.Scan() {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if line == "exit" || line == "quit" {
+			break
+		}
+
+		output, err := sess.Run(ctx, line)
+		if err != nil {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "error: %v\n", err)
+			continue
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n", output)
+	}
+
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "SDK session ended.")
+	return nil
 }

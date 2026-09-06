@@ -11,7 +11,6 @@ import (
 
 func TestSDKSession_FullLoop(t *testing.T) {
 	binary := buildMockSDK(t)
-	tmpDir := t.TempDir()
 	env := environment.NewLocalEnvironment()
 
 	ctx := context.Background()
@@ -21,19 +20,19 @@ func TestSDKSession_FullLoop(t *testing.T) {
 	}
 	defer sess.Stop()
 
-	output, err := sess.Run(ctx, "list files in "+tmpDir)
+	output, err := sess.Run(ctx, "echo sdk-mode-works")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The mock SDK sends a bash tool_call "echo hello from mock".
-	// The dispatcher routes it to LocalEnvironment.Exec which runs "sh -c echo hello from mock".
-	// The mock SDK receives the tool_result and sends text "Mock analysis: ..." + completion.
+	// The mock SDK uses the prompt as a bash command.
+	// Dispatcher routes it to LocalEnvironment.Exec → "sh -c echo sdk-mode-works".
+	// Mock SDK receives the tool_result and sends the output as text + completion.
 	if output == "" {
 		t.Error("expected non-empty output")
 	}
-	if !strings.Contains(output, "hello from mock") {
-		t.Errorf("output should contain tool result echo; got %q", output)
+	if !strings.Contains(output, "sdk-mode-works") {
+		t.Errorf("output should contain command output; got %q", output)
 	}
 }
 
