@@ -123,7 +123,7 @@ func TestIntegration_AgentsYAMLLoading(t *testing.T) {
 	dir := t.TempDir()
 	content := `
 - name: my-reviewer
-  runtime: claude
+  harness: claude
   model: opus
   prompt: "Review this code"
 `
@@ -142,8 +142,8 @@ func TestIntegration_AgentsYAMLLoading(t *testing.T) {
 	if agents[0].Name != "my-reviewer" {
 		t.Errorf("Name = %q, want my-reviewer", agents[0].Name)
 	}
-	if agents[0].Runtime != "claude" {
-		t.Errorf("Runtime = %q, want claude", agents[0].Runtime)
+	if agents[0].Harness != "claude" {
+		t.Errorf("Harness = %q, want claude", agents[0].Harness)
 	}
 
 	// Verify config.Load picks up agents.yaml from same directory

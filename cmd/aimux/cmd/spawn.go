@@ -49,7 +49,7 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 			}
 
 			if matchedConfig != nil {
-				provider = matchedConfig.Runtime
+				provider = matchedConfig.Harness
 				if model == "" && matchedConfig.Model != "" {
 					model = matchedConfig.Model
 				}

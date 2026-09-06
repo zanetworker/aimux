@@ -10,7 +10,7 @@ func TestLoadAgents_ValidYAML(t *testing.T) {
 	dir := t.TempDir()
 	content := `
 - name: reviewer
-  runtime: claude
+  harness: claude
   model: opus
   prompt: "Review code for bugs"
   mcp:
@@ -19,7 +19,7 @@ func TestLoadAgents_ValidYAML(t *testing.T) {
     - code-review
   policy: strict
 - name: writer
-  runtime: codex
+  harness: codex
   inference: openai
   model: o3
   prompt: "Write tests"
@@ -38,8 +38,8 @@ func TestLoadAgents_ValidYAML(t *testing.T) {
 	if agents[0].Name != "reviewer" {
 		t.Errorf("agents[0].Name = %q, want reviewer", agents[0].Name)
 	}
-	if agents[0].Runtime != "claude" {
-		t.Errorf("agents[0].Runtime = %q, want claude", agents[0].Runtime)
+	if agents[0].Harness != "claude" {
+		t.Errorf("agents[0].Harness = %q, want claude", agents[0].Harness)
 	}
 	if agents[0].Model != "opus" {
 		t.Errorf("agents[0].Model = %q, want opus", agents[0].Model)
@@ -96,12 +96,12 @@ func TestLoadAgentsMerged_GlobalAndProject(t *testing.T) {
 
 	globalContent := `
 - name: reviewer
-  runtime: claude
+  harness: claude
   model: opus
 `
 	projectContent := `
 - name: local-helper
-  runtime: codex
+  harness: codex
   model: o3
 `
 	if err := os.WriteFile(filepath.Join(globalDir, "agents.yaml"), []byte(globalContent), 0o600); err != nil {
@@ -137,12 +137,12 @@ func TestLoadAgentsMerged_ProjectOverridesGlobal(t *testing.T) {
 
 	globalContent := `
 - name: reviewer
-  runtime: claude
+  harness: claude
   model: opus
 `
 	projectContent := `
 - name: reviewer
-  runtime: claude
+  harness: claude
   model: sonnet
 `
 	if err := os.WriteFile(filepath.Join(globalDir, "agents.yaml"), []byte(globalContent), 0o600); err != nil {

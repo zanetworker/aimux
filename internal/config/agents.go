@@ -11,7 +11,7 @@ import (
 // AgentConfig defines a named agent configuration loaded from agents.yaml.
 type AgentConfig struct {
 	Name      string   `yaml:"name"`
-	Runtime   string   `yaml:"runtime"`
+	Harness   string   `yaml:"harness"`
 	Inference string   `yaml:"inference,omitempty"`
 	Model     string   `yaml:"model,omitempty"`
 	Prompt    string   `yaml:"prompt,omitempty"`

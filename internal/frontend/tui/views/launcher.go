@@ -146,10 +146,10 @@ type LauncherView struct {
 
 // AgentConfigEntry is a named agent config displayed in the launcher.
 type AgentConfigEntry struct {
-	Name     string
-	Runtime  string
-	Model    string
-	Prompt   string
+	Name    string
+	Harness string
+	Model   string
+	Prompt  string
 }
 
 // ProviderOptions holds the models and modes for a specific provider.
@@ -354,7 +354,7 @@ func (l *LauncherView) selectedIsConfig() bool {
 
 func (l *LauncherView) selectedProviderName() string {
 	if l.selectedIsConfig() {
-		return l.agentConfigs[l.providerCursor].Runtime
+		return l.agentConfigs[l.providerCursor].Harness
 	}
 	return l.providers[l.providerCursor-len(l.agentConfigs)]
 }
@@ -811,9 +811,9 @@ func (l *LauncherView) viewProvider() string {
 			}
 			label := style.Render(ac.Name)
 			if ac.Model != "" {
-				label += "  " + launcherDimStyle.Render(ac.Runtime+"/"+ac.Model)
+				label += "  " + launcherDimStyle.Render(ac.Harness+"/"+ac.Model)
 			} else {
-				label += "  " + launcherDimStyle.Render(ac.Runtime)
+				label += "  " + launcherDimStyle.Render(ac.Harness)
 			}
 			b.WriteString(cursor + label + "\n")
 			idx++

@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/evaluation"
@@ -960,7 +962,7 @@ func (s *Server) handleEnvironments(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAgentConfigs(w http.ResponseWriter, r *http.Request) {
 	type entry struct {
 		Name      string   `json:"name"`
-		Runtime   string   `json:"runtime"`
+		Harness   string   `json:"harness"`
 		Inference string   `json:"inference,omitempty"`
 		Model     string   `json:"model,omitempty"`
 		Prompt    string   `json:"prompt,omitempty"`
@@ -972,7 +974,7 @@ func (s *Server) handleAgentConfigs(w http.ResponseWriter, r *http.Request) {
 	for i, ac := range s.cfg.AgentConfigs {
 		configs[i] = entry{
 			Name:      ac.Name,
-			Runtime:   ac.Runtime,
+			Harness:   ac.Harness,
 			Inference: ac.Inference,
 			Model:     ac.Model,
 			Prompt:    ac.Prompt,
@@ -983,6 +985,77 @@ func (s *Server) handleAgentConfigs(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"configs": configs})
+}
+
+func (s *Server) agentsDir() string {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".aimux", "agents")
+}
+
+func (s *Server) handleCreateAgentConfig(w http.ResponseWriter, r *http.Request) {
+	var ac config.AgentConfig
+	if err := json.NewDecoder(r.Body).Decode(&ac); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	dir := s.agentsDir()
+	if dir == "" {
+		http.Error(w, "cannot determine home directory", http.StatusInternalServerError)
+		return
+	}
+	if err := controller.CreateAgent(dir, ac); err != nil {
+		http.Error(w, fmt.Sprintf("create agent: %v", err), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{"created": ac.Name})
+}
+
+func (s *Server) handleUpdateAgentConfig(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "agent name required", http.StatusBadRequest)
+		return
+	}
+	var updates config.AgentConfig
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	dir := s.agentsDir()
+	if dir == "" {
+		http.Error(w, "cannot determine home directory", http.StatusInternalServerError)
+		return
+	}
+	if err := controller.UpdateAgent(dir, name, updates); err != nil {
+		http.Error(w, fmt.Sprintf("update agent: %v", err), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"updated": name})
+}
+
+func (s *Server) handleDeleteAgentConfig(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "agent name required", http.StatusBadRequest)
+		return
+	}
+	dir := s.agentsDir()
+	if dir == "" {
+		http.Error(w, "cannot determine home directory", http.StatusInternalServerError)
+		return
+	}
+	if err := controller.RemoveAgent(dir, name); err != nil {
+		http.Error(w, fmt.Sprintf("remove agent: %v", err), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"removed": name})
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {

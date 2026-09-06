@@ -193,7 +193,7 @@ func (a App) openLauncher() (tea.Model, tea.Cmd) {
 	for _, ac := range a.cfg.AgentConfigs {
 		agentEntries = append(agentEntries, views.AgentConfigEntry{
 			Name:    ac.Name,
-			Runtime: ac.Runtime,
+			Harness: ac.Harness,
 			Model:   ac.Model,
 			Prompt:  ac.Prompt,
 		})

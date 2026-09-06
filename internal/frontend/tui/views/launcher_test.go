@@ -478,8 +478,8 @@ func TestLauncherEnvironmentViewRenders(t *testing.T) {
 func TestLauncherNamedConfigs_ShowsConfiguredSection(t *testing.T) {
 	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
 	configs := []AgentConfigEntry{
-		{Name: "reviewer", Runtime: "claude", Model: "opus"},
-		{Name: "writer", Runtime: "codex", Model: "o3"},
+		{Name: "reviewer", Harness: "claude", Model: "opus"},
+		{Name: "writer", Harness: "codex", Model: "o3"},
 	}
 	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
 		DefaultRuntime: "local",
@@ -502,7 +502,7 @@ func TestLauncherNamedConfigs_ShowsConfiguredSection(t *testing.T) {
 func TestLauncherNamedConfigs_SelectConfigSetsProvider(t *testing.T) {
 	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
 	configs := []AgentConfigEntry{
-		{Name: "reviewer", Runtime: "claude", Model: "opus"},
+		{Name: "reviewer", Harness: "claude", Model: "opus"},
 	}
 	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
 		DefaultRuntime: "local",
@@ -527,7 +527,7 @@ func TestLauncherNamedConfigs_SelectConfigSetsProvider(t *testing.T) {
 func TestLauncherNamedConfigs_SelectRawProvider(t *testing.T) {
 	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
 	configs := []AgentConfigEntry{
-		{Name: "reviewer", Runtime: "claude", Model: "opus"},
+		{Name: "reviewer", Harness: "claude", Model: "opus"},
 	}
 	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
 		DefaultRuntime: "local",
