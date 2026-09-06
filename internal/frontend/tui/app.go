@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -12,31 +11,29 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/cache"
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
-	"github.com/zanetworker/aimux/internal/debuglog"
+	"github.com/zanetworker/aimux/internal/coordination"
 	"github.com/zanetworker/aimux/internal/correlator"
+	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/environment"
 	"github.com/zanetworker/aimux/internal/evaluation"
+	"github.com/zanetworker/aimux/internal/frontend/tui/views"
 	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/jump"
-	"github.com/zanetworker/aimux/internal/notify"
-	"github.com/zanetworker/aimux/internal/provider"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
+	"github.com/zanetworker/aimux/internal/plugin"
+	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/session"
 	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/subagent"
-	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/team"
-	"github.com/zanetworker/aimux/internal/clipboard"
 	"github.com/zanetworker/aimux/internal/terminal"
 	"github.com/zanetworker/aimux/internal/trace"
-	"github.com/zanetworker/aimux/internal/plugin"
-	"github.com/zanetworker/aimux/internal/frontend/tui/views"
 )
 
 type viewType int
@@ -104,29 +101,29 @@ type App struct {
 	height      int
 
 	// Sub-views
-	headerView  *views.HeaderView
-	agentsView  *views.AgentsView
-	previewPane *views.PreviewPane
-	sessionView *views.SessionView
-	logsView    *views.LogsView
-	costsView    *views.CostsView
-	teamsView    *views.TeamsView
+	headerView     *views.HeaderView
+	agentsView     *views.AgentsView
+	previewPane    *views.PreviewPane
+	sessionView    *views.SessionView
+	logsView       *views.LogsView
+	costsView      *views.CostsView
+	teamsView      *views.TeamsView
 	sessionsView   *views.SessionsView
 	starredView    *views.SessionsView
 	cachedSessions []history.Session
 	helpView       *views.HelpView
-	healthView   *views.HealthView
+	healthView     *views.HealthView
 
 	// Layout
 	layout *Layout
 	zoomed bool
 
 	// Split mode: trace (left) + interactive session (right)
-	splitMode      bool
-	splitFocus     string          // "trace" or "session"
-	splitTrace     *views.LogsView // live trace pane in split mode
-	splitLaunchTime time.Time      // when :new session was launched (filters old files)
-	splitLoading   bool            // true while session is connecting (before first output)
+	splitMode       bool
+	splitFocus      string          // "trace" or "session"
+	splitTrace      *views.LogsView // live trace pane in split mode
+	splitLaunchTime time.Time       // when :new session was launched (filters old files)
+	splitLoading    bool            // true while session is connecting (before first output)
 
 	// Command palette
 	commandMode   bool
@@ -135,8 +132,8 @@ type App struct {
 	stickyHint    bool // true = statusHint persists until keypress (not cleared by tick)
 
 	// Preview panel focus (agents dashboard)
-	previewFocused  bool   // true when right panel has focus
-	previewSection  string // "trace" or "diff" — which section is active in right panel
+	previewFocused bool   // true when right panel has focus
+	previewSection string // "trace" or "diff" — which section is active in right panel
 
 	// Filter mode
 	filterMode  bool
@@ -169,10 +166,8 @@ type App struct {
 	pluginPicker     *views.PluginPickerView
 	pluginPickerMode bool
 
-	// Remote provider (e.g., K8s): stored separately from polling providers.
-	// Only queried on-demand (tasks view, :new spawn) — never on every tick.
-	// Uses the InfraProvider interface to avoid coupling to a concrete type.
-	infraProvider provider.InfraProvider
+	// Registered environments for lifecycle operations (kill, health, tasks, messaging).
+	environments []environment.Environment
 
 	// Compose engine for OpenShell sandbox operations
 	composeEngine *aimuxcompose.Engine
@@ -187,8 +182,8 @@ type App struct {
 	archivedCount int  // number of currently archived agents
 
 	// Evaluation: annotation persistence
-	evalStore      *evaluation.Store
-	evalSessionID  string
+	evalStore     *evaluation.Store
+	evalSessionID string
 
 	// Notifications
 	prevStatuses   map[int]agent.Status // PID -> last known status for transition detection
@@ -198,12 +193,13 @@ type App struct {
 	// Config
 	cfg       config.Config
 	ctrl      *controller.Controller
+	coord     coordination.Coordinator
 	launchDir string // CWD when aimux was started; used as default session scope
 
 	// OTEL receiver (optional)
-	otelReceiver    *aimuxotel.Receiver
-	otelStore       *aimuxotel.SpanStore
-	lastEnrichTime  time.Time
+	otelReceiver   *aimuxotel.Receiver
+	otelStore      *aimuxotel.SpanStore
+	lastEnrichTime time.Time
 
 	// Startup cache: tracks which PIDs came from cache (stale) vs fresh discovery
 	staleAgents map[int]bool
@@ -215,6 +211,7 @@ type App struct {
 	pendingAgents map[string]agent.Agent
 
 	remoteSessionIDs *controller.SessionStore
+	sessionMgr       *session.Manager
 
 	// Live trace streaming: tailer watches the session JSONL and signals
 	// traceRefresh when new lines are appended.
@@ -223,10 +220,10 @@ type App struct {
 }
 
 // NewApp creates a new root TUI application.
-func newOrchestrator(providers []discovery.AgentProvider, cfg config.Config) *discovery.Orchestrator {
+func newOrchestrator(providers []discovery.AgentProvider, envs []environment.Environment) *discovery.Orchestrator {
 	o := discovery.NewOrchestrator(providers...)
-	if cfg.Remote.Backend == "openshell" {
-		o.EnableRemoteDiscovery()
+	for _, env := range envs {
+		o.AddEnvironment(env)
 	}
 	return o
 }
@@ -242,15 +239,24 @@ func NewApp() App {
 
 	ctrl := controller.New(cfg)
 
+	// Create coordinator based on config
+	var coord coordination.Coordinator
+	if cfg.Coordination.RedisURL != "" {
+		coord, _ = coordination.NewRedisCoordinator(cfg.Coordination.RedisURL, cfg.Coordination.TeamID)
+	} else if cfg.Kubernetes.RedisURL != "" {
+		coord, _ = coordination.NewRedisCoordinator(cfg.Kubernetes.RedisURL, cfg.Kubernetes.TeamID)
+	}
+	if coord == nil {
+		coord = coordination.NewLocalCoordinator()
+	}
+
 	allProviders := []provider.Provider{
 		&provider.Claude{},
 		&provider.Codex{},
 	}
 
-	// K8s provider participates in discovery (agents table) but is also
-	// stored as a InfraProvider for on-demand operations (spawn, tasks,
-	// health check). Concrete type used only here; stored via interface.
-	var infraProv provider.InfraProvider
+	// K8s provider participates in provider-level operations (ParseTrace).
+	// Discovery and lifecycle are handled by K8sEnvironment.
 	if cfg.Kubernetes.IsActive() {
 		k8s := provider.NewK8s(provider.K8sConfig{
 			RedisURL:   cfg.Kubernetes.RedisURL,
@@ -259,7 +265,6 @@ func NewApp() App {
 			Kubeconfig: cfg.Kubernetes.Kubeconfig,
 		})
 		allProviders = append(allProviders, k8s)
-		infraProv = k8s
 	}
 
 	// Filter to enabled providers only.
@@ -292,36 +297,60 @@ func NewApp() App {
 		staleAgents[a.PID] = true
 	}
 
+	// Build environments for remote agent discovery and lifecycle.
+	var envs []environment.Environment
+	if cfg.Remote.Backend == "openshell" {
+		osEnv := environment.NewOpenShellEnvironment("openshell", environment.OpenShellConfig{
+			Gateway:  cfg.Remote.Gateway,
+			Insecure: true,
+			Image:    cfg.Remote.Image,
+		})
+		envs = append(envs, osEnv)
+	}
+	if cfg.Kubernetes.IsActive() {
+		k8sEnv := environment.NewK8sEnvironment("k8s", environment.K8sEnvironmentConfig{
+			RedisURL:   cfg.Kubernetes.RedisURL,
+			TeamID:     cfg.Kubernetes.TeamID,
+			Namespace:  cfg.Kubernetes.Namespace,
+			Kubeconfig: cfg.Kubernetes.Kubeconfig,
+		})
+		envs = append(envs, k8sEnv)
+	}
+
+	orch := newOrchestrator(agentProviders, envs)
+
 	app := App{
-		currentView:  viewAgents,
-		headerView:   views.NewHeaderView(),
-		agentsView:   views.NewAgentsView(),
-		previewPane:  views.NewPreviewPane(),
-		sessionView:  views.NewSessionView(),
-		costsView:     views.NewCostsView(),
-		sessionsView:  views.NewSessionsView(),
-		starredView:   views.NewSessionsView(),
-		teamsView:    views.NewTeamsView(),
-		helpView:     views.NewHelpView(),
-		healthView:   views.NewHealthView(),
-		tasksView:    views.NewTasksView(),
-		layout:       NewLayout(0, 0),
-		orchestrator: newOrchestrator(agentProviders, cfg),
-		providers:    providers,
-		breadcrumbs:    []string{"Agents"},
-		hiddenAgents:   make(map[string]bool),
-		prevStatuses:   make(map[int]agent.Status),
-		doneTimestamps: make(map[int]time.Time),
-		cfg:            cfg,
-		ctrl:           ctrl,
-		launchDir:      launchDir,
-		otelStore:      aimuxotel.NewSpanStore(),
-		infraProvider:  infraProv,
-		instances:      cachedAgents,
-		staleAgents:    staleAgents,
+		currentView:      viewAgents,
+		headerView:       views.NewHeaderView(),
+		agentsView:       views.NewAgentsView(),
+		previewPane:      views.NewPreviewPane(),
+		sessionView:      views.NewSessionView(),
+		costsView:        views.NewCostsView(),
+		sessionsView:     views.NewSessionsView(),
+		starredView:      views.NewSessionsView(),
+		teamsView:        views.NewTeamsView(),
+		helpView:         views.NewHelpView(),
+		healthView:       views.NewHealthView(),
+		tasksView:        views.NewTasksView(),
+		layout:           NewLayout(0, 0),
+		orchestrator:     orch,
+		providers:        providers,
+		breadcrumbs:      []string{"Agents"},
+		hiddenAgents:     make(map[string]bool),
+		prevStatuses:     make(map[int]agent.Status),
+		doneTimestamps:   make(map[int]time.Time),
+		cfg:              cfg,
+		ctrl:             ctrl,
+		coord:            coord,
+		launchDir:        launchDir,
+		otelStore:        aimuxotel.NewSpanStore(),
+		environments:     envs,
+		instances:        cachedAgents,
+		staleAgents:      staleAgents,
 		pendingAgents:    make(map[string]agent.Agent),
 		remoteSessionIDs: controller.NewSessionStore(aimuxConfigDir()),
-		traceRefresh:   make(chan struct{}, 1),
+		sessionMgr:       session.NewManager(session.NewFileStore(filepath.Join(aimuxConfigDir(), "sessions.json"))),
+		traceRefresh:     make(chan struct{}, 1),
 	}
 
 	// Start OTEL receiver if enabled
@@ -569,12 +598,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.headerView.SetSilenced(a.silenced)
 		a.costsView.SetAgents(a.instances)
 
-		// Update infra status in header
-		if a.infraProvider != nil {
-			a.headerView.SetK8sStatus(a.infraProvider.Status())
-		}
-		// OpenShell status check is dispatched as an async command
-		// so it never blocks the TUI event loop.
+		// Environment health checks dispatched as async commands.
 
 		// Refresh tasks only when viewing the tasks tab
 		if a.currentView == viewTasks {
@@ -683,58 +707,52 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusHint = fmt.Sprintf("Launch failed: unknown provider %q", msg.Provider)
 			return a, nil
 		}
-		cmd := p.SpawnCommand(msg.Dir, msg.Model, msg.Mode)
-		envPrefix := ""
-		if msg.OTELEnabled && a.cfg.OTELReceiver.Enabled {
-			endpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
-			envPrefix = p.OTELEnv(endpoint)
+
+		// Resolve runtime from environment when set
+		runtime := msg.Runtime
+		if msg.Environment != "" {
+			if envCfg, ok := a.cfg.Environments[msg.Environment]; ok {
+				runtime = controller.ResolveLaunchRuntime(envCfg)
+			} else {
+				a.statusHint = fmt.Sprintf("Launch failed: unknown environment %q", msg.Environment)
+				return a, nil
+			}
 		}
-		shell := msg.Shell
-		if shell == "" {
-			shell = a.cfg.ResolveShell()
-		}
-		sessionMgr := msg.SessionManager
-		if sessionMgr == "" {
-			sessionMgr = "tmux"
-		}
-		if msg.Runtime == "remote" {
+
+		// Remote path: async launch with TUI-specific loading state
+		if runtime == "remote" {
 			if a.composeEngine == nil {
 				a.statusHint = "Remote launch requires OpenShell backend — check config remote.backend and gateway"
 				return a, nil
 			}
-
-			// Always inject OTEL for remote sessions since file-based tracing
-			// doesn't work (no local session file).
-			otelPort := a.cfg.OTELReceiverPort()
-			otelEndpoint := fmt.Sprintf("http://localhost:%d", otelPort)
-			debuglog.Log("remote launch: otel_enabled=%v port=%d endpoint=%s",
-				a.cfg.OTELReceiver.Enabled, otelPort, otelEndpoint)
-
-			// Show loading state immediately so user sees feedback.
-			// Don't zoom yet — keep the agent list visible so the user has context.
+			otelEndpoint := fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
 			a.splitMode = true
+			a.zoomed = true
 			a.splitLoading = true
-			a.statusHint = fmt.Sprintf("⏳ Creating sandbox for %s in %s — please wait...", msg.Provider, filepath.Base(msg.Dir))
+			a.layout.SetZoomed(true)
+			a.statusHint = fmt.Sprintf("Launching %s remotely...", msg.Provider)
 
 			sOpts := aimuxcompose.LaunchOpts{
 				Image:        a.cfg.Remote.Image,
 				OTELEndpoint: otelEndpoint,
 			}
-
-			// Run launch async so the TUI stays responsive
 			provider, dir, model := msg.Provider, msg.Dir, msg.Model
 			return a, func() tea.Msg {
 				result, err := a.composeEngine.LaunchInSandbox(provider, dir, sOpts)
 				return remoteLaunchResultMsg{
-					provider: provider,
-					dir:      dir,
-					model:    model,
-					result:   result,
-					err:      err,
+					provider: provider, dir: dir, model: model,
+					result: result, err: err,
 				}
 			}
-		} else if msg.Runtime == "container" {
-			cOpts := spawn.ContainerOpts{}
+		}
+
+		// Local/container: build spec via shared controller, execute
+		otelEndpoint := ""
+		if msg.OTELEnabled && a.cfg.OTELReceiver.Enabled {
+			otelEndpoint = fmt.Sprintf("http://localhost:%d", a.cfg.OTELReceiverPort())
+		}
+		cOpts := spawn.ContainerOpts{}
+		if runtime == "container" {
 			for _, rt := range a.cfg.Runtimes {
 				if rt.Type == "container" {
 					cOpts.Engine = rt.Engine
@@ -742,21 +760,37 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			if err := spawn.LaunchInContainer(cmd, msg.Provider, msg.Dir, shell, envPrefix, cOpts); err != nil {
-				a.statusHint = fmt.Sprintf("Container launch failed: %v", err)
-				return a, nil
-			}
-		} else {
-			if err := spawn.Launch(cmd, msg.Provider, msg.Dir, sessionMgr, shell, envPrefix); err != nil {
-				a.statusHint = fmt.Sprintf("Launch failed: %v", err)
-				return a, nil
-			}
+		}
+		spec := controller.BuildLaunchSpec(p, controller.LaunchRequest{
+			Dir:            msg.Dir,
+			Model:          msg.Model,
+			Mode:           msg.Mode,
+			Shell:          msg.Shell,
+			SessionManager: msg.SessionManager,
+			OTELEnabled:    msg.OTELEnabled,
+			OTELEndpoint:   otelEndpoint,
+			Runtime:        runtime,
+			ContainerOpts:  cOpts,
+		})
+		if spec.Shell == "/bin/sh" && a.cfg.ResolveShell() != "" {
+			spec.Shell = a.cfg.ResolveShell()
+		}
+		if _, err := controller.ExecuteLocalLaunch(spec); err != nil {
+			a.statusHint = fmt.Sprintf("Launch failed: %v", err)
+			return a, nil
 		}
 
+		envName := msg.Environment
+		if envName == "" {
+			envName = runtime
+		}
+		if _, err := a.sessionMgr.CreateSession(msg.Provider, envName, msg.Dir, msg.Model, ""); err != nil {
+			debuglog.Log("session create failed: %v", err)
+		}
 		name := filepath.Base(msg.Dir)
 
 		// Immediately open split view (both local and container use tmux)
-		if msg.Runtime == "local" || msg.Runtime == "container" {
+		if runtime == "local" || runtime == "container" {
 			tmuxName := spawn.TmuxSessionName(msg.Provider, msg.Dir)
 
 			// Size the session view
@@ -787,8 +821,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Model:        msg.Model,
 				StartTime:    time.Now(),
 				LastActivity: time.Now(),
-				GroupCount:    1,
-				GroupPIDs:     []int{},
+				GroupCount:   1,
+				GroupPIDs:    []int{},
 			}
 
 			// Track as pending so it survives instancesMsg replacements
@@ -799,7 +833,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			teaCmd, err := a.sessionView.Open(newAgent, backend)
 			if err != nil {
-				a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, msg.Runtime)
+				runtimeLabel := runtime
+				if msg.Environment != "" {
+					runtimeLabel = msg.Environment
+				}
+				a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, runtimeLabel)
 				return a, nil
 			}
 
@@ -831,7 +869,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(teaCmd, a.pollSessionFile(pollDeadline))
 		}
 
-		a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, msg.Runtime)
+		runtimeLabel := runtime
+		if msg.Environment != "" {
+			runtimeLabel = msg.Environment
+		}
+		a.statusHint = fmt.Sprintf("Launched %s in %s (%s)", msg.Provider, name, runtimeLabel)
 		return a, nil
 
 	case views.LaunchCancelMsg:
@@ -1076,7 +1118,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		newAgent := &agent.Agent{
-			Name:         result.SandboxName,
+			Name:         name,
 			ProviderName: msg.provider,
 			WorkingDir:   msg.dir,
 			SessionID:    result.OTELSessionID,
@@ -1096,6 +1138,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Provider:  msg.provider,
 			Dir:       msg.dir,
 		})
+		if _, err := a.sessionMgr.CreateSession(msg.provider, "remote", msg.dir, msg.model, result.SandboxName); err != nil {
+			debuglog.Log("session create failed: %v", err)
+		}
 		a.instances = append(a.instances, *newAgent)
 		a.agentsView.SetAgents(a.instances)
 
@@ -1215,193 +1260,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleZoomedKey processes keys while the session view is zoomed in.
 // In split mode: Tab switches focus, Ctrl+g exits, keys go to focused pane.
 // In full-screen mode: Ctrl+g/]/\ exits, all other keys go to PTY.
-func (a App) handleZoomedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
-	debuglog.Log("tui: zoomed key received: %q (bytes: %x)", key, []byte(key))
-
-	// Clear status hints on any keypress (e.g., "Launched..." or export result)
-	a.statusHint = ""
-	a.stickyHint = false
-
-	// Exit keys — always work regardless of mode/focus
-	switch key {
-	case "ctrl+]", "ctrl+\\", "ctrl+g", "ctrl+q":
-		debuglog.Log("tui: exit zoom triggered by key %q", key)
-		return a.exitZoom()
-	}
-	if len(key) == 1 && key[0] == 0x1d {
-		debuglog.Log("tui: exit zoom triggered by raw 0x1d")
-		return a.exitZoom()
-	}
-
-	// Esc in split mode: clear trace filter if active, otherwise forward to PTY.
-	// Esc is NOT used to exit zoom — use Ctrl+]/g/\ instead.
-	// This allows shell features like Ctrl+R (reverse search) to work normally.
-	if key == "esc" {
-		if a.splitMode && a.splitFocus == "trace" && a.splitTrace != nil && a.splitTrace.HasActiveFilter() {
-			a.splitTrace.Update(msg)
-			return a, nil
-		}
-		// Forward Esc to PTY (needed for Ctrl+R cancel, vim escape, etc.)
-		a.sessionView.SendKey(key)
-		return a, nil
-	}
-
-	// Ctrl+b toggles permission mode: close PTY, relaunch with toggled mode
-	if key == "ctrl+b" {
-		return a, func() tea.Msg { return views.SessionTogglePermsMsg{} }
-	}
-
-	// Ctrl+f toggles split/fullscreen — zooms whichever pane is focused
-	if key == "ctrl+f" && a.splitTrace != nil {
-		a.splitMode = !a.splitMode
-		if !a.splitMode {
-			// Full-screen the focused pane
-			if a.splitFocus == "trace" {
-				a.splitTrace.SetSize(a.width, a.height-1)
-			} else {
-				a.sessionView.SetSize(a.width, a.height)
-			}
-		} else {
-			// Return to split
-			leftW := a.width * 40 / 100
-			rightW := a.width - leftW - 1
-			a.sessionView.SetSize(rightW, a.height)
-			a.splitTrace.SetSize(leftW, a.height-3)
-		}
-		return a, nil
-	}
-
-	// Tab switches focus
-	if key == "tab" && a.splitMode {
-		if a.splitFocus == "trace" {
-			a.splitFocus = "session"
-		} else {
-			a.splitFocus = "trace"
-		}
-		return a, nil
-	}
-	if key == "tab" && a.currentView == viewAgents && !a.commandMode && !a.filterMode {
-		a.previewFocused = !a.previewFocused
-		if a.previewFocused {
-			if a.previewSection == "" {
-				a.previewSection = "trace"
-			}
-			a.statusHint = fmt.Sprintf("Preview [%s] (Tab:back, j/k:scroll, up/down:switch section)", a.previewSection)
-		} else {
-			a.statusHint = ""
-		}
-		return a, nil
-	}
-
-	// Command palette -- intercept ":" before routing to trace or PTY
-	if key == ":" {
-		a.commandMode = true
-		a.commandInput.Reset()
-		return a, nil
-	}
-
-	// Route keys to trace pane when focused (both split and fullscreen trace)
-	if a.splitFocus == "trace" && a.splitTrace != nil {
-		// Intercept "e" for export only when NOT in note/filter input mode
-		if key == "e" && !a.splitTrace.HasActiveFilter() && !a.splitTrace.NoteMode() {
-			a.exportConfirm = true
-			a.statusHint = "Export: j:JSONL  o:OTEL  Esc:cancel"
-			a.stickyHint = true
-			return a, nil
-		}
-		// Intercept "$" for cost-per-turn toggle
-		if key == "$" {
-			a.splitTrace.ToggleCostPerTurn()
-			return a, nil
-		}
-		if key == "*" {
-			return a.starFromTrace(a.splitTrace.FilePath())
-		}
-		if key == "C" {
-			return a.copySessionIDFromTrace()
-		}
-		cmd := a.splitTrace.Update(msg)
-		return a, cmd
-	}
-
-	// Intercept scroll keys in session view
-	if tv := a.sessionView.TermView(); tv != nil {
-		switch key {
-		case "pgup":
-			tv.ScrollUp(tv.Height() / 2)
-			return a, nil
-		case "pgdown":
-			tv.ScrollDown(tv.Height() / 2)
-			return a, nil
-		case "shift+up":
-			tv.ScrollUp(1)
-			return a, nil
-		case "shift+down":
-			tv.ScrollDown(1)
-			return a, nil
-		}
-	}
-
-	// Send to PTY session
-	a.sessionView.SendKey(key)
-	return a, nil
-}
-
-func (a App) exitZoom() (tea.Model, tea.Cmd) {
-	// Use splitTrace nil check for TUI-specific full-screen detection:
-	// the Navigator only tracks state booleans, not TUI objects.
-	canReturnToSplit := !a.splitMode && a.splitTrace != nil
-	if canReturnToSplit {
-		a.ctrl.Nav.SplitMode = false // ensure Navigator matches before ExitZoom
-		a.ctrl.Nav.Zoomed = true
-	}
-
-	exitedFully := a.ctrl.Nav.ExitZoom()
-
-	if !exitedFully {
-		// Returned to split view
-		a.splitMode = true
-		a.splitFocus = a.ctrl.Nav.SplitFocus
-		// Resize back to split layout
-		leftW := a.width * 40 / 100
-		rightW := a.width - leftW - 1
-		a.sessionView.SetSize(rightW, a.height)
-		a.splitTrace.SetSize(leftW, a.height-3)
-		return a, nil
-	}
-
-	// Fully exited
-	a.stopActiveTailer()
-	a.zoomed = false
-	a.splitMode = false
-	a.splitTrace = nil
-	a.splitLaunchTime = time.Time{}
-	a.splitLoading = false
-	a.layout.SetZoomed(false)
-	a.sessionView.Close()
-	return a, nil
-}
-
-// returnToAgentsIfZoomed exits zoom/split mode after a kill and returns to the
-// agents list. If the user is already on the agents list, it's a no-op.
-func (a App) returnToAgentsIfZoomed() (tea.Model, tea.Cmd) {
-	if a.zoomed || a.splitMode || a.splitTrace != nil {
-		a.stopActiveTailer()
-		a.zoomed = false
-		a.splitMode = false
-		a.splitTrace = nil
-		a.splitLaunchTime = time.Time{}
-		a.splitLoading = false
-		a.layout.SetZoomed(false)
-		a.sessionView.Close()
-	}
-	a.currentView = viewAgents
-	a.stickyHint = true
-	return a, nil
-}
-
 func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Clear any status hint on keypress
 	a.statusHint = ""
@@ -1775,171 +1633,6 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // syncPreview updates the preview pane with the currently selected agent.
-func (a *App) syncPreview() {
-	selected := a.agentsView.Selected()
-	if selected != nil {
-		if selected.Location == "remote" {
-			sandboxName := selected.SandboxName
-			if sandboxName == "" {
-				sandboxName = selected.Name
-			}
-			sessionID := selected.SessionID
-			if !controller.UUIDValid(sessionID) {
-				if mapped := a.remoteSessionIDs.Get(sandboxName); mapped != "" {
-					sessionID = mapped
-					debuglog.Log("syncPreview: recovered session %s for sandbox %s", sessionID, sandboxName)
-				} else {
-					debuglog.Log("syncPreview: no session in map for sandbox %q", sandboxName)
-				}
-			}
-			a.previewPane.SetParser(a.parserForRemote(sessionID, sandboxName))
-		} else if p := a.providerFor(selected.ProviderName); p != nil {
-			a.previewPane.SetParser(a.parserForProvider(p))
-		}
-	}
-	a.previewPane.SetAgent(selected)
-}
-
-// refreshTasks queries all providers that implement TaskLister and updates
-// the tasks view and header summary with the aggregated results.
-func (a *App) refreshTasks() {
-	var allTasks []task.Task
-
-	// Only query K8s when user is actively viewing tasks — not on every tick.
-	if a.infraProvider != nil && a.currentView == viewTasks {
-		tasks, _ := a.infraProvider.ListTasks()
-		allTasks = append(allTasks, tasks...)
-	}
-
-	a.tasksView.SetTasks(allTasks)
-
-	// Compute summary counts for the header
-	pending, active, completed, failed := 0, 0, 0, 0
-	for _, t := range allTasks {
-		switch t.Status {
-		case task.StatusPending:
-			pending++
-		case task.StatusInProgress, task.StatusClaimed:
-			active++
-		case task.StatusCompleted:
-			completed++
-		case task.StatusFailed, task.StatusDead:
-			failed++
-		}
-	}
-	a.headerView.SetTaskSummary(pending, active, completed, failed)
-}
-
-// parserForProvider returns a TraceParser function that checks the OTEL store
-// first (if receiver is enabled and has data), then falls back to the provider's
-// file-based ParseTrace.
-func (a App) parserForProvider(p provider.Provider) views.TraceParser {
-	return func(filePath string) ([]trace.Turn, error) {
-		// File-based parsing for display (has full response text).
-		// OTEL receiver still collects data for :export-otel to MLflow/Jaeger.
-		if filePath != "" {
-			turns, err := p.ParseTrace(filePath)
-			if err == nil && len(turns) > 0 {
-				// For :new launches, filter out turns from before the launch
-				// to avoid showing traces from previous sessions in the same dir.
-				if !a.splitLaunchTime.IsZero() {
-					var filtered []trace.Turn
-					for _, t := range turns {
-						// Skip turns from before launch: either explicitly old
-						// or missing timestamp (unparsed entries from old sessions)
-						if t.Timestamp.IsZero() || t.Timestamp.Before(a.splitLaunchTime) {
-							continue
-						}
-						filtered = append(filtered, t)
-					}
-					if len(filtered) > 0 {
-						// Re-number turns
-						for i := range filtered {
-							filtered[i].Number = i + 1
-						}
-						return filtered, nil
-					}
-					// All turns are old, fall through to OTEL
-				} else {
-					return turns, nil
-				}
-			}
-		}
-
-		// Fall back to OTEL when file isn't available yet
-		// (newly launched sessions before session file is created)
-		if a.otelStore != nil && a.otelStore.HasData() {
-			var sessionIDs []string
-
-			if selected := a.agentsView.Selected(); selected != nil && selected.SessionID != "" {
-				sessionIDs = append(sessionIDs, selected.SessionID)
-			}
-			if a.sessionView != nil && a.sessionView.Agent() != nil {
-				ag := a.sessionView.Agent()
-				if ag.SessionID != "" {
-					sessionIDs = append(sessionIDs, ag.SessionID)
-				}
-				if ag.TMuxSession != "" {
-					sessionIDs = append(sessionIDs, ag.TMuxSession)
-				}
-			}
-
-			for _, id := range sessionIDs {
-				if root := a.otelStore.GetByConversation(id); root != nil {
-					turns := aimuxotel.SpansToTurns(root)
-					if len(turns) > 0 {
-						return turns, nil
-					}
-				}
-			}
-		}
-		return nil, nil
-	}
-}
-
-func (a App) parserForRemote(otelSessionID, sandboxName string) views.TraceParser {
-	return func(_ string) ([]trace.Turn, error) {
-		// Shared path: direct OTEL lookup + session-file fallback.
-		turns := controller.RemoteTraceParser(a.otelStore, otelSessionID, sandboxName)
-		if len(turns) > 0 {
-			return turns, nil
-		}
-
-		// TUI-specific: when the session ID injection failed, scan all
-		// conversations and exclude known local sessions to find the
-		// remote one by elimination.
-		if a.otelStore != nil && a.otelStore.HasData() {
-			localIDs := make(map[string]bool)
-			if a.agentsView != nil {
-				for _, ag := range a.agentsView.Agents() {
-					if ag.Location != "remote" && ag.SessionID != "" {
-						localIDs[ag.SessionID] = true
-					}
-				}
-			}
-			for _, convID := range a.otelStore.ConversationIDs() {
-				if localIDs[convID] {
-					continue
-				}
-				root := a.otelStore.GetByConversation(convID)
-				if root == nil {
-					continue
-				}
-				turns := aimuxotel.SpansToTurns(root)
-				if len(turns) > 0 {
-					if sandboxName != "" {
-						replies := aimuxotel.FetchSessionReplies(sandboxName, otelSessionID)
-						aimuxotel.EnrichTurnsWithReplies(turns, replies)
-					}
-					return turns, nil
-				}
-			}
-		}
-
-		return turns, nil
-	}
-}
-
 func (a App) handleCommandInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -2021,1665 +1714,3 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 // sendMessageToSelected sends a message to the currently selected K8s agent
 // via its Redis inbox. Only works for providers implementing Messenger.
 // Usage: :send <text>
-func (a App) sendMessageToSelected(text string) (tea.Model, tea.Cmd) {
-	if text == "" {
-		a.statusHint = "Usage: :send <message text>"
-		return a, nil
-	}
-	selected := a.agentsView.Selected()
-	if selected == nil {
-		a.statusHint = "No agent selected"
-		return a, nil
-	}
-	p := a.providerFor(selected.ProviderName)
-	if p == nil {
-		a.statusHint = "No provider for " + selected.ProviderName
-		return a, nil
-	}
-	m, ok := p.(provider.Messenger)
-	if !ok {
-		a.statusHint = selected.ProviderName + " does not support messaging"
-		return a, nil
-	}
-	if err := m.SendMessage(selected.SessionID, text); err != nil {
-		a.statusHint = "Send failed: " + err.Error()
-		return a, nil
-	}
-	a.statusHint = fmt.Sprintf("Sent to %s: %s", selected.SessionID, text)
-	return a, nil
-}
-
-func (a App) openHealth() (tea.Model, tea.Cmd) {
-	// Count active agents per provider from current instances.
-	counts := make(map[string]int)
-	for _, ag := range a.instances {
-		counts[ag.ProviderName]++
-	}
-
-	health := provider.GatherHealthWithRemote(a.providers, a.infraProvider, counts, provider.RemoteHealthConfig{
-		Backend: a.cfg.Remote.Backend,
-		Gateway: a.cfg.Remote.Gateway,
-	})
-	a.healthView.SetHealth(health)
-	a.healthView.SetSize(a.width, a.height)
-	return a.navigateTo(viewHealth, "Health")
-}
-
-func (a App) openLauncher() (tea.Model, tea.Cmd) {
-	// Build recent dirs list from all enabled providers.
-	type dirEntry struct {
-		path     string
-		lastUsed time.Time
-		provider string
-	}
-	byPath := make(map[string]*dirEntry)
-
-	for _, p := range a.providers {
-		for _, rd := range p.RecentDirs(20) {
-			if existing, ok := byPath[rd.Path]; ok {
-				existing.provider = "both"
-				if rd.LastUsed.After(existing.lastUsed) {
-					existing.lastUsed = rd.LastUsed
-				}
-			} else {
-				byPath[rd.Path] = &dirEntry{
-					path:     rd.Path,
-					lastUsed: rd.LastUsed,
-					provider: p.Name(),
-				}
-			}
-		}
-	}
-
-	// Sort by most recent first
-	sorted := make([]*dirEntry, 0, len(byPath))
-	for _, de := range byPath {
-		sorted = append(sorted, de)
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].lastUsed.After(sorted[j].lastUsed)
-	})
-	if len(sorted) > 20 {
-		sorted = sorted[:20]
-	}
-
-	var entries []views.RecentDirEntry
-	for _, de := range sorted {
-		display := filepath.Base(de.path)
-		if display == "" || display == "." {
-			display = de.path
-		}
-		age := ""
-		if !de.lastUsed.IsZero() {
-			age = formatDurationShort(time.Since(de.lastUsed))
-		}
-		entries = append(entries, views.RecentDirEntry{
-			Path:     de.path,
-			Display:  display,
-			Provider: de.provider,
-			Age:      age,
-		})
-	}
-
-	// Build provider options from CLI agent providers only.
-	// K8s is a runtime (where agents run), not a provider (which agent).
-	providerOpts := make(map[string]views.ProviderOptions)
-	for _, p := range a.providers {
-		if p.Name() == "k8s" {
-			continue
-		}
-		sa := p.SpawnArgs()
-		providerOpts[p.Name()] = views.ProviderOptions{
-			Models: sa.Models,
-			Modes:  sa.Modes,
-		}
-	}
-
-	a.launcherView = views.NewLauncherView(entries, providerOpts, a.cfg.OTELReceiver.Enabled, views.LauncherConfig{
-			DefaultRuntime:        a.cfg.Runtime,
-			DefaultExecution:      a.cfg.Execution,
-			DefaultShell:          a.cfg.ResolveShell(),
-			DefaultSessionManager: a.cfg.SessionManager,
-			DefaultMode:           a.cfg.DefaultMode,
-			RemoteAvailable:       a.composeEngine != nil,
-		})
-	if len(a.cfg.QuickLaunch.Directories) > 0 {
-		a.launcherView.SetQuickDirs(a.cfg.QuickLaunch.Directories)
-	}
-	a.launcherView.SetSize(a.width, a.height)
-	a.launcherActive = true
-	return a, nil
-}
-
-// NOTE: The former NewPicker overlay (openNewPicker, handleNewSession, handleNewTask,
-// dismissPicker, pickerError, buildRecentDirs) has been removed. The :new command now
-// opens the Launcher directly. The NewPicker view file (views/newpicker.go) is kept
-// for reference but is no longer wired.
-//
-// Capabilities that existed in the NewPicker but are NOT yet in the Launcher:
-//   - Task mode: fire-and-forget prompt execution (local + remote via K8s)
-//   - Remote (pod) session launch via infraProvider.SpawnSession
-//   - K8s health status bar display
-// These should be added as new Launcher states/axes in a future pass.
-
-func formatDurationShort(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds ago", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-}
-
-func (a App) handleEnter() (tea.Model, tea.Cmd) {
-	if a.currentView != viewAgents {
-		return a, nil
-	}
-	selected := a.agentsView.Selected()
-	if selected == nil {
-		return a, nil
-	}
-
-	// K8s session pods: attach via kubectl exec + tmux.
-	if strings.HasPrefix(selected.SessionID, "pod-") {
-		return a.openK8sSession(selected)
-	}
-
-	// Remote sandbox sessions: re-enter the tmux session.
-	// Guard against racing an in-flight launch: while a remote launch is
-	// still setting up (splitLoading), the sandbox already shows up as a
-	// discovered agent. Opening it here would create a second tmux session
-	// that competes with the launch's session, and the two stomp each other
-	// (orphaned backends, killed sessions, "no current target" on keys).
-	if selected.Location == "remote" {
-		if a.splitLoading {
-			a.statusHint = "Sandbox is still launching, please wait..."
-			return a, nil
-		}
-		return a.openRemoteSession(selected)
-	}
-
-	p := a.providerFor(selected.ProviderName)
-	if p == nil {
-		a.statusHint = "No provider for " + selected.ProviderName
-		return a, nil
-	}
-
-	// Resolve session file for the trace pane via the provider.
-	sessionFile := selected.SessionFile
-	if sessionFile == "" {
-		sessionFile = p.FindSessionFile(*selected)
-	}
-
-	cmd := p.ResumeCommand(*selected)
-	if cmd == nil {
-		// No resume possible — fall back to trace-only view
-		if sessionFile == "" {
-			a.statusHint = "No trace data yet — agent may still be starting"
-			return a, nil
-		}
-		return a.openLogsForAgent(selected, sessionFile)
-	}
-
-	// Size the session view for the right half
-	rightW := a.width * 60 / 100
-	a.sessionView.SetSize(rightW, a.height)
-
-	contentH := a.height - 2
-	if contentH < 1 {
-		contentH = 24
-	}
-	contentW := rightW
-	if contentW < 1 {
-		contentW = 80
-	}
-
-	// Build OTEL env prefix for the provider (used by both PTY and tmux paths)
-	otelEnvPrefix := ""
-	if endpoint := a.cfg.OTELEndpoint(); endpoint != "" {
-		otelEnvPrefix = p.OTELEnv(endpoint)
-	}
-
-	// Pick backend: direct PTY for embeddable providers, tmux mirror for others
-	var backend terminal.SessionBackend
-	if p.CanEmbed() {
-		// Inject OTEL env vars into the command's environment
-		if otelEnvPrefix != "" {
-			cmd.Env = otelEnvForCmd(cmd, otelEnvPrefix)
-		}
-		sess, err := terminal.Start(cmd)
-		if err != nil {
-			a.statusHint = fmt.Sprintf("Error: %v", err)
-			return a, nil
-		}
-		backend = sess
-	} else {
-		// Use tmux mirror — attach to existing session if available, else create
-		var err error
-		if selected.TMuxSession != "" {
-			backend, err = terminal.AttachTmux(selected.TMuxSession, contentW, contentH)
-		} else {
-			backend, err = terminal.StartTmux(cmd, contentW, contentH, a.cfg.ResolveShell(), otelEnvPrefix)
-		}
-		if err != nil {
-			a.statusHint = fmt.Sprintf("Tmux mirror failed: %v", err)
-			return a, nil
-		}
-	}
-
-	// Set perm mode indicator from the running agent's known mode
-	permMode := selected.PermissionMode
-	if permMode == "" || permMode == "default" {
-		permMode = "default"
-	}
-	a.sessionView.SetPermMode(permMode)
-
-	teaCmd, err := a.sessionView.Open(selected, backend)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("Error: %v", err)
-		return a, nil
-	}
-
-	// Create live trace pane with annotations loaded
-	if sessionFile != "" {
-		leftW := a.width - rightW
-		a.splitTrace = views.NewLogsView(selected.PID, sessionFile, a.parserForProvider(p))
-		a.splitTrace.SetSessionCost(selected.EstCostUSD)
-		a.splitTrace.SetSize(leftW, a.height-1)
-
-		// Set up evaluation store and load annotations into split trace
-		sessionID := selected.SessionID
-		if sessionID == "" {
-			sessionID = fmt.Sprintf("pid-%d", selected.PID)
-		}
-		a.evalSessionID = sessionID
-		a.evalStore = evaluation.NewStore(sessionID)
-		annotations, _ := a.evalStore.Load()
-		annotMap := make(map[int]string)
-		noteMap := make(map[int]string)
-		for _, ann := range annotations {
-			annotMap[ann.Turn] = ann.Label
-			if ann.Note != "" {
-				noteMap[ann.Turn] = ann.Note
-			}
-		}
-		a.splitTrace.SetAnnotations(annotMap)
-		a.splitTrace.SetNotes(noteMap)
-
-		// Start live file tailer for real-time trace updates.
-		a.activeTailer = startTraceTailer(sessionFile, a.traceRefresh)
-	}
-
-	a.zoomed = true
-	a.splitMode = true
-	a.splitFocus = "trace" // start with focus on the trace pane (left)
-	a.splitLoading = true   // show loading placeholder until first PTY output
-	a.layout.SetZoomed(true)
-	cmds := []tea.Cmd{teaCmd}
-	if a.activeTailer != nil {
-		cmds = append(cmds, a.waitForTraceRefresh())
-	}
-	return a, tea.Batch(cmds...)
-}
-
-// openK8sSession attaches to a K8s session pod via kubectl exec + tmux.
-// The pod runs `sleep infinity` with a tmux session named "main" inside.
-func (a App) openK8sSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
-	// Don't try to exec into unhealthy pods.
-	if selected.Status == agent.StatusError {
-		a.statusHint = fmt.Sprintf("Cannot attach: pod is unhealthy (%s)", selected.LastAction)
-		a.stickyHint = true
-		return a, nil
-	}
-
-	// Extract pod name and namespace from SessionID and WorkingDir.
-	podName := strings.TrimPrefix(selected.SessionID, "pod-")
-	namespace := "agents"
-	if parts := strings.SplitN(strings.TrimPrefix(selected.WorkingDir, "k8s://"), "/", 2); len(parts) == 2 {
-		namespace = parts[0]
-	}
-
-	// K8s sessions are zoomed full-screen (not split), so use full width.
-	contentW := a.width
-	contentH := a.height - 2
-	if contentW < 1 {
-		contentW = 80
-	}
-	if contentH < 1 {
-		contentH = 24
-	}
-
-	backend, err := terminal.NewKubectlExec(podName, namespace, "", contentW, contentH)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("kubectl exec failed: %v", err)
-		return a, nil
-	}
-
-	a.sessionView.SetSize(a.width, a.height)
-	teaCmd, err := a.sessionView.Open(selected, backend)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("Error: %v", err)
-		return a, nil
-	}
-
-	// Set up the remote session: env vars, tmux, then claude.
-	// kubectl exec gives us a bash shell. We set env vars, start tmux
-	// (for session persistence), then launch claude inside tmux.
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-
-		// Set TERM for color support.
-		if _, err := backend.Write([]byte("export TERM=xterm-256color\n")); err != nil {
-			debuglog.Log("k8s setup: write TERM failed: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-
-		// Forward non-secret config env vars from local shell.
-		// Credentials (API keys, GCP ADC) are NOT forwarded here.
-		// They're injected via K8s secrets (created by auto-provisioning
-		// in ensureAuthSecrets or manually via kubectl create secret).
-		// Only non-sensitive configuration values are sent via terminal.
-		configEnvVars := []string{
-			"CLAUDE_CODE_USE_VERTEX",
-			"CLOUD_ML_REGION",
-			"ANTHROPIC_VERTEX_PROJECT_ID",
-			"ANTHROPIC_VERTEX_REGION",
-		}
-		for _, key := range configEnvVars {
-			if val := os.Getenv(key); val != "" {
-				_, _ = fmt.Fprintf(backend, "export %s=%q\n", key, val)
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-
-		// Launch claude. Use exec to replace the shell so there's no
-		// command echo or leftover shell prompt. The clear removes
-		// any env export output from the screen.
-		if _, err := backend.Write([]byte("cd /workspace 2>/dev/null\n")); err != nil {
-			debuglog.Log("k8s setup: write cd failed: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-		if _, err := backend.Write([]byte("clear && exec claude\n")); err != nil {
-			debuglog.Log("k8s setup: write claude launch failed: %v", err)
-		}
-	}()
-
-	a.zoomed = true
-	a.splitMode = false
-	a.layout.SetZoomed(true)
-	return a, teaCmd
-}
-
-// openRemoteSession re-enters a remote sandbox by opening a fresh
-// "openshell sandbox connect" PTY (no tmux). The sandbox is a gateway
-// resource that persists across connects, so a new connection reattaches to
-// the same sandbox each time.
-func (a App) openRemoteSession(selected *agent.Agent) (tea.Model, tea.Cmd) {
-	rightW := a.width * 60 / 100
-	a.sessionView.SetSize(rightW, a.height)
-
-	contentH := a.height - 2
-	if contentH < 1 {
-		contentH = 24
-	}
-	contentW := rightW
-	if contentW < 1 {
-		contentW = 80
-	}
-
-	sandboxName := selected.SandboxName
-	if sandboxName == "" {
-		sandboxName = selected.Name
-	}
-
-	backend, err := terminal.NewOpenShellExec(sandboxName, "", false, contentW, contentH)
-	if err != nil {
-		debuglog.Log("remote session: openshell connect FAILED for %s: %v", sandboxName, err)
-		a.statusHint = fmt.Sprintf("Cannot connect to %s: %v", selected.Name, err)
-		return a, nil
-	}
-	debuglog.Log("remote session: connected to sandbox %s", sandboxName)
-
-	// Resolve the pinned Claude session UUID. The selected agent is usually the
-	// orchestrator-discovered record, which lacks it, so recover it from the
-	// launch-time map keyed by sandbox name.
-	sessionID := selected.SessionID
-	if !controller.UUIDValid(sessionID) {
-		if mapped := a.remoteSessionIDs.Get(sandboxName); mapped != "" {
-			sessionID = mapped
-			debuglog.Log("remote session: recovered pinned session id %s for %s", sessionID, sandboxName)
-		}
-	}
-
-	teaCmd, err := a.sessionView.Open(selected, backend)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("Error: %v", err)
-		return a, nil
-	}
-
-	// A fresh connect gives a bare shell (the previous agent process ended
-	// when the last connection closed). Resume the same Claude session so the
-	// conversation and telemetry session.id continue, keeping the trace pane's
-	// history. With the pinned UUID we resume it explicitly; without it we fall
-	// back to --continue (Claude resumes its most recent conversation on disk).
-	resumeCmd := controller.RemoteAgentCommand(selected.ProviderName, sessionID, true)
-	if resumeCmd == selected.ProviderName && selected.ProviderName == "claude" {
-		resumeCmd = "claude --continue"
-	}
-	go sendAgentCommand(backend, resumeCmd)
-
-	// Reattaching to a full-screen agent leaves a stale screen; nudge a
-	// redraw once the reconnect settles.
-	go nudgeRedraw(backend, contentW, contentH)
-
-	// Set up split view with trace pane on the left
-	leftW := a.width - rightW - 1
-	a.splitLaunchTime = time.Now()
-	a.evalSessionID = sessionID
-
-	// Use OTEL parser for remote sessions (no local session file)
-	remoteParser := a.parserForRemote(sessionID, sandboxName)
-	a.splitTrace = views.NewLogsView(0, "", remoteParser)
-	a.splitTrace.SetSize(leftW, a.height-1)
-
-	a.zoomed = true
-	a.splitMode = true
-	a.splitFocus = "session"
-	a.splitLoading = true
-	a.layout.SetZoomed(true)
-	a.statusHint = fmt.Sprintf("Attached to %s", selected.Name)
-	return a, teaCmd
-}
-
-// sendAgentCommand waits briefly for the sandbox shell to be ready, then types
-// the given command into the PTY. Runs in its own goroutine so the TUI stays
-// responsive while the connection establishes.
-func sendAgentCommand(backend terminal.SessionBackend, cmd string) {
-	time.Sleep(3 * time.Second)
-	if _, err := backend.Write([]byte(cmd + "\n")); err != nil {
-		debuglog.Log("remote: failed to send agent command %q: %v", cmd, err)
-		return
-	}
-	debuglog.Log("remote: sent agent command %q", cmd)
-}
-
-// nudgeRedraw forces a full repaint of a full-screen TUI (e.g. claude) that is
-// being reattached to after a reconnect. Reattaching to a running TUI leaves a
-// stale/garbled screen until the app receives a window-size change; toggling
-// the PTY size by one column and back delivers two SIGWINCHs that trigger a
-// clean redraw. Runs in its own goroutine after the connection settles.
-func nudgeRedraw(backend terminal.SessionBackend, cols, rows int) {
-	if cols < 2 || rows < 1 {
-		return
-	}
-	time.Sleep(1500 * time.Millisecond)
-	_ = backend.Resize(cols-1, rows)
-	time.Sleep(150 * time.Millisecond)
-	_ = backend.Resize(cols, rows)
-	debuglog.Log("remote: sent redraw nudge (%dx%d)", cols, rows)
-}
-
-// providerFor returns the full provider.Provider whose Name() matches, or nil.
-func (a App) providerFor(name string) provider.Provider {
-	for _, p := range a.providers {
-		if p.Name() == name {
-			return p
-		}
-	}
-	return nil
-}
-
-func (a App) handleJump() (tea.Model, tea.Cmd) {
-	selected := a.agentsView.Selected()
-	if selected == nil {
-		return a, nil
-	}
-	// J always opens a zoomed session (same as Enter)
-	return a.handleEnter()
-}
-
-func (a App) exportTrace() (tea.Model, tea.Cmd) {
-	ctx := a.buildExportContext()
-	if ctx.SessionID == "" || len(ctx.Turns) == 0 {
-		a.statusHint = "Open a trace first (l on an agent or Enter for split view), then :export"
-		return a, nil
-	}
-
-	result, err := a.ctrl.ExportJSONL(ctx)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("Export failed: %v", err)
-		a.stickyHint = true
-		return a, nil
-	}
-
-	a.statusHint = fmt.Sprintf("Exported %d turns to %s (press any key to dismiss)", result.Count, result.Path)
-	a.stickyHint = true
-	return a, nil
-}
-
-// exportOTEL sends the current trace + annotations as OTLP/HTTP spans to
-// the configured export endpoint (e.g., MLflow, Jaeger).
-func (a App) exportOTEL() (tea.Model, tea.Cmd) {
-	ctx := a.buildExportContext()
-	if ctx.SessionID == "" || len(ctx.Turns) == 0 {
-		a.statusHint = "Open a trace first (l on an agent or Enter for split view), then :export-otel"
-		return a, nil
-	}
-
-	result, err := a.ctrl.ExportOTEL(ctx)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("OTEL export failed: %v", err)
-		a.stickyHint = true
-		return a, nil
-	}
-
-	a.statusHint = fmt.Sprintf("Exported %d turns to %s (press any key to dismiss)", result.Count, result.Path)
-	a.stickyHint = true
-	return a, nil
-}
-
-// jumpToSession opens the selected agent's session in a separate terminal pane
-// (iTerm split or tmux pane). Used for providers like Codex whose TUI can't embed.
-func (a App) jumpToSession() (tea.Model, tea.Cmd) {
-	selected := a.agentsView.Selected()
-	if selected == nil {
-		a.statusHint = "No agent selected"
-		return a, nil
-	}
-
-	p := a.providerFor(selected.ProviderName)
-	if p == nil {
-		a.statusHint = "No provider for " + selected.ProviderName
-		return a, nil
-	}
-
-	cmd := p.ResumeCommand(*selected)
-	if cmd == nil {
-		a.statusHint = "Cannot resume this session"
-		return a, nil
-	}
-
-	// Build the command string for the external terminal
-	cmdStr := strings.Join(cmd.Args, " ")
-	if cmd.Dir != "" {
-		cmdStr = fmt.Sprintf("cd %q && %s", cmd.Dir, cmdStr)
-	}
-
-	if jump.IsITerm2() {
-		if err := jump.ITerm2SplitPane(cmdStr); err != nil {
-			a.statusHint = fmt.Sprintf("iTerm split failed: %v", err)
-		} else {
-			a.statusHint = "Opened in iTerm split pane"
-		}
-	} else if jump.IsInsideTmux() {
-		// Create a tmux split pane
-		tmuxCmd := exec.Command("tmux", "split-window", "-h", cmdStr) // #nosec G204
-		if err := tmuxCmd.Run(); err != nil {
-			a.statusHint = fmt.Sprintf("tmux split failed: %v", err)
-		} else {
-			a.statusHint = "Opened in tmux split pane"
-		}
-	} else {
-		a.statusHint = fmt.Sprintf("Run manually: %s", cmdStr)
-	}
-
-	return a, nil
-}
-
-// resumeSession opens a past session in split view: trace on left, live Claude on right.
-// Mirrors handleEnter() but builds the command from session history instead of a running agent.
-// The mode parameter controls permission mode ("bypass", "plan", etc.); empty or "default" means no flag.
-func (a App) resumeSession(sessionID, workingDir, sessionFilePath, mode string) (tea.Model, tea.Cmd) {
-	debuglog.Log("tui: resumeSession start: id=%q dir=%q file=%q mode=%q", sessionID, workingDir, sessionFilePath, mode)
-
-	claudeBin := "claude"
-	if path, err := exec.LookPath("claude"); err == nil {
-		claudeBin = path
-	}
-
-	if workingDir != "" {
-		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
-			// valid
-		} else {
-			debuglog.Log("tui: resumeSession: workingDir %q not found", workingDir)
-			a.statusHint = "Cannot resolve project directory for resume"
-			return a, nil
-		}
-	}
-	cmd := controller.ResumeCommand(claudeBin, sessionID, workingDir, mode)
-
-	// Size the session view for the right half
-	rightW := a.width * 60 / 100
-	a.sessionView.SetSize(rightW, a.height)
-
-	// Start embedded PTY (Claude supports embedding)
-	debuglog.Log("tui: resumeSession: starting PTY for %q", claudeBin)
-	sess, err := terminal.Start(cmd)
-	if err != nil {
-		debuglog.Log("tui: resumeSession: PTY start failed: %v", err)
-		a.statusHint = fmt.Sprintf("Resume failed: %v", err)
-		return a, nil
-	}
-	debuglog.Log("tui: resumeSession: PTY started, opening session view")
-
-	// Build a minimal agent for the session view
-	resumeAgent := &agent.Agent{
-		ProviderName: "claude",
-		SessionID:    sessionID,
-		WorkingDir:   workingDir,
-	}
-
-	a.sessionView.SetPermMode(mode)
-	teaCmd, err := a.sessionView.Open(resumeAgent, sess)
-	if err != nil {
-		debuglog.Log("tui: resumeSession: session view open failed: %v", err)
-		a.statusHint = fmt.Sprintf("Error opening session: %v", err)
-		return a, nil
-	}
-
-	// Create trace pane on the left from the session file
-	if sessionFilePath != "" {
-		debuglog.Log("tui: resumeSession: parsing trace file %q", sessionFilePath)
-		leftW := a.width - rightW
-		claudeProvider := a.providerFor("claude")
-		var parser func(string) ([]trace.Turn, error)
-		if claudeProvider != nil {
-			parser = claudeProvider.ParseTrace
-		}
-		a.splitTrace = views.NewLogsView(0, sessionFilePath, parser)
-		a.splitTrace.SetSize(leftW, a.height-1)
-		debuglog.Log("tui: resumeSession: trace loaded, splitTrace is set")
-
-		// Load existing annotations
-		a.evalSessionID = sessionID
-		a.evalStore = evaluation.NewStore(sessionID)
-		annotations, _ := a.evalStore.Load()
-		annotMap := make(map[int]string)
-		noteMap := make(map[int]string)
-		for _, ann := range annotations {
-			annotMap[ann.Turn] = ann.Label
-			if ann.Note != "" {
-				noteMap[ann.Turn] = ann.Note
-			}
-		}
-		a.splitTrace.SetAnnotations(annotMap)
-		a.splitTrace.SetNotes(noteMap)
-
-		// Start live file tailer for real-time trace updates.
-		a.activeTailer = startTraceTailer(sessionFilePath, a.traceRefresh)
-	} else {
-		debuglog.Log("tui: resumeSession: no session file, splitTrace will be nil")
-	}
-
-	a.zoomed = true
-	a.splitMode = true
-	a.splitFocus = "session" // start with focus on the live session (right)
-	a.splitLoading = true      // show loading placeholder until first PTY output
-	a.layout.SetZoomed(true)
-	debuglog.Log("tui: resumeSession complete: zoomed=%v splitMode=%v splitFocus=%q splitTrace=%v", a.zoomed, a.splitMode, a.splitFocus, a.splitTrace != nil)
-	cmds := []tea.Cmd{teaCmd}
-	if a.activeTailer != nil {
-		cmds = append(cmds, a.waitForTraceRefresh())
-	}
-	return a, tea.Batch(cmds...)
-}
-
-// promptKill shows a confirmation prompt before killing the selected agent.
-// For session-only entries (PID=0), offers to remove and delete trace files.
-func (a App) promptKill() (tea.Model, tea.Cmd) {
-	selected := a.agentsView.Selected()
-	if selected == nil {
-		a.statusHint = "No agent selected"
-		return a, nil
-	}
-	a.killConfirm = true
-	a.killTarget = selected
-
-	action := controller.DetermineKillAction(*selected)
-	switch action.Type {
-	case controller.KillSandbox:
-		a.statusHint = fmt.Sprintf("Delete sandbox %s? y:confirm  n:cancel", action.SandboxName)
-	case controller.KillPod:
-		a.statusHint = fmt.Sprintf("Delete pod %s? y:confirm  n:cancel", action.PodName)
-	case controller.KillRemoveOnly:
-		a.statusHint = fmt.Sprintf("Remove %s? y:remove  d:remove+delete trace  n:cancel", selected.ShortProject())
-	default:
-		a.statusHint = fmt.Sprintf("Kill %s (PID %d)? y:confirm  n:cancel", selected.ShortProject(), selected.PID)
-	}
-	return a, nil
-}
-
-// handleKillConfirm processes the y/n/d response to the kill confirmation.
-func (a App) handleKillConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	target := a.killTarget
-	a.killConfirm = false
-	a.killTarget = nil
-
-	if target == nil {
-		return a, nil
-	}
-
-	action := controller.DetermineKillAction(*target)
-
-	switch msg.String() {
-	case "y", "Y":
-		switch action.Type {
-		case controller.KillSandbox:
-			a.hideAgent(target)
-			a.statusHint = fmt.Sprintf("Deleting sandbox %s...", action.SandboxName)
-			go func() {
-				if err := controller.ExecuteKillSandbox(action, a.composeEngine); err != nil {
-					debuglog.Log("tui: sandbox delete failed: %v", err)
-				}
-			}()
-			return a.returnToAgentsIfZoomed()
-		case controller.KillPod:
-			a.hideAgent(target)
-			a.statusHint = fmt.Sprintf("Deleting pod %s...", action.PodName)
-			k8s := a.infraProvider
-			go func() {
-				if k8s != nil {
-					if err := k8s.ScaleDownOne(target.ProviderName, "session"); err != nil {
-						debuglog.Log("tui: ScaleDownOne failed (non-fatal): %v", err)
-					}
-				}
-				if err := exec.Command("kubectl", "delete", "pod", action.PodName, "-n", action.Namespace, "--grace-period=3", "--wait=false").Run(); err != nil { // #nosec G204
-					debuglog.Log("kubectl delete pod %q failed: %v", action.PodName, err)
-				}
-			}()
-			return a.returnToAgentsIfZoomed()
-		case controller.KillRemoveOnly:
-			a.hideAgent(target)
-			a.statusHint = fmt.Sprintf("Removed %s from view", target.ShortProject())
-		default:
-			p := a.providerFor(target.ProviderName)
-			var err error
-			if p != nil {
-				err = p.Kill(*target)
-			} else {
-				err = fmt.Errorf("unknown provider %q", target.ProviderName)
-			}
-			if err != nil {
-				a.statusHint = fmt.Sprintf("Kill failed: %v", err)
-			} else {
-				a.hideAgent(target)
-				a.statusHint = fmt.Sprintf("Killed %s (PID %d)", target.ShortProject(), target.PID)
-			}
-		}
-		return a.returnToAgentsIfZoomed()
-	case "d", "D":
-		a.hideAgent(target)
-		if target.SessionFile != "" {
-			if err := os.Remove(target.SessionFile); err != nil {
-				a.statusHint = fmt.Sprintf("Removed from view, but failed to delete trace: %v", err)
-			} else {
-				a.statusHint = fmt.Sprintf("Removed %s and deleted trace file", target.ShortProject())
-			}
-		} else {
-			a.statusHint = fmt.Sprintf("Removed %s (no trace file to delete)", target.ShortProject())
-		}
-		return a.returnToAgentsIfZoomed()
-	default:
-		a.statusHint = "Cancelled"
-		return a, nil
-	}
-}
-
-// hideAgent adds an agent to the hidden set so it doesn't appear in the list.
-func (a *App) hideAgent(ag *agent.Agent) {
-	key := ag.SessionID
-	if key == "" && ag.SandboxName != "" {
-		key = "sandbox-" + ag.SandboxName
-	}
-	if key == "" && ag.SessionFile != "" {
-		key = ag.SessionFile
-	}
-	if key == "" {
-		key = fmt.Sprintf("pid-%d", ag.PID)
-	}
-	a.hiddenAgents[key] = true
-}
-
-
-// maybeNotify fires a macOS notification for an agent that changed state.
-// The decision logic lives in controller.ShouldNotify; this method only
-// delivers the notification via the platform-specific notify package.
-func (a *App) maybeNotify(inst agent.Agent) {
-	name := inst.ShortProject()
-	if name == "" {
-		name = inst.ProviderName
-	}
-	n := controller.ShouldNotify(inst.Status, name, a.cfg.Notifications)
-	if n == nil {
-		return
-	}
-	if n.Sound {
-		notify.SendWithSound(n.Title, n.Message)
-	} else {
-		notify.Send(n.Title, n.Message)
-	}
-}
-
-// openLogsForAgent opens the trace viewer for a specific agent and session file.
-// Used for non-Claude providers where embedding a PTY isn't possible.
-func (a App) openLogsForAgent(ag *agent.Agent, sessionFile string) (tea.Model, tea.Cmd) {
-	p := a.providerFor(ag.ProviderName)
-	var parser views.TraceParser
-	if p != nil {
-		parser = a.parserForProvider(p)
-	}
-	a.logsView = views.NewLogsView(ag.PID, sessionFile, parser)
-	a.logsView.SetSessionCost(ag.EstCostUSD)
-	contentHeight := a.height - a.headerView.Height()
-	if contentHeight < 1 {
-		contentHeight = 10
-	}
-	a.logsView.SetSize(a.width, contentHeight)
-
-	// Set up evaluation store
-	sessionID := ag.SessionID
-	if sessionID == "" {
-		sessionID = fmt.Sprintf("pid-%d", ag.PID)
-	}
-	a.evalSessionID = sessionID
-	a.evalStore = evaluation.NewStore(sessionID)
-	annotations, _ := a.evalStore.Load()
-	annotMap := make(map[int]string)
-	noteMap := make(map[int]string)
-	for _, ann := range annotations {
-		annotMap[ann.Turn] = ann.Label
-		if ann.Note != "" {
-			noteMap[ann.Turn] = ann.Note
-		}
-	}
-	a.logsView.SetAnnotations(annotMap)
-	a.logsView.SetNotes(noteMap)
-
-	label := fmt.Sprintf("Trace [%s: %s]", ag.ProviderName, ag.ShortProject())
-	a.statusHint = "J:jump  a:annotate  N:note  :export  :export-otel"
-	return a.navigateTo(viewLogs, label)
-}
-
-func (a App) openLogsForSelected() (tea.Model, tea.Cmd) {
-	selected := a.agentsView.Selected()
-	if selected == nil {
-		return a, nil
-	}
-	p := a.providerFor(selected.ProviderName)
-	sessionFile := selected.SessionFile
-	if sessionFile == "" {
-		if p != nil {
-			sessionFile = p.FindSessionFile(*selected)
-		}
-	}
-	var parser views.TraceParser
-	if p != nil {
-		parser = a.parserForProvider(p)
-	}
-	a.logsView = views.NewLogsView(selected.PID, sessionFile, parser)
-	a.logsView.SetSessionCost(selected.EstCostUSD)
-	contentHeight := a.height - a.headerView.Height()
-	if contentHeight < 1 {
-		contentHeight = 10
-	}
-	a.logsView.SetSize(a.width, contentHeight)
-
-	// Set up evaluation store and load existing annotations
-	sessionID := selected.SessionID
-	if sessionID == "" {
-		sessionID = fmt.Sprintf("pid-%d", selected.PID)
-	}
-	a.evalSessionID = sessionID
-	a.evalStore = evaluation.NewStore(sessionID)
-	annotations, _ := a.evalStore.Load()
-	annotMap := make(map[int]string)
-	noteMap := make(map[int]string)
-	for _, ann := range annotations {
-		annotMap[ann.Turn] = ann.Label
-		if ann.Note != "" {
-			noteMap[ann.Turn] = ann.Note
-		}
-	}
-	a.logsView.SetAnnotations(annotMap)
-	a.logsView.SetNotes(noteMap)
-
-	return a.navigateTo(viewLogs, fmt.Sprintf("Logs [PID %d]", selected.PID))
-}
-
-func (a App) navigateTo(v viewType, label string) (tea.Model, tea.Cmd) {
-	a.ctrl.Nav.NavigateTo(controller.ViewType(v), label)
-	a.currentView = v
-	a.breadcrumbs = a.ctrl.Nav.Breadcrumbs
-	a.headerView.SetCrumbs(a.breadcrumbs)
-	return a, nil
-}
-
-// SetPluginExecutor wires the plugin executor into the TUI for rendering plugin tabs.
-func (a *App) SetPluginExecutor(exec *plugin.Executor) {
-	a.pluginExec = exec
-}
-
-// openPlugins opens the plugin picker or goes directly to a single plugin.
-func (a App) openPlugins() (tea.Model, tea.Cmd) {
-	if a.pluginExec == nil {
-		a.statusHint = "No plugins configured"
-		return a, nil
-	}
-	plugins := a.pluginExec.Plugins()
-	if len(plugins) == 0 {
-		a.statusHint = "No plugins available"
-		return a, nil
-	}
-
-	views.SortPlugins(plugins)
-
-	if len(plugins) == 1 {
-		return a.openPlugin(plugins[0])
-	}
-
-	a.pluginPicker = views.NewPluginPickerView(plugins)
-	a.pluginPickerMode = true
-	a.statusHint = "Select a plugin"
-	return a, nil
-}
-
-// openPlugin opens a specific plugin, executes its command, and navigates to its view.
-func (a App) openPlugin(p plugin.Plugin) (tea.Model, tea.Cmd) {
-	data, err := a.pluginExec.Execute(p.Name)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("Plugin error: %v", err)
-		return a, nil
-	}
-	a.pluginView = views.NewPluginTUIView(p)
-	a.pluginView.SetData(data)
-	a.pluginPickerMode = false
-	return a.navigateTo(viewPlugin, p.Tab)
-}
-
-// refreshPlugin re-executes the current plugin's command and updates the view.
-func (a App) refreshPlugin() (tea.Model, tea.Cmd) {
-	if a.pluginView == nil || a.pluginExec == nil {
-		return a, nil
-	}
-	data, err := a.pluginExec.Execute(a.pluginView.Manifest().Name)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("Refresh error: %v", err)
-		return a, nil
-	}
-	a.pluginView.SetData(data)
-	a.statusHint = "Refreshed"
-	return a, nil
-}
-
-// openSessions discovers past sessions and navigates to the sessions browser.
-func (a App) openSessions() (tea.Model, tea.Cmd) {
-	agentDir := ""
-	if sel := a.agentsView.Selected(); sel != nil {
-		agentDir = sel.WorkingDir
-	}
-	dir := controller.DefaultSessionDir(agentDir, a.launchDir)
-	a.sessionsView.SetCurrentDir(dir)
-
-	// Set up trace parser (use Claude's parser as default)
-	for _, p := range a.providers {
-		if p.Name() == "claude" {
-			a.sessionsView.SetTraceParser(p.ParseTrace)
-			break
-		}
-	}
-
-	opts := history.DiscoverOpts{Dir: dir}
-	sessions, _ := history.Discover(opts, "")
-	a.cachedSessions = sessions
-	a.sessionsView.SetSessions(sessions)
-	a.sessionsView.SetTagVocab(history.CollectTags(""))
-	a.sessionsView.SetHourlyRate(a.cfg.ROI.HourlyRate)
-	if a.sessionsView.ResumeMode() == "" {
-		a.sessionsView.SetResumeMode(controller.ResolveMode("", a.cfg.DefaultMode))
-	}
-
-	return a.navigateTo(viewSessions, "Sessions")
-}
-
-func (a App) openStarred() (tea.Model, tea.Cmd) {
-	for _, p := range a.providers {
-		if p.Name() == "claude" {
-			a.starredView.SetTraceParser(p.ParseTrace)
-			break
-		}
-	}
-
-	allSessions := a.cachedSessions
-	if len(allSessions) == 0 {
-		allSessions, _ = history.Discover(history.DiscoverOpts{}, "")
-		a.cachedSessions = allSessions
-	}
-	var starred []history.Session
-	for _, s := range allSessions {
-		if s.Starred {
-			starred = append(starred, s)
-		}
-	}
-	a.starredView.SetSessions(starred)
-	a.starredView.SetShowAll(true)
-	return a.navigateTo(viewStarred, "Starred")
-}
-
-func (a App) navigateBack() (tea.Model, tea.Cmd) {
-	a.ctrl.Nav.NavigateBack()
-	a.currentView = viewType(a.ctrl.Nav.CurrentView)
-	a.breadcrumbs = a.ctrl.Nav.Breadcrumbs
-	a.headerView.SetCrumbs(a.breadcrumbs)
-	return a, nil
-}
-
-func (a *App) resizeViews() {
-	a.layout.SetSize(a.width, a.height)
-	a.headerView.SetWidth(a.width)
-
-	headerHeight := a.headerView.Height()
-	contentHeight := a.layout.ContentHeight(headerHeight)
-
-	leftW, rightW := a.layout.SplitVertical(35)
-
-	a.agentsView.SetSize(leftW, contentHeight)
-	a.previewPane.SetSize(rightW, contentHeight)
-	a.costsView.SetSize(a.width, contentHeight)
-	a.teamsView.SetSize(a.width, contentHeight)
-	a.tasksView.SetSize(a.width, contentHeight)
-	a.helpView.SetSize(a.width, contentHeight)
-	if a.logsView != nil {
-		a.logsView.SetSize(a.width, contentHeight)
-	}
-	if a.sessionView != nil {
-		a.sessionView.SetSize(a.width, a.height)
-	}
-}
-
-// --- View rendering ---
-
-func (a App) View() string {
-	if a.width == 0 {
-		return "Loading..."
-	}
-
-	// Zoomed modes — no header, no outer status bar.
-	if a.zoomed && a.sessionView != nil && a.sessionView.Active() {
-		if a.splitMode {
-			return a.renderSplitView()
-		}
-		// Full-screen whichever pane was focused
-		if a.splitFocus == "trace" && a.splitTrace != nil {
-			return a.splitTrace.View()
-		}
-		return a.sessionView.View()
-	}
-
-	// Set contextual hints based on current view
-	switch a.currentView {
-	case viewAgents:
-		a.headerView.SetHint("Enter:open  a:attend  *:pin  B:starred  t:traces  c:costs  T:tasks  S:sessions  P:plugins  H:health  C:copy-id  d:diff  :new:launch  x:kill  s:sort  /:filter  ?:help")
-	case viewLogs:
-		a.headerView.SetHint("j/k:scroll  Enter:expand  a:annotate  N:note  *:pin  C:copy-id  $:costs  :export  :export-otel  Esc:back")
-	case viewCosts:
-		a.headerView.SetHint("Esc:back  ?:help")
-	case viewTeams:
-		a.headerView.SetHint("Esc:back  ?:help")
-	case viewTasks:
-		a.headerView.SetHint("j/k:nav  g/G:top/bottom  :new:create  Esc:back")
-	case viewSessions:
-		hint := "j/k:nav  Enter:resume  B:toggle-perms  *:pin  t:titles  C:copy-id  P:path-filter  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  R:roi  I:roi-detail  d:delete  D:cleanup  p:preview"
-		if a.sessionsView.ShowSubagents() {
-			hint += "  H:hide-agents"
-		} else {
-			hint += "  H:show-agents"
-		}
-		hint += "  Esc:back"
-		a.headerView.SetHint(hint)
-	case viewStarred:
-		a.headerView.SetHint("j/k:nav  Enter:resume  *:unpin  C:copy-id  /:filter  s:sort  p:preview  Esc:back")
-	case viewHealth:
-		a.headerView.SetHint("Esc:back  :health to refresh")
-	case viewPlugin:
-		a.headerView.SetHint("j/k:scroll  d/u:page  r:refresh  Esc:back")
-	case viewHelp:
-		a.headerView.SetHint("Esc:back  q:quit")
-	}
-
-	header := a.headerView.View()
-	headerHeight := a.headerView.Height()
-	contentHeight := a.layout.ContentHeight(headerHeight)
-
-	var content string
-	switch a.currentView {
-	case viewAgents:
-		leftW, rightW := a.layout.SplitVertical(35)
-		a.agentsView.SetSize(leftW, contentHeight)
-		a.previewPane.SetSize(rightW, contentHeight)
-
-		// Update preview with currently selected agent
-		selected := a.agentsView.Selected()
-		a.previewPane.SetAgent(selected)
-
-		content = lipgloss.JoinHorizontal(lipgloss.Top,
-			a.agentsView.View(),
-			a.previewPane.View(),
-		)
-	case viewLogs:
-		if a.logsView != nil {
-			content = a.logsView.View()
-		} else {
-			content = "  No logs available"
-		}
-	case viewCosts:
-		content = a.costsView.View()
-	case viewTeams:
-		content = a.teamsView.View()
-	case viewTasks:
-		a.tasksView.SetSize(a.width, contentHeight)
-		content = a.tasksView.View()
-	case viewSessions:
-		a.sessionsView.SetSize(a.width, contentHeight)
-		content = a.sessionsView.View()
-	case viewStarred:
-		a.starredView.SetSize(a.width, contentHeight)
-		content = a.starredView.View()
-	case viewHealth:
-		a.healthView.SetSize(a.width, contentHeight)
-		content = a.healthView.View()
-	case viewPlugin:
-		if a.pluginView != nil {
-			a.pluginView.SetSize(a.width, contentHeight)
-			content = a.pluginView.View()
-		} else {
-			content = "  No plugin selected"
-		}
-	case viewHelp:
-		content = a.helpView.View()
-	}
-
-	statusBar := a.renderStatusBar()
-
-	// Fit content to exact available height: pad if short, truncate if long
-	availableHeight := a.height - headerHeight - 1
-	if availableHeight < 1 {
-		availableHeight = 1
-	}
-	lines := strings.Split(content, "\n")
-	if len(lines) > availableHeight {
-		lines = lines[:availableHeight]
-	}
-	for len(lines) < availableHeight {
-		lines = append(lines, "")
-	}
-	content = strings.Join(lines, "\n")
-
-	result := header + "\n" + content + "\n" + statusBar
-
-	// Overlay the launcher if active
-	if a.launcherActive && a.launcherView != nil {
-		a.launcherView.SetSize(a.width, a.height)
-		return a.launcherView.View()
-	}
-
-	// Overlay the plugin picker if active
-	if a.pluginPickerMode && a.pluginPicker != nil {
-		a.pluginPicker.SetSize(a.width, a.height)
-		return header + "\n" + a.pluginPicker.View()
-	}
-
-	return result
-}
-
-// renderSplitView renders the split layout: live trace (left) + session (right).
-func (a App) renderSplitView() string {
-	leftW := a.width * 40 / 100
-	rightW := a.width - leftW - 1 // -1 for divider
-
-	contentH := a.height - 1 // reserve 1 for status bar
-
-	// Resize panes
-	if a.splitTrace != nil {
-		a.splitTrace.SetSize(leftW, contentH-2) // -2 for trace header + status
-	}
-	a.sessionView.SetSize(rightW, contentH)
-
-	// Styles for pane headers
-	focusedHeaderStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#111827")).
-		Background(lipgloss.Color("#5F87FF"))
-	unfocusedHeaderStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#9CA3AF")).
-		Background(lipgloss.Color("#1E293B"))
-	dividerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#374151"))
-
-	// Left pane: trace
-	var leftLines []string
-	traceHeaderStyle := unfocusedHeaderStyle
-	if a.splitFocus == "trace" {
-		traceHeaderStyle = focusedHeaderStyle
-	}
-	// Show data source indicator in trace header
-	traceLabel := " TRACE [FILE] "
-	if a.sessionView != nil && a.sessionView.Agent() != nil && a.sessionView.Agent().Location == "remote" {
-		traceLabel = " TRACE [OTEL] "
-		if a.otelReceiver != nil {
-			_, logs, _ := a.otelReceiver.Stats()
-			if logs > 0 {
-				traceLabel = fmt.Sprintf(" TRACE [OTEL] (%d spans) ", logs)
-			}
-		}
-	} else if a.otelReceiver != nil {
-		_, logs, _ := a.otelReceiver.Stats()
-		if logs > 0 {
-			traceLabel = fmt.Sprintf(" TRACE [FILE] (otel:%d) ", logs)
-		}
-	}
-	traceHeader := traceHeaderStyle.Render(padRight(traceLabel, leftW))
-	leftLines = append(leftLines, traceHeader)
-
-	if a.splitTrace != nil {
-		traceContent := a.splitTrace.View()
-		leftLines = append(leftLines, strings.Split(traceContent, "\n")...)
-	} else {
-		leftLines = append(leftLines, lipgloss.NewStyle().Foreground(colorMuted).Render("  No trace data"))
-	}
-
-	// Pad left pane to fill height
-	for len(leftLines) < contentH {
-		leftLines = append(leftLines, "")
-	}
-	if len(leftLines) > contentH {
-		leftLines = leftLines[:contentH]
-	}
-
-	// Right pane: session (rendered by SessionView with its own header/status)
-	var sessionContent string
-	if a.splitLoading {
-		loadMsg := "⏳  Creating sandbox…\n\nThis may take 10–30 seconds.\nThe terminal will open automatically when ready."
-		sessionContent = lipgloss.Place(
-			rightW, contentH,
-			lipgloss.Center, lipgloss.Center,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Align(lipgloss.Center).Render(loadMsg),
-		)
-	} else {
-		sessionContent = a.sessionView.View()
-	}
-	rightLines := strings.Split(sessionContent, "\n")
-	// Replace session header with our focused/unfocused version
-	sessionHeaderStyle := unfocusedHeaderStyle
-	if a.splitFocus == "session" {
-		sessionHeaderStyle = focusedHeaderStyle
-	}
-	agentName := "(session)"
-	if a.sessionView.Agent() != nil {
-		agentName = a.sessionView.Agent().ShortProject()
-	}
-	rightLines[0] = sessionHeaderStyle.Render(padRight(" SESSION: "+agentName+" ", rightW))
-
-	// Pad right pane
-	for len(rightLines) < contentH {
-		rightLines = append(rightLines, "")
-	}
-	if len(rightLines) > contentH {
-		rightLines = rightLines[:contentH]
-	}
-
-	// Join left and right with divider
-	divider := dividerStyle.Render("│")
-	var b strings.Builder
-	for i := 0; i < contentH; i++ {
-		left := leftLines[i]
-		right := ""
-		if i < len(rightLines) {
-			right = rightLines[i]
-		}
-		// Pad left to exact width
-		leftPad := leftW - lipgloss.Width(left)
-		if leftPad > 0 {
-			left += strings.Repeat(" ", leftPad)
-		}
-		b.WriteString(left)
-		b.WriteString(divider)
-		b.WriteString(right)
-		b.WriteString("\n")
-	}
-
-	// Status bar
-	badge := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#111827")).
-		Background(lipgloss.Color("#5F87FF")).
-		Render(" aimux ")
-	focus := a.splitFocus
-	hintStyle := lipgloss.NewStyle().Foreground(colorMuted)
-	var focusHint string
-	if a.statusHint != "" {
-		// Show export menu or other status messages
-		focusHint = " " + a.statusHint
-	} else if a.commandMode {
-		focusHint = " :" + a.commandInput.BeforeCursor() + "█" + a.commandInput.AfterCursor()
-	} else if focus == "trace" && a.splitTrace != nil && a.splitTrace.NoteMode() {
-		noteText, noteTurn := a.splitTrace.NoteInput()
-		noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
-		focusHint = noteStyle.Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + noteStyle.Render("|")
-	} else if focus == "trace" {
-		focusHint = " [TRACE] j/k:turns  a:annotate  N:note  $:costs  e:export"
-	} else {
-		focusHint = " [SESSION] typing goes to agent"
-	}
-	hints := hintStyle.Render(focusHint + "  Tab:switch  Ctrl+b:toggle-perms  Ctrl+f:fullscreen  Esc:exit")
-	statusGap := a.width - lipgloss.Width(badge) - lipgloss.Width(hints)
-	if statusGap < 0 {
-		statusGap = 0
-	}
-	b.WriteString(badge + hints + strings.Repeat(" ", statusGap))
-
-	return b.String()
-}
-
-func padRight(s string, width int) string {
-	w := lipgloss.Width(s)
-	if w >= width {
-		return s
-	}
-	return s + strings.Repeat(" ", width-w)
-}
-
-func (a App) renderStatusBar() string {
-	if a.commandMode {
-		return lipgloss.NewStyle().
-			Background(lipgloss.Color("#111827")).
-			Width(a.width).
-			Render(lipgloss.NewStyle().
-				Foreground(colorLogo).
-				Bold(true).
-				Render(" :") + a.commandInput.BeforeCursor() + lipgloss.NewStyle().
-				Foreground(colorLogo).Render("█") + a.commandInput.AfterCursor())
-	}
-	if a.filterMode {
-		return lipgloss.NewStyle().
-			Background(lipgloss.Color("#111827")).
-			Width(a.width).
-			Render(lipgloss.NewStyle().
-				Foreground(colorWaiting).
-				Bold(true).
-				Render(" /") + a.filterInput.BeforeCursor() + lipgloss.NewStyle().
-				Foreground(colorWaiting).Render("█") + a.filterInput.AfterCursor())
-	}
-	if a.currentView == viewLogs && a.logsView != nil && a.logsView.NoteMode() {
-		noteText, noteTurn := a.logsView.NoteInput()
-		return lipgloss.NewStyle().
-			Background(lipgloss.Color("#111827")).
-			Width(a.width).
-			Render(lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F59E0B")).
-				Bold(true).
-				Render(fmt.Sprintf(" Note [Turn %d]: ", noteTurn)) + noteText + lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F59E0B")).Render("|"))
-	}
-
-	var hints string
-	if a.statusHint != "" {
-		hintColor := colorWaiting
-		if strings.Contains(a.statusHint, "failed") || strings.Contains(a.statusHint, "Error") {
-			hintColor = lipgloss.Color("#EF4444") // red for errors
-		}
-		hints = " " + lipgloss.NewStyle().Foreground(hintColor).Bold(true).Render(a.statusHint)
-	} else if a.currentView == viewLogs {
-		hints = " j/k:turns  Enter:expand  a:annotate  N:note  $:costs  /:filter  :export  :export-otel  Esc:back"
-	} else if a.currentView == viewSessions {
-		hints = " j/k:nav  Enter:resume  C:copy-id  F:find-content  s:sort  /:filter  A:all  a:annotate  f:failure-mode  N:note  d:delete  D:cleanup  p:preview  Esc:back"
-		if a.sessionsView.HasActiveFilter() {
-			hints += "  [Esc clears filter]"
-		}
-	} else if a.currentView == viewTasks {
-		hints = " j/k:nav  g/G:top/bottom  :new:create  Esc:back"
-	} else {
-		// Show group hint if selected agent is grouped
-		selected := a.agentsView.Selected()
-		if selected != nil && selected.GroupCount > 1 {
-			hints = fmt.Sprintf(" x%d = %d grouped  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  x:kill  ?:help",
-				selected.GroupCount, selected.GroupCount)
-		} else {
-			hints = " j/k:nav  Enter:open  t:traces  c:costs  T:tasks  S:sessions  H:health  s:sort  ?:help  q:quit"
-		}
-		if a.filterInput.Value() != "" {
-			hints += fmt.Sprintf("  [filter: %s]", a.filterInput.Value())
-		}
-	}
-	return lipgloss.NewStyle().
-		Foreground(colorIdle).
-		Background(lipgloss.Color("#111827")).
-		Width(a.width).
-		Render(hints)
-}
-
-// activeTraceTurns returns turns from whichever trace view is active:
-// standalone logs view (via `l`) or split trace pane (via Enter).
-func (a App) activeTraceTurns() []trace.Turn {
-	if a.logsView != nil {
-		return a.logsView.Turns()
-	}
-	if a.splitTrace != nil {
-		return a.splitTrace.Turns()
-	}
-	return nil
-}
-
-// buildExportContext assembles an ExportContext from the current TUI state.
-// This is the bridge between TUI-specific state and UI-agnostic controller logic.
-func (a App) buildExportContext() controller.ExportContext {
-	turns := a.activeTraceTurns()
-	providerName := ""
-	if selected := a.agentsView.Selected(); selected != nil {
-		providerName = selected.ProviderName
-	}
-	if providerName == "" && a.sessionView != nil && a.sessionView.Agent() != nil {
-		providerName = a.sessionView.Agent().ProviderName
-	}
-
-	return controller.ExportContext{
-		SessionID:    a.activeTraceSessionID(),
-		SessionFile:  a.activeTraceFilePath(),
-		ProviderName: providerName,
-		Turns:        controller.TurnsToInputs(turns),
-		EvalStore:    a.evalStore,
-	}
-}
-
-// activeTraceFilePath returns the session file path for the active trace context.
-func (a App) activeTraceFilePath() string {
-	if a.logsView != nil {
-		return a.logsView.FilePath()
-	}
-	if a.splitTrace != nil {
-		return a.splitTrace.FilePath()
-	}
-	if a.sessionView != nil && a.sessionView.Agent() != nil {
-		return a.sessionView.Agent().SessionFile
-	}
-	return ""
-}
-
-// pollSessionFile returns a tea.Cmd that fires a sessionFilePollMsg after 200ms.
-func (a App) pollSessionFile(deadline time.Time) tea.Cmd {
-	return tea.Tick(200*time.Millisecond, func(_ time.Time) tea.Msg {
-		return sessionFilePollMsg{deadline: deadline}
-	})
-}
-
-// activeTraceSessionID returns the session ID for the active trace context.
-func (a App) activeTraceSessionID() string {
-	if a.evalSessionID != "" {
-		return a.evalSessionID
-	}
-	// Derive from session view agent in split mode
-	if a.sessionView != nil && a.sessionView.Agent() != nil {
-		ag := a.sessionView.Agent()
-		if ag.SessionID != "" {
-			return ag.SessionID
-		}
-		return fmt.Sprintf("pid-%d", ag.PID)
-	}
-	return ""
-}
-
-// startTraceTailer creates a Tailer for the given session file. When new lines
-// are appended, it sends a non-blocking signal on the channel so the Bubble Tea
-// event loop can re-parse the trace. Returns nil if the file cannot be watched.
-func startTraceTailer(path string, ch chan struct{}) *trace.Tailer {
-	tailer, err := trace.NewTailer(path, func(_ string) {
-		// Non-blocking send: if a signal is already pending, skip.
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	})
-	if err != nil {
-		return nil
-	}
-	return tailer
-}
-
-// waitForTraceRefresh returns a tea.Cmd that blocks until the traceRefresh
-// channel receives a signal, then delivers a traceRefreshMsg.
-func (a App) waitForTraceRefresh() tea.Cmd {
-	return func() tea.Msg {
-		<-a.traceRefresh
-		return traceRefreshMsg{}
-	}
-}
-
-// stopActiveTailer stops the active file tailer and drains the channel.
-func (a *App) stopActiveTailer() {
-	if a.activeTailer != nil {
-		a.activeTailer.Stop()
-		a.activeTailer = nil
-	}
-	// Drain any pending signal so it doesn't fire after split exit.
-	select {
-	case <-a.traceRefresh:
-	default:
-	}
-}
-
-// otelEnvForCmd merges OTEL env vars (from the provider's OTELEnv shell prefix)
-// into a cmd.Env slice suitable for exec.Cmd. Starts from the current process
-// environment so the child inherits everything else.
-func otelEnvForCmd(cmd *exec.Cmd, shellPrefix string) []string {
-	env := os.Environ()
-	if cmd.Env != nil {
-		env = cmd.Env
-	}
-	// Parse "KEY=value KEY2=value2 " shell-style prefix into individual vars
-	for _, part := range strings.Fields(shellPrefix) {
-		if strings.Contains(part, "=") {
-			env = append(env, part)
-		}
-	}
-	return env
-}
-
-// copySessionID copies the selected agent's session ID (as a resume command) to the clipboard.
-func (a App) copySessionID() (tea.Model, tea.Cmd) {
-	sel := a.agentsView.Selected()
-	if sel == nil || sel.SessionID == "" {
-		a.statusHint = "No session ID available"
-		return a, nil
-	}
-	cmd := clipboard.ResumeCommand(sel.SessionID, sel.WorkingDir)
-	if err := clipboard.Copy(cmd); err != nil {
-		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
-		return a, nil
-	}
-	a.statusHint = fmt.Sprintf("Copied: %s", cmd)
-	return a, nil
-}
-
-// copySessionIDFromSessions copies the selected past session's ID (as a resume command) to the clipboard.
-func (a App) copySessionIDFromSessions() (tea.Model, tea.Cmd) {
-	sel := a.sessionsView.SelectedSession()
-	if sel == nil || sel.ID == "" {
-		a.statusHint = "No session ID available"
-		return a, nil
-	}
-	cmd := clipboard.ResumeCommand(sel.ID, sel.Project)
-	if err := clipboard.Copy(cmd); err != nil {
-		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
-		return a, nil
-	}
-	a.statusHint = fmt.Sprintf("Copied: %s", cmd)
-	return a, nil
-}
-
-// starFromTrace toggles star on a session identified by its file path.
-// Used from both the standalone trace view (viewLogs) and the split-mode trace pane.
-func (a App) starFromTrace(filePath string) (tea.Model, tea.Cmd) {
-	if filePath == "" {
-		a.statusHint = "No session file available"
-		return a, nil
-	}
-	starred, err := controller.ToggleStar(filePath)
-	if err != nil {
-		a.statusHint = fmt.Sprintf("Star toggle failed: %v", err)
-		return a, nil
-	}
-	a.cachedSessions = nil
-	if starred {
-		a.statusHint = "Session pinned ★"
-	} else {
-		a.statusHint = "Session unpinned"
-	}
-	return a, nil
-}
-
-// copySessionIDFromTrace copies the session ID from the currently viewed trace.
-// Works in both standalone trace view and split-mode trace pane.
-func (a App) copySessionIDFromTrace() (tea.Model, tea.Cmd) {
-	var ag *agent.Agent
-	if a.sessionView != nil && a.sessionView.Agent() != nil {
-		ag = a.sessionView.Agent()
-	} else {
-		ag = a.agentForLogsView()
-	}
-	if ag == nil || ag.SessionID == "" {
-		a.statusHint = "No session ID available"
-		return a, nil
-	}
-	cmd := clipboard.ResumeCommand(ag.SessionID, ag.WorkingDir)
-	if err := clipboard.Copy(cmd); err != nil {
-		a.statusHint = fmt.Sprintf("Copy failed: %v", err)
-		return a, nil
-	}
-	a.statusHint = fmt.Sprintf("Copied: %s", cmd)
-	return a, nil
-}
-
-// agentForLogsView finds the agent matching the current logsView by session file path.
-func (a *App) agentForLogsView() *agent.Agent {
-	if a.logsView == nil {
-		return nil
-	}
-	fp := a.logsView.FilePath()
-	for i := range a.instances {
-		if a.instances[i].SessionFile == fp {
-			return &a.instances[i]
-		}
-	}
-	return nil
-}
-
-func aimuxConfigDir() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".aimux")
-	}
-	return ".aimux"
-}

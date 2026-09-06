@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/zanetworker/aimux/internal/agent"
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -20,6 +21,8 @@ type Deps struct {
 	SpawnAgent       func(opts spawn.LaunchOpts) (pid int, tmuxSession string, err error)
 	WebServer        func(port int) error
 	Providers        []string
+	Environments     map[string]config.EnvironmentConfig
+	AgentConfigs     []config.AgentConfig
 	ProfileStore     *profile.Store
 	SkipPermissions  bool
 	DefaultMode      string
@@ -34,7 +37,9 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newAgentsCmd(d.Discover))
 	rootCmd.AddCommand(newSessionsCmd(d.DiscoverSessions, d.SearchContent, d.PickSession, d.ResumeExec))
 	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec, d.SkipPermissions))
-	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent, d.DefaultMode))
+	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent, d.DefaultMode, d.Environments, d.AgentConfigs))
+	rootCmd.AddCommand(newEnvironmentsCmd(d.Environments))
+	rootCmd.AddCommand(newConfigsCmd(d.AgentConfigs))
 	rootCmd.AddCommand(newWebCmd(d.WebServer))
 	rootCmd.AddCommand(newAgentContextCmd(d.Providers))
 	if d.ProfileStore != nil {

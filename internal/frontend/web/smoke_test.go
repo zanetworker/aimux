@@ -98,6 +98,8 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		"/api/agents/nonexistent/diff",
 		"/api/tasks/lists",
 		"/api/tasks?list=default",
+		"/api/agent-configs",
+		"/api/environments",
 	}
 
 	for _, path := range gets {

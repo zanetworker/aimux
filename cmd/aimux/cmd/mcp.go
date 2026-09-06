@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/coordination"
 	"github.com/zanetworker/aimux/internal/mcpserver"
 )
 
@@ -85,6 +86,21 @@ func newMCPServeCmd() *cobra.Command {
 			if resolvedBackend == "k8s" && opts.RedisURL == "" {
 				return fmt.Errorf("redis URL is required for k8s backend: set --redis-url flag or kubernetes.redis_url in config")
 			}
+
+			// Create coordinator from config
+			var coord coordination.Coordinator
+			coordURL := firstNonEmpty(cfg.Coordination.RedisURL, opts.RedisURL)
+			coordTeam := firstNonEmpty(cfg.Coordination.TeamID, opts.TeamID)
+			if resolvedBackend != "openshell" && coordURL != "" {
+				var coordErr error
+				coord, coordErr = coordination.NewRedisCoordinator(coordURL, coordTeam)
+				if coordErr != nil {
+					coord = coordination.NewLocalCoordinator()
+				}
+			} else {
+				coord = coordination.NewLocalCoordinator()
+			}
+			opts.Coordinator = coord
 
 			s, err := mcpserver.NewServer(opts)
 			if err != nil {

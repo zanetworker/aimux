@@ -1,9 +1,11 @@
 package discovery
 
 import (
+	"context"
 	"testing"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/environment"
 )
 
 func TestAssignUniqueSuffixes_NoDuplicates(t *testing.T) {
@@ -62,4 +64,122 @@ func TestAssignUniqueSuffixes_MixedDuplicates(t *testing.T) {
 
 func TestAssignUniqueSuffixes_Empty(t *testing.T) {
 	assignUniqueSuffixes(nil) // should not panic
+}
+
+type fakeProvider struct {
+	name   string
+	agents []agent.Agent
+}
+
+func (f *fakeProvider) Name() string                    { return f.name }
+func (f *fakeProvider) Discover() ([]agent.Agent, error) { return f.agents, nil }
+
+type fakeEnv struct {
+	agents []agent.Agent
+	err    error
+}
+
+func (e *fakeEnv) Name() string { return "fake" }
+func (e *fakeEnv) Type() string { return "fake" }
+func (e *fakeEnv) Discover() ([]agent.Agent, error) {
+	return e.agents, e.err
+}
+func (e *fakeEnv) CreateSandbox(_ context.Context, _ environment.SandboxOpts) (string, error) {
+	return "", nil
+}
+func (e *fakeEnv) DeleteSandbox(_ context.Context, _ string) error { return nil }
+func (e *fakeEnv) ListSandboxes(_ context.Context) ([]environment.SandboxStatus, error) {
+	return nil, nil
+}
+func (e *fakeEnv) Kill(_ agent.Agent) error { return nil }
+
+func TestOrchestrator_AddEnvironment(t *testing.T) {
+	o := NewOrchestrator()
+	env := &fakeEnv{
+		agents: []agent.Agent{
+			{Name: "remote-1", SandboxName: "sb-1", Location: "remote"},
+		},
+	}
+	o.AddEnvironment(env)
+
+	agents, err := o.Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	if agents[0].Name != "remote-1" {
+		t.Errorf("agent name = %q, want %q", agents[0].Name, "remote-1")
+	}
+}
+
+func TestOrchestrator_EnvironmentDedup(t *testing.T) {
+	prov := &fakeProvider{
+		name: "claude",
+		agents: []agent.Agent{
+			{Name: "local-1", SandboxName: "sb-1", WorkingDir: "/src/local"},
+		},
+	}
+	env := &fakeEnv{
+		agents: []agent.Agent{
+			{Name: "remote-1", SandboxName: "sb-1", Location: "remote"},
+		},
+	}
+
+	o := NewOrchestrator(prov)
+	o.AddEnvironment(env)
+
+	agents, err := o.Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent (dedup by SandboxName), got %d", len(agents))
+	}
+	if agents[0].Name != "local-1" {
+		t.Errorf("expected provider agent to win, got %q", agents[0].Name)
+	}
+}
+
+func TestOrchestrator_EnvironmentError(t *testing.T) {
+	env := &fakeEnv{
+		err: context.DeadlineExceeded,
+	}
+
+	o := NewOrchestrator()
+	o.AddEnvironment(env)
+
+	agents, err := o.Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(agents) != 0 {
+		t.Errorf("expected 0 agents on env error, got %d", len(agents))
+	}
+}
+
+func TestOrchestrator_MixedProviderAndEnvironment(t *testing.T) {
+	prov := &fakeProvider{
+		name: "claude",
+		agents: []agent.Agent{
+			{Name: "local-agent", WorkingDir: "/src/local"},
+		},
+	}
+	env := &fakeEnv{
+		agents: []agent.Agent{
+			{Name: "remote-agent", SandboxName: "sb-2", Location: "remote"},
+		},
+	}
+
+	o := NewOrchestrator(prov)
+	o.AddEnvironment(env)
+
+	agents, err := o.Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(agents) != 2 {
+		t.Fatalf("expected 2 agents, got %d", len(agents))
+	}
 }

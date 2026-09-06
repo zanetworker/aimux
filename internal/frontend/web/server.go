@@ -187,6 +187,8 @@ func (s *Server) Start() error {
 
 	mux.HandleFunc("GET /api/costs", s.handleCosts)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
+	mux.HandleFunc("GET /api/agent-configs", s.handleAgentConfigs)
+	mux.HandleFunc("GET /api/environments", s.handleEnvironments)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/agents/{id}/kill", s.handleKill)
 

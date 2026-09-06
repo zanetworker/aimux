@@ -28,7 +28,28 @@ func LoadProject(projectDir string, global Config) (Config, error) {
 		return global, err
 	}
 
-	return mergeOver(global, proj), nil
+	merged := mergeOver(global, proj)
+
+	// Merge project-local agents.yaml over global agent configs
+	projectAgents, _ := LoadAgents(filepath.Join(projectDir, ProjectConfigDir, "agents.yaml"))
+	if len(projectAgents) > 0 {
+		byName := make(map[string]AgentConfig, len(global.AgentConfigs)+len(projectAgents))
+		for _, a := range global.AgentConfigs {
+			byName[a.Name] = a
+		}
+		for _, a := range projectAgents {
+			byName[a.Name] = a
+		}
+		result := make([]AgentConfig, 0, len(byName))
+		for _, a := range byName {
+			result = append(result, a)
+		}
+		merged.AgentConfigs = result
+	} else {
+		merged.AgentConfigs = global.AgentConfigs
+	}
+
+	return merged, nil
 }
 
 // mergeOver applies non-zero values from overlay onto base.
