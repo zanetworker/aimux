@@ -92,6 +92,9 @@ func (e *fakeEnv) ListSandboxes(_ context.Context) ([]environment.SandboxStatus,
 	return nil, nil
 }
 func (e *fakeEnv) Kill(_ agent.Agent) error { return nil }
+func (e *fakeEnv) Exec(_ context.Context, _ string, _ string) (string, error) {
+	return "", nil
+}
 
 func TestOrchestrator_AddEnvironment(t *testing.T) {
 	o := NewOrchestrator()

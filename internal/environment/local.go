@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"syscall"
 
 	"github.com/zanetworker/aimux/internal/agent"
@@ -58,6 +59,15 @@ func (e *LocalEnvironment) DeleteSandbox(ctx context.Context, name string) error
 
 func (e *LocalEnvironment) ListSandboxes(ctx context.Context) ([]SandboxStatus, error) {
 	return nil, nil
+}
+
+func (e *LocalEnvironment) Exec(ctx context.Context, _ string, command string) (string, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command) // #nosec G204
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("local exec: %w", err)
+	}
+	return string(out), nil
 }
 
 func (e *LocalEnvironment) Kill(a agent.Agent) error {

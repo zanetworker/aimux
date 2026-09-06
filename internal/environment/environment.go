@@ -30,6 +30,9 @@ type Environment interface {
 
 	// Kill terminates an agent process.
 	Kill(a agent.Agent) error
+
+	// Exec runs a command in the named sandbox and returns combined stdout+stderr.
+	Exec(ctx context.Context, sandbox string, command string) (string, error)
 }
 
 // SandboxOpts contains options for creating a sandbox.

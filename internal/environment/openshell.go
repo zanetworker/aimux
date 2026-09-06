@@ -120,6 +120,29 @@ func (e *OpenShellEnvironment) Kill(a agent.Agent) error {
 }
 
 
+func (e *OpenShellEnvironment) Exec(ctx context.Context, sandbox, command string) (string, error) {
+	args := openshellExecArgs(sandbox, e.cfg.Gateway, e.cfg.Insecure, command)
+	cmd := exec.CommandContext(ctx, "openshell", args...) // #nosec G204
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("openshell exec %q: %w", sandbox, err)
+	}
+	return string(out), nil
+}
+
+// openshellExecArgs builds the argument list for `openshell sandbox exec`.
+func openshellExecArgs(sandbox, gateway string, insecure bool, command string) []string {
+	args := []string{"sandbox", "exec", "--name", sandbox}
+	if gateway != "" {
+		args = append(args, "--gateway-endpoint", gateway)
+	}
+	if insecure {
+		args = append(args, "--gateway-insecure")
+	}
+	args = append(args, "--", "sh", "-c", command)
+	return args
+}
+
 // FetchSessionReplies reads the Claude Code session JSONL from inside a remote
 // sandbox and returns assistant reply text keyed by promptId.
 func (e *OpenShellEnvironment) FetchSessionReplies(sandboxName, sessionID string) map[string]string {

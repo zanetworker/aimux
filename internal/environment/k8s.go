@@ -403,6 +403,10 @@ func (e *K8sEnvironment) ListSandboxes(ctx context.Context) ([]SandboxStatus, er
 }
 
 
+func (e *K8sEnvironment) Exec(_ context.Context, _ string, _ string) (string, error) {
+	return "", fmt.Errorf("k8s environment: Exec not yet supported")
+}
+
 // Status returns a human-readable connection status.
 func (e *K8sEnvironment) Status() string {
 	e.mu.Lock()
