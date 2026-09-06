@@ -6,7 +6,6 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/subagent"
-	"github.com/zanetworker/aimux/internal/task"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -56,80 +55,17 @@ type Provider interface {
 	// uses for subagent identity. Return zero AttrKeys if the provider
 	// doesn't support subagent tracking.
 	SubagentAttrKeys() subagent.AttrKeys
-
-	// Kill stops the agent. For local providers, this sends SIGTERM/SIGKILL
-	// to the process tree. For infra providers (e.g., Kubernetes), this
-	// deletes the pod or scales down the deployment.
-	Kill(a agent.Agent) error
 }
 
-// Messenger is an optional interface for providers that support sending
-// messages to a specific agent (e.g. writing to a Redis inbox stream).
-// Check with: if m, ok := p.(provider.Messenger); ok { m.SendMessage(...) }
-type Messenger interface {
-	SendMessage(agentID, text string) error
-}
-
-// TaskLister is an optional interface for providers that support task management.
-// The TUI checks for this via type assertion:
-//
-//	if tl, ok := p.(provider.TaskLister); ok { tasks, _ := tl.ListTasks() }
-type TaskLister interface {
-	ListTasks() ([]task.Task, error)
-	GetTaskResult(taskID string) (string, error)
-}
-
-// Spawner is an optional interface for providers that can spawn agents remotely.
-// The TUI checks for this via type assertion:
-//
-//	if sp, ok := p.(provider.Spawner); ok { sp.SpawnRemote(...) }
-type Spawner interface {
-	SpawnRemote(provider, role string, count int) error
-	ScaleDown(provider, role string) error
-}
-
-// InfraProvider is an optional interface for providers that manage remote
-// agent infrastructure (Kubernetes, EC2, SSH hosts, etc.). The TUI stores
-// one of these for on-demand operations (spawn sessions, health checks,
-// status display). Each backend implements its own discovery, spawning, and
-// health check logic behind this interface.
-//
-//	if rp, ok := p.(provider.InfraProvider); ok { rp.Status() }
-type InfraProvider interface {
-	Provider
-	TaskLister
-	Spawner
-
-	// Status returns a human-readable connection status for display.
-	Status() string
-
-	// CheckHealth validates connectivity to backing infrastructure.
-	// The returned HealthStatus uses generic fields that map to any
-	// backend's coordination + compute layers.
-	CheckHealth() HealthStatus
-
-	// SpawnSession creates a new interactive session instance and waits
-	// for it to become ready. Returns the instance name and namespace
-	// (or region, availability zone, etc. depending on the backend).
-	SpawnSession(providerName string) (instanceName, namespace string, err error)
-
-	// ScaleDownOne removes one instance of the named workload.
-	ScaleDownOne(providerName, role string) error
-}
-
-// HealthStatus represents the readiness of a infra provider's infrastructure.
-// The two-layer model (coordination + compute) maps to any backend:
-//
-//	K8s:  CoordOK=Redis, ComputeOK=cluster API
-//	EC2:  CoordOK=SQS/DynamoDB, ComputeOK=EC2 API
-//	SSH:  CoordOK=control host, ComputeOK=target host reachable
+// HealthStatus represents the readiness of an infrastructure backend.
+// Used by health.go for system health reporting.
 type HealthStatus struct {
-	Configured  bool     // true if the backend is configured
-	CoordOK     bool     // coordination layer healthy (Redis, SQS, etc.)
-	CoordErr    string   // coordination error message
-	ComputeOK   bool     // compute layer healthy (K8s API, EC2 API, etc.)
-	ComputeErr  string   // compute error message
-	Workloads   []string // discovered workload names (deployments, instances, etc.)
+	Configured  bool
+	CoordOK     bool
+	CoordErr    string
+	ComputeOK   bool
+	ComputeErr  string
+	Workloads   []string
 }
 
 // RecentDir is a recently-used project directory from a provider's session history.

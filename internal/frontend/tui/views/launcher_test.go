@@ -361,3 +361,223 @@ func TestLauncherThreeTabCycling(t *testing.T) {
 		t.Error("expected Quick mode after third Tab")
 	}
 }
+
+func TestLauncherEnvironmentSelection_MultipleEnvs(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+		Environments:   []string{"local", "sandbox", "cluster"},
+	})
+
+	if !l.hasMultipleEnvironments() {
+		t.Fatal("expected hasMultipleEnvironments() to be true")
+	}
+	if len(l.environments) != 3 {
+		t.Fatalf("expected 3 environments, got %d", len(l.environments))
+	}
+
+	sendEnter(l) // provider
+	sendEnter(l) // directory
+
+	// Navigate to field 2 (environment)
+	sendKey(l, "j") // field 1 (permissions)
+	sendKey(l, "j") // field 2 (environment)
+	if l.optionField != 2 {
+		t.Fatalf("optionField = %d, want 2", l.optionField)
+	}
+
+	// Default cursor at 0 (local)
+	if l.envCursor != 0 {
+		t.Errorf("envCursor = %d, want 0", l.envCursor)
+	}
+
+	// Navigate right to sandbox
+	sendKey(l, "l")
+	if l.envCursor != 1 {
+		t.Errorf("envCursor = %d, want 1 (sandbox)", l.envCursor)
+	}
+
+	// Launch
+	cmd := sendEnter(l)
+	if cmd == nil {
+		t.Fatal("expected LaunchMsg, got nil")
+	}
+	msg := cmd().(LaunchMsg)
+	if msg.Environment != "sandbox" {
+		t.Errorf("Environment = %q, want sandbox", msg.Environment)
+	}
+}
+
+func TestLauncherEnvironmentSelection_SingleEnv(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+		Environments:   []string{"local"},
+	})
+
+	if l.hasMultipleEnvironments() {
+		t.Fatal("expected hasMultipleEnvironments() to be false with single env")
+	}
+
+	sendEnter(l) // provider
+	sendEnter(l) // directory
+
+	// Navigate to field 2 (should be Runtime, not Environment)
+	sendKey(l, "j") // field 1
+	sendKey(l, "j") // field 2
+
+	// Navigate right should change runtime, not env
+	sendKey(l, "l")
+	if l.runtimeCursor != 1 {
+		t.Errorf("runtimeCursor = %d, want 1 (container)", l.runtimeCursor)
+	}
+
+	// Launch should have empty Environment (backward compat)
+	sendKey(l, "h") // back to local runtime
+	cmd := sendEnter(l)
+	msg := cmd().(LaunchMsg)
+	if msg.Environment != "" {
+		t.Errorf("Environment = %q, want empty for single-env", msg.Environment)
+	}
+	if msg.Runtime != "local" {
+		t.Errorf("Runtime = %q, want local", msg.Runtime)
+	}
+}
+
+func TestLauncherEnvironmentSelection_NoEnvsConfigured(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+	})
+
+	if l.hasMultipleEnvironments() {
+		t.Fatal("expected hasMultipleEnvironments() to be false with no envs")
+	}
+	if len(l.environments) != 1 || l.environments[0] != "local" {
+		t.Errorf("environments = %v, want [local]", l.environments)
+	}
+}
+
+func TestLauncherEnvironmentViewRenders(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+		Environments:   []string{"local", "sandbox"},
+	})
+	l.SetSize(80, 40)
+
+	sendEnter(l) // provider
+	sendEnter(l) // directory
+
+	view := l.View()
+	if !containsStr(view, "Environment:") {
+		t.Error("expected 'Environment:' in options view with multiple envs")
+	}
+}
+
+func TestLauncherNamedConfigs_ShowsConfiguredSection(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	configs := []AgentConfigEntry{
+		{Name: "reviewer", Runtime: "claude", Model: "opus"},
+		{Name: "writer", Runtime: "codex", Model: "o3"},
+	}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+		AgentConfigs:   configs,
+	})
+	l.SetSize(80, 40)
+
+	view := l.View()
+	if !containsStr(view, "Configured:") {
+		t.Error("expected 'Configured:' section in provider view")
+	}
+	if !containsStr(view, "Quick Launch:") {
+		t.Error("expected 'Quick Launch:' section in provider view")
+	}
+	if !containsStr(view, "reviewer") {
+		t.Error("expected 'reviewer' config in view")
+	}
+}
+
+func TestLauncherNamedConfigs_SelectConfigSetsProvider(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	configs := []AgentConfigEntry{
+		{Name: "reviewer", Runtime: "claude", Model: "opus"},
+	}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+		AgentConfigs:   configs,
+	})
+
+	// Cursor starts at 0 (first config: "reviewer")
+	sendEnter(l) // select "reviewer" config
+	sendEnter(l) // select directory
+
+	// Launch
+	cmd := sendEnter(l)
+	msg := cmd().(LaunchMsg)
+	if msg.Provider != "claude" {
+		t.Errorf("Provider = %q, want claude (from config runtime)", msg.Provider)
+	}
+	if msg.AgentConfig != "reviewer" {
+		t.Errorf("AgentConfig = %q, want reviewer", msg.AgentConfig)
+	}
+}
+
+func TestLauncherNamedConfigs_SelectRawProvider(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	configs := []AgentConfigEntry{
+		{Name: "reviewer", Runtime: "claude", Model: "opus"},
+	}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+		AgentConfigs:   configs,
+	})
+
+	// Move past config to raw providers (1=claude, 2=codex)
+	sendKey(l, "j") // cursor 1 = claude (raw)
+	sendEnter(l)     // select claude raw
+	sendEnter(l)     // select directory
+
+	cmd := sendEnter(l)
+	msg := cmd().(LaunchMsg)
+	if msg.Provider != "claude" {
+		t.Errorf("Provider = %q, want claude", msg.Provider)
+	}
+	if msg.AgentConfig != "" {
+		t.Errorf("AgentConfig = %q, want empty for raw provider", msg.AgentConfig)
+	}
+}
+
+func TestLauncherNamedConfigs_NoConfigsShowsProvider(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+	})
+	l.SetSize(80, 40)
+
+	view := l.View()
+	if !containsStr(view, "Provider:") {
+		t.Error("expected 'Provider:' when no configs")
+	}
+	if containsStr(view, "Configured:") {
+		t.Error("should not show 'Configured:' when no configs")
+	}
+}
+
+func TestLauncherRuntimeViewRenders(t *testing.T) {
+	recent := []RecentDirEntry{{Path: "/tmp/test", Display: "test"}}
+	l := NewLauncherView(recent, testProviderOpts(), false, LauncherConfig{
+		DefaultRuntime: "local",
+		Environments:   []string{"local"},
+	})
+	l.SetSize(80, 40)
+
+	sendEnter(l) // provider
+	sendEnter(l) // directory
+
+	view := l.View()
+	if !containsStr(view, "Runtime:") {
+		t.Error("expected 'Runtime:' in options view with single env")
+	}
+}

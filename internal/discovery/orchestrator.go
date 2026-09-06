@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/environment"
 )
 
 // AgentProvider is the minimal interface that the orchestrator requires from
@@ -51,10 +52,10 @@ func TakeSnapshot() *Snapshot {
 	return snap
 }
 
-// Orchestrator coordinates multiple providers to produce a unified list of agents.
+// Orchestrator coordinates multiple providers and environments to produce a unified list of agents.
 type Orchestrator struct {
-	providers       []AgentProvider
-	discoverRemote  bool
+	providers    []AgentProvider
+	environments []environment.Environment
 }
 
 // NewOrchestrator creates an orchestrator that iterates the given providers.
@@ -62,9 +63,9 @@ func NewOrchestrator(providers ...AgentProvider) *Orchestrator {
 	return &Orchestrator{providers: providers}
 }
 
-// EnableRemoteDiscovery enables sandbox discovery via openshell sandbox list.
-func (o *Orchestrator) EnableRemoteDiscovery() {
-	o.discoverRemote = true
+// AddEnvironment registers an environment for remote agent discovery.
+func (o *Orchestrator) AddEnvironment(env environment.Environment) {
+	o.environments = append(o.environments, env)
 }
 
 // Discover queries every registered provider and merges the results.
@@ -101,18 +102,32 @@ func (o *Orchestrator) Discover() ([]agent.Agent, error) {
 		all = append(all, r.agents...)
 	}
 
-	if o.discoverRemote {
-		sandboxAgents := DiscoverSandboxes()
-		// Avoid duplicates: skip sandboxes that match a pending/local agent by tmux session name
+	// Environment discovery (for remote agents: OpenShell, K8s, etc.)
+	if len(o.environments) > 0 {
+		envCh := make(chan result, len(o.environments))
+		for _, env := range o.environments {
+			go func(e environment.Environment) {
+				agents, err := e.Discover()
+				if err != nil {
+					envCh <- result{}
+				} else {
+					envCh <- result{agents: agents}
+				}
+			}(env)
+		}
 		existing := make(map[string]bool)
 		for _, a := range all {
 			if a.SandboxName != "" {
 				existing[a.SandboxName] = true
 			}
 		}
-		for _, sa := range sandboxAgents {
-			if !existing[sa.SandboxName] {
-				all = append(all, sa)
+		for range len(o.environments) {
+			r := <-envCh
+			for _, a := range r.agents {
+				if a.SandboxName != "" && existing[a.SandboxName] {
+					continue
+				}
+				all = append(all, a)
 			}
 		}
 	}

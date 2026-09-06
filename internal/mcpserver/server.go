@@ -10,14 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcplib "github.com/mark3labs/mcp-go/server"
-	"github.com/redis/go-redis/v9"
+	"github.com/zanetworker/aimux/internal/coordination"
 )
 
 var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -40,6 +39,8 @@ type Options struct {
 	Kubeconfig string
 	Namespace  string
 	TeamID     string
+	// Coordination
+	Coordinator coordination.Coordinator
 	// Shared
 	JournalPath string
 	MaxAgents   int
@@ -75,11 +76,7 @@ type Server struct {
 	backend     Backend
 	journal     *Journal
 	pool        *Pool
-	// K8s-specific: kept for backward compat with Redis task handlers.
-	// Nil when using OpenShell backend.
-	rdb         *redis.Client
-	teamID      string
-	namespace   string
+	coord       coordination.Coordinator
 	maxAgents   int
 	maxCost     float64
 	warmPool    int
@@ -103,6 +100,10 @@ func NewServer(opts Options) (*Server, error) {
 		s.backend = opts.ExternalBackend
 	}
 
+	if opts.Coordinator != nil {
+		s.coord = opts.Coordinator
+	}
+
 	switch {
 	case s.backend != nil:
 		// Already set via ExternalBackend
@@ -120,11 +121,15 @@ func NewServer(opts Options) (*Server, error) {
 			return nil, err
 		}
 		s.backend = k8sBackend
-		s.rdb = k8sBackend.Redis()
-		s.teamID = k8sBackend.TeamID()
-		s.namespace = opts.Namespace
+		if s.coord == nil {
+			s.coord = coordination.NewRedisCoordinatorFromClient(k8sBackend.Redis(), k8sBackend.TeamID())
+		}
 	default:
 		return nil, fmt.Errorf("unknown backend %q (want \"openshell\" or \"k8s\")", opts.Backend)
+	}
+
+	if s.coord == nil {
+		s.coord = coordination.NewLocalCoordinator()
 	}
 
 	// Journal for durable task state
@@ -173,12 +178,6 @@ func (s *Server) Serve() error {
 	srv.AddTool(s.getCostsTool(), s.handleGetCosts)
 	srv.AddTool(s.cleanupBranchesTool(), s.handleCleanupBranches)
 	return mcplib.ServeStdio(srv)
-}
-
-// teamKey scopes a Redis key to the current team.
-// Format: team:{teamID}:{suffix}
-func (s *Server) teamKey(suffix string) string {
-	return fmt.Sprintf("team:%s:%s", s.teamID, suffix)
 }
 
 // --- Tool definitions ---
@@ -256,15 +255,34 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultText("Error: prompt is required"), nil
 	}
 
-	taskID := uuid.New().String()[:8]
-
-	// OpenShell path: exec directly into a sandbox
-	if s.rdb == nil {
+	// Exec path: dispatch directly into a sandbox
+	if _, ok := s.backend.(PoolBackend); ok {
+		taskID := uuid.New().String()[:8]
 		return s.createTaskExec(ctx, taskID, prompt)
 	}
 
-	// K8s path: push to Redis queue
-	return s.createTaskRedis(ctx, taskID, prompt, req)
+	// Coordinator path: queue task for async processing
+	role := req.GetString("required_role", "")
+	depsStr := req.GetString("depends_on", "")
+	var deps []string
+	if depsStr != "" {
+		deps = splitComma(depsStr)
+	}
+
+	taskID, err := s.coord.CreateTask(ctx, coordination.TaskSpec{
+		Prompt:       prompt,
+		RequiredRole: role,
+		DependsOn:    deps,
+	})
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf("Error creating task: %v", err)), nil
+	}
+
+	label := "any"
+	if role != "" {
+		label = role
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Task %s created (role=%s)", taskID, label)), nil
 }
 
 // PoolBackend is an optional interface for backends that support idle pool management.
@@ -324,54 +342,6 @@ func (s *Server) recordEvent(ev TaskEvent) {
 	}
 }
 
-// createTaskRedis pushes a task to the Redis queue for K8s agents.
-func (s *Server) createTaskRedis(ctx context.Context, taskID string, prompt string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	role := req.GetString("required_role", "")
-	depsStr := req.GetString("depends_on", "")
-
-	deps := "[]"
-	if depsStr != "" {
-		parts := splitComma(depsStr)
-		b, err := json.Marshal(parts)
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("Error marshaling depends_on: %v", err)), nil
-		}
-		deps = string(b)
-	}
-
-	now := time.Now().Unix()
-	taskHash := map[string]any{
-		"status":         "pending",
-		"prompt":         prompt,
-		"required_role":  role,
-		"assignee":       "",
-		"depends_on":     deps,
-		"result_summary": "",
-		"error":          "",
-		"retry_count":    "0",
-		"created_at":     fmt.Sprintf("%d", now),
-		"completed_at":   "",
-	}
-
-	if err := s.rdb.HSet(ctx, s.teamKey("task:"+taskID), taskHash).Err(); err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("Error writing task to Redis: %v", err)), nil
-	}
-
-	score := float64(now)
-	if err := s.rdb.ZAdd(ctx, s.teamKey("tasks:pending"), redis.Z{Score: score, Member: taskID}).Err(); err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("Error writing to tasks:pending: %v", err)), nil
-	}
-	if err := s.rdb.ZAdd(ctx, s.teamKey("tasks:all"), redis.Z{Score: score, Member: taskID}).Err(); err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("Error writing to tasks:all: %v", err)), nil
-	}
-
-	label := "any"
-	if role != "" {
-		label = role
-	}
-	return mcp.NewToolResultText(fmt.Sprintf("Task %s created (role=%s)", taskID, label)), nil
-}
-
 func (s *Server) listTasksTool() mcp.Tool {
 	return mcp.NewTool("list_tasks",
 		mcp.WithDescription("Show all remote tasks and their status."),
@@ -379,57 +349,31 @@ func (s *Server) listTasksTool() mcp.Tool {
 }
 
 func (s *Server) handleListTasks(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if s.rdb == nil {
+	if _, ok := s.backend.(PoolBackend); ok {
 		return mcp.NewToolResultText("Tasks are executed synchronously on the OpenShell backend. Use create_task to run a command and get results immediately."), nil
 	}
-	taskIDs, err := s.rdb.ZRange(ctx, s.teamKey("tasks:all"), 0, -1).Result()
+
+	tasks, err := s.coord.ListTasks(ctx)
 	if err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("Error reading tasks:all from Redis: %v", err)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Error listing tasks: %v", err)), nil
 	}
-
-	if len(taskIDs) == 0 {
-		var cursor uint64
-		prefix := s.teamKey("task:")
-		for {
-			batch, nextCursor, scanErr := s.rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
-			if scanErr != nil {
-				break
-			}
-			for _, key := range batch {
-				taskIDs = append(taskIDs, key[len(prefix):])
-			}
-			cursor = nextCursor
-			if cursor == 0 {
-				break
-			}
-		}
-	}
-
-	if len(taskIDs) == 0 {
+	if len(tasks) == 0 {
 		return mcp.NewToolResultText("No tasks"), nil
 	}
 
 	var lines []string
-	for _, tid := range taskIDs {
-		t, err := s.rdb.HGetAll(ctx, s.teamKey("task:"+tid)).Result()
-		if err != nil || len(t) == 0 {
-			continue
+	for _, t := range tasks {
+		line := fmt.Sprintf("  %s: [%s]", t.ID, t.Status)
+		if t.Assignee != "" {
+			line += fmt.Sprintf(" assigned=%s", t.Assignee)
 		}
-		line := fmt.Sprintf("  %s: [%s]", tid, t["status"])
-		if t["assignee"] != "" {
-			line += fmt.Sprintf(" assigned=%s", t["assignee"])
-		}
-		prompt := truncate(t["prompt"], 60)
+		prompt := truncate(t.Prompt, 60)
 		line += " " + prompt
-		if t["status"] == "completed" && t["result_summary"] != "" {
-			result := truncate(t["result_summary"], 60)
+		if t.Status == coordination.TaskCompleted && t.ResultSummary != "" {
+			result := truncate(t.ResultSummary, 60)
 			line += "\n         result: " + result
 		}
 		lines = append(lines, line)
-	}
-
-	if len(lines) == 0 {
-		return mcp.NewToolResultText("No tasks"), nil
 	}
 	return mcp.NewToolResultText(joinLines(lines)), nil
 }
@@ -442,25 +386,36 @@ func (s *Server) getTaskTool() mcp.Tool {
 }
 
 func (s *Server) handleGetTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if s.rdb == nil {
+	if _, ok := s.backend.(PoolBackend); ok {
 		return mcp.NewToolResultText("Tasks are executed synchronously on the OpenShell backend. Results are returned directly from create_task."), nil
 	}
 	taskID, err := req.RequireString("task_id")
 	if err != nil {
 		return mcp.NewToolResultText("Error: task_id is required"), nil
 	}
-	t, err := s.rdb.HGetAll(ctx, s.teamKey("task:"+taskID)).Result()
+	tasks, err := s.coord.ListTasks(ctx)
 	if err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("Error reading task from Redis: %v", err)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Error listing tasks: %v", err)), nil
 	}
-	if len(t) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("Task %s not found", taskID)), nil
+	for _, t := range tasks {
+		if t.ID == taskID {
+			taskMap := map[string]any{
+				"id":             t.ID,
+				"status":         string(t.Status),
+				"prompt":         t.Prompt,
+				"required_role":  t.RequiredRole,
+				"assignee":       t.Assignee,
+				"result_summary": t.ResultSummary,
+				"error":          t.Error,
+			}
+			b, err := json.MarshalIndent(taskMap, "", "  ")
+			if err != nil {
+				return mcp.NewToolResultText(fmt.Sprintf("Error formatting task: %v", err)), nil
+			}
+			return mcp.NewToolResultText(string(b)), nil
+		}
 	}
-	b, err := json.MarshalIndent(t, "", "  ")
-	if err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("Error formatting task: %v", err)), nil
-	}
-	return mcp.NewToolResultText(string(b)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Task %s not found", taskID)), nil
 }
 
 func (s *Server) listAgentsTool() mcp.Tool {
@@ -498,7 +453,7 @@ func (s *Server) sendMessageTool() mcp.Tool {
 }
 
 func (s *Server) handleSendMessage(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if s.rdb == nil {
+	if _, ok := s.backend.(PoolBackend); ok {
 		return mcp.NewToolResultText("send_message is not supported on the OpenShell backend. Use create_task to exec commands directly."), nil
 	}
 	to, err := req.RequireString("to")
@@ -510,17 +465,8 @@ func (s *Server) handleSendMessage(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultText("Error: text is required"), nil
 	}
 
-	if err := s.rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: s.teamKey("inbox:" + to),
-		MaxLen: 1000,
-		Approx: true,
-		Values: map[string]any{
-			"from":      "lead",
-			"text":      text,
-			"timestamp": fmt.Sprintf("%d", time.Now().Unix()),
-		},
-	}).Err(); err != nil {
-		return mcp.NewToolResultText(fmt.Sprintf("Error sending message to Redis: %v", err)), nil
+	if err := s.coord.SendMessage(ctx, to, text); err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf("Error sending message: %v", err)), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Message sent to %s", to)), nil
 }
@@ -565,38 +511,21 @@ func (s *Server) getCostsTool() mcp.Tool {
 }
 
 func (s *Server) handleGetCosts(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if s.rdb == nil {
+	if _, ok := s.backend.(PoolBackend); ok {
 		return mcp.NewToolResultText("Cost tracking is not yet available on the OpenShell backend."), nil
 	}
-	var costKeys []string
-	var cursor uint64
-	prefix := s.teamKey("cost:")
-	for {
-		batch, nextCursor, err := s.rdb.Scan(ctx, cursor, prefix+"*", 100).Result()
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("Error scanning cost keys: %v", err)), nil
-		}
-		costKeys = append(costKeys, batch...)
-		cursor = nextCursor
-		if cursor == 0 {
-			break
-		}
+
+	costs, err := s.coord.GetCosts(ctx)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf("Error reading costs: %v", err)), nil
 	}
 
 	var total float64
 	var lines []string
-
-	for _, key := range costKeys {
-		c, err := s.rdb.HGetAll(ctx, key).Result()
-		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("Error reading cost hash %s: %v", key, err)), nil
-		}
-		agentID := key[len(prefix):]
-		tokensIn, _ := strconv.ParseInt(c["tokens_in"], 10, 64)
-		tokensOut, _ := strconv.ParseInt(c["tokens_out"], 10, 64)
-		cost := float64(tokensIn)*0.015/1000 + float64(tokensOut)*0.075/1000
+	for _, c := range costs {
+		cost := float64(c.TokensIn)*0.015/1000 + float64(c.TokensOut)*0.075/1000
 		total += cost
-		lines = append(lines, fmt.Sprintf("  %s: $%.2f (%d in, %d out)", agentID, cost, tokensIn, tokensOut))
+		lines = append(lines, fmt.Sprintf("  %s: $%.2f (%d in, %d out)", c.AgentID, cost, c.TokensIn, c.TokensOut))
 	}
 
 	if len(lines) == 0 {
@@ -618,7 +547,7 @@ func (s *Server) waitForTaskTool() mcp.Tool {
 }
 
 func (s *Server) handleWaitForTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if s.rdb == nil {
+	if _, ok := s.backend.(PoolBackend); ok {
 		return mcp.NewToolResultText("Tasks execute synchronously on the OpenShell backend. Results are returned directly from create_task."), nil
 	}
 	taskID, err := req.RequireString("task_id")
@@ -628,17 +557,23 @@ func (s *Server) handleWaitForTask(ctx context.Context, req mcp.CallToolRequest)
 
 	deadline := time.Now().Add(10 * time.Minute)
 	for time.Now().Before(deadline) {
-		t, err := s.rdb.HGetAll(ctx, s.teamKey("task:"+taskID)).Result()
+		tasks, err := s.coord.ListTasks(ctx)
 		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("Error reading task: %v", err)), nil
+			return mcp.NewToolResultText(fmt.Sprintf("Error reading tasks: %v", err)), nil
 		}
-		if len(t) == 0 {
+		found := false
+		for _, t := range tasks {
+			if t.ID == taskID {
+				found = true
+				if t.Status == coordination.TaskCompleted || t.Status == coordination.TaskFailed {
+					return mcp.NewToolResultText(fmt.Sprintf("Task %s: status=%s summary=%s",
+						taskID, t.Status, t.ResultSummary)), nil
+				}
+				break
+			}
+		}
+		if !found {
 			return mcp.NewToolResultText(fmt.Sprintf("Task %s not found", taskID)), nil
-		}
-		status := t["status"]
-		if status == "completed" || status == "failed" || status == "dead" {
-			return mcp.NewToolResultText(fmt.Sprintf("Task %s: status=%s summary=%s",
-				taskID, status, t["result_summary"])), nil
 		}
 		time.Sleep(5 * time.Second)
 	}
@@ -654,16 +589,19 @@ func (s *Server) getTaskResultTool() mcp.Tool {
 }
 
 func (s *Server) handleGetTaskResult(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if s.rdb == nil {
+	if _, ok := s.backend.(PoolBackend); ok {
 		return mcp.NewToolResultText("Tasks execute synchronously on the OpenShell backend. Results are returned directly from create_task."), nil
 	}
 	taskID, err := req.RequireString("task_id")
 	if err != nil {
 		return mcp.NewToolResultText("Error: task_id is required"), nil
 	}
-	val, err := s.rdb.Get(ctx, s.teamKey("task:"+taskID+":result_full")).Result()
+	val, err := s.coord.GetTaskResult(ctx, taskID)
 	if err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf("No full result stored for task %s", taskID)), nil
+	}
+	if val == "" {
+		return mcp.NewToolResultText(fmt.Sprintf("No result stored for task %s", taskID)), nil
 	}
 	return mcp.NewToolResultText(val), nil
 }

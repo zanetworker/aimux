@@ -112,17 +112,11 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 	if env == nil {
 		env = make(map[string]string)
 	}
-	// The agent inside the sandbox routes model traffic through the gateway's
-	// in-sandbox inference proxy (inference.local), configured by
-	// --auto-providers at create time. Do NOT pass the host's Vertex
-	// credentials (CLAUDE_CODE_USE_VERTEX, GOOGLE_APPLICATION_CREDENTIALS,
-	// etc.): CLAUDE_CODE_USE_VERTEX makes Claude Code ignore ANTHROPIC_BASE_URL
-	// and dial Vertex directly, which then fails because the host's gcloud ADC
-	// file does not exist inside the sandbox.
-	env["ANTHROPIC_BASE_URL"] = "https://inference.local"
-	env["CLAUDE_MODEL"] = "claude-sonnet-4-6"
-	env["CLAUDE_CODE_MODEL"] = "claude-sonnet-4-6"
-	env["ANTHROPIC_API_KEY"] = "placeholder"
+	// Auto-detect host auth and configure the sandbox to match.
+	// The goal: if Claude works on the host, it works in the sandbox.
+	if err := ensureSandboxAuth(env); err != nil {
+		debuglog.Log("compose: auth setup warning: %v", err)
+	}
 
 	// OpenShell sandbox names are limited to 19 characters.
 	sandboxName := sandboxName(provider, time.Now().Unix())
@@ -137,11 +131,11 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 	// env (deliberately not set): the agent still dials inference.local, and the
 	// gateway does the Vertex auth. Without this flag inference.local has no
 	// backend and the agent's requests fail and retry.
-	createArgs := []string{"sandbox", "create", "--name", sandboxName, "--from", image, "--no-tty", "--auto-providers", "--provider", "vertex"}
+	createArgs := []string{"sandbox", "create", "--name", sandboxName, "--from", image, "--no-tty", "--detach", "--auto-providers", "--provider", "vertex"}
 	for k, v := range env {
 		createArgs = append(createArgs, "--env", k+"="+v)
 	}
-	createArgs = append(createArgs, "--", "true")
+	createArgs = append(createArgs, "--", "sleep", "infinity")
 
 	cmd := exec.Command("openshell", createArgs...) // #nosec G204
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -151,14 +145,17 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 	}
 	debuglog.Log("compose: sandbox %s created", sandboxName)
 
-	// Step 2: Inject OTEL env vars into .bashrc so sandbox connect shells get them.
-	// --env only applies to the container's initial process, not to shells
-	// spawned by "sandbox connect".
+	// Step 2: Inject env vars into both /root/.bashrc and /sandbox/.bashrc
+	// (sandbox user may be root or sandbox depending on image).
+	// Also write to /etc/profile.d/ as a catch-all for login shells.
+	var exportLines string
 	for k, v := range env {
-		exportCmd := fmt.Sprintf("echo 'export %s=%s' >> ~/.bashrc", k, v)
-		_ = exec.Command("openshell", "sandbox", "exec", "--name", sandboxName, // #nosec G204
-			"--", "bash", "-c", exportCmd).Run()
+		exportLines += fmt.Sprintf("export %s=%s\n", k, v)
 	}
+	writeCmd := fmt.Sprintf("echo '%s' >> $HOME/.bashrc 2>/dev/null; echo '%s' >> $HOME/.profile 2>/dev/null; mkdir -p /etc/profile.d && echo '%s' > /etc/profile.d/aimux.sh 2>/dev/null; true",
+		exportLines, exportLines, exportLines)
+	_ = exec.Command("openshell", "sandbox", "exec", "--name", sandboxName, // #nosec G204
+		"--", "bash", "-c", writeCmd).Run()
 	debuglog.Log("compose: OTEL env vars written to .bashrc for %s", sandboxName)
 
 	// Step 3: Update egress policy BEFORE agent starts.
@@ -237,6 +234,89 @@ func firstErrorLine(raw string) string {
 		}
 	}
 	return raw
+}
+
+// ensureSandboxAuth detects the host's auth method and configures the sandbox
+// environment accordingly. If the host uses Vertex, it auto-configures the
+// OpenShell gateway provider so inference.local works without manual setup.
+func ensureSandboxAuth(env map[string]string) error {
+	// Priority 1: direct API key
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		env["ANTHROPIC_API_KEY"] = key
+		debuglog.Log("compose: auth: using host ANTHROPIC_API_KEY")
+		return nil
+	}
+
+	// Priority 2: OAuth token via ant CLI
+	if token := os.Getenv("ANTHROPIC_AUTH_TOKEN"); token != "" {
+		env["ANTHROPIC_AUTH_TOKEN"] = token
+		debuglog.Log("compose: auth: using host ANTHROPIC_AUTH_TOKEN")
+		return nil
+	}
+
+	// Priority 3: Vertex AI - route through gateway's inference proxy.
+	// DO NOT set CLAUDE_CODE_USE_VERTEX inside the sandbox: it makes Claude
+	// Code bypass ANTHROPIC_BASE_URL and dial Google directly (which fails
+	// because the sandbox has no Google ADC credentials). Instead, set
+	// ANTHROPIC_BASE_URL to inference.local with a dummy key. The gateway's
+	// --auto-providers --provider vertex translates Anthropic-format requests
+	// to Vertex using the GATEWAY's own Google credentials.
+	if os.Getenv("CLAUDE_CODE_USE_VERTEX") != "" {
+		projectID := os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
+		if projectID == "" {
+			projectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
+		}
+		if projectID != "" {
+			ensureGatewayVertexProvider(projectID)
+		}
+		env["ANTHROPIC_BASE_URL"] = "https://inference.local"
+		env["ANTHROPIC_API_KEY"] = "gateway-proxy"
+		debuglog.Log("compose: auth: Vertex host detected, using gateway proxy (project=%s)", projectID)
+		return nil
+	}
+
+	// Priority 4: try ant auth for a short-lived token
+	if out, err := exec.Command("ant", "auth", "print-credentials", "--access-token").Output(); err == nil { // #nosec G204
+		token := strings.TrimSpace(string(out))
+		if token != "" && !strings.HasPrefix(token, "{") {
+			env["ANTHROPIC_AUTH_TOKEN"] = token
+			debuglog.Log("compose: auth: using OAuth token from ant CLI")
+			return nil
+		}
+	}
+
+	// Fallback: gateway proxy without key (gateway handles auth)
+	env["ANTHROPIC_BASE_URL"] = "https://inference.local"
+	debuglog.Log("compose: auth: no credentials found, falling back to gateway proxy")
+	return fmt.Errorf("no host credentials detected; configure the gateway provider or set ANTHROPIC_API_KEY")
+}
+
+// ensureGatewayVertexProvider checks if the gateway has a Vertex provider
+// and inference route configured. If missing, creates them automatically
+// using the host's Google ADC credentials.
+func ensureGatewayVertexProvider(projectID string) {
+	out, _ := exec.Command("openshell", "provider", "list").Output() // #nosec G204
+	if strings.Contains(string(out), "vertex") {
+		return
+	}
+	region := os.Getenv("CLOUD_ML_REGION")
+	if region == "" {
+		region = "us-east5"
+	}
+	debuglog.Log("compose: auto-configuring Vertex provider (project=%s, region=%s)", projectID, region)
+	cmd := exec.Command("openshell", "provider", "create", // #nosec G204
+		"--name", "vertex", "--type", "vertex", "--from-gcloud-adc",
+		"--config", "VERTEX_AI_PROJECT_ID="+projectID,
+		"--config", "GOOGLE_CLOUD_LOCATION="+region)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		debuglog.Log("compose: provider create failed: %v: %s", err, strings.TrimSpace(string(out)))
+		return
+	}
+	cmd = exec.Command("openshell", "inference", "set", // #nosec G204
+		"--provider", "vertex", "--model", "claude-sonnet-4-6", "--no-verify")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		debuglog.Log("compose: inference set failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
 }
 
 // stripAnsi removes ANSI escape sequences from a string.

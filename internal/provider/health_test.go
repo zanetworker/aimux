@@ -9,13 +9,12 @@ func TestGatherHealth_LocalProviders(t *testing.T) {
 	providers := []Provider{&Claude{}, &Codex{}}
 	counts := map[string]int{"claude": 3, "codex": 0}
 
-	sh := GatherHealth(providers, nil, counts)
+	sh := GatherHealth(providers, counts)
 
 	if len(sh.Providers) != 2 {
 		t.Fatalf("GatherHealth() returned %d providers, want 2", len(sh.Providers))
 	}
 
-	// Claude should have agents counted.
 	for _, p := range sh.Providers {
 		if p.Name == "claude" {
 			if p.Agents != 3 {
@@ -28,8 +27,8 @@ func TestGatherHealth_LocalProviders(t *testing.T) {
 	}
 }
 
-func TestGatherHealth_NilInfra(t *testing.T) {
-	sh := GatherHealth([]Provider{&Claude{}}, nil, nil)
+func TestGatherHealth_NilCounts(t *testing.T) {
+	sh := GatherHealth([]Provider{&Claude{}}, nil)
 	if len(sh.Providers) != 1 {
 		t.Fatalf("expected 1 provider, got %d", len(sh.Providers))
 	}

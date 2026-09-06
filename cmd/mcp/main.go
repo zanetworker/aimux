@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
+	"github.com/zanetworker/aimux/internal/coordination"
 	"github.com/zanetworker/aimux/internal/mcpserver"
 )
 
@@ -38,6 +39,19 @@ func main() {
 		}
 		opts.ExternalBackend = aimuxcompose.NewBackend(engine)
 	}
+
+	// Create coordinator from config
+	var coord coordination.Coordinator
+	if opts.Backend != "openshell" && opts.RedisURL != "" {
+		var coordErr error
+		coord, coordErr = coordination.NewRedisCoordinator(opts.RedisURL, opts.TeamID)
+		if coordErr != nil {
+			coord = coordination.NewLocalCoordinator()
+		}
+	} else {
+		coord = coordination.NewLocalCoordinator()
+	}
+	opts.Coordinator = coord
 
 	s, err := mcpserver.NewServer(opts)
 	if err != nil {

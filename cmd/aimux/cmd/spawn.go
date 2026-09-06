@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/deliver"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -16,37 +17,72 @@ import (
 
 type spawnFn func(opts spawn.LaunchOpts) (pid int, tmuxSession string, err error)
 
-func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string) *cobra.Command {
+func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string, environments map[string]config.EnvironmentConfig, agentConfigs ...[]config.AgentConfig) *cobra.Command {
 	var dir, model, mode, prompt string
 	var runtime, execution, shell, sessionMgr string
+	var envFlag string
 	var otel bool
 	var dryRun bool
 	var wait bool
 	var deliverTarget string
 
+	var configs []config.AgentConfig
+	if len(agentConfigs) > 0 {
+		configs = agentConfigs[0]
+	}
+
 	cmd := &cobra.Command{
-		Use:   "spawn <provider>",
+		Use:   "spawn <provider|config-name>",
 		Short: "Start a new AI agent session",
-		Long:  fmt.Sprintf("Launch a new AI agent session. Provider must be one of: %s", strings.Join(validProviders, ", ")),
+		Long:  fmt.Sprintf("Launch a new AI agent session. Argument is a provider (%s) or a named config from agents.yaml.", strings.Join(validProviders, ", ")),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := args[0]
 
-			valid := false
-			for _, vp := range validProviders {
-				if provider == vp {
-					valid = true
+			// Check if it's a named agent config
+			var matchedConfig *config.AgentConfig
+			for i := range configs {
+				if configs[i].Name == provider {
+					matchedConfig = &configs[i]
 					break
 				}
 			}
-			if !valid {
-				return fmt.Errorf("invalid provider %q (must be one of: %s)", provider, strings.Join(validProviders, ", "))
+
+			if matchedConfig != nil {
+				provider = matchedConfig.Runtime
+				if model == "" && matchedConfig.Model != "" {
+					model = matchedConfig.Model
+				}
+				if prompt == "" && matchedConfig.Prompt != "" {
+					prompt = matchedConfig.Prompt
+				}
+			} else {
+				valid := false
+				for _, vp := range validProviders {
+					if provider == vp {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					return fmt.Errorf("unknown provider or config %q (providers: %s; run 'aimux configs' to see named configs)",
+						provider, strings.Join(validProviders, ", "))
+				}
 			}
 
 			if dir == "" {
 				dir, _ = os.Getwd()
 			}
 			mode = controller.ResolveMode(mode, defaultMode)
+
+			if envFlag != "" {
+				envCfg, ok := environments[envFlag]
+				if !ok {
+					return fmt.Errorf("unknown environment %q (available: %s)",
+						envFlag, strings.Join(controller.EnvironmentNames(environments), ", "))
+				}
+				runtime = controller.ResolveLaunchRuntime(envCfg)
+			}
 
 			if dryRun {
 				if jsonOutput {
@@ -157,6 +193,7 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 	cmd.Flags().StringVar(&mode, "mode", "", "Mode (e.g., plan, auto)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Initial prompt")
 	cmd.Flags().StringVar(&runtime, "runtime", "", "Runtime: local (default) or container")
+	cmd.Flags().StringVar(&envFlag, "environment", "", "Named environment (from config.yaml environments section)")
 	cmd.Flags().StringVar(&execution, "execution", "", "Execution: local (default) or hybrid")
 	cmd.Flags().StringVar(&shell, "shell", "", "Login shell (default: $SHELL)")
 	cmd.Flags().StringVar(&sessionMgr, "session", "", "Session manager: tmux (default) or direct")

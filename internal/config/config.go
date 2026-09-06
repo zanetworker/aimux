@@ -37,6 +37,9 @@ type Config struct {
 	Badges           []BadgeRule               `yaml:"badges"`             // project file badge rules
 	Runtimes         map[string]RuntimeConfig  `yaml:"runtimes"`           // named runtime environments
 	ROI              ROIConfig                 `yaml:"roi"`                // per-session ROI settings
+	Coordination     CoordinationConfig        `yaml:"coordination"`       // coordination backend settings
+	Environments     map[string]EnvironmentConfig `yaml:"environments"`    // named environments for agent execution
+	AgentConfigs     []AgentConfig             `yaml:"-"`                  // loaded from agents.yaml, not config.yaml
 }
 
 // K8sProviderConfig holds connection settings for the Kubernetes agent provider.
@@ -152,6 +155,23 @@ type ROIConfig struct {
 	HourlyRate float64 `yaml:"hourly_rate"` // developer hourly rate in USD (default: 150)
 }
 
+// CoordinationConfig holds settings for the multi-agent coordination backend.
+type CoordinationConfig struct {
+	RedisURL string `yaml:"redis_url"`
+	TeamID   string `yaml:"team_id"`
+}
+
+// EnvironmentConfig holds settings for a named environment where agents can execute.
+type EnvironmentConfig struct {
+	Type       string `yaml:"type"`       // "local", "openshell", "k8s"
+	Gateway    string `yaml:"gateway"`    // OpenShell gateway URL
+	Insecure   bool   `yaml:"insecure"`
+	Image      string `yaml:"image"`
+	RedisURL   string `yaml:"redis_url"`  // K8s only
+	Namespace  string `yaml:"namespace"`
+	Kubeconfig string `yaml:"kubeconfig"`
+}
+
 // TasksConfig holds settings for Google Tasks integration.
 type TasksConfig struct {
 	Backend        string `yaml:"backend"`         // "auto", "mcp", or "api"
@@ -163,6 +183,7 @@ type TasksConfig struct {
 // Default returns the configuration used when no config file is present.
 // All known providers are enabled. The Kubernetes provider is disabled by
 // default because it requires a Redis URL and team ID to be useful.
+// A default "local" environment is always created.
 func Default() Config {
 	return Config{
 		Providers: func() map[string]ProviderConfig {
@@ -198,6 +219,9 @@ func Default() Config {
 		Tasks: TasksConfig{
 			Backend:        "auto",
 			PromptTemplate: "Work on the following task: {title}\n\nDetails: {notes}\n\nAdditional instructions: {user_prompt}\n\nWhen done, summarize what you did.",
+		},
+		Environments: map[string]EnvironmentConfig{
+			"local": {Type: "local"},
 		},
 	}
 }
@@ -299,6 +323,42 @@ func Load(path string) (Config, error) {
 		for name, rc := range fileCfg.Runtimes {
 			cfg.Runtimes[name] = rc
 		}
+	}
+	if fileCfg.Coordination.RedisURL != "" {
+		cfg.Coordination = fileCfg.Coordination
+	}
+
+	// Backward compat: if Environments is still just the default and legacy Remote.Backend is set,
+	// auto-create an environment entry.
+	if len(fileCfg.Environments) > 0 {
+		if cfg.Environments == nil {
+			cfg.Environments = make(map[string]EnvironmentConfig)
+		}
+		for name, ec := range fileCfg.Environments {
+			cfg.Environments[name] = ec
+		}
+	}
+	if fileCfg.Remote.Backend == "openshell" && len(cfg.Environments) == 1 && cfg.Environments["local"].Type == "local" {
+		cfg.Environments["openshell"] = EnvironmentConfig{
+			Type:    "openshell",
+			Gateway: fileCfg.Remote.Gateway,
+			Image:   fileCfg.Remote.Image,
+		}
+	}
+	if fileCfg.Remote.Backend == "k8s" && len(cfg.Environments) == 1 && cfg.Environments["local"].Type == "local" {
+		cfg.Environments["k8s"] = EnvironmentConfig{
+			Type:       "k8s",
+			RedisURL:   fileCfg.Kubernetes.RedisURL,
+			Namespace:  fileCfg.Kubernetes.Namespace,
+			Kubeconfig: fileCfg.Kubernetes.Kubeconfig,
+		}
+	}
+
+	// Load agents.yaml from the same directory as config.yaml
+	if path != "" {
+		agentsPath := filepath.Join(filepath.Dir(path), "agents.yaml")
+		agents, _ := LoadAgents(agentsPath)
+		cfg.AgentConfigs = agents
 	}
 
 	return cfg, nil

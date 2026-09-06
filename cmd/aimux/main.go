@@ -18,6 +18,7 @@ import (
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/environment"
 	"github.com/zanetworker/aimux/internal/frontend/tui"
 	"github.com/zanetworker/aimux/internal/frontend/web"
 	"github.com/zanetworker/aimux/internal/history"
@@ -125,6 +126,8 @@ func main() {
 			"codex":  (&provider.Codex{}).ParseTrace,
 		},
 		ComposeEngine: cliComposeEngine,
+		Environments:  cfg.Environments,
+		AgentConfigs:  cfg.AgentConfigs,
 	}
 
 	cmd.RegisterAll(deps)
@@ -203,60 +206,25 @@ func buildSpawnFn(disco *discovery.Orchestrator, cfg config.Config) func(opts sp
 		if p == nil {
 			return 0, "", fmt.Errorf("unknown provider: %s", opts.Provider)
 		}
-
-		type spawner interface {
-			SpawnCommand(dir, model, mode string) *exec.Cmd
-		}
-		sp, ok := p.(spawner)
+		h, ok := p.(controller.Harness)
 		if !ok {
 			return 0, "", fmt.Errorf("provider %s does not support spawning", opts.Provider)
 		}
 
-		c := sp.SpawnCommand(opts.Dir, opts.Model, opts.Mode)
-		if c == nil {
-			return 0, "", fmt.Errorf("failed to build spawn command for %s", opts.Provider)
+		spec := controller.BuildLaunchSpec(h, controller.LaunchRequest{
+			Dir: opts.Dir, Model: opts.Model, Mode: opts.Mode, Prompt: opts.Prompt,
+			Shell: opts.Shell, SessionManager: opts.SessionManager,
+			OTELEnabled: opts.OTELEnabled, OTELEndpoint: opts.OTELEndpoint,
+			Runtime: opts.Runtime, ContainerOpts: opts.ContainerOpts,
+		})
+		if spec.Shell == "/bin/sh" {
+			spec.Shell = cfg.ResolveShell()
 		}
-
-		if opts.Prompt != "" {
-			switch opts.Provider {
-			case "codex":
-				c.Args = append(c.Args, "--prompt", opts.Prompt)
-			default:
-				c.Args = append(c.Args, opts.Prompt)
-			}
+		result, err := controller.ExecuteLocalLaunch(spec)
+		if err != nil {
+			return 0, "", err
 		}
-
-		shell := opts.Shell
-		if shell == "" {
-			shell = cfg.ResolveShell()
-		}
-		sessionMgr := opts.SessionManager
-		if sessionMgr == "" {
-			sessionMgr = "tmux"
-		}
-
-		if opts.Runtime == "container" {
-			cOpts := opts.ContainerOpts
-			if cOpts.Engine == "" {
-				for _, rt := range cfg.Runtimes {
-					if rt.Type == "container" {
-						cOpts.Engine = rt.Engine
-						cOpts.Image = rt.Image
-						break
-					}
-				}
-			}
-			if err := spawn.LaunchInContainer(c, opts.Provider, opts.Dir, shell, "", cOpts); err != nil {
-				return 0, "", err
-			}
-		} else {
-			if err := spawn.Launch(c, opts.Provider, opts.Dir, sessionMgr, shell, ""); err != nil {
-				return 0, "", err
-			}
-		}
-
-		tmuxSession := spawn.TmuxSessionName(opts.Provider, opts.Dir)
-		return 0, tmuxSession, nil
+		return 0, result.TmuxSession, nil
 	}
 }
 
@@ -283,9 +251,13 @@ func createWebServer(port int) *web.Server {
 		&provider.Codex{},
 	)
 
-	// Enable remote sandbox discovery so sandboxes appear in the web agent list
+	// Register environments for remote agent discovery
 	if cfg.Remote.Backend == "openshell" {
-		disco.EnableRemoteDiscovery()
+		disco.AddEnvironment(environment.NewOpenShellEnvironment("openshell", environment.OpenShellConfig{
+			Gateway:  cfg.Remote.Gateway,
+			Insecure: true,
+			Image:    cfg.Remote.Image,
+		}))
 	}
 
 	// Initialize compose engine for OpenShell sandbox operations
@@ -304,90 +276,40 @@ func createWebServer(port int) *web.Server {
 	}
 	s.SetDiscoverFunc(disco.Discover)
 	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
-		// Find the provider to build the spawn command
 		p := disco.ProviderFor(opts.Provider)
 		if p == nil {
 			return spawn.LaunchResult{}, fmt.Errorf("unknown provider: %s", opts.Provider)
-		}
-
-		// Get the provider's spawn args interface to build the command
-		type spawner interface {
-			SpawnCommand(dir, model, mode string) *exec.Cmd
-		}
-		sp, ok := p.(spawner)
-		if !ok {
-			return spawn.LaunchResult{}, fmt.Errorf("provider %s does not support spawning", opts.Provider)
-		}
-
-		cmd := sp.SpawnCommand(opts.Dir, opts.Model, opts.Mode)
-		if cmd == nil {
-			return spawn.LaunchResult{}, fmt.Errorf("failed to build spawn command for %s", opts.Provider)
-		}
-
-		if opts.Prompt != "" {
-			switch opts.Provider {
-			case "codex":
-				cmd.Args = append(cmd.Args, "--prompt", opts.Prompt)
-			default:
-				cmd.Args = append(cmd.Args, opts.Prompt)
-			}
-		}
-
-		shell := opts.Shell
-		if shell == "" {
-			shell = cfg.ResolveShell()
-		}
-		sessionMgr := opts.SessionManager
-		if sessionMgr == "" {
-			sessionMgr = "tmux"
-		}
-
-		envPrefix := ""
-		if opts.OTELEnabled && opts.OTELEndpoint != "" {
-			type otelEnver interface {
-				OTELEnv(endpoint string) string
-			}
-			if oe, ok := p.(otelEnver); ok {
-				envPrefix = oe.OTELEnv(opts.OTELEndpoint)
-			}
 		}
 
 		if opts.Runtime == "remote" {
 			if composeEngine == nil {
 				return spawn.LaunchResult{}, fmt.Errorf("remote runtime requires openshell backend configured")
 			}
-			sOpts := aimuxcompose.LaunchOpts{
-				Image: cfg.Remote.Image,
-			}
-			result, err := composeEngine.LaunchInSandbox(opts.Provider, opts.Dir, sOpts)
+			result, err := composeEngine.LaunchInSandbox(opts.Provider, opts.Dir, aimuxcompose.LaunchOpts{Image: cfg.Remote.Image})
 			if err != nil {
 				return spawn.LaunchResult{}, err
 			}
-			return spawn.LaunchResult{
-				SandboxName:   result.SandboxName,
-				OTELSessionID: result.OTELSessionID,
-			}, nil
-		} else if opts.Runtime == "container" {
-			cOpts := opts.ContainerOpts
-			if cOpts.Engine == "" {
-				for _, rt := range cfg.Runtimes {
-					if rt.Type == "container" {
-						cOpts.Engine = rt.Engine
-						cOpts.Image = rt.Image
-						break
-					}
-				}
-			}
-			if err := spawn.LaunchInContainer(cmd, opts.Provider, opts.Dir, shell, envPrefix, cOpts); err != nil {
-				return spawn.LaunchResult{}, err
-			}
-		} else {
-			if err := spawn.Launch(cmd, opts.Provider, opts.Dir, sessionMgr, shell, envPrefix); err != nil {
-				return spawn.LaunchResult{}, err
-			}
+			return spawn.LaunchResult{SandboxName: result.SandboxName, OTELSessionID: result.OTELSessionID}, nil
 		}
-		tmuxSession := spawn.TmuxSessionName(opts.Provider, opts.Dir)
-		return spawn.LaunchResult{TmuxSession: tmuxSession}, nil
+
+		h, ok := p.(controller.Harness)
+		if !ok {
+			return spawn.LaunchResult{}, fmt.Errorf("provider %s does not support spawning", opts.Provider)
+		}
+		spec := controller.BuildLaunchSpec(h, controller.LaunchRequest{
+			Dir: opts.Dir, Model: opts.Model, Mode: opts.Mode, Prompt: opts.Prompt,
+			Shell: opts.Shell, SessionManager: opts.SessionManager,
+			OTELEnabled: opts.OTELEnabled, OTELEndpoint: opts.OTELEndpoint,
+			Runtime: opts.Runtime, ContainerOpts: opts.ContainerOpts,
+		})
+		if spec.Shell == "/bin/sh" {
+			spec.Shell = cfg.ResolveShell()
+		}
+		result, err := controller.ExecuteLocalLaunch(spec)
+		if err != nil {
+			return spawn.LaunchResult{}, err
+		}
+		return spawn.LaunchResult{TmuxSession: result.TmuxSession}, nil
 	})
 	s.SetKillFunc(func(pid int, tmuxSession string) error {
 		// Kill the tmux session if it exists

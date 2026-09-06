@@ -52,11 +52,13 @@ type LaunchMsg struct {
 	Dir            string
 	Model          string
 	Mode           string // permission mode: "default", "bypass", "plan", etc.
-	Runtime        string // "local" or "container"
+	Runtime        string // "local" or "container" — derived from Environment when set
 	Execution      string // "local" or "hybrid"
 	Shell          string // e.g. "/bin/zsh"
 	SessionManager string // "tmux" or "direct"
 	OTELEnabled    bool
+	Environment    string // named environment from config (e.g. "local", "sandbox")
+	AgentConfig    string // named agent config (from agents.yaml), empty for raw provider
 }
 
 // LaunchResumeMsg is emitted when the user picks a session to resume from the launcher.
@@ -124,13 +126,30 @@ type LauncherView struct {
 	sessionMgrCursor int
 	otelEnabled   bool // toggle for OTEL tracing on spawned session
 	otelAvailable bool // true if OTEL receiver is running
-	optionField   int  // 0=model, 1=permissions, 2=runtime, 3=execution, 4=shell, 5=session, 6=otel
+	optionField   int  // 0=model, 1=permissions, 2=environment (or runtime), 3=execution, 4=shell, 5=session, 6=otel
 	providerOpts map[string]ProviderOptions
 	defaultMode  string // configured default mode (persists across provider switches)
+
+	// Environment selection (replaces Runtime when >1 environment configured)
+	environments []string            // named environments from config
+	envHealth    map[string]string   // env name → health status
+	envCursor    int
+
+	// Named agent configs (from agents.yaml)
+	agentConfigs []AgentConfigEntry // named configs shown above raw providers
+	configMode   bool              // true when cursor is in configs section
 
 	// Resume step
 	resumeSessions []history.Session // recent sessions for selected directory
 	resumeCursor   int               // 0 = "New session", 1+ = sessions
+}
+
+// AgentConfigEntry is a named agent config displayed in the launcher.
+type AgentConfigEntry struct {
+	Name     string
+	Runtime  string
+	Model    string
+	Prompt   string
 }
 
 // ProviderOptions holds the models and modes for a specific provider.
@@ -146,12 +165,15 @@ type browseEntry struct {
 
 // LauncherConfig holds defaults for the launcher's six axes.
 type LauncherConfig struct {
-	DefaultRuntime        string // "local" or "container"
-	DefaultExecution      string // "local" or "hybrid"
-	DefaultShell          string // e.g. "/bin/zsh"
-	DefaultSessionManager string // "tmux" or "direct"
-	DefaultMode           string // "default", "bypass", "plan", "acceptEdits", "dontAsk"
-	RemoteAvailable       bool   // true when OpenShell backend is configured and reachable
+	DefaultRuntime        string   // "local" or "container"
+	DefaultExecution      string   // "local" or "hybrid"
+	DefaultShell          string   // e.g. "/bin/zsh"
+	DefaultSessionManager string   // "tmux" or "direct"
+	DefaultMode           string   // "default", "bypass", "plan", "acceptEdits", "dontAsk"
+	RemoteAvailable       bool              // true when OpenShell backend is configured and reachable
+	Environments          []string          // named environments from config (sorted, "local" first)
+	EnvironmentHealth     map[string]string  // env name → status ("ready", "unreachable", etc.)
+	AgentConfigs          []AgentConfigEntry // named agent configs from agents.yaml
 }
 
 // NewLauncherView creates a new launcher overlay. providerOpts maps provider
@@ -237,6 +259,11 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		}
 	}
 
+	environments := lCfg.Environments
+	if len(environments) == 0 {
+		environments = []string{"local"}
+	}
+
 	return &LauncherView{
 		state:            statePickProvider,
 		providers:        providers,
@@ -257,6 +284,9 @@ func NewLauncherView(recentDirs []RecentDirEntry, providerOpts map[string]Provid
 		otelEnabled:      otelAvailable,
 		providerOpts:     providerOpts,
 		defaultMode:      lCfg.DefaultMode,
+		environments:     environments,
+		envHealth:        lCfg.EnvironmentHealth,
+		agentConfigs:     lCfg.AgentConfigs,
 	}
 }
 
@@ -314,10 +344,33 @@ func (l *LauncherView) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+func (l *LauncherView) totalProviderItems() int {
+	return len(l.agentConfigs) + len(l.providers)
+}
+
+func (l *LauncherView) selectedIsConfig() bool {
+	return l.providerCursor < len(l.agentConfigs)
+}
+
+func (l *LauncherView) selectedProviderName() string {
+	if l.selectedIsConfig() {
+		return l.agentConfigs[l.providerCursor].Runtime
+	}
+	return l.providers[l.providerCursor-len(l.agentConfigs)]
+}
+
+func (l *LauncherView) selectedConfigName() string {
+	if l.selectedIsConfig() {
+		return l.agentConfigs[l.providerCursor].Name
+	}
+	return ""
+}
+
 func (l *LauncherView) updateProvider(key string) tea.Cmd {
+	maxIdx := l.totalProviderItems() - 1
 	switch key {
 	case "j", "down":
-		if l.providerCursor < len(l.providers)-1 {
+		if l.providerCursor < maxIdx {
 			l.providerCursor++
 		}
 	case "k", "up":
@@ -325,14 +378,27 @@ func (l *LauncherView) updateProvider(key string) tea.Cmd {
 			l.providerCursor--
 		}
 	case "enter":
-		// Update models/modes for the selected provider
-		selected := l.providers[l.providerCursor]
-		if opts, ok := l.providerOpts[selected]; ok {
+		providerName := l.selectedProviderName()
+		if opts, ok := l.providerOpts[providerName]; ok {
 			l.models = opts.Models
 			l.modes = opts.Modes
 		}
 		l.modelCursor = 0
 		l.modeCursor = 0
+
+		// If a named config specifies a model, pre-select it
+		if l.selectedIsConfig() {
+			configModel := l.agentConfigs[l.providerCursor].Model
+			if configModel != "" {
+				for i, m := range l.models {
+					if m == configModel {
+						l.modelCursor = i
+						break
+					}
+				}
+			}
+		}
+
 		if l.defaultMode != "" {
 			for i, m := range l.modes {
 				if m == l.defaultMode {
@@ -465,8 +531,12 @@ func (l *LauncherView) handleBrowseEnter() tea.Cmd {
 	return nil
 }
 
+func (l *LauncherView) hasMultipleEnvironments() bool {
+	return len(l.environments) > 1
+}
+
 func (l *LauncherView) updateOptions(key string) tea.Cmd {
-	// 0=model, 1=permissions, 2=runtime, 3=execution, 4=shell, 5=session, 6=otel
+	// 0=model, 1=permissions, 2=environment (or runtime), 3=execution, 4=shell, 5=session, 6=otel
 	maxField := 5
 	if l.otelAvailable {
 		maxField = 6
@@ -487,7 +557,11 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 		case 1:
 			if l.modeCursor < len(l.modes)-1 { l.modeCursor++ }
 		case 2:
-			if l.runtimeCursor < len(l.runtimes)-1 { l.runtimeCursor++ }
+			if l.hasMultipleEnvironments() {
+				if l.envCursor < len(l.environments)-1 { l.envCursor++ }
+			} else {
+				if l.runtimeCursor < len(l.runtimes)-1 { l.runtimeCursor++ }
+			}
 		case 3:
 			if l.executionCursor < len(l.executions)-1 { l.executionCursor++ }
 		case 4:
@@ -504,7 +578,11 @@ func (l *LauncherView) updateOptions(key string) tea.Cmd {
 		case 1:
 			if l.modeCursor > 0 { l.modeCursor-- }
 		case 2:
-			if l.runtimeCursor > 0 { l.runtimeCursor-- }
+			if l.hasMultipleEnvironments() {
+				if l.envCursor > 0 { l.envCursor-- }
+			} else {
+				if l.runtimeCursor > 0 { l.runtimeCursor-- }
+			}
 		case 3:
 			if l.executionCursor > 0 { l.executionCursor-- }
 		case 4:
@@ -531,7 +609,7 @@ func (l *LauncherView) advanceFromDir() {
 	dir := l.selectedDir()
 	provider := ""
 	if l.providerCursor < len(l.providers) {
-		provider = l.providers[l.providerCursor]
+		provider = l.selectedProviderName()
 	}
 
 	// Only Claude supports resume for now
@@ -607,16 +685,24 @@ func (l *LauncherView) emitLaunch() tea.Cmd {
 		mode = ""
 	}
 
+	runtime := l.runtimes[l.runtimeCursor]
+	envName := ""
+	if l.hasMultipleEnvironments() {
+		envName = l.environments[l.envCursor]
+	}
+
 	msg := LaunchMsg{
-		Provider:       l.providers[l.providerCursor],
+		Provider:       l.selectedProviderName(),
 		Dir:            dir,
 		Model:          model,
 		Mode:           mode,
-		Runtime:        l.runtimes[l.runtimeCursor],
+		Runtime:        runtime,
 		Execution:      l.executions[l.executionCursor],
 		Shell:          l.shells[l.shellCursor],
 		SessionManager: l.sessionMgrs[l.sessionMgrCursor],
 		OTELEnabled:    l.otelEnabled,
+		Environment:    envName,
+		AgentConfig:    l.selectedConfigName(),
 	}
 	return func() tea.Msg { return msg }
 }
@@ -710,17 +796,45 @@ func (l *LauncherView) viewProvider() string {
 	var b strings.Builder
 	b.WriteString(launcherTitleStyle.Render("Launch Agent"))
 	b.WriteString("\n\n")
-	b.WriteString(launcherLabelStyle.Render("Provider:"))
-	b.WriteString("\n")
 
-	for i, p := range l.providers {
+	idx := 0
+
+	if len(l.agentConfigs) > 0 {
+		b.WriteString(launcherLabelStyle.Render("Configured:"))
+		b.WriteString("\n")
+		for _, ac := range l.agentConfigs {
+			cursor := "  "
+			style := launcherOptionStyle
+			if idx == l.providerCursor {
+				cursor = "▸ "
+				style = launcherSelectedStyle
+			}
+			label := style.Render(ac.Name)
+			if ac.Model != "" {
+				label += "  " + launcherDimStyle.Render(ac.Runtime+"/"+ac.Model)
+			} else {
+				label += "  " + launcherDimStyle.Render(ac.Runtime)
+			}
+			b.WriteString(cursor + label + "\n")
+			idx++
+		}
+		b.WriteString("\n")
+		b.WriteString(launcherLabelStyle.Render("Quick Launch:"))
+		b.WriteString("\n")
+	} else {
+		b.WriteString(launcherLabelStyle.Render("Provider:"))
+		b.WriteString("\n")
+	}
+
+	for _, p := range l.providers {
 		cursor := "  "
 		style := launcherOptionStyle
-		if i == l.providerCursor {
+		if idx == l.providerCursor {
 			cursor = "▸ "
 			style = launcherSelectedStyle
 		}
 		b.WriteString(cursor + style.Render(p) + "\n")
+		idx++
 	}
 
 	b.WriteString("\n")
@@ -732,7 +846,7 @@ func (l *LauncherView) viewDirectory() string {
 	var b strings.Builder
 	b.WriteString(launcherTitleStyle.Render("Launch Agent"))
 	b.WriteString("  ")
-	b.WriteString(launcherLabelStyle.Render(l.providers[l.providerCursor]))
+	b.WriteString(launcherLabelStyle.Render(l.selectedProviderName()))
 	b.WriteString("\n\n")
 
 	// Tabs (Quick, Recent, Browse or just Recent, Browse)
@@ -906,7 +1020,7 @@ func (l *LauncherView) viewResume() string {
 	if len(shortDir) > 40 {
 		shortDir = "..." + shortDir[len(shortDir)-37:]
 	}
-	provider := l.providers[l.providerCursor]
+	provider := l.selectedProviderName()
 
 	var lines []string
 	lines = append(lines, launcherTitleStyle.Render(fmt.Sprintf("  Launch %s in %s", provider, shortDir)))
@@ -953,7 +1067,7 @@ func (l *LauncherView) viewOptions() string {
 	var b strings.Builder
 	b.WriteString(launcherTitleStyle.Render("Launch Agent"))
 	b.WriteString("  ")
-	b.WriteString(launcherLabelStyle.Render(l.providers[l.providerCursor]))
+	b.WriteString(launcherLabelStyle.Render(l.selectedProviderName()))
 	b.WriteString("\n")
 
 	dir := l.selectedDir()
@@ -965,7 +1079,11 @@ func (l *LauncherView) viewOptions() string {
 
 	b.WriteString(l.renderOptionRow("Model:", l.models, l.modelCursor, l.optionField == 0))
 	b.WriteString(l.renderOptionRow("Permissions:", l.modes, l.modeCursor, l.optionField == 1))
-	b.WriteString(l.renderOptionRow("Runtime:", l.runtimes, l.runtimeCursor, l.optionField == 2))
+	if l.hasMultipleEnvironments() {
+		b.WriteString(l.renderEnvRow(l.optionField == 2))
+	} else {
+		b.WriteString(l.renderOptionRow("Runtime:", l.runtimes, l.runtimeCursor, l.optionField == 2))
+	}
 	b.WriteString(l.renderOptionRow("Execution:", l.executions, l.executionCursor, l.optionField == 3))
 	b.WriteString(l.renderOptionRow("Shell:", l.shells, l.shellCursor, l.optionField == 4))
 	b.WriteString(l.renderOptionRow("Session:", l.sessionMgrs, l.sessionMgrCursor, l.optionField == 5))
@@ -1008,6 +1126,35 @@ func (l *LauncherView) renderOptionRow(label string, options []string, cursor in
 			}
 		} else {
 			row += launcherOptionStyle.Render("  " + opt + "  ")
+		}
+	}
+	return row + "\n"
+}
+
+func (l *LauncherView) renderEnvRow(active bool) string {
+	readyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+	downStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+
+	row := launcherLabelStyle.Render(fmt.Sprintf("%-13s", "Environment:"))
+	for i, env := range l.environments {
+		label := env
+		if l.envHealth != nil {
+			if status, ok := l.envHealth[env]; ok {
+				if status == "ready" {
+					label = env + " " + readyStyle.Render("●")
+				} else {
+					label = env + " " + downStyle.Render("●")
+				}
+			}
+		}
+		if i == l.envCursor {
+			if active {
+				row += launcherSelectedStyle.Render(" [" + label + "] ")
+			} else {
+				row += lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5E7EB")).Render(" [" + label + "] ")
+			}
+		} else {
+			row += launcherOptionStyle.Render("  " + label + "  ")
 		}
 	}
 	return row + "\n"

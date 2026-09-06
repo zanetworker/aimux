@@ -38,6 +38,8 @@ type launchRequest struct {
 	TaskID         string `json:"task_id,omitempty"`
 	TaskListID     string `json:"task_list_id,omitempty"`
 	UserPrompt     string `json:"user_prompt,omitempty"`
+	Environment    string `json:"environment,omitempty"`
+	AgentConfig    string `json:"agent_config,omitempty"`
 }
 
 func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
@@ -96,13 +98,23 @@ func (s *Server) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	runtime := req.Runtime
+	if req.Environment != "" {
+		if envCfg, ok := s.cfg.Environments[req.Environment]; ok {
+			runtime = controller.ResolveLaunchRuntime(envCfg)
+		} else {
+			http.Error(w, fmt.Sprintf("unknown environment %q", req.Environment), http.StatusBadRequest)
+			return
+		}
+	}
+
 	opts := spawn.LaunchOpts{
 		Provider:       req.Provider,
 		Dir:            req.Dir,
 		Model:          req.Model,
 		Mode:           req.Mode,
 		Prompt:         prompt,
-		Runtime:        req.Runtime,
+		Runtime:        runtime,
 		Execution:      req.Execution,
 		Shell:          req.Shell,
 		SessionManager: req.SessionManager,
@@ -921,6 +933,56 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]any{"agents": items}); err != nil {
 		debuglog.Log("encode agents response: %v", err)
 	}
+}
+
+func (s *Server) handleEnvironments(w http.ResponseWriter, r *http.Request) {
+	type entry struct {
+		Name      string `json:"name"`
+		Type      string `json:"type"`
+		Gateway   string `json:"gateway,omitempty"`
+		Namespace string `json:"namespace,omitempty"`
+	}
+	names := controller.EnvironmentNames(s.cfg.Environments)
+	envs := make([]entry, len(names))
+	for i, name := range names {
+		ec := s.cfg.Environments[name]
+		envs[i] = entry{
+			Name:      name,
+			Type:      ec.Type,
+			Gateway:   ec.Gateway,
+			Namespace: ec.Namespace,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"environments": envs})
+}
+
+func (s *Server) handleAgentConfigs(w http.ResponseWriter, r *http.Request) {
+	type entry struct {
+		Name      string   `json:"name"`
+		Runtime   string   `json:"runtime"`
+		Inference string   `json:"inference,omitempty"`
+		Model     string   `json:"model,omitempty"`
+		Prompt    string   `json:"prompt,omitempty"`
+		MCP       []string `json:"mcp,omitempty"`
+		Skills    []string `json:"skills,omitempty"`
+		Policy    string   `json:"policy,omitempty"`
+	}
+	configs := make([]entry, len(s.cfg.AgentConfigs))
+	for i, ac := range s.cfg.AgentConfigs {
+		configs[i] = entry{
+			Name:      ac.Name,
+			Runtime:   ac.Runtime,
+			Inference: ac.Inference,
+			Model:     ac.Model,
+			Prompt:    ac.Prompt,
+			MCP:       ac.MCP,
+			Skills:    ac.Skills,
+			Policy:    ac.Policy,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"configs": configs})
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
