@@ -6,11 +6,13 @@ import "github.com/google/uuid"
 // sandbox. For Claude, the session id is pinned so telemetry and conversation
 // stay continuous across reconnects.
 func RemoteAgentCommand(provider, sessionID string, resume bool) string {
-	if provider == "claude" && UUIDValid(sessionID) {
+	if provider == "claude" {
 		if resume {
-			return "claude --resume " + sessionID
+			return "claude --continue"
 		}
-		return "claude --session-id " + sessionID
+		if UUIDValid(sessionID) {
+			return "claude --session-id " + sessionID
+		}
 	}
 	return provider
 }

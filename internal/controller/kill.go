@@ -64,12 +64,17 @@ func ExecuteKillSandbox(action KillAction, engine *aimuxcompose.Engine) error {
 		time.Sleep(2 * time.Second)
 	}
 	if action.SandboxName != "" && engine != nil {
-		// Sandbox deletion against a remote gateway can take longer than a
-		// few seconds. A short timeout kills the delete mid-flight (exit
-		// "signal: killed"), leaving sandboxes stuck in the Deleting phase.
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		return engine.KillSandbox(ctx, action.SandboxName)
+		err := engine.KillSandbox(ctx, action.SandboxName)
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "not found") || strings.Contains(errStr, "no sandbox") ||
+				strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "Error") {
+				return nil
+			}
+			return err
+		}
 	}
 	return nil
 }

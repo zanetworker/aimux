@@ -29,15 +29,15 @@ type RemoteHealthConfig struct {
 	Gateway string // gateway endpoint URL
 }
 
-// GatherHealth collects health from all providers and an optional infra
-// provider. Each local provider's binary is checked via exec.LookPath.
-// Agent counts come from the most recent discovery results.
-func GatherHealth(providers []Provider, infra InfraProvider, agentCounts map[string]int) SystemHealth {
-	return GatherHealthWithRemote(providers, infra, agentCounts, RemoteHealthConfig{})
+// GatherHealth collects health from all providers. Each local provider's
+// binary is checked via exec.LookPath. Agent counts come from the most
+// recent discovery results.
+func GatherHealth(providers []Provider, agentCounts map[string]int) SystemHealth {
+	return GatherHealthWithRemote(providers, agentCounts, RemoteHealthConfig{})
 }
 
 // GatherHealthWithRemote extends GatherHealth with OpenShell gateway status.
-func GatherHealthWithRemote(providers []Provider, infra InfraProvider, agentCounts map[string]int, remote RemoteHealthConfig) SystemHealth {
+func GatherHealthWithRemote(providers []Provider, agentCounts map[string]int, remote RemoteHealthConfig) SystemHealth {
 	var sh SystemHealth
 
 	for _, p := range providers {
@@ -55,12 +55,6 @@ func GatherHealthWithRemote(providers []Provider, infra InfraProvider, agentCoun
 				ph.BinaryPath = path
 				ph.Version = getBinaryVersion(path)
 			}
-		}
-
-		if infra != nil && p.Name() == infra.Name() {
-			ph.Kind = "infra"
-			h := infra.CheckHealth()
-			ph.Infra = &h
 		}
 
 		sh.Providers = append(sh.Providers, ph)
@@ -104,7 +98,6 @@ func checkOpenShellHealth(gateway string) ProviderHealth {
 	connected := strings.Contains(output, "connected")
 
 	if connected {
-		// Get sandbox count
 		listOut, _ := exec.Command("openshell", "sandbox", "list").CombinedOutput()
 		lines := strings.Split(strings.TrimSpace(string(listOut)), "\n")
 		sandboxCount := 0
@@ -144,11 +137,9 @@ func getBinaryVersion(binaryPath string) string {
 		return ""
 	}
 	line := strings.TrimSpace(string(out))
-	// Take first line only.
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
 		line = line[:i]
 	}
-	// Trim common prefixes like "claude-code v2.1.72" → "v2.1.72"
 	if parts := strings.Fields(line); len(parts) >= 2 {
 		for _, p := range parts {
 			if strings.HasPrefix(p, "v") || strings.HasPrefix(p, "V") || (len(p) > 0 && p[0] >= '0' && p[0] <= '9') {
@@ -163,12 +154,9 @@ func getBinaryVersion(binaryPath string) string {
 }
 
 // FormatHealth renders SystemHealth as a human-readable string.
-// This is used by the TUI health view but lives here so it can be
-// tested without TUI dependencies.
 func FormatHealth(sh SystemHealth) string {
 	var b strings.Builder
 
-	// Group by kind.
 	var locals, infras []ProviderHealth
 	for _, p := range sh.Providers {
 		if p.Kind == "infra" {
@@ -178,7 +166,6 @@ func FormatHealth(sh SystemHealth) string {
 		}
 	}
 
-	// Local providers.
 	if len(locals) > 0 {
 		b.WriteString("Local Providers\n")
 		for _, p := range locals {
@@ -194,7 +181,6 @@ func FormatHealth(sh SystemHealth) string {
 		}
 	}
 
-	// Infra providers.
 	for _, p := range infras {
 		fmt.Fprintf(&b, "\nInfrastructure (%s)\n", p.Name)
 		if p.Infra == nil {
@@ -207,7 +193,6 @@ func FormatHealth(sh SystemHealth) string {
 			continue
 		}
 
-		// Coordination layer.
 		if h.CoordOK {
 			b.WriteString("  Coordination:  OK\n")
 		} else {
@@ -218,7 +203,6 @@ func FormatHealth(sh SystemHealth) string {
 			fmt.Fprintf(&b, "  Coordination:  FAIL  %s\n", msg)
 		}
 
-		// Compute layer.
 		if h.ComputeOK {
 			fmt.Fprintf(&b, "  Compute:       OK    %d workloads\n", len(h.Workloads))
 			for _, w := range h.Workloads {

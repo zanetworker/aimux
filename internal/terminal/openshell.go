@@ -29,19 +29,19 @@ type OpenShellExecBackend struct {
 	closed bool
 }
 
-// openshellConnectArgs builds the argument list for `openshell sandbox connect`.
-// Kept as a pure function so it can be unit-tested without a live gateway.
+// openshellConnectArgs builds the argument list for `openshell sandbox exec`.
+// Uses exec (not connect) to start a new interactive shell inside the sandbox,
+// avoiding the "input owner" conflict with the detached main process.
+// Sources .bashrc first to pick up OTEL env vars injected during sandbox setup.
 func openshellConnectArgs(sandbox, gatewayEndpoint string, insecure bool) []string {
-	args := []string{"sandbox", "connect"}
-	if sandbox != "" {
-		args = append(args, sandbox)
-	}
+	args := []string{"sandbox", "exec", "--name", sandbox, "--tty"}
 	if gatewayEndpoint != "" {
 		args = append(args, "--gateway-endpoint", gatewayEndpoint)
 	}
 	if insecure {
 		args = append(args, "--gateway-insecure")
 	}
+	args = append(args, "--", "bash", "-l")
 	return args
 }
 

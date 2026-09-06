@@ -131,8 +131,8 @@ func TestNewServer_OpenShellBackend(t *testing.T) {
 	if s.backend == nil {
 		t.Fatal("backend is nil")
 	}
-	if s.rdb != nil {
-		t.Error("rdb should be nil for OpenShell backend")
+	if s.coord == nil {
+		t.Error("coord should not be nil (LocalCoordinator fallback)")
 	}
 }
 
@@ -140,19 +140,6 @@ func TestNewServer_UnknownBackend(t *testing.T) {
 	_, err := NewServer(Options{Backend: "magic"})
 	if err == nil {
 		t.Fatal("expected error for unknown backend")
-	}
-}
-
-func TestTeamKey(t *testing.T) {
-	s := &Server{teamID: "myteam"}
-	got := s.teamKey("heartbeat")
-	if got != "team:myteam:heartbeat" {
-		t.Errorf("teamKey: got %q, want %q", got, "team:myteam:heartbeat")
-	}
-
-	got = s.teamKey("task:abc123")
-	if got != "team:myteam:task:abc123" {
-		t.Errorf("teamKey: got %q, want %q", got, "team:myteam:task:abc123")
 	}
 }
 

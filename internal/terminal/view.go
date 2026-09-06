@@ -112,6 +112,8 @@ func (tv *TermView) Resize(cols, rows int) {
 	tv.width = cols
 	tv.height = rows
 	tv.term.Resize(cols, rows)
+	tv.dirty = true
+	tv.cachedView = ""
 }
 
 // Render returns the current screen buffer as a string with ANSI styling.

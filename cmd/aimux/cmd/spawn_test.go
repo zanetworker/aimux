@@ -16,6 +16,7 @@ func TestSpawnCmd_DryRun_JSON(t *testing.T) {
 			return 0, "", nil
 		},
 		"",
+		nil,
 	)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -45,6 +46,7 @@ func TestSpawnCmd_InvalidProvider(t *testing.T) {
 		[]string{"claude", "codex"},
 		nil,
 		"",
+		nil,
 	)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -69,6 +71,7 @@ func TestSpawnCmd_DryRun_Wait(t *testing.T) {
 			return 0, "", nil
 		},
 		"",
+		nil,
 	)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -98,6 +101,7 @@ func TestSpawnCmd_DefaultMode(t *testing.T) {
 			return 0, "", nil
 		},
 		"bypass",
+		nil,
 	)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -127,6 +131,7 @@ func TestSpawnCmd_ExplicitModeOverridesDefault(t *testing.T) {
 			return 0, "", nil
 		},
 		"bypass",
+		nil,
 	)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -149,7 +154,7 @@ func TestSpawnCmd_ExplicitModeOverridesDefault(t *testing.T) {
 }
 
 func TestSpawnCmd_MissingProvider(t *testing.T) {
-	c := newSpawnCmd([]string{"claude", "codex"}, nil, "")
+	c := newSpawnCmd([]string{"claude", "codex"}, nil, "", nil)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"spawn"})
