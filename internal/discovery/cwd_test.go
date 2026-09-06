@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -16,6 +17,10 @@ func TestGetProcessCwdOwnPID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Getwd(): %v", err)
 	}
+
+	// Resolve symlinks to handle macOS /tmp -> /private/tmp.
+	cwd, _ = filepath.EvalSymlinks(cwd)
+	expected, _ = filepath.EvalSymlinks(expected)
 
 	if cwd != expected {
 		t.Errorf("GetProcessCwd(%d) = %q, want %q", pid, cwd, expected)

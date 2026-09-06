@@ -88,6 +88,14 @@ func (s *FileStore) Delete(id string) error {
 	return s.saveLocked()
 }
 
+func (s *FileStore) AddEvent(sessionID string, evt *SessionEvent) error {
+	return nil
+}
+
+func (s *FileStore) ListEvents(sessionID string) ([]SessionEvent, error) {
+	return nil, nil
+}
+
 func (s *FileStore) load() {
 	raw, err := os.ReadFile(s.path)
 	if err != nil {

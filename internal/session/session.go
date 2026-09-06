@@ -23,11 +23,23 @@ type Session struct {
 	Status       SessionStatus `json:"status"`
 	Model        string        `json:"model,omitempty"`
 	WorkingDir   string        `json:"working_dir"`
+	Harness      string        `json:"harness,omitempty"`
 	StartTime    time.Time     `json:"start_time"`
 	LastActivity time.Time     `json:"last_activity"`
 	TokensIn     int64         `json:"tokens_in"`
 	TokensOut    int64         `json:"tokens_out"`
 	CostUSD      float64       `json:"cost_usd"`
+	Error        string        `json:"error,omitempty"`
+	Metadata     string        `json:"metadata,omitempty"`
+}
+
+// SessionEvent records a discrete event in a session's lifecycle.
+type SessionEvent struct {
+	ID        int       `json:"id"`
+	SessionID string    `json:"session_id"`
+	Timestamp time.Time `json:"timestamp"`
+	Type      string    `json:"type"`
+	Data      string    `json:"data,omitempty"`
 }
 
 // Store defines CRUD operations for session persistence.
@@ -37,4 +49,6 @@ type Store interface {
 	List() ([]*Session, error)
 	Update(s *Session) error
 	Delete(id string) error
+	AddEvent(sessionID string, evt *SessionEvent) error
+	ListEvents(sessionID string) ([]SessionEvent, error)
 }

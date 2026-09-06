@@ -12,9 +12,9 @@ func TestRemoteAgentCommand(t *testing.T) {
 		want     string
 	}{
 		{"claude launch pins session id", "claude", validUUID, false, "claude --session-id " + validUUID},
-		{"claude re-entry resumes session", "claude", validUUID, true, "claude --resume " + validUUID},
+		{"claude re-entry resumes session", "claude", validUUID, true, "claude --continue"},
 		{"claude without uuid falls back", "claude", "", false, "claude"},
-		{"claude with non-uuid falls back", "claude", "aimux-remote-claude-123", true, "claude"},
+		{"claude with non-uuid falls back", "claude", "aimux-remote-claude-123", true, "claude --continue"},
 		{"non-claude provider is bare", "codex", validUUID, false, "codex"},
 	}
 	for _, tt := range tests {

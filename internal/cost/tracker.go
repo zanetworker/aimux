@@ -6,7 +6,7 @@ import "strings"
 // provider pricing pages. Update this date whenever you verify pricing.
 // Claude: https://platform.claude.com/docs/en/about-claude/pricing
 // OpenAI: https://openai.com/api/pricing/
-const pricingLastVerified = "2026-05-27"
+const pricingLastVerified = "2026-09-06"
 
 // ModelPricing holds per-million-token pricing in USD.
 type ModelPricing struct {
