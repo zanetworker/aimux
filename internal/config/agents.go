@@ -23,7 +23,7 @@ type AgentConfig struct {
 // LoadAgents reads agent configs from a YAML file.
 // Returns nil, nil if the file does not exist.
 func LoadAgents(path string) ([]AgentConfig, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is from trusted config, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

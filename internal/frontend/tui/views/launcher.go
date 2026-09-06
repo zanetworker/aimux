@@ -137,8 +137,6 @@ type LauncherView struct {
 
 	// Named agent configs (from agents.yaml)
 	agentConfigs []AgentConfigEntry // named configs shown above raw providers
-	configMode   bool              // true when cursor is in configs section
-
 	// Resume step
 	resumeSessions []history.Session // recent sessions for selected directory
 	resumeCursor   int               // 0 = "New session", 1+ = sessions

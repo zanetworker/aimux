@@ -31,7 +31,7 @@ func NewRedisCoordinator(redisURL, teamID string) (*RedisCoordinator, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		rdb.Close()
+		_ = rdb.Close()
 		return nil, fmt.Errorf("redis ping: %w", err)
 	}
 

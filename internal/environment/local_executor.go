@@ -19,7 +19,7 @@ func NewLocalExecutor() *LocalExecutor {
 // Launch starts a new process with the given binary, arguments, working directory, and environment.
 // It returns the started process or an error if the process could not be started.
 func (e *LocalExecutor) Launch(ctx context.Context, binary string, args []string, dir string, env map[string]string) (*os.Process, error) {
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- binary is from trusted config
 	cmd.Dir = dir
 
 	// Start with inherited environment

@@ -304,7 +304,7 @@ func ensureGatewayVertexProvider(projectID string) {
 		region = "us-east5"
 	}
 	debuglog.Log("compose: auto-configuring Vertex provider (project=%s, region=%s)", projectID, region)
-	cmd := exec.Command("openshell", "provider", "create", // #nosec G204
+	cmd := exec.Command("openshell", "provider", "create", // #nosec G204,G702
 		"--name", "vertex", "--type", "vertex", "--from-gcloud-adc",
 		"--config", "VERTEX_AI_PROJECT_ID="+projectID,
 		"--config", "GOOGLE_CLOUD_LOCATION="+region)

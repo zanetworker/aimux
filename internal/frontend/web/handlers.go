@@ -954,7 +954,7 @@ func (s *Server) handleEnvironments(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"environments": envs})
+	_ = json.NewEncoder(w).Encode(map[string]any{"environments": envs})
 }
 
 func (s *Server) handleAgentConfigs(w http.ResponseWriter, r *http.Request) {
@@ -982,7 +982,7 @@ func (s *Server) handleAgentConfigs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"configs": configs})
+	_ = json.NewEncoder(w).Encode(map[string]any{"configs": configs})
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {

@@ -187,7 +187,7 @@ func TestFileStore_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			id := "concurrent-" + string(rune('a'+n))
+			id := "concurrent-" + string(rune('a'+n)) //nolint:gosec // n is bounded [0,19]
 			s := testSession(id, "claude", "local", "/tmp")
 			_ = store.Create(s)
 		}(i)

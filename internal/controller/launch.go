@@ -64,8 +64,7 @@ func BuildLaunchSpec(h Harness, req LaunchRequest) LaunchSpec {
 		return LaunchSpec{Dir: req.Dir, Runtime: req.Runtime}
 	}
 
-	var cmd *exec.Cmd
-	cmd = h.SpawnCommand(req.Dir, req.Model, req.Mode)
+	cmd := h.SpawnCommand(req.Dir, req.Model, req.Mode)
 
 	if req.Prompt != "" && cmd != nil {
 		switch h.Name() {

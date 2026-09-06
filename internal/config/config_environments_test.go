@@ -42,7 +42,7 @@ environments:
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
 
 	if _, err := tmpfile.WriteString(yaml); err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ remote:
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
 
 	if _, err := tmpfile.WriteString(yaml); err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ kubernetes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
 
 	if _, err := tmpfile.WriteString(yaml); err != nil {
 		t.Fatal(err)
@@ -226,7 +226,7 @@ environments:
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
 
 	if _, err := tmpfile.WriteString(yaml); err != nil {
 		t.Fatal(err)
