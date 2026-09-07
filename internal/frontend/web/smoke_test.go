@@ -79,6 +79,7 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 	// --- GET endpoints ---
 	gets := []string{
 		"/api/health",
+		"/api/sessions/list",
 		"/api/agents",
 		"/api/agents?sort=name",
 		"/api/agents?filter=claude",

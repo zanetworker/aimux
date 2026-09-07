@@ -185,6 +185,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/plugins/{name}/data", s.handlePluginData)
 	mux.HandleFunc("POST /api/insight", s.handleInsight)
 
+	mux.HandleFunc("GET /api/sessions/list", s.handleSessionsList)
 	mux.HandleFunc("GET /api/costs", s.handleCosts)
 	mux.HandleFunc("GET /api/agents", s.handleAgents)
 	mux.HandleFunc("GET /api/agent-configs", s.handleAgentConfigs)

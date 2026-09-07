@@ -9,6 +9,8 @@ import { SessionsTable } from './components/SessionsTable';
 import type { HistorySession } from './components/SessionsTable';
 import { LaunchDialog } from './components/LaunchDialog';
 import { PluginView } from './components/PluginView';
+import { AgentDefinitions } from './components/AgentDefinitions';
+import { EnvironmentsList } from './components/EnvironmentsList';
 import TasksPanel from './components/TasksPanel';
 import { TaskLaunchDialog } from './components/TaskLaunchDialog';
 import './styles/theme.css';
@@ -18,11 +20,11 @@ export interface ContentSearchResult {
   snippet: string;
 }
 
-type ViewTab = 'agents' | 'sessions' | string;
+type ViewTab = 'sessions' | 'live' | 'agents' | 'environments' | 'starred' | string;
 
 export default function App() {
   const { agents, loading: agentsLoading } = useAgentStream();
-  const [activeTab, setActiveTab] = useState<ViewTab>('agents');
+  const [activeTab, setActiveTab] = useState<ViewTab>('sessions');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
   const [statusFilter, setStatusFilter] = useState<number | null>(null);
@@ -57,7 +59,7 @@ export default function App() {
 
   useEffect(() => {
     if (cachedSessions !== null) return;
-    if (activeTab !== 'sessions' && activeTab !== 'starred') return;
+    if (activeTab !== 'sessions' && activeTab !== 'starred' && activeTab !== 'live') return;
     fetch('/api/history')
       .then(r => r.ok ? r.json() : null)
       .then(d => {
@@ -120,13 +122,13 @@ export default function App() {
     return () => clearTimeout(timeout);
   }, [pendingLaunch]);
 
-  const selectedAgent = activeTab === 'agents'
+  const selectedAgent = activeTab === 'live'
     ? agents.find(a => a.SessionID === selectedId || String(a.PID) === selectedId)
     : undefined;
 
   // When the selected agent disappears (exited/killed), deselect and close panel
   useEffect(() => {
-    if (selectedId && activeTab === 'agents' && agents.length > 0 && !selectedAgent && !pendingLaunch) {
+    if (selectedId && activeTab === 'live' && agents.length > 0 && !selectedAgent && !pendingLaunch) {
       setSelectedId(null);
       setSessionAgent(null);
       setPanelFullscreen(false);
@@ -198,7 +200,7 @@ export default function App() {
       <StatsBar
         agents={agents}
         onLaunch={() => setShowLaunch(true)}
-        onHome={() => { setActiveTab('agents'); setSelectedId(null); setSessionAgent(null); setPanelFullscreen(false); }}
+        onHome={() => { setActiveTab('sessions'); setSelectedId(null); setSessionAgent(null); setPanelFullscreen(false); }}
         onToggleTasks={() => setShowTasks(t => !t)}
         taskCount={pendingTaskCount}
         tasksOpen={showTasks}
@@ -210,37 +212,42 @@ export default function App() {
           {/* Tab row */}
           <div style={{
             display: 'flex', padding: '0 18px', gap: 0,
-            borderBottom: activeTab !== 'agents' ? '1px solid var(--border)' : 'none',
+            borderBottom: '1px solid var(--border)',
             flexShrink: 0,
           }}>
-            {(['agents', 'sessions', 'starred', ...pluginTabs.map(p => `plugin:${p.name}`)]).map(tab => (
+            {/* Primary navigation: Sessions, Agents, Environments */}
+            {([
+              { key: 'sessions', label: `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}` },
+              { key: 'live', label: `Live (${agents.length})` },
+              { key: 'starred', label: `Starred${starredCount > 0 ? ` (${starredCount})` : ''}` },
+              { key: 'agents', label: 'Agents' },
+              { key: 'environments', label: 'Environments' },
+              ...pluginTabs.map(p => ({ key: `plugin:${p.name}`, label: p.tab })),
+            ] as { key: string; label: string }[]).map(tab => (
               <button
-                key={tab}
-                onClick={() => { setActiveTab(tab); setSelectedId(null); setSessionAgent(null); }}
+                key={tab.key}
+                onClick={() => { setActiveTab(tab.key as ViewTab); setSelectedId(null); setSessionAgent(null); }}
                 style={{
                   padding: '8px 16px',
                   background: 'transparent',
                   border: 'none',
-                  borderBottom: activeTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
-                  color: activeTab === tab ? 'var(--fg)' : 'var(--fg-3)',
+                  borderBottom: activeTab === tab.key ? '2px solid var(--accent)' : '2px solid transparent',
+                  color: activeTab === tab.key ? 'var(--fg)' : 'var(--fg-3)',
                   fontSize: 11,
-                  fontWeight: activeTab === tab ? 600 : 400,
+                  fontWeight: activeTab === tab.key ? 600 : 400,
                   textTransform: 'uppercase',
                   letterSpacing: '0.04em',
                   cursor: 'pointer',
                   transition: 'all 0.15s',
                 }}
               >
-                {tab === 'agents' ? `Live Agents (${agents.length})`
-                  : tab === 'sessions' ? `Sessions${sessionCount !== null ? ` (${sessionCount})` : ''}`
-                  : tab === 'starred' ? `★ Starred${starredCount > 0 ? ` (${starredCount})` : ''}`
-                  : pluginTabs.find(p => `plugin:${p.name}` === tab)?.tab || tab}
+                {tab.label}
               </button>
             ))}
           </div>
 
-          {/* Filter bar on its own row for agents tab */}
-          {activeTab === 'agents' && (
+          {/* Filter bar on its own row for live agents tab */}
+          {activeTab === 'live' && (
             <FilterBar
               agents={agents}
               statusFilter={statusFilter}
@@ -266,7 +273,7 @@ export default function App() {
         </>
       )}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {!panelFullscreen && activeTab === 'agents' && (
+        {!panelFullscreen && activeTab === 'live' && (
           <CardGrid
             agents={agents}
             selectedId={selectedId}
@@ -299,6 +306,14 @@ export default function App() {
             initialSessions={cachedSessions}
             onSessionsLoaded={(s) => { setCachedSessions(s); setStarredCount(s.filter(x => x.starred).length); }}
           />
+        )}
+        {!panelFullscreen && activeTab === 'agents' && (
+          <AgentDefinitions
+            onLaunch={() => setShowLaunch(true)}
+          />
+        )}
+        {!panelFullscreen && activeTab === 'environments' && (
+          <EnvironmentsList />
         )}
         {!panelFullscreen && activeTab.startsWith('plugin:') && (() => {
           const p = pluginTabs.find(pt => `plugin:${pt.name}` === activeTab);
@@ -337,7 +352,7 @@ export default function App() {
       )}
       <LaunchDialog open={showLaunch} onClose={() => setShowLaunch(false)}
         onLaunched={(provider, dir, tmuxSession, sandboxName) => {
-          setActiveTab('agents');
+          setActiveTab('live');
           setPendingLaunch({ provider, dir, tmuxSession, sandboxName, existingPIDs: new Set(agents.map(a => a.PID)) });
         }}
       />
@@ -346,7 +361,7 @@ export default function App() {
         task={taskLaunchTarget}
         onClose={() => setTaskLaunchTarget(null)}
         onLaunched={(provider, dir, tmuxSession) => {
-          setActiveTab('agents');
+          setActiveTab('live');
           setPendingLaunch({ provider, dir, tmuxSession, existingPIDs: new Set(agents.map(a => a.PID)) });
         }}
       />

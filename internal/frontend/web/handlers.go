@@ -1337,6 +1337,60 @@ func (s *Server) handleRemoteHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
+	if s.discoverFn == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+	agents, err := s.cachedDiscover()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	activeCount := 0
+	sessions := make([]map[string]any, len(agents))
+	for i, a := range agents {
+		status := a.Status.String()
+		if a.Status == agent.StatusActive {
+			activeCount++
+		}
+		sessions[i] = map[string]any{
+			"id":           a.SessionID,
+			"pid":          a.PID,
+			"name":         a.Name,
+			"provider":     a.ProviderName,
+			"model":        a.Model,
+			"shortModel":   a.ShortModel(),
+			"project":      a.ShortProject(),
+			"workingDir":   a.WorkingDir,
+			"status":       status,
+			"sessionFile":  a.SessionFile,
+			"tokensIn":     a.TokensIn,
+			"tokensOut":    a.TokensOut,
+			"costUSD":      a.EstCostUSD,
+			"startTime":    a.StartTime.Format(time.RFC3339),
+			"lastActivity": a.LastActivity.Format(time.RFC3339),
+			"lastAction":   a.LastAction,
+			"gitBranch":    a.GitBranch,
+		}
+		if a.Location != "" {
+			sessions[i]["location"] = a.Location
+		}
+		if a.SandboxName != "" {
+			sessions[i]["sandboxName"] = a.SandboxName
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"sessions":     sessions,
+		"active_count": activeCount,
+	}); err != nil {
+		debuglog.Log("encode sessions list response: %v", err)
+	}
+}
+
 func (s *Server) handleGetROIConfig(w http.ResponseWriter, _ *http.Request) {
 	rate := s.cfg.ROI.HourlyRate
 	if rate <= 0 {
