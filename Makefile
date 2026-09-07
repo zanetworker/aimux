@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-integration test-all install lint build-mcp build-agent-claude push-agent-claude web-build web-dev build-all
+.PHONY: build run clean test test-integration test-all install lint build-mcp build-mock-sdk build-agent-claude push-agent-claude web-build web-dev build-all
 
 BINARY=aimux
 REGISTRY=quay.io/azaalouk
@@ -30,11 +30,15 @@ test-integration:
 test-all:
 	go test -tags "integration e2e" ./... -timeout 60s
 
-install: build
+install: build build-mock-sdk
 	cp $(BINARY) /usr/local/bin/
+	cp bin/mock-sdk /usr/local/bin/
 
 lint:
 	golangci-lint run ./...
+
+build-mock-sdk:
+	go build -o bin/mock-sdk ./cmd/mock-sdk
 
 build-mcp:
 	go build -o bin/k8s-agents-mcp ./cmd/mcp

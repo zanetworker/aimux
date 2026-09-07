@@ -35,9 +35,9 @@ type Deps struct {
 func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newAgentsCmd(d.Discover))
-	rootCmd.AddCommand(newSessionsCmd(d.DiscoverSessions, d.SearchContent, d.PickSession, d.ResumeExec))
-	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec, d.SkipPermissions))
-	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent, d.DefaultMode, d.Environments, d.AgentConfigs))
+	rootCmd.AddCommand(newSessionsParentCmd(d))
+	rootCmd.AddCommand(newHiddenSpawnAlias(d))
+	rootCmd.AddCommand(newHiddenResumeAlias(d.ResumeBuilder, d.ResumeExec, d.SkipPermissions))
 	rootCmd.AddCommand(newEnvironmentsCmd(d.Environments))
 	rootCmd.AddCommand(newConfigsCmd(d.AgentConfigs))
 	rootCmd.AddCommand(newWebCmd(d.WebServer))
