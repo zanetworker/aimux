@@ -144,23 +144,29 @@ func (v *EnvironmentsView) View() string {
 			}
 		}
 
-		var statusStyled string
-		switch status {
-		case "ready":
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Render("● " + status)
-		case "unreachable":
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render("○ " + status)
-		default:
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("◐ " + status)
-		}
-
 		details := envDetails(ec)
 
-		row := fmt.Sprintf("  %-*s   %-*s   %-*s   %-*s",
-			colName, nameStyle.Render(truncate(name, colName)),
-			colType, typeStyle.Render(truncate(ec.Type, colType)),
-			colStatus, statusStyled,
-			colDetails, detailStyle.Render(truncate(details, colDetails)))
+		statusText := status
+		if len(statusText) > colStatus {
+			statusText = statusText[:colStatus-3] + "..."
+		}
+		statusColor := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+		switch status {
+		case "ready":
+			statusColor = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E"))
+			statusText = "● " + statusText
+		case "unreachable":
+			statusColor = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+			statusText = "○ " + statusText
+		default:
+			statusText = "◐ " + statusText
+		}
+
+		row := "  " +
+			nameStyle.Render(padToWidth(truncate(name, colName), colName)) + "   " +
+			typeStyle.Render(padToWidth(truncate(ec.Type, colType), colType)) + "   " +
+			statusColor.Render(padToWidth(truncate(statusText, colStatus), colStatus)) + "   " +
+			detailStyle.Render(padToWidth(truncate(details, colDetails), colDetails))
 
 		if i == v.cursor {
 			row = selectedStyle.Render(padToWidth(row, w))

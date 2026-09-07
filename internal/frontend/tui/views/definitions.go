@@ -135,11 +135,11 @@ func (v *DefinitionsView) View() string {
 			model = "-"
 		}
 
-		row := fmt.Sprintf("  %-*s   %-*s   %-*s   %-*s",
-			colName, nameStyle.Render(truncate(ac.Name, colName)),
-			colHarness, harnessStyle.Render(truncate(ac.Harness, colHarness)),
-			colModel, modelStyle.Render(truncate(model, colModel)),
-			colPrompt, promptStyle.Render(truncate(prompt, colPrompt)))
+		row := "  " +
+			nameStyle.Render(padRight(truncate(ac.Name, colName), colName)) + "   " +
+			harnessStyle.Render(padRight(truncate(ac.Harness, colHarness), colHarness)) + "   " +
+			modelStyle.Render(padRight(truncate(model, colModel), colModel)) + "   " +
+			promptStyle.Render(padRight(truncate(prompt, colPrompt), colPrompt))
 
 		if i == v.cursor {
 			row = selectedStyle.Render(padToWidth(row, w))

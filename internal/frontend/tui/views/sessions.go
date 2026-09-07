@@ -1883,6 +1883,36 @@ func (v *SessionsView) renderActiveAgents(w int) string {
 	envStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA"))
 	dirStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 
+	statusIcon := func(s agent.Status) string {
+		switch s {
+		case agent.StatusActive:
+			return "● active"
+		case agent.StatusIdle:
+			return "○ idle"
+		case agent.StatusWaitingPermission:
+			return "◐ wait"
+		case agent.StatusError:
+			return "✕ error"
+		default:
+			return "? unknown"
+		}
+	}
+
+	statusColor := func(s agent.Status) lipgloss.Style {
+		switch s {
+		case agent.StatusActive:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true)
+		case agent.StatusIdle:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+		case agent.StatusWaitingPermission:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+		case agent.StatusError:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
+		default:
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+		}
+	}
+
 	for _, ag := range v.activeAgents {
 		name := ag.Name
 		if name == "" {
@@ -1899,32 +1929,27 @@ func (v *SessionsView) renderActiveAgents(w int) string {
 			env = "remote"
 		}
 
-		var statusStyled string
-		switch ag.Status {
-		case agent.StatusActive:
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("● active")
-		case agent.StatusIdle:
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("○ idle")
-		case agent.StatusWaitingPermission:
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("◐ waiting")
-		case agent.StatusError:
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("✕ error")
-		default:
-			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("? unknown")
-		}
-
 		dir := filepath.Base(ag.WorkingDir)
 		if dir == "" || dir == "." {
 			dir = ag.WorkingDir
 		}
 
-		row := fmt.Sprintf("  %-*s   %-*s   %-*s   %-*s   %-*s",
-			colName, nameStyle.Render(truncate(name, colName)),
-			colModel, modelStyle.Render(truncate(model, colModel)),
-			colEnv, envStyle.Render(truncate(env, colEnv)),
-			colStatus, statusStyled,
-			colDir, dirStyle.Render(truncate(dir, colDir)))
-		b.WriteString(row + "\n")
+		status := statusIcon(ag.Status)
+
+		row := "  " +
+			padRight(truncate(name, colName), colName) + "   " +
+			padRight(truncate(model, colModel), colModel) + "   " +
+			padRight(truncate(env, colEnv), colEnv) + "   " +
+			padRight(truncate(status, colStatus), colStatus) + "   " +
+			padRight(truncate(dir, colDir), colDir)
+
+		styled := nameStyle.Render(padRight(truncate(name, colName), colName)) + "   " +
+			modelStyle.Render(padRight(truncate(model, colModel), colModel)) + "   " +
+			envStyle.Render(padRight(truncate(env, colEnv), colEnv)) + "   " +
+			statusColor(ag.Status).Render(padRight(truncate(status, colStatus), colStatus)) + "   " +
+			dirStyle.Render(padRight(truncate(dir, colDir), colDir))
+		_ = row
+		b.WriteString("  " + styled + "\n")
 	}
 	b.WriteString("\n")
 
