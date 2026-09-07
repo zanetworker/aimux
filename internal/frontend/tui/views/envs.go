@@ -5,23 +5,60 @@ import (
 	"sort"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/config"
 )
 
+type envFormStep int
+
+const (
+	envFormNone envFormStep = iota
+	envFormName
+	envFormType
+	envFormGateway
+	envFormNamespace
+	envFormConfirmRemove
+)
+
 // EnvironmentsView shows configured environments.
 type EnvironmentsView struct {
-	names  []string
-	envs   map[string]config.EnvironmentConfig
-	health map[string]string // name -> status
-	width  int
-	height int
-	cursor int
+	names      []string
+	envs       map[string]config.EnvironmentConfig
+	health     map[string]string // name -> status
+	width      int
+	height     int
+	cursor     int
+	configPath string
+
+	formStep  envFormStep
+	formInput TextInput
+	formData  map[string]string
+	status    string
 }
 
 // NewEnvironmentsView creates a new environments view.
 func NewEnvironmentsView() *EnvironmentsView {
-	return &EnvironmentsView{}
+	return &EnvironmentsView{
+		formData: make(map[string]string),
+	}
+}
+
+// SetConfigPath sets the config file path for environment CRUD operations.
+func (v *EnvironmentsView) SetConfigPath(path string) {
+	v.configPath = path
+}
+
+// InForm returns true when the view is in a form input state.
+func (v *EnvironmentsView) InForm() bool {
+	return v.formStep != envFormNone
+}
+
+// Status returns and clears the last status message.
+func (v *EnvironmentsView) Status() string {
+	s := v.status
+	v.status = ""
+	return s
 }
 
 // SetEnvironments updates the environments list.
@@ -65,6 +102,168 @@ func (v *EnvironmentsView) CursorDown() {
 	}
 }
 
+// HandleKey processes key events for the environments view. Returns true if consumed.
+func (v *EnvironmentsView) HandleKey(msg tea.KeyMsg) bool {
+	if v.formStep != envFormNone {
+		return v.handleFormKey(msg)
+	}
+
+	switch msg.String() {
+	case "j", "down":
+		v.CursorDown()
+		return true
+	case "k", "up":
+		v.CursorUp()
+		return true
+	case "a":
+		v.formStep = envFormName
+		v.formInput.Reset()
+		v.formData = make(map[string]string)
+		return true
+	case "r":
+		name := v.SelectedName()
+		if name == "" {
+			return true
+		}
+		v.formStep = envFormConfirmRemove
+		v.formInput.Reset()
+		return true
+	case "c":
+		name := v.SelectedName()
+		if name != "" {
+			v.status = fmt.Sprintf("Health check for '%s': use CLI ':health'", name)
+		}
+		return true
+	}
+	return false
+}
+
+func (v *EnvironmentsView) handleFormKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "esc":
+		v.formStep = envFormNone
+		v.formInput.Reset()
+		return true
+	case "enter":
+		return v.advanceForm()
+	default:
+		v.formInput.HandleKey(msg)
+		return true
+	}
+}
+
+func (v *EnvironmentsView) advanceForm() bool {
+	switch v.formStep {
+	case envFormName:
+		name := strings.TrimSpace(v.formInput.Value())
+		if name == "" {
+			v.status = "Name cannot be empty"
+			v.formStep = envFormNone
+			return true
+		}
+		if err := config.ValidateEnvironmentName(name); err != nil {
+			v.status = err.Error()
+			v.formStep = envFormNone
+			return true
+		}
+		v.formData["name"] = name
+		v.formStep = envFormType
+		v.formInput.Reset()
+	case envFormType:
+		t := strings.TrimSpace(strings.ToLower(v.formInput.Value()))
+		if t == "" {
+			t = "local"
+		}
+		v.formData["type"] = t
+		switch t {
+		case "openshell":
+			v.formStep = envFormGateway
+			v.formInput.Reset()
+		case "k8s":
+			v.formStep = envFormNamespace
+			v.formInput.Reset()
+		default:
+			v.createEnvironment()
+		}
+	case envFormGateway:
+		v.formData["gateway"] = strings.TrimSpace(v.formInput.Value())
+		v.createEnvironment()
+	case envFormNamespace:
+		v.formData["namespace"] = strings.TrimSpace(v.formInput.Value())
+		v.createEnvironment()
+	case envFormConfirmRemove:
+		answer := strings.TrimSpace(strings.ToLower(v.formInput.Value()))
+		if answer == "y" || answer == "yes" {
+			name := v.SelectedName()
+			if name != "" {
+				if v.configPath != "" {
+					if err := config.RemoveEnvironmentFromConfig(v.configPath, name); err != nil {
+						v.status = fmt.Sprintf("Error: %s", err)
+					} else {
+						v.status = fmt.Sprintf("Removed environment '%s'", name)
+						delete(v.envs, name)
+						v.rebuildNames()
+					}
+				} else {
+					delete(v.envs, name)
+					v.rebuildNames()
+					v.status = fmt.Sprintf("Removed environment '%s'", name)
+				}
+			}
+		} else {
+			v.status = "Remove cancelled"
+		}
+		v.formStep = envFormNone
+		v.formInput.Reset()
+	}
+	return true
+}
+
+func (v *EnvironmentsView) createEnvironment() {
+	name := v.formData["name"]
+	env := config.EnvironmentConfig{
+		Type:      v.formData["type"],
+		Gateway:   v.formData["gateway"],
+		Namespace: v.formData["namespace"],
+	}
+	if err := config.ValidateEnvironmentConfig(env); err != nil {
+		v.status = fmt.Sprintf("Error: %s", err)
+		v.formStep = envFormNone
+		v.formInput.Reset()
+		return
+	}
+	if v.configPath != "" {
+		if err := config.AddEnvironmentToConfig(v.configPath, name, env); err != nil {
+			v.status = fmt.Sprintf("Error: %s", err)
+			v.formStep = envFormNone
+			v.formInput.Reset()
+			return
+		}
+	}
+	if v.envs == nil {
+		v.envs = make(map[string]config.EnvironmentConfig)
+	}
+	v.envs[name] = env
+	v.rebuildNames()
+	v.status = fmt.Sprintf("Added environment '%s'", name)
+	v.formStep = envFormNone
+	v.formInput.Reset()
+}
+
+func (v *EnvironmentsView) rebuildNames() {
+	v.names = make([]string, 0, len(v.envs))
+	for name := range v.envs {
+		v.names = append(v.names, name)
+	}
+	sort.Strings(v.names)
+	if v.cursor >= len(v.names) {
+		v.cursor = len(v.names) - 1
+	}
+	if v.cursor < 0 {
+		v.cursor = 0
+	}
+}
+
 // SelectedName returns the name of the currently selected environment.
 func (v *EnvironmentsView) SelectedName() string {
 	if v.cursor < 0 || v.cursor >= len(v.names) {
@@ -92,6 +291,10 @@ func (v *EnvironmentsView) View() string {
 	if len(v.names) == 0 {
 		b.WriteString(dimStyle.Render("  No environments configured.") + "\n")
 		b.WriteString(dimStyle.Render("  Add environments to ~/.aimux/config.yaml") + "\n")
+		if v.formStep != envFormNone {
+			b.WriteString("\n")
+			b.WriteString(v.renderForm())
+		}
 		return b.String()
 	}
 
@@ -175,7 +378,37 @@ func (v *EnvironmentsView) View() string {
 		b.WriteString(row + "\n")
 	}
 
+	if v.formStep != envFormNone {
+		b.WriteString("\n")
+		b.WriteString(v.renderForm())
+	}
+
 	return b.String()
+}
+
+func (v *EnvironmentsView) renderForm() string {
+	promptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#5F87FF")).Bold(true)
+	inputStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+
+	var label string
+	switch v.formStep {
+	case envFormName:
+		label = "  Environment name: "
+	case envFormType:
+		label = "  Type (local/openshell/k8s): "
+	case envFormGateway:
+		label = "  Gateway URL: "
+	case envFormNamespace:
+		label = "  Namespace: "
+	case envFormConfirmRemove:
+		label = fmt.Sprintf("  Remove environment '%s'? (y/n): ", v.SelectedName())
+	}
+
+	cursor := inputStyle.Render(v.formInput.BeforeCursor()) +
+		lipgloss.NewStyle().Background(lipgloss.Color("#5F87FF")).Render(" ") +
+		inputStyle.Render(v.formInput.AfterCursor())
+
+	return promptStyle.Render(label) + cursor
 }
 
 func envDetails(ec config.EnvironmentConfig) string {

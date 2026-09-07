@@ -411,7 +411,9 @@ func NewApp() App {
 
 	// Initialize definitions and environments views
 	app.definitionsView.SetConfigs(cfg.AgentConfigs)
+	app.definitionsView.SetConfigDir(aimuxConfigDir())
 	app.environmentsView.SetEnvironments(cfg.Environments)
+	app.environmentsView.SetConfigPath(config.DefaultPath())
 
 	return app
 }
@@ -1661,20 +1663,18 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case viewDefinitions:
 		if a.definitionsView != nil {
-			switch msg.String() {
-			case "j", "down":
-				a.definitionsView.CursorDown()
-			case "k", "up":
-				a.definitionsView.CursorUp()
+			a.definitionsView.HandleKey(msg)
+			if s := a.definitionsView.Status(); s != "" {
+				a.statusHint = s
+				a.stickyHint = true
 			}
 		}
 	case viewEnvironments:
 		if a.environmentsView != nil {
-			switch msg.String() {
-			case "j", "down":
-				a.environmentsView.CursorDown()
-			case "k", "up":
-				a.environmentsView.CursorUp()
+			a.environmentsView.HandleKey(msg)
+			if s := a.environmentsView.Status(); s != "" {
+				a.statusHint = s
+				a.stickyHint = true
 			}
 		}
 	case viewToolStream:

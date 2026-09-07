@@ -52,9 +52,17 @@ func (a App) View() string {
 	case viewPlugin:
 		a.headerView.SetHint("j/k:scroll  d/u:page  r:refresh  Esc:back")
 	case viewDefinitions:
-		a.headerView.SetHint("j/k:nav  Enter:start  :new:launch  Esc:back  ?:help")
+		if a.definitionsView != nil && a.definitionsView.InForm() {
+			a.headerView.SetHint("Enter:confirm  Esc:cancel")
+		} else {
+			a.headerView.SetHint("j/k:nav  c:create  d:delete  Enter:start  Esc:back  ?:help")
+		}
 	case viewEnvironments:
-		a.headerView.SetHint("j/k:nav  c:check-health  Esc:back  ?:help")
+		if a.environmentsView != nil && a.environmentsView.InForm() {
+			a.headerView.SetHint("Enter:confirm  Esc:cancel")
+		} else {
+			a.headerView.SetHint("j/k:nav  a:add  r:remove  c:check-health  Esc:back  ?:help")
+		}
 	case viewToolStream:
 		a.headerView.SetHint("j/k:nav  Enter:expand  g/G:top/bottom  PgUp/PgDn:page  q/Esc:back")
 	case viewHelp:
