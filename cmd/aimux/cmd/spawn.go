@@ -128,6 +128,11 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 				return nil
 			}
 
+			// Claude brain mode: real claude CLI with stream-json
+			if harness == "claude" || harness == "claude-brain" {
+				return runClaudeSession(cmd, dir, model, prompt)
+			}
+
 			// SDK mode: interactive session with tool dispatch
 			if harness == "claude-sdk" || harness == "sdk" {
 				return runSDKSession(cmd, provider, dir, prompt, envFlag, environments)
@@ -218,6 +223,46 @@ func newSpawnCmd(validProviders []string, spawnAgent spawnFn, defaultMode string
 	cmd.Flags().BoolVar(&wait, "wait", false, "Block until the spawned session exits")
 	cmd.Flags().StringVar(&deliverTarget, "deliver", "", "Delivery target: stdout (default), file:<path>, webhook:<url>")
 	return cmd
+}
+
+func runClaudeSession(cmd *cobra.Command, dir, model, prompt string) error {
+	if prompt == "" {
+		return fmt.Errorf("claude harness requires --prompt")
+	}
+
+	ctx := context.Background()
+	sess, err := sdk.NewClaudeSession(ctx, model, prompt, dir)
+	if err != nil {
+		return fmt.Errorf("start claude session: %w", err)
+	}
+	defer sess.Stop()
+
+	result, err := sess.Run(ctx)
+	if err != nil {
+		return fmt.Errorf("claude session error: %w", err)
+	}
+
+	if jsonOutput {
+		out := map[string]any{
+			"output":      result.Output,
+			"is_error":    result.IsError,
+			"num_turns":   result.NumTurns,
+			"cost_usd":    result.CostUSD,
+			"tokens_in":   result.TokensIn,
+			"tokens_out":  result.TokensOut,
+			"stop_reason": result.StopReason,
+			"session_id":  result.SessionID,
+			"events":      len(sess.Events()),
+		}
+		b, _ := json.MarshalIndent(out, "", "  ")
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+	} else {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), result.Output)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n[%d turns, $%.4f, %d events]\n",
+			result.NumTurns, result.CostUSD, len(sess.Events()))
+	}
+
+	return nil
 }
 
 func runSDKSession(cmd *cobra.Command, provider, dir, prompt string, envName string, environments map[string]config.EnvironmentConfig) error {
