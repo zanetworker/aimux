@@ -1079,25 +1079,15 @@ func (v *SessionsView) View() string {
 		b.WriteString("  " + searchBadge.Render(label) + sessDimStyle.Render("  Esc:clear") + "\n\n")
 	}
 
-	// Active agents section
-	if len(v.activeAgents) > 0 {
-		b.WriteString(v.renderActiveAgents(w))
-		divLine := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render("  " + strings.Repeat("─", 10) + " History " + strings.Repeat("─", w-23))
-		b.WriteString(divLine + "\n")
-	}
+	// Active agents are shown in the Active tab (tab 1), not here.
 
 	if v.cleanupMode {
 		b.WriteString(v.renderCleanupView(w))
 		return b.String()
 	}
 
-	if len(visible) == 0 && len(v.activeAgents) == 0 {
-		b.WriteString(sessDimStyle.Render("  No sessions found.") + "\n")
-		return b.String()
-	}
 	if len(visible) == 0 {
-		b.WriteString(sessDimStyle.Render("  No past sessions.") + "\n")
+		b.WriteString(sessDimStyle.Render("  No past sessions. Press A to show all projects.") + "\n")
 		return b.String()
 	}
 

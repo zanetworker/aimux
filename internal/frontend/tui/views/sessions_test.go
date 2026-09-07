@@ -424,8 +424,8 @@ func TestSessionsView_EmptySessions(t *testing.T) {
 	v.SetSize(160, 40)
 
 	output := v.View()
-	if !strings.Contains(output, "No sessions found") {
-		t.Error("expected 'No sessions found' message")
+	if !strings.Contains(output, "No past sessions") {
+		t.Error("expected 'No past sessions' message")
 	}
 
 	if v.SelectedSession() != nil {
