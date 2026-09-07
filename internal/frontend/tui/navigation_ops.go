@@ -564,6 +564,14 @@ func (a App) navigateBack() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a App) switchTab(v viewType, label string) (tea.Model, tea.Cmd) {
+	a.currentView = v
+	a.breadcrumbs = []string{label}
+	a.headerView.SetCrumbs(a.breadcrumbs)
+	a.headerView.SetActiveTab(int(v))
+	return a, nil
+}
+
 func (a *App) resizeViews() {
 	a.layout.SetSize(a.width, a.height)
 	a.headerView.SetWidth(a.width)
@@ -579,6 +587,8 @@ func (a *App) resizeViews() {
 	a.teamsView.SetSize(a.width, contentHeight)
 	a.tasksView.SetSize(a.width, contentHeight)
 	a.helpView.SetSize(a.width, contentHeight)
+	a.definitionsView.SetSize(a.width, contentHeight)
+	a.environmentsView.SetSize(a.width, contentHeight)
 	if a.logsView != nil {
 		a.logsView.SetSize(a.width, contentHeight)
 	}

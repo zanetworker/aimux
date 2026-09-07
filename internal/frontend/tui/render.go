@@ -51,6 +51,10 @@ func (a App) View() string {
 		a.headerView.SetHint("Esc:back  :health to refresh")
 	case viewPlugin:
 		a.headerView.SetHint("j/k:scroll  d/u:page  r:refresh  Esc:back")
+	case viewDefinitions:
+		a.headerView.SetHint("j/k:nav  Enter:start  :new:launch  Esc:back  ?:help")
+	case viewEnvironments:
+		a.headerView.SetHint("j/k:nav  c:check-health  Esc:back  ?:help")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
 	}
@@ -103,6 +107,12 @@ func (a App) View() string {
 		} else {
 			content = "  No plugin selected"
 		}
+	case viewDefinitions:
+		a.definitionsView.SetSize(a.width, contentHeight)
+		content = a.definitionsView.View()
+	case viewEnvironments:
+		a.environmentsView.SetSize(a.width, contentHeight)
+		content = a.environmentsView.View()
 	case viewHelp:
 		content = a.helpView.View()
 	}

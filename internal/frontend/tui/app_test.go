@@ -363,7 +363,7 @@ func TestOtelEnvForCmd_PreservesExisting(t *testing.T) {
 }
 
 // TestViewTasks_NavigateAndBack verifies that T navigates to tasks view
-// and Esc returns to agents view.
+// and Esc returns to sessions view (home tab).
 func TestViewTasks_NavigateAndBack(t *testing.T) {
 	app := App{
 		currentView: viewAgents,
@@ -381,16 +381,16 @@ func TestViewTasks_NavigateAndBack(t *testing.T) {
 		t.Errorf("after T key: currentView = %d, want %d (viewTasks)", a.currentView, viewTasks)
 	}
 
-	// Navigate back via Esc
+	// Navigate back via Esc — goes to sessions (home tab)
 	result, _ = a.handleKey(keyMsg("esc"))
 	a = result.(App)
-	if a.currentView != viewAgents {
-		t.Errorf("after Esc: currentView = %d, want %d (viewAgents)", a.currentView, viewAgents)
+	if a.currentView != viewSessions {
+		t.Errorf("after Esc: currentView = %d, want %d (viewSessions)", a.currentView, viewSessions)
 	}
 }
 
-// TestViewTasks_QuitReturnsToAgents verifies that q in tasks view goes back.
-func TestViewTasks_QuitReturnsToAgents(t *testing.T) {
+// TestViewTasks_QuitReturnsToSessions verifies that q in tasks view goes back to sessions.
+func TestViewTasks_QuitReturnsToSessions(t *testing.T) {
 	app := App{
 		currentView: viewTasks,
 		agentsView:  views.NewAgentsView(),
@@ -399,12 +399,12 @@ func TestViewTasks_QuitReturnsToAgents(t *testing.T) {
 		otelStore:   aimuxotel.NewSpanStore(),
 	}
 	app.ctrl = newTestController()
-	app.ctrl.Nav.NavigateTo(6, "Tasks") // viewTasks = 6
+	app.ctrl.Nav.NavigateTo(7, "Tasks") // viewTasks = 7
 
 	result, _ := app.handleKey(keyMsg("q"))
 	a := result.(App)
-	if a.currentView != viewAgents {
-		t.Errorf("after q in tasks: currentView = %d, want %d (viewAgents)", a.currentView, viewAgents)
+	if a.currentView != viewSessions {
+		t.Errorf("after q in tasks: currentView = %d, want %d (viewSessions)", a.currentView, viewSessions)
 	}
 }
 

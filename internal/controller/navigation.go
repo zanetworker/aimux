@@ -9,7 +9,13 @@ const (
 	ViewCosts
 	ViewTeams
 	ViewSessions
+	ViewStarred
 	ViewHelp
+	ViewTasks
+	ViewHealth
+	ViewPlugin
+	ViewDefinitions
+	ViewEnvironments
 )
 
 // Navigator manages the view navigation state machine.
@@ -22,29 +28,29 @@ type Navigator struct {
 	SplitFocus  string // "trace" or "session"
 }
 
-// NewNavigator creates a Navigator in the default state (agents view).
+// NewNavigator creates a Navigator in the default state (sessions view).
 func NewNavigator() *Navigator {
 	return &Navigator{
-		CurrentView: ViewAgents,
-		Breadcrumbs: []string{"Agents"},
+		CurrentView: ViewSessions,
+		Breadcrumbs: []string{"Sessions"},
 	}
 }
 
 // NavigateTo switches to a new view with a breadcrumb label.
 func (n *Navigator) NavigateTo(v ViewType, label string) {
 	n.CurrentView = v
-	if v == ViewAgents {
-		n.Breadcrumbs = []string{"Agents"}
+	if v == ViewSessions || v == ViewDefinitions || v == ViewEnvironments {
+		n.Breadcrumbs = []string{label}
 	} else {
-		n.Breadcrumbs = []string{"Agents", label}
+		n.Breadcrumbs = []string{"Sessions", label}
 	}
 }
 
-// NavigateBack returns to the agents view.
+// NavigateBack returns to the sessions view (home tab).
 func (n *Navigator) NavigateBack() {
-	if n.CurrentView != ViewAgents {
-		n.CurrentView = ViewAgents
-		n.Breadcrumbs = []string{"Agents"}
+	if n.CurrentView != ViewSessions {
+		n.CurrentView = ViewSessions
+		n.Breadcrumbs = []string{"Sessions"}
 	}
 }
 

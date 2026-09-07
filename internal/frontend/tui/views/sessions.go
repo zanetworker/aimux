@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/history"
 )
 
@@ -227,11 +229,19 @@ type SessionsView struct {
 	// Trace preview (reused LogsView)
 	previewLogs  *LogsView
 	traceParser  TraceParser
+
+	// Active agents (discovered running processes) shown above history
+	activeAgents []agent.Agent
 }
 
 // NewSessionsView creates a new sessions browser.
 func NewSessionsView() *SessionsView {
 	return &SessionsView{}
+}
+
+// SetActiveAgents updates the list of currently running agents shown above history.
+func (v *SessionsView) SetActiveAgents(agents []agent.Agent) {
+	v.activeAgents = agents
 }
 
 // SetSessions updates the session list.
@@ -1062,13 +1072,25 @@ func (v *SessionsView) View() string {
 		b.WriteString("  " + searchBadge.Render(label) + sessDimStyle.Render("  Esc:clear") + "\n\n")
 	}
 
+	// Active agents section
+	if len(v.activeAgents) > 0 {
+		b.WriteString(v.renderActiveAgents(w))
+		divLine := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
+			Render("  " + strings.Repeat("─", 10) + " History " + strings.Repeat("─", w-23))
+		b.WriteString(divLine + "\n")
+	}
+
 	if v.cleanupMode {
 		b.WriteString(v.renderCleanupView(w))
 		return b.String()
 	}
 
-	if len(visible) == 0 {
+	if len(visible) == 0 && len(v.activeAgents) == 0 {
 		b.WriteString(sessDimStyle.Render("  No sessions found.") + "\n")
+		return b.String()
+	}
+	if len(visible) == 0 {
+		b.WriteString(sessDimStyle.Render("  No past sessions.") + "\n")
 		return b.String()
 	}
 
@@ -1819,4 +1841,85 @@ func (v *SessionsView) SubagentCount() int {
 // ShowSubagents returns whether subagent sessions are currently visible.
 func (v *SessionsView) ShowSubagents() bool {
 	return v.showSubagents
+}
+
+// renderActiveAgents renders the active agents section above history.
+func (v *SessionsView) renderActiveAgents(w int) string {
+	var b strings.Builder
+
+	sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true)
+	b.WriteString("  " + sectionStyle.Render(fmt.Sprintf("Active (%d)", len(v.activeAgents))) + "\n")
+
+	colName := 22
+	colModel := 14
+	colEnv := 10
+	colStatus := 12
+	colDir := w - colName - colModel - colEnv - colStatus - 16
+	if colDir < 10 {
+		colDir = 10
+	}
+
+	tableHeader := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#5F87FF")).
+		Background(lipgloss.Color("#1E293B"))
+	header := fmt.Sprintf("  %-*s   %-*s   %-*s   %-*s   %-*s",
+		colName, "NAME",
+		colModel, "MODEL",
+		colEnv, "ENV",
+		colStatus, "STATUS",
+		colDir, "DIR")
+	b.WriteString(tableHeader.Render(padToWidth(header, w)) + "\n")
+
+	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Bold(true)
+	modelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
+	envStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA"))
+	dirStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+
+	for _, ag := range v.activeAgents {
+		name := ag.Name
+		if name == "" {
+			name = ag.ShortProject()
+		}
+
+		model := ag.Model
+		if model == "" {
+			model = "-"
+		}
+
+		env := "local"
+		if ag.Location == "remote" {
+			env = "remote"
+		}
+
+		var statusStyled string
+		switch ag.Status {
+		case agent.StatusActive:
+			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#22C55E")).Bold(true).Render("● active")
+		case agent.StatusIdle:
+			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("○ idle")
+		case agent.StatusWaitingPermission:
+			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).Render("◐ waiting")
+		case agent.StatusError:
+			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("✕ error")
+		default:
+			statusStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("? unknown")
+		}
+
+		dir := filepath.Base(ag.WorkingDir)
+		if dir == "" || dir == "." {
+			dir = ag.WorkingDir
+		}
+
+		row := fmt.Sprintf("  %-*s   %-*s   %-*s   %-*s   %-*s",
+			colName, nameStyle.Render(truncate(name, colName)),
+			colModel, modelStyle.Render(truncate(model, colModel)),
+			colEnv, envStyle.Render(truncate(env, colEnv)),
+			colStatus, statusStyled,
+			colDir, dirStyle.Render(truncate(dir, colDir)))
+		b.WriteString(row + "\n")
+	}
+	b.WriteString("\n")
+
+	return b.String()
 }

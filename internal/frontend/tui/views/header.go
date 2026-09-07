@@ -54,6 +54,9 @@ type HeaderView struct {
 
 	// Attention counter
 	attentionCount int
+
+	// Tab navigation
+	activeTab int // viewType value of the currently active tab
 }
 
 // NewHeaderView creates a new HeaderView.
@@ -111,11 +114,15 @@ func (h *HeaderView) SetAttentionCount(n int) {
 	h.attentionCount = n
 }
 
+// SetActiveTab updates which tab is visually highlighted.
+func (h *HeaderView) SetActiveTab(tab int) {
+	h.activeTab = tab
+}
+
 // View renders the header.
 func (h *HeaderView) View() string {
 	infoBoxes := h.renderInfoBoxes()
 	logo := h.renderLogo()
-	crumbBar := h.renderCrumbs()
 
 	// Hide logo if terminal is too narrow to fit both info boxes and logo
 	infoW := lipgloss.Width(infoBoxes)
@@ -130,7 +137,9 @@ func (h *HeaderView) View() string {
 	// Ensure the top row fills the width
 	topRow = lipgloss.NewStyle().Width(h.width).Render(topRow)
 
-	result := topRow + "\n" + crumbBar
+	tabBar := h.renderTabs()
+
+	result := topRow + "\n" + tabBar
 	if h.hintText != "" {
 		sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).Render(strings.Repeat("─", h.width))
 		result += "\n" + h.renderHintBar() + "\n" + sep
@@ -357,6 +366,55 @@ func (h *HeaderView) fillGap(left, right string) string {
 		gap = 1
 	}
 	return strings.Repeat(" ", gap)
+}
+
+// Tab IDs matching the viewType constants in tui/app.go.
+const (
+	tabSessions     = 4  // viewSessions
+	tabDefinitions  = 10 // viewDefinitions
+	tabEnvironments = 11 // viewEnvironments
+)
+
+func (h *HeaderView) renderTabs() string {
+	type tab struct {
+		key   string
+		label string
+		id    int
+	}
+	tabs := []tab{
+		{"1", "Sessions", tabSessions},
+		{"2", "Agents", tabDefinitions},
+		{"3", "Environments", tabEnvironments},
+	}
+
+	activeStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#111827")).
+		Background(lipgloss.Color("#5F87FF")).
+		Padding(0, 1)
+	inactiveStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#9CA3AF")).
+		Background(lipgloss.Color("#1E293B")).
+		Padding(0, 1)
+	keyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280"))
+
+	var parts []string
+	for _, t := range tabs {
+		label := t.label
+		if h.activeTab == t.id {
+			parts = append(parts, activeStyle.Render(label))
+		} else {
+			parts = append(parts, inactiveStyle.Render(keyStyle.Render(t.key+" ")+label))
+		}
+	}
+
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Padding(0, 1)
+	parts = append(parts, helpStyle.Render("?:Help"))
+
+	return " " + strings.Join(parts, " ")
 }
 
 func (h *HeaderView) renderCrumbs() string {

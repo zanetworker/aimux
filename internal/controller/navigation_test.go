@@ -6,11 +6,11 @@ import (
 
 func TestNavigator_InitialState(t *testing.T) {
 	n := NewNavigator()
-	if n.CurrentView != ViewAgents {
-		t.Errorf("initial view = %d, want ViewAgents", n.CurrentView)
+	if n.CurrentView != ViewSessions {
+		t.Errorf("initial view = %d, want ViewSessions", n.CurrentView)
 	}
-	if len(n.Breadcrumbs) != 1 || n.Breadcrumbs[0] != "Agents" {
-		t.Errorf("initial breadcrumbs = %v, want [Agents]", n.Breadcrumbs)
+	if len(n.Breadcrumbs) != 1 || n.Breadcrumbs[0] != "Sessions" {
+		t.Errorf("initial breadcrumbs = %v, want [Sessions]", n.Breadcrumbs)
 	}
 	if n.Zoomed || n.SplitMode {
 		t.Error("should not be zoomed or split initially")
@@ -22,19 +22,19 @@ func TestNavigator_InitialState(t *testing.T) {
 
 func TestNavigator_NavigateTo(t *testing.T) {
 	n := NewNavigator()
-	n.NavigateTo(ViewSessions, "Sessions")
-	if n.CurrentView != ViewSessions {
-		t.Errorf("view = %d, want ViewSessions", n.CurrentView)
+	n.NavigateTo(ViewLogs, "Logs")
+	if n.CurrentView != ViewLogs {
+		t.Errorf("view = %d, want ViewLogs", n.CurrentView)
 	}
-	if len(n.Breadcrumbs) != 2 || n.Breadcrumbs[1] != "Sessions" {
-		t.Errorf("breadcrumbs = %v, want [Agents Sessions]", n.Breadcrumbs)
+	if len(n.Breadcrumbs) != 2 || n.Breadcrumbs[1] != "Logs" {
+		t.Errorf("breadcrumbs = %v, want [Sessions Logs]", n.Breadcrumbs)
 	}
 }
 
-func TestNavigator_NavigateToAgents_ResetsBreadcrumbs(t *testing.T) {
+func TestNavigator_NavigateToTab_ResetsBreadcrumbs(t *testing.T) {
 	n := NewNavigator()
-	n.NavigateTo(ViewSessions, "Sessions")
-	n.NavigateTo(ViewAgents, "")
+	n.NavigateTo(ViewLogs, "Logs")
+	n.NavigateTo(ViewDefinitions, "Agents")
 	if len(n.Breadcrumbs) != 1 {
 		t.Errorf("breadcrumbs = %v, want [Agents]", n.Breadcrumbs)
 	}
@@ -47,22 +47,22 @@ func TestNavigator_NavigateBack(t *testing.T) {
 	n := NewNavigator()
 	n.NavigateTo(ViewLogs, "Logs [PID 123]")
 	n.NavigateBack()
-	if n.CurrentView != ViewAgents {
-		t.Errorf("view = %d, want ViewAgents after back", n.CurrentView)
+	if n.CurrentView != ViewSessions {
+		t.Errorf("view = %d, want ViewSessions after back", n.CurrentView)
 	}
 	if len(n.Breadcrumbs) != 1 {
-		t.Errorf("breadcrumbs = %v, want [Agents]", n.Breadcrumbs)
+		t.Errorf("breadcrumbs = %v, want [Sessions]", n.Breadcrumbs)
 	}
 }
 
-func TestNavigator_NavigateBack_AlreadyAtAgents(t *testing.T) {
+func TestNavigator_NavigateBack_AlreadyAtSessions(t *testing.T) {
 	n := NewNavigator()
 	n.NavigateBack() // should be no-op
-	if n.CurrentView != ViewAgents {
-		t.Errorf("view = %d, want ViewAgents", n.CurrentView)
+	if n.CurrentView != ViewSessions {
+		t.Errorf("view = %d, want ViewSessions", n.CurrentView)
 	}
-	if len(n.Breadcrumbs) != 1 || n.Breadcrumbs[0] != "Agents" {
-		t.Errorf("breadcrumbs = %v, want [Agents]", n.Breadcrumbs)
+	if len(n.Breadcrumbs) != 1 || n.Breadcrumbs[0] != "Sessions" {
+		t.Errorf("breadcrumbs = %v, want [Sessions]", n.Breadcrumbs)
 	}
 }
 

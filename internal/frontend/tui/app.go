@@ -49,6 +49,8 @@ const (
 	viewTasks
 	viewHealth
 	viewPlugin
+	viewDefinitions
+	viewEnvironments
 )
 
 // tickMsg triggers periodic refresh.
@@ -112,7 +114,9 @@ type App struct {
 	starredView    *views.SessionsView
 	cachedSessions []history.Session
 	helpView       *views.HelpView
-	healthView     *views.HealthView
+	healthView       *views.HealthView
+	definitionsView  *views.DefinitionsView
+	environmentsView *views.EnvironmentsView
 
 	// Layout
 	layout *Layout
@@ -320,7 +324,7 @@ func NewApp() App {
 	orch := newOrchestrator(agentProviders, envs)
 
 	app := App{
-		currentView:      viewAgents,
+		currentView:      viewSessions,
 		headerView:       views.NewHeaderView(),
 		agentsView:       views.NewAgentsView(),
 		previewPane:      views.NewPreviewPane(),
@@ -331,11 +335,13 @@ func NewApp() App {
 		teamsView:        views.NewTeamsView(),
 		helpView:         views.NewHelpView(),
 		healthView:       views.NewHealthView(),
+		definitionsView:  views.NewDefinitionsView(),
+		environmentsView: views.NewEnvironmentsView(),
 		tasksView:        views.NewTasksView(),
 		layout:           NewLayout(0, 0),
 		orchestrator:     orch,
 		providers:        providers,
-		breadcrumbs:      []string{"Agents"},
+		breadcrumbs:      []string{"Sessions"},
 		hiddenAgents:     make(map[string]bool),
 		prevStatuses:     make(map[int]agent.Status),
 		doneTimestamps:   make(map[int]time.Time),
@@ -379,6 +385,31 @@ func NewApp() App {
 	// Set cached agents as initial instances and mark them stale in AgentsView
 	app.agentsView.SetStalePIDs(staleAgents)
 	app.agentsView.SetHourlyRate(cfg.ROI.HourlyRate)
+
+	// Set initial active tab
+	app.headerView.SetActiveTab(int(viewSessions))
+
+	// Initialize sessions view as default home tab
+	app.sessionsView.SetCurrentDir(launchDir)
+	for _, p := range providers {
+		if p.Name() == "claude" {
+			app.sessionsView.SetTraceParser(p.ParseTrace)
+			break
+		}
+	}
+	app.sessionsView.SetResumeMode(controller.ResolveMode("", cfg.DefaultMode))
+	app.sessionsView.SetHourlyRate(cfg.ROI.HourlyRate)
+	app.sessionsView.SetTagVocab(history.CollectTags(""))
+	sessions, _ := history.Discover(history.DiscoverOpts{Dir: launchDir}, "")
+	app.cachedSessions = sessions
+	app.sessionsView.SetSessions(sessions)
+
+	// Populate active agents for the merged sessions view
+	app.sessionsView.SetActiveAgents(cachedAgents)
+
+	// Initialize definitions and environments views
+	app.definitionsView.SetConfigs(cfg.AgentConfigs)
+	app.environmentsView.SetEnvironments(cfg.Environments)
 
 	return app
 }
@@ -597,6 +628,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.headerView.SetAgents(a.instances)
 		a.headerView.SetSilenced(a.silenced)
 		a.costsView.SetAgents(a.instances)
+		a.sessionsView.SetActiveAgents(a.instances)
 
 		// Environment health checks dispatched as async commands.
 
@@ -1265,8 +1297,14 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	a.statusHint = ""
 
 	switch msg.String() {
+	case "1":
+		return a.switchTab(viewSessions, "Sessions")
+	case "2":
+		return a.switchTab(viewDefinitions, "Agents")
+	case "3":
+		return a.switchTab(viewEnvironments, "Environments")
 	case "q":
-		if a.currentView == viewAgents {
+		if a.currentView == viewSessions || a.currentView == viewDefinitions || a.currentView == viewEnvironments || a.currentView == viewAgents {
 			return a, tea.Quit
 		}
 		return a.navigateBack()
@@ -1612,6 +1650,24 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case viewTasks:
 		if a.tasksView != nil {
 			a.tasksView.HandleKey(msg.String())
+		}
+	case viewDefinitions:
+		if a.definitionsView != nil {
+			switch msg.String() {
+			case "j", "down":
+				a.definitionsView.CursorDown()
+			case "k", "up":
+				a.definitionsView.CursorUp()
+			}
+		}
+	case viewEnvironments:
+		if a.environmentsView != nil {
+			switch msg.String() {
+			case "j", "down":
+				a.environmentsView.CursorDown()
+			case "k", "up":
+				a.environmentsView.CursorUp()
+			}
 		}
 	case viewPlugin:
 		if a.pluginView != nil {
