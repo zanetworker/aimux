@@ -326,7 +326,7 @@ func NewApp() App {
 	orch := newOrchestrator(agentProviders, envs)
 
 	app := App{
-		currentView:      viewSessions,
+		currentView:      viewAgents,
 		headerView:       views.NewHeaderView(),
 		agentsView:       views.NewAgentsView(),
 		previewPane:      views.NewPreviewPane(),
@@ -389,7 +389,7 @@ func NewApp() App {
 	app.agentsView.SetHourlyRate(cfg.ROI.HourlyRate)
 
 	// Set initial active tab
-	app.headerView.SetActiveTab(int(viewSessions))
+	app.headerView.SetActiveTab(int(viewAgents))
 
 	// Initialize sessions view as default home tab
 	app.sessionsView.SetCurrentDir(launchDir)
@@ -1304,9 +1304,9 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "1":
-		return a.switchTab(viewSessions, "Sessions")
+		return a.switchTab(viewAgents, "Active")
 	case "2":
-		return a.switchTab(viewAgents, "Live")
+		return a.switchTab(viewSessions, "History")
 	case "3":
 		return a.switchTab(viewDefinitions, "Agents")
 	case "4":
@@ -1770,8 +1770,18 @@ func (a App) executeCommand(cmd string) (tea.Model, tea.Cmd) {
 		return a.exportTrace()
 	case "kill":
 		return a.promptKill()
-	case "new":
+	case "new", "start":
 		return a.openLauncher()
+	case "active":
+		return a.switchTab(viewAgents, "Active")
+	case "history":
+		return a.switchTab(viewSessions, "History")
+	case "agents":
+		return a.switchTab(viewDefinitions, "Agents")
+	case "environments", "envs":
+		return a.switchTab(viewEnvironments, "Environments")
+	case "resume":
+		return a.handleEnter()
 	case "export-otel":
 		return a.exportOTEL()
 	case "quit":

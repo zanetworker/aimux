@@ -383,8 +383,8 @@ func (h *HeaderView) renderTabs() string {
 		id    int
 	}
 	tabs := []tab{
-		{"1", "Sessions", tabSessions},
-		{"2", "Live", tabAgents},
+		{"1", "Active", tabAgents},
+		{"2", "History", tabSessions},
 		{"3", "Agents", tabDefinitions},
 		{"4", "Environments", tabEnvironments},
 	}

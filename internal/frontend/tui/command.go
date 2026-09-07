@@ -16,8 +16,9 @@ var commandAliases = map[string]string{
 
 // allCommands is the full list of available commands.
 var allCommands = []string{
-	"instances", "logs", "traces", "session", "teams", "tasks", "costs",
-	"health", "help", "new", "kill", "export", "export-otel", "send", "quit",
+	"active", "agents", "costs", "environments", "envs", "export", "export-otel",
+	"health", "help", "history", "instances", "kill", "logs", "new", "plugins",
+	"quit", "resume", "send", "session", "start", "tasks", "teams", "traces",
 }
 
 // resolveCommand resolves an alias or validates a full command name.
