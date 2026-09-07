@@ -22,11 +22,18 @@ func defaultAgentsDir() string {
 
 func newConfigsCmd(agentConfigs []config.AgentConfig) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "agents",
+		Use:     "configs",
 		Short:   "Manage named agent configurations",
 		Long:    "List, create, update, and remove agent configurations from per-file YAML.",
-		Aliases: []string{"configs", "agent-configs"},
+		Aliases: []string{"agent-configs"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Load dynamically from per-file directory
+			dir := defaultAgentsDir()
+			if dir != "" {
+				if loaded, err := config.LoadAgentDir(dir); err == nil && len(loaded) > 0 {
+					agentConfigs = loaded
+				}
+			}
 			if len(agentConfigs) == 0 {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "No agent configs found. Create files in ~/.aimux/agents/ or .aimux/agents/")
 				return nil

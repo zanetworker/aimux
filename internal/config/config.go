@@ -354,10 +354,15 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	// Load agents.yaml from the same directory as config.yaml
+	// Load agent configs: per-file directory first, fall back to agents.yaml
 	if path != "" {
-		agentsPath := filepath.Join(filepath.Dir(path), "agents.yaml")
-		agents, _ := LoadAgents(agentsPath)
+		dir := filepath.Dir(path)
+		agentsDir := filepath.Join(dir, "agents")
+		agents, err := LoadAgentDir(agentsDir)
+		if err != nil || len(agents) == 0 {
+			agentsPath := filepath.Join(dir, "agents.yaml")
+			agents, _ = LoadAgents(agentsPath)
+		}
 		cfg.AgentConfigs = agents
 	}
 
