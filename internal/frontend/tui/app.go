@@ -1306,8 +1306,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "1":
 		return a.switchTab(viewSessions, "Sessions")
 	case "2":
-		return a.switchTab(viewDefinitions, "Agents")
+		return a.switchTab(viewAgents, "Live")
 	case "3":
+		return a.switchTab(viewDefinitions, "Agents")
+	case "4":
 		return a.switchTab(viewEnvironments, "Environments")
 	case "q":
 		if a.currentView == viewSessions || a.currentView == viewDefinitions || a.currentView == viewEnvironments || a.currentView == viewAgents {

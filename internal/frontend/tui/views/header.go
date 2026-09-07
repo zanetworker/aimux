@@ -370,6 +370,7 @@ func (h *HeaderView) fillGap(left, right string) string {
 
 // Tab IDs matching the viewType constants in tui/app.go.
 const (
+	tabAgents       = 0  // viewAgents
 	tabSessions     = 4  // viewSessions
 	tabDefinitions  = 10 // viewDefinitions
 	tabEnvironments = 11 // viewEnvironments
@@ -383,8 +384,9 @@ func (h *HeaderView) renderTabs() string {
 	}
 	tabs := []tab{
 		{"1", "Sessions", tabSessions},
-		{"2", "Agents", tabDefinitions},
-		{"3", "Environments", tabEnvironments},
+		{"2", "Live", tabAgents},
+		{"3", "Agents", tabDefinitions},
+		{"4", "Environments", tabEnvironments},
 	}
 
 	activeStyle := lipgloss.NewStyle().
