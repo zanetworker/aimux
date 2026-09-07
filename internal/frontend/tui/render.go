@@ -55,6 +55,8 @@ func (a App) View() string {
 		a.headerView.SetHint("j/k:nav  Enter:start  :new:launch  Esc:back  ?:help")
 	case viewEnvironments:
 		a.headerView.SetHint("j/k:nav  c:check-health  Esc:back  ?:help")
+	case viewToolStream:
+		a.headerView.SetHint("j/k:nav  Enter:expand  g/G:top/bottom  PgUp/PgDn:page  q/Esc:back")
 	case viewHelp:
 		a.headerView.SetHint("Esc:back  q:quit")
 	}
@@ -113,6 +115,13 @@ func (a App) View() string {
 	case viewEnvironments:
 		a.environmentsView.SetSize(a.width, contentHeight)
 		content = a.environmentsView.View()
+	case viewToolStream:
+		if a.toolStreamView != nil {
+			a.toolStreamView.SetSize(a.width, contentHeight)
+			content = a.toolStreamView.View()
+		} else {
+			content = "  No tool stream available"
+		}
 	case viewHelp:
 		content = a.helpView.View()
 	}

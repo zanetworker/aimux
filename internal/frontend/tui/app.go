@@ -51,6 +51,7 @@ const (
 	viewPlugin
 	viewDefinitions
 	viewEnvironments
+	viewToolStream
 )
 
 // tickMsg triggers periodic refresh.
@@ -117,6 +118,7 @@ type App struct {
 	healthView       *views.HealthView
 	definitionsView  *views.DefinitionsView
 	environmentsView *views.EnvironmentsView
+	toolStreamView   *views.ToolStreamView
 
 	// Layout
 	layout *Layout
@@ -1051,6 +1053,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusHint = fmt.Sprintf("Found %d sessions matching '%s'", count, msg.Query)
 		}
 		return a, nil
+	case views.ToolStreamBackMsg:
+		return a.navigateBack()
+	case views.SessionOpenToolStreamMsg:
+		return a.openToolStream(msg.SessionID)
 	case views.SessionResumeMsg:
 		debuglog.Log("tui: SessionResumeMsg received: id=%q dir=%q file=%q mode=%q", msg.SessionID, msg.WorkingDir, msg.FilePath, msg.Mode)
 		if msg.SessionID == "" {
@@ -1668,6 +1674,11 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case "k", "up":
 				a.environmentsView.CursorUp()
 			}
+		}
+	case viewToolStream:
+		if a.toolStreamView != nil {
+			_, cmd := a.toolStreamView.Update(msg)
+			return a, cmd
 		}
 	case viewPlugin:
 		if a.pluginView != nil {

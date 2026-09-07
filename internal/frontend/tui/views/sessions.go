@@ -422,7 +422,10 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			v.contentSearchIDs = nil
 		case "enter":
 			s := v.SelectedSession()
-			if s != nil && s.Resumable {
+			if s == nil {
+				return nil
+			}
+			if s.Resumable {
 				mode := v.resumeMode
 				return func() tea.Msg {
 					return SessionResumeMsg{
@@ -432,6 +435,10 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 						Mode:       mode,
 					}
 				}
+			}
+			sid := s.ID
+			return func() tea.Msg {
+				return SessionOpenToolStreamMsg{SessionID: sid}
 			}
 		case "B":
 			if v.resumeMode == "bypass" {

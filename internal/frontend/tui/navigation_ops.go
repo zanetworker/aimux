@@ -20,6 +20,7 @@ import (
 	"github.com/zanetworker/aimux/internal/notify"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/session"
 	"github.com/zanetworker/aimux/internal/task"
 )
 
@@ -554,6 +555,15 @@ func (a App) openStarred() (tea.Model, tea.Cmd) {
 	a.starredView.SetSessions(starred)
 	a.starredView.SetShowAll(true)
 	return a.navigateTo(viewStarred, "Starred")
+}
+
+func (a App) openToolStream(sessionID string) (tea.Model, tea.Cmd) {
+	var events []session.SessionEvent
+	if a.sessionMgr != nil {
+		events, _ = a.sessionMgr.Store().ListEvents(sessionID)
+	}
+	a.toolStreamView = views.NewToolStreamView(events, a.width, a.height)
+	return a.navigateTo(viewToolStream, "ToolStream")
 }
 
 func (a App) navigateBack() (tea.Model, tea.Cmd) {
