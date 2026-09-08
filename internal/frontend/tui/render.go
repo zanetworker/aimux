@@ -375,6 +375,20 @@ func (a App) renderStatusBar() string {
 		}
 	} else if a.currentView == viewTasks {
 		hints = " j/k:nav  g/G:top/bottom  :new:create  Esc:back"
+	} else if a.currentView == viewDefinitions {
+		if a.definitionsView != nil && a.definitionsView.InForm() {
+			hints = " Enter:confirm  Esc:cancel"
+		} else {
+			hints = " j/k:nav  c:create  d:delete  Enter:start  Esc:back  ?:help  q:quit"
+		}
+	} else if a.currentView == viewEnvironments {
+		if a.environmentsView != nil && a.environmentsView.InForm() {
+			hints = " Enter:confirm  Esc:cancel"
+		} else {
+			hints = " j/k:nav  a:add  r:remove  c:check-health  Esc:back  ?:help  q:quit"
+		}
+	} else if a.currentView == viewToolStream {
+		hints = " j/k:nav  Enter:expand  g/G:top/bottom  PgUp/PgDn:page  q/Esc:back"
 	} else {
 		// Show group hint if selected agent is grouped
 		selected := a.agentsView.Selected()

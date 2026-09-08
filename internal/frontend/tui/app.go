@@ -1489,6 +1489,23 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a.navigateBack()
 	case "enter", " ":
+		// Let form views handle Enter first
+		if a.currentView == viewDefinitions && a.definitionsView != nil && a.definitionsView.InForm() {
+			a.definitionsView.HandleKey(msg)
+			if s := a.definitionsView.Status(); s != "" {
+				a.statusHint = s
+				a.stickyHint = true
+			}
+			return a, nil
+		}
+		if a.currentView == viewEnvironments && a.environmentsView != nil && a.environmentsView.InForm() {
+			a.environmentsView.HandleKey(msg)
+			if s := a.environmentsView.Status(); s != "" {
+				a.statusHint = s
+				a.stickyHint = true
+			}
+			return a, nil
+		}
 		// Enter in file diff view -> back to file picker
 		if a.currentView == viewAgents && a.previewPane != nil && a.previewPane.IsDiffExpanded() {
 			a.previewPane.DiffPickerBack()
