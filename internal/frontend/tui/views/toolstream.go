@@ -65,6 +65,12 @@ func (v *ToolStreamView) SetEvents(events []session.SessionEvent) {
 	}
 }
 
+// AppendEvent adds a single event and auto-scrolls to bottom.
+func (v *ToolStreamView) AppendEvent(event session.SessionEvent) {
+	v.events = append(v.events, event)
+	v.cursor = len(v.events) - 1
+}
+
 // SetSize sets the available rendering dimensions.
 func (v *ToolStreamView) SetSize(w, h int) {
 	v.width = w

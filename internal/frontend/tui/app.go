@@ -1057,16 +1057,22 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusHint = fmt.Sprintf("Found %d sessions matching '%s'", count, msg.Query)
 		}
 		return a, nil
+	case managedSessionEventMsg:
+		if a.toolStreamView != nil {
+			a.toolStreamView.AppendEvent(msg.event)
+		}
+		// Keep listening for more events
+		if sessionEventChan != nil {
+			return a, listenForSessionEvent(sessionEventChan)
+		}
+		return a, nil
+
 	case managedSessionDoneMsg:
+		sessionEventChan = nil
 		if msg.err != nil {
 			a.statusHint = fmt.Sprintf("Session error: %v", msg.err)
-		} else if a.toolStreamView != nil {
-			a.toolStreamView.SetEvents(msg.events)
-			if msg.result != nil {
-				a.statusHint = fmt.Sprintf("Session complete [%d turns, $%.4f]", msg.result.NumTurns, msg.result.CostUSD)
-			} else {
-				a.statusHint = "Session complete"
-			}
+		} else {
+			a.statusHint = "Session complete"
 		}
 		a.stickyHint = true
 		return a, nil
@@ -1514,7 +1520,8 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.breadcrumbs = append(a.breadcrumbs, "ToolStream")
 				a.headerView.SetCrumbs(a.breadcrumbs)
 				a.statusHint = fmt.Sprintf("Starting session: %s...", ac.Name)
-				return a, startManagedSession(ac.Model, ac.Prompt, a.launchDir)
+				a.stickyHint = true
+				return a, startManagedSessionStreaming(ac.Model, ac.Prompt, a.launchDir)
 			}
 			if s := a.definitionsView.Status(); s != "" {
 				a.statusHint = s
