@@ -1491,8 +1491,8 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a.navigateBack()
 	case "enter", " ":
-		// Let form views handle Enter first
-		if a.currentView == viewDefinitions && a.definitionsView != nil && a.definitionsView.InForm() {
+		// Let definitions and environments views handle Enter
+		if a.currentView == viewDefinitions && a.definitionsView != nil {
 			a.definitionsView.HandleKey(msg)
 			if s := a.definitionsView.Status(); s != "" {
 				a.statusHint = s
@@ -1500,7 +1500,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
-		if a.currentView == viewEnvironments && a.environmentsView != nil && a.environmentsView.InForm() {
+		if a.currentView == viewEnvironments && a.environmentsView != nil {
 			a.environmentsView.HandleKey(msg)
 			if s := a.environmentsView.Status(); s != "" {
 				a.statusHint = s
