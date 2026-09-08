@@ -1057,6 +1057,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusHint = fmt.Sprintf("Found %d sessions matching '%s'", count, msg.Query)
 		}
 		return a, nil
+	case managedSessionDoneMsg:
+		if msg.err != nil {
+			a.statusHint = fmt.Sprintf("Session error: %v", msg.err)
+		} else if a.toolStreamView != nil {
+			a.toolStreamView.SetEvents(msg.events)
+			if msg.result != nil {
+				a.statusHint = fmt.Sprintf("Session complete [%d turns, $%.4f]", msg.result.NumTurns, msg.result.CostUSD)
+			} else {
+				a.statusHint = "Session complete"
+			}
+		}
+		a.stickyHint = true
+		return a, nil
+
 	case views.ToolStreamBackMsg:
 		return a.navigateBack()
 	case views.SessionOpenToolStreamMsg:
@@ -1494,6 +1508,14 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Let definitions and environments views handle Enter
 		if a.currentView == viewDefinitions && a.definitionsView != nil {
 			a.definitionsView.HandleKey(msg)
+			if ac := a.definitionsView.PendingStart(); ac != nil {
+				a.toolStreamView = views.NewToolStreamView(nil, a.width, a.height)
+				a.currentView = viewToolStream
+				a.breadcrumbs = append(a.breadcrumbs, "ToolStream")
+				a.headerView.SetCrumbs(a.breadcrumbs)
+				a.statusHint = fmt.Sprintf("Starting session: %s...", ac.Name)
+				return a, startManagedSession(ac.Model, ac.Prompt, a.launchDir)
+			}
 			if s := a.definitionsView.Status(); s != "" {
 				a.statusHint = s
 				a.stickyHint = true

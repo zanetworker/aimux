@@ -28,10 +28,11 @@ type DefinitionsView struct {
 	cursor    int
 	configDir string
 
-	formStep  defFormStep
-	formInput TextInput
-	formData  map[string]string
-	status    string
+	formStep     defFormStep
+	formInput    TextInput
+	formData     map[string]string
+	status       string
+	pendingStart *config.AgentConfig
 }
 
 // NewDefinitionsView creates a new agent definitions view.
@@ -118,7 +119,7 @@ func (v *DefinitionsView) HandleKey(msg tea.KeyMsg) bool {
 	case "enter":
 		sel := v.Selected()
 		if sel != nil {
-			v.status = fmt.Sprintf("Use CLI: aimux sessions start %s", sel.Name)
+			v.pendingStart = sel
 		}
 		return true
 	}
@@ -221,6 +222,14 @@ func (v *DefinitionsView) Selected() *config.AgentConfig {
 		return nil
 	}
 	return &v.configs[v.cursor]
+}
+
+// PendingStart returns the agent config that was selected for launch via Enter,
+// then clears the flag. Returns nil if no launch is pending.
+func (v *DefinitionsView) PendingStart() *config.AgentConfig {
+	ac := v.pendingStart
+	v.pendingStart = nil
+	return ac
 }
 
 // View renders the definitions table.

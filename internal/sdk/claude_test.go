@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"bufio"
 	"context"
 	"os"
 	"os/exec"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/session"
 )
 
 func TestReadEvents_TextOnly(t *testing.T) {
@@ -280,6 +283,50 @@ func TestClaudeSession_WithToolUse(t *testing.T) {
 
 	t.Logf("Output: %s", result.Output)
 	t.Logf("Events: %d, Cost: $%.6f", len(events), result.CostUSD)
+}
+
+func TestRunWithEvents_StreamsEventsToChannel(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"type":"system","subtype":"init","session_id":"sess-rwe"}`,
+		`{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"Hello"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}},"session_id":"sess-rwe"}`,
+		`{"type":"assistant","message":{"id":"msg_2","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"test.go"}}],"stop_reason":"tool_use","usage":{"input_tokens":15,"output_tokens":8}},"session_id":"sess-rwe"}`,
+		`{"type":"result","is_error":false,"result":"Hello","stop_reason":"end_turn","num_turns":1,"total_cost_usd":0.002,"session_id":"sess-rwe","usage":{"input_tokens":0,"output_tokens":0}}`,
+	}, "\n"))
+
+	cs := &ClaudeSession{
+		stdout: bufio.NewScanner(input),
+		done:   make(chan error, 1),
+	}
+	cs.stdout.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	go func() { cs.done <- nil }()
+
+	eventCh := make(chan session.SessionEvent, 10)
+	ctx := context.Background()
+	result, err := cs.RunWithEvents(ctx, eventCh)
+	if err != nil {
+		t.Fatalf("RunWithEvents: %v", err)
+	}
+
+	if result.Output != "Hello" {
+		t.Errorf("Output = %q, want %q", result.Output, "Hello")
+	}
+	if result.NumTurns != 1 {
+		t.Errorf("NumTurns = %d, want 1", result.NumTurns)
+	}
+
+	var received []session.SessionEvent
+	for evt := range eventCh {
+		received = append(received, evt)
+	}
+	if len(received) != 2 {
+		t.Fatalf("expected 2 events on channel, got %d", len(received))
+	}
+	if received[0].Type != "text" {
+		t.Errorf("first event type = %q, want 'text'", received[0].Type)
+	}
+	if received[1].Type != "tool_call" {
+		t.Errorf("second event type = %q, want 'tool_call'", received[1].Type)
+	}
 }
 
 func TestClaudeSession_NotOnPath(t *testing.T) {

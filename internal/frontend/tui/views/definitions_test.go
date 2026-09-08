@@ -185,13 +185,20 @@ func TestDefinitionsView_EscCancelsForm(t *testing.T) {
 	}
 }
 
-func TestDefinitionsView_EnterShowsStartHint(t *testing.T) {
+func TestDefinitionsView_EnterSetsPendingStart(t *testing.T) {
 	v := NewDefinitionsView()
 	v.SetConfigs([]config.AgentConfig{{Name: "reviewer", Harness: "claude"}})
 
 	v.HandleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if !strings.Contains(v.status, "aimux sessions start reviewer") {
-		t.Fatalf("expected start hint, got %q", v.status)
+	ac := v.PendingStart()
+	if ac == nil {
+		t.Fatal("expected PendingStart to return the selected config")
+	}
+	if ac.Name != "reviewer" {
+		t.Fatalf("expected name 'reviewer', got %q", ac.Name)
+	}
+	if v.PendingStart() != nil {
+		t.Fatal("PendingStart should return nil on second call")
 	}
 }
 

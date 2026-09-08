@@ -254,6 +254,66 @@ func (cs *ClaudeSession) Stop() error {
 	}
 }
 
+// RunWithEvents reads stream-json events, sending each to eventCh as they arrive.
+// The channel is closed when the session completes or errors.
+func (cs *ClaudeSession) RunWithEvents(ctx context.Context, eventCh chan<- session.SessionEvent) (*ClaudeResult, error) {
+	defer close(eventCh)
+
+	var result ClaudeResult
+
+	for cs.stdout.Scan() {
+		line := cs.stdout.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var envelope StreamEvent
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			continue
+		}
+
+		prevLen := len(cs.events)
+
+		switch envelope.Type {
+		case "system":
+			cs.parseSystemEvent(line)
+		case "assistant":
+			cs.parseAssistantEvent(line, &result)
+		case "result":
+			cs.parseResultEvent(line, &result)
+			cs.mu.Lock()
+			for i := prevLen; i < len(cs.events); i++ {
+				eventCh <- cs.events[i]
+			}
+			cs.mu.Unlock()
+			return &result, nil
+		}
+
+		cs.mu.Lock()
+		for i := prevLen; i < len(cs.events); i++ {
+			eventCh <- cs.events[i]
+		}
+		cs.mu.Unlock()
+	}
+
+	if err := cs.stdout.Err(); err != nil {
+		return &result, fmt.Errorf("claude session: read stdout: %w", err)
+	}
+
+	if err := <-cs.done; err != nil {
+		stderrOut := cs.stderr.String()
+		if stderrOut != "" {
+			return &result, fmt.Errorf("claude session: process exited with error: %w (stderr: %s)", err, stderrOut)
+		}
+		return &result, fmt.Errorf("claude session: process exited with error: %w", err)
+	}
+
+	if result.Output == "" && len(cs.events) == 0 {
+		return &result, fmt.Errorf("claude session: no output received")
+	}
+	return &result, nil
+}
+
 // Stderr returns captured stderr output.
 func (cs *ClaudeSession) Stderr() string {
 	return cs.stderr.String()
