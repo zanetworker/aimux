@@ -8,22 +8,38 @@
 
 ## Problem
 
-aimux currently runs agents one way: start the `claude` CLI as a local subprocess, parse its stream-json output. This works but has no isolation (tools execute on the host), no sandbox routing (everything runs locally), and no path to multi-tenant enterprise use.
+aimux runs all agents locally. With 20+ concurrent agents, each consuming 2-3GB of RAM, a developer laptop runs out of memory. There's no way to offload agents to remote infrastructure while keeping the same dashboard experience.
 
-The design needs to support three tiers without changing frontend code:
+Two motivations drive the backend architecture:
 
-1. **Local** — developer laptop, no infrastructure needed
-2. **OpenClaw Gateway** — single-tenant, sandbox isolation via OpenShell
-3. **OpenClaw Enterprise (OCC)** — multi-tenant control plane with IAM, policies, secrets
+1. **Remote execution** — run agents on remote infrastructure when your machine can't handle the load. This is the primary driver.
+2. **Sandbox isolation** — tools execute in an isolated environment, API keys stay off the sandbox. This is a bonus that comes with remote execution.
+
+The design supports three tiers without changing frontend code:
+
+1. **Local** — developer laptop, no infrastructure needed. Fast, direct access. Best for quick tasks with 1-2 agents.
+2. **OpenClaw Gateway** — agents run on a remote server with optional OpenShell sandboxes. Best when you have 5+ agents or need isolation.
+3. **OpenClaw Enterprise (OCC)** — multi-tenant control plane with IAM, policies, secrets. Best for teams.
+
+Local is not a fallback. It's a first-class mode for when you want things right here on your machine.
+
+## Use Cases
+
+| Situation | Backend | Why |
+|-----------|---------|-----|
+| Quick bug fix, one agent | local | Speed. No network latency. Code is right here. |
+| Running 10 agents on a refactor | my-server | Your Mac has 16GB free. 10 agents need 30GB. Offload. |
+| Background workers overnight | gpu-box | Long-running tasks shouldn't tie up your laptop. |
+| Team sharing agent configs | occ-prod | Enterprise: IAM, policies, audit, shared agents. |
 
 ## Goals
 
-- One Backend interface that all three tiers implement
+- Named backends configured in `~/.aimux/config.yaml`
+- One interface (Sessions/Agents/Sandboxes) that all backends implement
 - Frontends (TUI, Web, CLI) never import backend-specific packages
-- Agent definitions have exactly one authority per backend
-- Session/Run distinction (durable conversation vs one prompt execution)
+- Agent definitions have a `backend` field for their default; `--backend` flag overrides per session
 - Event streaming is resumable (cursor-based, not ephemeral channels)
-- Self-managed environments for local mode only; gateway/enterprise modes delegate to the platform
+- Sandboxes managed by the platform in remote mode; not an aimux concern
 - No replication of OCC concepts (Namespace, AgentRevision, SandboxPolicy) in aimux
 
 ## Non-Goals
@@ -358,20 +374,51 @@ backends:
   local:
     type: local
 
-  openclaw-prod:
+  my-server:
     type: openclaw
-    endpoint: wss://gateway.example.com
+    endpoint: wss://my-server.example.com
+
+  gpu-box:
+    type: openclaw
+    endpoint: wss://gpu.internal:3000
 
   # Future:
   # occ-prod:
   #   type: occ
   #   endpoint: https://occ.example.com
   #   namespace: my-team
+```
 
-# Local-mode environments (only used by local backend)
-environments:
-  local:
-    type: local
+`local` always exists, no configuration needed. Remote backends are added by name.
+
+### Agent default backend
+
+```yaml
+# ~/.aimux/agents/reviewer.agent.yaml
+name: reviewer
+model: haiku
+backend: my-server    # default backend for this agent
+
+# ~/.aimux/agents/quick-fix.agent.yaml
+name: quick-fix
+model: sonnet
+# no backend field = defaults to local
+```
+
+### Per-session override
+
+```bash
+aimux sessions start reviewer                    # uses my-server (agent default)
+aimux sessions start reviewer --backend local    # override to local this time
+aimux sessions start reviewer --backend gpu-box  # override to gpu-box
+```
+
+### Backend CLI
+
+```bash
+aimux backends list                              # show all configured backends
+aimux backends add my-server --type openclaw --endpoint wss://...
+aimux backends remove my-server
 ```
 
 The `backends` key replaces the scattered `Runtime`, `Execution`, `Remote`, `Runtimes`, and `Kubernetes` config fields. One top-level backend connection choice, backend-specific config nested under each entry.
