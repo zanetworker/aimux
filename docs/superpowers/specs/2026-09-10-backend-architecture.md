@@ -64,10 +64,9 @@ aimux (developer dashboard)
   ┌──────────────────────▼───────────────────────────┐
   │ Backend Layer (capability interfaces)            │
   │                                                  │
-  │  SessionBackend — create, send, abort, subscribe │
-  │  AgentCatalog — list, get                        │
-  │  SandboxCatalog — list                       │
-  │  AgentAdmin — create, update, delete (optional)  │
+  │  Sessions — create, get, list, send, abort, subscribe │
+  │  Agents — list, get, create, update, delete            │
+  │  Sandboxes — list                                      │
   └───────┬──────────────┬──────────────┬────────────┘
           │              │              │
   ┌───────▼──────┐ ┌─────▼──────┐ ┌────▼─────────┐
@@ -257,9 +256,9 @@ type Sandbox struct {
 
 Wraps existing code:
 
-- `SessionBackend`: starts `claude` CLI subprocess via `sdk.ClaudeSession`, manages lifecycle in SQLite
-- `AgentCatalog` + `AgentAdmin`: reads/writes `~/.aimux/agents/*.agent.yaml` via `config.LoadAgentDir`/`config.SaveAgent`
-- `SandboxCatalog`: reads from `~/.aimux/config.yaml` environments map
+- `Sessions`: starts `claude` CLI subprocess via `sdk.ClaudeSession`, manages lifecycle in SQLite
+- `Agents`: reads/writes `~/.aimux/agents/*.agent.yaml` via `config.LoadAgentDir`/`config.SaveAgent`
+- `Sandboxes`: returns empty (local mode has no sandboxes)
 
 **Session = one claude subprocess.** A local session starts a subprocess and keeps it for one prompt (batch mode). Future: persistent sessions that accept multiple prompts.
 
@@ -273,9 +272,9 @@ Wraps existing code:
 
 Go WebSocket client speaking the OpenClaw gateway protocol.
 
-- `SessionBackend`: maps to `sessions.create`, `sessions.abort`, `sessions.list`, `sessions.get`, `sessions.messages.subscribe`
-- `AgentCatalog` + `AgentAdmin`: maps to `agents.list`, `agents.create`, `agents.update`, `agents.delete`
-- `SandboxCatalog`: maps to `environments.list`, `environments.status`
+- `Sessions`: Create → `sessions.create`, Get → `sessions.get`, List → `sessions.list`, Send → send prompt to session, Abort → `sessions.abort`, Subscribe → `sessions.messages.subscribe`
+- `Agents`: List → `agents.list`, Get → agent detail, Create → `agents.create`, Update → `agents.update`, Delete → `agents.delete`
+- `Sandboxes`: List → `environments.list` + `environments.status`
 
 **OpenClaw is authoritative** for agents, sessions, events, and sandboxes.
 
@@ -444,15 +443,15 @@ Frontends merge data from all configured backends:
 
 | Current code | In local backend | In openclaw backend |
 |-------------|-----------------|-------------------|
-| `sdk/claude.go` | SessionBackend.CreateSession + Send | Unused |
+| `sdk/claude.go` | Sessions.Create + Send | Unused |
 | `sdk/dispatcher.go` | Unused (local = no sandbox) | Unused (OpenClaw routes tools) |
 | `sdk/subprocess.go` | Used by ClaudeSession | Unused |
-| `config/agent_file.go` | AgentCatalog + AgentAdmin | Unused |
-| `environment/*.go` | SandboxCatalog | Unused |
+| `config/agent_file.go` | Agents (full CRUD) | Unused |
+| `environment/*.go` | Sandboxes (empty list) | Unused |
 | `session/sqlite_store.go` | Authoritative store | Projection cache |
 | `session/lifecycle.go` | Local session state machine | Unused (gateway owns lifecycle) |
-| `controller/agents.go` | Routes to local AgentAdmin | Routes to gateway AgentAdmin |
-| `controller/environments.go` | Routes to local SandboxCatalog | Read-only from gateway |
+| `controller/agents.go` | Routes to local Agents | Routes to gateway Agents |
+| `controller/environments.go` | Routes to local Sandboxes | Read-only from gateway |
 
 Nothing is deleted. Code stays; the Backend interface routes to the right implementation.
 
@@ -485,13 +484,13 @@ Nothing is deleted. Code stays; the Backend interface routes to the right implem
 
 ## Key Design Decisions
 
-1. **Capability interfaces over one fat interface.** SessionBackend, AgentCatalog, SandboxCatalog are separate. Optional mutation via type assertion (AgentAdmin). Backends implement what they support. (Codex recommendation)
+1. **Capability interfaces over one fat interface.** Sessions, Agents, Sandboxes are separate. Agents includes CRUD; backends that don't support mutation return ErrUnsupported. (Codex recommendation)
 
 2. **Session/Run distinction.** A Session is durable. A Run is one prompt execution. Abort stops the run, not the session. Maps cleanly to OpenClaw's model. (Codex recommendation)
 
 3. **Namespaced refs.** Every resource identity is `backend/id`. No bare IDs. Prevents confusion when multiple backends have agents with the same name. (Codex recommendation)
 
-4. **Events use json.RawMessage, not string.** Avoids double-encoding. Includes RunRef, sequence number, and backend event ID for proper correlation. (Codex recommendation)
+4. **Events use json.RawMessage, not string.** Avoids double-encoding. Includes sequence number and backend event ID for proper correlation. (Codex recommendation)
 
 5. **Resumable event streams.** Cursor-based Subscribe, not ephemeral channels. EventStream interface with Next/Cursor/Close. Handles reconnection cleanly. (Codex recommendation)
 
