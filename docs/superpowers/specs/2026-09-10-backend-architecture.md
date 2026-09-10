@@ -120,11 +120,15 @@ type Sessions interface {
     Subscribe(ctx context.Context, ref Ref, cursor string) (EventStream, error)
 }
 
-// Agents provides read access to agent definitions.
-// Agents are templates — sessions are running instances of them.
+// Agents manages agent definitions (templates).
+// Sessions are running instances of agents.
+// Backends that don't support mutation return ErrUnsupported from Create/Update/Delete.
 type Agents interface {
     List(ctx context.Context) ([]Agent, error)
     Get(ctx context.Context, ref Ref) (Agent, error)
+    Create(ctx context.Context, agent Agent) (Ref, error)
+    Update(ctx context.Context, ref Ref, agent Agent) error
+    Delete(ctx context.Context, ref Ref) error
 }
 
 // Sandboxes provides read access to available sandboxes.
@@ -132,14 +136,6 @@ type Agents interface {
 // returns what OpenClaw manages. aimux never creates sandboxes — the platform does.
 type Sandboxes interface {
     List(ctx context.Context) ([]Sandbox, error)
-}
-
-// AgentAdmin is an optional capability for backends that support agent mutation.
-// Type-assert from Agents when create/update/delete is needed.
-type AgentAdmin interface {
-    Create(ctx context.Context, agent Agent) (Ref, error)
-    Update(ctx context.Context, ref Ref, agent Agent) error
-    Delete(ctx context.Context, ref Ref) error
 }
 ```
 
