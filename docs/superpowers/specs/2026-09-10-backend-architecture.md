@@ -50,7 +50,7 @@ aimux (developer dashboard)
   │                                                  │
   │  SessionBackend — create, send, abort, subscribe │
   │  AgentCatalog — list, get                        │
-  │  EnvironmentCatalog — list                       │
+  │  SandboxCatalog — list                       │
   │  AgentAdmin — create, update, delete (optional)  │
   └───────┬──────────────┬──────────────┬────────────┘
           │              │              │
@@ -73,7 +73,7 @@ aimux (developer dashboard)
 
 ## Backend Interfaces
 
-Incorporates Codex review feedback: separate Session from Run, split catalogs from execution, use capability interfaces with optional mutation via type assertion.
+Incorporates Codex review feedback: split catalogs from execution, use capability interfaces with optional mutation via type assertion. Methods are plain verbs; the interface name provides the noun.
 
 ### Core interfaces
 
@@ -102,86 +102,71 @@ type Descriptor struct {
     Capabilities []string // "sessions", "agents", "environments", "admin"
 }
 
-// SessionBackend manages session lifecycle and event streaming.
-type SessionBackend interface {
+// Sessions manages session lifecycle and event streaming.
+// Sessions are running instances of agents.
+type Sessions interface {
     Descriptor() Descriptor
 
-    CreateSession(ctx context.Context, opts CreateSessionOpts) (Session, error)
-    GetSession(ctx context.Context, ref Ref) (Session, error)
-    ListSessions(ctx context.Context, query SessionQuery) (SessionPage, error)
+    Create(ctx context.Context, opts CreateOpts) (Session, error)
+    Get(ctx context.Context, ref Ref) (Session, error)
+    List(ctx context.Context, query Query) (Page, error)
 
-    // Send starts a run (one prompt execution) within a session.
-    Send(ctx context.Context, sessionRef Ref, input Input) (Run, error)
-    AbortRun(ctx context.Context, runRef Ref) error
+    // Send delivers a prompt to the session. Status comes back via Subscribe.
+    Send(ctx context.Context, ref Ref, input Input) error
+    Abort(ctx context.Context, ref Ref) error
 
     // Subscribe returns a resumable event stream. Cursor is the last
     // received event's position; empty string starts from the beginning.
-    Subscribe(ctx context.Context, sessionRef Ref, cursor string) (EventStream, error)
+    Subscribe(ctx context.Context, ref Ref, cursor string) (EventStream, error)
 }
 
-// AgentCatalog provides read access to agent definitions.
-type AgentCatalog interface {
-    ListAgents(ctx context.Context) ([]AgentSummary, error)
-    GetAgent(ctx context.Context, ref Ref) (AgentDefinition, error)
+// Agents provides read access to agent definitions.
+// Agents are templates — sessions are running instances of them.
+type Agents interface {
+    List(ctx context.Context) ([]Agent, error)
+    Get(ctx context.Context, ref Ref) (Agent, error)
 }
 
-// EnvironmentCatalog provides read access to available environments.
-type EnvironmentCatalog interface {
-    ListEnvironments(ctx context.Context) ([]EnvironmentSummary, error)
+// Sandboxes provides read access to available sandboxes.
+// In local mode, returns nothing (no sandboxes). In gateway/enterprise mode,
+// returns what OpenClaw manages. aimux never creates sandboxes — the platform does.
+type Sandboxes interface {
+    List(ctx context.Context) ([]Sandbox, error)
 }
 
-// AgentAdmin is an optional capability for backends that support agent CRUD.
-// Type-assert from AgentCatalog when mutation is needed.
+// AgentAdmin is an optional capability for backends that support agent mutation.
+// Type-assert from Agents when create/update/delete is needed.
 type AgentAdmin interface {
-    CreateAgent(ctx context.Context, def AgentDefinition) (Ref, error)
-    UpdateAgent(ctx context.Context, ref Ref, def AgentDefinition) error
-    DeleteAgent(ctx context.Context, ref Ref) error
+    Create(ctx context.Context, agent Agent) (Ref, error)
+    Update(ctx context.Context, ref Ref, agent Agent) error
+    Delete(ctx context.Context, ref Ref) error
 }
 ```
 
 ### Data types
 
 ```go
-// Session is a durable conversation. Multiple Runs can occur within one Session.
+// Session is a durable conversation. Send delivers prompts; status changes
+// arrive via Subscribe. Multiple sends can occur within one session.
 type Session struct {
     Ref          Ref
     AgentRef     Ref
-    Status       SessionStatus
+    Status       Status
     DisplayTitle string
     CreatedAt    time.Time
     LastActivity time.Time
 }
 
-type SessionStatus string
+type Status string
 
 const (
-    SessionReady       SessionStatus = "ready"
-    SessionBusy        SessionStatus = "busy"
-    SessionArchived    SessionStatus = "archived"
-    SessionUnavailable SessionStatus = "unavailable"
+    Ready       Status = "ready"
+    Busy        Status = "busy"
+    Archived    Status = "archived"
+    Unavailable Status = "unavailable"
 )
 
-// Run is one prompt execution within a Session.
-type Run struct {
-    Ref        Ref
-    SessionRef Ref
-    Status     RunStatus
-    StartedAt  time.Time
-    FinishedAt *time.Time
-    Error      string
-}
-
-type RunStatus string
-
-const (
-    RunAccepted  RunStatus = "accepted"
-    RunRunning   RunStatus = "running"
-    RunSucceeded RunStatus = "succeeded"
-    RunFailed    RunStatus = "failed"
-    RunCancelled RunStatus = "cancelled"
-)
-
-// Input is what gets sent to a session to start a run.
+// Input is what gets sent to a session.
 type Input struct {
     Prompt string
     Model  string // override, empty = use agent default
@@ -190,7 +175,6 @@ type Input struct {
 // Event is a single event in a session's event stream.
 type Event struct {
     ID        string          // backend-assigned event ID
-    RunRef    Ref             // which run this event belongs to
     Sequence  int64           // monotonic sequence for cursor-based resume
     Timestamp time.Time
     Type      string          // "tool_call", "tool_result", "text", "error", "status_change"
@@ -210,40 +194,31 @@ type EventStream interface {
     Close() error
 }
 
-// CreateSessionOpts configures a new session.
-type CreateSessionOpts struct {
+// CreateOpts configures a new session.
+type CreateOpts struct {
     AgentRef    Ref
     Environment string // environment name (local mode) or empty (gateway mode)
     WorkingDir  string
     Model       string // override agent default
 }
 
-// SessionQuery filters session listings.
-type SessionQuery struct {
-    Status  *SessionStatus
+// Query filters session listings.
+type Query struct {
+    Status   *Status
     AgentRef *Ref
-    Limit   int
-    Cursor  string // pagination cursor
+    Limit    int
+    Cursor   string // pagination cursor
 }
 
-// SessionPage is a paginated session list.
-type SessionPage struct {
+// Page is a paginated session list.
+type Page struct {
     Sessions []Session
     Next     string // pagination cursor, empty if no more
     Total    int
 }
 
-// AgentSummary is the display-friendly agent info for listings.
-type AgentSummary struct {
-    Ref     Ref
-    Name    string
-    Model   string
-    Prompt  string // truncated for display
-    Backend string
-}
-
-// AgentDefinition is the full agent configuration.
-type AgentDefinition struct {
+// Agent is a template definition. Sessions are running instances of agents.
+type Agent struct {
     Ref     Ref
     Name    string
     Model   string
@@ -254,10 +229,10 @@ type AgentDefinition struct {
     Policy  string
 }
 
-// EnvironmentSummary shows an environment's health.
-type EnvironmentSummary struct {
+// Sandbox is a managed execution environment (OpenShell, K8s pod, etc.).
+type Sandbox struct {
     Name    string
-    Type    string // "local", "openshell", "k8s"
+    Type    string // "openshell", "k8s"
     Status  string // "ready", "unhealthy", "unknown"
     Details string // gateway URL, namespace, etc.
     Backend string // which backend owns this
@@ -272,7 +247,7 @@ Wraps existing code:
 
 - `SessionBackend`: starts `claude` CLI subprocess via `sdk.ClaudeSession`, manages lifecycle in SQLite
 - `AgentCatalog` + `AgentAdmin`: reads/writes `~/.aimux/agents/*.agent.yaml` via `config.LoadAgentDir`/`config.SaveAgent`
-- `EnvironmentCatalog`: reads from `~/.aimux/config.yaml` environments map
+- `SandboxCatalog`: reads from `~/.aimux/config.yaml` environments map
 
 **Session = one claude subprocess.** A local session starts a subprocess and keeps it for one prompt (batch mode). Future: persistent sessions that accept multiple prompts.
 
@@ -288,7 +263,7 @@ Go WebSocket client speaking the OpenClaw gateway protocol.
 
 - `SessionBackend`: maps to `sessions.create`, `sessions.abort`, `sessions.list`, `sessions.get`, `sessions.messages.subscribe`
 - `AgentCatalog` + `AgentAdmin`: maps to `agents.list`, `agents.create`, `agents.update`, `agents.delete`
-- `EnvironmentCatalog`: maps to `environments.list`, `environments.status`
+- `SandboxCatalog`: maps to `environments.list`, `environments.status`
 
 **OpenClaw is authoritative** for agents, sessions, events, and sandboxes.
 
@@ -430,11 +405,11 @@ Frontends merge data from all configured backends:
 | `sdk/dispatcher.go` | Unused (local = no sandbox) | Unused (OpenClaw routes tools) |
 | `sdk/subprocess.go` | Used by ClaudeSession | Unused |
 | `config/agent_file.go` | AgentCatalog + AgentAdmin | Unused |
-| `environment/*.go` | EnvironmentCatalog | Unused |
+| `environment/*.go` | SandboxCatalog | Unused |
 | `session/sqlite_store.go` | Authoritative store | Projection cache |
 | `session/lifecycle.go` | Local session state machine | Unused (gateway owns lifecycle) |
 | `controller/agents.go` | Routes to local AgentAdmin | Routes to gateway AgentAdmin |
-| `controller/environments.go` | Routes to local EnvironmentCatalog | Read-only from gateway |
+| `controller/environments.go` | Routes to local SandboxCatalog | Read-only from gateway |
 
 Nothing is deleted. Code stays; the Backend interface routes to the right implementation.
 
@@ -467,7 +442,7 @@ Nothing is deleted. Code stays; the Backend interface routes to the right implem
 
 ## Key Design Decisions
 
-1. **Capability interfaces over one fat interface.** SessionBackend, AgentCatalog, EnvironmentCatalog are separate. Optional mutation via type assertion (AgentAdmin). Backends implement what they support. (Codex recommendation)
+1. **Capability interfaces over one fat interface.** SessionBackend, AgentCatalog, SandboxCatalog are separate. Optional mutation via type assertion (AgentAdmin). Backends implement what they support. (Codex recommendation)
 
 2. **Session/Run distinction.** A Session is durable. A Run is one prompt execution. Abort stops the run, not the session. Maps cleanly to OpenClaw's model. (Codex recommendation)
 
