@@ -53,6 +53,125 @@ The Backend interface aligns with three external platforms. All use the same mod
 
 OpenClaw includes messaging channels (Slack, WhatsApp, Telegram) natively. When aimux connects to it, aimux IS the channel. OpenAI and CMA are pure APIs where you build the channel yourself.
 
+## User Experience
+
+### Day one: just install and go
+
+You install aimux. No config needed. You run `aimux` and the TUI opens showing your running claude and codex sessions. You navigate with j/k, zoom into a session with Enter, see live traces. This is local mode. Everything runs on your machine. You don't think about backends.
+
+```bash
+brew install aimux
+aimux                    # TUI opens, shows your running agents
+```
+
+### Day two: create agent definitions
+
+You realize you keep typing the same prompts. You create agent templates:
+
+```bash
+aimux agents create reviewer --model haiku --prompt "Review code for bugs and security issues"
+aimux agents create refactor --model sonnet --prompt "Refactor for clarity without changing behavior"
+```
+
+In the TUI, you press `3` for the Agents tab. Your two agents are there. Press Enter on `reviewer`, it starts a session, Claude runs, tool calls stream live in the TUI. You see: Read handler.go, Bash go test, then the review text. Cost shows in the footer. Press `q` to go back.
+
+### Day three: running out of memory
+
+You have 15 agents running. Your Mac fans are screaming. You set up a remote backend:
+
+```bash
+aimux backends add my-server --type openclaw --endpoint wss://my-server.example.com
+aimux agents update refactor --backend my-server
+```
+
+Now when you start a refactor session, it runs on your server, not your laptop. The TUI looks exactly the same. Events stream in, tool calls appear, text flows. The only difference: your Mac stays cool, and there's a small `my-server` label next to the session.
+
+```bash
+aimux sessions start refactor --prompt "refactor internal/sdk/"
+# Runs on my-server. Your Mac is free.
+
+aimux sessions start reviewer --prompt "review main.go"
+# Runs locally (reviewer's default is local). Fast, direct.
+```
+
+### The daily workflow
+
+You open aimux in the morning. Four tabs:
+
+**Tab 1 — Active:** Your live sessions. Three running on your laptop, five on my-server. You see them all in one list. Backend label tells you where each one is. j/k to navigate, Enter to see what an agent is doing right now.
+
+**Tab 2 — History:** What happened overnight. Your background workers finished. You see the results: which files were changed, how many tool calls, what it cost. Enter on any session to read the full event stream. Resume a session to continue where it left off.
+
+**Tab 3 — Agents:** Your templates. reviewer, refactor, quick-fix, security-scan. Each shows its model, prompt, and default backend. Press Enter to start a new session. Press `c` to create a new agent. Press `d` to delete one.
+
+**Tab 4 — Sandboxes:** What's running on your remote backends. OpenShell sandboxes with their status. Read-only; the platform manages them.
+
+### Working across frontends
+
+You start a session from CLI:
+
+```bash
+aimux sessions start reviewer --prompt "review the auth module"
+```
+
+Open the TUI. The session is there in Active, events streaming. Go to History after it finishes. It's there with cost and event trace.
+
+Open the web dashboard (`aimux web`). Same sessions, same agents, same everything. Create an agent in the web UI. It shows up in CLI and TUI immediately. State is shared across all three frontends.
+
+### Pause and resume
+
+You start a long refactor session on my-server. It's been running for 20 minutes, made 40 tool calls, created a branch with 12 commits. You need the server for something else.
+
+```bash
+aimux sessions pause my-server/session-42
+```
+
+The sandbox stops. Compute released. The git repo on the PVC survives. The conversation history survives in the gateway's session store. Your server is free.
+
+Three hours later:
+
+```bash
+aimux sessions resume my-server/session-42
+```
+
+The sandbox restarts, workspace remounts, the agent reloads conversation history and continues. It doesn't re-read the 40 files it already read. It picks up from where it was.
+
+### Override per session
+
+Your reviewer agent defaults to my-server. But you want a quick local review right now:
+
+```bash
+aimux sessions start reviewer --backend local --prompt "quick check on this one file"
+```
+
+Same agent template, different backend for this one session. No config change needed.
+
+### Command palette in TUI
+
+Press `:` from anywhere:
+
+```
+:start reviewer                    start with default backend
+:start reviewer --backend local    override backend
+:abort my-server/session-42        stop a running session
+:pause my-server/session-42        suspend, keep workspace
+:resume my-server/session-42       pick up where you left off
+:agents                            switch to Agents tab
+:history                           switch to History tab
+:backends                          list configured backends
+```
+
+### What you never have to think about
+
+- Where the sandbox lives (the backend handles it)
+- How tools get routed to the sandbox (OpenClaw handles it)
+- API key management (stays on the gateway or your shell env)
+- Sandbox lifecycle (auto-created on first tool use, auto-managed)
+- Session state storage (SQLite locally, gateway remotely)
+- Which protocol the backend speaks (WebSocket, REST, whatever)
+
+You think: I have agents, I start sessions, I see what happened. The backend determines where things run. The UX is the same.
+
 ## Goals
 
 - Named backends configured in `~/.aimux/config.yaml`
