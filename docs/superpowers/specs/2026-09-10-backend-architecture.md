@@ -351,6 +351,82 @@ aimux's primary use case (coding agents) needs Level 1 only. Git commit is the c
 | L2: Checkpoint | Disk + memory + process | Sub-second | CRIU, gVisor (not in OpenShell today) |
 | L3: VM snapshot | Everything | Sub-second | Cloud Hypervisor (not in OpenShell) |
 
+## State Layers
+
+A session has four distinct layers of state. Each layer has a different owner, storage location, and crash behavior.
+
+| Layer | What it is | Examples |
+|-------|-----------|---------|
+| **Workspace** | Files and environment inside the sandbox | Git repo, node_modules, installed deps, test results |
+| **Session state** | Conversation record and events | Messages sent/received, tool call records, token usage |
+| **Harness state** | Agent loop's in-memory position | Which step, pending tool calls, approval state, compacted context |
+| **Platform state** | Agent definitions, policies, config | Agent YAML, sandbox policies, IAM bindings, revisions |
+
+### Where each layer lives per backend
+
+| Layer | local | openclaw | mecatl (future) | openai | occ |
+|-------|-------|----------|-----------------|--------|-----|
+| Workspace | Local filesystem | Sandbox PVC (OpenShell) | Redis virtual FS | Provider-managed | SandboxDriver + PVC |
+| Session state | SQLite | Gateway SQLite | Redis snapshots | OpenAI cloud | Namespace gateway store |
+| Harness state | In-memory (claude subprocess) | In-memory (gateway process) | Redis snapshot (saved every turn) | RunState (serialized) | Namespace gateway |
+| Platform state | YAML files | Gateway config | Redis / gRPC service | OpenAI cloud | OCC database |
+
+### Crash recovery per layer
+
+| Layer | local crash | openclaw gateway crash | mecatl crash | openai crash |
+|-------|------------|----------------------|-------------|-------------|
+| Workspace | **Lost** (subprocess dies) | **Survives** (PVC in sandbox) | **Survives** (Redis) | **Survives** (provider) |
+| Session state | **Partial** (SQLite, if saved) | **Survives** (gateway SQLite) | **Survives** (Redis) | **Survives** (cloud) |
+| Harness state | **Lost** | **Lost** (no snapshot) | **Survives** (sessnap at every turn) | **Survives** (RunState) |
+| Platform state | **Survives** (YAML on disk) | **Survives** (gateway config) | **Survives** (Redis) | **Survives** (cloud) |
+
+The critical gap is **harness state** in OpenClaw mode. When the gateway crashes, it loses which step the agent was on, pending tool calls, and approval state. The session restarts from the last completed turn, not the exact pause point. Mecatl solves this with snapshot fidelity: a `sessnap` saved at every turn boundary captures all harness state. A restarted process loads the snapshot and is indistinguishable from the original.
+
+### Session exclusivity
+
+Only one writer per session at a time. If two aimux instances send to the same session simultaneously, the results are undefined.
+
+- **local:** single process, not an issue
+- **openclaw:** gateway serializes writes per session
+- **mecatl:** explicit session leasing (K8s Leases / flock / gRPC). Only the lease holder can write. Lease expires on crash, another process acquires it.
+- **openai/occ:** platform enforces
+
+aimux does not implement leasing. The backend enforces single-writer semantics. `Sessions.Send` documents that concurrent sends to the same session are not supported.
+
+### How OCC fits the state model
+
+OCC is the control plane. It does NOT store session state or harness state in the data path.
+
+```
+OCC (control plane)
+  |
+  | owns: platform state (agents, revisions, policies, IAM)
+  | stores: platform resources in OCC database
+  | does NOT store: session state, harness state, workspace
+  |
+  +-- manages: per-namespace gateway
+  |     |
+  |     | gateway owns: session state + harness state
+  |     | gateway connects to: sandbox (via SandboxDriver)
+  |     |
+  |     | if gateway crashes:
+  |     |   OCC restarts the gateway pod (K8s reconciliation)
+  |     |   gateway reloads from its store
+  |     |   quality depends on gateway implementation:
+  |     |     OpenClaw gateway: SQLite reload, harness state lost
+  |     |     Mecatl gateway: Redis snapshot, harness state preserved
+  |     |
+  +-- manages: sandbox lifecycle via SandboxDriver
+        |
+        +-- workspace lives here (PVC)
+            survives gateway crash, pod restart, everything
+            only lost if sandbox is explicitly deleted
+```
+
+OCC's role in crash recovery: detect gateway pod died, restart it, verify health. The gateway handles its own session recovery. OCC orchestrates but doesn't participate in the data path.
+
+If the per-namespace gateway used Mecatl's engine (Go, Redis, snapshots, leases) instead of OpenClaw's Node.js/SQLite, you'd get zero-downtime crash recovery with session takeover across pods. This is a future architectural option for OCC, not an aimux concern.
+
 ## Backend Implementations
 
 ### local (internal/backend/local.go)
@@ -591,11 +667,14 @@ Nothing is deleted. Code stays; the Backend interface routes to the right implem
 | Gap | Owned by | Impact |
 |-----|----------|--------|
 | Session resume after sandbox restart | OpenClaw gateway | Pause/Resume won't work end-to-end until gateway reconnects harness to restarted sandbox |
+| Harness state snapshot (sessnap) | OpenClaw gateway | Gateway crash loses mid-turn position. Mecatl solves this; OpenClaw doesn't have it. |
+| Session leasing | OpenClaw gateway | No single-writer enforcement across gateway replicas. Mecatl has K8s Leases; OpenClaw is single-process. |
 | RunState serialization | OpenClaw gateway / future | Smart resume (skip completed steps) vs dumb resume (replay transcript) |
 | Auto-suspend on idle | OpenClaw gateway | Without it, idle sandboxes burn compute |
 | Auto-resume on access | OpenClaw gateway | Without it, user must manually resume |
 | Workspace manifest | aimux + backends | No portable workspace definition yet (OpenAI has this) |
 | Session memory | aimux + backends | No cross-run learning persistence (OpenAI has this) |
+| Mecatl as gateway engine | OCC / OpenClaw | If OCC namespaces used Mecatl (Go, Redis, snapshots) instead of OpenClaw (Node.js, SQLite), crash recovery would be zero-downtime. Future architectural option. |
 
 ## Key Design Decisions
 
@@ -618,3 +697,9 @@ Nothing is deleted. Code stays; the Backend interface routes to the right implem
 9. **Four backends, one interface.** Local, OpenClaw, OpenAI, OCC. Each is a new file implementing the same interfaces. Frontend code never changes.
 
 10. **Pause/Resume is session-level.** Sandbox lifecycle is the backend's concern. aimux says "pause this session" and the backend decides what that means (stop the sandbox, serialize state, etc.).
+
+11. **Four layers of state, four owners.** Workspace (sandbox), session state (store), harness state (harness process), platform state (control plane). Each layer has different crash behavior. aimux owns none of them in remote mode.
+
+12. **Crash recovery is a backend quality, not an aimux feature.** Local sessions are not crash-recoverable. Remote backends vary: OpenClaw loses harness state on crash, Mecatl preserves it via snapshots, OpenAI/OCC manage it in the cloud. aimux documents the capability, doesn't implement it.
+
+13. **Session exclusivity.** Only one writer per session. Backends enforce single-writer semantics (OpenClaw serializes, Mecatl uses leases). aimux does not implement leasing.
