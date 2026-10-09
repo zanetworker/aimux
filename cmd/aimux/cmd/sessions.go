@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -21,7 +22,8 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 	var dir string
 	var listMode, exportMode, danger, allProjects bool
 	var limit int
-	var fields string
+	var fields, mode string
+	var includeAutomated bool
 
 	cmd := &cobra.Command{
 		Use:   "sessions [query]",
@@ -29,6 +31,25 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 		Long:  "List, search, and resume past AI agent sessions. Scopes to the current directory by default; use --all for all projects.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validMode(mode); err != nil {
+				return err
+			}
+			query := ""
+			if len(args) > 0 {
+				query = args[0]
+			}
+			// Interactive: the split-view picker over the index (browse or query).
+			if sessionsSearch.Index != nil && !listMode && !exportMode && !jsonOutput && IsInteractive() && hasFzf() {
+				return runSearchPicker(cmd, query, danger, resume)
+			}
+			// Indexed search spans all projects unless --dir narrows it.
+			if len(args) > 0 && args[0] != "" && sessionsSearch.Index != nil {
+				q := sessionsIndexQuery{Mode: mode, Limit: limit, IncludeAutomated: includeAutomated}
+				if q.Limit == 0 {
+					q.Limit = 20
+				}
+				return runIndexedQuery(cmd, args[0], q, dir, listMode, danger, picker, resume)
+			}
 			if !allProjects && dir == "" {
 				cwd, _ := os.Getwd()
 				dir = controller.DefaultSessionDir("", cwd)
@@ -51,11 +72,6 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 					continue
 				}
 				filtered = append(filtered, s)
-			}
-
-			query := ""
-			if len(args) > 0 {
-				query = args[0]
 			}
 
 			if query != "" {
@@ -120,8 +136,17 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 	cmd.Flags().BoolVarP(&danger, "danger", "d", false, "Resume with --dangerously-skip-permissions")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Max sessions to show (0 = all)")
 	cmd.Flags().StringVar(&fields, "fields", "", "Comma-separated fields: id,provider,project,age,turns,cost,annotation,prompt,tags")
+	cmd.Flags().StringVar(&mode, "mode", "hybrid", "Query ranking: hybrid, keyword or semantic")
+	cmd.Flags().BoolVar(&includeAutomated, "include-automated", false, "Include automated (SDK/cron) sessions in query results")
 	cmd.AddCommand(newSessionsStarCmd(discover))
+	cmd.AddCommand(newSessionsIndexCmd())
+	cmd.AddCommand(newSessionsRowsCmd(), newSessionsPreviewCmd(), newSessionsPickerToggleCmd())
 	return cmd
+}
+
+func hasFzf() bool {
+	_, err := exec.LookPath("fzf")
+	return err == nil
 }
 
 func searchSessionsFiltered(allSessions []history.Session, query string, searchFn sessionsSearchFn) []history.Session {

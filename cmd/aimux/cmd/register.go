@@ -6,6 +6,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
+	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/trace"
 )
@@ -18,6 +19,9 @@ type Deps struct {
 	PickSession      func(sessions []history.Session) (history.Session, error)
 	ResumeBuilder    func(sessionID string, danger bool) (command, workDir string, err error)
 	ResumeExec       func(sessionID string, danger bool)
+	IndexSearch      func(query string, q sessionsIndexQuery) ([]search.Result, bool, error) // nil: legacy search
+	FocusLive        func(sessionID string) (string, bool)                                   // nil: always resume
+	LiveIDs          func() []string                                                         // nil: no live markers
 	SpawnAgent       func(opts spawn.LaunchOpts) (pid int, tmuxSession string, err error)
 	WebServer        func(port int) error
 	Providers        []string
@@ -35,6 +39,7 @@ type Deps struct {
 func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newAgentsCmd(d.Discover))
+	sessionsSearch = sessionsSearchDeps{Index: d.IndexSearch, FocusLive: d.FocusLive, LiveIDs: d.LiveIDs}
 	rootCmd.AddCommand(newSessionsCmd(d.DiscoverSessions, d.SearchContent, d.PickSession, d.ResumeExec))
 	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec, d.SkipPermissions))
 	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent, d.DefaultMode, d.Environments, d.AgentConfigs))

@@ -35,6 +35,15 @@ import (
 var version = "dev"
 
 func main() {
+	// fzf calls these on every keystroke; skip the full startup for them.
+	if handled, err := cmd.RunPickerHelper(os.Args[1:], os.Stdout); handled {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	disco := discovery.NewOrchestrator(
 		&provider.Claude{},
 		&provider.Codex{},
@@ -113,6 +122,9 @@ func main() {
 		PickSession:      sessions.PickSession,
 		ResumeBuilder:    buildResumeBuilder(cfg),
 		ResumeExec:       resumeSession,
+		IndexSearch:      cmd.DefaultIndexSearch,
+		FocusLive:        cmd.FocusLiveVia(disco.Discover),
+		LiveIDs:          cmd.LiveIDsVia(disco.Discover),
 		SpawnAgent:       buildSpawnFn(disco, cfg),
 		WebServer: func(port int) error {
 			return createWebServer(port).Start()

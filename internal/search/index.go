@@ -1,0 +1,444 @@
+package search
+
+import (
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	_ "modernc.org/sqlite" // pure-Go SQLite with FTS5
+)
+
+// Index is a persistent full-text index over session transcripts.
+type Index struct {
+	db *sql.DB
+}
+
+// Result is one matching session, best-scoring chunk first.
+type Result struct {
+	SessionID string
+	Path      string
+	CWD       string
+	Title     string
+	Automated bool
+	ModTime   time.Time
+	Snippet   string
+	Score     float64 // lower is better (BM25)
+}
+
+// SearchOpts narrows a search.
+type SearchOpts struct {
+	Limit            int
+	IncludeAutomated bool
+}
+
+// UpdateStats reports what an Update changed.
+type UpdateStats struct {
+	Indexed int // sessions (re)read because they were new or changed
+	Removed int // sessions dropped because their file is gone
+	Total   int // sessions in the index afterwards
+}
+
+const schema = `
+CREATE TABLE IF NOT EXISTS sessions (
+	id TEXT PRIMARY KEY, path TEXT, cwd TEXT, title TEXT, first_prompt TEXT,
+	automated INTEGER, mtime INTEGER, size INTEGER
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
+	session_id UNINDEXED, seq UNINDEXED, prompt UNINDEXED, prose UNINDEXED, title, text,
+	tokenize = 'unicode61'
+);`
+
+// Open opens (creating if needed) the index database at path.
+func Open(path string) (*Index, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- index path is the user's own config/default
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	if err != nil {
+		return nil, err
+	}
+	if err := migrate(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(schema + embeddingsSchema); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("init schema: %w", err)
+	}
+	return &Index{db: db}, nil
+}
+
+// schemaVersion is bumped whenever the table layout or tokenizer changes; an index with an
+// older version is dropped and rebuilt from the session files on next Update.
+const schemaVersion = 4
+
+func migrate(db *sql.DB) error {
+	var v int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v == schemaVersion {
+		return nil
+	}
+	for _, t := range []string{"chunks", "embeddings", "sessions", "query_vectors"} {
+		if _, err := db.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
+			return fmt.Errorf("reset index: %w", err)
+		}
+	}
+	_, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion))
+	return err
+}
+
+// Close releases the database.
+func (ix *Index) Close() error { return ix.db.Close() }
+
+// DefaultPath is ~/.aimux/search.db.
+func DefaultPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".aimux", "search.db")
+}
+
+type fileState struct {
+	mtime, size int64
+}
+
+// Update brings the index in line with the session files under projectsDir
+// (layout: <projectsDir>/<project>/<session-id>.jsonl). Only new or changed
+// files are re-read; sessions whose file is gone are removed.
+func (ix *Index) Update(projectsDir string, opts ExtractOpts) (UpdateStats, error) {
+	var st UpdateStats
+	files, err := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
+	if err != nil {
+		return st, err
+	}
+
+	known := map[string]fileState{}
+	rows, err := ix.db.Query(`SELECT id, mtime, size FROM sessions`)
+	if err != nil {
+		return st, err
+	}
+	for rows.Next() {
+		var id string
+		var fs fileState
+		if err := rows.Scan(&id, &fs.mtime, &fs.size); err != nil {
+			_ = rows.Close()
+			return st, err
+		}
+		known[id] = fs
+	}
+	_ = rows.Close()
+
+	seen := map[string]bool{}
+	var changed []string
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
+		seen[id] = true
+		if fs, ok := known[id]; ok && fs.mtime == info.ModTime().UnixNano() && fs.size == info.Size() {
+			continue
+		}
+		changed = append(changed, f)
+	}
+
+	docs := extractAll(changed, opts)
+
+	tx, err := ix.db.Begin()
+	if err != nil {
+		return st, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, d := range docs {
+		if err := writeDoc(tx, d); err != nil {
+			return st, err
+		}
+		st.Indexed++
+	}
+	for id := range known {
+		if seen[id] {
+			continue
+		}
+		if err := deleteSession(tx, id); err != nil {
+			return st, err
+		}
+		st.Removed++
+	}
+	if err := tx.Commit(); err != nil {
+		return st, err
+	}
+	err = ix.db.QueryRow(`SELECT count(*) FROM sessions`).Scan(&st.Total)
+	return st, err
+}
+
+// extractAll parses files in parallel; unreadable files are skipped.
+func extractAll(files []string, opts ExtractOpts) []Doc {
+	out := make([]Doc, len(files))
+	ok := make([]bool, len(files))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, runtime.NumCPU())
+	for i, f := range files {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, f string) {
+			defer func() { <-sem; wg.Done() }()
+			if d, err := ExtractFile(f, opts); err == nil {
+				out[i], ok[i] = d, true
+			}
+		}(i, f)
+	}
+	wg.Wait()
+	var docs []Doc
+	for i := range out {
+		if ok[i] {
+			docs = append(docs, out[i])
+		}
+	}
+	return docs
+}
+
+func writeDoc(tx *sql.Tx, d Doc) error {
+	info, err := os.Stat(d.Path)
+	if err != nil {
+		return nil // vanished between extract and write; next Update removes it
+	}
+	if err := deleteSession(tx, d.SessionID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO sessions (id, path, cwd, title, first_prompt, automated, mtime, size)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.SessionID, d.Path, d.CWD, d.Title, d.FirstPrompt, boolInt(d.Automated), info.ModTime().UnixNano(), info.Size()); err != nil {
+		return err
+	}
+	for _, c := range d.Chunks {
+		if _, err := tx.Exec(`INSERT INTO chunks (session_id, seq, prompt, prose, title, text) VALUES (?, ?, ?, ?, ?, ?)`,
+			d.SessionID, c.Seq, c.Prompt, c.Prose, d.Title, c.Text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteSession drops a session's row, chunks and vectors (stale vectors would
+// otherwise point at chunk numbers that now hold different text).
+func deleteSession(tx *sql.Tx, id string) error {
+	for _, q := range []string{
+		`DELETE FROM chunks WHERE session_id = ?`,
+		`DELETE FROM embeddings WHERE session_id = ?`,
+		`DELETE FROM sessions WHERE id = ?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AnyTermCap bounds the any-term fallback: once nothing covers enough of the
+// query, a loose match is a guess, and a long list of guesses buries the point.
+const AnyTermCap = 20
+
+// candidateChunks is how many BM25-ranked chunks are examined per query.
+const candidateChunks = 600
+
+// minCoverage is how many query terms a chunk must contain: all of them for
+// one- or two-word queries, about two thirds for longer, natural-language
+// ones, where people rarely remember their exact wording.
+func minCoverage(n int) int {
+	if n <= 2 {
+		return n
+	}
+	return (2*n + 2) / 3
+}
+
+// Search returns sessions matching query, best first, ranked by the BM25
+// score of their best chunk. Chunks covering fewer than minCoverage terms are
+// dropped; if no session qualifies, up to
+// AnyTermCap sessions matching any term are returned. Titles naming the query
+// are lifted to the top (tierByTitle).
+func (ix *Index) Search(query string, opts SearchOpts) ([]Result, error) {
+	terms := queryTerms(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	rs, err := ix.coverageMatch(terms, minCoverage(len(terms)), opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(rs) == 0 && len(terms) > 1 {
+		if rs, err = ix.coverageMatch(terms, 1, opts); err != nil {
+			return nil, err
+		}
+		opts.Limit = min(opts.Limit, AnyTermCap)
+	}
+	rs = tierByTitle(rs, query, terms)
+	if len(rs) > opts.Limit {
+		rs = rs[:opts.Limit]
+	}
+	return rs, nil
+}
+
+type scored struct {
+	Result
+	coverage int
+}
+
+func (ix *Index) coverageMatch(terms []string, need int, opts SearchOpts) ([]Result, error) {
+	rows, err := ix.db.Query(`
+		SELECT c.session_id, bm25(chunks, 0, 0, 0, 0, 10.0, 1.0) AS score,
+		       snippet(chunks, -1, '[', ']', '…', 14), c.title, c.text,
+		       s.path, s.cwd, s.automated, s.mtime
+		FROM chunks c JOIN sessions s ON s.id = c.session_id
+		WHERE chunks MATCH ? AND (s.automated = 0 OR ?)
+		ORDER BY score LIMIT ?`, strings.Join(terms, " OR "), boolInt(opts.IncludeAutomated), candidateChunks)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	plain := termPrefixes(terms)
+	best := map[string]*scored{}
+	var order []string
+	for rows.Next() {
+		var r Result
+		var text string
+		var auto int
+		var mtime int64
+		if err := rows.Scan(&r.SessionID, &r.Score, &r.Snippet, &r.Title, &text, &r.Path, &r.CWD, &auto, &mtime); err != nil {
+			return nil, err
+		}
+		cov := coverage(plain, r.Title+" "+text)
+		if cov < need {
+			continue
+		}
+		cur, seen := best[r.SessionID]
+		if seen && r.Score >= cur.Score {
+			continue
+		}
+		r.Automated = auto == 1
+		r.ModTime = time.Unix(0, mtime)
+		r.Snippet = oneLine(r.Snippet, 240)
+		if !seen {
+			order = append(order, r.SessionID)
+		}
+		best[r.SessionID] = &scored{Result: r, coverage: cov}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]scored, 0, len(order))
+	for _, id := range order {
+		out = append(out, *best[id])
+	}
+	// coverage only filters; BM25 ranks, since it already weighs rare terms
+	// above common ones ("swimming" over "old")
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Score < out[j].Score })
+	rs := make([]Result, len(out))
+	for i := range out {
+		rs[i] = out[i].Result
+	}
+	return rs, nil
+}
+
+// termPrefixes strips the FTS5 quoting from queryTerms output.
+func termPrefixes(terms []string) []string {
+	out := make([]string, len(terms))
+	for i, t := range terms {
+		out[i] = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(t, `"`), `"*`))
+	}
+	return out
+}
+
+// coverage counts the terms that prefix at least one word of text.
+func coverage(prefixes []string, text string) int {
+	words := strings.Fields(normalizeWords(text))
+	n := 0
+	for _, p := range prefixes {
+		for _, w := range words {
+			if strings.HasPrefix(w, p) {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+// tierByTitle orders results so typing a session's name finds it: first a
+// title equal to the query (ignoring case and punctuation), then titles that
+// contain every term, then the rest; BM25 order is kept within each tier.
+func tierByTitle(rs []Result, query string, terms []string) []Result {
+	q := normalizeWords(query)
+	prefixes := termPrefixes(terms)
+	tier := func(r Result) int {
+		t := normalizeWords(r.Title)
+		switch {
+		case t == q:
+			return 0
+		case coverage(prefixes, t) == len(prefixes):
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(rs, func(i, j int) bool { return tier(rs[i]) < tier(rs[j]) })
+	return rs
+}
+
+// normalizeWords lowercases s and reduces it to space-separated letter/digit runs.
+func normalizeWords(s string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}), " ")
+}
+
+// stopwords are dropped from queries: as prefix terms they match nearly every
+// chunk, which floods the any-term fallback and the snippet highlights.
+var stopwords = map[string]bool{
+	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true, "be": true, "by": true,
+	"did": true, "do": true, "for": true, "from": true, "how": true, "i": true, "in": true, "is": true,
+	"it": true, "me": true, "my": true, "of": true, "on": true, "or": true, "our": true, "that": true,
+	"the": true, "they": true, "this": true, "to": true, "was": true, "we": true, "what": true,
+	"when": true, "where": true, "which": true, "who": true, "why": true, "with": true, "you": true,
+}
+
+// queryTerms turns free text into quoted FTS5 prefix terms, so user input can
+// never be parsed as FTS5 syntax. Single characters and stopwords are dropped
+// (stopwords are kept only when the query has nothing else).
+func queryTerms(q string) []string {
+	words := strings.FieldsFunc(q, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) })
+	var terms, stops []string
+	for _, w := range words {
+		if len([]rune(w)) < 2 {
+			continue
+		}
+		t := `"` + w + `"*`
+		if stopwords[strings.ToLower(w)] {
+			stops = append(stops, t)
+			continue
+		}
+		terms = append(terms, t)
+	}
+	if len(terms) == 0 {
+		return stops
+	}
+	return terms
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
