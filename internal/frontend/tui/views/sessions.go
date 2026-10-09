@@ -867,18 +867,27 @@ func sessionTitle(s history.Session) string {
 // visibleSessions returns sessions matching the current filter, sorted
 // by the active sort field.
 // Near-empty sessions (1 turn, $0 cost) are hidden unless a filter is active.
+// hiddenUntilH is the one rule for what H reveals (subagent and automated
+// sessions while not searching); the list and the header count both use it.
+func (v *SessionsView) hiddenUntilH(s history.Session, isSearching bool) bool {
+	return !v.showSubagents && !isSearching && (s.IsSubagent || s.Automated)
+}
+
 func (v *SessionsView) visibleSessions() []history.Session {
 	isSearching := v.filterText != "" || v.contentSearchIDs != nil
 	var result []history.Session
 	for _, s := range v.sessions {
-		if !v.showSubagents && !isSearching && s.IsSubagent {
+		if v.hiddenUntilH(s, isSearching) {
 			continue
 		}
-		if !isSearching && isHookSession(s) {
+		// H promises automated sessions: the noise filters below must not
+		// take them away again.
+		revealed := v.showSubagents && s.Automated
+		if !isSearching && !revealed && isHookSession(s) {
 			continue
 		}
 		// Hide near-empty sessions (auto-memory, system operations) unless searching
-		if !isSearching && s.CostUSD == 0 && s.TurnCount <= 5 {
+		if !isSearching && !revealed && s.CostUSD == 0 && s.TurnCount <= 5 {
 			continue
 		}
 		// Hide sessions with no timestamps (broken/incomplete files)
@@ -1071,14 +1080,23 @@ func (v *SessionsView) View() string {
 		countStr += sessDimStyle.Render(fmt.Sprintf("  (%d total)", len(v.sessions)))
 	}
 	if !v.showSubagents {
-		hiddenCount := 0
+		hiddenCount, automatedCount := 0, 0
+		isSearching := v.filterText != "" || v.contentSearchIDs != nil
 		for _, s := range v.sessions {
+			if !v.hiddenUntilH(s, isSearching) {
+				continue
+			}
 			if s.IsSubagent {
 				hiddenCount++
+			} else {
+				automatedCount++
 			}
 		}
 		if hiddenCount > 0 {
 			countStr += sessDimStyle.Render(fmt.Sprintf("  (+%d agent)", hiddenCount))
+		}
+		if automatedCount > 0 {
+			countStr += sessDimStyle.Render(fmt.Sprintf("  (+%d automated, H to show)", automatedCount))
 		}
 	}
 	if !v.showAll && v.currentDir != "" {

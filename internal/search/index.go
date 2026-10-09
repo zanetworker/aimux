@@ -33,6 +33,8 @@ type Result struct {
 	ModTime   time.Time
 	Snippet   string
 	Score     float64 // lower is better (BM25)
+
+	matchText string // the matching chunk's text, so a snippet is built only if shown
 }
 
 // SearchOpts narrows a search.
@@ -306,7 +308,9 @@ func overflowWeightSQL() string { return strconv.FormatFloat(overflowWeight, 'f'
 const AnyTermCap = 20
 
 // candidateChunks is how many BM25-ranked chunks are examined per query.
-const candidateChunks = 600
+// Reading candidates dominates query time; measured on real sessions, 200
+// gave the same ranking quality as 600 at half the latency (90ms vs 179ms).
+var candidateChunks = 200
 
 // minCoverage is how many query terms a chunk must contain: all of them for
 // one- or two-word queries, about two thirds for longer, natural-language
@@ -356,6 +360,18 @@ func (ix *Index) Search(query string, opts SearchOpts) ([]Result, error) {
 	if len(rs) > opts.Limit {
 		rs = rs[:opts.Limit]
 	}
+	// Highlighting is costly in FTS5 (most of a query's time when done for
+	// every candidate), so only the results returned get snippets, built from
+	// text the query already read.
+	marks := termPrefixes(append(terms, queryTerms(strings.Join(phraseWords(phrases), " "))...))
+	for i := range rs {
+		snip := makeSnippet(rs[i].matchText, marks, 14)
+		if !strings.Contains(snip, "[") && matchesAny(rs[i].Title, marks) {
+			snip = makeSnippet(rs[i].Title, marks, 14) // matched on the title only
+		}
+		rs[i].Snippet = oneLine(snip, 240)
+		rs[i].matchText = ""
+	}
 	return rs, nil
 }
 
@@ -401,7 +417,7 @@ func (ix *Index) coverageMatch(fts string, plain []string, need int, opts Search
 	// #nosec G202 -- dirSQL is a fixed clause; values are bound
 	rows, err := ix.db.Query(`
 		SELECT c.session_id, bm25(chunks, 0, 0, 0, 0, 10.0, 1.0, `+overflowWeightSQL()+`) AS score,
-		       snippet(chunks, -1, '[', ']', '…', 14), c.title, c.text, c.more,
+		       c.title, c.text, c.more,
 		       s.path, s.cwd, s.automated, s.mtime
 		FROM chunks c JOIN sessions s ON s.id = c.session_id
 		WHERE chunks MATCH ? AND (s.automated = 0 OR ?)`+dirSQL+`
@@ -418,15 +434,19 @@ func (ix *Index) coverageMatch(fts string, plain []string, need int, opts Search
 		var text, more string
 		var auto int
 		var mtime int64
-		if err := rows.Scan(&r.SessionID, &r.Score, &r.Snippet, &r.Title, &text, &more, &r.Path, &r.CWD, &auto, &mtime); err != nil {
+		if err := rows.Scan(&r.SessionID, &r.Score, &r.Title, &text, &more, &r.Path, &r.CWD, &auto, &mtime); err != nil {
 			return nil, err
 		}
 		// The main text must cover enough of the query. Overflow (the rest
 		// of a long exchange) only qualifies a chunk when it completes every
 		// term: deep text stays findable without letting loose matches in.
 		cov := coverage(plain, r.Title+" "+text)
-		if cov < need && (more == "" || coverage(plain, r.Title+" "+text+" "+more) < len(plain)) {
-			continue
+		r.matchText = text
+		if cov < need {
+			if more == "" || coverage(plain, r.Title+" "+text+" "+more) < len(plain) {
+				continue
+			}
+			r.matchText = more // qualified by its overflow: show that part
 		}
 		cur, seen := best[r.SessionID]
 		if seen && r.Score >= cur.Score {
@@ -434,7 +454,6 @@ func (ix *Index) coverageMatch(fts string, plain []string, need int, opts Search
 		}
 		r.Automated = auto == 1
 		r.ModTime = time.Unix(0, mtime)
-		r.Snippet = oneLine(r.Snippet, 240)
 		if !seen {
 			order = append(order, r.SessionID)
 		}

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 // Doc is one session transcript reduced to searchable text.
@@ -48,17 +50,12 @@ type ExtractOpts struct {
 // DefaultExtractOpts returns limits sized for embedding (~1k tokens per chunk).
 func DefaultExtractOpts() ExtractOpts {
 	return ExtractOpts{
-		AutomatedPrefixes: []string{
-			"YOU ARE A SESSION ANALYZER", "Evaluate session", "Tag each library item",
-			"LINKS ARE MANDATORY", "Read the JSON file", "Run a prompt audit",
-		},
+		AutomatedPrefixes:  history.DefaultAutomatedPrefixes,
 		MaxChunkChars:      4000,
 		MaxTextChars:       64000,
 		MaxToolOutputChars: 300,
 	}
 }
-
-var tempDirPrefixes = []string{"/private/var/folders/", "/var/folders/", "/tmp/", "/private/tmp/"}
 
 // tool_use input fields worth indexing; bulky fields (old_string, content) are skipped.
 var toolInputFields = []string{"command", "file_path", "path", "pattern", "query", "url", "description", "prompt"}
@@ -190,7 +187,7 @@ func ExtractFile(path string, opts ExtractOpts) (Doc, error) {
 	default:
 		doc.Title = doc.FirstPrompt
 	}
-	doc.Automated = isAutomated(entrypoint, doc.CWD, doc.FirstPrompt, opts.AutomatedPrefixes)
+	doc.Automated = history.IsAutomated(entrypoint, doc.CWD, doc.FirstPrompt, opts.AutomatedPrefixes)
 	return doc, nil
 }
 
@@ -287,23 +284,6 @@ func assistantProse(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(out, "\n")
-}
-
-func isAutomated(entrypoint, cwd, firstPrompt string, prefixes []string) bool {
-	if strings.HasPrefix(entrypoint, "sdk") {
-		return true
-	}
-	for _, p := range tempDirPrefixes {
-		if strings.HasPrefix(cwd, p) {
-			return true
-		}
-	}
-	for _, p := range prefixes {
-		if p != "" && strings.HasPrefix(firstPrompt, p) {
-			return true
-		}
-	}
-	return false
 }
 
 func oneLine(s string, max int) string {

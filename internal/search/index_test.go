@@ -549,3 +549,24 @@ func TestOpen_LayoutChangeKeepsEmbeddings(t *testing.T) {
 		t.Errorf("layout change forced %d re-embeddings; vectors are matched by text hash and must survive", n)
 	}
 }
+
+func TestSearch_TitleOnlyMatchShowsTitleInSnippet(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "-p", "aaaaaaaa-7777-0000-0000-000000000001",
+		human("/p", "unrelated body text"), `{"type":"custom-title","customTitle":"zanzibar planning"}`)
+	ix := openIndex(t)
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	rs := mustSearch(t, ix, "zanzibar")
+	if len(rs) != 1 || !strings.Contains(rs[0].Snippet, "[zanzibar]") {
+		t.Errorf("title-only match: snippet %q should show the matching title", firstSnippet(rs))
+	}
+}
+
+func firstSnippet(rs []Result) string {
+	if len(rs) == 0 {
+		return ""
+	}
+	return rs[0].Snippet
+}
