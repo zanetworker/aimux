@@ -290,10 +290,7 @@ func applyPickerFlags(st sessions.PickerState, mode string, modeSet, includeAuto
 		pick = "hybrid"
 	}
 	if modeSet {
-		pick = "hybrid"
-		if mode == search.ModeKeyword {
-			pick = "keyword"
-		}
+		pick = mode // keyword, hybrid or semantic (validated by the command)
 	}
 	if err := st.SetMode(pick); err != nil {
 		return err
@@ -324,10 +321,9 @@ func runSearchPicker(cmd *cobra.Command, query string, danger bool, resume sessi
 	// Open on the cached index at once; refresh and live discovery (~3s) run
 	// in the background and reload the open picker when done.
 	background := func() {
-		if ix, err := search.Open(searchDBPath()); err == nil {
-			_, _ = ix.Update(claudeProjectsDir(), search.DefaultExtractOpts())
-			_ = ix.Close()
-		}
+		svc := search.DefaultService(nil)
+		svc.DBPath = searchDBPath()
+		_ = svc.Refresh(context.Background()) // index and embed what changed
 		if sessionsSearch.LiveIDs != nil {
 			_ = st.SetLive(sessionsSearch.LiveIDs())
 		}
@@ -420,6 +416,13 @@ func newSessionsRowsCmd() *cobra.Command {
 			switch {
 			case q == "":
 				rs, err = ix.Recent(opts)
+			case st.Mode() == "semantic":
+				if inner := envEmbedder(); inner != nil {
+					rs, err = ix.Semantic(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir}, ix.CachedEmbedder(inner))
+				} else { // no key: answer with keyword rather than nothing
+					opts.Limit = 100
+					rs, err = ix.Search(q, opts)
+				}
 			case st.Mode() == "hybrid":
 				var e search.Embedder
 				if inner := envEmbedder(); inner != nil {

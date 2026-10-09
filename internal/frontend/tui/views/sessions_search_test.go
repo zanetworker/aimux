@@ -202,3 +202,24 @@ func TestContentSearch_PassesTheViewScope(t *testing.T) {
 		t.Errorf("all-projects view searched dir %q, want all projects", gotDir)
 	}
 }
+
+func TestContentSearch_SameQueryDifferentScopeKeepsLatest(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(rankedSessions())
+	v.SetCurrentDir("/Users/me/research")
+	v.SetContentSearch(func(_ string, dir string) ([]history.ContentMatch, error) {
+		if dir == "" {
+			return []history.ContentMatch{{SessionID: "old"}}, nil
+		}
+		return []history.ContentMatch{{SessionID: "recent"}}, nil
+	})
+	v.SetShowAll(true)
+	allProjects := startSearch(v, "token")
+	v.SetShowAll(false)
+	scoped := startSearch(v, "token")
+	v.HandleContentSearchResult(scoped().(SessionContentSearchResultMsg))
+	v.HandleContentSearchResult(allProjects().(SessionContentSearchResultMsg)) // older, arrives last
+	if got := visibleIDs(v); len(got) != 1 || got[0] != "recent" {
+		t.Errorf("visible = %v, want the latest search's result only", got)
+	}
+}

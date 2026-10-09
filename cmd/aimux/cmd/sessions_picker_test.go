@@ -176,9 +176,25 @@ func TestPickerStateFromFlags(t *testing.T) {
 	if st.Mode() != "keyword" || !st.IncludeAutomated() || st.Scope() != "/Users/me/research" {
 		t.Errorf("flags not applied: mode=%s automated=%v scope=%q", st.Mode(), st.IncludeAutomated(), st.Scope())
 	}
-	// semantic in the picker is hybrid; an unset --mode keeps the default
+	// an explicit --mode semantic stays semantic-only in the picker
 	st2 := sessions.PickerState{Dir: t.TempDir()}
-	if err := applyPickerFlags(st2, "semantic", true, false, "", true); err != nil || st2.Mode() != "hybrid" {
+	if err := applyPickerFlags(st2, "semantic", true, false, "", true); err != nil || st2.Mode() != "semantic" {
 		t.Errorf("semantic flag: mode=%s err=%v", st2.Mode(), err)
+	}
+	// unset --mode: hybrid with embeddings, keyword without
+	st3 := sessions.PickerState{Dir: t.TempDir()}
+	if err := applyPickerFlags(st3, "hybrid", false, false, "", false); err != nil || st3.Mode() != "keyword" {
+		t.Errorf("default without embedder: mode=%s err=%v", st3.Mode(), err)
+	}
+}
+
+func TestPickerRows_SemanticModeFallsBackToKeywordWithoutKey(t *testing.T) {
+	st := pickerEnv(t)
+	t.Setenv("OPENAI_API_KEY", "")
+	if err := st.SetMode("semantic"); err != nil {
+		t.Fatal(err)
+	}
+	if out := runSub(t, "rows", "--", "Ying deck"); !strings.HasPrefix(out, "43ce13d4\t") {
+		t.Errorf("semantic rows without a key should still answer (keyword): %q", out)
 	}
 }

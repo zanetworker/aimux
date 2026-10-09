@@ -145,6 +145,7 @@ type SessionContentSearchResultMsg struct {
 	Matches []history.ContentMatch
 	Query   string
 	Err     error // search failed (distinct from zero matches)
+	Gen     int   // which search request produced it
 }
 
 // cleanupItem represents a session flagged for potential cleanup.
@@ -205,6 +206,7 @@ type SessionsView struct {
 	contentSearchRank  map[string]int    // session ID -> position in the ranked results
 	contentSearchFn    func(query, dir string) ([]history.ContentMatch, error)
 	contentSearchQuery string // query of the search in flight or shown; "" = none
+	contentSearchGen   int    // bumped per request and on clear; older results are dropped
 	contentSearchBusy  bool
 	contentSearchErr   string
 
@@ -558,8 +560,8 @@ func (v *SessionsView) handleContentSearchKey(msg tea.KeyMsg) tea.Cmd {
 // HandleContentSearchResult processes the async content search results.
 // Called from app.go when a SessionContentSearchResultMsg is received.
 func (v *SessionsView) HandleContentSearchResult(msg SessionContentSearchResultMsg) {
-	if msg.Query != v.contentSearchQuery {
-		return // a newer search started, or the search was cleared
+	if msg.Gen != v.contentSearchGen {
+		return // a newer search started (any query or scope), or the search was cleared
 	}
 	v.contentSearchBusy = false
 	if msg.Err != nil {
@@ -587,6 +589,8 @@ func (v *SessionsView) SetContentSearch(fn func(query, dir string) ([]history.Co
 // marks it as the active search, so results of earlier searches are dropped.
 func (v *SessionsView) contentSearchCmd(query string) tea.Cmd {
 	v.contentSearchQuery, v.contentSearchBusy, v.contentSearchErr = query, true, ""
+	v.contentSearchGen++
+	gen := v.contentSearchGen
 	search := v.contentSearchFn
 	dir := ""
 	if !v.showAll {
@@ -594,10 +598,10 @@ func (v *SessionsView) contentSearchCmd(query string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		if search == nil {
-			return SessionContentSearchResultMsg{Query: query}
+			return SessionContentSearchResultMsg{Query: query, Gen: gen}
 		}
 		matches, err := search(query, dir)
-		return SessionContentSearchResultMsg{Matches: matches, Query: query, Err: err}
+		return SessionContentSearchResultMsg{Matches: matches, Query: query, Err: err, Gen: gen}
 	}
 }
 
@@ -605,6 +609,7 @@ func (v *SessionsView) clearContentSearch() {
 	v.contentSearchIDs = nil
 	v.contentSearchRank = nil
 	v.contentSearchQuery, v.contentSearchBusy, v.contentSearchErr = "", false, ""
+	v.contentSearchGen++
 }
 
 // ContentSearchSnippet returns the snippet for a session if one exists from

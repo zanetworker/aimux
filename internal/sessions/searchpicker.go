@@ -49,11 +49,15 @@ func (s PickerState) IncludeAutomated() bool {
 	return err == nil
 }
 
-// Mode is "keyword" (default: instant while typing) or "hybrid".
+// Mode is "keyword" (default), "hybrid" (keyword + semantic) or "semantic"
+// (embeddings only, from an explicit --mode semantic).
 func (s PickerState) Mode() string {
 	if s.Dir != "" {
-		if b, err := os.ReadFile(s.file("mode")); err == nil && strings.TrimSpace(string(b)) == "hybrid" {
-			return "hybrid"
+		if b, err := os.ReadFile(s.file("mode")); err == nil {
+			switch m := strings.TrimSpace(string(b)); m {
+			case "hybrid", "semantic":
+				return m
+			}
 		}
 	}
 	return "keyword"
@@ -72,9 +76,9 @@ func (s PickerState) Toggle(name string) error {
 			return os.Remove(s.file("automated"))
 		}
 		return os.WriteFile(s.file("automated"), nil, 0o600)
-	case "semantic":
+	case "semantic": // ^s: keyword <-> semantic-enabled ranking
 		next := "hybrid"
-		if s.Mode() == "hybrid" {
+		if s.Mode() != "keyword" {
 			next = "keyword"
 		}
 		return os.WriteFile(s.file("mode"), []byte(next), 0o600)
@@ -88,8 +92,8 @@ func (s PickerState) SetMode(mode string) error {
 	if s.Dir == "" {
 		return errNoStateDir
 	}
-	if mode != "keyword" && mode != "hybrid" {
-		return fmt.Errorf("unknown mode %q: valid values are keyword, hybrid", mode)
+	if mode != "keyword" && mode != "hybrid" && mode != "semantic" {
+		return fmt.Errorf("unknown mode %q: valid values are keyword, hybrid, semantic", mode)
 	}
 	return os.WriteFile(s.file("mode"), []byte(mode), 0o600)
 }
@@ -140,10 +144,7 @@ func (s PickerState) Live() map[string]bool {
 
 // Header is the status and key-hint line shown above the list.
 func (s PickerState) Header() string {
-	mode := "keyword"
-	if s.Mode() == "hybrid" {
-		mode = "semantic"
-	}
+	mode := map[string]string{"keyword": "keyword", "hybrid": "semantic", "semantic": "semantic only"}[s.Mode()]
 	auto := "automated hidden"
 	if s.IncludeAutomated() {
 		auto = "automated shown"

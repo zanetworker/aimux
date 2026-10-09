@@ -72,9 +72,8 @@ func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Resul
 		return nil, false, fmt.Errorf("open search index: %w", err)
 	}
 	defer func() { _ = ix.Close() }()
-	st, err := ix.Update(s.ProjectsDir, DefaultExtractOpts())
-	if err != nil {
-		return nil, false, fmt.Errorf("update search index: %w", err)
+	if err := s.refresh(ctx, ix); err != nil {
+		return nil, false, err
 	}
 	opts := SearchOpts{Limit: o.Limit, IncludeAutomated: o.IncludeAutomated, Dir: o.Dir}
 
@@ -90,20 +89,43 @@ func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Resul
 		rs, err := ix.Search(query, opts)
 		return rs, false, err
 	}
-	// Embed only what this refresh changed; checking the whole index for
-	// missing vectors costs seconds per query. Big backlogs (a first run) are
-	// left to `aimux sessions index`.
-	if len(st.Changed) > 0 && len(st.Changed) <= embedInlineSessions {
-		_, _ = ix.EmbedMissingFor(ctx, s.Embedder, st.Changed, embedInlineMax)
-	} else if len(st.Changed) > embedInlineSessions {
-		s.note(fmt.Sprintf("note: %d sessions changed; run `aimux sessions index` to embed them for semantic ranking", len(st.Changed)))
-	}
 	e := ix.CachedEmbedder(s.Embedder)
 	if mode == ModeSemantic {
 		rs, err := ix.Semantic(ctx, query, opts, e)
 		return rs, err == nil, err
 	}
 	return ix.Hybrid(ctx, query, opts, e)
+}
+
+// Refresh brings the index up to date and embeds what changed, without
+// querying. The picker runs it in the background so hybrid ranking sees new
+// sessions too.
+func (s *Service) Refresh(ctx context.Context) error {
+	ix, err := Open(s.DBPath)
+	if err != nil {
+		return fmt.Errorf("open search index: %w", err)
+	}
+	defer func() { _ = ix.Close() }()
+	return s.refresh(ctx, ix)
+}
+
+// refresh re-reads changed session files and, with an embedder, embeds only
+// those sessions: checking the whole index for missing vectors costs seconds.
+// Big backlogs (a first run) are left to `aimux sessions index`.
+func (s *Service) refresh(ctx context.Context, ix *Index) error {
+	st, err := ix.Update(s.ProjectsDir, DefaultExtractOpts())
+	if err != nil {
+		return fmt.Errorf("update search index: %w", err)
+	}
+	if s.Embedder == nil || len(st.Changed) == 0 {
+		return nil
+	}
+	if len(st.Changed) > embedInlineSessions {
+		s.note(fmt.Sprintf("note: %d sessions changed; run `aimux sessions index` to embed them for semantic ranking", len(st.Changed)))
+		return nil
+	}
+	_, _ = ix.EmbedMissingFor(ctx, s.Embedder, st.Changed, embedInlineMax)
+	return nil
 }
 
 func (s *Service) note(msg string) {

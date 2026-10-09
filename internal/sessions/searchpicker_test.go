@@ -226,6 +226,9 @@ func TestPickerState_SetMode(t *testing.T) {
 	if err := st.SetMode("hybrid"); err != nil || st.Mode() != "hybrid" {
 		t.Errorf("SetMode hybrid: mode=%s err=%v", st.Mode(), err)
 	}
+	if err := st.SetMode("semantic"); err != nil || st.Mode() != "semantic" {
+		t.Errorf("SetMode semantic: mode=%s err=%v", st.Mode(), err)
+	}
 	if err := st.SetMode("fuzzy"); err == nil {
 		t.Error("invalid mode: want error")
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,6 +37,14 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 			query := ""
 			if len(args) > 0 {
 				query = args[0]
+			}
+			// The index compares absolute cwd paths, so resolve "--dir ." etc.
+			if dir != "" && sessionsSearch.Index != nil {
+				abs, err := filepath.Abs(dir)
+				if err != nil {
+					return fmt.Errorf("resolve --dir %q: %w", dir, err)
+				}
+				dir = abs
 			}
 			// Interactive: the split-view picker over the index (browse or query).
 			if sessionsSearch.Index != nil && !listMode && !exportMode && !jsonOutput && IsInteractive() && hasFzf() {

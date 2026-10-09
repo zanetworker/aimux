@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -194,5 +195,22 @@ func TestOpenSessionGuarded_RefusesRecentlyActiveUnfocusable(t *testing.T) {
 	openSessionGuarded("edge", "", time.Now().Add(-activeWindow), false, notLive, resume)
 	if resumed != "edge" {
 		t.Error("session idle for exactly the window should resume")
+	}
+}
+
+func TestSessionsQuery_RelativeDirIsResolved(t *testing.T) {
+	var got sessionsIndexQuery
+	deps := sessionsSearchDeps{Index: func(_ string, q sessionsIndexQuery) ([]search.Result, bool, error) {
+		got = q
+		return fakeHits(), false, nil
+	}}
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if _, err := runSessions(t, deps, nil, "x", "--list", "--dir", "."); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.Abs(".")
+	if got.Dir != want {
+		t.Errorf("Dir = %q, want the absolute path %q", got.Dir, want)
 	}
 }

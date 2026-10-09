@@ -81,3 +81,24 @@ func TestService_BlankQueryReturnsNothing(t *testing.T) {
 		t.Errorf("blank: %v err=%v", ids(rs), err)
 	}
 }
+
+func TestService_RefreshIndexesAndEmbedsChanges(t *testing.T) {
+	e := &conceptEmbedder{}
+	svc, _ := newService(t, e)
+	if err := svc.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ix, err := Open(svc.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if n, _ := ix.PendingEmbeddings(e.Model()); n != 0 {
+		t.Errorf("after Refresh %d texts lack vectors; the picker needs them for hybrid ranking", n)
+	}
+	// without an embedder Refresh still indexes
+	svc2, _ := newService(t, nil)
+	if err := svc2.Refresh(context.Background()); err != nil {
+		t.Errorf("Refresh without embedder: %v", err)
+	}
+}
