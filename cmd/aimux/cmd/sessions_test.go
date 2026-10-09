@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,5 +177,31 @@ func TestSessionsCmd_Export(t *testing.T) {
 	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte("\n"))
 	if len(lines) != 2 {
 		t.Errorf("expected 2 JSONL lines, got %d", len(lines))
+	}
+}
+
+func TestSessionsList_HidesAutomatedUnlessAsked(t *testing.T) {
+	sessions := fakeSessions()
+	sessions[1].Automated = true
+	run := func(args ...string) string {
+		var stdout bytes.Buffer
+		c := newSessionsCmd(func(history.DiscoverOpts, string) ([]history.Session, error) { return sessions, nil }, nil, nil)
+		rootCmd.SetOut(&stdout)
+		rootCmd.SetErr(&bytes.Buffer{})
+		rootCmd.SetArgs(append([]string{"sessions", "--list", "--all"}, args...))
+		rootCmd.AddCommand(c)
+		defer rootCmd.RemoveCommand(c)
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return stdout.String()
+	}
+	jsonOutput = true
+	defer func() { jsonOutput = false }()
+	if out := run(); strings.Contains(out, "sess-002") || !strings.Contains(out, "sess-001") {
+		t.Errorf("default list should hide the automated session:\n%s", out)
+	}
+	if out := run("--include-automated"); !strings.Contains(out, "sess-002") {
+		t.Errorf("--include-automated should show it:\n%s", out)
 	}
 }

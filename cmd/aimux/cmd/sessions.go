@@ -79,6 +79,9 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 				if s.IsSubagent {
 					continue
 				}
+				if s.Automated && !includeAutomated {
+					continue // cron/SDK runs, same default as search and the TUI
+				}
 				filtered = append(filtered, s)
 			}
 
@@ -145,7 +148,7 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 	cmd.Flags().IntVar(&limit, "limit", 0, "Max sessions to show (0 = all)")
 	cmd.Flags().StringVar(&fields, "fields", "", "Comma-separated fields: id,provider,project,age,turns,cost,annotation,prompt,tags")
 	cmd.Flags().StringVar(&mode, "mode", "hybrid", "Query ranking: hybrid, keyword or semantic")
-	cmd.Flags().BoolVar(&includeAutomated, "include-automated", false, "Include automated (SDK/cron) sessions in query results")
+	cmd.Flags().BoolVar(&includeAutomated, "include-automated", false, "Include automated (SDK/cron) sessions")
 	cmd.AddCommand(newSessionsStarCmd(discover))
 	cmd.AddCommand(newSessionsIndexCmd())
 	cmd.AddCommand(newSessionsRowsCmd(), newSessionsPreviewCmd(), newSessionsPickerToggleCmd())

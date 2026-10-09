@@ -303,6 +303,21 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// visibleHistory drops automated (cron/SDK) sessions unless asked for them,
+// matching the TUI and search defaults.
+func visibleHistory(sessions []history.Session, includeAutomated bool) []history.Session {
+	if includeAutomated {
+		return sessions
+	}
+	out := sessions[:0:0]
+	for _, s := range sessions {
+		if !s.Automated {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("dir")
 	opts := history.DiscoverOpts{Dir: dir}
@@ -311,6 +326,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	sessions = visibleHistory(sessions, r.URL.Query().Get("automated") == "1")
 	if sessions == nil {
 		sessions = []history.Session{}
 	}

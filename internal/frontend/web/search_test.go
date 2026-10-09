@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/search"
 )
 
@@ -65,5 +66,15 @@ func TestHandleSearch_ErrorsAndUnconfigured(t *testing.T) {
 	// no search function wired: an empty, valid answer rather than a scan
 	if code, rs := searchResponse(t, NewServer(0), "x"); code != http.StatusOK || len(rs) != 0 {
 		t.Errorf("unconfigured: code=%d results=%v", code, rs)
+	}
+}
+
+func TestHistoryHidesAutomatedByDefault(t *testing.T) {
+	all := []history.Session{{ID: "human"}, {ID: "cron", Automated: true}}
+	if got := visibleHistory(all, false); len(got) != 1 || got[0].ID != "human" {
+		t.Errorf("default: %v, want only the interactive session", got)
+	}
+	if got := visibleHistory(all, true); len(got) != 2 {
+		t.Errorf("?automated=1: %v, want both", got)
 	}
 }

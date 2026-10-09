@@ -38,6 +38,7 @@ type Session struct {
 	Note        string    `json:"note"`          // free-text rationale
 	Tags        []string  `json:"tags"`          // failure mode tags
 	IsSubagent     bool   `json:"is_subagent"`
+	Automated      bool   `json:"automated"` // started by a program (cron, SDK, analyzers), see IsAutomated
 	PermissionMode string `json:"permission_mode"`
 	Starred        bool   `json:"starred"`
 	GitBranch      string `json:"git_branch"`
@@ -47,6 +48,10 @@ type Session struct {
 	ROIMultiplier  float64 `json:"roi_multiplier"`
 	TaskType       string  `json:"task_type"`
 	DurationMin    float64 `json:"duration_min"`
+
+	// scan-time only (not serialized): inputs to Automated
+	entrypoint string
+	cwd        string
 }
 
 // Meta holds session-level annotation data stored in sidecar .meta.json files.
@@ -274,6 +279,8 @@ func scanSession(id, filePath, project string) (Session, error) {
 		}
 	}
 
+	s.Automated = IsAutomated(s.entrypoint, s.cwd, s.FirstPrompt, DefaultAutomatedPrefixes)
+
 	// Extract last prompt and action once (not per-line)
 	if text := extractUserText(lastUserContent); text != "" && text != "(no prompt)" {
 		s.LastPrompt = text
@@ -331,6 +338,8 @@ func scanSession(id, filePath, project string) (Session, error) {
 // sessionEntry is the minimal structure for fast-scanning JSONL entries.
 type sessionEntry struct {
 	Type           string    `json:"type"`
+	Entrypoint     string    `json:"entrypoint"`
+	CWD            string    `json:"cwd"`
 	Timestamp      time.Time `json:"timestamp"`
 	GitBranch      string    `json:"gitBranch"`
 	PermissionMode string    `json:"permissionMode"`
@@ -407,6 +416,14 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (time
 		if entry.Timestamp.After(s.LastActive) {
 			s.LastActive = entry.Timestamp
 		}
+	}
+
+	// Remember how and where the session started (first one wins), for IsAutomated.
+	if entry.Entrypoint != "" && s.entrypoint == "" {
+		s.entrypoint = entry.Entrypoint
+	}
+	if entry.CWD != "" && s.cwd == "" {
+		s.cwd = entry.CWD
 	}
 
 	// Track permission mode (first one wins)

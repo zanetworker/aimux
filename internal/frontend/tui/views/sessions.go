@@ -871,8 +871,8 @@ func (v *SessionsView) visibleSessions() []history.Session {
 	isSearching := v.filterText != "" || v.contentSearchIDs != nil
 	var result []history.Session
 	for _, s := range v.sessions {
-		if !v.showSubagents && !isSearching && s.IsSubagent {
-			continue
+		if !v.showSubagents && !isSearching && (s.IsSubagent || s.Automated) {
+			continue // H shows subagent and automated (cron/SDK) sessions
 		}
 		if !isSearching && isHookSession(s) {
 			continue
@@ -1071,14 +1071,20 @@ func (v *SessionsView) View() string {
 		countStr += sessDimStyle.Render(fmt.Sprintf("  (%d total)", len(v.sessions)))
 	}
 	if !v.showSubagents {
-		hiddenCount := 0
+		hiddenCount, automatedCount := 0, 0
 		for _, s := range v.sessions {
-			if s.IsSubagent {
+			switch {
+			case s.IsSubagent:
 				hiddenCount++
+			case s.Automated:
+				automatedCount++
 			}
 		}
 		if hiddenCount > 0 {
 			countStr += sessDimStyle.Render(fmt.Sprintf("  (+%d agent)", hiddenCount))
+		}
+		if automatedCount > 0 {
+			countStr += sessDimStyle.Render(fmt.Sprintf("  (+%d automated, H to show)", automatedCount))
 		}
 	}
 	if !v.showAll && v.currentDir != "" {

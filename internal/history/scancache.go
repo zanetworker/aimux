@@ -15,7 +15,7 @@ import (
 
 // scanCacheVersion must be bumped whenever scanSession's output changes, so
 // stale cached parses are discarded.
-const scanCacheVersion = 1
+const scanCacheVersion = 2 // 2: Session.Automated
 
 // scanSessionFn is swapped in tests to count parses.
 var scanSessionFn = scanSession
