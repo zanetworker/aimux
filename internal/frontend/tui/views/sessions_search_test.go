@@ -32,7 +32,7 @@ func TestContentSearch_UsesInjectedSearchAndRankOrder(t *testing.T) {
 	v.SetSessions(rankedSessions())
 	v.SetSize(160, 40)
 	var gotQuery string
-	v.SetContentSearch(func(q string) ([]history.ContentMatch, error) {
+	v.SetContentSearch(func(q, _ string) ([]history.ContentMatch, error) {
 		gotQuery = q
 		// best match is the oldest session
 		return []history.ContentMatch{{SessionID: "old", Snippet: "[token]"}, {SessionID: "recent", Snippet: "token"}}, nil
@@ -89,7 +89,7 @@ func TestFilterKey_DeepSearchUsesIndexAndRanksContentFirst(t *testing.T) {
 	sessions[0].FirstPrompt = "middle ground" // "recent" matches the filter by metadata only
 	v.SetSessions(sessions)
 	called := false
-	v.SetContentSearch(func(q string) ([]history.ContentMatch, error) {
+	v.SetContentSearch(func(q, _ string) ([]history.ContentMatch, error) {
 		called = true
 		return []history.ContentMatch{{SessionID: "old", Snippet: "[middle]"}}, nil
 	})
@@ -119,7 +119,7 @@ func startSearch(v *SessionsView, q string) tea.Cmd {
 func TestContentSearch_IgnoresStaleResults(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(rankedSessions())
-	v.SetContentSearch(func(q string) ([]history.ContentMatch, error) {
+	v.SetContentSearch(func(q, _ string) ([]history.ContentMatch, error) {
 		if q == "first" {
 			return []history.ContentMatch{{SessionID: "old"}}, nil
 		}
@@ -146,7 +146,7 @@ func TestContentSearch_FailureIsShownNotEmpty(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSessions(rankedSessions())
 	v.SetSize(160, 40)
-	v.SetContentSearch(func(string) ([]history.ContentMatch, error) {
+	v.SetContentSearch(func(string, string) ([]history.ContentMatch, error) {
 		return nil, errors.New("index locked")
 	})
 	cmd := startSearch(v, "token")
@@ -168,7 +168,7 @@ func TestFilter_NoContentMatchesKeepsSelectedSort(t *testing.T) {
 	}
 	// shuffled input: the expected order must come from sorting, not from input order
 	v.SetSessions([]history.Session{sessions[2], sessions[0], sessions[1]})
-	v.SetContentSearch(func(string) ([]history.ContentMatch, error) { return nil, nil })
+	v.SetContentSearch(func(string, string) ([]history.ContentMatch, error) { return nil, nil })
 	v.filterMode = true
 	v.filterInput.SetValue("shared")
 	cmd := v.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -176,5 +176,29 @@ func TestFilter_NoContentMatchesKeepsSelectedSort(t *testing.T) {
 	got := visibleIDs(v)
 	if len(got) != 3 || got[0] != "recent" || got[2] != "old" {
 		t.Errorf("visible = %v, want metadata matches in the normal (newest first) order", got)
+	}
+}
+
+func TestContentSearch_PassesTheViewScope(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(rankedSessions())
+	var gotDir string
+	v.SetContentSearch(func(_ string, dir string) ([]history.ContentMatch, error) {
+		gotDir = dir
+		return nil, nil
+	})
+
+	v.SetShowAll(false)
+	v.SetCurrentDir("/Users/me/research")
+	want := v.CurrentDir()
+	startSearch(v, "token")()
+	if gotDir != want {
+		t.Errorf("scoped view searched dir %q, want %q (the search must scope before its limit)", gotDir, want)
+	}
+
+	v.SetShowAll(true)
+	startSearch(v, "token")()
+	if gotDir != "" {
+		t.Errorf("all-projects view searched dir %q, want all projects", gotDir)
 	}
 }

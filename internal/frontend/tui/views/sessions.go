@@ -203,7 +203,7 @@ type SessionsView struct {
 	contentSearchInput TextInput
 	contentSearchIDs   map[string]string // session ID -> snippet (nil = no active search)
 	contentSearchRank  map[string]int    // session ID -> position in the ranked results
-	contentSearchFn    func(query string) ([]history.ContentMatch, error)
+	contentSearchFn    func(query, dir string) ([]history.ContentMatch, error)
 	contentSearchQuery string // query of the search in flight or shown; "" = none
 	contentSearchBusy  bool
 	contentSearchErr   string
@@ -577,8 +577,9 @@ func (v *SessionsView) HandleContentSearchResult(msg SessionContentSearchResultM
 }
 
 // SetContentSearch wires content search (the shared internal/search index);
-// matches arrive best first.
-func (v *SessionsView) SetContentSearch(fn func(query string) ([]history.ContentMatch, error)) {
+// matches arrive best first. dir is the view's scope ("" = all projects), so
+// the search scopes before applying its limit.
+func (v *SessionsView) SetContentSearch(fn func(query, dir string) ([]history.ContentMatch, error)) {
 	v.contentSearchFn = fn
 }
 
@@ -587,11 +588,15 @@ func (v *SessionsView) SetContentSearch(fn func(query string) ([]history.Content
 func (v *SessionsView) contentSearchCmd(query string) tea.Cmd {
 	v.contentSearchQuery, v.contentSearchBusy, v.contentSearchErr = query, true, ""
 	search := v.contentSearchFn
+	dir := ""
+	if !v.showAll {
+		dir = v.currentDir
+	}
 	return func() tea.Msg {
 		if search == nil {
 			return SessionContentSearchResultMsg{Query: query}
 		}
-		matches, err := search(query)
+		matches, err := search(query, dir)
 		return SessionContentSearchResultMsg{Matches: matches, Query: query, Err: err}
 	}
 }

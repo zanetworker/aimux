@@ -447,7 +447,7 @@ func (a *App) SetPluginExecutor(exec *plugin.Executor) {
 }
 
 // SetSessionSearch wires the sessions view's content search (internal/search).
-func (a *App) SetSessionSearch(fn func(query string) ([]history.ContentMatch, error)) {
+func (a *App) SetSessionSearch(fn func(query, dir string) ([]history.ContentMatch, error)) {
 	a.sessionsView.SetContentSearch(fn)
 }
 
