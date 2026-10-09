@@ -41,9 +41,10 @@ type SearchOpts struct {
 
 // UpdateStats reports what an Update changed.
 type UpdateStats struct {
-	Indexed int // sessions (re)read because they were new or changed
-	Removed int // sessions dropped because their file is gone
-	Total   int // sessions in the index afterwards
+	Indexed int      // sessions (re)read because they were new or changed
+	Changed []string // ids of those sessions
+	Removed int      // sessions dropped because their file is gone
+	Total   int      // sessions in the index afterwards
 }
 
 const schema = `
@@ -163,6 +164,7 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts) (UpdateStats, erro
 			return st, err
 		}
 		st.Indexed++
+		st.Changed = append(st.Changed, d.SessionID)
 	}
 	for id := range known {
 		if seen[id] {

@@ -23,6 +23,9 @@ var Modes = []string{ModeHybrid, ModeKeyword, ModeSemantic}
 // backlogs are left to an explicit index run so a search stays fast.
 const embedInlineMax = 64
 
+// embedInlineSessions is the most changed sessions a query embeds inline.
+const embedInlineSessions = 20
+
 // Service is the one entry point every frontend (CLI, TUI, web) uses to
 // search sessions: it refreshes the index, then ranks.
 type Service struct {
@@ -68,7 +71,8 @@ func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Resul
 		return nil, false, fmt.Errorf("open search index: %w", err)
 	}
 	defer func() { _ = ix.Close() }()
-	if _, err := ix.Update(s.ProjectsDir, DefaultExtractOpts()); err != nil {
+	st, err := ix.Update(s.ProjectsDir, DefaultExtractOpts())
+	if err != nil {
 		return nil, false, fmt.Errorf("update search index: %w", err)
 	}
 	opts := SearchOpts{Limit: o.Limit, IncludeAutomated: o.IncludeAutomated}
@@ -85,12 +89,13 @@ func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Resul
 		rs, err := ix.Search(query, opts)
 		return rs, false, err
 	}
-	if n, err := ix.PendingEmbeddings(s.Embedder.Model()); err == nil && n > 0 {
-		if n <= embedInlineMax {
-			_, _ = ix.EmbedMissing(ctx, s.Embedder, embedInlineMax)
-		} else {
-			s.note(fmt.Sprintf("note: %d new exchanges not embedded yet; run `aimux sessions index` for full semantic coverage", n))
-		}
+	// Embed only what this refresh changed; checking the whole index for
+	// missing vectors costs seconds per query. Big backlogs (a first run) are
+	// left to `aimux sessions index`.
+	if len(st.Changed) > 0 && len(st.Changed) <= embedInlineSessions {
+		_, _ = ix.EmbedMissingFor(ctx, s.Embedder, st.Changed, embedInlineMax)
+	} else if len(st.Changed) > embedInlineSessions {
+		s.note(fmt.Sprintf("note: %d sessions changed; run `aimux sessions index` to embed them for semantic ranking", len(st.Changed)))
 	}
 	e := ix.CachedEmbedder(s.Embedder)
 	if mode == ModeSemantic {

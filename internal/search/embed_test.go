@@ -385,3 +385,40 @@ func TestEmbeddings_SurviveSessionGrowth(t *testing.T) {
 		t.Errorf("session lost its vectors while growing: %v", ids(rs))
 	}
 }
+
+func TestUpdateReportsChangedSessions_PendingScopedToThem(t *testing.T) {
+	root := newProjects(t)
+	ix := openIndex(t)
+	e := &conceptEmbedder{}
+	st, err := ix.Update(root, DefaultExtractOpts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Changed) != 4 {
+		t.Fatalf("first update Changed = %v, want all 4 sessions", st.Changed)
+	}
+	if _, err := ix.EmbedMissing(context.Background(), e, 50); err != nil {
+		t.Fatal(err)
+	}
+
+	p := put(t, root, "-Users-me-research", sidDeck, human("/Users/me/research", "a new presentation outline"))
+	future := time.Now().Add(time.Minute)
+	_ = os.Chtimes(p, future, future)
+	st, _ = ix.Update(root, DefaultExtractOpts())
+	if len(st.Changed) != 1 || st.Changed[0] != sidDeck {
+		t.Fatalf("Changed = %v, want only %s", st.Changed, sidDeck)
+	}
+	// only the changed session is inspected for missing vectors
+	n, err := ix.EmbedMissingFor(context.Background(), e, st.Changed, 50)
+	if err != nil || n != 2 { // its new chunk + its summary
+		t.Errorf("EmbedMissingFor = %d err=%v, want 2", n, err)
+	}
+	if n, _ := ix.PendingEmbeddings(e.Model()); n != 0 {
+		t.Errorf("after scoped embed, %d still pending", n)
+	}
+	// no changes: nothing to do, no embedder calls
+	calls := e.calls
+	if n, _ := ix.EmbedMissingFor(context.Background(), e, nil, 50); n != 0 || e.calls != calls {
+		t.Errorf("empty scope embedded %d (calls %d -> %d)", n, calls, e.calls)
+	}
+}
