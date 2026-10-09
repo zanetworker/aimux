@@ -184,3 +184,26 @@ func TestExtractFile_ProseExcludesToolNoise(t *testing.T) {
 		t.Error("Text lost tool context")
 	}
 }
+
+func TestExtractFile_LongExchangeOverflowStaysSearchable(t *testing.T) {
+	long := strings.Repeat("filler ", 1000) + "needle-at-the-end"
+	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"` + long + `"}]}}`
+	opts := DefaultExtractOpts()
+	doc, err := ExtractFile(writeSession(t, humanFirst, line), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := doc.Chunks[0]
+	if len(c.Text) > opts.MaxChunkChars {
+		t.Errorf("main text is %d chars, want <= %d", len(c.Text), opts.MaxChunkChars)
+	}
+	if strings.Contains(c.Text, "needle-at-the-end") || !strings.Contains(c.More, "needle-at-the-end") {
+		t.Error("text past the main budget must go to More, not be dropped")
+	}
+	if len(c.Text)+len(c.More) > opts.MaxTextChars {
+		t.Errorf("text+more = %d chars, want <= %d", len(c.Text)+len(c.More), opts.MaxTextChars)
+	}
+	if len(c.Prose) > opts.MaxChunkChars/2 {
+		t.Errorf("embedding prose is %d chars; it must stay within the embedding budget", len(c.Prose))
+	}
+}

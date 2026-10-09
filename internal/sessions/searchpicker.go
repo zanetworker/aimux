@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -91,6 +92,26 @@ func (s PickerState) SetMode(mode string) error {
 		return fmt.Errorf("unknown mode %q: valid values are keyword, hybrid", mode)
 	}
 	return os.WriteFile(s.file("mode"), []byte(mode), 0o600)
+}
+
+// SetScope limits the picker to sessions under dir ("" = all projects).
+func (s PickerState) SetScope(dir string) error {
+	if s.Dir == "" {
+		return errNoStateDir
+	}
+	return os.WriteFile(s.file("scope"), []byte(dir), 0o600)
+}
+
+// Scope is the directory the picker is limited to, or "" for all projects.
+func (s PickerState) Scope() string {
+	if s.Dir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(s.file("scope"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // SetLive records which sessions are running in a terminal right now.
@@ -282,7 +303,11 @@ func SearchPick(self, query string, st PickerState, background func()) (string, 
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return "", ErrCancelled
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && fzfCancelled(exit.ExitCode()) {
+			return "", ErrCancelled
+		}
+		return "", fmt.Errorf("session picker (fzf): %w", err)
 	}
 	id := ParseSelectedID(string(out))
 	if id == "" {
@@ -290,6 +315,10 @@ func SearchPick(self, query string, st PickerState, background func()) (string, 
 	}
 	return id, nil
 }
+
+// fzfCancelled reports whether an fzf exit code means "nothing chosen":
+// 130 for Esc/Ctrl-C, 1 for no match. Anything else is a real failure.
+func fzfCancelled(code int) bool { return code == 130 || code == 1 }
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"

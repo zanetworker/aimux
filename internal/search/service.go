@@ -40,6 +40,7 @@ type QueryOpts struct {
 	Mode             string // "" means hybrid
 	Limit            int
 	IncludeAutomated bool
+	Dir              string // only sessions under this working directory
 }
 
 // DefaultService searches ~/.aimux/search.db over ~/.claude/projects, with
@@ -75,7 +76,7 @@ func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Resul
 	if err != nil {
 		return nil, false, fmt.Errorf("update search index: %w", err)
 	}
-	opts := SearchOpts{Limit: o.Limit, IncludeAutomated: o.IncludeAutomated}
+	opts := SearchOpts{Limit: o.Limit, IncludeAutomated: o.IncludeAutomated, Dir: o.Dir}
 
 	if mode == ModeKeyword {
 		rs, err := ix.Search(query, opts)

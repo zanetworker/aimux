@@ -280,10 +280,12 @@ func (ix *Index) semanticRank(ctx context.Context, query string, opts SearchOpts
 	}
 	q := normalize(qv[0])
 
+	dirSQL, dirArgs := dirClause(opts.Dir)
+	// #nosec G202 -- dirSQL is a fixed clause; values are bound
 	rows, err := ix.db.QueryContext(ctx, `
 		SELECT v.session_id, v.seq, v.vec, s.path, s.cwd, s.title, s.automated, s.mtime
 		FROM embeddings v JOIN sessions s ON s.id = v.session_id
-		WHERE v.model = ? AND (s.automated = 0 OR ?)`, e.Model(), boolInt(opts.IncludeAutomated))
+		WHERE v.model = ? AND (s.automated = 0 OR ?)`+dirSQL, append([]any{e.Model(), boolInt(opts.IncludeAutomated)}, dirArgs...)...)
 	if err != nil {
 		return nil, nil, err
 	}

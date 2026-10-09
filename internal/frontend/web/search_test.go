@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/zanetworker/aimux/internal/search"
@@ -53,8 +54,13 @@ func TestHandleSearch_UsesIndexRankingAndKeepsFields(t *testing.T) {
 func TestHandleSearch_ErrorsAndUnconfigured(t *testing.T) {
 	s := NewServer(0)
 	s.SetSearchFunc(func(string) ([]search.Result, error) { return nil, errors.New("index locked") })
-	if code, _ := searchResponse(t, s, "x"); code != http.StatusInternalServerError {
-		t.Errorf("search error: code %d, want 500", code)
+	rec := httptest.NewRecorder()
+	s.handleSearch(rec, httptest.NewRequest(http.MethodGet, "/api/search?q=x", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("search error: code %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "index locked") {
+		t.Errorf("internal error text leaked to the client: %q", rec.Body.String())
 	}
 	// no search function wired: an empty, valid answer rather than a scan
 	if code, rs := searchResponse(t, NewServer(0), "x"); code != http.StatusOK || len(rs) != 0 {

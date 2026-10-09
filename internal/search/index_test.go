@@ -433,3 +433,119 @@ func TestHybrid_QuotedQueryStaysExact(t *testing.T) {
 		t.Errorf("quoted query: used=%v got=%v err=%v, want exact keyword only (none)", used, ids(rs), err)
 	}
 }
+
+func TestSearch_DirScopesBeforeLimit(t *testing.T) {
+	root := t.TempDir()
+	// many matches elsewhere, one in the scoped project
+	for i := 0; i < 30; i++ {
+		put(t, root, "-other", fmt.Sprintf("%08d-0000-0000-0000-00000000000e", i), human("/Users/me/other", "token exchange notes"))
+	}
+	put(t, root, "-mine", "99999999-0000-0000-0000-00000000000e", human("/Users/me/mine/sub", "token exchange here too"))
+	ix := openIndex(t)
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := ix.Search("token exchange", SearchOpts{Limit: 5, Dir: "/Users/me/mine"})
+	if err != nil || len(rs) != 1 || rs[0].SessionID != "99999999-0000-0000-0000-00000000000e" {
+		t.Errorf("scoped search = %v err=%v, want the one session under /Users/me/mine", ids(rs), err)
+	}
+	// a sibling directory sharing a prefix is not inside the scope
+	put(t, root, "-mine2", "88888888-0000-0000-0000-00000000000e", human("/Users/me/mine2", "token exchange"))
+	_, _ = ix.Update(root, DefaultExtractOpts())
+	if rs, _ := ix.Search("token exchange", SearchOpts{Limit: 5, Dir: "/Users/me/mine"}); len(rs) != 1 {
+		t.Errorf("prefix sibling leaked into scope: %v", ids(rs))
+	}
+}
+
+func TestOpen_ExtractVersionBumpRereadsWithoutDroppingVectors(t *testing.T) {
+	root := newProjects(t)
+	path := filepath.Join(t.TempDir(), "search.db")
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &conceptEmbedder{}
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.EmbedMissing(context.Background(), e, 50); err != nil {
+		t.Fatal(err)
+	}
+	// simulate an index written by an older extractor
+	if _, err := ix.db.Exec(`UPDATE meta SET value = '0' WHERE key = 'extract_version'`); err != nil {
+		t.Fatal(err)
+	}
+	_ = ix.Close()
+
+	ix, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	st, err := ix.Update(root, DefaultExtractOpts())
+	if err != nil || st.Indexed != 4 {
+		t.Errorf("after extractor change: %+v err=%v, want every session re-read", st, err)
+	}
+	if n, _ := ix.PendingEmbeddings(e.Model()); n != 0 {
+		t.Errorf("%d texts need re-embedding; unchanged prose must keep its vectors", n)
+	}
+}
+
+func TestSearch_DirWithLikeWildcards(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "-a", "aaaaaaaa-5555-0000-0000-000000000001", human("/Users/me/my_proj/x", "token exchange"))
+	put(t, root, "-b", "bbbbbbbb-5555-0000-0000-000000000002", human("/Users/me/myXproj/x", "token exchange"))
+	ix := openIndex(t)
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	rs, _ := ix.Search("token exchange", SearchOpts{Limit: 5, Dir: "/Users/me/my_proj"})
+	if len(rs) != 1 || rs[0].SessionID != "aaaaaaaa-5555-0000-0000-000000000001" {
+		t.Errorf(`"_" in --dir acted as a wildcard: %v`, ids(rs))
+	}
+}
+
+func TestSearch_FindsTextDeepInALongExchange(t *testing.T) {
+	root := t.TempDir()
+	long := strings.Repeat("filler ", 1000) + "zanzibar-config"
+	put(t, root, "-p", "aaaaaaaa-6666-0000-0000-000000000001", human("/p", "start"), reply(long))
+	ix := openIndex(t)
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	if rs := mustSearch(t, ix, "zanzibar-config"); len(rs) != 1 {
+		t.Errorf("text past the first %d chars of an exchange is not searchable: %v", DefaultExtractOpts().MaxChunkChars, ids(rs))
+	}
+}
+
+func TestOpen_LayoutChangeKeepsEmbeddings(t *testing.T) {
+	root := newProjects(t)
+	path := filepath.Join(t.TempDir(), "search.db")
+	ix, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &conceptEmbedder{}
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.EmbedMissing(context.Background(), e, 50); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.db.Exec(`PRAGMA user_version = 1`); err != nil { // an older layout
+		t.Fatal(err)
+	}
+	_ = ix.Close()
+
+	ix, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := ix.PendingEmbeddings(e.Model()); n != 0 {
+		t.Errorf("layout change forced %d re-embeddings; vectors are matched by text hash and must survive", n)
+	}
+}

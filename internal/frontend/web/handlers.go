@@ -525,7 +525,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if s.searchFn != nil {
 		matches, err := s.searchFn(q)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			debuglog.Log("session search %q: %v", q, err) // details stay in the log
+			http.Error(w, "search failed", http.StatusInternalServerError)
 			return
 		}
 		// best match first; field names are what the web frontend reads

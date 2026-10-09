@@ -32,14 +32,16 @@ type Doc struct {
 type Chunk struct {
 	Seq    int
 	Prompt string // the human message that opened the exchange, one line
-	Text   string // everything searchable: messages, tool calls, trimmed tool output
+	Text   string // searchable: messages, tool calls, trimmed tool output (first MaxChunkChars)
+	More   string // the rest of a long exchange (up to MaxTextChars), searched at a lower weight
 	Prose  string // only what was said (human + assistant text), for embeddings
 }
 
 // ExtractOpts controls what gets indexed and how much of it.
 type ExtractOpts struct {
 	AutomatedPrefixes  []string // first-prompt prefixes that mark a session as automated
-	MaxChunkChars      int
+	MaxChunkChars      int      // embedding budget; prose is kept within half of it
+	MaxTextChars       int      // searchable text per exchange (full-text index)
 	MaxToolOutputChars int
 }
 
@@ -51,6 +53,7 @@ func DefaultExtractOpts() ExtractOpts {
 			"LINKS ARE MANDATORY", "Read the JSON file", "Run a prompt audit",
 		},
 		MaxChunkChars:      4000,
+		MaxTextChars:       64000,
 		MaxToolOutputChars: 300,
 	}
 }
@@ -100,8 +103,10 @@ func ExtractFile(path string, opts ExtractOpts) (Doc, error) {
 
 	flush := func() {
 		if cur != nil && cur.Len() > 0 {
-			doc.Chunks = append(doc.Chunks, Chunk{Seq: len(doc.Chunks), Prompt: curPrompt,
-				Text:  truncate(strings.TrimSpace(cur.String()), opts.MaxChunkChars),
+			full := strings.TrimSpace(cur.String())
+			text := truncate(full, opts.MaxChunkChars)
+			more := strings.TrimSpace(truncate(full[len(text):], max(opts.MaxTextChars-len(text), 0)))
+			doc.Chunks = append(doc.Chunks, Chunk{Seq: len(doc.Chunks), Prompt: curPrompt, Text: text, More: more,
 				Prose: truncate(strings.TrimSpace(prose.String()), opts.MaxChunkChars/2)})
 		}
 		cur = nil

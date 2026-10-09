@@ -2,12 +2,14 @@ package search
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +39,18 @@ type Result struct {
 type SearchOpts struct {
 	Limit            int
 	IncludeAutomated bool
+	Dir              string // only sessions whose cwd is Dir or below it
+}
+
+// dirClause restricts a query joined to sessions as "s" to opts.Dir.
+// It returns "" and no args when Dir is empty.
+func dirClause(dir string) (string, []any) {
+	dir = strings.TrimRight(dir, "/")
+	if dir == "" {
+		return "", nil
+	}
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(dir)
+	return ` AND (s.cwd = ? OR s.cwd LIKE ? ESCAPE '\')`, []any{dir, esc + "/%"}
 }
 
 // UpdateStats reports what an Update changed.
@@ -48,12 +62,13 @@ type UpdateStats struct {
 }
 
 const schema = `
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY, path TEXT, cwd TEXT, title TEXT, first_prompt TEXT,
 	automated INTEGER, mtime INTEGER, size INTEGER
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
-	session_id UNINDEXED, seq UNINDEXED, prompt UNINDEXED, prose UNINDEXED, title, text,
+	session_id UNINDEXED, seq UNINDEXED, prompt UNINDEXED, prose UNINDEXED, title, text, more,
 	tokenize = 'unicode61'
 );`
 
@@ -74,12 +89,16 @@ func Open(path string) (*Index, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
+	if err := rereadIfExtractorChanged(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &Index{db: db}, nil
 }
 
 // schemaVersion is bumped whenever the table layout or tokenizer changes; an index with an
 // older version is dropped and rebuilt from the session files on next Update.
-const schemaVersion = 5
+const schemaVersion = 6
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -89,12 +108,37 @@ func migrate(db *sql.DB) error {
 	if v == schemaVersion {
 		return nil
 	}
-	for _, t := range []string{"chunks", "embeddings", "sessions", "query_vectors"} {
+	// embeddings and query vectors are matched by text hash, so they stay valid
+	// across layout changes: keeping them spares a full re-embed.
+	for _, t := range []string{"chunks", "sessions", "meta"} {
 		if _, err := db.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
 			return fmt.Errorf("reset index: %w", err)
 		}
 	}
 	_, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion))
+	return err
+}
+
+// extractVersion is bumped when ExtractFile's output changes without the
+// table layout changing. Sessions are then re-read on the next Update while
+// embeddings stay: they are matched by text hash, so unchanged prose is not
+// re-embedded.
+const extractVersion = 2
+
+func rereadIfExtractorChanged(db *sql.DB) error {
+	var v string
+	err := db.QueryRow(`SELECT value FROM meta WHERE key = 'extract_version'`).Scan(&v)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	want := strconv.Itoa(extractVersion)
+	if v == want {
+		return nil
+	}
+	if _, err := db.Exec(`UPDATE sessions SET mtime = 0, size = -1`); err != nil {
+		return fmt.Errorf("mark sessions for re-read: %w", err)
+	}
+	_, err = db.Exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('extract_version', ?)`, want)
 	return err
 }
 
@@ -228,8 +272,8 @@ func writeDoc(tx *sql.Tx, d Doc) error {
 		return err
 	}
 	for _, c := range d.Chunks {
-		if _, err := tx.Exec(`INSERT INTO chunks (session_id, seq, prompt, prose, title, text) VALUES (?, ?, ?, ?, ?, ?)`,
-			d.SessionID, c.Seq, c.Prompt, c.Prose, d.Title, c.Text); err != nil {
+		if _, err := tx.Exec(`INSERT INTO chunks (session_id, seq, prompt, prose, title, text, more) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			d.SessionID, c.Seq, c.Prompt, c.Prose, d.Title, c.Text, c.More); err != nil {
 			return err
 		}
 	}
@@ -249,6 +293,13 @@ func deleteSession(tx *sql.Tx, id string) error {
 	}
 	return nil
 }
+
+// overflowWeight is the BM25 weight of a long exchange's text past its first
+// MaxChunkChars (title 10, main text 1). Measured: indexing overflow at full
+// weight let long, tool-heavy exchanges outrank precise matches.
+var overflowWeight = 0.1
+
+func overflowWeightSQL() string { return strconv.FormatFloat(overflowWeight, 'f', 2, 64) }
 
 // AnyTermCap bounds the any-term fallback: once nothing covers enough of the
 // query, a loose match is a guess, and a long list of guesses buries the point.
@@ -346,13 +397,15 @@ type scored struct {
 }
 
 func (ix *Index) coverageMatch(fts string, plain []string, need int, opts SearchOpts) ([]Result, error) {
+	dirSQL, dirArgs := dirClause(opts.Dir)
+	// #nosec G202 -- dirSQL is a fixed clause; values are bound
 	rows, err := ix.db.Query(`
-		SELECT c.session_id, bm25(chunks, 0, 0, 0, 0, 10.0, 1.0) AS score,
-		       snippet(chunks, -1, '[', ']', '…', 14), c.title, c.text,
+		SELECT c.session_id, bm25(chunks, 0, 0, 0, 0, 10.0, 1.0, `+overflowWeightSQL()+`) AS score,
+		       snippet(chunks, -1, '[', ']', '…', 14), c.title, c.text, c.more,
 		       s.path, s.cwd, s.automated, s.mtime
 		FROM chunks c JOIN sessions s ON s.id = c.session_id
-		WHERE chunks MATCH ? AND (s.automated = 0 OR ?)
-		ORDER BY score LIMIT ?`, fts, boolInt(opts.IncludeAutomated), candidateChunks)
+		WHERE chunks MATCH ? AND (s.automated = 0 OR ?)`+dirSQL+`
+		ORDER BY score LIMIT ?`, append(append([]any{fts, boolInt(opts.IncludeAutomated)}, dirArgs...), candidateChunks)...)
 	if err != nil {
 		return nil, err
 	}
@@ -362,14 +415,17 @@ func (ix *Index) coverageMatch(fts string, plain []string, need int, opts Search
 	var order []string
 	for rows.Next() {
 		var r Result
-		var text string
+		var text, more string
 		var auto int
 		var mtime int64
-		if err := rows.Scan(&r.SessionID, &r.Score, &r.Snippet, &r.Title, &text, &r.Path, &r.CWD, &auto, &mtime); err != nil {
+		if err := rows.Scan(&r.SessionID, &r.Score, &r.Snippet, &r.Title, &text, &more, &r.Path, &r.CWD, &auto, &mtime); err != nil {
 			return nil, err
 		}
+		// The main text must cover enough of the query. Overflow (the rest
+		// of a long exchange) only qualifies a chunk when it completes every
+		// term: deep text stays findable without letting loose matches in.
 		cov := coverage(plain, r.Title+" "+text)
-		if cov < need {
+		if cov < need && (more == "" || coverage(plain, r.Title+" "+text+" "+more) < len(plain)) {
 			continue
 		}
 		cur, seen := best[r.SessionID]

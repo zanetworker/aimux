@@ -24,6 +24,7 @@ type sessionsIndexQuery struct {
 	Mode             string
 	Limit            int
 	IncludeAutomated bool
+	Dir              string // applied inside the query, before the limit
 }
 
 // sessionsSearchDeps are optional; with Index unset, `sessions <query>` keeps
@@ -63,18 +64,10 @@ func envEmbedder() search.Embedder {
 // runIndexedQuery prints index results, or opens the picked one.
 func runIndexedQuery(cmd *cobra.Command, query string, q sessionsIndexQuery, dir string, listMode, danger bool,
 	picker sessionsPickerFn, resume sessionsResumeFn) error {
+	q.Dir = dir
 	rs, semantic, err := sessionsSearch.Index(query, q)
 	if err != nil {
 		return err
-	}
-	if dir != "" {
-		var scoped []search.Result
-		for _, r := range rs {
-			if r.CWD == dir || strings.HasPrefix(r.CWD, strings.TrimRight(dir, "/")+"/") {
-				scoped = append(scoped, r)
-			}
-		}
-		rs = scoped
 	}
 	if len(rs) == 0 {
 		return fmt.Errorf("no sessions matching %q", query)
@@ -195,7 +188,7 @@ func resultsAsSessions(rs []search.Result) []history.Session {
 func DefaultIndexSearch(query string, q sessionsIndexQuery) ([]search.Result, bool, error) {
 	svc := search.DefaultService(os.Stderr)
 	svc.DBPath = searchDBPath()
-	return svc.Query(context.Background(), query, search.QueryOpts{Mode: q.Mode, Limit: q.Limit, IncludeAutomated: q.IncludeAutomated})
+	return svc.Query(context.Background(), query, search.QueryOpts{Mode: q.Mode, Limit: q.Limit, IncludeAutomated: q.IncludeAutomated, Dir: q.Dir})
 }
 
 // LiveIDsVia lists session ids of agents running in a terminal right now.
@@ -288,17 +281,41 @@ var searchDBPath = search.DefaultPath
 // runSearchPicker opens the split-view picker (fzf), then focuses or resumes
 // the chosen session. It refreshes the index once up front; keystrokes then
 // query the index without re-scanning session files.
-func runSearchPicker(cmd *cobra.Command, query string, danger bool, resume sessionsResumeFn) error {
-	dir, err := os.MkdirTemp("", "aimux-picker-")
+// applyPickerFlags carries --mode, --include-automated and --dir into the
+// picker. Without an explicit --mode the picker ranks hybrid when embeddings
+// are available, keyword otherwise; "semantic" maps to hybrid.
+func applyPickerFlags(st sessions.PickerState, mode string, modeSet, includeAutomated bool, dir string, haveEmbedder bool) error {
+	pick := "keyword"
+	if haveEmbedder {
+		pick = "hybrid"
+	}
+	if modeSet {
+		pick = "hybrid"
+		if mode == search.ModeKeyword {
+			pick = "keyword"
+		}
+	}
+	if err := st.SetMode(pick); err != nil {
+		return err
+	}
+	if includeAutomated && !st.IncludeAutomated() {
+		if err := st.Toggle("automated"); err != nil {
+			return err
+		}
+	}
+	return st.SetScope(dir)
+}
+
+func runSearchPicker(cmd *cobra.Command, query string, danger bool, resume sessionsResumeFn,
+	mode string, modeSet, includeAutomated bool, dir string) error {
+	stateDir, err := os.MkdirTemp("", "aimux-picker-")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	st := sessions.PickerState{Dir: dir}
-	if envEmbedder() != nil {
-		// semantic+keyword ranks best when embeddings are available;
-		// ^s switches to plain keyword
-		_ = st.SetMode("hybrid")
+	defer func() { _ = os.RemoveAll(stateDir) }()
+	st := sessions.PickerState{Dir: stateDir}
+	if err := applyPickerFlags(st, mode, modeSet, includeAutomated, dir, envEmbedder() != nil); err != nil {
+		return err
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -397,7 +414,7 @@ func newSessionsRowsCmd() *cobra.Command {
 				return err
 			}
 			defer func() { _ = ix.Close() }()
-			opts := search.SearchOpts{Limit: 200, IncludeAutomated: st.IncludeAutomated()}
+			opts := search.SearchOpts{Limit: 200, IncludeAutomated: st.IncludeAutomated(), Dir: st.Scope()}
 			q := pickerArg(args)
 			var rs []search.Result
 			switch {
@@ -408,7 +425,7 @@ func newSessionsRowsCmd() *cobra.Command {
 				if inner := envEmbedder(); inner != nil {
 					e = ix.CachedEmbedder(inner)
 				}
-				rs, _, err = ix.Hybrid(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated}, e)
+				rs, _, err = ix.Hybrid(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir}, e)
 			default:
 				opts.Limit = 100
 				rs, err = ix.Search(q, opts)

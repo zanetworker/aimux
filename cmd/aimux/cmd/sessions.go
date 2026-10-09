@@ -39,7 +39,7 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 			}
 			// Interactive: the split-view picker over the index (browse or query).
 			if sessionsSearch.Index != nil && !listMode && !exportMode && !jsonOutput && IsInteractive() && hasFzf() {
-				return runSearchPicker(cmd, query, danger, resume)
+				return runSearchPicker(cmd, query, danger, resume, mode, cmd.Flags().Changed("mode"), includeAutomated, dir)
 			}
 			// Indexed search spans all projects unless --dir narrows it.
 			if len(args) > 0 && args[0] != "" && sessionsSearch.Index != nil {

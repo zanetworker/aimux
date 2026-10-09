@@ -148,3 +148,37 @@ func TestQuietCancel(t *testing.T) {
 		t.Error("nil stays nil")
 	}
 }
+
+func TestPickerRows_RespectScope(t *testing.T) {
+	st := pickerEnv(t)
+	if err := st.SetScope("/Users/me/elsewhere"); err != nil {
+		t.Fatal(err)
+	}
+	if out := runSub(t, "rows", "--", ""); strings.Contains(out, "43ce13d4") {
+		t.Errorf("browse ignored the --dir scope:\n%s", out)
+	}
+	if out := runSub(t, "rows", "--", "deck"); strings.Contains(out, "43ce13d4") {
+		t.Errorf("query ignored the --dir scope:\n%s", out)
+	}
+	if err := st.SetScope("/Users/me/research"); err != nil {
+		t.Fatal(err)
+	}
+	if out := runSub(t, "rows", "--", "deck"); !strings.Contains(out, "43ce13d4") {
+		t.Errorf("in-scope session missing:\n%s", out)
+	}
+}
+
+func TestPickerStateFromFlags(t *testing.T) {
+	st := sessions.PickerState{Dir: t.TempDir()}
+	if err := applyPickerFlags(st, "keyword", true, true, "/Users/me/research", true); err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode() != "keyword" || !st.IncludeAutomated() || st.Scope() != "/Users/me/research" {
+		t.Errorf("flags not applied: mode=%s automated=%v scope=%q", st.Mode(), st.IncludeAutomated(), st.Scope())
+	}
+	// semantic in the picker is hybrid; an unset --mode keeps the default
+	st2 := sessions.PickerState{Dir: t.TempDir()}
+	if err := applyPickerFlags(st2, "semantic", true, false, "", true); err != nil || st2.Mode() != "hybrid" {
+		t.Errorf("semantic flag: mode=%s err=%v", st2.Mode(), err)
+	}
+}

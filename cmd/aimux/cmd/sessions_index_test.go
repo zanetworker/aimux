@@ -117,18 +117,18 @@ func TestSessionsQuery_Flags(t *testing.T) {
 	}
 }
 
-func TestSessionsQuery_DirScopesResults(t *testing.T) {
-	deps := sessionsSearchDeps{Index: func(string, sessionsIndexQuery) ([]search.Result, bool, error) {
+func TestSessionsQuery_DirIsPassedIntoTheQuery(t *testing.T) {
+	var got sessionsIndexQuery
+	deps := sessionsSearchDeps{Index: func(_ string, q sessionsIndexQuery) ([]search.Result, bool, error) {
+		got = q
 		return fakeHits(), false, nil
 	}}
-	jsonOutput = true
-	defer func() { jsonOutput = false }()
-	out, err := runSessions(t, deps, nil, "x", "--list", "--dir", "/Users/me/research")
-	if err != nil {
+	if _, err := runSessions(t, deps, nil, "x", "--list", "--dir", "/Users/me/research"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "a97a2cca") || !strings.Contains(out, "43ce13d4") {
-		t.Errorf("--dir did not scope results:\n%s", out)
+	// the index scopes before applying the limit (see search.TestSearch_DirScopesBeforeLimit)
+	if got.Dir != "/Users/me/research" {
+		t.Errorf("Dir = %q, want it passed to the index", got.Dir)
 	}
 }
 

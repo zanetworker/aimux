@@ -25,10 +25,12 @@ func (ix *Index) Recent(opts SearchOpts) ([]Result, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 200
 	}
+	dirSQL, dirArgs := dirClause(opts.Dir)
+	// #nosec G202 -- dirSQL is a fixed clause; values are bound
 	rows, err := ix.db.Query(`
-		SELECT id, path, cwd, title, automated, mtime FROM sessions
-		WHERE automated = 0 OR ?
-		ORDER BY mtime DESC LIMIT ?`, boolInt(opts.IncludeAutomated), opts.Limit)
+		SELECT s.id, s.path, s.cwd, s.title, s.automated, s.mtime FROM sessions s
+		WHERE (s.automated = 0 OR ?)`+dirSQL+`
+		ORDER BY s.mtime DESC LIMIT ?`, append(append([]any{boolInt(opts.IncludeAutomated)}, dirArgs...), opts.Limit)...)
 	if err != nil {
 		return nil, err
 	}

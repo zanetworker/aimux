@@ -144,6 +144,7 @@ type SessionTitlesGeneratedMsg struct {
 type SessionContentSearchResultMsg struct {
 	Matches []history.ContentMatch
 	Query   string
+	Err     error // search failed (distinct from zero matches)
 }
 
 // cleanupItem represents a session flagged for potential cleanup.
@@ -203,6 +204,9 @@ type SessionsView struct {
 	contentSearchIDs   map[string]string // session ID -> snippet (nil = no active search)
 	contentSearchRank  map[string]int    // session ID -> position in the ranked results
 	contentSearchFn    func(query string) ([]history.ContentMatch, error)
+	contentSearchQuery string // query of the search in flight or shown; "" = none
+	contentSearchBusy  bool
+	contentSearchErr   string
 
 	// Pinned count (starred sessions at the top of visible list)
 	pinnedCount int
@@ -554,6 +558,14 @@ func (v *SessionsView) handleContentSearchKey(msg tea.KeyMsg) tea.Cmd {
 // HandleContentSearchResult processes the async content search results.
 // Called from app.go when a SessionContentSearchResultMsg is received.
 func (v *SessionsView) HandleContentSearchResult(msg SessionContentSearchResultMsg) {
+	if msg.Query != v.contentSearchQuery {
+		return // a newer search started, or the search was cleared
+	}
+	v.contentSearchBusy = false
+	if msg.Err != nil {
+		v.contentSearchErr = msg.Err.Error()
+		return
+	}
 	v.contentSearchIDs = make(map[string]string)
 	v.contentSearchRank = make(map[string]int)
 	for i, m := range msg.Matches {
@@ -570,24 +582,24 @@ func (v *SessionsView) SetContentSearch(fn func(query string) ([]history.Content
 	v.contentSearchFn = fn
 }
 
-// contentSearchCmd runs the injected content search off the UI goroutine.
+// contentSearchCmd runs the injected content search off the UI goroutine and
+// marks it as the active search, so results of earlier searches are dropped.
 func (v *SessionsView) contentSearchCmd(query string) tea.Cmd {
+	v.contentSearchQuery, v.contentSearchBusy, v.contentSearchErr = query, true, ""
 	search := v.contentSearchFn
 	return func() tea.Msg {
 		if search == nil {
 			return SessionContentSearchResultMsg{Query: query}
 		}
 		matches, err := search(query)
-		if err != nil {
-			return SessionContentSearchResultMsg{Query: query}
-		}
-		return SessionContentSearchResultMsg{Matches: matches, Query: query}
+		return SessionContentSearchResultMsg{Matches: matches, Query: query, Err: err}
 	}
 }
 
 func (v *SessionsView) clearContentSearch() {
 	v.contentSearchIDs = nil
 	v.contentSearchRank = nil
+	v.contentSearchQuery, v.contentSearchBusy, v.contentSearchErr = "", false, ""
 }
 
 // ContentSearchSnippet returns the snippet for a session if one exists from
@@ -896,7 +908,7 @@ func (v *SessionsView) visibleSessions() []history.Session {
 
 	// Content search results keep the search ranking (best match first);
 	// metadata-only matches from the / filter follow in their usual order.
-	if v.contentSearchRank != nil {
+	if len(v.contentSearchRank) > 0 {
 		sort.SliceStable(result, func(i, j int) bool {
 			ri, iok := v.contentSearchRank[result[i].ID]
 			rj, jok := v.contentSearchRank[result[j].ID]
@@ -1093,6 +1105,13 @@ func (v *SessionsView) View() string {
 		count := len(v.contentSearchIDs)
 		label := fmt.Sprintf(" CONTENT SEARCH: %d matches ", count)
 		b.WriteString("  " + searchBadge.Render(label) + sessDimStyle.Render("  Esc:clear") + "\n\n")
+	}
+
+	switch {
+	case v.contentSearchBusy:
+		b.WriteString("  " + sessDimStyle.Render("searching content…") + "\n\n")
+	case v.contentSearchErr != "":
+		b.WriteString("  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render("content search failed: "+v.contentSearchErr) + "\n\n")
 	}
 
 	if v.cleanupMode {

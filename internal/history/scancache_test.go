@@ -3,6 +3,7 @@ package history
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -13,14 +14,17 @@ func withScanCache(t *testing.T) (cacheFile string, scans *int) {
 	t.Helper()
 	cacheFile = filepath.Join(t.TempDir(), "session-scan.gob")
 	origFile, origScan := scanCacheFile, scanSessionFn
-	n := 0
+	n := new(int)
+	var mu sync.Mutex // scanAll parses files concurrently
 	scanCacheFile = func(string, bool) string { return cacheFile }
 	scanSessionFn = func(id, path, project string) (Session, error) {
-		n++
+		mu.Lock()
+		*n++
+		mu.Unlock()
 		return origScan(id, path, project)
 	}
 	t.Cleanup(func() { scanCacheFile, scanSessionFn = origFile, origScan })
-	return cacheFile, &n
+	return cacheFile, n
 }
 
 func scanFixture(t *testing.T) (root, projDir string) {
@@ -152,5 +156,31 @@ func TestDiscover_NoCacheForCustomProjectsDirByDefault(t *testing.T) {
 	}
 	if f := scanCacheFile("", true); f == "" {
 		t.Error("default projects dir should be cached")
+	}
+}
+
+func TestDiscover_ScanCacheFollowsSymlinkTargets(t *testing.T) {
+	withScanCache(t)
+	root := t.TempDir()
+	projDir := filepath.Join(root, "-Users-test-linked")
+	store := t.TempDir()
+	if err := os.MkdirAll(projDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2026, 3, 6, 10, 0, 0, 0, time.UTC)
+	minimalSession(t, store, "lll", "before", ts)
+	if err := os.Symlink(filepath.Join(store, "lll.jsonl"), filepath.Join(projDir, "lll.jsonl")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	if _, err := Discover(DiscoverOpts{}, root); err != nil {
+		t.Fatal(err)
+	}
+	// rewrite the target only; the link itself is untouched
+	minimalSession(t, store, "lll", "after", ts)
+	future := time.Now().Add(time.Minute)
+	_ = os.Chtimes(filepath.Join(store, "lll.jsonl"), future, future)
+	got, _ := Discover(DiscoverOpts{}, root)
+	if len(got) != 1 || got[0].FirstPrompt != "after" {
+		t.Errorf("symlinked session served stale from cache: %+v", got)
 	}
 }

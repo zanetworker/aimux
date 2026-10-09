@@ -134,6 +134,10 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 			}
 
 			info, err := e.Info()
+			if err == nil && e.Type()&os.ModeSymlink != 0 {
+				// key the cache on the target: that is what gets parsed
+				info, err = os.Stat(filepath.Join(dirPath, e.Name()))
+			}
 			if err != nil {
 				continue
 			}

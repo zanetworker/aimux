@@ -237,3 +237,27 @@ func TestFzfArgs_DebouncesTyping(t *testing.T) {
 		t.Error("typing should debounce: fzf cancels the pending reload on the next keystroke")
 	}
 }
+
+func TestPickerState_Scope(t *testing.T) {
+	st := PickerState{Dir: t.TempDir()}
+	if st.Scope() != "" {
+		t.Errorf("default scope = %q, want all projects", st.Scope())
+	}
+	if err := st.SetScope("/Users/me/research"); err != nil {
+		t.Fatal(err)
+	}
+	if got := (PickerState{Dir: st.Dir}).Scope(); got != "/Users/me/research" {
+		t.Errorf("Scope() = %q", got)
+	}
+	if err := (PickerState{}).SetScope("/x"); err == nil {
+		t.Error("SetScope without a state dir: want error")
+	}
+}
+
+func TestFzfExit(t *testing.T) {
+	for code, want := range map[int]bool{130: true, 1: true, 2: false, 127: false} {
+		if got := fzfCancelled(code); got != want {
+			t.Errorf("fzfCancelled(%d) = %v, want %v", code, got, want)
+		}
+	}
+}

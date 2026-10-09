@@ -1,6 +1,8 @@
 package views
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,5 +107,74 @@ func TestFilterKey_DeepSearchUsesIndexAndRanksContentFirst(t *testing.T) {
 	got := visibleIDs(v)
 	if len(got) < 2 || got[0] != "old" {
 		t.Errorf("visible = %v, want the ranked content match first, then metadata matches", got)
+	}
+}
+
+func startSearch(v *SessionsView, q string) tea.Cmd {
+	v.contentSearchMode = true
+	v.contentSearchInput.SetValue(q)
+	return v.handleContentSearchKey(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func TestContentSearch_IgnoresStaleResults(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(rankedSessions())
+	v.SetContentSearch(func(q string) ([]history.ContentMatch, error) {
+		if q == "first" {
+			return []history.ContentMatch{{SessionID: "old"}}, nil
+		}
+		return []history.ContentMatch{{SessionID: "recent"}}, nil
+	})
+	first := startSearch(v, "first")
+	second := startSearch(v, "second")
+	v.HandleContentSearchResult(second().(SessionContentSearchResultMsg))
+	v.HandleContentSearchResult(first().(SessionContentSearchResultMsg)) // arrives late
+	if got := visibleIDs(v); len(got) != 1 || got[0] != "recent" {
+		t.Errorf("visible = %v, want only the newer search's result", got)
+	}
+
+	// a result arriving after the search was cleared is dropped too
+	late := startSearch(v, "first")
+	v.clearContentSearch()
+	v.HandleContentSearchResult(late().(SessionContentSearchResultMsg))
+	if v.HasActiveContentSearch() {
+		t.Error("cleared search was revived by a late result")
+	}
+}
+
+func TestContentSearch_FailureIsShownNotEmpty(t *testing.T) {
+	v := NewSessionsView()
+	v.SetSessions(rankedSessions())
+	v.SetSize(160, 40)
+	v.SetContentSearch(func(string) ([]history.ContentMatch, error) {
+		return nil, errors.New("index locked")
+	})
+	cmd := startSearch(v, "token")
+	if !strings.Contains(v.View(), "searching content") {
+		t.Error("while a search runs the view should say so")
+	}
+	v.HandleContentSearchResult(cmd().(SessionContentSearchResultMsg))
+	out := v.View()
+	if !strings.Contains(out, "content search failed") || !strings.Contains(out, "index locked") {
+		t.Errorf("failure not shown:\n%s", out)
+	}
+}
+
+func TestFilter_NoContentMatchesKeepsSelectedSort(t *testing.T) {
+	v := NewSessionsView()
+	sessions := rankedSessions()
+	for i := range sessions {
+		sessions[i].FirstPrompt = "shared word"
+	}
+	// shuffled input: the expected order must come from sorting, not from input order
+	v.SetSessions([]history.Session{sessions[2], sessions[0], sessions[1]})
+	v.SetContentSearch(func(string) ([]history.ContentMatch, error) { return nil, nil })
+	v.filterMode = true
+	v.filterInput.SetValue("shared")
+	cmd := v.handleFilterKey(tea.KeyMsg{Type: tea.KeyEnter})
+	v.HandleContentSearchResult(cmd().(SessionContentSearchResultMsg))
+	got := visibleIDs(v)
+	if len(got) != 3 || got[0] != "recent" || got[2] != "old" {
+		t.Errorf("visible = %v, want metadata matches in the normal (newest first) order", got)
 	}
 }

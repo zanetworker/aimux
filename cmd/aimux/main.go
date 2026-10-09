@@ -258,7 +258,8 @@ func createPluginExecutor() *plugin.Executor {
 // sessionContentSearch adapts the shared search service to the TUI's
 // content-search shape, keeping the ranking (best match first).
 func sessionContentSearch(q string) ([]history.ContentMatch, error) {
-	rs, _, err := search.DefaultService(nil).Query(context.Background(), q, search.QueryOpts{Limit: 50})
+	// generous limit: the TUI may narrow the results to the current project
+	rs, _, err := search.DefaultService(nil).Query(context.Background(), q, search.QueryOpts{Limit: 500})
 	if err != nil {
 		return nil, err
 	}
