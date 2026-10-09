@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -77,7 +78,7 @@ func Open(path string) (*Index, error) {
 
 // schemaVersion is bumped whenever the table layout or tokenizer changes; an index with an
 // older version is dropped and rebuilt from the session files on next Update.
-const schemaVersion = 4
+const schemaVersion = 5
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -210,7 +211,13 @@ func writeDoc(tx *sql.Tx, d Doc) error {
 	if err != nil {
 		return nil // vanished between extract and write; next Update removes it
 	}
-	if err := deleteSession(tx, d.SessionID); err != nil {
+	// keep the session's vectors: they are matched to chunk text by hash, so a
+	// growing session only re-embeds what changed. Drop vectors for chunks
+	// that no longer exist.
+	if _, err := tx.Exec(`DELETE FROM chunks WHERE session_id = ?`, d.SessionID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM embeddings WHERE session_id = ? AND seq >= ?`, d.SessionID, len(d.Chunks)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO sessions (id, path, cwd, title, first_prompt, automated, mtime, size)
@@ -227,8 +234,7 @@ func writeDoc(tx *sql.Tx, d Doc) error {
 	return nil
 }
 
-// deleteSession drops a session's row, chunks and vectors (stale vectors would
-// otherwise point at chunk numbers that now hold different text).
+// deleteSession drops a session's row, chunks and vectors (its file is gone).
 func deleteSession(tx *sql.Tx, id string) error {
 	for _, q := range []string{
 		`DELETE FROM chunks WHERE session_id = ?`,
@@ -260,33 +266,76 @@ func minCoverage(n int) int {
 }
 
 // Search returns sessions matching query, best first, ranked by the BM25
-// score of their best chunk. Chunks covering fewer than minCoverage terms are
-// dropped; if no session qualifies, up to
-// AnyTermCap sessions matching any term are returned. Titles naming the query
-// are lifted to the top (tierByTitle).
+// score of their best chunk. Text in double quotes must appear as an exact
+// phrase (an unclosed quote is a phrase up to the end, its last word a
+// prefix, so it works while typing). Free words: chunks covering fewer than
+// minCoverage of them are dropped; if no session qualifies, up to AnyTermCap
+// sessions matching any word are returned. Titles naming the query are lifted
+// to the top (tierByTitle).
 func (ix *Index) Search(query string, opts SearchOpts) ([]Result, error) {
-	terms := queryTerms(query)
-	if len(terms) == 0 {
+	phrases, rest := parsePhrases(query)
+	terms := queryTerms(rest)
+	if len(terms) == 0 && len(phrases) == 0 {
 		return nil, nil
 	}
 	if opts.Limit <= 0 {
 		opts.Limit = 20
 	}
-	rs, err := ix.coverageMatch(terms, minCoverage(len(terms)), opts)
+	fts := strings.Join(terms, " OR ")
+	if len(phrases) > 0 {
+		fts = strings.Join(phrases, " AND ")
+		if len(terms) > 0 {
+			fts += " AND (" + strings.Join(terms, " OR ") + ")"
+		}
+	}
+	prefixes := termPrefixes(terms)
+	rs, err := ix.coverageMatch(fts, prefixes, minCoverage(len(terms)), opts)
 	if err != nil {
 		return nil, err
 	}
 	if len(rs) == 0 && len(terms) > 1 {
-		if rs, err = ix.coverageMatch(terms, 1, opts); err != nil {
+		if rs, err = ix.coverageMatch(fts, prefixes, 1, opts); err != nil {
 			return nil, err
 		}
 		opts.Limit = min(opts.Limit, AnyTermCap)
 	}
-	rs = tierByTitle(rs, query, terms)
+	rs = tierByTitle(rs, query, append(terms, queryTerms(strings.Join(phraseWords(phrases), " "))...))
 	if len(rs) > opts.Limit {
 		rs = rs[:opts.Limit]
 	}
 	return rs, nil
+}
+
+var quoted = regexp.MustCompile(`"([^"]*)("|$)`)
+
+// parsePhrases pulls "quoted text" out of q as FTS5 phrase expressions and
+// returns them with the remaining free text.
+func parsePhrases(q string) (phrases []string, rest string) {
+	rest = quoted.ReplaceAllStringFunc(q, func(m string) string {
+		sub := quoted.FindStringSubmatch(m)
+		words := normalizeWords(sub[1])
+		if words == "" {
+			return " "
+		}
+		p := `"` + words + `"`
+		if sub[2] == "" { // unclosed: still typing, last word is a prefix
+			p += "*"
+		}
+		phrases = append(phrases, p)
+		return " "
+	})
+	return phrases, rest
+}
+
+// HasPhrase reports whether q asks for an exact phrase.
+func HasPhrase(q string) bool { return strings.Contains(q, `"`) }
+
+func phraseWords(phrases []string) []string {
+	out := make([]string, len(phrases))
+	for i, p := range phrases {
+		out[i] = strings.Trim(p, `"*`)
+	}
+	return out
 }
 
 type scored struct {
@@ -294,20 +343,19 @@ type scored struct {
 	coverage int
 }
 
-func (ix *Index) coverageMatch(terms []string, need int, opts SearchOpts) ([]Result, error) {
+func (ix *Index) coverageMatch(fts string, plain []string, need int, opts SearchOpts) ([]Result, error) {
 	rows, err := ix.db.Query(`
 		SELECT c.session_id, bm25(chunks, 0, 0, 0, 0, 10.0, 1.0) AS score,
 		       snippet(chunks, -1, '[', ']', '…', 14), c.title, c.text,
 		       s.path, s.cwd, s.automated, s.mtime
 		FROM chunks c JOIN sessions s ON s.id = c.session_id
 		WHERE chunks MATCH ? AND (s.automated = 0 OR ?)
-		ORDER BY score LIMIT ?`, strings.Join(terms, " OR "), boolInt(opts.IncludeAutomated), candidateChunks)
+		ORDER BY score LIMIT ?`, fts, boolInt(opts.IncludeAutomated), candidateChunks)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	plain := termPrefixes(terms)
 	best := map[string]*scored{}
 	var order []string
 	for rows.Next() {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -362,7 +363,7 @@ func runSearchPicker(cmd *cobra.Command, query string, danger bool, resume sessi
 	}
 	id, err := sessions.SearchPick(self, query, st, background)
 	if err != nil {
-		return err
+		return quietCancel(err)
 	}
 	title, modTime := "", time.Time{}
 	if ix, err := search.Open(searchDBPath()); err == nil {
@@ -379,6 +380,14 @@ func runSearchPicker(cmd *cobra.Command, query string, danger bool, resume sessi
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), msg)
 	}
 	return nil
+}
+
+// quietCancel treats leaving the picker without a choice as success.
+func quietCancel(err error) error {
+	if errors.Is(err, sessions.ErrCancelled) {
+		return nil
+	}
+	return err
 }
 
 // RunPickerHelper runs the commands fzf calls on every keystroke

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,5 +133,18 @@ func TestRunPickerHelper_FastPath(t *testing.T) {
 		if handled, _ := RunPickerHelper(args, &out); handled {
 			t.Errorf("%v must take the normal path", args)
 		}
+	}
+}
+
+func TestQuietCancel(t *testing.T) {
+	if err := quietCancel(sessions.ErrCancelled); err != nil {
+		t.Errorf("leaving the picker should not be an error, got %v", err)
+	}
+	boom := errors.New("fzf missing")
+	if err := quietCancel(boom); err != boom {
+		t.Errorf("real errors must pass through, got %v", err)
+	}
+	if quietCancel(nil) != nil {
+		t.Error("nil stays nil")
 	}
 }

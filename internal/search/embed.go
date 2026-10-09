@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"math"
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,7 +28,7 @@ type Embedder interface {
 
 const embeddingsSchema = `
 CREATE TABLE IF NOT EXISTS embeddings (
-	session_id TEXT, seq INTEGER, model TEXT, vec BLOB,
+	session_id TEXT, seq INTEGER, model TEXT, vec BLOB, hash TEXT,
 	PRIMARY KEY (session_id, seq, model)
 );
 CREATE TABLE IF NOT EXISTS query_vectors (
@@ -75,6 +77,13 @@ type pendingEmbedding struct {
 	sid  string
 	seq  int
 	text string
+	hash string // of text: a vector is redone only when its text changes
+}
+
+func textHash(s string) string {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 // EmbedMissing embeds, for every non-automated session, each chunk's prose and
@@ -108,8 +117,8 @@ func (ix *Index) EmbedMissing(ctx context.Context, e Embedder, batchSize int) (i
 			return done, err
 		}
 		for i, p := range batch {
-			if _, err := tx.Exec(`INSERT OR REPLACE INTO embeddings (session_id, seq, model, vec) VALUES (?, ?, ?, ?)`,
-				p.sid, p.seq, e.Model(), encodeVec(normalize(vecs[i]))); err != nil {
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO embeddings (session_id, seq, model, vec, hash) VALUES (?, ?, ?, ?, ?)`,
+				p.sid, p.seq, e.Model(), encodeVec(normalize(vecs[i])), p.hash); err != nil {
 				_ = tx.Rollback()
 				return done, err
 			}
@@ -123,12 +132,35 @@ func (ix *Index) EmbedMissing(ctx context.Context, e Embedder, batchSize int) (i
 }
 
 func (ix *Index) pendingEmbeddings(ctx context.Context, model string) ([]pendingEmbedding, error) {
+	have := map[string]string{} // "sid|seq" -> hash of the text that was embedded
+	rows, err := ix.db.QueryContext(ctx, `SELECT session_id, seq, hash FROM embeddings WHERE model = ?`, model)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var sid string
+		var seq int
+		var hash sql.NullString
+		if err := rows.Scan(&sid, &seq, &hash); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		have[sid+"|"+strconv.Itoa(seq)] = hash.String
+	}
+	_ = rows.Close()
+
 	var todo []pendingEmbedding
-	rows, err := ix.db.QueryContext(ctx, `
+	want := func(p pendingEmbedding) {
+		p.hash = textHash(p.text)
+		if have[p.sid+"|"+strconv.Itoa(p.seq)] != p.hash {
+			todo = append(todo, p)
+		}
+	}
+
+	rows, err = ix.db.QueryContext(ctx, `
 		SELECT c.session_id, c.seq, s.title, c.prose, c.text
 		FROM chunks c JOIN sessions s ON s.id = c.session_id
-		WHERE s.automated = 0 AND NOT EXISTS (
-			SELECT 1 FROM embeddings v WHERE v.session_id = c.session_id AND v.seq = c.seq AND v.model = ?)`, model)
+		WHERE s.automated = 0`)
 	if err != nil {
 		return nil, err
 	}
@@ -143,16 +175,14 @@ func (ix *Index) pendingEmbeddings(ctx context.Context, model string) ([]pending
 			prose = text
 		}
 		p.text = title + "\n" + prose
-		todo = append(todo, p)
+		want(p)
 	}
 	_ = rows.Close()
 
 	rows, err = ix.db.QueryContext(ctx, `
 		SELECT s.id, s.title, s.first_prompt,
 		       (SELECT group_concat(prompt, ' | ') FROM chunks c WHERE c.session_id = s.id)
-		FROM sessions s
-		WHERE s.automated = 0 AND NOT EXISTS (
-			SELECT 1 FROM embeddings v WHERE v.session_id = s.id AND v.seq = ? AND v.model = ?)`, summarySeq, model)
+		FROM sessions s WHERE s.automated = 0`)
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +193,7 @@ func (ix *Index) pendingEmbeddings(ctx context.Context, model string) ([]pending
 		if err := rows.Scan(&sid, &title, &first, &prompts); err != nil {
 			return nil, err
 		}
-		todo = append(todo, pendingEmbedding{sid: sid, seq: summarySeq,
-			text: truncate(title+"\n"+first+"\n"+prompts.String, 6000)})
+		want(pendingEmbedding{sid: sid, seq: summarySeq, text: truncate(title+"\n"+first+"\n"+prompts.String, 6000)})
 	}
 	return todo, rows.Err()
 }
@@ -296,7 +325,7 @@ func (ix *Index) Hybrid(ctx context.Context, query string, opts SearchOpts, e Em
 	if opts.Limit <= 0 {
 		opts.Limit = 20
 	}
-	if e == nil {
+	if e == nil || HasPhrase(query) { // quotes mean exact: no semantic neighbours
 		rs, err = ix.Search(query, opts)
 		return rs, false, err
 	}

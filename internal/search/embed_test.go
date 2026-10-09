@@ -337,3 +337,51 @@ func TestCachedEmbedder_ReusesQueryVectors(t *testing.T) {
 		t.Error("want the inner error")
 	}
 }
+
+func TestEmbeddings_SurviveSessionGrowth(t *testing.T) {
+	root := t.TempDir()
+	lines := []string{
+		human("/p", "why do agents need service accounts"), reply("for short-lived tokens"),
+		human("/p", "where do the tokens come from"), reply("the gateway mints them"),
+		human("/p", "how long do they live"), reply("minutes"),
+	}
+	p := put(t, root, "-p", sidAccounts, lines...)
+	ix := openIndex(t)
+	e := &conceptEmbedder{}
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.EmbedMissing(context.Background(), e, 50); err != nil {
+		t.Fatal(err)
+	}
+
+	grow := func(extra ...string) {
+		t.Helper()
+		lines = append(lines, extra...)
+		put(t, root, "-p", sidAccounts, lines...)
+		future := time.Now().Add(time.Duration(len(lines)) * time.Minute)
+		_ = os.Chtimes(p, future, future)
+		if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// the assistant adds to the last exchange: only that exchange changed
+	grow(reply("and they are bound to one sandbox"))
+	if n, _ := ix.PendingEmbeddings(e.Model()); n != 1 {
+		t.Errorf("after reply: %d pending, want 1 (the changed exchange only)", n)
+	}
+	if _, err := ix.EmbedMissing(context.Background(), e, 50); err != nil {
+		t.Fatal(err)
+	}
+
+	// a new question: one new exchange plus the session summary (its prompts changed)
+	grow(human("/p", "can vault trust them"))
+	if n, _ := ix.PendingEmbeddings(e.Model()); n != 2 {
+		t.Errorf("after new prompt: %d pending, want 2", n)
+	}
+	// unchanged exchanges stay searchable semantically meanwhile
+	if rs, _ := ix.Semantic(context.Background(), "identity credentials", SearchOpts{Limit: 5}, e); len(rs) != 1 {
+		t.Errorf("session lost its vectors while growing: %v", ids(rs))
+	}
+}

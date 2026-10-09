@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -389,5 +390,46 @@ func TestSearch_CoverageBeatsRepetition(t *testing.T) {
 	got := ids(mustSearch(t, ix, "keycloak registration race token exchange"))
 	if len(got) == 0 || got[0] != "aaaaaaaa-2222-0000-0000-000000000001" {
 		t.Errorf("got %v: the chunk covering all 5 terms must beat one repeating 3", got)
+	}
+}
+
+func TestSearch_QuotedPhraseIsExact(t *testing.T) {
+	root := t.TempDir()
+	put(t, root, "-p", "aaaaaaaa-3333-0000-0000-000000000001", human("/p", "the token exchange fails behind keycloak"))
+	put(t, root, "-p", "bbbbbbbb-3333-0000-0000-000000000002", human("/p", "exchange the old token for a new one"))
+	put(t, root, "-p", "cccccccc-3333-0000-0000-000000000003", human("/p", "token exchange with service accounts on kubernetes"))
+	ix := openIndex(t)
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ids(mustSearch(t, ix, `"token exchange"`))
+	if len(got) != 2 || strings.Contains(strings.Join(got, ","), "bbbbbbbb") {
+		t.Errorf(`"token exchange" = %v, want the two sessions with the exact phrase`, got)
+	}
+	// phrase plus a free word: phrase required, word must match too
+	if got := ids(mustSearch(t, ix, `"token exchange" kubernetes`)); len(got) != 1 || got[0] != "cccccccc-3333-0000-0000-000000000003" {
+		t.Errorf("phrase + word = %v", got)
+	}
+	// unclosed quote while typing still means a phrase
+	if got := ids(mustSearch(t, ix, `"token exch`)); len(got) != 2 {
+		t.Errorf("unclosed quote = %v, want 2", got)
+	}
+	// a phrase nobody wrote finds nothing, rather than falling back to loose matches
+	if got := ids(mustSearch(t, ix, `"exchange token"`)); len(got) != 0 {
+		t.Errorf("reversed phrase = %v, want none", got)
+	}
+}
+
+func TestHybrid_QuotedQueryStaysExact(t *testing.T) {
+	ix, _ := indexed(t)
+	e := &conceptEmbedder{}
+	if _, err := ix.EmbedMissing(context.Background(), e, 10); err != nil {
+		t.Fatal(err)
+	}
+	// "presentation" would pull the deck session in semantically; quotes forbid that
+	rs, used, err := ix.Hybrid(context.Background(), `"presentation"`, SearchOpts{Limit: 5}, e)
+	if err != nil || used || len(rs) != 0 {
+		t.Errorf("quoted query: used=%v got=%v err=%v, want exact keyword only (none)", used, ids(rs), err)
 	}
 }
