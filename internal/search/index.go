@@ -365,7 +365,11 @@ func (ix *Index) Search(query string, opts SearchOpts) ([]Result, error) {
 	// text the query already read.
 	marks := termPrefixes(append(terms, queryTerms(strings.Join(phraseWords(phrases), " "))...))
 	for i := range rs {
-		rs[i].Snippet = oneLine(makeSnippet(rs[i].matchText, marks, 14), 240)
+		snip := makeSnippet(rs[i].matchText, marks, 14)
+		if !strings.Contains(snip, "[") && matchesAny(rs[i].Title, marks) {
+			snip = makeSnippet(rs[i].Title, marks, 14) // matched on the title only
+		}
+		rs[i].Snippet = oneLine(snip, 240)
 		rs[i].matchText = ""
 	}
 	return rs, nil

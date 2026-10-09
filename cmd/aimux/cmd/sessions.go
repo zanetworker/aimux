@@ -79,8 +79,8 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 				if s.IsSubagent {
 					continue
 				}
-				if s.Automated && !includeAutomated {
-					continue // cron/SDK runs, same default as search and the TUI
+				if s.Automated && !includeAutomated && !exportMode {
+					continue // cron/SDK runs hidden when browsing; exports stay complete
 				}
 				filtered = append(filtered, s)
 			}

@@ -241,3 +241,31 @@ func TestSessionsList_HidesAutomatedUntilH(t *testing.T) {
 		t.Errorf("after H: %v, want all 3", got)
 	}
 }
+
+func TestSessionsList_HiddenCountMatchesWhatIsHidden(t *testing.T) {
+	v := NewSessionsView()
+	sessions := rankedSessions()
+	sessions[1].Automated = true
+	sessions[1].FirstPrompt = "nightly report token"
+	v.SetSessions(sessions)
+	v.SetSize(160, 40)
+	// a search that shows the automated session must not also call it hidden
+	v.filterText = "token"
+	if strings.Contains(v.View(), "automated, H to show") {
+		t.Error("header counts a visible (matching) automated session as hidden")
+	}
+}
+
+func TestSessionsList_HRevealsAutomatedPastOtherFilters(t *testing.T) {
+	v := NewSessionsView()
+	sessions := rankedSessions()
+	sessions[0].Automated = true
+	sessions[0].FirstPrompt = "YOU ARE A SESSION ANALYZER. Analyze"
+	sessions[1].Automated = true
+	sessions[1].TurnCount, sessions[1].CostUSD = 1, 0 // near-empty
+	v.SetSessions(sessions)
+	v.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("H")})
+	if got := visibleIDs(v); len(got) != 3 {
+		t.Errorf("after H: %v, want all 3 (H promises to show automated sessions)", got)
+	}
+}

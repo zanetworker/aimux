@@ -205,3 +205,21 @@ func TestSessionsList_HidesAutomatedUnlessAsked(t *testing.T) {
 		t.Errorf("--include-automated should show it:\n%s", out)
 	}
 }
+
+func TestSessionsExport_KeepsAutomatedSessions(t *testing.T) {
+	sessions := fakeSessions()
+	sessions[1].Automated = true
+	var stdout bytes.Buffer
+	c := newSessionsCmd(func(history.DiscoverOpts, string) ([]history.Session, error) { return sessions, nil }, nil, nil)
+	rootCmd.SetOut(&stdout)
+	rootCmd.SetErr(&bytes.Buffer{})
+	rootCmd.SetArgs([]string{"sessions", "--export", "--all"})
+	rootCmd.AddCommand(c)
+	defer rootCmd.RemoveCommand(c)
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "sess-002") {
+		t.Errorf("--export must keep automated sessions (evaluation pipelines rely on the full set):\n%s", stdout.String())
+	}
+}

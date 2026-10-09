@@ -66,3 +66,19 @@ func TestScanSession_SetsAutomated(t *testing.T) {
 		t.Error("interactive session marked automated")
 	}
 }
+
+func TestScanSession_FindsFirstPromptPastLineTen(t *testing.T) {
+	dir := t.TempDir()
+	var lines []map[string]any
+	for i := 0; i < 12; i++ { // metadata lines before any human message
+		lines = append(lines, map[string]any{"type": "system", "cwd": "/Users/me/r", "entrypoint": "cli"})
+	}
+	lines = append(lines, userLine("cli", "/Users/me/r", "YOU ARE A SESSION ANALYZER. Analyze this"))
+	s, err := scanSession("late", writeLines(t, dir, "late", lines...), "/p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(s.FirstPrompt, "YOU ARE A SESSION ANALYZER") || !s.Automated {
+		t.Errorf("FirstPrompt=%q Automated=%v; a first prompt after line 10 must still be found and classified", s.FirstPrompt, s.Automated)
+	}
+}

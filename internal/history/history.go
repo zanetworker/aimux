@@ -248,7 +248,9 @@ func scanSession(id, filePath, project string) (Session, error) {
 		raw := make(json.RawMessage, len(scanner.Bytes()))
 		copy(raw, scanner.Bytes())
 
-		extractPrompt := lineCount <= 10
+		// keep looking until the first prompt is found: it also decides
+		// IsAutomated, which must agree with the search index
+		extractPrompt := s.FirstPrompt == ""
 		entryTS, m, isHuman, role, content := parseSessionLine(raw, &s, extractPrompt)
 		if m != "" {
 			model = m
