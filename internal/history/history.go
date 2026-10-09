@@ -74,6 +74,7 @@ type DiscoverOpts struct {
 // Currently supports Claude sessions in ~/.claude/projects/.
 // The projectsDir parameter overrides the default location (for testing).
 func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
+	cachePath := scanCacheFile(projectsDir, projectsDir == "")
 	if projectsDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -87,7 +88,7 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 		return nil, nil
 	}
 
-	var sessions []Session
+	var jobs []scanJob
 
 	// Find all project directories
 	projectDirs, err := os.ReadDir(projectsDir)
@@ -132,26 +133,51 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 				continue
 			}
 
-			sessionID := strings.TrimSuffix(e.Name(), ".jsonl")
-			filePath := filepath.Join(dirPath, e.Name())
-
-			s, err := scanSession(sessionID, filePath, projectPath)
+			info, err := e.Info()
 			if err != nil {
-				continue // skip unreadable sessions
+				continue
 			}
-
-			// Load sidecar metadata
-			meta := LoadMeta(filePath)
-			s.Annotation = meta.Annotation
-			s.Note = meta.Note
-			s.Tags = meta.Tags
-			s.Title = meta.Title
-			s.Starred = meta.Starred
-			s.ROIMultiplier = meta.ROIMultiplier
-			s.TaskType = meta.TaskType
-
-			sessions = append(sessions, s)
+			jobs = append(jobs, scanJob{
+				id:      strings.TrimSuffix(e.Name(), ".jsonl"),
+				path:    filepath.Join(dirPath, e.Name()),
+				project: projectPath,
+				modTime: info.ModTime().UnixNano(),
+				size:    info.Size(),
+			})
 		}
+	}
+
+	// Parse only new or changed files (unreadable ones are skipped).
+	cache := loadScanCache(cachePath)
+	sessions, cacheChanged := scanAll(jobs, cache)
+	if cache != nil {
+		if encodedDir == "" { // a full scan: forget files that are gone
+			seen := make(map[string]bool, len(jobs))
+			for _, j := range jobs {
+				seen[j.path] = true
+			}
+			for path := range cache {
+				if !seen[path] {
+					delete(cache, path)
+					cacheChanged = true
+				}
+			}
+		}
+		if cacheChanged {
+			_ = saveScanCache(cachePath, cache) // a failed save only costs a rescan
+		}
+	}
+
+	// Sidecar metadata is always read fresh: it changes without the session file.
+	for i := range sessions {
+		meta := LoadMeta(sessions[i].FilePath)
+		sessions[i].Annotation = meta.Annotation
+		sessions[i].Note = meta.Note
+		sessions[i].Tags = meta.Tags
+		sessions[i].Title = meta.Title
+		sessions[i].Starred = meta.Starred
+		sessions[i].ROIMultiplier = meta.ROIMultiplier
+		sessions[i].TaskType = meta.TaskType
 	}
 
 	// Auto-infer ROI from skill-usage data for sessions without user-set values
