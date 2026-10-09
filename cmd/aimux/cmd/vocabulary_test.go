@@ -48,7 +48,6 @@ func registerTestCommands(t *testing.T) func() {
 	deps := Deps{
 		Discover:         func() ([]agent.Agent, error) { return nil, nil },
 		DiscoverSessions: func(_ history.DiscoverOpts, _ string) ([]history.Session, error) { return nil, nil },
-		SearchContent:    func(_, _ string) ([]history.ContentMatch, error) { return nil, nil },
 		PickSession:      func(_ []history.Session) (history.Session, error) { return history.Session{}, nil },
 		ResumeBuilder:    func(_ string, _ bool) (string, string, error) { return "", "", nil },
 		ResumeExec:       func(_ string, _ bool) {},

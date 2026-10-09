@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSearchQuality scores ranking against a private set of queries with
@@ -83,10 +84,13 @@ func TestSearchQuality(t *testing.T) {
 		}
 		var top1, top5, total int
 		var mrr float64
+		var elapsed time.Duration
 		var misses []string
 		for _, c := range qs {
 			rank := 0
+			start := time.Now()
 			rs := run(c.text)
+			elapsed += time.Since(start)
 			total += len(rs)
 			for i, r := range rs {
 				if strings.HasPrefix(r.SessionID, c.want) {
@@ -108,7 +112,7 @@ func TestSearchQuality(t *testing.T) {
 			}
 		}
 		n := float64(len(qs))
-		t.Logf("%-8s top1 %2d/%d  top5 %2d/%d  MRR %.2f  avg results %.1f", mode, top1, len(qs), top5, len(qs), mrr/n, float64(total)/n)
+		t.Logf("%-8s top1 %2d/%d  top5 %2d/%d  MRR %.2f  avg results %5.1f  avg %v/query", mode, top1, len(qs), top5, len(qs), mrr/n, float64(total)/n, (elapsed / time.Duration(len(qs))).Round(time.Millisecond))
 		for _, m := range misses {
 			t.Log(m)
 		}

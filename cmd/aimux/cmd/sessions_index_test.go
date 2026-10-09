@@ -3,8 +3,6 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +31,7 @@ func runSessions(t *testing.T, deps sessionsSearchDeps, discoverCalled *bool, ar
 			*discoverCalled = true
 		}
 		return fakeSessions(), nil
-	}, nil, nil, nil)
+	}, nil, nil)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs(append([]string{"sessions"}, args...))
@@ -170,34 +168,6 @@ func TestOpenSession_FocusesLivePaneBeforeResuming(t *testing.T) {
 	openSession("43ce13d4", "", true, nil, resume)
 	if resumed != "43ce13d4" {
 		t.Error("nil focus func: want plain resume")
-	}
-}
-
-func TestRunIndexSearch_EndToEnd(t *testing.T) {
-	projects := t.TempDir()
-	dir := filepath.Join(projects, "-Users-me-research")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	line := `{"type":"user","entrypoint":"cli","cwd":"/Users/me/research","message":{"content":"add hypotheses to Ying's deck"}}`
-	if err := os.WriteFile(filepath.Join(dir, "43ce13d4.jsonl"), []byte(line+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	db := filepath.Join(t.TempDir(), "search.db")
-	var stderr bytes.Buffer
-
-	rs, semantic, err := runIndexSearch(projects, db, nil, &stderr, "Ying deck", sessionsIndexQuery{Mode: "hybrid", Limit: 5})
-	if err != nil || len(rs) != 1 || rs[0].SessionID != "43ce13d4" {
-		t.Fatalf("got %+v semantic=%v err=%v", rs, semantic, err)
-	}
-	if semantic {
-		t.Error("no embedder: semantic must be false")
-	}
-	if !strings.Contains(stderr.String(), "OPENAI_API_KEY") {
-		t.Errorf("hybrid without key should say why it fell back, stderr=%q", stderr.String())
-	}
-	if _, _, err := runIndexSearch(projects, db, nil, &stderr, "Ying", sessionsIndexQuery{Mode: "semantic", Limit: 5}); err == nil {
-		t.Error("semantic mode without embedder: want error")
 	}
 }
 

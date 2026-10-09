@@ -14,11 +14,10 @@ import (
 )
 
 type sessionsDiscoverFn func(opts history.DiscoverOpts, dir string) ([]history.Session, error)
-type sessionsSearchFn func(query, dir string) ([]history.ContentMatch, error)
 type sessionsPickerFn func(sessions []history.Session) (history.Session, error)
 type sessionsResumeFn func(sessionID string, danger bool)
 
-func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker sessionsPickerFn, resume sessionsResumeFn) *cobra.Command {
+func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume sessionsResumeFn) *cobra.Command {
 	var dir string
 	var listMode, exportMode, danger, allProjects bool
 	var limit int
@@ -75,7 +74,7 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 			}
 
 			if query != "" {
-				filtered = searchSessionsFiltered(filtered, query, search)
+				filtered = searchSessionsFiltered(filtered, query)
 				if len(filtered) == 0 {
 					return fmt.Errorf("no sessions matching %q", query)
 				}
@@ -149,36 +148,11 @@ func hasFzf() bool {
 	return err == nil
 }
 
-func searchSessionsFiltered(allSessions []history.Session, query string, searchFn sessionsSearchFn) []history.Session {
-	matched := history.FilterByPrompt(allSessions, query)
-	if len(matched) >= 3 {
-		return matched
-	}
-	if searchFn == nil {
-		return matched
-	}
-	contentMatches, err := searchFn(query, "")
-	if err != nil {
-		return matched
-	}
-	seen := make(map[string]bool)
-	for _, s := range matched {
-		seen[s.ID] = true
-	}
-	sessionByID := make(map[string]history.Session)
-	for _, s := range allSessions {
-		sessionByID[s.ID] = s
-	}
-	for _, cm := range contentMatches {
-		if seen[cm.SessionID] {
-			continue
-		}
-		if s, ok := sessionByID[cm.SessionID]; ok {
-			matched = append(matched, s)
-			seen[cm.SessionID] = true
-		}
-	}
-	return matched
+// searchSessionsFiltered is the fallback when no search index is wired:
+// a metadata match on titles and prompts. Content search goes through
+// internal/search.
+func searchSessionsFiltered(allSessions []history.Session, query string) []history.Session {
+	return history.FilterByPrompt(allSessions, query)
 }
 
 func printSessionsTableCobra(cmd *cobra.Command, sessions []history.Session, fields []string) {

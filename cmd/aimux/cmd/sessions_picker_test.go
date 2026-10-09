@@ -50,7 +50,7 @@ func pickerEnv(t *testing.T) sessions.PickerState {
 func runSub(t *testing.T, args ...string) string {
 	t.Helper()
 	var out bytes.Buffer
-	c := newSessionsCmd(nil, nil, nil, nil)
+	c := newSessionsCmd(nil, nil, nil)
 	rootCmd.SetOut(&out)
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs(append([]string{"sessions"}, args...))

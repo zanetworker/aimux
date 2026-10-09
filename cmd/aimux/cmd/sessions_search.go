@@ -37,19 +37,13 @@ type sessionsSearchDeps struct {
 // sessionsSearch is set by RegisterAll.
 var sessionsSearch sessionsSearchDeps
 
-var searchModes = []string{"hybrid", "keyword", "semantic"}
-
-// embedInlineMax is the most chunks a search embeds on the spot; larger
-// backlogs are left to `aimux sessions index` so a search stays fast.
-const embedInlineMax = 64
-
 func validMode(m string) error {
-	for _, v := range searchModes {
+	for _, v := range search.Modes {
 		if m == v {
 			return nil
 		}
 	}
-	return fmt.Errorf("invalid --mode %q: valid values are %s", m, strings.Join(searchModes, ", "))
+	return fmt.Errorf("invalid --mode %q: valid values are %s", m, strings.Join(search.Modes, ", "))
 }
 
 func claudeProjectsDir() string {
@@ -64,47 +58,6 @@ func envEmbedder() search.Embedder {
 		return e
 	}
 	return nil
-}
-
-// runIndexSearch refreshes the index (only changed files are re-read) and
-// queries it. Notes about degraded modes go to stderr.
-func runIndexSearch(projectsDir, dbPath string, e search.Embedder, stderr io.Writer, query string, q sessionsIndexQuery) ([]search.Result, bool, error) {
-	ix, err := search.Open(dbPath)
-	if err != nil {
-		return nil, false, fmt.Errorf("open search index: %w", err)
-	}
-	defer func() { _ = ix.Close() }()
-	if _, err := ix.Update(projectsDir, search.DefaultExtractOpts()); err != nil {
-		return nil, false, fmt.Errorf("update search index: %w", err)
-	}
-	opts := search.SearchOpts{Limit: q.Limit, IncludeAutomated: q.IncludeAutomated}
-	ctx := context.Background()
-
-	if q.Mode == "keyword" {
-		rs, err := ix.Search(query, opts)
-		return rs, false, err
-	}
-	if e == nil {
-		if q.Mode == "semantic" {
-			return nil, false, fmt.Errorf("semantic search needs OPENAI_API_KEY; use --mode keyword")
-		}
-		_, _ = fmt.Fprintln(stderr, "note: keyword ranking only (set OPENAI_API_KEY for semantic ranking)")
-		rs, err := ix.Search(query, opts)
-		return rs, false, err
-	}
-	if n, err := ix.PendingEmbeddings(e.Model()); err == nil && n > 0 {
-		if n <= embedInlineMax {
-			_, _ = ix.EmbedMissing(ctx, e, embedInlineMax)
-		} else {
-			_, _ = fmt.Fprintf(stderr, "note: %d new chunks not embedded yet; run `aimux sessions index` for full semantic coverage\n", n)
-		}
-	}
-	e = ix.CachedEmbedder(e)
-	if q.Mode == "semantic" {
-		rs, err := ix.Semantic(ctx, query, opts, e)
-		return rs, err == nil, err
-	}
-	return ix.Hybrid(ctx, query, opts, e)
 }
 
 // runIndexedQuery prints index results, or opens the picked one.
@@ -238,10 +191,11 @@ func resultsAsSessions(rs []search.Result) []history.Session {
 	return out
 }
 
-// DefaultIndexSearch searches ~/.aimux/search.db over ~/.claude/projects,
-// using OpenAI embeddings when OPENAI_API_KEY is set.
+// DefaultIndexSearch runs a query through the shared search service.
 func DefaultIndexSearch(query string, q sessionsIndexQuery) ([]search.Result, bool, error) {
-	return runIndexSearch(claudeProjectsDir(), searchDBPath(), envEmbedder(), os.Stderr, query, q)
+	svc := search.DefaultService(os.Stderr)
+	svc.DBPath = searchDBPath()
+	return svc.Query(context.Background(), query, search.QueryOpts{Mode: q.Mode, Limit: q.Limit, IncludeAutomated: q.IncludeAutomated})
 }
 
 // LiveIDsVia lists session ids of agents running in a terminal right now.

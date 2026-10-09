@@ -15,7 +15,6 @@ import (
 type Deps struct {
 	Discover         func() ([]agent.Agent, error)
 	DiscoverSessions func(opts history.DiscoverOpts, dir string) ([]history.Session, error)
-	SearchContent    func(query, dir string) ([]history.ContentMatch, error)
 	PickSession      func(sessions []history.Session) (history.Session, error)
 	ResumeBuilder    func(sessionID string, danger bool) (command, workDir string, err error)
 	ResumeExec       func(sessionID string, danger bool)
@@ -40,7 +39,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newAgentsCmd(d.Discover))
 	sessionsSearch = sessionsSearchDeps{Index: d.IndexSearch, FocusLive: d.FocusLive, LiveIDs: d.LiveIDs}
-	rootCmd.AddCommand(newSessionsCmd(d.DiscoverSessions, d.SearchContent, d.PickSession, d.ResumeExec))
+	rootCmd.AddCommand(newSessionsCmd(d.DiscoverSessions, d.PickSession, d.ResumeExec))
 	rootCmd.AddCommand(newResumeCmd(d.ResumeBuilder, d.ResumeExec, d.SkipPermissions))
 	rootCmd.AddCommand(newSpawnCmd(d.Providers, d.SpawnAgent, d.DefaultMode, d.Environments, d.AgentConfigs))
 	rootCmd.AddCommand(newEnvironmentsCmd(d.Environments))

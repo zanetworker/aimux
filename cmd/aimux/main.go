@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,6 +26,7 @@ import (
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/plugin"
 	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/sessions"
 	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/tasks"
@@ -64,6 +66,7 @@ func main() {
 		debuglog.Log("aimux starting (version %s)", version)
 
 		app := tui.NewApp()
+		app.SetSessionSearch(sessionContentSearch)
 		if exec := createPluginExecutor(); exec != nil {
 			app.SetPluginExecutor(exec)
 		}
@@ -93,6 +96,7 @@ func main() {
 		debuglog.Log("aimux starting (version %s)", version)
 
 		app := tui.NewApp()
+		app.SetSessionSearch(sessionContentSearch)
 		if exec := createPluginExecutor(); exec != nil {
 			app.SetPluginExecutor(exec)
 		}
@@ -118,7 +122,6 @@ func main() {
 	deps := cmd.Deps{
 		Discover:         disco.Discover,
 		DiscoverSessions: history.Discover,
-		SearchContent:    history.SearchContent,
 		PickSession:      sessions.PickSession,
 		ResumeBuilder:    buildResumeBuilder(cfg),
 		ResumeExec:       resumeSession,
@@ -252,6 +255,20 @@ func createPluginExecutor() *plugin.Executor {
 	return plugin.NewExecutor(allPlugins)
 }
 
+// sessionContentSearch adapts the shared search service to the TUI's
+// content-search shape, keeping the ranking (best match first).
+func sessionContentSearch(q string) ([]history.ContentMatch, error) {
+	rs, _, err := search.DefaultService(nil).Query(context.Background(), q, search.QueryOpts{Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]history.ContentMatch, len(rs))
+	for i, r := range rs {
+		out[i] = history.ContentMatch{SessionID: r.SessionID, FilePath: r.Path, Snippet: r.Snippet}
+	}
+	return out, nil
+}
+
 func createWebServer(port int) *web.Server {
 	cfg, _ := config.Load(config.DefaultPath())
 	// Merge project-local config if running from a project directory
@@ -287,6 +304,10 @@ func createWebServer(port int) *web.Server {
 		s.SetComposeEngine(composeEngine)
 	}
 	s.SetDiscoverFunc(disco.Discover)
+	s.SetSearchFunc(func(q string) ([]search.Result, error) {
+		rs, _, err := search.DefaultService(nil).Query(context.Background(), q, search.QueryOpts{Limit: 50})
+		return rs, err
+	})
 	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
 		p := disco.ProviderFor(opts.Provider)
 		if p == nil {

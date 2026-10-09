@@ -201,6 +201,8 @@ type SessionsView struct {
 	contentSearchMode  bool
 	contentSearchInput TextInput
 	contentSearchIDs   map[string]string // session ID -> snippet (nil = no active search)
+	contentSearchRank  map[string]int    // session ID -> position in the ranked results
+	contentSearchFn    func(query string) ([]history.ContentMatch, error)
 
 	// Pinned count (starred sessions at the top of visible list)
 	pinnedCount int
@@ -388,7 +390,7 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			}
 			if v.filterText != "" || v.contentSearchIDs != nil {
 				v.filterText = ""
-				v.contentSearchIDs = nil
+				v.clearContentSearch()
 				v.cursor = 0
 				return nil
 			}
@@ -409,7 +411,7 @@ func (v *SessionsView) Update(msg tea.Msg) tea.Cmd {
 			v.filterInput.Reset()
 			// Clear previous search results so new search starts fresh
 			v.filterText = ""
-			v.contentSearchIDs = nil
+			v.clearContentSearch()
 		case "enter":
 			s := v.SelectedSession()
 			if s != nil && s.Resumable {
@@ -539,13 +541,7 @@ func (v *SessionsView) handleContentSearchKey(msg tea.KeyMsg) tea.Cmd {
 		if query == "" {
 			return nil
 		}
-		return func() tea.Msg {
-			matches, err := history.SearchContentWithSnippets(query, "")
-			if err != nil {
-				return SessionContentSearchResultMsg{Query: query}
-			}
-			return SessionContentSearchResultMsg{Matches: matches, Query: query}
-		}
+		return v.contentSearchCmd(query)
 	case "esc":
 		v.contentSearchMode = false
 		v.contentSearchInput.Reset()
@@ -559,11 +555,39 @@ func (v *SessionsView) handleContentSearchKey(msg tea.KeyMsg) tea.Cmd {
 // Called from app.go when a SessionContentSearchResultMsg is received.
 func (v *SessionsView) HandleContentSearchResult(msg SessionContentSearchResultMsg) {
 	v.contentSearchIDs = make(map[string]string)
-	for _, m := range msg.Matches {
+	v.contentSearchRank = make(map[string]int)
+	for i, m := range msg.Matches {
 		v.contentSearchIDs[m.SessionID] = m.Snippet
+		v.contentSearchRank[m.SessionID] = i
 	}
 	v.cursor = 0
 	v.previewLogs = nil
+}
+
+// SetContentSearch wires content search (the shared internal/search index);
+// matches arrive best first.
+func (v *SessionsView) SetContentSearch(fn func(query string) ([]history.ContentMatch, error)) {
+	v.contentSearchFn = fn
+}
+
+// contentSearchCmd runs the injected content search off the UI goroutine.
+func (v *SessionsView) contentSearchCmd(query string) tea.Cmd {
+	search := v.contentSearchFn
+	return func() tea.Msg {
+		if search == nil {
+			return SessionContentSearchResultMsg{Query: query}
+		}
+		matches, err := search(query)
+		if err != nil {
+			return SessionContentSearchResultMsg{Query: query}
+		}
+		return SessionContentSearchResultMsg{Matches: matches, Query: query}
+	}
+}
+
+func (v *SessionsView) clearContentSearch() {
+	v.contentSearchIDs = nil
+	v.contentSearchRank = nil
 }
 
 // ContentSearchSnippet returns the snippet for a session if one exists from
@@ -606,13 +630,7 @@ func (v *SessionsView) handleFilterKey(msg tea.KeyMsg) tea.Cmd {
 		// Also kick off async content search for deep matching
 		query := v.filterInput.Value()
 		if query != "" {
-			return func() tea.Msg {
-				matches, err := history.SearchContentWithSnippets(query, "")
-				if err != nil {
-					return SessionContentSearchResultMsg{Query: query}
-				}
-				return SessionContentSearchResultMsg{Matches: matches, Query: query}
-			}
+			return v.contentSearchCmd(query)
 		}
 	case "esc":
 		v.filterMode = false
@@ -874,6 +892,21 @@ func (v *SessionsView) visibleSessions() []history.Session {
 			}
 		}
 		result = append(result, s)
+	}
+
+	// Content search results keep the search ranking (best match first);
+	// metadata-only matches from the / filter follow in their usual order.
+	if v.contentSearchRank != nil {
+		sort.SliceStable(result, func(i, j int) bool {
+			ri, iok := v.contentSearchRank[result[i].ID]
+			rj, jok := v.contentSearchRank[result[j].ID]
+			if iok != jok {
+				return iok
+			}
+			return ri < rj
+		})
+		v.pinnedCount = 0
+		return result
 	}
 
 	// Split into starred and unstarred, sort each independently

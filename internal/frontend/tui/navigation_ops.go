@@ -446,6 +446,11 @@ func (a *App) SetPluginExecutor(exec *plugin.Executor) {
 	a.pluginExec = exec
 }
 
+// SetSessionSearch wires the sessions view's content search (internal/search).
+func (a *App) SetSessionSearch(fn func(query string) ([]history.ContentMatch, error)) {
+	a.sessionsView.SetContentSearch(fn)
+}
+
 // openPlugins opens the plugin picker or goes directly to a single plugin.
 
 func (a App) openPlugins() (tea.Model, tea.Cmd) {
