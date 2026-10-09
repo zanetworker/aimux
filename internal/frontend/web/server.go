@@ -15,6 +15,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/plugin"
+	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -33,6 +34,7 @@ type Server struct {
 	cfg              config.Config
 	taskProvider     tasks.Provider
 	recentDirsFn     func(int) []RecentDirInfo
+	searchFn         func(query string) ([]search.Result, error)
 	composeEngine    *aimuxcompose.Engine
 	sessionStore     *controller.SessionStore
 	otelStore        controller.OTELLookup
@@ -126,6 +128,11 @@ type RecentDirInfo struct {
 	Path    string `json:"path"`
 	Display string `json:"display"`
 	Age     string `json:"age"`
+}
+
+// SetSearchFunc wires session search (the shared internal/search index).
+func (s *Server) SetSearchFunc(fn func(query string) ([]search.Result, error)) {
+	s.searchFn = fn
 }
 
 func (s *Server) SetRecentDirsFunc(fn func(int) []RecentDirInfo) {

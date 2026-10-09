@@ -39,7 +39,7 @@ func TestSessionsCmd_JSON(t *testing.T) {
 	sessions := fakeSessions()
 	c := newSessionsCmd(
 		func(opts history.DiscoverOpts, dir string) ([]history.Session, error) { return sessions, nil },
-		nil, nil, nil,
+		nil, nil,
 	)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -72,7 +72,7 @@ func TestSessionsCmd_Limit(t *testing.T) {
 	sessions := fakeSessions()
 	c := newSessionsCmd(
 		func(opts history.DiscoverOpts, dir string) ([]history.Session, error) { return sessions, nil },
-		nil, nil, nil,
+		nil, nil,
 	)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -113,7 +113,7 @@ func TestSessionsCmd_AllFlag(t *testing.T) {
 			capturedDir = opts.Dir
 			return sessions, nil
 		},
-		nil, nil, nil,
+		nil, nil,
 	)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -139,7 +139,7 @@ func TestSessionsCmd_DefaultScopesToCWD(t *testing.T) {
 			capturedDir = opts.Dir
 			return sessions, nil
 		},
-		nil, nil, nil,
+		nil, nil,
 	)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -162,7 +162,7 @@ func TestSessionsCmd_Export(t *testing.T) {
 	sessions := fakeSessions()
 	c := newSessionsCmd(
 		func(opts history.DiscoverOpts, dir string) ([]history.Session, error) { return sessions, nil },
-		nil, nil, nil,
+		nil, nil,
 	)
 	rootCmd.SetOut(&stdout)
 	rootCmd.SetErr(&bytes.Buffer{})

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,15 +15,15 @@ import (
 )
 
 type sessionsDiscoverFn func(opts history.DiscoverOpts, dir string) ([]history.Session, error)
-type sessionsSearchFn func(query, dir string) ([]history.ContentMatch, error)
 type sessionsPickerFn func(sessions []history.Session) (history.Session, error)
 type sessionsResumeFn func(sessionID string, danger bool)
 
-func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker sessionsPickerFn, resume sessionsResumeFn) *cobra.Command {
+func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume sessionsResumeFn) *cobra.Command {
 	var dir string
 	var listMode, exportMode, danger, allProjects bool
 	var limit int
-	var fields string
+	var fields, mode string
+	var includeAutomated bool
 
 	cmd := &cobra.Command{
 		Use:   "sessions [query]",
@@ -29,6 +31,33 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 		Long:  "List, search, and resume past AI agent sessions. Scopes to the current directory by default; use --all for all projects.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validMode(mode); err != nil {
+				return err
+			}
+			query := ""
+			if len(args) > 0 {
+				query = args[0]
+			}
+			// The index compares absolute cwd paths, so resolve "--dir ." etc.
+			if dir != "" && sessionsSearch.Index != nil {
+				abs, err := filepath.Abs(dir)
+				if err != nil {
+					return fmt.Errorf("resolve --dir %q: %w", dir, err)
+				}
+				dir = abs
+			}
+			// Interactive: the split-view picker over the index (browse or query).
+			if sessionsSearch.Index != nil && !listMode && !exportMode && !jsonOutput && IsInteractive() && hasFzf() {
+				return runSearchPicker(cmd, query, danger, resume, mode, cmd.Flags().Changed("mode"), includeAutomated, dir)
+			}
+			// Indexed search spans all projects unless --dir narrows it.
+			if len(args) > 0 && args[0] != "" && sessionsSearch.Index != nil {
+				q := sessionsIndexQuery{Mode: mode, Limit: limit, IncludeAutomated: includeAutomated}
+				if q.Limit == 0 {
+					q.Limit = 20
+				}
+				return runIndexedQuery(cmd, args[0], q, dir, listMode, danger, picker, resume)
+			}
 			if !allProjects && dir == "" {
 				cwd, _ := os.Getwd()
 				dir = controller.DefaultSessionDir("", cwd)
@@ -53,13 +82,8 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 				filtered = append(filtered, s)
 			}
 
-			query := ""
-			if len(args) > 0 {
-				query = args[0]
-			}
-
 			if query != "" {
-				filtered = searchSessionsFiltered(filtered, query, search)
+				filtered = searchSessionsFiltered(filtered, query)
 				if len(filtered) == 0 {
 					return fmt.Errorf("no sessions matching %q", query)
 				}
@@ -120,40 +144,24 @@ func newSessionsCmd(discover sessionsDiscoverFn, search sessionsSearchFn, picker
 	cmd.Flags().BoolVarP(&danger, "danger", "d", false, "Resume with --dangerously-skip-permissions")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Max sessions to show (0 = all)")
 	cmd.Flags().StringVar(&fields, "fields", "", "Comma-separated fields: id,provider,project,age,turns,cost,annotation,prompt,tags")
+	cmd.Flags().StringVar(&mode, "mode", "hybrid", "Query ranking: hybrid, keyword or semantic")
+	cmd.Flags().BoolVar(&includeAutomated, "include-automated", false, "Include automated (SDK/cron) sessions in query results")
 	cmd.AddCommand(newSessionsStarCmd(discover))
+	cmd.AddCommand(newSessionsIndexCmd())
+	cmd.AddCommand(newSessionsRowsCmd(), newSessionsPreviewCmd(), newSessionsPickerToggleCmd())
 	return cmd
 }
 
-func searchSessionsFiltered(allSessions []history.Session, query string, searchFn sessionsSearchFn) []history.Session {
-	matched := history.FilterByPrompt(allSessions, query)
-	if len(matched) >= 3 {
-		return matched
-	}
-	if searchFn == nil {
-		return matched
-	}
-	contentMatches, err := searchFn(query, "")
-	if err != nil {
-		return matched
-	}
-	seen := make(map[string]bool)
-	for _, s := range matched {
-		seen[s.ID] = true
-	}
-	sessionByID := make(map[string]history.Session)
-	for _, s := range allSessions {
-		sessionByID[s.ID] = s
-	}
-	for _, cm := range contentMatches {
-		if seen[cm.SessionID] {
-			continue
-		}
-		if s, ok := sessionByID[cm.SessionID]; ok {
-			matched = append(matched, s)
-			seen[cm.SessionID] = true
-		}
-	}
-	return matched
+func hasFzf() bool {
+	_, err := exec.LookPath("fzf")
+	return err == nil
+}
+
+// searchSessionsFiltered is the fallback when no search index is wired:
+// a metadata match on titles and prompts. Content search goes through
+// internal/search.
+func searchSessionsFiltered(allSessions []history.Session, query string) []history.Session {
+	return history.FilterByPrompt(allSessions, query)
 }
 
 func printSessionsTableCobra(cmd *cobra.Command, sessions []history.Session, fields []string) {

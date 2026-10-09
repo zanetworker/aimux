@@ -521,17 +521,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	matches, err := history.SearchContentWithSnippets(q, "")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	results := make([]map[string]string, len(matches))
-	for i, m := range matches {
-		results[i] = map[string]string{
-			"sessionId": m.SessionID,
-			"filePath":  m.FilePath,
-			"snippet":   m.Snippet,
+	results := []map[string]string{}
+	if s.searchFn != nil {
+		matches, err := s.searchFn(q)
+		if err != nil {
+			debuglog.Log("session search %q: %v", q, err) // details stay in the log
+			http.Error(w, "search failed", http.StatusInternalServerError)
+			return
+		}
+		// best match first; field names are what the web frontend reads
+		for _, m := range matches {
+			results = append(results, map[string]string{
+				"sessionId": m.SessionID,
+				"filePath":  m.Path,
+				"snippet":   m.Snippet,
+				"title":     m.Title,
+				"project":   m.CWD,
+			})
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -24,7 +24,7 @@ func TestSessionsStarCmd_ToggleOn(t *testing.T) {
 		return sessions, nil
 	}
 
-	parent := newSessionsCmd(discover, nil, nil, nil)
+	parent := newSessionsCmd(discover, nil, nil)
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -65,7 +65,7 @@ func TestSessionsStarCmd_ToggleOff(t *testing.T) {
 		return sessions, nil
 	}
 
-	parent := newSessionsCmd(discover, nil, nil, nil)
+	parent := newSessionsCmd(discover, nil, nil)
 	var buf bytes.Buffer
 	rootCmd.SetOut(&buf)
 	rootCmd.SetErr(&bytes.Buffer{})
@@ -91,7 +91,7 @@ func TestSessionsStarCmd_NotFound(t *testing.T) {
 		return []history.Session{{ID: "deadbeef"}}, nil
 	}
 
-	parent := newSessionsCmd(discover, nil, nil, nil)
+	parent := newSessionsCmd(discover, nil, nil)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"sessions", "star", "zzz-no-match"})
@@ -116,7 +116,7 @@ func TestSessionsStarCmd_AmbiguousPrefix(t *testing.T) {
 		return sessions, nil
 	}
 
-	parent := newSessionsCmd(discover, nil, nil, nil)
+	parent := newSessionsCmd(discover, nil, nil)
 	rootCmd.SetOut(&bytes.Buffer{})
 	rootCmd.SetErr(&bytes.Buffer{})
 	rootCmd.SetArgs([]string{"sessions", "star", "abc"})
