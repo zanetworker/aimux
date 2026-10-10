@@ -41,7 +41,26 @@ type Result struct {
 type SearchOpts struct {
 	Limit            int
 	IncludeAutomated bool
-	Dir              string // only sessions whose cwd is Dir or below it
+	Dir              string   // only sessions whose cwd is Dir or below it
+	IDs              []string // only these sessions; nil = no restriction, empty = none
+}
+
+// scopeClause restricts a query joined to sessions as "s" to opts.Dir and
+// opts.IDs, returning the SQL fragment and its arguments.
+func scopeClause(opts SearchOpts) (string, []any) {
+	sqlText, args := dirClause(opts.Dir)
+	if opts.IDs != nil {
+		if len(opts.IDs) == 0 {
+			return sqlText + ` AND 0`, args
+		}
+		marks := make([]string, len(opts.IDs))
+		for i, id := range opts.IDs {
+			marks[i] = "?"
+			args = append(args, id)
+		}
+		sqlText += ` AND s.id IN (` + strings.Join(marks, ",") + `)`
+	}
+	return sqlText, args
 }
 
 // dirClause restricts a query joined to sessions as "s" to opts.Dir.
@@ -413,7 +432,7 @@ type scored struct {
 }
 
 func (ix *Index) coverageMatch(fts string, plain []string, need int, opts SearchOpts) ([]Result, error) {
-	dirSQL, dirArgs := dirClause(opts.Dir)
+	dirSQL, dirArgs := scopeClause(opts)
 	// #nosec G202 -- dirSQL is a fixed clause; values are bound
 	rows, err := ix.db.Query(`
 		SELECT c.session_id, bm25(chunks, 0, 0, 0, 0, 10.0, 1.0, `+overflowWeightSQL()+`) AS score,

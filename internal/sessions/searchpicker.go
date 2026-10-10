@@ -49,6 +49,15 @@ func (s PickerState) IncludeAutomated() bool {
 	return err == nil
 }
 
+// LiveOnly reports whether the picker shows only live sessions (default no).
+func (s PickerState) LiveOnly() bool {
+	if s.Dir == "" {
+		return false
+	}
+	_, err := os.Stat(s.file("live-only"))
+	return err == nil
+}
+
 // Mode is "keyword" (default), "hybrid" (keyword + semantic) or "semantic"
 // (embeddings only, from an explicit --mode semantic).
 func (s PickerState) Mode() string {
@@ -76,6 +85,11 @@ func (s PickerState) Toggle(name string) error {
 			return os.Remove(s.file("automated"))
 		}
 		return os.WriteFile(s.file("automated"), nil, 0o600)
+	case "live": // ^l: only sessions running in a terminal now
+		if s.LiveOnly() {
+			return os.Remove(s.file("live-only"))
+		}
+		return os.WriteFile(s.file("live-only"), nil, 0o600)
 	case "semantic": // ^s: keyword <-> semantic-enabled ranking
 		next := "hybrid"
 		if s.Mode() != "keyword" {
@@ -83,7 +97,7 @@ func (s PickerState) Toggle(name string) error {
 		}
 		return os.WriteFile(s.file("mode"), []byte(next), 0o600)
 	default:
-		return fmt.Errorf("unknown toggle %q: valid values are automated, semantic", name)
+		return fmt.Errorf("unknown toggle %q: valid values are automated, live, semantic", name)
 	}
 }
 
@@ -149,7 +163,12 @@ func (s PickerState) Header() string {
 	if s.IncludeAutomated() {
 		auto = "automated shown"
 	}
-	return fmt.Sprintf("%s · %s   │   enter/double-click open · ^s semantic · ^a automated · ^/ preview", mode, auto)
+	scope := ""
+	if s.LiveOnly() {
+		scope = " · live only"
+	}
+	// two short lines so the hints fit the list pane next to the preview
+	return fmt.Sprintf("%s · %s%s\n↵/click open  ^y copy  ^s semantic  ^a auto  ^l live  ^/ preview", mode, auto, scope)
 }
 
 // projectPalette holds 256-color codes that stay readable on dark and light
@@ -176,8 +195,47 @@ func ageColor(t time.Time) string {
 	}
 }
 
+// RowColumns are the title and project column widths of a picker row.
+type RowColumns struct{ Title, Project int }
+
+// DefaultRowLayout is used when the terminal width is unknown.
+var DefaultRowLayout = RowColumns{Title: 44, Project: 14}
+
+// previewPercent is the preview's share of a wide terminal; under
+// sideBySideMin columns the preview moves below the list.
+const (
+	previewPercent = 50
+	sideBySideMin  = 140
+)
+
+// ListPaneWidth is the width fzf gives the list in a cols-wide terminal.
+func ListPaneWidth(cols int) int {
+	if cols < sideBySideMin {
+		return cols
+	}
+	return cols - cols*previewPercent/100
+}
+
+// RowLayout sizes the row columns to fit the list pane; cols <= 0 means
+// unknown (FZF_COLUMNS unset).
+func RowLayout(cols int) RowColumns {
+	if cols <= 0 {
+		return DefaultRowLayout
+	}
+	// the row spends 10 columns on the marker, separators and age, and fzf
+	// takes 3 for the pointer and margin
+	avail := ListPaneWidth(cols) - 13
+	project := min(max(avail/4, 6), 20)
+	return RowColumns{Title: min(max(avail-project, 10), 72), Project: project}
+}
+
 // FormatRow renders one session as "<id>\t<display>"; fzf hides the id.
 func FormatRow(r search.Result, live bool) string {
+	return FormatRowLayout(r, live, DefaultRowLayout)
+}
+
+// FormatRowLayout is FormatRow with explicit column widths.
+func FormatRowLayout(r search.Result, live bool, l RowColumns) string {
 	marker, titleStyle := " ", ""
 	if live {
 		marker, titleStyle = ansiGreen+"●"+ansiReset, ansiBold
@@ -187,9 +245,9 @@ func FormatRow(r search.Result, live bool) string {
 		title = "(untitled)"
 	}
 	project := shortProject(r.CWD)
-	return fmt.Sprintf("%s\t%s %s%-44s%s  %s%-14s%s  %s%s%s",
-		r.SessionID, marker, titleStyle, clipRunes(title, 44), ansiReset,
-		projectColor(project), clipRunes(project, 14), ansiReset,
+	return fmt.Sprintf("%s\t%s %s%-*s%s  %s%-*s%s  %s%s%s",
+		r.SessionID, marker, titleStyle, l.Title, clipRunes(title, l.Title), ansiReset,
+		projectColor(project), l.Project, clipRunes(project, l.Project), ansiReset,
 		ageColor(r.ModTime), strings.TrimSuffix(shortAge(r.ModTime), " ago"), ansiReset)
 }
 
@@ -243,10 +301,14 @@ func FzfArgs(self, query, header string, listenPort int) []string {
 		"--bind=change:reload(sleep 0.15; " + rows + ")+first",
 		"--bind=ctrl-s:transform-header(" + bin + " sessions picker-toggle semantic)+reload(" + rows + ")",
 		"--bind=ctrl-a:transform-header(" + bin + " sessions picker-toggle automated)+reload(" + rows + ")",
+		"--bind=ctrl-l:transform-header(" + bin + " sessions picker-toggle live)+reload(" + rows + ")+first",
 		"--bind=ctrl-/:toggle-preview",
+		"--bind=left-click:accept", // a click opens the session (fzf moves to the clicked row first)
+		"--bind=ctrl-y:transform-header(" + bin + " sessions copy-resume {1})",
 		"--preview=" + bin + " sessions preview {1} -- {q}",
-		// side by side when wide; preview below the list under 110 columns
-		"--preview-window=right,55%,wrap,border-left,<110(down,50%,wrap,border-top)",
+		// side by side when wide; preview below the list under sideBySideMin
+		// columns (fzf compares the threshold to the preview's width)
+		fmt.Sprintf("--preview-window=right,%d%%,wrap,border-left,<%d(down,50%%,wrap,border-top)", previewPercent, sideBySideMin*previewPercent/100),
 	}
 	if listenPort > 0 {
 		args = append(args, fmt.Sprintf("--listen=127.0.0.1:%d", listenPort))

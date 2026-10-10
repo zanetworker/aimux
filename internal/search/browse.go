@@ -25,7 +25,7 @@ func (ix *Index) Recent(opts SearchOpts) ([]Result, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 200
 	}
-	dirSQL, dirArgs := dirClause(opts.Dir)
+	dirSQL, dirArgs := scopeClause(opts)
 	// #nosec G202 -- dirSQL is a fixed clause; values are bound
 	rows, err := ix.db.Query(`
 		SELECT s.id, s.path, s.cwd, s.title, s.automated, s.mtime FROM sessions s
