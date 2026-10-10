@@ -2,29 +2,81 @@ package cmd
 
 import (
 	"bytes"
+	"context"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
+
+	mcplib "github.com/mark3labs/mcp-go/server"
+
+	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/search"
 )
 
-func TestMCPServeCmd_MissingRedisURL(t *testing.T) {
-	// Point to a nonexistent config so defaults are used (no redis URL).
-	mcpConfigPath = "/nonexistent/config.yaml"
-	defer func() { mcpConfigPath = "" }()
-
-	cmd := newMCPCmd()
-	rootCmd.AddCommand(cmd)
-	defer rootCmd.RemoveCommand(cmd)
-
-	rootCmd.SetArgs([]string{"mcp", "serve"})
-	rootCmd.SetOut(&bytes.Buffer{})
-	rootCmd.SetErr(&bytes.Buffer{})
-
-	err := rootCmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when redis URL is missing, got nil")
+func TestBuildAgentsServer_MissingRedisURL(t *testing.T) {
+	_, err := buildAgentsServer(agentsFlags{backend: "k8s"}, &config.Config{})
+	if err == nil || !strings.Contains(err.Error(), "redis") {
+		t.Errorf("err = %v, want one mentioning redis", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "redis") {
-		t.Errorf("error should mention redis, got %q", got)
+}
+
+func TestMCPServeCmd_AgentsFlag(t *testing.T) {
+	f := newMCPServeCmd().Flags().Lookup("agents")
+	if f == nil || f.DefValue != "false" {
+		t.Fatalf("--agents flag = %+v, want a bool defaulting to false", f)
+	}
+}
+
+func testService(t *testing.T) *search.Service {
+	t.Helper()
+	return &search.Service{DBPath: filepath.Join(t.TempDir(), "search.db"), ProjectsDir: t.TempDir()}
+}
+
+func toolNames(srv *mcplib.MCPServer) string {
+	var names []string
+	for name := range srv.ListTools() {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ",")
+}
+
+const sessionTools = "continue_session,create_virtual_session,get_session,list_sessions,search_sessions"
+
+func TestNewServeMCP_SessionsOnly(t *testing.T) {
+	var notes bytes.Buffer
+	srv := newServeMCP(false, agentsFlags{}, &config.Config{}, testService(t), &notes)
+	if got := toolNames(srv); got != sessionTools {
+		t.Errorf("tools = %s, want %s", got, sessionTools)
+	}
+}
+
+func TestNewServeMCP_AgentsFailureKeepsSessions(t *testing.T) {
+	var notes bytes.Buffer
+	srv := newServeMCP(true, agentsFlags{backend: "k8s"}, &config.Config{}, testService(t), &notes)
+	if got := toolNames(srv); got != sessionTools {
+		t.Errorf("tools = %s, want only the session tools", got)
+	}
+	if !strings.Contains(notes.String(), "agents tools disabled") {
+		t.Errorf("notes = %q, want the agents failure explained", notes.String())
+	}
+}
+
+func TestSessionMCP_NoClusterDeps(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", "github.com/zanetworker/aimux/internal/sessionmcp").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list: %v\n%s", err, out)
+	}
+	bad := regexp.MustCompile(`internal/mcpserver|k8s.io/|redis`)
+	for _, line := range strings.Split(string(out), "\n") {
+		if bad.MatchString(line) {
+			t.Errorf("sessionmcp depends on %s", line)
+		}
 	}
 }
 
@@ -44,5 +96,35 @@ func TestMCPServeCmd_Flags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("missing flag --%s on serve subcommand", name)
 		}
+	}
+}
+
+// The openshell executor must never touch the server's stdin/stdout: they
+// carry JSON-RPC under `mcp serve --agents`.
+func TestMCPExecutor_KeepsStdioClean(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "openshell")
+	// #nosec G306 -- a fake binary in a test temp dir must be executable
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho LEAK\ncat >/dev/null\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	var stderr bytes.Buffer
+	execErr := mcpExecutor(bin, &stderr).ExecInSandbox(context.Background(), "x", []string{"true"})
+	os.Stdout = orig
+	_ = w.Close()
+	leaked, _ := io.ReadAll(r)
+	if execErr != nil {
+		t.Fatalf("exec: %v", execErr)
+	}
+	if len(leaked) != 0 {
+		t.Errorf("child wrote %q to stdout", leaked)
+	}
+	if !strings.Contains(stderr.String(), "LEAK") {
+		t.Errorf("child output should go to stderr, got %q", stderr.String())
 	}
 }

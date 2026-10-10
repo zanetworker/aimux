@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,5 +101,96 @@ func TestService_RefreshIndexesAndEmbedsChanges(t *testing.T) {
 	svc2, _ := newService(t, nil)
 	if err := svc2.Refresh(context.Background()); err != nil {
 		t.Errorf("Refresh without embedder: %v", err)
+	}
+}
+
+func TestService_SessionByPrefix(t *testing.T) {
+	svc, _ := newService(t, nil)
+	tr, err := svc.Session(context.Background(), "aaaaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Detail.SessionID != sidAccounts || tr.Detail.CWD != "/Users/me/OpenShell" {
+		t.Errorf("detail = %+v", tr.Detail)
+	}
+	if len(tr.Exchanges) != 1 {
+		t.Errorf("exchanges = %d, want 1", len(tr.Exchanges))
+	}
+}
+
+func TestService_SessionSeesNewFile(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, nil)
+	if _, _, err := svc.Query(ctx, "Ying", QueryOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	sid := "eeeeeeee-0000-0000-0000-000000000005"
+	put(t, svc.ProjectsDir, "-Users-me-research", sid, human("/Users/me/research", "a brand new session"), reply("ok"))
+	tr, err := svc.Session(ctx, "eeeeeeee")
+	if err != nil || tr.Detail.SessionID != sid {
+		t.Fatalf("Session(new file) = %q err=%v", tr.Detail.SessionID, err)
+	}
+}
+
+func TestService_SessionAmbiguous(t *testing.T) {
+	svc, _ := newService(t, nil)
+	put(t, svc.ProjectsDir, "-Users-me-research", "bbbbbbbb-9999-0000-0000-000000000009",
+		human("/Users/me/research", "a second b session"), reply("ok"))
+	_, err := svc.Session(context.Background(), "bbbbbbbb")
+	var amb *AmbiguousError
+	if !errors.As(err, &amb) {
+		t.Fatalf("err = %v, want *AmbiguousError", err)
+	}
+}
+
+func TestService_RecentHidesAutomated(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, nil)
+	rs, err := svc.Recent(ctx, SearchOpts{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if r.SessionID == sidAuto {
+			t.Errorf("default Recent includes automated session: %v", ids(rs))
+		}
+	}
+	if len(rs) == 0 {
+		t.Error("default Recent returned nothing")
+	}
+	rs, _ = svc.Recent(ctx, SearchOpts{Limit: 10, IncludeAutomated: true})
+	found := false
+	for _, r := range rs {
+		found = found || r.SessionID == sidAuto
+	}
+	if !found {
+		t.Errorf("IncludeAutomated Recent = %v, want %s", ids(rs), sidAuto)
+	}
+}
+
+// MCP clients issue tool calls concurrently; each refreshes the index.
+func TestService_ConcurrentCallsDoNotLock(t *testing.T) {
+	svc, _ := newService(t, nil)
+	for i := 0; i < 300; i++ {
+		sid := fmt.Sprintf("ffffffff-0000-0000-0000-%012d", i)
+		put(t, svc.ProjectsDir, "-Users-me-bulk", sid, human("/Users/me/bulk", fmt.Sprintf("bulk session %d %s", i, strings.Repeat("words ", 2000))), reply("ok"))
+	}
+	ctx := context.Background()
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		go func(i int) {
+			if i%2 == 0 {
+				_, err := svc.Session(ctx, "aaaaaaaa")
+				errs <- err
+				return
+			}
+			_, err := svc.Recent(ctx, SearchOpts{Limit: 5})
+			errs <- err
+		}(i)
+	}
+	for i := 0; i < 16; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent call: %v", err)
+		}
 	}
 }

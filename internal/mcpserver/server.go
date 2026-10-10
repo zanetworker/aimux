@@ -159,13 +159,19 @@ func NewServer(opts Options) (*Server, error) {
 
 // Serve registers all MCP tools and starts the stdio server. Blocks until done.
 func (s *Server) Serve() error {
+	srv := mcplib.NewMCPServer("aimux-agents", "1.0.0")
+	s.Register(srv)
+	return mcplib.ServeStdio(srv)
+}
+
+// Register warms the pool and adds the remote-agent tools to srv.
+func (s *Server) Register(srv *mcplib.MCPServer) {
 	if s.pool != nil {
 		if err := s.pool.WarmUp(context.Background()); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: warm pool failed: %v\n", err)
 		}
 	}
 
-	srv := mcplib.NewMCPServer("aimux-agents", "1.0.0")
 	srv.AddTool(s.spawnAgentTool(), s.handleSpawnAgent)
 	srv.AddTool(s.createTaskTool(), s.handleCreateTask)
 	srv.AddTool(s.listTasksTool(), s.handleListTasks)
@@ -177,7 +183,6 @@ func (s *Server) Serve() error {
 	srv.AddTool(s.scaleDownTool(), s.handleScaleDown)
 	srv.AddTool(s.getCostsTool(), s.handleGetCosts)
 	srv.AddTool(s.cleanupBranchesTool(), s.handleCleanupBranches)
-	return mcplib.ServeStdio(srv)
 }
 
 // --- Tool definitions ---
