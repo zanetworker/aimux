@@ -102,3 +102,67 @@ func TestService_RefreshIndexesAndEmbedsChanges(t *testing.T) {
 		t.Errorf("Refresh without embedder: %v", err)
 	}
 }
+
+func TestService_SessionByPrefix(t *testing.T) {
+	svc, _ := newService(t, nil)
+	tr, err := svc.Session(context.Background(), "aaaaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Detail.SessionID != sidAccounts || tr.Detail.CWD != "/Users/me/OpenShell" {
+		t.Errorf("detail = %+v", tr.Detail)
+	}
+	if len(tr.Exchanges) != 1 {
+		t.Errorf("exchanges = %d, want 1", len(tr.Exchanges))
+	}
+}
+
+func TestService_SessionSeesNewFile(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, nil)
+	if _, _, err := svc.Query(ctx, "Ying", QueryOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	sid := "eeeeeeee-0000-0000-0000-000000000005"
+	put(t, svc.ProjectsDir, "-Users-me-research", sid, human("/Users/me/research", "a brand new session"), reply("ok"))
+	tr, err := svc.Session(ctx, "eeeeeeee")
+	if err != nil || tr.Detail.SessionID != sid {
+		t.Fatalf("Session(new file) = %q err=%v", tr.Detail.SessionID, err)
+	}
+}
+
+func TestService_SessionAmbiguous(t *testing.T) {
+	svc, _ := newService(t, nil)
+	put(t, svc.ProjectsDir, "-Users-me-research", "bbbbbbbb-9999-0000-0000-000000000009",
+		human("/Users/me/research", "a second b session"), reply("ok"))
+	_, err := svc.Session(context.Background(), "bbbbbbbb")
+	var amb *AmbiguousError
+	if !errors.As(err, &amb) {
+		t.Fatalf("err = %v, want *AmbiguousError", err)
+	}
+}
+
+func TestService_RecentHidesAutomated(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, nil)
+	rs, err := svc.Recent(ctx, SearchOpts{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if r.SessionID == sidAuto {
+			t.Errorf("default Recent includes automated session: %v", ids(rs))
+		}
+	}
+	if len(rs) == 0 {
+		t.Error("default Recent returned nothing")
+	}
+	rs, _ = svc.Recent(ctx, SearchOpts{Limit: 10, IncludeAutomated: true})
+	found := false
+	for _, r := range rs {
+		found = found || r.SessionID == sidAuto
+	}
+	if !found {
+		t.Errorf("IncludeAutomated Recent = %v, want %s", ids(rs), sidAuto)
+	}
+}

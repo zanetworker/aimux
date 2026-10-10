@@ -110,6 +110,52 @@ func (s *Service) Refresh(ctx context.Context) error {
 	return s.refresh(ctx, ix)
 }
 
+// Transcript is one session's preview data plus every exchange in order.
+type Transcript struct {
+	Detail    Detail
+	Exchanges []Exchange
+}
+
+// Session refreshes the index, resolves an ID or unique prefix, and returns
+// the whole session. Resolve errors come back unwrapped, so callers can
+// errors.As them into *AmbiguousError.
+func (s *Service) Session(ctx context.Context, idOrPrefix string) (Transcript, error) {
+	ix, err := Open(s.DBPath)
+	if err != nil {
+		return Transcript{}, fmt.Errorf("open search index: %w", err)
+	}
+	defer func() { _ = ix.Close() }()
+	if err := s.refresh(ctx, ix); err != nil {
+		return Transcript{}, err
+	}
+	id, err := ix.Resolve(idOrPrefix)
+	if err != nil {
+		return Transcript{}, err
+	}
+	d, err := ix.Detail(id, 0)
+	if err != nil {
+		return Transcript{}, err
+	}
+	ex, err := ix.Exchanges(id)
+	if err != nil {
+		return Transcript{}, err
+	}
+	return Transcript{Detail: d, Exchanges: ex}, nil
+}
+
+// Recent refreshes the index and lists sessions by last activity.
+func (s *Service) Recent(ctx context.Context, o SearchOpts) ([]Result, error) {
+	ix, err := Open(s.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("open search index: %w", err)
+	}
+	defer func() { _ = ix.Close() }()
+	if err := s.refresh(ctx, ix); err != nil {
+		return nil, err
+	}
+	return ix.Recent(o)
+}
+
 // refresh re-reads changed session files and, with an embedder, embeds only
 // those sessions: checking the whole index for missing vectors costs seconds.
 // Big backlogs (a first run) are left to `aimux sessions index`.
