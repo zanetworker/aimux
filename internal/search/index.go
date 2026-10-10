@@ -172,29 +172,49 @@ func DefaultPath() string {
 	return filepath.Join(home, ".aimux", "search.db")
 }
 
+// DefaultArchiveDir holds transcripts kept past Claude Code's cleanup, in
+// the ~/.claude/projects layout.
+func DefaultArchiveDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".aimux", "archive")
+}
+
 type fileState struct {
+	path        string
 	mtime, size int64
 }
 
 // Update brings the index in line with the session files under projectsDir
-// (layout: <projectsDir>/<project>/<session-id>.jsonl). Only new or changed
-// files are re-read; sessions whose file is gone are removed.
-func (ix *Index) Update(projectsDir string, opts ExtractOpts) (UpdateStats, error) {
+// and any archiveDirs (layout: <dir>/<project>/<session-id>.jsonl). A session
+// in projectsDir wins over an archived copy. Only new, changed or moved files
+// are re-read. A session is removed only when its recorded file is gone and
+// no scanned dir has it, so an Update that does not scan an archive never
+// drops that archive's sessions.
+func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...string) (UpdateStats, error) {
 	var st UpdateStats
-	files, err := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
-	if err != nil {
-		return st, err
+	files := map[string]string{} // session id -> file, first dir wins
+	for _, dir := range append([]string{projectsDir}, archiveDirs...) {
+		m, err := filepath.Glob(filepath.Join(dir, "*", "*.jsonl"))
+		if err != nil {
+			return st, err
+		}
+		for _, f := range m {
+			id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
+			if _, ok := files[id]; !ok {
+				files[id] = f
+			}
+		}
 	}
 
 	known := map[string]fileState{}
-	rows, err := ix.db.Query(`SELECT id, mtime, size FROM sessions`)
+	rows, err := ix.db.Query(`SELECT id, path, mtime, size FROM sessions`)
 	if err != nil {
 		return st, err
 	}
 	for rows.Next() {
 		var id string
 		var fs fileState
-		if err := rows.Scan(&id, &fs.mtime, &fs.size); err != nil {
+		if err := rows.Scan(&id, &fs.path, &fs.mtime, &fs.size); err != nil {
 			_ = rows.Close()
 			return st, err
 		}
@@ -202,20 +222,18 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts) (UpdateStats, erro
 	}
 	_ = rows.Close()
 
-	seen := map[string]bool{}
 	var changed []string
-	for _, f := range files {
+	for id, f := range files {
 		info, err := os.Stat(f)
 		if err != nil {
 			continue
 		}
-		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
-		seen[id] = true
-		if fs, ok := known[id]; ok && fs.mtime == info.ModTime().UnixNano() && fs.size == info.Size() {
+		if fs, ok := known[id]; ok && fs.path == f && fs.mtime == info.ModTime().UnixNano() && fs.size == info.Size() {
 			continue
 		}
 		changed = append(changed, f)
 	}
+	sort.Strings(changed)
 
 	docs := extractAll(changed, opts)
 
@@ -231,9 +249,12 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts) (UpdateStats, erro
 		st.Indexed++
 		st.Changed = append(st.Changed, d.SessionID)
 	}
-	for id := range known {
-		if seen[id] {
+	for id, fs := range known {
+		if _, ok := files[id]; ok {
 			continue
+		}
+		if _, err := os.Stat(fs.path); err == nil {
+			continue // in a dir this Update did not scan
 		}
 		if err := deleteSession(tx, id); err != nil {
 			return st, err

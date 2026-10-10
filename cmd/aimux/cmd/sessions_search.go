@@ -240,7 +240,7 @@ func newSessionsIndexCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "index",
 		Short: "Build or refresh the session search index",
-		Long:  "Re-reads new or changed session files into ~/.aimux/search.db and, when OPENAI_API_KEY is set, embeds new exchanges for semantic ranking.",
+		Long:  "Re-reads new or changed session files (~/.claude/projects and the ~/.aimux/archive copies) into ~/.aimux/search.db and, when OPENAI_API_KEY is set, embeds new exchanges for semantic ranking.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ix, err := search.Open(searchDBPath())
@@ -248,7 +248,7 @@ func newSessionsIndexCmd() *cobra.Command {
 				return err
 			}
 			defer func() { _ = ix.Close() }()
-			st, err := ix.Update(claudeProjectsDir(), search.DefaultExtractOpts())
+			st, err := ix.Update(claudeProjectsDir(), search.DefaultExtractOpts(), search.DefaultArchiveDir())
 			if err != nil {
 				return err
 			}

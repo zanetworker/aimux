@@ -31,6 +31,7 @@ const embedInlineSessions = 20
 type Service struct {
 	DBPath      string
 	ProjectsDir string
+	ArchiveDirs []string  // also indexed; sessions here outlive Claude Code's cleanup
 	Embedder    Embedder  // nil: keyword only
 	Notes       io.Writer // explanations of degraded modes; nil discards
 }
@@ -44,11 +45,12 @@ type QueryOpts struct {
 	IDs              []string // only these sessions; nil = no restriction, empty = none
 }
 
-// DefaultService searches ~/.aimux/search.db over ~/.claude/projects, with
-// OpenAI embeddings when OPENAI_API_KEY is set.
+// DefaultService searches ~/.aimux/search.db over ~/.claude/projects and
+// ~/.aimux/archive, with OpenAI embeddings when OPENAI_API_KEY is set.
 func DefaultService(notes io.Writer) *Service {
 	home, _ := os.UserHomeDir()
-	s := &Service{DBPath: DefaultPath(), ProjectsDir: filepath.Join(home, ".claude", "projects"), Notes: notes}
+	s := &Service{DBPath: DefaultPath(), ProjectsDir: filepath.Join(home, ".claude", "projects"),
+		ArchiveDirs: []string{DefaultArchiveDir()}, Notes: notes}
 	if e := NewOpenAIEmbedderFromEnv(); e != nil { // keep a nil *OpenAIEmbedder out of the interface
 		s.Embedder = e
 	}
@@ -160,7 +162,7 @@ func (s *Service) Recent(ctx context.Context, o SearchOpts) ([]Result, error) {
 // those sessions: checking the whole index for missing vectors costs seconds.
 // Big backlogs (a first run) are left to `aimux sessions index`.
 func (s *Service) refresh(ctx context.Context, ix *Index) error {
-	st, err := ix.Update(s.ProjectsDir, DefaultExtractOpts())
+	st, err := ix.Update(s.ProjectsDir, DefaultExtractOpts(), s.ArchiveDirs...)
 	if err != nil {
 		return fmt.Errorf("update search index: %w", err)
 	}
