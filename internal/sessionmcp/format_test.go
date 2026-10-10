@@ -199,3 +199,17 @@ func TestFormatContinue_PointsToPaging(t *testing.T) {
 		t.Error("continue_session should say how to fetch earlier exchanges")
 	}
 }
+
+func TestFormatContinue_QuotesUnsafeDirectories(t *testing.T) {
+	cases := map[string]string{
+		"/Users/me/research":         "cd /Users/me/research && claude --resume s",
+		"/Users/me/My Projects/demo": "cd '/Users/me/My Projects/demo' && claude --resume s",
+		"/tmp/it's here":             `cd '/tmp/it'\''s here' && claude --resume s`,
+		"":                           "`claude --resume s`",
+	}
+	for cwd, want := range cases {
+		if out := formatContinue(transcript("s", cwd, 1, func(int) string { return "p" })); !strings.Contains(out, want) {
+			t.Errorf("cwd %q: resume line should contain %q\n%s", cwd, want, out)
+		}
+	}
+}

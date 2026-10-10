@@ -21,7 +21,7 @@ func TestMCPRegister_CreatesEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = registerMCPServer(settingsPath, "/usr/local/bin/aimux", "redis://:pass@localhost:6379", "agents", "my-team", 20, 100)
+	err = registerMCPServer(settingsPath, "/usr/local/bin/aimux", "agents", "my-team", 20, 100)
 	if err != nil {
 		t.Fatalf("registerMCPServer returned error: %v", err)
 	}
@@ -60,8 +60,10 @@ func TestMCPRegister_CreatesEntry(t *testing.T) {
 	if !ok {
 		t.Fatal("env missing or not a map")
 	}
-	if env["REDIS_URL"] != "redis://:pass@localhost:6379" {
-		t.Errorf("REDIS_URL = %v, want redis://:pass@localhost:6379", env["REDIS_URL"])
+	// serve --agents reads the Redis URL from ~/.aimux/config.yaml; copying it
+	// (password included) into settings.json would only leak it
+	if _, ok := env["REDIS_URL"]; ok {
+		t.Errorf("REDIS_URL must not be written to settings, got %v", env["REDIS_URL"])
 	}
 	if env["K8S_NAMESPACE"] != "agents" {
 		t.Errorf("K8S_NAMESPACE = %v, want agents", env["K8S_NAMESPACE"])
@@ -148,7 +150,7 @@ func TestMCPRegister_PreservesExistingSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = registerMCPServer(settingsPath, "/usr/local/bin/aimux", "redis://localhost:6379", "default", "", 10, 50)
+	err = registerMCPServer(settingsPath, "/usr/local/bin/aimux", "default", "", 10, 50)
 	if err != nil {
 		t.Fatalf("registerMCPServer returned error: %v", err)
 	}
@@ -233,7 +235,7 @@ func TestMCPRegister_CreatesFileIfMissing(t *testing.T) {
 	dir := t.TempDir()
 	settingsPath := filepath.Join(dir, "subdir", "settings.json")
 
-	err := registerMCPServer(settingsPath, "/usr/local/bin/aimux", "redis://localhost:6379", "agents", "team", 5, 25)
+	err := registerMCPServer(settingsPath, "/usr/local/bin/aimux", "agents", "team", 5, 25)
 	if err != nil {
 		t.Fatalf("registerMCPServer returned error: %v", err)
 	}

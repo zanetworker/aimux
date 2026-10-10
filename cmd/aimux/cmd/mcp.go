@@ -212,7 +212,7 @@ func newMCPRegisterCmd() *cobra.Command {
 			maxAgents := 20
 			maxCost := 100.0
 
-			if err := registerMCPServer(settingsPath, aimuxBin, cfg.Kubernetes.RedisURL, namespace, teamID, maxAgents, maxCost); err != nil {
+			if err := registerMCPServer(settingsPath, aimuxBin, namespace, teamID, maxAgents, maxCost); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Registered aimux-k8s-agents in %s\n", settingsPath)
@@ -284,14 +284,14 @@ func AutoRegisterMCP(cfg config.Config) {
 	}
 
 	_ = registerMCPServer(
-		settingsPath, aimuxBin, cfg.Kubernetes.RedisURL,
+		settingsPath, aimuxBin,
 		cfg.Kubernetes.Namespace, cfg.Kubernetes.TeamID,
 		maxAgents, maxCost,
 	)
 }
 
 // registerMCPServer adds the aimux-k8s-agents entry to a Claude Code settings.json file.
-func registerMCPServer(settingsPath, aimuxBin, redisURL, namespace, teamID string, maxAgents int, maxCost float64) error {
+func registerMCPServer(settingsPath, aimuxBin, namespace, teamID string, maxAgents int, maxCost float64) error {
 	settings := make(map[string]interface{})
 
 	data, err := os.ReadFile(settingsPath) // #nosec G304 -- user-controlled path
@@ -313,7 +313,6 @@ func registerMCPServer(settingsPath, aimuxBin, redisURL, namespace, teamID strin
 		"command": aimuxBin,
 		"args":    []string{"mcp", "serve", "--agents"},
 		"env": map[string]string{
-			"REDIS_URL":     redisURL,
 			"K8S_NAMESPACE": namespace,
 			"TEAM_ID":       teamID,
 			"MAX_AGENTS":    strconv.Itoa(maxAgents),

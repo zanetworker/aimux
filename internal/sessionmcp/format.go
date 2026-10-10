@@ -89,7 +89,7 @@ func formatSession(t search.Transcript, lastN, beforeSeq int) string {
 // natively, then the newest exchanges that fit.
 func formatContinue(t search.Transcript) string {
 	d := t.Detail
-	head := header(t) + fmt.Sprintf("**Native resume:** `cd %s && claude --resume %s`\n", d.CWD, d.SessionID)
+	head := header(t) + fmt.Sprintf("**Native resume:** `%s`\n", resumeCommand(d.CWD, d.SessionID))
 	blocks, kept := fitNewest(t.Exchanges, maxOutputChars-len(head)-200)
 	heading := fmt.Sprintf("## Transcript (%d exchanges)", len(t.Exchanges))
 	if kept < len(t.Exchanges) {
@@ -161,6 +161,24 @@ func formatVirtual(ts []search.Transcript, numExchanges int) string {
 		out = render()
 	}
 	return out
+}
+
+// resumeCommand is the shell line that reopens a session in Claude Code; the
+// directory is single-quoted when it holds anything a shell would split.
+func resumeCommand(cwd, id string) string {
+	if cwd == "" {
+		return "claude --resume " + id
+	}
+	return "cd " + shellQuote(cwd) + " && claude --resume " + id
+}
+
+const shellSafe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+@:,="
+
+func shellQuote(s string) string {
+	if strings.IndexFunc(s, func(r rune) bool { return !strings.ContainsRune(shellSafe, r) }) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func header(t search.Transcript) string {
