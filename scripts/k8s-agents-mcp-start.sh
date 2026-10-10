@@ -2,17 +2,22 @@
 # Wrapper: port-forwards Redis, reads secrets from cluster, then runs the MCP server.
 # Claude Code invokes this script as the MCP server command.
 
-set -e
+set -eo pipefail
+
+die() { echo "k8s-agents-mcp: $*" >&2; exit 1; }
 
 NAMESPACE="${K8S_NAMESPACE:-agents}"
 LOCAL_PORT="${REDIS_LOCAL_PORT:-6380}"
 
 # Read secrets from cluster (nothing stored locally)
 REDIS_PASSWORD=$(kubectl get secret redis-secret -n "$NAMESPACE" \
-  -o jsonpath='{.data.password}' | base64 -d)
+  -o jsonpath='{.data.password}' | base64 -d) \
+  || die "cannot read redis-secret in namespace $NAMESPACE (cluster login expired or stack not deployed?)"
+[ -n "$REDIS_PASSWORD" ] || die "redis-secret in namespace $NAMESPACE has no password"
 
 GITHUB_TOKEN=$(kubectl get secret repo-secret -n "$NAMESPACE" \
-  -o jsonpath='{.data.token}' | base64 -d)
+  -o jsonpath='{.data.token}' | base64 -d) \
+  || die "cannot read repo-secret in namespace $NAMESPACE"
 
 # Start Redis port-forward in background
 kubectl port-forward svc/redis "$LOCAL_PORT":6379 -n "$NAMESPACE" \
@@ -27,6 +32,8 @@ for i in $(seq 1 10); do
   sleep 0.5
   nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null && break
 done
+nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null \
+  || die "Redis port-forward did not come up: $(tail -1 /tmp/redis-portforward.log)"
 
 # Run the MCP server with all required env vars
 export REDIS_URL="redis://:${REDIS_PASSWORD}@127.0.0.1:${LOCAL_PORT}"
