@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -67,5 +68,36 @@ func TestDetail_FirstAndRecentPrompts(t *testing.T) {
 
 	if _, err := ix.Detail("no-such-session", 2); err == nil {
 		t.Error("unknown session: want error")
+	}
+}
+
+func TestSearchOpts_IDsRestrictEveryQuery(t *testing.T) {
+	ix, _ := indexed(t)
+	e := &conceptEmbedder{}
+	if _, err := ix.EmbedMissing(context.Background(), e, 50); err != nil {
+		t.Fatal(err)
+	}
+	deckOnly := SearchOpts{Limit: 10, IDs: []string{sidDeck}}
+
+	if rs, _ := ix.Recent(deckOnly); len(rs) != 1 || rs[0].SessionID != sidDeck {
+		t.Errorf("Recent restricted to deck: %v", ids(rs))
+	}
+	if rs, _ := ix.Search("service accounts", deckOnly); len(rs) != 0 {
+		t.Errorf("keyword search leaked sessions outside IDs: %v", ids(rs))
+	}
+	if rs, _ := ix.Search("Ying deck", deckOnly); len(rs) != 1 {
+		t.Errorf("keyword search inside IDs: %v", ids(rs))
+	}
+	accountsOnly := SearchOpts{Limit: 10, IDs: []string{sidAccounts}}
+	if rs, _ := ix.Semantic(context.Background(), "presentation", accountsOnly, e); len(rs) != 1 || rs[0].SessionID != sidAccounts {
+		t.Errorf("semantic search leaked sessions outside IDs: %v", ids(rs))
+	}
+	// restricted to nothing (live-only with no live sessions) is empty, not unrestricted
+	none := SearchOpts{Limit: 10, IDs: []string{}}
+	if rs, _ := ix.Recent(none); len(rs) != 0 {
+		t.Errorf("empty IDs must match nothing, got %v", ids(rs))
+	}
+	if rs, _ := ix.Search("deck", none); len(rs) != 0 {
+		t.Errorf("empty IDs must match nothing, got %v", ids(rs))
 	}
 }

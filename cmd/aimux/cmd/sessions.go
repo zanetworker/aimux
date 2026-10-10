@@ -23,7 +23,7 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 	var listMode, exportMode, danger, allProjects bool
 	var limit int
 	var fields, mode string
-	var includeAutomated bool
+	var includeAutomated, live bool
 
 	cmd := &cobra.Command{
 		Use:   "sessions [query]",
@@ -48,7 +48,7 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 			}
 			// Interactive: the split-view picker over the index (browse or query).
 			if sessionsSearch.Index != nil && !listMode && !exportMode && !jsonOutput && IsInteractive() && hasFzf() {
-				return runSearchPicker(cmd, query, danger, resume, mode, cmd.Flags().Changed("mode"), includeAutomated, dir)
+				return runSearchPicker(cmd, query, danger, resume, mode, cmd.Flags().Changed("mode"), includeAutomated, dir, live)
 			}
 			// Indexed search spans all projects unless --dir narrows it.
 			if len(args) > 0 && args[0] != "" && sessionsSearch.Index != nil {
@@ -56,7 +56,7 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 				if q.Limit == 0 {
 					q.Limit = 20
 				}
-				return runIndexedQuery(cmd, args[0], q, dir, listMode, danger, picker, resume)
+				return runIndexedQuery(cmd, args[0], q, dir, listMode, danger, picker, resume, live)
 			}
 			if !allProjects && dir == "" {
 				cwd, _ := os.Getwd()
@@ -68,8 +68,18 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 				return fmt.Errorf("session discovery failed: %w", err)
 			}
 
+			var liveSet map[string]bool
+			if live {
+				liveSet = map[string]bool{}
+				for _, id := range currentLiveIDs() {
+					liveSet[id] = true
+				}
+			}
 			var filtered []history.Session
 			for _, s := range allSessions {
+				if live && !liveSet[s.ID] {
+					continue // --live: only sessions running in a terminal now
+				}
 				if s.TurnCount <= 5 && s.CostUSD == 0 {
 					continue
 				}
@@ -149,9 +159,10 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 	cmd.Flags().StringVar(&fields, "fields", "", "Comma-separated fields: id,provider,project,age,turns,cost,annotation,prompt,tags")
 	cmd.Flags().StringVar(&mode, "mode", "hybrid", "Query ranking: hybrid, keyword or semantic")
 	cmd.Flags().BoolVar(&includeAutomated, "include-automated", false, "Include automated (SDK/cron) sessions")
+	cmd.Flags().BoolVar(&live, "live", false, "Only sessions running in a terminal now (^l toggles it in the picker)")
 	cmd.AddCommand(newSessionsStarCmd(discover))
 	cmd.AddCommand(newSessionsIndexCmd())
-	cmd.AddCommand(newSessionsRowsCmd(), newSessionsPreviewCmd(), newSessionsPickerToggleCmd())
+	cmd.AddCommand(newSessionsRowsCmd(), newSessionsPreviewCmd(), newSessionsPickerToggleCmd(), newSessionsCopyResumeCmd())
 	return cmd
 }
 

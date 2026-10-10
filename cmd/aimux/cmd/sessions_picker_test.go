@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -170,7 +171,7 @@ func TestPickerRows_RespectScope(t *testing.T) {
 
 func TestPickerStateFromFlags(t *testing.T) {
 	st := sessions.PickerState{Dir: t.TempDir()}
-	if err := applyPickerFlags(st, "keyword", true, true, "/Users/me/research", true); err != nil {
+	if err := applyPickerFlags(st, "keyword", true, true, "/Users/me/research", true, false); err != nil {
 		t.Fatal(err)
 	}
 	if st.Mode() != "keyword" || !st.IncludeAutomated() || st.Scope() != "/Users/me/research" {
@@ -178,12 +179,12 @@ func TestPickerStateFromFlags(t *testing.T) {
 	}
 	// an explicit --mode semantic stays semantic-only in the picker
 	st2 := sessions.PickerState{Dir: t.TempDir()}
-	if err := applyPickerFlags(st2, "semantic", true, false, "", true); err != nil || st2.Mode() != "semantic" {
+	if err := applyPickerFlags(st2, "semantic", true, false, "", true, false); err != nil || st2.Mode() != "semantic" {
 		t.Errorf("semantic flag: mode=%s err=%v", st2.Mode(), err)
 	}
 	// unset --mode: hybrid with embeddings, keyword without
 	st3 := sessions.PickerState{Dir: t.TempDir()}
-	if err := applyPickerFlags(st3, "hybrid", false, false, "", false); err != nil || st3.Mode() != "keyword" {
+	if err := applyPickerFlags(st3, "hybrid", false, false, "", false, false); err != nil || st3.Mode() != "keyword" {
 		t.Errorf("default without embedder: mode=%s err=%v", st3.Mode(), err)
 	}
 }
@@ -196,5 +197,107 @@ func TestPickerRows_SemanticModeFallsBackToKeywordWithoutKey(t *testing.T) {
 	}
 	if out := runSub(t, "rows", "--", "Ying deck"); !strings.HasPrefix(out, "43ce13d4\t") {
 		t.Errorf("semantic rows without a key should still answer (keyword): %q", out)
+	}
+}
+
+func TestPickerRows_LiveOnly(t *testing.T) {
+	st := pickerEnv(t)
+	if err := st.Toggle("live"); err != nil {
+		t.Fatal(err)
+	}
+	// nothing is live yet (discovery still running): show nothing rather than everything
+	if out := runSub(t, "rows", "--", ""); strings.TrimSpace(out) != "" {
+		t.Errorf("live-only with no live sessions should be empty:\n%s", out)
+	}
+	if err := st.SetLive([]string{"43ce13d4"}); err != nil {
+		t.Fatal(err)
+	}
+	if out := runSub(t, "rows", "--", ""); !strings.HasPrefix(out, "43ce13d4\t") {
+		t.Errorf("live session missing from live-only browse:\n%s", out)
+	}
+	if out := runSub(t, "rows", "--", "deck"); !strings.HasPrefix(out, "43ce13d4\t") {
+		t.Errorf("live session missing from live-only search:\n%s", out)
+	}
+	if err := st.SetLive([]string{"someone-else"}); err != nil {
+		t.Fatal(err)
+	}
+	if out := runSub(t, "rows", "--", "deck"); strings.Contains(out, "43ce13d4") {
+		t.Errorf("non-live session shown in live-only search:\n%s", out)
+	}
+}
+
+func TestPickerFlags_Live(t *testing.T) {
+	st := sessions.PickerState{Dir: t.TempDir()}
+	if err := applyPickerFlags(st, "hybrid", false, false, "", false, true); err != nil {
+		t.Fatal(err)
+	}
+	if !st.LiveOnly() {
+		t.Error("--live should start the picker in live-only mode")
+	}
+}
+
+func TestCopyResume_CopiesCommandWithFullPath(t *testing.T) {
+	pickerEnv(t)
+	var copied string
+	orig := copyToClipboard
+	copyToClipboard = func(s string) error { copied = s; return nil }
+	defer func() { copyToClipboard = orig }()
+
+	out := runSub(t, "copy-resume", "43ce13d4")
+	want := "cd '/Users/me/research' && claude --resume '43ce13d4'"
+	if copied != want {
+		t.Errorf("copied %q, want %q", copied, want)
+	}
+	if !strings.Contains(out, "copied") {
+		t.Errorf("header should confirm the copy, got %q", out)
+	}
+
+	copied = ""
+	out = runSub(t, "copy-resume", "nope")
+	if copied != "" || !strings.Contains(out, "not in the index") {
+		t.Errorf("unknown session: copied=%q out=%q", copied, out)
+	}
+}
+
+func TestRunPickerHelper_CopyResumeIsFast(t *testing.T) {
+	pickerEnv(t)
+	orig := copyToClipboard
+	copyToClipboard = func(string) error { return nil }
+	defer func() { copyToClipboard = orig }()
+	var out bytes.Buffer
+	if handled, err := RunPickerHelper([]string{"sessions", "copy-resume", "43ce13d4"}, &out); !handled || err != nil {
+		t.Errorf("copy-resume should use the fast path: handled=%v err=%v", handled, err)
+	}
+}
+
+func TestPickerRows_SizedToTerminal(t *testing.T) {
+	pickerEnv(t)
+	width := func(cols string) int {
+		t.Setenv("FZF_COLUMNS", cols)
+		out := runSub(t, "rows", "--", "")
+		line := strings.SplitN(strings.TrimSpace(out), "\n", 2)[0]
+		plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(line, "")
+		return len([]rune(strings.TrimRight(plain[strings.Index(plain, "\t")+1:], " ")))
+	}
+	narrow, wide := width("150"), width("240")
+	if narrow > sessions.ListPaneWidth(150)-3 {
+		t.Errorf("row %d wide overflows the list pane at 150 cols", narrow)
+	}
+	if wide <= narrow {
+		t.Errorf("rows should widen with the terminal: 150→%d, 240→%d", narrow, wide)
+	}
+	if width("garbage") == 0 {
+		t.Error("a bad FZF_COLUMNS should fall back to the default layout")
+	}
+}
+
+func TestCopyResume_NoteOnItsOwnLine(t *testing.T) {
+	pickerEnv(t)
+	orig := copyToClipboard
+	copyToClipboard = func(string) error { return nil }
+	defer func() { copyToClipboard = orig }()
+	lines := strings.Split(strings.TrimSpace(runSub(t, "copy-resume", "43ce13d4")), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "✓ copied: ") {
+		t.Errorf("copy note should be its own header line, got %q", lines)
 	}
 }

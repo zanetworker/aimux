@@ -214,3 +214,40 @@ func TestSessionsQuery_RelativeDirIsResolved(t *testing.T) {
 		t.Errorf("Dir = %q, want the absolute path %q", got.Dir, want)
 	}
 }
+
+func TestSessionsLive_QueryRestrictsToLiveIDs(t *testing.T) {
+	var got sessionsIndexQuery
+	deps := sessionsSearchDeps{
+		Index: func(_ string, q sessionsIndexQuery) ([]search.Result, bool, error) {
+			got = q
+			return fakeHits(), false, nil
+		},
+		LiveIDs: func() []string { return []string{"a97a2cca"} },
+	}
+	if _, err := runSessions(t, deps, nil, "x", "--list", "--live"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.IDs) != 1 || got.IDs[0] != "a97a2cca" {
+		t.Errorf("IDs = %v, want the live session ids passed to the index", got.IDs)
+	}
+	// without --live the query is unrestricted
+	if _, err := runSessions(t, deps, nil, "x", "--list"); err != nil {
+		t.Fatal(err)
+	}
+	if got.IDs != nil {
+		t.Errorf("IDs = %v without --live, want nil (no restriction)", got.IDs)
+	}
+}
+
+func TestSessionsLive_ListKeepsOnlyLiveSessions(t *testing.T) {
+	deps := sessionsSearchDeps{LiveIDs: func() []string { return []string{"sess-002"} }}
+	jsonOutput = true
+	defer func() { jsonOutput = false }()
+	out, err := runSessions(t, deps, nil, "--list", "--all", "--live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "sess-002") || strings.Contains(out, "sess-001") {
+		t.Errorf("--live list should keep only live sessions:\n%s", out)
+	}
+}

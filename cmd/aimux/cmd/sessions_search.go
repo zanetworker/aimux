@@ -8,11 +8,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/clipboard"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/jump"
 	"github.com/zanetworker/aimux/internal/search"
@@ -24,7 +26,8 @@ type sessionsIndexQuery struct {
 	Mode             string
 	Limit            int
 	IncludeAutomated bool
-	Dir              string // applied inside the query, before the limit
+	Dir              string   // applied inside the query, before the limit
+	IDs              []string // --live: only these sessions; nil = no restriction
 }
 
 // sessionsSearchDeps are optional; with Index unset, `sessions <query>` keeps
@@ -63,7 +66,10 @@ func envEmbedder() search.Embedder {
 
 // runIndexedQuery prints index results, or opens the picked one.
 func runIndexedQuery(cmd *cobra.Command, query string, q sessionsIndexQuery, dir string, listMode, danger bool,
-	picker sessionsPickerFn, resume sessionsResumeFn) error {
+	picker sessionsPickerFn, resume sessionsResumeFn, live bool) error {
+	if live {
+		q.IDs = currentLiveIDs()
+	}
 	q.Dir = dir
 	rs, semantic, err := sessionsSearch.Index(query, q)
 	if err != nil {
@@ -188,7 +194,7 @@ func resultsAsSessions(rs []search.Result) []history.Session {
 func DefaultIndexSearch(query string, q sessionsIndexQuery) ([]search.Result, bool, error) {
 	svc := search.DefaultService(os.Stderr)
 	svc.DBPath = searchDBPath()
-	return svc.Query(context.Background(), query, search.QueryOpts{Mode: q.Mode, Limit: q.Limit, IncludeAutomated: q.IncludeAutomated, Dir: q.Dir})
+	return svc.Query(context.Background(), query, search.QueryOpts{Mode: q.Mode, Limit: q.Limit, IncludeAutomated: q.IncludeAutomated, Dir: q.Dir, IDs: q.IDs})
 }
 
 // LiveIDsVia lists session ids of agents running in a terminal right now.
@@ -284,7 +290,7 @@ var searchDBPath = search.DefaultPath
 // applyPickerFlags carries --mode, --include-automated and --dir into the
 // picker. Without an explicit --mode the picker ranks hybrid when embeddings
 // are available, keyword otherwise; "semantic" maps to hybrid.
-func applyPickerFlags(st sessions.PickerState, mode string, modeSet, includeAutomated bool, dir string, haveEmbedder bool) error {
+func applyPickerFlags(st sessions.PickerState, mode string, modeSet, includeAutomated bool, dir string, haveEmbedder, liveOnly bool) error {
 	pick := "keyword"
 	if haveEmbedder {
 		pick = "hybrid"
@@ -300,18 +306,23 @@ func applyPickerFlags(st sessions.PickerState, mode string, modeSet, includeAuto
 			return err
 		}
 	}
+	if liveOnly && !st.LiveOnly() {
+		if err := st.Toggle("live"); err != nil {
+			return err
+		}
+	}
 	return st.SetScope(dir)
 }
 
 func runSearchPicker(cmd *cobra.Command, query string, danger bool, resume sessionsResumeFn,
-	mode string, modeSet, includeAutomated bool, dir string) error {
+	mode string, modeSet, includeAutomated bool, dir string, liveOnly bool) error {
 	stateDir, err := os.MkdirTemp("", "aimux-picker-")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(stateDir) }()
 	st := sessions.PickerState{Dir: stateDir}
-	if err := applyPickerFlags(st, mode, modeSet, includeAutomated, dir, envEmbedder() != nil); err != nil {
+	if err := applyPickerFlags(st, mode, modeSet, includeAutomated, dir, envEmbedder() != nil, liveOnly); err != nil {
 		return err
 	}
 	self, err := os.Executable()
@@ -372,6 +383,8 @@ func RunPickerHelper(args []string, out io.Writer) (bool, error) {
 		c = newSessionsPreviewCmd()
 	case "picker-toggle":
 		c = newSessionsPickerToggleCmd()
+	case "copy-resume":
+		c = newSessionsCopyResumeCmd()
 	default:
 		return false, nil
 	}
@@ -389,6 +402,26 @@ func sessionFilePath(id string) string {
 		return ""
 	}
 	return m[0]
+}
+
+// currentLiveIDs lists sessions running in a terminal now (empty, never nil,
+// when none are or detection is unavailable).
+func currentLiveIDs() []string {
+	ids := []string{}
+	if sessionsSearch.LiveIDs != nil {
+		ids = append(ids, sessionsSearch.LiveIDs()...)
+	}
+	return ids
+}
+
+// liveIDList turns the live set into a non-nil slice, so "no live sessions"
+// restricts to nothing instead of meaning "no restriction".
+func liveIDList(live map[string]bool) []string {
+	ids := make([]string, 0, len(live))
+	for id := range live {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func pickerArg(args []string) string {
@@ -411,6 +444,9 @@ func newSessionsRowsCmd() *cobra.Command {
 			}
 			defer func() { _ = ix.Close() }()
 			opts := search.SearchOpts{Limit: 200, IncludeAutomated: st.IncludeAutomated(), Dir: st.Scope()}
+			if st.LiveOnly() {
+				opts.IDs = liveIDList(st.Live()) // empty until live discovery finishes
+			}
 			q := pickerArg(args)
 			var rs []search.Result
 			switch {
@@ -418,7 +454,7 @@ func newSessionsRowsCmd() *cobra.Command {
 				rs, err = ix.Recent(opts)
 			case st.Mode() == "semantic":
 				if inner := envEmbedder(); inner != nil {
-					rs, err = ix.Semantic(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir}, ix.CachedEmbedder(inner))
+					rs, err = ix.Semantic(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir, IDs: opts.IDs}, ix.CachedEmbedder(inner))
 				} else { // no key: answer with keyword rather than nothing
 					opts.Limit = 100
 					rs, err = ix.Search(q, opts)
@@ -428,7 +464,7 @@ func newSessionsRowsCmd() *cobra.Command {
 				if inner := envEmbedder(); inner != nil {
 					e = ix.CachedEmbedder(inner)
 				}
-				rs, _, err = ix.Hybrid(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir}, e)
+				rs, _, err = ix.Hybrid(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir, IDs: opts.IDs}, e)
 			default:
 				opts.Limit = 100
 				rs, err = ix.Search(q, opts)
@@ -437,8 +473,10 @@ func newSessionsRowsCmd() *cobra.Command {
 				return err
 			}
 			live := st.Live()
+			cols, _ := strconv.Atoi(os.Getenv("FZF_COLUMNS")) // fzf exports its width to reload commands
+			layout := sessions.RowLayout(cols)
 			for _, r := range rs {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), sessions.FormatRow(r, live[r.SessionID]))
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), sessions.FormatRowLayout(r, live[r.SessionID], layout))
 			}
 			return nil
 		},
@@ -472,6 +510,41 @@ func newSessionsPreviewCmd() *cobra.Command {
 				}
 			}
 			_, _ = fmt.Fprint(cmd.OutOrStdout(), sessions.FormatDetail(d, snippet, sessions.PickerStateFromEnv().Live()[d.SessionID]))
+			return nil
+		},
+	}
+}
+
+// copyToClipboard is swapped in tests.
+var copyToClipboard = clipboard.Copy
+
+// newSessionsCopyResumeCmd copies "cd <cwd> && claude --resume <id>" for a
+// session and prints the picker header with a confirmation (bound to ^y).
+func newSessionsCopyResumeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "copy-resume <id>", Hidden: true, Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			header := sessions.PickerStateFromEnv().Header()
+			ix, err := search.Open(searchDBPath())
+			if err != nil {
+				return err
+			}
+			defer func() { _ = ix.Close() }()
+			d, err := ix.Detail(args[0], 0)
+			if err != nil {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), header+"   │   "+err.Error())
+				return nil
+			}
+			resumeCmd := clipboard.ResumeCommand(d.SessionID, d.CWD)
+			if resumeCmd == "" {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), header+"   │   cannot build a resume command for "+d.SessionID)
+				return nil
+			}
+			if err := copyToClipboard(resumeCmd); err != nil {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), header+"   │   copy failed: "+err.Error())
+				return nil
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), header+"\n✓ copied: "+resumeCmd)
 			return nil
 		},
 	}

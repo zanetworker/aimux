@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -92,7 +93,7 @@ func TestPickerState_Live(t *testing.T) {
 func TestPickerHeader(t *testing.T) {
 	st := PickerState{Dir: t.TempDir()}
 	h := st.Header()
-	for _, want := range []string{"keyword", "automated hidden", "enter", "^s", "^a", "^/"} {
+	for _, want := range []string{"keyword", "automated hidden", "↵", "^s", "^a", "^/"} {
 		if !strings.Contains(h, want) {
 			t.Errorf("header %q missing %q", h, want)
 		}
@@ -152,7 +153,7 @@ func TestFzfArgs_ResponsivePreviewAndListenPort(t *testing.T) {
 	if !strings.Contains(args, "--listen=127.0.0.1:43210") {
 		t.Error("missing --listen for background reloads")
 	}
-	if !strings.Contains(args, "<110(down") {
+	if !strings.Contains(args, "(down") {
 		t.Error("preview should move below the list in narrow windows")
 	}
 	if strings.Contains(strings.Join(FzfArgs("/bin/aimux", "", "h", 0), "\n"), "--listen") {
@@ -215,9 +216,9 @@ func TestColors_ProjectStableAndAgeByRecency(t *testing.T) {
 	}
 }
 
-func TestPickerHeader_MentionsDoubleClick(t *testing.T) {
-	if !strings.Contains(PickerState{Dir: t.TempDir()}.Header(), "double-click") {
-		t.Error("header should say rows open on enter or double-click")
+func TestPickerHeader_MentionsClickToOpen(t *testing.T) {
+	if !strings.Contains(PickerState{Dir: t.TempDir()}.Header(), "↵/click open") {
+		t.Error("header should say rows open on enter or click")
 	}
 }
 
@@ -262,5 +263,111 @@ func TestFzfExit(t *testing.T) {
 		if got := fzfCancelled(code); got != want {
 			t.Errorf("fzfCancelled(%d) = %v, want %v", code, got, want)
 		}
+	}
+}
+
+func TestPickerState_LiveOnlyToggle(t *testing.T) {
+	st := PickerState{Dir: t.TempDir()}
+	if st.LiveOnly() {
+		t.Fatal("live-only must be off by default")
+	}
+	if strings.Contains(st.Header(), "live only") {
+		t.Error("header claims live-only while off")
+	}
+	if err := st.Toggle("live"); err != nil {
+		t.Fatal(err)
+	}
+	if !(PickerState{Dir: st.Dir}).LiveOnly() || !strings.Contains(st.Header(), "live only") {
+		t.Errorf("after toggle: live=%v header=%q", st.LiveOnly(), st.Header())
+	}
+	if !strings.Contains(st.Header(), "^l") {
+		t.Errorf("header should hint the ^l key: %q", st.Header())
+	}
+	_ = st.Toggle("live")
+	if st.LiveOnly() {
+		t.Error("second toggle should turn live-only off")
+	}
+}
+
+func TestFzfArgs_BindsLiveToggle(t *testing.T) {
+	args := strings.Join(FzfArgs("/bin/aimux", "", "h", 0), "\n")
+	if !strings.Contains(args, "ctrl-l:transform-header(") || !strings.Contains(args, "picker-toggle live") {
+		t.Error("ctrl-l should toggle live-only and refresh the header")
+	}
+}
+
+func TestFzfArgs_ClickOpensAndCopyBinding(t *testing.T) {
+	args := strings.Join(FzfArgs("/bin/aimux", "", "h", 0), "\n")
+	if !strings.Contains(args, "--bind=left-click:accept") {
+		t.Error("a single click on a session should open it")
+	}
+	if !strings.Contains(args, "ctrl-y:transform-header(") || !strings.Contains(args, "sessions copy-resume {1}") {
+		t.Error("ctrl-y should copy the resume command for the highlighted session")
+	}
+	h := PickerState{Dir: t.TempDir()}.Header()
+	for _, want := range []string{"click", "^y copy"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("header %q should mention %q", h, want)
+		}
+	}
+}
+
+// displayWidth is the visible width of a row's display part (after the id tab).
+func displayWidth(row string) int {
+	plain := ansiRegexp.ReplaceAllString(row, "")
+	return len([]rune(plain[strings.Index(plain, "\t")+1:]))
+}
+
+func TestRowLayout_FitsListPane(t *testing.T) {
+	long := search.Result{SessionID: "x", Title: strings.Repeat("t", 200), CWD: "/a/" + strings.Repeat("p", 40), ModTime: time.Now()}
+	for _, cols := range []int{80, sideBySideMin - 1, sideBySideMin, 160, 240} {
+		pane := ListPaneWidth(cols)
+		if w := displayWidth(FormatRowLayout(long, false, RowLayout(cols))); w > pane-3 {
+			t.Errorf("cols=%d: row is %d wide, list pane is %d (minus fzf's 3-col margin)", cols, w, pane)
+		}
+	}
+	if ListPaneWidth(130) != 130 {
+		t.Errorf("below %d cols the preview goes below, so the list gets the full width; got %d", sideBySideMin, ListPaneWidth(130))
+	}
+	if RowLayout(240).Title <= RowLayout(160).Title {
+		t.Error("a wider terminal should give titles more room")
+	}
+	if RowLayout(160).Project < 16 {
+		t.Errorf("project names like session-search should not be clipped at 160 cols: %d", RowLayout(160).Project)
+	}
+	if RowLayout(139).Title > 72 {
+		t.Errorf("stacked layout should cap titles so the project stays near them: %d", RowLayout(139).Title)
+	}
+	if l := RowLayout(20); l.Title < 10 || l.Project < 6 {
+		t.Errorf("tiny terminal still needs usable columns: %+v", l)
+	}
+	if RowLayout(0) != DefaultRowLayout {
+		t.Error("unknown width (FZF_COLUMNS unset) keeps the default layout")
+	}
+}
+
+func TestPickerHeader_FitsListPane(t *testing.T) {
+	st := PickerState{Dir: t.TempDir()}
+	for _, k := range []string{"semantic", "automated", "live"} {
+		_ = st.Toggle(k)
+	}
+	// the narrowest side-by-side pane, minus fzf's 3-column margin
+	pane := ListPaneWidth(sideBySideMin) - 3
+	for _, line := range strings.Split(st.Header(), "\n") {
+		if n := len([]rune(line)); n > pane {
+			t.Errorf("header line is %d wide, usable list pane is %d: %q", n, pane, line)
+		}
+	}
+	if !strings.Contains(st.Header(), "^/ preview") {
+		t.Error("header lost the preview hint")
+	}
+}
+
+func TestFzfArgs_PreviewThresholdMatchesListPane(t *testing.T) {
+	// fzf compares the threshold to the preview's own width, not the terminal's
+	args := strings.Join(FzfArgs("/bin/aimux", "", "h", 0), "\n")
+	want := fmt.Sprintf("right,%d%%,wrap,border-left,<%d(", previewPercent, sideBySideMin*previewPercent/100)
+	if !strings.Contains(args, want) {
+		t.Errorf("preview window should switch to below at %d terminal cols; want %q in args", sideBySideMin, want)
 	}
 }

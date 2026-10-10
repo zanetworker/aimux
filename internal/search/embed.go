@@ -280,7 +280,7 @@ func (ix *Index) semanticRank(ctx context.Context, query string, opts SearchOpts
 	}
 	q := normalize(qv[0])
 
-	dirSQL, dirArgs := dirClause(opts.Dir)
+	dirSQL, dirArgs := scopeClause(opts)
 	// #nosec G202 -- dirSQL is a fixed clause; values are bound
 	rows, err := ix.db.QueryContext(ctx, `
 		SELECT v.session_id, v.seq, v.vec, s.path, s.cwd, s.title, s.automated, s.mtime
