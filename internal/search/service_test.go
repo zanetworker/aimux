@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -164,5 +165,32 @@ func TestService_RecentHidesAutomated(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("IncludeAutomated Recent = %v, want %s", ids(rs), sidAuto)
+	}
+}
+
+// MCP clients issue tool calls concurrently; each refreshes the index.
+func TestService_ConcurrentCallsDoNotLock(t *testing.T) {
+	svc, _ := newService(t, nil)
+	for i := 0; i < 300; i++ {
+		sid := fmt.Sprintf("ffffffff-0000-0000-0000-%012d", i)
+		put(t, svc.ProjectsDir, "-Users-me-bulk", sid, human("/Users/me/bulk", fmt.Sprintf("bulk session %d %s", i, strings.Repeat("words ", 2000))), reply("ok"))
+	}
+	ctx := context.Background()
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		go func(i int) {
+			if i%2 == 0 {
+				_, err := svc.Session(ctx, "aaaaaaaa")
+				errs <- err
+				return
+			}
+			_, err := svc.Recent(ctx, SearchOpts{Limit: 5})
+			errs <- err
+		}(i)
+	}
+	for i := 0; i < 16; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent call: %v", err)
+		}
 	}
 }

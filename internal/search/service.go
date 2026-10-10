@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Ranking modes for Service.Query.
@@ -34,6 +35,8 @@ type Service struct {
 	ArchiveDirs []string  // also indexed; sessions here outlive Claude Code's cleanup
 	Embedder    Embedder  // nil: keyword only
 	Notes       io.Writer // explanations of degraded modes; nil discards
+
+	mu sync.Mutex // one call at a time: concurrent refreshes lock SQLite
 }
 
 // QueryOpts narrows a Service query.
@@ -60,6 +63,8 @@ func DefaultService(notes io.Writer) *Service {
 // Query refreshes the index (only changed files are re-read) and returns
 // sessions best first, and whether semantic ranking contributed.
 func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Result, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	mode := o.Mode
 	if mode == "" {
 		mode = ModeHybrid
@@ -104,6 +109,8 @@ func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Resul
 // querying. The picker runs it in the background so hybrid ranking sees new
 // sessions too.
 func (s *Service) Refresh(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ix, err := Open(s.DBPath)
 	if err != nil {
 		return fmt.Errorf("open search index: %w", err)
@@ -122,6 +129,8 @@ type Transcript struct {
 // the whole session. Resolve errors come back unwrapped, so callers can
 // errors.As them into *AmbiguousError.
 func (s *Service) Session(ctx context.Context, idOrPrefix string) (Transcript, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ix, err := Open(s.DBPath)
 	if err != nil {
 		return Transcript{}, fmt.Errorf("open search index: %w", err)
@@ -147,6 +156,8 @@ func (s *Service) Session(ctx context.Context, idOrPrefix string) (Transcript, e
 
 // Recent refreshes the index and lists sessions by last activity.
 func (s *Service) Recent(ctx context.Context, o SearchOpts) ([]Result, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ix, err := Open(s.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("open search index: %w", err)
