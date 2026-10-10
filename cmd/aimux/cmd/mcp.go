@@ -3,15 +3,19 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 
+	mcplib "github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/coordination"
 	"github.com/zanetworker/aimux/internal/mcpserver"
+	"github.com/zanetworker/aimux/internal/search"
+	"github.com/zanetworker/aimux/internal/sessionmcp"
 )
 
 // mcpConfigPath overrides the config file path for testing. Empty uses the default.
@@ -20,8 +24,8 @@ var mcpConfigPath string
 func newMCPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "MCP server for remote agent orchestration",
-		Long:  "MCP server commands for orchestrating AI coding agents on remote infrastructure.",
+		Short: "MCP server for session search and remote agents",
+		Long:  "MCP server commands: session search and resume tools, plus opt-in remote agent orchestration.",
 	}
 	cmd.AddCommand(newMCPServeCmd())
 	cmd.AddCommand(newMCPRegisterCmd())
@@ -29,99 +33,129 @@ func newMCPCmd() *cobra.Command {
 	return cmd
 }
 
+// agentsFlags holds the remote-agent overrides of `aimux mcp serve`.
+type agentsFlags struct {
+	backend    string
+	gateway    string
+	image      string
+	warmPool   int
+	redisURL   string
+	kubeconfig string
+	namespace  string
+	teamID     string
+	maxAgents  int
+	maxCost    float64
+}
+
 func newMCPServeCmd() *cobra.Command {
 	var (
-		backend    string
-		gateway    string
-		image      string
-		warmPool   int
-		redisURL   string
-		kubeconfig string
-		namespace  string
-		teamID     string
-		maxAgents  int
-		maxCost    float64
+		f      agentsFlags
+		agents bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the MCP stdio server",
-		Long:  "Start the remote agent MCP server over stdio. Reads config from ~/.aimux/config.yaml with flag overrides.",
+		Long: "Start the aimux MCP server over stdio. Session tools (search, get, list, continue and merge " +
+			"Claude Code sessions) are always on. --agents adds the remote agent tools, configured from " +
+			"~/.aimux/config.yaml with flag overrides; if they fail to start, the session tools keep serving.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath := mcpConfigPath
 			if cfgPath == "" {
 				cfgPath = config.DefaultPath()
 			}
 			cfg, _ := config.Load(cfgPath)
-
-			resolvedBackend := firstNonEmpty(backend, cfg.Remote.Backend, "k8s")
-
-			opts := mcpserver.Options{
-				Backend:         resolvedBackend,
-				GatewayEndpoint: firstNonEmpty(gateway, cfg.Remote.Gateway),
-				Image:           firstNonEmpty(image, cfg.Remote.Image),
-				WarmPool:        max(warmPool, cfg.Remote.WarmPool),
-				RedisURL:        firstNonEmpty(redisURL, cfg.Kubernetes.RedisURL),
-				Kubeconfig:      firstNonEmpty(kubeconfig, cfg.Kubernetes.Kubeconfig),
-				Namespace:       firstNonEmpty(namespace, cfg.Kubernetes.Namespace),
-				TeamID:          firstNonEmpty(teamID, cfg.Kubernetes.TeamID),
-				MaxAgents:       maxAgents,
-				MaxCost:         maxCost,
-			}
-
-			if resolvedBackend == "openshell" {
-				engine, err := aimuxcompose.New(aimuxcompose.Options{
-					Binary:   "openshell",
-					Gateway:  opts.GatewayEndpoint,
-					Insecure: false,
-					Image:    opts.Image,
-				})
-				if err != nil {
-					return fmt.Errorf("compose engine: %w", err)
-				}
-				opts.ExternalBackend = aimuxcompose.NewBackend(engine)
-			}
-
-			// K8s backend requires Redis URL
-			if resolvedBackend == "k8s" && opts.RedisURL == "" {
-				return fmt.Errorf("redis URL is required for k8s backend: set --redis-url flag or kubernetes.redis_url in config")
-			}
-
-			// Create coordinator from config
-			var coord coordination.Coordinator
-			coordURL := firstNonEmpty(cfg.Coordination.RedisURL, opts.RedisURL)
-			coordTeam := firstNonEmpty(cfg.Coordination.TeamID, opts.TeamID)
-			if resolvedBackend != "openshell" && coordURL != "" {
-				var coordErr error
-				coord, coordErr = coordination.NewRedisCoordinator(coordURL, coordTeam)
-				if coordErr != nil {
-					coord = coordination.NewLocalCoordinator()
-				}
-			} else {
-				coord = coordination.NewLocalCoordinator()
-			}
-			opts.Coordinator = coord
-
-			s, err := mcpserver.NewServer(opts)
-			if err != nil {
-				return fmt.Errorf("create MCP server: %w", err)
-			}
-			return s.Serve()
+			notes := cmd.ErrOrStderr()
+			return mcplib.ServeStdio(newServeMCP(agents, f, &cfg, search.DefaultService(notes), notes))
 		},
 	}
 
-	cmd.Flags().StringVar(&backend, "backend", "", "Backend type: openshell or k8s (default from config or k8s)")
-	cmd.Flags().StringVar(&gateway, "gateway", "", "OpenShell gateway endpoint URL")
-	cmd.Flags().StringVar(&image, "image", "", "Default sandbox image")
-	cmd.Flags().IntVar(&warmPool, "warm-pool", 0, "Number of sandboxes to pre-create on startup")
-	cmd.Flags().StringVar(&redisURL, "redis-url", "", "Redis URL (K8s backend, e.g. redis://localhost:6379)")
-	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (K8s backend)")
-	cmd.Flags().StringVar(&namespace, "namespace", "", "Kubernetes namespace for agent deployments (K8s backend)")
-	cmd.Flags().StringVar(&teamID, "team-id", "", "Team ID for Redis key scoping (K8s backend)")
-	cmd.Flags().IntVar(&maxAgents, "max-agents", 0, "Maximum number of concurrent agents (default 20)")
-	cmd.Flags().Float64Var(&maxCost, "max-cost", 0, "Maximum cost limit in USD (default 100)")
+	cmd.Flags().BoolVar(&agents, "agents", false, "Also serve the remote agent tools (needs a k8s or openshell backend)")
+	cmd.Flags().StringVar(&f.backend, "backend", "", "Backend type: openshell or k8s (default from config or k8s)")
+	cmd.Flags().StringVar(&f.gateway, "gateway", "", "OpenShell gateway endpoint URL")
+	cmd.Flags().StringVar(&f.image, "image", "", "Default sandbox image")
+	cmd.Flags().IntVar(&f.warmPool, "warm-pool", 0, "Number of sandboxes to pre-create on startup")
+	cmd.Flags().StringVar(&f.redisURL, "redis-url", "", "Redis URL (K8s backend, e.g. redis://localhost:6379)")
+	cmd.Flags().StringVar(&f.kubeconfig, "kubeconfig", "", "Path to kubeconfig file (K8s backend)")
+	cmd.Flags().StringVar(&f.namespace, "namespace", "", "Kubernetes namespace for agent deployments (K8s backend)")
+	cmd.Flags().StringVar(&f.teamID, "team-id", "", "Team ID for Redis key scoping (K8s backend)")
+	cmd.Flags().IntVar(&f.maxAgents, "max-agents", 0, "Maximum number of concurrent agents (default 20)")
+	cmd.Flags().Float64Var(&f.maxCost, "max-cost", 0, "Maximum cost limit in USD (default 100)")
 
 	return cmd
+}
+
+// newServeMCP builds the server: session tools always, agent tools when
+// asked and they start; an agents failure is reported to notes, not fatal.
+func newServeMCP(agents bool, f agentsFlags, cfg *config.Config, svc *search.Service, notes io.Writer) *mcplib.MCPServer {
+	srv := mcplib.NewMCPServer("aimux", rootCmd.Version)
+	sessionmcp.New(svc).Register(srv)
+	if agents {
+		s, err := buildAgentsServer(f, cfg)
+		if err != nil {
+			_, _ = fmt.Fprintf(notes, "agents tools disabled: %v\n", err)
+		} else {
+			s.Register(srv)
+		}
+	}
+	return srv
+}
+
+// buildAgentsServer resolves the remote-agent backend from flags and config.
+func buildAgentsServer(f agentsFlags, cfg *config.Config) (*mcpserver.Server, error) {
+	resolvedBackend := firstNonEmpty(f.backend, cfg.Remote.Backend, "k8s")
+
+	opts := mcpserver.Options{
+		Backend:         resolvedBackend,
+		GatewayEndpoint: firstNonEmpty(f.gateway, cfg.Remote.Gateway),
+		Image:           firstNonEmpty(f.image, cfg.Remote.Image),
+		WarmPool:        max(f.warmPool, cfg.Remote.WarmPool),
+		RedisURL:        firstNonEmpty(f.redisURL, cfg.Kubernetes.RedisURL),
+		Kubeconfig:      firstNonEmpty(f.kubeconfig, cfg.Kubernetes.Kubeconfig),
+		Namespace:       firstNonEmpty(f.namespace, cfg.Kubernetes.Namespace),
+		TeamID:          firstNonEmpty(f.teamID, cfg.Kubernetes.TeamID),
+		MaxAgents:       f.maxAgents,
+		MaxCost:         f.maxCost,
+	}
+
+	if resolvedBackend == "openshell" {
+		engine, err := aimuxcompose.New(aimuxcompose.Options{
+			Binary:   "openshell",
+			Gateway:  opts.GatewayEndpoint,
+			Insecure: false,
+			Image:    opts.Image,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("compose engine: %w", err)
+		}
+		opts.ExternalBackend = aimuxcompose.NewBackend(engine)
+	}
+
+	// K8s backend requires Redis URL
+	if resolvedBackend == "k8s" && opts.RedisURL == "" {
+		return nil, fmt.Errorf("redis URL is required for k8s backend: set --redis-url flag or kubernetes.redis_url in config")
+	}
+
+	// Create coordinator from config
+	var coord coordination.Coordinator
+	coordURL := firstNonEmpty(cfg.Coordination.RedisURL, opts.RedisURL)
+	coordTeam := firstNonEmpty(cfg.Coordination.TeamID, opts.TeamID)
+	if resolvedBackend != "openshell" && coordURL != "" {
+		var coordErr error
+		coord, coordErr = coordination.NewRedisCoordinator(coordURL, coordTeam)
+		if coordErr != nil {
+			coord = coordination.NewLocalCoordinator()
+		}
+	} else {
+		coord = coordination.NewLocalCoordinator()
+	}
+	opts.Coordinator = coord
+
+	s, err := mcpserver.NewServer(opts)
+	if err != nil {
+		return nil, fmt.Errorf("create MCP server: %w", err)
+	}
+	return s, nil
 }
 
 // firstNonEmpty returns the first non-empty string from the given values.
