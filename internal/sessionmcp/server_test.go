@@ -181,3 +181,14 @@ func TestList_DaysFilter(t *testing.T) {
 		t.Errorf("project_filter:\n%s", out)
 	}
 }
+
+func TestVirtual_TooManyIDs(t *testing.T) {
+	s, _ := newFixture(t)
+	ids := make([]any, maxVirtualSessions+1)
+	for i := range ids {
+		ids[i] = sidDeck
+	}
+	if out, isErr := call(t, s.handleVirtual, map[string]any{"session_ids": ids}); !isErr || !strings.Contains(out, "at most") {
+		t.Errorf("too many IDs: isErr=%v %s", isErr, out)
+	}
+}

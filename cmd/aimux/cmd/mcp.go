@@ -10,6 +10,7 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
+	pkgcompose "github.com/zanetworker/agent-compose/pkg/compose"
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/coordination"
@@ -101,6 +102,12 @@ func newServeMCP(agents bool, f agentsFlags, cfg *config.Config, svc *search.Ser
 	return srv
 }
 
+// mcpExecutor runs openshell with no stdin and all output on stderr: under
+// `mcp serve` the process's stdin and stdout carry JSON-RPC.
+func mcpExecutor(binary string, stderr io.Writer) pkgcompose.Executor {
+	return pkgcompose.NewCLIExecutor(binary, nil, stderr, stderr)
+}
+
 // buildAgentsServer resolves the remote-agent backend from flags and config.
 func buildAgentsServer(f agentsFlags, cfg *config.Config) (*mcpserver.Server, error) {
 	resolvedBackend := firstNonEmpty(f.backend, cfg.Remote.Backend, "k8s")
@@ -124,6 +131,7 @@ func buildAgentsServer(f agentsFlags, cfg *config.Config) (*mcpserver.Server, er
 			Gateway:  opts.GatewayEndpoint,
 			Insecure: false,
 			Image:    opts.Image,
+			Executor: mcpExecutor("openshell", os.Stderr),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("compose engine: %w", err)
@@ -303,7 +311,7 @@ func registerMCPServer(settingsPath, aimuxBin, redisURL, namespace, teamID strin
 
 	mcpServers["aimux-k8s-agents"] = map[string]interface{}{
 		"command": aimuxBin,
-		"args":    []string{"mcp", "serve"},
+		"args":    []string{"mcp", "serve", "--agents"},
 		"env": map[string]string{
 			"REDIS_URL":     redisURL,
 			"K8S_NAMESPACE": namespace,

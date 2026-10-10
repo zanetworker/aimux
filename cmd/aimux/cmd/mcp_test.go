@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -93,5 +96,35 @@ func TestMCPServeCmd_Flags(t *testing.T) {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("missing flag --%s on serve subcommand", name)
 		}
+	}
+}
+
+// The openshell executor must never touch the server's stdin/stdout: they
+// carry JSON-RPC under `mcp serve --agents`.
+func TestMCPExecutor_KeepsStdioClean(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "openshell")
+	// #nosec G306 -- a fake binary in a test temp dir must be executable
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho LEAK\ncat >/dev/null\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	var stderr bytes.Buffer
+	execErr := mcpExecutor(bin, &stderr).ExecInSandbox(context.Background(), "x", []string{"true"})
+	os.Stdout = orig
+	_ = w.Close()
+	leaked, _ := io.ReadAll(r)
+	if execErr != nil {
+		t.Fatalf("exec: %v", execErr)
+	}
+	if len(leaked) != 0 {
+		t.Errorf("child wrote %q to stdout", leaked)
+	}
+	if !strings.Contains(stderr.String(), "LEAK") {
+		t.Errorf("child output should go to stderr, got %q", stderr.String())
 	}
 }

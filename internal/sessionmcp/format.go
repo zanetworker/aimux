@@ -17,6 +17,7 @@ const (
 	maxExchangeChars    = 20_000  // one exchange's prose is cut here
 	fullExchanges       = 20      // virtual sessions this short are shown whole
 	defaultNumExchanges = 10      // otherwise the last this many
+	maxVirtualSessions  = 20      // most sessions one virtual session merges
 	truncMark           = "…[truncated]"
 )
 
@@ -60,18 +61,26 @@ func formatList(rs []search.Result) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// formatSession renders a session; lastN > 0 keeps only its last lastN
-// exchanges. Output past maxOutputChars keeps the newest exchanges.
-func formatSession(t search.Transcript, lastN int) string {
+// formatSession renders a session. beforeSeq > 0 keeps only exchanges
+// before that seq; lastN > 0 then keeps the last lastN of those. Output past
+// maxOutputChars keeps the newest, and the heading says how to page back.
+func formatSession(t search.Transcript, lastN, beforeSeq int) string {
 	ex := t.Exchanges
+	if beforeSeq > 0 {
+		ex = ex[:sort.Search(len(ex), func(i int) bool { return ex[i].Seq >= beforeSeq })]
+	}
 	if lastN > 0 && lastN < len(ex) {
 		ex = ex[len(ex)-lastN:]
 	}
 	head := header(t)
 	blocks, kept := fitNewest(ex, maxOutputChars-len(head)-200)
 	heading := fmt.Sprintf("## Transcript (%d of %d exchanges)", kept, len(t.Exchanges))
-	if kept < len(ex) {
-		heading = fmt.Sprintf("## Transcript (last %d of %d exchanges; pass last_n to page)", kept, len(t.Exchanges))
+	if kept > 0 {
+		shown := ex[len(ex)-kept:]
+		if shown[0].Seq > t.Exchanges[0].Seq {
+			heading = fmt.Sprintf("## Transcript (exchanges %d to %d of %d exchanges; for earlier ones call get_session with before_seq=%d)",
+				shown[0].Seq, shown[kept-1].Seq, len(t.Exchanges), shown[0].Seq)
+		}
 	}
 	return head + "\n" + heading + "\n\n" + blocks
 }
@@ -84,7 +93,8 @@ func formatContinue(t search.Transcript) string {
 	blocks, kept := fitNewest(t.Exchanges, maxOutputChars-len(head)-200)
 	heading := fmt.Sprintf("## Transcript (%d exchanges)", len(t.Exchanges))
 	if kept < len(t.Exchanges) {
-		heading = fmt.Sprintf("## Transcript (last %d of %d exchanges; use get_session for earlier ones)", kept, len(t.Exchanges))
+		heading = fmt.Sprintf("## Transcript (last %d of %d exchanges; for earlier ones call get_session with before_seq=%d)",
+			kept, len(t.Exchanges), t.Exchanges[len(t.Exchanges)-kept].Seq)
 	}
 	return head + "\n" + heading + "\n\n" + blocks
 }
@@ -106,10 +116,17 @@ func formatVirtual(ts []search.Transcript, numExchanges int) string {
 			shown[i] = t.Exchanges[len(t.Exchanges)-numExchanges:]
 		}
 	}
+	skip := 0 // oldest sessions dropped when one exchange each still does not fit
 	render := func() string {
 		var b strings.Builder
 		fmt.Fprintf(&b, "# Virtual session (%d sessions merged, oldest first)\n\n", len(ts))
+		if skip > 0 {
+			fmt.Fprintf(&b, "_%d oldest sessions omitted to fit the output cap; load them with get_session._\n\n", skip)
+		}
 		for i, t := range ts {
+			if i < skip {
+				continue
+			}
 			d := t.Detail
 			fmt.Fprintf(&b, "## Session %d of %d: %s (%s)\n\n", i+1, len(ts), short(d.SessionID), d.CWD)
 			fmt.Fprintf(&b, "**Title:** %s · **Last modified:** %s · ", title(d.Title), d.ModTime.Format("2006-01-02 15:04"))
@@ -127,13 +144,18 @@ func formatVirtual(ts []search.Transcript, numExchanges int) string {
 	out := render()
 	for len(out) > maxOutputChars {
 		longest := -1
-		for i := range shown {
+		for i := skip; i < len(shown); i++ {
 			if len(shown[i]) > 1 && (longest < 0 || sectionLen(shown[i]) > sectionLen(shown[longest])) {
 				longest = i
 			}
 		}
 		if longest < 0 {
-			break // one exchange each, already clipped: nothing left to drop
+			if skip >= len(ts)-1 {
+				break // only the newest session left, and its one exchange is clipped
+			}
+			skip++
+			out = render()
+			continue
 		}
 		shown[longest] = shown[longest][1:]
 		out = render()

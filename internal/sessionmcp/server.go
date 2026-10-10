@@ -52,12 +52,13 @@ func searchTool() mcp.Tool {
 func getTool() mcp.Tool {
 	return mcp.NewTool("get_session",
 		mcp.WithDescription("Retrieve a session's conversation by its ID. Accepts a full UUID or a unique prefix "+
-			"(e.g. 'd941e8'); an ambiguous prefix returns the matching candidates. Use last_n to return only the tail. "+
+			"(e.g. 'd941e8'); an ambiguous prefix returns the matching candidates. Use last_n to return only the tail; output over 100k characters keeps the newest exchanges and its heading gives the before_seq that pages back. "+
 			"Finds sessions in any project, including ones started after the last index refresh, and automated ones.\n\n"+
 			"Use when: you already have a session ID and need to inspect its content, "+
 			"or user says 'show me session X', 'what happened in session Y'. "+noPaths),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Full or prefix UUID of the session")),
 		mcp.WithNumber("last_n", mcp.Description("Return only the last N exchanges")),
+		mcp.WithNumber("before_seq", mcp.Description("Only exchanges before this sequence number, to page back through a long session; the output heading gives the next value")),
 	)
 }
 
@@ -94,7 +95,7 @@ func virtualTool() mcp.Tool {
 			"Use when: work spans multiple sessions and user needs context from all of them, "+
 			"e.g. 'combine these sessions', 'merge context from session A and B', "+
 			"'I worked on this across several sessions'.", fullExchanges)),
-		mcp.WithArray("session_ids", mcp.Required(), mcp.WithStringItems(), mcp.MinItems(2),
+		mcp.WithArray("session_ids", mcp.Required(), mcp.WithStringItems(), mcp.MinItems(2), mcp.MaxItems(maxVirtualSessions),
 			mcp.Description("Session IDs or unique prefixes to combine")),
 		mcp.WithNumber("num_exchanges", mcp.DefaultNumber(defaultNumExchanges),
 			mcp.Description(fmt.Sprintf("Tail exchanges to keep for sessions over %d exchanges", fullExchanges))),
@@ -124,7 +125,7 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if res != nil {
 		return res, nil
 	}
-	return mcp.NewToolResultText(formatSession(t, req.GetInt("last_n", 0))), nil
+	return mcp.NewToolResultText(formatSession(t, req.GetInt("last_n", 0), req.GetInt("before_seq", 0))), nil
 }
 
 func (s *Server) handleContinue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -161,6 +162,9 @@ func (s *Server) handleVirtual(ctx context.Context, req mcp.CallToolRequest) (*m
 	ids := req.GetStringSlice("session_ids", nil)
 	if len(ids) < 2 {
 		return mcp.NewToolResultError("session_ids needs at least 2 session IDs"), nil
+	}
+	if len(ids) > maxVirtualSessions {
+		return mcp.NewToolResultError(fmt.Sprintf("session_ids takes at most %d session IDs", maxVirtualSessions)), nil
 	}
 	ts := make([]search.Transcript, 0, len(ids))
 	for _, id := range ids {

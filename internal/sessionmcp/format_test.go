@@ -2,6 +2,8 @@ package sessionmcp
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +59,7 @@ func TestFormatContinue_GiantExchangeTruncated(t *testing.T) {
 }
 
 func TestFormatSession_LastN(t *testing.T) {
-	out := formatSession(transcript("s", "/x", 5, func(i int) string { return fmt.Sprintf("prose-%d", i) }), 2)
+	out := formatSession(transcript("s", "/x", 5, func(i int) string { return fmt.Sprintf("prose-%d", i) }), 2, 0)
 	for _, want := range []string{"prose-3", "prose-4"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s", want)
@@ -68,18 +70,18 @@ func TestFormatSession_LastN(t *testing.T) {
 			t.Errorf("should not contain %s", not)
 		}
 	}
-	if all := formatSession(transcript("s", "/x", 5, func(i int) string { return fmt.Sprintf("prose-%d", i) }), 0); !strings.Contains(all, "prose-0") {
+	if all := formatSession(transcript("s", "/x", 5, func(i int) string { return fmt.Sprintf("prose-%d", i) }), 0, 0); !strings.Contains(all, "prose-0") {
 		t.Error("lastN=0 should show every exchange")
 	}
 }
 
 func TestFormatSession_AutomatedFlag(t *testing.T) {
 	tr := transcript("s", "/x", 1, func(int) string { return "p" })
-	if strings.Contains(formatSession(tr, 0), "automated") {
+	if strings.Contains(formatSession(tr, 0, 0), "automated") {
 		t.Error("human session flagged automated")
 	}
 	tr.Detail.Automated = true
-	if !strings.Contains(formatSession(tr, 0), "automated") {
+	if !strings.Contains(formatSession(tr, 0, 0), "automated") {
 		t.Error("automated flag missing")
 	}
 }
@@ -136,7 +138,7 @@ func TestFormatList(t *testing.T) {
 }
 
 func TestFormatSession_CapKeepsNewest(t *testing.T) {
-	out := formatSession(transcript("s", "/x", 100, func(i int) string { return fmt.Sprintf("ex-%d ", i) + strings.Repeat("x", 5_000) }), 0)
+	out := formatSession(transcript("s", "/x", 100, func(i int) string { return fmt.Sprintf("ex-%d ", i) + strings.Repeat("x", 5_000) }), 0, 0)
 	if len(out) > maxOutputChars {
 		t.Errorf("len = %d, over cap", len(out))
 	}
@@ -154,5 +156,46 @@ func TestFormatVirtual_CapShrinksLongestFirst(t *testing.T) {
 	}
 	if !strings.Contains(out, "small-0.") || !strings.Contains(out, "big-19.") || strings.Contains(out, "big-0.") {
 		t.Error("the long section should shrink from its oldest end; the short one stays whole")
+	}
+}
+
+func TestFormatVirtual_CapHoldsWhenEverySectionIsOneExchange(t *testing.T) {
+	var ts []search.Transcript
+	for i := 0; i < 6; i++ {
+		tr := transcript(fmt.Sprintf("%08d-x", i), "/a", 1, func(int) string { return strings.Repeat("p", 30_000) })
+		tr.Exchanges[0].Prompt = strings.Repeat("q", 30_000)
+		tr.Detail.ModTime = tr.Detail.ModTime.Add(time.Duration(i) * time.Hour)
+		ts = append(ts, tr)
+	}
+	out := formatVirtual(ts, 10)
+	if len(out) > maxOutputChars {
+		t.Errorf("len = %d, over cap", len(out))
+	}
+	if !strings.Contains(out, "00000005") || !strings.Contains(out, "omitted") {
+		t.Error("the newest session should stay and the omission be stated")
+	}
+}
+
+func TestFormatSession_PagesBackWithBeforeSeq(t *testing.T) {
+	tr := transcript("s", "/x", 100, func(i int) string { return fmt.Sprintf("ex-%d ", i) + strings.Repeat("x", 5_000) })
+	first := formatSession(tr, 0, 0)
+	m := regexp.MustCompile(`before_seq=(\d+)`).FindStringSubmatch(first)
+	if m == nil {
+		t.Fatalf("cut output should say how to page back:\n%s", first[:400])
+	}
+	next, _ := strconv.Atoi(m[1])
+	older := formatSession(tr, 0, next)
+	if !strings.Contains(older, fmt.Sprintf("ex-%d ", next-1)) || strings.Contains(older, fmt.Sprintf("ex-%d ", next)) {
+		t.Errorf("before_seq=%d should end at exchange %d", next, next-1)
+	}
+	if got := formatSession(tr, 3, 10); !strings.Contains(got, "ex-7 ") || !strings.Contains(got, "ex-9 ") || strings.Contains(got, "ex-6 ") || strings.Contains(got, "ex-10 ") {
+		t.Error("last_n=3 with before_seq=10 should show exchanges 7 to 9")
+	}
+}
+
+func TestFormatContinue_PointsToPaging(t *testing.T) {
+	tr := transcript("s", "/x", 100, func(i int) string { return strings.Repeat("x", 5_000) })
+	if out := formatContinue(tr); !strings.Contains(out, "get_session") || !strings.Contains(out, "before_seq=") {
+		t.Error("continue_session should say how to fetch earlier exchanges")
 	}
 }

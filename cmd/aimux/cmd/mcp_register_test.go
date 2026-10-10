@@ -52,8 +52,8 @@ func TestMCPRegister_CreatesEntry(t *testing.T) {
 	}
 
 	args, ok := entry["args"].([]interface{})
-	if !ok || len(args) != 2 || args[0] != "mcp" || args[1] != "serve" {
-		t.Errorf("args = %v, want [mcp serve]", entry["args"])
+	if !ok || len(args) != 3 || args[0] != "mcp" || args[1] != "serve" || args[2] != "--agents" {
+		t.Errorf("args = %v, want [mcp serve --agents]: this entry exists for the agent tools", entry["args"])
 	}
 
 	env, ok := entry["env"].(map[string]interface{})
