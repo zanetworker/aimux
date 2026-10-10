@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -81,4 +82,95 @@ func (ix *Index) Detail(sessionID string, n int) (Detail, error) {
 		d.RecentPrompts = append([]string{p}, d.RecentPrompts...)
 	}
 	return d, rows.Err()
+}
+
+// Exchange is one indexed exchange: the prompt that opened it and what was
+// said (human and assistant text, no tool output).
+type Exchange struct {
+	Seq    int
+	Prompt string
+	Prose  string
+}
+
+// AmbiguousError reports a session ID prefix that matches more than one session.
+type AmbiguousError struct {
+	Prefix     string
+	Candidates []Result
+}
+
+func (e *AmbiguousError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%q matches more than one session; use a longer prefix:", e.Prefix)
+	for _, c := range e.Candidates {
+		fmt.Fprintf(&b, "\n  %s  %s  %s", c.SessionID, c.CWD, c.Title)
+	}
+	return b.String()
+}
+
+// Resolve maps a full session ID or a unique prefix of one to the full ID.
+// Automated sessions resolve too: an explicit ID always wins over filters.
+func (ix *Index) Resolve(idOrPrefix string) (string, error) {
+	q := strings.TrimSpace(idOrPrefix)
+	if q == "" {
+		return "", fmt.Errorf("no session matches an empty ID")
+	}
+	var id string
+	err := ix.db.QueryRow(`SELECT id FROM sessions WHERE id = ?`, q).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	rows, err := ix.db.Query(`SELECT id, cwd, title FROM sessions WHERE id LIKE ? ESCAPE '\' ORDER BY mtime DESC LIMIT 11`,
+		likePrefix(q))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	var cands []Result
+	for rows.Next() {
+		var r Result
+		if err := rows.Scan(&r.SessionID, &r.CWD, &r.Title); err != nil {
+			return "", err
+		}
+		cands = append(cands, r)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	switch len(cands) {
+	case 0:
+		return "", fmt.Errorf("no session matches %q", q)
+	case 1:
+		return cands[0].SessionID, nil
+	}
+	if len(cands) > 10 {
+		cands = cands[:10]
+	}
+	return "", &AmbiguousError{Prefix: q, Candidates: cands}
+}
+
+// likePrefix escapes LIKE wildcards in p and appends %.
+func likePrefix(p string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(p) + "%"
+}
+
+// Exchanges returns every indexed exchange of a session in order.
+func (ix *Index) Exchanges(sessionID string) ([]Exchange, error) {
+	rows, err := ix.db.Query(`SELECT seq, prompt, prose FROM chunks WHERE session_id = ? ORDER BY CAST(seq AS INTEGER)`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Exchange
+	for rows.Next() {
+		var e Exchange
+		if err := rows.Scan(&e.Seq, &e.Prompt, &e.Prose); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
