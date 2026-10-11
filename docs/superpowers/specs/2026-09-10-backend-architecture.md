@@ -1,6 +1,6 @@
 # aimux Backend Architecture
 
-**Date:** 2026-09-10 (updated 2026-09-11)
+**Date:** 2026-09-10 (updated 2026-09-11; OCC sections revised 2026-10-01 from the [OCC spike](../spikes/2026-10-01-occ-spike.md))
 **Status:** Design
 **Scope:** Backend interface, multi-tier execution model, OpenClaw/OpenAI/CMA alignment
 **Depends on:** Phases 1-6 (complete), UX restructure (complete)
@@ -49,7 +49,7 @@ The Backend interface aligns with three external platforms. All use the same mod
 | OpenClaw Gateway | Self-hosted gateway (channels + agent runtime + plugins) | Gateway (your infra) | OpenShell plugin (your infra) |
 | OpenAI Agents API | Hosted API | OpenAI (their infra) | Pluggable providers (E2B, Modal, self-hosted) |
 | Claude CMA | Hosted API | Anthropic (their infra) | Anthropic (their sandbox) |
-| OCC (enterprise) | Self-hosted multi-tenant control plane | Per-namespace gateway | SandboxDriver + ComputeDriver |
+| OCC (enterprise) | Self-hosted multi-tenant control plane | Per-agent OpenClaw gateway (one per agent revision, deployed by OCC) | SandboxDriver + ComputeDriver |
 
 OpenClaw includes messaging channels (Slack, WhatsApp, Telegram) natively. When aimux connects to it, aimux IS the channel. OpenAI and CMA are pure APIs where you build the channel yourself.
 
@@ -135,6 +135,21 @@ aimux sessions resume my-server/session-42
 ```
 
 The sandbox restarts, workspace remounts, the agent reloads conversation history and continues. It doesn't re-read the 40 files it already read. It picks up from where it was.
+
+*Target experience, not available today: neither OpenClaw nor OCC has session pause/resume (see Phase 4 and Dependencies and Gaps). Backends without it return ErrUnsupported.*
+
+### Day four: your team's OCC
+
+Your team runs OpenClaw Enterprise. The platform team gives you an OCC URL, a service key, and the agent gateway URL they exposed.
+
+```bash
+aimux backends add team --type occ --endpoint https://occ.example.com \
+  --namespace my-team --gateway wss://agents.example.com
+```
+
+The Agents tab shows `team:security-scan` next to your local agents. Editing it and pressing deploy creates a new revision in OCC; that is a deploy of the agent, not of a session, and every session started afterwards uses it. Starting a session opens a connection to that agent's own gateway. The Active tab shows sessions from every agent you can reach. There is no pause: abort stops the turn, and the session stays in the agent's gateway.
+
+If the platform team has not exposed the gateway, aimux can still list and deploy agents through OCC but cannot open sessions. It says so instead of hanging.
 
 ### Override per session
 
@@ -457,7 +472,7 @@ aimux calls: Sessions.Resume(ref)
     8. Events flow back to aimux via Subscribe
 ```
 
-**Gap: session resume after sandbox restart does not exist today in OpenClaw.** The gateway has the session store and the OpenShell integration, but there is no flow that automatically reconnects a harness to a restarted sandbox and replays the conversation. This is gateway-level work, not aimux work. In OCC enterprise mode, OCC orchestrates this via the per-namespace gateway.
+**Gap: session resume after sandbox restart does not exist today in OpenClaw.** The gateway has the session store and the OpenShell integration, but there is no flow that automatically reconnects a harness to a restarted sandbox and replays the conversation. This is gateway-level work, not aimux work. OCC does not change this: it has no session API, so resume would happen inside each agent's gateway, not through OCC.
 
 ### State preservation levels
 
@@ -486,8 +501,8 @@ A session has four distinct layers of state. Each layer has a different owner, s
 | Layer | local | openclaw | mecatl (future) | openai | occ |
 |-------|-------|----------|-----------------|--------|-----|
 | Workspace | Local filesystem | Sandbox PVC (OpenShell) | Redis virtual FS | Provider-managed | SandboxDriver + PVC |
-| Session state | SQLite | Gateway SQLite | Redis snapshots | OpenAI cloud | Namespace gateway store |
-| Harness state | In-memory (claude subprocess) | In-memory (gateway process) | Redis snapshot (saved every turn) | RunState (serialized) | Namespace gateway |
+| Session state | SQLite | Gateway SQLite | Redis snapshots | OpenAI cloud | Per-agent gateway store (agent volume) |
+| Harness state | In-memory (claude subprocess) | In-memory (gateway process) | Redis snapshot (saved every turn) | RunState (serialized) | Per-agent gateway process |
 | Platform state | YAML files | Gateway config | Redis / gRPC service | OpenAI cloud | OCC database |
 
 ### Crash recovery per layer
@@ -522,14 +537,17 @@ OCC (control plane)
   | owns: platform state (agents, revisions, policies, IAM)
   | stores: platform resources in OCC database
   | does NOT store: session state, harness state, workspace
+  | does NOT expose: any session API (no sessions in OCC REST or CLI)
   |
-  +-- manages: per-namespace gateway
+  +-- deploys: one OpenClaw gateway per agent revision (Kubernetes Compute)
   |     |
-  |     | gateway owns: session state + harness state
+  |     | gateway owns: session state + harness state (agent volume)
   |     | gateway connects to: sandbox (via SandboxDriver)
+  |     | reachable at: wss://<private-host>/namespaces/<ns>/agents/<agent>
+  |     |   via a ClusterIP-only Envoy; no public listener
   |     |
   |     | if gateway crashes:
-  |     |   OCC restarts the gateway pod (K8s reconciliation)
+  |     |   Kubernetes restarts the gateway pod
   |     |   gateway reloads from its store
   |     |   quality depends on gateway implementation:
   |     |     OpenClaw gateway: SQLite reload, harness state lost
@@ -544,7 +562,7 @@ OCC (control plane)
 
 OCC's role in crash recovery: detect gateway pod died, restart it, verify health. The gateway handles its own session recovery. OCC orchestrates but doesn't participate in the data path.
 
-If the per-namespace gateway used Mecatl's engine (Go, Redis, snapshots, leases) instead of OpenClaw's Node.js/SQLite, you'd get zero-downtime crash recovery with session takeover across pods. This is a future architectural option for OCC, not an aimux concern.
+If the per-agent gateway used Mecatl's engine (Go, Redis, snapshots, leases) instead of OpenClaw's Node.js/SQLite, you'd get zero-downtime crash recovery with session takeover across pods. This is a future architectural option for OCC, not an aimux concern.
 
 ## Backend Implementations
 
@@ -597,22 +615,30 @@ REST + SSE client for the OpenAI Agents API.
 
 ### occ (internal/backend/occ.go) — future
 
-Client for the OpenClaw Controller (OCC) API per RFC 0027.
+Client for OpenClaw Enterprise's control plane (OCC, github.com/openclaw/openclaw-enterprise). The OCC REST API has shipped; it covers platform resources only.
 
-- Maps to OCC API for Agents, AgentRevisions, Sessions, Namespaces
-- Multi-tenant: aimux connects to one Installation, user selects Namespace
-- Agent definitions are OCC resources (Agent + Configuration + Harness)
-- SandboxPolicy and ComputeDriver are OCC concerns
-- Secrets via SecretBroker, never in aimux
-- Session resume orchestrated by OCC: OCC tells namespace gateway to resume, gateway does the work
+The occ backend is a composite of two connections:
 
-**aimux does NOT replicate OCC concepts.** No Namespace, AgentRevision, SandboxPolicy, SecretBroker, or Restriction types in aimux.
+1. **OCC REST** (service key or console identity): `Agents` and deployment. Agent = Agent + Configuration + Harness; an update creates a new revision, and `deploy` rolls it out. Deploy is per agent, never per session.
+2. **Per-agent OpenClaw gateway** (gateway credential): `Sessions`. Each deployed agent runs its own gateway, so the backend opens one gateway connection per agent and a namespace-wide session list is a fan-out across agents. Reuses the `openclaw` backend's gateway client.
+
+Constraints observed in the spike:
+
+- OCC exposes no session API and does not proxy session traffic. The only OCC-mediated interactive path is the native admin UI pilot (browser session, `administer` on the exact agent), not a programmatic client.
+- The gateway is private by design: ClusterIP Envoy, no public listener, routing off by default. aimux needs an operator-exposed gateway URL per installation (Route/LoadBalancer + TLS), or falls back to port-forward.
+- Gateway auth is not per user: an Envoy API key on the routed path, or the gateway password from the pod env on the direct path. OCC's own reference client uses `kubectl exec` into the gateway pod.
+- No session pause/resume in OCC or OpenClaw. `Pause`/`Resume` return ErrUnsupported.
+- Sessions are implicit: on the gateway's chat-completions endpoint the OpenAI `user` field keys the session (`agent:main:openai-user:<user>`), so `Sessions.Create` is a client-side ID and the first `Send` creates it. Sessions persist on the agent's gateway volume and survive redeploys (observed).
+- A deploy replaces the gateway pod; pod-pinned connections (port-forward) drop. `Subscribe` must reconnect when the agent's active revision changes.
+- Observed latency: deploy 57s cold, 40s warm; new session 3-5s to first token, warm turn about 2.5s; first request on a fresh gateway 7-9s.
+- Only Kubernetes Compute deploys agents. Docker Compute rejects harness auth bindings; SSH Compute supports embedded OpenClaw only.
+
+**aimux does NOT replicate OCC concepts.** No Namespace, AgentRevision, SandboxPolicy, SecretBroker, or Restriction types in aimux. One configured namespace per backend entry.
 
 **Ownership in OCC mode:**
-- OCC owns the session store (platform database)
-- Gateway is per-namespace, managed by OCC
-- Gateway doesn't own session state in enterprise mode; OCC does
-- Resume flow: aimux -> OCC API -> OCC tells gateway -> gateway restarts sandbox -> gateway reconnects harness
+- OCC owns platform state (agents, configurations, revisions, IAM, secrets)
+- Each agent's gateway owns its sessions and harness state on the agent volume
+- Kubernetes restarts crashed gateway pods; recovery quality is the gateway's (see State Layers)
 
 ## Agent Definition Ownership
 
@@ -646,7 +672,7 @@ aimux agents publish reviewer --to my-server
 | local | SQLite | Authoritative store |
 | openclaw | OpenClaw | Disposable projection |
 | openai | OpenAI | Disposable projection |
-| occ | OCC | Disposable projection |
+| occ | Each agent's gateway (not OCC) | Disposable projection |
 
 **Local projection schema for remote backends:**
 
@@ -691,8 +717,12 @@ backends:
   #
   # occ-prod:
   #   type: occ
-  #   endpoint: https://occ.example.com
+  #   endpoint: https://occ.example.com        # OCC REST
   #   namespace: my-team
+  #   service_key_file: ~/.aimux/keys/occ-prod.json
+  #   gateway:                                  # operator-exposed; OCC does not provide one
+  #     base: wss://agents.example.com          # + /namespaces/<ns>/agents/<agent>
+  #     api_key_env: OCC_GATEWAY_API_KEY
 ```
 
 `local` always exists, no configuration needed. Remote backends added by name.
@@ -776,10 +806,11 @@ Nothing is deleted. Code stays; the Backend interface routes to the right implem
 - REST + SSE client
 - Session state serialization for pause/resume
 
-### Phase 6: OCC backend (future, post-RFC)
-- Implement `occ.go` when OCC API ships
-- Namespace selection
-- Read-only surfacing of OCC concepts
+### Phase 6: OCC backend (future)
+- Depends on Phase 2 (OpenClaw gateway client), which the occ backend reuses per agent
+- `occ.go`: OCC REST for Agents + deploy, per-agent gateway connections for Sessions
+- One namespace per backend entry
+- Observed on OpenShift 4.20 (spike doc): deploy 57s cold / 40s warm; new session 3-5s to first token; sessions survive redeploy
 
 ## Dependencies and Gaps
 
@@ -793,7 +824,9 @@ Nothing is deleted. Code stays; the Backend interface routes to the right implem
 | Auto-resume on access | OpenClaw gateway | Without it, user must manually resume |
 | Workspace manifest | aimux + backends | No portable workspace definition yet (OpenAI has this) |
 | Session memory | aimux + backends | No cross-run learning persistence (OpenAI has this) |
-| Mecatl as gateway engine | OCC / OpenClaw | If OCC namespaces used Mecatl (Go, Redis, snapshots) instead of OpenClaw (Node.js, SQLite), crash recovery would be zero-downtime. Future architectural option. |
+| Gateway exposure outside the cluster | OCC operator | OCC creates no public listener; without an operator-exposed route aimux can only port-forward |
+| Per-user gateway credentials | OCC | Gateway auth is a shared API key or pod password; no per-user identity on session traffic |
+| Mecatl as gateway engine | OCC / OpenClaw | If OCC agent gateways used Mecatl (Go, Redis, snapshots) instead of OpenClaw (Node.js, SQLite), crash recovery would be zero-downtime. Future architectural option. |
 
 ## Key Design Decisions
 
