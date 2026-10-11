@@ -1,22 +1,21 @@
-## aimux 0.9.0
+## aimux v0.13.0
 
-### Web Dashboard
-Full browser-based UI at `aimux web`. Card grid with agent status, session history table, trace panel with annotations, export (JSONL/OTEL), filtering, sorting, content search, and a plugin system for custom dashboard tabs.
+### Highlights
 
-### Dark/Light Themes
-Toggle between dark and light themes in the web dashboard. Dark uses the aimux palette (pure black, red accent). Light uses Red Hat brand colors with inverted elevation.
+**Session search, rebuilt.** `aimux sessions` uses one ranked SQLite index for the CLI, TUI and web dashboard: BM25 keyword search, optional OpenAI-embedding semantic and hybrid ranking, exact "quoted phrase" search, and match snippets. It replaces the ripgrep backend.
 
-### Launch Modes
-Spawn agents in **tmux** (persistent, detachable) or **direct** (child process) mode. Quick launch directories for fast access to frequent projects.
+**Only your sessions.** Automated sessions (`claude -p`, cron jobs, SDK runs) are hidden in every list by default; `^a` or `--automated` shows them.
 
-### Google Tasks Integration
-Launch agents with task context from Google Tasks. Task title and notes are injected into the agent prompt. Supports MCP and Google Workspace API backends.
+**Sessions over MCP.** `aimux mcp serve` exposes session search, transcript reading and resume as MCP tools; remote agents move behind `--agents`.
 
-### Documentation Site
-Full documentation at [zanetworker.github.io/aimux](https://zanetworker.github.io/aimux/) built with Starlight. 14 pages covering getting started, configuration, all guides, and advanced topics.
+### Session picker
+- `^l` / `--live`: only sessions running in a terminal now
+- Click a row to jump to its iTerm pane or resume it
+- `^y` copies `cd '<path>' && claude --resume '<id>'`
+- `^s` cycles keyword and semantic modes; `^/` toggles the preview
+- Rows and header size themselves to the terminal; preview sits beside the list at 140+ columns, below it otherwise
 
-### Code Quality
-Resolved all 108 golangci-lint issues. Added golangci-lint to pre-commit hooks. Proper error logging via debuglog for HTTP responses, PTY writes, and subprocess execution.
-
-### Repo Cleanup
-Purged 96MB of compiled binaries from git history. Fresh clones are now ~41MB instead of ~225MB.
+### Fixes and speed
+- About half the search latency; persistent index refreshes incrementally
+- Session archive dir indexed so sessions outlive Claude Code's 30-day cleanup
+- Concurrent MCP calls no longer lock SQLite
