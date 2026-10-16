@@ -328,3 +328,64 @@ func TestService_FailedBackgroundEmbedIsRetried(t *testing.T) {
 		t.Errorf("%d texts never embedded: the failed round's sessions were dropped", n)
 	}
 }
+
+// flakyEmbedder blocks its first call until release, then fails it; later
+// calls succeed.
+type flakyEmbedder struct {
+	mu      sync.Mutex
+	inner   conceptEmbedder
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *flakyEmbedder) Model() string { return f.inner.Model() }
+
+func (f *flakyEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	f.mu.Lock()
+	f.calls++
+	first := f.calls == 1
+	f.mu.Unlock()
+	if first {
+		close(f.started)
+		<-f.release
+		return nil, errors.New("api down")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inner.Embed(ctx, texts)
+}
+
+// Sessions queued while a failing round is in flight must not be stranded:
+// the next search retries everything still queued, even with no new changes.
+func TestService_WorkQueuedDuringFailedRoundIsRetried(t *testing.T) {
+	ctx := context.Background()
+	f := &flakyEmbedder{started: make(chan struct{}), release: make(chan struct{})}
+	svc, _ := newService(t, f)
+	svc.EmbedInBackground = true
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	<-f.started // first round in flight
+	put(t, svc.ProjectsDir, "-Users-me-research", "eeeeeeee-0000-0000-0000-000000000005",
+		human("/Users/me/research", "queued during the failing round"), reply("ok"))
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	close(f.release) // the round fails
+	svc.Wait()
+
+	// no files change; the next search alone must retry the queue
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Wait()
+	ix, err := Open(svc.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if n, _ := ix.PendingEmbeddings(f.Model()); n != 0 {
+		t.Errorf("%d texts stranded after the failed round", n)
+	}
+}

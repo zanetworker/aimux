@@ -190,15 +190,21 @@ func (s *Service) refresh(ctx context.Context, ix *Index) error {
 	if err != nil {
 		return fmt.Errorf("update search index: %w", err)
 	}
-	if s.Embedder == nil || len(st.Changed) == 0 {
+	if s.Embedder == nil {
 		return nil
 	}
-	if len(st.Changed) > embedInlineSessions {
-		s.note(fmt.Sprintf("note: %d sessions changed; run `aimux sessions index` to embed them for semantic ranking", len(st.Changed)))
-		return nil
+	changed := st.Changed
+	if len(changed) > embedInlineSessions {
+		s.note(fmt.Sprintf("note: %d sessions changed; run `aimux sessions index` to embed them for semantic ranking", len(changed)))
+		changed = nil
 	}
 	if s.EmbedInBackground {
-		s.queueEmbed(st.Changed)
+		// even with nothing new, this restarts the worker for work left
+		// queued by a failed round
+		s.queueEmbed(changed)
+		return nil
+	}
+	if len(changed) == 0 {
 		return nil
 	}
 	_, _ = ix.EmbedMissingFor(ctx, s.Embedder, st.Changed, embedInlineMax)
@@ -216,7 +222,7 @@ func (s *Service) queueEmbed(ids []string) {
 	for _, id := range ids {
 		s.bg.pending[id] = true
 	}
-	if s.bg.running {
+	if s.bg.running || len(s.bg.pending) == 0 {
 		return
 	}
 	s.bg.running = true
@@ -255,10 +261,10 @@ func (s *Service) embedWorker() {
 	}
 }
 
-// requeue puts a failed round back and stops the worker. Update already
-// recorded these sessions as indexed, so no refresh reports them again; the
-// next queueEmbed restarts the worker and retries them (only texts still
-// lacking a vector are sent).
+// requeue puts a failed round back (with anything queued meanwhile) and
+// stops the worker. Update already recorded these sessions as indexed, so no
+// refresh reports them again; the next search restarts the worker and
+// retries them (only texts still lacking a vector are sent).
 func (s *Service) requeue(ids []string) {
 	s.bg.mu.Lock()
 	defer s.bg.mu.Unlock()
