@@ -67,7 +67,7 @@ description: Keyboard shortcuts for the terminal dashboard.
 | `H` | Show/hide subagent sessions |
 | `Esc` | Clear filters (path first, then text), then exit view |
 
-`F` searches the same ranked index as `aimux sessions`: keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. The TUI refreshes the index when it starts and embeds changed sessions in the background, so a search doesn't wait for them; only a new query's own embedding calls the API (cached after the first time). New messages match by keyword right away and usually join semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up.
+`F` searches the same ranked index as `aimux sessions`: keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. The TUI refreshes the index when it starts and embeds changed sessions in the background, so a search doesn't wait for them; only a new query's own embedding calls the API (cached after the first time). New messages match by keyword right away and usually join semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed.
 
 ## Cross-Session Search
 
