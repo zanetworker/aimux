@@ -296,3 +296,35 @@ func TestService_NoRefreshSkipsTheScan(t *testing.T) {
 		t.Errorf("default Query should pick up the new file: %v", ids(rs))
 	}
 }
+
+// A failed background round (API down, DB busy) must keep its sessions
+// queued: Update already recorded them as indexed, so no later refresh
+// reports them as changed again.
+func TestService_FailedBackgroundEmbedIsRetried(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, &conceptEmbedder{fail: errors.New("api down")})
+	svc.EmbedInBackground = true
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Wait()
+
+	// the API is back; the next search that sees a change restarts the worker
+	good := &conceptEmbedder{}
+	svc.Embedder = good
+	put(t, svc.ProjectsDir, "-Users-me-research", "eeeeeeee-0000-0000-0000-000000000005",
+		human("/Users/me/research", "a new session"), reply("ok"))
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Wait()
+
+	ix, err := Open(svc.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if n, _ := ix.PendingEmbeddings(good.Model()); n != 0 {
+		t.Errorf("%d texts never embedded: the failed round's sessions were dropped", n)
+	}
+}

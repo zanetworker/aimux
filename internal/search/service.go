@@ -243,15 +243,29 @@ func (s *Service) embedWorker() {
 		// its own connection, outside s.mu, so queries never wait on the API;
 		// SQLite's busy timeout serializes the short write transactions
 		ix, err := Open(s.DBPath)
+		if err == nil {
+			_, err = ix.EmbedMissingFor(context.Background(), s.Embedder, ids, embedInlineMax)
+			_ = ix.Close()
+		}
 		if err != nil {
 			s.note(fmt.Sprintf("note: background embedding: %v", err))
-			continue
+			s.requeue(ids)
+			return
 		}
-		if _, err := ix.EmbedMissingFor(context.Background(), s.Embedder, ids, embedInlineMax); err != nil {
-			s.note(fmt.Sprintf("note: background embedding: %v", err))
-		}
-		_ = ix.Close()
 	}
+}
+
+// requeue puts a failed round back and stops the worker. Update already
+// recorded these sessions as indexed, so no refresh reports them again; the
+// next queueEmbed restarts the worker and retries them (only texts still
+// lacking a vector are sent).
+func (s *Service) requeue(ids []string) {
+	s.bg.mu.Lock()
+	defer s.bg.mu.Unlock()
+	for _, id := range ids {
+		s.bg.pending[id] = true
+	}
+	s.bg.running = false
 }
 
 // Wait blocks until background embedding has finished.
