@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func newService(t *testing.T, e Embedder) (*Service, *bytes.Buffer) {
@@ -192,5 +194,198 @@ func TestService_ConcurrentCallsDoNotLock(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Errorf("concurrent call: %v", err)
 		}
+	}
+}
+
+// gatedEmbedder blocks every Embed call until release is closed; safe for
+// concurrent use.
+type gatedEmbedder struct {
+	mu      sync.Mutex
+	inner   conceptEmbedder
+	release chan struct{}
+	started chan struct{} // closed on the first call
+	once    sync.Once
+}
+
+func newGatedEmbedder() *gatedEmbedder {
+	return &gatedEmbedder{release: make(chan struct{}), started: make(chan struct{})}
+}
+
+func (g *gatedEmbedder) Model() string { return g.inner.Model() }
+
+func (g *gatedEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	g.once.Do(func() { close(g.started) })
+	<-g.release
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.inner.Embed(ctx, texts)
+}
+
+// Long-lived frontends (TUI, web, MCP) must not wait on the embedding API
+// for whatever live sessions wrote since the last search.
+func TestService_BackgroundEmbedDoesNotBlockQueries(t *testing.T) {
+	g := newGatedEmbedder()
+	svc, _ := newService(t, g)
+	svc.EmbedInBackground = true
+	ctx := context.Background()
+
+	done := make(chan error, 1)
+	go func() {
+		rs, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword, Limit: 5})
+		if err == nil && (len(rs) != 1 || rs[0].SessionID != sidDeck) {
+			err = fmt.Errorf("got %v", ids(rs))
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		close(g.release)
+		t.Fatal("query waited for embedding; it should run in the background")
+	}
+
+	// the background job did start, and finishes once the API answers
+	select {
+	case <-g.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("changed sessions were never queued for embedding")
+	}
+	close(g.release)
+	svc.Wait()
+	ix, err := Open(svc.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if n, _ := ix.PendingEmbeddings(g.Model()); n != 0 {
+		t.Errorf("%d texts still lack vectors after the background job", n)
+	}
+}
+
+// One-shot CLI runs exit right after the query, so they keep embedding
+// inline; background mode is opt-in.
+func TestService_InlineEmbedIsTheDefault(t *testing.T) {
+	e := &conceptEmbedder{}
+	svc, _ := newService(t, e)
+	if _, _, err := svc.Query(context.Background(), "presentation", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Wait() // no-op without background work
+	if e.calls == 0 {
+		t.Error("default Query should embed changed sessions before returning")
+	}
+}
+
+// The picker refreshes once in the background, so per-keystroke queries skip
+// the file scan.
+func TestService_NoRefreshSkipsTheScan(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, nil)
+	if _, _, err := svc.Query(ctx, "Ying", QueryOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	sid := "eeeeeeee-0000-0000-0000-000000000005"
+	put(t, svc.ProjectsDir, "-Users-me-research", sid, human("/Users/me/research", "zanzibar walkthrough"), reply("ok"))
+	if rs, _, _ := svc.Query(ctx, "zanzibar", QueryOpts{NoRefresh: true}); len(rs) != 0 {
+		t.Errorf("NoRefresh still scanned files: %v", ids(rs))
+	}
+	if rs, _, _ := svc.Query(ctx, "zanzibar", QueryOpts{}); len(rs) != 1 {
+		t.Errorf("default Query should pick up the new file: %v", ids(rs))
+	}
+}
+
+// A failed background round (API down, DB busy) must keep its sessions
+// queued: Update already recorded them as indexed, so no later refresh
+// reports them as changed again.
+func TestService_FailedBackgroundEmbedIsRetried(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := newService(t, &conceptEmbedder{fail: errors.New("api down")})
+	svc.EmbedInBackground = true
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Wait()
+
+	// the API is back; the next search that sees a change restarts the worker
+	good := &conceptEmbedder{}
+	svc.Embedder = good
+	put(t, svc.ProjectsDir, "-Users-me-research", "eeeeeeee-0000-0000-0000-000000000005",
+		human("/Users/me/research", "a new session"), reply("ok"))
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Wait()
+
+	ix, err := Open(svc.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if n, _ := ix.PendingEmbeddings(good.Model()); n != 0 {
+		t.Errorf("%d texts never embedded: the failed round's sessions were dropped", n)
+	}
+}
+
+// flakyEmbedder blocks its first call until release, then fails it; later
+// calls succeed.
+type flakyEmbedder struct {
+	mu      sync.Mutex
+	inner   conceptEmbedder
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *flakyEmbedder) Model() string { return f.inner.Model() }
+
+func (f *flakyEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	f.mu.Lock()
+	f.calls++
+	first := f.calls == 1
+	f.mu.Unlock()
+	if first {
+		close(f.started)
+		<-f.release
+		return nil, errors.New("api down")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inner.Embed(ctx, texts)
+}
+
+// Sessions queued while a failing round is in flight must not be stranded:
+// the next search retries everything still queued, even with no new changes.
+func TestService_WorkQueuedDuringFailedRoundIsRetried(t *testing.T) {
+	ctx := context.Background()
+	f := &flakyEmbedder{started: make(chan struct{}), release: make(chan struct{})}
+	svc, _ := newService(t, f)
+	svc.EmbedInBackground = true
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	<-f.started // first round in flight
+	put(t, svc.ProjectsDir, "-Users-me-research", "eeeeeeee-0000-0000-0000-000000000005",
+		human("/Users/me/research", "queued during the failing round"), reply("ok"))
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	close(f.release) // the round fails
+	svc.Wait()
+
+	// no files change; the next search alone must retry the queue
+	if _, _, err := svc.Query(ctx, "Ying deck", QueryOpts{Mode: ModeKeyword}); err != nil {
+		t.Fatal(err)
+	}
+	svc.Wait()
+	ix, err := Open(svc.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if n, _ := ix.PendingEmbeddings(f.Model()); n != 0 {
+		t.Errorf("%d texts stranded after the failed round", n)
 	}
 }

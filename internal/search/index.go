@@ -98,7 +98,10 @@ func Open(path string) (*Index, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { // #nosec G703 -- index path is the user's own config/default
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	// every transaction here writes; taking the lock at BEGIN (immediate)
+	// makes a concurrent writer wait instead of failing a read-then-write
+	// transaction with SQLITE_BUSY_SNAPSHOT
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}

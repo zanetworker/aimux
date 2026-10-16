@@ -438,36 +438,30 @@ func newSessionsRowsCmd() *cobra.Command {
 		Use: "rows [query]", Hidden: true, Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st := sessions.PickerStateFromEnv()
-			ix, err := search.Open(searchDBPath())
-			if err != nil {
-				return err
-			}
-			defer func() { _ = ix.Close() }()
 			opts := search.SearchOpts{Limit: 200, IncludeAutomated: st.IncludeAutomated(), Dir: st.Scope()}
 			if st.LiveOnly() {
 				opts.IDs = liveIDList(st.Live()) // empty until live discovery finishes
 			}
 			q := pickerArg(args)
 			var rs []search.Result
-			switch {
-			case q == "":
+			var err error
+			if q == "" {
+				ix, oerr := search.Open(searchDBPath())
+				if oerr != nil {
+					return oerr
+				}
 				rs, err = ix.Recent(opts)
-			case st.Mode() == "semantic":
-				if inner := envEmbedder(); inner != nil {
-					rs, err = ix.Semantic(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir, IDs: opts.IDs}, ix.CachedEmbedder(inner))
-				} else { // no key: answer with keyword rather than nothing
-					opts.Limit = 100
-					rs, err = ix.Search(q, opts)
+				_ = ix.Close()
+			} else {
+				// the picker refreshed the index when it opened; a keystroke only ranks
+				svc := search.DefaultService(nil)
+				svc.DBPath = searchDBPath()
+				mode, limit := st.Mode(), 50
+				if mode == search.ModeKeyword || (mode == search.ModeSemantic && svc.Embedder == nil) {
+					mode, limit = search.ModeKeyword, 100 // no key: answer with keyword rather than nothing
 				}
-			case st.Mode() == "hybrid":
-				var e search.Embedder
-				if inner := envEmbedder(); inner != nil {
-					e = ix.CachedEmbedder(inner)
-				}
-				rs, _, err = ix.Hybrid(context.Background(), q, search.SearchOpts{Limit: 50, IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir, IDs: opts.IDs}, e)
-			default:
-				opts.Limit = 100
-				rs, err = ix.Search(q, opts)
+				rs, _, err = svc.Query(context.Background(), q, search.QueryOpts{Mode: mode, Limit: limit,
+					IncludeAutomated: opts.IncludeAutomated, Dir: opts.Dir, IDs: opts.IDs, NoRefresh: true})
 			}
 			if err != nil {
 				return err

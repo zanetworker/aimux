@@ -112,6 +112,28 @@ func (ix *Index) EmbedMissingFor(ctx context.Context, e Embedder, sessionIDs []s
 	return ix.embed(ctx, e, todo, batchSize)
 }
 
+// currentHashes maps "sid|seq" to the hash of the text the index holds now
+// for the sessions in batch.
+func currentHashes(ctx context.Context, q queryer, batch []pendingEmbedding) (map[string]string, error) {
+	seen := map[string]bool{}
+	var sids []string
+	for _, p := range batch {
+		if !seen[p.sid] {
+			seen[p.sid] = true
+			sids = append(sids, p.sid)
+		}
+	}
+	texts, err := currentTexts(ctx, q, sids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(texts))
+	for _, p := range texts {
+		out[embedKey(p.sid, p.seq)] = p.hash
+	}
+	return out, nil
+}
+
 func (ix *Index) embed(ctx context.Context, e Embedder, todo []pendingEmbedding, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 64
@@ -134,7 +156,19 @@ func (ix *Index) embed(ctx context.Context, e Embedder, todo []pendingEmbedding,
 		if err != nil {
 			return done, err
 		}
+		// the API call ran outside any lock; a refresh may have rewritten or
+		// deleted these texts meanwhile, so keep only vectors for current text
+		current, err := currentHashes(ctx, tx, batch)
+		if err != nil {
+			_ = tx.Rollback()
+			return done, err
+		}
+		written := 0
 		for i, p := range batch {
+			if current[embedKey(p.sid, p.seq)] != p.hash {
+				continue
+			}
+			written++
 			if _, err := tx.Exec(`INSERT OR REPLACE INTO embeddings (session_id, seq, model, vec, hash) VALUES (?, ?, ?, ?, ?)`,
 				p.sid, p.seq, e.Model(), encodeVec(normalize(vecs[i])), p.hash); err != nil {
 				_ = tx.Rollback()
@@ -144,33 +178,23 @@ func (ix *Index) embed(ctx context.Context, e Embedder, todo []pendingEmbedding,
 		if err := tx.Commit(); err != nil {
 			return done, err
 		}
-		done += len(batch)
+		done += written
 	}
 	return done, nil
+}
+
+// queryer is satisfied by *sql.DB and *sql.Tx.
+type queryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 // pendingEmbeddings lists texts with no up-to-date vector for model; nil
 // sessionIDs means every session.
 func (ix *Index) pendingEmbeddings(ctx context.Context, model string, sessionIDs []string) ([]pendingEmbedding, error) {
-	scope, args := "", []any{}
-	if sessionIDs != nil {
-		marks := make([]string, len(sessionIDs))
-		for i, id := range sessionIDs {
-			marks[i] = "?"
-			args = append(args, id)
-		}
-		scope = " IN (" + strings.Join(marks, ",") + ")"
-	}
-	where := func(col string) string { // " AND <col> IN (?,...)" or ""
-		if scope == "" {
-			return ""
-		}
-		return " AND " + col + scope
-	}
-
+	scope, args := idScope(sessionIDs)
 	have := map[string]string{} // "sid|seq" -> hash of the text that was embedded
 	// #nosec G202 -- only "?" placeholders are concatenated; ids are bound
-	rows, err := ix.db.QueryContext(ctx, `SELECT session_id, seq, hash FROM embeddings WHERE model = ?`+where("session_id"), append([]any{model}, args...)...)
+	rows, err := ix.db.QueryContext(ctx, `SELECT session_id, seq, hash FROM embeddings WHERE model = ?`+scope("session_id"), append([]any{model}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -182,23 +206,55 @@ func (ix *Index) pendingEmbeddings(ctx context.Context, model string, sessionIDs
 			_ = rows.Close()
 			return nil, err
 		}
-		have[sid+"|"+strconv.Itoa(seq)] = hash.String
+		have[embedKey(sid, seq)] = hash.String
 	}
 	_ = rows.Close()
 
+	all, err := currentTexts(ctx, ix.db, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
 	var todo []pendingEmbedding
-	want := func(p pendingEmbedding) {
-		p.hash = textHash(p.text)
-		if have[p.sid+"|"+strconv.Itoa(p.seq)] != p.hash {
+	for _, p := range all {
+		if have[embedKey(p.sid, p.seq)] != p.hash {
 			todo = append(todo, p)
 		}
 	}
+	return todo, nil
+}
+
+func embedKey(sid string, seq int) string { return sid + "|" + strconv.Itoa(seq) }
+
+// idScope returns a func adding " AND <col> IN (?,...)" for sessionIDs (or
+// nothing when nil) and the matching args.
+func idScope(sessionIDs []string) (func(col string) string, []any) {
+	if sessionIDs == nil {
+		return func(string) string { return "" }, nil
+	}
+	marks := make([]string, len(sessionIDs))
+	args := make([]any, len(sessionIDs))
+	for i, id := range sessionIDs {
+		marks[i], args[i] = "?", id
+	}
+	in := " IN (" + strings.Join(marks, ",") + ")"
+	return func(col string) string { return " AND " + col + in }, args
+}
+
+// currentTexts builds the text to embed (with its hash) for every chunk and
+// session summary of non-automated sessions as the index holds them now.
+func currentTexts(ctx context.Context, q queryer, sessionIDs []string) ([]pendingEmbedding, error) {
+	scope, args := idScope(sessionIDs)
+	var out []pendingEmbedding
+	add := func(p pendingEmbedding) {
+		p.hash = textHash(p.text)
+		out = append(out, p)
+	}
 
 	// #nosec G202 -- only "?" placeholders are concatenated; ids are bound
-	rows, err = ix.db.QueryContext(ctx, `
+	rows, err := q.QueryContext(ctx, `
 		SELECT c.session_id, c.seq, s.title, c.prose, c.text
 		FROM chunks c JOIN sessions s ON s.id = c.session_id
-		WHERE s.automated = 0`+where("s.id"), args...)
+		WHERE s.automated = 0`+scope("s.id"), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -213,15 +269,15 @@ func (ix *Index) pendingEmbeddings(ctx context.Context, model string, sessionIDs
 			prose = text
 		}
 		p.text = title + "\n" + prose
-		want(p)
+		add(p)
 	}
 	_ = rows.Close()
 
 	// #nosec G202 -- only "?" placeholders are concatenated; ids are bound
-	rows, err = ix.db.QueryContext(ctx, `
+	rows, err = q.QueryContext(ctx, `
 		SELECT s.id, s.title, s.first_prompt,
 		       (SELECT group_concat(prompt, ' | ') FROM chunks c WHERE c.session_id = s.id)
-		FROM sessions s WHERE s.automated = 0`+where("s.id"), args...)
+		FROM sessions s WHERE s.automated = 0`+scope("s.id"), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,9 +288,9 @@ func (ix *Index) pendingEmbeddings(ctx context.Context, model string, sessionIDs
 		if err := rows.Scan(&sid, &title, &first, &prompts); err != nil {
 			return nil, err
 		}
-		want(pendingEmbedding{sid: sid, seq: summarySeq, text: truncate(title+"\n"+first+"\n"+prompts.String, 6000)})
+		add(pendingEmbedding{sid: sid, seq: summarySeq, text: truncate(title+"\n"+first+"\n"+prompts.String, 6000)})
 	}
-	return todo, rows.Err()
+	return out, rows.Err()
 }
 
 // PendingEmbeddings counts texts (chunks and session summaries) of

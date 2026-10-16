@@ -129,6 +129,10 @@ With `--json`, errors go to stderr as structured JSON:
 {"error": "invalid provider \"gpt\"", "code": 2, "valid_values": ["claude", "codex"]}
 ```
 
+## Session Search over MCP
+
+`aimux mcp serve` exposes session search, transcript reading and resume as MCP tools over stdio. It shares the ranked index with `aimux sessions` (`~/.aimux/search.db`). Each tool call picks up changed session files and embeds them in the background, so calls don't wait for them; only a new query's own embedding calls the API (cached after the first time). New content matches by keyword at once and usually joins semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next tool call retries it, even if no files changed. One-shot CLI searches (`aimux sessions "query" --list`) embed inline instead, since the process exits right after answering.
+
 ## Configuration
 
 Add to `~/.aimux/config.yaml`:

@@ -91,7 +91,7 @@ Click any row to open its trace in the right panel. The toolbar provides two fil
 - **Filter sessions**: Search by title, prompt, project, annotation, or tags
 - **Filter by path**: Narrow to sessions in a specific directory (type a directory name like "research" or "aimux")
 
-Both filters stack: filter by path first, then search within those results. Use the content search (ripgrep) for deep matches inside session files.
+Both filters stack: filter by path first, then search within those results. Use the content search for deep matches inside session files.
 
 ### CLI Session Commands
 
@@ -114,6 +114,8 @@ Search across all agent traces to find specific files, functions, or topics:
 - **TUI**: Press `/` to search across all active agent traces.
 
 This is useful for questions like "which agent edited auth.go?" or "who ran the database migration?".
+
+Content search uses the same ranked index as `aimux sessions` (`~/.aimux/search.db`): keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. Each search first picks up session files that changed and embeds them in the background, so it doesn't wait for them; new messages match by keyword at once and usually join semantic ranking within seconds. Only the query itself is embedded inline (cached after the first time). If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed.
 
 ## Dark/Light Theme
 

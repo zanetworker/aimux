@@ -35,8 +35,18 @@ type Service struct {
 	ArchiveDirs []string  // also indexed; sessions here outlive Claude Code's cleanup
 	Embedder    Embedder  // nil: keyword only
 	Notes       io.Writer // explanations of degraded modes; nil discards
+	// EmbedInBackground queues changed sessions for embedding instead of
+	// waiting on the embedding API inside a query. For long-lived frontends
+	// (TUI, web, MCP); one-shot CLI runs exit before background work ends.
+	EmbedInBackground bool
 
 	mu sync.Mutex // one call at a time: concurrent refreshes lock SQLite
+	bg struct {
+		mu      sync.Mutex
+		pending map[string]bool // session IDs waiting for embedding
+		running bool
+		wg      sync.WaitGroup
+	}
 }
 
 // QueryOpts narrows a Service query.
@@ -46,6 +56,7 @@ type QueryOpts struct {
 	IncludeAutomated bool
 	Dir              string   // only sessions under this working directory
 	IDs              []string // only these sessions; nil = no restriction, empty = none
+	NoRefresh        bool     // skip the file scan; the caller keeps the index fresh
 }
 
 // DefaultService searches ~/.aimux/search.db over ~/.claude/projects and
@@ -80,8 +91,10 @@ func (s *Service) Query(ctx context.Context, query string, o QueryOpts) ([]Resul
 		return nil, false, fmt.Errorf("open search index: %w", err)
 	}
 	defer func() { _ = ix.Close() }()
-	if err := s.refresh(ctx, ix); err != nil {
-		return nil, false, err
+	if !o.NoRefresh {
+		if err := s.refresh(ctx, ix); err != nil {
+			return nil, false, err
+		}
 	}
 	opts := SearchOpts{Limit: o.Limit, IncludeAutomated: o.IncludeAutomated, Dir: o.Dir, IDs: o.IDs}
 
@@ -177,16 +190,92 @@ func (s *Service) refresh(ctx context.Context, ix *Index) error {
 	if err != nil {
 		return fmt.Errorf("update search index: %w", err)
 	}
-	if s.Embedder == nil || len(st.Changed) == 0 {
+	if s.Embedder == nil {
 		return nil
 	}
-	if len(st.Changed) > embedInlineSessions {
-		s.note(fmt.Sprintf("note: %d sessions changed; run `aimux sessions index` to embed them for semantic ranking", len(st.Changed)))
+	changed := st.Changed
+	if len(changed) > embedInlineSessions {
+		s.note(fmt.Sprintf("note: %d sessions changed; run `aimux sessions index` to embed them for semantic ranking", len(changed)))
+		changed = nil
+	}
+	if s.EmbedInBackground {
+		// even with nothing new, this restarts the worker for work left
+		// queued by a failed round
+		s.queueEmbed(changed)
+		return nil
+	}
+	if len(changed) == 0 {
 		return nil
 	}
 	_, _ = ix.EmbedMissingFor(ctx, s.Embedder, st.Changed, embedInlineMax)
 	return nil
 }
+
+// queueEmbed hands changed sessions to a single background worker; sessions
+// queued while it runs are picked up in its next round.
+func (s *Service) queueEmbed(ids []string) {
+	s.bg.mu.Lock()
+	defer s.bg.mu.Unlock()
+	if s.bg.pending == nil {
+		s.bg.pending = map[string]bool{}
+	}
+	for _, id := range ids {
+		s.bg.pending[id] = true
+	}
+	if s.bg.running || len(s.bg.pending) == 0 {
+		return
+	}
+	s.bg.running = true
+	s.bg.wg.Add(1)
+	go s.embedWorker()
+}
+
+func (s *Service) embedWorker() {
+	defer s.bg.wg.Done()
+	for {
+		s.bg.mu.Lock()
+		if len(s.bg.pending) == 0 {
+			s.bg.running = false
+			s.bg.mu.Unlock()
+			return
+		}
+		ids := make([]string, 0, len(s.bg.pending))
+		for id := range s.bg.pending {
+			ids = append(ids, id)
+		}
+		s.bg.pending = map[string]bool{}
+		s.bg.mu.Unlock()
+
+		// its own connection, outside s.mu, so queries never wait on the API;
+		// SQLite's busy timeout serializes the short write transactions
+		ix, err := Open(s.DBPath)
+		if err == nil {
+			_, err = ix.EmbedMissingFor(context.Background(), s.Embedder, ids, embedInlineMax)
+			_ = ix.Close()
+		}
+		if err != nil {
+			s.note(fmt.Sprintf("note: background embedding: %v", err))
+			s.requeue(ids)
+			return
+		}
+	}
+}
+
+// requeue puts a failed round back (with anything queued meanwhile) and
+// stops the worker. Update already recorded these sessions as indexed, so no
+// refresh reports them again; the next search restarts the worker and
+// retries them (only texts still lacking a vector are sent).
+func (s *Service) requeue(ids []string) {
+	s.bg.mu.Lock()
+	defer s.bg.mu.Unlock()
+	for _, id := range ids {
+		s.bg.pending[id] = true
+	}
+	s.bg.running = false
+}
+
+// Wait blocks until background embedding has finished.
+func (s *Service) Wait() { s.bg.wg.Wait() }
 
 func (s *Service) note(msg string) {
 	if s.Notes != nil {

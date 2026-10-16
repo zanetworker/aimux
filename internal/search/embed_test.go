@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -420,5 +421,55 @@ func TestUpdateReportsChangedSessions_PendingScopedToThem(t *testing.T) {
 	calls := e.calls
 	if n, _ := ix.EmbedMissingFor(context.Background(), e, nil, 50); n != 0 || e.calls != calls {
 		t.Errorf("empty scope embedded %d (calls %d -> %d)", n, calls, e.calls)
+	}
+}
+
+// Background embedding runs outside the service lock, so a session can be
+// rewritten while its vectors are being computed. Stale results must not be
+// written back over the new index state.
+func TestEmbed_DropsVectorsForChunksRewrittenInFlight(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	sid := "abababab-0000-0000-0000-000000000001"
+	put(t, root, "-Users-me-research", sid,
+		human("/Users/me/research", "first question about decks"), reply("one"),
+		human("/Users/me/research", "second question about slides"), reply("two"),
+		human("/Users/me/research", "third question about summaries"), reply("three"))
+	ix, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ix.Close() }()
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+
+	g := newGatedEmbedder()
+	done := make(chan error, 1)
+	go func() {
+		_, err := ix.EmbedMissingFor(ctx, g, []string{sid}, 64)
+		done <- err
+	}()
+	<-g.started // texts snapshotted, API call in flight
+	put(t, root, "-Users-me-research", sid,
+		human("/Users/me/research", "a rewritten question about credentials"), reply("new"))
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	var orphans int
+	if err := ix.db.QueryRow(`SELECT count(*) FROM embeddings e WHERE e.seq >= 0 AND NOT EXISTS
+		(SELECT 1 FROM chunks c WHERE c.session_id = e.session_id AND c.seq = e.seq)`).Scan(&orphans); err != nil {
+		t.Fatal(err)
+	}
+	if orphans != 0 {
+		t.Errorf("%d vectors kept for chunks deleted while embedding was in flight", orphans)
+	}
+	if n, _ := ix.PendingEmbeddings(g.Model()); n == 0 {
+		t.Error("rewritten text was marked embedded with the old text's vector")
 	}
 }

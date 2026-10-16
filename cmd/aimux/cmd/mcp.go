@@ -67,7 +67,9 @@ func newMCPServeCmd() *cobra.Command {
 			}
 			cfg, _ := config.Load(cfgPath)
 			notes := cmd.ErrOrStderr()
-			return mcplib.ServeStdio(newServeMCP(agents, f, &cfg, search.DefaultService(notes), notes))
+			svc := search.DefaultService(notes)
+			svc.EmbedInBackground = true // long-lived: tool calls never wait on the embedding API
+			return mcplib.ServeStdio(newServeMCP(agents, f, &cfg, svc, notes))
 		},
 	}
 

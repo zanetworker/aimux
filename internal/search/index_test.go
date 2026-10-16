@@ -570,3 +570,47 @@ func firstSnippet(rs []Result) string {
 	}
 	return rs[0].Snippet
 }
+
+// Background embedding reads current hashes and then writes in one
+// transaction while another connection may commit. Transactions must hold
+// the write lock from BEGIN, or SQLite (WAL) fails the read-to-write upgrade
+// with SQLITE_BUSY_SNAPSHOT and the batch is lost.
+func TestIndex_TransactionsTakeTheWriteLockUpFront(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "s.db")
+	a, err := Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.Close() }()
+	b, err := Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+
+	ctx := context.Background()
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM embeddings`).Scan(&n); err != nil { // snapshot
+		t.Fatal(err)
+	}
+	other := make(chan error, 1)
+	go func() { // a foreground refresh committing meanwhile
+		_, err := b.db.Exec(`INSERT INTO meta (key, value) VALUES ('probe', 'x')`)
+		other <- err
+	}()
+	time.Sleep(200 * time.Millisecond)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO embeddings (session_id, seq, model, vec, hash) VALUES ('s', 0, 'm', x'00', 'h')`); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("write after read in a transaction failed: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-other; err != nil {
+		t.Errorf("the other writer should wait for the lock, not fail: %v", err)
+	}
+}
