@@ -301,3 +301,31 @@ func TestCopyResume_NoteOnItsOwnLine(t *testing.T) {
 		t.Errorf("copy note should be its own header line, got %q", lines)
 	}
 }
+
+// fzf runs rows on every keystroke; the picker refreshes once in the
+// background, so rows must not scan session files itself.
+func TestPickerRows_DoNotRescanPerKeystroke(t *testing.T) {
+	pickerEnv(t)
+	t.Setenv("OPENAI_API_KEY", "") // hermetic: no live API; semantic falls back to keyword
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".claude", "projects", "-Users-me-new")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","entrypoint":"cli","cwd":"/Users/me/new","message":{"content":"zanzibar walkthrough"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "5a5a5a5a.jsonl"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"keyword", "hybrid", "semantic"} {
+		if err := (sessions.PickerState{Dir: os.Getenv(sessions.PickerStateEnv)}).SetMode(mode); err != nil {
+			t.Fatal(err)
+		}
+		if out := runSub(t, "rows", "--", "zanzibar"); strings.Contains(out, "5a5a5a5a") {
+			t.Errorf("%s: rows scanned session files on a keystroke:\n%s", mode, out)
+		}
+		if out := runSub(t, "rows", "--", "deck"); !strings.HasPrefix(out, "43ce13d4\t") {
+			t.Errorf("%s: indexed session missing:\n%s", mode, out)
+		}
+	}
+}

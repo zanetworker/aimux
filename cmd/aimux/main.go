@@ -65,6 +65,7 @@ func main() {
 		defer debuglog.Close()
 		debuglog.Log("aimux starting (version %s)", version)
 
+		go func() { _ = interactiveSearch.Refresh(context.Background()) }() // first search finds a fresh index
 		app := tui.NewApp()
 		app.SetSessionSearch(sessionContentSearch)
 		if exec := createPluginExecutor(); exec != nil {
@@ -95,6 +96,7 @@ func main() {
 		defer debuglog.Close()
 		debuglog.Log("aimux starting (version %s)", version)
 
+		go func() { _ = interactiveSearch.Refresh(context.Background()) }() // first search finds a fresh index
 		app := tui.NewApp()
 		app.SetSessionSearch(sessionContentSearch)
 		if exec := createPluginExecutor(); exec != nil {
@@ -258,8 +260,20 @@ func createPluginExecutor() *plugin.Executor {
 // sessionContentSearch adapts the shared search service to the TUI's
 // content-search shape, keeping the ranking (best match first).
 // dir is the sessions view's scope ("" = all projects).
+// newInteractiveSearch is the search service for long-lived frontends: it
+// embeds what live sessions wrote in the background, so a search never waits
+// on the embedding API.
+func newInteractiveSearch() *search.Service {
+	s := search.DefaultService(nil)
+	s.EmbedInBackground = true
+	return s
+}
+
+// interactiveSearch is shared by the TUI and the web dashboard.
+var interactiveSearch = newInteractiveSearch()
+
 func sessionContentSearch(q, dir string) ([]history.ContentMatch, error) {
-	rs, _, err := search.DefaultService(nil).Query(context.Background(), q, search.QueryOpts{Limit: 200, Dir: dir})
+	rs, _, err := interactiveSearch.Query(context.Background(), q, search.QueryOpts{Limit: 200, Dir: dir})
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +320,7 @@ func createWebServer(port int) *web.Server {
 	}
 	s.SetDiscoverFunc(disco.Discover)
 	s.SetSearchFunc(func(q string) ([]search.Result, error) {
-		rs, _, err := search.DefaultService(nil).Query(context.Background(), q, search.QueryOpts{Limit: 50})
+		rs, _, err := interactiveSearch.Query(context.Background(), q, search.QueryOpts{Limit: 50})
 		return rs, err
 	})
 	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
