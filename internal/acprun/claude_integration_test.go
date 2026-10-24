@@ -7,12 +7,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
 
 // TestClaudeACP_ContinuesARealSession needs Claude Code, npx and model
@@ -117,4 +120,68 @@ func countLines(t *testing.T, path string) int {
 		n++
 	}
 	return n
+}
+
+// TestClaudeACP_ApprovalDecidesToolUse checks the permission relay against
+// the real adapter: an allowed shell command runs, a denied one does not.
+func TestClaudeACP_ApprovalDecidesToolUse(t *testing.T) {
+	if os.Getenv("AIMUX_ACP_INTEGRATION") != "1" {
+		t.Skip("set AIMUX_ACP_INTEGRATION=1 to run against the real claude-agent-acp")
+	}
+	dir := t.TempDir()
+	first := exec.Command("claude", "-p", "--output-format", "json")
+	first.Dir, first.Env = dir, withoutClaudeCode(os.Environ())
+	first.Stdin = strings.NewReader("Reply with only OK.")
+	out, err := first.Output()
+	if err != nil {
+		t.Fatalf("claude -p: %v", err)
+	}
+	var res struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil || res.SessionID == "" {
+		t.Fatalf("no session id in %s", out)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(findSessionFile(t, res.SessionID))) })
+
+	turn := func(allow bool, file string) int {
+		t.Helper()
+		asked := 0
+		approve := func(ctx context.Context, req acp.RequestPermissionRequest) (string, bool) {
+			asked++
+			if !allow {
+				return "", false
+			}
+			for _, o := range req.Options {
+				if o.Kind == acp.PermissionOptionKindAllowOnce {
+					return string(o.OptionId), true
+				}
+			}
+			return "", false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		defer cancel()
+		r, err := Start(ctx, Spec{Command: "npx", Args: []string{"-y", "@agentclientprotocol/claude-agent-acp"}, Cwd: dir}, res.SessionID, approve)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		defer func() { _ = r.Close() }()
+		if _, err := r.Prompt(ctx, "Run exactly this shell command and nothing else: touch "+file, func(Event) {}); err != nil {
+			t.Fatalf("Prompt: %v", err)
+		}
+		return asked
+	}
+
+	if asked := turn(true, "allowed.txt"); asked == 0 {
+		t.Fatal("the approver was never asked; the command may have been allowed by a settings rule")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "allowed.txt")); err != nil {
+		t.Fatalf("allowed command did not run: %v", err)
+	}
+	if asked := turn(false, "denied.txt"); asked == 0 {
+		t.Fatal("the approver was never asked for the denied command")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "denied.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("denied command ran anyway (stat err %v)", err)
+	}
 }

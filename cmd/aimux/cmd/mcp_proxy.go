@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -142,7 +141,7 @@ func newMCPProxyServeCmd() *cobra.Command {
 			for _, s := range f.perSession {
 				perSession[s] = true
 			}
-			var catMu sync.Mutex
+			updater := mcpproxy.NewCatalogUpdater(cat, f.catalog)
 			pool := mcpproxy.NewPool(mcpproxy.StdioStarter(cfgs), mcpproxy.PoolOptions{
 				PerSession: perSession,
 				// Keep the catalog current: re-list tools whenever a backend starts.
@@ -150,22 +149,13 @@ func newMCPProxyServeCmd() *cobra.Command {
 					go func() {
 						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 						defer cancel()
-						tools, err := b.ListToolsRaw(ctx)
-						if err != nil {
-							return // backend may already be reaped; the old entry stays
-						}
-						catMu.Lock()
-						defer catMu.Unlock()
-						cat.Set(server, tools, time.Now())
-						if err := cat.Save(f.catalog); err != nil {
-							_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "save catalog: %v\n", err)
+						if err := updater.Refresh(ctx, server, b); err != nil {
+							_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
 						}
 					}()
 				},
 			})
-			catMu.Lock()
-			srv, skipped := mcpproxy.NewServer(cat, pool, proxyName)
-			catMu.Unlock()
+			srv, skipped := mcpproxy.NewServer(updater.Snapshot(), pool, proxyName)
 			for _, s := range skipped {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "skipped %s\n", s)
 			}

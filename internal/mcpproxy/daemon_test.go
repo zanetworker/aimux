@@ -2,6 +2,7 @@ package mcpproxy
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"testing"
@@ -108,5 +109,92 @@ func TestServe_ReapsIdleBackends(t *testing.T) {
 			t.Fatal("idle backend was not reaped")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestServe_PerSessionBackendsOverHTTP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat := &Catalog{}
+	cat.Set("playwright", []json.RawMessage{json.RawMessage(`{"name":"click","inputSchema":{"type":"object"}}`)}, time.Now())
+	cat.Set("slack", []json.RawMessage{json.RawMessage(`{"name":"post","inputSchema":{"type":"object"}}`)}, time.Now())
+	fs := newFakeStarter()
+	pool := NewPool(fs.start, PoolOptions{PerSession: map[string]bool{"playwright": true}})
+	srv, _ := NewServer(cat, pool, "mux")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, ln, srv, pool, DaemonOptions{}) }()
+	defer func() { cancel(); <-done }()
+	url := "http://" + ln.Addr().String() + "/mcp"
+
+	call := func(c *client.Client, tool string) {
+		t.Helper()
+		req := mcp.CallToolRequest{}
+		req.Params.Name = tool
+		if r, err := c.CallTool(context.Background(), req); err != nil || r.IsError {
+			t.Fatalf("call %s: %v %+v", tool, err, r)
+		}
+	}
+	a, b := httpClient(t, url), httpClient(t, url)
+	call(a, "playwright__click")
+	call(b, "playwright__click")
+	call(a, "slack__post")
+	call(b, "slack__post")
+	if got := fs.count("playwright"); got != 2 {
+		t.Fatalf("playwright started %d times for two clients, want 2", got)
+	}
+	if got := fs.count("slack"); got != 1 {
+		t.Fatalf("slack started %d times, want 1 shared", got)
+	}
+
+	_ = a.Close() // ends client a's session
+	deadline := time.Now().Add(3 * time.Second)
+	for !fs.backends[0].closed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("client a's per-session backend still open after it disconnected")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if fs.backends[1].closed.Load() || fs.backends[2].closed.Load() {
+		t.Fatal("disconnecting one client closed another client's backend or the shared one")
+	}
+	_ = b.Close()
+}
+
+// Claude Code exits without ending its MCP session; its per-session
+// backends must still be stopped once the session goes idle.
+func TestServe_AbandonedSessionStopsItsBackends(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat := &Catalog{}
+	cat.Set("playwright", []json.RawMessage{json.RawMessage(`{"name":"click","inputSchema":{"type":"object"}}`)}, time.Now())
+	fs := newFakeStarter()
+	pool := NewPool(fs.start, PoolOptions{PerSession: map[string]bool{"playwright": true}})
+	srv, _ := NewServer(cat, pool, "mux")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(ctx, ln, srv, pool, DaemonOptions{IdleTimeout: 300 * time.Millisecond, ReapEvery: time.Hour})
+	}()
+	defer func() { cancel(); <-done }()
+
+	c := httpClient(t, "http://"+ln.Addr().String()+"/mcp")
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "playwright__click"
+	if _, err := c.CallTool(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	// No c.Close(): the client just goes away. ReapEvery is an hour, so only
+	// session expiry can stop the backend here.
+	deadline := time.Now().Add(5 * time.Second)
+	for !fs.backends[0].closed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("abandoned session's per-session backend was never stopped")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

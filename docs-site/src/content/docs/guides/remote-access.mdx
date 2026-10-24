@@ -1,0 +1,72 @@
+---
+title: Remote Access
+description: Reach your sessions from a phone or another device through Tailscale
+---
+
+`aimux remote serve` is an HTTP API for your Claude Code sessions, meant for your other devices on the same tailnet: list sessions, read recent turns, continue an idle session, follow the reply as it streams, and answer the agent's permission requests. The conversation continues in the session's own file, so `claude --resume <id>` on the Mac carries on from there.
+
+## Set it up
+
+1. Allow your Tailscale login in `~/.aimux/config.yaml`:
+
+   ```yaml
+   remote_access:
+     allowed_logins:
+       - you@example.com
+   ```
+
+2. Run the API:
+
+   ```bash
+   aimux remote serve
+   ```
+
+3. Expose it on your tailnet with HTTPS:
+
+   ```bash
+   tailscale serve --bg --https=8443 http://127.0.0.1:7382
+   ```
+
+   Turn it off again with `tailscale serve --https=8443 off`.
+
+From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:8443/v1/health`.
+
+## Security model
+
+- The API listens on `127.0.0.1` only. It is not reachable on the tailnet except through `tailscale serve`.
+- Every request must carry the `Tailscale-User-Login` header that `tailscale serve` sets for the caller (and overwrites if a client sends its own). The login must be in `allowed_logins`; an empty list admits nobody.
+- Requests with a browser `Origin` header are refused, so no web page can use the API.
+- Sessions open in a terminal on the Mac are follow-only: sending to them is refused, because typing into a running session can approve a prompt nobody saw.
+- A permission request waits for an answer from a client. Without one it is denied after `approval_timeout`.
+
+## API
+
+All responses are JSON. Errors have the form `{"error": "...", "code": "..."}`.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /v1/health` | Who you are: `{"status","login"}` |
+| `GET /v1/sessions?limit=50` | Recent Claude sessions with `state`: `idle`, `open_in_terminal` or `busy`. Sessions started by a program (for example `claude -p`) are left out unless `include_automated=1` |
+| `GET /v1/sessions/{id}?turns=20` | One session and its last turns (user text, reply, tools) |
+| `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn, returns `202 {"turn","after","events"}`. The same `key` returns the same turn, so retries are safe |
+| `GET /v1/sessions/{id}/events?after=N` | Server-sent events after `N` (or the `Last-Event-ID` header). `?wait=0` returns one JSON page instead |
+| `POST /v1/sessions/{id}/cancel` | Stop the running turn |
+| `POST /v1/approvals/{id}` | Body `{"option": "<optionId>"}` from the approval event, or `{"option": ""}` to deny |
+
+Event kinds: `turn_started`, `update` (an ACP session update: agent text, tool calls, plans; the agent's slash-command list is left out), `approval` (with `approvalId`, `title` and `options`), `approval_resolved` (`allowed`, `denied` or `expired`), `turn_done` (with `stopReason`) and `turn_error`.
+
+Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `too_many_runs` (503), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400).
+
+## Settings
+
+| Key under `remote_access` | Flag | Default | Meaning |
+|---|---|---|---|
+| `port` | `--port` | `7382` | Port on `127.0.0.1` |
+| `allowed_logins` | `--allow` | none | Tailscale logins admitted |
+| `adapter` | | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command |
+| `max_runs` | | `2` | Sessions running at once; each is a full agent process |
+| `approval_timeout` | | `10m` | Unanswered permission requests are denied after this |
+
+A session aimux continued keeps its adapter running between turns, up to `max_runs`, and stops it after a few idle minutes.
+
+Codex sessions are not listed yet.

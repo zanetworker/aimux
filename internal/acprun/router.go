@@ -40,16 +40,30 @@ type Router struct {
 // Send continues sessionID with text through the manager, unless the session
 // is unknown or open in a terminal that aimux does not drive.
 func (r *Router) Send(ctx context.Context, sessionID, text string, onEvent func(Event)) (string, error) {
-	info, err := r.Lookup(sessionID)
+	info, err := r.route(sessionID)
 	if err != nil {
 		return "", err
+	}
+	return r.Manager.Send(ctx, sessionID, info.Cwd, text, onEvent)
+}
+
+// Check reports whether Send would accept sessionID, without sending.
+func (r *Router) Check(sessionID string) error {
+	_, err := r.route(sessionID)
+	return err
+}
+
+func (r *Router) route(sessionID string) (SessionInfo, error) {
+	info, err := r.Lookup(sessionID)
+	if err != nil {
+		return SessionInfo{}, err
 	}
 	// A session aimux already runs shows up in Claude's registry through the
 	// adapter's own process; that is not a user's terminal.
 	if info.OpenInTerminal && !r.Manager.Running(sessionID) {
-		return "", fmt.Errorf("%w (session %s)", ErrOpenInTerminal, sessionID)
+		return SessionInfo{}, fmt.Errorf("%w (session %s)", ErrOpenInTerminal, sessionID)
 	}
-	return r.Manager.Send(ctx, sessionID, info.Cwd, text, onEvent)
+	return info, nil
 }
 
 // ClaudeLookup finds Claude Code sessions: the session file under

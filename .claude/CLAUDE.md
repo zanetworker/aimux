@@ -289,6 +289,7 @@ Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't
 **CLI has, TUI and Web missing:**
 - Chat with an idle session (`aimux chat`, `internal/acprun`); web and phone come with the remote listener
 - MCP proxy (`aimux mcp proxy`); a daemon, no UI planned
+- Remote API (`aimux remote serve`, `internal/remoteapi`); a daemon whose clients are other devices; web dashboard has no chat view yet
 
 **Web has, TUI missing:**
 - Plugin listing/execution, AI insights, task complete/reopen

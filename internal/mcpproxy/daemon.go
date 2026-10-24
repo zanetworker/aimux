@@ -31,7 +31,11 @@ func Serve(ctx context.Context, ln net.Listener, srv *server.MCPServer, pool *Po
 		opt.ReapEvery = time.Minute
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", server.NewStreamableHTTPServer(srv))
+	// Clients such as Claude Code exit without ending their MCP session;
+	// expiring idle sessions runs the unregister hook, which stops their
+	// per-session backends. A client that comes back after expiry gets a new
+	// session, as the MCP spec requires.
+	mux.Handle("/mcp", server.NewStreamableHTTPServer(srv, server.WithSessionIdleTTL(opt.IdleTimeout)))
 	httpSrv := &http.Server{Handler: netguard.LocalOnly(mux), ReadHeaderTimeout: 10 * time.Second}
 
 	go func() {

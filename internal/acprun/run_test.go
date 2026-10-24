@@ -1,9 +1,11 @@
 package acprun
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -372,5 +376,34 @@ func TestAdapterEnv(t *testing.T) {
 		if !want[kv] {
 			t.Fatalf("unexpected %q in %v (CLAUDECODE must be dropped so Claude does not refuse to start nested)", kv, got)
 		}
+	}
+}
+
+func TestStart_AdapterHasNoControllingTerminal(t *testing.T) {
+	r := start(t, fakeSpec(t), "sess-1", nil)
+	sid, err := unix.Getsid(r.PID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := unix.Getsid(0)
+	// Its own session: it cannot open /dev/tty and read keystrokes meant for
+	// aimux's approval prompt.
+	if sid != r.PID() || sid == mine {
+		t.Fatalf("adapter session %d (pid %d, aimux session %d); want the adapter to lead its own session", sid, r.PID(), mine)
+	}
+}
+
+func TestRun_SDKDoesNotLogToTheDefaultLogger(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	r := start(t, fakeSpec(t), "sess-1", nil)
+	prompt(t, r, "hello")
+	_ = r.Close()
+	time.Sleep(100 * time.Millisecond) // let the connection notice the closed peer
+	if buf.Len() != 0 {
+		t.Fatalf("the ACP SDK logged to the default logger, which ends up in the user's output:\n%s", buf.String())
 	}
 }

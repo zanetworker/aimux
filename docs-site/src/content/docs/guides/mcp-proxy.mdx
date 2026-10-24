@@ -14,6 +14,8 @@ Claude Code starts every configured MCP server when a session opens, before any 
 
 Remote (`http`, `sse`) servers are not proxied. They run no local process, so Claude Code keeps connecting to them directly.
 
+Only **tools** are proxied. Prompts, resources and log messages from the proxied servers are not available through the proxy; keep a server as a direct entry if you rely on those.
+
 ## Set it up
 
 1. Cache the tool catalog. This starts each stdio server in `~/.claude.json` once and stops it:
@@ -58,3 +60,8 @@ The proxy listens on `127.0.0.1` only. It rejects requests whose `Host` is not a
 - A server that fails to start returns an error result naming the server. Other servers keep working, and the next call tries again.
 - A call that times out (2 minutes) or loses its connection stops that server, and the next call starts a new one.
 - A tool that reports an error keeps its server running.
+- Claude Code does not end its MCP session when it exits. A session idle for longer than `--idle` expires, which also stops its per-session servers. A client that comes back later gets a new session automatically.
+
+## Conformance check
+
+`scripts/mcp-proxy-conformance.sh` runs the official MCP conformance suite against the reference server directly and through the proxy, and lists the scenarios the proxy drops. Expect `logging-*`, `prompts-*` and `resources-*` (tools only, as above). `tools-call-error` and `tools-call-simple-text` also differ, because the suite calls tools the reference server lacks: the reference server wraps that error in a tool result, while the proxy returns the JSON-RPC error `-32602` the specification defines for unknown tools.

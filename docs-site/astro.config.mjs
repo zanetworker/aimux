@@ -30,6 +30,7 @@ export default defineConfig({
 						{ label: 'Agent Usage', slug: 'guides/agent-usage' },
 						{ label: 'MCP Proxy', slug: 'guides/mcp-proxy' },
 						{ label: 'Chat with Sessions', slug: 'guides/chat' },
+						{ label: 'Remote Access', slug: 'guides/remote-access' },
 					],
 				},
 				{

@@ -1,10 +1,14 @@
 package mcpproxy
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -78,5 +82,77 @@ func TestDecodeTool_RequiresName(t *testing.T) {
 	}
 	if _, err := DecodeTool(json.RawMessage(`[]`)); err == nil {
 		t.Fatal("non-object decoded without error")
+	}
+}
+
+type listingBackend struct {
+	fakeBackend
+	tools []json.RawMessage
+	err   error
+}
+
+func (l *listingBackend) ListToolsRaw(context.Context) ([]json.RawMessage, error) {
+	return l.tools, l.err
+}
+
+func TestCatalogUpdater_RecordsToolsWhenABackendStarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cat := &Catalog{}
+	cat.Set("slack", []json.RawMessage{json.RawMessage(`{"name":"old_tool"}`)}, old)
+	update := NewCatalogUpdater(cat, path)
+
+	if err := update.Refresh(context.Background(), "slack", &listingBackend{tools: []json.RawMessage{
+		json.RawMessage(`{"name":"post"}`), json.RawMessage(`{"name":"new_tool"}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	saved, err := LoadCatalog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := saved.Servers["slack"]
+	if len(e.Tools) != 2 || !strings.Contains(string(e.Tools[1]), "new_tool") || !e.FetchedAt.After(old) {
+		t.Fatalf("saved entry = %+v, want the two fresh tools", e)
+	}
+	if got := update.Snapshot().Servers["slack"]; len(got.Tools) != 2 {
+		t.Fatalf("in-memory catalog not updated: %+v", got)
+	}
+}
+
+func TestCatalogUpdater_FailedListingKeepsOldEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	cat := &Catalog{}
+	cat.Set("slack", []json.RawMessage{json.RawMessage(`{"name":"old_tool"}`)}, time.Now())
+	update := NewCatalogUpdater(cat, path)
+	if err := update.Refresh(context.Background(), "slack", &listingBackend{err: errors.New("broken pipe")}); err == nil || !strings.Contains(err.Error(), "slack") {
+		t.Fatalf("got %v, want an error naming the server", err)
+	}
+	if got := update.Snapshot().Servers["slack"]; len(got.Tools) != 1 {
+		t.Fatalf("a failed listing replaced the entry: %+v", got)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a failed listing still wrote the catalog")
+	}
+}
+
+func TestCatalogUpdater_ConcurrentRefreshes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	update := NewCatalogUpdater(&Catalog{}, path)
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := update.Refresh(context.Background(), fmt.Sprintf("s%d", i), &listingBackend{tools: []json.RawMessage{json.RawMessage(`{"name":"t"}`)}}); err != nil {
+				t.Error(err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	saved, err := LoadCatalog(path)
+	if err != nil || len(saved.Servers) != 10 {
+		t.Fatalf("saved %d servers (%v), want all 10", len(saved.Servers), err)
 	}
 }

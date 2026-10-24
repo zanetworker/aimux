@@ -120,3 +120,18 @@ func TestRouter_SessionAimuxAlreadyRunsIsNotOpenInTerminal(t *testing.T) {
 		t.Fatalf("second message to a session aimux runs: %v", err)
 	}
 }
+
+func TestRouter_Check(t *testing.T) {
+	projects, registry := claudeFixture(t)
+	r := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})}
+	defer r.Manager.Close()
+	if err := r.Check("idle-1"); err != nil {
+		t.Fatalf("idle session: %v", err)
+	}
+	if err := r.Check("open-1"); !errors.Is(err, ErrOpenInTerminal) {
+		t.Fatalf("open session: %v", err)
+	}
+	if err := r.Check("missing"); !errors.Is(err, ErrUnknownSession) {
+		t.Fatalf("unknown session: %v", err)
+	}
+}

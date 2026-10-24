@@ -1,0 +1,339 @@
+package remoteapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	acp "github.com/coder/acp-go-sdk"
+	"github.com/zanetworker/aimux/internal/acprun"
+)
+
+type fakeBackend struct {
+	sends   atomic.Int32
+	checkF  func(session string) error
+	sendF   func(ctx context.Context, session, text string, onEvent func(acprun.Event)) (string, error)
+	cancels atomic.Int32
+}
+
+func (f *fakeBackend) deps(b **Broker) BrokerDeps {
+	return BrokerDeps{
+		Check: func(s string) error {
+			if f.checkF != nil {
+				return f.checkF(s)
+			}
+			return nil
+		},
+		Send: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+			f.sends.Add(1)
+			if f.sendF != nil {
+				return f.sendF(ctx, s, text, on)
+			}
+			on(acprun.Event{Kind: acprun.KindUpdate, Data: json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`)})
+			return "end_turn", nil
+		},
+		Cancel: func(string) error { f.cancels.Add(1); return nil },
+	}
+}
+
+func newBroker(t *testing.T, f *fakeBackend, ttl time.Duration) *Broker {
+	t.Helper()
+	var b *Broker
+	b = NewBroker(f.deps(&b), BrokerOptions{ApprovalTimeout: ttl})
+	return b
+}
+
+// waitFor returns the session's events once one of kind appears.
+func waitFor(t *testing.T, b *Broker, session, kind string) []Event {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		evs := b.Events(session, 0)
+		for _, e := range evs {
+			if e.Kind == kind {
+				return evs
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("no %s event for %s; have %+v", kind, session, b.Events(session, 0))
+	return nil
+}
+
+func TestBroker_TurnStreamsEventsAndEnds(t *testing.T) {
+	f := &fakeBackend{}
+	b := newBroker(t, f, time.Second)
+	turn, err := b.Start("s1", "hello", "k1")
+	if err != nil || turn == "" {
+		t.Fatalf("Start: %q %v", turn, err)
+	}
+	evs := waitFor(t, b, "s1", KindTurnDone)
+	kinds := []string{}
+	for i, e := range evs {
+		if e.Seq != int64(i+1) {
+			t.Fatalf("event %d has seq %d", i, e.Seq)
+		}
+		if e.Turn != turn {
+			t.Fatalf("event %d belongs to turn %q, want %q", i, e.Turn, turn)
+		}
+		kinds = append(kinds, e.Kind)
+	}
+	if len(kinds) != 3 || kinds[0] != KindTurnStarted || kinds[1] != acprun.KindUpdate || kinds[2] != KindTurnDone {
+		t.Fatalf("kinds %v, want turn_started, update, turn_done", kinds)
+	}
+	var done struct {
+		StopReason string `json:"stopReason"`
+	}
+	if err := json.Unmarshal(evs[2].Data, &done); err != nil || done.StopReason != "end_turn" {
+		t.Fatalf("turn_done data %s", evs[2].Data)
+	}
+}
+
+func TestBroker_SameKeyIsOneTurn(t *testing.T) {
+	f := &fakeBackend{}
+	b := newBroker(t, f, time.Second)
+	a, err := b.Start("s1", "hello", "retry-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	again, err := b.Start("s1", "hello", "retry-key")
+	if err != nil || again != a {
+		t.Fatalf("retry returned %q, %v; want the original turn %q", again, err, a)
+	}
+	if f.sends.Load() != 1 {
+		t.Fatalf("sent %d times for one key, want 1", f.sends.Load())
+	}
+}
+
+func TestBroker_BusyWhileATurnRuns(t *testing.T) {
+	release := make(chan struct{})
+	f := &fakeBackend{sendF: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		<-release
+		return "end_turn", nil
+	}}
+	b := newBroker(t, f, time.Second)
+	if _, err := b.Start("s1", "one", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Start("s1", "two", "k2"); !errors.Is(err, acprun.ErrBusy) {
+		t.Fatalf("second turn: %v, want ErrBusy", err)
+	}
+	if _, err := b.Start("s2", "other session", "k3"); err != nil {
+		t.Fatalf("another session must not be blocked: %v", err)
+	}
+	close(release)
+	waitFor(t, b, "s1", KindTurnDone)
+	if _, err := b.Start("s1", "three", "k4"); err != nil {
+		t.Fatalf("after the turn ended: %v", err)
+	}
+}
+
+func TestBroker_CheckErrorIsImmediate(t *testing.T) {
+	f := &fakeBackend{checkF: func(string) error { return acprun.ErrOpenInTerminal }}
+	b := newBroker(t, f, time.Second)
+	if _, err := b.Start("s1", "hi", "k1"); !errors.Is(err, acprun.ErrOpenInTerminal) {
+		t.Fatalf("got %v, want ErrOpenInTerminal", err)
+	}
+	if f.sends.Load() != 0 {
+		t.Fatal("sent to a session that failed the check")
+	}
+}
+
+func TestBroker_SendErrorEndsTurnWithError(t *testing.T) {
+	f := &fakeBackend{sendF: func(context.Context, string, string, func(acprun.Event)) (string, error) {
+		return "", errors.New("adapter exited")
+	}}
+	b := newBroker(t, f, time.Second)
+	if _, err := b.Start("s1", "hi", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	evs := waitFor(t, b, "s1", KindTurnError)
+	if string(evs[len(evs)-1].Data) == "" {
+		t.Fatal("turn_error carries no message")
+	}
+}
+
+func permissionRequest() acp.RequestPermissionRequest {
+	return acp.RequestPermissionRequest{
+		SessionId: "s1",
+		ToolCall:  acp.ToolCallUpdate{ToolCallId: "c1", Title: acp.Ptr("git push")},
+		Options: []acp.PermissionOption{
+			{OptionId: "allow", Name: "Allow", Kind: acp.PermissionOptionKindAllowOnce},
+			{OptionId: "reject", Name: "Reject", Kind: acp.PermissionOptionKindRejectOnce},
+		},
+	}
+}
+
+// approvalFlow runs a turn whose agent asks for permission and returns what
+// the agent was told and the broker's events.
+func approvalFlow(t *testing.T, ttl time.Duration, answer func(b *Broker, approvalID string)) (string, bool, []Event) {
+	t.Helper()
+	var gotID string
+	var gotOK bool
+	var b *Broker
+	f := &fakeBackend{}
+	f.sendF = func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		gotID, gotOK = b.Approver()(ctx, permissionRequest())
+		return "end_turn", nil
+	}
+	b = NewBroker(f.deps(&b), BrokerOptions{ApprovalTimeout: ttl})
+	if _, err := b.Start("s1", "push it", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	evs := waitFor(t, b, "s1", KindApproval)
+	var ap struct {
+		ApprovalID string `json:"approvalId"`
+	}
+	for _, e := range evs {
+		if e.Kind == KindApproval {
+			_ = json.Unmarshal(e.Data, &ap)
+		}
+	}
+	if ap.ApprovalID == "" {
+		t.Fatal("approval event has no approvalId")
+	}
+	if answer != nil {
+		answer(b, ap.ApprovalID)
+	}
+	return gotID, gotOK, waitFor(t, b, "s1", KindTurnDone)
+}
+
+func TestBroker_ApprovalAllowed(t *testing.T) {
+	id, ok, evs := approvalFlow(t, 5*time.Second, func(b *Broker, approval string) {
+		if err := b.Answer(approval, "allow"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Answer(approval, "allow"); !errors.Is(err, ErrNoSuchApproval) {
+			t.Fatalf("second answer: %v, want ErrNoSuchApproval", err)
+		}
+	})
+	if !ok || id != "allow" {
+		t.Fatalf("agent got %q,%v; want allow", id, ok)
+	}
+	if !hasResolution(evs, "allowed") {
+		t.Fatalf("no approval_resolved=allowed event in %v", kindsOf(evs))
+	}
+}
+
+func TestBroker_ApprovalDenied(t *testing.T) {
+	id, ok, evs := approvalFlow(t, 5*time.Second, func(b *Broker, approval string) {
+		if err := b.Answer(approval, ""); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if ok || id != "" {
+		t.Fatalf("agent got %q,%v; want a denial", id, ok)
+	}
+	if !hasResolution(evs, "denied") {
+		t.Fatalf("no approval_resolved=denied event in %v", kindsOf(evs))
+	}
+}
+
+func TestBroker_ApprovalExpiresAsDenied(t *testing.T) {
+	id, ok, evs := approvalFlow(t, 50*time.Millisecond, nil)
+	if ok || id != "" {
+		t.Fatalf("agent got %q,%v; want a denial after expiry", id, ok)
+	}
+	if !hasResolution(evs, "expired") {
+		t.Fatalf("no approval_resolved=expired event in %v", kindsOf(evs))
+	}
+}
+
+func TestBroker_UnknownOptionIsRejected(t *testing.T) {
+	_, _, _ = approvalFlow(t, 5*time.Second, func(b *Broker, approval string) {
+		if err := b.Answer(approval, "allow_everything"); !errors.Is(err, ErrInvalidOption) {
+			t.Fatalf("got %v, want ErrInvalidOption", err)
+		}
+		_ = b.Answer(approval, "")
+	})
+}
+
+func TestBroker_SubscribeReplaysThenFollows(t *testing.T) {
+	release := make(chan struct{})
+	f := &fakeBackend{sendF: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		on(acprun.Event{Kind: acprun.KindUpdate, Data: json.RawMessage(`{"n":1}`)})
+		<-release
+		on(acprun.Event{Kind: acprun.KindUpdate, Data: json.RawMessage(`{"n":2}`)})
+		return "end_turn", nil
+	}}
+	b := newBroker(t, f, time.Second)
+	if _, err := b.Start("s1", "hi", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", acprun.KindUpdate)
+	ch, stop := b.Subscribe("s1", 1) // skip turn_started
+	defer stop()
+	first := <-ch
+	if first.Seq != 2 || first.Kind != acprun.KindUpdate {
+		t.Fatalf("replayed %+v, want seq 2 update", first)
+	}
+	close(release)
+	next := <-ch
+	last := <-ch
+	if next.Seq != 3 || last.Kind != KindTurnDone {
+		t.Fatalf("followed %+v then %+v, want seq 3 update then turn_done", next, last)
+	}
+}
+
+func TestBroker_Cancel(t *testing.T) {
+	f := &fakeBackend{}
+	b := newBroker(t, f, time.Second)
+	if err := b.Cancel("s1"); err != nil {
+		t.Fatal(err)
+	}
+	if f.cancels.Load() != 1 {
+		t.Fatal("cancel not forwarded")
+	}
+}
+
+func hasResolution(evs []Event, outcome string) bool {
+	for _, e := range evs {
+		if e.Kind != KindApprovalResolved {
+			continue
+		}
+		var r struct {
+			Outcome string `json:"outcome"`
+		}
+		if json.Unmarshal(e.Data, &r) == nil && r.Outcome == outcome {
+			return true
+		}
+	}
+	return false
+}
+
+func kindsOf(evs []Event) []string {
+	var k []string
+	for _, e := range evs {
+		k = append(k, e.Kind)
+	}
+	return k
+}
+
+func TestBroker_DropsAvailableCommandsUpdates(t *testing.T) {
+	f := &fakeBackend{sendF: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		on(acprun.Event{Kind: acprun.KindUpdate, Data: json.RawMessage(`{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"x"}]}`)})
+		on(acprun.Event{Kind: acprun.KindUpdate, Data: json.RawMessage(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}}`)})
+		return "end_turn", nil
+	}}
+	b := newBroker(t, f, time.Second)
+	if _, err := b.Start("s1", "hi", "k"); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range waitFor(t, b, "s1", KindTurnDone) {
+		if strings.Contains(string(e.Data), "available_commands_update") {
+			t.Fatal("the slash-command list was passed to clients")
+		}
+	}
+}
+
+func TestBroker_EventsEmptyIsNotNil(t *testing.T) {
+	b := newBroker(t, &fakeBackend{}, time.Second)
+	if evs := b.Events("never-used", 0); evs == nil {
+		t.Fatal("Events returned nil; JSON clients get null instead of []")
+	}
+}

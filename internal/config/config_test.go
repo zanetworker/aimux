@@ -609,3 +609,38 @@ func TestModeFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteAccessConfig(t *testing.T) {
+	yamlContent := `
+remote_access:
+  port: 7400
+  allowed_logins:
+    - me@example.com
+  adapter: "claude-agent-acp"
+  max_runs: 3
+  approval_timeout: 5m
+`
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	ra := cfg.RemoteAccess
+	if ra.Port != 7400 || len(ra.AllowedLogins) != 1 || ra.AllowedLogins[0] != "me@example.com" ||
+		ra.Adapter != "claude-agent-acp" || ra.MaxRuns != 3 || ra.ApprovalTimeout != "5m" {
+		t.Fatalf("remote_access = %+v", ra)
+	}
+}
+
+func TestRemoteAccessConfig_DefaultsAllowNobody(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "absent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.RemoteAccess.AllowedLogins) != 0 {
+		t.Fatalf("default allowlist %v, want empty (nobody admitted until configured)", cfg.RemoteAccess.AllowedLogins)
+	}
+}

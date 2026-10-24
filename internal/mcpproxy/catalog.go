@@ -1,11 +1,13 @@
 package mcpproxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -108,4 +110,41 @@ func DecodeTool(raw json.RawMessage) (mcp.Tool, error) {
 		tool.RawOutputSchema = schemas.Output
 	}
 	return tool, nil
+}
+
+// CatalogUpdater keeps a catalog and its file current as backends start, so
+// tools a server added appear the next time the proxy starts.
+type CatalogUpdater struct {
+	mu   sync.Mutex
+	cat  *Catalog
+	path string
+}
+
+// NewCatalogUpdater updates cat and saves it to path.
+func NewCatalogUpdater(cat *Catalog, path string) *CatalogUpdater {
+	return &CatalogUpdater{cat: cat, path: path}
+}
+
+// Refresh re-lists a started backend's tools and saves the catalog. A failed
+// listing keeps the previous entry and writes nothing.
+func (u *CatalogUpdater) Refresh(ctx context.Context, server string, b Backend) error {
+	tools, err := b.ListToolsRaw(ctx)
+	if err != nil {
+		return fmt.Errorf("refresh catalog for %s: %w", server, err)
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.cat.Set(server, tools, time.Now())
+	return u.cat.Save(u.path)
+}
+
+// Snapshot returns a copy of the current catalog.
+func (u *CatalogUpdater) Snapshot() *Catalog {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	c := &Catalog{Servers: make(map[string]CatalogEntry, len(u.cat.Servers))}
+	for k, v := range u.cat.Servers {
+		c.Servers[k] = v
+	}
+	return c
 }

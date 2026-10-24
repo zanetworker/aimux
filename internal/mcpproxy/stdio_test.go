@@ -14,6 +14,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -175,5 +177,23 @@ func TestStdioBackend_CloseKillsProcessesBehindAWrapper(t *testing.T) {
 			t.Fatalf("server child %d still running after Close", pid)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestStdioBackend_HasNoControllingTerminal(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	b, err := StdioStarter(testConfigs())(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	pid := b.(*stdioBackend).cmd.Process.Pid
+	sid, err := unix.Getsid(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mine, _ := unix.Getsid(0); sid != pid || sid == mine {
+		t.Fatalf("backend session %d (pid %d, proxy session %d); want its own session", sid, pid, mine)
 	}
 }

@@ -44,12 +44,13 @@ func startStdio(ctx context.Context, server string, cfg ServerConfig) (*stdioBac
 	for k, v := range cfg.Env {
 		env = append(env, k+"="+v)
 	}
-	// Run each server in its own process group so Close also stops the real
-	// server when the command is a wrapper such as npx or uv.
+	// Run each server in its own session (so its own process group) so Close
+	// also stops the real server when the command is a wrapper such as npx or
+	// uv, and so it cannot read from the user's terminal.
 	cmdFunc := func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
 		cmd := exec.CommandContext(ctx, command, args...) // #nosec G204 -- command comes from the user's MCP config
 		cmd.Env = append(cmd.Environ(), env...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // own session: no controlling terminal
 		b.cmd = cmd
 		return cmd, nil
 	}

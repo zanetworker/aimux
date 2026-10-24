@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -71,8 +72,10 @@ func Start(ctx context.Context, spec Spec, sessionID string, approve Approver) (
 	cmd := exec.Command(spec.Command, spec.Args...) // #nosec G204 -- adapter command comes from aimux config
 	cmd.Dir = spec.Cwd
 	cmd.Env = adapterEnv(os.Environ(), spec.Env)
-	// Own process group, so Close also stops what a wrapper like npx started.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Own session (and so own process group): Close also stops what a
+	// wrapper like npx started, and the agent has no controlling terminal,
+	// so it cannot read keystrokes meant for aimux's approval prompt.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("start ACP adapter: %w", err)
@@ -86,6 +89,9 @@ func Start(ctx context.Context, spec Spec, sessionID string, approve Approver) (
 	}
 	r.cmd, r.stdin = cmd, stdin
 	r.conn = acp.NewClientSideConnection(client{r}, stdin, stdout)
+	// The SDK logs connection events to slog.Default, which would land in the
+	// user's terminal output.
+	r.conn.SetLogger(slog.New(slog.DiscardHandler))
 
 	init, err := r.conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
