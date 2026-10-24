@@ -68,6 +68,10 @@ type Run struct {
 	loading bool
 	onEvent func(Event)
 	closed  bool
+	// prompting is true while a prompt is in flight; cancelPending records a
+	// Cancel that arrived before the prompt was sent, which then ends it.
+	prompting     bool
+	cancelPending bool
 }
 
 // Start launches the adapter, initializes it and loads sessionID. Updates the
@@ -142,11 +146,19 @@ func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (str
 		r.mu.Unlock()
 		return "", errors.New("run is closed")
 	}
+	if r.cancelPending {
+		r.cancelPending = false
+		r.mu.Unlock()
+		return string(acp.StopReasonCancelled), nil
+	}
 	r.onEvent = onEvent
+	r.prompting = true
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		r.onEvent = nil
+		r.prompting = false
+		r.cancelPending = false
 		r.mu.Unlock()
 	}()
 
@@ -161,8 +173,13 @@ func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (str
 }
 
 // Cancel asks the agent to stop the current turn; Prompt then returns
-// "cancelled".
+// "cancelled". A Cancel before the prompt is sent ends that prompt at once.
 func (r *Run) Cancel() {
+	r.mu.Lock()
+	if !r.prompting {
+		r.cancelPending = true
+	}
+	r.mu.Unlock()
 	_ = r.conn.Cancel(context.Background(), acp.CancelNotification{SessionId: r.sessionID})
 }
 

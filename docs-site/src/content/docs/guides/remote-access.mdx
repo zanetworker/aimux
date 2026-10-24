@@ -48,14 +48,14 @@ Responses are JSON, except the events endpoint, which streams server-sent events
 | `GET /v1/health` | Who you are: `{"status","login"}` |
 | `GET /v1/sessions?limit=50` | Recent Claude sessions with `state`: `idle`, `open_in_terminal` or `busy`. Sessions started by a program (for example `claude -p`) are left out unless `include_automated=1` |
 | `GET /v1/sessions/{id}?turns=20` | One session and its last turns (user text, reply, tools) |
-| `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn, returns `202 {"turn","after","events"}`. The same `key` returns the same turn, so retries are safe |
-| `GET /v1/sessions/{id}/events?after=N` | Server-sent events after `N` (or the `Last-Event-ID` header). `?wait=0` returns one JSON page instead |
+| `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn, returns `202 {"turn","after","events"}`. A retry with the same non-empty `key` returns the same turn instead of sending twice; keys are remembered per session until the server restarts |
+| `GET /v1/sessions/{id}/events?after=N` | Server-sent events after `N` (or the `Last-Event-ID` header, which wins on reconnect). `?wait=0` returns one JSON page instead. The server keeps the latest 2,000 events per session, in memory: replay starts over after a restart |
 | `POST /v1/sessions/{id}/cancel` | Stop the running turn |
 | `POST /v1/approvals/{id}` | Body `{"option": "<optionId>"}` from the approval event, or `{"option": ""}` to deny |
 
 Event kinds: `turn_started`, `update` (an ACP session update: agent text, tool calls, plans; the agent's slash-command list is left out), `approval` (with `approvalId`, `title` and `options`), `approval_resolved` (`allowed`, `denied` or `expired`), `turn_done` (with `stopReason`) and `turn_error`.
 
-Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `not_running` (409, cancel with no turn), `too_many_runs` (503), `ownership_unknown` (503, Claude's session registry is unavailable, so aimux will not risk a second writer), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
+Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process, such as `aimux chat`, is continuing the session), `not_running` (409, cancel with no turn), `too_many_runs` (503), `ownership_unknown` (503, Claude's session registry is unavailable, so aimux will not risk a second writer), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
 
 ## Settings
 

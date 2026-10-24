@@ -190,9 +190,13 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 	})
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err != nil {
+	switch {
+	case errors.Is(err, context.Canceled):
+		// Stopped by Cancel before the agent got the prompt.
+		b.appendLocked(session, turn, KindTurnDone, map[string]string{"stopReason": string(acp.StopReasonCancelled)})
+	case err != nil:
 		b.appendLocked(session, turn, KindTurnError, map[string]string{"error": err.Error()})
-	} else {
+	default:
 		b.appendLocked(session, turn, KindTurnDone, map[string]string{"stopReason": stop})
 	}
 	l := b.log(session)
@@ -258,19 +262,21 @@ func (b *Broker) Busy(session string) bool {
 	return b.log(session).active != ""
 }
 
-// Cancel stops the session's running turn: gracefully through the agent if
-// its run exists, otherwise by cancelling the turn before it gets that far.
-// With no turn running it returns acprun.ErrNotRunning.
+// Cancel stops the session's running turn wherever it is: before the agent
+// has the prompt, or during it. With no turn running it returns
+// acprun.ErrNotRunning.
 func (b *Broker) Cancel(session string) error {
 	b.mu.Lock()
 	stopTurn := b.log(session).cancel
 	b.mu.Unlock()
-	err := b.deps.Cancel(session)
-	if err != nil && stopTurn != nil {
-		stopTurn()
-		return nil
+	if stopTurn == nil {
+		return acprun.ErrNotRunning // no turn: leave any idle adapter alone
 	}
-	return err
+	// Both, always: the turn's context stops it if it has not reached the
+	// agent yet; the agent's own cancel stops it mid-prompt.
+	stopTurn()
+	_ = b.deps.Cancel(session)
+	return nil
 }
 
 // Approver is the acprun.Approver for runs started on the broker's behalf:

@@ -248,8 +248,10 @@ func TestAPI_ApprovalAndCancel(t *testing.T) {
 	if resp, body := do(t, srv, "POST", "/v1/approvals/"+ap.ApprovalID, `{"option":"allow"}`); resp.StatusCode != 404 || body["code"] != "no_such_approval" {
 		t.Fatalf("answered twice: %d %v", resp.StatusCode, body)
 	}
-	if resp, _ := do(t, srv, "POST", "/v1/sessions/s1/cancel", ""); resp.StatusCode != 202 || f.cancels.Load() != 1 {
-		t.Fatalf("cancel: %d, cancels %d", resp.StatusCode, f.cancels.Load())
+	// The turn is over: cancel has nothing to stop and must not poke the
+	// idle adapter.
+	if resp, body := do(t, srv, "POST", "/v1/sessions/s1/cancel", ""); resp.StatusCode != 409 || body["code"] != "not_running" || f.cancels.Load() != 0 {
+		t.Fatalf("cancel after the turn: %d %v, adapter cancels %d; want 409 not_running and no adapter call", resp.StatusCode, body, f.cancels.Load())
 	}
 }
 

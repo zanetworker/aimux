@@ -76,6 +76,8 @@ func writeFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "open_in_terminal", err)
 	case errors.Is(err, acprun.ErrBusy):
 		writeError(w, http.StatusConflict, "busy", err)
+	case errors.Is(err, acprun.ErrInUseElsewhere):
+		writeError(w, http.StatusConflict, "in_use", err)
 	case errors.Is(err, acprun.ErrOwnershipUnknown):
 		writeError(w, http.StatusServiceUnavailable, "ownership_unknown", err)
 	case errors.Is(err, acprun.ErrNotRunning):

@@ -281,14 +281,37 @@ func TestBroker_SubscribeReplaysThenFollows(t *testing.T) {
 }
 
 func TestBroker_Cancel(t *testing.T) {
-	f := &fakeBackend{}
+	release := make(chan struct{})
+	f := &fakeBackend{sendF: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		select {
+		case <-release:
+			return "end_turn", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}}
 	b := newBroker(t, f, time.Second)
+	if err := b.Cancel("s1"); !errors.Is(err, acprun.ErrNotRunning) || f.cancels.Load() != 0 {
+		t.Fatalf("cancel with no turn: %v (adapter cancels %d), want ErrNotRunning and the adapter untouched", err, f.cancels.Load())
+	}
+	if _, err := b.Start("s1", "work", "k"); err != nil {
+		t.Fatal(err)
+	}
 	if err := b.Cancel("s1"); err != nil {
 		t.Fatal(err)
 	}
 	if f.cancels.Load() != 1 {
-		t.Fatal("cancel not forwarded")
+		t.Fatal("graceful cancel not forwarded to the agent")
 	}
+	evs := waitFor(t, b, "s1", KindTurnDone)
+	var done struct {
+		StopReason string `json:"stopReason"`
+	}
+	_ = json.Unmarshal(evs[len(evs)-1].Data, &done)
+	if done.StopReason != "cancelled" {
+		t.Fatalf("stop reason %q, want cancelled", done.StopReason)
+	}
+	close(release)
 }
 
 func hasResolution(evs []Event, outcome string) bool {
@@ -399,7 +422,7 @@ func TestBroker_CancelBeforeTheRunExists(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the accepted turn kept going after Cancel")
 	}
-	waitFor(t, b, "s1", KindTurnError)
+	waitFor(t, b, "s1", KindTurnDone)
 	if b.Busy("s1") {
 		t.Fatal("session still busy after the cancelled turn ended")
 	}

@@ -45,6 +45,11 @@ type ManagerOptions struct {
 	// elsewhere and the cached adapter is replaced so the session reloads.
 	// Nil or "" disables the check.
 	Fingerprint func(sessionID string) string
+	// Reserve claims the session for this process before an adapter starts
+	// and returns its release, called when the adapter is gone for good. It
+	// keeps separate aimux processes from driving one session (SessionLock).
+	// Nil disables it.
+	Reserve func(sessionID string) (release func(), err error)
 	// StartTimeout bounds starting an adapter and loading the session.
 	// Default 3 minutes (the first npx run downloads the adapter).
 	StartTimeout time.Duration
@@ -54,11 +59,25 @@ type ManagerOptions struct {
 }
 
 type runEntry struct {
-	fingerprint string             // session state after aimux's last turn
-	run         Runner             // nil while starting
-	cancelStart context.CancelFunc // aborts a start in progress
-	busy        bool
-	lastUsed    time.Time
+	release         func()             // gives up the cross-process reservation
+	prompting       bool               // a prompt is with the agent: cancel goes to the agent
+	cancelRequested bool               // cancelled after the turn was accepted, before its prompt
+	fingerprint     string             // session state after aimux's last turn
+	run             Runner             // nil while starting
+	cancelStart     context.CancelFunc // aborts a start in progress
+	busy            bool
+	lastUsed        time.Time
+}
+
+// retire ends an entry that has left the map: its adapter and reservation.
+func (e *runEntry) retire() {
+	if e.run != nil {
+		_ = e.run.Close()
+	}
+	if e.release != nil {
+		e.release()
+		e.release = nil
+	}
 }
 
 // Manager keeps at most one run per session and decides when to start, reuse
@@ -98,7 +117,7 @@ func NewManager(opt ManagerOptions) *Manager {
 func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent func(Event)) (string, error) {
 	e, evicted, err := m.claim(sessionID)
 	if evicted != nil {
-		_ = evicted.Close()
+		evicted.retire()
 	}
 	if err != nil {
 		return "", err
@@ -113,11 +132,24 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		}
 	}
 	if e.run == nil {
+		if e.release == nil && m.opt.Reserve != nil {
+			release, err := m.opt.Reserve(sessionID)
+			if err != nil {
+				m.mu.Lock()
+				if m.runs[sessionID] == e {
+					delete(m.runs, sessionID)
+				}
+				m.mu.Unlock()
+				return "", err
+			}
+			e.release = release
+		}
 		sctx, cancel := context.WithTimeout(ctx, m.opt.StartTimeout)
 		m.mu.Lock()
 		if m.closed {
 			m.mu.Unlock()
 			cancel()
+			e.retire()
 			return "", errManagerDone
 		}
 		e.cancelStart = cancel
@@ -143,23 +175,42 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 			if err == nil {
 				// It finished starting after an interrupt or shutdown: do not
 				// prompt it, and do not leave it running untracked.
-				_ = r.Close()
+				e.run = r
 				err = errManagerDone
 				if !closed && ctx.Err() != nil {
 					err = ctx.Err()
 				}
 			}
+			e.retire()
 			return "", err
 		}
 	}
 
-	stop, err := e.run.Prompt(ctx, text, onEvent)
+	m.mu.Lock()
+	if ctx.Err() != nil || e.cancelRequested {
+		// Cancelled after the turn was accepted but before its prompt: keep
+		// the healthy adapter, send nothing.
+		e.busy = false
+		e.cancelRequested = false
+		e.lastUsed = m.opt.Now()
+		m.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return "", context.Canceled
+	}
+	e.prompting = true
+	m.mu.Unlock()
+	// The prompt itself is not cut off by ctx: stopping a turn mid-prompt is
+	// the agent's job (Cancel), so its session state stays consistent.
+	stop, err := e.run.Prompt(context.WithoutCancel(ctx), text, onEvent)
 	fp := ""
 	if err == nil && m.opt.Fingerprint != nil {
 		fp = m.opt.Fingerprint(sessionID)
 	}
 	m.mu.Lock()
 	e.busy = false
+	e.prompting = false
 	e.lastUsed = m.opt.Now()
 	e.fingerprint = fp
 	if err != nil && m.runs[sessionID] == e {
@@ -167,14 +218,14 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 	}
 	m.mu.Unlock()
 	if err != nil {
-		_ = e.run.Close()
+		e.retire()
 	}
 	return stop, err
 }
 
 // claim marks the session's run busy, creating an entry (and evicting the
 // least recently used idle run when full) if needed.
-func (m *Manager) claim(sessionID string) (*runEntry, Runner, error) {
+func (m *Manager) claim(sessionID string) (*runEntry, *runEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -185,9 +236,10 @@ func (m *Manager) claim(sessionID string) (*runEntry, Runner, error) {
 			return nil, nil, ErrBusy
 		}
 		e.busy = true
+		e.cancelRequested = false
 		return e, nil, nil
 	}
-	var evicted Runner
+	var evicted *runEntry
 	if len(m.runs) >= m.opt.MaxRuns {
 		victim := ""
 		for id, e := range m.runs {
@@ -201,7 +253,7 @@ func (m *Manager) claim(sessionID string) (*runEntry, Runner, error) {
 		if victim == "" {
 			return nil, nil, ErrTooManyRuns
 		}
-		evicted = m.runs[victim].run
+		evicted = m.runs[victim]
 		delete(m.runs, victim)
 	}
 	e := &runEntry{busy: true}
@@ -219,22 +271,29 @@ func (m *Manager) running(sessionID string) (Runner, error) {
 	return e.run, nil
 }
 
-// Cancel stops the session's current turn, or aborts starting its adapter.
+// Cancel stops the session's current turn wherever it is: starting the
+// adapter, between accepting the turn and prompting, or in the prompt (then
+// the agent is asked to stop). With no turn it returns ErrNotRunning and the
+// adapter is left alone, since a cancel it kept would stop the next turn.
 func (m *Manager) Cancel(sessionID string) error {
 	m.mu.Lock()
 	e, ok := m.runs[sessionID]
-	if ok && e.run == nil && e.cancelStart != nil {
+	switch {
+	case !ok || !e.busy:
+		m.mu.Unlock()
+		return ErrNotRunning
+	case e.run == nil && e.cancelStart != nil:
 		cancel := e.cancelStart
 		m.mu.Unlock()
 		cancel()
-		return nil
+	case e.prompting:
+		r := e.run
+		m.mu.Unlock()
+		r.Cancel()
+	default:
+		e.cancelRequested = true
+		m.mu.Unlock()
 	}
-	m.mu.Unlock()
-	r, err := m.running(sessionID)
-	if err != nil {
-		return err
-	}
-	r.Cancel()
 	return nil
 }
 
@@ -262,17 +321,17 @@ func (m *Manager) Active() []string {
 // Reap closes runs idle longer than IdleTimeout and returns how many.
 func (m *Manager) Reap() int {
 	now := m.opt.Now()
-	var victims []Runner
+	var victims []*runEntry
 	m.mu.Lock()
 	for id, e := range m.runs {
 		if !e.busy && e.run != nil && now.Sub(e.lastUsed) > m.opt.IdleTimeout {
-			victims = append(victims, e.run)
+			victims = append(victims, e)
 			delete(m.runs, id)
 		}
 	}
 	m.mu.Unlock()
-	for _, r := range victims {
-		_ = r.Close()
+	for _, e := range victims {
+		e.retire()
 	}
 	return len(victims)
 }
@@ -282,18 +341,18 @@ func (m *Manager) Reap() int {
 func (m *Manager) Close() {
 	m.mu.Lock()
 	m.closed = true
-	var all []Runner
+	var all []*runEntry
 	for id, e := range m.runs {
 		if e.run != nil {
-			all = append(all, e.run)
+			all = append(all, e)
 		} else if e.cancelStart != nil {
-			e.cancelStart()
+			e.cancelStart() // its Send retires it once the start returns
 		}
 		delete(m.runs, id)
 	}
 	m.mu.Unlock()
-	for _, r := range all {
-		_ = r.Close()
+	for _, e := range all {
+		e.retire()
 	}
 	m.starting.Wait()
 }
@@ -329,4 +388,19 @@ func (m *Manager) Owns(pid int) bool {
 		}
 	}
 	return false
+}
+
+// ProbeReserved reports ErrInUseElsewhere when another process holds the
+// session's reservation. It holds nothing; sessions this manager already
+// runs are not probed (it holds their reservation itself).
+func (m *Manager) ProbeReserved(sessionID string) error {
+	if m.opt.Reserve == nil || m.Running(sessionID) {
+		return nil
+	}
+	release, err := m.opt.Reserve(sessionID)
+	if err != nil {
+		return err
+	}
+	release()
+	return nil
 }

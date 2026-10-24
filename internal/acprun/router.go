@@ -68,6 +68,11 @@ func (r *Router) route(sessionID string) (SessionInfo, error) {
 	if err != nil {
 		return SessionInfo{}, err
 	}
+	// Another aimux process first: its adapter would otherwise look like a
+	// terminal below. (The manager takes the real reservation.)
+	if err := r.Manager.ProbeReserved(sessionID); err != nil {
+		return SessionInfo{}, err
+	}
 	// A session aimux runs shows up in Claude's registry through the
 	// adapter's own process; any other holder is a user's terminal, even
 	// while aimux keeps an idle run for the session.

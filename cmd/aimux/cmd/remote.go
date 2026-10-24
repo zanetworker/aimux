@@ -105,6 +105,7 @@ func newRemoteServeCmd() *cobra.Command {
 			manager := acprun.NewManager(acprun.ManagerOptions{
 				MaxRuns:     s.maxRuns,
 				Fingerprint: acprun.ClaudeFingerprint(projects),
+				Reserve:     sessionReservation(home),
 				Start: func(ctx context.Context, id, cwd string) (acprun.Runner, error) {
 					return acprun.Start(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, id, broker.Approver())
 				},

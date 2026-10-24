@@ -426,3 +426,16 @@ func TestRun_EventHistoryIsBounded(t *testing.T) {
 		t.Fatalf("kept seqs %d..%d, want the newest", kept[0].Seq, kept[len(kept)-1].Seq)
 	}
 }
+
+// Cancel that arrives before Prompt sends anything ends that prompt at once.
+func TestRun_CancelBeforePromptEndsIt(t *testing.T) {
+	r := start(t, fakeSpec(t), "sess-1", nil)
+	r.Cancel()
+	events, stop := prompt(t, r, "hello")
+	if stop != "cancelled" || len(events) != 0 {
+		t.Fatalf("stop %q with %d events, want cancelled and nothing sent", stop, len(events))
+	}
+	if _, stop := prompt(t, r, "hello"); stop != "end_turn" {
+		t.Fatalf("next prompt %q: the pending cancel must apply only once", stop)
+	}
+}

@@ -203,8 +203,10 @@ func TestManager_CancelAndEvents(t *testing.T) {
 		t.Fatalf("events without a run: %v, want ErrNotRunning", err)
 	}
 	_, _ = send(m, "a")
-	if err := m.Cancel("a"); err != nil || fs.runners[0].cancels.Load() != 1 {
-		t.Fatalf("cancel: %v, cancels=%d", err, fs.runners[0].cancels.Load())
+	// Idle adapter, no turn: nothing to cancel, and the adapter is not told
+	// (a cancel it kept would stop the next, unrelated turn).
+	if err := m.Cancel("a"); !errors.Is(err, ErrNotRunning) || fs.runners[0].cancels.Load() != 0 {
+		t.Fatalf("cancel of an idle session: %v, cancels=%d; want ErrNotRunning and no adapter call", err, fs.runners[0].cancels.Load())
 	}
 	if ev, err := m.Events("a", 0); err != nil || len(ev) != 1 || ev[0].Seq != 7 {
 		t.Fatalf("events: %v %v", ev, err)
@@ -384,5 +386,84 @@ func TestManager_ReloadsWhenTheSessionChangedElsewhere(t *testing.T) {
 	}
 	if fs.count() != 2 || !fs.runners[0].closed.Load() {
 		t.Fatalf("started %d, first closed=%v; want a fresh adapter that reloads the session", fs.count(), fs.runners[0].closed.Load())
+	}
+}
+
+// A cancel that lands after the adapter is ready but before the prompt is
+// sent must stop the turn, not reach an idle adapter and be lost.
+func TestManager_CancelledBeforePromptDoesNotPrompt(t *testing.T) {
+	var prompts atomic.Int32
+	fs := &fakeRunStarter{promptF: func(context.Context, string) (string, error) {
+		prompts.Add(1)
+		return "end_turn", nil
+	}}
+	m := NewManager(ManagerOptions{Start: fs.start})
+	defer m.Close()
+	_, _ = send(m, "a") // leaves a cached idle adapter
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := m.Send(ctx, "a", "/w", "second", func(Event) {}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if prompts.Load() != 1 {
+		t.Fatalf("prompted %d times, want only the first turn", prompts.Load())
+	}
+	if !m.Running("a") || fs.runners[0].closed.Load() {
+		t.Fatal("a turn cancelled before its prompt must not throw away the healthy adapter")
+	}
+}
+
+func TestManager_CancelReachesTheAdapterDuringAPrompt(t *testing.T) {
+	inPrompt := make(chan struct{})
+	release := make(chan struct{})
+	fs := &fakeRunStarter{promptF: func(context.Context, string) (string, error) {
+		close(inPrompt)
+		<-release
+		return "cancelled", nil
+	}}
+	m := NewManager(ManagerOptions{Start: fs.start})
+	defer m.Close()
+	go func() { _, _ = send(m, "a") }()
+	<-inPrompt
+	if err := m.Cancel("a"); err != nil || fs.runners[0].cancels.Load() != 1 {
+		t.Fatalf("cancel during a prompt: %v, cancels=%d; want it forwarded to the agent", err, fs.runners[0].cancels.Load())
+	}
+	close(release)
+}
+
+func TestManager_CancelBetweenClaimAndPromptStopsTheTurn(t *testing.T) {
+	var prompts atomic.Int32
+	fs := &fakeRunStarter{promptF: func(context.Context, string) (string, error) { prompts.Add(1); return "end_turn", nil }}
+	var armed atomic.Bool
+	gate := make(chan struct{})
+	reached := make(chan struct{})
+	m := NewManager(ManagerOptions{Start: fs.start, Fingerprint: func(string) string {
+		// Armed for the second turn only: the reuse check runs between
+		// claiming the cached run and prompting it.
+		if armed.CompareAndSwap(true, false) {
+			close(reached)
+			<-gate
+		}
+		return ""
+	}})
+	defer m.Close()
+	_, _ = send(m, "a")
+	prompts.Store(0)
+	armed.Store(true)
+	done := make(chan error)
+	go func() { _, err := send(m, "a"); done <- err }()
+	<-reached
+	if err := m.Cancel("a"); err != nil {
+		t.Fatalf("cancel of an accepted turn: %v", err)
+	}
+	close(gate)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if prompts.Load() != 0 || fs.runners[0].cancels.Load() != 0 {
+		t.Fatalf("prompts %d, adapter cancels %d; want the turn stopped before the agent", prompts.Load(), fs.runners[0].cancels.Load())
+	}
+	if _, err := send(m, "a"); err != nil || prompts.Load() != 1 {
+		t.Fatalf("next turn: %v, prompts %d; the cancel must not leak into it", err, prompts.Load())
 	}
 }
