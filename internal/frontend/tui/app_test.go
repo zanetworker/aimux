@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/cache"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
@@ -1194,6 +1195,18 @@ func TestInstancesMsg_CacheSaveDoesNotRaceWithSort(t *testing.T) {
 	}
 	app.Update(msg)
 
-	// Let the background save finish so the test doesn't exit mid-write.
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the background save to land under the temp HOME, so it never
+	// runs after t.Setenv restores the real HOME.
+	path := filepath.Join(os.Getenv("HOME"), ".aimux", "cache", "last-seen.json")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		saved, _ := cache.Load(path)
+		if len(saved) == len(msg) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cache save did not complete: got %d agents in %s, want %d", len(saved), path, len(msg))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
