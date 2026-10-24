@@ -165,6 +165,6 @@ The header shows aggregate statistics:
 The dashboard listens on `127.0.0.1` and only answers its own page and local tools:
 
 - Requests must use a loopback host name (`127.0.0.1`, `localhost` or `::1`), which blocks DNS rebinding.
-- Requests that change state (`POST`, `DELETE`) are rejected with `403` when a browser sends them from another site.
-- Terminal WebSockets are accepted only from the dashboard's own origin.
+- Requests that change state (`POST`, `DELETE`) are rejected with `403` when a browser sends them from another site. Pages on other loopback ports (for example the Vite dev server on `localhost:5173`) are allowed.
+- Terminal WebSockets are stricter: they are accepted only from the dashboard's exact origin.
 - Endpoints that take a `file` parameter (`/api/trace`, `/api/sessions/diffs`, `/api/sessions/meta`, the export endpoints) only read session files under `~/.claude/projects`, `~/.codex/sessions` or `~/.aimux/archive`.

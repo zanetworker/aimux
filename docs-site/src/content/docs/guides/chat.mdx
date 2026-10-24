@@ -19,6 +19,7 @@ aimux starts an [ACP](https://agentclientprotocol.com) adapter for Claude (`clau
 
 - **Sessions open in a terminal.** If the session is running in a terminal on this machine, aimux does not send to it, because typing into a running session can approve a permission prompt nobody saw. Close it there, then run `aimux chat`.
 - **Unknown sessions.** The ID must match a session file under `~/.claude/projects`.
+- **Sessions aimux cannot vouch for.** If Claude's session registry (`~/.claude/sessions`) is missing or unreadable, aimux cannot tell whether a terminal holds the session, so it refuses rather than risk a second writer.
 
 ## Permissions
 
@@ -31,6 +32,6 @@ Ctrl-C stops the agent's turn. What it already did stays in the session.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--adapter` | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command |
-| `--json` | off | Print each event (agent text, tool calls, permission requests) as a JSON line |
+| `--json` | off | Print each event (agent text, tool calls, permission requests) as a JSON line. Errors are still plain text on stderr |
 
 Codex sessions are not supported yet.

@@ -68,7 +68,8 @@ type pendingApproval struct {
 	session string
 	turn    string
 	options []acp.PermissionOption
-	answer  chan string // option id, "" for deny
+	answer  chan string   // option id, "" for deny
+	ended   chan struct{} // closed when the turn that asked ends
 }
 
 // Broker runs turns in the background, keeps each session's event log, and
@@ -197,6 +198,13 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 	l := b.log(session)
 	l.active = ""
 	l.cancel = nil
+	// Approvals belong to their turn: once it ends they cannot be answered.
+	for id, p := range b.approvals {
+		if p.session == session && p.turn == turn {
+			delete(b.approvals, id)
+			close(p.ended)
+		}
+	}
 }
 
 // Events returns the session's events after seq.
@@ -272,7 +280,7 @@ func (b *Broker) Approver() acprun.Approver {
 	return func(ctx context.Context, req acp.RequestPermissionRequest) (string, bool) {
 		session := string(req.SessionId)
 		id := newID()
-		p := &pendingApproval{session: session, options: req.Options, answer: make(chan string, 1)}
+		p := &pendingApproval{session: session, options: req.Options, answer: make(chan string, 1), ended: make(chan struct{})}
 		title := ""
 		if req.ToolCall.Title != nil {
 			title = *req.ToolCall.Title
@@ -296,6 +304,7 @@ func (b *Broker) Approver() acprun.Approver {
 			}
 		case <-timer.C:
 		case <-ctx.Done():
+		case <-p.ended: // the turn is over; nobody may act on this any more
 		}
 		b.mu.Lock()
 		delete(b.approvals, id)

@@ -411,3 +411,48 @@ func TestBroker_CancelWithNoTurn(t *testing.T) {
 		t.Fatalf("got %v, want ErrNotRunning", err)
 	}
 }
+
+// The adapter ends its turn (for example after a cancel) without withdrawing
+// a permission request. That approval must stop being answerable.
+func TestBroker_ApprovalExpiresWhenItsTurnEnds(t *testing.T) {
+	var b *Broker
+	decided := make(chan bool, 1)
+	f := &fakeBackend{}
+	f.sendF = func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		go func() { // #nosec G118 -- on purpose: the permission request outlives the prompt
+			_, ok := b.Approver()(context.Background(), permissionRequest())
+			decided <- ok
+		}()
+		for len(b.Events(s, 0)) < 2 { // wait until the approval is posted
+			time.Sleep(time.Millisecond)
+		}
+		return "cancelled", nil
+	}
+	b = NewBroker(f.deps(&b), BrokerOptions{ApprovalTimeout: time.Hour})
+	if _, err := b.Start("s1", "push", "k"); err != nil {
+		t.Fatal(err)
+	}
+	evs := waitFor(t, b, "s1", KindTurnDone)
+	var ap struct {
+		ApprovalID string `json:"approvalId"`
+	}
+	for _, e := range evs {
+		if e.Kind == KindApproval {
+			_ = json.Unmarshal(e.Data, &ap)
+		}
+	}
+	select {
+	case ok := <-decided:
+		if ok {
+			t.Fatal("the stale approval was granted")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the approval stayed pending after its turn ended")
+	}
+	if err := b.Answer(ap.ApprovalID, "allow"); !errors.Is(err, ErrNoSuchApproval) {
+		t.Fatalf("answering an approval of a finished turn: %v, want ErrNoSuchApproval", err)
+	}
+	if !hasResolution(waitFor(t, b, "s1", KindApprovalResolved), "expired") {
+		t.Fatal("no approval_resolved=expired event for the finished turn")
+	}
+}

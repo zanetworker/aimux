@@ -125,7 +125,7 @@ $ aimux spawn gpt
 Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
-With `--json`, errors go to stderr as structured JSON:
+With `--json`, errors go to stderr as structured JSON (except `aimux chat`, whose `--json` covers the event stream; its errors stay plain text):
 
 ```json
 {"error": "invalid provider \"gpt\"", "code": 2, "valid_values": ["claude", "codex"]}
