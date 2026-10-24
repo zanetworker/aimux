@@ -578,7 +578,9 @@ func (s *Server) handleExportJSONL(w http.ResponseWriter, r *http.Request) {
 	if providerName == "" {
 		providerName = "claude"
 	}
-	if !s.requireSessionFile(w, sessionFile) {
+	// Local providers read files; the K8s provider resolves its own k8s:// ids.
+	k8sID := providerName == "k8s" && strings.HasPrefix(sessionFile, "k8s://")
+	if !k8sID && !s.requireSessionFile(w, sessionFile) {
 		return
 	}
 
@@ -629,7 +631,9 @@ func (s *Server) handleExportOTEL(w http.ResponseWriter, r *http.Request) {
 	if providerName == "" {
 		providerName = "claude"
 	}
-	if !s.requireSessionFile(w, sessionFile) {
+	// Local providers read files; the K8s provider resolves its own k8s:// ids.
+	k8sID := providerName == "k8s" && strings.HasPrefix(sessionFile, "k8s://")
+	if !k8sID && !s.requireSessionFile(w, sessionFile) {
 		return
 	}
 

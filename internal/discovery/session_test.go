@@ -270,3 +270,27 @@ func TestParseSessionFile_LineOver1MBKeepsSession(t *testing.T) {
 		t.Fatalf("got %+v, want sessionId sess-big, 7 input tokens, 3 messages", info)
 	}
 }
+
+func TestFindSessionFile_RejectsUnsafeIDs(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects")
+	if err := os.MkdirAll(filepath.Join(projects, "p"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	id := "1f29de94-74c3-4089-94f7-df066c9fc5f5"
+	if err := os.WriteFile(filepath.Join(projects, "p", id+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A JSONL file outside the projects dir that traversal would reach.
+	if err := os.WriteFile(filepath.Join(root, "secret.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindSessionFile(id, projects); got == "" {
+		t.Fatal("a valid session id was not found")
+	}
+	for _, bad := range []string{"../secret", "../../secret", "p/../../secret", "*", "1f29de94*", "a?b", "[a]", "", "a\\b"} {
+		if got := FindSessionFile(bad, projects); got != "" {
+			t.Errorf("FindSessionFile(%q) = %q, want nothing", bad, got)
+		}
+	}
+}

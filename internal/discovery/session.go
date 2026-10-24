@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -201,9 +202,19 @@ func toolSnippetForAction(name string, input map[string]interface{}) string {
 	return ""
 }
 
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+// ValidSessionID reports whether id looks like an agent session id (letters,
+// digits, dash, underscore). Anything else, such as a path separator, ".."
+// or a glob character, is refused before it reaches the filesystem.
+func ValidSessionID(id string) bool { return sessionIDPattern.MatchString(id) }
+
 // FindSessionFile searches for a session JSONL file matching the given session ID
 // within the projects directory.
 func FindSessionFile(sessionID, projectsDir string) string {
+	if !ValidSessionID(sessionID) {
+		return "" // never let an id add path segments or glob patterns
+	}
 	pattern := filepath.Join(projectsDir, "*", sessionID+".jsonl")
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {

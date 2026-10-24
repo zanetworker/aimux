@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -72,6 +73,7 @@ type Run struct {
 	// Cancel that arrived before the prompt was sent, which then ends it.
 	prompting     bool
 	cancelPending bool
+	promptGen     int // counts prompts, so a re-sent cancel never reaches the next one
 }
 
 // Start launches the adapter, initializes it and loads sessionID. Updates the
@@ -153,6 +155,7 @@ func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (str
 	}
 	r.onEvent = onEvent
 	r.prompting = true
+	r.promptGen++
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
@@ -176,10 +179,33 @@ func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (str
 // "cancelled". A Cancel before the prompt is sent ends that prompt at once.
 func (r *Run) Cancel() {
 	r.mu.Lock()
-	if !r.prompting {
+	prompting, gen := r.prompting, r.promptGen
+	if !prompting {
 		r.cancelPending = true
 	}
 	r.mu.Unlock()
+	r.sendCancel()
+	if !prompting {
+		return
+	}
+	// The cancel may reach the agent before it has registered the prompt we
+	// just sent, and be ignored. Repeat it while that same prompt still runs
+	// (cancelling a turn is idempotent).
+	go func() {
+		for _, wait := range []time.Duration{250 * time.Millisecond, time.Second} {
+			time.Sleep(wait)
+			r.mu.Lock()
+			same := r.prompting && r.promptGen == gen && !r.closed
+			r.mu.Unlock()
+			if !same {
+				return
+			}
+			r.sendCancel()
+		}
+	}()
+}
+
+func (r *Run) sendCancel() {
 	_ = r.conn.Cancel(context.Background(), acp.CancelNotification{SessionId: r.sessionID})
 }
 

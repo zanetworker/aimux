@@ -176,3 +176,28 @@ func TestFastTraceRejectsFileOutsideSessionRoots(t *testing.T) {
 		t.Fatalf("trace outside session roots: code=%d, want 403", w.Code)
 	}
 }
+
+// K8s sessions use "k8s://<id>" identifiers that the K8s provider resolves
+// through Redis; the local-file allowlist must not reject them.
+func TestExportAcceptsK8sIdentifiers(t *testing.T) {
+	s := &Server{}
+	for _, path := range []string{"/api/sessions/abc/export/jsonl", "/api/sessions/abc/export/otel"} {
+		r := httptest.NewRequest("POST", path+"?file=k8s://abc&provider=k8s", nil)
+		w := httptest.NewRecorder()
+		if strings.HasSuffix(path, "jsonl") {
+			s.handleExportJSONL(w, r)
+		} else {
+			s.handleExportOTEL(w, r)
+		}
+		if w.Code == http.StatusForbidden {
+			t.Fatalf("%s: k8s identifier rejected with 403", path)
+		}
+	}
+	// A k8s:// identifier claimed for a local provider is still refused.
+	r := httptest.NewRequest("POST", "/api/sessions/abc/export/jsonl?file=k8s://abc&provider=claude", nil)
+	w := httptest.NewRecorder()
+	s.handleExportJSONL(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("k8s:// with provider claude: %d, want 403", w.Code)
+	}
+}

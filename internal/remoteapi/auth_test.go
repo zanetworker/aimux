@@ -28,10 +28,11 @@ func TestRequireTailnetUser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var seen string
-			h := RequireTailnetUser(tt.allowed, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := RequireTailnetUser(tt.allowed, []string{"mac.tail1.ts.net"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				seen = LoginFrom(r.Context())
 			}))
 			r := httptest.NewRequest("GET", "/v1/sessions", nil)
+			r.Host = "mac.tail1.ts.net:8443"
 			r.RemoteAddr = tt.remote
 			if tt.login != "" {
 				r.Header.Set("Tailscale-User-Login", tt.login)
@@ -54,5 +55,46 @@ func TestRequireTailnetUser(t *testing.T) {
 				t.Fatal("handler ran without the caller's login in the context")
 			}
 		})
+	}
+}
+
+// A DNS-rebinding page reaches the loopback listener with its own Host, no
+// Origin on a same-origin GET, and any header it likes.
+func TestRequireTailnetUser_RejectsUntrustedHost(t *testing.T) {
+	h := RequireTailnetUser([]string{"me@example.com"}, []string{"mac.tail1.ts.net"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	for _, host := range []string{"evil.example:7382", "127.0.0.1:7382", "localhost:7382", "mac.tail1.ts.net.evil.example", ""} {
+		r := httptest.NewRequest("GET", "/v1/sessions", nil)
+		r.Host = host
+		r.RemoteAddr = "127.0.0.1:50000"
+		r.Header.Set("Tailscale-User-Login", "me@example.com")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("Host %q: status %d, want 403", host, w.Code)
+		}
+	}
+	for _, host := range []string{"mac.tail1.ts.net", "MAC.tail1.ts.net:8443", "mac.tail1.ts.net."} {
+		r := httptest.NewRequest("GET", "/v1/sessions", nil)
+		r.Host = host
+		r.RemoteAddr = "127.0.0.1:50000"
+		r.Header.Set("Tailscale-User-Login", "me@example.com")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("trusted Host %q: status %d, want 200", host, w.Code)
+		}
+	}
+}
+
+func TestRequireTailnetUser_NoTrustedHostsAdmitsNobody(t *testing.T) {
+	h := RequireTailnetUser([]string{"me@example.com"}, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	r := httptest.NewRequest("GET", "/v1/sessions", nil)
+	r.Host = "mac.tail1.ts.net"
+	r.RemoteAddr = "127.0.0.1:50000"
+	r.Header.Set("Tailscale-User-Login", "me@example.com")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403 with no trusted hosts", w.Code)
 	}
 }

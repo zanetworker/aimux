@@ -294,6 +294,7 @@ remote_access:
 | `adapter` | string | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command for Claude sessions |
 | `max_runs` | int | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | duration | `10m` | Unanswered permission requests are denied after this |
+| `hostnames` | list | detected from `tailscale status` | `Host` names the API accepts (this machine's tailnet names); others are refused |
 
 ## API Endpoints
 

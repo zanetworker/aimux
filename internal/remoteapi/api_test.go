@@ -34,7 +34,7 @@ func newTestAPI(t *testing.T, f *fakeBackend) (*httptest.Server, *Broker) {
 			return SessionDetail{Session: Session{ID: "s1", State: StateIdle}, Turns: []json.RawMessage{json.RawMessage(`{"user":"hi"}`)}}, nil
 		},
 	}
-	srv := httptest.NewServer(api.Handler([]string{testLogin}))
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
 	t.Cleanup(srv.Close)
 	return srv, b
 }
@@ -262,7 +262,7 @@ func TestAPI_IncludeAutomatedParam(t *testing.T) {
 			gotAutomated = automated
 			return nil, nil
 		}}
-	s2 := httptest.NewServer(api.Handler([]string{testLogin}))
+	s2 := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
 	defer s2.Close()
 	if resp, body := do(t, s2, "GET", "/v1/sessions?include_automated=1", ""); resp.StatusCode != 200 || !gotAutomated {
 		t.Fatalf("include_automated not passed: %d %v", resp.StatusCode, body)
@@ -302,7 +302,7 @@ func TestAPI_LastEventIDBeatsTheInitialCursor(t *testing.T) {
 func TestAPI_CancelIdleSession(t *testing.T) {
 	b := NewBroker(BrokerDeps{Check: func(string) error { return nil }, Cancel: func(string) error { return acprun.ErrNotRunning }}, BrokerOptions{})
 	api := &API{Broker: b, Sessions: func(context.Context, int, bool) ([]Session, error) { return nil, nil }}
-	srv := httptest.NewServer(api.Handler([]string{testLogin}))
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
 	defer srv.Close()
 	if resp, body := do(t, srv, "POST", "/v1/sessions/s1/cancel", ""); resp.StatusCode != 409 || body["code"] != "not_running" {
 		t.Fatalf("cancel with nothing running: %d %v, want 409 not_running", resp.StatusCode, body)

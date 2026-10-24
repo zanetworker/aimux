@@ -34,6 +34,7 @@ From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:84
 ## Security model
 
 - The API listens on `127.0.0.1` only. It is not reachable on the tailnet except through `tailscale serve`.
+- Requests must carry this machine's tailnet name as their `Host` (as `tailscale serve` forwards them). Requests for any other Host, including `127.0.0.1`, are refused, so a web page that rebinds its own domain to your machine cannot use the API. The name is detected from `tailscale status`; set `hostnames` to override it.
 - Every request must carry the `Tailscale-User-Login` header that `tailscale serve` sets for the caller (and overwrites if a client sends its own). The login must be in `allowed_logins`; an empty list admits nobody.
 - Requests with a browser `Origin` header are refused, so no web page can use the API.
 - Sessions open in a terminal on the Mac are read-only: sending to them is refused, because typing into a running session can approve a prompt nobody saw. `GET /v1/sessions/{id}` shows their latest turns; the event stream carries only turns started through this API, so live progress of a terminal session is not streamed yet.
@@ -66,6 +67,7 @@ Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `
 | `adapter` | | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command |
 | `max_runs` | | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | | `10m` | Unanswered permission requests are denied after this |
+| `hostnames` | | detected from `tailscale status` | `Host` names to accept: this machine's tailnet names |
 
 A session aimux continued keeps its adapter running between turns, up to `max_runs`, and stops it after a few idle minutes.
 

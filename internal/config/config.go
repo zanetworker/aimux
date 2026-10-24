@@ -77,6 +77,7 @@ func (c K8sProviderConfig) IsActive() bool {
 type RemoteAccessConfig struct {
 	Port            int      `yaml:"port"`             // on 127.0.0.1 (default 7382)
 	AllowedLogins   []string `yaml:"allowed_logins"`   // Tailscale logins admitted; empty admits nobody
+	Hostnames       []string `yaml:"hostnames"`        // trusted Host names (this machine's tailnet names); default: detected from tailscale
 	Adapter         string   `yaml:"adapter"`          // ACP adapter command for Claude sessions
 	MaxRuns         int      `yaml:"max_runs"`         // live adapters at once (default 2)
 	ApprovalTimeout string   `yaml:"approval_timeout"` // unanswered approvals are denied after this (default 10m)

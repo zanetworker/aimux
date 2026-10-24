@@ -44,8 +44,9 @@ type API struct {
 	Session  func(ctx context.Context, id string, turns int) (SessionDetail, error)
 }
 
-// Handler returns the /v1 routes, admitting only allowed Tailscale logins.
-func (a *API) Handler(allowedLogins []string) http.Handler {
+// Handler returns the /v1 routes, admitting only allowed Tailscale logins
+// arriving through tailscale serve for one of trustedHosts.
+func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", a.health)
 	mux.HandleFunc("GET /v1/sessions", a.listSessions)
@@ -54,7 +55,7 @@ func (a *API) Handler(allowedLogins []string) http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{id}/events", a.events)
 	mux.HandleFunc("POST /v1/sessions/{id}/cancel", a.cancel)
 	mux.HandleFunc("POST /v1/approvals/{id}", a.answer)
-	return RequireTailnetUser(allowedLogins, mux)
+	return RequireTailnetUser(allowedLogins, trustedHosts, mux)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -2,13 +2,16 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,6 +61,38 @@ func resolveRemoteSettings(cfg config.RemoteAccessConfig, port int, allow []stri
 		return s, errors.New("nobody is allowed: set remote_access.allowed_logins in ~/.aimux/config.yaml or pass --allow <tailscale-login>")
 	}
 	return s, nil
+}
+
+// resolveTrustedHosts returns the Host names the API accepts: configured
+// names, or this machine's MagicDNS name from tailscale.
+func resolveTrustedHosts(configured []string, detect func() (string, error)) ([]string, error) {
+	if len(configured) > 0 {
+		return configured, nil
+	}
+	name, err := detect()
+	if err != nil || strings.TrimSuffix(name, ".") == "" {
+		return nil, fmt.Errorf("cannot tell which Host names to trust: set remote_access.hostnames (your tailnet name, e.g. mac.tailnet.ts.net) or start tailscale (%v)", err)
+	}
+	return []string{strings.TrimSuffix(name, ".")}, nil
+}
+
+// tailscaleDNSName asks tailscale for this machine's MagicDNS name.
+func tailscaleDNSName() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tailscale", "status", "--json").Output()
+	if err != nil {
+		return "", fmt.Errorf("tailscale status: %w", err)
+	}
+	var st struct {
+		Self struct {
+			DNSName string `json:"DNSName"`
+		} `json:"Self"`
+	}
+	if err := json.Unmarshal(out, &st); err != nil {
+		return "", fmt.Errorf("tailscale status: %w", err)
+	}
+	return st.Self.DNSName, nil
 }
 
 func tailscaleServeHint(port int) string {
@@ -122,11 +157,15 @@ func newRemoteServeCmd() *cobra.Command {
 			}
 			api := &remoteapi.API{Broker: broker, Sessions: index.Sessions, Session: index.Session}
 
+			hosts, err := resolveTrustedHosts(cfg.RemoteAccess.Hostnames, tailscaleDNSName)
+			if err != nil {
+				return err
+			}
 			ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.port))
 			if err != nil {
 				return fmt.Errorf("listen on 127.0.0.1:%d: %w (choose another port with --port)", s.port, err)
 			}
-			srv := &http.Server{Handler: api.Handler(s.allowed), ReadHeaderTimeout: 10 * time.Second}
+			srv := &http.Server{Handler: api.Handler(s.allowed, hosts), ReadHeaderTimeout: 10 * time.Second}
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -149,7 +188,7 @@ func newRemoteServeCmd() *cobra.Command {
 				_ = srv.Shutdown(shut)
 			}()
 			out := cmd.OutOrStdout()
-			_, _ = fmt.Fprintf(out, "aimux remote API on http://%s/v1 for %v\n%s", ln.Addr(), s.allowed, tailscaleServeHint(s.port))
+			_, _ = fmt.Fprintf(out, "aimux remote API on http://%s/v1 for %v via %v\n%s", ln.Addr(), s.allowed, hosts, tailscaleServeHint(s.port))
 			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}

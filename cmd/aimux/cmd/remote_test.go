@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -43,5 +44,20 @@ func TestTailscaleServeHint(t *testing.T) {
 	h := tailscaleServeHint(7382)
 	if !strings.Contains(h, "tailscale serve --bg --https=8443 http://127.0.0.1:7382") {
 		t.Fatalf("hint %q", h)
+	}
+}
+
+func TestResolveTrustedHosts(t *testing.T) {
+	detected := func() (string, error) { return "mac.tail1.ts.net.", nil }
+	failing := func() (string, error) { return "", errors.New("tailscale not running") }
+
+	if got, err := resolveTrustedHosts(nil, detected); err != nil || len(got) != 1 || got[0] != "mac.tail1.ts.net" {
+		t.Fatalf("auto-detect: %v %v", got, err)
+	}
+	if got, err := resolveTrustedHosts([]string{"a.ts.net", "b.ts.net"}, failing); err != nil || len(got) != 2 {
+		t.Fatalf("configured names must not need detection: %v %v", got, err)
+	}
+	if _, err := resolveTrustedHosts(nil, failing); err == nil || !strings.Contains(err.Error(), "hostnames") {
+		t.Fatalf("no names at all: %v, want an error naming remote_access.hostnames", err)
 	}
 }

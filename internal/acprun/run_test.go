@@ -88,6 +88,9 @@ func (a *fakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Prompt
 			say("permission: cancelled")
 		}
 	case "slow":
+		// Like a real agent, take a moment before the turn is cancellable; a
+		// cancel arriving in that gap finds no turn and is ignored.
+		time.Sleep(100 * time.Millisecond)
 		a.mu.Lock()
 		a.cancelled = make(chan struct{})
 		ch := a.cancelled
@@ -437,5 +440,34 @@ func TestRun_CancelBeforePromptEndsIt(t *testing.T) {
 	}
 	if _, stop := prompt(t, r, "hello"); stop != "end_turn" {
 		t.Fatalf("next prompt %q: the pending cancel must apply only once", stop)
+	}
+}
+
+// Cancel sent in the instant the prompt is being dispatched reaches the
+// agent before it has a turn and is ignored; the turn must still stop.
+func TestRun_CancelDuringDispatchStillStopsTheTurn(t *testing.T) {
+	r := start(t, fakeSpec(t), "sess-1", nil)
+	done := make(chan string, 1)
+	go func() {
+		stop, _ := r.Prompt(context.Background(), "slow", func(Event) {})
+		done <- stop
+	}()
+	for {
+		r.mu.Lock()
+		p := r.prompting
+		r.mu.Unlock()
+		if p {
+			break
+		}
+		time.Sleep(50 * time.Microsecond)
+	}
+	r.Cancel() // the agent has not registered the "slow" turn yet
+	select {
+	case stop := <-done:
+		if stop != "cancelled" {
+			t.Fatalf("stop %q, want cancelled", stop)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancel during dispatch was lost; the turn kept running")
 	}
 }
