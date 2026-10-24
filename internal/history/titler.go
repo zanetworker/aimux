@@ -1,7 +1,6 @@
 package history
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -10,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 // TitleConfig controls LLM-based session title generation.
@@ -66,8 +67,7 @@ func extractConversationSummary(filePath string) string {
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+	scanner := jsonl.NewScanner(f)
 
 	var parts []string
 	userCount, assistantCount := 0, 0

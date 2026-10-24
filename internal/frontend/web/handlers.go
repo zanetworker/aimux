@@ -214,6 +214,9 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "filePath required", http.StatusBadRequest)
 		return
 	}
+	if !s.requireSessionFile(w, req.FilePath) {
+		return
+	}
 	meta := history.LoadMeta(req.FilePath)
 	meta.Annotation = req.Annotation
 	if req.Tags != nil {
@@ -243,6 +246,9 @@ func (s *Server) handleGetSessionMeta(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")
 	if filePath == "" {
 		http.Error(w, "missing file param", http.StatusBadRequest)
+		return
+	}
+	if !s.requireSessionFile(w, filePath) {
 		return
 	}
 	meta := history.LoadMeta(filePath)
@@ -399,6 +405,9 @@ func (s *Server) handleFastTrace(w http.ResponseWriter, r *http.Request) {
 	}
 	if !strings.HasSuffix(file, ".jsonl") && !strings.HasSuffix(file, ".json") {
 		http.Error(w, "invalid file", http.StatusBadRequest)
+		return
+	}
+	if !s.requireSessionFile(w, file) {
 		return
 	}
 	providerName := r.URL.Query().Get("provider")
@@ -569,6 +578,9 @@ func (s *Server) handleExportJSONL(w http.ResponseWriter, r *http.Request) {
 	if providerName == "" {
 		providerName = "claude"
 	}
+	if !s.requireSessionFile(w, sessionFile) {
+		return
+	}
 
 	if s.ctrl == nil || s.providerLookupFn == nil {
 		http.Error(w, "not configured", http.StatusServiceUnavailable)
@@ -616,6 +628,9 @@ func (s *Server) handleExportOTEL(w http.ResponseWriter, r *http.Request) {
 	providerName := r.URL.Query().Get("provider")
 	if providerName == "" {
 		providerName = "claude"
+	}
+	if !s.requireSessionFile(w, sessionFile) {
+		return
 	}
 
 	if s.ctrl == nil || s.providerLookupFn == nil {
@@ -810,6 +825,9 @@ func (s *Server) handleSessionDiffs(w http.ResponseWriter, r *http.Request) {
 	sessionFile := r.URL.Query().Get("file")
 	if sessionFile == "" {
 		http.Error(w, "file parameter required", http.StatusBadRequest)
+		return
+	}
+	if !s.requireSessionFile(w, sessionFile) {
 		return
 	}
 

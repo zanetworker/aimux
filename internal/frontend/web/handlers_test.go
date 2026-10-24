@@ -297,6 +297,7 @@ func TestSessionMetaHandler(t *testing.T) {
 	_ = os.WriteFile(sessionFile, []byte("{\"type\":\"user\"}\n"), 0o600)
 
 	s := NewServer(0)
+	s.sessionRoots = []string{tmpDir}
 	go func() { _ = s.Start() }()
 	defer s.Stop()
 	time.Sleep(100 * time.Millisecond)
@@ -440,6 +441,7 @@ func TestSessionDiffsHandler_WithSessionFile(t *testing.T) {
 	_ = os.WriteFile(sessionFile, []byte(content), 0o600)
 
 	s := NewServer(0)
+	s.sessionRoots = []string{tmpDir}
 	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
 		return &provider.Claude{}
 	})

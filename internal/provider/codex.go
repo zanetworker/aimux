@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/jsonl"
 	"github.com/zanetworker/aimux/internal/statusdetect"
 	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -397,8 +397,7 @@ func (c *Codex) readSessionMeta(path string) codexSessionInfo {
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 512*1024), 512*1024)
+	scanner := jsonl.NewScanner(f)
 
 	for scanner.Scan() {
 		var entry struct {
@@ -430,8 +429,7 @@ func (c *Codex) parseSession(path string) codexSessionInfo {
 	defer func() { _ = f.Close() }()
 
 	var info codexSessionInfo
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 512*1024), 512*1024)
+	scanner := jsonl.NewScanner(f)
 
 	for scanner.Scan() {
 		var entry struct {

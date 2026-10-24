@@ -1,13 +1,14 @@
 package trace
 
 import (
-	"bufio"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 // Tailer watches a JSONL file and calls onLine for each new complete line
@@ -108,9 +109,8 @@ func (t *Tailer) readNewLines() {
 		return
 	}
 
-	// Scan lines with 256KB buffer
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+	// Scan lines; the buffer grows for long lines (see jsonl.MaxLineSize)
+	scanner := jsonl.NewScanner(f)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

@@ -5,7 +5,6 @@
 package history
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 // Session represents a past agent session discovered from session files.
@@ -221,8 +221,7 @@ func scanSession(id, filePath, project string) (Session, error) {
 		Resumable: true,
 	}
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 512*1024), 512*1024)
+	scanner := jsonl.NewScanner(f)
 
 	lineCount := 0
 	humanTurnCount := 0

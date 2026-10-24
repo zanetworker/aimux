@@ -55,7 +55,7 @@ Selecting an agent opens the right panel with three tabs:
 
 - **Trace**: Turn-by-turn conversation with tool calls, inline diffs, and outputs
 - **Diffs**: PR-style diff review with hierarchical file tree, line-numbered diffs, and per-file stats
-- **Session**: Live terminal with "Review Diffs" split view (diffs auto-refresh alongside the session)
+- **Session**: Live terminal with "Review Diffs" split view (diffs auto-refresh alongside the session). Resuming a past session uses normal permissions unless you tick **Skip permissions**, even if the original session ran in bypass mode.
 
 Additional features:
 - **Annotations**: Label turns as good/bad/waste with notes
@@ -159,3 +159,12 @@ The header shows aggregate statistics:
 - Repository count
 - Total tokens in/out
 - Total cost across all agents
+
+## Local-Only Access
+
+The dashboard listens on `127.0.0.1` and only answers its own page and local tools:
+
+- Requests must use a loopback host name (`127.0.0.1`, `localhost` or `::1`), which blocks DNS rebinding.
+- Requests that change state (`POST`, `DELETE`) are rejected with `403` when a browser sends them from another site.
+- Terminal WebSockets are accepted only from the dashboard's own origin.
+- Endpoints that take a `file` parameter (`/api/trace`, `/api/sessions/diffs`, `/api/sessions/meta`, the export endpoints) only read session files under `~/.claude/projects`, `~/.codex/sessions` or `~/.aimux/archive`.

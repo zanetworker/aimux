@@ -3,7 +3,9 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -18,7 +20,39 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: checkLocalOrigin,
+}
+
+// checkLocalOrigin allows a WebSocket upgrade only from the dashboard itself.
+// The Host must be a loopback address (blocks DNS rebinding, where a foreign
+// name resolves to 127.0.0.1) and a browser Origin, when sent, must match it
+// exactly (blocks other web pages and other local ports). A missing Origin is
+// allowed because browsers always send one; only local non-browser clients omit it.
+func checkLocalOrigin(r *http.Request) bool {
+	if !isLoopbackHost(r.Host) {
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
+
+func isLoopbackHost(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 type resizeMsg struct {

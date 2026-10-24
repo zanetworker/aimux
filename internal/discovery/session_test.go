@@ -2,7 +2,9 @@ package discovery
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"runtime"
 	"testing"
 	"time"
@@ -248,5 +250,23 @@ func TestToolSnippetForAction(t *testing.T) {
 				t.Errorf("toolSnippetForAction(%q, %v) = %q, want %q", tt.toolName, tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseSessionFile_LineOver1MBKeepsSession(t *testing.T) {
+	big := strings.Repeat("x", 2<<20)
+	content := `{"type":"user","sessionId":"sess-big","timestamp":"2026-10-24T10:00:00Z"}` + "\n" +
+		`{"type":"user","message":{"content":"` + big + `"}}` + "\n" +
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":7,"output_tokens":3}}}` + "\n"
+	path := filepath.Join(t.TempDir(), "big.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := ParseSessionFile(path)
+	if err != nil {
+		t.Fatalf("ParseSessionFile returned error %v; callers drop the session on error", err)
+	}
+	if info.SessionID != "sess-big" || info.TokensIn != 7 || info.MessageCount != 3 {
+		t.Fatalf("got %+v, want sessionId sess-big, 7 input tokens, 3 messages", info)
 	}
 }

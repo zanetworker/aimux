@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/jsonl"
 	"github.com/zanetworker/aimux/internal/statusdetect"
 	"github.com/zanetworker/aimux/internal/subagent"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -52,6 +52,15 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	// call (~50-100ms) that blocks when done sequentially per agent.
 	c.batchResolveProcessInfo(agents)
 
+	// Claude Code records each running session's ID by PID. It is more
+	// accurate than the command line (stale after /clear or a fork) and than
+	// start-time file matching.
+	registry := discovery.ReadClaudeRegistry(filepath.Join(home, ".claude", "sessions"))
+	fromRegistry := make(map[int]bool)
+	for i := range agents {
+		fromRegistry[i] = applyRegistryEntry(&agents[i], registry)
+	}
+
 	// Match tmux sessions: try name-based first (cheap), then PID-based
 	// fallback for aimux-launched sessions where the CWD changed.
 	for i := range agents {
@@ -67,7 +76,18 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	// needs assignedFiles tracking to avoid double-claiming).
 	assignedFiles := make(map[string]bool)
 	for i := range agents {
-		c.matchSessionFile(&agents[i], projectsDir, assignedFiles)
+		if fromRegistry[i] {
+			// The ID is authoritative; a session with no file yet must not
+			// claim another session's file by start time.
+			if f := discovery.FindSessionFile(agents[i].SessionID, projectsDir); f != "" {
+				assignedFiles[f] = true
+				agents[i].SessionFile = f
+			} else {
+				agents[i].Status = agent.StatusActive
+			}
+		} else {
+			c.matchSessionFile(&agents[i], projectsDir, assignedFiles)
+		}
 		agents[i].ProviderName = "claude"
 		if agents[i].Name == "" {
 			agents[i].Name = agents[i].ShortProject()
@@ -115,6 +135,27 @@ func (c *Claude) batchResolveProcessInfo(agents []agent.Agent) {
 			agents[r.idx].StartTime = r.startTime
 		}
 	}
+}
+
+// applyRegistryEntry sets the agent's session ID (and working dir, if
+// unknown) from Claude's registry. It reports whether an entry was applied.
+// An entry whose recorded start time differs from the process's by more than
+// two seconds belongs to an earlier process that had the same PID.
+func applyRegistryEntry(inst *agent.Agent, registry map[int]discovery.ClaudeRegistryEntry) bool {
+	e, ok := registry[inst.PID]
+	if !ok {
+		return false
+	}
+	if started, ok := e.StartedAt(); ok && !inst.StartTime.IsZero() {
+		if d := inst.StartTime.Sub(started); d > 2*time.Second || d < -2*time.Second {
+			return false
+		}
+	}
+	inst.SessionID = e.SessionID
+	if inst.WorkingDir == "" {
+		inst.WorkingDir = e.CWD
+	}
+	return true
 }
 
 // matchSessionFile finds the session file for an agent (cheap: glob + stat).
@@ -538,8 +579,7 @@ func sessionFirstTimestamp(path string) time.Time {
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+	scanner := jsonl.NewScanner(f)
 	for scanner.Scan() {
 		var entry struct {
 			Timestamp string `json:"timestamp"`

@@ -1,13 +1,14 @@
 package discovery
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 // SessionInfo holds aggregated data parsed from a Claude JSONL session file.
@@ -52,8 +53,7 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 	defer func() { _ = f.Close() }()
 
 	var info SessionInfo
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner := jsonl.NewScanner(f)
 
 	// Defer expensive content parsing: save the last assistant content
 	// and only call extractLastToolAction once after the loop.

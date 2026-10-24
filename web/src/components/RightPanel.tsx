@@ -26,7 +26,9 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen, d
   const [sessionMeta, setSessionMeta] = useState<{ annotation: string; tags: string[]; note: string }>({ annotation: '', tags: [], note: '' });
   const [showEvalHelp, setShowEvalHelp] = useState(false);
   const wasBypass = agent.PermissionMode === 'bypassPermissions' || agent.PermissionMode === 'bypass' || agent.PermissionMode === 'full-auto';
-  const [skipPermissions, setSkipPermissions] = useState(wasBypass);
+  // Opt-in, like `aimux resume --danger`: opening the Session tab must not
+  // resume an agent in bypass mode without the user choosing it.
+  const [skipPermissions, setSkipPermissions] = useState(false);
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem('aimux-panel-width');
     return saved ? parseInt(saved) : 440;
