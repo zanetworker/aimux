@@ -31,6 +31,7 @@ func newMCPCmd() *cobra.Command {
 	cmd.AddCommand(newMCPServeCmd())
 	cmd.AddCommand(newMCPRegisterCmd())
 	cmd.AddCommand(newMCPUnregisterCmd())
+	cmd.AddCommand(newMCPProxyCmd())
 	return cmd
 }
 

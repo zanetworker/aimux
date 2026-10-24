@@ -28,6 +28,7 @@ export default defineConfig({
 						{ label: 'Tasks Integration', slug: 'guides/tasks' },
 						{ label: 'MLflow Integration', slug: 'guides/mlflow-integration' },
 						{ label: 'Agent Usage', slug: 'guides/agent-usage' },
+						{ label: 'MCP Proxy', slug: 'guides/mcp-proxy' },
 					],
 				},
 				{

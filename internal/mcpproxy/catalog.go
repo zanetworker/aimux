@@ -1,0 +1,111 @@
+package mcpproxy
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+)
+
+// Catalog is the cached tools/list of every backend, so the proxy can list
+// tools without starting the servers that provide them.
+type Catalog struct {
+	Servers map[string]CatalogEntry `json:"servers"`
+}
+
+// CatalogEntry holds one backend's tools exactly as the server sent them.
+// Raw JSON is kept because mcp.Tool drops schema keywords it does not model,
+// such as a top-level anyOf.
+type CatalogEntry struct {
+	Tools     []json.RawMessage `json:"tools"`
+	FetchedAt time.Time         `json:"fetchedAt"`
+}
+
+// LoadCatalog reads a catalog file. A missing file is an empty catalog.
+func LoadCatalog(path string) (*Catalog, error) {
+	c := &Catalog{Servers: map[string]CatalogEntry{}}
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from aimux config
+	if errors.Is(err, os.ErrNotExist) {
+		return c, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read MCP catalog %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, c); err != nil {
+		return nil, fmt.Errorf("parse MCP catalog %s: %w", path, err)
+	}
+	if c.Servers == nil {
+		c.Servers = map[string]CatalogEntry{}
+	}
+	return c, nil
+}
+
+// Set replaces a backend's tools.
+func (c *Catalog) Set(server string, tools []json.RawMessage, fetchedAt time.Time) {
+	if c.Servers == nil {
+		c.Servers = map[string]CatalogEntry{}
+	}
+	c.Servers[server] = CatalogEntry{Tools: tools, FetchedAt: fetchedAt}
+}
+
+// Save writes the catalog atomically with owner-only permissions.
+func (c *Catalog) Save(path string) error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode MCP catalog: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create MCP catalog dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
+	if err != nil {
+		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }() // no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+	}
+	return nil
+}
+
+// DecodeTool turns a cached tool into an mcp.Tool whose input and output
+// schemas are the server's original JSON.
+func DecodeTool(raw json.RawMessage) (mcp.Tool, error) {
+	var tool mcp.Tool
+	if err := json.Unmarshal(raw, &tool); err != nil {
+		return mcp.Tool{}, fmt.Errorf("decode tool: %w", err)
+	}
+	if tool.Name == "" {
+		return mcp.Tool{}, errors.New("decode tool: missing name")
+	}
+	var schemas struct {
+		Input  json.RawMessage `json:"inputSchema"`
+		Output json.RawMessage `json:"outputSchema"`
+	}
+	if err := json.Unmarshal(raw, &schemas); err != nil {
+		return mcp.Tool{}, fmt.Errorf("decode tool %s schemas: %w", tool.Name, err)
+	}
+	if len(schemas.Input) > 0 {
+		tool.InputSchema = mcp.ToolInputSchema{}
+		tool.RawInputSchema = schemas.Input
+	}
+	if len(schemas.Output) > 0 {
+		tool.OutputSchema = mcp.ToolOutputSchema{}
+		tool.RawOutputSchema = schemas.Output
+	}
+	return tool, nil
+}

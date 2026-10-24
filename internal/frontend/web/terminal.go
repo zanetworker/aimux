@@ -3,7 +3,6 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/netguard"
 	"github.com/zanetworker/aimux/internal/terminal"
 )
 
@@ -43,17 +43,7 @@ func checkLocalOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-func isLoopbackHost(hostport string) bool {
-	host, _, err := net.SplitHostPort(hostport)
-	if err != nil {
-		host = hostport
-	}
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	return ip != nil && ip.IsLoopback()
-}
+func isLoopbackHost(hostport string) bool { return netguard.IsLoopbackHost(hostport) }
 
 type resizeMsg struct {
 	Type string `json:"type"`

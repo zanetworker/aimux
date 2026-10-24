@@ -1,0 +1,179 @@
+package mcpproxy
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+const (
+	testServerEnv  = "AIMUX_MCPPROXY_TEST_SERVER"
+	testPIDFileEnv = "AIMUX_MCPPROXY_TEST_PIDFILE"
+	testLingerEnv  = "AIMUX_MCPPROXY_TEST_LINGER"
+)
+
+// TestMain lets the test binary act as a stdio MCP server for the tests
+// below, so they exercise real processes and the real protocol.
+func TestMain(m *testing.M) {
+	if os.Getenv(testServerEnv) == "1" {
+		runTestServer()
+		return
+	}
+	os.Exit(m.Run())
+}
+
+func runTestServer() {
+	s := server.NewMCPServer("test-backend", "1.0.0")
+	echo := mcp.NewToolWithRawSchema("echo", "Echo the text back",
+		json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"anyOf":[{"required":["text"]}]}`))
+	s.AddTool(echo, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return mcp.NewToolResultText("echo: " + req.GetString("text", "")), nil
+	})
+	s.AddTool(mcp.NewTool("crash", mcp.WithDescription("Exit the process")),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			os.Exit(3)
+			return nil, nil
+		})
+	if f := os.Getenv(testPIDFileEnv); f != "" {
+		_ = os.WriteFile(f, []byte(strconv.Itoa(os.Getpid())), 0o600) // #nosec G703 -- test helper, path set by the test
+	}
+	_ = server.ServeStdio(s)
+	if os.Getenv(testLingerEnv) == "1" {
+		// Act like a server that ignores shutdown: survive stdin EOF and SIGTERM.
+		signal.Ignore(syscall.SIGTERM)
+		time.Sleep(time.Minute)
+	}
+}
+
+func testConfigs() map[string]ServerConfig {
+	return map[string]ServerConfig{
+		"test": {Command: os.Args[0], Env: map[string]string{testServerEnv: "1"}},
+	}
+}
+
+func callReq(tool string, args map[string]any) mcp.CallToolRequest {
+	r := mcp.CallToolRequest{}
+	r.Params.Name = tool
+	r.Params.Arguments = args
+	return r
+}
+
+func TestStdioStarter_UnknownServer(t *testing.T) {
+	_, err := StdioStarter(testConfigs())(context.Background(), "nope")
+	if err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("got %v, want an error naming the server", err)
+	}
+}
+
+func TestStdioStarter_MissingCommand(t *testing.T) {
+	cfgs := map[string]ServerConfig{"ghost": {Command: "/nonexistent/aimux-test-mcp"}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := StdioStarter(cfgs)(ctx, "ghost"); err == nil {
+		t.Fatal("starting a missing command succeeded")
+	}
+}
+
+func TestStdioBackend_ListToolsRawKeepsSchemas(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	b, err := StdioStarter(testConfigs())(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	raw, err := b.ListToolsRaw(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]string{}
+	for _, r := range raw {
+		tool, err := DecodeTool(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[tool.Name] = string(tool.RawInputSchema)
+	}
+	if len(names) != 2 {
+		t.Fatalf("got tools %v, want echo and crash", names)
+	}
+	if !strings.Contains(names["echo"], "anyOf") {
+		t.Fatalf("echo schema lost anyOf: %s", names["echo"])
+	}
+}
+
+func TestStdioBackend_CallTool(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	b, err := StdioStarter(testConfigs())(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	res, err := b.CallTool(ctx, callReq("echo", map[string]any{"text": "hi"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Content[0].(mcp.TextContent).Text; got != "echo: hi" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPool_RestartsCrashedStdioBackend(t *testing.T) {
+	p := NewPool(StdioStarter(testConfigs()), PoolOptions{CallTimeout: 10 * time.Second})
+	defer p.Close()
+	ctx := context.Background()
+
+	if r := p.Call(ctx, "test", "", callReq("echo", map[string]any{"text": "one"})); r.IsError {
+		t.Fatalf("first call failed: %+v", r)
+	}
+	if r := p.Call(ctx, "test", "", callReq("crash", nil)); !r.IsError {
+		t.Fatal("call that kills the server reported success")
+	}
+	r := p.Call(ctx, "test", "", callReq("echo", map[string]any{"text": "two"}))
+	if r.IsError || r.Content[0].(mcp.TextContent).Text != "echo: two" {
+		t.Fatalf("call after crash: %+v, want a restarted backend", r)
+	}
+}
+
+func TestStdioBackend_CloseKillsProcessesBehindAWrapper(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	cfgs := map[string]ServerConfig{"wrapped": {
+		// Like npx or uv: a parent process that runs the real server as a child.
+		Command: "sh", Args: []string{"-c", os.Args[0] + "; true"},
+		Env: map[string]string{testServerEnv: "1", testPIDFileEnv: pidFile, testLingerEnv: "1"},
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	b, err := StdioStarter(cfgs)(ctx, "wrapped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(pidFile) // #nosec G304 -- test temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := strconv.Atoi(string(data))
+	if pid <= 0 || syscall.Kill(pid, 0) != nil {
+		t.Fatalf("server child pid %d not running before Close", pid)
+	}
+	_ = b.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("server child %d still running after Close", pid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
