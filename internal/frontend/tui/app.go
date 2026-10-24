@@ -520,9 +520,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Save cache on discovery refresh
+		// Save cache on discovery refresh. Copy first: msg shares its backing
+		// array with a.instances, which SetAgents sorts in place below.
+		snapshot := append([]agent.Agent(nil), msg...)
 		go func() {
-			if err := cache.Save(cache.DefaultPath(), []agent.Agent(msg)); err != nil {
+			if err := cache.Save(cache.DefaultPath(), snapshot); err != nil {
 				debuglog.Log("cache save failed: %v", err)
 			}
 		}()

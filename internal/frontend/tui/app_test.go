@@ -1179,3 +1179,21 @@ func TestParserForRemote_FallbackSkipsLocal(t *testing.T) {
 		t.Errorf("expected 0 turns (local session should be excluded), got %d", len(turns))
 	}
 }
+
+// TestInstancesMsg_CacheSaveDoesNotRaceWithSort guards the crash where the
+// background cache.Save read the discovery slice while SetAgents sorted it in
+// place. Run with -race: the race detector reports the shared backing array.
+func TestInstancesMsg_CacheSaveDoesNotRaceWithSort(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app := newTestAppForPending(map[string]agent.Agent{})
+
+	msg := instancesMsg{
+		{PID: 3, Name: "zeta", WorkingDir: "/z", Status: agent.StatusIdle},
+		{PID: 1, Name: "alpha", WorkingDir: "/a", Status: agent.StatusActive},
+		{PID: 2, Name: "mid", WorkingDir: "/m", Status: agent.StatusIdle},
+	}
+	app.Update(msg)
+
+	// Let the background save finish so the test doesn't exit mid-write.
+	time.Sleep(100 * time.Millisecond)
+}
