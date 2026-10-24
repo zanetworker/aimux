@@ -105,19 +105,43 @@ func TestRouter(t *testing.T) {
 func TestRouter_SessionAimuxAlreadyRunsIsNotOpenInTerminal(t *testing.T) {
 	projects, registry := claudeFixture(t)
 	fs := &fakeRunStarter{}
-	r := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: fs.start})}
+	// The registry entry below is the adapter's own Claude process: a child of
+	// the adapter (pid 4242) that aimux started.
+	parents := map[int]int{os.Getppid(): 4242}
+	r := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: fs.start, ParentPID: func(p int) int { return parents[p] }})}
 	defer r.Manager.Close()
 	ctx := context.Background()
 	if _, err := r.Send(ctx, "idle-1", "one", func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
-	// The adapter's own Claude process now holds the session in the registry.
-	body := fmt.Sprintf(`{"pid":%d,"sessionId":"idle-1","cwd":"/w/app"}`, os.Getppid())
-	if err := os.WriteFile(filepath.Join(registry, fmt.Sprintf("%d.json", os.Getppid())), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeHolder(t, registry, os.Getppid(), "idle-1")
 	if _, err := r.Send(ctx, "idle-1", "two", func(Event) {}); err != nil {
 		t.Fatalf("second message to a session aimux runs: %v", err)
+	}
+}
+
+// The user opens a session in a terminal while aimux still keeps an idle
+// adapter for it: aimux must stop sending, or two agents drive one session.
+func TestRouter_TerminalOpenedWhileAimuxHoldsAnIdleRun(t *testing.T) {
+	projects, registry := claudeFixture(t)
+	fs := &fakeRunStarter{}
+	r := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: fs.start, ParentPID: func(int) int { return 1 }})}
+	defer r.Manager.Close()
+	ctx := context.Background()
+	if _, err := r.Send(ctx, "idle-1", "one", func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	writeHolder(t, registry, os.Getppid(), "idle-1") // an unrelated live process: the user's terminal
+	if _, err := r.Send(ctx, "idle-1", "two", func(Event) {}); !errors.Is(err, ErrOpenInTerminal) {
+		t.Fatalf("got %v, want ErrOpenInTerminal once a terminal holds the session", err)
+	}
+}
+
+func writeHolder(t *testing.T, registry string, pid int, session string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":"/w/app"}`, pid, session)
+	if err := os.WriteFile(filepath.Join(registry, fmt.Sprintf("%d.json", pid)), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

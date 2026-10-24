@@ -158,3 +158,17 @@ func limitOrAll(limit, n int) int {
 	}
 	return min(limit, n)
 }
+
+func TestLocalIndex_OwnAdapterIsNotATerminal(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	x.Owned = func(pid int) bool { return pid == os.Getpid() } // the "open" session's holder is aimux's adapter
+	got, err := x.Sessions(context.Background(), 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got {
+		if s.ID == "open" && s.State != StateIdle {
+			t.Fatalf("aimux's own idle adapter reported as %s, want idle so clients can reply", s.State)
+		}
+	}
+}

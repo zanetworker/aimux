@@ -23,6 +23,7 @@ const proxyName = "mux" // what Claude Code registers the proxy as; tools appear
 
 type proxyFlags struct {
 	claudeConfig string
+	servers      string
 	catalog      string
 	exclude      []string
 	perSession   []string
@@ -33,6 +34,7 @@ type proxyFlags struct {
 func (f *proxyFlags) bind(cmd *cobra.Command, serve, withPort bool) {
 	home, _ := os.UserHomeDir()
 	cmd.Flags().StringVar(&f.claudeConfig, "claude-config", filepath.Join(home, ".claude.json"), "Claude Code config to read stdio MCP servers from")
+	cmd.Flags().StringVar(&f.servers, "servers", filepath.Join(home, ".aimux", "mcp-servers.json"), "The proxy's saved backend definitions (written by refresh)")
 	cmd.Flags().StringVar(&f.catalog, "catalog", filepath.Join(home, ".aimux", "mcp-catalog.json"), "Tool catalog file")
 	cmd.Flags().StringSliceVar(&f.exclude, "exclude", nil, "MCP servers to leave out of the proxy")
 	if withPort {
@@ -63,7 +65,7 @@ func newMCPProxyRefreshCmd() *cobra.Command {
 		Use:   "refresh",
 		Short: "Start each stdio MCP server once and cache its tools",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfgs, err := mcpproxy.LoadClaudeServers(f.claudeConfig, f.exclude)
+			cfgs, err := proxyBackends(f.claudeConfig, f.servers, f.exclude, true)
 			if err != nil {
 				return err
 			}
@@ -121,7 +123,7 @@ func newMCPProxyServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Run the shared MCP proxy on 127.0.0.1",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfgs, err := mcpproxy.LoadClaudeServers(f.claudeConfig, f.exclude)
+			cfgs, err := proxyBackends(f.claudeConfig, f.servers, f.exclude, false)
 			if err != nil {
 				return err
 			}
@@ -184,11 +186,11 @@ func newMCPProxyConfigCmd() *cobra.Command {
 		Use:   "config",
 		Short: "Print the Claude Code entry for the proxy (does not edit any file)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfgs, err := mcpproxy.LoadClaudeServers(f.claudeConfig, f.exclude)
+			cfgs, err := proxyBackends(f.claudeConfig, f.servers, f.exclude, false)
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprint(cmd.OutOrStdout(), proxyClaudeConfig(sortedKeys(cfgs), f.port))
+			_, _ = fmt.Fprint(cmd.OutOrStdout(), proxyClaudeConfig(sortedKeys(cfgs), f.port, f.servers))
 			return nil
 		},
 	}
@@ -196,8 +198,33 @@ func newMCPProxyConfigCmd() *cobra.Command {
 	return cmd
 }
 
+// proxyBackends returns the stdio servers the proxy runs: those saved by an
+// earlier refresh, overlaid with the ones still in the Claude config, minus
+// excluded names. With save, that set is written back, so removing the stdio
+// entries from the Claude config afterwards loses nothing.
+func proxyBackends(claudeConfig, serversFile string, exclude []string, save bool) (map[string]mcpproxy.ServerConfig, error) {
+	saved, err := mcpproxy.LoadServers(serversFile)
+	if err != nil {
+		return nil, err
+	}
+	fromClaude, err := mcpproxy.LoadClaudeServers(claudeConfig, nil)
+	if err != nil && len(saved) == 0 {
+		return nil, err // with nothing saved, the Claude config is required
+	}
+	merged := mcpproxy.MergeServers(saved, fromClaude)
+	for _, name := range exclude {
+		delete(merged, name)
+	}
+	if save {
+		if err := mcpproxy.SaveServers(serversFile, merged); err != nil {
+			return nil, err
+		}
+	}
+	return merged, nil
+}
+
 // proxyClaudeConfig explains how to switch Claude Code to the proxy.
-func proxyClaudeConfig(replaced []string, port int) string {
+func proxyClaudeConfig(replaced []string, port int, serversFile string) string {
 	entry := map[string]any{"mcpServers": map[string]any{
 		proxyName: map[string]string{"type": "http", "url": fmt.Sprintf("http://127.0.0.1:%d/mcp", port)},
 	}}
@@ -205,7 +232,9 @@ func proxyClaudeConfig(replaced []string, port int) string {
 	sorted := append([]string(nil), replaced...)
 	sort.Strings(sorted)
 	return fmt.Sprintf("Add this entry to mcpServers in your Claude Code config:\n\n%s\n\n"+
-		"It replaces these stdio entries, which you can then remove: %s\n", data, strings.Join(sorted, ", "))
+		"It replaces these stdio entries: %s\n\n"+
+		"Their definitions are saved in %s by `aimux mcp proxy refresh`; once refresh has run,\n"+
+		"you can remove them from the Claude config and the proxy keeps serving them.\n", data, strings.Join(sorted, ", "), serversFile)
 }
 
 func sortedKeys[V any](m map[string]V) []string {

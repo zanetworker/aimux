@@ -149,7 +149,13 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 	}
 
 	b.mu.Lock()
-	if l.active != "" { // another Start won the race during Check
+	// Another Start may have won the race while Check ran unlocked: the
+	// same key means the same turn, even if that turn already finished.
+	if id, ok := l.keys[key]; ok && key != "" {
+		b.mu.Unlock()
+		return id, nil
+	}
+	if l.active != "" {
 		b.mu.Unlock()
 		return "", acprun.ErrBusy
 	}

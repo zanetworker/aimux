@@ -60,28 +60,33 @@ func (c *Catalog) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("encode MCP catalog: %w", err)
 	}
+	if err := writePrivateFile(path, data); err != nil {
+		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+	}
+	return nil
+}
+
+// writePrivateFile replaces path atomically with an owner-only (0600) file.
+func writePrivateFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create MCP catalog dir: %w", err)
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
 	if err != nil {
-		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }() // no-op after a successful rename
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+		return err
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+		return err
 	}
 	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		return fmt.Errorf("write MCP catalog %s: %w", path, err)
+		return err
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return fmt.Errorf("write MCP catalog %s: %w", path, err)
-	}
-	return nil
+	return os.Rename(tmp.Name(), path)
 }
 
 // DecodeTool turns a cached tool into an mcp.Tool whose input and output

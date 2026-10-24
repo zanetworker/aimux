@@ -25,7 +25,8 @@ var (
 type SessionInfo struct {
 	Provider       string
 	Cwd            string
-	OpenInTerminal bool
+	OpenInTerminal bool  // some live process holds the session
+	Holders        []int // those processes
 }
 
 // Lookup finds a session by ID.
@@ -58,10 +59,13 @@ func (r *Router) route(sessionID string) (SessionInfo, error) {
 	if err != nil {
 		return SessionInfo{}, err
 	}
-	// A session aimux already runs shows up in Claude's registry through the
-	// adapter's own process; that is not a user's terminal.
-	if info.OpenInTerminal && !r.Manager.Running(sessionID) {
-		return SessionInfo{}, fmt.Errorf("%w (session %s)", ErrOpenInTerminal, sessionID)
+	// A session aimux runs shows up in Claude's registry through the
+	// adapter's own process; any other holder is a user's terminal, even
+	// while aimux keeps an idle run for the session.
+	for _, pid := range info.Holders {
+		if !r.Manager.Owns(pid) {
+			return SessionInfo{}, fmt.Errorf("%w (session %s)", ErrOpenInTerminal, sessionID)
+		}
 	}
 	return info, nil
 }
@@ -83,7 +87,7 @@ func ClaudeLookup(projectsDir, registryDir string) Lookup {
 		for pid, e := range discovery.ReadClaudeRegistry(registryDir) {
 			if e.SessionID == sessionID && syscall.Kill(pid, 0) == nil {
 				info.OpenInTerminal = true
-				break
+				info.Holders = append(info.Holders, pid)
 			}
 		}
 		return info, nil

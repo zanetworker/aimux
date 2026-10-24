@@ -57,15 +57,20 @@ func newChatCmd() *cobra.Command {
 			defer router.Manager.Close()
 
 			// Ctrl-C stops the agent's turn; the session file keeps what was done.
+			// Before the turn starts (adapter still loading) it aborts the send.
+			sendCtx, abort := context.WithCancel(cmd.Context())
+			defer abort()
 			sigCtx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			go func() {
 				<-sigCtx.Done()
-				_ = router.Manager.Cancel(sessionID)
+				if err := router.Manager.Cancel(sessionID); err != nil {
+					abort() // not running yet: stop the startup instead
+				}
 			}()
 
 			out, info := cmd.OutOrStdout(), cmd.ErrOrStderr()
-			reason, err := router.Send(context.Background(), sessionID, message,
+			reason, err := router.Send(sendCtx, sessionID, message,
 				func(e acprun.Event) { renderChatEvent(out, info, e, asJSON) })
 			if err != nil {
 				return err

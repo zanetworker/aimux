@@ -10,6 +10,7 @@ import (
 )
 
 type fakeRunner struct {
+	pid     int
 	session string
 	closed  atomic.Bool
 	promptF func(ctx context.Context, text string) (string, error)
@@ -23,11 +24,13 @@ func (f *fakeRunner) Prompt(ctx context.Context, text string, onEvent func(Event
 	onEvent(Event{Seq: 1, Kind: KindUpdate})
 	return "end_turn", nil
 }
+func (f *fakeRunner) PID() int             { return f.pid }
 func (f *fakeRunner) Cancel()              { f.cancels.Add(1) }
 func (f *fakeRunner) Events(int64) []Event { return []Event{{Seq: 7}} }
 func (f *fakeRunner) Close() error         { f.closed.Store(true); return nil }
 
 type fakeRunStarter struct {
+	block   chan struct{} // when set, start waits for it to close
 	mu      sync.Mutex
 	runners []*fakeRunner
 	fail    error
@@ -35,12 +38,15 @@ type fakeRunStarter struct {
 }
 
 func (s *fakeRunStarter) start(ctx context.Context, session, cwd string) (Runner, error) {
+	if s.block != nil {
+		<-s.block // the adapter finishes starting regardless of ctx
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail != nil {
 		return nil, s.fail
 	}
-	r := &fakeRunner{session: session, promptF: s.promptF}
+	r := &fakeRunner{pid: 4242 + len(s.runners), session: session, promptF: s.promptF}
 	s.runners = append(s.runners, r)
 	return r, nil
 }
@@ -215,5 +221,66 @@ func TestManager_CloseClosesRunsAndRefuses(t *testing.T) {
 	}
 	if _, err := send(m, "a"); err == nil {
 		t.Fatal("send after Close succeeded")
+	}
+}
+
+func TestManager_Owns(t *testing.T) {
+	parents := map[int]int{5001: 5000, 5000: 4242, 6001: 1}
+	fs := &fakeRunStarter{}
+	m := NewManager(ManagerOptions{Start: fs.start, ParentPID: func(pid int) int { return parents[pid] }})
+	_, _ = send(m, "a") // adapter pid 4242
+	for pid, want := range map[int]bool{4242: true, 5000: true, 5001: true, 6001: false, 0: false} {
+		if got := m.Owns(pid); got != want {
+			t.Errorf("Owns(%d) = %v, want %v", pid, got, want)
+		}
+	}
+	m.Close()
+	if m.Owns(5001) {
+		t.Fatal("still owns a process after Close")
+	}
+}
+
+func TestManager_CancelDuringStartDoesNotPrompt(t *testing.T) {
+	var prompts atomic.Int32
+	fs := &fakeRunStarter{block: make(chan struct{}), promptF: func(context.Context, string) (string, error) {
+		prompts.Add(1)
+		return "end_turn", nil
+	}}
+	m := NewManager(ManagerOptions{Start: fs.start})
+	defer m.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { _, err := m.Send(ctx, "a", "/w", "hi", func(Event) {}); done <- err }()
+	time.Sleep(20 * time.Millisecond)
+	cancel() // Ctrl-C while the adapter is still starting
+	close(fs.block)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if prompts.Load() != 0 {
+		t.Fatal("the message was sent after the user interrupted")
+	}
+	if !fs.runners[0].closed.Load() || m.Running("a") {
+		t.Fatal("the runner that finished starting after the interrupt was kept")
+	}
+}
+
+func TestManager_CloseDuringStartClosesTheRunner(t *testing.T) {
+	var prompts atomic.Int32
+	fs := &fakeRunStarter{block: make(chan struct{}), promptF: func(context.Context, string) (string, error) {
+		prompts.Add(1)
+		return "end_turn", nil
+	}}
+	m := NewManager(ManagerOptions{Start: fs.start})
+	done := make(chan error)
+	go func() { _, err := m.Send(context.Background(), "a", "/w", "hi", func(Event) {}); done <- err }()
+	time.Sleep(20 * time.Millisecond)
+	m.Close() // shutdown while the adapter is starting
+	close(fs.block)
+	if err := <-done; err == nil {
+		t.Fatal("Send succeeded on a closed manager")
+	}
+	if prompts.Load() != 0 || !fs.runners[0].closed.Load() {
+		t.Fatalf("prompts=%d closed=%v; want no prompt and the late runner closed", prompts.Load(), fs.runners[0].closed.Load())
 	}
 }

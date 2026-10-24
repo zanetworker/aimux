@@ -36,7 +36,9 @@ Only **tools** are proxied. Prompts, resources and log messages from the proxied
    aimux mcp proxy config
    ```
 
-   Add the `mux` entry to `mcpServers` in `~/.claude.json`, then remove the replaced stdio entries. The command never edits the file.
+   Add the `mux` entry to `mcpServers` in `~/.claude.json`. The command never edits the file.
+
+4. Remove the replaced stdio entries from `~/.claude.json` if you want. `refresh` saved their definitions (commands, arguments and `env`) in `~/.aimux/mcp-servers.json`, an owner-only file, and the proxy runs them from there. Later refreshes merge: a server still in `~/.claude.json` overrides the saved copy, and one you removed is kept. To drop a server from the proxy, pass `--exclude` to `refresh`.
 
 The catalog is also refreshed whenever a server starts, so new tools appear the next time the proxy starts.
 
@@ -45,6 +47,7 @@ The catalog is also refreshed whenever a server starts, so new tools appear the 
 | Flag | Commands | Default | Meaning |
 |---|---|---|---|
 | `--claude-config` | all | `~/.claude.json` | Where the stdio servers are read from |
+| `--servers` | all | `~/.aimux/mcp-servers.json` | The proxy's saved backend definitions, written by `refresh` |
 | `--catalog` | all | `~/.aimux/mcp-catalog.json` | Tool catalog file |
 | `--exclude` | all | none | Servers to leave out of the proxy |
 | `--port` | `serve`, `config` | `7381` | Port on `127.0.0.1` |
@@ -57,7 +60,7 @@ The proxy listens on `127.0.0.1` only. It rejects requests whose `Host` is not a
 
 ## Failure handling
 
-- A server that fails to start returns an error result naming the server. Other servers keep working, and the next call tries again.
+- A server that fails to start, or does not answer within 2 minutes, returns an error result naming the server. Other servers keep working, and the next call tries again.
 - A call that times out (2 minutes) or loses its connection stops that server, and the next call starts a new one.
 - A tool that reports an error keeps its server running.
 - Claude Code does not end its MCP session when it exits. A session idle for longer than `--idle` expires, which also stops its per-session servers. A client that comes back later gets a new session automatically.

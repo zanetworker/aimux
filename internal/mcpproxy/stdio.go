@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"sync/atomic"
 	"syscall"
@@ -59,6 +60,11 @@ func startStdio(ctx context.Context, server string, cfg ServerConfig) (*stdioBac
 		return nil, fmt.Errorf("start MCP server %s (%s): %w", server, cfg.Command, err)
 	}
 	b.c = c
+	// Read the server's stderr: the client opens the pipe but never reads it,
+	// and a server that logs more than the pipe holds would block and hang.
+	if stderr, ok := client.GetStderr(c); ok {
+		go func() { _, _ = io.Copy(io.Discard, stderr) }()
+	}
 	init := mcp.InitializeRequest{}
 	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 	init.Params.ClientInfo = mcp.Implementation{Name: "aimux-mcp-proxy", Version: "1"}

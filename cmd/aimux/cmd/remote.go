@@ -116,7 +116,7 @@ func newRemoteServeCmd() *cobra.Command {
 			claude := &provider.Claude{}
 			index := &remoteapi.LocalIndex{
 				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
-				Discover: history.Discover, ParseTrace: claude.ParseTrace,
+				Discover: history.Discover, ParseTrace: claude.ParseTrace, Owned: manager.Owns,
 			}
 			api := &remoteapi.API{Broker: broker, Sessions: index.Sessions, Session: index.Session}
 

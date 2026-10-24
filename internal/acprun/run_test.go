@@ -99,6 +99,10 @@ func (a *fakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Prompt
 		}
 	case "crash":
 		os.Exit(5)
+	case "flood":
+		for i := 0; i < 1500; i++ {
+			say("x")
+		}
 	default:
 		say("echo: ")
 		say(text)
@@ -405,5 +409,20 @@ func TestRun_SDKDoesNotLogToTheDefaultLogger(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // let the connection notice the closed peer
 	if buf.Len() != 0 {
 		t.Fatalf("the ACP SDK logged to the default logger, which ends up in the user's output:\n%s", buf.String())
+	}
+}
+
+func TestRun_EventHistoryIsBounded(t *testing.T) {
+	r := start(t, fakeSpec(t), "sess-1", nil)
+	events, _ := prompt(t, r, "flood")
+	if len(events) != 1500 {
+		t.Fatalf("callback got %d events, want all 1500 streamed", len(events))
+	}
+	kept := r.Events(0)
+	if len(kept) != maxRunEvents {
+		t.Fatalf("kept %d events, want the last %d", len(kept), maxRunEvents)
+	}
+	if kept[len(kept)-1].Seq != 1500 || kept[0].Seq != int64(1500-maxRunEvents+1) {
+		t.Fatalf("kept seqs %d..%d, want the newest", kept[0].Seq, kept[len(kept)-1].Seq)
 	}
 }

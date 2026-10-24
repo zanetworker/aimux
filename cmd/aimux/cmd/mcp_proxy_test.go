@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,7 +58,7 @@ func TestProxyRefresh_NoServers(t *testing.T) {
 }
 
 func TestProxyClaudeConfig(t *testing.T) {
-	got := proxyClaudeConfig([]string{"slack", "github"}, 7381)
+	got := proxyClaudeConfig([]string{"slack", "github"}, 7381, "/h/.aimux/mcp-servers.json")
 	var parsed struct {
 		MCPServers map[string]struct {
 			Type string `json:"type"`
@@ -71,6 +72,9 @@ func TestProxyClaudeConfig(t *testing.T) {
 	mux := parsed.MCPServers["mux"]
 	if mux.Type != "http" || mux.URL != "http://127.0.0.1:7381/mcp" {
 		t.Fatalf("mux entry = %+v", mux)
+	}
+	if !strings.Contains(got, "/h/.aimux/mcp-servers.json") {
+		t.Fatalf("output should say where the definitions are kept:\n%s", got)
 	}
 	if !strings.Contains(got, "github, slack") {
 		t.Fatalf("output should list the entries it replaces, sorted:\n%s", got)
@@ -106,5 +110,35 @@ func TestProxyCatalogProblem(t *testing.T) {
 	}
 	if msg := proxyCatalogProblem(present, 3); msg != "" {
 		t.Fatalf("usable catalog reported a problem: %q", msg)
+	}
+}
+
+func TestProxyBackends_KeepsServersRemovedFromClaudeConfig(t *testing.T) {
+	dir := t.TempDir()
+	claudePath, serversPath := filepath.Join(dir, "claude.json"), filepath.Join(dir, "mcp-servers.json")
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"slack":{"command":"slack-mcp"},"pypi":{"command":"pypi-mcp"},"mux":{"type":"http","url":"http://127.0.0.1:7381/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpproxy.SaveServers(serversPath, map[string]mcpproxy.ServerConfig{"github": {Command: "gh-mcp"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := proxyBackends(claudePath, serversPath, []string{"pypi"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["slack"].Command != "slack-mcp" || got["github"].Command != "gh-mcp" {
+		t.Fatalf("backends %v: want slack (Claude config) and github (saved), pypi excluded", got)
+	}
+	saved, _ := mcpproxy.LoadServers(serversPath)
+	if len(saved) != 2 {
+		t.Fatalf("saved %v, want the merged set written back", saved)
+	}
+	// serve reads the saved set even after the Claude entries are gone.
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"mux":{"type":"http","url":"x"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	again, err := proxyBackends(claudePath, serversPath, nil, false)
+	if err != nil || len(again) != 2 {
+		t.Fatalf("after removing the stdio entries: %v %v, want both saved servers", again, err)
 	}
 }

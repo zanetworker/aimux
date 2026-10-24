@@ -22,6 +22,7 @@ const (
 	testServerEnv  = "AIMUX_MCPPROXY_TEST_SERVER"
 	testPIDFileEnv = "AIMUX_MCPPROXY_TEST_PIDFILE"
 	testLingerEnv  = "AIMUX_MCPPROXY_TEST_LINGER"
+	testStderrEnv  = "AIMUX_MCPPROXY_TEST_STDERR_FLOOD"
 )
 
 // TestMain lets the test binary act as a stdio MCP server for the tests
@@ -46,6 +47,10 @@ func runTestServer() {
 			os.Exit(3)
 			return nil, nil
 		})
+	if os.Getenv(testStderrEnv) == "1" {
+		// Like a chatty server: far more log output than a pipe buffer holds.
+		_, _ = os.Stderr.Write([]byte(strings.Repeat("log line from the server\n", 80000)))
+	}
 	if f := os.Getenv(testPIDFileEnv); f != "" {
 		_ = os.WriteFile(f, []byte(strconv.Itoa(os.Getpid())), 0o600) // #nosec G703 -- test helper, path set by the test
 	}
@@ -195,5 +200,19 @@ func TestStdioBackend_HasNoControllingTerminal(t *testing.T) {
 	}
 	if mine, _ := unix.Getsid(0); sid != pid || sid == mine {
 		t.Fatalf("backend session %d (pid %d, proxy session %d); want its own session", sid, pid, mine)
+	}
+}
+
+func TestStdioBackend_ChattyStderrDoesNotHang(t *testing.T) {
+	cfgs := map[string]ServerConfig{"chatty": {Command: os.Args[0], Env: map[string]string{testServerEnv: "1", testStderrEnv: "1"}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	b, err := StdioStarter(cfgs)(ctx, "chatty")
+	if err != nil {
+		t.Fatalf("start with 2 MB of stderr: %v (the pipe filled and the server blocked)", err)
+	}
+	defer func() { _ = b.Close() }()
+	if _, err := b.CallTool(ctx, callReq("echo", map[string]any{"text": "hi"})); err != nil {
+		t.Fatal(err)
 	}
 }

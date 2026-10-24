@@ -304,3 +304,28 @@ func TestPool_CloseSessionWhileStartingClosesBackend(t *testing.T) {
 		t.Fatal("closed session's backend is still tracked by the pool")
 	}
 }
+
+func TestPool_StartThatNeverFinishesTimesOut(t *testing.T) {
+	var starts atomic.Int32
+	hang := func(ctx context.Context, server string) (Backend, error) {
+		starts.Add(1)
+		<-ctx.Done() // a server that never answers initialize
+		return nil, ctx.Err()
+	}
+	p := NewPool(hang, PoolOptions{StartTimeout: 50 * time.Millisecond})
+	defer p.Close()
+	done := make(chan *mcp.CallToolResult)
+	go func() { done <- p.Call(context.Background(), "stuck", "", req("x")) }()
+	select {
+	case r := <-done:
+		if !r.IsError || !strings.Contains(resultText(t, r), "stuck") {
+			t.Fatalf("got %+v, want an error result naming the server", r)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a backend that never finishes starting held the call forever")
+	}
+	p.Call(context.Background(), "stuck", "", req("x"))
+	if starts.Load() != 2 {
+		t.Fatalf("started %d times, want a retry after the timeout", starts.Load())
+	}
+}

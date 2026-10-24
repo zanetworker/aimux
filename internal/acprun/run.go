@@ -27,6 +27,11 @@ const (
 	KindPermission = "permission" // Data: the ACP permission request sent to the approver
 )
 
+// maxRunEvents bounds the history a run keeps for Events; a long-lived run
+// would otherwise grow without limit. Callers that need everything use the
+// Prompt callback.
+const maxRunEvents = 1000
+
 // Event is one thing that happened during a run, numbered so a client that
 // reconnects can ask for everything after the last number it saw.
 type Event struct {
@@ -205,6 +210,9 @@ func (r *Run) emit(kind string, v any) {
 	r.seq++
 	e := Event{Seq: r.seq, Kind: kind, Data: data}
 	r.events = append(r.events, e)
+	if len(r.events) > maxRunEvents {
+		r.events = r.events[len(r.events)-maxRunEvents:]
+	}
 	cb := r.onEvent
 	r.mu.Unlock()
 	if cb != nil {

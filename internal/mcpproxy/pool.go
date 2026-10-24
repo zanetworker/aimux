@@ -24,6 +24,10 @@ type Starter func(ctx context.Context, server string) (Backend, error)
 type PoolOptions struct {
 	// CallTimeout bounds each tool call. Default 2 minutes.
 	CallTimeout time.Duration
+	// StartTimeout bounds starting and initializing a backend, so a server
+	// that never answers cannot hold its callers. Default 2 minutes (npx and
+	// uvx may download the server first).
+	StartTimeout time.Duration
 	// PerSession names servers that get one backend per client session
 	// instead of one shared backend (for example browser automation).
 	PerSession map[string]bool
@@ -62,6 +66,9 @@ var (
 func NewPool(start Starter, opt PoolOptions) *Pool {
 	if opt.CallTimeout <= 0 {
 		opt.CallTimeout = 2 * time.Minute
+	}
+	if opt.StartTimeout <= 0 {
+		opt.StartTimeout = 2 * time.Minute
 	}
 	if opt.Now == nil {
 		opt.Now = time.Now
@@ -153,7 +160,9 @@ func (p *Pool) drop(k slotKey, s *slot) {
 // errors, so one broken backend cannot break the proxy's other tools.
 func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToolRequest) *mcp.CallToolResult {
 	k := p.key(server, session)
-	s, err := p.acquire(ctx, k)
+	actx, cancelAcquire := context.WithTimeout(ctx, p.opt.StartTimeout)
+	s, err := p.acquire(actx, k)
+	cancelAcquire()
 	if err != nil {
 		return mcp.NewToolResultErrorf("%s: could not start MCP server: %v", server, err)
 	}

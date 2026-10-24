@@ -6,10 +6,13 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/discovery"
 )
 
 // Runner is a started run; *Run implements it.
 type Runner interface {
+	PID() int // the adapter process
 	Prompt(ctx context.Context, text string, onEvent func(Event)) (string, error)
 	Cancel()
 	Events(after int64) []Event
@@ -36,6 +39,9 @@ type ManagerOptions struct {
 	// Default 5 minutes.
 	IdleTimeout time.Duration
 	Now         func() time.Time
+	// ParentPID returns a process's parent, for telling aimux's own adapter
+	// processes from the user's terminals. Default discovery.GetParentPID.
+	ParentPID func(pid int) int
 }
 
 type runEntry struct {
@@ -64,6 +70,9 @@ func NewManager(opt ManagerOptions) *Manager {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
+	if opt.ParentPID == nil {
+		opt.ParentPID = discovery.GetParentPID
+	}
 	return &Manager{opt: opt, runs: map[string]*runEntry{}}
 }
 
@@ -82,15 +91,27 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 	if e.run == nil {
 		r, err := m.opt.Start(ctx, sessionID, cwd)
 		m.mu.Lock()
-		if err != nil {
-			if m.runs[sessionID] == e {
+		owned := m.runs[sessionID] == e // false if Close or eviction removed it meanwhile
+		if err == nil && !m.closed && owned && ctx.Err() == nil {
+			e.run = r
+			m.mu.Unlock()
+		} else {
+			if owned {
 				delete(m.runs, sessionID)
 			}
+			closed := m.closed
 			m.mu.Unlock()
+			if err == nil {
+				// It finished starting after an interrupt or shutdown: do not
+				// prompt it, and do not leave it running untracked.
+				_ = r.Close()
+				err = errManagerDone
+				if !closed && ctx.Err() != nil {
+					err = ctx.Err()
+				}
+			}
 			return "", err
 		}
-		e.run = r
-		m.mu.Unlock()
 	}
 
 	stop, err := e.run.Prompt(ctx, text, onEvent)
@@ -226,4 +247,29 @@ func (m *Manager) Running(sessionID string) bool {
 	defer m.mu.Unlock()
 	_, ok := m.runs[sessionID]
 	return ok
+}
+
+// Owns reports whether pid is one of aimux's adapter processes or runs
+// below one (the adapter starts the agent CLI as a child).
+func (m *Manager) Owns(pid int) bool {
+	if pid <= 1 {
+		return false
+	}
+	m.mu.Lock()
+	adapters := map[int]bool{}
+	for _, e := range m.runs {
+		if e.run != nil {
+			adapters[e.run.PID()] = true
+		}
+	}
+	m.mu.Unlock()
+	if len(adapters) == 0 {
+		return false
+	}
+	for p, depth := pid, 0; p > 1 && depth < 10; p, depth = m.opt.ParentPID(p), depth+1 {
+		if adapters[p] {
+			return true
+		}
+	}
+	return false
 }

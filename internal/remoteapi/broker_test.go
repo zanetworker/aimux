@@ -337,3 +337,35 @@ func TestBroker_EventsEmptyIsNotNil(t *testing.T) {
 		t.Fatal("Events returned nil; JSON clients get null instead of []")
 	}
 }
+
+// Two sends with the same key race: the second is still in Check while the
+// first turn runs and finishes. The message must run once.
+func TestBroker_SameKeyRacingThroughCheckRunsOnce(t *testing.T) {
+	gate := make(chan struct{})
+	var checks atomic.Int32
+	f := &fakeBackend{checkF: func(string) error {
+		if checks.Add(1) == 1 {
+			<-gate // the first caller is slow in Check
+		}
+		return nil
+	}}
+	b := newBroker(t, f, time.Second)
+	slow := make(chan string)
+	go func() { id, _ := b.Start("s1", "pay the invoice", "same-key"); slow <- id }()
+	for checks.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	fast, err := b.Start("s1", "pay the invoice", "same-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	close(gate)
+	if got := <-slow; got != fast {
+		t.Fatalf("racing retry got turn %q, want the existing turn %q", got, fast)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if f.sends.Load() != 1 {
+		t.Fatalf("the message ran %d times for one key", f.sends.Load())
+	}
+}

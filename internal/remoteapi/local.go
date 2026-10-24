@@ -25,12 +25,15 @@ type LocalIndex struct {
 	Broker      *Broker
 	Discover    func(opts history.DiscoverOpts, projectsDir string) ([]history.Session, error)
 	ParseTrace  func(path string) ([]trace.Turn, error)
+	// Owned reports aimux's own adapter processes, which hold a session in
+	// Claude's registry without it being open in a terminal.
+	Owned func(pid int) bool
 }
 
 func (x *LocalIndex) openSessions() map[string]bool {
 	open := map[string]bool{}
 	for pid, e := range discovery.ReadClaudeRegistry(x.RegistryDir) {
-		if syscall.Kill(pid, 0) == nil {
+		if syscall.Kill(pid, 0) == nil && (x.Owned == nil || !x.Owned(pid)) {
 			open[e.SessionID] = true
 		}
 	}
