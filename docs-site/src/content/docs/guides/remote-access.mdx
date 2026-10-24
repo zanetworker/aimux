@@ -55,7 +55,7 @@ Responses are JSON, except the events endpoint, which streams server-sent events
 
 Event kinds: `turn_started`, `update` (an ACP session update: agent text, tool calls, plans; the agent's slash-command list is left out), `approval` (with `approvalId`, `title` and `options`), `approval_resolved` (`allowed`, `denied` or `expired`), `turn_done` (with `stopReason`) and `turn_error`.
 
-Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `too_many_runs` (503), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
+Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `not_running` (409, cancel with no turn), `too_many_runs` (503), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
 
 ## Settings
 

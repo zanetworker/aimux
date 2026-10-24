@@ -296,3 +296,13 @@ func TestAPI_LastEventIDBeatsTheInitialCursor(t *testing.T) {
 		t.Fatalf("got %d events from seq %v, want only seq 3 (after Last-Event-ID 2)", len(page.Events), page.Events)
 	}
 }
+
+func TestAPI_CancelIdleSession(t *testing.T) {
+	b := NewBroker(BrokerDeps{Check: func(string) error { return nil }, Cancel: func(string) error { return acprun.ErrNotRunning }}, BrokerOptions{})
+	api := &API{Broker: b, Sessions: func(context.Context, int, bool) ([]Session, error) { return nil, nil }}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}))
+	defer srv.Close()
+	if resp, body := do(t, srv, "POST", "/v1/sessions/s1/cancel", ""); resp.StatusCode != 409 || body["code"] != "not_running" {
+		t.Fatalf("cancel with nothing running: %d %v, want 409 not_running", resp.StatusCode, body)
+	}
+}

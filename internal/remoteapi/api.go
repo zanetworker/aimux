@@ -76,6 +76,8 @@ func writeFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "open_in_terminal", err)
 	case errors.Is(err, acprun.ErrBusy):
 		writeError(w, http.StatusConflict, "busy", err)
+	case errors.Is(err, acprun.ErrNotRunning):
+		writeError(w, http.StatusConflict, "not_running", err)
 	case errors.Is(err, acprun.ErrTooManyRuns):
 		writeError(w, http.StatusServiceUnavailable, "too_many_runs", err)
 	case errors.Is(err, ErrNoSuchApproval):

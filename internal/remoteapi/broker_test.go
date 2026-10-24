@@ -369,3 +369,45 @@ func TestBroker_SameKeyRacingThroughCheckRunsOnce(t *testing.T) {
 		t.Fatalf("the message ran %d times for one key", f.sends.Load())
 	}
 }
+
+// Cancel arrives right after the 202, while the turn is still before the
+// manager (looking up the session): the turn must not start anyway.
+func TestBroker_CancelBeforeTheRunExists(t *testing.T) {
+	sawCancelled := make(chan bool, 1)
+	f := &fakeBackend{}
+	f.sendF = func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		<-ctx.Done() // the run never registers in time; only the turn context can stop it
+		sawCancelled <- true
+		return "", ctx.Err()
+	}
+	b := NewBroker(BrokerDeps{
+		Check: func(string) error { return nil },
+		Send: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+			f.sends.Add(1)
+			return f.sendF(ctx, s, text, on)
+		},
+		Cancel: func(string) error { return acprun.ErrNotRunning },
+	}, BrokerOptions{})
+	if _, err := b.Start("s1", "pay the invoice", "k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Cancel("s1"); err != nil {
+		t.Fatalf("cancel of an accepted turn: %v", err)
+	}
+	select {
+	case <-sawCancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the accepted turn kept going after Cancel")
+	}
+	waitFor(t, b, "s1", KindTurnError)
+	if b.Busy("s1") {
+		t.Fatal("session still busy after the cancelled turn ended")
+	}
+}
+
+func TestBroker_CancelWithNoTurn(t *testing.T) {
+	b := NewBroker(BrokerDeps{Cancel: func(string) error { return acprun.ErrNotRunning }}, BrokerOptions{})
+	if err := b.Cancel("s1"); !errors.Is(err, acprun.ErrNotRunning) {
+		t.Fatalf("got %v, want ErrNotRunning", err)
+	}
+}

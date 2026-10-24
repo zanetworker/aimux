@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 )
 
@@ -87,6 +88,37 @@ func MergeServers(saved, fromClaude map[string]ServerConfig) map[string]ServerCo
 	}
 	for k, v := range fromClaude {
 		out[k] = v
+	}
+	return out
+}
+
+// claudeVar matches the variable forms Claude Code expands in MCP server
+// definitions: ${VAR} and ${VAR:-default}.
+var claudeVar = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}`)
+
+func expandValue(s string) string {
+	return claudeVar.ReplaceAllStringFunc(s, func(m string) string {
+		parts := claudeVar.FindStringSubmatch(m)
+		if v, ok := os.LookupEnv(parts[1]); ok && v != "" {
+			return v
+		}
+		return parts[3] // the default, or "" for an unset variable without one
+	})
+}
+
+// expandConfig resolves ${VAR} and ${VAR:-default} in a server's command,
+// arguments and env, as Claude Code does, without changing cfg. The saved
+// definitions keep the variables, so a changed value applies on next start.
+func expandConfig(cfg ServerConfig) ServerConfig {
+	out := ServerConfig{Command: expandValue(cfg.Command)}
+	for _, a := range cfg.Args {
+		out.Args = append(out.Args, expandValue(a))
+	}
+	if cfg.Env != nil {
+		out.Env = make(map[string]string, len(cfg.Env))
+		for k, v := range cfg.Env {
+			out.Env[k] = expandValue(v)
+		}
 	}
 	return out
 }

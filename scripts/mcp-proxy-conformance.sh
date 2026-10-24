@@ -36,8 +36,11 @@ wait_port 17460
 run_suite direct http://127.0.0.1:17460/mcp
 
 # Through aimux.
-"$WORK/aimux" mcp proxy refresh --claude-config "$WORK/claude.json" --catalog "$WORK/catalog.json" > "$WORK/refresh.log"
-"$WORK/aimux" mcp proxy serve --claude-config "$WORK/claude.json" --catalog "$WORK/catalog.json" --port 17461 > "$WORK/proxy.log" 2>&1 &
+# Every path under $WORK, so the run never reads or writes the real
+# ~/.aimux/mcp-servers.json or catalog.
+P=(--claude-config "$WORK/claude.json" --servers "$WORK/servers.json" --catalog "$WORK/catalog.json")
+"$WORK/aimux" mcp proxy refresh "${P[@]}" > "$WORK/refresh.log"
+"$WORK/aimux" mcp proxy serve "${P[@]}" --port 17461 > "$WORK/proxy.log" 2>&1 &
 pids+=($!)
 wait_port 17461
 run_suite proxy http://127.0.0.1:17461/mcp

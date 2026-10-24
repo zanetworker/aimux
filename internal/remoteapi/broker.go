@@ -58,8 +58,9 @@ type BrokerOptions struct {
 type sessionLog struct {
 	events []Event
 	seq    int64
-	active string            // running turn id, "" when idle
-	keys   map[string]string // client key -> turn id
+	active string             // running turn id, "" when idle
+	cancel context.CancelFunc // stops the running turn, even before its run exists
+	keys   map[string]string  // client key -> turn id
 	subs   map[chan Event]struct{}
 }
 
@@ -160,21 +161,24 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 		return "", acprun.ErrBusy
 	}
 	turn := newID()
+	ctx, cancel := context.WithCancel(context.Background())
 	l.active = turn
+	l.cancel = cancel
 	if key != "" {
 		l.keys[key] = turn
 	}
 	b.appendLocked(session, turn, KindTurnStarted, map[string]string{"text": text})
 	b.mu.Unlock()
 
-	go b.run(session, turn, text)
+	go b.run(ctx, cancel, session, turn, text)
 	return turn, nil
 }
 
-func (b *Broker) run(session, turn, text string) {
-	// The turn outlives the request that started it; the client follows it
-	// through the event log.
-	stop, err := b.deps.Send(context.Background(), session, text, func(e acprun.Event) {
+// run executes a turn. Its context outlives the request that started it (the
+// client follows the turn through the event log) and is cancelled by Cancel.
+func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, turn, text string) {
+	defer cancel()
+	stop, err := b.deps.Send(ctx, session, text, func(e acprun.Event) {
 		if e.Kind == acprun.KindPermission {
 			return // the broker's own approval event replaces it
 		}
@@ -190,7 +194,9 @@ func (b *Broker) run(session, turn, text string) {
 	} else {
 		b.appendLocked(session, turn, KindTurnDone, map[string]string{"stopReason": stop})
 	}
-	b.log(session).active = ""
+	l := b.log(session)
+	l.active = ""
+	l.cancel = nil
 }
 
 // Events returns the session's events after seq.
@@ -244,8 +250,20 @@ func (b *Broker) Busy(session string) bool {
 	return b.log(session).active != ""
 }
 
-// Cancel stops the session's running turn.
-func (b *Broker) Cancel(session string) error { return b.deps.Cancel(session) }
+// Cancel stops the session's running turn: gracefully through the agent if
+// its run exists, otherwise by cancelling the turn before it gets that far.
+// With no turn running it returns acprun.ErrNotRunning.
+func (b *Broker) Cancel(session string) error {
+	b.mu.Lock()
+	stopTurn := b.log(session).cancel
+	b.mu.Unlock()
+	err := b.deps.Cancel(session)
+	if err != nil && stopTurn != nil {
+		stopTurn()
+		return nil
+	}
+	return err
+}
 
 // Approver is the acprun.Approver for runs started on the broker's behalf:
 // it posts an approval event and waits for Answer, the timeout, or the end

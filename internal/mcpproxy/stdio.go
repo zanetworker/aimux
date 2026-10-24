@@ -40,6 +40,7 @@ type stdioBackend struct {
 }
 
 func startStdio(ctx context.Context, server string, cfg ServerConfig) (*stdioBackend, error) {
+	cfg = expandConfig(cfg)
 	b := &stdioBackend{server: server}
 	env := make([]string, 0, len(cfg.Env))
 	for k, v := range cfg.Env {

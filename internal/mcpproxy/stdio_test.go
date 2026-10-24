@@ -42,6 +42,10 @@ func runTestServer() {
 	s.AddTool(echo, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return mcp.NewToolResultText("echo: " + req.GetString("text", "")), nil
 	})
+	s.AddTool(mcp.NewTool("getenv", mcp.WithDescription("Return an environment variable")),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText(os.Getenv(req.GetString("name", ""))), nil
+		})
 	s.AddTool(mcp.NewTool("crash", mcp.WithDescription("Exit the process")),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			os.Exit(3)
@@ -111,8 +115,8 @@ func TestStdioBackend_ListToolsRawKeepsSchemas(t *testing.T) {
 		}
 		names[tool.Name] = string(tool.RawInputSchema)
 	}
-	if len(names) != 2 {
-		t.Fatalf("got tools %v, want echo and crash", names)
+	if len(names) != 3 {
+		t.Fatalf("got tools %v, want echo, getenv and crash", names)
 	}
 	if !strings.Contains(names["echo"], "anyOf") {
 		t.Fatalf("echo schema lost anyOf: %s", names["echo"])
@@ -214,5 +218,26 @@ func TestStdioBackend_ChattyStderrDoesNotHang(t *testing.T) {
 	defer func() { _ = b.Close() }()
 	if _, err := b.CallTool(ctx, callReq("echo", map[string]any{"text": "hi"})); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStdioBackend_ExpandsClaudeVariablesAtLaunch(t *testing.T) {
+	t.Setenv("AIMUX_TEST_CRED", "s3cret")
+	cfgs := map[string]ServerConfig{"test": {Command: os.Args[0], Env: map[string]string{
+		testServerEnv: "1", "AIMUX_PROBE": "${AIMUX_TEST_CRED}",
+	}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	b, err := StdioStarter(cfgs)(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	res, err := b.CallTool(ctx, callReq("getenv", map[string]any{"name": "AIMUX_PROBE"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Content[0].(mcp.TextContent).Text; got != "s3cret" {
+		t.Fatalf("server saw AIMUX_PROBE=%q, want the expanded value", got)
 	}
 }

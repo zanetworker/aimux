@@ -87,3 +87,29 @@ func TestMergeServers(t *testing.T) {
 		t.Fatalf("merged %+v: want the Claude entry to win, and saved-only entries kept", got)
 	}
 }
+
+func TestExpandConfig(t *testing.T) {
+	t.Setenv("AIMUX_TEST_CRED", "secret123")
+	t.Setenv("AIMUX_TEST_DIR", "/data")
+	in := ServerConfig{
+		Command: "${AIMUX_TEST_BIN:-/usr/local/bin/tool}",
+		Args:    []string{"--cred", "${AIMUX_TEST_CRED}", "--dir=${AIMUX_TEST_DIR}/x", "$NOT_EXPANDED", "${AIMUX_TEST_UNSET}"},
+		Env:     map[string]string{"TOKEN": "${AIMUX_TEST_CRED}", "PLAIN": "x", "WITH_DEFAULT": "${AIMUX_TEST_UNSET:-fallback}"}, // #nosec G101 -- variable references in a test fixture, not credentials
+	}
+	got := expandConfig(in)
+	if got.Command != "/usr/local/bin/tool" {
+		t.Fatalf("command %q, want the default", got.Command)
+	}
+	wantArgs := []string{"--cred", "secret123", "--dir=/data/x", "$NOT_EXPANDED", ""}
+	for i, a := range wantArgs {
+		if got.Args[i] != a {
+			t.Fatalf("args %q, want %q", got.Args, wantArgs)
+		}
+	}
+	if got.Env["TOKEN"] != "secret123" || got.Env["PLAIN"] != "x" || got.Env["WITH_DEFAULT"] != "fallback" {
+		t.Fatalf("env %v", got.Env)
+	}
+	if in.Env["TOKEN"] != "${AIMUX_TEST_CRED}" {
+		t.Fatal("expandConfig modified its input (the saved definitions must keep ${VAR})")
+	}
+}

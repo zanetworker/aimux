@@ -18,8 +18,8 @@ func TestRefreshCatalog(t *testing.T) {
 	defer cancel()
 	errs := RefreshCatalog(ctx, cat, StdioStarter(cfgs), []string{"test", "ghost"})
 
-	if len(cat.Servers["test"].Tools) != 2 || cat.Servers["test"].FetchedAt.Before(old) {
-		t.Fatalf("test entry = %+v, want 2 fresh tools", cat.Servers["test"])
+	if len(cat.Servers["test"].Tools) != 3 || cat.Servers["test"].FetchedAt.Before(old) {
+		t.Fatalf("test entry = %+v, want the test server's 3 fresh tools", cat.Servers["test"])
 	}
 	if errs["ghost"] == nil || errs["test"] != nil {
 		t.Fatalf("errs = %v, want only ghost to fail", errs)
