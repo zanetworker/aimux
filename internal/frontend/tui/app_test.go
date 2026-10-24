@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/cache"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
@@ -1177,5 +1178,35 @@ func TestParserForRemote_FallbackSkipsLocal(t *testing.T) {
 	}
 	if len(turns) != 0 {
 		t.Errorf("expected 0 turns (local session should be excluded), got %d", len(turns))
+	}
+}
+
+// TestInstancesMsg_CacheSaveDoesNotRaceWithSort guards the crash where the
+// background cache.Save read the discovery slice while SetAgents sorted it in
+// place. Run with -race: the race detector reports the shared backing array.
+func TestInstancesMsg_CacheSaveDoesNotRaceWithSort(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app := newTestAppForPending(map[string]agent.Agent{})
+
+	msg := instancesMsg{
+		{PID: 3, Name: "zeta", WorkingDir: "/z", Status: agent.StatusIdle},
+		{PID: 1, Name: "alpha", WorkingDir: "/a", Status: agent.StatusActive},
+		{PID: 2, Name: "mid", WorkingDir: "/m", Status: agent.StatusIdle},
+	}
+	app.Update(msg)
+
+	// Wait for the background save to land under the temp HOME, so it never
+	// runs after t.Setenv restores the real HOME.
+	path := filepath.Join(os.Getenv("HOME"), ".aimux", "cache", "last-seen.json")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		saved, _ := cache.Load(path)
+		if len(saved) == len(msg) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cache save did not complete: got %d agents in %s, want %d", len(saved), path, len(msg))
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
