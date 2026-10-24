@@ -106,6 +106,8 @@ aimux spawn claude --dir ./proj --wait --json    # start and wait for completion
 aimux agent-context                              # full CLI schema for agents
 aimux profile save work --provider claude        # save reusable config
 aimux feedback "the X flag doesn't work"         # report friction
+aimux chat <session-id> "next step?"             # continue an idle Claude session
+aimux mcp proxy serve                            # lazy, shared MCP servers for all sessions
 ```
 
 See [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) for the full guide and [SKILL.md](SKILL.md) for agent workflow recipes.

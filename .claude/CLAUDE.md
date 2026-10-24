@@ -286,6 +286,10 @@ Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't
 **TUI has, CLI missing:**
 - Trace viewing, annotations, cost tracking, kill agent, export
 
+**CLI has, TUI and Web missing:**
+- Chat with an idle session (`aimux chat`, `internal/acprun`); web and phone come with the remote listener
+- MCP proxy (`aimux mcp proxy`); a daemon, no UI planned
+
 **Web has, TUI missing:**
 - Plugin listing/execution, AI insights, task complete/reopen
 

@@ -1,0 +1,36 @@
+---
+title: Chat with Sessions
+description: Continue an existing Claude Code session from aimux
+---
+
+`aimux chat` sends a message to an existing Claude Code session and streams the reply. The conversation continues in the session's own file, so `claude --resume <id>` on the same machine picks up where aimux left off.
+
+```bash
+aimux chat <session-id> "What did we decide about the cache?"
+```
+
+Find session IDs with `aimux sessions` or the web dashboard's Sessions view.
+
+## How it works
+
+aimux starts an [ACP](https://agentclientprotocol.com) adapter for Claude (`claude-agent-acp`) in the session's working directory, loads the session, sends the message, and stops the adapter when the turn ends. The first run downloads the adapter through `npx`, which can take about half a minute; later runs start in about a second.
+
+## What it refuses
+
+- **Sessions open in a terminal.** If the session is running in a terminal on this machine, aimux does not send to it, because typing into a running session can approve a permission prompt nobody saw. Close it there, then run `aimux chat`.
+- **Unknown sessions.** The ID must match a session file under `~/.claude/projects`.
+
+## Permissions
+
+When the agent wants to use a tool that needs approval, aimux asks on the terminal (`Allow git push? [y/N]`). Anything but `y` or `yes` denies. Without a terminal, for example in a script, every request is denied.
+
+Ctrl-C stops the agent's turn. What it already did stays in the session.
+
+## Flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--adapter` | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command |
+| `--json` | off | Print each event (agent text, tool calls, permission requests) as a JSON line |
+
+Codex sessions are not supported yet.

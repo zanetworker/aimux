@@ -186,7 +186,9 @@ func TestPool_TransportErrorDropsBackend(t *testing.T) {
 
 func TestPool_ToolErrorResultKeepsBackend(t *testing.T) {
 	fs := newFakeStarter()
-	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) { return mcp.NewToolResultError("bad input"), nil }
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		return mcp.NewToolResultError("bad input"), nil
+	}
 	p := NewPool(fs.start, PoolOptions{})
 	defer p.Close()
 	p.Call(context.Background(), "s", "", req("x"))
@@ -208,7 +210,10 @@ func TestPool_ReapClosesOnlyIdleBackends(t *testing.T) {
 	defer p.Close()
 
 	// backends[0] "busy": started long ago, but a call is still in flight.
-	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) { <-release; return mcp.NewToolResultText("ok"), nil }
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		<-release
+		return mcp.NewToolResultText("ok"), nil
+	}
 	done := make(chan struct{})
 	go func() { p.Call(context.Background(), "busy", "", req("x")); close(done) }()
 	for fs.count("busy") == 0 {
