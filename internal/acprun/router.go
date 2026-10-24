@@ -6,6 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/jsonl"
@@ -18,6 +24,10 @@ var (
 	// out on purpose; typing into one can approve a permission prompt the
 	// user never saw. Close it there to continue it here.
 	ErrOpenInTerminal = errors.New("the session is open in a terminal on this machine; close it there to continue it here")
+	// ErrOwnershipUnknown: without Claude's session registry aimux cannot
+	// tell whether a terminal holds the session, so it does not risk a
+	// second writer.
+	ErrOwnershipUnknown = errors.New("cannot tell whether the session is open in a terminal: Claude's session registry is unavailable")
 )
 
 // SessionInfo is what the router needs to know about a session.
@@ -82,13 +92,30 @@ func ClaudeLookup(projectsDir, registryDir string) Lookup {
 		if err != nil {
 			return SessionInfo{}, err
 		}
+		if st, err := os.Stat(registryDir); err != nil || !st.IsDir() {
+			return SessionInfo{}, fmt.Errorf("%w (%s)", ErrOwnershipUnknown, registryDir)
+		}
 		info := SessionInfo{Provider: "claude", Cwd: cwd}
+		seen := map[int]bool{}
 		for pid, e := range discovery.ReadClaudeRegistry(registryDir) {
 			if e.SessionID == sessionID && discovery.IsLiveHolder(e) {
-				info.OpenInTerminal = true
-				info.Holders = append(info.Holders, pid)
+				seen[pid] = true
 			}
 		}
+		// The registry can miss a session (an older Claude Code, a
+		// half-written entry); a Claude process with the session id on its
+		// command line holds it too.
+		if procs, err := listProcesses(); err == nil {
+			for _, p := range procs {
+				if commandLineHolds(p.Args, sessionID) && syscall.Kill(p.PID, 0) == nil {
+					seen[p.PID] = true
+				}
+			}
+		}
+		for pid := range seen {
+			info.Holders = append(info.Holders, pid)
+		}
+		info.OpenInTerminal = len(info.Holders) > 0
 		return info, nil
 	}
 }
@@ -130,4 +157,48 @@ func ClaudeFingerprint(projectsDir string) func(sessionID string) string {
 		}
 		return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
 	}
+}
+
+type processArgs struct {
+	PID  int
+	Args string
+}
+
+// listProcesses lists processes with their command lines. A variable so
+// tests can replace it.
+var listProcesses = func() ([]processArgs, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,args=").Output()
+	if err != nil {
+		return nil, err
+	}
+	var procs []processArgs
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		procs = append(procs, processArgs{PID: pid, Args: strings.Join(fields[1:], " ")})
+	}
+	return procs, nil
+}
+
+// commandLineHolds reports whether a process command line is Claude Code
+// working on sessionID (for example `claude --resume <id>`).
+func commandLineHolds(args, sessionID string) bool {
+	fields := strings.Fields(args)
+	if len(fields) == 0 || filepath.Base(fields[0]) != "claude" {
+		return false
+	}
+	for _, f := range fields[1:] {
+		if f == sessionID || strings.HasSuffix(f, "="+sessionID) {
+			return true
+		}
+	}
+	return false
 }

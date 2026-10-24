@@ -184,3 +184,21 @@ func (s *syncBuffer) Write(p []byte) (int, error) {
 	return s.b.Write(p)
 }
 func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+// "Allow X? [y/N]" approves this one call. It must never grant a standing
+// permission, even when that is all the agent offers.
+func TestPromptApprover_NeverGrantsAllowAlways(t *testing.T) {
+	req := permReq()
+	req.Options = []acp.PermissionOption{
+		{OptionId: "rej", Name: "Reject", Kind: acp.PermissionOptionKindRejectOnce},
+		{OptionId: "always", Name: "Always allow", Kind: acp.PermissionOptionKindAllowAlways},
+	}
+	var out bytes.Buffer
+	id, ok := promptApprover(strings.NewReader("y\n"), &out)(context.Background(), req)
+	if ok || id == "always" {
+		t.Fatalf("y to a one-off prompt granted %q", id)
+	}
+	if !strings.Contains(out.String(), "denied") {
+		t.Fatalf("no explanation for the denial: %q", out.String())
+	}
+}

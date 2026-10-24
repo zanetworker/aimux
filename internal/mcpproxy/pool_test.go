@@ -364,3 +364,42 @@ func TestPool_CloseSessionWaitsForInFlightCall(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// Two clients share a backend. One cancels its request; the other's call and
+// the backend itself must be unaffected.
+func TestPool_CallerCancelKeepsSharedBackend(t *testing.T) {
+	release := make(chan struct{})
+	fs := newFakeStarter()
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-release:
+			return mcp.NewToolResultText("done"), nil
+		}
+	}
+	p := NewPool(fs.start, PoolOptions{})
+	defer p.Close()
+	ctxA, cancelA := context.WithCancel(context.Background())
+	resA, resB := make(chan *mcp.CallToolResult), make(chan *mcp.CallToolResult)
+	go func() { resA <- p.Call(ctxA, "slack", "", req("x")) }()
+	go func() { resB <- p.Call(context.Background(), "slack", "", req("x")) }()
+	for fs.count("slack") == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	cancelA()
+	if r := <-resA; !r.IsError {
+		t.Fatal("cancelled call reported success")
+	}
+	if fs.backends[0].closed.Load() {
+		t.Fatal("one caller's cancel closed the shared backend")
+	}
+	close(release)
+	if r := <-resB; r.IsError {
+		t.Fatalf("the other client's call was aborted: %s", resultText(t, r))
+	}
+	if fs.count("slack") != 1 {
+		t.Fatal("backend was restarted")
+	}
+}

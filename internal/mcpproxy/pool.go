@@ -177,9 +177,14 @@ func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToo
 	defer cancel()
 	res, err := s.backend.CallTool(cctx, req)
 	if err != nil {
-		// A transport error or timeout may leave the server wedged; restart
-		// it on the next call. Tool-level failures arrive as IsError results
-		// and keep the backend.
+		if ctx.Err() != nil {
+			// The caller went away; the backend is fine and may be serving
+			// other clients' calls.
+			return mcp.NewToolResultErrorf("%s: %s cancelled: %v", server, req.Params.Name, ctx.Err())
+		}
+		// A transport error or our timeout may leave the server wedged;
+		// restart it on the next call. Tool-level failures arrive as IsError
+		// results and keep the backend.
 		p.drop(k, s)
 		if errors.Is(cctx.Err(), context.DeadlineExceeded) {
 			return mcp.NewToolResultErrorf("%s: %s timed out after %v", server, req.Params.Name, p.opt.CallTimeout)

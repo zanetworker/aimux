@@ -144,13 +144,14 @@ func promptApprover(in io.Reader, out io.Writer) acprun.Approver {
 		if answer != "y" && answer != "yes" {
 			return "", false
 		}
-		for _, kind := range []acp.PermissionOptionKind{acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways} {
-			for _, o := range req.Options {
-				if o.Kind == kind {
-					return string(o.OptionId), true
-				}
+		// The prompt asks about this one call, so only allow_once answers it;
+		// a standing permission is never granted from here.
+		for _, o := range req.Options {
+			if o.Kind == acp.PermissionOptionKindAllowOnce {
+				return string(o.OptionId), true
 			}
 		}
+		_, _ = fmt.Fprintln(out, "denied: the agent offered only a standing permission, which aimux chat does not grant")
 		return "", false
 	}
 }

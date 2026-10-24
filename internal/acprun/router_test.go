@@ -176,3 +176,34 @@ func TestClaudeLookup_ReusedPIDIsNotAHolder(t *testing.T) {
 		t.Fatalf("info %+v: a reused PID was treated as the session's terminal", info)
 	}
 }
+
+func TestClaudeLookup_NoRegistryRefuses(t *testing.T) {
+	projects, _ := claudeFixture(t)
+	missing := filepath.Join(t.TempDir(), "no-sessions-dir")
+	r := &Router{Lookup: ClaudeLookup(projects, missing), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})}
+	defer r.Manager.Close()
+	if err := r.Check("idle-1"); !errors.Is(err, ErrOwnershipUnknown) {
+		t.Fatalf("got %v, want ErrOwnershipUnknown when Claude's registry is unavailable", err)
+	}
+}
+
+// A Claude process started with the session id on its command line holds the
+// session even when the registry has no entry for it.
+func TestClaudeLookup_CommandLineHolder(t *testing.T) {
+	projects, registry := claudeFixture(t)
+	prev := listProcesses
+	defer func() { listProcesses = prev }()
+	listProcesses = func() ([]processArgs, error) {
+		return []processArgs{
+			{PID: os.Getpid(), Args: "/usr/local/bin/claude --dangerously-skip-permissions --resume idle-1"},
+			{PID: os.Getppid(), Args: "vim notes-about-idle-1.md"}, // not claude
+		}, nil
+	}
+	info, err := ClaudeLookup(projects, registry)("idle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.OpenInTerminal || len(info.Holders) != 1 || info.Holders[0] != os.Getpid() {
+		t.Fatalf("info %+v, want the claude --resume process as the only holder", info)
+	}
+}
