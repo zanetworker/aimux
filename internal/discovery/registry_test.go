@@ -55,3 +55,28 @@ func TestClaudeRegistryEntry_StartedAt(t *testing.T) {
 		t.Fatal("empty procStart reported ok")
 	}
 }
+
+func TestIsLiveHolder(t *testing.T) {
+	started := time.Date(2026, 10, 23, 15, 40, 46, 0, time.UTC)
+	prev := ProcessStartTime
+	defer func() { ProcessStartTime = prev }()
+	alive := os.Getpid()
+	entry := ClaudeRegistryEntry{PID: alive, SessionID: "s", ProcStart: "Fri Oct 23 15:40:46 2026"}
+
+	ProcessStartTime = func(int) time.Time { return started.Add(time.Second) }
+	if !IsLiveHolder(entry) {
+		t.Fatal("live process with a matching start time not counted as the holder")
+	}
+	ProcessStartTime = func(int) time.Time { return started.Add(3 * time.Hour) }
+	if IsLiveHolder(entry) {
+		t.Fatal("a reused PID (different start time) was counted as the session's holder")
+	}
+	ProcessStartTime = func(int) time.Time { return time.Time{} }
+	if !IsLiveHolder(entry) {
+		t.Fatal("unknown process start time should not hide a live holder")
+	}
+	dead := ClaudeRegistryEntry{PID: 999999, SessionID: "s", ProcStart: entry.ProcStart}
+	if IsLiveHolder(dead) {
+		t.Fatal("a dead PID counted as a holder")
+	}
+}

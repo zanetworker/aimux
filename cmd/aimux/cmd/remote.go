@@ -103,7 +103,8 @@ func newRemoteServeCmd() *cobra.Command {
 
 			var broker *remoteapi.Broker
 			manager := acprun.NewManager(acprun.ManagerOptions{
-				MaxRuns: s.maxRuns,
+				MaxRuns:     s.maxRuns,
+				Fingerprint: acprun.ClaudeFingerprint(projects),
 				Start: func(ctx context.Context, id, cwd string) (acprun.Runner, error) {
 					return acprun.Start(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, id, broker.Approver())
 				},

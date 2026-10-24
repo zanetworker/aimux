@@ -159,3 +159,20 @@ func TestRouter_Check(t *testing.T) {
 		t.Fatalf("unknown session: %v", err)
 	}
 }
+
+// A stale registry entry whose PID now belongs to an unrelated process must
+// not make the session look open in a terminal.
+func TestClaudeLookup_ReusedPIDIsNotAHolder(t *testing.T) {
+	projects, registry := claudeFixture(t)
+	body := fmt.Sprintf(`{"pid":%d,"sessionId":"idle-1","procStart":"Thu Jan  1 00:00:00 2026"}`, os.Getpid())
+	if err := os.WriteFile(filepath.Join(registry, "stale.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := ClaudeLookup(projects, registry)("idle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.OpenInTerminal || len(info.Holders) != 0 {
+		t.Fatalf("info %+v: a reused PID was treated as the session's terminal", info)
+	}
+}

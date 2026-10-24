@@ -275,8 +275,14 @@ func TestManager_CloseDuringStartClosesTheRunner(t *testing.T) {
 	done := make(chan error)
 	go func() { _, err := m.Send(context.Background(), "a", "/w", "hi", func(Event) {}); done <- err }()
 	time.Sleep(20 * time.Millisecond)
-	m.Close() // shutdown while the adapter is starting
+	// Shutdown while the adapter is starting. This fake start ignores
+	// cancellation, so Close (which waits for starts) returns once it is
+	// released.
+	closed := make(chan struct{})
+	go func() { m.Close(); close(closed) }()
+	time.Sleep(20 * time.Millisecond)
 	close(fs.block)
+	<-closed
 	if err := <-done; err == nil {
 		t.Fatal("Send succeeded on a closed manager")
 	}
@@ -327,5 +333,56 @@ func TestManager_CancelWhileStarting(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("Cancel did not stop a start that hangs")
+	}
+}
+
+// Shutting down while an adapter is starting must stop that start before
+// Close returns; once the process exits, nothing else would close it.
+func TestManager_CloseCancelsAndWaitsForStartingAdapters(t *testing.T) {
+	m := NewManager(ManagerOptions{Start: hangingStart})
+	done := make(chan error, 1)
+	go func() { _, err := m.Send(context.Background(), "a", "/w", "hi", func(Event) {}); done <- err }()
+	for !m.Running("a") {
+		time.Sleep(time.Millisecond)
+	}
+	closed := make(chan struct{})
+	go func() { m.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close did not cancel the adapter that was starting")
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Send succeeded although the manager shut down during startup")
+		}
+	default:
+		t.Fatal("Close returned before the starting adapter was dealt with")
+	}
+}
+
+// The user continues the session in a terminal between two remote messages.
+// The cached adapter still holds the old conversation, so it must be
+// replaced by one that reloads the session.
+func TestManager_ReloadsWhenTheSessionChangedElsewhere(t *testing.T) {
+	var mu sync.Mutex
+	fp := "v1"
+	fs := &fakeRunStarter{}
+	m := NewManager(ManagerOptions{Start: fs.start, Fingerprint: func(string) string { mu.Lock(); defer mu.Unlock(); return fp }})
+	defer m.Close()
+	_, _ = send(m, "a")
+	_, _ = send(m, "a") // nothing changed: reuse
+	if fs.count() != 1 {
+		t.Fatalf("started %d adapters with no outside change, want 1", fs.count())
+	}
+	mu.Lock()
+	fp = "v2" // turns added from a terminal
+	mu.Unlock()
+	if _, err := send(m, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if fs.count() != 2 || !fs.runners[0].closed.Load() {
+		t.Fatalf("started %d, first closed=%v; want a fresh adapter that reloads the session", fs.count(), fs.runners[0].closed.Load())
 	}
 }

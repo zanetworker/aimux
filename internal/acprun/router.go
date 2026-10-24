@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"syscall"
 
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/jsonl"
@@ -85,7 +84,7 @@ func ClaudeLookup(projectsDir, registryDir string) Lookup {
 		}
 		info := SessionInfo{Provider: "claude", Cwd: cwd}
 		for pid, e := range discovery.ReadClaudeRegistry(registryDir) {
-			if e.SessionID == sessionID && syscall.Kill(pid, 0) == nil {
+			if e.SessionID == sessionID && discovery.IsLiveHolder(e) {
 				info.OpenInTerminal = true
 				info.Holders = append(info.Holders, pid)
 			}
@@ -115,4 +114,20 @@ func sessionCwd(path string) (string, error) {
 		return "", fmt.Errorf("read session file %s: %w", path, err)
 	}
 	return "", fmt.Errorf("session file %s records no working directory", path)
+}
+
+// ClaudeFingerprint fingerprints a Claude session by its file's size and
+// modification time, for ManagerOptions.Fingerprint.
+func ClaudeFingerprint(projectsDir string) func(sessionID string) string {
+	return func(sessionID string) string {
+		file := discovery.FindSessionFile(sessionID, projectsDir)
+		if file == "" {
+			return ""
+		}
+		info, err := os.Stat(file)
+		if err != nil {
+			return ""
+		}
+		return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+	}
 }

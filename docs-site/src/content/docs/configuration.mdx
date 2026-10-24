@@ -279,7 +279,13 @@ See [Kubernetes Quickstart](/advanced/k8s-quickstart/) for full setup guide.
 
 ## Remote Access
 
-Settings for `aimux remote serve`. See [Remote Access](/guides/remote-access/) for setup and the API.
+Settings for `aimux remote serve`, under the `remote_access` key (separate from `remote`, which configures remote agent backends). See [Remote Access](/guides/remote-access/) for setup and the API.
+
+```yaml
+remote_access:
+  allowed_logins:
+    - you@example.com
+```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

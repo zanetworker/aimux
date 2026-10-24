@@ -52,8 +52,9 @@ func newChatCmd() *cobra.Command {
 				return fmt.Errorf("resolve home directory: %w", err)
 			}
 			router := &acprun.Router{
-				Lookup:  acprun.ClaudeLookup(filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".claude", "sessions")),
-				Manager: acprun.NewManager(acprun.ManagerOptions{Start: start, MaxRuns: 1}),
+				Lookup: acprun.ClaudeLookup(filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".claude", "sessions")),
+				Manager: acprun.NewManager(acprun.ManagerOptions{Start: start, MaxRuns: 1,
+					Fingerprint: acprun.ClaudeFingerprint(filepath.Join(home, ".claude", "projects"))}),
 			}
 			defer router.Manager.Close()
 

@@ -39,6 +39,12 @@ type ManagerOptions struct {
 	// Default 5 minutes.
 	IdleTimeout time.Duration
 	Now         func() time.Time
+	// Fingerprint identifies the session's on-disk state (for example the
+	// session file's size and modification time). When it differs from the
+	// one recorded after aimux's last turn, the session was continued
+	// elsewhere and the cached adapter is replaced so the session reloads.
+	// Nil or "" disables the check.
+	Fingerprint func(sessionID string) string
 	// StartTimeout bounds starting an adapter and loading the session.
 	// Default 3 minutes (the first npx run downloads the adapter).
 	StartTimeout time.Duration
@@ -48,6 +54,7 @@ type ManagerOptions struct {
 }
 
 type runEntry struct {
+	fingerprint string             // session state after aimux's last turn
 	run         Runner             // nil while starting
 	cancelStart context.CancelFunc // aborts a start in progress
 	busy        bool
@@ -57,10 +64,11 @@ type runEntry struct {
 // Manager keeps at most one run per session and decides when to start, reuse
 // and close them.
 type Manager struct {
-	opt    ManagerOptions
-	mu     sync.Mutex
-	runs   map[string]*runEntry
-	closed bool
+	opt      ManagerOptions
+	mu       sync.Mutex
+	runs     map[string]*runEntry
+	closed   bool
+	starting sync.WaitGroup // adapter starts in progress; Close waits for them
 }
 
 // NewManager returns a Manager.
@@ -95,11 +103,27 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 	if err != nil {
 		return "", err
 	}
+	if e.run != nil && m.opt.Fingerprint != nil {
+		if fp := m.opt.Fingerprint(sessionID); fp != "" && fp != e.fingerprint {
+			m.mu.Lock()
+			stale := e.run
+			e.run = nil // start a fresh adapter below, which reloads the session
+			m.mu.Unlock()
+			_ = stale.Close()
+		}
+	}
 	if e.run == nil {
 		sctx, cancel := context.WithTimeout(ctx, m.opt.StartTimeout)
 		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
+			cancel()
+			return "", errManagerDone
+		}
 		e.cancelStart = cancel
+		m.starting.Add(1)
 		m.mu.Unlock()
+		defer m.starting.Done() // after the late runner, if any, is closed below
 		r, err := m.opt.Start(sctx, sessionID, cwd)
 		if err == nil && sctx.Err() != nil {
 			ctx = sctx // cancelled or timed out just as the start finished
@@ -130,9 +154,14 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 	}
 
 	stop, err := e.run.Prompt(ctx, text, onEvent)
+	fp := ""
+	if err == nil && m.opt.Fingerprint != nil {
+		fp = m.opt.Fingerprint(sessionID)
+	}
 	m.mu.Lock()
 	e.busy = false
 	e.lastUsed = m.opt.Now()
+	e.fingerprint = fp
 	if err != nil && m.runs[sessionID] == e {
 		delete(m.runs, sessionID)
 	}
@@ -248,7 +277,8 @@ func (m *Manager) Reap() int {
 	return len(victims)
 }
 
-// Close closes every run and refuses further messages.
+// Close closes every run, cancels adapters still starting and waits for
+// them, and refuses further messages.
 func (m *Manager) Close() {
 	m.mu.Lock()
 	m.closed = true
@@ -256,6 +286,8 @@ func (m *Manager) Close() {
 	for id, e := range m.runs {
 		if e.run != nil {
 			all = append(all, e.run)
+		} else if e.cancelStart != nil {
+			e.cancelStart()
 		}
 		delete(m.runs, id)
 	}
@@ -263,6 +295,7 @@ func (m *Manager) Close() {
 	for _, r := range all {
 		_ = r.Close()
 	}
+	m.starting.Wait()
 }
 
 // Running reports whether aimux has a run (starting or started) for the session.

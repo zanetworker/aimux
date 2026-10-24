@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"syscall"
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/discovery"
@@ -33,7 +32,7 @@ type LocalIndex struct {
 func (x *LocalIndex) openSessions() map[string]bool {
 	open := map[string]bool{}
 	for pid, e := range discovery.ReadClaudeRegistry(x.RegistryDir) {
-		if syscall.Kill(pid, 0) == nil && (x.Owned == nil || !x.Owned(pid)) {
+		if discovery.IsLiveHolder(e) && (x.Owned == nil || !x.Owned(pid)) {
 			open[e.SessionID] = true
 		}
 	}
