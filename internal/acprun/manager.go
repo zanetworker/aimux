@@ -39,15 +39,19 @@ type ManagerOptions struct {
 	// Default 5 minutes.
 	IdleTimeout time.Duration
 	Now         func() time.Time
+	// StartTimeout bounds starting an adapter and loading the session.
+	// Default 3 minutes (the first npx run downloads the adapter).
+	StartTimeout time.Duration
 	// ParentPID returns a process's parent, for telling aimux's own adapter
 	// processes from the user's terminals. Default discovery.GetParentPID.
 	ParentPID func(pid int) int
 }
 
 type runEntry struct {
-	run      Runner // nil while starting
-	busy     bool
-	lastUsed time.Time
+	run         Runner             // nil while starting
+	cancelStart context.CancelFunc // aborts a start in progress
+	busy        bool
+	lastUsed    time.Time
 }
 
 // Manager keeps at most one run per session and decides when to start, reuse
@@ -70,6 +74,9 @@ func NewManager(opt ManagerOptions) *Manager {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
+	if opt.StartTimeout <= 0 {
+		opt.StartTimeout = 3 * time.Minute
+	}
 	if opt.ParentPID == nil {
 		opt.ParentPID = discovery.GetParentPID
 	}
@@ -89,7 +96,15 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		return "", err
 	}
 	if e.run == nil {
-		r, err := m.opt.Start(ctx, sessionID, cwd)
+		sctx, cancel := context.WithTimeout(ctx, m.opt.StartTimeout)
+		m.mu.Lock()
+		e.cancelStart = cancel
+		m.mu.Unlock()
+		r, err := m.opt.Start(sctx, sessionID, cwd)
+		if err == nil && sctx.Err() != nil {
+			ctx = sctx // cancelled or timed out just as the start finished
+		}
+		cancel()
 		m.mu.Lock()
 		owned := m.runs[sessionID] == e // false if Close or eviction removed it meanwhile
 		if err == nil && !m.closed && owned && ctx.Err() == nil {
@@ -175,8 +190,17 @@ func (m *Manager) running(sessionID string) (Runner, error) {
 	return e.run, nil
 }
 
-// Cancel stops the session's current turn.
+// Cancel stops the session's current turn, or aborts starting its adapter.
 func (m *Manager) Cancel(sessionID string) error {
+	m.mu.Lock()
+	e, ok := m.runs[sessionID]
+	if ok && e.run == nil && e.cancelStart != nil {
+		cancel := e.cancelStart
+		m.mu.Unlock()
+		cancel()
+		return nil
+	}
+	m.mu.Unlock()
 	r, err := m.running(sessionID)
 	if err != nil {
 		return err

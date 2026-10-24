@@ -172,3 +172,23 @@ func TestLocalIndex_OwnAdapterIsNotATerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalIndex_LimitAppliesAfterFiltering(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	x.Discover = func(opts history.DiscoverOpts, dir string) ([]history.Session, error) {
+		all := []history.Session{
+			{ID: "cron1", Provider: "claude", Automated: true},
+			{ID: "cron2", Provider: "claude", Automated: true},
+			{ID: "cron3", Provider: "claude", Automated: true},
+			{ID: "idle", Provider: "claude", Title: "the one interactive session"},
+		}
+		return all[:limitOrAll(opts.Limit, len(all))], nil
+	}
+	got, err := x.Sessions(context.Background(), 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "idle" {
+		t.Fatalf("got %v, want the interactive session behind the automated ones", got)
+	}
+}

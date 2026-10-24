@@ -10,7 +10,8 @@ Claude Code starts every configured MCP server when a session opens, before any 
 - **Lazy:** tools are listed from a cached catalog, and a server starts on its first tool call.
 - **Shared:** one process per server serves every session.
 - **Stopped when idle:** a server unused for 10 minutes (configurable) is stopped, including any child processes started by `npx` or `uv`.
-- **Same tools:** each tool keeps its name, prefixed by its server (`mcp__mux__slack__post_message`), so tool search and per-tool permissions work as before.
+- **Same tools:** each tool keeps its name, prefixed by its server (`mcp__mux__slack__post_message`), so tool search works as before. Claude Code limits tool names to 64 characters; a longer one is cut short and ends in a 6-character hash of the full name, so it stays unique and stable.
+- **Permissions follow the new names:** an allow rule written for a direct server, such as `mcp__slack__post_message`, does not match the proxied tool. Add rules for the `mcp__mux__…` names (for example `mcp__mux__slack__post_message`) before switching.
 
 Remote (`http`, `sse`) servers are not proxied. They run no local process, so Claude Code keeps connecting to them directly.
 

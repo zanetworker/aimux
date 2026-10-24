@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -126,7 +127,12 @@ func renderChatEvent(out, info io.Writer, e acprun.Event, asJSON bool) {
 // Anything but y or yes, including end of input, denies.
 func promptApprover(in io.Reader, out io.Writer) acprun.Approver {
 	lines := bufio.NewReader(in)
+	// Parallel tool calls ask concurrently; one prompt and its answer at a
+	// time, so a y always belongs to the tool shown above it.
+	var mu sync.Mutex
 	return func(ctx context.Context, req acp.RequestPermissionRequest) (string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
 		title := "a tool call"
 		if req.ToolCall.Title != nil {
 			title = *req.ToolCall.Title

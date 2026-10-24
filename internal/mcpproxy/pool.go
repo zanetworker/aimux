@@ -46,6 +46,7 @@ type slot struct {
 	inflight int
 	lastUsed time.Time
 	closed   bool // removed while starting; the starter closes it on arrival
+	retired  bool // removed with calls in flight; the last release closes it
 }
 
 // Pool starts backends on first use, shares them, and closes idle ones.
@@ -142,7 +143,11 @@ func (p *Pool) release(s *slot) {
 	p.mu.Lock()
 	s.inflight--
 	s.lastUsed = p.opt.Now()
+	last := s.retired && s.inflight == 0
 	p.mu.Unlock()
+	if last {
+		_ = s.backend.Close()
+	}
 }
 
 // drop removes a backend that misbehaved so the next call starts a new one.
@@ -211,12 +216,13 @@ func (p *Pool) Reap(idle time.Duration) int {
 	return len(victims)
 }
 
-// CloseSession closes the per-session backends of one client session.
+// CloseSession closes the per-session backends of one client session. A
+// backend with a call still running is closed when that call returns.
 func (p *Pool) CloseSession(session string) {
 	if session == "" {
 		return
 	}
-	p.closeWhere(func(k slotKey) bool { return k.session == session })
+	p.closeWhere(func(k slotKey) bool { return k.session == session }, true)
 }
 
 // Close closes every backend and rejects further calls.
@@ -224,10 +230,12 @@ func (p *Pool) Close() {
 	p.mu.Lock()
 	p.closed = true
 	p.mu.Unlock()
-	p.closeWhere(func(slotKey) bool { return true })
+	p.closeWhere(func(slotKey) bool { return true }, false)
 }
 
-func (p *Pool) closeWhere(match func(slotKey) bool) {
+// closeWhere closes matching backends. With waitForCalls, one that has calls
+// in flight is retired instead and closed by its last release.
+func (p *Pool) closeWhere(match func(slotKey) bool, waitForCalls bool) {
 	var victims []Backend
 	p.mu.Lock()
 	for k, s := range p.slots {
@@ -236,7 +244,11 @@ func (p *Pool) closeWhere(match func(slotKey) bool) {
 		}
 		select {
 		case <-s.ready:
-			if s.err == nil {
+			switch {
+			case s.err != nil:
+			case waitForCalls && s.inflight > 0:
+				s.retired = true
+			default:
 				victims = append(victims, s.backend)
 			}
 			delete(p.slots, k)

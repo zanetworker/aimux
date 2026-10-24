@@ -269,3 +269,30 @@ func TestAPI_IncludeAutomatedParam(t *testing.T) {
 		t.Fatalf("empty list encoded as null: %v", body)
 	}
 }
+
+// A browser EventSource reconnects to the original ?after= URL and adds a
+// newer Last-Event-ID; the header must win or every reconnect replays.
+func TestAPI_LastEventIDBeatsTheInitialCursor(t *testing.T) {
+	srv, b := newTestAPI(t, &fakeBackend{})
+	if _, err := b.Start("s1", "hello", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	req, _ := http.NewRequest("GET", srv.URL+"/v1/sessions/s1/events?after=0&wait=0", nil)
+	req.Header.Set("Tailscale-User-Login", testLogin)
+	req.Header.Set("Last-Event-ID", "2")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var page struct {
+		Events []Event `json:"events"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 || page.Events[0].Seq != 3 {
+		t.Fatalf("got %d events from seq %v, want only seq 3 (after Last-Event-ID 2)", len(page.Events), page.Events)
+	}
+}

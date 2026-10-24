@@ -167,13 +167,11 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // events streams the session's events as server-sent events, starting after
-// ?after= or the Last-Event-ID header. ?wait=0 returns one JSON page instead.
+// the Last-Event-ID header if present, else ?after=. ?wait=0 returns one JSON
+// page instead.
 func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	session := r.PathValue("id")
 	after := int64(0)
-	if v := r.Header.Get("Last-Event-ID"); v != "" {
-		after, _ = strconv.ParseInt(v, 10, 64)
-	}
 	if v := r.URL.Query().Get("after"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || n < 0 {
@@ -181,6 +179,13 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		after = n
+	}
+	// On reconnect, EventSource repeats the original URL and adds the last id
+	// it received; that newer cursor wins.
+	if v := r.Header.Get("Last-Event-ID"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			after = n
+		}
 	}
 	if r.URL.Query().Get("wait") == "0" {
 		writeJSON(w, http.StatusOK, map[string]any{"events": a.Broker.Events(session, after)})

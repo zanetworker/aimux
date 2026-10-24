@@ -284,3 +284,48 @@ func TestManager_CloseDuringStartClosesTheRunner(t *testing.T) {
 		t.Fatalf("prompts=%d closed=%v; want no prompt and the late runner closed", prompts.Load(), fs.runners[0].closed.Load())
 	}
 }
+
+// hangingStart is an adapter that never answers initialize or load.
+func hangingStart(ctx context.Context, session, cwd string) (Runner, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestManager_StartTimeout(t *testing.T) {
+	m := NewManager(ManagerOptions{Start: hangingStart, StartTimeout: 50 * time.Millisecond})
+	defer m.Close()
+	done := make(chan error)
+	go func() { _, err := m.Send(context.Background(), "a", "/w", "hi", func(Event) {}); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("got %v, want a start deadline", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("an adapter that never starts kept the session busy")
+	}
+	if m.Running("a") {
+		t.Fatal("the failed start is still tracked, so the session stays busy")
+	}
+}
+
+func TestManager_CancelWhileStarting(t *testing.T) {
+	m := NewManager(ManagerOptions{Start: hangingStart})
+	defer m.Close()
+	done := make(chan error)
+	go func() { _, err := m.Send(context.Background(), "a", "/w", "hi", func(Event) {}); done <- err }()
+	for !m.Running("a") {
+		time.Sleep(time.Millisecond)
+	}
+	if err := m.Cancel("a"); err != nil {
+		t.Fatalf("cancel during startup: %v, want it to abort the start", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Cancel did not stop a start that hangs")
+	}
+}

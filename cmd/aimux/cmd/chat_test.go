@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/zanetworker/aimux/internal/acprun"
@@ -114,3 +118,69 @@ func TestDenyNoTerminal(t *testing.T) {
 		t.Fatalf("got %q,%v and note %q; want a denial that says what was denied", id, ok, out.String())
 	}
 }
+
+// Parallel tool calls ask for permission concurrently. Each prompt must be
+// answered by the line typed after it, never by another prompt's answer.
+func TestPromptApprover_ConcurrentRequestsAreSerialized(t *testing.T) {
+	pr, pw := io.Pipe()
+	var out syncBuffer
+	approve := promptApprover(pr, &out)
+	reqFor := func(title string) acp.RequestPermissionRequest {
+		r := permReq()
+		r.ToolCall.Title = acp.Ptr(title)
+		return r
+	}
+	results := make(chan string, 2)
+	for _, title := range []string{"rm -rf build", "git push"} {
+		go func(title string) {
+			id, ok := approve(context.Background(), reqFor(title))
+			results <- fmt.Sprintf("%s=%v/%s", title, ok, id)
+		}(title)
+	}
+	// Answer each prompt only once it is on screen: y to whichever came first.
+	answered := map[string]string{}
+	for len(answered) < 2 {
+		time.Sleep(20 * time.Millisecond)
+		screen := out.String()
+		for _, title := range []string{"rm -rf build", "git push"} {
+			if _, done := answered[title]; done || !strings.Contains(screen, "Allow "+title+"?") {
+				continue
+			}
+			ans := "n"
+			if len(answered) == 0 {
+				ans = "y"
+			}
+			answered[title] = ans
+			_, _ = pw.Write([]byte(ans + "\n"))
+		}
+		if strings.Count(screen, "Allow ") > len(answered)+1 {
+			t.Fatalf("a second prompt appeared before the first was answered:\n%s", screen)
+		}
+	}
+	got := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		r := <-results
+		got[r] = true
+	}
+	for title, ans := range answered {
+		want := title + "=false/"
+		if ans == "y" {
+			want = title + "=true/ok"
+		}
+		if !got[want] {
+			t.Fatalf("answers %v: %q should have been decided by %q", got, title, ans)
+		}
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }

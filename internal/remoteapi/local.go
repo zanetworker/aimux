@@ -54,7 +54,8 @@ func (x *LocalIndex) state(id string, open map[string]bool) string {
 // Sessions lists the most recently active sessions; automated ones only when
 // includeAutomated is set.
 func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated bool) ([]Session, error) {
-	all, err := x.Discover(history.DiscoverOpts{Provider: "claude", Limit: limit * 2}, x.ProjectsDir)
+	// No limit here: filtering happens below, and the index scan is cached.
+	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}

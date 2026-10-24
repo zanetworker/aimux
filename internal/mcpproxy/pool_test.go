@@ -329,3 +329,38 @@ func TestPool_StartThatNeverFinishesTimesOut(t *testing.T) {
 		t.Fatalf("started %d times, want a retry after the timeout", starts.Load())
 	}
 }
+
+// A client session can expire while one of its calls is still running (a
+// long tool call with a short --idle). The backend must finish that call.
+func TestPool_CloseSessionWaitsForInFlightCall(t *testing.T) {
+	release := make(chan struct{})
+	fs := newFakeStarter()
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		<-release
+		return mcp.NewToolResultText("finished"), nil
+	}
+	p := NewPool(fs.start, PoolOptions{PerSession: map[string]bool{"playwright": true}})
+	defer p.Close()
+	done := make(chan *mcp.CallToolResult)
+	go func() { done <- p.Call(context.Background(), "playwright", "s1", req("long")) }()
+	for fs.count("playwright") == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	p.CloseSession("s1") // the session expired mid-call
+	if fs.backends[0].closed.Load() {
+		t.Fatal("backend closed under a running call")
+	}
+	close(release)
+	if r := <-done; r.IsError || resultText(t, r) != "finished" {
+		t.Fatalf("in-flight call got %+v, want it to finish", r)
+	}
+	deadline := time.Now().Add(time.Second)
+	for !fs.backends[0].closed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("backend of the closed session was never closed after its call finished")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
