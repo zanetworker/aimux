@@ -237,6 +237,22 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 	return out, nil
 }
 
+// maxSearchScan bounds how many ranked matches a search looks through.
+const maxSearchScan = 500
+
+// eligible counts the results Search would return: not automated (unless
+// aimux created them) and not only in aimux's archive.
+func (x *LocalIndex) eligible(results []search.Result) int {
+	n := 0
+	for _, r := range results {
+		if _, created := x.Created.Get(r.SessionID); created ||
+			(!r.Automated && discovery.FindSessionFile(r.SessionID, x.ProjectsDir) != "") {
+			n++
+		}
+	}
+	return n
+}
+
 // SearchHit is a session matching a search, with the matching text.
 type SearchHit struct {
 	Session
@@ -250,9 +266,17 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 	if x.SearchIndex == nil {
 		return nil, errors.New("session search is not available")
 	}
-	results, err := x.SearchIndex(ctx, query, limit*2) // some are filtered out below
-	if err != nil {
-		return nil, fmt.Errorf("search sessions: %w", err)
+	// Automated and archive-only sessions are filtered out after ranking, so
+	// ask for more until the limit is filled or the matches run out.
+	var results []search.Result
+	for n := limit * 2; ; n *= 4 {
+		var err error
+		if results, err = x.SearchIndex(ctx, query, n); err != nil {
+			return nil, fmt.Errorf("search sessions: %w", err)
+		}
+		if len(results) < n || n >= maxSearchScan || x.eligible(results) >= limit {
+			break
+		}
 	}
 	open := x.openSessions()
 	hits := []SearchHit{}

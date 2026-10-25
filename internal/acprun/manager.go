@@ -109,7 +109,8 @@ type Manager struct {
 	mu       sync.Mutex
 	runs     map[string]*runEntry
 	closed   bool
-	starting sync.WaitGroup // adapter starts in progress; Close waits for them
+	starting sync.WaitGroup               // adapter starts in progress; Close waits for them
+	newStart map[*context.CancelFunc]bool // new-session starts in progress; Close cancels them
 }
 
 // NewManager returns a Manager.
@@ -258,9 +259,30 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 	}
 	sctx, cancel := context.WithTimeout(ctx, m.opt.StartTimeout)
 	defer cancel()
+	// Like a load in Send: Close cancels this start and waits for it.
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return "", errManagerDone
+	}
+	if m.newStart == nil {
+		m.newStart = map[*context.CancelFunc]bool{}
+	}
+	m.newStart[&cancel] = true
+	m.starting.Add(1)
+	m.mu.Unlock()
+	defer m.starting.Done()
 	r, id, err := m.opt.StartNew(sctx, cwd)
+	m.mu.Lock()
+	delete(m.newStart, &cancel)
+	closed := m.closed
+	m.mu.Unlock()
 	if err != nil {
 		return "", err
+	}
+	if closed {
+		_ = r.Close() // it finished starting after shutdown began
+		return "", errManagerDone
 	}
 	var release func()
 	if m.opt.Reserve != nil {
@@ -423,6 +445,9 @@ func (m *Manager) Close() {
 			e.cancelStart() // its Send retires it once the start returns
 		}
 		delete(m.runs, id)
+	}
+	for cancel := range m.newStart {
+		(*cancel)() // its New closes the adapter once the start returns
 	}
 	m.mu.Unlock()
 	for _, e := range all {

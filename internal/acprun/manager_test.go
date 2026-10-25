@@ -606,3 +606,35 @@ func TestManager_NewSessionWithoutSupport(t *testing.T) {
 		t.Fatal("New without StartNew succeeded")
 	}
 }
+
+// Shutdown during a new session's start waits for it and closes its
+// adapter, instead of leaving it running untracked.
+func TestManager_CloseDuringNewSessionStart(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	r := &fakeRunner{}
+	m := NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) {
+			close(started)
+			<-release // an adapter that finishes starting regardless of ctx
+			return r, "late-1", nil
+		}})
+	newErr := make(chan error, 1)
+	go func() { _, err := m.New(context.Background(), "/w"); newErr <- err }()
+	<-started
+	closed := make(chan struct{})
+	go func() { m.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a new session's adapter was still starting")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-closed
+	if err := <-newErr; err == nil {
+		t.Fatal("New succeeded during shutdown")
+	}
+	if !r.closed.Load() {
+		t.Fatal("the late adapter was left running")
+	}
+}

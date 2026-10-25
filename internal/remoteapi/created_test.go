@@ -2,6 +2,7 @@ package remoteapi
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -142,4 +143,25 @@ func ids(list []Session) []string {
 		out = append(out, s.ID)
 	}
 	return out
+}
+
+// Eligible matches below a page of automated ones are still found: the
+// limit applies after filtering.
+func TestLocalIndex_SearchLooksPastIneligibleMatches(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	all := make([]search.Result, 0, 41)
+	for i := 0; i < 40; i++ {
+		all = append(all, search.Result{SessionID: fmt.Sprintf("auto-%d", i), Automated: true, Snippet: "cache"})
+	}
+	all = append(all, search.Result{SessionID: "idle", Title: "Fix the cache", Snippet: "the [cache]"})
+	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
+		return all[:min(limit, len(all))], nil
+	}
+	hits, err := x.Search(context.Background(), "cache", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "idle" {
+		t.Fatalf("hits %+v, want the interactive session ranked below 40 automated ones", hits)
+	}
 }

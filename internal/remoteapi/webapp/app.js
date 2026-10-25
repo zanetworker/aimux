@@ -258,7 +258,7 @@ let createKey = null; // kept across retries of one request, so it creates one s
 async function startNew(ev) {
   ev.preventDefault();
   const text = $('newprompt').value.trim();
-  if (!text || !newProject || creating) return;
+  if (!text || !newProject || creating || $('newsheet').hidden) return;
   creating = true;
   $('newstart').disabled = true;
   $('newerror').hidden = true;
@@ -937,16 +937,26 @@ function listenAgain(session, since) {
 
 // dictate fills the message box from speech; with auto-send (or hands-free)
 // it sends when the user stops talking.
+// dictationGen invalidates a dictation when the user navigates away: its
+// late result must not fill, or send, a message on another screen.
+let dictationGen = 0;
+
 function dictate(fromLoop) {
   const box = $('newsheet').hidden ? $('prompt') : $('newprompt');
   const mic = $('newsheet').hidden ? $('mic') : $('newmic');
   if (Voice.listening()) { Voice.stopListening(); return; }
   if (box.disabled) return;
   const base = box.value.trim() ? box.value.trim() + ' ' : '';
+  const gen = ++dictationGen;
   const ok = Voice.listen({
-    onText: (text) => { box.value = base + text; if (box === $('prompt')) autoResize(); },
+    onText: (text) => {
+      if (gen !== dictationGen) return;
+      box.value = base + text;
+      if (box === $('prompt')) autoResize();
+    },
     onEnd: (text) => {
       mic.classList.remove('listening');
+      if (gen !== dictationGen) return;
       setStatus(following ? 'live' : '', following ? 'ok' : '');
       if (text && Voice.settings().autoSend) {
         (box === $('prompt') ? $('composer') : $('newform')).requestSubmit();
@@ -995,6 +1005,7 @@ function setupVoice() {
 // else the list.
 
 function route() {
+  dictationGen++; // a dictation in progress belongs to the screen being left
   Voice.stopListening();
   const m = location.hash.match(/^#\/s\/(.+)$/);
   if (m) showSession(decodeURIComponent(m[1]));
