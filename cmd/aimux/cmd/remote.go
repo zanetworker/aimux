@@ -168,12 +168,17 @@ func newRemoteServeCmd() *cobra.Command {
 				Check: router.Check, Send: router.Send, Cancel: manager.Cancel,
 			}, remoteapi.BrokerOptions{ApprovalTimeout: s.approvalTimeout})
 			claude := &provider.Claude{}
-			searcher := search.DefaultService(io.Discard)
 			// Keyword ranking only (below), in an index of its own: without
 			// embeddings, refreshing the shared index would mark changed
-			// sessions as seen before the CLI and TUI embed them.
-			searcher.Embedder = nil
-			searcher.DBPath = filepath.Join(home, ".aimux", "remote-search.db")
+			// sessions as seen before the CLI and TUI embed them. One service
+			// refreshes it in the background; a second one answers queries, so
+			// a search reads the last committed index (SQLite WAL) instead of
+			// waiting for a refresh that can take minutes.
+			remoteIndex := filepath.Join(home, ".aimux", "remote-search.db")
+			searcher := search.DefaultService(io.Discard)
+			searcher.Embedder, searcher.DBPath = nil, remoteIndex
+			reader := search.DefaultService(io.Discard)
+			reader.Embedder, reader.DBPath = nil, remoteIndex
 			index := &remoteapi.LocalIndex{
 				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
 				Discover: history.Discover, ParseTrace: claude.ParseTrace, Owned: manager.Owns,
@@ -183,7 +188,7 @@ func newRemoteServeCmd() *cobra.Command {
 				// query nothing contains finds nothing. The index is refreshed in
 				// the background (below); refreshing per query takes seconds.
 				SearchIndex: func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
-					rs, _, err := searcher.Query(ctx, q, search.QueryOpts{Mode: search.ModeKeyword, Limit: limit, IncludeAutomated: true, NoRefresh: true, IDs: ids})
+					rs, _, err := reader.Query(ctx, q, search.QueryOpts{Mode: search.ModeKeyword, Limit: limit, IncludeAutomated: true, NoRefresh: true, IDs: ids})
 					return rs, err
 				},
 			}

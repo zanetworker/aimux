@@ -624,7 +624,7 @@ function handle(e, live) {
     case 'approval':
       approvalCard(d);
       if (live && Voice.settings().speak) {
-        Voice.stopListening();
+        dictationGen++;
         Voice.speak('The agent asks for permission: ' + (d.title || 'a tool call') + '. Tap one of the options on screen.');
       }
       break;
@@ -950,6 +950,7 @@ function speakTurn(t) {
     ? 'Ran ' + (lines.length === 1 ? 'one tool' : lines.length + ' tools') + (failed ? ', ' + failed + ' failed.' : '.')
     : '';
   const session = current && current.id;
+  dictationGen++; // a dictation in progress must not auto-send what it overhears
   Voice.speak(Voice.spoken(t.text, summary), () => listenAgain(session, Date.now()));
 }
 

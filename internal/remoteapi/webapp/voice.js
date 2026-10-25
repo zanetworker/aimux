@@ -92,8 +92,11 @@ const Voice = (() => {
   // tapped the mic, or sent something), which must not restart listening.
   let speakGen = 0;
 
+  // speak stops any dictation first: the microphone would otherwise hear
+  // the reply from the speaker and type it into the message box.
   function speak(text, onEnd) {
     if (!synth || !text) { if (onEnd) onEnd(); return; }
+    stopListening();
     stopSpeaking();
     const gen = ++speakGen;
     const u = new SpeechSynthesisUtterance(text);
