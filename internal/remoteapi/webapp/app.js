@@ -91,57 +91,190 @@ function ago(iso) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
   if (!isFinite(s)) return '';
   if (s < 60) return 'now';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  return Math.floor(s / 86400) + 'd ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return Math.floor(s / 86400) + 'd';
 }
 
-function badge(state) {
-  const b = el('span', 'badge ' + state, STATE_LABEL[state] || state);
-  return b;
+function dayGroup(iso) {
+  const d = new Date(iso);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const t = d.getTime(), day = 86400000;
+  if (t >= today.getTime()) return 'Today';
+  if (t >= today.getTime() - day) return 'Yesterday';
+  if (t >= today.getTime() - 6 * day) return 'This week';
+  return 'Earlier';
+}
+
+// mark highlights the search snippet's [matched] words, after escaping.
+function mark(snippet) {
+  return escapeHtml(snippet || '').replace(/\[([^\]\n]{1,80})\]/g, '<mark>$1</mark>');
+}
+
+let query = '';
+let searchTimer = null;
+
+function showView(name) {
+  $('listview').hidden = name !== 'list';
+  $('newsheet').hidden = name !== 'new';
+  $('session').hidden = name !== 'session';
+  $('back').hidden = name === 'list';
 }
 
 async function showList() {
   if (current) drafts.set(current.id, $('prompt').value);
   closeSession();
-  $('session').hidden = true;
-  $('list').hidden = false;
-  $('back').hidden = true;
+  showView('list');
   $('state').hidden = true;
+  setActivity('');
   $('title').textContent = 'aimux';
   document.title = 'aimux';
   await loadList();
   clearInterval(listTimer);
-  listTimer = setInterval(loadList, 30000);
+  listTimer = setInterval(() => { if (!query) loadList(); }, 30000);
 }
 
 async function loadList() {
+  if (query) return runSearch();
   setStatus('loading');
   let data;
   try {
     data = await api('GET', '/v1/sessions?limit=100');
   } catch (e) {
     setStatus('offline', 'error');
-    const list = $('list');
-    list.replaceChildren(el('div', 'empty', 'Could not load sessions: ' + e.message));
+    $('list').replaceChildren(el('div', 'empty', 'Could not load sessions: ' + e.message));
     return;
   }
+  if (query) return; // the user started searching meanwhile
   setStatus('');
-  const list = $('list');
   if (!data.sessions.length) {
-    list.replaceChildren(el('div', 'empty', 'No Claude sessions yet. Sessions you start on your Mac show up here.'));
+    $('list').replaceChildren(el('div', 'empty', 'No Claude sessions yet. Start one with +, or on your Mac.'));
     return;
   }
-  list.replaceChildren(...data.sessions.map((s) => {
+  renderSessions(data.sessions, true);
+}
+
+async function runSearch() {
+  const q = query;
+  setStatus('searching');
+  let data;
+  try {
+    data = await api('GET', '/v1/search?q=' + encodeURIComponent(q) + '&limit=30');
+  } catch (e) {
+    if (q !== query) return;
+    setStatus('');
+    $('list').replaceChildren(el('div', 'empty', 'Search failed: ' + e.message));
+    return;
+  }
+  if (q !== query) return; // a newer query is on its way
+  setStatus('');
+  if (!data.results.length) {
+    $('list').replaceChildren(el('div', 'empty', 'No sessions match \u201c' + q + '\u201d.'));
+    return;
+  }
+  renderSessions(data.results, false);
+}
+
+// renderSessions draws compact rows: a state dot, the title and when, then
+// one dim line saying what the session was last asked (or, for a search,
+// where it matched).
+function renderSessions(sessions, grouped) {
+  const out = [];
+  let group = '';
+  for (const s of sessions) {
+    if (grouped && dayGroup(s.lastActive) !== group) {
+      group = dayGroup(s.lastActive);
+      out.push(el('div', 'group', group));
+    }
     const item = el('button', 'session-item');
     item.type = 'button';
     const row = el('div', 'row');
-    row.append(el('span', 'name', s.title || s.id.slice(0, 8)), badge(s.state));
+    const dot = el('span', 'dot ' + s.state);
+    dot.title = STATE_LABEL[s.state] || s.state;
     const project = (s.project || '').split('/').filter(Boolean).pop() || '';
-    item.append(row, el('div', 'meta', [project, ago(s.lastActive)].filter(Boolean).join(' · ')));
+    row.append(dot, el('span', 'name', s.title || s.id.slice(0, 8)), el('span', 'proj', project), el('span', 'ago', ago(s.lastActive)));
+    item.append(row);
+    if (s.snippet) {
+      const sn = el('div', 'meta snippet');
+      sn.innerHTML = mark(s.snippet);
+      item.append(sn);
+    } else if (s.lastPrompt && s.lastPrompt !== s.title) {
+      item.append(el('div', 'meta', s.lastPrompt));
+    }
+    item.setAttribute('aria-label', (s.title || 'session') + ', ' + (STATE_LABEL[s.state] || s.state));
     item.addEventListener('click', () => { location.hash = '#/s/' + encodeURIComponent(s.id); });
-    return item;
+    out.push(item);
+  }
+  $('list').replaceChildren(...out);
+}
+
+// New session: pick one of the recent project folders, say what to do.
+
+let newProject = '';
+
+async function showNew() {
+  if (current) drafts.set(current.id, $('prompt').value);
+  closeSession();
+  clearInterval(listTimer);
+  showView('new');
+  $('state').hidden = true;
+  setActivity('');
+  $('title').textContent = 'aimux';
+  $('newerror').hidden = true;
+  const box = $('projects');
+  box.replaceChildren(el('div', 'empty', 'Loading projects\u2026'));
+  let data;
+  try {
+    data = await api('GET', '/v1/projects');
+  } catch (e) {
+    box.replaceChildren(el('div', 'empty', 'Could not load projects: ' + e.message));
+    return;
+  }
+  if (!data.projects.length) {
+    box.replaceChildren(el('div', 'empty', 'No recent projects. Start a session in a folder on your Mac first.'));
+    return;
+  }
+  if (!data.projects.some((p) => p.path === newProject)) newProject = data.projects[0].path;
+  box.replaceChildren(...data.projects.map((p) => {
+    const b = el('button', 'project' + (p.path === newProject ? ' chosen' : ''));
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(p.path === newProject));
+    b.append(el('span', 'name', p.name), el('span', 'path', p.path.replace(/^\/Users\/[^/]+/, '~')));
+    b.addEventListener('click', () => {
+      newProject = p.path;
+      box.querySelectorAll('.project').forEach((x) => { x.classList.remove('chosen'); x.setAttribute('aria-checked', 'false'); });
+      b.classList.add('chosen');
+      b.setAttribute('aria-checked', 'true');
+    });
+    return b;
   }));
+  $('newprompt').focus();
+}
+
+let creating = false;
+let createKey = null; // kept across retries of one request, so it creates one session
+
+async function startNew(ev) {
+  ev.preventDefault();
+  const text = $('newprompt').value.trim();
+  if (!text || !newProject || creating) return;
+  creating = true;
+  $('newstart').disabled = true;
+  $('newerror').hidden = true;
+  if (!createKey) createKey = newKey();
+  try {
+    const r = await api('POST', '/v1/sessions', { cwd: newProject, text, key: createKey });
+    createKey = null;
+    $('newprompt').value = '';
+    location.hash = '#/s/' + encodeURIComponent(r.id);
+  } catch (e) {
+    $('newerror').textContent = 'Could not start the session: ' + e.message;
+    $('newerror').hidden = false;
+  } finally {
+    creating = false;
+    $('newstart').disabled = false;
+  }
 }
 
 // Session view
@@ -174,10 +307,10 @@ async function showSession(id) {
   $('prompt').value = drafts.get(id) || '';
   autoResize();
   const gen = nav;
-  $('list').hidden = true;
-  $('session').hidden = false;
-  $('back').hidden = false;
+  showView('session');
+  setActivity('');
   $('messages').replaceChildren();
+  $('pending').replaceChildren();
   $('banner').hidden = true;
   $('banner').textContent = '';
   $('title').textContent = 'Loading\u2026';
@@ -221,6 +354,7 @@ async function load(id, gen) {
   if (gen !== nav) return;
   current = { id, detail };
   $('messages').replaceChildren();
+  $('pending').replaceChildren();
   $('title').textContent = detail.title || id.slice(0, 8);
   document.title = (detail.title || 'session') + ' \u00b7 aimux';
   showState(detail.state);
@@ -352,8 +486,8 @@ function showState(state) {
   if (current) current.detail.state = state;
   const s = $('state');
   s.hidden = false;
-  s.className = 'badge ' + state;
-  s.textContent = STATE_LABEL[state] || state;
+  s.className = 'dot ' + state;
+  s.title = STATE_LABEL[state] || state;
   const inTerminal = state === 'open_in_terminal';
   $('banner').hidden = !inTerminal;
   $('banner').textContent = inTerminal
@@ -374,7 +508,9 @@ function refresh() {
 }
 
 // renderHistory draws the turns and returns each one's last element, so
-// notes about a turn (its error) can be placed right after it.
+// notes about a turn (its error) can be placed right after it. Each turn is
+// its prompt, one collapsed line for its tools, and its reply, cut to a few
+// lines until tapped.
 function renderHistory(turns) {
   const box = $('messages');
   const ends = [];
@@ -383,20 +519,16 @@ function renderHistory(turns) {
     if (t.user) box.append(el('div', 'msg user', t.user));
     if (t.reply || (t.tools && t.tools.length)) {
       const div = el('div', 'msg assistant');
+      if (t.tools && t.tools.length) {
+        const tools = toolsBlock();
+        for (const tool of t.tools) addTool(tools, tool.ok ? 'completed' : 'failed', toolLabel(tool.name, tool.snippet));
+        div.append(tools);
+      }
       if (t.reply) {
         const text = el('div', 'text');
         text.innerHTML = renderMarkdown(t.reply);
         div.append(text);
-      }
-      if (t.tools && t.tools.length) {
-        const tools = el('div', 'tools');
-        for (const tool of t.tools) {
-          let target = (tool.snippet || '').split('\n')[0];
-          if (/^\/\S+$/.test(target)) target = target.split('/').pop(); // a bare path: its file name
-
-          tools.append(el('div', 'tool ' + (tool.ok ? 'completed' : 'failed'), target ? tool.name + ' ' + target : tool.name));
-        }
-        div.append(tools);
+        clamp(div, text);
       }
       box.append(div);
     }
@@ -404,6 +536,57 @@ function renderHistory(turns) {
   }
   scrollDown(true);
   return ends;
+}
+
+// toolLabel is a tool and its target: a bare path shortened to its file name.
+function toolLabel(name, snippet) {
+  let target = (snippet || '').split('\n')[0];
+  if (/^\/\S+$/.test(target)) target = target.split('/').pop();
+  if (target.length > 60) target = target.slice(0, 60) + '\u2026';
+  return target ? name + ' ' + target : name;
+}
+
+// toolsBlock is a turn's tools, collapsed to one summary line.
+function toolsBlock() {
+  const d = el('details', 'tools');
+  d.append(el('summary'), el('div', 'list'));
+  return d;
+}
+
+function addTool(block, status, label) {
+  const line = el('div', 'tool ' + status, label);
+  block.lastChild.append(line);
+  summarize(block);
+  return line;
+}
+
+// summarize writes "N tools: last ✓ ✗" so a turn's work reads at a glance.
+function summarize(block) {
+  const lines = [...block.lastChild.children];
+  const failed = lines.filter((l) => l.classList.contains('failed')).length;
+  const last = lines[lines.length - 1];
+  const head = lines.length === 1 ? '1 tool' : lines.length + ' tools';
+  block.firstChild.textContent = head + (failed ? ' \u00b7 ' + failed + ' failed' : '') + (last ? ' \u00b7 ' + last.textContent : '');
+  block.classList.toggle('has-failed', failed > 0);
+}
+
+// clamp cuts a long reply to a few lines, with a tap to read it all.
+function clamp(div, text) {
+  if ((text.textContent || '').length < 500 && text.querySelectorAll('p, li, pre').length < 6) return;
+  text.classList.add('clamped');
+  const more = el('button', 'more', 'more');
+  more.type = 'button';
+  more.addEventListener('click', () => {
+    const open = text.classList.toggle('clamped');
+    more.textContent = open ? 'more' : 'less';
+  });
+  div.append(more);
+}
+
+function setActivity(text) {
+  const a = $('activity');
+  a.textContent = text;
+  a.hidden = !text;
 }
 
 function handle(e, live) {
@@ -424,20 +607,30 @@ function handle(e, live) {
       break;
     case 'approval':
       approvalCard(d);
+      if (live && Voice.settings().speak) {
+        Voice.stopListening();
+        Voice.speak('The agent asks for permission: ' + (d.title || 'a tool call') + '. Tap allow or no.');
+      }
       break;
     case 'approval_resolved':
       resolveCard(d.approvalId, d.outcome);
       break;
-    case 'turn_done':
+    case 'turn_done': {
+      const done = turn;
       endTurn();
+      // Spoken first: a turn joined part way (a new session's first reply)
+      // has its full text from the replay plus the stream.
+      if (live && d.stopReason !== 'cancelled') speakTurn(done);
       if (live && !liveTurns.has(e.turn)) { refresh(); return; }
       if (d.stopReason === 'cancelled') system('Stopped.');
       else if (d.stopReason && d.stopReason !== 'end_turn') system('Turn ended: ' + d.stopReason);
       break;
+    }
     case 'turn_error':
       endTurn();
       if (live && !liveTurns.has(e.turn)) { refresh(); return; }
       system(d.error || 'The turn failed.', true);
+      if (live && Voice.settings().speak) Voice.speak('The turn failed.');
       break;
   }
   scrollDown();
@@ -450,6 +643,7 @@ function startTurn() {
   $('messages').append(div);
   turn = { div, text: '', textEl, tools: {}, toolsEl: null, thinking: null, planEl: null, pending: false };
   setRunning(true);
+  setActivity('thinking');
 }
 
 function ensureTurn() {
@@ -461,6 +655,7 @@ function endTurn() {
   if (turn) {
     turn.div.classList.remove('streaming');
     flushText(turn);
+    if (turn.text) clamp(turn.div, turn.textEl);
     if (!turn.text && !turn.toolsEl && !turn.thinking && !turn.planEl) turn.div.remove();
   }
   turn = null;
@@ -477,6 +672,7 @@ function update(u) {
   switch (u.sessionUpdate) {
     case 'agent_message_chunk':
       if (u.content && u.content.type === 'text') {
+        if (!t.text) setActivity('writing');
         t.text += u.content.text;
         if (!t.pending) { // re-render at most once a frame
           t.pending = true;
@@ -496,10 +692,10 @@ function update(u) {
       }
       break;
     case 'tool_call': {
-      if (!t.toolsEl) { t.toolsEl = el('div', 'tools'); t.div.append(t.toolsEl); }
-      const line = el('div', 'tool ' + (u.status || 'pending'), u.title || u.kind || 'tool');
-      t.tools[u.toolCallId] = line;
-      t.toolsEl.append(line);
+      if (!t.toolsEl) { t.toolsEl = toolsBlock(); t.div.insertBefore(t.toolsEl, t.textEl); }
+      const title = u.title || u.kind || 'tool';
+      t.tools[u.toolCallId] = addTool(t.toolsEl, u.status || 'pending', title);
+      setActivity(title);
       break;
     }
     case 'tool_call_update': {
@@ -507,6 +703,8 @@ function update(u) {
       if (!line) break;
       if (u.status) line.className = 'tool ' + u.status;
       if (u.title) line.textContent = u.title;
+      summarize(t.toolsEl);
+      if (u.status === 'in_progress' || u.title) setActivity(line.textContent);
       break;
     }
     case 'plan': {
@@ -548,8 +746,11 @@ function approvalCard(d) {
     opts.append(b);
   }
   card.append(opts, el('div', 'outcome'));
-  $('messages').append(card);
+  card.dataset.title = d.title || 'a tool call';
+  $('pending').append(card); // pinned above the composer until answered
+  setActivity('waiting for you');
   if (navigator.vibrate) navigator.vibrate(80);
+  return card;
 }
 
 async function answer(card, id, option) {
@@ -564,12 +765,16 @@ async function answer(card, id, option) {
   }
 }
 
+// resolveCard takes an answered request out of the pinned area and leaves a
+// one-line record of it in the conversation.
 function resolveCard(id, outcome) {
   const card = document.querySelector('[data-approval="' + CSS.escape(id) + '"]');
   if (!card) return;
-  card.classList.add('resolved');
-  card.querySelectorAll('button').forEach((b) => { b.disabled = true; });
-  card.querySelector('.outcome').textContent = { allowed: 'Allowed', denied: 'Denied', expired: 'Expired: denied after no answer' }[outcome] || outcome;
+  const word = { allowed: 'Allowed', denied: 'Denied', expired: 'Expired (denied, no answer)' }[outcome] || outcome;
+  const note = el('div', 'decision ' + outcome, word + ': ' + card.dataset.title);
+  card.remove();
+  (turn ? turn.div : $('messages')).append(note);
+  if (running) setActivity('thinking');
 }
 
 // Sending and stopping
@@ -584,6 +789,7 @@ async function send(ev) {
   ev.preventDefault();
   const text = $('prompt').value.trim();
   if (!text || !current || running || sending || !following) return;
+  Voice.stopSpeaking();
   const gen = nav;
   const session = current.id;
   const prior = unsettled.get(session);
@@ -645,9 +851,10 @@ function setRunning(on) {
     const base = current.detail.state === 'open_in_terminal' ? 'open_in_terminal' : (on ? 'busy' : 'idle');
     const s = $('state');
     s.hidden = false;
-    s.className = 'badge ' + base;
-    s.textContent = STATE_LABEL[base];
+    s.className = 'dot ' + base;
+    s.title = STATE_LABEL[base];
   }
+  if (!on) setActivity('');
   $('stop').hidden = !on;
   $('send').hidden = on;
   setComposer(!!current && !$('banner').textContent);
@@ -668,7 +875,9 @@ let stick = true;
 $('messages').addEventListener('scroll', () => {
   const box = $('messages');
   stick = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+  $('jump').hidden = stick;
 });
+$('jump').addEventListener('click', () => { stick = true; scrollDown(true); $('jump').hidden = true; });
 
 function scrollDown(force) {
   const box = $('messages');
@@ -699,18 +908,118 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && running) requestWakeLock();
 });
 
-// Routing: #/s/<id> is a session, anything else the list.
+// Voice
+
+// speakTurn reads a finished reply aloud, if the user asked for that, and
+// in hands-free mode starts listening for the next message afterwards.
+function speakTurn(t) {
+  const v = Voice.settings();
+  if (!v.speak || !t) return;
+  const lines = t.toolsEl ? [...t.toolsEl.lastChild.children] : [];
+  const failed = lines.filter((l) => l.classList.contains('failed')).length;
+  const summary = lines.length
+    ? 'Ran ' + (lines.length === 1 ? 'one tool' : lines.length + ' tools') + (failed ? ', ' + failed + ' failed.' : '.')
+    : '';
+  const session = current && current.id;
+  Voice.speak(Voice.spoken(t.text, summary), () => listenAgain(session, Date.now()));
+}
+
+// listenAgain continues a hands-free conversation once the reply has been
+// spoken, waiting (briefly) for the message box if the view is reloading.
+function listenAgain(session, since) {
+  if (!Voice.settings().handsFree || !current || current.id !== session || running) return;
+  if ($('prompt').disabled || !following) {
+    if (Date.now() - since < 10000) setTimeout(() => listenAgain(session, since), 300);
+    return;
+  }
+  dictate(true);
+}
+
+// dictate fills the message box from speech; with auto-send (or hands-free)
+// it sends when the user stops talking.
+function dictate(fromLoop) {
+  const box = $('newsheet').hidden ? $('prompt') : $('newprompt');
+  const mic = $('newsheet').hidden ? $('mic') : $('newmic');
+  if (Voice.listening()) { Voice.stopListening(); return; }
+  if (box.disabled) return;
+  const base = box.value.trim() ? box.value.trim() + ' ' : '';
+  const ok = Voice.listen({
+    onText: (text) => { box.value = base + text; if (box === $('prompt')) autoResize(); },
+    onEnd: (text) => {
+      mic.classList.remove('listening');
+      setStatus(following ? 'live' : '', following ? 'ok' : '');
+      if (text && Voice.settings().autoSend) {
+        (box === $('prompt') ? $('composer') : $('newform')).requestSubmit();
+      }
+    },
+    onError: (err) => {
+      mic.classList.remove('listening');
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        setStatus(fromLoop ? 'tap the mic to talk' : 'microphone not allowed', 'error');
+      }
+    },
+  });
+  if (ok) {
+    mic.classList.add('listening');
+    setStatus('listening', 'ok');
+  }
+}
+
+function setupVoice() {
+  if (Voice.canListen) {
+    $('mic').hidden = false;
+    $('newmic').hidden = false;
+    $('mic').addEventListener('click', () => dictate(false));
+    $('newmic').addEventListener('click', () => dictate(false));
+  }
+  if (!Voice.canListen && !Voice.canSpeak) return;
+  $('voice').hidden = false;
+  const menu = $('voicemenu');
+  const sync = () => {
+    const v = Voice.settings();
+    menu.querySelectorAll('[data-voice]').forEach((c) => { c.checked = !!v[c.dataset.voice]; });
+  };
+  menu.querySelectorAll('[data-voice]').forEach((c) => {
+    if (!Voice.canListen && c.dataset.voice !== 'speak') c.closest('label').hidden = true;
+    c.addEventListener('change', () => {
+      Voice.set(c.dataset.voice, c.checked);
+      if (!c.checked && c.dataset.voice === 'speak') Voice.stopSpeaking();
+      sync();
+    });
+  });
+  $('voice').addEventListener('click', (e) => { e.stopPropagation(); sync(); menu.hidden = !menu.hidden; });
+  document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) menu.hidden = true; });
+}
+
+// Routing: #/s/<id> is a session, #/new the new-session sheet, anything
+// else the list.
 
 function route() {
+  Voice.stopListening();
   const m = location.hash.match(/^#\/s\/(.+)$/);
   if (m) showSession(decodeURIComponent(m[1]));
+  else if (location.hash === '#/new') showNew();
   else showList();
 }
 
 $('back').addEventListener('click', () => { location.hash = ''; });
+$('newbtn').addEventListener('click', () => { location.hash = '#/new'; });
+$('newcancel').addEventListener('click', () => { location.hash = ''; });
+$('newform').addEventListener('submit', startNew);
+$('newprompt').addEventListener('input', () => { createKey = null; });
+$('search').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    query = $('search').value.trim();
+    loadList();
+  }, 300);
+});
+setupVoice();
 $('refresh').addEventListener('click', () => {
   const m = location.hash.match(/^#\/s\/(.+)$/);
-  if (m) showSession(decodeURIComponent(m[1])); else loadList();
+  if (m) showSession(decodeURIComponent(m[1]));
+  else if (location.hash === '#/new') showNew();
+  else loadList();
 });
 $('composer').addEventListener('submit', send);
 $('stop').addEventListener('click', stop);

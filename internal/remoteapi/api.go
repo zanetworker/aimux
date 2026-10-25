@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
@@ -29,6 +30,7 @@ type Session struct {
 	Project    string    `json:"project"`
 	LastActive time.Time `json:"lastActive"`
 	State      string    `json:"state"`
+	LastPrompt string    `json:"lastPrompt,omitempty"` // the latest message the user sent
 }
 
 // SessionDetail is a session plus its most recent turns.
@@ -42,6 +44,14 @@ type API struct {
 	Broker   *Broker
 	Sessions func(ctx context.Context, limit int, includeAutomated bool) ([]Session, error)
 	Session  func(ctx context.Context, id string, turns int) (SessionDetail, error)
+	Search   func(ctx context.Context, query string, limit int) ([]SearchHit, error)
+	// Projects lists the folders a new session may start in; Create starts
+	// one there and returns its id.
+	Projects func(ctx context.Context) ([]Project, error)
+	Create   func(ctx context.Context, cwd, text string) (string, error)
+
+	createMu sync.Mutex        // one creation at a time, so a retried key cannot create twice
+	created  map[string]string // client key -> new session id
 }
 
 // Handler returns the /v1 routes, admitting only allowed Tailscale logins
@@ -51,6 +61,9 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux.HandleFunc("GET /v1/health", a.health)
 	mux.HandleFunc("GET /v1/sessions", a.listSessions)
 	mux.HandleFunc("GET /v1/sessions/{id}", a.getSession)
+	mux.HandleFunc("POST /v1/sessions", a.newSession)
+	mux.HandleFunc("GET /v1/search", a.search)
+	mux.HandleFunc("GET /v1/projects", a.projects)
 	mux.HandleFunc("POST /v1/sessions/{id}/messages", a.sendMessage)
 	mux.HandleFunc("GET /v1/sessions/{id}/events", a.events)
 	mux.HandleFunc("POST /v1/sessions/{id}/cancel", a.cancel)
@@ -141,6 +154,103 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+func (a *API) search(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("q is empty"))
+		return
+	}
+	limit, err := intParam(r, "limit", 20, 100)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err)
+		return
+	}
+	if a.Search == nil {
+		writeError(w, http.StatusNotFound, "not_supported", errors.New("search is not available"))
+		return
+	}
+	hits, err := a.Search(r.Context(), q, limit)
+	if err != nil {
+		writeFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": hits})
+}
+
+func (a *API) projects(w http.ResponseWriter, r *http.Request) {
+	if a.Projects == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"projects": []Project{}})
+		return
+	}
+	list, err := a.Projects(r.Context())
+	if err != nil {
+		writeFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": list})
+}
+
+// newSession starts a session in one of the recent project folders (never
+// an arbitrary path) and sends its first message.
+func (a *API) newSession(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Cwd  string `json:"cwd"`
+		Text string `json:"text"`
+		Key  string `json:"key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with cwd and text: %w", err))
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("text is empty"))
+		return
+	}
+	if a.Create == nil || a.Projects == nil {
+		writeError(w, http.StatusNotFound, "not_supported", errors.New("starting sessions is not available"))
+		return
+	}
+	projects, err := a.Projects(r.Context())
+	if err != nil {
+		writeFailure(w, err)
+		return
+	}
+	allowed := false
+	for _, p := range projects {
+		allowed = allowed || p.Path == req.Cwd
+	}
+	if !allowed {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("cwd must be one of the recent projects from /v1/projects"))
+		return
+	}
+
+	a.createMu.Lock()
+	id, ok := a.created[req.Key]
+	if !ok || req.Key == "" {
+		id, err = a.Create(r.Context(), req.Cwd, req.Text)
+		if err == nil && req.Key != "" {
+			if a.created == nil {
+				a.created = map[string]string{}
+			}
+			a.created[req.Key] = id
+		}
+	}
+	a.createMu.Unlock()
+	if err != nil {
+		writeFailure(w, err)
+		return
+	}
+	turn, err := a.Broker.Start(id, req.Text, req.Key)
+	if err != nil {
+		writeFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"id": id, "turn": turn,
+		"events": fmt.Sprintf("/v1/sessions/%s/events", id),
+	})
 }
 
 func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {

@@ -273,7 +273,9 @@ func scanSession(id, filePath, project string) (Session, error) {
 		if content != nil {
 			switch role {
 			case "user":
-				lastUserContent = content
+				if isHuman { // not a tool result, which usually ends the file
+					lastUserContent = content
+				}
 			case "assistant":
 				lastAssistantContent = content
 			}

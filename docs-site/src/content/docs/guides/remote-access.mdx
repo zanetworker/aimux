@@ -33,7 +33,13 @@ From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:84
 
 ## Web client
 
-Open `https://<your-mac>.<tailnet>.ts.net:8443/app/` on your phone (`remote serve` prints the address). There is no login: Tailscale says who you are. The page lists your sessions with their state, and in a session shows its latest turns. You can send a message, follow the reply as it streams, answer permission requests with the agent's own options, and stop the turn. A session open in a terminal on the Mac is shown read-only. Add the page to your home screen to open it like an app.
+On the iPhone, install Tailscale and sign in with the same account as the Mac. Then open `https://<your-mac>.<tailnet>.ts.net:8443/app/` in Safari (`remote serve` prints the address) and use Share, Add to Home Screen to open it like an app. There is no login: Tailscale says who you are.
+
+- **Sessions:** one compact row each, grouped by day: a state dot (green idle, amber running, hollow when open in a terminal on the Mac), the title, project and age, and the last message you sent.
+- **Search:** the box at the top searches the content of your sessions (aimux's session index, refreshed every minute) and shows where each one matched.
+- **New session:** + starts a session in one of your recent project folders (only those; never an arbitrary path) with a first message.
+- **In a session:** each turn shows your message, one line summing up its tools (tap for the list) and the reply, cut to a few lines until you tap. The header says what the agent is doing right now. Permission requests are pinned above the message box, with a preview of what the tool will write or run; answer with the agent's own options. Stop ends the running turn. A session open in a terminal on the Mac is read-only.
+- **Voice:** the mic dictates into the message box (the browser's speech recognition; on iPhone it runs through Apple's speech service, like keyboard dictation). In the voice menu: read replies aloud (code is skipped), send when you stop talking, and hands-free conversation, which listens again after each reply. Permission requests are read out but only answered with a tap. iOS may need a tap on the mic again after the phone sleeps.
 
 The page is served by `remote serve` itself and loads nothing from elsewhere; its Content-Security-Policy allows only its own script, style and API.
 
@@ -54,7 +60,10 @@ Responses are JSON, except the events endpoint, which streams server-sent events
 | Method and path | Purpose |
 |---|---|
 | `GET /v1/health` | Who you are: `{"status","login"}` |
-| `GET /v1/sessions?limit=50` | Recent Claude sessions with `state`: `idle`, `open_in_terminal` or `busy`. Sessions started by a program (for example `claude -p`) are left out unless `include_automated=1` |
+| `GET /v1/sessions?limit=50` | Recent Claude sessions with `state`: `idle`, `open_in_terminal` or `busy`, and `lastPrompt`. Sessions started by a program (for example `claude -p`) are left out unless `include_automated=1`; sessions started through this API are always listed |
+| `GET /v1/search?q=...&limit=20` | Sessions matching `q` in their content, best first, each with a `snippet` where matched words are in `[brackets]` |
+| `GET /v1/projects` | Folders of recent sessions: where a new session may start |
+| `POST /v1/sessions` | Body `{"cwd","text","key"}`: start a session in one of `/v1/projects` and send its first message. Returns `202 {"id","turn","events"}`; a retry with the same `key` returns the same session |
 | `GET /v1/sessions/{id}?turns=20` | One session and its last turns (user text, reply, tools) |
 | `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn, returns `202 {"turn","after","events"}`. A retry with the same non-empty `key` returns the same turn instead of sending twice; keys are remembered per session until the server restarts |
 | `GET /v1/sessions/{id}/events?after=N` | Server-sent events after `N` (or the `Last-Event-ID` header, which wins on reconnect). `?wait=0` returns one JSON page instead, `{"events","log"}`; pass that `log` back as `?log=` with `after`, so a cursor from before a server restart replays the new log. Streamed event ids have the form `<log>.<seq>`; `<log>` changes when the server restarts, and a `Last-Event-ID` from an earlier log replays the new log from the start. The server keeps the latest 2,000 events per session, in memory |
@@ -79,6 +88,8 @@ If `~/.aimux/config.yaml` cannot be read or parsed, `aimux remote serve` stops w
 | `max_runs` | | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | | `10m` | Unanswered permission requests are denied after this |
 | `hostnames` | | detected from `tailscale status` | `Host` names to accept: this machine's tailnet names |
+
+Sessions started through the API are recorded in `~/.aimux/remote-created.json` (owner-only), so they stay listed although Claude marks agent-SDK sessions as automated.
 
 A session aimux continued keeps its adapter running between turns, up to `max_runs`, and stops it after a few idle minutes.
 

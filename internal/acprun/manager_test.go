@@ -544,3 +544,65 @@ func TestManager_CancelDuringReloadStopsTheTurn(t *testing.T) {
 		t.Fatalf("send returned %v after %d prompts; want the cancelled turn stopped before its prompt", err, prompts.Load())
 	}
 }
+
+func newSessionStarter(fs *fakeRunStarter, id string) StartNewFunc {
+	return func(ctx context.Context, cwd string) (Runner, string, error) {
+		r, err := fs.start(ctx, id, cwd)
+		return r, id, err
+	}
+}
+
+// A new session's run is kept, so the first message goes to it without a
+// second adapter (the session has no file to load yet).
+func TestManager_NewSessionKeepsItsRun(t *testing.T) {
+	fs := &fakeRunStarter{}
+	var reserved []string
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh-1"),
+		Reserve: func(id string) (func(), error) { reserved = append(reserved, id); return func() {}, nil }})
+	defer m.Close()
+	id, err := m.New(context.Background(), "/w/app")
+	if err != nil || id != "fresh-1" {
+		t.Fatalf("New: %q, %v", id, err)
+	}
+	if !m.Running("fresh-1") || len(reserved) != 1 || reserved[0] != "fresh-1" {
+		t.Fatalf("running=%v reserved=%v; want the new run kept and reserved", m.Running("fresh-1"), reserved)
+	}
+	if _, err := send(m, "fresh-1"); err != nil {
+		t.Fatal(err)
+	}
+	if fs.count() != 1 {
+		t.Fatalf("started %d adapters, want the new session's one", fs.count())
+	}
+}
+
+func TestManager_NewSessionWhenFullClosesTheRun(t *testing.T) {
+	fs := &fakeRunStarter{block: nil}
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh-2"), MaxRuns: 1})
+	defer m.Close()
+	// One busy run fills the only slot.
+	release := make(chan struct{})
+	fs.promptF = func(ctx context.Context, text string) (string, error) { <-release; return "end_turn", nil }
+	go func() { _, _ = send(m, "a") }()
+	for !m.Running("a") {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := m.New(context.Background(), "/w/app"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("New with no free slot: %v, want ErrTooManyRuns", err)
+	}
+	close(release)
+	fs.mu.Lock()
+	last := fs.runners[len(fs.runners)-1]
+	fs.mu.Unlock()
+	if !last.closed.Load() {
+		t.Fatal("the new session's adapter was left running after it could not be kept")
+	}
+}
+
+func TestManager_NewSessionWithoutSupport(t *testing.T) {
+	m := NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})
+	defer m.Close()
+	if _, err := m.New(context.Background(), "/w"); err == nil {
+		t.Fatal("New without StartNew succeeded")
+	}
+}

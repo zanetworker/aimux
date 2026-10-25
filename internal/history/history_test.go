@@ -1109,3 +1109,24 @@ func TestScanSession_TimestampsFromJSONL(t *testing.T) {
 		t.Errorf("LastActive = %v, want %v", s.LastActive, end)
 	}
 }
+
+// The last prompt is the user's last message, not the tool result that
+// usually ends a session's file.
+func TestScanSession_LastPromptSkipsToolResults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":"first ask"}}
+{"type":"user","timestamp":"2026-01-01T10:01:00Z","cwd":"/w","message":{"role":"user","content":[{"type":"text","text":"make the TTL configurable"}]}}
+{"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{}}]}}
+{"type":"user","timestamp":"2026-01-01T10:01:06Z","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanSession("s", path, "/w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LastPrompt != "make the TTL configurable" {
+		t.Fatalf("LastPrompt = %q, want the last human message", s.LastPrompt)
+	}
+}

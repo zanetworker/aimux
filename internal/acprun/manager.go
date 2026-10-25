@@ -22,6 +22,9 @@ type Runner interface {
 // StartFunc starts a run that continues sessionID in cwd.
 type StartFunc func(ctx context.Context, sessionID, cwd string) (Runner, error)
 
+// StartNewFunc starts a run for a new session in cwd and returns its id.
+type StartNewFunc func(ctx context.Context, cwd string) (Runner, string, error)
+
 // Errors returned by Manager.
 var (
 	ErrBusy        = errors.New("the session is already answering a message")
@@ -50,6 +53,8 @@ type ManagerOptions struct {
 	// keeps separate aimux processes from driving one session (SessionLock).
 	// Nil disables it.
 	Reserve func(sessionID string) (release func(), err error)
+	// StartNew starts a new session (New). Nil: new sessions are not offered.
+	StartNew StartNewFunc
 	// StartTimeout bounds starting an adapter and loading the session.
 	// Default 3 minutes (the first npx run downloads the adapter).
 	StartTimeout time.Duration
@@ -183,7 +188,7 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		}
 		cancel()
 		m.mu.Lock()
-		e.cancelStart = nil // spent: a later cancel during a reload must not find it
+		e.cancelStart = nil             // spent: a later cancel during a reload must not find it
 		owned := m.runs[sessionID] == e // false if Close or eviction removed it meanwhile
 		if err == nil && !m.closed && owned && ctx.Err() == nil {
 			e.setRun(r)
@@ -243,6 +248,53 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		e.retire()
 	}
 	return stop, err
+}
+
+// New starts a new session in cwd and keeps its run for the session's
+// messages, which go through Send as usual. The run counts against MaxRuns.
+func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
+	if m.opt.StartNew == nil {
+		return "", errors.New("starting new sessions is not supported")
+	}
+	sctx, cancel := context.WithTimeout(ctx, m.opt.StartTimeout)
+	defer cancel()
+	r, id, err := m.opt.StartNew(sctx, cwd)
+	if err != nil {
+		return "", err
+	}
+	var release func()
+	if m.opt.Reserve != nil {
+		if release, err = m.opt.Reserve(id); err != nil {
+			_ = r.Close()
+			return "", err
+		}
+	}
+	e, evicted, err := m.claim(id)
+	if evicted != nil {
+		evicted.retire()
+	}
+	if err != nil {
+		_ = r.Close()
+		if release != nil {
+			release()
+		}
+		return "", err
+	}
+	m.mu.Lock()
+	if m.closed || m.runs[id] != e { // Close took the entry meanwhile
+		m.mu.Unlock()
+		_ = r.Close()
+		if release != nil {
+			release()
+		}
+		return "", errManagerDone
+	}
+	e.release = release
+	e.setRun(r)
+	e.busy = false
+	e.lastUsed = m.opt.Now()
+	m.mu.Unlock()
+	return id, nil
 }
 
 // claim marks the session's run busy, creating an entry (and evicting the

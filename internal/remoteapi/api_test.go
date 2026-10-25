@@ -389,3 +389,79 @@ func TestAPI_EventPageNamesItsLogAndScopesAfter(t *testing.T) {
 		t.Fatalf("after=2 from this log: got %d events, want 1", len(evs))
 	}
 }
+
+func TestAPI_Search(t *testing.T) {
+	var gotQ string
+	api := &API{Broker: NewBroker(BrokerDeps{}, BrokerOptions{}),
+		Search: func(ctx context.Context, q string, limit int) ([]SearchHit, error) {
+			gotQ = q
+			return []SearchHit{{Session: Session{ID: "s1", Title: "Fix the cache"}, Snippet: "the [cache]"}}, nil
+		}}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	resp, body := do(t, srv, "GET", "/v1/search?q=cache+ttl", "")
+	results, _ := body["results"].([]any)
+	if resp.StatusCode != 200 || gotQ != "cache ttl" || len(results) != 1 {
+		t.Fatalf("search: %d q=%q %v", resp.StatusCode, gotQ, body)
+	}
+	if hit := results[0].(map[string]any); hit["snippet"] != "the [cache]" || hit["id"] != "s1" {
+		t.Fatalf("hit %v", hit)
+	}
+	if resp, body := do(t, srv, "GET", "/v1/search?q=+", ""); resp.StatusCode != 400 || body["code"] != "bad_request" {
+		t.Fatalf("empty query: %d %v", resp.StatusCode, body)
+	}
+}
+
+func newSessionAPI(t *testing.T) (*httptest.Server, *int) {
+	t.Helper()
+	creates := 0
+	var b *Broker
+	f := &fakeBackend{}
+	b = NewBroker(f.deps(&b), BrokerOptions{})
+	api := &API{Broker: b,
+		Projects: func(ctx context.Context) ([]Project, error) {
+			return []Project{{Path: "/w/app", Name: "app"}}, nil
+		},
+		Create: func(ctx context.Context, cwd, text string) (string, error) {
+			creates++
+			return fmt.Sprintf("new-%d", creates), nil
+		},
+	}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	t.Cleanup(srv.Close)
+	return srv, &creates
+}
+
+func TestAPI_NewSession(t *testing.T) {
+	srv, creates := newSessionAPI(t)
+	resp, body := do(t, srv, "GET", "/v1/projects", "")
+	if projects, _ := body["projects"].([]any); resp.StatusCode != 200 || len(projects) != 1 {
+		t.Fatalf("projects: %d %v", resp.StatusCode, body)
+	}
+	resp, body = do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"plan the release","key":"k1"}`)
+	if resp.StatusCode != 202 || body["id"] != "new-1" || body["turn"] == "" {
+		t.Fatalf("create: %d %v", resp.StatusCode, body)
+	}
+	// A retry with the same key is the same session and turn.
+	resp, again := do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"plan the release","key":"k1"}`)
+	if resp.StatusCode != 202 || again["id"] != "new-1" || again["turn"] != body["turn"] || *creates != 1 {
+		t.Fatalf("retry: %d %v (creates %d)", resp.StatusCode, again, *creates)
+	}
+}
+
+func TestAPI_NewSessionOnlyInRecentProjects(t *testing.T) {
+	srv, creates := newSessionAPI(t)
+	for _, body := range []string{
+		`{"cwd":"/etc","text":"x"}`,
+		`{"cwd":"/w/app/../../etc","text":"x"}`,
+		`{"cwd":"/w/app","text":"  "}`,
+		`not json`,
+	} {
+		if resp, out := do(t, srv, "POST", "/v1/sessions", body); resp.StatusCode != 400 || out["code"] != "bad_request" {
+			t.Fatalf("%s: %d %v, want 400 bad_request", body, resp.StatusCode, out)
+		}
+	}
+	if *creates != 0 {
+		t.Fatalf("created %d sessions from refused requests", *creates)
+	}
+}

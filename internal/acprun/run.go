@@ -85,7 +85,49 @@ type Run struct {
 // Start launches the adapter, initializes it and loads sessionID. Updates the
 // agent replays while loading are history and are not reported as events.
 func Start(ctx context.Context, spec Spec, sessionID string, approve Approver) (*Run, error) {
-	r := &Run{sessionID: acp.SessionId(sessionID), approve: approve}
+	r, init, err := launch(ctx, spec, approve)
+	if err != nil {
+		return nil, err
+	}
+	if !init.AgentCapabilities.LoadSession {
+		_ = r.Close()
+		return nil, fmt.Errorf("ACP adapter %s cannot load existing sessions", spec.Command)
+	}
+	r.sessionID = acp.SessionId(sessionID)
+	r.setLoading(true)
+	_, err = r.conn.LoadSession(ctx, acp.LoadSessionRequest{
+		SessionId: r.sessionID, Cwd: spec.Cwd, McpServers: []acp.McpServer{},
+	})
+	r.setLoading(false)
+	if err != nil {
+		_ = r.Close()
+		return nil, fmt.Errorf("load session %s in %s: %w", sessionID, spec.Cwd, err)
+	}
+	return r, nil
+}
+
+// StartNew launches the adapter and starts a new session in spec.Cwd; its id
+// is r.SessionID(). The agent writes the session file on the first prompt.
+func StartNew(ctx context.Context, spec Spec, approve Approver) (*Run, error) {
+	r, _, err := launch(ctx, spec, approve)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := r.conn.NewSession(ctx, acp.NewSessionRequest{Cwd: spec.Cwd, McpServers: []acp.McpServer{}})
+	if err != nil {
+		_ = r.Close()
+		return nil, fmt.Errorf("new session in %s: %w", spec.Cwd, err)
+	}
+	r.sessionID = resp.SessionId
+	return r, nil
+}
+
+// SessionID is the session this run continues.
+func (r *Run) SessionID() string { return string(r.sessionID) }
+
+// launch starts and initializes the adapter, with no session yet.
+func launch(ctx context.Context, spec Spec, approve Approver) (*Run, acp.InitializeResponse, error) {
+	r := &Run{approve: approve}
 	cmd := exec.Command(spec.Command, spec.Args...) // #nosec G204 -- adapter command comes from aimux config
 	cmd.Dir = spec.Cwd
 	cmd.Env = adapterEnv(os.Environ(), spec.Env)
@@ -95,14 +137,14 @@ func Start(ctx context.Context, spec Spec, sessionID string, approve Approver) (
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("start ACP adapter: %w", err)
+		return nil, acp.InitializeResponse{}, fmt.Errorf("start ACP adapter: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("start ACP adapter: %w", err)
+		return nil, acp.InitializeResponse{}, fmt.Errorf("start ACP adapter: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start ACP adapter %s: %w", spec.Command, err)
+		return nil, acp.InitializeResponse{}, fmt.Errorf("start ACP adapter %s: %w", spec.Command, err)
 	}
 	r.cmd, r.stdin = cmd, stdin
 	r.conn = acp.NewClientSideConnection(client{r}, stdin, stdout)
@@ -119,23 +161,9 @@ func Start(ctx context.Context, spec Spec, sessionID string, approve Approver) (
 	})
 	if err != nil {
 		_ = r.Close()
-		return nil, fmt.Errorf("initialize ACP adapter %s: %w", spec.Command, err)
+		return nil, acp.InitializeResponse{}, fmt.Errorf("initialize ACP adapter %s: %w", spec.Command, err)
 	}
-	if !init.AgentCapabilities.LoadSession {
-		_ = r.Close()
-		return nil, fmt.Errorf("ACP adapter %s cannot load existing sessions", spec.Command)
-	}
-
-	r.setLoading(true)
-	_, err = r.conn.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionId: r.sessionID, Cwd: spec.Cwd, McpServers: []acp.McpServer{},
-	})
-	r.setLoading(false)
-	if err != nil {
-		_ = r.Close()
-		return nil, fmt.Errorf("load session %s in %s: %w", sessionID, spec.Cwd, err)
-	}
-	return r, nil
+	return r, init, nil
 }
 
 func (r *Run) setLoading(v bool) {

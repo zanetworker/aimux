@@ -3,12 +3,19 @@ package remoteapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -27,6 +34,11 @@ type LocalIndex struct {
 	// Owned reports aimux's own adapter processes, which hold a session in
 	// Claude's registry without it being open in a terminal.
 	Owned func(pid int) bool
+	// Created is the sessions aimux started; they are listed although the
+	// agent SDK marks them automated. Nil: none.
+	Created *CreatedStore
+	// SearchIndex ranks sessions for a query (aimux's session search).
+	SearchIndex func(ctx context.Context, query string, limit int) ([]search.Result, error)
 }
 
 func (x *LocalIndex) openSessions() map[string]bool {
@@ -61,7 +73,10 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 	open := x.openSessions()
 	out := make([]Session, 0, limit)
 	for _, s := range all {
-		if s.Provider != "claude" || s.IsSubagent || (s.Automated && !includeAutomated) {
+		if s.Provider != "claude" || s.IsSubagent {
+			continue
+		}
+		if _, created := x.Created.Get(s.ID); s.Automated && !includeAutomated && !created {
 			continue
 		}
 		out = append(out, summary(s, x.state(s.ID, open)))
@@ -75,15 +90,48 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 func summary(s history.Session, state string) Session {
 	title := s.Title
 	if title == "" {
-		title = shorten(s.FirstPrompt, 80)
+		title = shorten(cleanPrompt(s.FirstPrompt), 80)
 	}
-	return Session{ID: s.ID, Provider: s.Provider, Title: title, Project: s.Project, LastActive: s.LastActive, State: state}
+	return Session{ID: s.ID, Provider: s.Provider, Title: title, Project: s.Project, LastActive: s.LastActive, State: state,
+		LastPrompt: shorten(cleanPrompt(s.LastPrompt), 160)}
+}
+
+var imageTag = regexp.MustCompile(`\[Image(?: #\d+|: [^\]]*)\]`)
+
+// cleanPrompt turns a stored prompt into what a person would call it:
+// without image placeholders, and with the messages Claude Code itself puts
+// in the user's place (hook feedback, notifications) named, not quoted.
+func cleanPrompt(p string) string {
+	p = strings.TrimSpace(p)
+	switch {
+	case p == "":
+		return ""
+	case strings.HasPrefix(p, "The user sent a new message while you were working:"):
+		p = strings.TrimPrefix(p, "The user sent a new message while you were working:")
+	case strings.HasPrefix(p, "Stop hook feedback:"):
+		return "(hook feedback)"
+	case strings.HasPrefix(p, "Another Claude session sent a message"):
+		return "(message from another session)"
+	case strings.HasPrefix(p, "<"):
+		return "(notification)"
+	}
+	hadImage := imageTag.MatchString(p)
+	p = strings.Join(strings.Fields(imageTag.ReplaceAllString(p, " ")), " ")
+	if p == "" && hadImage {
+		return "(image)"
+	}
+	return p
 }
 
 // Session returns one session and its last turns.
 func (x *LocalIndex) Session(ctx context.Context, id string, turns int) (SessionDetail, error) {
 	file := discovery.FindSessionFile(id, x.ProjectsDir)
 	if file == "" {
+		if c, ok := x.Created.Get(id); ok {
+			// Created here, and the agent has not written its file yet.
+			return SessionDetail{Session: Session{ID: id, Provider: "claude", Title: c.Prompt, Project: c.Cwd,
+				LastActive: c.Created, State: x.state(id, x.openSessions())}, Turns: []json.RawMessage{}}, nil
+		}
 		return SessionDetail{}, fmt.Errorf("%w: %s", acprun.ErrUnknownSession, id)
 	}
 	parsed, err := x.ParseTrace(file)
@@ -150,4 +198,81 @@ func (x *LocalIndex) lookupSummary(id string) Session {
 		}
 	}
 	return Session{ID: id, Provider: "claude", State: state}
+}
+
+// maxProjects is how many recent project folders a client may start a new
+// session in.
+const maxProjects = 12
+
+// Project is a folder recent Claude sessions ran in.
+type Project struct {
+	Path       string    `json:"path"`
+	Name       string    `json:"name"`
+	LastActive time.Time `json:"lastActive"`
+}
+
+// Projects lists the folders of recent interactive Claude sessions, most
+// recent first: the only places a client may start a new session.
+func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
+	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].LastActive.After(all[j].LastActive) })
+	seen := map[string]bool{}
+	out := []Project{}
+	for _, s := range all {
+		if s.Provider != "claude" || s.IsSubagent || s.Automated || s.Project == "" || seen[s.Project] {
+			continue
+		}
+		seen[s.Project] = true
+		if fi, err := os.Stat(s.Project); err != nil || !fi.IsDir() {
+			continue
+		}
+		out = append(out, Project{Path: s.Project, Name: filepath.Base(s.Project), LastActive: s.LastActive})
+		if len(out) == maxProjects {
+			break
+		}
+	}
+	return out, nil
+}
+
+// SearchHit is a session matching a search, with the matching text.
+type SearchHit struct {
+	Session
+	Snippet string `json:"snippet"`
+}
+
+// Search ranks this machine's Claude sessions for query. Like the list, it
+// leaves out automated sessions (unless aimux created them) and sessions
+// that are only in aimux's archive, which cannot be continued.
+func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	if x.SearchIndex == nil {
+		return nil, errors.New("session search is not available")
+	}
+	results, err := x.SearchIndex(ctx, query, limit*2) // some are filtered out below
+	if err != nil {
+		return nil, fmt.Errorf("search sessions: %w", err)
+	}
+	open := x.openSessions()
+	hits := []SearchHit{}
+	for _, r := range results {
+		c, created := x.Created.Get(r.SessionID)
+		if r.Automated && !created {
+			continue
+		}
+		if !created && discovery.FindSessionFile(r.SessionID, x.ProjectsDir) == "" {
+			continue
+		}
+		title := shorten(cleanPrompt(r.Title), 80)
+		if title == "" {
+			title = c.Prompt
+		}
+		hits = append(hits, SearchHit{Session: Session{ID: r.SessionID, Provider: "claude", Title: title, Project: r.CWD,
+			LastActive: r.ModTime, State: x.state(r.SessionID, open)}, Snippet: r.Snippet})
+		if len(hits) == limit {
+			break
+		}
+	}
+	return hits, nil
 }
