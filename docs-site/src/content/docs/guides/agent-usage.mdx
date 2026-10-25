@@ -56,7 +56,7 @@ aimux sessions --list --json --fields id,project,cost
 aimux agents --json --fields pid,provider,status
 ```
 
-Session fields worth knowing: `title` (a title aimux generated, if any), `ai_title` (the name Claude Code gave the session), `first_prompt` and `last_prompt` (the last message the person typed: not tool results, hook feedback, notifications, messages from other sessions or image placeholders), `project` (rebuilt from Claude's folder name) and `cwd` (the working directory recorded in the session, exact where `project` can be ambiguous).
+Session fields worth knowing: `title` (a title aimux generated, if any), `ai_title` (the name Claude Code gave the session), `first_prompt` (the first prompt), `last_prompt` (the last message the person typed: not tool results, hook feedback, notifications, messages from other sessions or image placeholders), `project` (rebuilt from Claude's folder name) and `cwd` (the working directory recorded in the session, exact where `project` can be ambiguous).
 
 ## Bounded Output
 

@@ -25,7 +25,9 @@ const Voice = (() => {
   let rec = null;
 
   // listen streams what the user says: onText(text) with each interim
-  // result, onEnd(finalText) once they stop. Returns false if it cannot.
+  // result, onEnd(text, failed) once they stop; failed is true when the
+  // recognizer reported an error, so the text may be unfinished. Returns
+  // false if it cannot start.
   function listen({ onText, onEnd, onError }) {
     if (!Recognition) return false;
     stopSpeaking();
@@ -39,6 +41,7 @@ const Voice = (() => {
     r.continuous = false; // one utterance; ends when the user pauses
     let final = '';
     let latest = '';
+    let failed = false;
     r.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -49,10 +52,13 @@ const Voice = (() => {
       latest = (final + interim).trim();
       onText(latest);
     };
-    r.onerror = (e) => { if (onError) onError(e.error || 'error'); };
+    r.onerror = (e) => {
+      if (e.error !== 'no-speech' && e.error !== 'aborted') failed = true;
+      if (onError) onError(e.error || 'error');
+    };
     r.onend = () => {
       if (rec === r) rec = null;
-      onEnd((final || latest).trim());
+      onEnd((final || latest).trim(), failed);
     };
     try {
       r.start();

@@ -957,8 +957,11 @@ function speakTurn(t) {
 // listenAgain continues a hands-free conversation once the reply has been
 // spoken, waiting (briefly) for the message box if the view is reloading.
 function listenAgain(session, since) {
-  if (!Voice.settings().handsFree || !current || current.id !== session || running) return;
-  if ($('prompt').disabled || !following) {
+  // The address says which session is on screen; current is briefly empty
+  // while that same session reloads (a turn joined part way, just ended).
+  const onScreen = location.hash === '#/s/' + encodeURIComponent(session);
+  if (!Voice.settings().handsFree || !onScreen) return;
+  if (!current || running || $('prompt').disabled || !following) {
     if (Date.now() - since < 10000) setTimeout(() => listenAgain(session, since), 300);
     return;
   }
@@ -984,11 +987,13 @@ function dictate(fromLoop) {
       box.value = base + text;
       if (box === $('prompt')) autoResize();
     },
-    onEnd: (text) => {
+    onEnd: (text, failed) => {
       mic.classList.remove('listening');
       if (gen !== dictationGen) return;
       setStatus(following ? 'live' : '', following ? 'ok' : '');
-      if (text && Voice.settings().autoSend) {
+      // After a recognition error the text may be cut short: leave it in the
+      // box to check rather than sending it.
+      if (text && Voice.settings().autoSend && !failed) {
         (box === $('prompt') ? $('composer') : $('newform')).requestSubmit();
       }
     },
