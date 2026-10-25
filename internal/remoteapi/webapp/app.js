@@ -264,6 +264,8 @@ async function startNew(ev) {
   ev.preventDefault();
   const text = $('newprompt').value.trim();
   if (!text || !newProject || creating || $('newsheet').hidden) return;
+  dictationGen++; // as for a message: a late dictation result must not start another session
+  Voice.stopListening();
   const cwd = newProject;
   const req = createReq && createReq.cwd === cwd && createReq.text === text ? createReq : { key: newKey(), cwd, text };
   const gen = nav;
@@ -816,6 +818,10 @@ async function send(ev) {
     return;
   }
   if (running) return;
+  // Sending ends any dictation: a late result must not refill the box or
+  // send the same words again.
+  dictationGen++;
+  Voice.stopListening();
   Voice.stopSpeaking();
   stick = true;
   scrollDown(true);
