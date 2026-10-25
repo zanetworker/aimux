@@ -380,7 +380,13 @@ components:
       additionalProperties: false
       required: [number, time, user, reply, tools]
       properties:
-        number: { type: integer, minimum: 0 }
+        number:
+          type: integer
+          minimum: 0
+          description: >-
+            Order of the turn among the turns returned. The server reads only
+            the end of long sessions, so this is not the turn's position in
+            the whole session.
         time: { type: string, format: date-time }
         user: { type: string }
         reply: { type: string, description: "Reply text, cut at 8 KiB." }

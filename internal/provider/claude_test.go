@@ -904,3 +904,45 @@ func TestClaudeParseTrace_ArrayContentPromptsStartTurns(t *testing.T) {
 		t.Errorf("turn 3 actions %+v, want the Write, succeeded", turns[2].Actions)
 	}
 }
+
+// The latest turns of a long session read from its end match the same turns
+// from a full parse, without reading the whole file.
+func TestClaudeParseTraceTail_MatchesTheFullParse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "long.jsonl")
+	var b strings.Builder
+	for i := 1; i <= 60; i++ {
+		fmt.Fprintf(&b, `{"type":"user","timestamp":"2026-01-01T10:%02d:00Z","message":{"role":"user","content":"question %d"}}`+"\n", i%60, i)
+		fmt.Fprintf(&b, `{"type":"assistant","timestamp":"2026-01-01T10:%02d:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t%d","name":"Bash","input":{"command":"ls"}}]}}`+"\n", i%60, i)
+		fmt.Fprintf(&b, `{"type":"user","timestamp":"2026-01-01T10:%02d:06Z","message":{"role":"user","content":[{"tool_use_id":"t%d","type":"tool_result","content":"ok"}]}}`+"\n", i%60, i)
+		fmt.Fprintf(&b, `{"type":"assistant","timestamp":"2026-01-01T10:%02d:07Z","message":{"role":"assistant","content":[{"type":"text","text":"answer %d %s"}]}}`+"\n", i%60, i, strings.Repeat("x", 300))
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prev := traceTailWindow
+	traceTailWindow = 2048 // a few turns per read, so the window has to grow
+	defer func() { traceTailWindow = prev }()
+
+	full, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []int{1, 5, 20, 60, 100} {
+		tail, err := (&Claude{}).ParseTraceTail(path, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := full[max(0, len(full)-n):]
+		if len(tail) < len(want) {
+			t.Fatalf("n=%d: got %d turns, want at least %d", n, len(tail), len(want))
+		}
+		tail = tail[len(tail)-len(want):]
+		for i := range want {
+			if strings.Join(tail[i].UserLines, "\n") != strings.Join(want[i].UserLines, "\n") ||
+				strings.Join(tail[i].OutputLines, "\n") != strings.Join(want[i].OutputLines, "\n") ||
+				len(tail[i].Actions) != len(want[i].Actions) || (len(want[i].Actions) > 0 && tail[i].Actions[0].Success != want[i].Actions[0].Success) {
+				t.Fatalf("n=%d turn %d: tail %+v, full %+v", n, i, tail[i], want[i])
+			}
+		}
+	}
+}

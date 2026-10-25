@@ -177,7 +177,7 @@ func newRemoteServeCmd() *cobra.Command {
 			reader.Embedder, reader.DBPath = nil, remoteIndex
 			index := &remoteapi.LocalIndex{
 				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
-				Discover: history.Discover, ParseTrace: claude.ParseTrace, Owned: manager.Owns,
+				Discover: history.Discover, ParseTrace: claude.ParseTrace, ParseTail: claude.ParseTraceTail, Owned: manager.Owns,
 				Created: &remoteapi.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")},
 				Running: manager.Running,
 				// Keyword ranking: every hit shows where the words matched, and a

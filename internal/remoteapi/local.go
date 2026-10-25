@@ -30,6 +30,9 @@ type LocalIndex struct {
 	Broker      *Broker
 	Discover    func(opts history.DiscoverOpts, projectsDir string) ([]history.Session, error)
 	ParseTrace  func(path string) ([]trace.Turn, error)
+	// ParseTail returns at least the last n turns, reading only the end of
+	// the file; used instead of ParseTrace when set.
+	ParseTail func(path string, n int) ([]trace.Turn, error)
 	// Owned reports aimux's own adapter processes, which hold a session in
 	// Claude's registry without it being open in a terminal.
 	Owned func(pid int) bool
@@ -158,7 +161,13 @@ func (x *LocalIndex) Session(ctx context.Context, id string, turns int) (Session
 		}
 		return SessionDetail{}, fmt.Errorf("%w: %s", acprun.ErrUnknownSession, id)
 	}
-	parsed, err := x.ParseTrace(file)
+	var parsed []trace.Turn
+	var err error
+	if x.ParseTail != nil {
+		parsed, err = x.ParseTail(file, turns)
+	} else {
+		parsed, err = x.ParseTrace(file)
+	}
 	if err != nil {
 		return SessionDetail{}, fmt.Errorf("read session %s: %w", id, err)
 	}

@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -777,6 +778,51 @@ func (c *Claude) ParseTrace(filePath string) ([]trace.Turn, error) {
 		return nil, fmt.Errorf("read Claude trace %s: %w", filePath, err)
 	}
 	return parseClaudeJSONL(string(data)), nil
+}
+
+// traceTailWindow is the first read size of ParseTraceTail; it doubles until
+// the window holds enough turns or covers the file.
+var traceTailWindow int64 = 1 << 20
+
+// ParseTraceTail returns at least the last n turns of a session (all of them
+// if it has fewer), reading only as much of the end of the file as needed:
+// session files grow to hundreds of MB. Turn numbers count from the start of
+// the part read, not of the session.
+func (c *Claude) ParseTraceTail(filePath string, n int) ([]trace.Turn, error) {
+	f, err := os.Open(filePath) // #nosec G304 -- a session file the caller found
+	if err != nil {
+		return nil, fmt.Errorf("read Claude trace %s: %w", filePath, err)
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("read Claude trace %s: %w", filePath, err)
+	}
+	size := fi.Size()
+	for window := traceTailWindow; ; window *= 2 {
+		start := max(size-window, 0)
+		buf := make([]byte, size-start)
+		if _, err := f.ReadAt(buf, start); err != nil && err != io.EOF {
+			return nil, fmt.Errorf("read Claude trace %s: %w", filePath, err)
+		}
+		data := string(buf)
+		if start > 0 {
+			// Start at a line boundary, and drop the first turn, which may
+			// have begun before the window.
+			if i := strings.IndexByte(data, '\n'); i >= 0 {
+				data = data[i+1:]
+			} else {
+				data = ""
+			}
+		}
+		turns := parseClaudeJSONL(data)
+		if start == 0 {
+			return turns, nil
+		}
+		if len(turns) > n {
+			return turns[1:], nil
+		}
+	}
 }
 
 // --- Claude JSONL trace parsing ---

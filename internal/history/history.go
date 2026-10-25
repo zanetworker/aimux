@@ -76,13 +76,23 @@ type DiscoverOpts struct {
 	Limit    int    // max results (0 = unlimited)
 }
 
+// isDefaultProjectsDir reports whether dir is Claude's own projects folder,
+// given as "" or spelled out (~/.claude/projects): only that one is cached.
+func isDefaultProjectsDir(dir string) bool {
+	if dir == "" {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	return err == nil && filepath.Clean(dir) == filepath.Join(home, ".claude", "projects")
+}
+
 // Discover scans session directories and returns past sessions sorted
 // by LastActive descending (most recent first).
 //
 // Currently supports Claude sessions in ~/.claude/projects/.
 // The projectsDir parameter overrides the default location (for testing).
 func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
-	cachePath := scanCacheFile(projectsDir, projectsDir == "")
+	cachePath := scanCacheFile(projectsDir, isDefaultProjectsDir(projectsDir))
 	if projectsDir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
