@@ -234,15 +234,30 @@ async function load(id, gen) {
   const active = last && last.kind !== 'turn_done' && last.kind !== 'turn_error'
     ? evs.filter((e) => e.turn === last.turn) : [];
   let turns = detail.turns || [];
+  const lastTurn = turns[turns.length - 1];
   if (active.length && active[0].kind === 'turn_started') {
-    const since = new Date(active[0].time).getTime() - 500;
-    turns = turns.filter((t) => !(new Date(t.time).getTime() >= since));
+    // The running turn, if the file has it yet, is the file's latest turn
+    // with this prompt, recorded after the turn started.
+    if (lastTurn && samePrompt(lastTurn.user, active[0].data.text) &&
+        new Date(lastTurn.time).getTime() >= new Date(active[0].time).getTime() - 2000) {
+      turns = turns.slice(0, -1);
+    }
   } else if (active.length) {
     // Its start aged out of the log: the turn has run long enough to be in
     // the file, as its latest turn.
     turns = turns.slice(0, -1);
   }
   renderHistory(turns);
+  // A turn that failed before reaching the session file is only in the
+  // event log: show its prompt and error after the history.
+  for (const e of evs) {
+    if (e.kind !== 'turn_started' || (active.length && e.turn === last.turn)) continue;
+    const failed = evs.find((x) => x.turn === e.turn && x.kind === 'turn_error');
+    if (failed && !turns.some((t) => samePrompt(t.user, e.data.text))) {
+      $('messages').append(el('div', 'msg user', e.data.text || ''));
+      system(failed.data.error || 'The turn failed.', true);
+    }
+  }
   for (const e of active) handle(e, false);
   stream(id, gen, last ? last.seq : 0, page.log);
 }
@@ -278,6 +293,14 @@ function stream(id, gen, after, log) {
       try { handle(JSON.parse(msg.data), true); } catch (err) { console.error(err); }
     });
   }
+}
+
+// samePrompt matches a history turn's prompt (whitespace-folded, perhaps
+// cut short with an ellipsis) to the text a turn was started with.
+function samePrompt(history, text) {
+  const fold = (x) => (x || '').replace(/\s+/g, ' ').trim();
+  const h = fold(history).replace(/\u2026$/, '');
+  return h !== '' && fold(text).startsWith(h);
 }
 
 // retry reloads the session with backoff while the view still shows it;
