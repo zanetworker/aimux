@@ -34,16 +34,14 @@
   <section id="listview">
     <div id="searchbar">
       <input id="search" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off" enterkeyhint="search">
+      <div class="legend" aria-hidden="true"><span class="dot idle"></span>idle <span class="dot busy"></span>running <span class="dot open_in_terminal"></span>open on your Mac</div>
     </div>
     <main id="list"></main>
     <button id="newbtn" type="button" aria-label="New session">+</button>
   </section>
 
   <section id="newsheet" hidden>
-    <div class="sheet-head">
-      <button id="newcancel" class="icon" type="button" aria-label="Cancel">&#215;</button>
-      <h2>New session</h2>
-    </div>
+    <p class="sheet-hint">Start Claude in one of your recent project folders.</p>
     <div id="projects" role="radiogroup" aria-label="Project"></div>
     <form id="newform">
       <textarea id="newprompt" rows="3" placeholder="What should it do?" aria-label="First message"></textarea>

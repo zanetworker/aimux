@@ -53,6 +53,21 @@ func (s *CreatedStore) Get(id string) (CreatedSession, bool) {
 	return c, ok
 }
 
+// All returns every created session by id.
+func (s *CreatedStore) All() map[string]CreatedSession {
+	out := map[string]CreatedSession{}
+	if s == nil {
+		return out
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.load()
+	for id, c := range s.byID {
+		out[id] = c
+	}
+	return out
+}
+
 // Add records a new session and saves the store.
 func (s *CreatedStore) Add(id, cwd, prompt string) error {
 	if s == nil {

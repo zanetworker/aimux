@@ -265,11 +265,17 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 		m.mu.Unlock()
 		return "", errManagerDone
 	}
-	// Fail before launching anything when no slot can be had: every run
-	// (and every new session still starting) is busy.
-	if len(m.runs)+len(m.newStart) >= m.opt.MaxRuns && !m.hasIdleRunLocked() {
-		m.mu.Unlock()
-		return "", ErrTooManyRuns
+	// Take a slot before launching anything: evict an idle run if all are
+	// in use, or fail now when every run (or new session starting) is busy.
+	var evicted *runEntry
+	if len(m.runs)+len(m.newStart) >= m.opt.MaxRuns {
+		victim := m.idleVictimLocked()
+		if victim == "" {
+			m.mu.Unlock()
+			return "", ErrTooManyRuns
+		}
+		evicted = m.runs[victim]
+		delete(m.runs, victim)
 	}
 	if m.newStart == nil {
 		m.newStart = map[*context.CancelFunc]bool{}
@@ -278,6 +284,9 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 	m.starting.Add(1)
 	m.mu.Unlock()
 	defer m.starting.Done()
+	if evicted != nil {
+		evicted.retire()
+	}
 	r, id, err := m.opt.StartNew(sctx, cwd)
 	m.mu.Lock()
 	delete(m.newStart, &cancel)
@@ -325,14 +334,19 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 	return id, nil
 }
 
-// hasIdleRunLocked reports whether some run could be evicted for a new one.
-func (m *Manager) hasIdleRunLocked() bool {
-	for _, e := range m.runs {
-		if !e.busy && e.run != nil {
-			return true
+// idleVictimLocked picks the least recently used idle run to make room, or
+// "" if every run is busy or starting.
+func (m *Manager) idleVictimLocked() string {
+	victim := ""
+	for id, e := range m.runs {
+		if e.busy || e.run == nil {
+			continue
+		}
+		if victim == "" || e.lastUsed.Before(m.runs[victim].lastUsed) {
+			victim = id
 		}
 	}
-	return false
+	return victim
 }
 
 // claim marks the session's run busy, creating an entry (and evicting the
@@ -352,16 +366,9 @@ func (m *Manager) claim(sessionID string) (*runEntry, *runEntry, error) {
 		return e, nil, nil
 	}
 	var evicted *runEntry
-	if len(m.runs) >= m.opt.MaxRuns {
-		victim := ""
-		for id, e := range m.runs {
-			if e.busy || e.run == nil {
-				continue
-			}
-			if victim == "" || e.lastUsed.Before(m.runs[victim].lastUsed) {
-				victim = id
-			}
-		}
+	// New sessions still starting hold their slots too.
+	if len(m.runs)+len(m.newStart) >= m.opt.MaxRuns {
+		victim := m.idleVictimLocked()
 		if victim == "" {
 			return nil, nil, ErrTooManyRuns
 		}

@@ -72,7 +72,9 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 	}
 	open := x.openSessions()
 	out := make([]Session, 0, limit)
+	seen := map[string]bool{}
 	for _, s := range all {
+		seen[s.ID] = true
 		if s.Provider != "claude" || s.IsSubagent {
 			continue
 		}
@@ -80,15 +82,27 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 			continue
 		}
 		out = append(out, summary(s, x.state(s.ID, open)))
-		if len(out) == limit {
-			break
+	}
+	// Sessions created here that have no file yet (still starting, or failed
+	// before the agent wrote one) are listed from their creation record.
+	for id, c := range x.Created.All() {
+		if !seen[id] {
+			out = append(out, Session{ID: id, Provider: "claude", Title: c.Prompt, Project: c.Cwd,
+				LastActive: c.Created, State: x.state(id, open)})
 		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].LastActive.After(out[j].LastActive) })
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }
 
 func summary(s history.Session, state string) Session {
 	title := s.Title
+	if title == "" {
+		title = s.AITitle
+	}
 	if title == "" {
 		title = shorten(cleanPrompt(s.FirstPrompt), 80)
 	}
@@ -245,6 +259,9 @@ const maxSearchScan = 500
 func (x *LocalIndex) eligible(results []search.Result) int {
 	n := 0
 	for _, r := range results {
+		if r.Snippet == "" {
+			continue
+		}
 		if _, created := x.Created.Get(r.SessionID); created ||
 			(!r.Automated && discovery.FindSessionFile(r.SessionID, x.ProjectsDir) != "") {
 			n++
@@ -281,6 +298,9 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 	open := x.openSessions()
 	hits := []SearchHit{}
 	for _, r := range results {
+		if r.Snippet == "" { // a semantic neighbour with no matching text
+			continue
+		}
 		c, created := x.Created.Get(r.SessionID)
 		if r.Automated && !created {
 			continue

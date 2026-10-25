@@ -165,3 +165,36 @@ func TestLocalIndex_SearchLooksPastIneligibleMatches(t *testing.T) {
 		t.Fatalf("hits %+v, want the interactive session ranked below 40 automated ones", hits)
 	}
 }
+
+// A session created here is listed before Claude Code has written its file
+// (still starting, or failed early), so the user can always find it.
+func TestLocalIndex_ListsCreatedSessionsWithoutAFile(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	x.Created = &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")}
+	if err := x.Created.Add("born-now", "/w/app", "plan the release"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := x.Sessions(context.Background(), 2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "born-now" || got[0].Title != "plan the release" {
+		t.Fatalf("got %v; want the just-created session first (newest), within the limit", ids(got))
+	}
+}
+
+// Semantic ranking always returns its nearest sessions, even for nonsense;
+// a hit with no matching text says nothing, so it is left out.
+func TestLocalIndex_SearchDropsHitsWithoutAMatch(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
+		return []search.Result{{SessionID: "idle", Title: "Fix the cache", Snippet: ""}}, nil
+	}
+	hits, err := x.Search(context.Background(), "zqxjvwk", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("hits %+v, want none for a query nothing contains", hits)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ type Session struct {
 	CostUSD          float64   `json:"cost_usd"`
 	FirstPrompt string    `json:"first_prompt"`  // first user message (cleaned, for display)
 	Title       string    `json:"title"`         // LLM-generated title (from meta, or empty)
+	AITitle     string    `json:"ai_title"`      // the name Claude Code gave the session (its latest ai-title entry)
 	Resumable   bool      `json:"resumable"`     // true if provider supports resume
 	Annotation  string    `json:"annotation"`    // achieved/partial/failed/abandoned
 	Note        string    `json:"note"`          // free-text rationale
@@ -273,7 +275,9 @@ func scanSession(id, filePath, project string) (Session, error) {
 		if content != nil {
 			switch role {
 			case "user":
-				if isHuman { // not a tool result, which usually ends the file
+				// Not a tool result (which usually ends the file), and not
+				// text Claude Code wrote in the user's place.
+				if isHuman && !machinePrompt(allUserText(content)) {
 					lastUserContent = content
 				}
 			case "assistant":
@@ -285,8 +289,10 @@ func scanSession(id, filePath, project string) (Session, error) {
 	s.Automated = IsAutomated(s.entrypoint, s.cwd, s.FirstPrompt, DefaultAutomatedPrefixes)
 
 	// Extract last prompt and action once (not per-line)
-	if text := extractUserText(lastUserContent); text != "" && text != "(no prompt)" {
-		s.LastPrompt = text
+	if raw := imagePlaceholder.ReplaceAllString(allUserText(lastUserContent), ""); strings.TrimSpace(raw) != "" {
+		if text := cleanPrompt(raw); text != "" && text != "(no prompt)" {
+			s.LastPrompt = text
+		}
 	}
 	if action := extractLastToolAction(lastAssistantContent); action != "" {
 		s.LastAction = action
@@ -341,6 +347,8 @@ func scanSession(id, filePath, project string) (Session, error) {
 // sessionEntry is the minimal structure for fast-scanning JSONL entries.
 type sessionEntry struct {
 	Type           string    `json:"type"`
+	IsMeta         bool      `json:"isMeta"` // text Claude Code adds in the user's place
+	AITitle        string    `json:"aiTitle"` // on ai-title entries
 	Entrypoint     string    `json:"entrypoint"`
 	CWD            string    `json:"cwd"`
 	Timestamp      time.Time `json:"timestamp"`
@@ -362,6 +370,27 @@ type sessionEntry struct {
 // isHumanMessage returns true if the content appears to be a human-written message.
 // Returns false for tool_result-only content, system-generated content with markers
 // like <local-command-caveat> or <command-name>, or empty content.
+// machinePromptPrefixes start the messages Claude Code itself puts in the
+// user's turn: hook output, background notifications, other sessions.
+var machinePromptPrefixes = []string{
+	"Stop hook feedback:", "<task-notification>", "<system-reminder>", "[SYSTEM NOTIFICATION",
+	"Another Claude session sent a message", "<command-", "<local-command-",
+}
+
+var imagePlaceholder = regexp.MustCompile(`\[Image(?: #\d+|: [^\]]*)\]?`)
+
+// machinePrompt reports a user-turn text nobody typed: one of Claude Code's
+// own messages, or only image placeholders.
+func machinePrompt(text string) bool {
+	t := strings.TrimSpace(text)
+	for _, p := range machinePromptPrefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	return strings.TrimSpace(imagePlaceholder.ReplaceAllString(t, "")) == ""
+}
+
 func isHumanMessage(content json.RawMessage) bool {
 	if content == nil {
 		return false
@@ -438,12 +467,18 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (time
 		s.GitBranch = entry.GitBranch
 	}
 
+	if entry.Type == "ai-title" && entry.AITitle != "" {
+		s.AITitle = entry.AITitle // the latest name wins
+	}
+
 	if entry.Message == nil {
 		return entry.Timestamp, "", false, "", nil
 	}
 
+	// Only user entries count: newer files also hold request records
+	// (api-request-blob, attachment) whose messages have the user role.
 	var isHuman bool
-	if entry.Message.Role == "user" {
+	if entry.Message.Role == "user" && (entry.Type == "user" || entry.Type == "human" || entry.Type == "") && !entry.IsMeta {
 		isHuman = isHumanMessage(entry.Message.Content)
 	}
 
@@ -479,6 +514,35 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (time
 // extractUserText pulls the text from a user message content array.
 // Returns a single-line, truncated preview suitable for display.
 func extractUserText(content json.RawMessage) string {
+	raw := rawUserText(content)
+	if raw == "" {
+		return ""
+	}
+	return cleanPrompt(raw)
+}
+
+// allUserText joins every text block of a user message, as stored.
+func allUserText(content json.RawMessage) string {
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &blocks) == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Type == "text" {
+				parts = append(parts, b.Text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	var text string
+	_ = json.Unmarshal(content, &text)
+	return text
+}
+
+// rawUserText is a user message's first text, as stored.
+func rawUserText(content json.RawMessage) string {
 	if content == nil {
 		return ""
 	}
@@ -507,11 +571,7 @@ func extractUserText(content json.RawMessage) string {
 		}
 	}
 
-	if raw == "" {
-		return ""
-	}
-
-	return cleanPrompt(raw)
+	return raw
 }
 
 // cleanPrompt normalizes a user prompt for single-line display.

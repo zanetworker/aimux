@@ -661,3 +661,34 @@ func TestManager_NewSessionChecksCapacityFirst(t *testing.T) {
 		t.Fatalf("launched %d adapters with no slot for them", launched)
 	}
 }
+
+// A new session takes its slot when it starts: an idle run is evicted for
+// it at once, and a message to another session meanwhile finds no slot.
+func TestManager_NewSessionReservesItsSlot(t *testing.T) {
+	fs := &fakeRunStarter{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	m := NewManager(ManagerOptions{Start: fs.start, MaxRuns: 1,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) {
+			close(started)
+			<-release
+			return &fakeRunner{}, "fresh", nil
+		}})
+	defer m.Close()
+	if _, err := send(m, "idle-one"); err != nil { // fills the slot, then idles
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := m.New(context.Background(), "/w"); done <- err }()
+	<-started
+	if !fs.runners[0].closed.Load() {
+		t.Fatal("the idle run was not evicted when the new session took its slot")
+	}
+	if _, err := send(m, "other"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("send while the new session starts: %v, want ErrTooManyRuns", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("New: %v", err)
+	}
+}

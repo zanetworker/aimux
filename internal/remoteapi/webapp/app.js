@@ -113,6 +113,7 @@ function mark(snippet) {
 
 let query = '';
 let searchTimer = null;
+let lastList = null; // shown at once when a search is cleared, then refreshed
 
 function showView(name) {
   $('listview').hidden = name !== 'list';
@@ -146,6 +147,7 @@ async function loadList() {
     return;
   }
   if (query) return; // the user started searching meanwhile
+  lastList = data.sessions;
   setStatus('');
   if (!data.sessions.length) {
     $('list').replaceChildren(el('div', 'empty', 'No Claude sessions yet. Start one with +, or on your Mac.'));
@@ -219,7 +221,7 @@ async function showNew() {
   showView('new');
   $('state').hidden = true;
   setActivity('');
-  $('title').textContent = 'aimux';
+  $('title').textContent = 'New session';
   $('newerror').hidden = true;
   const box = $('projects');
   box.replaceChildren(el('div', 'empty', 'Loading projects\u2026'));
@@ -444,7 +446,7 @@ function stream(id, gen, after, log) {
     if (dropped) { refresh(); return; } // the server may have restarted: reload its state
     following = true;
     retryDelay = 2000;
-    setStatus('live', 'ok');
+    setStatus($('banner').textContent ? 'read only' : 'live', $('banner').textContent ? '' : 'ok');
     setComposer(!$('banner').textContent);
   };
   events.onerror = () => {
@@ -497,6 +499,8 @@ function showState(state) {
   s.className = 'dot ' + state;
   s.title = STATE_LABEL[state] || state;
   const inTerminal = state === 'open_in_terminal';
+  $('mic').hidden = inTerminal || !Voice.canListen;
+  $('prompt').placeholder = inTerminal ? 'Read only here' : 'Message this session';
   $('banner').hidden = !inTerminal;
   $('banner').textContent = inTerminal
     ? 'This session is open in a terminal on your Mac, so it is read only here. Close it there (or let it finish) to continue from this device.'
@@ -522,7 +526,7 @@ function refresh() {
 function renderHistory(turns) {
   const box = $('messages');
   const ends = [];
-  if (turns.length) box.append(el('div', 'earlier', 'Latest ' + turns.length + ' turns'));
+  if (turns.length) box.append(el('div', 'earlier', turns.length === 1 ? 'Latest turn' : 'Latest ' + turns.length + ' turns'));
   for (const t of turns) {
     if (t.user) box.append(el('div', 'msg user', t.user));
     if (t.reply || (t.tools && t.tools.length)) {
@@ -617,7 +621,7 @@ function handle(e, live) {
       approvalCard(d);
       if (live && Voice.settings().speak) {
         Voice.stopListening();
-        Voice.speak('The agent asks for permission: ' + (d.title || 'a tool call') + '. Tap allow or no.');
+        Voice.speak('The agent asks for permission: ' + (d.title || 'a tool call') + '. Tap one of the options on screen.');
       }
       break;
     case 'approval_resolved':
@@ -728,6 +732,7 @@ function update(u) {
 // Approvals
 
 const OPTION_CLASS = { allow_once: 'allow', allow_always: 'always' };
+const BARE_ANSWER = /^(yes|no|yeah|nope|ok|okay|allow|deny|sure)[.!]?$/i;
 
 // toolPreview shows what the agent wants to run or write, from the request's
 // raw tool input, shortened for a phone.
@@ -781,6 +786,9 @@ function resolveCard(id, outcome) {
   const word = { allowed: 'Allowed', denied: 'Denied', expired: 'Expired (denied, no answer)' }[outcome] || outcome;
   const note = el('div', 'decision ' + outcome, word + ': ' + card.dataset.title);
   card.remove();
+  // A bare yes or no typed or dictated for the request is spent with it;
+  // left in the box, one tap would send it to the agent as a message.
+  if (BARE_ANSWER.test($('prompt').value.trim())) { $('prompt').value = ''; autoResize(); }
   (turn ? turn.div : $('messages')).append(note);
   if (running) setActivity('thinking');
 }
@@ -796,8 +804,17 @@ const unsettled = new Map(); // session id -> {text, key}
 async function send(ev) {
   ev.preventDefault();
   const text = $('prompt').value.trim();
-  if (!text || !current || running || sending || !following) return;
+  if (!text || !current || sending || !following) return;
+  if ($('pending').childElementCount && BARE_ANSWER.test(text)) {
+    // A bare yes or no while a permission request waits is meant for the
+    // request; answering it takes a tap on one of its options.
+    system('Answer the permission request with one of its buttons.', true);
+    return;
+  }
+  if (running) return;
   Voice.stopSpeaking();
+  stick = true;
+  scrollDown(true);
   const gen = nav;
   const session = current.id;
   const prior = unsettled.get(session);
@@ -1023,14 +1040,18 @@ function route() {
 
 $('back').addEventListener('click', () => { location.hash = ''; });
 $('newbtn').addEventListener('click', () => { location.hash = '#/new'; });
-$('newcancel').addEventListener('click', () => { location.hash = ''; });
 $('newform').addEventListener('submit', startNew);
 $('search').addEventListener('input', () => {
   clearTimeout(searchTimer);
+  const q = $('search').value.trim();
+  if (!q && lastList) { // back to the list: show it now, refresh behind it
+    query = '';
+    renderSessions(lastList, true);
+  }
   searchTimer = setTimeout(() => {
-    query = $('search').value.trim();
+    query = q;
     loadList();
-  }, 300);
+  }, q ? 300 : 0);
 });
 setupVoice();
 $('refresh').addEventListener('click', () => {
