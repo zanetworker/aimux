@@ -1,0 +1,590 @@
+openapi: 3.0.3
+info:
+  title: aimux remote API
+  version: "1"
+  description: |
+    The API `aimux remote serve` offers to your other devices on a Tailscale
+    tailnet: list and search your Claude Code sessions, follow them, continue
+    idle ones, start new ones in recent project folders, and answer the
+    agent's permission requests. Conversations continue in the session's own
+    file, so `claude --resume` picks up from there.
+
+    Reach it through `tailscale serve` (HTTPS); it listens on 127.0.0.1 only.
+    Identity comes from the `Tailscale-User-Login` header that tailscale serve
+    sets. Browser requests are accepted only from the API's own origin.
+
+    Events: `GET /v1/sessions/{id}/events` streams server-sent events whose
+    `data` is an `Event` (the SSE `event:` field repeats `kind`, and `id:` is
+    `<log>.<seq>`). The data of each kind is described by the schema named in
+    `Event.kind`'s description. `update` events pass an Agent Client Protocol
+    `SessionUpdate` through unchanged; `GET /v1/health` reports the ACP
+    protocol version they follow.
+
+    This file is the contract: `internal/remoteapi/contract_test.go` checks
+    every response and event kind the server produces against it. Each
+    server also serves it at `GET /v1/openapi.yaml`.
+
+    Compatibility rules for clients and for the server:
+    - `/v1` changes only by adding: new endpoints, new optional request
+      fields, new response fields, new values in enums (event kinds,
+      session states, error codes, capabilities, ACP session updates).
+    - Clients ignore response fields they do not know, and handle enum
+      values they do not know (skip an unknown event kind, show an unknown
+      state as-is, treat an unknown error code by its HTTP status).
+    - Clients detect optional features from `capabilities` in
+      `GET /v1/health`, not by probing; `404 not_supported` means the server
+      does not offer an endpoint.
+    - Removing or renaming anything, or changing what a field means, needs a
+      new version path (`/v2`); `/v1` keeps working alongside it.
+    - `update` event data follows ACP, whose version is `acpProtocolVersion`;
+      an ACP version change is reported there, not hidden.
+
+    Known gaps for app clients (not offered yet):
+    - Notifications while the client is not connected: events arrive only
+      over the open stream, so a backgrounded app learns of an approval when
+      it reconnects (replay from its cursor), not sooner.
+    - Paging the session list: `limit` only, newest first.
+    - Codex and other agents' sessions: Claude only (`provider` is `claude`).
+servers:
+  - url: https://{host}:8443
+    variables:
+      host:
+        default: your-mac.your-tailnet.ts.net
+security:
+  - tailscale: []
+
+paths:
+  /v1/health:
+    get:
+      summary: Who you are and what this server offers
+      operationId: health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/openapi.yaml:
+    get:
+      summary: This contract
+      operationId: openapi
+      responses:
+        "200":
+          description: The OpenAPI document this server implements
+          content:
+            application/yaml:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions:
+    get:
+      summary: Recent Claude sessions, newest first
+      operationId: listSessions
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+        - name: include_automated
+          in: query
+          description: "1 also lists sessions started by a program (for example `claude -p`)."
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Start a session in a recent project folder and send its first message
+      description: >
+        Requires the `new_sessions` capability. `cwd` must be one of
+        `GET /v1/projects`. A retry with the same non-empty `key` returns the
+        same session and turn (keys are remembered until the server restarts).
+      operationId: newSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewSessionRequest" }
+      responses:
+        "202":
+          description: Started; follow the turn at `events`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TurnAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}:
+    get:
+      summary: One session and its latest turns
+      operationId: getSession
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - { name: turns, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 20 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionDetail" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/messages:
+    post:
+      summary: Continue a session with a message
+      description: >
+        Starts a turn and returns at once. A retry with the same non-empty
+        `key` returns the same turn. When every run slot is busy the message
+        is still accepted and the turn ends with a `turn_error` event.
+      operationId: sendMessage
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendMessageRequest" }
+      responses:
+        "202":
+          description: Accepted; follow the turn at `events`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TurnAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/events:
+    get:
+      summary: The session's events after a cursor
+      description: >
+        Server-sent events by default; `wait=0` returns one JSON page. The
+        cursor is `after` (or the `Last-Event-ID` header, which wins). A
+        cursor from an earlier log (the server restarted) replays the current
+        log from its start: pass the page's `log` back as `log`, and a
+        `Last-Event-ID` is either `<log>.<seq>` or a bare `<seq>` of the log
+        named by `log`. The server keeps the latest 2,000 events per session,
+        in memory.
+      operationId: events
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - { name: after, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: log, in: query, schema: { type: string } }
+        - { name: wait, in: query, description: "0 returns one JSON page instead of a stream.", schema: { type: string, enum: ["0"] } }
+        - { name: Last-Event-ID, in: header, schema: { type: string } }
+      responses:
+        "200":
+          description: The events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventPage" }
+            text/event-stream:
+              schema:
+                type: string
+                description: "Frames `id: <log>.<seq>`, `event: <kind>`, `data: <Event as JSON>`; comment frames keep the connection alive."
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/cancel:
+    post:
+      summary: Stop the session's running turn
+      operationId: cancel
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "202":
+          description: Stopping; the turn ends with `turn_done` (stopReason cancelled)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/approvals/{id}:
+    post:
+      summary: Answer a permission request
+      operationId: answerApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: "`approvalId` from the `approval` event."
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnswerRequest" }
+      responses:
+        "200":
+          description: Answered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/search:
+    get:
+      summary: Sessions whose content matches a query
+      description: Requires the `search` capability. Keyword ranking; every hit shows where it matched.
+      operationId: search
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResults" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/projects:
+    get:
+      summary: Recent project folders, where a new session may start
+      operationId: projects
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    tailscale:
+      type: apiKey
+      in: header
+      name: Tailscale-User-Login
+      description: Set by `tailscale serve` for the caller; must be in `remote_access.allowed_logins`.
+
+  parameters:
+    SessionID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: An error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
+
+  schemas:
+    ErrorBody:
+      type: object
+      additionalProperties: false
+      required: [error, code]
+      properties:
+        error: { type: string, description: "A message for people." }
+        code:
+          type: string
+          description: A stable code for programs.
+          enum:
+            - unauthorized       # 401: no Tailscale identity
+            - forbidden          # 403: not allowed (login, Host, origin)
+            - bad_request        # 400
+            - unknown_session    # 404
+            - no_such_approval   # 404: answered, expired, or never existed
+            - not_supported      # 404: this server does not offer the endpoint (see capabilities)
+            - open_in_terminal   # 409: read only here while open in a terminal on the Mac
+            - busy               # 409: a turn is already running
+            - in_use             # 409: another aimux process drives the session
+            - not_running        # 409: cancel with no running turn
+            - invalid_option     # 400: not one of the approval's options
+            - ownership_unknown  # 503: Claude's session registry is unreadable
+            - too_many_runs      # 503: every run slot is busy (session creation)
+            - internal           # 500
+
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, login, version, acpProtocolVersion, capabilities]
+      properties:
+        status: { type: string, enum: [ok] }
+        login: { type: string, description: "The caller's Tailscale login." }
+        version: { type: string, description: "The aimux version serving the API." }
+        acpProtocolVersion: { type: integer, minimum: 1, description: "The Agent Client Protocol version `update` events follow." }
+        capabilities:
+          type: array
+          items: { type: string, enum: [sessions, search, new_sessions] }
+
+    SessionState:
+      type: string
+      enum: [idle, open_in_terminal, busy, unavailable]
+      description: >
+        idle: can be continued. open_in_terminal: read only here while a
+        terminal on the Mac holds it. busy: aimux is running a turn.
+        unavailable: created here, but its first message failed before Claude
+        saved it.
+
+    Session:
+      type: object
+      additionalProperties: false
+      required: [id, provider, title, project, lastActive, state]
+      properties:
+        id: { type: string }
+        provider: { type: string, enum: [claude] }
+        title: { type: string }
+        project: { type: string, description: "The session's folder." }
+        lastActive: { type: string, format: date-time }
+        state: { $ref: "#/components/schemas/SessionState" }
+        lastPrompt: { type: string, description: "The last message the person typed." }
+
+    SessionList:
+      type: object
+      additionalProperties: false
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/Session" }
+
+    Turn:
+      type: object
+      additionalProperties: false
+      required: [number, time, user, reply, tools]
+      properties:
+        number: { type: integer, minimum: 0 }
+        time: { type: string, format: date-time }
+        user: { type: string }
+        reply: { type: string, description: "Reply text, cut at 8 KiB." }
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/TurnTool" }
+
+    TurnTool:
+      type: object
+      additionalProperties: false
+      required: [name, ok]
+      properties:
+        name: { type: string }
+        snippet: { type: string, description: "Its target: a path, a command." }
+        ok: { type: boolean }
+
+    SessionDetail:
+      type: object
+      additionalProperties: false
+      required: [id, provider, title, project, lastActive, state, turns]
+      properties:
+        id: { type: string }
+        provider: { type: string, enum: [claude] }
+        title: { type: string }
+        project: { type: string }
+        lastActive: { type: string, format: date-time }
+        state: { $ref: "#/components/schemas/SessionState" }
+        lastPrompt: { type: string }
+        turns:
+          type: array
+          items: { $ref: "#/components/schemas/Turn" }
+
+    SearchHit:
+      type: object
+      additionalProperties: false
+      required: [id, provider, title, project, lastActive, state, snippet]
+      properties:
+        id: { type: string }
+        provider: { type: string, enum: [claude] }
+        title: { type: string }
+        project: { type: string }
+        lastActive: { type: string, format: date-time }
+        state: { $ref: "#/components/schemas/SessionState" }
+        lastPrompt: { type: string }
+        snippet: { type: string, description: "Where it matched; matched words are in [brackets]." }
+
+    SearchResults:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/SearchHit" }
+
+    Project:
+      type: object
+      additionalProperties: false
+      required: [path, name, lastActive]
+      properties:
+        path: { type: string, description: "Pass as `cwd` to start a session here." }
+        name: { type: string }
+        lastActive: { type: string, format: date-time }
+
+    ProjectList:
+      type: object
+      additionalProperties: false
+      required: [projects]
+      properties:
+        projects:
+          type: array
+          maxItems: 12
+          items: { $ref: "#/components/schemas/Project" }
+
+    SendMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1 }
+        key: { type: string, description: "Idempotency key for retries." }
+
+    NewSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [cwd, text]
+      properties:
+        cwd: { type: string, description: "One of `GET /v1/projects`." }
+        text: { type: string, minLength: 1 }
+        key: { type: string, description: "Idempotency key for retries." }
+
+    AnswerRequest:
+      type: object
+      additionalProperties: false
+      required: [option]
+      properties:
+        option: { type: string, description: "An `optionId` from the approval event, or empty to deny." }
+
+    TurnAccepted:
+      type: object
+      additionalProperties: false
+      required: [id, turn, after, events]
+      properties:
+        id: { type: string, description: "The session." }
+        turn: { type: string }
+        after: { type: integer, minimum: 0, description: "The cursor just before the turn." }
+        events: { type: string, description: "The events URL from that cursor." }
+
+    Status:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [cancelling, answered] }
+
+    EventPage:
+      type: object
+      additionalProperties: false
+      required: [events, log]
+      properties:
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+        log: { type: string, description: "This server's event log; pass it back as `log`." }
+
+    Event:
+      type: object
+      additionalProperties: false
+      required: [seq, turn, kind, time, data]
+      properties:
+        seq: { type: integer, minimum: 1 }
+        turn: { type: string }
+        kind:
+          type: string
+          enum: [turn_started, update, approval, approval_resolved, turn_done, turn_error]
+          description: >
+            data by kind: turn_started TurnStartedData, update UpdateData,
+            approval ApprovalData, approval_resolved ApprovalResolvedData,
+            turn_done TurnDoneData, turn_error TurnErrorData.
+        time: { type: string, format: date-time }
+        data: { type: object }
+
+    TurnStartedData:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string }
+
+    UpdateData:
+      type: object
+      description: >
+        An Agent Client Protocol SessionUpdate, passed through unchanged
+        (agent_message_chunk, agent_thought_chunk, tool_call,
+        tool_call_update, plan, ...). The agent's slash-command list
+        (available_commands_update) is left out.
+      required: [sessionUpdate]
+      properties:
+        sessionUpdate: { type: string }
+
+    ApprovalData:
+      type: object
+      additionalProperties: false
+      required: [approvalId, title, options, toolCall]
+      properties:
+        approvalId: { type: string }
+        title: { type: string }
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/PermissionOption" }
+        toolCall:
+          type: object
+          description: The ACP ToolCallUpdate being asked about (rawInput shows what it will do).
+          required: [toolCallId]
+          properties:
+            toolCallId: { type: string }
+
+    PermissionOption:
+      type: object
+      description: An ACP PermissionOption.
+      required: [optionId, name, kind]
+      properties:
+        optionId: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [allow_once, allow_always, reject_once, reject_always] }
+
+    ApprovalResolvedData:
+      type: object
+      additionalProperties: false
+      required: [approvalId, outcome]
+      properties:
+        approvalId: { type: string }
+        outcome: { type: string, enum: [allowed, denied, expired] }
+
+    TurnDoneData:
+      type: object
+      additionalProperties: false
+      required: [stopReason]
+      properties:
+        stopReason: { type: string, description: "ACP's: end_turn, cancelled, max_tokens, max_turn_requests, refusal." }
+
+    TurnErrorData:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: { type: string }

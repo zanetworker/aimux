@@ -98,3 +98,43 @@ func TestRequireTailnetUser_NoTrustedHostsAdmitsNobody(t *testing.T) {
 		t.Fatalf("status %d, want 403 with no trusted hosts", w.Code)
 	}
 }
+
+// The phone web client at /app calls the API from its own origin; every
+// other origin, and any cross-site request, stays out.
+func TestRequireTailnetUser_SameOriginPage(t *testing.T) {
+	const me = "adel@example.com"
+	tests := []struct {
+		name, method, origin, site string
+		want                       int
+	}{
+		{"page POST from its own origin", "POST", "https://mac.tail1.ts.net:8443", "same-origin", http.StatusOK},
+		{"page GET from its own origin", "GET", "", "same-origin", http.StatusOK},
+		{"address typed into the browser", "GET", "", "none", http.StatusOK},
+		{"another port on the same host", "POST", "https://mac.tail1.ts.net:9999", "same-site", http.StatusForbidden},
+		{"plain http origin", "POST", "http://mac.tail1.ts.net:8443", "", http.StatusForbidden},
+		{"another site", "POST", "https://evil.example", "cross-site", http.StatusForbidden},
+		{"cross-site GET without Origin (img, script tag)", "GET", "", "cross-site", http.StatusForbidden},
+		{"same-site but other origin, GET", "GET", "", "same-site", http.StatusForbidden},
+		{"opaque origin", "POST", "null", "cross-site", http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := RequireTailnetUser([]string{me}, []string{"mac.tail1.ts.net"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			r := httptest.NewRequest(tt.method, "/v1/sessions", nil)
+			r.Host = "mac.tail1.ts.net:8443"
+			r.RemoteAddr = "127.0.0.1:50000"
+			r.Header.Set("Tailscale-User-Login", me)
+			if tt.origin != "" {
+				r.Header.Set("Origin", tt.origin)
+			}
+			if tt.site != "" {
+				r.Header.Set("Sec-Fetch-Site", tt.site)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != tt.want {
+				t.Fatalf("status %d, want %d (body %q)", w.Code, tt.want, w.Body.String())
+			}
+		})
+	}
+}

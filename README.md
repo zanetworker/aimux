@@ -111,7 +111,7 @@ aimux mcp proxy serve                            # lazy, shared MCP servers for 
 aimux remote serve                               # your sessions from other devices, via tailscale serve
 ```
 
-See [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) for the full guide and [SKILL.md](SKILL.md) for agent workflow recipes.
+See [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) for the full guide and [SKILL.md](SKILL.md) for agent workflow recipes. The remote API's contract, for building clients, is [api/remote-v1.openapi.yaml](api/remote-v1.openapi.yaml) (each server also serves it at `/v1/openapi.yaml`).
 
 ## Documentation
 
