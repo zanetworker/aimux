@@ -36,7 +36,7 @@ From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:84
 On the iPhone, install Tailscale and sign in with the same account as the Mac. Then open `https://<your-mac>.<tailnet>.ts.net:8443/app/` in Safari (`remote serve` prints the address) and use Share, Add to Home Screen to open it like an app. There is no login: Tailscale says who you are.
 
 - **Sessions:** one compact row each, grouped by day: a state dot (green idle, amber running, hollow when open in a terminal on the Mac), the title, project and age, and the last message you sent.
-- **Search:** the box at the top searches the words in your sessions (aimux's session index, keyword ranking, refreshed every minute) and shows where each one matched.
+- **Search:** the box at the top searches the words in your sessions and shows where each one matched. `remote serve` keeps its own keyword index, `~/.aimux/remote-search.db`, refreshed every minute and separate from the CLI and TUI index (which also holds embeddings). The first start builds it in the background; that takes a few minutes for a large history, and searches find nothing until it is ready.
 - **New session:** + starts a session in one of your recent project folders (only those; never an arbitrary path) with a first message.
 - **In a session:** each turn shows your message, one line summing up its tools (tap for the list) and the reply, cut to a few lines until you tap. The header says what the agent is doing right now. Permission requests are pinned above the message box, with a preview of what the tool will write or run; answer with the agent's own options. Stop ends the running turn. A session open in a terminal on the Mac is read-only.
 - **Voice:** the mic dictates into the message box (the browser's speech recognition; on iPhone it runs through Apple's speech service, like keyboard dictation). In the voice menu: read replies aloud (code is skipped), send when you stop talking, and hands-free conversation, which listens again after each reply. Permission requests are read out but only answered with a tap. iOS may need a tap on the mic again after the phone sleeps.
@@ -61,8 +61,8 @@ Responses are JSON, except the events endpoint, which streams server-sent events
 |---|---|
 | `GET /v1/health` | Who you are: `{"status","login"}` |
 | `GET /v1/sessions?limit=50` | Recent Claude sessions with `state`: `idle`, `open_in_terminal` or `busy`, and `lastPrompt`. A session created through this API whose first message failed before Claude saved it has `state` `unavailable` on `GET /v1/sessions/{id}` and is not listed. Sessions started by a program (for example `claude -p`) are left out unless `include_automated=1`; sessions started through this API are always listed |
-| `GET /v1/search?q=...&limit=20` | Sessions matching `q` in their content, best first, each with a `snippet` where matched words are in `[brackets]` |
-| `GET /v1/projects` | Folders of recent sessions: where a new session may start |
+| `GET /v1/search?q=...&limit=20` | `{"results":[...]}`: sessions matching `q` in their content, best first, each a session (as in the list) plus a `snippet` where matched words are in `[brackets]` |
+| `GET /v1/projects` | `{"projects":[{"path","name","lastActive"}]}`: up to 12 existing folders of recent interactive sessions (including ones started through this API), most recent first: where a new session may start |
 | `POST /v1/sessions` | Body `{"cwd","text","key"}`: start a session in one of `/v1/projects` and send its first message. Returns `202 {"id","turn","events"}`. A retry with the same non-empty `key` returns the same session; keys are remembered until the server restarts. When every run slot is busy it fails at once with `503 too_many_runs` (a message to an existing session is accepted and ends with `turn_error` instead) |
 | `GET /v1/sessions/{id}?turns=20` | One session and its last turns (user text, reply, tools) |
 | `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn, returns `202 {"turn","after","events"}`. A retry with the same non-empty `key` returns the same turn instead of sending twice; keys are remembered per session until the server restarts |
@@ -72,7 +72,7 @@ Responses are JSON, except the events endpoint, which streams server-sent events
 
 Event kinds: `turn_started`, `update` (an ACP session update: agent text, tool calls, plans; the agent's slash-command list is left out), `approval` (with `approvalId`, `title` and `options`), `approval_resolved` (`allowed`, `denied` or `expired`), `turn_done` (with `stopReason`) and `turn_error`.
 
-When every run slot is busy (`max_runs`), the message is still accepted (202) and the turn ends with a `turn_error` event saying so; send again once a session finishes.
+When every run slot is busy (`max_runs`), a message to an existing session is still accepted (202) and the turn ends with a `turn_error` event saying so; send again once a session finishes. Creating a session instead fails at once with `503 too_many_runs`.
 
 Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process, such as `aimux chat`, is continuing the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is missing or has an entry aimux cannot read, so it will not risk a second writer), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
 

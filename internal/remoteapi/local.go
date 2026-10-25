@@ -252,7 +252,8 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 		if dir == "" {
 			dir = s.Project
 		}
-		if s.Provider != "claude" || s.IsSubagent || s.Automated || dir == "" || seen[dir] {
+		_, created := x.Created.Get(s.ID)
+		if s.Provider != "claude" || s.IsSubagent || (s.Automated && !created) || dir == "" || seen[dir] {
 			continue
 		}
 		seen[dir] = true

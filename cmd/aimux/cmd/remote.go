@@ -169,9 +169,11 @@ func newRemoteServeCmd() *cobra.Command {
 			}, remoteapi.BrokerOptions{ApprovalTimeout: s.approvalTimeout})
 			claude := &provider.Claude{}
 			searcher := search.DefaultService(io.Discard)
-			// Keyword ranking only (below), so no embeddings: refreshing would
-			// otherwise send changed sessions to the embedding API for nothing.
+			// Keyword ranking only (below), in an index of its own: without
+			// embeddings, refreshing the shared index would mark changed
+			// sessions as seen before the CLI and TUI embed them.
 			searcher.Embedder = nil
+			searcher.DBPath = filepath.Join(home, ".aimux", "remote-search.db")
 			index := &remoteapi.LocalIndex{
 				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
 				Discover: history.Discover, ParseTrace: claude.ParseTrace, Owned: manager.Owns,

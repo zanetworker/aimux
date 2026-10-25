@@ -275,3 +275,20 @@ func TestCreatedStore_NullFileIsEmpty(t *testing.T) {
 		t.Fatal("entry missing after Add")
 	}
 }
+
+// A folder used only by sessions started here stays a recent project,
+// although the agent SDK marks those sessions automated.
+func TestLocalIndex_ProjectsIncludeFoldersOfCreatedSessions(t *testing.T) {
+	dir := t.TempDir()
+	x := &LocalIndex{Created: &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")},
+		Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+			return []history.Session{{ID: "phone", Provider: "claude", Cwd: dir, Automated: true, LastActive: time.Now()}}, nil
+		}}
+	if err := x.Created.Add("phone", dir, "x"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := x.Projects(context.Background())
+	if err != nil || len(got) != 1 || got[0].Path != dir {
+		t.Fatalf("projects %+v (%v), want %s", got, err, dir)
+	}
+}
