@@ -236,14 +236,20 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 	seen := map[string]bool{}
 	out := []Project{}
 	for _, s := range all {
-		if s.Provider != "claude" || s.IsSubagent || s.Automated || s.Project == "" || seen[s.Project] {
+		// The recorded working directory: Project is rebuilt from Claude's
+		// folder name, which different paths can share.
+		dir := s.Cwd
+		if dir == "" {
+			dir = s.Project
+		}
+		if s.Provider != "claude" || s.IsSubagent || s.Automated || dir == "" || seen[dir] {
 			continue
 		}
-		seen[s.Project] = true
-		if fi, err := os.Stat(s.Project); err != nil || !fi.IsDir() {
+		seen[dir] = true
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 			continue
 		}
-		out = append(out, Project{Path: s.Project, Name: filepath.Base(s.Project), LastActive: s.LastActive})
+		out = append(out, Project{Path: dir, Name: filepath.Base(dir), LastActive: s.LastActive})
 		if len(out) == maxProjects {
 			break
 		}

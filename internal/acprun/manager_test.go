@@ -692,3 +692,26 @@ func TestManager_NewSessionReservesItsSlot(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 }
+
+// The slot a new session reserved is still its own while the start is
+// being handed over to a run: a concurrent message elsewhere cannot take it.
+func TestManager_NewSessionKeepsItsSlotThroughHandover(t *testing.T) {
+	fs := &fakeRunStarter{}
+	var m *Manager
+	var otherErr error
+	m = NewManager(ManagerOptions{Start: fs.start, MaxRuns: 1,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) { return &fakeRunner{}, "fresh", nil },
+		Reserve: func(id string) (func(), error) {
+			if id == "fresh" { // mid-handover: another request arrives
+				_, otherErr = send(m, "other")
+			}
+			return func() {}, nil
+		}})
+	defer m.Close()
+	if _, err := m.New(context.Background(), "/w"); err != nil {
+		t.Fatalf("New lost its reserved slot: %v", err)
+	}
+	if !errors.Is(otherErr, ErrTooManyRuns) {
+		t.Fatalf("concurrent send: %v, want ErrTooManyRuns while the slot is reserved", otherErr)
+	}
+}

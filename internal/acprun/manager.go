@@ -3,6 +3,7 @@ package acprun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -288,50 +289,47 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 		evicted.retire()
 	}
 	r, id, err := m.opt.StartNew(sctx, cwd)
-	m.mu.Lock()
-	delete(m.newStart, &cancel)
-	closed := m.closed
-	m.mu.Unlock()
 	if err != nil {
+		m.dropNewStart(&cancel)
 		return "", err
-	}
-	if closed {
-		_ = r.Close() // it finished starting after shutdown began
-		return "", errManagerDone
 	}
 	var release func()
 	if m.opt.Reserve != nil {
 		if release, err = m.opt.Reserve(id); err != nil {
+			m.dropNewStart(&cancel)
 			_ = r.Close()
 			return "", err
 		}
 	}
-	e, evicted, err := m.claim(id)
-	if evicted != nil {
-		evicted.retire()
-	}
-	if err != nil {
-		_ = r.Close()
-		if release != nil {
-			release()
-		}
-		return "", err
-	}
+	// Turn the reserved slot into the session's run in one step, so no
+	// other request can take the slot in between.
 	m.mu.Lock()
-	if m.closed || m.runs[id] != e { // Close took the entry meanwhile
-		m.mu.Unlock()
-		_ = r.Close()
+	delete(m.newStart, &cancel)
+	closed, taken := m.closed, m.runs[id] != nil
+	if !closed && !taken {
+		e := &runEntry{release: release, lastUsed: m.opt.Now()}
+		e.setRun(r)
+		m.runs[id] = e
+	}
+	m.mu.Unlock()
+	if closed || taken {
+		_ = r.Close() // it finished starting after shutdown began, or the id is in use
 		if release != nil {
 			release()
 		}
-		return "", errManagerDone
+		if closed {
+			return "", errManagerDone
+		}
+		return "", fmt.Errorf("new session %s: %w", id, ErrBusy)
 	}
-	e.release = release
-	e.setRun(r)
-	e.busy = false
-	e.lastUsed = m.opt.Now()
-	m.mu.Unlock()
 	return id, nil
+}
+
+// dropNewStart gives up a new session's reserved slot.
+func (m *Manager) dropNewStart(cancel *context.CancelFunc) {
+	m.mu.Lock()
+	delete(m.newStart, cancel)
+	m.mu.Unlock()
 }
 
 // idleVictimLocked picks the least recently used idle run to make room, or

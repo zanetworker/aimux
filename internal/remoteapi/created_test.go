@@ -198,3 +198,24 @@ func TestLocalIndex_SearchDropsHitsWithoutAMatch(t *testing.T) {
 		t.Fatalf("hits %+v, want none for a query nothing contains", hits)
 	}
 }
+
+func TestLocalIndex_ProjectsUseTheRecordedCwd(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "my-app")
+	if err := os.MkdirAll(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "my", "app"), 0o700); err != nil { // the look-alike
+		t.Fatal(err)
+	}
+	x := &LocalIndex{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+		return []history.Session{{ID: "1", Provider: "claude", Project: filepath.Join(root, "my", "app"), Cwd: real, LastActive: time.Now()}}, nil
+	}}
+	got, err := x.Projects(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Path != real {
+		t.Fatalf("projects %+v, want the recorded %s", got, real)
+	}
+}

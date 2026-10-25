@@ -1202,3 +1202,21 @@ func TestScanSession_AITitle(t *testing.T) {
 		t.Fatalf("AITitle = %q", s.AITitle)
 	}
 }
+
+// The working directory recorded in the session, not the one guessed from
+// the encoded folder name (different paths can encode the same way).
+func TestScanSession_RecordedCwd(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/Users/me/my-app","message":{"role":"user","content":"hello there"}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanSession("s", path, "/Users/me/my/app") // the lossy reconstruction
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Cwd != "/Users/me/my-app" {
+		t.Fatalf("Cwd = %q, want the recorded one", s.Cwd)
+	}
+}

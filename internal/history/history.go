@@ -35,6 +35,7 @@ type Session struct {
 	FirstPrompt string    `json:"first_prompt"`  // first user message (cleaned, for display)
 	Title       string    `json:"title"`         // LLM-generated title (from meta, or empty)
 	AITitle     string    `json:"ai_title"`      // the name Claude Code gave the session (its latest ai-title entry)
+	Cwd         string    `json:"cwd"`           // working directory recorded in the session (Project is reconstructed from the folder name)
 	Resumable   bool      `json:"resumable"`     // true if provider supports resume
 	Annotation  string    `json:"annotation"`    // achieved/partial/failed/abandoned
 	Note        string    `json:"note"`          // free-text rationale
@@ -287,6 +288,7 @@ func scanSession(id, filePath, project string) (Session, error) {
 	}
 
 	s.Automated = IsAutomated(s.entrypoint, s.cwd, s.FirstPrompt, DefaultAutomatedPrefixes)
+	s.Cwd = s.cwd
 
 	// Extract last prompt and action once (not per-line)
 	if raw := imagePlaceholder.ReplaceAllString(allUserText(lastUserContent), ""); strings.TrimSpace(raw) != "" {
