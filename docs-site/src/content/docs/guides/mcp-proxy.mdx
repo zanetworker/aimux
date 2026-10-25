@@ -39,7 +39,7 @@ Only **tools** are proxied. Prompts, resources and log messages from the proxied
 
    Add the `mux` entry to `mcpServers` in `~/.claude.json`. The command never edits the file.
 
-4. Remove the replaced stdio entries from `~/.claude.json` if you want. `refresh` saved their definitions (commands, arguments and `env`) in `~/.aimux/mcp-servers.json`, an owner-only file, and the proxy runs them from there. Later refreshes merge: a server still in `~/.claude.json` overrides the saved copy, and one you removed is kept. To drop a server from the proxy, pass `--exclude` to `refresh`.
+4. Remove the replaced stdio entries from `~/.claude.json` if you want. `refresh` saved their definitions (commands, arguments and `env`) in `~/.aimux/mcp-servers.json`, an owner-only file, and the proxy runs them from there. Later refreshes merge: a server still in `~/.claude.json` overrides the saved copy, and one you removed is kept. To drop a server from the proxy, remove it from `~/.claude.json` and pass `--exclude` to `refresh`; while it is still in `~/.claude.json`, every `refresh` and `serve` adds it back unless you pass `--exclude` to each.
 
 The catalog is also refreshed whenever a server starts, so new tools appear the next time the proxy starts.
 
