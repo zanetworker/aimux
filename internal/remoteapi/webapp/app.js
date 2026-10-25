@@ -534,11 +534,10 @@ async function send(ev) {
   try {
     await api('POST', '/v1/sessions/' + encodeURIComponent(session) + '/messages', { text, key });
     unsettled = null;
-    if (gen !== nav) { // the user has moved to another session
-      if ((drafts.get(session) || '').trim() === text) drafts.delete(session); // sent: not a draft
-      return;
-    }
-    if ($('prompt').value.trim() === text) { // keep anything typed meanwhile
+    // Sent text is no draft, wherever it is now (saved, or back on screen
+    // after the user left and returned); anything typed since is kept.
+    if ((drafts.get(session) || '').trim() === text) drafts.delete(session);
+    if (current && current.id === session && $('prompt').value.trim() === text) {
       $('prompt').value = '';
       autoResize();
     }

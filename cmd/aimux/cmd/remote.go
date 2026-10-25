@@ -122,7 +122,8 @@ func newRemoteServeCmd() *cobra.Command {
 		Short: "Serve the /v1 API on 127.0.0.1 for tailscale serve to expose",
 		Long: "Serve the remote API: list Claude sessions, follow them, continue idle ones and answer " +
 			"approvals from another device. It listens on 127.0.0.1 only and admits a request only when " +
-			"tailscale serve forwarded it for a login in remote_access.allowed_logins.",
+			"tailscale serve forwarded it for a login in remote_access.allowed_logins. It also serves a " +
+			"phone web client at /app/: after tailscale serve, open https://<this machine's tailnet name>:8443/app/.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(config.DefaultPath())
 			if err != nil {
