@@ -16,6 +16,7 @@ const (
 	CapSessions    = "sessions"     // list, detail, send, events, cancel, approvals
 	CapSearch      = "search"       // GET /v1/search
 	CapNewSessions = "new_sessions" // GET /v1/projects, POST /v1/sessions
+	CapPush        = "push"         // POST /v1/devices, DELETE /v1/devices/{token}: approval notifications over APNs
 )
 
 // Health is GET /v1/health: who the caller is and what this server offers.

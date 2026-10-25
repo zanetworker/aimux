@@ -39,10 +39,12 @@ info:
     - `update` event data follows ACP, whose version is `acpProtocolVersion`;
       an ACP version change is reported there, not hidden.
 
+    Notifications while the client is not connected: with the `push`
+    capability an app registers its APNs device token (`POST /v1/devices`)
+    and each new approval reaches the lock screen. Other events still
+    arrive only over the open stream (replay from the cursor on reconnect).
+
     Known gaps for app clients (not offered yet):
-    - Notifications while the client is not connected: events arrive only
-      over the open stream, so a backgrounded app learns of an approval when
-      it reconnects (replay from its cursor), not sooner.
     - Paging the session list: `limit` only, newest first.
     - Codex and other agents' sessions: Claude only (`provider` is `claude`).
 servers:
@@ -249,6 +251,54 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /v1/devices:
+    post:
+      summary: Send approval notifications to this phone
+      description: >
+        Requires the `push` capability. Registers an APNs device token; register
+        again on every launch, since tokens change. Each new approval then
+        sends an alert (category `AIMUX_APPROVAL`, thread = the session) with
+        `approvalId` and `sessionId` beside `aps`. The alert names the session
+        and the tool, never the tool's input. Answer it in the app with
+        `POST /v1/approvals/{approvalId}`. Tokens Apple reports as gone are
+        forgotten.
+      operationId: registerDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceRequest" }
+      responses:
+        "200":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/devices/{token}:
+    delete:
+      summary: Stop sending approval notifications to this phone
+      description: Requires the `push` capability. An unknown token is not an error.
+      operationId: unregisterDevice
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Unregistered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
   /v1/search:
     get:
       summary: Sessions whose content matches a query
@@ -342,7 +392,7 @@ components:
         acpProtocolVersion: { type: integer, minimum: 1, description: "The Agent Client Protocol version `update` events follow." }
         capabilities:
           type: array
-          items: { type: string, enum: [sessions, search, new_sessions] }
+          items: { type: string, enum: [sessions, search, new_sessions, push] }
 
     SessionState:
       type: string
@@ -479,6 +529,17 @@ components:
         text: { type: string, minLength: 1 }
         key: { type: string, description: "Idempotency key for retries." }
 
+    DeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [token, environment]
+      properties:
+        token: { type: string, description: "The APNs device token, hex." }
+        environment:
+          type: string
+          enum: [sandbox, production]
+          description: "`sandbox` for a build run from Xcode, `production` for TestFlight and the App Store."
+
     AnswerRequest:
       type: object
       additionalProperties: false
@@ -501,7 +562,7 @@ components:
       additionalProperties: false
       required: [status]
       properties:
-        status: { type: string, enum: [cancelling, answered] }
+        status: { type: string, enum: [cancelling, answered, registered, unregistered] }
 
     EventPage:
       type: object

@@ -295,6 +295,14 @@ remote_access:
 | `max_runs` | int | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | duration | `10m` | Unanswered permission requests are denied after this |
 | `hostnames` | list | detected from `tailscale status` | `Host` names the API accepts (this machine's tailnet names); others are refused |
+| `push.ntfy.topic` | string | off | ntfy topic that gets an alert for each permission request; on when set |
+| `push.ntfy.server` | string | `https://ntfy.sh` | ntfy server (2.16 or later also takes the alert back once the request is settled) |
+| `push.ntfy.token_env` | string | none | Environment variable holding an ntfy access token; `remote serve` refuses to start if it is not set |
+| `push.ntfy.click_url` | string | `https://<tailnet name>:8443/app/` | Web client a tapped alert opens |
+| `push.apns.key_file` | path | off | Apple token signing key (`.p8`, P-256) for the aimux iPhone app; `~/` is expanded |
+| `push.apns.key_id`, `push.apns.team_id`, `push.apns.topic` | string | none | The key's id, your Apple team id and the app's bundle id; all four `apns` fields or none |
+
+See [Approval notifications](/guides/remote-access/#approval-notifications) for setting up the phone.
 
 ## API Endpoints
 

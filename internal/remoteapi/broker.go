@@ -53,6 +53,21 @@ type BrokerOptions struct {
 	// ApprovalTimeout is how long a permission request waits for an answer
 	// before it is denied. Default 10 minutes.
 	ApprovalTimeout time.Duration
+	// OnApproval, if set, is told about each new permission request, in a
+	// goroutine of its own, so a person not watching can be notified.
+	OnApproval func(ApprovalNotice)
+	// OnApprovalResolved, if set, is told when one is answered, expires or
+	// its turn ends (Outcome set), so the notification can be taken back.
+	OnApprovalResolved func(ApprovalNotice)
+}
+
+// ApprovalNotice describes a new permission request for a notification.
+type ApprovalNotice struct {
+	ApprovalID string
+	Session    string
+	Title      string    // the tool call's title
+	Expires    time.Time // denied after this unless answered
+	Outcome    string    // OnApprovalResolved only: allowed, denied or expired
 }
 
 type sessionLog struct {
@@ -319,6 +334,10 @@ func (b *Broker) Approver() acprun.Approver {
 			ApprovalID: id, Title: title, Options: req.Options, ToolCall: req.ToolCall,
 		})
 		b.mu.Unlock()
+		notice := ApprovalNotice{ApprovalID: id, Session: session, Title: title, Expires: time.Now().Add(b.opt.ApprovalTimeout)}
+		if b.opt.OnApproval != nil {
+			go b.opt.OnApproval(notice)
+		}
 
 		outcome, option := OutcomeExpired, ""
 		timer := time.NewTimer(b.opt.ApprovalTimeout)
@@ -337,6 +356,10 @@ func (b *Broker) Approver() acprun.Approver {
 		delete(b.approvals, id)
 		b.appendLocked(session, p.turn, KindApprovalResolved, ApprovalResolvedData{ApprovalID: id, Outcome: outcome})
 		b.mu.Unlock()
+		if b.opt.OnApprovalResolved != nil {
+			notice.Outcome = outcome
+			go b.opt.OnApprovalResolved(notice)
+		}
 		if outcome == OutcomeAllowed {
 			return option, true
 		}

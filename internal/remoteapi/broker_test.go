@@ -560,3 +560,84 @@ func TestBroker_WedgedCancelDoesNotBlockOtherSessions(t *testing.T) {
 		t.Fatal("broker frozen while one session's cancel is stuck")
 	}
 }
+
+func TestBroker_ApprovalNoticeArrivesWithoutHoldingTheApproval(t *testing.T) {
+	notices := make(chan ApprovalNotice, 1)
+	release := make(chan struct{})
+	defer close(release)
+	var b *Broker
+	f := &fakeBackend{}
+	f.sendF = func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+		_, _ = b.Approver()(ctx, permissionRequest())
+		return "end_turn", nil
+	}
+	ttl := 5 * time.Second
+	b = NewBroker(f.deps(&b), BrokerOptions{ApprovalTimeout: ttl, OnApproval: func(n ApprovalNotice) {
+		notices <- n
+		<-release // a slow push service must not hold up the approval
+	}})
+	before := time.Now()
+	if _, err := b.Start("s1", "push it", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	var n ApprovalNotice
+	select {
+	case n = <-notices:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no approval notice")
+	}
+	if n.Session != "s1" || n.ApprovalID == "" || n.Title != "git push" {
+		t.Fatalf("notice %+v", n)
+	}
+	if n.Expires.Before(before.Add(ttl)) || n.Expires.After(time.Now().Add(ttl)) {
+		t.Fatalf("expires %v, want about now + the approval timeout", n.Expires)
+	}
+	if err := b.Answer(n.ApprovalID, "allow"); err != nil {
+		t.Fatalf("answer while the notice is still being sent: %v", err)
+	}
+	if !hasResolution(waitFor(t, b, "s1", KindTurnDone), "allowed") {
+		t.Fatal("the approval did not resolve")
+	}
+}
+
+func TestBroker_ResolvedNoticeFollowsEveryOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name, option, outcome string
+		ttl                   time.Duration
+	}{
+		{"answered", "allow", OutcomeAllowed, 5 * time.Second},
+		{"expired", "", OutcomeExpired, 50 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			asked := make(chan ApprovalNotice, 1)
+			resolved := make(chan ApprovalNotice, 1)
+			var b *Broker
+			f := &fakeBackend{}
+			f.sendF = func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+				_, _ = b.Approver()(ctx, permissionRequest())
+				return "end_turn", nil
+			}
+			b = NewBroker(f.deps(&b), BrokerOptions{ApprovalTimeout: tc.ttl,
+				OnApproval:         func(n ApprovalNotice) { asked <- n },
+				OnApprovalResolved: func(n ApprovalNotice) { resolved <- n },
+			})
+			if _, err := b.Start("s1", "push it", "k1"); err != nil {
+				t.Fatal(err)
+			}
+			n := <-asked
+			if tc.option != "" {
+				if err := b.Answer(n.ApprovalID, tc.option); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case r := <-resolved:
+				if r.ApprovalID != n.ApprovalID || r.Session != "s1" || r.Outcome != tc.outcome {
+					t.Fatalf("resolved %+v, want %s for %s", r, tc.outcome, n.ApprovalID)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("no resolved notice: the phone would keep showing a request nobody can answer")
+			}
+		})
+	}
+}
