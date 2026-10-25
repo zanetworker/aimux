@@ -102,6 +102,7 @@ function badge(state) {
 }
 
 async function showList() {
+  if (current) drafts.set(current.id, $('prompt').value);
   closeSession();
   $('session').hidden = true;
   $('list').hidden = false;
@@ -164,9 +165,14 @@ let retryTimer = null;
 let following = false; // the event stream is open: replies will show
 let liveTurns = new Set(); // turns this view saw start on the live stream
 
+const drafts = new Map(); // session id -> unsent text, so a draft never goes to another session
+
 async function showSession(id) {
   clearInterval(listTimer);
+  if (current) drafts.set(current.id, $('prompt').value);
   closeSession();
+  $('prompt').value = drafts.get(id) || '';
+  autoResize();
   const gen = nav;
   $('list').hidden = true;
   $('session').hidden = false;
@@ -188,9 +194,19 @@ async function showSession(id) {
 async function load(id, gen) {
   let page, detail;
   try {
-    page = await api('GET', '/v1/sessions/' + encodeURIComponent(id) + '/events?wait=0');
-    if (gen !== nav) return;
-    detail = await api('GET', '/v1/sessions/' + encodeURIComponent(id) + '?turns=30');
+    const eventsURL = '/v1/sessions/' + encodeURIComponent(id) + '/events?wait=0';
+    for (let attempt = 0; ; attempt++) {
+      page = await api('GET', eventsURL);
+      if (gen !== nav) return;
+      detail = await api('GET', '/v1/sessions/' + encodeURIComponent(id) + '?turns=30');
+      if (gen !== nav) return;
+      // A turn that started after the snapshot may already be in the history
+      // and would then also arrive on the stream: read both again.
+      const seen = page.events.length ? page.events[page.events.length - 1].seq : 0;
+      const since = await api('GET', eventsURL + '&after=' + seen);
+      if (gen !== nav) return;
+      if (!since.events.some((e) => e.kind === 'turn_started') || attempt >= 2) break;
+    }
   } catch (e) {
     if (gen !== nav) return;
     if (e.status === 404) {
@@ -331,6 +347,11 @@ function handle(e, live) {
   switch (e.kind) {
     case 'turn_started':
       if (live) liveTurns.add(e.turn);
+      if (unsettled && current && unsettled.session === current.id && unsettled.text === d.text) {
+        // The send that looked failed did reach the server.
+        unsettled = null;
+        if ($('prompt').value.trim() === d.text) { $('prompt').value = ''; autoResize(); }
+      }
       $('messages').append(el('div', 'msg user', d.text || ''));
       startTurn();
       break;
@@ -490,20 +511,30 @@ function resolveCard(id, outcome) {
 // Sending and stopping
 
 let sending = false; // a message POST is in flight: Enter must not send it again
+// unsettled is a failed send: its outcome may be unknown (the response was
+// lost), so a retry of the same text reuses its key and the server runs it
+// at most once. Reusing a key the server never saw is harmless.
+let unsettled = null; // {session, text, key}
 
 async function send(ev) {
   ev.preventDefault();
   const text = $('prompt').value.trim();
   if (!text || !current || running || sending || !following) return;
   const gen = nav;
+  const session = current.id;
+  const key = unsettled && unsettled.session === session && unsettled.text === text ? unsettled.key : newKey();
   sending = true;
   $('send').disabled = true;
   try {
-    await api('POST', '/v1/sessions/' + encodeURIComponent(current.id) + '/messages', { text, key: newKey() });
+    await api('POST', '/v1/sessions/' + encodeURIComponent(session) + '/messages', { text, key });
+    unsettled = null;
     if (gen !== nav) return; // the user has moved to another session
-    $('prompt').value = '';
-    autoResize();
+    if ($('prompt').value.trim() === text) { // keep anything typed meanwhile
+      $('prompt').value = '';
+      autoResize();
+    }
   } catch (e) {
+    unsettled = { session, text, key };
     if (gen !== nav) return;
     if (e.code === 'open_in_terminal') showState('open_in_terminal');
     system(sendError(e), true);
