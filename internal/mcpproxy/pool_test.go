@@ -403,3 +403,41 @@ func TestPool_CallerCancelKeepsSharedBackend(t *testing.T) {
 		t.Fatal("backend was restarted")
 	}
 }
+
+type slowCloseBackend struct {
+	fakeBackend
+	closing chan struct{}
+}
+
+func (s *slowCloseBackend) Close() error { <-s.closing; return s.fakeBackend.Close() }
+
+// Closing an abandoned backend can take seconds (graceful shutdown, then
+// kill). Other clients must not wait for it.
+func TestPool_SlowBackendCloseDoesNotBlockOthers(t *testing.T) {
+	closing := make(chan struct{})
+	defer close(closing)
+	startRelease := make(chan struct{})
+	start := func(ctx context.Context, server string) (Backend, error) {
+		if server == "browser" {
+			<-startRelease
+			return &slowCloseBackend{closing: closing}, nil
+		}
+		return &fakeBackend{}, nil
+	}
+	p := NewPool(start, PoolOptions{PerSession: map[string]bool{"browser": true}})
+	go func() { p.Call(context.Background(), "browser", "s1", req("x")) }()
+	time.Sleep(20 * time.Millisecond)
+	p.CloseSession("s1") // the session goes while its backend starts
+	close(startRelease)  // the start finishes; the pool must close it, slowly
+	time.Sleep(20 * time.Millisecond)
+	done := make(chan *mcp.CallToolResult)
+	go func() { done <- p.Call(context.Background(), "slack", "", req("post")) }()
+	select {
+	case r := <-done:
+		if r.IsError {
+			t.Fatalf("unrelated call failed: %s", resultText(t, r))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("an unrelated tool call waited for another backend's shutdown")
+	}
+}

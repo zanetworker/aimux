@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,4 +96,33 @@ func IsLiveHolder(e ClaudeRegistryEntry) bool {
 	}
 	d := actual.Sub(recorded)
 	return d <= 2*time.Second && d >= -2*time.Second
+}
+
+// ReadClaudeRegistryStrict is ReadClaudeRegistry for decisions that must not
+// guess: any registry file it cannot read or decode is an error, since that
+// file may be the live terminal holding a session.
+func ReadClaudeRegistryStrict(dir string) (map[int]ClaudeRegistryEntry, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read Claude session registry %s: %w", dir, err)
+	}
+	reg := make(map[int]ClaudeRegistryEntry)
+	for _, de := range entries {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, de.Name())
+		data, err := os.ReadFile(path) // #nosec G304 -- fixed registry dir
+		if err != nil {
+			return nil, fmt.Errorf("read Claude session registry entry %s: %w", path, err)
+		}
+		var e ClaudeRegistryEntry
+		if err := json.Unmarshal(data, &e); err != nil {
+			return nil, fmt.Errorf("decode Claude session registry entry %s: %w", path, err)
+		}
+		if e.PID > 0 && e.SessionID != "" {
+			reg[e.PID] = e
+		}
+	}
+	return reg, nil
 }

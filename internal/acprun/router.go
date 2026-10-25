@@ -97,12 +97,15 @@ func ClaudeLookup(projectsDir, registryDir string) Lookup {
 		if err != nil {
 			return SessionInfo{}, err
 		}
-		if st, err := os.Stat(registryDir); err != nil || !st.IsDir() {
-			return SessionInfo{}, fmt.Errorf("%w (%s)", ErrOwnershipUnknown, registryDir)
+		registry, err := discovery.ReadClaudeRegistryStrict(registryDir)
+		if err != nil {
+			// A registry aimux cannot fully read may hide the terminal that
+			// holds this session.
+			return SessionInfo{}, fmt.Errorf("%w: %v", ErrOwnershipUnknown, err)
 		}
 		info := SessionInfo{Provider: "claude", Cwd: cwd}
 		seen := map[int]bool{}
-		for pid, e := range discovery.ReadClaudeRegistry(registryDir) {
+		for pid, e := range registry {
 			if e.SessionID == sessionID && discovery.IsLiveHolder(e) {
 				seen[pid] = true
 			}

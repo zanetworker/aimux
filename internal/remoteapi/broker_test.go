@@ -479,3 +479,45 @@ func TestBroker_ApprovalExpiresWhenItsTurnEnds(t *testing.T) {
 		t.Fatal("no approval_resolved=expired event for the finished turn")
 	}
 }
+
+// While Cancel is signalling the agent, no new turn may start: otherwise the
+// agent cancel, meant for the old turn, would stop the new one.
+func TestBroker_NoNewTurnWhileCancelling(t *testing.T) {
+	inCancel := make(chan struct{})
+	release := make(chan struct{})
+	b := NewBroker(BrokerDeps{
+		Check: func(string) error { return nil },
+		Send: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+			if text == "first" {
+				<-ctx.Done()
+				return "", ctx.Err()
+			}
+			return "end_turn", nil
+		},
+		Cancel: func(string) error { close(inCancel); <-release; return nil },
+	}, BrokerOptions{})
+	if _, err := b.Start("s1", "first", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = b.Cancel("s1") }()
+	<-inCancel
+	started := make(chan error, 1)
+	go func() {
+		for {
+			if _, err := b.Start("s1", "second", "k2"); !errors.Is(err, acprun.ErrBusy) {
+				started <- err
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	select {
+	case err := <-started:
+		t.Fatalf("a new turn started (%v) while the old one's cancel was in flight", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if err := <-started; err != nil {
+		t.Fatalf("the next turn after the cancel: %v", err)
+	}
+}

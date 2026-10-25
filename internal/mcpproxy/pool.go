@@ -103,6 +103,7 @@ func (p *Pool) acquire(ctx context.Context, k slotKey) (*slot, error) {
 
 	if !ok {
 		b, err := p.start(ctx, k.server)
+		var abandoned Backend // closed after unlocking: shutdown can take seconds
 		p.mu.Lock()
 		s.backend, s.err = b, err
 		switch {
@@ -112,15 +113,18 @@ func (p *Pool) acquire(ctx context.Context, k slotKey) (*slot, error) {
 			}
 		case p.closed:
 			s.err = errPoolClosed
-			_ = b.Close()
+			abandoned = b
 		case s.closed:
 			s.err = errSessionClosed
-			_ = b.Close()
+			abandoned = b
 		default:
 			s.lastUsed = p.opt.Now()
 		}
 		close(s.ready)
 		p.mu.Unlock()
+		if abandoned != nil {
+			_ = abandoned.Close()
+		}
 		if err == nil && s.err == nil && p.opt.OnStart != nil {
 			p.opt.OnStart(k.server, b)
 		}

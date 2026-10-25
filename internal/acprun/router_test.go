@@ -207,3 +207,13 @@ func TestClaudeLookup_CommandLineHolder(t *testing.T) {
 		t.Fatalf("info %+v, want the claude --resume process as the only holder", info)
 	}
 }
+
+func TestClaudeLookup_UndecodableRegistryEntryRefuses(t *testing.T) {
+	projects, registry := claudeFixture(t)
+	if err := os.WriteFile(filepath.Join(registry, "777.json"), []byte(`{"pid":777,"sessi`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ClaudeLookup(projects, registry)("idle-1"); !errors.Is(err, ErrOwnershipUnknown) {
+		t.Fatalf("got %v, want ErrOwnershipUnknown: the broken entry may be the terminal holding this session", err)
+	}
+}

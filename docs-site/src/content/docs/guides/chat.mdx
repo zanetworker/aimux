@@ -20,7 +20,7 @@ aimux starts an [ACP](https://agentclientprotocol.com) adapter for Claude (`clau
 - **Sessions open in a terminal.** If the session is running in a terminal on this machine, aimux does not send to it, because typing into a running session can approve a permission prompt nobody saw. Close it there, then run `aimux chat`.
 - **Unknown sessions.** The ID must match a session file under `~/.claude/projects`.
 - **Sessions another aimux process is continuing.** One aimux process at a time drives a session (a lock in `~/.aimux/locks`), so `aimux chat` and `aimux remote serve` never both write to it.
-- **Sessions aimux cannot vouch for.** If Claude's session registry (`~/.claude/sessions`) is missing or unreadable, aimux cannot tell whether a terminal holds the session, so it refuses rather than risk a second writer.
+- **Sessions aimux cannot vouch for.** If Claude's session registry (`~/.claude/sessions`) is missing, or any of its entries cannot be read or decoded, aimux cannot tell whether a terminal holds the session, so it refuses rather than risk a second writer. A half-written entry clears on its own; try again shortly.
 
 ## Permissions
 

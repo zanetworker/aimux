@@ -80,3 +80,35 @@ func TestIsLiveHolder(t *testing.T) {
 		t.Fatal("a dead PID counted as a holder")
 	}
 }
+
+func TestReadClaudeRegistryStrict(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "101.json"), []byte(`{"pid":101,"sessionId":"a"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "101.abc.key"), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reg, err := ReadClaudeRegistryStrict(dir); err != nil || reg[101].SessionID != "a" {
+		t.Fatalf("clean registry: %v %v", reg, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "102.json"), []byte(`{not json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadClaudeRegistryStrict(dir); err == nil {
+		t.Fatal("an undecodable entry must be an error: it may be the live terminal's")
+	}
+	if err := os.Remove(filepath.Join(dir, "102.json")); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := filepath.Join(dir, "103.json")
+	if err := os.WriteFile(unreadable, []byte(`{"pid":103,"sessionId":"b"}`), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadClaudeRegistryStrict(dir); err == nil && os.Geteuid() != 0 {
+		t.Fatal("an unreadable entry must be an error")
+	}
+	if _, err := ReadClaudeRegistryStrict(filepath.Join(dir, "absent")); err == nil {
+		t.Fatal("a missing registry must be an error")
+	}
+}

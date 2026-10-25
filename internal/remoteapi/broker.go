@@ -266,9 +266,12 @@ func (b *Broker) Busy(session string) bool {
 // has the prompt, or during it. With no turn running it returns
 // acprun.ErrNotRunning.
 func (b *Broker) Cancel(session string) error {
+	// Hold the lock throughout: no turn can end and a new one start between
+	// choosing the turn and telling the agent, or the agent's cancel would
+	// stop the new turn instead.
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	stopTurn := b.log(session).cancel
-	b.mu.Unlock()
 	if stopTurn == nil {
 		return acprun.ErrNotRunning // no turn: leave any idle adapter alone
 	}
