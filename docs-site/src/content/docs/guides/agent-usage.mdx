@@ -17,7 +17,7 @@ Returns every command, flag, type, default, and valid enum as JSON. Agents use t
 
 ## Structured Output
 
-Add `--json` to any command for machine-parseable JSON output:
+Add `--json` for machine-parseable JSON output:
 
 ```bash
 aimux agents --json
@@ -29,6 +29,8 @@ aimux profile list --json
 aimux feedback "message" --json
 ```
 
+Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as the reply streams. The MCP proxy commands (`mcp proxy refresh`, `serve`, `config`) and `remote serve` print text: a per-server report, a startup line, or setup instructions.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -38,6 +40,8 @@ aimux feedback "message" --json
 | 2 | Usage error (bad flags, missing args) |
 | 3 | Not found (no sessions, no agents) |
 | 4 | Config error |
+
+`aimux chat`, `aimux remote serve` and `aimux mcp proxy` return 1 for every failure, including missing arguments, an unknown session and a bad setting.
 
 ## Non-Interactive Mode
 
@@ -123,7 +127,7 @@ $ aimux spawn gpt
 Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
-With `--json`, errors go to stderr as structured JSON:
+With `--json`, errors go to stderr as structured JSON (except `aimux chat`, whose `--json` covers the event stream; its errors stay plain text):
 
 ```json
 {"error": "invalid provider \"gpt\"", "code": 2, "valid_values": ["claude", "codex"]}
@@ -139,5 +143,5 @@ Add to `~/.aimux/config.yaml`:
 
 ```yaml
 resume:
-  skip_permissions: true    # always pass --dangerously-skip-permissions on resume
+  skip_permissions: true    # pass --dangerously-skip-permissions with `aimux resume` (the web dashboard asks per resume)
 ```

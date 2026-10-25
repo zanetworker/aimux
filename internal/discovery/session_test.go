@@ -2,7 +2,9 @@ package discovery
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"runtime"
 	"testing"
 	"time"
@@ -248,5 +250,47 @@ func TestToolSnippetForAction(t *testing.T) {
 				t.Errorf("toolSnippetForAction(%q, %v) = %q, want %q", tt.toolName, tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseSessionFile_LineOver1MBKeepsSession(t *testing.T) {
+	big := strings.Repeat("x", 2<<20)
+	content := `{"type":"user","sessionId":"sess-big","timestamp":"2026-10-24T10:00:00Z"}` + "\n" +
+		`{"type":"user","message":{"content":"` + big + `"}}` + "\n" +
+		`{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":7,"output_tokens":3}}}` + "\n"
+	path := filepath.Join(t.TempDir(), "big.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := ParseSessionFile(path)
+	if err != nil {
+		t.Fatalf("ParseSessionFile returned error %v; callers drop the session on error", err)
+	}
+	if info.SessionID != "sess-big" || info.TokensIn != 7 || info.MessageCount != 3 {
+		t.Fatalf("got %+v, want sessionId sess-big, 7 input tokens, 3 messages", info)
+	}
+}
+
+func TestFindSessionFile_RejectsUnsafeIDs(t *testing.T) {
+	root := t.TempDir()
+	projects := filepath.Join(root, "projects")
+	if err := os.MkdirAll(filepath.Join(projects, "p"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	id := "1f29de94-74c3-4089-94f7-df066c9fc5f5"
+	if err := os.WriteFile(filepath.Join(projects, "p", id+".jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A JSONL file outside the projects dir that traversal would reach.
+	if err := os.WriteFile(filepath.Join(root, "secret.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindSessionFile(id, projects); got == "" {
+		t.Fatal("a valid session id was not found")
+	}
+	for _, bad := range []string{"../secret", "../../secret", "p/../../secret", "*", "1f29de94*", "a?b", "[a]", "", "a\\b"} {
+		if got := FindSessionFile(bad, projects); got != "" {
+			t.Errorf("FindSessionFile(%q) = %q, want nothing", bad, got)
+		}
 	}
 }

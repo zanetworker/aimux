@@ -1,13 +1,15 @@
 package discovery
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 // SessionInfo holds aggregated data parsed from a Claude JSONL session file.
@@ -52,8 +54,7 @@ func ParseSessionFile(path string) (SessionInfo, error) {
 	defer func() { _ = f.Close() }()
 
 	var info SessionInfo
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner := jsonl.NewScanner(f)
 
 	// Defer expensive content parsing: save the last assistant content
 	// and only call extractLastToolAction once after the loop.
@@ -201,9 +202,19 @@ func toolSnippetForAction(name string, input map[string]interface{}) string {
 	return ""
 }
 
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+// ValidSessionID reports whether id looks like an agent session id (letters,
+// digits, dash, underscore). Anything else, such as a path separator, ".."
+// or a glob character, is refused before it reaches the filesystem.
+func ValidSessionID(id string) bool { return sessionIDPattern.MatchString(id) }
+
 // FindSessionFile searches for a session JSONL file matching the given session ID
 // within the projects directory.
 func FindSessionFile(sessionID, projectsDir string) string {
+	if !ValidSessionID(sessionID) {
+		return "" // never let an id add path segments or glob patterns
+	}
 	pattern := filepath.Join(projectsDir, "*", sessionID+".jsonl")
 	matches, err := filepath.Glob(pattern)
 	if err != nil || len(matches) == 0 {

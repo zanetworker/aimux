@@ -97,7 +97,7 @@ Requires **tmux**. Auto-discovers running Claude and Codex agents.
 
 ## Agent-Ready CLI
 
-aimux is built for AI agents. Every command supports `--json` for structured output, errors include valid values, and `agent-context` dumps the full CLI contract.
+aimux is built for AI agents. Commands support `--json` for structured output (the `mcp proxy` commands and `remote serve` print text, and `chat --json` streams JSON lines), errors include valid values, and `agent-context` dumps the full CLI contract.
 
 ```bash
 aimux agents --json                              # discover running agents
@@ -106,6 +106,9 @@ aimux spawn claude --dir ./proj --wait --json    # start and wait for completion
 aimux agent-context                              # full CLI schema for agents
 aimux profile save work --provider claude        # save reusable config
 aimux feedback "the X flag doesn't work"         # report friction
+aimux chat <session-id> "next step?"             # continue an idle Claude session
+aimux mcp proxy serve                            # lazy, shared MCP servers for all sessions
+aimux remote serve                               # your sessions from other devices, via tailscale serve
 ```
 
 See [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) for the full guide and [SKILL.md](SKILL.md) for agent workflow recipes.

@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 // newestFileModTime returns the modification time of the newest file matching
@@ -119,7 +119,7 @@ func extractCodexCWD(path string) string {
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
+	scanner := jsonl.NewScanner(f)
 	// Check the first 5 lines at most
 	for i := 0; i < 5 && scanner.Scan(); i++ {
 		var meta struct {

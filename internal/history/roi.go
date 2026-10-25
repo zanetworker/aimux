@@ -1,11 +1,12 @@
 package history
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 // TaskMultiplier maps task types to research-backed time multipliers.
@@ -111,7 +112,7 @@ func LoadSkillUsage() map[string][]string {
 	defer f.Close() //nolint:errcheck // read-only file
 
 	result := make(map[string][]string)
-	scanner := bufio.NewScanner(f)
+	scanner := jsonl.NewScanner(f)
 	for scanner.Scan() {
 		var entry skillUsageEntry
 		if json.Unmarshal(scanner.Bytes(), &entry) == nil && entry.Session != "" {

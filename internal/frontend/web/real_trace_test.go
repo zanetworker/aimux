@@ -33,6 +33,7 @@ func TestRealTrace_FastEndpoint(t *testing.T) {
 	claudeProvider := &provider.Claude{}
 
 	s := NewServer(0)
+	s.sessionRoots = []string{fixtureDir()}
 	s.SetConfig(config.Default())
 	s.SetDiscoverFunc(func() ([]agent.Agent, error) { return nil, nil })
 	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
@@ -184,6 +185,7 @@ func TestRealTrace_FastEndpoint_MissingFile(t *testing.T) {
 	claudeProvider := &provider.Claude{}
 
 	s := NewServer(0)
+	s.sessionRoots = []string{"/nonexistent"}
 	s.SetConfig(config.Default())
 	s.SetDiscoverFunc(func() ([]agent.Agent, error) { return nil, nil })
 	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
@@ -214,6 +216,7 @@ func TestRealTrace_FastEndpoint_MissingFile(t *testing.T) {
 // that the lookup function returns nil for.
 func TestRealTrace_FastEndpoint_UnknownProvider(t *testing.T) {
 	s := NewServer(0)
+	s.sessionRoots = []string{"/some"}
 	s.SetConfig(config.Default())
 	s.SetDiscoverFunc(func() ([]agent.Agent, error) { return nil, nil })
 	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {

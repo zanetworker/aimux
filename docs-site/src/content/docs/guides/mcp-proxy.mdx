@@ -1,0 +1,71 @@
+---
+title: MCP Proxy
+description: Serve your stdio MCP servers lazily behind one shared endpoint
+---
+
+Claude Code starts every configured MCP server when a session opens, before any tool is used. With many stdio servers that costs hundreds of MB to a few GB per session, and each session runs its own copy.
+
+`aimux mcp proxy` puts your stdio MCP servers behind one local endpoint:
+
+- **Lazy:** tools are listed from a cached catalog, and a server starts on its first tool call.
+- **Shared:** one process per server serves every session.
+- **Stopped when idle:** a server unused for 10 minutes (configurable) is stopped, including any child processes started by `npx` or `uv`.
+- **Same tools:** each tool keeps its name, prefixed by its server (`mcp__mux__slack__post_message`), so tool search works as before. Claude Code limits tool names to 64 characters; a longer one is cut short and ends in a 6-character hash of the full name, so it stays unique and stable.
+- **Permissions follow the new names:** an allow rule written for a direct server, such as `mcp__slack__post_message`, does not match the proxied tool. Add rules for the `mcp__mux__…` names (for example `mcp__mux__slack__post_message`) before switching.
+
+Remote (`http`, `sse`) servers are not proxied. They run no local process, so Claude Code keeps connecting to them directly.
+
+Only **tools** are proxied. Prompts, resources and log messages from the proxied servers are not available through the proxy; keep a server as a direct entry if you rely on those.
+
+## Set it up
+
+1. Cache the tool catalog. This starts each stdio server in `~/.claude.json` once and stops it:
+
+   ```bash
+   aimux mcp proxy refresh
+   ```
+
+2. Run the proxy:
+
+   ```bash
+   aimux mcp proxy serve
+   ```
+
+3. Print the Claude Code entry and the stdio entries it replaces:
+
+   ```bash
+   aimux mcp proxy config
+   ```
+
+   Add the `mux` entry to `mcpServers` in `~/.claude.json`. The command never edits the file.
+
+4. Remove the replaced stdio entries from `~/.claude.json` if you want. `refresh` saved their definitions (commands, arguments and `env`) in `~/.aimux/mcp-servers.json`, an owner-only file, and the proxy runs them from there. Later refreshes merge: a server still in `~/.claude.json` overrides the saved copy, and one you removed is kept. To drop a server from the proxy, remove it from `~/.claude.json` and pass `--exclude` to `refresh`; while it is still in `~/.claude.json`, every `refresh` and `serve` adds it back unless you pass `--exclude` to each.
+
+The catalog is also refreshed whenever a server starts, so new tools appear the next time the proxy starts.
+
+## Flags
+
+| Flag | Commands | Default | Meaning |
+|---|---|---|---|
+| `--claude-config` | all | `~/.claude.json` | Where the stdio servers are read from |
+| `--servers` | all | `~/.aimux/mcp-servers.json` | The proxy's saved backend definitions, written by `refresh` |
+| `--catalog` | all | `~/.aimux/mcp-catalog.json` | Tool catalog file |
+| `--exclude` | all | none | Servers to leave out of the proxy |
+| `--port` | `serve`, `config` | `7381` | Port on `127.0.0.1` |
+| `--per-session` | `serve` | `playwright,chrome-devtools,linkedin` | Servers that get one process per client session, for browser automation |
+| `--idle` | `serve` | `10m` | Stop a server after it has been unused this long |
+
+## Security
+
+The proxy listens on `127.0.0.1` only. It rejects requests whose `Host` is not a loopback name (DNS rebinding) and requests a browser sends from another site.
+
+## Failure handling
+
+- A server that fails to start, or does not answer within 2 minutes, returns an error result naming the server. Other servers keep working, and the next call tries again.
+- A call that times out (2 minutes) or loses its connection stops that server, and the next call starts a new one.
+- A tool that reports an error keeps its server running.
+- Claude Code does not end its MCP session when it exits. A session idle for longer than `--idle` expires, which also stops its per-session servers. A client that comes back later gets a new session automatically.
+
+## Conformance check
+
+`scripts/mcp-proxy-conformance.sh` runs the official MCP conformance suite against the reference server directly and through the proxy, and lists the scenarios the proxy drops. Expect `logging-*`, `prompts-*` and `resources-*` (tools only, as above). `tools-call-error` and `tools-call-simple-text` also differ, because the suite calls tools the reference server lacks: the reference server wraps that error in a tool result, while the proxy returns the JSON-RPC error `-32602` the specification defines for unknown tools.

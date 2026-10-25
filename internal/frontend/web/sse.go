@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +132,7 @@ func firstPromptFromJSONL(sessionFile string) string {
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
+	scanner := jsonl.NewScanner(f)
 	for scanner.Scan() {
 		var entry struct {
 			Type    string `json:"type"`

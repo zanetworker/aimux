@@ -6,6 +6,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/vt v0.0.0-20260225200202-61df8bc4b903
+	github.com/coder/acp-go-sdk v0.13.5
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/uuid v1.6.0

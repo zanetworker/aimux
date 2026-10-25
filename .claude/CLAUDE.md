@@ -152,7 +152,7 @@ internal/
 - **Config**: `~/.aimux/config.yaml` -- providers, shell, export (endpoint + experiment_id), OTEL receiver. Each provider's `OTELEnv(endpoint)` returns the right env vars for its OTEL mechanism.
 - **Stable agent ordering**: `sort.SliceStable` with status priority (active first), then alphabetical. Cursor preserved by PID tracking.
 - **Multi-session support**: Multiple sessions in the same directory appear as separate entries. Process tree dedup groups child processes (node wrappers) while keeping separate sessions distinct. `assignUniqueSuffixes` adds `#1`, `#2` when names collide.
-- **Session file matching**: Claude sessions matched to their JSONL files by correlating process start time (`ps -o lstart=`) with file first-write timestamp. Gemini sessions use per-session `session-*.json` chat files instead of shared `logs.json`.
+- **Session file matching**: for running Claude processes, the session ID comes from Claude Code's own registry (`~/.claude/sessions/<pid>.json`, see `discovery.ReadClaudeRegistry`), guarded against PID reuse by start time. Only when the registry has no entry are sessions matched to their JSONL files by correlating process start time (`ps -o lstart=`) with file first-write timestamp. Gemini sessions use per-session `session-*.json` chat files instead of shared `logs.json`.
 - **Subagent filtering**: `hasClaudeAncestor` walks up to 5 PPID levels to filter subagents spawned via Agent tool (handles `claude -> node -> claude` chains).
 - **Expandable process tree**: Agents table supports expand/collapse (Tab/x) for sessions with grouped processes. `treeRow` struct flattens the tree for rendering with box-drawing glyphs.
 
@@ -285,6 +285,11 @@ Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't
 
 **TUI has, CLI missing:**
 - Trace viewing, annotations, cost tracking, kill agent, export
+
+**CLI has, TUI and Web missing:**
+- Chat with an idle session (`aimux chat`, `internal/acprun`); web and phone come with the remote listener
+- MCP proxy (`aimux mcp proxy`); a daemon, no UI planned
+- Remote API (`aimux remote serve`, `internal/remoteapi`); a daemon whose clients are other devices; web dashboard has no chat view yet
 
 **Web has, TUI missing:**
 - Plugin listing/execution, AI insights, task complete/reopen

@@ -38,6 +38,7 @@ type Server struct {
 	composeEngine    *aimuxcompose.Engine
 	sessionStore     *controller.SessionStore
 	otelStore        controller.OTELLookup
+	sessionRoots     []string // nil means defaultSessionRoots()
 
 	// Discovery cache to avoid redundant ps/tmux scans
 	cacheMu     sync.Mutex
@@ -225,7 +226,7 @@ func (s *Server) Start() error {
 	}
 	s.listener = ln
 	s.srv = &http.Server{
-		Handler:           mux,
+		Handler:           localOnly(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

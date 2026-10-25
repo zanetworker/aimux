@@ -31,6 +31,7 @@ type Config struct {
 	Notifications   NotificationsConfig       `yaml:"notifications"` // macOS notification settings
 	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
 	Remote          RemoteConfig              `yaml:"remote"`      // Remote backend (OpenShell or K8s)
+	RemoteAccess    RemoteAccessConfig        `yaml:"remote_access"` // API for clients on other devices
 	QuickLaunch      QuickLaunchConfig         `yaml:"quick_launch"`       // quick launch directories
 	Tasks            TasksConfig               `yaml:"tasks"`              // Google Tasks integration
 	AutoArchiveAfter string                    `yaml:"auto_archive_after"` // idle duration before auto-archiving (e.g. "1h", "30m")
@@ -71,6 +72,17 @@ func (c K8sProviderConfig) IsActive() bool {
 }
 
 // RemoteConfig holds settings for the remote agent backend.
+// RemoteAccessConfig configures `aimux remote serve`, the API that phones and
+// other devices reach through `tailscale serve`.
+type RemoteAccessConfig struct {
+	Port            int      `yaml:"port"`             // on 127.0.0.1 (default 7382)
+	AllowedLogins   []string `yaml:"allowed_logins"`   // Tailscale logins admitted; empty admits nobody
+	Hostnames       []string `yaml:"hostnames"`        // trusted Host names (this machine's tailnet names); default: detected from tailscale
+	Adapter         string   `yaml:"adapter"`          // ACP adapter command for Claude sessions
+	MaxRuns         int      `yaml:"max_runs"`         // live adapters at once (default 2)
+	ApprovalTimeout string   `yaml:"approval_timeout"` // unanswered approvals are denied after this (default 10m)
+}
+
 type RemoteConfig struct {
 	Backend  string `yaml:"backend"`   // "openshell" or "k8s"
 	Gateway  string `yaml:"gateway"`   // OpenShell gateway URL
@@ -304,6 +316,7 @@ func Load(path string) (Config, error) {
 	if fileCfg.Remote.Backend != "" {
 		cfg.Remote = fileCfg.Remote
 	}
+	cfg.RemoteAccess = fileCfg.RemoteAccess // no defaults to keep; unset means nobody is admitted
 	if len(fileCfg.QuickLaunch.Directories) > 0 {
 		cfg.QuickLaunch = fileCfg.QuickLaunch
 	}

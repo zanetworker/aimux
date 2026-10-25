@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/discovery"
 )
 
 func TestClaudeName(t *testing.T) {
@@ -798,3 +799,68 @@ func TestClaudeParseTrace_PreservesIndentation(t *testing.T) {
 
 // Verify Claude implements the Provider interface at compile time.
 var _ Provider = (*Claude)(nil)
+
+func TestApplyRegistryEntry(t *testing.T) {
+	start := time.Date(2026, 10, 23, 15, 40, 46, 0, time.UTC)
+	reg := map[int]discovery.ClaudeRegistryEntry{
+		100: {PID: 100, SessionID: "from-registry", CWD: "/w/a", ProcStart: "Fri Oct 23 15:40:46 2026"},
+		200: {PID: 200, SessionID: "old-process", ProcStart: "Thu Oct 22 09:00:00 2026"},
+		300: {PID: 300, SessionID: "no-start-info"},
+	}
+	tests := []struct {
+		name      string
+		in        agent.Agent
+		wantID    string
+		wantDir   string
+		wantFound bool
+	}{
+		{"registry overrides command-line id", agent.Agent{PID: 100, SessionID: "stale-cli-id", StartTime: start.Add(time.Second)}, "from-registry", "/w/a", true},
+		{"keeps existing working dir", agent.Agent{PID: 100, WorkingDir: "/w/own", StartTime: start}, "from-registry", "/w/own", true},
+		{"pid reused by another process", agent.Agent{PID: 200, SessionID: "cli-id", StartTime: start}, "cli-id", "", false},
+		{"unknown start time still matches", agent.Agent{PID: 300}, "no-start-info", "", true},
+		{"no registry entry", agent.Agent{PID: 999, SessionID: "cli-id"}, "cli-id", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := tt.in
+			found := applyRegistryEntry(&a, reg)
+			if found != tt.wantFound || a.SessionID != tt.wantID || a.WorkingDir != tt.wantDir {
+				t.Fatalf("got found=%v id=%q dir=%q, want found=%v id=%q dir=%q", found, a.SessionID, a.WorkingDir, tt.wantFound, tt.wantID, tt.wantDir)
+			}
+		})
+	}
+}
+
+// An agent without a registry entry comes first and falls back to matching
+// by start time; it must not take the file that the registry assigns to a
+// later agent.
+func TestAssignSessionFiles_RegistryFilesAreReservedFirst(t *testing.T) {
+	agents := []agent.Agent{
+		{PID: 1, WorkingDir: "/w"},                      // fallback matching
+		{PID: 2, WorkingDir: "/w", SessionID: "sess-x"}, // from the registry
+	}
+	fromRegistry := map[int]bool{1: true}
+	find := func(id string) string {
+		if id == "sess-x" {
+			return "/p/w/sess-x.jsonl"
+		}
+		return ""
+	}
+	// A greedy fallback: takes the first file in /w nobody has claimed yet.
+	fallback := func(a *agent.Agent, assigned map[string]bool) {
+		for _, f := range []string{"/p/w/sess-x.jsonl", "/p/w/other.jsonl"} {
+			if !assigned[f] {
+				assigned[f] = true
+				a.SessionFile = f
+				return
+			}
+		}
+	}
+	assignSessionFiles(agents, fromRegistry, find, fallback)
+	if agents[1].SessionFile != "/p/w/sess-x.jsonl" {
+		t.Fatalf("registry agent got %q, want its own file", agents[1].SessionFile)
+	}
+	if agents[0].SessionFile == agents[1].SessionFile {
+		t.Fatalf("both agents got %q: the fallback took the registry agent's file", agents[0].SessionFile)
+	}
+}
