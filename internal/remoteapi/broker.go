@@ -77,6 +77,7 @@ type pendingApproval struct {
 type Broker struct {
 	deps      BrokerDeps
 	opt       BrokerOptions
+	logID     string // names this run's event log; sequence numbers restart with it
 	mu        sync.Mutex
 	sessions  map[string]*sessionLog
 	approvals map[string]*pendingApproval
@@ -87,7 +88,7 @@ func NewBroker(deps BrokerDeps, opt BrokerOptions) *Broker {
 	if opt.ApprovalTimeout <= 0 {
 		opt.ApprovalTimeout = 10 * time.Minute
 	}
-	return &Broker{deps: deps, opt: opt, sessions: map[string]*sessionLog{}, approvals: map[string]*pendingApproval{}}
+	return &Broker{deps: deps, opt: opt, logID: newID(), sessions: map[string]*sessionLog{}, approvals: map[string]*pendingApproval{}}
 }
 
 func (b *Broker) log(session string) *sessionLog {
@@ -210,6 +211,10 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 		}
 	}
 }
+
+// LogID names this broker's event log. Sequence numbers start over in a new
+// log, so a cursor is only meaningful with the log it came from.
+func (b *Broker) LogID() string { return b.logID }
 
 // Events returns the session's events after seq.
 func (b *Broker) Events(session string, after int64) []Event {

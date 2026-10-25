@@ -308,3 +308,64 @@ func TestAPI_CancelIdleSession(t *testing.T) {
 		t.Fatalf("cancel with nothing running: %d %v, want 409 not_running", resp.StatusCode, body)
 	}
 }
+
+func eventsPage(t *testing.T, srv *httptest.Server, path, lastID string) []Event {
+	t.Helper()
+	req, _ := http.NewRequest("GET", srv.URL+path, nil)
+	req.Header.Set("Tailscale-User-Login", testLogin)
+	req.Header.Set("Last-Event-ID", lastID)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var page struct {
+		Events []Event `json:"events"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatal(err)
+	}
+	return page.Events
+}
+
+// Sequence numbers restart with the server, so an EventSource that
+// reconnects with a cursor from before the restart must see the new log
+// from the start, not wait until the new numbers pass its old cursor.
+func TestAPI_LastEventIDFromAnEarlierLogReplaysTheNewLog(t *testing.T) {
+	srv, b := newTestAPI(t, &fakeBackend{})
+	if _, err := b.Start("s1", "hello", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?after=50&wait=0", "0123456789abcdef.50"); len(evs) != 3 {
+		t.Fatalf("got %d events after a cursor from an earlier log, want all 3", len(evs))
+	}
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0", b.LogID()+".2"); len(evs) != 1 || evs[0].Seq != 3 {
+		t.Fatalf("cursor from this log: got %v, want only seq 3", evs)
+	}
+}
+
+func TestAPI_StreamedEventIDsNameTheLog(t *testing.T) {
+	srv, b := newTestAPI(t, &fakeBackend{})
+	if _, err := b.Start("s1", "hello", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	req, _ := http.NewRequest("GET", srv.URL+"/v1/sessions/s1/events", nil)
+	req.Header.Set("Tailscale-User-Login", testLogin)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		if id, ok := strings.CutPrefix(sc.Text(), "id: "); ok {
+			if id != b.LogID()+".1" {
+				t.Fatalf("first event id %q, want %q", id, b.LogID()+".1")
+			}
+			return
+		}
+	}
+	t.Fatal("no event id in the stream")
+}

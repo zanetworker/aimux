@@ -461,3 +461,33 @@ func TestPool_RequestErrorKeepsBackend(t *testing.T) {
 		t.Fatalf("started %d times, want the backend kept", fs.count("s"))
 	}
 }
+
+// stuckBackend ignores its context, like a stdio write to a server that
+// stopped reading: only closing the backend unblocks the call.
+type stuckBackend struct {
+	once   sync.Once
+	closed chan struct{}
+}
+
+func (b *stuckBackend) ListToolsRaw(context.Context) ([]json.RawMessage, error) { return nil, nil }
+func (b *stuckBackend) CallTool(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	<-b.closed
+	return nil, errors.New("write |1: file already closed")
+}
+func (b *stuckBackend) Close() error { b.once.Do(func() { close(b.closed) }); return nil }
+
+func TestPool_TimeoutClosesABackendThatIgnoresItsContext(t *testing.T) {
+	b := &stuckBackend{closed: make(chan struct{})}
+	p := NewPool(func(context.Context, string) (Backend, error) { return b, nil }, PoolOptions{CallTimeout: 30 * time.Millisecond})
+	defer p.Close()
+	done := make(chan *mcp.CallToolResult, 1)
+	go func() { done <- p.Call(context.Background(), "srv", "", req("big")) }()
+	select {
+	case r := <-done:
+		if !r.IsError || !strings.Contains(resultText(t, r), "timed out") {
+			t.Fatalf("got %q, want a timeout error result", resultText(t, r))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("call still blocked long after CallTimeout")
+	}
+}

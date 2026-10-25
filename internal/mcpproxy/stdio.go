@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -38,6 +39,9 @@ type stdioBackend struct {
 	c      *client.Client
 	cmd    *exec.Cmd
 	listID atomic.Int64
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func startStdio(ctx context.Context, server string, cfg ServerConfig) (*stdioBackend, error) {
@@ -123,11 +127,14 @@ func (b *stdioBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*
 }
 
 // Close shuts the client down, then kills anything left in the server's
-// process group.
+// process group. Only the first call does anything: a later one could kill
+// a new process group that reused the id.
 func (b *stdioBackend) Close() error {
-	err := b.c.Close()
-	if b.cmd != nil && b.cmd.Process != nil {
-		_ = syscall.Kill(-b.cmd.Process.Pid, syscall.SIGKILL) // group may already be gone
-	}
-	return err
+	b.closeOnce.Do(func() {
+		b.closeErr = b.c.Close()
+		if b.cmd != nil && b.cmd.Process != nil {
+			_ = syscall.Kill(-b.cmd.Process.Pid, syscall.SIGKILL) // group may already be gone
+		}
+	})
+	return b.closeErr
 }

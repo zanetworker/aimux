@@ -188,10 +188,18 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		after = n
 	}
 	// On reconnect, EventSource repeats the original URL and adds the last id
-	// it received; that newer cursor wins.
+	// it received, "<log>.<seq>"; that newer cursor wins. One from an earlier
+	// log (the server restarted) restarts the replay from the beginning.
 	if v := r.Header.Get("Last-Event-ID"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+		log, seq, scoped := strings.Cut(v, ".")
+		if !scoped {
+			seq = log
+		}
+		if n, err := strconv.ParseInt(seq, 10, 64); err == nil && n >= 0 {
 			after = n
+			if scoped && log != a.Broker.LogID() {
+				after = 0
+			}
 		}
 	}
 	if r.URL.Query().Get("wait") == "0" {
@@ -224,7 +232,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 				return // fell behind; the client reconnects with Last-Event-ID
 			}
 			data, _ := json.Marshal(e)
-			_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", e.Seq, e.Kind, data)
+			_, _ = fmt.Fprintf(w, "id: %s.%d\nevent: %s\ndata: %s\n\n", a.Broker.LogID(), e.Seq, e.Kind, data)
 			flusher.Flush()
 		}
 	}

@@ -1,8 +1,10 @@
 package mcpproxy
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -24,11 +26,16 @@ const (
 	testPIDFileEnv = "AIMUX_MCPPROXY_TEST_PIDFILE"
 	testLingerEnv  = "AIMUX_MCPPROXY_TEST_LINGER"
 	testStderrEnv  = "AIMUX_MCPPROXY_TEST_STDERR_FLOOD"
+	testDeafEnv    = "AIMUX_MCPPROXY_TEST_DEAF"
 )
 
 // TestMain lets the test binary act as a stdio MCP server for the tests
 // below, so they exercise real processes and the real protocol.
 func TestMain(m *testing.M) {
+	if os.Getenv(testDeafEnv) == "1" {
+		runDeafServer()
+		return
+	}
 	if os.Getenv(testServerEnv) == "1" {
 		runTestServer()
 		return
@@ -64,6 +71,26 @@ func runTestServer() {
 		// Act like a server that ignores shutdown: survive stdin EOF and SIGTERM.
 		signal.Ignore(syscall.SIGTERM)
 		time.Sleep(time.Minute)
+	}
+}
+
+// runDeafServer completes the MCP handshake, then stops reading stdin, like
+// a server stuck in a busy loop: writes to it block once the pipe is full.
+func runDeafServer() {
+	sc := bufio.NewScanner(os.Stdin)
+	for sc.Scan() {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		_ = json.Unmarshal(sc.Bytes(), &msg)
+		switch msg.Method {
+		case "initialize":
+			fmt.Printf(`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"deaf","version":"1"}}}`+"\n", msg.ID)
+		case "notifications/initialized":
+			time.Sleep(time.Minute)
+			return
+		}
 	}
 }
 
@@ -259,5 +286,22 @@ func TestPool_UnknownToolOnRealBackendKeepsIt(t *testing.T) {
 	}
 	if starts.Load() != 1 {
 		t.Fatalf("backend started %d times, want 1 (not restarted after a request error)", starts.Load())
+	}
+}
+
+func TestPool_TimeoutUnblocksAWriteToAServerThatStoppedReading(t *testing.T) {
+	cfgs := map[string]ServerConfig{"deaf": {Command: os.Args[0], Env: map[string]string{testDeafEnv: "1"}}}
+	p := NewPool(StdioStarter(cfgs), PoolOptions{CallTimeout: 300 * time.Millisecond})
+	defer p.Close()
+	big := strings.Repeat("x", 4<<20) // far more than a pipe buffer holds
+	done := make(chan *mcp.CallToolResult, 1)
+	go func() { done <- p.Call(context.Background(), "deaf", "", callReq("echo", map[string]any{"text": big})) }()
+	select {
+	case r := <-done:
+		if !r.IsError {
+			t.Fatalf("got a success result from a server that never read the call")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("call still blocked writing to the server long after CallTimeout")
 	}
 }
