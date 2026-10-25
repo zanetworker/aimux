@@ -384,9 +384,10 @@ components:
           type: integer
           minimum: 0
           description: >-
-            Order of the turn among the turns returned. The server reads only
-            the end of long sessions, so this is not the turn's position in
-            the whole session.
+            Counts the turns in the part of the session file the server read
+            (it reads only the end of long sessions), so it is not the turn's
+            position in the whole session and can change between requests.
+            Use it for order only, not as an identifier.
         time: { type: string, format: date-time }
         user: { type: string }
         reply: { type: string, description: "Reply text, cut at 8 KiB." }

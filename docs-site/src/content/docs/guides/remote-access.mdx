@@ -53,7 +53,7 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 |---|---|
 | `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`) |
 | `GET /v1/sessions?limit=50` | `{"sessions":[...]}`: recent Claude sessions, newest first, with `state` and `lastPrompt` (the last message the person typed). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`) |
-| `GET /v1/sessions/{id}?turns=20` | One session and its last turns: `{..session, "turns":[{"number","time","user","reply","tools":[{"name","snippet","ok"}]}]}` |
+| `GET /v1/sessions/{id}?turns=20` | One session and its last turns: `{..session, "turns":[{"number","time","user","reply","tools":[{"name","snippet","ok"}]}]}`. Long sessions are read from the end, so `number` counts turns in the part read: use it for order, not as a stable id |
 | `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn |
 | `POST /v1/sessions` | Body `{"cwd","text","key"}`. Starts a session in one of `/v1/projects` and sends its first message (capability `new_sessions`) |
 | `GET /v1/sessions/{id}/events` | The session's events: a server-sent event stream, or one JSON page `{"events","log"}` with `?wait=0` |
