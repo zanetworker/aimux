@@ -36,30 +36,50 @@ From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:84
 - The API listens on `127.0.0.1` only. It is not reachable on the tailnet except through `tailscale serve`.
 - Requests must carry this machine's tailnet name as their `Host` (as `tailscale serve` forwards them). Requests for any other Host, including `127.0.0.1`, are refused, so a web page that rebinds its own domain to your machine cannot use the API. The name is detected from `tailscale status`; set `hostnames` to override it.
 - Every request must carry the `Tailscale-User-Login` header that `tailscale serve` sets for the caller (and overwrites if a client sends its own). The login must be in `allowed_logins`; an empty list admits nobody.
-- Requests with a browser `Origin` header are refused, so no web page can use the API.
+- Browser requests are accepted only from the API's own origin (a client served by `remote serve` itself) (`https://<this host>:<port>`, as `tailscale serve` exposes it). A request from any other page is refused, including a plain cross-site GET such as an image tag (browsers mark those with `Sec-Fetch-Site`).
 - These checks keep out the tailnet and web pages, not programs on this machine: any local process (of any user account) can connect to `127.0.0.1` and send the same `Host` and `Tailscale-User-Login` headers. Run it only on a machine whose local users and programs you trust as much as yourself.
 - Sessions open in a terminal on the Mac are read-only: sending to them is refused, because typing into a running session can approve a prompt nobody saw. `GET /v1/sessions/{id}` shows their latest turns; the event stream carries only turns started through this API, so live progress of a terminal session is not streamed yet.
 - A permission request waits for an answer from a client. Without one it is denied after `approval_timeout`.
 
 ## API
 
-Responses are JSON, except the events endpoint, which streams server-sent events unless called with `?wait=0`. Errors have the form `{"error": "...", "code": "..."}`.
+The contract is [`api/remote-v1.openapi.yaml`](https://github.com/zanetworker/aimux/blob/main/api/remote-v1.openapi.yaml) (OpenAPI 3.0): every path, request and response body, error code and event schema, and the compatibility rules. Each server also serves it at `GET /v1/openapi.yaml`, so a client or code generator gets the exact contract of the server it talks to. A contract test drives the server through every operation and event kind and checks each response against it, so the file and the server cannot drift apart.
+
+**Compatibility.** `/v1` only grows: new endpoints, optional fields, response fields and enum values (event kinds, states, error codes, capabilities). Clients ignore unknown fields, handle unknown enum values, and detect optional features from `capabilities` in `GET /v1/health`. Anything breaking gets a new path (`/v2`) next to `/v1`. Known gaps for app clients, listed in the spec: no notifications while disconnected (events replay on reconnect), no paging of the session list, Claude sessions only.
+
+Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stable code>"}`.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /v1/health` | Who you are: `{"status","login"}` |
-| `GET /v1/sessions?limit=50` | Recent Claude sessions with `state`: `idle`, `open_in_terminal` or `busy`. Sessions started by a program (for example `claude -p`) are left out unless `include_automated=1` |
-| `GET /v1/sessions/{id}?turns=20` | One session and its last turns (user text, reply, tools) |
-| `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn, returns `202 {"turn","after","events"}`. A retry with the same non-empty `key` returns the same turn instead of sending twice; keys are remembered per session until the server restarts |
-| `GET /v1/sessions/{id}/events?after=N` | Server-sent events after `N` (or the `Last-Event-ID` header, which wins on reconnect). `?wait=0` returns one JSON page instead. Streamed event ids have the form `<log>.<seq>`; `<log>` changes when the server restarts, and a `Last-Event-ID` from an earlier log replays the new log from the start. The server keeps the latest 2,000 events per session, in memory |
+| `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`) |
+| `GET /v1/sessions?limit=50` | `{"sessions":[...]}`: recent Claude sessions, newest first, with `state` and `lastPrompt` (the last message the person typed). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`) |
+| `GET /v1/sessions/{id}?turns=20` | One session and its last turns: `{..session, "turns":[{"number","time","user","reply","tools":[{"name","snippet","ok"}]}]}` |
+| `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn |
+| `POST /v1/sessions` | Body `{"cwd","text","key"}`. Starts a session in one of `/v1/projects` and sends its first message (capability `new_sessions`) |
+| `GET /v1/sessions/{id}/events` | The session's events: a server-sent event stream, or one JSON page `{"events","log"}` with `?wait=0` |
 | `POST /v1/sessions/{id}/cancel` | Stop the running turn |
 | `POST /v1/approvals/{id}` | Body `{"option": "<optionId>"}` from the approval event, or `{"option": ""}` to deny |
+| `GET /v1/search?q=...&limit=20` | `{"results":[...]}`: sessions whose content matches `q` (keyword ranking), each with a `snippet` whose matched words are in `[brackets]` (capability `search`). `remote serve` keeps its own keyword index, `~/.aimux/remote-search.db` (separate from the CLI and TUI index, no embeddings), built in the background on first start (a few minutes for a large history, with no results until then) and refreshed every minute, so new turns can take up to a minute to become searchable |
+| `GET /v1/projects` | `{"projects":[{"path","name","lastActive"}]}`: up to 12 folders of recent sessions, where a new session may start |
 
-Event kinds: `turn_started`, `update` (an ACP session update: agent text, tool calls, plans; the agent's slash-command list is left out), `approval` (with `approvalId`, `title` and `options`), `approval_resolved` (`allowed`, `denied` or `expired`), `turn_done` (with `stopReason`) and `turn_error`.
+**Starting a turn.** Both `POST /v1/sessions/{id}/messages` and `POST /v1/sessions` answer `202 {"id","turn","after","events"}`: the session, the turn, and its events URL from just before the turn. A retry with the same non-empty `key` returns the same session and turn instead of running it twice; keys live until the server restarts. When every run slot (`max_runs`) is busy, a message is still accepted and the turn ends with `turn_error`; creating a session fails at once with `503 too_many_runs`.
 
-When every run slot is busy (`max_runs`), the message is still accepted (202) and the turn ends with a `turn_error` event saying so; send again once a session finishes.
+**Session states.** `idle` (can be continued), `busy` (aimux is running a turn), `open_in_terminal` (read only here while a terminal on the Mac holds it), `unavailable` (created here, but its first message failed before Claude saved it).
 
-Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process, such as `aimux chat`, is continuing the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is missing or has an entry aimux cannot read, so it will not risk a second writer), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
+**Events.** Each event is `{"seq","turn","kind","time","data"}`:
+
+| `kind` | `data` |
+|---|---|
+| `turn_started` | `{"text"}` |
+| `update` | An ACP `SessionUpdate`, passed through unchanged (agent text, thoughts, tool calls, plans; the agent's slash-command list is left out). It follows the ACP version in `/v1/health` |
+| `approval` | `{"approvalId","title","options","toolCall"}`: answer with one option's `optionId` |
+| `approval_resolved` | `{"approvalId","outcome"}`, outcome `allowed`, `denied` or `expired` |
+| `turn_done` | `{"stopReason"}` (`end_turn`, `cancelled`, ...) |
+| `turn_error` | `{"error"}` |
+
+**Cursors.** Read events after a cursor: `?after=N`, or the `Last-Event-ID` header, which wins (browsers send it on reconnect). Stream frames carry `id: <log>.<seq>` and `event: <kind>`. `<log>` names the server's event log and changes when it restarts: a cursor from an earlier log replays the new log from its start, so pass a page's `log` back as `?log=`; a bare `Last-Event-ID` (just `<seq>`) belongs to the log `?log=` names. The server keeps the latest 2,000 events per session, in memory.
+
+**Error codes.** `unauthorized` (401), `forbidden` (403), `bad_request` (400), `invalid_option` (400), `unknown_session` (404), `no_such_approval` (404), `not_supported` (404, this server does not offer the endpoint; see `capabilities`), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process such as `aimux chat` drives the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is unreadable, so aimux will not risk a second writer), `too_many_runs` (503), `internal` (500).
 
 ## Settings
 
@@ -73,6 +93,8 @@ If `~/.aimux/config.yaml` cannot be read or parsed, `aimux remote serve` stops w
 | `max_runs` | | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | | `10m` | Unanswered permission requests are denied after this |
 | `hostnames` | | detected from `tailscale status` | `Host` names to accept: this machine's tailnet names |
+
+Sessions started through the API are recorded in `~/.aimux/remote-created.json` (owner-only), so they stay listed although Claude marks agent-SDK sessions as automated.
 
 A session aimux continued keeps its adapter running between turns, up to `max_runs`, and stops it after a few idle minutes.
 

@@ -135,8 +135,11 @@ func (a *fakeAgent) CloseSession(context.Context, acp.CloseSessionRequest) (acp.
 func (a *fakeAgent) ListSessions(context.Context, acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
 	return acp.ListSessionsResponse{}, nil
 }
-func (a *fakeAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
-	return acp.NewSessionResponse{}, errors.New("not supported by the fake agent")
+func (a *fakeAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	if p.Cwd == "" {
+		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "cwd is required"})
+	}
+	return acp.NewSessionResponse{SessionId: "new-1"}, nil
 }
 func (a *fakeAgent) ResumeSession(context.Context, acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	return acp.ResumeSessionResponse{}, errors.New("not supported by the fake agent")
@@ -502,4 +505,31 @@ func TestRun_CancelRetryNeverReachesTheNextPrompt(t *testing.T) {
 	}
 	r.Cancel()
 	<-done
+}
+
+func TestStartNew_CreatesASessionAndPrompts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	r, err := StartNew(ctx, fakeSpec(t), nil)
+	if err != nil {
+		t.Fatalf("StartNew: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	if r.SessionID() != "new-1" {
+		t.Fatalf("session id %q, want the agent's new-1", r.SessionID())
+	}
+	if events, stop := prompt(t, r, "hello"); stop != "end_turn" || !strings.Contains(messageText(t, events), "hello") {
+		t.Fatalf("prompt in the new session: %q, %q", stop, messageText(t, events))
+	}
+}
+
+func TestStartNew_AgentRefusalIsAnError(t *testing.T) {
+	spec := fakeSpec(t)
+	spec.Cwd = "" // the fake agent requires a cwd
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if r, err := StartNew(ctx, spec, nil); err == nil {
+		_ = r.Close()
+		t.Fatal("StartNew succeeded without a cwd")
+	}
 }

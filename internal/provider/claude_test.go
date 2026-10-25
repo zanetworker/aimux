@@ -864,3 +864,43 @@ func TestAssignSessionFiles_RegistryFilesAreReservedFirst(t *testing.T) {
 		t.Fatalf("both agents got %q: the fallback took the registry agent's file", agents[0].SessionFile)
 	}
 }
+
+// Prompts sent through the ACP adapter (and terminal prompts with a pasted
+// image) are stored with array content; each still starts its own turn. The
+// interrupt marker and tool results do not.
+func TestClaudeParseTrace_ArrayContentPromptsStartTurns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Reply with exactly: ready\n"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"ready"}]}}
+{"type":"user","timestamp":"2026-01-01T10:01:00Z","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly: pong 42"}]}}
+{"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","content":[{"type":"text","text":"pong 42"}]}}
+{"type":"user","timestamp":"2026-01-01T10:02:00Z","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"text","text":"what is in this screenshot?"}]}}
+{"type":"assistant","timestamp":"2026-01-01T10:02:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"/w/a.txt","content":"hi"}}]}}
+{"type":"user","timestamp":"2026-01-01T10:02:06Z","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"File created"}]}}
+{"type":"assistant","timestamp":"2026-01-01T10:02:07Z","message":{"role":"assistant","content":[{"type":"text","text":"a cat"}]}}
+{"type":"user","timestamp":"2026-01-01T10:03:00Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+{"type":"user","isMeta":true,"timestamp":"2026-01-01T10:03:01Z","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x"}]}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct{ user, reply string }{
+		{"Reply with exactly: ready", "ready"},
+		{"Reply with exactly: pong 42", "pong 42"},
+		{"what is in this screenshot?", "a cat"},
+	}
+	if len(turns) != len(want) {
+		t.Fatalf("got %d turns, want %d: %+v", len(turns), len(want), turns)
+	}
+	for i, w := range want {
+		if strings.Join(turns[i].UserLines, "\n") != w.user || strings.Join(turns[i].OutputLines, "\n") != w.reply {
+			t.Errorf("turn %d: user %q reply %q, want %q / %q", i+1, turns[i].UserLines, turns[i].OutputLines, w.user, w.reply)
+		}
+	}
+	if len(turns[2].Actions) != 1 || !turns[2].Actions[0].Success {
+		t.Errorf("turn 3 actions %+v, want the Write, succeeded", turns[2].Actions)
+	}
+}

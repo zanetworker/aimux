@@ -70,8 +70,20 @@ func TestPromptApprover(t *testing.T) {
 		{"", "", false}, // EOF
 	}
 	for _, tt := range tests {
-		var out bytes.Buffer
-		approve := promptApprover(strings.NewReader(tt.answer), &out)
+		// The answer is typed once the prompt shows, as a person would: input
+		// that arrives before any prompt is discarded on purpose.
+		var out syncBuffer
+		pr, pw := io.Pipe()
+		approve := promptApprover(pr, &out)
+		go func() {
+			for !strings.Contains(out.String(), "Allow ") {
+				time.Sleep(time.Millisecond)
+			}
+			if tt.answer != "" {
+				_, _ = pw.Write([]byte(tt.answer))
+			}
+			_ = pw.Close() // end of input after the answer
+		}()
 		id, ok := approve(context.Background(), permReq())
 		if id != tt.wantID || ok != tt.wantOK {
 			t.Errorf("answer %q: got %q,%v want %q,%v", tt.answer, id, ok, tt.wantID, tt.wantOK)

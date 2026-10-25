@@ -2,7 +2,6 @@ package remoteapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -100,17 +99,7 @@ func TestLocalIndex_Session(t *testing.T) {
 	if len(d.Turns) != 2 {
 		t.Fatalf("%d turns, want the last 2", len(d.Turns))
 	}
-	var last struct {
-		Number int    `json:"number"`
-		User   string `json:"user"`
-		Reply  string `json:"reply"`
-		Tools  []struct {
-			Name string `json:"name"`
-		} `json:"tools"`
-	}
-	if err := json.Unmarshal(d.Turns[1], &last); err != nil {
-		t.Fatal(err)
-	}
+	last := d.Turns[1]
 	if last.Number != 5 || last.User != "q5" || len(last.Tools) != 1 || last.Tools[0].Name != "Bash" {
 		t.Fatalf("last turn %+v", last)
 	}
@@ -190,5 +179,24 @@ func TestLocalIndex_LimitAppliesAfterFiltering(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "idle" {
 		t.Fatalf("got %v, want the interactive session behind the automated ones", got)
+	}
+}
+
+func TestCleanPrompt(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"fix the cache", "fix the cache"},
+		{"[Image #1] what is this?", "what is this?"},
+		{"[Image: original 3445x2245, displayed at 2000x1303. Multiply coordinates by 1.72 to map to original image.]", "(image)"},
+		{"[Image #1]", "(image)"},
+		{"The user sent a new message while you were working:\nare you still blocked?", "are you still blocked?"},
+		{"Stop hook feedback:\n[python3 hook]: Docs check", "(hook feedback)"},
+		{"Another Claude session sent a message: deploy done", "(message from another session)"},
+		{"<task-notification>\n<task-id>x</task-id>", "(notification)"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := cleanPrompt(tt.in); got != tt.want {
+			t.Errorf("cleanPrompt(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }

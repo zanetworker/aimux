@@ -3,6 +3,7 @@ package acprun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -21,6 +22,9 @@ type Runner interface {
 
 // StartFunc starts a run that continues sessionID in cwd.
 type StartFunc func(ctx context.Context, sessionID, cwd string) (Runner, error)
+
+// StartNewFunc starts a run for a new session in cwd and returns its id.
+type StartNewFunc func(ctx context.Context, cwd string) (Runner, string, error)
 
 // Errors returned by Manager.
 var (
@@ -50,6 +54,8 @@ type ManagerOptions struct {
 	// keeps separate aimux processes from driving one session (SessionLock).
 	// Nil disables it.
 	Reserve func(sessionID string) (release func(), err error)
+	// StartNew starts a new session (New). Nil: new sessions are not offered.
+	StartNew StartNewFunc
 	// StartTimeout bounds starting an adapter and loading the session.
 	// Default 3 minutes (the first npx run downloads the adapter).
 	StartTimeout time.Duration
@@ -68,6 +74,7 @@ type runEntry struct {
 	runMu           sync.Mutex         // lets retire, which runs without m.mu, read run
 	cancelStart     context.CancelFunc // aborts a start in progress
 	busy            bool
+	firstPending    bool // a new session waiting for its first prompt: its run is its only state
 	lastUsed        time.Time
 }
 
@@ -104,7 +111,8 @@ type Manager struct {
 	mu       sync.Mutex
 	runs     map[string]*runEntry
 	closed   bool
-	starting sync.WaitGroup // adapter starts in progress; Close waits for them
+	starting sync.WaitGroup               // adapter starts in progress; Close waits for them
+	newStart map[*context.CancelFunc]bool // new-session starts in progress; Close cancels them
 }
 
 // NewManager returns a Manager.
@@ -183,7 +191,7 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		}
 		cancel()
 		m.mu.Lock()
-		e.cancelStart = nil // spent: a later cancel during a reload must not find it
+		e.cancelStart = nil             // spent: a later cancel during a reload must not find it
 		owned := m.runs[sessionID] == e // false if Close or eviction removed it meanwhile
 		if err == nil && !m.closed && owned && ctx.Err() == nil {
 			e.setRun(r)
@@ -222,6 +230,7 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		return "", context.Canceled
 	}
 	e.prompting = true
+	e.firstPending = false // the first prompt is going out; from now on the session is on disk
 	m.mu.Unlock()
 	// The prompt itself is not cut off by ctx: stopping a turn mid-prompt is
 	// the agent's job (Cancel), so its session state stays consistent.
@@ -245,6 +254,105 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 	return stop, err
 }
 
+// New starts a new session in cwd and keeps its run for the session's
+// messages, which go through Send as usual. The run counts against MaxRuns.
+func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
+	if m.opt.StartNew == nil {
+		return "", errors.New("starting new sessions is not supported")
+	}
+	sctx, cancel := context.WithTimeout(ctx, m.opt.StartTimeout)
+	defer cancel()
+	// Like a load in Send: Close cancels this start and waits for it.
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return "", errManagerDone
+	}
+	// Take a slot before launching anything: evict an idle run if all are
+	// in use, or fail now when every run (or new session starting) is busy.
+	var evicted *runEntry
+	if len(m.runs)+len(m.newStart) >= m.opt.MaxRuns {
+		victim := m.idleVictimLocked()
+		if victim == "" {
+			m.mu.Unlock()
+			return "", ErrTooManyRuns
+		}
+		evicted = m.runs[victim]
+		delete(m.runs, victim)
+	}
+	if m.newStart == nil {
+		m.newStart = map[*context.CancelFunc]bool{}
+	}
+	m.newStart[&cancel] = true
+	m.starting.Add(1)
+	m.mu.Unlock()
+	defer m.starting.Done()
+	if evicted != nil {
+		evicted.retire()
+	}
+	r, id, err := m.opt.StartNew(sctx, cwd)
+	if err == nil && sctx.Err() != nil {
+		_ = r.Close() // ready just as the caller gave up or the start timed out
+		err = sctx.Err()
+	}
+	if err != nil {
+		m.dropNewStart(&cancel)
+		return "", err
+	}
+	var release func()
+	if m.opt.Reserve != nil {
+		if release, err = m.opt.Reserve(id); err != nil {
+			m.dropNewStart(&cancel)
+			_ = r.Close()
+			return "", err
+		}
+	}
+	// Turn the reserved slot into the session's run in one step, so no
+	// other request can take the slot in between.
+	m.mu.Lock()
+	delete(m.newStart, &cancel)
+	closed, taken := m.closed, m.runs[id] != nil
+	if !closed && !taken {
+		e := &runEntry{release: release, lastUsed: m.opt.Now(), firstPending: true}
+		e.setRun(r)
+		m.runs[id] = e
+	}
+	m.mu.Unlock()
+	if closed || taken {
+		_ = r.Close() // it finished starting after shutdown began, or the id is in use
+		if release != nil {
+			release()
+		}
+		if closed {
+			return "", errManagerDone
+		}
+		return "", fmt.Errorf("new session %s: %w", id, ErrBusy)
+	}
+	return id, nil
+}
+
+// dropNewStart gives up a new session's reserved slot.
+func (m *Manager) dropNewStart(cancel *context.CancelFunc) {
+	m.mu.Lock()
+	delete(m.newStart, cancel)
+	m.mu.Unlock()
+}
+
+// idleVictimLocked picks the least recently used idle run to make room, or
+// "" if every run is busy or starting.
+func (m *Manager) idleVictimLocked() string {
+	victim := ""
+	for id, e := range m.runs {
+		if e.busy || e.run == nil || e.firstPending {
+			continue
+		}
+		if victim == "" || e.lastUsed.Before(m.runs[victim].lastUsed) {
+			victim = id
+		}
+	}
+	return victim
+}
+
 // claim marks the session's run busy, creating an entry (and evicting the
 // least recently used idle run when full) if needed.
 func (m *Manager) claim(sessionID string) (*runEntry, *runEntry, error) {
@@ -262,16 +370,9 @@ func (m *Manager) claim(sessionID string) (*runEntry, *runEntry, error) {
 		return e, nil, nil
 	}
 	var evicted *runEntry
-	if len(m.runs) >= m.opt.MaxRuns {
-		victim := ""
-		for id, e := range m.runs {
-			if e.busy || e.run == nil {
-				continue
-			}
-			if victim == "" || e.lastUsed.Before(m.runs[victim].lastUsed) {
-				victim = id
-			}
-		}
+	// New sessions still starting hold their slots too.
+	if len(m.runs)+len(m.newStart) >= m.opt.MaxRuns {
+		victim := m.idleVictimLocked()
 		if victim == "" {
 			return nil, nil, ErrTooManyRuns
 		}
@@ -371,6 +472,9 @@ func (m *Manager) Close() {
 			e.cancelStart() // its Send retires it once the start returns
 		}
 		delete(m.runs, id)
+	}
+	for cancel := range m.newStart {
+		(*cancel)() // its New closes the adapter once the start returns
 	}
 	m.mu.Unlock()
 	for _, e := range all {

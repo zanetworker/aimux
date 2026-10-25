@@ -185,3 +185,31 @@ func TestClaudeACP_ApprovalDecidesToolUse(t *testing.T) {
 		t.Fatalf("denied command ran anyway (stat err %v)", err)
 	}
 }
+
+// TestClaudeACP_NewSession starts a session through ACP, prompts it, and
+// checks Claude Code wrote it to disk where `claude --resume` finds it.
+func TestClaudeACP_NewSession(t *testing.T) {
+	if os.Getenv("AIMUX_ACP_INTEGRATION") != "1" {
+		t.Skip("set AIMUX_ACP_INTEGRATION=1 to run against the real claude-agent-acp")
+	}
+	dir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	r, err := StartNew(ctx, Spec{Command: "npx", Args: []string{"-y", "@agentclientprotocol/claude-agent-acp"}, Cwd: dir, Env: []string{"CLAUDECODE="}}, nil)
+	if err != nil {
+		t.Fatalf("StartNew: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	if r.SessionID() == "" {
+		t.Fatal("no session id")
+	}
+	var events []Event
+	if _, err := r.Prompt(ctx, "Reply with exactly: BORN-7", func(e Event) { events = append(events, e) }); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if got := messageText(t, events); !strings.Contains(got, "BORN-7") {
+		t.Fatalf("reply %q", got)
+	}
+	file := findSessionFile(t, r.SessionID())
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(file)) })
+}

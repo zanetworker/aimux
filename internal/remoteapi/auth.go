@@ -30,7 +30,11 @@ func LoginFrom(ctx context.Context) string {
 //     (the listener must also bind to loopback only);
 //   - Tailscale-User-Login, which tailscale serve sets and strips from client
 //     input, names a login in allowed (an empty list admits nobody);
-//   - no Origin header: browsers send one, and no web page may use this API.
+//   - no web page but aimux's own: a request with an Origin must come from
+//     the very origin it is sent to (a browser client at /app, served from
+//     here), and a browser's Sec-Fetch-Site, when sent, must be same-origin
+//     or none (typed into the address bar). Cross-site pages, including a
+//     plain <img> or <script> GET that carries no Origin, are refused.
 func RequireTailnetUser(allowed, trustedHosts []string, next http.Handler) http.Handler {
 	ok := map[string]bool{}
 	for _, a := range allowed {
@@ -47,7 +51,7 @@ func RequireTailnetUser(allowed, trustedHosts []string, next http.Handler) http.
 			writeError(w, http.StatusForbidden, "forbidden", errors.New("untrusted Host; use this API through tailscale serve"))
 			return
 		}
-		if !fromLoopback(r.RemoteAddr) || r.Header.Get("Origin") != "" {
+		if !fromLoopback(r.RemoteAddr) || !fromOwnPage(r) {
 			writeError(w, http.StatusForbidden, "forbidden", errors.New("use this API through tailscale serve"))
 			return
 		}
@@ -71,6 +75,19 @@ func normalizeHost(hostport string) string {
 		host = h
 	}
 	return strings.TrimSuffix(strings.ToLower(host), ".")
+}
+
+// fromOwnPage reports whether a browser request comes from a page served by
+// this origin (or from no page at all). tailscale serve terminates HTTPS, so
+// the origin is https and the Host it forwards.
+func fromOwnPage(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+	default:
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	return origin == "" || strings.EqualFold(origin, "https://"+r.Host)
 }
 
 func fromLoopback(remoteAddr string) bool {

@@ -1109,3 +1109,114 @@ func TestScanSession_TimestampsFromJSONL(t *testing.T) {
 		t.Errorf("LastActive = %v, want %v", s.LastActive, end)
 	}
 }
+
+// The last prompt is the user's last message, not the tool result that
+// usually ends a session's file.
+func TestScanSession_LastPromptSkipsToolResults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":"first ask"}}
+{"type":"user","timestamp":"2026-01-01T10:01:00Z","cwd":"/w","message":{"role":"user","content":[{"type":"text","text":"make the TTL configurable"}]}}
+{"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{}}]}}
+{"type":"user","timestamp":"2026-01-01T10:01:06Z","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanSession("s", path, "/w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LastPrompt != "make the TTL configurable" {
+		t.Fatalf("LastPrompt = %q, want the last human message", s.LastPrompt)
+	}
+}
+
+// Newer Claude Code files also hold request records with user-role text
+// (system reminders, "Tool loaded."), and Claude Code puts hook feedback,
+// notifications and image placeholders in the user's place. None of these
+// is what the user last asked.
+func TestScanSession_LastPromptIsWhatThePersonTyped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":"compare the two designs"}}
+{"type":"api-request-blob","timestamp":"2026-01-01T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>\nCodebase and user instructions are shown below."}]}}
+{"type":"user","isMeta":true,"timestamp":"2026-01-01T10:00:02Z","message":{"role":"user","content":[{"type":"text","text":"Tool loaded."}]}}
+{"type":"user","timestamp":"2026-01-01T10:00:03Z","message":{"role":"user","content":"Stop hook feedback:\n[hook]: docs check"}}
+{"type":"user","timestamp":"2026-01-01T10:00:04Z","message":{"role":"user","content":"<task-notification>\n<task-id>x</task-id>"}}
+{"type":"user","timestamp":"2026-01-01T10:00:05Z","message":{"role":"user","content":[{"type":"text","text":"[Image: original 3445x2245, displayed at 2000x1303.]"},{"type":"image","source":{}}]}}
+{"type":"user","timestamp":"2026-01-01T10:00:06Z","message":{"role":"user","content":"Another Claude session sent a message: done"}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanSession("s", path, "/w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LastPrompt != "compare the two designs" {
+		t.Fatalf("LastPrompt = %q, want the last message the person typed", s.LastPrompt)
+	}
+}
+
+func TestMachinePrompt_ImagePlusQuestionIsHuman(t *testing.T) {
+	content := json.RawMessage(`[{"type":"text","text":"[Image: original 100x100]"},{"type":"image","source":{}},{"type":"text","text":"what is wrong in this chart?"}]`)
+	if machinePrompt(allUserText(content)) {
+		t.Fatal("a question with a screenshot was treated as machine text")
+	}
+	if !machinePrompt(allUserText(json.RawMessage(`[{"type":"text","text":"[Image #2]"}]`))) {
+		t.Fatal("an image-only message was treated as typed text")
+	}
+}
+
+func TestScanSession_LastPromptWithScreenshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":[{"type":"text","text":"[Image: original 100x100]"},{"type":"image","source":{}},{"type":"text","text":"why is this chart flat?"}]}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanSession("s", path, "/w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LastPrompt != "why is this chart flat?" {
+		t.Fatalf("LastPrompt = %q", s.LastPrompt)
+	}
+}
+
+// Claude Code names sessions as they go (ai-title entries); the latest name
+// wins.
+func TestScanSession_AITitle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":"https://example.com/some/long/link"}}
+{"type":"ai-title","aiTitle":"Reading a link"}
+{"type":"ai-title","aiTitle":"Remote session access plan"}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanSession("s", path, "/w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.AITitle != "Remote session access plan" {
+		t.Fatalf("AITitle = %q", s.AITitle)
+	}
+}
+
+// The working directory recorded in the session, not the one guessed from
+// the encoded folder name (different paths can encode the same way).
+func TestScanSession_RecordedCwd(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/Users/me/my-app","message":{"role":"user","content":"hello there"}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := scanSession("s", path, "/Users/me/my/app") // the lossy reconstruction
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Cwd != "/Users/me/my-app" {
+		t.Fatalf("Cwd = %q, want the recorded one", s.Cwd)
+	}
+}

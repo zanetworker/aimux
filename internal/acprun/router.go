@@ -65,6 +65,11 @@ func (r *Router) Check(sessionID string) error {
 
 func (r *Router) route(sessionID string) (SessionInfo, error) {
 	info, err := r.Lookup(sessionID)
+	if errors.Is(err, ErrUnknownSession) && r.Manager.Running(sessionID) {
+		// A session aimux just created: the agent writes its file on the
+		// first prompt, and only aimux's run holds it.
+		return SessionInfo{Provider: "claude"}, nil
+	}
 	if err != nil {
 		return SessionInfo{}, err
 	}

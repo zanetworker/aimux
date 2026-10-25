@@ -31,7 +31,7 @@ func newTestAPI(t *testing.T, f *fakeBackend) (*httptest.Server, *Broker) {
 			if id != "s1" {
 				return SessionDetail{}, acprun.ErrUnknownSession
 			}
-			return SessionDetail{Session: Session{ID: "s1", State: StateIdle}, Turns: []json.RawMessage{json.RawMessage(`{"user":"hi"}`)}}, nil
+			return SessionDetail{Session: Session{ID: "s1", State: StateIdle}, Turns: []Turn{{User: "hi"}}}, nil
 		},
 	}
 	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
@@ -368,4 +368,182 @@ func TestAPI_StreamedEventIDsNameTheLog(t *testing.T) {
 		}
 	}
 	t.Fatal("no event id in the stream")
+}
+
+// The event page names its log, and a cursor (?after=) passed with another
+// log's id (the server restarted in between) replays the new log in full.
+func TestAPI_EventPageNamesItsLogAndScopesAfter(t *testing.T) {
+	srv, b := newTestAPI(t, &fakeBackend{})
+	if _, err := b.Start("s1", "hello", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	resp, body := do(t, srv, "GET", "/v1/sessions/s1/events?wait=0", "")
+	if resp.StatusCode != 200 || body["log"] != b.LogID() {
+		t.Fatalf("page log %v, want %q", body["log"], b.LogID())
+	}
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0&after=2&log=0123456789abcdef", ""); len(evs) != 3 {
+		t.Fatalf("after=2 from another log: got %d events, want all 3", len(evs))
+	}
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0&after=2&log="+b.LogID(), ""); len(evs) != 1 {
+		t.Fatalf("after=2 from this log: got %d events, want 1", len(evs))
+	}
+}
+
+func TestAPI_Search(t *testing.T) {
+	var gotQ string
+	api := &API{Broker: NewBroker(BrokerDeps{}, BrokerOptions{}),
+		Search: func(ctx context.Context, q string, limit int) ([]SearchHit, error) {
+			gotQ = q
+			return []SearchHit{{Session: Session{ID: "s1", Title: "Fix the cache"}, Snippet: "the [cache]"}}, nil
+		}}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	resp, body := do(t, srv, "GET", "/v1/search?q=cache+ttl", "")
+	results, _ := body["results"].([]any)
+	if resp.StatusCode != 200 || gotQ != "cache ttl" || len(results) != 1 {
+		t.Fatalf("search: %d q=%q %v", resp.StatusCode, gotQ, body)
+	}
+	if hit := results[0].(map[string]any); hit["snippet"] != "the [cache]" || hit["id"] != "s1" {
+		t.Fatalf("hit %v", hit)
+	}
+	if resp, body := do(t, srv, "GET", "/v1/search?q=+", ""); resp.StatusCode != 400 || body["code"] != "bad_request" {
+		t.Fatalf("empty query: %d %v", resp.StatusCode, body)
+	}
+}
+
+func newSessionAPI(t *testing.T) (*httptest.Server, *int) {
+	t.Helper()
+	creates := 0
+	var b *Broker
+	f := &fakeBackend{}
+	b = NewBroker(f.deps(&b), BrokerOptions{})
+	api := &API{Broker: b,
+		Projects: func(ctx context.Context) ([]Project, error) {
+			return []Project{{Path: "/w/app", Name: "app"}}, nil
+		},
+		Create: func(ctx context.Context, cwd, text string) (string, error) {
+			creates++
+			return fmt.Sprintf("new-%d", creates), nil
+		},
+	}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	t.Cleanup(srv.Close)
+	return srv, &creates
+}
+
+func TestAPI_NewSession(t *testing.T) {
+	srv, creates := newSessionAPI(t)
+	resp, body := do(t, srv, "GET", "/v1/projects", "")
+	if projects, _ := body["projects"].([]any); resp.StatusCode != 200 || len(projects) != 1 {
+		t.Fatalf("projects: %d %v", resp.StatusCode, body)
+	}
+	resp, body = do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"plan the release","key":"k1"}`)
+	if resp.StatusCode != 202 || body["id"] != "new-1" || body["turn"] == "" {
+		t.Fatalf("create: %d %v", resp.StatusCode, body)
+	}
+	// A retry with the same key is the same session and turn.
+	resp, again := do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"plan the release","key":"k1"}`)
+	if resp.StatusCode != 202 || again["id"] != "new-1" || again["turn"] != body["turn"] || *creates != 1 {
+		t.Fatalf("retry: %d %v (creates %d)", resp.StatusCode, again, *creates)
+	}
+}
+
+func TestAPI_NewSessionOnlyInRecentProjects(t *testing.T) {
+	srv, creates := newSessionAPI(t)
+	for _, body := range []string{
+		`{"cwd":"/etc","text":"x"}`,
+		`{"cwd":"/w/app/../../etc","text":"x"}`,
+		`{"cwd":"/w/app","text":"  "}`,
+		`not json`,
+	} {
+		if resp, out := do(t, srv, "POST", "/v1/sessions", body); resp.StatusCode != 400 || out["code"] != "bad_request" {
+			t.Fatalf("%s: %d %v, want 400 bad_request", body, resp.StatusCode, out)
+		}
+	}
+	if *creates != 0 {
+		t.Fatalf("created %d sessions from refused requests", *creates)
+	}
+}
+
+// A retry of a session already created answers from the key, even if the
+// folder has left the recent projects since.
+func TestAPI_NewSessionRetryAfterProjectsChange(t *testing.T) {
+	projects := []Project{{Path: "/w/app", Name: "app"}}
+	creates := 0
+	var b *Broker
+	b = NewBroker((&fakeBackend{}).deps(&b), BrokerOptions{})
+	api := &API{Broker: b,
+		Projects: func(ctx context.Context) ([]Project, error) { return projects, nil },
+		Create:   func(ctx context.Context, cwd, text string) (string, error) { creates++; return "new-1", nil },
+	}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	if resp, _ := do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"go","key":"k9"}`); resp.StatusCode != 202 {
+		t.Fatal(resp.StatusCode)
+	}
+	projects = nil // the folder is no longer among the recent ones
+	resp, body := do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"go","key":"k9"}`)
+	if resp.StatusCode != 202 || body["id"] != "new-1" || creates != 1 {
+		t.Fatalf("retry: %d %v (creates %d)", resp.StatusCode, body, creates)
+	}
+}
+
+// A bare Last-Event-ID carries no log of its own; it belongs to the log the
+// request names with ?log=. From an earlier log, the replay starts over.
+func TestAPI_UnscopedLastEventIDFollowsTheLogParam(t *testing.T) {
+	srv, b := newTestAPI(t, &fakeBackend{})
+	if _, err := b.Start("s1", "hello", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0&after=2&log=0123456789abcdef", "2"); len(evs) != 3 {
+		t.Fatalf("bare Last-Event-ID with an old ?log=: got %d events, want all 3", len(evs))
+	}
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0&log="+b.LogID(), "2"); len(evs) != 1 {
+		t.Fatalf("bare Last-Event-ID with the current ?log=: got %d events, want 1", len(evs))
+	}
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0", "2"); len(evs) != 1 {
+		t.Fatalf("bare Last-Event-ID without ?log=: got %d events, want 1 (taken as this log)", len(evs))
+	}
+}
+
+// Clients detect what the server offers from /v1/health instead of probing.
+func TestAPI_HealthReportsVersionAndCapabilities(t *testing.T) {
+	api := &API{Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), Version: "1.2.3",
+		Search: func(context.Context, string, int) ([]SearchHit, error) { return nil, nil }}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	resp, body := do(t, srv, "GET", "/v1/health", "")
+	if resp.StatusCode != 200 || body["version"] != "1.2.3" || body["login"] != testLogin {
+		t.Fatalf("health: %d %v", resp.StatusCode, body)
+	}
+	if v, ok := body["acpProtocolVersion"].(float64); !ok || v < 1 {
+		t.Fatalf("acpProtocolVersion %v, want the ACP version update events follow", body["acpProtocolVersion"])
+	}
+	caps := map[string]bool{}
+	for _, c := range body["capabilities"].([]any) {
+		caps[c.(string)] = true
+	}
+	if !caps["search"] || caps["new_sessions"] {
+		t.Fatalf("capabilities %v: want search (configured) and not new_sessions (not configured)", body["capabilities"])
+	}
+}
+
+// Starting a session answers like sending a message, so one code path in a
+// client follows both.
+func TestAPI_NewSessionAnswersLikeASend(t *testing.T) {
+	srv, _ := newSessionAPI(t)
+	resp, body := do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"plan","key":"k2"}`)
+	if resp.StatusCode != 202 {
+		t.Fatal(resp.StatusCode)
+	}
+	for _, f := range []string{"id", "turn", "after", "events"} {
+		if _, ok := body[f]; !ok {
+			t.Fatalf("response %v lacks %q", body, f)
+		}
+	}
+	if body["events"] != fmt.Sprintf("/v1/sessions/%s/events?after=%v", body["id"], body["after"]) {
+		t.Fatalf("events link %v", body["events"])
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/remoteapi"
+	"github.com/zanetworker/aimux/internal/search"
 )
 
 type remoteSettings struct {
@@ -118,7 +120,8 @@ func newRemoteServeCmd() *cobra.Command {
 		Short: "Serve the /v1 API on 127.0.0.1 for tailscale serve to expose",
 		Long: "Serve the remote API: list Claude sessions, follow them, continue idle ones and answer " +
 			"approvals from another device. It listens on 127.0.0.1 only and admits a request only when " +
-			"tailscale serve forwarded it for a login in remote_access.allowed_logins.",
+			"tailscale serve forwarded it for a login in remote_access.allowed_logins. Its contract is " +
+			"api/remote-v1.openapi.yaml, also served at /v1/openapi.yaml.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(config.DefaultPath())
 			if err != nil {
@@ -147,6 +150,13 @@ func newRemoteServeCmd() *cobra.Command {
 				Start: func(ctx context.Context, id, cwd string) (acprun.Runner, error) {
 					return acprun.Start(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, id, broker.Approver())
 				},
+				StartNew: func(ctx context.Context, cwd string) (acprun.Runner, string, error) {
+					r, err := acprun.StartNew(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, broker.Approver())
+					if err != nil {
+						return nil, "", err
+					}
+					return r, r.SessionID(), nil
+				},
 			})
 			defer manager.Close()
 			router := &acprun.Router{Lookup: acprun.ClaudeLookup(projects, registry), Manager: manager}
@@ -154,11 +164,43 @@ func newRemoteServeCmd() *cobra.Command {
 				Check: router.Check, Send: router.Send, Cancel: manager.Cancel,
 			}, remoteapi.BrokerOptions{ApprovalTimeout: s.approvalTimeout})
 			claude := &provider.Claude{}
+			// Keyword ranking only (below), in an index of its own: without
+			// embeddings, refreshing the shared index would mark changed
+			// sessions as seen before the CLI and TUI embed them. One service
+			// refreshes it in the background; a second one answers queries, so
+			// a search reads the last committed index (SQLite WAL) instead of
+			// waiting for a refresh that can take minutes.
+			remoteIndex := filepath.Join(home, ".aimux", "remote-search.db")
+			searcher := search.DefaultService(io.Discard)
+			searcher.Embedder, searcher.DBPath = nil, remoteIndex
+			reader := search.DefaultService(io.Discard)
+			reader.Embedder, reader.DBPath = nil, remoteIndex
 			index := &remoteapi.LocalIndex{
 				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
 				Discover: history.Discover, ParseTrace: claude.ParseTrace, Owned: manager.Owns,
+				Created: &remoteapi.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")},
+				Running: manager.Running,
+				// Keyword ranking: every hit shows where the words matched, and a
+				// query nothing contains finds nothing. The index is refreshed in
+				// the background (below); refreshing per query takes seconds.
+				SearchIndex: func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
+					rs, _, err := reader.Query(ctx, q, search.QueryOpts{Mode: search.ModeKeyword, Limit: limit, IncludeAutomated: true, NoRefresh: true, IDs: ids})
+					return rs, err
+				},
 			}
-			api := &remoteapi.API{Broker: broker, Sessions: index.Sessions, Session: index.Session}
+			api := &remoteapi.API{Version: cmd.Root().Version, Broker: broker, Sessions: index.Sessions, Session: index.Session,
+				Search: index.Search, Projects: index.Projects,
+				Create: func(ctx context.Context, cwd, text string) (string, error) {
+					id, err := manager.New(ctx, cwd)
+					if err != nil {
+						return "", err
+					}
+					if err := index.Created.Add(id, cwd, text); err != nil {
+						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err) // the session works; it may only be hidden from the list
+					}
+					return id, nil
+				},
+			}
 
 			hosts, err := resolveTrustedHosts(cfg.RemoteAccess.Hostnames, tailscaleDNSName)
 			if err != nil {
@@ -181,6 +223,18 @@ func newRemoteServeCmd() *cobra.Command {
 						return
 					case <-t.C:
 						manager.Reap()
+					}
+				}
+			}()
+			go func() {
+				for {
+					if err := searcher.Refresh(ctx); err != nil && ctx.Err() == nil {
+						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(time.Minute):
 					}
 				}
 			}()

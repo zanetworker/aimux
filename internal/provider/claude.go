@@ -860,11 +860,18 @@ func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
 		return
 	}
 
-	// Try as array (could contain tool_result blocks)
+	// Try as array: tool_result blocks, or a prompt stored as blocks (sent
+	// through the ACP adapter, or typed with a pasted image).
 	var contentArr []map[string]interface{}
 	if err := json.Unmarshal(contentRaw, &contentArr); err == nil {
+		var texts []string
 		for _, item := range contentArr {
 			itemType, _ := item["type"].(string)
+			if itemType == "text" {
+				if text, ok := item["text"].(string); ok {
+					texts = append(texts, text)
+				}
+			}
 			if itemType == "tool_result" {
 				e.hasToolResults = true
 				tr := claudeToolResultEntry{}
@@ -888,6 +895,14 @@ func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
 				}
 				e.toolResults = append(e.toolResults, tr)
 			}
+		}
+		prompt := strings.Join(texts, "\n")
+		var meta bool // text Claude Code injects, such as a loaded skill
+		_ = json.Unmarshal(raw["isMeta"], &meta)
+		if !e.hasToolResults && !meta && prompt != "" && !strings.HasPrefix(prompt, "[Request interrupted") {
+			e.isHumanMessage = true
+			e.textContent = prompt
+			return
 		}
 	}
 

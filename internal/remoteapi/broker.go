@@ -177,7 +177,7 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 	if key != "" {
 		l.keys[key] = turn
 	}
-	b.appendLocked(session, turn, KindTurnStarted, map[string]string{"text": text})
+	b.appendLocked(session, turn, KindTurnStarted, TurnStartedData{Text: text})
 	b.mu.Unlock()
 
 	go b.run(ctx, cancel, session, turn, text)
@@ -202,11 +202,11 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 	switch {
 	case errors.Is(err, context.Canceled):
 		// Stopped by Cancel before the agent got the prompt.
-		b.appendLocked(session, turn, KindTurnDone, map[string]string{"stopReason": string(acp.StopReasonCancelled)})
+		b.appendLocked(session, turn, KindTurnDone, TurnDoneData{StopReason: string(acp.StopReasonCancelled)})
 	case err != nil:
-		b.appendLocked(session, turn, KindTurnError, map[string]string{"error": err.Error()})
+		b.appendLocked(session, turn, KindTurnError, TurnErrorData{Error: err.Error()})
 	default:
-		b.appendLocked(session, turn, KindTurnDone, map[string]string{"stopReason": stop})
+		b.appendLocked(session, turn, KindTurnDone, TurnDoneData{StopReason: stop})
 	}
 	l := b.log(session)
 	l.active = ""
@@ -315,19 +315,19 @@ func (b *Broker) Approver() acprun.Approver {
 		b.mu.Lock()
 		p.turn = b.log(session).active
 		b.approvals[id] = p
-		b.appendLocked(session, p.turn, KindApproval, map[string]any{
-			"approvalId": id, "title": title, "options": req.Options, "toolCall": req.ToolCall,
+		b.appendLocked(session, p.turn, KindApproval, ApprovalData{
+			ApprovalID: id, Title: title, Options: req.Options, ToolCall: req.ToolCall,
 		})
 		b.mu.Unlock()
 
-		outcome, option := "expired", ""
+		outcome, option := OutcomeExpired, ""
 		timer := time.NewTimer(b.opt.ApprovalTimeout)
 		defer timer.Stop()
 		select {
 		case option = <-p.answer:
-			outcome = "denied"
+			outcome = OutcomeDenied
 			if kind, ok := optionKind(req.Options, option); ok && (kind == acp.PermissionOptionKindAllowOnce || kind == acp.PermissionOptionKindAllowAlways) {
-				outcome = "allowed"
+				outcome = OutcomeAllowed
 			}
 		case <-timer.C:
 		case <-ctx.Done():
@@ -335,12 +335,12 @@ func (b *Broker) Approver() acprun.Approver {
 		}
 		b.mu.Lock()
 		delete(b.approvals, id)
-		b.appendLocked(session, p.turn, KindApprovalResolved, map[string]string{"approvalId": id, "outcome": outcome})
+		b.appendLocked(session, p.turn, KindApprovalResolved, ApprovalResolvedData{ApprovalID: id, Outcome: outcome})
 		b.mu.Unlock()
-		if outcome == "allowed" {
+		if outcome == OutcomeAllowed {
 			return option, true
 		}
-		if outcome == "denied" && option != "" {
+		if outcome == OutcomeDenied && option != "" {
 			return option, true // the client chose one of the agent's reject options
 		}
 		return "", false
