@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -239,5 +240,24 @@ func TestStdioBackend_ExpandsClaudeVariablesAtLaunch(t *testing.T) {
 	}
 	if got := res.Content[0].(mcp.TextContent).Text; got != "s3cret" {
 		t.Fatalf("server saw AIMUX_PROBE=%q, want the expanded value", got)
+	}
+}
+
+// The real server answers an unknown tool with a JSON-RPC error; the backend
+// is healthy and must keep serving.
+func TestPool_UnknownToolOnRealBackendKeepsIt(t *testing.T) {
+	var starts atomic.Int32
+	p := NewPool(StdioStarter(testConfigs()), PoolOptions{OnStart: func(string, Backend) { starts.Add(1) }})
+	defer p.Close()
+	ctx := context.Background()
+	if r := p.Call(ctx, "test", "", callReq("no_such_tool", nil)); !r.IsError {
+		t.Fatal("unknown tool reported success")
+	}
+	r := p.Call(ctx, "test", "", callReq("echo", map[string]any{"text": "still here"}))
+	if r.IsError || r.Content[0].(mcp.TextContent).Text != "echo: still here" {
+		t.Fatalf("after a JSON-RPC error: %+v", r)
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("backend started %d times, want 1 (not restarted after a request error)", starts.Load())
 	}
 }

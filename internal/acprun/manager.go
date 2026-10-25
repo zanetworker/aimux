@@ -64,7 +64,8 @@ type runEntry struct {
 	prompting       bool               // a prompt is with the agent: cancel goes to the agent
 	cancelRequested bool               // cancelled after the turn was accepted, before its prompt
 	fingerprint     string             // session state after aimux's last turn
-	run             Runner             // nil while starting
+	run             Runner             // nil while starting; written under m.mu and runMu
+	runMu           sync.Mutex         // lets retire, which runs without m.mu, read run
 	cancelStart     context.CancelFunc // aborts a start in progress
 	busy            bool
 	lastUsed        time.Time
@@ -75,13 +76,25 @@ type runEntry struct {
 // first does anything.
 func (e *runEntry) retire() {
 	e.retired.Do(func() {
-		if e.run != nil {
-			_ = e.run.Close()
+		if r := e.getRun(); r != nil {
+			_ = r.Close()
 		}
 		if e.release != nil {
 			e.release()
 		}
 	})
+}
+
+func (e *runEntry) getRun() Runner {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+	return e.run
+}
+
+func (e *runEntry) setRun(r Runner) {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+	e.run = r
 }
 
 // Manager keeps at most one run per session and decides when to start, reuse
@@ -129,8 +142,12 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 	if e.run != nil && m.opt.Fingerprint != nil {
 		if fp := m.opt.Fingerprint(sessionID); fp != "" && fp != e.fingerprint {
 			m.mu.Lock()
+			if m.closed || m.runs[sessionID] != e {
+				m.mu.Unlock()
+				return "", errManagerDone // Close took the entry and retires it
+			}
 			stale := e.run
-			e.run = nil // start a fresh adapter below, which reloads the session
+			e.setRun(nil) // start a fresh adapter below, which reloads the session
 			m.mu.Unlock()
 			_ = stale.Close()
 		}
@@ -168,7 +185,7 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		m.mu.Lock()
 		owned := m.runs[sessionID] == e // false if Close or eviction removed it meanwhile
 		if err == nil && !m.closed && owned && ctx.Err() == nil {
-			e.run = r
+			e.setRun(r)
 			m.mu.Unlock()
 		} else {
 			if owned {
@@ -179,7 +196,7 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 			if err == nil {
 				// It finished starting after an interrupt or shutdown: do not
 				// prompt it, and do not leave it running untracked.
-				e.run = r
+				e.setRun(r)
 				err = errManagerDone
 				if !closed && ctx.Err() != nil {
 					err = ctx.Err()

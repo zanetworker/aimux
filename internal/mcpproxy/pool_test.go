@@ -441,3 +441,23 @@ func TestPool_SlowBackendCloseDoesNotBlockOthers(t *testing.T) {
 		t.Fatal("an unrelated tool call waited for another backend's shutdown")
 	}
 }
+
+func TestPool_RequestErrorKeepsBackend(t *testing.T) {
+	fs := newFakeStarter()
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		return nil, &RequestError{Err: errors.New("invalid params")}
+	}
+	p := NewPool(fs.start, PoolOptions{})
+	defer p.Close()
+	r := p.Call(context.Background(), "s", "", req("x"))
+	if !r.IsError || !strings.Contains(resultText(t, r), "invalid params") {
+		t.Fatalf("got %+v", r)
+	}
+	if fs.backends[0].closed.Load() {
+		t.Fatal("a JSON-RPC error from a healthy backend closed it")
+	}
+	p.Call(context.Background(), "s", "", req("x"))
+	if fs.count("s") != 1 {
+		t.Fatalf("started %d times, want the backend kept", fs.count("s"))
+	}
+}

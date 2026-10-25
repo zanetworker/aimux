@@ -3,6 +3,7 @@ package mcpproxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -112,7 +113,13 @@ func (b *stdioBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, err
 }
 
 func (b *stdioBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return b.c.CallTool(ctx, req)
+	res, err := b.c.CallTool(ctx, req)
+	var terr *transport.Error
+	if err != nil && !errors.As(err, &terr) {
+		// The server answered with a JSON-RPC error: it is alive and well.
+		return nil, &RequestError{Err: err}
+	}
+	return res, err
 }
 
 // Close shuts the client down, then kills anything left in the server's

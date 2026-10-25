@@ -485,3 +485,28 @@ func TestRunEntry_RetireIsSafeConcurrently(t *testing.T) {
 		}
 	}
 }
+
+// Close may retire an entry while its Send is replacing a stale adapter;
+// the two must not touch the entry's runner unsynchronized (run with -race).
+func TestManager_CloseDuringReloadIsSafe(t *testing.T) {
+	fs := &fakeRunStarter{}
+	var m *Manager
+	var calls atomic.Int32
+	m = NewManager(ManagerOptions{Start: fs.start, Fingerprint: func(string) string {
+		if calls.Add(1) == 2 { // the reload check on the second send
+			go m.Close()
+			time.Sleep(50 * time.Millisecond)
+			return "v2"
+		}
+		return "v1"
+	}})
+	if _, err := send(m, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := send(m, "a"); err == nil {
+		t.Fatal("send during shutdown succeeded, want an error")
+	}
+	if fs.count() != 1 || !fs.runners[0].closed.Load() {
+		t.Fatalf("started %d, first closed=%v; want no new adapter and the old one closed", fs.count(), fs.runners[0].closed.Load())
+	}
+}

@@ -17,6 +17,13 @@ type Backend interface {
 	Close() error
 }
 
+// RequestError is a backend's JSON-RPC error answer to a call (unknown
+// tool, invalid params). The server is healthy, so the pool keeps it.
+type RequestError struct{ Err error }
+
+func (e *RequestError) Error() string { return e.Err.Error() }
+func (e *RequestError) Unwrap() error { return e.Err }
+
 // Starter starts the named backend.
 type Starter func(ctx context.Context, server string) (Backend, error)
 
@@ -185,6 +192,10 @@ func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToo
 			// The caller went away; the backend is fine and may be serving
 			// other clients' calls.
 			return mcp.NewToolResultErrorf("%s: %s cancelled: %v", server, req.Params.Name, ctx.Err())
+		}
+		var requestErr *RequestError
+		if errors.As(err, &requestErr) {
+			return mcp.NewToolResultErrorf("%s: %s failed: %v", server, req.Params.Name, err)
 		}
 		// A transport error or our timeout may leave the server wedged;
 		// restart it on the next call. Tool-level failures arrive as IsError
