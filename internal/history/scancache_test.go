@@ -184,3 +184,29 @@ func TestDiscover_ScanCacheFollowsSymlinkTargets(t *testing.T) {
 		t.Errorf("symlinked session served stale from cache: %+v", got)
 	}
 }
+
+// Callers that pass ~/.claude/projects explicitly (the remote API does) use
+// the cache too: it is the default directory, however it is named.
+func TestDiscover_ExplicitDefaultDirUsesTheCache(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prev := scanCacheFile
+	defer func() { scanCacheFile = prev }()
+	var gotDefault bool
+	scanCacheFile = func(dir string, isDefault bool) string { gotDefault = isDefault; return "" }
+	if _, err := Discover(DiscoverOpts{}, filepath.Join(home, ".claude", "projects")+"/"); err != nil {
+		t.Fatal(err)
+	}
+	if !gotDefault {
+		t.Fatal("the default projects dir passed explicitly was not cached")
+	}
+	if _, err := Discover(DiscoverOpts{}, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if gotDefault {
+		t.Fatal("a custom projects dir was treated as the default")
+	}
+}

@@ -200,3 +200,26 @@ func TestCleanPrompt(t *testing.T) {
 		}
 	}
 }
+
+// The session view reads only the end of the file when it can: session files
+// grow to hundreds of MB and only the latest turns are shown.
+func TestLocalIndex_SessionReadsTheTail(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	x.ParseTrace = func(string) ([]trace.Turn, error) { t.Fatal("whole file parsed"); return nil, nil }
+	var asked int
+	x.ParseTail = func(path string, n int) ([]trace.Turn, error) {
+		asked = n
+		var turns []trace.Turn
+		for i := 1; i <= n+1; i++ { // a tail may hold a turn more than asked
+			turns = append(turns, trace.Turn{Number: i, UserLines: []string{fmt.Sprintf("q%d", i)}})
+		}
+		return turns, nil
+	}
+	d, err := x.Session(context.Background(), "idle", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked != 3 || len(d.Turns) != 3 || d.Turns[2].User != "q4" {
+		t.Fatalf("asked %d, turns %+v; want the latest 3", asked, d.Turns)
+	}
+}
