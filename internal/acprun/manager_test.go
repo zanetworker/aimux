@@ -544,3 +544,238 @@ func TestManager_CancelDuringReloadStopsTheTurn(t *testing.T) {
 		t.Fatalf("send returned %v after %d prompts; want the cancelled turn stopped before its prompt", err, prompts.Load())
 	}
 }
+
+func newSessionStarter(fs *fakeRunStarter, id string) StartNewFunc {
+	return func(ctx context.Context, cwd string) (Runner, string, error) {
+		r, err := fs.start(ctx, id, cwd)
+		return r, id, err
+	}
+}
+
+// A new session's run is kept, so the first message goes to it without a
+// second adapter (the session has no file to load yet).
+func TestManager_NewSessionKeepsItsRun(t *testing.T) {
+	fs := &fakeRunStarter{}
+	var reserved []string
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh-1"),
+		Reserve: func(id string) (func(), error) { reserved = append(reserved, id); return func() {}, nil }})
+	defer m.Close()
+	id, err := m.New(context.Background(), "/w/app")
+	if err != nil || id != "fresh-1" {
+		t.Fatalf("New: %q, %v", id, err)
+	}
+	if !m.Running("fresh-1") || len(reserved) != 1 || reserved[0] != "fresh-1" {
+		t.Fatalf("running=%v reserved=%v; want the new run kept and reserved", m.Running("fresh-1"), reserved)
+	}
+	if _, err := send(m, "fresh-1"); err != nil {
+		t.Fatal(err)
+	}
+	if fs.count() != 1 {
+		t.Fatalf("started %d adapters, want the new session's one", fs.count())
+	}
+}
+
+func TestManager_NewSessionWhenFullClosesTheRun(t *testing.T) {
+	fs := &fakeRunStarter{block: nil}
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh-2"), MaxRuns: 1})
+	defer m.Close()
+	// One busy run fills the only slot.
+	release := make(chan struct{})
+	fs.promptF = func(ctx context.Context, text string) (string, error) { <-release; return "end_turn", nil }
+	go func() { _, _ = send(m, "a") }()
+	for !m.Running("a") {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := m.New(context.Background(), "/w/app"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("New with no free slot: %v, want ErrTooManyRuns", err)
+	}
+	close(release)
+	if fs.count() != 1 {
+		t.Fatalf("started %d adapters, want only the busy session's: no slot, no launch", fs.count())
+	}
+}
+
+func TestManager_NewSessionWithoutSupport(t *testing.T) {
+	m := NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})
+	defer m.Close()
+	if _, err := m.New(context.Background(), "/w"); err == nil {
+		t.Fatal("New without StartNew succeeded")
+	}
+}
+
+// Shutdown during a new session's start waits for it and closes its
+// adapter, instead of leaving it running untracked.
+func TestManager_CloseDuringNewSessionStart(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	r := &fakeRunner{}
+	m := NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) {
+			close(started)
+			<-release // an adapter that finishes starting regardless of ctx
+			return r, "late-1", nil
+		}})
+	newErr := make(chan error, 1)
+	go func() { _, err := m.New(context.Background(), "/w"); newErr <- err }()
+	<-started
+	closed := make(chan struct{})
+	go func() { m.Close(); close(closed) }()
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a new session's adapter was still starting")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-closed
+	if err := <-newErr; err == nil {
+		t.Fatal("New succeeded during shutdown")
+	}
+	if !r.closed.Load() {
+		t.Fatal("the late adapter was left running")
+	}
+}
+
+// With every slot busy, New fails before launching an adapter.
+func TestManager_NewSessionChecksCapacityFirst(t *testing.T) {
+	fs := &fakeRunStarter{}
+	launched := 0
+	m := NewManager(ManagerOptions{Start: fs.start, MaxRuns: 1,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) {
+			launched++
+			return &fakeRunner{}, "x", nil
+		}})
+	defer m.Close()
+	release := make(chan struct{})
+	defer close(release)
+	fs.promptF = func(ctx context.Context, text string) (string, error) { <-release; return "end_turn", nil }
+	go func() { _, _ = send(m, "a") }()
+	for !m.Running("a") {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := m.New(context.Background(), "/w"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("New with no free slot: %v, want ErrTooManyRuns", err)
+	}
+	if launched != 0 {
+		t.Fatalf("launched %d adapters with no slot for them", launched)
+	}
+}
+
+// A new session takes its slot when it starts: an idle run is evicted for
+// it at once, and a message to another session meanwhile finds no slot.
+func TestManager_NewSessionReservesItsSlot(t *testing.T) {
+	fs := &fakeRunStarter{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	m := NewManager(ManagerOptions{Start: fs.start, MaxRuns: 1,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) {
+			close(started)
+			<-release
+			return &fakeRunner{}, "fresh", nil
+		}})
+	defer m.Close()
+	if _, err := send(m, "idle-one"); err != nil { // fills the slot, then idles
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := m.New(context.Background(), "/w"); done <- err }()
+	<-started
+	if !fs.runners[0].closed.Load() {
+		t.Fatal("the idle run was not evicted when the new session took its slot")
+	}
+	if _, err := send(m, "other"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("send while the new session starts: %v, want ErrTooManyRuns", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("New: %v", err)
+	}
+}
+
+// The slot a new session reserved is still its own while the start is
+// being handed over to a run: a concurrent message elsewhere cannot take it.
+func TestManager_NewSessionKeepsItsSlotThroughHandover(t *testing.T) {
+	fs := &fakeRunStarter{}
+	var m *Manager
+	var otherErr error
+	m = NewManager(ManagerOptions{Start: fs.start, MaxRuns: 1,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) { return &fakeRunner{}, "fresh", nil },
+		Reserve: func(id string) (func(), error) {
+			if id == "fresh" { // mid-handover: another request arrives
+				_, otherErr = send(m, "other")
+			}
+			return func() {}, nil
+		}})
+	defer m.Close()
+	if _, err := m.New(context.Background(), "/w"); err != nil {
+		t.Fatalf("New lost its reserved slot: %v", err)
+	}
+	if !errors.Is(otherErr, ErrTooManyRuns) {
+		t.Fatalf("concurrent send: %v, want ErrTooManyRuns while the slot is reserved", otherErr)
+	}
+}
+
+// Until its first prompt starts, a new session's run is its only state (no
+// file yet), so it is not evicted for another session.
+func TestManager_NewSessionIsNotEvictedBeforeItsFirstPrompt(t *testing.T) {
+	fs := &fakeRunStarter{}
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh"), MaxRuns: 1})
+	defer m.Close()
+	if _, err := m.New(context.Background(), "/w"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := send(m, "other"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("send elsewhere before the first prompt: %v, want ErrTooManyRuns", err)
+	}
+	if !m.Running("fresh") {
+		t.Fatal("the new session's run was evicted")
+	}
+	if _, err := send(m, "fresh"); err != nil {
+		t.Fatalf("first prompt: %v", err)
+	}
+	if _, err := send(m, "other"); err != nil { // now an ordinary idle run
+		t.Fatalf("send elsewhere after the first prompt: %v", err)
+	}
+}
+
+// A start that finishes after the caller gave up (or the start timed out)
+// is not adopted: its adapter is closed and New reports the cancellation.
+func TestManager_NewSessionFinishingAfterCancel(t *testing.T) {
+	r := &fakeRunner{}
+	ctx, cancel := context.WithCancel(context.Background())
+	m := NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start,
+		StartNew: func(sctx context.Context, cwd string) (Runner, string, error) {
+			cancel() // the caller gives up just as the adapter is ready
+			return r, "late", nil
+		}})
+	defer m.Close()
+	if _, err := m.New(ctx, "/w"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("New: %v, want context.Canceled", err)
+	}
+	if !r.closed.Load() || m.Running("late") {
+		t.Fatalf("closed=%v running=%v; want the late adapter closed and not kept", r.closed.Load(), m.Running("late"))
+	}
+}
+
+// A new session's first message cancelled before it reaches the agent
+// leaves nothing on disk, so the run keeps its protection.
+func TestManager_NewSessionKeepsProtectionWhenTheFirstSendIsCancelled(t *testing.T) {
+	fs := &fakeRunStarter{}
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh"), MaxRuns: 1})
+	defer m.Close()
+	if _, err := m.New(context.Background(), "/w"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled before the prompt goes out
+	if _, err := m.Send(ctx, "fresh", "/w", "hi", func(Event) {}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled first send: %v", err)
+	}
+	if _, err := send(m, "other"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("send elsewhere after a cancelled first send: %v, want ErrTooManyRuns", err)
+	}
+	if !m.Running("fresh") {
+		t.Fatal("the new session's run was evicted before any prompt reached it")
+	}
+}

@@ -236,3 +236,26 @@ func TestClaudeLookup_UndecodableRegistryEntryRefuses(t *testing.T) {
 		t.Fatalf("got %v, want ErrOwnershipUnknown: the broken entry may be the terminal holding this session", err)
 	}
 }
+
+// A session aimux just created has no file until its first prompt; its
+// live run is what makes it known.
+func TestRouter_NewSessionWithoutAFileIsAccepted(t *testing.T) {
+	fs := &fakeRunStarter{}
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh-9")})
+	defer m.Close()
+	r := &Router{Lookup: func(id string) (SessionInfo, error) {
+		return SessionInfo{}, fmt.Errorf("%w: %s", ErrUnknownSession, id)
+	}, Manager: m}
+	if _, err := m.New(context.Background(), "/w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Check("fresh-9"); err != nil {
+		t.Fatalf("new session refused: %v", err)
+	}
+	if _, err := r.Send(context.Background(), "fresh-9", "hi", func(Event) {}); err != nil {
+		t.Fatalf("send to the new session: %v", err)
+	}
+	if err := r.Check("other"); !errors.Is(err, ErrUnknownSession) {
+		t.Fatalf("unknown session: %v, want ErrUnknownSession", err)
+	}
+}
