@@ -195,16 +195,35 @@ func TestClaudeLookup_CommandLineHolder(t *testing.T) {
 	defer func() { listProcesses = prev }()
 	listProcesses = func() ([]processArgs, error) {
 		return []processArgs{
-			{PID: os.Getpid(), Args: "/usr/local/bin/claude --dangerously-skip-permissions --resume idle-1"},
-			{PID: os.Getppid(), Args: "vim notes-about-idle-1.md"}, // not claude
+			{PID: os.Getppid(), Args: "/usr/local/bin/claude --dangerously-skip-permissions --resume idle-1"}, // no registry entry
+			{PID: 1, Args: "vim notes-about-idle-1.md"},                                                       // not claude
 		}, nil
 	}
 	info, err := ClaudeLookup(projects, registry)("idle-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !info.OpenInTerminal || len(info.Holders) != 1 || info.Holders[0] != os.Getpid() {
+	if !info.OpenInTerminal || len(info.Holders) != 1 || info.Holders[0] != os.Getppid() {
 		t.Fatalf("info %+v, want the claude --resume process as the only holder", info)
+	}
+}
+
+// After /clear or a fork, a process started as "claude --resume old" holds
+// a new session; its live registry entry says which, and the old id on its
+// command line must not keep the old session locked.
+func TestClaudeLookup_RegistryBeatsAStaleCommandLine(t *testing.T) {
+	projects, registry := claudeFixture(t) // this process's entry: open-1
+	prev := listProcesses
+	defer func() { listProcesses = prev }()
+	listProcesses = func() ([]processArgs, error) {
+		return []processArgs{{PID: os.Getpid(), Args: "claude --resume idle-1"}}, nil
+	}
+	info, err := ClaudeLookup(projects, registry)("idle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.OpenInTerminal {
+		t.Fatalf("info %+v: the process now holds open-1, not idle-1", info)
 	}
 }
 

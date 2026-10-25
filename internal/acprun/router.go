@@ -112,9 +112,13 @@ func ClaudeLookup(projectsDir, registryDir string) Lookup {
 		}
 		// The registry can miss a session (an older Claude Code, a
 		// half-written entry); a Claude process with the session id on its
-		// command line holds it too.
+		// command line holds it too, unless its own live registry entry says
+		// it moved on (/clear, a fork) to another session.
 		if procs, err := listProcesses(); err == nil {
 			for _, p := range procs {
+				if e, ok := registry[p.PID]; ok && discovery.IsLiveHolder(e) {
+					continue
+				}
 				if commandLineHolds(p.Args, sessionID) && syscall.Kill(p.PID, 0) == nil {
 					seen[p.PID] = true
 				}

@@ -491,3 +491,21 @@ func TestPool_TimeoutClosesABackendThatIgnoresItsContext(t *testing.T) {
 		t.Fatal("call still blocked long after CallTimeout")
 	}
 }
+
+// A caller that gives up must not leave a call stuck in a write forever: the
+// pool's own timeout still closes the backend, so the slot is freed.
+func TestPool_CallerCancelStillLetsTheTimeoutFreeAStuckCall(t *testing.T) {
+	b := &stuckBackend{closed: make(chan struct{})}
+	p := NewPool(func(context.Context, string) (Backend, error) { return b, nil }, PoolOptions{CallTimeout: 100 * time.Millisecond})
+	defer p.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { p.Call(ctx, "srv", "", req("big")); close(done) }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("call stuck after its caller cancelled; the pool timeout never closed the backend")
+	}
+}

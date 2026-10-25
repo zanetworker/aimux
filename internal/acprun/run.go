@@ -62,6 +62,10 @@ type Run struct {
 	conn      *acp.ClientSideConnection
 
 	promptMu sync.Mutex // one prompt at a time
+	// cancelMu makes deciding to send a cancel and sending it one step that a
+	// new prompt cannot start in the middle of: the notification names only
+	// the session, so a late one would stop the next turn.
+	cancelMu sync.Mutex
 
 	mu      sync.Mutex
 	events  []Event
@@ -74,6 +78,8 @@ type Run struct {
 	prompting     bool
 	cancelPending bool
 	promptGen     int // counts prompts, so a re-sent cancel never reaches the next one
+
+	beforeCancelRetry func() // test hook, between a retry's check and its send
 }
 
 // Start launches the adapter, initializes it and loads sessionID. Updates the
@@ -143,20 +149,24 @@ func (r *Run) setLoading(v bool) {
 func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (string, error) {
 	r.promptMu.Lock()
 	defer r.promptMu.Unlock()
+	r.cancelMu.Lock()
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
+		r.cancelMu.Unlock()
 		return "", errors.New("run is closed")
 	}
 	if r.cancelPending {
 		r.cancelPending = false
 		r.mu.Unlock()
+		r.cancelMu.Unlock()
 		return string(acp.StopReasonCancelled), nil
 	}
 	r.onEvent = onEvent
 	r.prompting = true
 	r.promptGen++
 	r.mu.Unlock()
+	r.cancelMu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		r.onEvent = nil
@@ -178,6 +188,7 @@ func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (str
 // Cancel asks the agent to stop the current turn; Prompt then returns
 // "cancelled". A Cancel before the prompt is sent ends that prompt at once.
 func (r *Run) Cancel() {
+	r.cancelMu.Lock()
 	r.mu.Lock()
 	prompting, gen := r.prompting, r.promptGen
 	if !prompting {
@@ -185,6 +196,7 @@ func (r *Run) Cancel() {
 	}
 	r.mu.Unlock()
 	r.sendCancel()
+	r.cancelMu.Unlock()
 	if !prompting {
 		return
 	}
@@ -194,13 +206,20 @@ func (r *Run) Cancel() {
 	go func() {
 		for _, wait := range []time.Duration{250 * time.Millisecond, time.Second} {
 			time.Sleep(wait)
+			r.cancelMu.Lock()
 			r.mu.Lock()
 			same := r.prompting && r.promptGen == gen && !r.closed
 			r.mu.Unlock()
+			if same {
+				if r.beforeCancelRetry != nil {
+					r.beforeCancelRetry()
+				}
+				r.sendCancel()
+			}
+			r.cancelMu.Unlock()
 			if !same {
 				return
 			}
-			r.sendCancel()
 		}
 	}()
 }

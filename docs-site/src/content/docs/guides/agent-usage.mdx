@@ -41,6 +41,8 @@ Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as t
 | 3 | Not found (no sessions, no agents) |
 | 4 | Config error |
 
+`aimux chat` and `aimux remote serve` return 1 for every failure, including missing arguments, an unknown session and a bad `remote_access` setting.
+
 ## Non-Interactive Mode
 
 When stdin is not a TTY (piped or called by an agent), `aimux sessions` automatically behaves as `aimux sessions --list` instead of launching the interactive picker.
@@ -141,5 +143,5 @@ Add to `~/.aimux/config.yaml`:
 
 ```yaml
 resume:
-  skip_permissions: true    # always pass --dangerously-skip-permissions on resume
+  skip_permissions: true    # pass --dangerously-skip-permissions on resume (the web dashboard asks for it per resume)
 ```

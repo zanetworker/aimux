@@ -131,7 +131,7 @@ aimux spawn gpt
 # Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
-Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config.
+Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config. `aimux chat` and `aimux remote serve` return 1 for every failure, including missing arguments, an unknown session and a bad `remote_access` setting.
 
 With `--json`, errors go to stderr as structured JSON (except `aimux chat`, whose `--json` covers the event stream; its errors stay plain text):
 

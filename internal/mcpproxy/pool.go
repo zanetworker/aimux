@@ -186,15 +186,12 @@ func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToo
 
 	cctx, cancel := context.WithTimeout(ctx, p.opt.CallTimeout)
 	defer cancel()
-	// A stdio write to a server that stopped reading ignores the deadline;
-	// closing the backend when our timeout fires is what unblocks it.
-	stopWatch := context.AfterFunc(cctx, func() {
-		if ctx.Err() == nil {
-			p.drop(k, s)
-		}
-	})
+	// A stdio write to a server that stopped reading ignores the deadline,
+	// and the caller's cancel too; closing the backend when our own timeout
+	// fires is what unblocks it. A call that returns in time stops the timer.
+	watchdog := time.AfterFunc(p.opt.CallTimeout, func() { p.drop(k, s) })
 	res, err := s.backend.CallTool(cctx, req)
-	stopWatch()
+	fired := !watchdog.Stop()
 	if err != nil {
 		if ctx.Err() != nil {
 			// The caller went away; the backend is fine and may be serving
@@ -209,7 +206,7 @@ func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToo
 		// restart it on the next call. Tool-level failures arrive as IsError
 		// results and keep the backend.
 		p.drop(k, s)
-		if errors.Is(cctx.Err(), context.DeadlineExceeded) {
+		if fired || errors.Is(cctx.Err(), context.DeadlineExceeded) {
 			return mcp.NewToolResultErrorf("%s: %s timed out after %v", server, req.Params.Name, p.opt.CallTimeout)
 		}
 		return mcp.NewToolResultErrorf("%s: %s failed: %v", server, req.Params.Name, err)

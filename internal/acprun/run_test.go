@@ -471,3 +471,35 @@ func TestRun_CancelDuringDispatchStillStopsTheTurn(t *testing.T) {
 		t.Fatal("a cancel during dispatch was lost; the turn kept running")
 	}
 }
+
+// A re-sent cancel names only the session, so it must never go out once the
+// prompt it was for has ended and the next one has started.
+func TestRun_CancelRetryNeverReachesTheNextPrompt(t *testing.T) {
+	r := start(t, fakeSpec(t), "sess-1", nil)
+	r.mu.Lock()
+	r.prompting = true // a prompt the agent ignores the first cancel for
+	r.promptGen++
+	r.mu.Unlock()
+	done := make(chan string, 1)
+	var once sync.Once
+	r.beforeCancelRetry = func() {
+		once.Do(func() {
+			r.mu.Lock()
+			r.prompting = false // that prompt ends...
+			r.mu.Unlock()
+			go func() { // ...and the next turn starts while the retry is in flight
+				stop, _ := r.Prompt(context.Background(), "slow", func(Event) {})
+				done <- stop
+			}()
+			time.Sleep(300 * time.Millisecond)
+		})
+	}
+	r.Cancel()
+	select {
+	case stop := <-done:
+		t.Fatalf("next prompt ended %q: a retried cancel for the earlier prompt stopped it", stop)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	r.Cancel()
+	<-done
+}
