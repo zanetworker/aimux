@@ -369,3 +369,23 @@ func TestAPI_StreamedEventIDsNameTheLog(t *testing.T) {
 	}
 	t.Fatal("no event id in the stream")
 }
+
+// The event page names its log, and a cursor (?after=) passed with another
+// log's id (the server restarted in between) replays the new log in full.
+func TestAPI_EventPageNamesItsLogAndScopesAfter(t *testing.T) {
+	srv, b := newTestAPI(t, &fakeBackend{})
+	if _, err := b.Start("s1", "hello", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnDone)
+	resp, body := do(t, srv, "GET", "/v1/sessions/s1/events?wait=0", "")
+	if resp.StatusCode != 200 || body["log"] != b.LogID() {
+		t.Fatalf("page log %v, want %q", body["log"], b.LogID())
+	}
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0&after=2&log=0123456789abcdef", ""); len(evs) != 3 {
+		t.Fatalf("after=2 from another log: got %d events, want all 3", len(evs))
+	}
+	if evs := eventsPage(t, srv, "/v1/sessions/s1/events?wait=0&after=2&log="+b.LogID(), ""); len(evs) != 1 {
+		t.Fatalf("after=2 from this log: got %d events, want 1", len(evs))
+	}
+}

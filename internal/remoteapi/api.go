@@ -189,6 +189,11 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		}
 		after = n
 	}
+	// A cursor taken from another log (the server restarted since) means
+	// nothing here: replay this log from the start.
+	if log := r.URL.Query().Get("log"); log != "" && log != a.Broker.LogID() {
+		after = 0
+	}
 	// On reconnect, EventSource repeats the original URL and adds the last id
 	// it received, "<log>.<seq>"; that newer cursor wins. One from an earlier
 	// log (the server restarted) restarts the replay from the beginning.
@@ -205,7 +210,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if r.URL.Query().Get("wait") == "0" {
-		writeJSON(w, http.StatusOK, map[string]any{"events": a.Broker.Events(session, after)})
+		writeJSON(w, http.StatusOK, map[string]any{"events": a.Broker.Events(session, after), "log": a.Broker.LogID()})
 		return
 	}
 	flusher, ok := w.(http.Flusher)

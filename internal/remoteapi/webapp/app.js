@@ -234,18 +234,24 @@ async function load(id, gen) {
   const active = last && last.kind !== 'turn_done' && last.kind !== 'turn_error'
     ? evs.filter((e) => e.turn === last.turn) : [];
   let turns = detail.turns || [];
-  if (active.length) {
+  if (active.length && active[0].kind === 'turn_started') {
     const since = new Date(active[0].time).getTime() - 500;
     turns = turns.filter((t) => !(new Date(t.time).getTime() >= since));
+  } else if (active.length) {
+    // Its start aged out of the log: the turn has run long enough to be in
+    // the file, as its latest turn.
+    turns = turns.slice(0, -1);
   }
   renderHistory(turns);
   for (const e of active) handle(e, false);
-  stream(id, gen, last ? last.seq : 0);
+  stream(id, gen, last ? last.seq : 0, page.log);
 }
 
-function stream(id, gen, after) {
+function stream(id, gen, after, log) {
   if (gen !== nav) return;
-  events = new EventSource('/v1/sessions/' + encodeURIComponent(id) + '/events?after=' + after);
+  // The log id scopes the cursor: if the server restarted since the
+  // snapshot, it replays its new log instead of hiding it behind our cursor.
+  events = new EventSource('/v1/sessions/' + encodeURIComponent(id) + '/events?after=' + after + '&log=' + encodeURIComponent(log || ''));
   let dropped = false;
   events.onopen = () => {
     if (dropped) { refresh(); return; } // the server may have restarted: reload its state
@@ -528,7 +534,10 @@ async function send(ev) {
   try {
     await api('POST', '/v1/sessions/' + encodeURIComponent(session) + '/messages', { text, key });
     unsettled = null;
-    if (gen !== nav) return; // the user has moved to another session
+    if (gen !== nav) { // the user has moved to another session
+      if ((drafts.get(session) || '').trim() === text) drafts.delete(session); // sent: not a draft
+      return;
+    }
     if ($('prompt').value.trim() === text) { // keep anything typed meanwhile
       $('prompt').value = '';
       autoResize();
