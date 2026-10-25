@@ -247,15 +247,24 @@ async function load(id, gen) {
     // the file, as its latest turn.
     turns = turns.slice(0, -1);
   }
-  renderHistory(turns);
-  // A turn that failed before reaching the session file is only in the
-  // event log: show its prompt and error after the history.
+  const ends = renderHistory(turns);
+  // The history has no errors: a failed turn's error comes from the event
+  // log, placed after that turn (the first history turn with its prompt
+  // recorded after it started), or with its prompt at the end if the agent
+  // never wrote it.
+  const claimed = new Set();
   for (const e of evs) {
     if (e.kind !== 'turn_started' || (active.length && e.turn === last.turn)) continue;
     const failed = evs.find((x) => x.turn === e.turn && x.kind === 'turn_error');
-    if (failed && !turns.some((t) => samePrompt(t.user, e.data.text))) {
-      $('messages').append(el('div', 'msg user', e.data.text || ''));
-      system(failed.data.error || 'The turn failed.', true);
+    if (!failed) continue;
+    const start = new Date(e.time).getTime() - 2000;
+    const i = turns.findIndex((t, j) => !claimed.has(j) && samePrompt(t.user, e.data.text) && new Date(t.time).getTime() >= start);
+    const note = el('div', 'msg system error', failed.data.error || 'The turn failed.');
+    if (i >= 0) {
+      claimed.add(i);
+      ends[i].after(note);
+    } else {
+      $('messages').append(el('div', 'msg user', e.data.text || ''), note);
     }
   }
   for (const e of active) handle(e, false);
@@ -343,8 +352,11 @@ function refresh() {
   if (current) showSession(current.id);
 }
 
+// renderHistory draws the turns and returns each one's last element, so
+// notes about a turn (its error) can be placed right after it.
 function renderHistory(turns) {
   const box = $('messages');
+  const ends = [];
   if (turns.length) box.append(el('div', 'earlier', 'Latest ' + turns.length + ' turns'));
   for (const t of turns) {
     if (t.user) box.append(el('div', 'msg user', t.user));
@@ -367,8 +379,10 @@ function renderHistory(turns) {
       }
       box.append(div);
     }
+    ends.push(box.lastElementChild);
   }
   scrollDown(true);
+  return ends;
 }
 
 function handle(e, live) {
