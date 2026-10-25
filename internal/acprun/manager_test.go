@@ -738,3 +738,22 @@ func TestManager_NewSessionIsNotEvictedBeforeItsFirstPrompt(t *testing.T) {
 		t.Fatalf("send elsewhere after the first prompt: %v", err)
 	}
 }
+
+// A start that finishes after the caller gave up (or the start timed out)
+// is not adopted: its adapter is closed and New reports the cancellation.
+func TestManager_NewSessionFinishingAfterCancel(t *testing.T) {
+	r := &fakeRunner{}
+	ctx, cancel := context.WithCancel(context.Background())
+	m := NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start,
+		StartNew: func(sctx context.Context, cwd string) (Runner, string, error) {
+			cancel() // the caller gives up just as the adapter is ready
+			return r, "late", nil
+		}})
+	defer m.Close()
+	if _, err := m.New(ctx, "/w"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("New: %v, want context.Canceled", err)
+	}
+	if !r.closed.Load() || m.Running("late") {
+		t.Fatalf("closed=%v running=%v; want the late adapter closed and not kept", r.closed.Load(), m.Running("late"))
+	}
+}

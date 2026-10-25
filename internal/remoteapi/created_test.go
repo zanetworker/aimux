@@ -261,3 +261,17 @@ func TestLocalIndex_SearchSkipsUnavailableCreatedSessions(t *testing.T) {
 		t.Fatalf("hits %+v (%v), want none", hits, err)
 	}
 }
+
+func TestCreatedStore_NullFileIsEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.json")
+	if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &CreatedStore{Path: path}
+	if err := s.Add("x", "/w", "p"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Get("x"); !ok {
+		t.Fatal("entry missing after Add")
+	}
+}

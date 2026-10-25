@@ -290,6 +290,10 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 		evicted.retire()
 	}
 	r, id, err := m.opt.StartNew(sctx, cwd)
+	if err == nil && sctx.Err() != nil {
+		_ = r.Close() // ready just as the caller gave up or the start timed out
+		err = sctx.Err()
+	}
 	if err != nil {
 		m.dropNewStart(&cancel)
 		return "", err

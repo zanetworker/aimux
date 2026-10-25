@@ -39,6 +39,9 @@ func (s *CreatedStore) load() {
 		return // missing (nothing created yet) or unreadable: start empty
 	}
 	_ = json.Unmarshal(data, &s.byID) // a corrupt file only loses the list
+	if s.byID == nil {
+		s.byID = map[string]CreatedSession{} // the file held null
+	}
 }
 
 // Get returns a created session, if this store has it.
