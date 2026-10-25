@@ -231,8 +231,10 @@ async function load(id, gen) {
   // it goes); those turns, from its start on, are left to the replay.
   const evs = page.events || [];
   const last = evs[evs.length - 1];
-  const active = last && last.kind !== 'turn_done' && last.kind !== 'turn_error'
-    ? evs.filter((e) => e.turn === last.turn) : [];
+  // The last event's turn is running unless it has ended: its end can come
+  // before late events of its own (an approval resolved as the turn ended).
+  const ended = (turn) => evs.some((e) => e.turn === turn && (e.kind === 'turn_done' || e.kind === 'turn_error'));
+  const active = last && !ended(last.turn) ? evs.filter((e) => e.turn === last.turn) : [];
   let turns = detail.turns || [];
   const lastTurn = turns[turns.length - 1];
   if (active.length && active[0].kind === 'turn_started') {
@@ -659,10 +661,18 @@ function system(text, isError) {
   scrollDown(true);
 }
 
+// stick records whether the reader is at the bottom, measured when they
+// scroll, not after new content lands (a big card would otherwise look like
+// the reader scrolled away).
+let stick = true;
+$('messages').addEventListener('scroll', () => {
+  const box = $('messages');
+  stick = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+});
+
 function scrollDown(force) {
   const box = $('messages');
-  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-  if (force || near) box.scrollTop = box.scrollHeight;
+  if (force || stick) box.scrollTop = box.scrollHeight;
 }
 
 function autoResize() {
