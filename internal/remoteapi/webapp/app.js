@@ -208,28 +208,38 @@ async function load(id, gen) {
   $('title').textContent = detail.title || id.slice(0, 8);
   document.title = (detail.title || 'session') + ' \u00b7 aimux';
   showState(detail.state);
-  renderHistory(detail.turns || []);
 
   // A turn still running when the snapshot was taken is replayed from the
-  // events it still has, even if its start has aged out of the log.
+  // events it still has, even if its start has aged out of the log. The
+  // history may already hold its first part (the session file is written as
+  // it goes); those turns, from its start on, are left to the replay.
   const evs = page.events || [];
   const last = evs[evs.length - 1];
-  if (last && last.kind !== 'turn_done' && last.kind !== 'turn_error') {
-    for (const e of evs) if (e.turn === last.turn) handle(e, false);
+  const active = last && last.kind !== 'turn_done' && last.kind !== 'turn_error'
+    ? evs.filter((e) => e.turn === last.turn) : [];
+  let turns = detail.turns || [];
+  if (active.length) {
+    const since = new Date(active[0].time).getTime() - 500;
+    turns = turns.filter((t) => !(new Date(t.time).getTime() >= since));
   }
+  renderHistory(turns);
+  for (const e of active) handle(e, false);
   stream(id, gen, last ? last.seq : 0);
 }
 
 function stream(id, gen, after) {
   if (gen !== nav) return;
   events = new EventSource('/v1/sessions/' + encodeURIComponent(id) + '/events?after=' + after);
+  let dropped = false;
   events.onopen = () => {
+    if (dropped) { refresh(); return; } // the server may have restarted: reload its state
     following = true;
     retryDelay = 2000;
     setStatus('live', 'ok');
     setComposer(!$('banner').textContent);
   };
   events.onerror = () => {
+    dropped = true;
     following = false;
     setComposer(false);
     if (events && events.readyState === EventSource.CLOSED) {
@@ -479,20 +489,27 @@ function resolveCard(id, outcome) {
 
 // Sending and stopping
 
+let sending = false; // a message POST is in flight: Enter must not send it again
+
 async function send(ev) {
   ev.preventDefault();
   const text = $('prompt').value.trim();
-  if (!text || !current || running) return;
+  if (!text || !current || running || sending || !following) return;
+  const gen = nav;
+  sending = true;
   $('send').disabled = true;
   try {
     await api('POST', '/v1/sessions/' + encodeURIComponent(current.id) + '/messages', { text, key: newKey() });
+    if (gen !== nav) return; // the user has moved to another session
     $('prompt').value = '';
     autoResize();
   } catch (e) {
+    if (gen !== nav) return;
     if (e.code === 'open_in_terminal') showState('open_in_terminal');
     system(sendError(e), true);
   } finally {
-    setComposer(current && !$('prompt').disabled);
+    sending = false;
+    if (gen === nav) setComposer(!$('banner').textContent);
   }
 }
 
@@ -511,7 +528,10 @@ async function stop() {
   try {
     await api('POST', '/v1/sessions/' + encodeURIComponent(current.id) + '/cancel');
   } catch (e) {
-    if (e.code !== 'not_running') system('Could not stop: ' + e.message, true);
+    // not_running: the server has no turn (it may have restarted), so this
+    // view is out of date.
+    if (e.code === 'not_running') refresh();
+    else system('Could not stop: ' + e.message, true);
   }
 }
 
