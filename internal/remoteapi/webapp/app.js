@@ -253,22 +253,30 @@ async function showNew() {
 }
 
 let creating = false;
-let createKey = null; // kept across retries of one request, so it creates one session
+// createReq keeps a failed request's key with what it asked for: a retry of
+// the same project and text reuses it (so a lost response cannot create two
+// sessions); anything else gets a new key.
+let createReq = null; // {key, cwd, text}
 
 async function startNew(ev) {
   ev.preventDefault();
   const text = $('newprompt').value.trim();
   if (!text || !newProject || creating || $('newsheet').hidden) return;
+  const cwd = newProject;
+  const req = createReq && createReq.cwd === cwd && createReq.text === text ? createReq : { key: newKey(), cwd, text };
+  const gen = nav;
   creating = true;
   $('newstart').disabled = true;
   $('newerror').hidden = true;
-  if (!createKey) createKey = newKey();
   try {
-    const r = await api('POST', '/v1/sessions', { cwd: newProject, text, key: createKey });
-    createKey = null;
-    $('newprompt').value = '';
+    const r = await api('POST', '/v1/sessions', { cwd, text, key: req.key });
+    createReq = null;
+    if (gen !== nav) return; // the user left the sheet; the session is in the list
+    if ($('newprompt').value.trim() === text) $('newprompt').value = '';
     location.hash = '#/s/' + encodeURIComponent(r.id);
   } catch (e) {
+    createReq = req;
+    if (gen !== nav) return;
     $('newerror').textContent = 'Could not start the session: ' + e.message;
     $('newerror').hidden = false;
   } finally {
@@ -1017,7 +1025,6 @@ $('back').addEventListener('click', () => { location.hash = ''; });
 $('newbtn').addEventListener('click', () => { location.hash = '#/new'; });
 $('newcancel').addEventListener('click', () => { location.hash = ''; });
 $('newform').addEventListener('submit', startNew);
-$('newprompt').addEventListener('input', () => { createKey = null; });
 $('search').addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {

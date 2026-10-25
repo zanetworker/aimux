@@ -591,11 +591,8 @@ func TestManager_NewSessionWhenFullClosesTheRun(t *testing.T) {
 		t.Fatalf("New with no free slot: %v, want ErrTooManyRuns", err)
 	}
 	close(release)
-	fs.mu.Lock()
-	last := fs.runners[len(fs.runners)-1]
-	fs.mu.Unlock()
-	if !last.closed.Load() {
-		t.Fatal("the new session's adapter was left running after it could not be kept")
+	if fs.count() != 1 {
+		t.Fatalf("started %d adapters, want only the busy session's: no slot, no launch", fs.count())
 	}
 }
 
@@ -636,5 +633,31 @@ func TestManager_CloseDuringNewSessionStart(t *testing.T) {
 	}
 	if !r.closed.Load() {
 		t.Fatal("the late adapter was left running")
+	}
+}
+
+// With every slot busy, New fails before launching an adapter.
+func TestManager_NewSessionChecksCapacityFirst(t *testing.T) {
+	fs := &fakeRunStarter{}
+	launched := 0
+	m := NewManager(ManagerOptions{Start: fs.start, MaxRuns: 1,
+		StartNew: func(ctx context.Context, cwd string) (Runner, string, error) {
+			launched++
+			return &fakeRunner{}, "x", nil
+		}})
+	defer m.Close()
+	release := make(chan struct{})
+	defer close(release)
+	fs.promptF = func(ctx context.Context, text string) (string, error) { <-release; return "end_turn", nil }
+	go func() { _, _ = send(m, "a") }()
+	for !m.Running("a") {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if _, err := m.New(context.Background(), "/w"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("New with no free slot: %v, want ErrTooManyRuns", err)
+	}
+	if launched != 0 {
+		t.Fatalf("launched %d adapters with no slot for them", launched)
 	}
 }

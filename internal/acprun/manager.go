@@ -265,6 +265,12 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 		m.mu.Unlock()
 		return "", errManagerDone
 	}
+	// Fail before launching anything when no slot can be had: every run
+	// (and every new session still starting) is busy.
+	if len(m.runs)+len(m.newStart) >= m.opt.MaxRuns && !m.hasIdleRunLocked() {
+		m.mu.Unlock()
+		return "", ErrTooManyRuns
+	}
 	if m.newStart == nil {
 		m.newStart = map[*context.CancelFunc]bool{}
 	}
@@ -317,6 +323,16 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 	e.lastUsed = m.opt.Now()
 	m.mu.Unlock()
 	return id, nil
+}
+
+// hasIdleRunLocked reports whether some run could be evicted for a new one.
+func (m *Manager) hasIdleRunLocked() bool {
+	for _, e := range m.runs {
+		if !e.busy && e.run != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // claim marks the session's run busy, creating an entry (and evicting the
