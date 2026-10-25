@@ -107,6 +107,7 @@ func TestLocalIndex_Search(t *testing.T) {
 	if err := x.Created.Add("made", "/w", "x"); err != nil {
 		t.Fatal(err)
 	}
+	x.Running = func(id string) bool { return id == "made" } // created here and still live
 	var gotQuery string
 	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
 		gotQuery = q
@@ -241,5 +242,22 @@ func TestLocalIndex_CreatedSessionThatNeverStarted(t *testing.T) {
 	d, err := x.Session(context.Background(), "stillborn", 20)
 	if err != nil || d.State != StateUnavailable {
 		t.Fatalf("detail state %q (%v), want unavailable", d.State, err)
+	}
+}
+
+// A created session with neither a file nor a run cannot be continued, so a
+// search does not offer it (its archived copy may still match).
+func TestLocalIndex_SearchSkipsUnavailableCreatedSessions(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	x.Created = &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")}
+	x.Running = func(string) bool { return false }
+	if err := x.Created.Add("gone", "/w", "x"); err != nil {
+		t.Fatal(err)
+	}
+	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
+		return []search.Result{{SessionID: "gone", Automated: true, Snippet: "the [cache]"}}, nil
+	}
+	if hits, err := x.Search(context.Background(), "cache", 20); err != nil || len(hits) != 0 {
+		t.Fatalf("hits %+v (%v), want none", hits, err)
 	}
 }

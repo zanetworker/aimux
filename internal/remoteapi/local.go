@@ -270,20 +270,29 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 // maxSearchScan bounds how many ranked matches a search looks through.
 const maxSearchScan = 500
 
-// eligible counts the results Search would return: not automated (unless
-// aimux created them) and not only in aimux's archive.
+// eligible counts the results Search would return.
 func (x *LocalIndex) eligible(results []search.Result) int {
 	n := 0
 	for _, r := range results {
-		if r.Snippet == "" {
-			continue
-		}
-		if _, created := x.Created.Get(r.SessionID); created ||
-			(!r.Automated && discovery.FindSessionFile(r.SessionID, x.ProjectsDir) != "") {
+		if x.searchable(r) {
 			n++
 		}
 	}
 	return n
+}
+
+// searchable reports a search result the user can open and continue: it
+// matched some text, it is not automated (unless aimux created it), and it
+// still has a session file or, created here, a live run.
+func (x *LocalIndex) searchable(r search.Result) bool {
+	if r.Snippet == "" {
+		return false
+	}
+	_, created := x.Created.Get(r.SessionID)
+	if r.Automated && !created {
+		return false
+	}
+	return discovery.FindSessionFile(r.SessionID, x.ProjectsDir) != "" || (created && x.running(r.SessionID))
 }
 
 // SearchHit is a session matching a search, with the matching text.
@@ -314,16 +323,10 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 	open := x.openSessions()
 	hits := []SearchHit{}
 	for _, r := range results {
-		if r.Snippet == "" { // a semantic neighbour with no matching text
+		if !x.searchable(r) {
 			continue
 		}
-		c, created := x.Created.Get(r.SessionID)
-		if r.Automated && !created {
-			continue
-		}
-		if !created && discovery.FindSessionFile(r.SessionID, x.ProjectsDir) == "" {
-			continue
-		}
+		c, _ := x.Created.Get(r.SessionID)
 		title := shorten(cleanPrompt(r.Title), 80)
 		if title == "" {
 			title = c.Prompt

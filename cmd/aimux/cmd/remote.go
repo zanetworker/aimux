@@ -169,7 +169,9 @@ func newRemoteServeCmd() *cobra.Command {
 			}, remoteapi.BrokerOptions{ApprovalTimeout: s.approvalTimeout})
 			claude := &provider.Claude{}
 			searcher := search.DefaultService(io.Discard)
-			searcher.EmbedInBackground = true
+			// Keyword ranking only (below), so no embeddings: refreshing would
+			// otherwise send changed sessions to the embedding API for nothing.
+			searcher.Embedder = nil
 			index := &remoteapi.LocalIndex{
 				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
 				Discover: history.Discover, ParseTrace: claude.ParseTrace, Owned: manager.Owns,
