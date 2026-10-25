@@ -15,6 +15,7 @@ type fakeRunner struct {
 	closed  atomic.Bool
 	promptF func(ctx context.Context, text string) (string, error)
 	cancels atomic.Int32
+	closeF  func() // called on Close
 }
 
 func (f *fakeRunner) Prompt(ctx context.Context, text string, onEvent func(Event)) (string, error) {
@@ -27,7 +28,13 @@ func (f *fakeRunner) Prompt(ctx context.Context, text string, onEvent func(Event
 func (f *fakeRunner) PID() int             { return f.pid }
 func (f *fakeRunner) Cancel()              { f.cancels.Add(1) }
 func (f *fakeRunner) Events(int64) []Event { return []Event{{Seq: 7}} }
-func (f *fakeRunner) Close() error         { f.closed.Store(true); return nil }
+func (f *fakeRunner) Close() error {
+	f.closed.Store(true)
+	if f.closeF != nil {
+		f.closeF()
+	}
+	return nil
+}
 
 type fakeRunStarter struct {
 	block   chan struct{} // when set, start waits for it to close
@@ -508,5 +515,32 @@ func TestManager_CloseDuringReloadIsSafe(t *testing.T) {
 	}
 	if fs.count() != 1 || !fs.runners[0].closed.Load() {
 		t.Fatalf("started %d, first closed=%v; want no new adapter and the old one closed", fs.count(), fs.runners[0].closed.Load())
+	}
+}
+
+// A cancel while a stale adapter is being replaced must stop the turn; the
+// finished start's cancel function must not answer for it and do nothing.
+func TestManager_CancelDuringReloadStopsTheTurn(t *testing.T) {
+	var prompts atomic.Int32
+	fs := &fakeRunStarter{promptF: func(context.Context, string) (string, error) { prompts.Add(1); return "end_turn", nil }}
+	var calls atomic.Int32
+	m := NewManager(ManagerOptions{Start: fs.start, Fingerprint: func(string) string {
+		if calls.Add(1) >= 2 {
+			return "v2" // changed elsewhere since the first turn
+		}
+		return "v1"
+	}})
+	defer m.Close()
+	if _, err := send(m, "a"); err != nil {
+		t.Fatal(err)
+	}
+	var cancelErr error
+	fs.runners[0].closeF = func() { cancelErr = m.Cancel("a") } // in the reload window
+	_, err := send(m, "a")
+	if cancelErr != nil {
+		t.Fatalf("cancel during reload: %v", cancelErr)
+	}
+	if err == nil || prompts.Load() != 1 {
+		t.Fatalf("send returned %v after %d prompts; want the cancelled turn stopped before its prompt", err, prompts.Load())
 	}
 }

@@ -109,39 +109,15 @@ func (p *Pool) acquire(ctx context.Context, k slotKey) (*slot, error) {
 	p.mu.Unlock()
 
 	if !ok {
-		b, err := p.start(ctx, k.server)
-		var abandoned Backend // closed after unlocking: shutdown can take seconds
-		p.mu.Lock()
-		s.backend, s.err = b, err
-		switch {
-		case err != nil:
-			if p.slots[k] == s {
-				delete(p.slots, k)
-			}
-		case p.closed:
-			s.err = errPoolClosed
-			abandoned = b
-		case s.closed:
-			s.err = errSessionClosed
-			abandoned = b
-		default:
-			s.lastUsed = p.opt.Now()
-		}
-		close(s.ready)
-		p.mu.Unlock()
-		if abandoned != nil {
-			_ = abandoned.Close()
-		}
-		if err == nil && s.err == nil && p.opt.OnStart != nil {
-			p.opt.OnStart(k.server, b)
-		}
-	} else {
-		select {
-		case <-s.ready:
-		case <-ctx.Done():
-			p.release(s)
-			return nil, ctx.Err()
-		}
+		// One start serves every caller waiting for it, so it is not tied to
+		// the first caller's context; StartTimeout bounds it.
+		go p.startSlot(k, s) // #nosec G118 -- on purpose: the start outlives the request that triggered it
+	}
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		p.release(s)
+		return nil, ctx.Err()
 	}
 	if s.err != nil {
 		p.release(s)
@@ -169,6 +145,39 @@ func (p *Pool) drop(k slotKey, s *slot) {
 	}
 	p.mu.Unlock()
 	_ = s.backend.Close()
+}
+
+// startSlot starts the backend for a new slot and records the outcome for
+// everyone waiting on s.ready.
+func (p *Pool) startSlot(k slotKey, s *slot) {
+	ctx, cancel := context.WithTimeout(context.Background(), p.opt.StartTimeout)
+	defer cancel()
+	b, err := p.start(ctx, k.server)
+	var abandoned Backend // closed after unlocking: shutdown can take seconds
+	p.mu.Lock()
+	s.backend, s.err = b, err
+	switch {
+	case err != nil:
+		if p.slots[k] == s {
+			delete(p.slots, k)
+		}
+	case p.closed:
+		s.err = errPoolClosed
+		abandoned = b
+	case s.closed:
+		s.err = errSessionClosed
+		abandoned = b
+	default:
+		s.lastUsed = p.opt.Now()
+	}
+	close(s.ready)
+	p.mu.Unlock()
+	if abandoned != nil {
+		_ = abandoned.Close()
+	}
+	if err == nil && s.err == nil && p.opt.OnStart != nil {
+		p.opt.OnStart(k.server, b)
+	}
 }
 
 // Call forwards a tool call to the server's backend, starting it if needed.
@@ -278,7 +287,7 @@ func (p *Pool) closeWhere(match func(slotKey) bool, waitForCalls bool) {
 			}
 			delete(p.slots, k)
 		default:
-			// Still starting: acquire closes it when the start finishes.
+			// Still starting: startSlot closes it when the start finishes.
 			s.closed = true
 			delete(p.slots, k)
 		}

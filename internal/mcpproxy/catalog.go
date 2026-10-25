@@ -27,6 +27,17 @@ type CatalogEntry struct {
 	FetchedAt time.Time         `json:"fetchedAt"`
 }
 
+// Only returns a copy holding the servers keep accepts; c is unchanged.
+func (c *Catalog) Only(keep func(server string) bool) *Catalog {
+	out := &Catalog{Servers: map[string]CatalogEntry{}}
+	for s, e := range c.Servers {
+		if keep(s) {
+			out.Servers[s] = e
+		}
+	}
+	return out
+}
+
 // LoadCatalog reads a catalog file. A missing file is an empty catalog.
 func LoadCatalog(path string) (*Catalog, error) {
 	c := &Catalog{Servers: map[string]CatalogEntry{}}

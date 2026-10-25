@@ -156,3 +156,20 @@ func TestCatalogUpdater_ConcurrentRefreshes(t *testing.T) {
 		t.Fatalf("saved %d servers (%v), want all 10", len(saved.Servers), err)
 	}
 }
+
+func TestCatalog_OnlyFiltersACopy(t *testing.T) {
+	c := &Catalog{Servers: map[string]CatalogEntry{
+		"keep": {Tools: []json.RawMessage{json.RawMessage(`{"name":"a"}`)}},
+		"drop": {Tools: []json.RawMessage{json.RawMessage(`{"name":"b"}`)}},
+	}}
+	got := c.Only(func(s string) bool { return s == "keep" })
+	if len(got.Servers) != 1 || len(got.Servers["keep"].Tools) != 1 {
+		t.Fatalf("filtered catalog %+v, want only keep", got.Servers)
+	}
+	if len(c.Servers) != 2 {
+		t.Fatalf("original catalog changed to %+v; it is the one saved to disk", c.Servers)
+	}
+	if empty := c.Only(func(string) bool { return false }); empty.Servers == nil || len(empty.Servers) != 0 {
+		t.Fatalf("nothing kept: got %+v, want an empty, non-nil map", empty.Servers)
+	}
+}
