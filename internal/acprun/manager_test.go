@@ -467,3 +467,21 @@ func TestManager_CancelBetweenClaimAndPromptStopsTheTurn(t *testing.T) {
 		t.Fatalf("next turn: %v, prompts %d; the cancel must not leak into it", err, prompts.Load())
 	}
 }
+
+// Shutdown during a prompt: Close and the failing Send both retire the same
+// entry. The reservation must be released once, without a race or panic.
+func TestRunEntry_RetireIsSafeConcurrently(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		var releases atomic.Int32
+		e := &runEntry{run: &fakeRunner{}, release: func() { releases.Add(1) }}
+		var wg sync.WaitGroup
+		for j := 0; j < 4; j++ {
+			wg.Add(1)
+			go func() { defer wg.Done(); e.retire() }()
+		}
+		wg.Wait()
+		if releases.Load() != 1 {
+			t.Fatalf("released %d times, want once", releases.Load())
+		}
+	}
+}

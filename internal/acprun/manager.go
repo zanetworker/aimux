@@ -59,6 +59,7 @@ type ManagerOptions struct {
 }
 
 type runEntry struct {
+	retired         sync.Once
 	release         func()             // gives up the cross-process reservation
 	prompting       bool               // a prompt is with the agent: cancel goes to the agent
 	cancelRequested bool               // cancelled after the turn was accepted, before its prompt
@@ -70,14 +71,17 @@ type runEntry struct {
 }
 
 // retire ends an entry that has left the map: its adapter and reservation.
+// Close and a failing Send can both retire one entry at shutdown; only the
+// first does anything.
 func (e *runEntry) retire() {
-	if e.run != nil {
-		_ = e.run.Close()
-	}
-	if e.release != nil {
-		e.release()
-		e.release = nil
-	}
+	e.retired.Do(func() {
+		if e.run != nil {
+			_ = e.run.Close()
+		}
+		if e.release != nil {
+			e.release()
+		}
+	})
 }
 
 // Manager keeps at most one run per session and decides when to start, reuse

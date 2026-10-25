@@ -56,7 +56,9 @@ Responses are JSON, except the events endpoint, which streams server-sent events
 
 Event kinds: `turn_started`, `update` (an ACP session update: agent text, tool calls, plans; the agent's slash-command list is left out), `approval` (with `approvalId`, `title` and `options`), `approval_resolved` (`allowed`, `denied` or `expired`), `turn_done` (with `stopReason`) and `turn_error`.
 
-Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process, such as `aimux chat`, is continuing the session), `not_running` (409, cancel with no turn), `too_many_runs` (503), `ownership_unknown` (503, Claude's session registry is missing or has an entry aimux cannot read, so it will not risk a second writer), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
+When every run slot is busy (`max_runs`), the message is still accepted (202) and the turn ends with a `turn_error` event saying so; send again once a session finishes.
+
+Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process, such as `aimux chat`, is continuing the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is missing or has an entry aimux cannot read, so it will not risk a second writer), `no_such_approval` (404), `invalid_option` (400), `bad_request` (400), `internal` (500, any other failure).
 
 ## Settings
 

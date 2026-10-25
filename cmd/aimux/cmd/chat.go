@@ -128,7 +128,23 @@ func renderChatEvent(out, info io.Writer, e acprun.Event, asJSON bool) {
 // promptApprover asks on the terminal before the agent may use a tool.
 // Anything but y or yes, including end of input, denies.
 func promptApprover(in io.Reader, out io.Writer) acprun.Approver {
-	lines := bufio.NewReader(in)
+	// One reader for the whole session, so a prompt can stop waiting (its
+	// request withdrawn) without leaving a read behind that eats the next
+	// answer.
+	lines := make(chan string)
+	go func() {
+		r := bufio.NewReader(in)
+		for {
+			line, err := r.ReadString('\n')
+			if line != "" {
+				lines <- line
+			}
+			if err != nil {
+				close(lines)
+				return
+			}
+		}
+	}()
 	// Parallel tool calls ask concurrently; one prompt and its answer at a
 	// time, so a y always belongs to the tool shown above it.
 	var mu sync.Mutex
@@ -139,8 +155,27 @@ func promptApprover(in io.Reader, out io.Writer) acprun.Approver {
 		if req.ToolCall.Title != nil {
 			title = *req.ToolCall.Title
 		}
+		// Discard anything typed while no prompt was showing (for example a
+		// late y meant for a withdrawn prompt).
+		for drained := false; !drained; {
+			select {
+			case _, open := <-lines:
+				drained = !open // a closed channel is always ready: input has ended
+			default:
+				drained = true
+			}
+		}
 		_, _ = fmt.Fprintf(out, "\nAllow %s? [y/N] ", title)
-		answer, _ := lines.ReadString('\n')
+		var answer string
+		select {
+		case answer = <-lines: // "" once input has ended
+		case <-ctx.Done():
+			_, _ = fmt.Fprintln(out, "\n(request withdrawn by the agent)")
+			return "", false
+		}
+		if ctx.Err() != nil {
+			return "", false
+		}
 		answer = strings.ToLower(strings.TrimSpace(answer))
 		if answer != "y" && answer != "yes" {
 			return "", false

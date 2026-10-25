@@ -830,3 +830,37 @@ func TestApplyRegistryEntry(t *testing.T) {
 		})
 	}
 }
+
+// An agent without a registry entry comes first and falls back to matching
+// by start time; it must not take the file that the registry assigns to a
+// later agent.
+func TestAssignSessionFiles_RegistryFilesAreReservedFirst(t *testing.T) {
+	agents := []agent.Agent{
+		{PID: 1, WorkingDir: "/w"},                      // fallback matching
+		{PID: 2, WorkingDir: "/w", SessionID: "sess-x"}, // from the registry
+	}
+	fromRegistry := map[int]bool{1: true}
+	find := func(id string) string {
+		if id == "sess-x" {
+			return "/p/w/sess-x.jsonl"
+		}
+		return ""
+	}
+	// A greedy fallback: takes the first file in /w nobody has claimed yet.
+	fallback := func(a *agent.Agent, assigned map[string]bool) {
+		for _, f := range []string{"/p/w/sess-x.jsonl", "/p/w/other.jsonl"} {
+			if !assigned[f] {
+				assigned[f] = true
+				a.SessionFile = f
+				return
+			}
+		}
+	}
+	assignSessionFiles(agents, fromRegistry, find, fallback)
+	if agents[1].SessionFile != "/p/w/sess-x.jsonl" {
+		t.Fatalf("registry agent got %q, want its own file", agents[1].SessionFile)
+	}
+	if agents[0].SessionFile == agents[1].SessionFile {
+		t.Fatalf("both agents got %q: the fallback took the registry agent's file", agents[0].SessionFile)
+	}
+}

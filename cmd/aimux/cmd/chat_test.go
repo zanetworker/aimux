@@ -202,3 +202,60 @@ func TestPromptApprover_NeverGrantsAllowAlways(t *testing.T) {
 		t.Fatalf("no explanation for the denial: %q", out.String())
 	}
 }
+
+// The agent withdraws a permission request while the prompt waits. The
+// prompt must give up at once, and a "y" typed afterwards must not approve
+// something else.
+func TestPromptApprover_WithdrawnRequest(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	var out syncBuffer
+	approve := promptApprover(pr, &out)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() { _, ok := approve(ctx, permReq()); done <- ok }()
+	for !strings.Contains(out.String(), "Allow ") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("a withdrawn request was approved")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the prompt kept waiting after its request was withdrawn")
+	}
+
+	// The user, late, types y for the old prompt; then a new request comes.
+	_, _ = pw.Write([]byte("y\n"))
+	time.Sleep(50 * time.Millisecond)
+	next := make(chan bool, 1)
+	go func() { _, ok := approve(context.Background(), permReq()); next <- ok }()
+	time.Sleep(50 * time.Millisecond)
+	_, _ = pw.Write([]byte("n\n"))
+	select {
+	case ok := <-next:
+		if ok {
+			t.Fatal("the stale y typed for the withdrawn prompt approved the next request")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the next prompt never got its answer")
+	}
+}
+
+func TestPromptApprover_InputAlreadyEnded(t *testing.T) {
+	approve := promptApprover(strings.NewReader(""), io.Discard)
+	time.Sleep(50 * time.Millisecond) // the reader has seen end of input by now
+	done := make(chan bool, 1)
+	go func() { _, ok := approve(context.Background(), permReq()); done <- ok }()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("approved with no input")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the prompt hung once input had ended")
+	}
+}

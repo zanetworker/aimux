@@ -74,20 +74,10 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 
 	// Phase 1: match session files sequentially (cheap glob + stat calls,
 	// needs assignedFiles tracking to avoid double-claiming).
-	assignedFiles := make(map[string]bool)
+	assignSessionFiles(agents, fromRegistry,
+		func(id string) string { return discovery.FindSessionFile(id, projectsDir) },
+		func(a *agent.Agent, assigned map[string]bool) { c.matchSessionFile(a, projectsDir, assigned) })
 	for i := range agents {
-		if fromRegistry[i] {
-			// The ID is authoritative; a session with no file yet must not
-			// claim another session's file by start time.
-			if f := discovery.FindSessionFile(agents[i].SessionID, projectsDir); f != "" {
-				assignedFiles[f] = true
-				agents[i].SessionFile = f
-			} else {
-				agents[i].Status = agent.StatusActive
-			}
-		} else {
-			c.matchSessionFile(&agents[i], projectsDir, assignedFiles)
-		}
 		agents[i].ProviderName = "claude"
 		if agents[i].Name == "" {
 			agents[i].Name = agents[i].ShortProject()
@@ -133,6 +123,31 @@ func (c *Claude) batchResolveProcessInfo(agents []agent.Agent) {
 		}
 		if agents[r.idx].StartTime.IsZero() {
 			agents[r.idx].StartTime = r.startTime
+		}
+	}
+}
+
+// assignSessionFiles gives each agent its session file. Agents known from
+// Claude's registry go first: their ID is authoritative, so their files are
+// reserved before any other agent falls back to matching by start time and
+// could claim one of them. A registry agent whose file does not exist yet
+// stays without one rather than borrowing another session's.
+func assignSessionFiles(agents []agent.Agent, fromRegistry map[int]bool, find func(id string) string, fallback func(a *agent.Agent, assigned map[string]bool)) {
+	assigned := make(map[string]bool)
+	for i := range agents {
+		if !fromRegistry[i] {
+			continue
+		}
+		if f := find(agents[i].SessionID); f != "" {
+			assigned[f] = true
+			agents[i].SessionFile = f
+		} else {
+			agents[i].Status = agent.StatusActive
+		}
+	}
+	for i := range agents {
+		if !fromRegistry[i] {
+			fallback(&agents[i], assigned)
 		}
 	}
 }
