@@ -31,6 +31,18 @@ description: Reach your sessions from a phone or another device through Tailscal
 
 From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:8443/v1/health`.
 
+## Web client
+
+On the iPhone, install Tailscale and sign in with the same account as the Mac. Then open `https://<your-mac>.<tailnet>.ts.net:8443/app/` in Safari (`remote serve` prints the address) and use Share, Add to Home Screen to open it like an app. There is no login: Tailscale says who you are.
+
+- **Sessions:** one compact row each, grouped by day: a state dot (green idle, amber running, hollow when open in a terminal on the Mac), the title, project and age, and the last message you sent.
+- **Search:** the box at the top searches the words in your sessions and shows where each one matched (the index is described under `GET /v1/search` below; right after the first start it can take a few minutes to fill).
+- **New session:** + starts a session in one of your recent project folders (only those; never an arbitrary path) with a first message.
+- **In a session:** each turn shows your message, one line summing up its tools (tap for the list) and the reply, cut to a few lines until you tap. The header says what the agent is doing right now. Permission requests are pinned above the message box, with a preview of what the tool will write or run; answer with the agent's own options. Stop ends the running turn. A session open in a terminal on the Mac is read-only.
+- **Voice:** the mic dictates into the message box (the browser's speech recognition; on iPhone it runs through Apple's speech service, like keyboard dictation). In the voice menu: read replies aloud (code is skipped), send when you stop talking, and hands-free conversation, which listens again after each reply. Permission requests are read out but only answered with a tap. iOS may need a tap on the mic again after the phone sleeps.
+
+The page is served by `remote serve` itself and loads nothing from elsewhere; its Content-Security-Policy allows only its own script, style and API.
+
 ## Security model
 
 - The API listens on `127.0.0.1` only. It is not reachable on the tailnet except through `tailscale serve`.
