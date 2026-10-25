@@ -274,8 +274,15 @@ async function load(id, gen) {
       claimed.add(i);
       ends[i].after(note);
     } else if (started) {
-      $('messages').append(el('div', 'msg user', started.data.text || ''), note);
-    } else {
+      // Never written to the file: place it in time among the turns shown,
+      // and leave it out if it is older than all of them.
+      const t0 = ms(started.time);
+      if (turns.length && t0 < ms(turns[0].time)) continue;
+      const k = turns.findIndex((t) => ms(t.time) > t0);
+      const prompt = el('div', 'msg user', started.data.text || '');
+      if (k > 0) ends[k - 1].after(prompt, note);
+      else $('messages').append(prompt, note);
+    } else if (!turns.length || ms(failed.time) >= ms(turns[0].time)) {
       $('messages').append(note);
     }
   }
@@ -402,9 +409,9 @@ function handle(e, live) {
   switch (e.kind) {
     case 'turn_started':
       if (live) liveTurns.add(e.turn);
-      if (unsettled && current && unsettled.session === current.id && unsettled.text === d.text) {
+      if (current && unsettled.has(current.id) && unsettled.get(current.id).text === d.text) {
         // The send that looked failed did reach the server.
-        unsettled = null;
+        unsettled.delete(current.id);
         if ($('prompt').value.trim() === d.text) { $('prompt').value = ''; autoResize(); }
       }
       $('messages').append(el('div', 'msg user', d.text || ''));
@@ -569,7 +576,7 @@ let sending = false; // a message POST is in flight: Enter must not send it agai
 // unsettled is a failed send: its outcome may be unknown (the response was
 // lost), so a retry of the same text reuses its key and the server runs it
 // at most once. Reusing a key the server never saw is harmless.
-let unsettled = null; // {session, text, key}
+const unsettled = new Map(); // session id -> {text, key}
 
 async function send(ev) {
   ev.preventDefault();
@@ -577,12 +584,13 @@ async function send(ev) {
   if (!text || !current || running || sending || !following) return;
   const gen = nav;
   const session = current.id;
-  const key = unsettled && unsettled.session === session && unsettled.text === text ? unsettled.key : newKey();
+  const prior = unsettled.get(session);
+  const key = prior && prior.text === text ? prior.key : newKey();
   sending = true;
   $('send').disabled = true;
   try {
     await api('POST', '/v1/sessions/' + encodeURIComponent(session) + '/messages', { text, key });
-    unsettled = null;
+    unsettled.delete(session);
     // Sent text is no draft, wherever it is now (saved, or back on screen
     // after the user left and returned); anything typed since is kept.
     if ((drafts.get(session) || '').trim() === text) drafts.delete(session);
@@ -591,7 +599,7 @@ async function send(ev) {
       autoResize();
     }
   } catch (e) {
-    unsettled = { session, text, key };
+    unsettled.set(session, { text, key });
     if (gen !== nav) return;
     if (e.code === 'open_in_terminal') showState('open_in_terminal');
     system(sendError(e), true);
