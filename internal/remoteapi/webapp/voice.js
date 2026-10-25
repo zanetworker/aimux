@@ -84,17 +84,25 @@ const Voice = (() => {
     return [toolSummary, t].filter(Boolean).join(' ');
   }
 
+  // speakGen tells a finished reply from an interrupted one: onEnd runs
+  // only when the speech played out, not when it was cancelled (the user
+  // tapped the mic, or sent something), which must not restart listening.
+  let speakGen = 0;
+
   function speak(text, onEnd) {
     if (!synth || !text) { if (onEnd) onEnd(); return; }
     stopSpeaking();
+    const gen = ++speakGen;
     const u = new SpeechSynthesisUtterance(text);
     u.lang = navigator.language || 'en-US';
-    u.onend = () => { if (onEnd) onEnd(); };
-    u.onerror = () => { if (onEnd) onEnd(); };
+    const done = () => { if (gen === speakGen && onEnd) onEnd(); };
+    u.onend = done;
+    u.onerror = done;
     synth.speak(u);
   }
 
   function stopSpeaking() {
+    speakGen++;
     if (synth && (synth.speaking || synth.pending)) synth.cancel();
   }
 
