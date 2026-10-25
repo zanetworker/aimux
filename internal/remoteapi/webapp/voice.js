@@ -30,13 +30,16 @@ const Voice = (() => {
     if (!Recognition) return false;
     stopSpeaking();
     stopListening();
-    rec = new Recognition();
-    rec.lang = navigator.language || 'en-US';
-    rec.interimResults = true;
-    rec.continuous = false; // one utterance; ends when the user pauses
+    // Each recognizer clears the shared one only if it is still current: an
+    // old one ending late must not orphan a newer recording.
+    const r = new Recognition();
+    rec = r;
+    r.lang = navigator.language || 'en-US';
+    r.interimResults = true;
+    r.continuous = false; // one utterance; ends when the user pauses
     let final = '';
     let latest = '';
-    rec.onresult = (e) => {
+    r.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
@@ -46,15 +49,15 @@ const Voice = (() => {
       latest = (final + interim).trim();
       onText(latest);
     };
-    rec.onerror = (e) => { if (onError) onError(e.error || 'error'); };
-    rec.onend = () => {
-      rec = null;
+    r.onerror = (e) => { if (onError) onError(e.error || 'error'); };
+    r.onend = () => {
+      if (rec === r) rec = null;
       onEnd((final || latest).trim());
     };
     try {
-      rec.start();
+      r.start();
     } catch (_) {
-      rec = null;
+      if (rec === r) rec = null;
       return false;
     }
     return true;

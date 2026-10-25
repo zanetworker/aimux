@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,7 +110,7 @@ func TestLocalIndex_Search(t *testing.T) {
 	}
 	x.Running = func(id string) bool { return id == "made" } // created here and still live
 	var gotQuery string
-	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
+	x.SearchIndex = func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
 		gotQuery = q
 		return []search.Result{
 			{SessionID: "idle", Title: "Fix the cache", CWD: "/w", Snippet: "the [cache] TTL"},
@@ -156,8 +157,8 @@ func TestLocalIndex_SearchLooksPastIneligibleMatches(t *testing.T) {
 		all = append(all, search.Result{SessionID: fmt.Sprintf("auto-%d", i), Automated: true, Snippet: "cache"})
 	}
 	all = append(all, search.Result{SessionID: "idle", Title: "Fix the cache", Snippet: "the [cache]"})
-	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
-		return all[:min(limit, len(all))], nil
+	x.SearchIndex = func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
+		return restrict(all, limit, ids), nil
 	}
 	hits, err := x.Search(context.Background(), "cache", 2)
 	if err != nil {
@@ -190,7 +191,7 @@ func TestLocalIndex_ListsCreatedSessionsWithoutAFile(t *testing.T) {
 // a hit with no matching text says nothing, so it is left out.
 func TestLocalIndex_SearchDropsHitsWithoutAMatch(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
-	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
+	x.SearchIndex = func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
 		return []search.Result{{SessionID: "idle", Title: "Fix the cache", Snippet: ""}}, nil
 	}
 	hits, err := x.Search(context.Background(), "zqxjvwk", 20)
@@ -254,7 +255,7 @@ func TestLocalIndex_SearchSkipsUnavailableCreatedSessions(t *testing.T) {
 	if err := x.Created.Add("gone", "/w", "x"); err != nil {
 		t.Fatal(err)
 	}
-	x.SearchIndex = func(ctx context.Context, q string, limit int) ([]search.Result, error) {
+	x.SearchIndex = func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
 		return []search.Result{{SessionID: "gone", Automated: true, Snippet: "the [cache]"}}, nil
 	}
 	if hits, err := x.Search(context.Background(), "cache", 20); err != nil || len(hits) != 0 {
@@ -290,5 +291,52 @@ func TestLocalIndex_ProjectsIncludeFoldersOfCreatedSessions(t *testing.T) {
 	got, err := x.Projects(context.Background())
 	if err != nil || len(got) != 1 || got[0].Path != dir {
 		t.Fatalf("projects %+v (%v), want %s", got, err, dir)
+	}
+}
+
+// restrict applies the index's session-ID restriction, then its limit.
+func restrict(all []search.Result, limit int, ids []string) []search.Result {
+	allowed := map[string]bool{}
+	for _, id := range ids {
+		allowed[id] = true
+	}
+	var out []search.Result
+	for _, r := range all {
+		if ids == nil || allowed[r.SessionID] {
+			out = append(out, r)
+		}
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
+// Multi-word queries fall back to an any-term search the index caps at 20;
+// restricting it to listable sessions up front keeps real matches in reach.
+func TestLocalIndex_SearchRestrictsToListableSessions(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	var gotIDs []string
+	x.SearchIndex = func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
+		gotIDs = ids
+		capped := 20 // the any-term fallback's own cap
+		all := []search.Result{}
+		for i := 0; i < 30; i++ {
+			all = append(all, search.Result{SessionID: fmt.Sprintf("auto-%d", i), Automated: true, Snippet: "x"})
+		}
+		all = append(all, search.Result{SessionID: "idle", Title: "Fix the cache", Snippet: "the [cache]"})
+		return restrict(all, min(limit, capped), ids), nil
+	}
+	hits, err := x.Search(context.Background(), "cache ttl", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "idle" {
+		t.Fatalf("hits %+v (ids %v), want the listable session", hits, gotIDs)
+	}
+	for _, id := range gotIDs {
+		if strings.HasPrefix(id, "auto-") || id == "cron" || id == "sub" || id == "cx" {
+			t.Fatalf("ids %v include a session the list leaves out", gotIDs)
+		}
 	}
 }

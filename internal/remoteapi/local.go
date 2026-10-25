@@ -40,8 +40,9 @@ type LocalIndex struct {
 	// Running reports whether aimux has a run for a session: a created
 	// session without a file is usable only while it does.
 	Running func(id string) bool
-	// SearchIndex ranks sessions for a query (aimux's session search).
-	SearchIndex func(ctx context.Context, query string, limit int) ([]search.Result, error)
+	// SearchIndex ranks sessions for a query (aimux's session search),
+	// among the given sessions only.
+	SearchIndex func(ctx context.Context, query string, limit int, ids []string) ([]search.Result, error)
 }
 
 func (x *LocalIndex) running(id string) bool { return x.Running != nil && x.Running(id) }
@@ -268,18 +269,24 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 	return out, nil
 }
 
-// maxSearchScan bounds how many ranked matches a search looks through.
-const maxSearchScan = 500
-
-// eligible counts the results Search would return.
-func (x *LocalIndex) eligible(results []search.Result) int {
-	n := 0
-	for _, r := range results {
-		if x.searchable(r) {
-			n++
+// listableIDs are the sessions the list shows: interactive Claude sessions
+// with a file, and sessions created here that have a file or a live run.
+func (x *LocalIndex) listableIDs() []string {
+	ids := []string{}
+	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+	if err == nil {
+		for _, s := range all {
+			if _, created := x.Created.Get(s.ID); s.Provider == "claude" && !s.IsSubagent && (!s.Automated || created) {
+				ids = append(ids, s.ID)
+			}
 		}
 	}
-	return n
+	for id := range x.Created.All() {
+		if x.running(id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // searchable reports a search result the user can open and continue: it
@@ -309,17 +316,11 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 	if x.SearchIndex == nil {
 		return nil, errors.New("session search is not available")
 	}
-	// Automated and archive-only sessions are filtered out after ranking, so
-	// ask for more until the limit is filled or the matches run out.
-	var results []search.Result
-	for n := limit * 2; ; n *= 4 {
-		var err error
-		if results, err = x.SearchIndex(ctx, query, n); err != nil {
-			return nil, fmt.Errorf("search sessions: %w", err)
-		}
-		if len(results) < n || n >= maxSearchScan || x.eligible(results) >= limit {
-			break
-		}
+	// Search only the sessions the list would show: filtering after ranking
+	// can lose them behind the index's caps.
+	results, err := x.SearchIndex(ctx, query, limit, x.listableIDs())
+	if err != nil {
+		return nil, fmt.Errorf("search sessions: %w", err)
 	}
 	open := x.openSessions()
 	hits := []SearchHit{}

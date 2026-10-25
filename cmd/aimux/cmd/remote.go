@@ -182,8 +182,8 @@ func newRemoteServeCmd() *cobra.Command {
 				// Keyword ranking: every hit shows where the words matched, and a
 				// query nothing contains finds nothing. The index is refreshed in
 				// the background (below); refreshing per query takes seconds.
-				SearchIndex: func(ctx context.Context, q string, limit int) ([]search.Result, error) {
-					rs, _, err := searcher.Query(ctx, q, search.QueryOpts{Mode: search.ModeKeyword, Limit: limit, IncludeAutomated: true, NoRefresh: true})
+				SearchIndex: func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
+					rs, _, err := searcher.Query(ctx, q, search.QueryOpts{Mode: search.ModeKeyword, Limit: limit, IncludeAutomated: true, NoRefresh: true, IDs: ids})
 					return rs, err
 				},
 			}
