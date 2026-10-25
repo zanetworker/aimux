@@ -55,6 +55,8 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{id}/events", a.events)
 	mux.HandleFunc("POST /v1/sessions/{id}/cancel", a.cancel)
 	mux.HandleFunc("POST /v1/approvals/{id}", a.answer)
+	mux.Handle("GET /app/", webApp())
+	mux.Handle("GET /app", http.RedirectHandler("/app/", http.StatusFound))
 	return RequireTailnetUser(allowedLogins, trustedHosts, mux)
 }
 

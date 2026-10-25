@@ -43,9 +43,15 @@ func TestResolveRemoteSettings_Errors(t *testing.T) {
 }
 
 func TestTailscaleServeHint(t *testing.T) {
-	h := tailscaleServeHint(7382)
+	h := tailscaleServeHint(7382, []string{"mac.tail1.ts.net"})
 	if !strings.Contains(h, "tailscale serve --bg --https=8443 http://127.0.0.1:7382") {
 		t.Fatalf("hint %q", h)
+	}
+	if !strings.Contains(h, "https://mac.tail1.ts.net:8443/app/") {
+		t.Fatalf("hint %q does not say where the web client is", h)
+	}
+	if h := tailscaleServeHint(7382, nil); strings.Contains(h, "/app/") {
+		t.Fatalf("hint %q names a web client URL with no host", h)
 	}
 }
 

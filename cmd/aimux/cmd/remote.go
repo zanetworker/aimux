@@ -95,8 +95,12 @@ func tailscaleDNSName() (string, error) {
 	return st.Self.DNSName, nil
 }
 
-func tailscaleServeHint(port int) string {
-	return fmt.Sprintf("Expose it on your tailnet (HTTPS, tailnet only):\n  tailscale serve --bg --https=8443 http://127.0.0.1:%d\n", port)
+func tailscaleServeHint(port int, hosts []string) string {
+	hint := fmt.Sprintf("Expose it on your tailnet (HTTPS, tailnet only):\n  tailscale serve --bg --https=8443 http://127.0.0.1:%d\n", port)
+	if len(hosts) > 0 {
+		hint += fmt.Sprintf("Then open the web client on your phone: https://%s:8443/app/\n", hosts[0])
+	}
+	return hint
 }
 
 func newRemoteCmd() *cobra.Command {
@@ -191,7 +195,7 @@ func newRemoteServeCmd() *cobra.Command {
 				_ = srv.Shutdown(shut)
 			}()
 			out := cmd.OutOrStdout()
-			_, _ = fmt.Fprintf(out, "aimux remote API on http://%s/v1 for %v via %v\n%s", ln.Addr(), s.allowed, hosts, tailscaleServeHint(s.port))
+			_, _ = fmt.Fprintf(out, "aimux remote API on http://%s/v1 for %v via %v\n%s", ln.Addr(), s.allowed, hosts, tailscaleServeHint(s.port, hosts))
 			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}
