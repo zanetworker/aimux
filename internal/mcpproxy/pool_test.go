@@ -554,3 +554,89 @@ func TestPool_FirstCallerCancelDoesNotFailASharedStart(t *testing.T) {
 		t.Fatalf("started %d times, want one shared start", starts.Load())
 	}
 }
+
+// A caller waits for the shared start's own outcome (bounded by
+// StartTimeout), not for a deadline of its own that can fire first: a retry
+// right after a timed-out start must start the server again, not join the
+// attempt that is still winding down.
+func TestPool_RetryAfterAStartTimeoutStartsAgain(t *testing.T) {
+	var starts atomic.Int32
+	slowToGiveUp := func(ctx context.Context, server string) (Backend, error) {
+		starts.Add(1)
+		<-ctx.Done()
+		time.Sleep(20 * time.Millisecond) // cleaning up after the deadline
+		return nil, ctx.Err()
+	}
+	p := NewPool(slowToGiveUp, PoolOptions{StartTimeout: 50 * time.Millisecond})
+	defer p.Close()
+	if r := p.Call(context.Background(), "stuck", "", req("x")); !r.IsError {
+		t.Fatalf("got %+v, want an error result", r)
+	}
+	p.Call(context.Background(), "stuck", "", req("x"))
+	if starts.Load() != 2 {
+		t.Fatalf("started %d times, want a fresh start for the retry", starts.Load())
+	}
+}
+
+// A start that ignores its context still fails the waiting call at
+// StartTimeout, and the backend it delivers late is closed, not leaked.
+func TestPool_StartIgnoringItsContextIsBounded(t *testing.T) {
+	release := make(chan struct{})
+	late := &fakeBackend{}
+	deaf := func(context.Context, string) (Backend, error) {
+		<-release // ignores ctx entirely
+		return late, nil
+	}
+	p := NewPool(deaf, PoolOptions{StartTimeout: 50 * time.Millisecond})
+	defer p.Close()
+	done := make(chan *mcp.CallToolResult, 1)
+	go func() { done <- p.Call(context.Background(), "deaf", "", req("x")) }()
+	select {
+	case r := <-done:
+		if !r.IsError {
+			t.Fatalf("got %+v, want a timeout error", r)
+		}
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("a start that ignores its context held the call past StartTimeout")
+	}
+	close(release)
+	deadline := time.Now().Add(2 * time.Second)
+	for !late.closed.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !late.closed.Load() {
+		t.Fatal("the backend that arrived after the timeout was left running")
+	}
+}
+
+// A start that fails after the deadline may hand back a typed-nil backend
+// with its error (a nil *stdioBackend in a Backend); nothing is closed and
+// nothing panics.
+func TestPool_LateFailedStartIsNotClosed(t *testing.T) {
+	release := make(chan struct{})
+	var finished atomic.Bool
+	failsLate := func(context.Context, string) (Backend, error) {
+		<-release
+		defer finished.Store(true)
+		var none *stdioBackend
+		return none, errors.New("initialize: timed out")
+	}
+	p := NewPool(failsLate, PoolOptions{StartTimeout: 30 * time.Millisecond})
+	defer p.Close()
+	if r := p.Call(context.Background(), "x", "", req("x")); !r.IsError {
+		t.Fatalf("got %+v, want an error result", r)
+	}
+	close(release)
+	for !finished.Load() {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // a panic in the late-close goroutine would crash the test binary
+}
+
+func TestStdioStarter_FailedStartIsANilBackend(t *testing.T) {
+	b, err := StdioStarter(map[string]ServerConfig{"x": {Command: "/nonexistent/mcp-server"}})(context.Background(), "x")
+	if err == nil || b != nil {
+		t.Fatalf("got %v (%T), %v; want a nil Backend with the error", b, b, err)
+	}
+}

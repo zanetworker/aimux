@@ -152,7 +152,30 @@ func (p *Pool) drop(k slotKey, s *slot) {
 func (p *Pool) startSlot(k slotKey, s *slot) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.opt.StartTimeout)
 	defer cancel()
-	b, err := p.start(ctx, k.server)
+	// The outcome is published at StartTimeout even if the starter ignores
+	// its context; a backend it delivers after that is closed on arrival.
+	type started struct {
+		b   Backend
+		err error
+	}
+	result := make(chan started, 1)
+	go func() {
+		b, err := p.start(ctx, k.server)
+		result <- started{b, err}
+	}()
+	var b Backend
+	var err error
+	select {
+	case r := <-result:
+		b, err = r.b, r.err
+	case <-ctx.Done():
+		err = ctx.Err()
+		go func() {
+			if r := <-result; r.err == nil && r.b != nil {
+				_ = r.b.Close()
+			}
+		}()
+	}
 	var abandoned Backend // closed after unlocking: shutdown can take seconds
 	p.mu.Lock()
 	s.backend, s.err = b, err
@@ -185,9 +208,10 @@ func (p *Pool) startSlot(k slotKey, s *slot) {
 // errors, so one broken backend cannot break the proxy's other tools.
 func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToolRequest) *mcp.CallToolResult {
 	k := p.key(server, session)
-	actx, cancelAcquire := context.WithTimeout(ctx, p.opt.StartTimeout)
-	s, err := p.acquire(actx, k)
-	cancelAcquire()
+	// No deadline of our own: the shared start is bounded by StartTimeout
+	// and reports its outcome, so a retry never joins an attempt that is
+	// still winding down after its deadline.
+	s, err := p.acquire(ctx, k)
 	if err != nil {
 		return mcp.NewToolResultErrorf("%s: could not start MCP server: %v", server, err)
 	}

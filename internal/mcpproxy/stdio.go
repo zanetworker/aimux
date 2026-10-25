@@ -30,7 +30,11 @@ func StdioStarter(cfgs map[string]ServerConfig) Starter {
 		if !ok {
 			return nil, fmt.Errorf("no MCP server named %q is configured", server)
 		}
-		return startStdio(ctx, server, cfg)
+		b, err := startStdio(ctx, server, cfg)
+		if err != nil {
+			return nil, err // not a nil *stdioBackend inside a non-nil Backend
+		}
+		return b, nil
 	}
 }
 
