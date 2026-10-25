@@ -715,3 +715,26 @@ func TestManager_NewSessionKeepsItsSlotThroughHandover(t *testing.T) {
 		t.Fatalf("concurrent send: %v, want ErrTooManyRuns while the slot is reserved", otherErr)
 	}
 }
+
+// Until its first prompt starts, a new session's run is its only state (no
+// file yet), so it is not evicted for another session.
+func TestManager_NewSessionIsNotEvictedBeforeItsFirstPrompt(t *testing.T) {
+	fs := &fakeRunStarter{}
+	m := NewManager(ManagerOptions{Start: fs.start, StartNew: newSessionStarter(fs, "fresh"), MaxRuns: 1})
+	defer m.Close()
+	if _, err := m.New(context.Background(), "/w"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := send(m, "other"); !errors.Is(err, ErrTooManyRuns) {
+		t.Fatalf("send elsewhere before the first prompt: %v, want ErrTooManyRuns", err)
+	}
+	if !m.Running("fresh") {
+		t.Fatal("the new session's run was evicted")
+	}
+	if _, err := send(m, "fresh"); err != nil {
+		t.Fatalf("first prompt: %v", err)
+	}
+	if _, err := send(m, "other"); err != nil { // now an ordinary idle run
+		t.Fatalf("send elsewhere after the first prompt: %v", err)
+	}
+}

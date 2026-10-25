@@ -12,7 +12,7 @@ const el = (tag, cls, text) => {
   return e;
 };
 
-const STATE_LABEL = { idle: 'idle', busy: 'running', open_in_terminal: 'in terminal' };
+const STATE_LABEL = { idle: 'idle', busy: 'running', open_in_terminal: 'in terminal', unavailable: 'did not start' };
 
 let current = null;      // {id, detail} of the open session
 let events = null;       // EventSource for the open session
@@ -499,13 +499,17 @@ function showState(state) {
   s.className = 'dot ' + state;
   s.title = STATE_LABEL[state] || state;
   const inTerminal = state === 'open_in_terminal';
-  $('mic').hidden = inTerminal || !Voice.canListen;
-  $('prompt').placeholder = inTerminal ? 'Read only here' : 'Message this session';
-  $('banner').hidden = !inTerminal;
+  const unavailable = state === 'unavailable';
+  const readOnly = inTerminal || unavailable;
+  $('mic').hidden = readOnly || !Voice.canListen;
+  $('prompt').placeholder = readOnly ? 'Read only here' : 'Message this session';
+  $('banner').hidden = !readOnly;
   $('banner').textContent = inTerminal
     ? 'This session is open in a terminal on your Mac, so it is read only here. Close it there (or let it finish) to continue from this device.'
-    : '';
-  setComposer(!inTerminal);
+    : unavailable
+      ? 'This session never started: its first message failed before Claude saved it. Start a new session with +.'
+      : '';
+  setComposer(!readOnly);
 }
 
 function setComposer(enabled) {

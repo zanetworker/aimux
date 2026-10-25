@@ -65,6 +65,7 @@ button.icon:active { background: var(--surface2); }
 .dot.idle { background: var(--green); }
 .dot.busy { background: var(--amber); box-shadow: 0 0 0 3px rgba(245, 185, 66, 0.2); }
 .dot.open_in_terminal { background: transparent; border: 2px solid var(--text-dim); width: 10px; height: 10px; }
+.dot.unavailable { background: var(--accent-light); }
 
 /* Session list */
 #listview { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }

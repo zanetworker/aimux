@@ -74,6 +74,7 @@ type runEntry struct {
 	runMu           sync.Mutex         // lets retire, which runs without m.mu, read run
 	cancelStart     context.CancelFunc // aborts a start in progress
 	busy            bool
+	firstPending    bool // a new session waiting for its first prompt: its run is its only state
 	lastUsed        time.Time
 }
 
@@ -307,7 +308,7 @@ func (m *Manager) New(ctx context.Context, cwd string) (string, error) {
 	delete(m.newStart, &cancel)
 	closed, taken := m.closed, m.runs[id] != nil
 	if !closed && !taken {
-		e := &runEntry{release: release, lastUsed: m.opt.Now()}
+		e := &runEntry{release: release, lastUsed: m.opt.Now(), firstPending: true}
 		e.setRun(r)
 		m.runs[id] = e
 	}
@@ -337,7 +338,7 @@ func (m *Manager) dropNewStart(cancel *context.CancelFunc) {
 func (m *Manager) idleVictimLocked() string {
 	victim := ""
 	for id, e := range m.runs {
-		if e.busy || e.run == nil {
+		if e.busy || e.run == nil || e.firstPending {
 			continue
 		}
 		if victim == "" || e.lastUsed.Before(m.runs[victim].lastUsed) {
@@ -361,6 +362,7 @@ func (m *Manager) claim(sessionID string) (*runEntry, *runEntry, error) {
 		}
 		e.busy = true
 		e.cancelRequested = false
+		e.firstPending = false
 		return e, nil, nil
 	}
 	var evicted *runEntry

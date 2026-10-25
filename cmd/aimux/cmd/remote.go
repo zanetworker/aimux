@@ -174,10 +174,12 @@ func newRemoteServeCmd() *cobra.Command {
 				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
 				Discover: history.Discover, ParseTrace: claude.ParseTrace, Owned: manager.Owns,
 				Created: &remoteapi.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")},
-				// The index is refreshed in the background (below): refreshing on
-				// each query re-reads changed sessions and takes seconds.
+				Running: manager.Running,
+				// Keyword ranking: every hit shows where the words matched, and a
+				// query nothing contains finds nothing. The index is refreshed in
+				// the background (below); refreshing per query takes seconds.
 				SearchIndex: func(ctx context.Context, q string, limit int) ([]search.Result, error) {
-					rs, _, err := searcher.Query(ctx, q, search.QueryOpts{Limit: limit, IncludeAutomated: true, NoRefresh: true})
+					rs, _, err := searcher.Query(ctx, q, search.QueryOpts{Mode: search.ModeKeyword, Limit: limit, IncludeAutomated: true, NoRefresh: true})
 					return rs, err
 				},
 			}

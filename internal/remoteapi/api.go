@@ -19,6 +19,9 @@ const (
 	StateIdle           = "idle"             // can be continued from here
 	StateOpenInTerminal = "open_in_terminal" // follow only
 	StateBusy           = "busy"             // aimux is running a turn
+	// StateUnavailable: created here, but its first prompt failed before the
+	// agent wrote the session, so there is nothing to continue.
+	StateUnavailable = "unavailable"
 )
 
 // Session is one entry in the session list. Automated sessions (started by
@@ -104,6 +107,8 @@ func writeFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "no_such_approval", err)
 	case errors.Is(err, ErrInvalidOption):
 		writeError(w, http.StatusBadRequest, "invalid_option", err)
+	case errors.Is(err, errNotAProject):
+		writeError(w, http.StatusBadRequest, "bad_request", err)
 	default:
 		writeError(w, http.StatusInternalServerError, "internal", err)
 	}
@@ -212,24 +217,14 @@ func (a *API) newSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_supported", errors.New("starting sessions is not available"))
 		return
 	}
-	projects, err := a.Projects(r.Context())
-	if err != nil {
-		writeFailure(w, err)
-		return
-	}
-	allowed := false
-	for _, p := range projects {
-		allowed = allowed || p.Path == req.Cwd
-	}
-	if !allowed {
-		writeError(w, http.StatusBadRequest, "bad_request", errors.New("cwd must be one of the recent projects from /v1/projects"))
-		return
-	}
 
 	a.createMu.Lock()
-	id, ok := a.created[req.Key]
-	if !ok || req.Key == "" {
-		id, err = a.Create(r.Context(), req.Cwd, req.Text)
+	id, known := a.created[req.Key]
+	var err error
+	if !known || req.Key == "" {
+		// Only a new creation is checked against the current projects; a
+		// retry of one already made is answered from its key.
+		id, err = a.createIn(r.Context(), req.Cwd, req.Text)
 		if err == nil && req.Key != "" {
 			if a.created == nil {
 				a.created = map[string]string{}
@@ -251,6 +246,23 @@ func (a *API) newSession(w http.ResponseWriter, r *http.Request) {
 		"id": id, "turn": turn,
 		"events": fmt.Sprintf("/v1/sessions/%s/events", id),
 	})
+}
+
+// errNotAProject refuses a new session outside the recent project folders.
+var errNotAProject = errors.New("cwd must be one of the recent projects from /v1/projects")
+
+// createIn starts a session in cwd if it is one of the recent projects.
+func (a *API) createIn(ctx context.Context, cwd, text string) (string, error) {
+	projects, err := a.Projects(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range projects {
+		if p.Path == cwd {
+			return a.Create(ctx, cwd, text)
+		}
+	}
+	return "", errNotAProject
 }
 
 func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {

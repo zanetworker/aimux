@@ -37,9 +37,14 @@ type LocalIndex struct {
 	// Created is the sessions aimux started; they are listed although the
 	// agent SDK marks them automated. Nil: none.
 	Created *CreatedStore
+	// Running reports whether aimux has a run for a session: a created
+	// session without a file is usable only while it does.
+	Running func(id string) bool
 	// SearchIndex ranks sessions for a query (aimux's session search).
 	SearchIndex func(ctx context.Context, query string, limit int) ([]search.Result, error)
 }
+
+func (x *LocalIndex) running(id string) bool { return x.Running != nil && x.Running(id) }
 
 func (x *LocalIndex) openSessions() map[string]bool {
 	open := map[string]bool{}
@@ -86,7 +91,7 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 	// Sessions created here that have no file yet (still starting, or failed
 	// before the agent wrote one) are listed from their creation record.
 	for id, c := range x.Created.All() {
-		if !seen[id] {
+		if !seen[id] && x.running(id) {
 			out = append(out, Session{ID: id, Provider: "claude", Title: c.Prompt, Project: c.Cwd,
 				LastActive: c.Created, State: x.state(id, open)})
 		}
@@ -142,9 +147,14 @@ func (x *LocalIndex) Session(ctx context.Context, id string, turns int) (Session
 	file := discovery.FindSessionFile(id, x.ProjectsDir)
 	if file == "" {
 		if c, ok := x.Created.Get(id); ok {
-			// Created here, and the agent has not written its file yet.
+			// Created here, and the agent has not written its file yet. Without
+			// a run either, its first prompt failed: nothing to continue.
+			state := StateUnavailable
+			if x.running(id) {
+				state = x.state(id, x.openSessions())
+			}
 			return SessionDetail{Session: Session{ID: id, Provider: "claude", Title: c.Prompt, Project: c.Cwd,
-				LastActive: c.Created, State: x.state(id, x.openSessions())}, Turns: []json.RawMessage{}}, nil
+				LastActive: c.Created, State: state}, Turns: []json.RawMessage{}}, nil
 		}
 		return SessionDetail{}, fmt.Errorf("%w: %s", acprun.ErrUnknownSession, id)
 	}

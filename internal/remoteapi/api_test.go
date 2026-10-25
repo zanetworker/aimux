@@ -465,3 +465,26 @@ func TestAPI_NewSessionOnlyInRecentProjects(t *testing.T) {
 		t.Fatalf("created %d sessions from refused requests", *creates)
 	}
 }
+
+// A retry of a session already created answers from the key, even if the
+// folder has left the recent projects since.
+func TestAPI_NewSessionRetryAfterProjectsChange(t *testing.T) {
+	projects := []Project{{Path: "/w/app", Name: "app"}}
+	creates := 0
+	var b *Broker
+	b = NewBroker((&fakeBackend{}).deps(&b), BrokerOptions{})
+	api := &API{Broker: b,
+		Projects: func(ctx context.Context) ([]Project, error) { return projects, nil },
+		Create:   func(ctx context.Context, cwd, text string) (string, error) { creates++; return "new-1", nil },
+	}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	if resp, _ := do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"go","key":"k9"}`); resp.StatusCode != 202 {
+		t.Fatal(resp.StatusCode)
+	}
+	projects = nil // the folder is no longer among the recent ones
+	resp, body := do(t, srv, "POST", "/v1/sessions", `{"cwd":"/w/app","text":"go","key":"k9"}`)
+	if resp.StatusCode != 202 || body["id"] != "new-1" || creates != 1 {
+		t.Fatalf("retry: %d %v (creates %d)", resp.StatusCode, body, creates)
+	}
+}

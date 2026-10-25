@@ -60,6 +60,7 @@ func TestLocalIndex_ListsSessionsItCreated(t *testing.T) {
 func TestLocalIndex_CreatedSessionBeforeItsFile(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
 	x.Created = &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")}
+	x.Running = func(id string) bool { return id == "phone-1" }
 	if err := x.Created.Add("phone-1", "/w/app", "plan the release"); err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +172,7 @@ func TestLocalIndex_SearchLooksPastIneligibleMatches(t *testing.T) {
 func TestLocalIndex_ListsCreatedSessionsWithoutAFile(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
 	x.Created = &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")}
+	x.Running = func(id string) bool { return id == "born-now" } // its adapter is starting the first prompt
 	if err := x.Created.Add("born-now", "/w/app", "plan the release"); err != nil {
 		t.Fatal(err)
 	}
@@ -217,5 +219,27 @@ func TestLocalIndex_ProjectsUseTheRecordedCwd(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Path != real {
 		t.Fatalf("projects %+v, want the recorded %s", got, real)
+	}
+}
+
+// A created session whose first prompt failed before the agent wrote its
+// file has nothing left to continue: not listed, and shown as unavailable.
+func TestLocalIndex_CreatedSessionThatNeverStarted(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	x.Created = &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")}
+	x.Running = func(string) bool { return false }
+	if err := x.Created.Add("stillborn", "/w", "plan"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := x.Sessions(context.Background(), 50, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasSession(got, "stillborn") {
+		t.Fatal("a session that never started is listed")
+	}
+	d, err := x.Session(context.Background(), "stillborn", 20)
+	if err != nil || d.State != StateUnavailable {
+		t.Fatalf("detail state %q (%v), want unavailable", d.State, err)
 	}
 }
