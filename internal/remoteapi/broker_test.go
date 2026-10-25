@@ -521,3 +521,42 @@ func TestBroker_NoNewTurnWhileCancelling(t *testing.T) {
 		t.Fatalf("the next turn after the cancel: %v", err)
 	}
 }
+
+// A cancel stuck on a wedged adapter must not freeze the broker: other
+// sessions keep streaming, listing and starting turns.
+func TestBroker_WedgedCancelDoesNotBlockOtherSessions(t *testing.T) {
+	inCancel := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	b := NewBroker(BrokerDeps{
+		Check: func(string) error { return nil },
+		Send: func(ctx context.Context, s, text string, on func(acprun.Event)) (string, error) {
+			if s == "s1" {
+				<-ctx.Done()
+				return "", ctx.Err()
+			}
+			return "end_turn", nil
+		},
+		Cancel: func(string) error { close(inCancel); <-release; return nil },
+	}, BrokerOptions{})
+	if _, err := b.Start("s1", "first", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = b.Cancel("s1") }()
+	<-inCancel
+	done := make(chan error, 1)
+	go func() {
+		_ = b.Busy("s2")
+		_ = b.Events("s1", 0)
+		_, err := b.Start("s2", "hello", "k2")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("start on another session: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("broker frozen while one session's cancel is stuck")
+	}
+}

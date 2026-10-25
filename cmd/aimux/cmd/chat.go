@@ -128,19 +128,33 @@ func renderChatEvent(out, info io.Writer, e acprun.Event, asJSON bool) {
 // promptApprover asks on the terminal before the agent may use a tool.
 // Anything but y or yes, including end of input, denies.
 func promptApprover(in io.Reader, out io.Writer) acprun.Approver {
-	// One reader for the whole session, so a prompt can stop waiting (its
-	// request withdrawn) without leaving a read behind that eats the next
-	// answer.
-	lines := make(chan string)
+	// One reader for the whole session, always draining input: a line goes to
+	// the prompt showing when it is read, or nowhere. So nothing typed or
+	// pasted while no prompt shows (a late y for a withdrawn prompt) can
+	// answer a later one, and a withdrawn prompt leaves no read behind.
+	var (
+		wmu     sync.Mutex
+		waiting chan string // the showing prompt's answer, nil when none shows
+		ended   bool        // input is over; every later prompt denies
+	)
 	go func() {
 		r := bufio.NewReader(in)
 		for {
 			line, err := r.ReadString('\n')
-			if line != "" {
-				lines <- line
+			wmu.Lock()
+			if line != "" && waiting != nil {
+				waiting <- line // buffered for one answer
+				waiting = nil
 			}
 			if err != nil {
-				close(lines)
+				ended = true
+				if waiting != nil {
+					close(waiting)
+					waiting = nil
+				}
+			}
+			wmu.Unlock()
+			if err != nil {
 				return
 			}
 		}
@@ -155,21 +169,24 @@ func promptApprover(in io.Reader, out io.Writer) acprun.Approver {
 		if req.ToolCall.Title != nil {
 			title = *req.ToolCall.Title
 		}
-		// Discard anything typed while no prompt was showing (for example a
-		// late y meant for a withdrawn prompt).
-		for drained := false; !drained; {
-			select {
-			case _, open := <-lines:
-				drained = !open // a closed channel is always ready: input has ended
-			default:
-				drained = true
-			}
+		answers := make(chan string, 1)
+		wmu.Lock()
+		if ended {
+			close(answers)
+		} else {
+			waiting = answers
 		}
+		wmu.Unlock()
 		_, _ = fmt.Fprintf(out, "\nAllow %s? [y/N] ", title)
 		var answer string
 		select {
-		case answer = <-lines: // "" once input has ended
+		case answer = <-answers: // "" once input has ended
 		case <-ctx.Done():
+			wmu.Lock()
+			if waiting == answers {
+				waiting = nil
+			}
+			wmu.Unlock()
 			_, _ = fmt.Fprintln(out, "\n(request withdrawn by the agent)")
 			return "", false
 		}

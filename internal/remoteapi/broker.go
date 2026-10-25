@@ -61,7 +61,11 @@ type sessionLog struct {
 	active string             // running turn id, "" when idle
 	cancel context.CancelFunc // stops the running turn, even before its run exists
 	keys   map[string]string  // client key -> turn id
-	subs   map[chan Event]struct{}
+	// cancelling is held while a cancel is on its way to the agent, which
+	// can block on a wedged adapter; no new turn starts in the meantime, so
+	// the agent's cancel cannot stop that next turn instead.
+	cancelling sync.Mutex
+	subs       map[chan Event]struct{}
 }
 
 type pendingApproval struct {
@@ -151,6 +155,10 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 		return "", err
 	}
 
+	if !l.cancelling.TryLock() {
+		return "", acprun.ErrBusy // the previous turn's cancel is still in flight
+	}
+	defer l.cancelling.Unlock()
 	b.mu.Lock()
 	// Another Start may have won the race while Check ran unlocked: the
 	// same key means the same turn, even if that turn already finished.
@@ -271,12 +279,17 @@ func (b *Broker) Busy(session string) bool {
 // has the prompt, or during it. With no turn running it returns
 // acprun.ErrNotRunning.
 func (b *Broker) Cancel(session string) error {
-	// Hold the lock throughout: no turn can end and a new one start between
-	// choosing the turn and telling the agent, or the agent's cancel would
-	// stop the new turn instead.
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	stopTurn := b.log(session).cancel
+	l := b.log(session)
+	b.mu.Unlock()
+	// Hold the session's cancel lock, not the broker's, while telling the
+	// agent: no new turn can start between choosing the turn and the agent
+	// hearing the cancel, and a wedged adapter stalls only this session.
+	l.cancelling.Lock()
+	defer l.cancelling.Unlock()
+	b.mu.Lock()
+	stopTurn := l.cancel
+	b.mu.Unlock()
 	if stopTurn == nil {
 		return acprun.ErrNotRunning // no turn: leave any idle adapter alone
 	}

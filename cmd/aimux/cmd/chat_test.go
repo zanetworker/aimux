@@ -259,3 +259,30 @@ func TestPromptApprover_InputAlreadyEnded(t *testing.T) {
 		t.Fatal("the prompt hung once input had ended")
 	}
 }
+
+// Answers typed or pasted while no prompt is showing belong to no prompt;
+// none of them may approve the next request.
+func TestPromptApprover_TypedAheadAnswersNeverApprove(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	var out syncBuffer
+	approve := promptApprover(pr, &out)
+	for i := 0; i < 3; i++ {
+		_, _ = pw.Write([]byte("y\n")) // each write is one line the reader takes in
+	}
+	time.Sleep(50 * time.Millisecond)
+	next := make(chan bool, 1)
+	go func() { _, ok := approve(context.Background(), permReq()); next <- ok }()
+	for !strings.Contains(out.String(), "Allow ") {
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, _ = pw.Write([]byte("n\n"))
+	select {
+	case ok := <-next:
+		if ok {
+			t.Fatal("a y typed before the prompt approved it")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt never took its answer")
+	}
+}
