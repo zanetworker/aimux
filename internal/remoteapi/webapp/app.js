@@ -252,19 +252,31 @@ async function load(id, gen) {
   // log, placed after that turn (the first history turn with its prompt
   // recorded after it started), or with its prompt at the end if the agent
   // never wrote it.
+  // Its start may have aged out of the log (a long turn); then the error
+  // belongs to the latest history turn recorded before it.
   const claimed = new Set();
-  for (const e of evs) {
-    if (e.kind !== 'turn_started' || (active.length && e.turn === last.turn)) continue;
-    const failed = evs.find((x) => x.turn === e.turn && x.kind === 'turn_error');
-    if (!failed) continue;
-    const start = new Date(e.time).getTime() - 2000;
-    const i = turns.findIndex((t, j) => !claimed.has(j) && samePrompt(t.user, e.data.text) && new Date(t.time).getTime() >= start);
+  const ms = (x) => new Date(x).getTime();
+  for (const failed of evs) {
+    if (failed.kind !== 'turn_error') continue;
+    const started = evs.find((x) => x.turn === failed.turn && x.kind === 'turn_started');
+    const end = ms(failed.time) + 2000;
+    let i = -1;
+    if (started) {
+      const from = ms(started.time) - 2000;
+      i = turns.findIndex((t, j) => !claimed.has(j) && samePrompt(t.user, started.data.text) && ms(t.time) >= from && ms(t.time) <= end);
+    } else {
+      for (let j = turns.length - 1; j >= 0; j--) {
+        if (!claimed.has(j) && ms(turns[j].time) <= end) { i = j; break; }
+      }
+    }
     const note = el('div', 'msg system error', failed.data.error || 'The turn failed.');
     if (i >= 0) {
       claimed.add(i);
       ends[i].after(note);
+    } else if (started) {
+      $('messages').append(el('div', 'msg user', started.data.text || ''), note);
     } else {
-      $('messages').append(el('div', 'msg user', e.data.text || ''), note);
+      $('messages').append(note);
     }
   }
   for (const e of active) handle(e, false);
@@ -687,7 +699,8 @@ $('stop').addEventListener('click', stop);
 $('prompt').addEventListener('input', autoResize);
 $('prompt').addEventListener('keydown', (e) => {
   // Enter sends on a keyboard; on a phone Enter stays a newline.
-  if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) {
+  // Not while an input method is composing: there Enter picks the characters.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229 && !('ontouchstart' in window)) {
     e.preventDefault();
     $('composer').requestSubmit();
   }
