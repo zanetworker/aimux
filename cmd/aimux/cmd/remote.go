@@ -22,6 +22,7 @@ import (
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/remoteapi"
+	"github.com/zanetworker/aimux/internal/remoteclient"
 	"github.com/zanetworker/aimux/internal/search"
 )
 
@@ -97,8 +98,12 @@ func tailscaleDNSName() (string, error) {
 	return st.Self.DNSName, nil
 }
 
-func tailscaleServeHint(port int) string {
-	return fmt.Sprintf("Expose it on your tailnet (HTTPS, tailnet only):\n  tailscale serve --bg --https=8443 http://127.0.0.1:%d\n", port)
+func tailscaleServeHint(port int, hosts []string) string {
+	hint := fmt.Sprintf("Expose it on your tailnet (HTTPS, tailnet only):\n  tailscale serve --bg --https=8443 http://127.0.0.1:%d\n", port)
+	if len(hosts) > 0 {
+		hint += fmt.Sprintf("Then open the web client on your phone: https://%s:8443/app/\n", hosts[0])
+	}
+	return hint
 }
 
 func newRemoteCmd() *cobra.Command {
@@ -120,8 +125,8 @@ func newRemoteServeCmd() *cobra.Command {
 		Short: "Serve the /v1 API on 127.0.0.1 for tailscale serve to expose",
 		Long: "Serve the remote API: list Claude sessions, follow them, continue idle ones and answer " +
 			"approvals from another device. It listens on 127.0.0.1 only and admits a request only when " +
-			"tailscale serve forwarded it for a login in remote_access.allowed_logins. Its contract is " +
-			"api/remote-v1.openapi.yaml, also served at /v1/openapi.yaml.",
+			"tailscale serve forwarded it for a login in remote_access.allowed_logins. It also serves a " +
+			"phone web client at /app/: after tailscale serve, open https://<this machine's tailnet name>:8443/app/.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(config.DefaultPath())
 			if err != nil {
@@ -188,7 +193,7 @@ func newRemoteServeCmd() *cobra.Command {
 					return rs, err
 				},
 			}
-			api := &remoteapi.API{Version: cmd.Root().Version, Broker: broker, Sessions: index.Sessions, Session: index.Session,
+			api := &remoteapi.API{Version: cmd.Root().Version, Client: remoteclient.Handler(), Broker: broker, Sessions: index.Sessions, Session: index.Session,
 				Search: index.Search, Projects: index.Projects,
 				Create: func(ctx context.Context, cwd, text string) (string, error) {
 					id, err := manager.New(ctx, cwd)
@@ -245,7 +250,7 @@ func newRemoteServeCmd() *cobra.Command {
 				_ = srv.Shutdown(shut)
 			}()
 			out := cmd.OutOrStdout()
-			_, _ = fmt.Fprintf(out, "aimux remote API on http://%s/v1 for %v via %v\n%s", ln.Addr(), s.allowed, hosts, tailscaleServeHint(s.port))
+			_, _ = fmt.Fprintf(out, "aimux remote API on http://%s/v1 for %v via %v\n%s", ln.Addr(), s.allowed, hosts, tailscaleServeHint(s.port, hosts))
 			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return err
 			}
