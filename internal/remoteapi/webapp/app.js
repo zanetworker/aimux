@@ -146,15 +146,28 @@ async function loadList() {
 // Session view
 
 function closeSession() {
+  nav++;
+  clearTimeout(retryTimer);
+  retryDelay = 2000;
+  following = false;
+  liveTurns = new Set();
   if (events) { events.close(); events = null; }
   current = null;
   turn = null;
   setRunning(false);
 }
 
+// nav counts navigations; a response for an older one is dropped, so a slow
+// session can never take over the view (or the composer) of a newer one.
+let nav = 0;
+let retryTimer = null;
+let following = false; // the event stream is open: replies will show
+let liveTurns = new Set(); // turns this view saw start on the live stream
+
 async function showSession(id) {
   clearInterval(listTimer);
   closeSession();
+  const gen = nav;
   $('list').hidden = true;
   $('session').hidden = false;
   $('back').hidden = false;
@@ -166,22 +179,88 @@ async function showSession(id) {
   document.title = 'aimux';
   setComposer(false);
   setStatus('loading');
-  let detail;
+  await load(id, gen);
+}
+
+// load fetches the event snapshot first, then the history, then follows the
+// stream from the snapshot's cursor. A turn that ends after the history was
+// read is caught on the stream; see handle.
+async function load(id, gen) {
+  let page, detail;
   try {
+    page = await api('GET', '/v1/sessions/' + encodeURIComponent(id) + '/events?wait=0');
+    if (gen !== nav) return;
     detail = await api('GET', '/v1/sessions/' + encodeURIComponent(id) + '?turns=30');
   } catch (e) {
-    setStatus('');
-    $('title').textContent = 'aimux';
-    system(e.status === 404 ? 'No session with that id.' : 'Could not load the session: ' + e.message, true);
-    setComposer(false);
+    if (gen !== nav) return;
+    if (e.status === 404) {
+      setStatus('');
+      $('title').textContent = 'aimux';
+      system('No session with that id.', true);
+      return;
+    }
+    retry(id, gen, 'Could not load the session: ' + e.message);
     return;
   }
+  if (gen !== nav) return;
   current = { id, detail };
+  $('messages').replaceChildren();
   $('title').textContent = detail.title || id.slice(0, 8);
-  document.title = (detail.title || 'session') + ' · aimux';
+  document.title = (detail.title || 'session') + ' \u00b7 aimux';
   showState(detail.state);
   renderHistory(detail.turns || []);
-  await follow(id);
+
+  // A turn still running when the snapshot was taken is replayed from the
+  // events it still has, even if its start has aged out of the log.
+  const evs = page.events || [];
+  const last = evs[evs.length - 1];
+  if (last && last.kind !== 'turn_done' && last.kind !== 'turn_error') {
+    for (const e of evs) if (e.turn === last.turn) handle(e, false);
+  }
+  stream(id, gen, last ? last.seq : 0);
+}
+
+function stream(id, gen, after) {
+  if (gen !== nav) return;
+  events = new EventSource('/v1/sessions/' + encodeURIComponent(id) + '/events?after=' + after);
+  events.onopen = () => {
+    following = true;
+    retryDelay = 2000;
+    setStatus('live', 'ok');
+    setComposer(!$('banner').textContent);
+  };
+  events.onerror = () => {
+    following = false;
+    setComposer(false);
+    if (events && events.readyState === EventSource.CLOSED) {
+      // The browser gave up (the server refused or is gone): start over.
+      events = null;
+      retry(id, gen, 'Lost the connection to your Mac.');
+    } else {
+      setStatus('reconnecting', 'error');
+    }
+  };
+  for (const kind of ['turn_started', 'update', 'approval', 'approval_resolved', 'turn_done', 'turn_error']) {
+    events.addEventListener(kind, (msg) => {
+      if (gen !== nav) return;
+      try { handle(JSON.parse(msg.data), true); } catch (err) { console.error(err); }
+    });
+  }
+}
+
+// retry reloads the session with backoff while the view still shows it;
+// sending stays off meanwhile, since a reply could not be shown.
+let retryDelay = 2000;
+function retry(id, gen, why) {
+  setStatus('offline, retrying', 'error');
+  setComposer(false);
+  if (!$('messages').childElementCount) system(why, true);
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => {
+    if (gen !== nav) return;
+    retryDelay = Math.min(retryDelay * 2, 30000);
+    load(id, gen);
+  }, retryDelay);
 }
 
 function showState(state) {
@@ -200,7 +279,13 @@ function showState(state) {
 
 function setComposer(enabled) {
   $('prompt').disabled = !enabled;
-  $('send').disabled = !enabled || running;
+  $('send').disabled = !enabled || running || !following;
+}
+
+// refresh redraws the open session from the server: used when a turn this
+// view joined part way through ends, so its full text comes from history.
+function refresh() {
+  if (current) showSession(current.id);
 }
 
 function renderHistory(turns) {
@@ -231,45 +316,11 @@ function renderHistory(turns) {
   scrollDown(true);
 }
 
-// follow opens the session's event stream. A turn already running (started
-// from another device or tab) is replayed from its start; finished turns are
-// in the history above.
-async function follow(id) {
-  let page;
-  try {
-    page = await api('GET', '/v1/sessions/' + encodeURIComponent(id) + '/events?wait=0');
-  } catch (e) {
-    setStatus('offline', 'error');
-    return;
-  }
-  const evs = page.events || [];
-  let after = evs.length ? evs[evs.length - 1].seq : 0;
-  let start = -1;
-  for (let i = evs.length - 1; i >= 0; i--) {
-    if (evs[i].kind === 'turn_done' || evs[i].kind === 'turn_error') break;
-    if (evs[i].kind === 'turn_started') { start = i; break; }
-  }
-  if (start >= 0) {
-    for (const e of evs.slice(start)) handle(e);
-  }
-  if (!current || current.id !== id) return; // navigated away meanwhile
-  events = new EventSource('/v1/sessions/' + encodeURIComponent(id) + '/events?after=' + after);
-  events.onopen = () => setStatus('live', 'ok');
-  events.onerror = () => {
-    if (events && events.readyState === EventSource.CLOSED) setStatus('disconnected', 'error');
-    else setStatus('reconnecting', 'error');
-  };
-  for (const kind of ['turn_started', 'update', 'approval', 'approval_resolved', 'turn_done', 'turn_error']) {
-    events.addEventListener(kind, (msg) => {
-      try { handle(JSON.parse(msg.data)); } catch (err) { console.error(err); }
-    });
-  }
-}
-
-function handle(e) {
+function handle(e, live) {
   const d = e.data || {};
   switch (e.kind) {
     case 'turn_started':
+      if (live) liveTurns.add(e.turn);
       $('messages').append(el('div', 'msg user', d.text || ''));
       startTurn();
       break;
@@ -284,11 +335,13 @@ function handle(e) {
       break;
     case 'turn_done':
       endTurn();
+      if (live && !liveTurns.has(e.turn)) { refresh(); return; }
       if (d.stopReason === 'cancelled') system('Stopped.');
       else if (d.stopReason && d.stopReason !== 'end_turn') system('Turn ended: ' + d.stopReason);
       break;
     case 'turn_error':
       endTurn();
+      if (live && !liveTurns.has(e.turn)) { refresh(); return; }
       system(d.error || 'The turn failed.', true);
       break;
   }
@@ -529,7 +582,10 @@ function route() {
 }
 
 $('back').addEventListener('click', () => { location.hash = ''; });
-$('refresh').addEventListener('click', () => { if (current) showSession(current.id); else loadList(); });
+$('refresh').addEventListener('click', () => {
+  const m = location.hash.match(/^#\/s\/(.+)$/);
+  if (m) showSession(decodeURIComponent(m[1])); else loadList();
+});
 $('composer').addEventListener('submit', send);
 $('stop').addEventListener('click', stop);
 $('prompt').addEventListener('input', autoResize);
