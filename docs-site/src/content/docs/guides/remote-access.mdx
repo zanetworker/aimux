@@ -63,6 +63,8 @@ Error codes: `unauthorized` (401), `forbidden` (403), `unknown_session` (404), `
 
 ## Settings
 
+If `~/.aimux/config.yaml` cannot be read or parsed, `aimux remote serve` stops with that error, even when `--allow` and `--port` are given.
+
 | Key under `remote_access` | Flag | Default | Meaning |
 |---|---|---|---|
 | `port` | `--port` | `7382` | Port on `127.0.0.1` |

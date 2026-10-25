@@ -50,7 +50,7 @@ The catalog is also refreshed whenever a server starts, so new tools appear the 
 | `--claude-config` | all | `~/.claude.json` | Where the stdio servers are read from |
 | `--servers` | all | `~/.aimux/mcp-servers.json` | The proxy's saved backend definitions, written by `refresh` |
 | `--catalog` | all | `~/.aimux/mcp-catalog.json` | Tool catalog file |
-| `--exclude` | all | none | Servers to leave out of the proxy |
+| `--exclude` | all | none | Servers to leave out of the proxy. On `serve` it applies to that run only: the saved catalog keeps their tools |
 | `--port` | `serve`, `config` | `7381` | Port on `127.0.0.1` |
 | `--per-session` | `serve` | `playwright,chrome-devtools,linkedin` | Servers that get one process per client session, for browser automation |
 | `--idle` | `serve` | `10m` | Stop a server after it has been unused this long |
@@ -61,7 +61,7 @@ The proxy listens on `127.0.0.1` only. It rejects requests whose `Host` is not a
 
 ## Failure handling
 
-- A server that fails to start, or does not answer within 2 minutes, returns an error result naming the server. Other servers keep working, and the next call tries again.
+- A server that fails to start, or does not answer within 2 minutes, returns an error result naming the server. Other servers keep working, and the next call tries again. Calls that arrive while a server is starting share that start; one caller giving up does not stop it for the others.
 - A call that times out (2 minutes) or loses its connection stops that server, and the next call starts a new one.
 - A tool that reports an error keeps its server running.
 - Claude Code does not end its MCP session when it exits. A session idle for longer than `--idle` expires, which also stops its per-session servers. A client that comes back later gets a new session automatically.
