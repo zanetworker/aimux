@@ -120,7 +120,10 @@ func newRemoteServeCmd() *cobra.Command {
 			"approvals from another device. It listens on 127.0.0.1 only and admits a request only when " +
 			"tailscale serve forwarded it for a login in remote_access.allowed_logins.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, _ := config.Load(config.DefaultPath())
+			cfg, err := config.Load(config.DefaultPath())
+			if err != nil {
+				return fmt.Errorf("read %s: %w", config.DefaultPath(), err)
+			}
 			s, err := resolveRemoteSettings(cfg.RemoteAccess, port, allow)
 			if err != nil {
 				return err

@@ -183,6 +183,7 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		}
 		cancel()
 		m.mu.Lock()
+		e.cancelStart = nil // spent: a later cancel during a reload must not find it
 		owned := m.runs[sessionID] == e // false if Close or eviction removed it meanwhile
 		if err == nil && !m.closed && owned && ctx.Err() == nil {
 			e.setRun(r)

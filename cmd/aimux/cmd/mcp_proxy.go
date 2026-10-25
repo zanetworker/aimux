@@ -131,12 +131,12 @@ func newMCPProxyServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for s := range cat.Servers {
-				if _, ok := cfgs[s]; !ok {
-					delete(cat.Servers, s) // no longer configured, or excluded
-				}
-			}
-			if msg := proxyCatalogProblem(f.catalog, len(cat.Servers)); msg != "" {
+			// Serve only configured servers, but keep the full catalog for the
+			// updater, which saves it: an --exclude for this run must not drop
+			// a server's tools from the file.
+			configured := func(s string) bool { _, ok := cfgs[s]; return ok }
+			served := cat.Only(configured)
+			if msg := proxyCatalogProblem(f.catalog, len(served.Servers)); msg != "" {
 				return errors.New(msg)
 			}
 			perSession := map[string]bool{}
@@ -157,7 +157,7 @@ func newMCPProxyServeCmd() *cobra.Command {
 					}()
 				},
 			})
-			srv, skipped := mcpproxy.NewServer(updater.Snapshot(), pool, proxyName)
+			srv, skipped := mcpproxy.NewServer(updater.Snapshot().Only(configured), pool, proxyName)
 			for _, s := range skipped {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "skipped %s\n", s)
 			}
@@ -168,11 +168,11 @@ func newMCPProxyServeCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			tools := 0
-			for _, e := range cat.Servers {
+			for _, e := range served.Servers {
 				tools += len(e.Tools)
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "MCP proxy: %d tools from %d servers at http://%s/mcp (idle stop after %v)\n",
-				tools-len(skipped), len(cat.Servers), ln.Addr(), f.idle)
+				tools-len(skipped), len(served.Servers), ln.Addr(), f.idle)
 			return mcpproxy.Serve(ctx, ln, srv, pool, mcpproxy.DaemonOptions{IdleTimeout: f.idle})
 		},
 	}

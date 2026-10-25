@@ -509,3 +509,48 @@ func TestPool_CallerCancelStillLetsTheTimeoutFreeAStuckCall(t *testing.T) {
 		t.Fatal("call stuck after its caller cancelled; the pool timeout never closed the backend")
 	}
 }
+
+// The first caller to need a server starts it for everyone waiting; its
+// giving up must not fail the start for the others.
+func TestPool_FirstCallerCancelDoesNotFailASharedStart(t *testing.T) {
+	release := make(chan struct{})
+	var starts atomic.Int32
+	start := func(ctx context.Context, server string) (Backend, error) {
+		starts.Add(1)
+		select {
+		case <-release:
+			return &fakeBackend{}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	p := NewPool(start, PoolOptions{})
+	defer p.Close()
+	first, cancelFirst := context.WithCancel(context.Background())
+	firstDone := make(chan *mcp.CallToolResult, 1)
+	go func() { firstDone <- p.Call(first, "srv", "", req("a")) }()
+	for starts.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	second := make(chan *mcp.CallToolResult, 1)
+	go func() { second <- p.Call(context.Background(), "srv", "", req("b")) }()
+	time.Sleep(20 * time.Millisecond) // the second caller is waiting on the same start
+	cancelFirst()
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the cancelled first caller kept waiting for the start")
+	}
+	close(release)
+	select {
+	case r := <-second:
+		if r.IsError {
+			t.Fatalf("second caller got %q; the start failed with the first caller's cancel", resultText(t, r))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second caller never got the backend")
+	}
+	if starts.Load() != 1 {
+		t.Fatalf("started %d times, want one shared start", starts.Load())
+	}
+}

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -59,5 +61,24 @@ func TestResolveTrustedHosts(t *testing.T) {
 	}
 	if _, err := resolveTrustedHosts(nil, failing); err == nil || !strings.Contains(err.Error(), "hostnames") {
 		t.Fatalf("no names at all: %v, want an error naming remote_access.hostnames", err)
+	}
+}
+
+// A config file that does not parse must stop the server with that error,
+// not run it on defaults the user never chose.
+func TestRemoteServe_MalformedConfigIsAnError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".aimux"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".aimux", "config.yaml"), []byte("remote_access: [unclosed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := newRemoteServeCmd()
+	c.SetArgs([]string{"--allow", "you@example.com", "--port", "0"})
+	err := c.Execute()
+	if err == nil || !strings.Contains(err.Error(), "config.yaml") {
+		t.Fatalf("got %v, want an error naming the config file", err)
 	}
 }
