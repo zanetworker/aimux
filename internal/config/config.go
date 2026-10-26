@@ -74,13 +74,38 @@ func (c K8sProviderConfig) IsActive() bool {
 // RemoteConfig holds settings for the remote agent backend.
 // RemoteAccessConfig configures `aimux remote serve`, the API that phones and
 // other devices reach through `tailscale serve`.
+
 type RemoteAccessConfig struct {
-	Port            int      `yaml:"port"`             // on 127.0.0.1 (default 7382)
-	AllowedLogins   []string `yaml:"allowed_logins"`   // Tailscale logins admitted; empty admits nobody
-	Hostnames       []string `yaml:"hostnames"`        // trusted Host names (this machine's tailnet names); default: detected from tailscale
-	Adapter         string   `yaml:"adapter"`          // ACP adapter command for Claude sessions
-	MaxRuns         int      `yaml:"max_runs"`         // live adapters at once (default 2)
-	ApprovalTimeout string   `yaml:"approval_timeout"` // unanswered approvals are denied after this (default 10m)
+	Port            int        `yaml:"port"`             // on 127.0.0.1 (default 7382)
+	AllowedLogins   []string   `yaml:"allowed_logins"`   // Tailscale logins admitted; empty admits nobody
+	Hostnames       []string   `yaml:"hostnames"`        // trusted Host names (this machine's tailnet names); default: detected from tailscale
+	Adapter         string     `yaml:"adapter"`          // ACP adapter command for Claude sessions
+	MaxRuns         int        `yaml:"max_runs"`         // live adapters at once (default 2)
+	ApprovalTimeout string     `yaml:"approval_timeout"` // unanswered approvals are denied after this (default 10m)
+	Push            PushConfig `yaml:"push"`             // notify phones of approvals; off unless configured
+}
+
+// PushConfig turns on approval notifications; each sender is on when its
+// topic is set.
+type PushConfig struct {
+	Ntfy NtfyConfig `yaml:"ntfy"`
+	APNs APNsConfig `yaml:"apns"`
+}
+
+// NtfyConfig publishes approvals to an ntfy topic.
+type NtfyConfig struct {
+	Server   string `yaml:"server"`    // default https://ntfy.sh
+	Topic    string `yaml:"topic"`     // anyone who knows it can read it on a public server
+	TokenEnv string `yaml:"token_env"` // environment variable holding an access token; optional
+	ClickURL string `yaml:"click_url"` // web client opened by a tap (default https://<tailnet name>:8443/app/)
+}
+
+// APNsConfig sends approvals to the aimux iPhone app through Apple.
+type APNsConfig struct {
+	KeyFile string `yaml:"key_file"` // token signing key (.p8) from the Apple Developer account
+	KeyID   string `yaml:"key_id"`
+	TeamID  string `yaml:"team_id"`
+	Topic   string `yaml:"topic"` // the app's bundle id
 }
 
 type RemoteConfig struct {

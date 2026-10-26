@@ -644,3 +644,35 @@ func TestRemoteAccessConfig_DefaultsAllowNobody(t *testing.T) {
 		t.Fatalf("default allowlist %v, want empty (nobody admitted until configured)", cfg.RemoteAccess.AllowedLogins)
 	}
 }
+
+func TestRemoteAccessConfig_Push(t *testing.T) {
+	yamlContent := `
+remote_access:
+  push:
+    ntfy:
+      server: https://ntfy.example.com
+      topic: aimux-k3x9
+      token_env: AIMUX_NTFY_TOKEN
+      click_url: https://mac.ts.net:8443/app/
+    apns:
+      key_file: ~/.aimux/AuthKey_ABC.p8
+      key_id: ABC
+      team_id: TEAM
+      topic: me.example.aimux
+`
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, a := cfg.RemoteAccess.Push.Ntfy, cfg.RemoteAccess.Push.APNs
+	if n.Server != "https://ntfy.example.com" || n.Topic != "aimux-k3x9" || n.TokenEnv != "AIMUX_NTFY_TOKEN" || n.ClickURL != "https://mac.ts.net:8443/app/" {
+		t.Fatalf("ntfy = %+v", n)
+	}
+	if a.KeyFile != "~/.aimux/AuthKey_ABC.p8" || a.KeyID != "ABC" || a.TeamID != "TEAM" || a.Topic != "me.example.aimux" {
+		t.Fatalf("apns = %+v", a)
+	}
+}

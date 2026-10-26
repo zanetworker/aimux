@@ -14,6 +14,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/push"
 )
 
 // Session states as clients see them.
@@ -59,6 +60,10 @@ type API struct {
 	// identity check as /v1. It is any handler; the server knows nothing
 	// else about it.
 	Client http.Handler
+	// RegisterDevice and UnregisterDevice, if set, let a native app sign a
+	// phone up for approval notifications (APNs) and off again.
+	RegisterDevice   func(push.Device) error
+	UnregisterDevice func(token string) error
 
 	createMu sync.Mutex        // one creation at a time, so a retried key cannot create twice
 	created  map[string]string // client key -> new session id
@@ -79,6 +84,8 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{id}/events", a.events)
 	mux.HandleFunc("POST /v1/sessions/{id}/cancel", a.cancel)
 	mux.HandleFunc("POST /v1/approvals/{id}", a.answer)
+	mux.HandleFunc("POST /v1/devices", a.registerDevice)
+	mux.HandleFunc("DELETE /v1/devices/{token}", a.unregisterDevice)
 	if a.Client != nil {
 		mux.Handle("GET /app/", a.Client)
 		mux.Handle("GET /app", http.RedirectHandler("/app/", http.StatusFound))
@@ -117,6 +124,8 @@ func writeFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "no_such_approval", err)
 	case errors.Is(err, ErrInvalidOption):
 		writeError(w, http.StatusBadRequest, "invalid_option", err)
+	case errors.Is(err, push.ErrBadDevice):
+		writeError(w, http.StatusBadRequest, "bad_request", err)
 	case errors.Is(err, errNotAProject):
 		writeError(w, http.StatusBadRequest, "bad_request", err)
 	default:
@@ -149,6 +158,9 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.Projects != nil && a.Create != nil {
 		caps = append(caps, CapNewSessions)
+	}
+	if a.RegisterDevice != nil && a.UnregisterDevice != nil {
+		caps = append(caps, CapPush)
 	}
 	writeJSON(w, http.StatusOK, Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
 		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps})
@@ -421,4 +433,36 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, Status{Status: "answered"})
+}
+
+func (a *API) registerDevice(w http.ResponseWriter, r *http.Request) {
+	if a.RegisterDevice == nil || a.UnregisterDevice == nil {
+		writeError(w, http.StatusNotFound, "not_supported", errors.New("push notifications are not configured on this server"))
+		return
+	}
+	var req struct {
+		Token       string `json:"token"`
+		Environment string `json:"environment"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with token and environment: %w", err))
+		return
+	}
+	if err := a.RegisterDevice(push.Device{Token: req.Token, Environment: req.Environment, Login: LoginFrom(r.Context())}); err != nil {
+		writeFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, Status{Status: "registered"})
+}
+
+func (a *API) unregisterDevice(w http.ResponseWriter, r *http.Request) {
+	if a.RegisterDevice == nil || a.UnregisterDevice == nil {
+		writeError(w, http.StatusNotFound, "not_supported", errors.New("push notifications are not configured on this server"))
+		return
+	}
+	if err := a.UnregisterDevice(r.PathValue("token")); err != nil {
+		writeFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, Status{Status: "unregistered"})
 }

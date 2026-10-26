@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/push"
 )
 
 // The /v1 contract test: the server is driven through every operation in
@@ -242,6 +244,8 @@ func TestContract(t *testing.T) {
 		},
 		Create: func(context.Context, string, string) (string, error) { return "new-1", nil },
 	}
+	devices := &push.DeviceStore{Path: filepath.Join(t.TempDir(), "devices.json")}
+	api.RegisterDevice, api.UnregisterDevice = devices.Add, devices.Remove
 	c := newContract(t, api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
 	expect := func(want int, got int, body map[string]any, what string) {
 		t.Helper()
@@ -330,6 +334,25 @@ func TestContract(t *testing.T) {
 	st, body = c.call("POST", "/v1/sessions", `{"cwd":"/etc","text":"x"}`, testLogin)
 	expect(400, st, body, "new session outside the projects")
 
+	// Push devices.
+	token := strings.Repeat("0a", 32)
+	st, body = c.call("POST", "/v1/devices", `{"token":"`+token+`","environment":"sandbox"}`, testLogin)
+	expect(200, st, body, "register a device")
+	if ds, _ := devices.List(); len(ds) != 1 || ds[0].Token != token || ds[0].Login != testLogin {
+		t.Fatalf("registered devices %+v", ds)
+	}
+	st, body = c.call("POST", "/v1/devices", `{"token":"xyz","environment":"sandbox"}`, testLogin)
+	expect(400, st, body, "register a bad token")
+	st, body = c.call("DELETE", "/v1/devices/"+token, "", testLogin)
+	expect(200, st, body, "unregister a device")
+	if ds, _ := devices.List(); len(ds) != 0 {
+		t.Fatalf("devices after unregister %+v", ds)
+	}
+	_, body = c.call("GET", "/v1/health", "", testLogin)
+	if !strings.Contains(fmt.Sprint(body["capabilities"]), CapPush) {
+		t.Fatalf("capabilities %v, want %s", body["capabilities"], CapPush)
+	}
+
 	// Every operation and event kind in the contract was exercised.
 	var missing []string
 	for path, item := range c.doc.Paths.Map() {
@@ -363,6 +386,14 @@ func TestContract_UnsupportedEndpoints(t *testing.T) {
 	st, body = c.call("POST", "/v1/sessions", `{"cwd":"/w","text":"x"}`, testLogin)
 	if st != 404 || body["code"] != "not_supported" {
 		t.Fatalf("new session: %d %v", st, body)
+	}
+	st, body = c.call("POST", "/v1/devices", `{"token":"`+strings.Repeat("0a", 32)+`","environment":"sandbox"}`, testLogin)
+	if st != 404 || body["code"] != "not_supported" {
+		t.Fatalf("register a device: %d %v", st, body)
+	}
+	st, body = c.call("DELETE", "/v1/devices/"+strings.Repeat("0a", 32), "", testLogin)
+	if st != 404 || body["code"] != "not_supported" {
+		t.Fatalf("unregister a device: %d %v", st, body)
 	}
 	_, body = c.call("GET", "/v1/health", "", testLogin)
 	if fmt.Sprint(body["capabilities"]) != "[sessions]" {
