@@ -23,6 +23,7 @@ import (
 
 type Server struct {
 	port         int
+	runMu        sync.Mutex // guards listener and srv: Start sets them on its own goroutine
 	listener     net.Listener
 	srv          *http.Server
 	discoverFn   func() ([]agent.Agent, error)
@@ -224,26 +225,34 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	s.listener = ln
-	s.srv = &http.Server{
+	srv := &http.Server{
 		Handler:           localOnly(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	s.runMu.Lock()
+	s.listener, s.srv = ln, srv
+	s.runMu.Unlock()
 
-	return s.srv.Serve(ln)
+	return srv.Serve(ln)
 }
 
 func (s *Server) Stop() {
-	if s.srv != nil {
+	s.runMu.Lock()
+	srv := s.srv
+	s.runMu.Unlock()
+	if srv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = s.srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 	}
 }
 
 func (s *Server) URL() string {
-	if s.listener == nil {
+	s.runMu.Lock()
+	ln := s.listener
+	s.runMu.Unlock()
+	if ln == nil {
 		return ""
 	}
-	return fmt.Sprintf("http://%s", s.listener.Addr().String())
+	return fmt.Sprintf("http://%s", ln.Addr().String())
 }
