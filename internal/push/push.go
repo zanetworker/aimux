@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-// Message is one notification. It names what is asked, never the tool's
+// Message is one notification. It names what is asked (the tool call's
+// title, which for a shell command is the command), never the tool's full
 // input: a relay or the lock screen may show it to anyone.
 type Message struct {
 	Title      string

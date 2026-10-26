@@ -259,7 +259,8 @@ paths:
         again on every launch, since tokens change. Each new approval then
         sends an alert (category `AIMUX_APPROVAL`, thread = the session) with
         `approvalId` and `sessionId` beside `aps`. The alert names the session
-        and the tool, never the tool's input. Answer it in the app with
+        and the tool call (for a shell command, the shortened command itself),
+        never the tool's full input. Answer it in the app with
         `POST /v1/approvals/{approvalId}`. Tokens Apple reports as gone are
         forgotten.
       operationId: registerDevice
