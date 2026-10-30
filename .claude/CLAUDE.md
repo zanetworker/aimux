@@ -218,6 +218,7 @@ If a feature exists in only one frontend, it is tech debt. Track it.
 | Auto-archive | `PartitionByArchive()` | `o` key | -- TODO | -- |
 | Notify decision | `ShouldNotify()` | `maybeNotify` | -- TODO (SSE) | -- |
 | Kill action | `DetermineKillAction()` | `x` key | `POST /archive` | -- TODO |
+| Focus agent pane | `FindLiveAgent()` + `FocusAgent()` | `F` key | `POST /agents/{id}/focus` | `aimux jump` |
 | Toggle star | `ToggleStar()` | `*` key | `POST /sessions/meta` | -- TODO |
 | Set annotation | `SetAnnotation()` | sessions view | `POST /sessions/meta` | -- TODO |
 | Set tags | `SetTags()` | sessions view | `POST /sessions/meta` | -- TODO |
