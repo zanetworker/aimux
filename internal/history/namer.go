@@ -337,9 +337,13 @@ func (n *Namer) queueLen() int {
 }
 
 // needsName is the automatic rule: an interactive session active in the last
-// 14 days with no owner value, no away summary and nothing of ours.
+// 14 days with no owner value and nothing of ours, whose shown title is
+// useless or that has no description (Claude Code's away summary is one).
 func (n *Namer) needsName(s Session, now time.Time) bool {
-	if s.Automated || s.IsSubagent || s.FilePath == "" || s.AwaySummary != "" {
+	if s.Automated || s.IsSubagent || s.FilePath == "" {
+		return false
+	}
+	if s.AwaySummary != "" && !UselessTitle(ShownTitle(s)) {
 		return false
 	}
 	if now.Sub(s.LastActive) > namingMaxAge {
@@ -409,7 +413,7 @@ func (n *Namer) runBatch(ctx context.Context) {
 			n.mu.Unlock()
 			continue
 		}
-		items = append(items, namingItem{session: s, input: input, wantTitle: UselessTitle(ShownTitle(s)), wantDesc: true})
+		items = append(items, namingItem{session: s, input: input, wantTitle: UselessTitle(ShownTitle(s)), wantDesc: s.AwaySummary == ""})
 	}
 	if len(items) == 0 {
 		return

@@ -304,8 +304,8 @@ func TestNamer_SkipsSessionsItMustNotName(t *testing.T) {
 	sub.IsSubagent = true
 	old := f.add("old1", "")
 	old.LastActive = f.now.Add(-15 * 24 * time.Hour)
-	away := f.add("away1", "")
-	away.AwaySummary = "Claude Code's recap"
+	away := f.add("away1", "Fix the deploy")
+	away.AwaySummary = "Claude Code's recap" // a fine title and a recap: nothing to make
 	owner := f.add("owner1", "")
 	ownerT := f.add("ownerT1", "")
 	ours := f.add("ours1", "")
@@ -1025,5 +1025,33 @@ func TestNamer_UpdateSummaryCutReplyIsUnreadable(t *testing.T) {
 	}
 	if m := LoadMeta(s.FilePath); m.DescribedAt != "" {
 		t.Errorf("a cut reply was written: %+v", m)
+	}
+}
+
+// Claude Code's recap is the description, but it does not name the session:
+// a useless title (here Claude Code's own "Session <id>") still gets one.
+func TestNamer_AwaySummaryWithAUselessTitleAsksOnlyForTheTitle(t *testing.T) {
+	f := newNamerFixture(t)
+	s := f.add("5e55a0b1-1111-4c4f-8a6b-123456789abc", "continue this session 0ddba11e")
+	s.AITitle = "Session 5e55a0b1-1111-4c4f-8a6b-123456789abc"
+	s.AwaySummary = "Claude Code's recap"
+	f.sessions[s.ID] = s
+	f.namer.Want([]string{s.ID})
+	f.namer.runBatch(context.Background())
+	if f.backend.calls() != 1 {
+		t.Fatalf("calls = %d, want 1", f.backend.calls())
+	}
+	if req := f.backend.last(); !strings.Contains(req.Prompt, "Session 1 (title):") {
+		t.Errorf("prompt should ask only for a title")
+	}
+	m := LoadMeta(s.FilePath)
+	if m.Title == "" || m.TitleBy != "model" || m.Description != "" {
+		t.Errorf("meta = %+v, want a model title and no description of ours", m)
+	}
+	// Once: the next Want sends nothing.
+	f.namer.Want([]string{s.ID})
+	f.namer.runBatch(context.Background())
+	if f.backend.calls() != 1 {
+		t.Errorf("calls = %d after the session was named", f.backend.calls())
 	}
 }
