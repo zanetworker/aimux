@@ -80,10 +80,10 @@ public final class NowModel {
         await list.refresh()
         let sessions = list.sessions
         let current = now()
-        let candidates = sessions
-            .filter { isCandidate($0, now: current) }
-            .sorted { $0.lastActive > $1.lastActive }
-            .prefix(Self.snapshotLimit)
+        // Every busy session, since any may wait for an approval; the limit is for recent idle ones.
+        let newest = sessions.filter { isCandidate($0, now: current) }.sorted { $0.lastActive > $1.lastActive }
+        let candidates = newest.filter { $0.state == .busy }
+            + newest.filter { $0.state != .busy }.prefix(Self.snapshotLimit)
         let source = source
         var fresh: [String: Activity] = [:]
         await withTaskGroup(of: (String, Activity?).self) { group in

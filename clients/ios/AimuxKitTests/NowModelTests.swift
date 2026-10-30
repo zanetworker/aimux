@@ -228,6 +228,19 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         #expect(Set(activity.requested) == Set((0..<10).map { "s\($0)" }))
     }
 
+    @Test func anApprovalInTheOldestOfManyBusySessionsStillNeedsYou() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let rows = (0..<12).map { row("b\($0)", .busy, ago: TimeInterval(10 + $0)) }
+        let activity = StubActivity()
+        activity.pages["b11"] = page([event(1, .approval, .approval(approval))])
+        let model = makeModel(rows, activity, defaults)
+
+        await model.refresh()
+
+        #expect(model.view.needsYou.map(\.session.id) == ["b11"])
+    }
+
     @Test func refusedSnapshotIsNoActivity() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

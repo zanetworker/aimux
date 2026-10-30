@@ -50,7 +50,7 @@ function memoryStorage(initial = {}) {
 const model = (api, storage = memoryStorage()) => new NowModel({ api, storage, now: () => NOW });
 const snapshotted = (calls) => calls.filter((c) => c.path.includes('/events')).map((c) => decodeURIComponent(c.path.split('/')[3]));
 
-test('snapshots busy and recently active sessions, never terminal ones, newest first, at most 10', async () => {
+test('snapshots every busy session, then at most 10 recently active ones, never terminal ones, newest first', async () => {
   const sessions = [
     session('term', 'open_in_terminal', 10),
     session('old-idle', 'idle', 901),
@@ -61,15 +61,24 @@ test('snapshots busy and recently active sessions, never terminal ones, newest f
   const { api, calls } = fakeAPI({ sessions });
   await model(api).refresh();
   const got = snapshotted(calls);
-  assert.equal(got.length, 10);
-  assert.deepEqual(got, ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9']);
+  assert.equal(got.length, 11);
+  assert.deepEqual(got, ['old-busy', 'r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9']);
   assert.ok(!got.includes('term') && !got.includes('old-idle'));
 });
 
 test('a session at exactly 900 s is a candidate, and busy sessions are candidates at any age', async () => {
   const { api, calls } = fakeAPI({ sessions: [session('edge', 'idle', 900), session('old-busy', 'busy', 5000)] });
   await model(api).refresh();
-  assert.deepEqual(snapshotted(calls), ['edge', 'old-busy']);
+  assert.deepEqual(snapshotted(calls), ['old-busy', 'edge']);
+});
+
+test('an approval in the oldest of many busy sessions still needs you', async () => {
+  const sessions = [];
+  for (let i = 0; i < 12; i++) sessions.push(session('b' + i, 'busy', 20 + i));
+  const { api } = fakeAPI({ sessions, events: { b11: approvalEvents('ap') } });
+  const m = model(api);
+  await m.refresh();
+  assert.deepEqual(m.view.needsYou.map((r) => r.session.id), ['b11']);
 });
 
 test('ranks what the snapshots say: an approval needs you', async () => {

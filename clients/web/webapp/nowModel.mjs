@@ -83,10 +83,12 @@ export class NowModel {
     if (!this.health) await this.readHealth();
     await this.loadList();
     const current = this.now();
-    const candidates = this.sessions
-      .filter((s) => s.state !== 'open_in_terminal' && (s.state === 'busy' || current - s.lastActive <= RECENT_MS))
-      .sort((a, b) => b.lastActive - a.lastActive)
+    // Every busy session, since any may wait for an approval; the limit is for recent idle ones.
+    const newest = [...this.sessions].sort((a, b) => b.lastActive - a.lastActive);
+    const recent = newest
+      .filter((s) => s.state !== 'open_in_terminal' && s.state !== 'busy' && current - s.lastActive <= RECENT_MS)
       .slice(0, SNAPSHOT_LIMIT);
+    const candidates = [...newest.filter((s) => s.state === 'busy'), ...recent];
     const results = await Promise.all(candidates.map(async (s) => {
       try {
         const page = await this.api('GET', '/v1/sessions/' + encodeURIComponent(s.id) + '/events?wait=0');
