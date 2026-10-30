@@ -328,3 +328,30 @@ private let busy = APIError.server(status: 409, code: .busy, message: "a turn is
         pausedChat.close()
     }
 }
+
+/// A detail read that started before a queue change answers after it.
+@MainActor @Suite struct ChatModelQueueRaceTests {
+    private func spin(until condition: () -> Bool) async {
+        for _ in 0..<2000 where !condition() { await Task.yield() }
+    }
+
+    @Test func aDetailReadBeforeAQueueEventKeepsTheNewerQueue() async {
+        let source = StubChat()
+        source.details = [detail(queue: queue(["q1"])), detail(queue: queue(["q1"]))]
+        let chat = ChatModel(sessionID: "s1", source: source, stream: StubStreams(), queueEnabled: true,
+                             sleep: { _ in try await Task.sleep(for: .seconds(3600)) }, now: { base })
+        await chat.load()
+        let gate = ChatGate()
+        source.detailGate = gate
+
+        // The turn ends: the detail is read again, and its answer is slow.
+        chat.receive(StreamEvent(event: event(5, .turnDone, .turnDone(stopReason: "end_turn")), log: "L1"))
+        await spin { source.count("detail") == 2 }
+        let paused = queue(["q1"], state: "paused", reason: "Check the session, then resume.")
+        chat.receive(StreamEvent(event: event(6, .queue, .queue(paused), turn: ""), log: "L1"))
+        await gate.open()
+        await spin { chat.queue != paused }
+        #expect(chat.queue == paused, "the older detail's queue never replaces the event's")
+        chat.close()
+    }
+}

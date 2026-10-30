@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createLogin } from './login.mjs';
 import {
-  composerAction, createQueueClient, movePosition, queueActive, queueErrorText, queueItems, queueSection, sendRefusal,
+  adoptDetail, composerAction, createQueueClient, movePosition, queueActive, queueErrorText, queueItems, queueSection,
+  sendRefusal, setQueue,
 } from './queue.mjs';
 
 const DIR = new URL('../../../api/testdata/clients/queue/', import.meta.url);
@@ -176,4 +177,21 @@ test('queueActive: in flight in any state, or running with messages waiting (the
   assert.equal(queueActive({ state: 'running', items: [{ ...w, state: 'done' }] }), false, 'only a hidden done item');
   assert.equal(queueActive({ state: 'running', items: [w] }), true, 'running with one waiting');
   assert.equal(queueActive({ state: 'paused', items: [{ ...w, state: 'answering' }] }), true, 'paused with one in flight');
+});
+
+test('a detail read before a queue change keeps the newer queue; otherwise it says the queue now', () => {
+  const chat = { queue: { state: 'running', items: [{ id: 'q1' }] } };
+  const before = chat.queueRev || 0;
+  const paused = { state: 'paused', reason: 'Check the session.', items: [{ id: 'q1' }] };
+  setQueue(chat, paused); // a queue event while the detail was read
+  adoptDetail(chat, { id: 's1', queue: { state: 'running', items: [{ id: 'q1' }] } }, before);
+  assert.equal(chat.queue, paused);
+  assert.equal(chat.detail.id, 's1');
+
+  const now = chat.queueRev;
+  adoptDetail(chat, { id: 's1' }, now); // nothing changed meanwhile: an empty queue is absent
+  assert.equal(chat.queue, null);
+  setQueue(chat, null);
+  assert.equal(chat.queue, null);
+  assert.ok(chat.queueRev > now);
 });

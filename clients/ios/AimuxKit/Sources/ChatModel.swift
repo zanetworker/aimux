@@ -79,7 +79,11 @@ public final class ChatModel {
 
     // The chat queue (ChatModelQueue.swift), when the server has one (`queueEnabled`).
     /// The session's queue, from the detail, a `queue` event or a queue request's answer; nil when empty.
-    public internal(set) var queue: QueueStatus?
+    public internal(set) var queue: QueueStatus? {
+        didSet { queueRevision &+= 1 }
+    }
+    /// Counts queue changes, so a detail read before a newer one never puts its older queue back.
+    private(set) var queueRevision = 0
     /// A direct send was refused `409 busy`: the composer offers Add to queue until the next detail or turn end.
     public internal(set) var refusedBusy = false
     /// Why the text in the composer was not queued; cleared by the next add.
@@ -152,6 +156,7 @@ public final class ChatModel {
         let mine = generation
         let page: EventPage
         let detail: SessionDetail
+        let revision = queueRevision
         do {
             (page, detail) = try await readConsistent()
         } catch {
@@ -160,7 +165,7 @@ public final class ChatModel {
             return
         }
         guard mine == generation, !closed else { return }
-        session = detail
+        adopt(detail, readSince: revision)
         refreshFailure = nil
         delay = Self.firstDelay
         if Self.isTerminal(detail) {
@@ -275,20 +280,6 @@ public final class ChatModel {
         }
     }
 
-    /// Reads the session again once a turn ends, so the turn's record and the stats come from the session file.
-    /// A failure is left to the next load; a load or close meanwhile drops the result.
-    private func refreshDetail() {
-        let mine = generation
-        let source = source
-        let sessionID = sessionID
-        _ = Interaction.background { Task { [weak self] in
-            guard let detail = try? await source.session(id: sessionID, turns: Self.historyTurns) else { return }
-            guard let self, mine == self.generation, !self.closed else { return }
-            self.session = detail
-            self.rebuild()
-        } }
-    }
-
     /// Sends a message. The user item shows at once; sending the same text again after a failure
     /// is a retry and keeps the idempotency key, anything else is a new message with a new key.
     /// A read-only session takes no messages; a refusal because it is open in a terminal loads it again.
@@ -388,5 +379,22 @@ extension ChatModel {
         }
         answered.insert(id)
         rebuild()
+    }
+}
+
+extension ChatModel {
+    /// Reads the session again once a turn ends, so the turn's record and the stats come from the session file.
+    /// A failure is left to the next load; a load or close meanwhile drops the result.
+    fileprivate func refreshDetail() {
+        let mine = generation
+        let revision = queueRevision
+        let source = source
+        let sessionID = sessionID
+        _ = Interaction.background { Task { [weak self] in
+            guard let detail = try? await source.session(id: sessionID, turns: Self.historyTurns) else { return }
+            guard let self, mine == self.generation, !self.closed else { return }
+            self.adopt(detail, readSince: revision)
+            self.rebuild()
+        } }
     }
 }

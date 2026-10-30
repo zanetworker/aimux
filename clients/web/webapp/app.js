@@ -8,7 +8,7 @@ import { nextSession } from './now.mjs';
 import { displayTitle, el, icon } from './rows.mjs';
 import { buildTimeline, pendingShown } from './timeline.mjs';
 import { chatStatus, headerContent, nextBar, pendingNode, promptCard, readOnlyLine, timelineNodes } from './chatView.mjs';
-import { composerAction, createQueueClient, sendRefusal } from './queue.mjs';
+import { adoptDetail, composerAction, createQueueClient, sendRefusal, setQueue } from './queue.mjs';
 import { createQueueView, editOffersNode } from './queueView.mjs';
 import { terminalErrorText, terminalPollInterval, terminalReasonLine } from './terminal.mjs';
 import { announce, createInfoSheet, renderInfoSheet, renderMetaCard } from './sessionInfo.mjs';
@@ -263,6 +263,7 @@ async function showSession(id) {
 // that started meanwhile), then follows the stream from the snapshot's cursor.
 async function load(id, gen, opened) {
   let page, detail;
+  const queueRev = (chat && chat.queueRev) || 0;
   try {
     const got = await readChat(api, id, { opened, stale: () => gen !== nav });
     if (!got) return;
@@ -279,7 +280,7 @@ async function load(id, gen, opened) {
     return;
   }
   if (gen !== nav) return;
-  setDetail(chat, detail);
+  setDetail(chat, detail, queueRev);
   retryDelay = 2000;
   if (infoOpen) drawInfo();
   document.title = displayTitle(detail.title, id) + ' · aimux';
@@ -307,11 +308,11 @@ async function load(id, gen, opened) {
   stream(id, gen, chat.lastSeq, chat.log);
 }
 
-// setDetail takes a newly read detail: its queue (absent when empty), and the
-// end of an offer to queue after a refused send (the detail says the state now).
-function setDetail(c, detail) {
-  c.detail = detail;
-  c.queue = detail.queue || null;
+// setDetail takes a newly read detail: its queue (absent when empty) unless a
+// newer one came while it was read (adoptDetail), and the end of an offer to
+// queue after a refused send (the detail says the state now).
+function setDetail(c, detail, queueRev) {
+  adoptDetail(c, detail, queueRev);
   c.busyOffer = false;
 }
 
@@ -328,10 +329,11 @@ async function readTerminal() {
   const c = chat;
   if (!c || c.mode !== 'terminal') return;
   let detail;
+  const queueRev = c.queueRev || 0;
   try { detail = await api('GET', detailURL(c.id)); } catch (_) { return; }
   if (chat !== c || c.mode !== 'terminal') return;
   if (!isTerminal(detail)) { reload(); return; }
-  setDetail(c, detail);
+  setDetail(c, detail, queueRev);
   prunePrompts(c);
   if (infoOpen) drawInfo();
 }
@@ -434,7 +436,7 @@ function retry(id, gen, why) {
 function receive(e) {
   if (e.kind === 'queue') { // a snapshot of the queue, of no turn: not a timeline event
     chat.lastSeq = Math.max(chat.lastSeq, e.seq);
-    if (e.data) chat.queue = e.data;
+    if (e.data) setQueue(chat, e.data);
     scheduleRender();
     return;
   }
@@ -465,10 +467,11 @@ function receive(e) {
 // record (and the session's stats) come from the session file.
 async function refreshDetail() {
   const c = chat;
+  const queueRev = c.queueRev || 0;
   try {
     const detail = await api('GET', '/v1/sessions/' + encodeURIComponent(c.id) + '?turns=30');
     if (chat !== c) return;
-    setDetail(c, detail);
+    setDetail(c, detail, queueRev);
     render();
     if (infoOpen) drawInfo(); // new stats
   } catch (_) { /* the next load reads it */ }
@@ -600,7 +603,7 @@ const queueView = createQueueView({
   errorNode: $('queue-error'),
   client: () => chat.queueClient,
   isTouch: () => 'ontouchstart' in window,
-  onQueue: (q) => { if (chat) chat.queue = q; },
+  onQueue: (q) => { if (chat) setQueue(chat, q); },
   onGone: () => $('prompt').focus(),
   // An edit whose message was sent first: its text goes to an empty box, else it is kept in an
   // offer (Add to queue, Dismiss) until one of them is used; each lost edit has its own. Focus
@@ -973,7 +976,7 @@ async function queueText(text, onQueued) {
       if ($('prompt').value.trim() === text) { $('prompt').value = ''; autoResize(); }
       drafts.delete(c.id);
     }
-    if (r.queue) c.queue = r.queue;
+    if (r.queue) setQueue(c, r.queue);
     if (c.mode === 'terminal') { c.lastSend = Date.now(); termPoll.schedule(); } // read often while it may be sent
   } else {
     queueNotice = r.message; // the text stays where it was

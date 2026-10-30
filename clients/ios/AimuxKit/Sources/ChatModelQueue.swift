@@ -3,6 +3,15 @@ import Foundation
 // The chat's queue on the Mac: added to from the composer (or a refused message, or a lost edit), edited, moved,
 // deleted and resumed through the server. What it shows comes from ChatQueue (the shared fixtures).
 extension ChatModel {
+    /// Takes a newly read detail. A queue that changed while it was read (a `queue` event, a change's
+    /// answer) is newer than the detail's, so it stays.
+    func adopt(_ detail: SessionDetail, readSince revision: Int) {
+        let newer = queueRevision != revision
+        let current = queue
+        session = detail
+        if newer { queue = current }
+    }
+
     /// The composer's main button: Send, or Add to queue while the session works, its terminal cannot take
     /// typing, its queue is sending, or a send was just refused busy.
     public var composerAction: ComposerAction {

@@ -86,6 +86,20 @@ export function queueErrorText(e) {
   return MESSAGES[e && e.code] || 'Could not change the queue: ' + ((e && e.message) || 'unknown error');
 }
 
+// setQueue records a newer queue on a chat (a queue event, a change's answer) and counts it, so a
+// detail read before it never puts the older queue back.
+export function setQueue(chat, queue) {
+  chat.queue = queue;
+  chat.queueRev = (chat.queueRev || 0) + 1;
+}
+
+// adoptDetail takes a newly read detail on a chat. Its queue (absent when empty) says the queue
+// now, unless the queue changed while it was read (readSince is chat.queueRev then).
+export function adoptDetail(chat, detail, readSince) {
+  chat.detail = detail;
+  if ((chat.queueRev || 0) === readSince) chat.queue = detail.queue || null;
+}
+
 // createQueueClient wraps request (login.mjs request: a 401 locks and
 // replays) for one session. Every call answers {ok: true, queue} (the queue
 // after the change; null when the read after an add failed) or {ok: false,

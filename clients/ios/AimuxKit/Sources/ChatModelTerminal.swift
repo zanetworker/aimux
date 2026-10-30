@@ -38,6 +38,7 @@ extension ChatModel {
     /// meanwhile, or no longer in the terminal).
     func readTerminal() async -> Bool {
         let mine = generation
+        let revision = queueRevision
         let detail: SessionDetail
         do {
             detail = try await source.session(id: sessionID, turns: Self.historyTurns)
@@ -52,7 +53,7 @@ extension ChatModel {
             await load()
             return false
         }
-        session = detail
+        adopt(detail, readSince: revision)
         pruneAnsweredPrompts()
         rebuild()
         return true
