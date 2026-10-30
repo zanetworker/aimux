@@ -35,7 +35,7 @@ public final class APIClient: Sendable {
 
     /// Update summary: a new title and description from the model now (capability `describe`).
     public func describe(sessionID: String) async throws -> DescribeResult {
-        try await send("POST", "/v1/sessions/\(sessionID)/describe")
+        try await send("POST", "/v1/sessions/\(sessionID)/describe", timeout: Self.describeTimeout)
     }
 
     /// Keyword search over session content (needs the `search` capability); 1-100 hits.
@@ -137,8 +137,12 @@ public final class APIClient: Sendable {
     }
 
     /// `signedIn: false` for the routes open without a session (health), which never wait for an unlock.
+    /// Update summary waits for the model: the server allows the API and then `claude -p` 60 s each.
+    static let describeTimeout: TimeInterval = 130
+
     private func send<T: Decodable>(_ method: String, _ path: String, query: [URLQueryItem] = [],
-                                    body: Data? = nil, signedIn: Bool = true) async throws -> T {
+                                    body: Data? = nil, signedIn: Bool = true,
+                                    timeout: TimeInterval = 20) async throws -> T {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.path = path
         components?.queryItems = query.isEmpty ? nil : query
@@ -152,7 +156,7 @@ public final class APIClient: Sendable {
         }
         // Only a GET needs it: a change counts as use on the server by itself.
         if Interaction.isActive && method == "GET" { request.setValue("1", forHTTPHeaderField: Interaction.header) }
-        request.timeoutInterval = 20
+        request.timeoutInterval = timeout
 
         guard signedIn, let auth else { return try await perform(request) }
         var retried = false

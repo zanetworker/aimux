@@ -128,6 +128,8 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
         let request = try #require(StubProtocol.requests(host: host).first)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path() == "/v1/sessions/s1/describe")
+        // The server may run the API and then claude -p, 60 s each.
+        #expect(request.timeoutInterval > 120)
     }
 
     @Test func describeRefusalIsTyped() async {
