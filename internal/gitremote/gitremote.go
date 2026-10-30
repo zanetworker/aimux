@@ -44,6 +44,9 @@ func WebURL(remote string) (string, bool) {
 		// scp-like: user@host:path
 		rest := remote[strings.Index(remote, "@")+1:]
 		i := strings.Index(rest, ":")
+		if i < 0 {
+			return "", false // the colon is before the @: not user@host:path
+		}
 		host, path = rest[:i], rest[i+1:]
 		if !hostOK(host) {
 			return "", false

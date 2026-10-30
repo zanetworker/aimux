@@ -38,6 +38,7 @@ func TestWebURL(t *testing.T) {
 		{"https://token@gitlab.example.com/g/widget", "https://gitlab.example.com/g/widget", true},
 		// unknown host, local paths, junk
 		{"git@bitbucket.org:acme/widget.git", "", false},
+		{"host:path@name", "", false}, // the colon only before the @: not scp-like, never a panic
 		{"https://example.com/acme/widget.git", "", false},
 		{"/srv/git/widget.git", "", false},
 		{"", "", false},
