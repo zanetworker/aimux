@@ -62,13 +62,16 @@ Native iPhone app (SwiftUI) for aimux's remote API v1, so the owner can find, fo
 2. Command output in steps (not stored yet).
 3. Detail makes history payloads larger on the 2 s terminal poll; consider gzip or a per-turn byte budget.
 4. Next steps of the design's build order, each with its own plan: new session sheet redesign (the web one still has the old style), attachments and voice, push and Live Activity.
-5. Decide whether to squash `feat/clients` history before the first push; then push and open a PR when the owner says so.
+5. `feat/clients` was squashed to one commit plus review fixes and pushed as a branch (not main); open a PR when the owner says so. The unsquashed history is kept locally as `feat/clients-history` (it holds the iPhone's device id and real session titles: never push it).
 6. Hardware check of device login on the owner's iPhone: pair, unlock, then change the Face ID enrollment and confirm the app asks to pair again (the simulator has no Secure Enclave).
 7. Hardware check of the web client's unlock in Safari on the iPhone: the **Unlock with Face ID** tap starts Face ID (Safari may require the call to follow a tap directly).
 8. Live check of the chat queue and the new guard (not done): the guard with a hotkey window, with Stage Manager and with another app in front, and a real working screen (Claude Code's working line) against `terminput.Working`; then a two-item queue going one per turn. Both are still not verified live.
-9. A session detail snapshot can overwrite a newer `queue` event in both clients (the next change or poll corrects it).
+9. Fixed for detail reads (`adopt`, `adoptDetail`). Still open on iOS: the queue read after an add and a change's answer (`changeQueue`) can overwrite a newer `queue` event; apply the same revision check.
 10. tmux driver for the queue and terminal input (the driver interface allows it).
 11. Flaky UI tests, about 1 run in 5, also before finding sessions: the ChatUITests media card test (`testMediaCardsPlayInPlaceAndStop`) and the LongChat timeline test (`testTimelineStaysOnScreenWhileTheHistoryMovesOn`).
 12. Prices for the 5.5 models are missing from the cost table, so naming usage shows an unknown cost.
 13. `internal/insight` still uses 4.x model ids.
 14. Opening a pinned Finished session does not mark it seen, in both clients.
+15. Pre-push review findings left open (P2): a direct send retried after a lost response gets `409 busy` once a queue item exists, instead of its remembered turn (`internal/remoteapi/api.go`, also the terminal route), so a client may offer to queue it again and it may run twice; resolve idempotency keys before the queue gate.
+16. Web Lock waits for the logout request before showing the lock, so a stalled request leaves the session visible (`login.mjs` `lock`); lock locally first.
+17. iPhone: when the login expires or is revoked with a sheet open (session info, queue edit), the lock screen shows under the sheet; dismiss or cover presented sheets.

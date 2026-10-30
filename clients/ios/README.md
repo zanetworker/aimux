@@ -48,7 +48,7 @@ DEBUG launch arguments for screenshots and UI tests: `-demo finding|list|twenty|
 | `AimuxKit/Sources/SavedPrompt.swift` | `unwrapSavedPrompt`, `userMessageDisplay` (a saved message without Claude Code's wrappers: text, slash commands and command output as parts, image placeholders as chips) and `savedPromptAsTyped` (the form the pending match compares) |
 | `AimuxKit/Sources/ChatModel.swift` | Chat screen state: consistent load, live stream with 2-30 s reconnect backoff, send with a kept idempotency key, Stop, answers; read only for never-started sessions and for terminal sessions from a server without terminal input; reads the session again when a turn ends, and loads again on `open_in_terminal` (send) or `not_running` (Stop) |
 | `AimuxKit/Sources/ChatModelTerminal.swift` | Terminal sessions (`terminal` in the detail): history read every 2 s while busy or for 2 minutes after a send, else 15 s; messages typed into the Mac's terminal (never retried automatically; a Retry keeps the key); one re-read on `not_at_input` or `not_submitted`; the terminal prompt answered by key, collapsing on `prompt_changed`/`no_prompt` |
-| `AimuxKit/Sources/ChatQueue.swift`, `ChatModelQueue.swift` | The chat queue (`QueueStatus`, `QueueItem`, the composer's Send or Add to queue, rows and Resume, per `api/testdata/clients/queue/`); the model adds, edits, moves, deletes and resumes through `/v1/sessions/{id}/queue`, applies `queue` events (`events?queue=1`) and keeps a lost edit for queueing again. `App/Components/QueueList.swift` draws it under the composer (long press on Send queues from a free session) |
+| `AimuxKit/Sources/ChatQueue.swift`, `ChatModelQueue.swift` | The chat queue (`QueueStatus`, `QueueItem`, the composer's Send or Add to queue, rows and Resume, per `api/testdata/clients/queue/`); the model adds, edits, moves, deletes and resumes through `/v1/sessions/{id}/queue`, applies `queue` events (`events?queue=1`) and keeps a lost edit for queueing again. `App/Components/QueueList.swift` draws it under the composer (the smaller Add to queue button beside Send queues from a free session) |
 | `AimuxKit/Sources/ChatDrafts.swift` | Per-session draft and failed message, kept while the app runs so a closed chat loses neither |
 | `AimuxKit/Sources/ChatPresentation.swift` | Chat helpers: the Next bar target, the header status and read-only line, info sheet formats |
 | `AimuxKit/Sources/MarkdownTree.swift` | `MDBlock`/`MDInline`, the shared Markdown block tree, Codable in the fixtures' wire shape |
@@ -79,7 +79,7 @@ DEBUG launch arguments for screenshots and UI tests: `-demo finding|list|twenty|
 
 ## Backlog
 
-Not shown in the chat yet: result lines of steps and step detail.
+Not shown in the chat yet: what a command printed (aimux does not store command output).
 
 1. New session in a recent project folder, redesigned like the chat.
 2. Attachments in the composer.
