@@ -23,7 +23,7 @@ test('terminalErrorText: terminal refusals use the reason line, bad text its own
   assert.equal(terminalErrorText(err('mac_in_use')), 'Your Mac is in use right now');
   assert.equal(terminalErrorText(err('not_in_terminal')), "Can't reach the terminal");
   assert.equal(terminalErrorText(err('bad_text')), "The terminal can't take that text");
-  assert.equal(terminalErrorText(err('not_submitted')), 'Your message is in the box but not sent; a prompt appeared');
+  assert.equal(terminalErrorText(err('not_submitted')), 'Your message is in the box on your Mac, not sent yet; Retry sends it');
   assert.equal(terminalErrorText(err('internal', 'the terminal did not answer')), 'the terminal did not answer');
   assert.equal(terminalErrorText(err('', 'Failed to fetch')), 'Failed to fetch');
 });

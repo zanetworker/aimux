@@ -373,8 +373,22 @@ func (s *Service) record(sessionID, what string, err error) {
 	if s.log == nil {
 		return
 	}
-	_, _ = fmt.Fprintf(s.log, "%s %q %s %s\n", s.now().UTC().Format(time.RFC3339), sessionID, what, Code(err))
+	result := Code(err)
+	var ns *notSubmittedErr
+	if errors.As(err, &ns) {
+		result += " " + ns.cause
+	}
+	_, _ = fmt.Fprintf(s.log, "%s %q %s %s\n", s.now().UTC().Format(time.RFC3339), sessionID, what, result)
 }
+
+// notSubmittedErr is ErrNotSubmitted with the check that stopped the send,
+// for the attempt log (a fixed word, never text).
+type notSubmittedErr struct{ cause string }
+
+func (e *notSubmittedErr) Error() string { return ErrNotSubmitted.Error() }
+func (e *notSubmittedErr) Unwrap() error { return ErrNotSubmitted }
+
+func notSubmitted(cause string) error { return &notSubmittedErr{cause} }
 
 // registryBusy reports whether Claude's registry, when the sessions source
 // reads it, calls the session busy.
@@ -414,38 +428,43 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	if Working(scr) || s.registryBusy(sessionID) {
 		return ErrBusy
 	}
-	if !InputBoxEmpty(scr) {
+	// A send that typed but did not press Enter (ErrNotSubmitted) left this
+	// very text in the box: its retry presses Enter and types nothing.
+	waiting := !InputBoxEmpty(scr) && TextShownInBox(scr, text)
+	if !InputBoxEmpty(scr) && !waiting {
 		return ErrNotAtInput
 	}
 	if err := s.foregroundOK(t); err != nil {
 		return err // changed since locate: a shell may have the pane now
 	}
-	cctx, cancel := s.withTimeout(ctx)
-	err = d.Type(cctx, p, text)
-	cancel()
-	if err != nil {
-		return fmt.Errorf("%s: type: %w", d.Name(), err)
-	}
-	// A prompt may have appeared while typing (a background task), and
-	// Enter would then answer it; the owner may have focused this session.
-	// Look again first.
-	if err := s.sleep(ctx, settle); err != nil {
-		return ErrNotSubmitted
-	}
-	scr, err = s.readScreen(ctx, d, p)
-	if err != nil {
-		return err
-	}
-	if !TextInBox(scr, text) {
-		return ErrNotSubmitted
+	if !waiting {
+		cctx, cancel := s.withTimeout(ctx)
+		err = d.Type(cctx, p, text)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("%s: type: %w", d.Name(), err)
+		}
+		// A prompt may have appeared while typing (a background task), and
+		// Enter would then answer it; the owner may have focused this session.
+		// Look again first.
+		if err := s.sleep(ctx, settle); err != nil {
+			return notSubmitted("cancelled")
+		}
+		scr, err = s.readScreen(ctx, d, p)
+		if err != nil {
+			return err
+		}
+		if !TextInBox(scr, text) {
+			return notSubmitted("not_in_box")
+		}
 	}
 	if err := s.inUse(ctx, d, t); err != nil {
-		return ErrNotSubmitted // the text is in the box either way
+		return notSubmitted("in_use") // the text is in the box either way
 	}
 	if err := s.foregroundOK(t); err != nil {
 		return err
 	}
-	cctx, cancel = s.withTimeout(ctx)
+	cctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if err := d.Key(cctx, p, KeyEnter); err != nil {
 		return fmt.Errorf("%s: enter: %w", d.Name(), err)

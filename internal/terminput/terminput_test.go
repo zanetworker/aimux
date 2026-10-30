@@ -661,7 +661,7 @@ func TestSendNoEnterWhenPromptAppears(t *testing.T) {
 	if len(e.drv.sent) != 1 || len(e.drv.keys) != 0 {
 		t.Fatalf("sent %q keys %v, want the text typed and no Enter", e.drv.sent, e.drv.keys)
 	}
-	if !strings.Contains(e.log.String(), " not_submitted\n") {
+	if !strings.Contains(e.log.String(), " not_submitted not_in_box\n") { // which check stopped it, never the text
 		t.Fatalf("log = %q", e.log.String())
 	}
 	// not remembered: a retry with the same key reads the screen again
@@ -1172,5 +1172,36 @@ func TestSendBusyByRegistry(t *testing.T) {
 	reg.status["s1"] = "idle"
 	if err := e.svc.Send(ctx, "s1", "hi", ""); err != nil || len(e.drv.sent) != 1 {
 		t.Fatalf("idle registry: %v, typed %q", err, e.drv.sent)
+	}
+}
+
+// A retry after not_submitted finds its own text still in the box: it presses
+// Enter instead of refusing the box as not empty, and types nothing.
+func TestSendSubmitsTheSameTextWaitingInTheBox(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = boxWith("give me an example")
+	if err := e.svc.Send(context.Background(), "s1", "give me an example", "k2"); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 1 || e.drv.keys[0] != KeyEnter {
+		t.Fatalf("sent %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
+	}
+	// Other text in the box is the owner's draft: still refused, nothing pressed.
+	e = newEnv(t)
+	e.drv.screen = boxWith("my own draft")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_at_input")
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+		t.Fatalf("sent %q keys %v over a draft", e.drv.sent, e.drv.keys)
+	}
+}
+
+func TestSendLogsWhyItWasNotSubmitted(t *testing.T) {
+	e := newEnv(t)
+	e.sys.idle = 5
+	// The owner focuses this session while it types: the check before Enter sees it.
+	e.drv.front, e.drv.focusTTYs = true, []string{"/dev/ttys009", "/dev/ttys001"}
+	wantCode(t, e.svc.Send(context.Background(), "s1", "hello", ""), "not_submitted")
+	if !strings.Contains(e.log.String(), " not_submitted in_use\n") {
+		t.Fatalf("log = %q", e.log.String())
 	}
 }

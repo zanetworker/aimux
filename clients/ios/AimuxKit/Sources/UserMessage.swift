@@ -32,7 +32,7 @@ extension APIError {
         case .server(_, .badText, let message):
             UserMessage(title: "The terminal can't take that text", detail: message)
         case .server(_, .notSubmitted, let message):
-            UserMessage(title: "Your message is in the box but not sent; a prompt appeared", detail: message)
+            UserMessage(title: "Your message is in the box on your Mac, not sent yet; Retry sends it", detail: message)
         case .server(let status, _, let message):
             UserMessage(title: "Something went wrong", detail: "\(message) (HTTP \(status))")
         case .http(401):

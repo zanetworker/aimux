@@ -104,7 +104,7 @@ final class TestClock: @unchecked Sendable {
 
         #expect(source.count("detail") == 2)
         #expect(chat.pending?.failure?.userMessage.title
-                == "Your message is in the box but not sent; a prompt appeared")
+                == "Your message is in the box on your Mac, not sent yet; Retry sends it")
         #expect(chat.result.pendingApproval == "p-1")
         chat.close()
     }

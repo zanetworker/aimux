@@ -37,7 +37,7 @@ const TERMINAL_CODES = new Set(['disabled', 'not_in_terminal', ...Object.keys(RE
 export function terminalErrorText(e) {
   if (TERMINAL_CODES.has(e.code)) return terminalReasonText(e.code);
   if (e.code === 'bad_text') return "The terminal can't take that text";
-  if (e.code === 'not_submitted') return 'Your message is in the box but not sent; a prompt appeared';
+  if (e.code === 'not_submitted') return 'Your message is in the box on your Mac, not sent yet; Retry sends it';
   return e.message;
 }
 
