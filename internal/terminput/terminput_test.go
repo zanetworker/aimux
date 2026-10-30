@@ -1263,7 +1263,8 @@ func TestLeftTextIsForgottenOnceTheBoxChanges(t *testing.T) {
 	e := newEnv(t)
 	e.drv.afterType = boxWith("something else")
 	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
-	e.drv.screen = idleScreen // the owner cleared it at the Mac
+	e.drv.screen = idleScreen // the owner cleared it at the Mac, a few seconds later
+	e.now = e.now.Add(3 * time.Second)
 	if st := e.svc.Status(context.Background(), "s1", "idle"); !st.CanType {
 		t.Fatalf("status = %+v", st)
 	}
@@ -1288,5 +1289,22 @@ func TestStaleStatusReadKeepsTheLeftText(t *testing.T) {
 	e.drv.screen, e.drv.sent = boxWith("give me an example"), nil
 	if err := e.svc.Send(context.Background(), "s1", "give me an example", ""); err != nil {
 		t.Fatalf("retry: %v", err)
+	}
+}
+
+// Right after typing, the screen may not show the text yet: a read then
+// does not drop the record.
+func TestReadWhileTheTextSettlesKeepsTheRecord(t *testing.T) {
+	e := newEnv(t)
+	e.drv.afterType = boxWith("something else")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
+	e.svc.forgetLeftUnlessShown("s1", idleScreen, e.svc.leftGeneration()) // read 0 s after typing
+	if e.svc.leftText("s1") == "" {
+		t.Fatal("record dropped while the text was settling")
+	}
+	e.now = e.now.Add(3 * time.Second)
+	e.svc.forgetLeftUnlessShown("s1", idleScreen, e.svc.leftGeneration())
+	if e.svc.leftText("s1") != "" {
+		t.Fatal("record kept after the box showed empty")
 	}
 }

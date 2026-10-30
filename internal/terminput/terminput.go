@@ -191,7 +191,11 @@ type Service struct {
 	leftMu  sync.Mutex
 	left    map[string]string
 	leftGen int // counts records, so a screen read before one never drops it
+	leftAt  map[string]time.Time
 }
+
+// leftSettle is how long after typing a screen may not show the text yet.
+const leftSettle = 2 * time.Second
 
 // leftGeneration is taken before reading a screen that may drop a record.
 func (s *Service) leftGeneration() int {
@@ -214,7 +218,8 @@ func (s *Service) forgetLeftUnlessShown(sessionID, scr string, gen int) {
 	s.leftMu.Lock()
 	defer s.leftMu.Unlock()
 	left := s.left[sessionID]
-	if left != "" && s.leftGen == gen && ParsePrompt(scr) == nil && !WordsInBox(scr, left) {
+	settling := s.now().Sub(s.leftAt[sessionID]) < leftSettle
+	if left != "" && s.leftGen == gen && !settling && ParsePrompt(scr) == nil && !WordsInBox(scr, left) {
 		delete(s.left, sessionID)
 	}
 }
@@ -226,13 +231,14 @@ func (s *Service) setLeft(sessionID, text string) {
 		delete(s.left, sessionID)
 	} else {
 		s.left[sessionID] = text
+		s.leftAt[sessionID] = s.now()
 		s.leftGen++
 	}
 }
 
 // NewService builds a Service. log may be nil.
 func NewService(cfg config.TerminalInputConfig, sessions Sessions, sys System, log io.Writer, drivers ...Driver) *Service {
-	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}, left: map[string]string{}}
+	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}, left: map[string]string{}, leftAt: map[string]time.Time{}}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
