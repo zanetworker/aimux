@@ -15,8 +15,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/clipboard"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/jump"
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/sessions"
 )
@@ -223,12 +223,10 @@ func FocusLiveVia(discover func() ([]agent.Agent, error)) func(string) (string, 
 			return "", false
 		}
 		for _, a := range agents {
-			if a.SessionID != sessionID {
-				continue
-			}
-			if tty := jump.TTYForPID(a.PID); tty != "" {
-				where, ok, _ := jump.ITerm2FocusLocate(tty)
-				return where, ok
+			if a.SessionID == sessionID {
+				if res, err := controller.FocusAgent(a, controller.DefaultFocuser()); err == nil {
+					return res.Where, true
+				}
 			}
 		}
 		return "", false

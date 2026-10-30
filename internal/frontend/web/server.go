@@ -30,6 +30,7 @@ type Server struct {
 	launchFn     func(opts spawn.LaunchOpts) (spawn.LaunchResult, error)
 	providerLookupFn func(providerName string) interface{ ParseTrace(string) ([]trace.Turn, error) }
 	killFn           func(pid int, tmuxSession string) error
+	focuser          controller.Focuser
 	ctrl             *controller.Controller
 	pluginExec       *plugin.Executor
 	cfg              config.Config
@@ -48,7 +49,12 @@ type Server struct {
 }
 
 func NewServer(port int) *Server {
-	return &Server{port: port}
+	return &Server{port: port, focuser: controller.DefaultFocuser()}
+}
+
+// SetFocuser replaces how the server raises an agent's terminal pane.
+func (s *Server) SetFocuser(f controller.Focuser) {
+	s.focuser = f
 }
 
 func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
@@ -200,6 +206,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/environments", s.handleEnvironments)
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/agents/{id}/kill", s.handleKill)
+	mux.HandleFunc("POST /api/agents/{id}/focus", s.handleFocus)
 
 	mux.HandleFunc("GET /api/directories/browse", s.handleBrowseDir)
 	mux.HandleFunc("GET /api/directories/recent", s.handleRecentDirs)

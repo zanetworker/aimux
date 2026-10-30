@@ -716,3 +716,30 @@ func (a App) resumeSession(sessionID, workingDir, sessionFilePath, mode string) 
 
 // promptKill shows a confirmation prompt before killing the selected agent.
 // For session-only entries (PID=0), offers to remove and delete trace files.
+
+// focusResultMsg carries the outcome of an F-key focus back to Update.
+type focusResultMsg struct{ hint string }
+
+// focusSelectedPane brings the selected agent's own terminal pane to the front.
+// osascript can block on a macOS Automation prompt, so it runs as a tea.Cmd.
+func (a App) focusSelectedPane() (tea.Model, tea.Cmd) {
+	selected := a.agentsView.Selected()
+	if selected == nil {
+		a.statusHint = "No agent selected"
+		return a, nil
+	}
+	ag := *selected
+	f := a.focuser
+	a.statusHint = "Focusing " + ag.ShortProject() + "..."
+	return a, func() tea.Msg {
+		res, err := controller.FocusAgent(ag, f)
+		switch {
+		case err == nil:
+			return focusResultMsg{fmt.Sprintf("Focused %s: %s", ag.ShortProject(), res.Where)}
+		case res.Hint != "":
+			return focusResultMsg{fmt.Sprintf("No iTerm2 pane; run: %s", res.Hint)}
+		default:
+			return focusResultMsg{fmt.Sprintf("Focus failed: %v", err)}
+		}
+	}
+}

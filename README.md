@@ -83,6 +83,7 @@ Requires **tmux**. Auto-discovers running Claude and Codex agents.
 - Star/pin sessions to find them later across restarts
 - Profiles: save named flag bundles for repeated use
 - Session history with browse, search, path filter, and resume
+- Jump to a running agent's own iTerm2 pane (`F` in the TUI, **focus** on the web, `aimux jump` on the CLI)
 - LLM-powered title generation for untitled sessions
 - Kubernetes support: run agents on K8s pods
 
@@ -102,6 +103,7 @@ aimux is built for AI agents. Commands support `--json` for structured output (t
 ```bash
 aimux agents --json                              # discover running agents
 aimux sessions --list --json --limit 5           # search past sessions
+aimux jump <session-id> --json                   # bring a running session's iTerm2 pane to the front
 aimux spawn claude --dir ./proj --wait --json    # start and wait for completion
 aimux agent-context                              # full CLI schema for agents
 aimux profile save work --provider claude        # save reusable config

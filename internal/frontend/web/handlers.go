@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1265,4 +1266,46 @@ func (s *Server) handleGetROIConfig(w http.ResponseWriter, _ *http.Request) {
 		"hourlyRate":  rate,
 		"multipliers": history.TaskMultiplier,
 	})
+}
+
+// handleFocus brings the iTerm2 pane of the running agent {id} (session ID,
+// unique prefix or PID) to the front.
+func (s *Server) handleFocus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fail := func(status int, err error, extra map[string]any) {
+		body := map[string]any{"error": err.Error(), "focused": false}
+		for k, v := range extra {
+			body[k] = v
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(body)
+	}
+	if s.discoverFn == nil {
+		fail(http.StatusServiceUnavailable, errors.New("not configured"), nil)
+		return
+	}
+	agents, err := s.cachedDiscover()
+	if err != nil {
+		fail(http.StatusInternalServerError, err, nil)
+		return
+	}
+	target, err := controller.FindLiveAgent(agents, r.PathValue("id"))
+	switch {
+	case errors.Is(err, controller.ErrAmbiguousAgent):
+		fail(http.StatusConflict, err, nil)
+		return
+	case err != nil:
+		fail(http.StatusNotFound, err, nil)
+		return
+	}
+	res, err := controller.FocusAgent(target, s.focuser)
+	switch {
+	case errors.Is(err, controller.ErrNoPane):
+		fail(http.StatusUnprocessableEntity, err, map[string]any{"hint": res.Hint, "pid": res.PID, "session_id": res.SessionID})
+		return
+	case err != nil:
+		fail(http.StatusBadGateway, err, map[string]any{"hint": res.Hint})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(res)
 }

@@ -40,6 +40,7 @@ export function CardGrid({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [starredFiles, setStarredFiles] = useState<Set<string>>(new Set());
   const [killing, setKilling] = useState<Set<string>>(new Set());
+  const [focusNote, setFocusNote] = useState<Record<string, { label: string; detail: string }>>({});
 
   useEffect(() => {
     const starred = new Set<string>();
@@ -83,6 +84,24 @@ export function CardGrid({
     } catch {
       setKilling(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
+  };
+
+  // Raise the agent's own terminal pane; the button briefly shows the outcome.
+  const handleFocus = async (id: string) => {
+    let note = { label: 'failed', detail: 'request failed' };
+    try {
+      const resp = await fetch(`/api/agents/${id}/focus`, { method: 'POST' });
+      const body = await resp.json().catch(() => ({}));
+      note = resp.ok
+        ? { label: 'focused', detail: body.where || '' }
+        : { label: resp.status === 422 ? 'no pane' : 'failed', detail: body.hint ? `run: ${body.hint}` : (body.error || resp.statusText) };
+    } catch { /* keep the failed note */ }
+    setFocusNote(prev => ({ ...prev, [id]: note }));
+    // Clear only this click's note, so an earlier click's timer can't wipe a newer one.
+    setTimeout(() => setFocusNote(prev => {
+      if (prev[id] !== note) return prev;
+      const n = { ...prev }; delete n[id]; return n;
+    }), 3000);
   };
 
   const toggleGroup = (name: string) => {
@@ -341,6 +360,21 @@ export function CardGrid({
                           Deleting…
                         </span>
                       ) : (
+                        <>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleFocus(id); }}
+                          title={focusNote[id]?.detail || 'Bring this agent\'s terminal pane to the front'}
+                          style={{
+                            padding: '2px 8px', borderRadius: 3, fontSize: 10, fontWeight: 600,
+                            border: '1px solid var(--border)', background: 'transparent',
+                            color: 'var(--fg-3)', cursor: 'pointer', flexShrink: 0,
+                            transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--fg-2)'; e.currentTarget.style.color = 'var(--fg)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--fg-3)'; }}
+                        >
+                          {focusNote[id]?.label || 'focus'}
+                        </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleKill(agent.SessionID || agent.PID.toString()); }}
                           title="Kill agent (SIGTERM)"
@@ -355,6 +389,7 @@ export function CardGrid({
                         >
                           kill
                         </button>
+                        </>
                       )}
                     </div>
                   );
