@@ -71,6 +71,7 @@ func (v *HelpView) View() string {
 	writeHelp(&b, "*", "Star/pin selected session")
 	writeHelp(&b, "B", "Starred sessions view")
 	writeHelp(&b, "C", "Copy session ID to clipboard")
+	writeHelp(&b, "F", "Focus the agent's own terminal pane (iTerm2)")
 	writeHelp(&b, "d", "Toggle git diff preview in right panel")
 	writeHelp(&b, "Tab", "Switch focus to preview panel")
 	writeHelp(&b, "q", "Quit aimux")

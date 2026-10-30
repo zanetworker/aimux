@@ -25,6 +25,7 @@ aimux sessions --list --json
 aimux version --json
 aimux spawn claude --dry-run --json
 aimux resume <id> --dry-run --json
+aimux jump <id> --json
 aimux profile list --json
 aimux feedback "message" --json
 ```
@@ -41,7 +42,7 @@ Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as t
 | 3 | Not found (no sessions, no agents) |
 | 4 | Config error |
 
-`aimux chat`, `aimux remote serve` and `aimux mcp proxy` return 1 for every failure, including missing arguments, an unknown session and a bad setting.
+`aimux chat`, `aimux jump`, `aimux remote serve` and `aimux mcp proxy` return 1 for every failure, including missing arguments, an unknown session and a bad setting.
 
 ## Non-Interactive Mode
 

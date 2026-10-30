@@ -135,6 +135,7 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		body interface{}
 	}{
 		{"/api/agents/1/archive", nil},
+		{"/api/agents/1/focus", nil},
 		{"/api/agents/1/annotate", map[string]interface{}{"turn": 1, "label": "GOOD"}},
 		{"/api/sessions/nonexistent/export/jsonl", nil},
 		{"/api/sessions/nonexistent/export/otel", nil},
