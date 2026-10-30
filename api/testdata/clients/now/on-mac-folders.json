@@ -1,0 +1,99 @@
+{
+  "name": "on your Mac grouped by project: folders by their newest session, sessions newest first, one folder per path",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "m3",
+      "provider": "claude",
+      "title": "Queue tests",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T06:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Remote API review",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Draft post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-26T07:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m4",
+      "provider": "claude",
+      "title": "Docs index",
+      "project": "/work/docs",
+      "lastActive": "2026-10-26T05:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m5",
+      "provider": "claude",
+      "title": "Other docs folder",
+      "project": "/src/docs",
+      "lastActive": "2026-10-26T04:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5"
+    ],
+    "onMacTotal": 5,
+    "onMacFolders": [
+      {
+        "project": "/src/aimux",
+        "name": "aimux",
+        "sessions": [
+          "m1",
+          "m3"
+        ]
+      },
+      {
+        "project": "/src/blog",
+        "name": "blog",
+        "sessions": [
+          "m2"
+        ]
+      },
+      {
+        "project": "/work/docs",
+        "name": "docs",
+        "sessions": [
+          "m4"
+        ]
+      },
+      {
+        "project": "/src/docs",
+        "name": "docs",
+        "sessions": [
+          "m5"
+        ]
+      }
+    ],
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 5
+    }
+  }
+}

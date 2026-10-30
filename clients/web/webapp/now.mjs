@@ -114,6 +114,7 @@ export function rankNow({ sessions, activity, seen, now, lastOnMac = null }) {
   const stillWorking = working.filter(left).sort((a, b) => newestFirst(a.session, b.session));
   const stillOnMac = terminals.filter(left).map((i) => i.session).sort(newestFirst);
   const showOnMac = needsYou.length + finished.length + stillWorking.length <= ON_MAC_COLLAPSE_ABOVE;
+  const onMac = showOnMac ? stillOnMac.slice(0, ON_MAC_LIMIT) : [];
 
   return {
     lastOnMac: last,
@@ -121,7 +122,8 @@ export function rankNow({ sessions, activity, seen, now, lastOnMac = null }) {
     needsYou,
     finished,
     working: workingSection(stillWorking, lastActive),
-    onMac: showOnMac ? stillOnMac.slice(0, ON_MAC_LIMIT) : [],
+    onMac,
+    onMacFolders: byProject(onMac.map((session) => ({ session, activity: byId.get(session.id).activity }))),
     onMacTotal: stillOnMac.length,
     summary,
   };
@@ -133,24 +135,29 @@ export function descriptionLine(session) {
   return d || null;
 }
 
-function workingSection(working, lastActive) {
-  if (working.length <= FLAT_WORKING_LIMIT) return { list: working.map((item) => ({ kind: 'session', ...item })) };
-  // `working` is newest first, so the first item met for a project is its newest.
-  const byProject = new Map();
-  for (const item of working) {
-    if (!byProject.has(item.session.project)) byProject.set(item.session.project, []);
-    byProject.get(item.session.project).push(item);
+// byProject groups items by project path into folder rows, in the order first met. Items come
+// newest first, so each folder's first item is its newest and folders follow their newest session.
+function byProject(items) {
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.session.project)) groups.set(item.session.project, []);
+    groups.get(item.session.project).push(item);
   }
   // A folder row starts expanded; collapsing it is the view's state.
-  const groups = [...byProject].map(([project, items]) => ({
+  return [...groups].map(([project, grouped]) => ({
     kind: 'folder',
     expanded: true,
     project,
     name: project.split('/').filter(Boolean).pop() ?? project,
-    count: items.length,
-    newest: items[0],
-    items,
+    count: grouped.length,
+    newest: grouped[0],
+    items: grouped,
   }));
+}
+
+function workingSection(working, lastActive) {
+  if (working.length <= FLAT_WORKING_LIMIT) return { list: working.map((item) => ({ kind: 'session', ...item })) };
+  const groups = byProject(working);
   groups.sort((a, b) => b.count - a.count
     || lastActive(b.newest.session) - lastActive(a.newest.session)
     || byString(a.project, b.project));

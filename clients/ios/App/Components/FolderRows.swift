@@ -66,6 +66,8 @@ enum FolderLayout {
 struct SingleFolderRow: View {
     let group: ProjectGroup
     let format: SessionRowFormat
+    /// The live step line; off for On your Mac, whose sessions are not working.
+    var showsStep = true
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -84,10 +86,12 @@ struct SingleFolderRow: View {
                     if let description = item.session.descriptionLine {
                         DescriptionLine(text: description, stacked: stacked)
                     }
-                    StepLine(activity: item.activity, format: format)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if showsStep {
+                        StepLine(activity: item.activity, format: format)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 RowTime(date: item.session.lastActive, format: format)

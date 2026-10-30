@@ -51,6 +51,8 @@ public struct NowView: Equatable, Sendable {
     public let finished: [NowItem]
     public let working: WorkingSection
     public let onMac: [Session]
+    /// `onMac` grouped by project, the folder with the newest session first.
+    public var onMacFolders: [ProjectGroup] = []
     public let onMacTotal: Int
     public let summary: NowSummary
 }
@@ -86,6 +88,7 @@ public func rankNow(sessions: [Session], activity: [String: Activity], seen: [St
         .sorted { ranking.newestFirst($0.session, $1.session) }
     let onMac = found.terminals.filter { !taken.contains($0.id) }.sorted(by: ranking.newestFirst)
     let showOnMac = needsYou.count + finished.count + working.count <= Rules.onMacCollapseAbove
+    let shownOnMac = showOnMac ? Array(onMac.prefix(Rules.onMacLimit)) : []
 
     return NowView(
         lastOnMac: placed.last,
@@ -94,7 +97,8 @@ public func rankNow(sessions: [Session], activity: [String: Activity], seen: [St
         needsYou: needsYou,
         finished: finished,
         working: workingSection(working, lastActive: ranking.lastActive),
-        onMac: showOnMac ? Array(onMac.prefix(Rules.onMacLimit)) : [],
+        onMac: shownOnMac,
+        onMacFolders: byProject(shownOnMac.map { NowItem(session: $0, activity: activity[$0.id] ?? .none) }),
         onMacTotal: onMac.count,
         summary: summary
     )
@@ -186,20 +190,25 @@ private struct Ranking {
     }
 }
 
-private func workingSection(_ working: [NowItem], lastActive: (Session) -> Date) -> WorkingSection {
-    guard working.count > Rules.flatWorkingLimit else { return .list(working) }
-    // `working` is newest first, so the first item met for a project is its newest.
+/// Groups items by project path into folder rows, in the order first met. Items come newest first, so each
+/// folder's first item is its newest and folders follow their newest session.
+private func byProject(_ items: [NowItem]) -> [ProjectGroup] {
     var order: [String] = []
-    var byProject: [String: [NowItem]] = [:]
-    for item in working {
-        if byProject[item.session.project] == nil { order.append(item.session.project) }
-        byProject[item.session.project, default: []].append(item)
+    var grouped: [String: [NowItem]] = [:]
+    for item in items {
+        if grouped[item.session.project] == nil { order.append(item.session.project) }
+        grouped[item.session.project, default: []].append(item)
     }
-    let groups = order.map { project -> ProjectGroup in
-        let items = byProject[project] ?? []
+    return order.map { project -> ProjectGroup in
+        let items = grouped[project] ?? []
         let name = project.split(separator: "/").last.map(String.init) ?? project
         return ProjectGroup(project: project, name: name, count: items.count, newest: items[0], items: items)
-    }.sorted {
+    }
+}
+
+private func workingSection(_ working: [NowItem], lastActive: (Session) -> Date) -> WorkingSection {
+    guard working.count > Rules.flatWorkingLimit else { return .list(working) }
+    let groups = byProject(working).sorted {
         if $0.count != $1.count { return $0.count > $1.count }
         let (lhs, rhs) = (lastActive($0.newest.session), lastActive($1.newest.session))
         return lhs == rhs ? $0.project < $1.project : lhs > rhs

@@ -9,7 +9,7 @@ private let fixtureNames = [
     "sub-millisecond", "steps", "descriptions", "folder-rows", "last-on-mac-12h-boundary", "last-on-mac-and-pinned",
     "last-on-mac-first", "last-on-mac-future", "last-on-mac-stale", "last-on-mac-unknown-session", "needs-you-wins",
     "pinned-needs-approval", "pinned-order", "pinned-shrinks-working", "pinned-working-once",
-    "stale-last-on-mac-pinned"
+    "stale-last-on-mac-pinned", "on-mac-folders"
 ]
 
 private struct Fixture: Decodable {
@@ -39,7 +39,10 @@ private struct Fixture: Decodable {
         let pinned: [String]?
         /// Optional: the row's second line to pin per session id; null means none.
         let descriptions: [String: String?]?
+        /// Optional: the shown On your Mac sessions grouped by project.
+        let onMacFolders: [MacFolder]?
     }
+    struct MacFolder: Decodable, Equatable { let project: String; let name: String; let sessions: [String] }
 
     let name: String
     let now: Date
@@ -78,6 +81,12 @@ private func loadFixture(_ name: String) throws -> Fixture {
         #expect(view.finished.map(\.session.id) == expect.finished)
         #expect(view.onMac.map(\.id) == expect.onMac)
         #expect(view.onMacTotal == expect.onMacTotal)
+        if let folders = expect.onMacFolders {
+            let got = view.onMacFolders.map {
+                Fixture.MacFolder(project: $0.project, name: $0.name, sessions: $0.items.map(\.session.id))
+            }
+            #expect(got == folders)
+        }
         #expect(view.summary == NowSummary(needYou: expect.summary.needYou, working: expect.summary.working,
                                            onMac: expect.summary.onMac))
         for (id, step) in expect.steps ?? [:] {

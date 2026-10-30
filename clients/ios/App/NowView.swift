@@ -89,7 +89,7 @@ struct NowScreen: View {
 
     /// The bottom row, for the DEBUG `-scrollToEnd` screenshots.
     private var lastRowID: String? {
-        if let session = view.onMac.last { return session.id }
+        if let group = view.onMacFolders.last { return group.project }
         switch view.working {
         case .list(let items): return items.last?.session.id
         case .groups(let groups, _): return groups.last?.project
@@ -228,26 +228,34 @@ struct NowScreen: View {
         }
     }
 
-    @ViewBuilder private func groupRows(_ group: ProjectGroup) -> some View {
+    /// A Working folder (`onMac` false: working dots and steps) or an On your Mac one (idle rows, no step,
+    /// collapsed apart from a Working folder of the same project).
+    @ViewBuilder private func groupRows(_ group: ProjectGroup, onMac: Bool = false) -> some View {
         if group.count == 1 {
-            sessionButton(group.newest.session) { SingleFolderRow(group: group, format: format) }
+            sessionButton(group.newest.session) { SingleFolderRow(group: group, format: format, showsStep: !onMac) }
         } else {
-            let isOpen = !collapsed.contains(group.project)
+            let key = (onMac ? "mac:" : "") + group.project
+            let isOpen = !collapsed.contains(key)
             Button {
                 withAnimation(.snappy) {
-                    if isOpen { collapsed.insert(group.project) } else { collapsed.remove(group.project) }
+                    if isOpen { collapsed.insert(key) } else { collapsed.remove(key) }
                 }
             } label: {
                 ProjectGroupRow(group: group, isExpanded: isOpen)
             }
             .buttonStyle(.plain)
             .compactRow()
-            .accessibilityIdentifier("group-\(group.name)")
+            .accessibilityIdentifier((onMac ? "mac-group-" : "group-") + group.name)
             if isOpen {
                 ForEach(group.items, id: \.session.id) { item in
                     FolderItem {
-                        PinnableRow(session: item.session, model: model, open: { open(item.session) },
-                                    label: { CompactWorkingRow(item: item, format: format) })
+                        PinnableRow(session: item.session, model: model, open: { open(item.session) }, label: {
+                            if onMac {
+                                OnMacRow(session: item.session, format: format)
+                            } else {
+                                CompactWorkingRow(item: item, format: format)
+                            }
+                        })
                     }
                     .listRowInsets(.vertical, 0)
                 }
@@ -260,11 +268,11 @@ struct NowScreen: View {
     @ViewBuilder private var onMacSection: some View {
         if view.onMacTotal > 0 {
             Section {
-                ForEach(view.onMac) { session in
-                    sessionButton(session) { OnMacRow(session: session, format: format) }
+                ForEach(view.onMacFolders, id: \.project) { group in
+                    groupRows(group, onMac: true)
                 }
             } header: {
-                SectionLabel(title: "On your Mac", detail: "read-only") {
+                SectionLabel(title: "On your Mac", detail: "read-only, by project") {
                     Button("All \(view.onMacTotal)") { showAll(AllFilter(onMacOnly: true)) }
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

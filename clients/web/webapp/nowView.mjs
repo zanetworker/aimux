@@ -37,11 +37,10 @@ export function renderNow(model, ui) {
     const all = el('button', 'link', 'All ' + v.onMacTotal);
     all.type = 'button';
     all.addEventListener('click', () => ui.showAll({ onMacOnly: true }));
-    const label = sectionLabel('On your Mac', 'read-only', all);
-    if (v.onMac.length) {
-      out.push(section(label, ...v.onMac.flatMap((s) => withMenu(model, ui, s, dotRow({
-        status: 'idle', title: displayTitle(s.title, s.id), description: descriptionLine(s), time: s.lastActive, cls: 'one-line', onClick: () => ui.open(s),
-      })))));
+    const label = sectionLabel('On your Mac', 'read-only, by project', all);
+    if (v.onMacFolders.length) {
+      out.push(section(label, ...v.onMacFolders.map((g) => (g.count === 1
+        ? singleFolder(model, ui, g, ON_MAC_ROWS) : folder(model, ui, g, ON_MAC_ROWS)))));
     } else {
       const s = el('section', 'group');
       s.append(label);
@@ -306,14 +305,20 @@ function working(model, v, ui) {
   return [section(sectionLabel('Working', v.summary.working + ', by project'), ...rows)];
 }
 
+// How folder rows show their sessions: Working's with the working dot and the current step;
+// On your Mac's idle, without a step, and collapsed apart from a Working folder of the same project.
+const WORKING_ROWS = { status: 'working', steps: true, key: '' };
+const ON_MAC_ROWS = { status: 'idle', steps: false, key: 'mac:' };
+
 // A folder: its icon, the name in semibold, the count and a chevron; open, its sessions indented
 // under a guide line. Folders start open; ui.collapsed holds the ones closed.
-function folder(model, ui, g) {
-  const isOpen = !ui.collapsed.has(g.project);
+function folder(model, ui, g, rows = WORKING_ROWS) {
+  const key = rows.key + g.project;
+  const isOpen = !ui.collapsed.has(key);
   const box = el('div', 'folder');
   const head = el('button', 'row folder-row' + (isOpen ? ' open' : ''));
   head.type = 'button';
-  head.dataset.focus = 'folder:' + g.project;
+  head.dataset.focus = 'folder:' + key;
   head.setAttribute('aria-expanded', String(isOpen));
   const text = el('span', 'text one');
   text.append(bidi(g.name, 'group-name'));
@@ -324,20 +329,20 @@ function folder(model, ui, g) {
   }
   head.append(icon('folder'), text, el('span', 'count', String(g.count)), icon('chevron'));
   head.addEventListener('click', () => {
-    if (isOpen) ui.collapsed.add(g.project); else ui.collapsed.delete(g.project);
+    if (isOpen) ui.collapsed.add(key); else ui.collapsed.delete(key);
     ui.rerender();
   });
   box.append(head);
   if (isOpen) {
     const items = el('div', 'folder-items');
-    for (const item of g.items) items.append(...withMenu(model, ui, item.session, compactRow(item, ui)));
+    for (const item of g.items) items.append(...withMenu(model, ui, item.session, compactRow(item, ui, rows)));
     box.append(items);
   }
   return box;
 }
 
 // A folder of one session: the folder icon, its name and the session inline, opening the session.
-function singleFolder(model, ui, g) {
+function singleFolder(model, ui, g, rows = WORKING_ROWS) {
   const item = g.items[0];
   const r = el('button', 'row folder-row single');
   r.type = 'button';
@@ -349,7 +354,7 @@ function singleFolder(model, ui, g) {
   t.append(line);
   const desc = descriptionNode(descriptionLine(item.session));
   if (desc) t.append(desc);
-  t.append(stepLine(item, false));
+  if (rows.steps) t.append(stepLine(item, false));
   r.append(icon('folder'), t, el('span', 'time', relativeTime(item.session.lastActive)));
   r.addEventListener('click', () => ui.open(item.session));
   const box = el('div', 'folder');
@@ -358,21 +363,24 @@ function singleFolder(model, ui, g) {
 }
 
 // A session inside an open folder: dot, title · step, its description under them, the time.
-function compactRow(item, ui) {
+function compactRow(item, ui, rows = WORKING_ROWS) {
   const r = el('button', 'row compact');
   r.type = 'button';
   const t = el('span', 'text');
   const line = el('span', 'one');
   const title = bidi(displayTitle(item.session.title, item.session.id), 'compact-title');
   title.dir = 'auto';
-  const step = stepLine(item, false);
-  step.className = 'detail inline';
-  step.prepend(' · ');
-  line.append(title, step);
+  line.append(title);
+  if (rows.steps) {
+    const step = stepLine(item, false);
+    step.className = 'detail inline';
+    step.prepend(' · ');
+    line.append(step);
+  }
   t.append(line);
   const desc = descriptionNode(descriptionLine(item.session));
   if (desc) t.append(desc);
-  r.append(dot('working'), t, el('span', 'time', relativeTime(item.session.lastActive)));
+  r.append(dot(rows.status), t, el('span', 'time', relativeTime(item.session.lastActive)));
   r.addEventListener('click', () => ui.open(item.session));
   return r;
 }

@@ -34,6 +34,10 @@ for (const file of files) {
     assert.deepEqual(ids(got.finished), want.finished, 'finished');
     assert.deepEqual(got.onMac.map((s) => s.id), want.onMac, 'onMac');
     assert.equal(got.onMacTotal, want.onMacTotal, 'onMacTotal');
+    if (want.onMacFolders) {
+      assert.deepEqual(got.onMacFolders.map((g) => ({ project: g.project, name: g.name, sessions: g.items.map((i) => i.session.id) })),
+        want.onMacFolders, 'onMacFolders');
+    }
     assert.deepEqual(got.summary, want.summary, 'summary');
     for (const [id, step] of Object.entries(want.steps ?? {})) {
       assert.equal(activity[id].step ?? null, step, `step of ${id}`);

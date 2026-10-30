@@ -97,7 +97,7 @@ enum DebugHooks {
 
 #if DEBUG
 /// Made-up sessions covering every Now case: `list` (an approval, a failure, a finished turn, two working,
-/// three on the Mac, one Arabic title) and `twenty` (3 need you, 2 finished, 20 working in 7 projects).
+/// four on the Mac in three folders, one Arabic title) and `twenty` (3 need you, 2 finished, 20 working in 7 projects).
 private struct DemoSource: AppSource {
     let mode: String
 
@@ -267,6 +267,8 @@ enum DemoData {
         make("demo-17", "Release checklist review", "release-tools", minutesAgo: 660, .openInTerminal,
              "check the open items"),
         make("demo-18", "Docs site navigation", "docs-site", minutesAgo: 672, .openInTerminal, "fix the sidebar"),
+        make("demo-19", "Release notes draft", "release-tools", minutesAgo: 690, .openInTerminal,
+             "write the notes"),
         make("demo-16", "ملاحظات الاجتماع الأسبوعي", "notes", minutesAgo: 720, .openInTerminal,
              "لخص النقاط الرئيسية"),
         make("demo-5", "Garden planner paths", "garden-planner-very-long-folder-name-for-testing",
