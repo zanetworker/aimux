@@ -183,11 +183,29 @@ type Service struct {
 	sleep    func(ctx context.Context, d time.Duration) error
 	goos     string // runtime.GOOS; terminal drivers exist for darwin only
 
-	mu   sync.Mutex // serialises attempts and guards done and left
+	mu   sync.Mutex // serialises attempts and guards done
 	done map[string]time.Time
 	// left: per session, the text a send typed but did not submit; only that
-	// exact text in the box may be submitted by a retry, never the owner's.
-	left map[string]string
+	// text in the box may be submitted by a retry, never the owner's. Its own
+	// lock, so Status never waits for an attempt.
+	leftMu sync.Mutex
+	left   map[string]string
+}
+
+func (s *Service) leftText(sessionID string) string {
+	s.leftMu.Lock()
+	defer s.leftMu.Unlock()
+	return s.left[sessionID]
+}
+
+func (s *Service) setLeft(sessionID, text string) {
+	s.leftMu.Lock()
+	defer s.leftMu.Unlock()
+	if text == "" {
+		delete(s.left, sessionID)
+	} else {
+		s.left[sessionID] = text
+	}
 }
 
 // NewService builds a Service. log may be nil.
@@ -340,7 +358,9 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 	}
 	st.Prompt = ParsePrompt(scr)
 	st.Working = Working(scr)
-	if !InputBoxEmpty(scr) {
+	// The text a send left waiting can be retried (Retry presses Enter).
+	left := s.leftText(sessionID)
+	if !InputBoxEmpty(scr) && (left == "" || !WordsInBox(scr, left)) {
 		st.Reason = Code(ErrNotAtInput)
 		return st
 	}
@@ -433,7 +453,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	}
 	// A send that typed but did not press Enter (ErrNotSubmitted) left this
 	// very text in the box: its retry presses Enter and types nothing.
-	waiting := !InputBoxEmpty(scr) && s.left[sessionID] == text && WordsInBox(scr, text)
+	waiting := !InputBoxEmpty(scr) && s.leftText(sessionID) == text && WordsInBox(scr, text)
 	if !InputBoxEmpty(scr) && !waiting {
 		return ErrNotAtInput
 	}
@@ -447,6 +467,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 		if err != nil {
 			return fmt.Errorf("%s: type: %w", d.Name(), err)
 		}
+		s.setLeft(sessionID, text) // typed: until Enter, the box may hold it
 		// A prompt may have appeared while typing (a background task), and
 		// Enter would then answer it; the owner may have focused this session.
 		// Look again first.
@@ -457,7 +478,6 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 		if err != nil {
 			return err
 		}
-		s.left[sessionID] = text // typed: until Enter, the box may hold it
 		if !TextInBox(scr, text) {
 			return notSubmitted("not_in_box")
 		}
@@ -473,7 +493,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	if err := d.Key(cctx, p, KeyEnter); err != nil {
 		return fmt.Errorf("%s: enter: %w", d.Name(), err)
 	}
-	delete(s.left, sessionID)
+	s.setLeft(sessionID, "")
 	s.remember(sessionID, idemKey)
 	return nil
 }
@@ -522,7 +542,7 @@ func (s *Service) submit(ctx context.Context, sessionID, text string) error {
 	if err := d.Key(cctx, p, KeyEnter); err != nil {
 		return fmt.Errorf("%s: enter: %w", d.Name(), err)
 	}
-	delete(s.left, sessionID)
+	s.setLeft(sessionID, "")
 	return nil
 }
 

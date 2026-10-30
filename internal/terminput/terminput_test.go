@@ -1224,3 +1224,35 @@ func TestSendLogsWhyItWasNotSubmitted(t *testing.T) {
 		t.Fatalf("log = %q", e.log.String())
 	}
 }
+
+// A message a send left in the box can be retried: Status says so, so the
+// clients enable Retry; another draft still reads as not at input.
+func TestStatusCanRetryTheTextASendLeft(t *testing.T) {
+	e := newEnv(t)
+	e.drv.afterType = boxWith("something else")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
+	e.drv.screen = boxWith("give me an example")
+	if st := e.svc.Status(context.Background(), "s1", "idle"); !st.CanType || st.Reason != "" {
+		t.Fatalf("status = %+v, want can type", st)
+	}
+	e.drv.screen = boxWith("my own draft")
+	if st := e.svc.Status(context.Background(), "s1", "idle"); st.CanType || st.Reason != "not_at_input" {
+		t.Fatalf("status = %+v, want not_at_input", st)
+	}
+}
+
+// Cancelled while settling after typing: the text is in the box, and a retry
+// can still submit it.
+func TestSendCancelledAfterTypingCanBeRetried(t *testing.T) {
+	e := newEnv(t)
+	e.svc.sleep = func(context.Context, time.Duration) error { return context.Canceled }
+	wantCode(t, e.svc.Send(context.Background(), "s1", "hello there", ""), "not_submitted")
+	e.svc.sleep = func(context.Context, time.Duration) error { return nil }
+	e.drv.screen, e.drv.sent = boxWith("hello there"), nil
+	if err := e.svc.Send(context.Background(), "s1", "hello there", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 1 {
+		t.Fatalf("sent %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
+	}
+}
