@@ -404,3 +404,35 @@ test('a passkey the server will never know is reported to the browser, best effo
   await old.login.pair('ABCD-EFGH');
   assert.equal(old.login.error, PAIR_CODE_FAILED);
 });
+
+test('a 401 that arrives after a newer unlock is retried on the new login, not locked', async () => {
+  let unlocked = false;
+  let releaseSlow;
+  const slow = new Promise((r) => { releaseSlow = r; });
+  const { server } = rig({ routes: {
+    'GET /v1/health': health('live'),
+    'GET /v1/projects': () => (unlocked ? { status: 200, body: { projects: ['p'] } } : LOGIN_REQUIRED),
+    'GET /v1/sessions': () => (unlocked ? { status: 200, body: { sessions: ['a'] } } : LOGIN_REQUIRED),
+    'POST /v1/auth/challenge': { status: 200, body: { challenge: '-_8' } },
+    'POST /v1/auth/login': () => { unlocked = true; return { status: 200, body: { deviceId: 'd', name: 'phone' } }; },
+  } });
+  // The slow request's 401 was answered under the old login, but reaches the
+  // page only after the unlock.
+  const fetch = server.fetch;
+  const delayed = async (path, opts) => {
+    if (path === '/v1/projects' && !unlocked) { const r = await fetch(path, opts); await slow; return r; }
+    return fetch(path, opts);
+  };
+  const late = createLogin({ fetch: delayed, credentials: fakeCredentials(), storage: memoryStorage(STORED), hostname: 'My-Mac.tail1234.ts.net', random: (n) => new Uint8Array(n).fill(5) });
+  await late.start();
+  assert.equal(late.state, 'live');
+  const projects = late.request('GET', '/v1/projects');
+  const sessions = late.request('GET', '/v1/sessions');
+  await settle();
+  assert.equal(late.state, 'locked');
+  await late.unlock();
+  assert.deepEqual(await sessions, { sessions: ['a'] });
+  releaseSlow();
+  assert.deepEqual(await projects, { projects: ['p'] });
+  assert.equal(late.state, 'live');
+});

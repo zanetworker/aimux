@@ -103,6 +103,7 @@ export function createLogin({
   const listeners = new Set();
   let held = [];            // requests waiting for an unlock: {path, opts, resolve, reject}
   let justUnlocked = false; // replaying after an unlock, until one replayed request goes through
+  let generation = 0;       // counts unlocks and pairings, so a late 401 from an older login is told apart
 
   const login = {
     state: 'unknown',
@@ -170,10 +171,13 @@ export function createLogin({
   async function request(method, path, body, { interaction = false } = {}) {
     const opts = options(method, body, interaction);
     if (login.state === 'locked' || login.state === 'unpaired') return hold(path, opts);
+    const sentUnder = generation;
     try {
       return await send(path, opts);
     } catch (e) {
       if (!isLoginRequired(e)) throw e;
+      // Refused under an older login that a newer unlock replaced: try the new one.
+      if (sentUnder !== generation) return request(method, path, body, { interaction });
       if (login.state !== 'locked' && login.state !== 'unpaired') set({ state: signedOut(), error: '' });
       return hold(path, opts);
     }
@@ -216,6 +220,7 @@ export function createLogin({
   function loggedIn(ans, credentialId) {
     save({ deviceId: ans.deviceId, credentialId, name: ans.name });
     justUnlocked = true;
+    generation++;
     set({ state: 'live', error: '', revoked: false });
     return replay();
   }
