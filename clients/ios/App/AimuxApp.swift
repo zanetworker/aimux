@@ -55,7 +55,7 @@ private struct ConnectedRoot: View {
     var body: some View {
         let client = APIClient(baseURL: url, auth: login)
         // All sessions up front (500 load in about 0.3 s), so title search and project counts see everything.
-        RootTabs(source: client, stream: EventStream(baseURL: url, auth: login), cache: SessionCache(),
+        RootTabs(source: client, stream: EventStream(baseURL: url, auth: login), cache: SessionCache(server: url),
                  limit: SessionListModel.maxLimit, serverAddress: $serverAddress)
             .deviceLogin(login, serverAddress: $serverAddress)
             .task { await readHealth(client) }

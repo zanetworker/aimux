@@ -111,6 +111,17 @@ import Testing
         #expect(loaded.savedAt == savedAt)
     }
 
+    @Test func anotherMacsCacheLoadsNothing() throws {
+        let dir = tempDir()
+        let mine = try #require(URL(string: "https://my-mac.tail1234.ts.net:8443"))
+        let other = try #require(URL(string: "https://other-mac.tail1234.ts.net:8443"))
+        try SessionCache(directory: dir, server: mine).save(rows)
+        #expect(SessionCache(directory: dir, server: other).load() == nil)
+        // The same Mac, written another way, still reads it.
+        let same = try #require(URL(string: "https://MY-MAC.tail1234.ts.net:8443/"))
+        #expect(SessionCache(directory: dir, server: same).load()?.sessions == rows)
+    }
+
     @Test func emptyCacheLoadsNothing() {
         #expect(SessionCache(directory: tempDir()).load() == nil)
     }
