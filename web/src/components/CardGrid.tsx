@@ -94,10 +94,14 @@ export function CardGrid({
       const body = await resp.json().catch(() => ({}));
       note = resp.ok
         ? { label: 'focused', detail: body.where || '' }
-        : { label: 'no pane', detail: body.hint ? `run: ${body.hint}` : (body.error || resp.statusText) };
+        : { label: resp.status === 422 ? 'no pane' : 'failed', detail: body.hint ? `run: ${body.hint}` : (body.error || resp.statusText) };
     } catch { /* keep the failed note */ }
     setFocusNote(prev => ({ ...prev, [id]: note }));
-    setTimeout(() => setFocusNote(prev => { const n = { ...prev }; delete n[id]; return n; }), 3000);
+    // Clear only this click's note, so an earlier click's timer can't wipe a newer one.
+    setTimeout(() => setFocusNote(prev => {
+      if (prev[id] !== note) return prev;
+      const n = { ...prev }; delete n[id]; return n;
+    }), 3000);
   };
 
   const toggleGroup = (name: string) => {

@@ -164,3 +164,19 @@ func TestFocusAgent_OsascriptError_KeepsTmuxHint(t *testing.T) {
 		t.Errorf("Hint = %q, want the tmux attach command", res.Hint)
 	}
 }
+
+func TestFocusAgent_PartialFocuser_DefaultsMissingCallback(t *testing.T) {
+	// FocusTTY left nil: the default must fill it in instead of panicking.
+	// TTYForPID returning "" keeps the default FocusTTY (osascript) from running.
+	res, err := FocusAgent(agent.Agent{PID: 7, TMuxSession: "s"}, Focuser{TTYForPID: func(int) string { return "" }})
+	if !errors.Is(err, ErrNoPane) || res.Hint == "" {
+		t.Fatalf("res=%+v err=%v, want ErrNoPane with hint", res, err)
+	}
+}
+
+func TestFocusAgent_ZeroFocuser_DoesNotPanic(t *testing.T) {
+	// PID 0 has no controlling tty, so the default TTYForPID returns "" and no osascript runs.
+	if _, err := FocusAgent(agent.Agent{PID: 0}, Focuser{}); !errors.Is(err, ErrNoPane) {
+		t.Fatalf("err = %v, want ErrNoPane", err)
+	}
+}

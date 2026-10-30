@@ -153,7 +153,7 @@ type App struct {
 	// Temporary status hint (shown once then cleared)
 	statusHint string
 
-	// focuser raises an agent's terminal pane (F key); zero value means the real one.
+	// focuser raises an agent's terminal pane (F key); nil callbacks fall back to the real ones.
 	focuser controller.Focuser
 
 	// Launcher overlay

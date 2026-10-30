@@ -75,6 +75,13 @@ type FocusResult struct {
 // ErrNoPane when the agent has no iTerm2 pane, with a tmux attach hint in the
 // result when the agent runs in tmux.
 func FocusAgent(a agent.Agent, f Focuser) (FocusResult, error) {
+	def := DefaultFocuser()
+	if f.TTYForPID == nil {
+		f.TTYForPID = def.TTYForPID
+	}
+	if f.FocusTTY == nil {
+		f.FocusTTY = def.FocusTTY
+	}
 	res := FocusResult{SessionID: a.SessionID, PID: a.PID, TTY: f.TTYForPID(a.PID)}
 	if a.TMuxSession != "" {
 		// Set before focusing so the hint survives an osascript failure (Linux, no iTerm2).

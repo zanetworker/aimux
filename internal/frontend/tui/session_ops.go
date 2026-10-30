@@ -730,9 +730,6 @@ func (a App) focusSelectedPane() (tea.Model, tea.Cmd) {
 	}
 	ag := *selected
 	f := a.focuser
-	if f.TTYForPID == nil {
-		f = controller.DefaultFocuser()
-	}
 	a.statusHint = "Focusing " + ag.ShortProject() + "..."
 	return a, func() tea.Msg {
 		res, err := controller.FocusAgent(ag, f)

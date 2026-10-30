@@ -36,6 +36,11 @@ func (p *stubParser) ParseTrace(_ string) ([]trace.Turn, error) {
 // Run with: go test ./internal/frontend/web/ -run Smoke -timeout 60s -v
 func TestAPISmoke_AllEndpoints(t *testing.T) {
 	s := NewServer(0)
+	// Keep /focus off the real process table and osascript: report no pane.
+	s.SetFocuser(controller.Focuser{
+		TTYForPID: func(int) string { return "" },
+		FocusTTY:  func(string) (string, bool, error) { return "", false, nil },
+	})
 	cfg := config.Default()
 	s.SetConfig(cfg)
 	s.SetDiscoverFunc(func() ([]agent.Agent, error) {
