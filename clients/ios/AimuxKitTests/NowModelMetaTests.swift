@@ -17,6 +17,9 @@ private struct NoActivity: ActivitySource {
     func sendMessage(sessionID: String, text: String, key: String) async throws -> TurnAccepted {
         TurnAccepted(id: sessionID, turn: "t", after: 0, events: "")
     }
+    func session(id: String, turns: Int) async throws -> SessionDetail {
+        SessionDetail(id: id, title: "", project: "", lastActive: .now, state: .idle, turns: [])
+    }
 }
 
 private actor Latch {

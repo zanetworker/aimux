@@ -30,6 +30,9 @@ private final class StubActivity: ActivitySource, @unchecked Sendable {
     struct Sent { let session: String; let text: String; let key: String }
     private(set) var sent: [Sent] = []
     var sendFailure: Error?
+    /// Per session, the user text of its latest turn, as saved; a session without one has no turns.
+    var lastUser: [String: String] = [:]
+    var detailFailure: Error?
     /// Per session, results for its 1st, 2nd, ... snapshot call; the last one repeats.
     var sequences: [String: [Result<EventPage, Error>]] = [:]
     var firstSnapshotGate: Gate?
@@ -62,6 +65,13 @@ private final class StubActivity: ActivitySource, @unchecked Sendable {
         lock.withLock { sent.append(Sent(session: sessionID, text: text, key: key)) }
         if let sendFailure { throw sendFailure }
         return TurnAccepted(id: sessionID, turn: "t2", after: 1, events: "/v1/sessions/\(sessionID)/events?after=1")
+    }
+
+    func session(id: String, turns: Int) async throws -> SessionDetail {
+        if let detailFailure { throw detailFailure }
+        let user = lock.withLock { lastUser[id] }
+        let saved = user.map { [Turn(number: 1, time: now, user: $0, reply: "", tools: [])] } ?? []
+        return SessionDetail(id: id, title: "", project: "", lastActive: now, state: .idle, turns: saved)
     }
 }
 
@@ -260,6 +270,7 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         defer { defaults.removePersistentDomain(forName: suite) }
         let activity = StubActivity()
         activity.pages["f"] = page([event(1, .turnError, .turnError(error: "exit 1"))])
+        activity.lastUser["f"] = "run the tests again"
         let session = failedRow(prompt: "run the tests again")
         let model = makeModel([session], activity, defaults)
         await model.refresh()
@@ -282,6 +293,7 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         defer { defaults.removePersistentDomain(forName: suite) }
         let activity = StubActivity()
         activity.sendFailure = APIError.server(status: 409, code: .busy, message: "busy")
+        activity.lastUser["f"] = "again"
         let session = failedRow(prompt: "again")
         let model = makeModel([session], activity, defaults)
 
@@ -292,6 +304,35 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         activity.sendFailure = nil
         await model.retry(session)
         #expect(model.retryErrors["f"] == nil)
+    }
+
+    @Test func retrySendsTheWholeLastMessageFromTheHistoryNotThePreview() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let activity = StubActivity()
+        let long = String(repeating: "x", count: 300)
+        activity.lastUser["f"] = "The user sent a new message while you were working:\n" + long
+        let session = failedRow(prompt: String(long.prefix(160)) + "…")
+        let model = makeModel([session], activity, defaults)
+
+        await model.retry(session)
+
+        #expect(activity.sent.map(\.text) == [long])
+    }
+
+    @Test func retrySendsNothingWhenTheHistoryCannotBeRead() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let activity = StubActivity()
+        activity.detailFailure = APIError.http(status: 500)
+        let session = failedRow(prompt: "go")
+        let model = makeModel([session], activity, defaults)
+
+        await model.retry(session)
+
+        #expect(activity.sent.isEmpty)
+        #expect(model.retryErrors["f"] == .http(status: 500))
+        #expect(model.retrying.isEmpty)
     }
 
     @Test func retryWithoutAPromptSendsNothing() async {

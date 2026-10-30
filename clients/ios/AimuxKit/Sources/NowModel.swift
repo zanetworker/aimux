@@ -5,6 +5,7 @@ public protocol ActivitySource: Sendable {
     func eventSnapshot(sessionID: String) async throws -> EventPage
     func answer(approvalID: String, optionID: String) async throws
     func sendMessage(sessionID: String, text: String, key: String) async throws -> TurnAccepted
+    func session(id: String, turns: Int) async throws -> SessionDetail
 }
 
 extension APIClient: ActivitySource {}
@@ -125,7 +126,8 @@ public final class NowModel {
         rebuild()
     }
 
-    /// Sends the session's last prompt again as a new message. Each call is a new attempt
+    /// Sends the session's last prompt again as a new message, whole and as typed from its
+    /// history: the list's `lastPrompt` is a shortened preview. Each call is a new attempt
     /// by the person, so it gets a new idempotency key.
     public func retry(_ session: Session) async {
         let id = session.id
@@ -135,12 +137,21 @@ public final class NowModel {
         retryErrors[id] = nil
         defer { retrying.remove(id) }
         do {
-            _ = try await source.sendMessage(sessionID: id, text: prompt, key: UUID().uuidString)
+            let detail = try await source.session(id: id, turns: 3)
+            guard let text = Self.lastTyped(detail) else { return }
+            _ = try await source.sendMessage(sessionID: id, text: text, key: UUID().uuidString)
         } catch {
             retryErrors[id] = error as? APIError ?? .transport(.unknown)
             return
         }
         await refresh()
+    }
+
+    /// The latest message the person sent in a session's history, as they typed it.
+    static func lastTyped(_ detail: SessionDetail) -> String? {
+        detail.turns.reversed().lazy
+            .map { savedPromptAsTyped($0.user).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
     }
 
     /// Reads the capabilities and today's naming again (they change during the day); a failure keeps what was read.

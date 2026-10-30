@@ -15,13 +15,20 @@ const approvalEvents = (approvalId) => [
 const workingEvents = [{ seq: 1, turn: 't', kind: 'turn_started', time: iso(30), data: { text: 'go' } }];
 
 // A fake /v1: `sessions` is the list, `events[id]` a page's events or a function that throws.
-function fakeAPI({ sessions, events = {}, onPost }) {
+// `details[id]` is a session's detail, or a function that throws.
+function fakeAPI({ sessions, events = {}, details = {}, onPost }) {
   const calls = [];
   const api = async (method, path, body) => {
     calls.push({ method, path, body });
     if (method === 'GET' && path.startsWith('/v1/sessions?')) {
       if (typeof sessions === 'function') return sessions();
       return { sessions };
+    }
+    const d = path.match(/^\/v1\/sessions\/([^/?]+)\?turns=/);
+    if (method === 'GET' && d) {
+      const detail = details[decodeURIComponent(d[1])];
+      if (typeof detail === 'function') return detail();
+      if (detail) return detail;
     }
     const m = path.match(/^\/v1\/sessions\/([^/]+)\/events\?wait=0$/);
     if (m) {
@@ -168,6 +175,7 @@ test('retry sends the last prompt with a fresh key per tap and records a failure
   ];
   const { api } = fakeAPI({
     sessions: [session('f', 'idle', 50, { lastPrompt: 'do it again' })], events: { f: failed },
+    details: { f: { id: 'f', turns: [{ number: 1, user: 'first' }, { number: 2, user: 'do it again' }] } },
     onPost: (path, body) => { keys.push(body); return fail ? Promise.reject(httpError(409, 'busy')) : { turn: 'x' }; },
   });
   const m = model(api);
@@ -181,6 +189,35 @@ test('retry sends the last prompt with a fresh key per tap and records a failure
   fail = true;
   await m.retry(s);
   assert.ok(m.retryErrors.get('f'));
+});
+
+test('retry sends the whole last message from the history, not the list preview', async () => {
+  const long = 'x'.repeat(300);
+  const sent = [];
+  const { api } = fakeAPI({
+    sessions: [session('f', 'idle', 50, { lastPrompt: long.slice(0, 160) + '…' })],
+    details: { f: { id: 'f', turns: [
+      { number: 1, user: 'The user sent a new message while you were working:\n' + long }, { number: 2, user: '' },
+    ] } },
+    onPost: (path, body) => { sent.push(body); return { turn: 'x' }; },
+  });
+  const m = model(api);
+  await m.refresh();
+  await m.retry(m.sessions[0]);
+  assert.deepEqual(sent.map((b) => b.text), [long]);
+});
+
+test('retry sends nothing when the history cannot be read', async () => {
+  const { api, calls } = fakeAPI({
+    sessions: [session('f', 'idle', 50, { lastPrompt: 'go' })],
+    details: { f: () => { throw httpError(500); } },
+  });
+  const m = model(api);
+  await m.refresh();
+  await m.retry(m.sessions[0]);
+  assert.equal(calls.filter((c) => c.method === 'POST').length, 0);
+  assert.ok(m.retryErrors.get('f'));
+  assert.equal(m.retrying.has('f'), false);
 });
 
 test('retry does nothing without a last prompt', async () => {
@@ -238,6 +275,7 @@ test('retry holds its guard through the refresh after the send, like the app', a
   const { api } = fakeAPI({
     sessions: () => { lists += 1; return lists === 2 ? gate.then(() => ({ sessions: [s0] })) : { sessions: [s0] }; },
     events: { f: failed },
+    details: { f: { id: 'f', turns: [{ number: 1, user: 'again' }] } },
     onPost: () => { posts += 1; return { turn: 'x' }; },
   });
   const s0 = session('f', 'idle', 50, { lastPrompt: 'again' });

@@ -1,6 +1,7 @@
 import { apiDate } from './apiDate.mjs';
 import { deriveActivity, rankNow } from './now.mjs';
 import { pinErrorText } from './sessionInfo.mjs';
+import { savedPromptAsTyped } from './timeline.mjs';
 
 // The Now screen's state, like NowModel in the iPhone app: the session list, what each
 // candidate is doing (from its event snapshot), and the ranked view. The page polls refresh().
@@ -118,7 +119,8 @@ export class NowModel {
     this.rebuild();
   }
 
-  // Sends the session's last prompt again. Each tap is a new attempt, so it gets a new key.
+  // Sends the session's last prompt again, whole and as typed from its history: the list's
+  // lastPrompt is a shortened preview. Each tap is a new attempt, so it gets a new key.
   async retry(session) {
     const id = session.id;
     const prompt = (session.lastPrompt || '').trim();
@@ -128,7 +130,11 @@ export class NowModel {
     try {
       // Held through the refresh, like the app's defer, so a second tap cannot send twice.
       try {
-        await this.api('POST', '/v1/sessions/' + encodeURIComponent(id) + '/messages', { text: session.lastPrompt, key: newKey() });
+        const base = '/v1/sessions/' + encodeURIComponent(id);
+        const detail = await this.api('GET', base + '?turns=3');
+        const text = lastTyped(detail);
+        if (!text) return;
+        await this.api('POST', base + '/messages', { text, key: newKey() });
       } catch (e) {
         this.retryErrors.set(id, e);
         return;
@@ -208,4 +214,14 @@ export class NowModel {
     }
     this.view = rankNow({ sessions: this.sessions, activity: shown, seen: this.seen, now: this.now(), lastOnMac: this.lastOnMac });
   }
+}
+
+// lastTyped is the latest message the person sent in a session detail, as they typed it.
+function lastTyped(detail) {
+  const turns = (detail && detail.turns) || [];
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const text = savedPromptAsTyped(turns[i].user || '').trim();
+    if (text) return text;
+  }
+  return '';
 }
