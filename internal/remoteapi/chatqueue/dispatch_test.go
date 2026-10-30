@@ -1370,3 +1370,47 @@ func TestTerminalOwnerTypingAfterTheAnswerFinishesTheItem(t *testing.T) {
 		}
 	}
 }
+
+func TestUnsavedDoneIsRetriedNotPaused(t *testing.T) {
+	t.Run("ACP", func(t *testing.T) {
+		r := newRig(t)
+		r.add("s", "first")
+		r.add("s", "second")
+		r.step()
+		r.acp.end("turn1", false)
+		r.failSaves(true)
+		r.step() // its turn ended, but removing the item was not saved
+		r.failSaves(false)
+		r.wantFirst("s", "first", StateAnswering)
+		r.step()
+		r.wantFirst("s", "second", StateWaiting)
+		r.wantQueue("s", QueueRunning, "")
+		r.step()
+		if strings.Join(r.acp.starts, "|") != "first|second" {
+			t.Fatalf("starts = %q", r.acp.starts)
+		}
+	})
+	t.Run("terminal", func(t *testing.T) {
+		r := newRig(t)
+		r.openTerm("s")
+		r.add("s", "first")
+		r.add("s", "second")
+		r.settle()
+		r.wantSends("first")
+		r.turn("first")
+		r.term.status = free
+		r.now = r.now.Add(2 * time.Second)
+		r.step() // idle once
+		r.now = r.now.Add(2 * time.Second)
+		r.failSaves(true)
+		r.step() // answered, but removing the item was not saved
+		r.failSaves(false)
+		r.wantFirst("s", "first", StateAnswering)
+		r.now = r.now.Add(2 * time.Second)
+		r.step()
+		r.wantQueue("s", QueueRunning, "")
+		r.wantFirst("s", "second", StateWaiting)
+		r.settle()
+		r.wantSends("first", "second")
+	})
+}

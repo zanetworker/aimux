@@ -148,6 +148,8 @@ type flight struct {
 	item string // "" once the owner deleted it: still wait for its turn
 	text string
 	turn string // ACP: the turn it started; "" in a terminal
+	// finished: its answer is over but removing the item was not saved yet.
+	finished bool
 
 	// Terminal only.
 	inBox   bool      // typed (maybe) but Enter not pressed: wait for Resume
@@ -290,12 +292,17 @@ func (d *Dispatcher) stepSession(ctx context.Context, s string) {
 
 func (d *Dispatcher) stepACP(s string, q Queue, w *watch) {
 	if f := w.flight; f != nil {
+		if f.finished {
+			d.finish(s, w)
+			return
+		}
 		ended, failed := d.cfg.ACP.TurnEnded(s, f.turn)
 		if !ended {
 			return
 		}
-		w.flight = nil
-		d.done(s, f.item)
+		if !d.finish(s, w) {
+			return // retried next step; a failed turn pauses then
+		}
 		if failed {
 			d.pause(s, pauseTurnFailed)
 		}
@@ -337,14 +344,19 @@ func (d *Dispatcher) stepACP(s string, q Queue, w *watch) {
 
 func (d *Dispatcher) stepTerminal(ctx context.Context, s string, q Queue, w *watch, registry string, open, resumed bool) {
 	t := d.cfg.Terminal
+	if f := w.flight; f != nil && f.finished {
+		if !d.finish(s, w) {
+			return
+		}
+	}
 	if !open {
 		if f := w.flight; f != nil {
 			if f.inBox {
 				_ = d.cfg.Store.Release(s, f.item) // claude exited: its box is gone
-			} else {
-				d.done(s, f.item) // sent; claude exited, so its answer is over
+				w.flight = nil
+			} else if !d.finish(s, w) { // sent; claude exited, so its answer is over
+				return
 			}
-			w.flight = nil
 		}
 		d.pause(s, pauseClosed)
 		return
@@ -372,8 +384,7 @@ func (d *Dispatcher) stepTerminal(ctx context.Context, s string, q Queue, w *wat
 			return
 		}
 		if f.over {
-			w.flight = nil
-			d.done(s, f.item)
+			d.finish(s, w)
 			return
 		}
 		if !f.matched && !f.noAnswer && now.Sub(f.entered) >= answerWait {
@@ -404,8 +415,7 @@ func (d *Dispatcher) stepTerminal(ctx context.Context, s string, q Queue, w *wat
 			f.idleSince = now
 		}
 		if now.Sub(f.idleSince) >= idleFor {
-			w.flight = nil
-			d.done(s, f.item)
+			d.finish(s, w)
 		}
 		return
 	}
@@ -646,11 +656,20 @@ func (d *Dispatcher) answering(s string, f *flight) {
 	}
 }
 
-// done removes an answered item; one the owner deleted is already gone.
-func (d *Dispatcher) done(s, item string) {
-	if item != "" {
-		_ = d.cfg.Store.Done(s, item)
+// finish removes w's answered item and ends its flight. When the removal is
+// not saved, the flight stays, marked finished, and the next step tries
+// again: a cleared flight would leave the item answering, which reads as
+// possibly sent. One the owner deleted, or no longer in flight, is left.
+func (d *Dispatcher) finish(s string, w *watch) bool {
+	f := w.flight
+	if f.item != "" {
+		if err := d.cfg.Store.Done(s, f.item); err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrWrongState) {
+			f.finished = true
+			return false
+		}
 	}
+	w.flight = nil
+	return true
 }
 
 type pauseReason struct{ code, reason string }
