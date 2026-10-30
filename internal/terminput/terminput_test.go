@@ -1179,19 +1179,38 @@ func TestSendBusyByRegistry(t *testing.T) {
 // Enter instead of refusing the box as not empty, and types nothing.
 func TestSendSubmitsTheSameTextWaitingInTheBox(t *testing.T) {
 	e := newEnv(t)
-	e.drv.screen = boxWith("give me an example")
+	e.drv.afterType = boxWith("my own draft") // the first attempt cannot see its text: not submitted
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", "k1"), "not_submitted")
+	e.drv.screen, e.drv.afterType = boxWith("give me an example"), ""
+	e.drv.sent = nil
 	if err := e.svc.Send(context.Background(), "s1", "give me an example", "k2"); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.drv.sent) != 0 || len(e.drv.keys) != 1 || e.drv.keys[0] != KeyEnter {
 		t.Fatalf("sent %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
 	}
-	// Other text in the box is the owner's draft: still refused, nothing pressed.
-	e = newEnv(t)
-	e.drv.screen = boxWith("my own draft")
-	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_at_input")
-	if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
-		t.Fatalf("sent %q keys %v over a draft", e.drv.sent, e.drv.keys)
+}
+
+// Text aimux did not leave there is the owner's draft, even when it reads the
+// same without spaces: refused, nothing typed or pressed.
+func TestSendNeverSubmitsTheOwnersDraft(t *testing.T) {
+	for name, draft := range map[string]string{
+		"never typed by aimux":    "give me an example",
+		"same letters, no spaces": "giveme anexample",
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			if name != "never typed by aimux" {
+				e.drv.afterType = boxWith("something else")
+				wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
+				e.drv.sent = nil
+			}
+			e.drv.screen = boxWith(draft)
+			wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_at_input")
+			if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+				t.Fatalf("sent %q keys %v over a draft", e.drv.sent, e.drv.keys)
+			}
+		})
 	}
 }
 

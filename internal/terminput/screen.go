@@ -130,6 +130,15 @@ func TextShownInBox(screen, text string) bool {
 	return ok && squeeze(text) != "" && squeeze(box) == squeeze(text)
 }
 
+// WordsInBox is TextShownInBox keeping word breaks: the box holds the same
+// words as text, in order, with only the spacing and line wrapping changed.
+// A text that matches only with its spaces removed is someone else's.
+func WordsInBox(screen, text string) bool {
+	box, _, ok := boxText(screen)
+	words := strings.Fields(text)
+	return ok && len(words) > 0 && strings.Join(strings.Fields(box), " ") == strings.Join(words, " ")
+}
+
 // boxText is the text in Claude Code's input box and its row count, when
 // no prompt shows and the box has the form TextInBox describes.
 func boxText(screen string) (string, int, bool) {

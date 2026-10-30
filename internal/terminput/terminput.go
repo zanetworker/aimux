@@ -183,13 +183,16 @@ type Service struct {
 	sleep    func(ctx context.Context, d time.Duration) error
 	goos     string // runtime.GOOS; terminal drivers exist for darwin only
 
-	mu   sync.Mutex // serialises attempts and guards done
+	mu   sync.Mutex // serialises attempts and guards done and left
 	done map[string]time.Time
+	// left: per session, the text a send typed but did not submit; only that
+	// exact text in the box may be submitted by a retry, never the owner's.
+	left map[string]string
 }
 
 // NewService builds a Service. log may be nil.
 func NewService(cfg config.TerminalInputConfig, sessions Sessions, sys System, log io.Writer, drivers ...Driver) *Service {
-	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}}
+	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}, left: map[string]string{}}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -430,7 +433,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	}
 	// A send that typed but did not press Enter (ErrNotSubmitted) left this
 	// very text in the box: its retry presses Enter and types nothing.
-	waiting := !InputBoxEmpty(scr) && TextShownInBox(scr, text)
+	waiting := !InputBoxEmpty(scr) && s.left[sessionID] == text && WordsInBox(scr, text)
 	if !InputBoxEmpty(scr) && !waiting {
 		return ErrNotAtInput
 	}
@@ -454,6 +457,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 		if err != nil {
 			return err
 		}
+		s.left[sessionID] = text // typed: until Enter, the box may hold it
 		if !TextInBox(scr, text) {
 			return notSubmitted("not_in_box")
 		}
@@ -469,6 +473,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	if err := d.Key(cctx, p, KeyEnter); err != nil {
 		return fmt.Errorf("%s: enter: %w", d.Name(), err)
 	}
+	delete(s.left, sessionID)
 	s.remember(sessionID, idemKey)
 	return nil
 }
@@ -517,6 +522,7 @@ func (s *Service) submit(ctx context.Context, sessionID, text string) error {
 	if err := d.Key(cctx, p, KeyEnter); err != nil {
 		return fmt.Errorf("%s: enter: %w", d.Name(), err)
 	}
+	delete(s.left, sessionID)
 	return nil
 }
 

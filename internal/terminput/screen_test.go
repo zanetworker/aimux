@@ -301,3 +301,22 @@ func TestWorkingEdges(t *testing.T) {
 		}
 	}
 }
+
+func TestWordsInBox(t *testing.T) {
+	rule := strings.Repeat("─", 40)
+	wrapped := "⏺ Done.\n\n" + rule + "\n❯ give me an example\n  and use it\n" + rule + "\n  [Model] │ demo\n"
+	for _, c := range []struct {
+		name, text string
+		want       bool
+	}{
+		{"wrapped at a space", "give me an example and use it", true},
+		{"extra spaces typed", "give me  an example\nand use it", true},
+		{"same letters, other words", "giveme an example anduse it", false},
+		{"other text", "give me an example", false},
+		{"no text", "   ", false},
+	} {
+		if got := WordsInBox(wrapped, c.text); got != c.want {
+			t.Errorf("%s: WordsInBox = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
