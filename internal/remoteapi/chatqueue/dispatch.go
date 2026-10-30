@@ -141,6 +141,8 @@ type watch struct {
 	// idleSince: the session has read idle, unbroken, since then. A first
 	// send needs idleFor of it, so it never joins a turn that just began.
 	idleSince time.Time
+	// owed: a pause decided but not saved yet; nothing is sent until it is.
+	owed *pauseReason
 }
 
 // flight is an item the dispatcher typed or started.
@@ -149,7 +151,8 @@ type flight struct {
 	text string
 	turn string // ACP: the turn it started; "" in a terminal
 	// finished: its answer is over but removing the item was not saved yet.
-	finished bool
+	finished   bool
+	turnFailed bool // ACP: its turn ended with an error, so the queue pauses
 
 	// Terminal only.
 	inBox   bool      // typed (maybe) but Enter not pressed: wait for Resume
@@ -291,20 +294,21 @@ func (d *Dispatcher) stepSession(ctx context.Context, s string) {
 // --- ACP ---
 
 func (d *Dispatcher) stepACP(s string, q Queue, w *watch) {
+	if w.owed != nil {
+		d.payOwed(s, w)
+		return
+	}
 	if f := w.flight; f != nil {
-		if f.finished {
-			d.finish(s, w)
-			return
+		if !f.finished {
+			ended, failed := d.cfg.ACP.TurnEnded(s, f.turn)
+			if !ended {
+				return
+			}
+			f.turnFailed = failed
 		}
-		ended, failed := d.cfg.ACP.TurnEnded(s, f.turn)
-		if !ended {
-			return
-		}
-		if !d.finish(s, w) {
-			return // retried next step; a failed turn pauses then
-		}
-		if failed {
-			d.pause(s, pauseTurnFailed)
+		if d.finish(s, w) && f.turnFailed {
+			w.owed = &pauseTurnFailed
+			d.payOwed(s, w)
 		}
 		return
 	}
@@ -653,6 +657,13 @@ func (d *Dispatcher) claim(s string) (Item, bool) {
 func (d *Dispatcher) answering(s string, f *flight) {
 	if err := d.cfg.Store.MarkAnswering(s, f.item); errors.Is(err, ErrNotFound) {
 		f.item = ""
+	}
+}
+
+// payOwed saves the pause w owes; one with nothing left to hold back is paid.
+func (d *Dispatcher) payOwed(s string, w *watch) {
+	if d.pause(s, *w.owed) || len(d.cfg.Store.Get(s).Items) == 0 {
+		w.owed = nil
 	}
 }
 

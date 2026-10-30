@@ -1414,3 +1414,21 @@ func TestUnsavedDoneIsRetriedNotPaused(t *testing.T) {
 		r.wantSends("first", "second")
 	})
 }
+
+func TestUnsavedDoneOfAFailedTurnStillPauses(t *testing.T) {
+	r := newRig(t)
+	r.add("s", "first")
+	r.add("s", "second")
+	r.step()
+	r.acp.end("turn1", true)
+	r.failSaves(true)
+	r.step() // the turn failed, and removing its item was not saved
+	r.failSaves(false)
+	r.step()
+	r.wantQueue("s", QueuePaused, ReasonTurnFailed)
+	r.wantFirst("s", "second", StateWaiting)
+	r.step()
+	if len(r.acp.starts) != 1 {
+		t.Fatalf("sent after a failed turn without a Resume: %q", r.acp.starts)
+	}
+}
