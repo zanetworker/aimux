@@ -116,26 +116,41 @@ var metaKeys = func() []string {
 }()
 
 // lockMeta takes an exclusive flock on path (created 0600 if missing) and
-// returns the function that releases it.
+// returns the function that releases it. RemoveMeta unlinks the lock file, so
+// a writer that waited on the file it opened checks that it is still the one
+// at path once locked, and else opens path again.
 func lockMeta(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 G703 -- derived from a session file path
-	if err != nil {
-		return nil, fmt.Errorf("open session metadata lock %s: %w", path, err)
-	}
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX) // #nosec G115 -- a file descriptor fits in an int
-		if !errors.Is(err, syscall.EINTR) {
-			break
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 G703 -- derived from a session file path
+		if err != nil {
+			return nil, fmt.Errorf("open session metadata lock %s: %w", path, err)
+		}
+		for {
+			err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX) // #nosec G115 -- a file descriptor fits in an int
+			if !errors.Is(err, syscall.EINTR) {
+				break
+			}
+		}
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("lock session metadata %s: %w", path, err)
+		}
+		held, heldErr := f.Stat()
+		current, curErr := os.Stat(path) // #nosec G703 -- derived from a session file path
+		if heldErr == nil && curErr == nil && os.SameFile(held, current) {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) // #nosec G115 -- closing releases it anyway
+				_ = f.Close()
+			}, nil
+		}
+		_ = f.Close() // unlinked or replaced while waiting: lock the current file
+		if heldErr != nil {
+			return nil, fmt.Errorf("check session metadata lock %s: %w", path, heldErr)
+		}
+		if curErr != nil && !errors.Is(curErr, fs.ErrNotExist) {
+			return nil, fmt.Errorf("check session metadata lock %s: %w", path, curErr)
 		}
 	}
-	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("lock session metadata %s: %w", path, err)
-	}
-	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) // #nosec G115 -- closing releases it anyway
-		_ = f.Close()
-	}, nil
 }
 
 // replaceFile writes data to a temp file in path's folder with mode, syncs

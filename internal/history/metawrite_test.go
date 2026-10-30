@@ -375,3 +375,45 @@ func TestRemoveMeta_NoMetaIsFine(t *testing.T) {
 		t.Fatal("lock file left behind")
 	}
 }
+
+// A writer waiting on the lock when RemoveMeta unlinks it must not end up
+// holding the old file's lock while another writer holds the new file's.
+func TestLockMeta_WaiterOnAnUnlinkedLockTakesTheCurrentOne(t *testing.T) {
+	sf := newSessionFile(t)
+	path := MetaLockPath(sf)
+	unlockA, err := lockMeta(path) // plays RemoveMeta, which unlinks under its lock
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotB := make(chan func(), 1)
+	go func() {
+		unlock, err := lockMeta(path)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		gotB <- unlock
+	}()
+	time.Sleep(50 * time.Millisecond) // B has opened the old file and waits
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	unlockC, err := lockMeta(path) // a new writer: a new lock file, free at once
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlockA()
+	select {
+	case unlock := <-gotB:
+		unlock()
+		t.Fatal("a waiter took the unlinked lock while another writer held the current one")
+	case <-time.After(100 * time.Millisecond):
+	}
+	unlockC()
+	select {
+	case unlock := <-gotB:
+		unlock()
+	case <-time.After(2 * time.Second):
+		t.Fatal("the waiter never took the current lock")
+	}
+}
