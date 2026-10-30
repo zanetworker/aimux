@@ -188,8 +188,16 @@ type Service struct {
 	// left: per session, the text a send typed but did not submit; only that
 	// text in the box may be submitted by a retry, never the owner's. Its own
 	// lock, so Status never waits for an attempt.
-	leftMu sync.Mutex
-	left   map[string]string
+	leftMu  sync.Mutex
+	left    map[string]string
+	leftGen int // counts records, so a screen read before one never drops it
+}
+
+// leftGeneration is taken before reading a screen that may drop a record.
+func (s *Service) leftGeneration() int {
+	s.leftMu.Lock()
+	defer s.leftMu.Unlock()
+	return s.leftGen
 }
 
 func (s *Service) leftText(sessionID string) string {
@@ -200,10 +208,14 @@ func (s *Service) leftText(sessionID string) string {
 
 // forgetLeftUnlessShown drops the record of text a send left once a screen
 // with no prompt shows the box without it (cleared, or sent, at the Mac):
-// that text, typed again, is the owner's.
-func (s *Service) forgetLeftUnlessShown(sessionID, scr string) {
-	if left := s.leftText(sessionID); left != "" && ParsePrompt(scr) == nil && !WordsInBox(scr, left) {
-		s.setLeft(sessionID, "")
+// that text, typed again, is the owner's. gen is leftGeneration from before
+// the screen was read; a record made since then stays.
+func (s *Service) forgetLeftUnlessShown(sessionID, scr string, gen int) {
+	s.leftMu.Lock()
+	defer s.leftMu.Unlock()
+	left := s.left[sessionID]
+	if left != "" && s.leftGen == gen && ParsePrompt(scr) == nil && !WordsInBox(scr, left) {
+		delete(s.left, sessionID)
 	}
 }
 
@@ -214,6 +226,7 @@ func (s *Service) setLeft(sessionID, text string) {
 		delete(s.left, sessionID)
 	} else {
 		s.left[sessionID] = text
+		s.leftGen++
 	}
 }
 
@@ -360,6 +373,7 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 		st.Reason = Code(err)
 		return st
 	}
+	gen := s.leftGeneration()
 	scr, err := s.readScreen(ctx, d, p)
 	if err != nil {
 		st.Reason = Code(err)
@@ -368,7 +382,7 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 	st.Prompt = ParsePrompt(scr)
 	st.Working = Working(scr)
 	// The text a send left waiting can be retried (Retry presses Enter).
-	s.forgetLeftUnlessShown(sessionID, scr)
+	s.forgetLeftUnlessShown(sessionID, scr, gen)
 	left := s.leftText(sessionID)
 	if !InputBoxEmpty(scr) && (left == "" || !WordsInBox(scr, left)) {
 		st.Reason = Code(ErrNotAtInput)
@@ -454,6 +468,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	if err != nil {
 		return err
 	}
+	gen := s.leftGeneration()
 	scr, err := s.readScreen(ctx, d, p)
 	if err != nil {
 		return err
@@ -463,7 +478,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	}
 	// A send that typed but did not press Enter (ErrNotSubmitted) left this
 	// very text in the box: its retry presses Enter and types nothing.
-	s.forgetLeftUnlessShown(sessionID, scr)
+	s.forgetLeftUnlessShown(sessionID, scr, gen)
 	waiting := !InputBoxEmpty(scr) && s.leftText(sessionID) == text && WordsInBox(scr, text)
 	if !InputBoxEmpty(scr) && !waiting {
 		return ErrNotAtInput

@@ -1276,3 +1276,17 @@ func TestLeftTextIsForgottenOnceTheBoxChanges(t *testing.T) {
 		t.Fatalf("pressed %v on the owner's draft", e.drv.keys)
 	}
 }
+
+// A status read that saw the box before a send recorded its text must not
+// drop that record.
+func TestStaleStatusReadKeepsTheLeftText(t *testing.T) {
+	e := newEnv(t)
+	gen := e.svc.leftGeneration() // a status read starts and sees the empty box
+	e.drv.afterType = boxWith("something else")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
+	e.svc.forgetLeftUnlessShown("s1", idleScreen, gen) // that read ends now
+	e.drv.screen, e.drv.sent = boxWith("give me an example"), nil
+	if err := e.svc.Send(context.Background(), "s1", "give me an example", ""); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+}
