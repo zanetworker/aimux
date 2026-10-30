@@ -406,7 +406,12 @@ func (n *Namer) runBatch(ctx context.Context) {
 		if !ok || !n.needsName(s, now) {
 			continue
 		}
-		input := namingInput(s.FilePath, autoInputLimit, false)
+		// Claude Code's recap covers the whole session, where the first message
+		// and latest reply may not (a "continue ..." start, a long session).
+		input := capRunes(strings.TrimSpace(s.AwaySummary), autoInputLimit)
+		if input == "" {
+			input = namingInput(s.FilePath, autoInputLimit, false)
+		}
 		if input == "" {
 			n.mu.Lock()
 			n.noContent[s.ID] = s.LastActive

@@ -1041,8 +1041,13 @@ func TestNamer_AwaySummaryWithAUselessTitleAsksOnlyForTheTitle(t *testing.T) {
 	if f.backend.calls() != 1 {
 		t.Fatalf("calls = %d, want 1", f.backend.calls())
 	}
-	if req := f.backend.last(); !strings.Contains(req.Prompt, "Session 1 (title):") {
+	req := f.backend.last()
+	if !strings.Contains(req.Prompt, "Session 1 (title):") {
 		t.Errorf("prompt should ask only for a title")
+	}
+	// Named from the recap of the whole session, not its first message and latest reply.
+	if !strings.Contains(req.Prompt, "Claude Code's recap") || strings.Contains(req.Prompt, "Latest reply begins") {
+		t.Errorf("prompt should hold the away summary only")
 	}
 	m := LoadMeta(s.FilePath)
 	if m.Title == "" || m.TitleBy != "model" || m.Description != "" {
