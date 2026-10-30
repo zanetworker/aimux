@@ -16,6 +16,8 @@ struct AllScreen: View {
     let chat: ChatContext
     @Binding var filter: AllFilter
     @State private var path: [Session] = []
+    /// Folders opened in the folder view; they start closed.
+    @State private var openFolders: Set<String> = []
     private let format = SessionRowFormat()
 
     private var sections: [DaySection] {
@@ -50,17 +52,16 @@ struct AllScreen: View {
                             }
                         }
                     }
-                    ForEach(sections, id: \.day) { section in
-                        Section {
-                            ForEach(section.sessions) { session in
-                                Button { path.append(session) } label: { SessionRow(session: session, format: format) }
-                                    .buttonStyle(.plain)
-                                    .compactRow()
-                                    .accessibilityIdentifier("session-\(session.id)")
-                            }
-                        } header: {
-                            SectionLabel(title: title(section.day)) {
-                                Text("\(section.sessions.count)").monospacedDigit()
+                    if filter.sort == .project {
+                        folderSection
+                    } else {
+                        ForEach(sections, id: \.day) { section in
+                            Section {
+                                ForEach(section.sessions) { session in sessionRow(session) }
+                            } header: {
+                                SectionLabel(title: title(section.day)) {
+                                    Text("\(section.sessions.count)").monospacedDigit()
+                                }
                             }
                         }
                     }
@@ -87,6 +88,49 @@ struct AllScreen: View {
                 }
             }
         }
+    }
+
+    private func sessionRow(_ session: Session) -> some View {
+        Button { path.append(session) } label: { SessionRow(session: session, format: format) }
+            .buttonStyle(.plain)
+            .compactRow()
+            .accessibilityIdentifier("session-\(session.id)")
+    }
+
+    /// The Folders sort: one folder row per project (newest project first) that opens in place, its sessions
+    /// newest first under a guide line.
+    @ViewBuilder private var folderSection: some View {
+        if !sections.isEmpty {
+            Section {
+                ForEach(sections, id: \.day) { section in
+                    let isOpen = openFolders.contains(section.day)
+                    Button {
+                        withAnimation(.snappy) {
+                            if isOpen { openFolders.remove(section.day) } else { openFolders.insert(section.day) }
+                        }
+                    } label: {
+                        ProjectGroupRow(group: folder(section), isExpanded: isOpen)
+                    }
+                    .buttonStyle(.plain)
+                    .compactRow()
+                    .accessibilityIdentifier("folder-\(format.projectName(section.day))")
+                    if isOpen {
+                        ForEach(section.sessions) { session in
+                            FolderItem { sessionRow(session) }.listRowInsets(.vertical, 0)
+                        }
+                    }
+                }
+            } header: {
+                SectionLabel(title: "Folders") { Text("\(sections.count)").monospacedDigit() }
+            }
+        }
+    }
+
+    /// A project section as a folder row.
+    private func folder(_ section: DaySection) -> ProjectGroup {
+        let items = section.sessions.map { NowItem(session: $0, activity: .none) }
+        return ProjectGroup(project: section.day, name: format.projectName(section.day), count: items.count,
+                            newest: items[0], items: items)
     }
 
     private var filterMenus: some View {
@@ -118,7 +162,7 @@ struct AllScreen: View {
         switch sort {
         case .newest: "Newest"
         case .mostActive: "Most active"
-        case .project: "Project"
+        case .project: "Folders"
         }
     }
 

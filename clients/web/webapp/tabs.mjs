@@ -3,14 +3,14 @@ import { apiDate } from './apiDate.mjs';
 import { NowModel } from './nowModel.mjs';
 import { announce } from './sessionInfo.mjs';
 import { renderNow } from './nowView.mjs';
-import { displayTitle, el, icon, projectName, sectionLabel, section, sessionRow, dotRow, projectLine, errorBanner, screenHeader } from './rows.mjs';
+import { bidi, displayTitle, el, icon, projectName, sectionLabel, section, sessionRow, dotRow, projectLine, errorBanner, screenHeader } from './rows.mjs';
 
 // The Now / All / search screens and the tab bar under them, like RootTabs in the iPhone app.
 // One session list feeds all three; Now adds each candidate's activity.
 
 const POLL_MS = 15000;
 const SEARCH_DEBOUNCE_MS = 400;
-const SORTS = [['newest', 'Newest'], ['mostActive', 'Most active'], ['project', 'Project']];
+const SORTS = [['newest', 'Newest'], ['mostActive', 'Most active'], ['project', 'Folders']];
 
 function storage() {
   try { return window.localStorage; } catch { return { getItem: () => null, setItem: () => {} }; }
@@ -77,6 +77,7 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
   let tab = 'now';
   let active = false;
   let allFilter = { project: null, onMacOnly: false, sort: 'newest' };
+  const openFolders = new Set(); // folders opened in All's folder view; they start closed
   const ui = {
     collapsed: new Set(),
     openCards: new Set(),
@@ -175,9 +176,13 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
       sessions: shown, project: allFilter.project, sort: allFilter.sort, now: Date.now(),
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     });
-    for (const s of sections) {
-      out.push(section(sectionLabel(dayTitle(s.day), null, String(s.sessions.length)),
-        ...s.sessions.map((session) => sessionRow(session, () => ui.open(session)))));
+    if (allFilter.sort === 'project') {
+      if (sections.length) out.push(section(sectionLabel('Folders', null, String(sections.length)), ...sections.map(folder)));
+    } else {
+      for (const s of sections) {
+        out.push(section(sectionLabel(dayTitle(s.day), null, String(s.sessions.length)),
+          ...s.sessions.map((session) => sessionRow(session, () => ui.open(session)))));
+      }
     }
     if (!model.sessions.length && !model.loadError) {
       out.push(el('p', 'empty', model.loaded ? 'No sessions yet. Sessions from Claude Code on your Mac show up here.' : 'Loading sessions…'));
@@ -185,6 +190,36 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
       out.push(el('p', 'empty', 'No sessions here.'));
     }
     return out;
+  }
+
+  // A project in the folder view: its icon, name, newest session while closed, count and chevron;
+  // open, its sessions newest first under a guide line, as on Now.
+  function folder(s) {
+    const isOpen = openFolders.has(s.day);
+    const box = el('div', 'folder');
+    const head = el('button', 'row folder-row' + (isOpen ? ' open' : ''));
+    head.type = 'button';
+    head.dataset.focus = 'all-folder:' + s.day;
+    head.setAttribute('aria-expanded', String(isOpen));
+    const text = el('span', 'text one');
+    text.append(bidi(projectName(s.day), 'group-name'));
+    if (!isOpen) {
+      const newest = el('span', 'detail inline');
+      newest.append(' · ', bidi(displayTitle(s.sessions[0].title, s.sessions[0].id)));
+      text.append(newest);
+    }
+    head.append(icon('folder'), text, el('span', 'count', String(s.sessions.length)), icon('chevron'));
+    head.addEventListener('click', () => {
+      if (isOpen) openFolders.delete(s.day); else openFolders.add(s.day);
+      render();
+    });
+    box.append(head);
+    if (isOpen) {
+      const items = el('div', 'folder-items');
+      for (const session of s.sessions) items.append(sessionRow(session, () => ui.open(session)));
+      box.append(items);
+    }
+    return box;
   }
 
   // "Today", "Yesterday", "Mon, Oct 20"; the folder name when sorted by project.

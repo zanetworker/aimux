@@ -76,8 +76,12 @@ public final class NowModel {
     }
 
     private func performRefresh() async {
-        if health == nil { await readHealth() }
+        // The cached or last list at once, then the new list, then its activity: the screen never waits
+        // for every event read before showing anything.
+        rebuild()
+        async let healthRead: Void = readHealthOnce()
         await list.refresh()
+        rebuild()
         let sessions = list.sessions
         let current = now()
         // Every busy session, since any may wait for an approval; the limit is for recent idle ones.
@@ -103,6 +107,11 @@ public final class NowModel {
         }
         activity = fresh
         rebuild()
+        await healthRead
+    }
+
+    private func readHealthOnce() async {
+        if health == nil { await readHealth() }
     }
 
     public func answer(_ approval: Approval, option: PermissionOption, session: String) async {

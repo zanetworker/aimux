@@ -3,6 +3,11 @@ import Foundation
 public struct NowItem: Equatable, Sendable {
     public let session: Session
     public let activity: Activity
+
+    public init(session: Session, activity: Activity) {
+        self.session = session
+        self.activity = activity
+    }
 }
 
 /// A session placed in the Last on your Mac row or in Pinned: it keeps its own status (the dot).
@@ -22,6 +27,14 @@ public struct ProjectGroup: Equatable, Sendable {
     public let newest: NowItem
     /// The project's working sessions, newest first, for expanding the group in place.
     public let items: [NowItem]
+
+    public init(project: String, name: String, count: Int, newest: NowItem, items: [NowItem]) {
+        self.project = project
+        self.name = name
+        self.count = count
+        self.newest = newest
+        self.items = items
+    }
 }
 
 public struct MoreProjects: Equatable, Sendable {

@@ -15,7 +15,7 @@ struct RootTabs: View {
     @State private var now: NowModel
     @State private var search: SearchModel
     @State private var tab = DebugHooks.initialTab
-    @State private var allFilter = AllFilter(project: DebugHooks.initialProject)
+    @State private var allFilter = AllFilter(project: DebugHooks.initialProject, sort: DebugHooks.initialSort)
     @State private var drafts = ChatDrafts()
     /// The server's Jira settings for reference links; nil until read, or when it has none.
     @State private var links: HealthLinks?

@@ -14,6 +14,8 @@ enum DebugHooks {
     static var initialQuery: String? { UserDefaults.standard.string(forKey: "query") }
     /// -project <path>: start All filtered to this project.
     static var initialProject: String? { UserDefaults.standard.string(forKey: "project") }
+    /// -sort folders: start All in the folder view.
+    static var initialSort: AllSort { UserDefaults.standard.string(forKey: "sort") == "folders" ? .project : .newest }
     /// -collapse <path>: start Now with this working folder closed (folders start open).
     static var collapsedProject: String? { UserDefaults.standard.string(forKey: "collapse") }
     /// -scrollToEnd YES: open lists scrolled to the bottom, for screenshots of the lower sections.
@@ -79,6 +81,7 @@ enum DebugHooks {
     static let openSettings = false
     static let initialQuery: String? = nil
     static let initialProject: String? = nil
+    static let initialSort = AllSort.newest
     static let collapsedProject: String? = nil
     static let scrollToEnd = false
     static let initialTab = AppTab.now

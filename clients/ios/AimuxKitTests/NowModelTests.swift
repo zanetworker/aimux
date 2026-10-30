@@ -348,6 +348,20 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         #expect(model.retrying.isEmpty)
     }
 
+    @Test func showsTheListBeforeTheEventReadsAnswer() async {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let (activity, gate) = (StubActivity(), Gate())
+        activity.firstSnapshotGate = gate
+        activity.sequences["a"] = [page([])]
+        let model = makeModel([row("a", .busy), row("m", .openInTerminal, ago: 5000)], activity, defaults)
+        let refresh = Task { await model.refresh() }
+        await spin { activity.requestCount == 1 }  // the event read is still out: the list shows already
+        #expect(model.view.onMac.map(\.id) == ["m"])
+        #expect(model.view.summary.working == 1)
+        await gate.open()
+        await refresh.value
+    }
     @Test func retryWithoutAPromptSendsNothing() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
