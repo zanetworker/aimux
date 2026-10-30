@@ -315,7 +315,7 @@ The web dashboard exposes a REST API on `http://127.0.0.1:<port>`. All endpoints
 | `GET` | `/api/agents` | List active agents. Query params: `filter`, `sort` |
 | `POST` | `/api/agents/launch` | Launch a new agent session |
 | `POST` | `/api/agents/{id}/kill` | Kill an agent by session ID or PID |
-| `POST` | `/api/agents/{id}/focus` | Bring a running agent's iTerm2 pane to the front (session ID, unique prefix or PID). 404 not running, 409 ambiguous prefix, 422 no pane (body has `hint`) |
+| `POST` | `/api/agents/{id}/focus` | Bring a running agent's iTerm2 pane to the front (session ID, unique prefix or PID). 404 not running, 409 ambiguous prefix, 422 no pane, 502 iTerm2 focus failed (422 and 502 bodies carry `hint` with the tmux attach command for agents in tmux) |
 | `POST` | `/api/agents/{id}/archive` | Archive an agent session |
 | `GET` | `/api/agents/{id}/trace` | Get trace for an agent |
 | `GET` | `/api/agents/{id}/diff` | Get file diffs for an agent session |
