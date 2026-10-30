@@ -1,0 +1,48 @@
+{
+  "name": "A session that is Last on your Mac and pinned appears once, at the top",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "lastOnMac": {
+    "id": "s1",
+    "at": "2026-10-30T11:55:00Z"
+  },
+  "sessions": [
+    {
+      "id": "s2",
+      "provider": "claude",
+      "title": "Tidy the bookmarks",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:00:00Z",
+      "state": "idle",
+      "pinned": true
+    },
+    {
+      "id": "s1",
+      "provider": "claude",
+      "title": "Fix the login redirect",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:50:00Z",
+      "state": "open_in_terminal",
+      "pinned": true
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": "s1",
+    "pinned": [
+      "s2"
+    ],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 1,
+      "onMac": 0
+    }
+  }
+}

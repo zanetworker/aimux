@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/terminput"
 )
 
 const testLogin = "me@example.com"
@@ -89,6 +91,9 @@ func TestAPI_SessionDetail(t *testing.T) {
 	resp, body := do(t, srv, "GET", "/v1/sessions/s1", "")
 	if resp.StatusCode != 200 || len(body["turns"].([]any)) != 1 {
 		t.Fatalf("detail: %d %v", resp.StatusCode, body)
+	}
+	if _, ok := body["stats"]; ok {
+		t.Fatalf("detail without stats carries %v, want the key omitted", body["stats"])
 	}
 	resp, body = do(t, srv, "GET", "/v1/sessions/nope", "")
 	if resp.StatusCode != 404 || body["code"] != "unknown_session" {
@@ -530,6 +535,33 @@ func TestAPI_HealthReportsVersionAndCapabilities(t *testing.T) {
 	}
 }
 
+// Health carries the Jira settings only when a Jira base is configured.
+func TestAPI_HealthLinks(t *testing.T) {
+	health := func(links *Links) map[string]any {
+		api := &API{Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), Links: links}
+		srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+		defer srv.Close()
+		_, body := do(t, srv, "GET", "/v1/health", "")
+		return body
+	}
+	body := health(&Links{JiraBase: "https://jira.example.com", JiraProjects: []string{"WID", "OPS"}})
+	links, _ := body["links"].(map[string]any)
+	projects, _ := links["jiraProjects"].([]any)
+	if links["jiraBase"] != "https://jira.example.com" || len(projects) != 2 || projects[0] != "WID" {
+		t.Fatalf("health links %v, want {jiraBase, jiraProjects}", body["links"])
+	}
+	// No projects listed: the key is still an array, never null.
+	body = health(&Links{JiraBase: "https://jira.example.com"})
+	if p, ok := body["links"].(map[string]any)["jiraProjects"].([]any); !ok || len(p) != 0 {
+		t.Fatalf("jiraProjects %v, want []", body["links"])
+	}
+	for name, l := range map[string]*Links{"nil": nil, "no base": {JiraProjects: []string{"WID"}}} {
+		if body := health(l); body["links"] != nil {
+			t.Fatalf("%s: health links %v, want the key omitted", name, body["links"])
+		}
+	}
+}
+
 // Starting a session answers like sending a message, so one code path in a
 // client follows both.
 func TestAPI_NewSessionAnswersLikeASend(t *testing.T) {
@@ -545,5 +577,336 @@ func TestAPI_NewSessionAnswersLikeASend(t *testing.T) {
 	}
 	if body["events"] != fmt.Sprintf("/v1/sessions/%s/events?after=%v", body["id"], body["after"]) {
 		t.Fatalf("events link %v", body["events"])
+	}
+}
+
+// fakeTerminal is a TerminalInput that records each call and answers err.
+type fakeTerminal struct {
+	mu    sync.Mutex
+	err   error
+	calls []string
+}
+
+func (f *fakeTerminal) Send(_ context.Context, id, text, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf("send %s %q %s", id, text, key))
+	return f.err
+}
+
+func (f *fakeTerminal) Press(_ context.Context, id, promptID string, option terminput.Key, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf("press %s %s %s %s", id, promptID, option, key))
+	return f.err
+}
+
+func newTerminalAPI(t *testing.T, term TerminalInput, enabled bool) *httptest.Server {
+	t.Helper()
+	srv, _ := newTerminalAPIWithLog(t, term, enabled)
+	return srv
+}
+
+func newTerminalAPIWithLog(t *testing.T, term TerminalInput, enabled bool) (*httptest.Server, *syncBuffer) {
+	t.Helper()
+	log := &syncBuffer{}
+	api := &API{Log: log,
+		Broker:   NewBroker(BrokerDeps{}, BrokerOptions{}),
+		Sessions: func(context.Context, int, bool) ([]Session, error) { return nil, nil },
+		Session: func(_ context.Context, id string, _ int) (SessionDetail, error) {
+			if id == "nope" {
+				return SessionDetail{}, acprun.ErrUnknownSession
+			}
+			return SessionDetail{Session: Session{ID: id, State: StateOpenInTerminal}, Turns: []Turn{},
+				Terminal: &TerminalStatus{Status: "idle", CanType: true}}, nil
+		},
+		TerminalInput: term, TerminalEnabled: enabled,
+	}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	t.Cleanup(srv.Close)
+	return srv, log
+}
+
+// syncBuffer is a goroutine-safe log sink.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// A driver failure answers a fixed message: osascript stderr and JXA
+// exception text stay in the server's log, never in the response.
+func TestAPI_TerminalDriverFailureHidesDetail(t *testing.T) {
+	detail := "execution error: Error: TypeError: secret window 42 (-2700)"
+	for _, path := range []string{"/v1/sessions/s9/terminal/messages", "/v1/sessions/s9/terminal/keys"} {
+		srv, log := newTerminalAPIWithLog(t, &fakeTerminal{err: fmt.Errorf("iterm2: send: %s", detail)}, true)
+		req, _ := http.NewRequest("POST", srv.URL+path, strings.NewReader(`{"promptId":"p1","option":"1"}`))
+		if strings.HasSuffix(path, "messages") {
+			req, _ = http.NewRequest("POST", srv.URL+path, strings.NewReader(`{"text":"a"}`))
+		}
+		req.Header.Set("Tailscale-User-Login", testLogin)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != 500 || strings.Contains(string(raw), "secret") || !strings.Contains(string(raw), `"code":"internal"`) ||
+			!strings.Contains(string(raw), "the terminal driver failed") {
+			t.Fatalf("%s: %d %s, want 500 internal with a fixed message", path, resp.StatusCode, raw)
+		}
+		if !strings.Contains(log.String(), detail) {
+			t.Fatalf("server log %q, want the driver's detail", log.String())
+		}
+	}
+}
+
+func TestAPI_TerminalBodyLimitsAndUnknownFields(t *testing.T) {
+	term := &fakeTerminal{}
+	srv := newTerminalAPI(t, term, true)
+	big := strings.Repeat("a", 64<<10)
+	for _, c := range []struct{ name, path, body string }{
+		{"message over 64 KiB", "/v1/sessions/s9/terminal/messages", `{"text":"` + big + `"}`},
+		{"unknown message field", "/v1/sessions/s9/terminal/messages", `{"text":"a","paste":true}`},
+		{"keys over 64 KiB", "/v1/sessions/s9/terminal/keys", `{"promptId":"` + big + `","option":"1"}`},
+		{"unknown keys field", "/v1/sessions/s9/terminal/keys", `{"promptId":"p1","option":"1","force":true}`},
+	} {
+		if resp, body := do(t, srv, "POST", c.path, c.body); resp.StatusCode != 400 || body["code"] != "bad_request" {
+			t.Fatalf("%s: %d %v, want 400 bad_request", c.name, resp.StatusCode, body)
+		}
+	}
+	if len(term.calls) != 0 {
+		t.Fatalf("calls %v for refused bodies", term.calls)
+	}
+	// Just under the limit is typed.
+	if resp, _ := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"`+strings.Repeat("a", 60<<10)+`"}`); resp.StatusCode != 202 {
+		t.Fatalf("60 KiB message: %d, want 202", resp.StatusCode)
+	}
+}
+
+// Without a Session func, ErrNotInTerminal stays a 409 instead of panicking.
+func TestAPI_TerminalErrorWithoutSessionFunc(t *testing.T) {
+	api := &API{Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), TerminalInput: &fakeTerminal{err: terminput.ErrNotInTerminal}, TerminalEnabled: true}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	if resp, body := do(t, srv, "POST", "/v1/sessions/x/terminal/messages", `{"text":"a"}`); resp.StatusCode != 409 || body["code"] != "not_in_terminal" {
+		t.Fatalf("%d %v, want 409 not_in_terminal", resp.StatusCode, body)
+	}
+}
+
+func TestAPI_TerminalMessages(t *testing.T) {
+	tests := []struct {
+		name      string
+		session   string
+		err       error
+		body      string
+		wantCode  int
+		wantErr   string
+		wantCalls int
+	}{
+		{"typed", "s9", nil, `{"text":"run the tests","key":"k1"}`, 202, "", 1},
+		{"not json", "s9", nil, `hello`, 400, "bad_request", 0},
+		{"empty text", "s9", nil, `{"text":"  "}`, 400, "bad_request", 0},
+		{"control characters", "s9", terminput.ErrBadText, `{"text":"a"}`, 400, "bad_text", 1},
+		{"unknown session", "nope", terminput.ErrNotInTerminal, `{"text":"a"}`, 404, "unknown_session", 1},
+		{"not in a terminal", "s9", terminput.ErrNotInTerminal, `{"text":"a"}`, 409, "not_in_terminal", 1},
+		{"not claude", "s9", terminput.ErrNotClaude, `{"text":"a"}`, 409, "not_claude", 1},
+		{"mac in use", "s9", terminput.ErrMacInUse, `{"text":"a"}`, 409, "mac_in_use", 1},
+		{"no driver", "s9", terminput.ErrNoDriver, `{"text":"a"}`, 409, "no_terminal_driver", 1},
+		{"automation denied", "s9", terminput.ErrAutomationDenied, `{"text":"a"}`, 409, "automation_denied", 1},
+		{"not at input", "s9", terminput.ErrNotAtInput, `{"text":"a"}`, 409, "not_at_input", 1},
+		{"not submitted", "s9", terminput.ErrNotSubmitted, `{"text":"a"}`, 409, "not_submitted", 1},
+		{"claude working", "s9", terminput.ErrBusy, `{"text":"a"}`, 409, "busy", 1},
+		{"disabled by the service", "s9", terminput.ErrDisabled, `{"text":"a"}`, 403, "disabled", 1},
+		{"driver failure", "s9", fmt.Errorf("iterm2: send: %w", errors.New("helper died")), `{"text":"a"}`, 500, "internal", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := &fakeTerminal{err: tt.err}
+			srv := newTerminalAPI(t, term, true)
+			resp, body := do(t, srv, "POST", "/v1/sessions/"+tt.session+"/terminal/messages", tt.body)
+			if resp.StatusCode != tt.wantCode || (tt.wantErr != "" && body["code"] != tt.wantErr) {
+				t.Fatalf("got %d %v, want %d %s", resp.StatusCode, body, tt.wantCode, tt.wantErr)
+			}
+			if tt.wantErr == "" && body["status"] != "typed" {
+				t.Fatalf("body %v, want status typed", body)
+			}
+			if len(term.calls) != tt.wantCalls {
+				t.Fatalf("calls %v, want %d (never retried)", term.calls, tt.wantCalls)
+			}
+			if tt.name == "typed" && term.calls[0] != `send s9 "run the tests" k1` {
+				t.Fatalf("call %q", term.calls[0])
+			}
+		})
+	}
+}
+
+// The guard's and the busy refusal's fixed messages, never err.Error().
+func TestAPI_TerminalGuardMessages(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{terminput.ErrMacInUse, "you're using this session on your Mac"},
+		{terminput.ErrBusy, "Claude is working in this session; try again when it finishes"},
+	} {
+		srv := newTerminalAPI(t, &fakeTerminal{err: tc.err}, true)
+		resp, body := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"a"}`)
+		if resp.StatusCode != 409 || body["error"] != tc.want {
+			t.Errorf("%s: got %d %v, want 409 %q", terminput.Code(tc.err), resp.StatusCode, body, tc.want)
+		}
+	}
+}
+
+func TestAPI_TerminalKeys(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		body      string
+		wantCode  int
+		wantErr   string
+		wantCalls int
+	}{
+		{"typed", nil, `{"promptId":"p1","option":"1","key":"k2"}`, 202, "", 1},
+		{"not json", nil, `{`, 400, "bad_request", 0},
+		{"no prompt id", nil, `{"option":"1"}`, 400, "bad_request", 0},
+		{"no option", nil, `{"promptId":"p1"}`, 400, "bad_request", 0},
+		{"no prompt", terminput.ErrNoPrompt, `{"promptId":"p1","option":"1"}`, 409, "no_prompt", 1},
+		{"prompt changed", terminput.ErrPromptChanged, `{"promptId":"p1","option":"1"}`, 409, "prompt_changed", 1},
+		{"mac in use", terminput.ErrMacInUse, `{"promptId":"p1","option":"1"}`, 409, "mac_in_use", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			term := &fakeTerminal{err: tt.err}
+			srv := newTerminalAPI(t, term, true)
+			resp, body := do(t, srv, "POST", "/v1/sessions/s9/terminal/keys", tt.body)
+			if resp.StatusCode != tt.wantCode || (tt.wantErr != "" && body["code"] != tt.wantErr) {
+				t.Fatalf("got %d %v, want %d %s", resp.StatusCode, body, tt.wantCode, tt.wantErr)
+			}
+			if len(term.calls) != tt.wantCalls {
+				t.Fatalf("calls %v, want %d", term.calls, tt.wantCalls)
+			}
+			if tt.name == "typed" && (body["status"] != "typed" || term.calls[0] != "press s9 p1 1 k2") {
+				t.Fatalf("body %v call %v", body, term.calls)
+			}
+		})
+	}
+}
+
+// Off in config (or not wired): both endpoints answer 403 disabled without
+// reaching the terminal, and health leaves terminal_input out.
+func TestAPI_TerminalDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		term *fakeTerminal
+	}{{"off in config", &fakeTerminal{}}, {"not wired", nil}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var term TerminalInput
+			if tc.term != nil {
+				term = tc.term
+			}
+			srv := newTerminalAPI(t, term, false)
+			for _, c := range []struct{ path, body string }{
+				{"/v1/sessions/s9/terminal/messages", `{"text":"a"}`},
+				{"/v1/sessions/s9/terminal/keys", `{"promptId":"p1","option":"1"}`},
+			} {
+				if resp, body := do(t, srv, "POST", c.path, c.body); resp.StatusCode != 403 || body["code"] != "disabled" {
+					t.Fatalf("%s: %d %v, want 403 disabled", c.path, resp.StatusCode, body)
+				}
+			}
+			if tc.term != nil && len(tc.term.calls) != 0 {
+				t.Fatalf("calls %v while disabled", tc.term.calls)
+			}
+			_, body := do(t, srv, "GET", "/v1/health", "")
+			if strings.Contains(fmt.Sprint(body["capabilities"]), CapTerminalInput) {
+				t.Fatalf("capabilities %v while disabled", body["capabilities"])
+			}
+		})
+	}
+}
+
+func TestAPI_TerminalCapabilityWhenEnabled(t *testing.T) {
+	srv := newTerminalAPI(t, &fakeTerminal{}, true)
+	_, body := do(t, srv, "GET", "/v1/health", "")
+	if !strings.Contains(fmt.Sprint(body["capabilities"]), CapTerminalInput) {
+		t.Fatalf("capabilities %v, want %s", body["capabilities"], CapTerminalInput)
+	}
+	resp, body := do(t, srv, "GET", "/v1/sessions/s9", "")
+	term, _ := body["terminal"].(map[string]any)
+	if resp.StatusCode != 200 || term["status"] != "idle" || term["canType"] != true {
+		t.Fatalf("detail %d %v, want its terminal status", resp.StatusCode, body)
+	}
+}
+
+// A coded error answers its fixed message, never the wrapped text.
+func TestAPI_TerminalCodedErrorsUseFixedMessages(t *testing.T) {
+	for _, sentinel := range []error{terminput.ErrNotAtInput, terminput.ErrAutomationDenied, terminput.ErrNoDriver,
+		terminput.ErrNotClaude, terminput.ErrMacInUse, terminput.ErrPromptChanged, terminput.ErrNoPrompt,
+		terminput.ErrNotInTerminal, terminput.ErrBadText, terminput.ErrDisabled, terminput.ErrNotSubmitted} {
+		err := fmt.Errorf("iterm2: locate: secret tty /dev/ttys001: %w", sentinel)
+		w := httptest.NewRecorder()
+		writeTerminalFailure(w, err, io.Discard)
+		var body ErrorBody
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		if strings.Contains(w.Body.String(), "secret") || body.Code != terminput.Code(sentinel) || body.Error == "" {
+			t.Errorf("%v -> %s, want code %s with a fixed message", sentinel, w.Body.String(), terminput.Code(sentinel))
+		}
+	}
+	w := httptest.NewRecorder()
+	writeTerminalFailure(w, terminput.ErrNotAtInput, io.Discard)
+	if !strings.Contains(w.Body.String(), "Claude Code is not at an empty input box") {
+		t.Fatalf("not_at_input -> %s", w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	writeTerminalFailure(w, terminput.ErrBadText, io.Discard)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "starts with ! or /") {
+		t.Fatalf("bad_text -> %d %s, want the leading ! and / rule named", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	writeTerminalFailure(w, terminput.ErrNotSubmitted, io.Discard)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "the message is in the input box but was not sent") {
+		t.Fatalf("not_submitted -> %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAPI_TerminalDriverDetailIsQuotedInTheLog(t *testing.T) {
+	log := &syncBuffer{}
+	writeTerminalFailure(httptest.NewRecorder(), errors.New("line one\nline two"), log)
+	if got := log.String(); got != "terminal input: \"line one\\nline two\"\n" {
+		t.Fatalf("log %q, want the detail quoted on one line", got)
+	}
+}
+
+// After a successful send or press the session's cached status is dropped;
+// a failed attempt keeps it.
+func TestAPI_TerminalSuccessInvalidatesStatus(t *testing.T) {
+	var mu sync.Mutex
+	var typed []string
+	term := &fakeTerminal{}
+	api := &API{Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), TerminalInput: term, TerminalEnabled: true,
+		TerminalTyped: func(id string) { mu.Lock(); typed = append(typed, id); mu.Unlock() }}
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"a"}`)
+	do(t, srv, "POST", "/v1/sessions/s8/terminal/keys", `{"promptId":"p1","option":"1"}`)
+	term.mu.Lock()
+	term.err = terminput.ErrNotAtInput
+	term.mu.Unlock()
+	do(t, srv, "POST", "/v1/sessions/s7/terminal/messages", `{"text":"a"}`)
+	mu.Lock()
+	defer mu.Unlock()
+	if fmt.Sprint(typed) != "[s9 s8]" {
+		t.Fatalf("invalidated %v, want s9 and s8 only", typed)
 	}
 }

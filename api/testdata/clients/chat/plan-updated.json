@@ -1,0 +1,147 @@
+{
+  "name": "two plan updates make one plan item, at the first one's place, with the latest entries",
+  "now": "2026-10-26T08:01:00Z",
+  "turns": [],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "p1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Ship the small fixes"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "p1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:01Z",
+      "data": {
+        "sessionUpdate": "plan",
+        "entries": [
+          {
+            "content": "Fix the typo",
+            "priority": "high",
+            "status": "pending"
+          },
+          {
+            "content": "Update the test",
+            "priority": "medium",
+            "status": "pending"
+          },
+          {
+            "content": "Run the suite",
+            "priority": "low",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "p1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "The typo first."
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "p1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:03Z",
+      "data": {
+        "sessionUpdate": "plan",
+        "entries": [
+          {
+            "content": "Fix the typo",
+            "priority": "high",
+            "status": "completed"
+          },
+          {
+            "content": "Update the test",
+            "priority": "medium",
+            "status": "in_progress"
+          },
+          {
+            "content": "Run the suite",
+            "priority": "low",
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "p1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:04Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "t1",
+        "title": "Read sample_test.go",
+        "kind": "read",
+        "status": "in_progress"
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Ship the small fixes"
+      },
+      {
+        "kind": "plan",
+        "done": 1,
+        "total": 3,
+        "entries": [
+          {
+            "text": "Fix the typo",
+            "status": "completed"
+          },
+          {
+            "text": "Update the test",
+            "status": "in_progress"
+          },
+          {
+            "text": "Run the suite",
+            "status": "pending"
+          }
+        ]
+      },
+      {
+        "kind": "thought",
+        "text": "The typo first.",
+        "seconds": 1
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": 0,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "read",
+            "target": "Read sample_test.go",
+            "status": "running",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

@@ -1,0 +1,7 @@
+{"sessions":[
+{"id":"d12ce59e-17e0-4534-8027-eac22f02c34f","provider":"claude","title":"Aimux iOS app structure","project":"/Users/me/src/aimux-ios","lastActive":"2026-10-25T18:35:27.606Z","state":"open_in_terminal","lastPrompt":"Read the handoff and propose the app structure"},
+{"id":"6a320ebb-c7a5-46c5-a8d2-6d4723471b56","provider":"claude","title":"Garden app paths","project":"/Users/me/src/garden-planner","lastActive":"2026-10-25T18:35:03.34Z","state":"idle","lastPrompt":"still running?"},
+{"id":"a17fd8be-5fbe-47df-bba0-cbc38aec9675","provider":"claude","title":"Skills vs marketplace","project":"/Users/me/src/research","lastActive":"2026-10-25T18:32:44Z","state":"busy"},
+{"id":"11111111-2222-3333-4444-555555555555","provider":"claude","title":"From a newer server","project":"/Users/me/src/x","lastActive":"2026-10-25T18:30:00.1Z","state":"hibernating","newField":{"a":1}},
+{"provider":"claude","title":"Broken row without an id","project":"/Users/me/src/y","lastActive":"2026-10-25T18:00:00Z","state":"idle"}
+]}

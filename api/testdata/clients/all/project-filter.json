@@ -1,0 +1,87 @@
+{
+  "name": "a project filter matches the full path only",
+  "now": "2026-10-26T12:00:00Z",
+  "timeZone": "UTC",
+  "project": "/src/aimux",
+  "sort": "newest",
+  "sessions": [
+    {
+      "id": "p1",
+      "provider": "claude",
+      "title": "Match today",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T10:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "x1",
+      "provider": "claude",
+      "title": "Longer path",
+      "project": "/src/aimux-ios",
+      "lastActive": "2026-10-26T11:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "x2",
+      "provider": "claude",
+      "title": "Subfolder",
+      "project": "/src/aimux/sub",
+      "lastActive": "2026-10-26T11:30:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "x3",
+      "provider": "claude",
+      "title": "Other parent",
+      "project": "/work/src/aimux",
+      "lastActive": "2026-10-26T11:45:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "p2",
+      "provider": "claude",
+      "title": "Match yesterday",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T09:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "p3",
+      "provider": "claude",
+      "title": "Match older",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-20T09:00:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "x4",
+      "provider": "claude",
+      "title": "Other project",
+      "project": "/src/notes",
+      "lastActive": "2026-10-25T10:00:00Z",
+      "state": "idle"
+    }
+  ],
+  "expect": {
+    "sections": [
+      {
+        "day": "today",
+        "ids": [
+          "p1"
+        ]
+      },
+      {
+        "day": "yesterday",
+        "ids": [
+          "p2"
+        ]
+      },
+      {
+        "day": "2026-10-20",
+        "ids": [
+          "p3"
+        ]
+      }
+    ]
+  }
+}

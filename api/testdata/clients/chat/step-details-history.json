@@ -1,0 +1,130 @@
+{
+  "name": "history step detail: a long input, an error, an edit with whitespace, a Read and a Task whose input the snippet already shows (no detail)",
+  "now": "2026-10-28T09:00:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-28T08:00:00Z",
+      "user": "Fix the rounding in the ledger",
+      "reply": "Fixed the rounding.",
+      "tools": [
+        {
+          "name": "Bash",
+          "snippet": "go test ./internal/billing/...",
+          "ok": true,
+          "detail": {
+            "input": "go test ./internal/billing/... ./internal/invoice/... ./internal/ledger/... -run 'TestRounding|TestCarryOver|TestProration' -count=1 -race -timeout 120s -coverprofile=/tmp/cover.out -v"
+          }
+        },
+        {
+          "name": "Bash",
+          "snippet": "make lint",
+          "ok": false,
+          "detail": {
+            "input": "make lint",
+            "error": "lint: ledger.go:12: unused variable total\nmake: *** [lint] Error 1"
+          }
+        },
+        {
+          "name": "Edit",
+          "snippet": "/src/ledger/round.go",
+          "ok": true,
+          "detail": {
+            "old": "\tlet a = 1\n",
+            "new": "\tlet a = 2\n"
+          }
+        },
+        {
+          "name": "Read",
+          "snippet": "/src/ledger/ledger.go",
+          "ok": true
+        },
+        {
+          "name": "Task",
+          "snippet": "Check the ledger rounding",
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "events": [],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Fix the rounding in the ledger"
+      },
+      {
+        "kind": "steps",
+        "count": 5,
+        "seconds": null,
+        "filesChanged": [
+          "/src/ledger/round.go"
+        ],
+        "steps": [
+          {
+            "kind": "run",
+            "target": "go test ./internal/billing/...",
+            "status": "ok",
+            "detail": {
+              "input": "go test ./internal/billing/... ./internal/invoice/... ./internal/ledger/... -run 'TestRounding|TestCarryOver|TestProration' -count=1 -race -timeout 120s -coverprofile=/tmp/cover.out -v",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "run",
+            "target": "make lint",
+            "status": "failed",
+            "detail": {
+              "input": "make lint",
+              "error": "lint: ledger.go:12: unused variable total\nmake: *** [lint] Error 1",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "/src/ledger/round.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "\tlet a = 1\n",
+              "new": "\tlet a = 2\n"
+            }
+          },
+          {
+            "kind": "read",
+            "target": "/src/ledger/ledger.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "other",
+            "target": "Check the ledger rounding",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "Fixed the rounding."
+      }
+    ],
+    "working": false,
+    "pendingApproval": null
+  }
+}

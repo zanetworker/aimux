@@ -1,0 +1,15 @@
+⏺ Edit(app.go)
+────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ app.go
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  3 -old line
+  3 +new line
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to app.go?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session and also auto-approve common
+      shell commands that only read files in this project (shift+tab)
+   3. No, and tell Claude what to do differently (esc)
+
+ Esc to cancel

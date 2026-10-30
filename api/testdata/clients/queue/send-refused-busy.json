@@ -1,0 +1,30 @@
+{
+  "name": "send-refused-busy",
+  "session": {
+    "state": "open_in_terminal",
+    "terminal": {
+      "status": "idle",
+      "canType": true,
+      "working": false
+    }
+  },
+  "send": {
+    "error": "busy"
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": false
+    },
+    "items": [],
+    "offer": {
+      "action": "queue",
+      "label": "Add to queue",
+      "keepText": true,
+      "message": null
+    }
+  }
+}

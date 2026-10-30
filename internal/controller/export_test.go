@@ -18,12 +18,12 @@ func TestExportJSONL_Success(t *testing.T) {
 	// Create a session file with metadata
 	sessionFile := filepath.Join(dir, "test-session.jsonl")
 	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
-	_ = history.SaveMeta(sessionFile, history.Meta{
+	_ = history.UpdateMeta(sessionFile, func(m *history.Meta) { *m = history.Meta{
 		Annotation: "failed",
 		Tags:       []string{"loop-on-error"},
 		Note:       "agent looped",
 		Title:      "Fix markdown rendering",
-	})
+	} })
 
 	// Override export path by setting session ID
 	ctrl := New(config.Default())

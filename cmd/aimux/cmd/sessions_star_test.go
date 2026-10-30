@@ -54,7 +54,7 @@ func TestSessionsStarCmd_ToggleOff(t *testing.T) {
 	if err := os.WriteFile(sessionFile, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := history.SaveMeta(sessionFile, history.Meta{Starred: true}); err != nil {
+	if err := history.UpdateMeta(sessionFile, func(m *history.Meta) { *m = history.Meta{Starred: true} }); err != nil {
 		t.Fatal(err)
 	}
 

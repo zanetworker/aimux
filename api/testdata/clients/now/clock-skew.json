@@ -1,0 +1,51 @@
+{
+  "name": "a lastActive in the future counts as now",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Terminal ahead of the clock",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T09:05:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Busy a little earlier",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:58:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Old terminal",
+      "project": "/src/research",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "t1",
+        "w1"
+      ]
+    },
+    "onMac": [
+      "m1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 2,
+      "onMac": 1
+    }
+  }
+}

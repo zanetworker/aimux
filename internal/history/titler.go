@@ -5,13 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/jsonl"
 )
+
+// anthropicMessagesURL is the Messages API endpoint (a test points it at a fake).
+var anthropicMessagesURL = "https://api.anthropic.com/v1/messages"
+
+// recordNamingUsage records the titler's calls under "naming" (a test
+// replaces it).
+var recordNamingUsage = func(u cost.Usage) error { return cost.AppendUsage(cost.DefaultUsagePath(), u) }
 
 // TitleConfig controls LLM-based session title generation.
 type TitleConfig struct {
@@ -27,20 +36,6 @@ func DefaultTitleConfig() TitleConfig {
 	return TitleConfig{
 		Enabled: false,
 		Model:   "haiku",
-	}
-}
-
-// resolveModel maps short model names to full model IDs.
-func resolveModel(short string) string {
-	switch short {
-	case "haiku":
-		return "claude-haiku-4-5-20251001"
-	case "sonnet":
-		return "claude-sonnet-4-6-20250527"
-	case "opus":
-		return "claude-opus-4-6-20250527"
-	default:
-		return short
 	}
 }
 
@@ -180,7 +175,7 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 		}
 	}
 
-	model := resolveModel(cfg.Model)
+	model, _ := ResolveModel(cfg.Model)
 
 	prompt := fmt.Sprintf(
 		"Your task: write a single descriptive title (5-10 words) summarizing this coding session.\n\n"+
@@ -209,7 +204,7 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", anthropicMessagesURL, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -230,16 +225,31 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("anthropic API error %d: %s", resp.StatusCode, string(respBody))
+		// status and error type only: the message may echo the conversation
+		var e struct {
+			Error struct {
+				Type string `json:"type"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(respBody, &e)
+		return "", fmt.Errorf("anthropic API error %d (%s)", resp.StatusCode, e.Error.Type)
 	}
 
 	var result struct {
 		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
+		Usage struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("parse response: %w", err)
+	}
+	if err := recordNamingUsage(cost.Usage{Label: "naming", Model: model,
+		InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens}); err != nil {
+		log.Printf("title: %v", err)
 	}
 
 	if len(result.Content) == 0 || result.Content[0].Text == "" {
@@ -253,27 +263,28 @@ func callAnthropic(prompt, model, apiKey string) (string, error) {
 // Returns the number of titles generated and any error encountered.
 // Stops on first API error to avoid burning through quota on failures.
 func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
-	total := 0
-	for _, s := range sessions {
-		if (s.Title == "" || cfg.Regenerate) && s.FilePath != "" {
-			total++
-		}
-	}
-
 	out := cfg.Output
 	if out == nil {
 		out = os.Stderr
 	}
+	if _, known := ResolveModel(cfg.Model); !known {
+		_, _ = fmt.Fprintf(out, "  unknown title model %q, using %s\n", cfg.Model, DefaultModel)
+	}
+
+	var todo []Session
+	for _, s := range sessions {
+		if (s.Title != "" && !cfg.Regenerate) || s.FilePath == "" {
+			continue // already titled, or no session file to read
+		}
+		if LoadMeta(s.FilePath).TitleBy == "owner" {
+			continue // the owner's title is never replaced
+		}
+		todo = append(todo, s)
+	}
+	total := len(todo)
 
 	count := 0
-	for _, s := range sessions {
-		if s.Title != "" && !cfg.Regenerate {
-			continue // already has a title
-		}
-		if s.FilePath == "" {
-			continue // no session file to extract content from
-		}
-
+	for _, s := range todo {
 		prompt := s.FirstPrompt
 		if prompt == "" || prompt == "(no prompt)" {
 			prompt = "(from conversation)"
@@ -297,9 +308,11 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 		}
 
 		// Save to meta
-		meta := LoadMeta(s.FilePath)
-		meta.Title = title
-		if err := SaveMeta(s.FilePath, meta); err != nil {
+		if err := UpdateMeta(s.FilePath, func(m *Meta) {
+			if m.TitleBy != "owner" { // the owner may have named it during the call
+				m.Title, m.TitleBy = title, "model"
+			}
+		}); err != nil {
 			return count, fmt.Errorf("save meta for %s: %w", s.ID, err)
 		}
 		count++

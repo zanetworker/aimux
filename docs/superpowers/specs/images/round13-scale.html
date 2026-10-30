@@ -1,0 +1,285 @@
+<style>
+  .phones { display: flex; gap: 26px; flex-wrap: wrap; justify-content: center; }
+  .pw { display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 433px; zoom: .7; }
+  .pw p { font-size: 18px; line-height: 1.45; margin: 0; color: #d1d1d6; }
+  .pw .tag { font: 600 15px -apple-system, system-ui; color: #8e8e93; letter-spacing: .04em; text-transform: uppercase; }
+  .phone { width: 413px; height: 872px; border-radius: 58px; padding: 10px; background: #1c1c1e; box-shadow: 0 40px 80px -30px rgba(0,0,0,.7), inset 0 0 0 1px #3a3a3c; }
+  .screen { width: 100%; height: 100%; border-radius: 48px; overflow: hidden; position: relative; display: flex; flex-direction: column;
+            font: 17px/1.32 -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; letter-spacing: -.2px; background: var(--bg); color: var(--fg); }
+  .lite { --bg: #fff; --fg: #000; --grp: #f2f2f7; --sec: rgba(60,60,67,.6); --ter: rgba(60,60,67,.3); --line: rgba(60,60,67,.14); --me: #007aff; --ai: #e9e9eb;
+          --amber: #c56f00; --amberbg: #fff4e5; --green: #1f8a3a; --blue: #007aff; --red: #d70015; --bar: rgba(249,249,249,.85); --barline: rgba(0,0,0,.1); --code: #f2f2f7; }
+  .dark { --bg: #000; --fg: #fff; --grp: #1c1c1e; --sec: rgba(235,235,245,.6); --ter: rgba(235,235,245,.3); --line: rgba(84,84,88,.55); --me: #0a84ff; --ai: #262628;
+          --amber: #ffb340; --amberbg: #2e2412; --green: #30d158; --blue: #0a84ff; --red: #ff453a; --bar: rgba(28,28,30,.85); --barline: rgba(255,255,255,.1); --code: #1c1c1e; }
+  .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; border-radius: 19px; background: #000; z-index: 9; }
+  .sb { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 14px 34px 0 40px; font-weight: 600; font-size: 17px; flex: none; }
+  .sb svg { height: 13px; }
+  .nav { display: flex; align-items: center; gap: 10px; padding: 2px 14px 10px; flex: none; border-bottom: .5px solid var(--line); }
+  .gb { width: 44px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; color: var(--fg); background: var(--grp); flex: none; }
+  .gb svg { width: 20px; height: 20px; }
+  .nt { flex: 1; min-width: 0; text-align: center; }
+  .nt b { display: block; font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nt small { font-size: 13px; color: var(--sec); }
+  .nt small i { font-style: normal; font-weight: 600; }
+  .feed { flex: 1; overflow: hidden; padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+  .day { text-align: center; font-size: 12px; color: var(--sec); font-weight: 600; }
+  .me { align-self: flex-end; max-width: 80%; background: var(--me); color: #fff; padding: 9px 14px; border-radius: 20px 20px 6px 20px; font-size: 16px; }
+  .ai { align-self: flex-start; max-width: 88%; font-size: 16px; line-height: 1.4; padding: 0 2px; }
+  .ai code, .step code { font: 14px ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  /* thought */
+  .thought { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--sec); }
+  .thought svg { width: 15px; height: 15px; }
+  .thought .ch { width: 7px; height: 11px; color: var(--ter); }
+  .thought-open { border-left: 2px solid var(--line); padding: 2px 0 2px 12px; margin-left: 6px; font-size: 14px; color: var(--sec); line-height: 1.4; font-style: italic; }
+  /* steps */
+  .steps { border-radius: 16px; background: var(--grp); padding: 4px 0; }
+  .sh { display: flex; align-items: center; gap: 8px; padding: 8px 14px 6px; font-size: 14px; color: var(--sec); }
+  .sh b { color: var(--fg); font-weight: 600; }
+  .sh .ch { margin-left: auto; width: 11px; height: 7px; color: var(--ter); }
+  .step { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 14.5px; }
+  .step svg.ic { width: 16px; height: 16px; flex: none; color: var(--sec); }
+  .step .w { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .step .w code { font-size: 13px; }
+  .step .d { flex: none; font-size: 13px; color: var(--sec); font-variant-numeric: tabular-nums; }
+  .add { color: var(--green); } .del { color: var(--red); }
+  .ok { color: var(--green) !important; }
+  .spin { width: 14px; height: 14px; border-radius: 7px; border: 2px solid var(--line); border-top-color: var(--blue); flex: none; }
+  /* plan */
+  .plan { border-radius: 16px; background: var(--grp); padding: 10px 14px; font-size: 14.5px; }
+  .plan .ph { display: flex; justify-content: space-between; font-size: 13px; color: var(--sec); margin-bottom: 6px; }
+  .plan .it { display: flex; gap: 9px; align-items: center; padding: 3px 0; }
+  .plan .it svg { width: 16px; height: 16px; flex: none; }
+  .plan .done { color: var(--sec); text-decoration: line-through; text-decoration-color: var(--ter); }
+  .plan .cur { font-weight: 600; }
+  /* approval */
+  .appr { border-radius: 20px; background: var(--amberbg); padding: 14px; box-shadow: 0 0 0 .5px rgba(201,117,10,.25); }
+  .appr .ah { font-size: 13px; font-weight: 700; color: var(--amber); letter-spacing: .02em; display: flex; align-items: center; gap: 6px; }
+  .appr .ah svg { width: 15px; height: 15px; }
+  .appr .q { font-size: 16px; font-weight: 600; margin: 6px 0 8px; }
+  .appr pre { margin: 0 0 12px; font: 13.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--bg); border-radius: 10px; padding: 9px 11px; white-space: pre-wrap; color: var(--fg); }
+  .appr .btns { display: flex; gap: 8px; }
+  .appr .btns span { flex: 1; text-align: center; height: 42px; line-height: 42px; border-radius: 21px; font-size: 15.5px; font-weight: 600; background: var(--bg); color: var(--blue); }
+  .appr .btns span.pri { background: var(--blue); color: #fff; }
+  .appr .btns span.neg { color: var(--red); }
+  /* bottom */
+  .bottom { flex: none; padding: 8px 12px 30px; display: flex; flex-direction: column; gap: 8px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
+  .next { display: flex; align-items: center; gap: 10px; height: 44px; border-radius: 22px; padding: 0 8px 0 14px; background: var(--bar); box-shadow: 0 0 0 .5px var(--barline);
+          backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); font-size: 14.5px; }
+  .next .dot { width: 8px; height: 8px; border-radius: 4px; flex: none; }
+  .next span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .next small { color: var(--sec); font-size: 13px; }
+  .next .gbs { width: 32px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: var(--blue); }
+  .next .gbs svg { width: 14px; height: 14px; }
+  .comp { display: flex; align-items: center; gap: 8px; }
+  .field { flex: 1; height: 44px; border-radius: 22px; padding: 0 14px; display: flex; align-items: center; color: var(--sec); font-size: 16.5px; background: var(--bar); box-shadow: 0 0 0 .5px var(--barline); }
+  .field svg { margin-left: auto; width: 18px; height: 18px; }
+  .send { width: 44px; height: 44px; border-radius: 22px; background: var(--grp); color: var(--fg); display: flex; align-items: center; justify-content: center; }
+  .send svg { width: 18px; height: 18px; }
+  .ro { display: flex; align-items: center; gap: 10px; height: 46px; border-radius: 23px; padding: 0 16px; background: var(--grp); font-size: 14.5px; color: var(--sec); }
+  .ro svg { width: 16px; height: 16px; flex: none; }
+</style>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="c-back" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18" cy="12" r="1.7" fill="currentColor"/></symbol>
+    <symbol id="c-brain" viewBox="0 0 24 24"><path d="M12 4.5c-1.6-1.4-4.6-.8-5 1.6-2 .2-3.2 2.4-2.2 4.2-1.4 1.3-1 3.9.9 4.6-.2 2.2 2.1 3.8 4.1 2.8.9 1.5 2.2 1.8 2.2 1.8m0-15c1.6-1.4 4.6-.8 5 1.6 2 .2 3.2 2.4 2.2 4.2 1.4 1.3 1 3.9-.9 4.6.2 2.2-2.1 3.8-4.1 2.8-.9 1.5-2.2 1.8-2.2 1.8m0-15v15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-chev" viewBox="0 0 8 14"><path d="M1.5 1.5l5 5.5-5 5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-up" viewBox="0 0 12 8"><path d="M1.5 6.5 6 2l4.5 4.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-doc" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.5v4h4" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="c-pencil" viewBox="0 0 24 24"><path d="M15.5 4.5l4 4L9 19H5v-4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="c-term" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 15.5 20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="c-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="currentColor" opacity=".9"/><path d="M8 12.3l2.7 2.7 5.3-5.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="c-cur" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+    <symbol id="c-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="c-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></symbol>
+    <symbol id="c-arrow" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></symbol>
+    <symbol id="c-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="c-sig" viewBox="0 0 34 11"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/><rect x="21" y="0.5" width="12" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="22.5" y="2" width="8" height="7" rx="1.3"/></symbol>
+  </defs>
+</svg>
+
+<style>
+  .hs { width: 100%; height: 100%; border-radius: 48px; overflow: hidden; position: relative; display: flex; flex-direction: column;
+        font: 17px/1.3 -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; letter-spacing: -.2px; background: var(--hbg); color: var(--hfg); }
+  .hl { --hbg: #f2f2f7; --hfg: #000; --hg: #fff; --h2: rgba(60,60,67,.6); --h3: rgba(60,60,67,.32); --hline: rgba(60,60,67,.14); --ham: #c56f00; --hgr: #34c759; --hbl: #007aff; --hbar: rgba(249,249,249,.82); --hbl2: rgba(0,0,0,.1); }
+  .hd { --hbg: #000; --hfg: #fff; --hg: #1c1c1e; --h2: rgba(235,235,245,.6); --h3: rgba(235,235,245,.3); --hline: rgba(84,84,88,.55); --ham: #ffb340; --hgr: #30d158; --hbl: #0a84ff; --hbar: rgba(30,30,32,.82); --hbl2: rgba(255,255,255,.1); }
+  .hs .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; border-radius: 19px; background: #000; z-index: 9; }
+  .hs .sbar { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 14px 34px 0 40px; font-weight: 600; font-size: 17px; flex: none; }
+  .hs .sbar svg { height: 13px; }
+  .htop { display: flex; align-items: center; justify-content: space-between; padding: 4px 16px 6px 20px; flex: none; }
+  .htop h1 { margin: 0; font: 700 28px/1.1 -apple-system, "SF Pro Display", system-ui; letter-spacing: .2px; }
+  .hgb { width: 40px; height: 40px; border-radius: 20px; display: flex; align-items: center; justify-content: center; color: var(--hfg); background: var(--hg); box-shadow: 0 0 0 .5px var(--hbl2); }
+  .hgb svg { width: 19px; height: 19px; }
+  .hh { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 600; color: var(--h2); padding: 14px 36px 6px; letter-spacing: .01em; }
+  .hh .c { font-weight: 400; }
+  .hh a { color: var(--hbl); font-weight: 400; font-size: 15px; }
+  .hgrp { margin: 0 16px; background: var(--hg); border-radius: 22px; overflow: hidden; }
+  .need { padding: 12px 16px 13px; }
+  .need .l1 { display: flex; align-items: center; gap: 8px; }
+  .need .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--ham); flex: none; }
+  .need .t { flex: 1; font-size: 17px; font-weight: 600; }
+  .need .tm, .w .tm, .m .tm { font-size: 15px; color: var(--h2); flex: none; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
+  .need .qq { margin: 5px 0 0 16px; font-size: 16px; line-height: 1.35; color: var(--hfg); }
+  .need .meta { margin: 6px 0 0 16px; font-size: 14px; color: var(--h2); display: flex; gap: 6px; align-items: center; }
+  .need .meta b { color: var(--hbl); font-weight: 600; margin-left: auto; }
+  .w { display: flex; align-items: center; gap: 10px; padding: 9px 16px; position: relative; }
+  .w + .w::before, .m + .m::before { content: ""; position: absolute; top: 0; left: 34px; right: 0; height: .5px; background: var(--hline); }
+  .w .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--hgr); flex: none; }
+  .w .bb { flex: 1; min-width: 0; }
+  .w .t { font-size: 16.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w .p { font-size: 14.5px; color: var(--h2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .w .p i { font-style: normal; color: var(--h3); }
+  .m { display: flex; align-items: center; gap: 10px; padding: 10px 16px; position: relative; font-size: 16.5px; }
+  .m .sp { width: 8px; flex: none; }
+  .m .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+  .m .t bdi { unicode-bidi: isolate; }
+  .htb { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px 30px; display: flex; gap: 10px; align-items: center; z-index: 5;
+         background: linear-gradient(to bottom, transparent, var(--hbg) 40%); }
+  .hcap { height: 48px; border-radius: 24px; display: flex; align-items: center; background: var(--hbar); box-shadow: 0 0 0 .5px var(--hbl2), 0 6px 20px rgba(0,0,0,.08);
+          backdrop-filter: blur(20px) saturate(1.8); -webkit-backdrop-filter: blur(20px) saturate(1.8); }
+  .hcap.s { flex: 1; gap: 8px; padding: 0 16px; color: var(--h2); font-size: 17px; }
+  .hcap.s svg { width: 18px; height: 18px; } .hcap.s .mic { margin-left: auto; }
+  .hcap.b { width: 48px; justify-content: center; color: var(--hbl); } .hcap.b svg { width: 22px; height: 22px; }
+</style>
+
+<template id="home12">
+  <div class="island"></div>
+  <div class="sbar"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#c-sig"/></svg></div>
+  <div class="htop"><h1>Now</h1><span class="hgb"><svg><use href="#c-more"/></svg></span></div>
+  <div class="hh"><span>NEEDS YOU</span></div>
+  <div class="hgrp need">
+    <div class="l1"><span class="dot"></span><span class="t">Push notifications</span><span class="tm">1m</span></div>
+    <div class="qq">Should the .p8 key come from the keychain or a file?</div>
+    <div class="meta">aimux · approval waiting<b>Answer</b></div>
+  </div>
+  <div class="hh"><span>WORKING <span class="c">· 2</span></span></div>
+  <div class="hgrp">
+    <div class="w"><span class="dot"></span><div class="bb"><div class="t">Aimux iOS app structure</div><div class="p"><i>aimux-ios ·</i> Updating the home screen mockups</div></div><span class="tm">now</span></div>
+    <div class="w"><span class="dot"></span><div class="bb"><div class="t">web_fetch quota exceeded</div><div class="p"><i>web-shop ·</i> Running a tool</div></div><span class="tm">4m</span></div>
+  </div>
+  <div class="hh"><span>ON YOUR MAC <span class="c">· idle · read-only</span></span><a>All 18</a></div>
+  <div class="hgrp">
+    <div class="m"><span class="sp"></span><span class="t">Weekly status draft</span><span class="tm">11h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Database migration plan</span><span class="tm">11h</span></div>
+    <div class="m"><span class="sp"></span><span class="t"><bdi>ملاحظات اجتماع الفريق</bdi></span><span class="tm">12h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Release checklist review</span><span class="tm">12h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Screenshot-reported issues</span><span class="tm">13h</span></div>
+  </div>
+  <div class="htb">
+    <div class="hcap b"><svg><use href="#h-tray"/></svg></div>
+    <div class="hcap s"><svg><use href="#c-search"/></svg>Search 327 sessions<svg class="mic"><use href="#c-mic"/></svg></div>
+    <div class="hcap b"><svg><use href="#h-compose"/></svg></div>
+  </div>
+</template>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="h-tray" viewBox="0 0 24 24"><path d="M4 13.5l2.2-7a2 2 0 0 1 1.9-1.5h7.8a2 2 0 0 1 1.9 1.5l2.2 7v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4 13.5h4.5l1 2h5l1-2H20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="h-compose" viewBox="0 0 24 24"><path d="M11 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M17.8 3.7a1.9 1.9 0 0 1 2.7 2.7L12 14.9l-3.5.8.8-3.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+</defs></svg>
+
+<h2>Round 13: what 20 working sessions look like</h2>
+<p class="subtitle">Ranked by what you can act on: needs you (in full), just finished (new), working (folded by project), idle on your Mac (one link).</p>
+<style>
+  .need2 { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; position: relative; }
+  .need2 + .need2::before, .grow + .grow::before, .wl + .wl::before, .fin + .fin::before { content: ""; position: absolute; top: 0; left: 34px; right: 0; height: .5px; background: var(--hline); }
+  .need2 .dot, .fin .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--ham); flex: none; margin-top: 7px; }
+  .need2 .bb, .fin .bb { flex: 1; min-width: 0; }
+  .need2 .t, .fin .t { font-size: 16.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .need2 .q { font-size: 14.5px; color: var(--hfg); opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .need2 .tm, .fin .tm, .grow .tm, .wl .tm { font-size: 15px; color: var(--h2); flex: none; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
+  .fin { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; position: relative; }
+  .fin .dot { background: var(--hbl); }
+  .fin .q { font-size: 14.5px; color: var(--h2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .grow { display: flex; align-items: center; gap: 10px; padding: 11px 16px; position: relative; font-size: 16.5px; }
+  .grow .dots { display: flex; gap: 3px; width: 8px; flex: none; }
+  .grow .dots i { width: 8px; height: 8px; border-radius: 4px; background: var(--hgr); }
+  .grow .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grow .t small { color: var(--h2); font-size: 14.5px; }
+  .grow .n { flex: none; font-size: 15px; color: var(--h2); font-variant-numeric: tabular-nums; }
+  .grow svg.cv { width: 8px; height: 14px; color: var(--h3); flex: none; }
+  .grow.open svg.cv { transform: rotate(90deg); }
+  .wl { display: flex; align-items: center; gap: 10px; padding: 8px 16px 8px 34px; position: relative; font-size: 15.5px; }
+  .wl::after { content: ""; position: absolute; left: 20px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 3px; background: var(--hgr); opacity: .7; }
+  .wl .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wl .t small { color: var(--h2); }
+  .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 4px; background: var(--hgr); box-shadow: 0 0 0 4px color-mix(in srgb, var(--hgr) 22%, transparent); vertical-align: 1px; margin-right: 8px; }
+  .sumline { padding: 0 20px 4px; font-size: 15px; color: var(--h2); }
+  .sumline b { color: var(--hfg); font-weight: 600; }
+</style>
+
+<template id="scale-home">
+  <div class="island"></div>
+  <div class="sbar"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#c-sig"/></svg></div>
+  <div class="htop"><h1>Now</h1><span class="hgb"><svg><use href="#c-more"/></svg></span></div>
+  <div class="sumline"><b>3</b> need you · <b>2</b> finished · <span class="pulse"></span><b>20</b> working</div>
+  <div class="hh"><span>NEEDS YOU <span class="c">· 3</span></span></div>
+  <div class="hgrp">
+    <div class="need2"><span class="dot"></span><div class="bb"><div class="t">Push notifications</div><div class="q">Keychain or a file for the .p8 key?</div></div><span class="tm">1m</span></div>
+    <div class="need2"><span class="dot"></span><div class="bb"><div class="t">Staging certificate renewal</div><div class="q">Allow <span style="font-family:ui-monospace,Menlo;font-size:13.5px">kubectl apply -f staging.yaml</span>?</div></div><span class="tm">3m</span></div>
+    <div class="need2"><span class="dot"></span><div class="bb"><div class="t">Weekly report</div><div class="q">Which week should the summary cover?</div></div><span class="tm">8m</span></div>
+  </div>
+  <div class="hh"><span>JUST FINISHED <span class="c">· 2</span></span></div>
+  <div class="hgrp">
+    <div class="fin"><span class="dot"></span><div class="bb"><div class="t">web_fetch quota exceeded</div><div class="q">Fixed: retries with backoff, tests pass.</div></div><span class="tm">2m</span></div>
+    <div class="fin"><span class="dot"></span><div class="bb"><div class="t">Meeting notes cleanup</div><div class="q">Summary written to notes/meetings.</div></div><span class="tm">6m</span></div>
+  </div>
+  <div class="hh"><span>WORKING <span class="c">· 20, by project</span></span></div>
+  <div class="hgrp">
+    <div class="grow"><span class="dots"><i></i></span><span class="t">research <small>· Quarterly planning doc…</small></span><span class="n">9</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">aimux <small>· Push notifications server…</small></span><span class="n">4</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">web-shop <small>· Order export schema…</small></span><span class="n">3</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">aimux-ios <small>· App structure</small></span><span class="n">2</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">2 more projects</span><span class="n">2</span><svg class="cv"><use href="#c-chev"/></svg></div>
+  </div>
+  <div class="hh"><span>ON YOUR MAC <span class="c">· 14 idle</span></span><a>Show</a></div>
+  <div class="htb">
+    <div class="hcap b"><svg><use href="#h-tray"/></svg></div>
+    <div class="hcap s"><svg><use href="#c-search"/></svg>Search 327 sessions<svg class="mic"><use href="#c-mic"/></svg></div>
+    <div class="hcap b"><svg><use href="#h-compose"/></svg></div>
+  </div>
+</template>
+
+<template id="scale-open">
+  <div class="island"></div>
+  <div class="sbar"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#c-sig"/></svg></div>
+  <div class="htop"><h1>Now</h1><span class="hgb"><svg><use href="#c-more"/></svg></span></div>
+  <div class="sumline"><b>3</b> need you · <b>2</b> finished · <span class="pulse"></span><b>20</b> working</div>
+  <div class="hh"><span>WORKING <span class="c">· 20, by project</span></span></div>
+  <div class="hgrp">
+    <div class="grow open"><span class="dots"><i></i></span><span class="t">research</span><span class="n">9</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="wl"><span class="t">Quarterly planning doc <small>· editing the doc</small></span><span class="tm">now</span></div>
+    <div class="wl"><span class="t">Reading list summary <small>· reading docs</small></span><span class="tm">now</span></div>
+    <div class="wl"><span class="t">API rate limit checks <small>· running tests</small></span><span class="tm">1m</span></div>
+    <div class="wl"><span class="t">Image resize service <small>· searching</small></span><span class="tm">1m</span></div>
+    <div class="wl"><span class="t">Changelog draft <small>· writing</small></span><span class="tm">2m</span></div>
+    <div class="wl"><span class="t">Travel plan research <small>· reading mail</small></span><span class="tm">2m</span></div>
+    <div class="wl"><span class="t">Library comparison notes <small>· editing</small></span><span class="tm">3m</span></div>
+    <div class="wl"><span class="t">Design decision log <small>· thinking</small></span><span class="tm">3m</span></div>
+    <div class="wl"><span class="t"><bdi>ملاحظات اجتماع الفريق</bdi> <small>· editing</small></span><span class="tm">4m</span></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">aimux</span><span class="n">4</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">web-shop</span><span class="n">3</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">aimux-ios</span><span class="n">2</span><svg class="cv"><use href="#c-chev"/></svg></div>
+    <div class="grow"><span class="dots"><i></i></span><span class="t">2 more projects</span><span class="n">2</span><svg class="cv"><use href="#c-chev"/></svg></div>
+  </div>
+  <div class="htb">
+    <div class="hcap b"><svg><use href="#h-tray"/></svg></div>
+    <div class="hcap s"><svg><use href="#c-search"/></svg>Search 327 sessions<svg class="mic"><use href="#c-mic"/></svg></div>
+    <div class="hcap b"><svg><use href="#h-compose"/></svg></div>
+  </div>
+</template>
+
+<div class="phones">
+  <div class="pw"><span class="tag">20 working · light</span>
+    <div class="phone"><div class="hs hl" data-fill="scale-home"></div></div>
+    <p><b>Ranked by what you can act on.</b> The 3 that need you show their question. The 2 that finished since you last looked show their result. The 20 working fold into one row per project with the newest activity beside it. The whole picture fits on one screen.</p>
+  </div>
+  <div class="pw"><span class="tag">20 working · dark, one project opened</span>
+    <div class="phone"><div class="hs hd" data-fill="scale-open"></div></div>
+    <p><b>Tap a project to open it.</b> Its sessions become one line each: title, what it's doing in a word, how recently. Needs-you and finished scroll above; nothing else moves. Below 6 working sessions, the grouping turns off and they list directly, as in round 12.</p>
+  </div>
+</div>
+
+<script>document.querySelectorAll('[data-fill]').forEach(el => { el.innerHTML = document.getElementById(el.dataset.fill).innerHTML; });</script>

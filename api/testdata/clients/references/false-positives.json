@@ -1,0 +1,225 @@
+{
+  "name": "Look-alikes that must stay text",
+  "cases": [
+    {
+      "name": "ordinal words before a number sign",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "step #1, Step #2, (step #3), item #4, option #5, line #6, No. #7, number #8, NUMBER #9, no #10"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "step #1, Step #2, (step #3), item #4, option #5, line #6, No. #7, number #8, NUMBER #9, no "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#10",
+          "href": "https://github.com/acme/widget/issues/10"
+        }
+      ]
+    },
+    {
+      "name": "only the word right before the number sign blocks it; a parenthesis resets",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "step 1 then #2, and item (#3)"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "step 1 then "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#2",
+          "href": "https://github.com/acme/widget/issues/2"
+        },
+        {
+          "t": "text",
+          "v": ", and item ("
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#3",
+          "href": "https://github.com/acme/widget/issues/3"
+        },
+        {
+          "t": "text",
+          "v": ")"
+        }
+      ]
+    },
+    {
+      "name": "a number sign in headings and ids",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "C# and F#1 and issue#5 and ##6 and #"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "C# and F#1 and issue#5 and ##6 and #"
+        }
+      ]
+    },
+    {
+      "name": "short or digit-only hex words",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "cafe deadbeef 1234567 abcdefabc 0000000 face12 added 2026-10-27"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "cafe deadbeef 1234567 abcdefabc 0000000 face12 added 2026-10-27"
+        }
+      ]
+    },
+    {
+      "name": "standards that look like Jira keys",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID"
+        ],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "UTF-8 ISO-9001 SHA-256 PEP-8 RFC-2119 TCP-1 WID-"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "UTF-8 ISO-9001 SHA-256 PEP-8 RFC-2119 TCP-1 WID-"
+        }
+      ]
+    },
+    {
+      "name": "paths without an extension or a slash",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "and/or TCP/IP read/write src/lib and Dockerfile, src/Makefile"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "and/or TCP/IP read/write src/lib and Dockerfile, src/Makefile"
+        }
+      ]
+    },
+    {
+      "name": "urls inside text are left to the Markdown link rules",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "see https://example.com/internal/api/server.go and www.example.com/a/b.html"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "see https://example.com/internal/api/server.go and www.example.com/a/b.html"
+        }
+      ]
+    }
+  ]
+}

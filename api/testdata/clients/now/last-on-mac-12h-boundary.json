@@ -1,0 +1,37 @@
+{
+  "name": "Last on your Mac exactly 12 hours old is still shown",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "lastOnMac": {
+    "id": "t1",
+    "at": "2026-10-30T00:00:00Z"
+  },
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Plan the allotment layout",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T08:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": "t1",
+    "pinned": [],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 1
+    }
+  }
+}

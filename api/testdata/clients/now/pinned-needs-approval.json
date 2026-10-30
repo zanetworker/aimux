@@ -1,0 +1,122 @@
+{
+  "name": "A pinned session with a pending approval stays in Needs you and is not repeated in Pinned",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Deploy the demo site",
+      "project": "/src/web",
+      "lastActive": "2026-10-30T11:50:00Z",
+      "state": "busy",
+      "pinned": true
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Rotate the test keys",
+      "project": "/src/ops",
+      "lastActive": "2026-10-30T11:55:00Z",
+      "state": "busy",
+      "pinned": false
+    }
+  ],
+  "events": {
+    "a1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-30T11:40:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-30T11:50:00Z",
+        "data": {
+          "approvalId": "p1",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ],
+    "a2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-30T11:45:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-30T11:55:00Z",
+        "data": {
+          "approvalId": "p2",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [],
+    "needsYou": [
+      "a2",
+      "a1"
+    ],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 2,
+      "working": 0,
+      "onMac": 0
+    }
+  }
+}

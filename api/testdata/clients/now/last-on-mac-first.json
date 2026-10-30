@@ -1,0 +1,59 @@
+{
+  "name": "Last on your Mac is its own row and is not repeated in On your Mac",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "lastOnMac": {
+    "id": "l1",
+    "at": "2026-10-30T11:56:00Z"
+  },
+  "sessions": [
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Sort out the bookshelf plan",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    },
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Draft the garden checklist",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:59:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "l1",
+      "provider": "claude",
+      "title": "Fix the login redirect",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": "l1",
+    "pinned": [],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "w1"
+      ]
+    },
+    "onMac": [
+      "m1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 1,
+      "onMac": 2
+    }
+  }
+}

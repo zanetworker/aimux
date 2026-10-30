@@ -1,0 +1,99 @@
+{
+  "name": "five working sessions stay a flat list, newest first, and On your Mac still shows",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "w3",
+      "provider": "claude",
+      "title": "Profile the indexer",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Port the parser",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w5",
+      "provider": "claude",
+      "title": "Check the cache",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "w2",
+      "provider": "claude",
+      "title": "Plan the rollout",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:58:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "w4",
+      "provider": "claude",
+      "title": "Trim the logs",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Terminal session 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Terminal session 2",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T21:30:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {
+    "w2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:58:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "w1",
+        "w2",
+        "w3",
+        "w4",
+        "w5"
+      ]
+    },
+    "onMac": [
+      "m1",
+      "m2"
+    ],
+    "onMacTotal": 2,
+    "summary": {
+      "needYou": 0,
+      "working": 5,
+      "onMac": 2
+    }
+  }
+}

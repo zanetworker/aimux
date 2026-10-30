@@ -1,0 +1,159 @@
+{
+  "name": "exactly 900 seconds still counts; 901 does not",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Failed on the line",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "f2",
+      "provider": "claude",
+      "title": "Failed just late",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:44:59Z",
+      "state": "idle"
+    },
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Finished on the line",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "d2",
+      "provider": "claude",
+      "title": "Finished just late",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:44:59Z",
+      "state": "idle"
+    },
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Terminal on the line",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "t2",
+      "provider": "claude",
+      "title": "Terminal just late",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:44:59Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:45:00Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ],
+    "f2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:44:59Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ],
+    "d1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:45:00Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ],
+    "d2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:44:59Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "f1"
+    ],
+    "finished": [
+      "d1"
+    ],
+    "working": {
+      "list": [
+        "t1"
+      ]
+    },
+    "onMac": [
+      "t2"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 1,
+      "working": 1,
+      "onMac": 1
+    }
+  }
+}

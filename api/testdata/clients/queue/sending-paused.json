@@ -1,0 +1,41 @@
+{
+  "name": "sending-paused",
+  "session": {
+    "state": "idle",
+    "queue": {
+      "state": "paused",
+      "reason": "Your message is in the input box on your Mac",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Run the linter and fix what it finds",
+          "state": "sending",
+          "created": "2026-03-02T09:01:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "paused",
+      "line": "Your message is in the input box on your Mac",
+      "resume": true
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Run the linter and fix what it finds",
+        "state": "sending",
+        "label": "Sending",
+        "canEdit": false,
+        "canMove": false,
+        "canDelete": true
+      }
+    ]
+  }
+}

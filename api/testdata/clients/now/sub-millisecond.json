@@ -1,0 +1,104 @@
+{
+  "name": "times keep their sub-millisecond digits: events 0.4 ms apart order by time, and 900 s is measured to the microsecond",
+  "now": "2026-10-26T09:00:00.0004Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "a-first",
+      "provider": "claude",
+      "title": "T a-first",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "b-second",
+      "provider": "claude",
+      "title": "T b-second",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "f-late",
+      "provider": "claude",
+      "title": "T f-late",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "f-in",
+      "provider": "claude",
+      "title": "T f-in",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle"
+    }
+  ],
+  "events": {
+    "a-first": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:59:00.0010Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ],
+    "b-second": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:59:00.0014Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ],
+    "f-late": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:45:00.0001Z",
+        "data": {
+          "error": "x"
+        }
+      }
+    ],
+    "f-in": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:45:00.0005Z",
+        "data": {
+          "error": "x"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "f-in"
+    ],
+    "finished": [
+      "b-second",
+      "a-first"
+    ],
+    "working": {
+      "list": []
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 1,
+      "working": 0,
+      "onMac": 0
+    }
+  }
+}

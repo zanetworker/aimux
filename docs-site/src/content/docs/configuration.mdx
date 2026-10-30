@@ -28,7 +28,8 @@ resume:
 
 sessions:
   auto_title: false
-  title_model: "flash"
+  title_model: "haiku"
+  naming_daily_limit: 20
 
 notifications:
   enabled: true
@@ -156,9 +157,12 @@ aimux has six orthogonal configuration axes:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `auto_title` | bool | `false` | Generate titles via LLM on session discovery |
-| `title_model` | string | `"flash"` | LLM for title generation: `"flash"`, `"haiku"`, `"sonnet"`, `"opus"` |
-| `api_key` | string | env var | API key for title generation (overrides `GOOGLE_API_KEY` / `ANTHROPIC_API_KEY`) |
+| `auto_title` | bool | `false` | Name sessions a phone client shows that have no name or description, once, with a small model call. Never touches text you wrote |
+| `title_model` | string | `"haiku"` | Model for names: `"haiku"` (`claude-haiku-5-5`), `"sonnet"`, `"opus"`; an unknown name falls back to haiku |
+| `naming_daily_limit` | int | `20` | Sessions named automatically per local day; **Update summary** is not limited |
+| `api_key` | string | env var | API key for naming (overrides `ANTHROPIC_API_KEY`); without a key, `claude -p` in safe mode with your Claude Code login is used |
+
+At most 500 characters per session go to Anthropic for an automatic name (1,200 for Update summary). See [Finding sessions](/guides/remote-access/#finding-sessions) for the sources, privacy and cost details.
 
 ## Notifications
 
@@ -294,6 +298,7 @@ remote_access:
 | `adapter` | string | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command for Claude sessions |
 | `max_runs` | int | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | duration | `10m` | Unanswered permission requests are denied after this |
+| `device_login` | bool | `true` | Only devices paired with `aimux remote pair` may use the API, logged in with Face ID or Touch ID (see [Device login](/guides/remote-access/#device-login)); `false` admits any device of an allowed login and `remote serve` warns at start |
 | `hostnames` | list | detected from `tailscale status` | `Host` names the API accepts (this machine's tailnet names); others are refused |
 | `push.ntfy.topic` | string | off | ntfy topic that gets an alert for each permission request; on when set |
 | `push.ntfy.server` | string | `https://ntfy.sh` | ntfy server (2.16 or later also takes the alert back once the request is settled) |

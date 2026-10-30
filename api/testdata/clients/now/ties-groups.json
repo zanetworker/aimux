@@ -1,0 +1,226 @@
+{
+  "name": "equal failure and finish times order by id; equal groups order by project path",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "f2",
+      "provider": "claude",
+      "title": "Second failure",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "First failure",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "d2",
+      "provider": "claude",
+      "title": "Second finish",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "First finish",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "b2",
+      "provider": "claude",
+      "title": "Task b2",
+      "project": "/src/b",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "b1",
+      "provider": "claude",
+      "title": "Task b1",
+      "project": "/src/b",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Task a2",
+      "project": "/src/a",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Task a1",
+      "project": "/src/a",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "c2",
+      "provider": "claude",
+      "title": "Task c2",
+      "project": "/src/c",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "c1",
+      "provider": "claude",
+      "title": "Task c1",
+      "project": "/src/c",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    }
+  ],
+  "events": {
+    "f2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:56:00Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ],
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:56:00Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ],
+    "d2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:57:00Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ],
+    "d1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:57:00Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "f1",
+      "f2"
+    ],
+    "finished": [
+      "d1",
+      "d2"
+    ],
+    "working": {
+      "groups": [
+        {
+          "kind": "folder",
+          "project": "/src/a",
+          "name": "a",
+          "count": 2,
+          "expanded": true,
+          "newest": "a1",
+          "sessions": [
+            "a1",
+            "a2"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/b",
+          "name": "b",
+          "count": 2,
+          "expanded": true,
+          "newest": "b1",
+          "sessions": [
+            "b1",
+            "b2"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/c",
+          "name": "c",
+          "count": 2,
+          "expanded": true,
+          "newest": "c1",
+          "sessions": [
+            "c1",
+            "c2"
+          ]
+        }
+      ]
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 2,
+      "working": 6,
+      "onMac": 0
+    }
+  }
+}

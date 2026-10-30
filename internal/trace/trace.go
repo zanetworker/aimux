@@ -26,6 +26,11 @@ type Turn struct {
 	Model       string        // model used for this turn
 	PromptID    string        // Claude Code prompt.id; used to join session-file replies
 	Subagent    subagent.Info // subagent identity (empty for main thread)
+
+	// OutputText is the reply as written, blank lines kept (text blocks and
+	// assistant messages joined by a blank line); empty when the provider
+	// does not record it, in which case OutputLines is the reply.
+	OutputText string
 }
 
 // Duration returns the wall-clock duration of this turn.
@@ -55,6 +60,7 @@ func (t Turn) ErrorCount() int {
 type ToolSpan struct {
 	Name      string
 	Snippet   string // short description of the input
+	Input     string // full input text (command, pattern, url, path), untruncated
 	Success   bool   // true if tool succeeded
 	ErrorMsg  string // error message if failed
 	FilePath  string // for Edit/Write/Read: the file path

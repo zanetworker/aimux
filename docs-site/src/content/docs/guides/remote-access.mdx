@@ -31,17 +31,72 @@ description: Reach your sessions from a phone or another device through Tailscal
 
 From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:8443/v1/health`.
 
+4. Pair each phone or browser once (see [Device login](#device-login)):
+
+   ```bash
+   aimux remote pair --name iphone
+   ```
+
+   Type the code it prints into the iPhone app or the web client within 5 minutes.
+
 ## Web client
 
-On the iPhone, install Tailscale and sign in with the same account as the Mac. Then open `https://<your-mac>.<tailnet>.ts.net:8443/app/` in Safari (`remote serve` prints the address) and use Share, Add to Home Screen to open it like an app. There is no login: Tailscale says who you are.
+On the iPhone, install Tailscale and sign in with the same account as the Mac. Then open `https://<your-mac>.<tailnet>.ts.net:8443/app/` in Safari (`remote serve` prints the address) and use Share, Add to Home Screen to open it like an app. The first time, it asks for a pairing code from `aimux remote pair` (see [Device login](#device-login)); after that it unlocks with Face ID.
 
-- **Sessions:** one compact row each, grouped by day: a state dot (green idle, amber running, hollow when open in a terminal on the Mac), the title, project and age, and the last message you sent.
-- **Search:** the box at the top searches the words in your sessions and shows where each one matched (the index is described under `GET /v1/search` below; right after the first start it can take a few minutes to fill).
-- **New session:** + starts a session in one of your recent project folders (only those; never an arbitrary path) with a first message.
-- **In a session:** each turn shows your message, one line summing up its tools (tap for the list) and the reply, cut to a few lines until you tap. The header says what the agent is doing right now. Permission requests are pinned above the message box, with a preview of what the tool will write or run; answer with the agent's own options. Stop ends the running turn. A session open in a terminal on the Mac is read-only.
-- **Voice:** the mic dictates into the message box (the browser's speech recognition; on iPhone it runs through Apple's speech service, like keyboard dictation). In the voice menu: read replies aloud (code is skipped), send when you stop talking, and hands-free conversation, which listens again after each reply. Permission requests are read out but only answered with a tap. iOS may need a tap on the mic again after the phone sleeps.
+The web client's source is `clients/web` in the aimux repo. The iPhone app, a native app for the same API, is `clients/ios`; it has Now, All, Search and the chat, and is built from source with Xcode. Both clients rank sessions and build the chat timeline with the same shared test fixtures.
+
+The page has the iPhone app's layout: **Now** and **All** tabs in the bar at the bottom, with search as the round button beside them. It follows the phone's light or dark setting. Colour appears only as small status dots: green working, amber needs you, red failed, grey idle.
+
+- **Now:** what you can act on, refreshed every 15 seconds while the page is open. The line under the title counts what needs you, what is working and what is open on your Mac. Permission requests are cards with the request in large type, the command it wants to run and the agent's own options as buttons. When the screen is busy (more than five sessions need you, just finished or are working), each request is a one-line row instead; tap it to open its card in place. A failed turn shows its error and **Retry**, which sends the same message again. **Just finished** lists turns that ended since you last opened them. **Working** shows each session's current step, and above five sessions folds them by project (tap a project to open it). **On your Mac** lists sessions open in a terminal, read-only, with **All N** for the full list.
+- **All:** every session, grouped by day, filtered by project and sorted by newest, most active or project. A lock marks sessions open in a terminal on the Mac.
+- **Search:** title and folder matches appear at once; matches inside conversations follow from the server's index, with the matched words in bold (the index is described under `GET /v1/search` below; right after the first start it can take a few minutes to fill).
+- **New session:** the pencil button at the top of Now and All starts a session in one of your recent project folders (only those; never an arbitrary path) with a first message. This sheet keeps its older style for now.
+- **In a session:** the header shows the title and the session's state ("Working", "Your turn", "Failed", or "Open on your Mac · 12h ago"); tap it, or the info button, for the session's cost, tokens, model, turns, duration, branch and folder. Your messages are dark bubbles on the right, with inline Markdown (code, bold, links), pasted code kept as code and Claude Code's own wrappers removed (a pasted image shows as an "Image 1" chip); Claude's replies are on the left, formatted: headings, lists and task lists, quotes, tables that scroll sideways, and code blocks with their language and a **Copy** button. A reply line that is only a YouTube, Vimeo, video, image or audio link becomes a card; nothing loads from the other site until you tap it. Links open in a new tab, and issue numbers, commits, file paths and Jira keys become links (see [Links in replies](#links-in-replies)). A thought is one grey line ("Thought for 8s"), the tool calls between two replies fold into one line ("6 steps · 41s · 2 files changed"), and a plan is a checklist ("2 of 4"); tap a thought or the steps to open them, then tap a step to read it in full: a command with its whole text, a failure with its error under a red "Failed", an edit as its removed and added lines (the first 40, then "N more lines"). A step with nothing more to show does not open. A permission request is a card in the conversation with the exact command and the agent's own options as buttons; once answered it folds to one line ("Allowed"). Above the message box, **Next** opens the next session that needs you (or the next working one) without going back; it hides while this session waits for an answer. While Claude works, send becomes stop. A message that could not be sent stays with **Retry**, which sends it again without running it twice. A session open in a terminal on the Mac shows its latest turns and "Read-only here while it's open in a terminal on your Mac" instead of the message box, unless terminal input is on (see [Typing into terminal sessions](#typing-into-terminal-sessions)). When the connection drops, a grey "Reconnecting…" line shows under the header until it is back; in a terminal session a read that fails keeps the turns shown and says "Couldn't refresh" with **Retry** (iPhone). Scrolled up, a **Latest** button jumps back to the newest message. Not shown yet: what a command printed (aimux does not store command output yet) and attachments.
+- **Voice:** the mic dictates into the message box (the browser's speech recognition; on iPhone it runs through Apple's speech service, like keyboard dictation). In the session info sheet (and the voice menu on the new-session screen): read replies aloud (code is skipped), send when you stop talking, and hands-free conversation, which listens again after each reply. Permission requests are read out but only answered with a tap. iOS may need a tap on the mic again after the phone sleeps.
 
 The page is served by `remote serve` itself and loads nothing from elsewhere; its Content-Security-Policy allows only its own script, style and API.
+
+## Device login
+
+Tailscale decides who may reach the API; device login decides which of that person's devices may use it. With it on (the default), only a device you paired from the Mac gets in, it logs in with Face ID or Touch ID, and the login ends on its own.
+
+**Pair a device.** On the Mac:
+
+```bash
+aimux remote pair --name iphone
+```
+
+It prints a code such as `7K2M-Q9XD`. Type it on the device: the iPhone app and the web client show a pairing screen when they find no pairing. The code is 8 characters (dash optional, case does not matter), works once, for 5 minutes, and a new `pair` replaces the old code. Five wrong tries burn it, and the count survives a server restart; run `pair` again then. The name (1 to 32 characters) is how the device is listed and must not be taken, whatever its case (`iPhone` and `iphone` are the same name).
+
+- **iPhone app:** pairing makes a key in the phone's Secure Enclave that signs only after Face ID and never leaves the phone. A change to the enrolled faces (a face added or removed in Settings) invalidates it, and the app asks to pair again. **Pair this device again** on the lock screen starts over on the phone only: the old entry stays on the Mac until you run `aimux remote revoke` for it.
+- **Web client:** pairing makes a passkey for this server. It syncs as your passkey provider syncs it (iCloud Keychain to your Apple devices by default, another provider if you chose one, or nowhere), and each use needs Face ID or Touch ID. One pairing is one entry, whichever devices hold the passkey. If the code was wrong, the browser may keep an unused passkey; the client asks the browser to remove it where the browser supports that, otherwise delete it in your passwords settings.
+
+**Unlock.** The iPhone app asks for Face ID when a login is needed. The web client never starts Face ID on its own: it shows **Unlock with Face ID**, and the tap does it. Requests that hit the lock are sent again after the unlock. A device that was revoked shows "This device is no longer paired." and the pairing screen.
+
+**When a login ends.** After 1 hour without use, after 12 hours in any case, when you lock it (**Lock** in the iPhone app's server settings, or in the header of Now in the web client), when the device is revoked, or when `remote serve` restarts. Only things you do count as use: any `POST`, and a request the client marks with `Aimux-Interaction: 1` (opening a chat or a tab, pull to refresh, Retry, a search). Background polling and event streams do not, so a phone left open locks after an hour. An open event stream closes when its login ends.
+
+**List and revoke.**
+
+```bash
+aimux remote devices          # name, kind, paired, last seen
+aimux remote revoke iphone    # its next request fails
+```
+
+`kind` is `secure-enclave` (iPhone app) or `webauthn` (browser passkey). A running server notices a revoke within a second or two. Revoke a lost phone; pair a replacement under a new name.
+
+**Audit log.** `~/.aimux/logs/remote-audit.log` (owner-only) gets one JSON line per pairing, login, logout and revoke (and each failed pairing or login) and per action that changes something: sending a message, starting or stopping a turn, answering an approval, typing into or pressing a key in a terminal, and changing or sending from a session's chat queue (`queue_add`, `queue_edit`, `queue_move`, `queue_delete`, `queue_resume`, `queue_send`, `queue_paused`). Each line has the time, the Tailscale login, the device name, the action, the aimux session when there is one, and the result (`ok`, or a fixed reason code such as `wrong_code` or `bad_signature`). It never holds message text, pairing codes, challenges, tokens or keys. `aimux remote revoke` writes its own line. Identical failure lines (same login, device, action and result) are written at most once a minute; the next one carries `count`, how many it stands for. If the log cannot be written, the action still happens and the failure is printed by `remote serve` (or by `revoke`).
+
+**Files** in `~/.aimux`, all owner-only (0600): `remote-paired-devices.json` (each device's id, name, kind, public key and the login that paired it), `remote-pairing.json` (the pending code's SHA-256, never the code), `remote-paired-seen.json` (last seen), `remote-paired-devices.lock` (taken by the CLI and the server for every write). APNs push registrations stay in `remote-devices.json`.
+
+**What it guarantees, and what it does not.**
+
+- Every request still passes the Tailscale checks in [Security model](#security-model) first; device login is a second wall behind them.
+- A login is proven by a key that never left a device you paired: the device proves it holds the key at pairing and signs a fresh challenge at every login. The session that login starts is a token, kept in memory on the iPhone and in an `HttpOnly` cookie on the web, and valid until 1 hour without use or 12 hours, whichever comes first. The server keeps only its SHA-256.
+- Don't serve other apps under the same tailnet host name as `remote serve`, even on another port: browsers send cookies by host name and ignore the port, so a page from another app there could make requests with the web client's login.
+- The server cannot prove that the iPhone's key sits in the Secure Enclave behind Face ID; that would take Apple's App Attest. It trusts the app it paired with.
+- A device's logins work only with the Tailscale login that paired it.
+- Failed logins are audited, never locked out: a signature cannot be guessed. A device on your tailnet that knows a device id can delay that device's next login by asking for many challenges (each device keeps 5 open, the oldest dropped), but cannot log in. Passkey logins (the web client) ask for challenges without a device id and share one such bucket, so any device on your tailnet can delay them without knowing a device id; it still cannot log in.
+- `remote_access.device_login: false` turns it off: any device signed in to your tailnet as an allowed login can use the API again, and `remote serve` prints a warning at start.
 
 ## Approval notifications
 
@@ -67,15 +122,164 @@ remote_access:
 
 A notification says "Approval needed" and names the session and the tool call (for a shell command, the command itself, shortened). It never carries the tool's full input. It only tells you to look: answer in the app or web client, never from the notification. When nothing is configured, nothing is sent. A half-done `apns` block, a key that is not P-256, or an unset `token_env` variable stops `remote serve` at startup. Each sender and each phone is tried at the same time, so a slow one does not hold up the rest. A request answered before its alert is out sends none. A failed delivery is logged and the approval still waits as usual.
 
+## Typing into terminal sessions
+
+Sessions open in a Claude Code terminal on the Mac are read-only from the phone unless you turn on terminal input. With it on, aimux types the phone's message into the session's own iTerm2 pane, so the running Claude Code gets it as if you typed it, and you can answer its permission prompts from the phone. Only iTerm2 is supported so far.
+
+1. Turn it on in `~/.aimux/config.yaml` and restart `aimux remote serve`:
+
+   ```yaml
+   remote_access:
+     terminal_input:
+       enabled: true
+       # allow_while_in_use: true   # for testing at the Mac only; see below
+       # allow_slash_commands: true # let messages start with / (slash commands); see below
+   ```
+
+2. Run this once at the Mac:
+
+   ```bash
+   aimux remote terminal-input check
+   ```
+
+   It sends one harmless Apple Event to iTerm2, so macOS asks for Automation access while you are there to allow it, then lists each Claude session open in a terminal with its tty and whether aimux can reach its pane. It never types, reads a screen or changes a window. When `remote serve` runs from an iTerm2 tab it uses iTerm2's own Automation grant; run as a background service it needs this step. Off macOS it only prints that terminal input needs macOS and iTerm2, and the server answers every terminal request with `no_terminal_driver`.
+
+**What the phone shows** (the iPhone app and the web client alike). A terminal session's header reads "On your Mac · Working" or "On your Mac · Your turn". When aimux can type into it, the message box appears; a sent message shows as pending "Sent to your Mac's terminal" until Claude saves the turn, and "Sent; no answer yet" after 2 minutes without one. The message is never sent again on its own; **Retry** on a failed one sends it under the same key, and waits while the terminal cannot be typed into. When it cannot, a read-only line says why ("You're using this session on your Mac", "Claude isn't running in that terminal", "This terminal isn't supported yet", "Allow aimux to control iTerm2 on your Mac", "Claude isn't at its input box", "Typing into your Mac's terminal is off", or "Can't reach the terminal"). A permission prompt showing in the terminal appears as the usual approval card instead of that line, with what it asks about (the command and its description, or the file and a preview, as the terminal shows them) in monospace; each option presses its number in the terminal, and a prompt answered on the Mac meanwhile folds away without an error. The chat reads the session again every 2 seconds while Claude works or for 2 minutes after a message, otherwise every 15 seconds, and only while the chat is open on screen. Live steps and thoughts are not shown for terminal sessions: the chat shows the saved turns, refreshed while the session works.
+
+**Safety rules**, checked by the server on every message and key press:
+
+- Off by default. The phone sees the `terminal_input` capability only when it is on; otherwise both endpoints answer `403 disabled`.
+- The pane's foreground process must be the session's own `claude` (its process group, running `claude` or `node`; `not_claude` otherwise), checked again right before typing, before Enter and before a key press, so text never lands in a shell.
+- The session must not be the one you are using (`mac_in_use` otherwise); see [The in-use guard](#the-in-use-guard). `allow_while_in_use: true` lifts this for testing at the Mac; do not leave it on.
+- A session where Claude is working refuses a direct message (`409 busy`, "Claude is working in this session; try again when it finishes."), and so does a session started from the phone while its turn runs. Working is Claude Code's working line on screen or a `busy` status in Claude's session registry. Nothing is typed. The clients offer **Add to queue** instead (see [Chat queue](#chat-queue)).
+- While the session's queue is sending (a message in flight, or the queue running with messages waiting), a direct message is refused with `409 busy` too, on both `POST …/terminal/messages` and `POST …/messages`, so it never joins the queue's turn and the waiting messages keep their place.
+- A message is typed only when Claude Code's input box shows and is empty (`not_at_input` otherwise), so it cannot pick a highlighted prompt option or join a half-typed draft.
+- The text is typed without Enter. aimux waits 300 ms, reads the screen again and presses Enter only if no prompt is showing and the input box holds just that text. If a prompt came up meanwhile (sends are allowed while Claude works), Enter is not pressed: the answer is `409 not_submitted`, the phone says "Your message is in the box but not sent; a prompt appeared" and shows the prompt's card, and the text waits in the input box until you send or clear it at the Mac (until then, new messages get `not_at_input`).
+- A key press names the prompt it answers by its `promptId`, a hash of the prompt's body (such as the command), question and options; if another prompt shows by then, even the same question about another command, nothing is pressed (`prompt_changed`).
+- Text with control characters other than newline and tab is refused (`400 bad_text`): such bytes would reach the terminal as keys.
+- Text starting with `!` (after optional spaces) is always refused (`400 bad_text`): it switches Claude Code into bash mode, where Enter runs a shell command with no prompt. A `!` later in the text is fine.
+- Text starting with `/` (after optional spaces) is refused too (`400 bad_text`), since Claude Code runs it as a slash command (`/clear`, `/model`, ...), unless `allow_slash_commands: true` is set.
+- Every attempt is logged to `~/.aimux/logs/terminal-input.log` (owner-only): time, session id, text length or key, outcome. Never the text.
+- A retry with the same `key` within 10 minutes is not typed twice, and the server never retries a failed attempt on its own.
+- aimux never creates, focuses, resizes or closes windows, tabs or panes.
+
+### The in-use guard
+
+A session is blocked only when all three hold: iTerm2 is the app in front, the session is the focused pane of iTerm2's current window, and the Mac was used (keyboard or mouse) in the last 2 minutes. Any other iTerm2 session takes phone input while you work at the Mac. aimux checks before typing and again just before Enter; if it changed in between, nothing is submitted (`not_submitted`, the text waits in the input box).
+
+The scope is the focused pane only, because keystrokes reach only that pane: typing into a visible split pane, another window or a background tab cannot mix with what you type. A hotkey window and Stage Manager are not yet verified live. If the check cannot be made (the probe fails or iTerm2 does not answer), the session counts as in use.
+
+## Chat queue
+
+Each session has a queue held by the Mac, so what you line up keeps going while the phone is locked or offline. It works for sessions started from the phone and for Claude Code sessions in iTerm2 (with terminal input on). It needs no setting; the server offers the `queue` capability.
+
+**Using it.** When a session is working, blocked by the guard, its queue is sending (a message in flight, or the queue running with messages waiting), or it just refused a message as busy, the send button of the message box becomes **Add to queue**. To queue while the session is free, use the secondary action (long press on Send in the iPhone app, the second button on the web). The queue shows under the message box: one line per message with its state, **Waiting**, **Sending** or **Answer in progress**. In an iTerm2 session a message counts as answered once Claude stops working on it (text you type into the box at the Mac meanwhile is yours, not part of the answer), or when your next turn at the Mac shows. Tap a waiting message to edit it, move it with the drag handle (iPhone) or Move up and Move down (web), delete it with swipe or Delete. A message that is sending or answering cannot be edited or moved, and can be deleted only while the queue is paused. While the queue runs, one line says why it waits: "Waiting: you're using this session on your Mac", or "Waiting: Claude is working" while the next message waits for Claude to finish (if that line stays while the Mac shows Claude idle, check the session at the Mac). If you were editing a message that the Mac sent meanwhile, the clients keep your text so you can queue it again.
+
+**Rules.**
+
+- The queue lives on the Mac in `~/.aimux/remote-queue.json` (owner-only) and survives a restart of `remote serve`. It holds up to 20 messages per session (`queue_full` beyond that).
+- The text rules are checked when you add a message and again just before it is sent: control characters, a leading `!`, and a leading `/` unless `allow_slash_commands` is on. A message that breaks them is refused at adding (`409 bad_text`); if it breaks them later (the setting changed), the queue pauses.
+- One message at a time. The next is sent only after the answer to the previous one has finished: for a session started from the phone, when its turn is done; for iTerm2, when the message shows in the session history and the session has been idle for 2 seconds with an empty input box. A session with a permission prompt on screen waits silently. A session that is working waits with the line "Waiting: Claude is working", and one you are using on your Mac with "Waiting: you're using this session on your Mac".
+- The Mac never queues by itself: a refused direct message stays refused until you choose Add to queue.
+
+**When the queue pauses.** Nothing is sent from a paused queue until you tap **Resume**; editing, moving or deleting never resumes it. The line shown is the reason:
+
+| Reason | What to do |
+|---|---|
+| You used this session on your Mac | A turn you started at the Mac appeared. Resume when your queued messages should follow it. |
+| This session closed on your Mac | Claude exited in iTerm2. Resume it at the Mac, then Resume the queue. The queue never moves to a headless run by itself, which could clash with `claude --resume`. |
+| Session not running | The session ended. Delete the messages or resume it at the Mac. |
+| This message may have been sent. Check the session, then resume or delete it. | The server stopped while a message was being sent or answered. Look at the session; **Resume** sends it again, so delete it first if it already went. |
+| Your message is in the input box on your Mac | The text was typed but Enter was not pressed. Resume presses Enter only if the box holds exactly that message. |
+| Clear the input box on your Mac, then resume | The box holds something else. |
+| The input box on your Mac isn't empty. Clear it, then resume. | Clear the box at the Mac. |
+| No answer seen yet | The message was sent but no turn showed within 2 minutes. Check the session. |
+| Claude stopped with an error. Check the session, then resume. | The turn failed. |
+| This message is no longer allowed. Edit or delete it. | It now breaks the text rules. |
+| This message couldn't be sent. Check the session, then resume. | Any other send failure. aimux never retries a terminal send on its own. |
+| Claude Code isn't running in this session's terminal; Only sessions in iTerm2 can take queued messages; Typing into terminal sessions is off on the Mac; macOS isn't letting aimux type into iTerm2 | Fix it at the Mac (see [Typing into terminal sessions](#typing-into-terminal-sessions)), then Resume. |
+| This session is open in a terminal on your Mac; Couldn't read this session on your Mac | Resume once the session is reachable again. |
+| Couldn't read the session on your Mac. Check iTerm2, then resume. | aimux could not read the iTerm2 screen for 2 minutes. Check that iTerm2 is running and the session's window is open, then Resume. |
+
+Queue changes and sends go to the audit log as `queue_add`, `queue_edit`, `queue_move`, `queue_delete`, `queue_resume`, `queue_send` and `queue_paused`, never with the message text.
+
+## Links in replies
+
+The phone and web clients turn references in Claude's replies into links:
+
+- `#123` and `owner/repo#123` open the issue or pull request, a commit hash (7 to 40 hex characters) opens the commit, and a file path such as `internal/api/server.go:42` opens that line on the session's branch. The server reports the session's repository in `repo` on `GET /v1/sessions/{id}`; sessions in other folders get no such links. `git` runs on the Mac with a 2 second limit and never prompts; results are cached for a minute.
+- Jira keys link only when you set both settings. Without a project list nothing is linked, so `UTF-8` or `ISO-9001` never become links:
+
+```yaml
+remote_access:
+  links:
+    jira_base: https://issues.example.com
+    jira_projects: [WID, OPS]
+```
+
+## Finding sessions
+
+Every session in the phone clients shows a name and, when there is one, a short description. Names and pins are stored with the session, so the TUI and the web dashboard see them too.
+
+### Names and descriptions
+
+The **title** is the first of:
+
+1. The owner's text: a title you typed (info sheet, `PATCH /v1/sessions/{id}/meta`, or the TUI or dashboard). It is never overwritten.
+2. Ours: a title a model wrote (below). **Update summary** writes this one.
+3. Claude Code's own `ai-title`.
+4. The session's first message.
+
+The **description** is the owner's when you wrote one; otherwise the newer of Claude Code's away summary (the recap it writes after about 3 minutes idle in an interactive session) and ours.
+
+A title that says nothing ("Session c513a7b6", "continue c513a7b6", an id alone, or only a slash command) counts as useless: the model writes a title to replace it.
+
+Pins are the existing star: the same flag in the TUI, the dashboard and the phone clients.
+
+### When a model is used
+
+Automatically only for a session the phone's Now screen can show (Last on your Mac, Pinned, working, open in a terminal, or finished in the last 15 minutes) or the chat you open, when it has no title or description of yours, no away summary and nothing of ours, once. aimux asks for up to 5 such sessions per request, with small calls: at most 500 characters of the session in, 60 tokens out per session. The rest is up to you:
+
+- `sessions.auto_title: true` turns automatic naming on (default `false`). With it off, nothing is sent unless you press **Update summary**.
+- `sessions.naming_daily_limit` (default `20`) caps the sessions named automatically per local day. **Update summary** is not capped, but is counted.
+- **Update summary** (info sheet) asks again for one session, from its first message and latest turns, up to 1,200 characters. It keeps any title or description you wrote.
+- `sessions.title_model` is `haiku` (default, `claude-haiku-5-5`), `sonnet` or `opus`. An unknown name falls back to the default.
+- Backend: the Messages API when an API key is set (`sessions.api_key`, else `ANTHROPIC_API_KEY`); otherwise `claude -p` in safe mode, started from an empty temporary folder with no tools, MCP servers, hooks or memory, using your Claude Code login.
+- After three failed calls in a row, automatic naming pauses for a while; **Update summary** still works. Health shows `naming.failing`, a fixed `reason` and `paused`.
+- Token use is recorded in `~/.aimux/data/usage.jsonl` under the label `naming`. A model without a price in aimux's table shows tokens and an unknown cost, never 0.
+- The TUI and dashboard **Generate Titles** action keeps titles you wrote and records its usage the same way.
+
+What leaves your Mac, to Anthropic, as when you use Claude Code:
+
+- Automatic naming: the session's first user message and the start of its latest reply, up to 500 characters per session, only for the sessions named above (those Now shows, and the chat you open).
+- **Update summary**: the session's first user message and its latest turns, up to 1,200 characters, only when you tap it.
+
+No other session is sent, and nothing is sent automatically for a session that already has a name and description or that you named yourself. Names and descriptions are stored in `.meta.json` next to each transcript.
+
+### Last on your Mac
+
+With terminal input on, aimux looks at iTerm2's focused pane every 15 seconds while the Mac is in use and remembers which session it showed. This is held in memory only, so a restart forgets it. `GET /v1/sessions` returns it as `lastOnMac`; clients hide it after 12 hours.
+
+### In the clients
+
+- **Now** order: Last on your Mac, Pinned, then the usual sections. A session appears once. Needs you wins: a session waiting for an answer stays in Needs you even when it is pinned or last on your Mac.
+- With more than 5 sessions working, Working groups them by folder under a folder row (folder icon, name, count). A folder with one session is one row.
+- Each row can show a one-line description under the title; All and search show them too.
+- **Pin**: in the web client, the "..." menu on a row; on the iPhone, long press. Both need the `describe` capability.
+- **Info sheet**: edit the title (80 characters) and description (300), **Update summary**, Pin, and a line such as "Named 4 of 20 today." or "Naming paused.". An empty edit clears text you wrote and returns to the automatic text; clearing a title or description you did not write changes nothing and says "Nothing to clear".
+- **Search** also matches descriptions.
+
 ## Security model
 
+- With [device login](#device-login) on (the default), every request other than health, the contract, the web client's files and the three login endpoints also needs a live login from a paired device.
 - The API listens on `127.0.0.1` only. It is not reachable on the tailnet except through `tailscale serve`.
 - Requests must carry this machine's tailnet name as their `Host` (as `tailscale serve` forwards them). Requests for any other Host, including `127.0.0.1`, are refused, so a web page that rebinds its own domain to your machine cannot use the API. The name is detected from `tailscale status`; set `hostnames` to override it.
 - Every request must carry the `Tailscale-User-Login` header that `tailscale serve` sets for the caller (and overwrites if a client sends its own). The login must be in `allowed_logins`; an empty list admits nobody.
 - Browser requests are accepted only from the API's own origin (a client served by `remote serve` itself) (`https://<this host>:<port>`, as `tailscale serve` exposes it). A request from any other page is refused, including a plain cross-site GET such as an image tag (browsers mark those with `Sec-Fetch-Site`).
 - These checks keep out the tailnet and web pages, not programs on this machine: any local process (of any user account) can connect to `127.0.0.1` and send the same `Host` and `Tailscale-User-Login` headers. Run it only on a machine whose local users and programs you trust as much as yourself.
-- Sessions open in a terminal on the Mac are read-only: sending to them is refused, because typing into a running session can approve a prompt nobody saw. `GET /v1/sessions/{id}` shows their latest turns; the event stream carries only turns started through this API, so live progress of a terminal session is not streamed yet.
+- Sessions open in a terminal on the Mac are read-only through `POST /v1/sessions/{id}/messages`: sending to them is refused (`open_in_terminal`), because aimux does not drive a session another process owns. With terminal input on, `POST /v1/sessions/{id}/terminal/messages` types into the terminal itself under the checks in [Typing into terminal sessions](#typing-into-terminal-sessions). `GET /v1/sessions/{id}` shows their latest turns; the event stream carries only turns started through this API, so live progress of a terminal session is not streamed yet.
 - A permission request waits for an answer from a client. Without one it is denied after `approval_timeout`.
+- Step detail shows a command's full text and a failed step's error text on the phone, as replies already show Claude's text, so a command that carries or prints a secret shows that secret there.
 
 ## API
 
@@ -87,13 +291,26 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 
 | Method and path | Purpose |
 |---|---|
-| `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`, `push`) |
-| `GET /v1/sessions?limit=50` | `{"sessions":[...]}`: recent Claude sessions, newest first, with `state` and `lastPrompt` (the last message the person typed). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`) |
-| `GET /v1/sessions/{id}?turns=20` | One session and its last turns: `{..session, "turns":[{"number","time","user","reply","tools":[{"name","snippet","ok"}]}]}`. Long sessions are read from the end, so `number` counts turns in the part read: use it for order, not as a stable id |
+| `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`, `push`, `terminal_input`, `device_login`, `queue`, `describe`). With the `describe` capability it also has `"naming":{"today","limit","failing","reason","paused"}` (today's automatic naming; see [Finding sessions](#finding-sessions)). With device login on it also has `"session"`: `live` when the request carries a live login, else `none`. With `remote_access.links.jira_base` set it also has `"links":{"jiraBase","jiraProjects"}` (see [Links in replies](#links-in-replies)) |
+| `POST /v1/auth/pair` | Body `{"code","kind","publicKey",...}`: pair this device with a code from `aimux remote pair` and log it in (capability `device_login`). `kind` is `secure-enclave` (with `signature`, over `aimux-pair-v1\n<host>\n<code>`) or `webauthn` (with `credentialId`, `userHandle`, `clientDataJSON` and `authenticatorData` from the passkey's creation). The exact fields and signed strings are in the contract |
+| `POST /v1/auth/challenge` | Body `{"deviceId"}`, or `{}` for a passkey that finds its own device: `{"challenge"}`, valid 60 s, single use |
+| `POST /v1/auth/login` | Body `{"deviceId","challenge","signature",...}`: `{"deviceId","name"}`, plus `token` for the iPhone app (send it as `Authorization: Bearer <token>`); the web client gets the `__Host-aimux_session` cookie instead |
+| `POST /v1/auth/logout` | End this login: `{"status":"logged_out"}` |
+| `GET /v1/sessions?limit=50` | `{"sessions":[...],"lastOnMac":{"id","at"}}`: recent Claude sessions, newest first, with `state`, `lastPrompt`, `pinned` and an optional `description`; `lastPrompt` is the last message the person typed; `lastOnMac` is the session last in front on the Mac (absent when unknown). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`) |
+| `GET /v1/sessions/{id}?turns=20` | One session and its last turns: `{..session, "turns":[{"number","time","user","reply","tools":[{"name","snippet","ok","detail"}]}], "stats":{...}, "repo":{"web","branch","root"}}`. `repo` is the session folder's GitHub or GitLab repository (its `origin` remote as a web address without credentials: `https` for ssh remotes, while an `http` or `https` remote keeps its scheme and a non-default port; the checked-out branch; and `root`, the repository folder on the Mac; the session is looked up by the working directory it recorded); it is left out for any other folder and for a session that recorded no working directory. `stats` is what the session has cost and used so far: `costUsd`, `tokensIn`, `tokensOut`, `cacheReadTokens`, `cacheWriteTokens`, `turns`, `durationMin`, and `startTime`, `model` and `gitBranch` when known. It is left out for a session not in the index yet (just created, file not written). A tool's `detail` is optional and holds `input` (the full command or target; left out when `snippet` already shows it, as for a path or a search query), `error`, and for an edit `old` and `new` text (a Write's content arrives as `new`), cut at 4096, 2048, 4096 and 4096 bytes with a trailing `…`; it is left out when the tool has none. Long sessions are read from the end, so `number` counts turns in the part read: use it for order, not as a stable id. A session in state `open_in_terminal` also has `terminal`: `{"status","canType","working","reason","prompt"}` (see below). A session with messages queued also has `queue` (the same object as `GET …/queue`) |
 | `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn |
+| `POST /v1/sessions/{id}/terminal/messages` | Body `{"text","key"}`. Types the text into the session's terminal pane, then Enter: `202 {"status":"typed"}` (capability `terminal_input`). Bodies over 64 KiB or with unknown fields are `400 bad_request`; a driver failure is `500 internal` with a fixed message, its detail only in `remote serve`'s log |
+| `POST /v1/sessions/{id}/terminal/keys` | Body `{"promptId","option","key"}`. Presses `option` (an option's `key`) on the prompt `promptId` if it still shows: `202 {"status":"typed"}` (capability `terminal_input`) |
 | `POST /v1/sessions` | Body `{"cwd","text","key"}`. Starts a session in one of `/v1/projects` and sends its first message (capability `new_sessions`) |
 | `GET /v1/sessions/{id}/events` | The session's events: a server-sent event stream, or one JSON page `{"events","log"}` with `?wait=0` |
 | `POST /v1/sessions/{id}/cancel` | Stop the running turn |
+| `GET /v1/sessions/{id}/queue` | The session's queue `{"state","reason","note","items":[{"id","text","state","created"}]}` (capability `queue`); `state` is `running` or `paused`, item states are `waiting`, `sending` and `answering`. A session without a queue has an empty one |
+| `POST /v1/sessions/{id}/queue` | Body `{"text","key"}`. Adds a message to the end: `200` with the item. A retry with the same `key` never queues it twice (once the message was sent or deleted, the answer has state `done` and no text). `409 queue_full` at 20, `409 bad_text` (the text rules), `400 bad_request` for empty text or over 64 KiB |
+| `PATCH /v1/sessions/{id}/queue/{item}` | Body `{"text"}` or `{"position"}` (exactly one). Edits or moves a waiting message; answers the queue. `409 item_sending` for a message being sent or answered, `404 unknown_item` |
+| `DELETE /v1/sessions/{id}/queue/{item}` | Removes a message and answers the queue; `409 item_sending` for one being sent or answered while the queue runs. Works for a session that no longer exists |
+| `POST /v1/sessions/{id}/queue/resume` | Resumes a paused queue; answers the queue |
+| `PATCH /v1/sessions/{id}/meta` | Body with `title`, `description` and/or `pinned` (at least one; title up to 80 characters, description up to 300, one line, an empty string clears your text). Answers the title, description and pin as clients show them (capability `describe`) |
+| `POST /v1/sessions/{id}/describe` | Update summary: asks the model now for a new title and description; `{title, description, changed, kept}`. `409 owner_set` when you wrote both, `409 describe_running`; `502 naming_auth`, `naming_model`, `naming_unreadable`, `naming_failed`, `503 naming_unavailable`, `504 naming_timeout` (capability `describe`) |
 | `POST /v1/approvals/{id}` | Body `{"option": "<optionId>"}` from the approval event, or `{"option": ""}` to deny |
 | `POST /v1/devices` | Body `{"token","environment"}`: an APNs device token (hex) and `sandbox` (a build run from Xcode) or `production` (TestFlight, App Store). The phone then gets an alert for each new approval (capability `push`). Register on every launch; tokens change |
 | `DELETE /v1/devices/{token}` | Stop sending approval alerts to that phone (capability `push`) |
@@ -103,6 +320,8 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 **Starting a turn.** Both `POST /v1/sessions/{id}/messages` and `POST /v1/sessions` answer `202 {"id","turn","after","events"}`: the session, the turn, and its events URL from just before the turn. A retry with the same non-empty `key` returns the same session and turn instead of running it twice; keys live until the server restarts. When every run slot (`max_runs`) is busy, a message is still accepted and the turn ends with `turn_error`; creating a session fails at once with `503 too_many_runs`.
 
 **Session states.** `idle` (can be continued), `busy` (aimux is running a turn), `open_in_terminal` (read only here while a terminal on the Mac holds it), `unavailable` (created here, but its first message failed before Claude saved it).
+
+**Terminal status.** `terminal.status` is `busy`, `idle` or `unknown`, from Claude Code's session registry. `working` is true while the screen shows Claude working; it does not change `canType`, but a message would be refused with `busy` (clients offer Add to queue). `canType` says whether a message would be typed now; when it is false, `reason` says why: `disabled`, `not_in_terminal`, `not_claude`, `mac_in_use`, `no_terminal_driver`, `automation_denied`, `not_at_input` or `error` (the terminal driver failed). `prompt`, when a permission prompt shows, is `{"promptId","question","options":[{"key":"1","label":"Yes"}]}`; `promptId` stays the same while the same prompt shows. With terminal input off, `terminal` is still there with `reason` `disabled`, so a client can say why it cannot type.
 
 **Events.** Each event is `{"seq","turn","kind","time","data"}`:
 
@@ -117,7 +336,9 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 
 **Cursors.** Read events after a cursor: `?after=N`, or the `Last-Event-ID` header, which wins (browsers send it on reconnect). Stream frames carry `id: <log>.<seq>` and `event: <kind>`. `<log>` names the server's event log and changes when it restarts: a cursor from an earlier log replays the new log from its start, so pass a page's `log` back as `?log=`; a bare `Last-Event-ID` (just `<seq>`) belongs to the log `?log=` names. The server keeps the latest 2,000 events per session, in memory.
 
-**Error codes.** `unauthorized` (401), `forbidden` (403), `bad_request` (400), `invalid_option` (400), `unknown_session` (404), `no_such_approval` (404), `not_supported` (404, this server does not offer the endpoint; see `capabilities`), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process such as `aimux chat` drives the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is unreadable, so aimux will not risk a second writer), `too_many_runs` (503), `internal` (500).
+**Queue events.** The events request with `queue=1` also carries `queue` events, each the session's whole queue after a change; without `queue=1` they are left out, so older clients never see them. A detail read can be older than a `queue` event received just before it; the newest event wins on the next change.
+
+**Error codes.** `unauthorized` (401), `login_required` (401, device login is on and the request has no live login: log in, or pair if that fails), `forbidden` (403), `bad_request` (400), `invalid_option` (400), `unknown_session` (404), `queue_full` (409), `item_sending` (409), `unknown_item` (404), `no_such_approval` (404), `not_supported` (404, this server does not offer the endpoint; see `capabilities`), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process such as `aimux chat` drives the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is unreadable, so aimux will not risk a second writer), `too_many_runs` (503), `internal` (500). `busy` also answers a direct message while the session's queue is sending. Terminal input adds `disabled` (403, terminal input is off), `bad_text` (400 for `POST …/terminal/messages`; 409 for `POST …/queue`; control characters, or a leading `!` or `/`), and, all 409: `not_in_terminal`, `not_claude`, `mac_in_use`, `no_terminal_driver`, `automation_denied` (macOS refused aimux's Automation access to iTerm2), `not_at_input`, `not_submitted` (typed but Enter not pressed; the text waits in the input box), `no_prompt`, `prompt_changed`. Finding sessions adds `owner_set` (409), `describe_running` (409), `naming_timeout` (504), `naming_auth`, `naming_model`, `naming_unreadable`, `naming_failed` (502) and `naming_unavailable` (503). Device login adds `pairing_failed` (401, wrong, used, expired or burned code, or a bad proof), `pairing_conflict` (409, the name is taken), `unknown_device` (404) and `login_failed` (401).
 
 ## Settings
 
@@ -130,12 +351,19 @@ If `~/.aimux/config.yaml` cannot be read or parsed, `aimux remote serve` stops w
 | `adapter` | | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command |
 | `max_runs` | | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | | `10m` | Unanswered permission requests are denied after this |
+| `device_login` | | `true` | Only paired devices, logged in with Face ID or Touch ID, may use the API (see [Device login](#device-login)); `false` admits any device of an allowed login, with a warning at start |
 | `hostnames` | | detected from `tailscale status` | `Host` names to accept: this machine's tailnet names |
 | `push.ntfy.topic` | | off | ntfy topic for approval notifications (see [Approval notifications](#approval-notifications)) |
 | `push.ntfy.server` | | `https://ntfy.sh` | ntfy server |
 | `push.ntfy.token_env` | | none | Environment variable holding an ntfy access token |
 | `push.ntfy.click_url` | | `https://<tailnet name>:8443/app/` | Web client a tapped notification opens |
 | `push.apns.key_file`, `key_id`, `team_id`, `topic` | | off | APNs token key, its id, your Apple team id and the app's bundle id; all four or none |
+| `links.jira_base` | | none | Jira address, `http` or `https` (for example `https://issues.example.com`); anything else is ignored; clients link keys like `WID-123` to `<jira_base>/browse/WID-123` (see [Links in replies](#links-in-replies)) |
+| `links.jira_projects` | | none | Project keys whose issue keys become links, for example `[WID, OPS]`; with none listed, no key is linked |
+| `terminal_input.enabled` | | `false` | Type phone messages into sessions open in iTerm2 (see [Typing into terminal sessions](#typing-into-terminal-sessions)) |
+| `terminal_input.allow_while_in_use` | | `false` | Type even into the session you are using on the Mac; for testing at the Mac only |
+| `sessions.auto_title`, `sessions.naming_daily_limit`, `sessions.title_model`, `sessions.api_key` | | `false`, `20`, `haiku`, none | Automatic names and descriptions (see [Finding sessions](#finding-sessions)); these keys sit under `sessions`, not `remote_access` |
+| `terminal_input.allow_slash_commands` | | `false` | Let a phone message start with `/`, so it runs as a Claude Code slash command; a leading `!` is refused regardless |
 
 Sessions started through the API are recorded in `~/.aimux/remote-created.json` (owner-only), so they stay listed although Claude marks agent-SDK sessions as automated.
 

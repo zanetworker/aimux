@@ -1,0 +1,76 @@
+{
+  "name": "Pinned sessions order newest first, ties by id, whatever their state or the list order",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "p4",
+      "provider": "claude",
+      "title": "Archive the old invoices",
+      "project": "/src/finance",
+      "lastActive": "2026-10-30T10:00:00Z",
+      "state": "idle",
+      "pinned": true
+    },
+    {
+      "id": "c1",
+      "provider": "claude",
+      "title": "Check the train times",
+      "project": "/src/trips",
+      "lastActive": "2026-10-30T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    },
+    {
+      "id": "p3",
+      "provider": "claude",
+      "title": "Compare two ferry routes",
+      "project": "/src/trips",
+      "lastActive": "2026-10-30T11:30:00Z",
+      "state": "open_in_terminal",
+      "pinned": true
+    },
+    {
+      "id": "p1",
+      "provider": "claude",
+      "title": "Tidy the bookmarks",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:30:00Z",
+      "state": "idle",
+      "pinned": true
+    },
+    {
+      "id": "p2",
+      "provider": "claude",
+      "title": "Build the seed catalogue",
+      "project": "/src/garden",
+      "lastActive": "2026-10-30T11:59:00Z",
+      "state": "busy",
+      "pinned": true
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [
+      "p2",
+      "p1",
+      "p3",
+      "p4"
+    ],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [
+      "c1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 1,
+      "onMac": 2
+    }
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "name": "unknown update kinds, non-text and empty chunks are ignored; a tool call with no kind or title is other with an empty target",
+  "now": "2026-10-26T08:01:00Z",
+  "turns": [],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "u1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Look around"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:01Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Step one. "
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "sessionUpdate": "current_mode_update",
+        "currentModeId": "plan"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:03Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Step two."
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:04Z",
+      "data": {
+        "sessionUpdate": "some_future_kind",
+        "value": 1
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:05Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "image",
+          "data": "AAAA",
+          "mimeType": "image/png"
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:06Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": ""
+        }
+      }
+    },
+    {
+      "seq": 8,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:07Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "q1"
+      }
+    },
+    {
+      "seq": 9,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:08Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "q2",
+        "title": "Fetch the page",
+        "kind": "fetch",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 10,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:09Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "nope",
+        "status": "failed"
+      }
+    },
+    {
+      "seq": 11,
+      "turn": "u1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:10Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Nothing unusual."
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Look around"
+      },
+      {
+        "kind": "thought",
+        "text": "Step one. Step two.",
+        "seconds": 6
+      },
+      {
+        "kind": "steps",
+        "count": 2,
+        "seconds": 1,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "other",
+            "target": "",
+            "status": "running",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "other",
+            "target": "Fetch the page",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "Nothing unusual."
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

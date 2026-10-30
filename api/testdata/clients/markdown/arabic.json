@@ -1,0 +1,132 @@
+{
+  "name": "Arabic text passes through unchanged in headings, paragraphs, lists and tables",
+  "markdown": "# عنوان التقرير\n\nهذه **فقرة** فيها `code` ورابط [المستند](https://example.com/ar).\n\n- البند الأول\n- البند الثاني\n\n| الاسم | القيمة |\n| --- | ---: |\n| أ | ١٢ |\n",
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "عنوان التقرير"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "هذه "
+        },
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "فقرة"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " فيها "
+        },
+        {
+          "t": "code",
+          "v": "code"
+        },
+        {
+          "t": "text",
+          "v": " ورابط "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/ar",
+          "c": [
+            {
+              "t": "text",
+              "v": "المستند"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "البند الأول"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "البند الثاني"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "align": [
+        "left",
+        "right"
+      ],
+      "header": [
+        [
+          {
+            "t": "text",
+            "v": "الاسم"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "القيمة"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "t": "text",
+              "v": "أ"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "١٢"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "Last on your Mac older than 12 hours is hidden; the session stays in its section",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "lastOnMac": {
+    "id": "t1",
+    "at": "2026-10-29T23:59:59Z"
+  },
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Plan the allotment layout",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T08:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [
+      "t1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 1
+    }
+  }
+}

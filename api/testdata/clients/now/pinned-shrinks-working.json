@@ -1,0 +1,97 @@
+{
+  "name": "Pinned sessions leave Working before it is grouped or On your Mac is collapsed",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Task 1",
+      "project": "/src/p1",
+      "lastActive": "2026-10-30T11:59:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "w2",
+      "provider": "claude",
+      "title": "Task 2",
+      "project": "/src/p2",
+      "lastActive": "2026-10-30T11:58:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "w3",
+      "provider": "claude",
+      "title": "Task 3",
+      "project": "/src/p3",
+      "lastActive": "2026-10-30T11:57:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "w4",
+      "provider": "claude",
+      "title": "Task 4",
+      "project": "/src/p4",
+      "lastActive": "2026-10-30T11:56:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "w5",
+      "provider": "claude",
+      "title": "Task 5",
+      "project": "/src/p5",
+      "lastActive": "2026-10-30T11:55:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "w6",
+      "provider": "claude",
+      "title": "Task 6",
+      "project": "/src/p6",
+      "lastActive": "2026-10-30T11:54:00Z",
+      "state": "busy",
+      "pinned": true
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Idle terminal",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [
+      "w6"
+    ],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "w1",
+        "w2",
+        "w3",
+        "w4",
+        "w5"
+      ]
+    },
+    "onMac": [
+      "m1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 6,
+      "onMac": 1
+    }
+  }
+}

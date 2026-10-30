@@ -1,0 +1,241 @@
+{
+  "name": "Seven to forty lowercase hex digits with at least one digit and one letter become commit spans",
+  "cases": [
+    {
+      "name": "short and full hashes",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Reverted a1b2c3d, then 0123456789abcdef0123456789abcdef01234567 landed."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Reverted "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "a1b2c3d",
+          "href": "https://github.com/acme/widget/commit/a1b2c3d"
+        },
+        {
+          "t": "text",
+          "v": ", then "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "0123456789abcdef0123456789abcdef01234567",
+          "href": "https://github.com/acme/widget/commit/0123456789abcdef0123456789abcdef01234567"
+        },
+        {
+          "t": "text",
+          "v": " landed."
+        }
+      ]
+    },
+    {
+      "name": "must be a whole word",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "xa1b2c3d and a1b2c3dz and a1b2c3d_ and (a1b2c3d) and a1b2c3d, ok"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "xa1b2c3d and a1b2c3dz and a1b2c3d_ and ("
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "a1b2c3d",
+          "href": "https://github.com/acme/widget/commit/a1b2c3d"
+        },
+        {
+          "t": "text",
+          "v": ") and "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "a1b2c3d",
+          "href": "https://github.com/acme/widget/commit/a1b2c3d"
+        },
+        {
+          "t": "text",
+          "v": ", ok"
+        }
+      ]
+    },
+    {
+      "name": "length bounds",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "a1b2c3 is short; a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0e is 41 long"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "a1b2c3 is short; a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0e is 41 long"
+        }
+      ]
+    },
+    {
+      "name": "needs a digit and a letter",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "deadbeef cafe 1234567 abcdefa 12345678 are not commits; deadbee1 is"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "deadbeef cafe 1234567 abcdefa 12345678 are not commits; "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "deadbee1",
+          "href": "https://github.com/acme/widget/commit/deadbee1"
+        },
+        {
+          "t": "text",
+          "v": " is"
+        }
+      ]
+    },
+    {
+      "name": "uppercase hex is not a commit",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "A1B2C3D and a1b2C3d"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "A1B2C3D and a1b2C3d"
+        }
+      ]
+    },
+    {
+      "name": "not inside code or a link",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "code",
+          "v": "a1b2c3d"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/c",
+          "c": [
+            {
+              "t": "text",
+              "v": "a1b2c3d"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " a1b2c3d"
+        }
+      ],
+      "expect": [
+        {
+          "t": "code",
+          "v": "a1b2c3d"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/c",
+          "c": [
+            {
+              "t": "text",
+              "v": "a1b2c3d"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "a1b2c3d",
+          "href": "https://github.com/acme/widget/commit/a1b2c3d"
+        }
+      ]
+    }
+  ]
+}

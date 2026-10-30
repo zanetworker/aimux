@@ -1,0 +1,60 @@
+name: iPhone app
+
+on:
+  push:
+    branches: [main]
+    paths: ['clients/ios/**', 'api/**', '.github/workflows/clients-ios.yml']
+  pull_request:
+    branches: [main]
+    paths: ['clients/ios/**', 'api/**', '.github/workflows/clients-ios.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: clients/ios
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select Xcode 27
+        run: |
+          ls -d /Applications/Xcode*.app || true
+          XCODE=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$XCODE" ]; then
+            echo "::error::No Xcode 27 on this runner; project.yml needs the iOS 27 SDK"
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Tools
+        run: brew install xcodegen swiftlint
+      - name: Lint
+        run: swiftlint lint --strict
+      - name: Generate the Xcode project
+        run: xcodegen generate
+      - name: Logic tests
+        run: |
+          # Newest iPhone simulator on an iOS 27 or later runtime; the deployment target is 27.0.
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          found = []
+          for runtime, sims in json.load(sys.stdin)["devices"].items():
+              m = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              if m and int(m.group(1)) >= 27:
+                  found += [((int(m.group(1)), int(m.group(2))), s["name"], s["udid"]) for s in sims if s["name"].startswith("iPhone")]
+          if not found:
+              sys.exit("no available iPhone simulator with iOS 27 or later")
+          found.sort(key=lambda f: f[0], reverse=True)
+          print("using", found[0][1], "iOS %d.%d" % found[0][0], file=sys.stderr)
+          print(found[0][2])
+          ')
+          xcodebuild test -project Aimux.xcodeproj -scheme Aimux -only-testing:AimuxKitTests \
+            -destination "id=$UDID" -collect-test-diagnostics never CODE_SIGNING_ALLOWED=NO

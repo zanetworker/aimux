@@ -1,0 +1,59 @@
+{
+  "name": "add-bad-text",
+  "session": {
+    "state": "idle",
+    "queue": {
+      "state": "running",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Rename the helper to parseConfig",
+          "state": "waiting",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Then add a test for the empty file",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        }
+      ]
+    }
+  },
+  "add": {
+    "error": "bad_text"
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "running",
+      "resume": false
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Rename the helper to parseConfig",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q2",
+        "text": "Then add a test for the empty file",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ],
+    "message": "This message can't be queued (it starts with ! or /, holds control characters, or is too long).",
+    "keepText": true
+  }
+}

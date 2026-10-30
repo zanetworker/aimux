@@ -1,0 +1,187 @@
+<style>
+  .phones { display: flex; gap: 26px; flex-wrap: wrap; justify-content: center; }
+  .pw { display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 433px; zoom: .66; }
+  .pw p { font-size: 18px; line-height: 1.45; margin: 0; color: #d1d1d6; }
+  .pw .tag { font: 600 15px -apple-system, system-ui; color: #8e8e93; letter-spacing: .04em; text-transform: uppercase; }
+  .phone { width: 413px; height: 872px; border-radius: 58px; padding: 10px; background: #1c1c1e; box-shadow: 0 40px 80px -30px rgba(0,0,0,.7), inset 0 0 0 1px #3a3a3c; }
+  .screen { width: 100%; height: 100%; border-radius: 48px; overflow: hidden; position: relative; display: flex; flex-direction: column;
+            font: 17px/1.29 -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; letter-spacing: -.2px;
+            background: var(--bg); color: var(--fg); }
+  .lite { --bg: #f2f2f7; --fg: #000; --grp: #fff; --sec: rgba(60,60,67,.6); --ter: rgba(60,60,67,.3); --line: rgba(60,60,67,.18); --pv: rgba(60,60,67,.6);
+          --amber: #c56f00; --green: #1f8a3a; --blue: #007aff; --chev: rgba(60,60,67,.3); --bar: rgba(249,249,249,.8); --barline: rgba(0,0,0,.12); --field: rgba(118,118,128,.12); }
+  .dark { --bg: #000; --fg: #fff; --grp: #1c1c1e; --sec: rgba(235,235,245,.6); --ter: rgba(235,235,245,.3); --line: rgba(84,84,88,.6); --pv: rgba(235,235,245,.6);
+          --amber: #ffb340; --green: #30d158; --blue: #0a84ff; --chev: rgba(235,235,245,.3); --bar: rgba(22,22,24,.8); --barline: rgba(255,255,255,.1); --field: rgba(118,118,128,.24); }
+  .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; border-radius: 19px; background: #000; z-index: 9; }
+  .sb { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 14px 34px 0 40px; font-weight: 600; font-size: 17px; flex: none; }
+  .sb svg { height: 13px; }
+  .navbtns { display: flex; justify-content: flex-end; gap: 8px; padding: 2px 16px 0; height: 44px; align-items: center; flex: none; }
+  .gb { width: 44px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; color: var(--fg); background: var(--grp); box-shadow: 0 0 0 .5px var(--barline), 0 2px 8px rgba(0,0,0,.06); }
+  .gb svg { width: 20px; height: 20px; }
+  .lt { font: 700 34px/1.12 -apple-system, "SF Pro Display", system-ui; letter-spacing: .3px; padding: 0 20px; }
+  .lts { font-size: 15px; color: var(--sec); padding: 3px 20px 14px; }
+  .lts b { color: var(--amber); font-weight: 600; }
+  .body { flex: none; }
+  .gh { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--sec); padding: 18px 36px 7px; text-transform: uppercase; letter-spacing: .02em; }
+  .gh a { color: var(--blue); text-transform: none; font-size: 15px; letter-spacing: 0; }
+  .gh small { text-transform: none; letter-spacing: 0; }
+  .grp { margin: 0 16px; background: var(--grp); border-radius: 26px; overflow: hidden; }
+  .r { display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 12px; position: relative; }
+  .r + .r::before { content: ""; position: absolute; top: 0; left: 32px; right: 0; height: .5px; background: var(--line); }
+  .dot { width: 9px; height: 9px; border-radius: 5px; flex: none; }
+  .b { flex: 1; min-width: 0; }
+  .l1 { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .t { font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tm { font-size: 15px; color: var(--sec); flex: none; font-variant-numeric: tabular-nums; }
+  .l2 { display: flex; font-size: 15px; color: var(--pv); white-space: nowrap; overflow: hidden; margin-top: 1px; }
+  .l2 .s { font-weight: 600; flex: none; }
+  .l2 .x { overflow: hidden; text-overflow: ellipsis; }
+  .sep { padding: 0 6px; color: var(--ter); flex: none; }
+  .tw { color: var(--amber); } .wk { color: var(--green); }
+  .chev { width: 8px; height: 14px; color: var(--chev); flex: none; }
+  .q { display: flex; align-items: center; gap: 10px; padding: 11px 14px 11px 20px; position: relative; font-size: 17px; }
+  .q + .q::before { content: ""; position: absolute; top: 0; left: 20px; right: 0; height: .5px; background: var(--line); }
+  .q .t2 { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; unicode-bidi: plaintext; text-align: start; }
+  .q .p { color: var(--sec); font-size: 15px; flex: none; unicode-bidi: isolate; }
+  .q .tm { min-width: 0; unicode-bidi: isolate; }
+  .row1 { display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 16px; font-size: 17px; }
+  .row1 svg.ic { width: 22px; height: 22px; color: var(--blue); flex: none; }
+  .row1 span { flex: 1; }
+  .row1 .n { flex: none; color: var(--sec); font-variant-numeric: tabular-nums; }
+  .empty { margin: 4px 16px 0; background: var(--grp); border-radius: 26px; padding: 18px 18px; display: flex; gap: 14px; align-items: center; }
+  .empty svg { width: 26px; height: 26px; color: var(--green); flex: none; }
+  .empty b { display: block; font-size: 17px; font-weight: 600; }
+  .empty span { font-size: 15px; color: var(--sec); }
+  /* native iOS 26/27 bottom toolbar: glass capsules, Mail-style */
+  .tb { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px 30px; display: flex; gap: 10px; align-items: center; z-index: 5;
+        background: linear-gradient(to bottom, transparent, var(--bg) 45%); }
+  .cap { height: 48px; border-radius: 24px; display: flex; align-items: center; background: var(--bar); box-shadow: 0 0 0 .5px var(--barline), 0 6px 20px rgba(0,0,0,.08);
+         backdrop-filter: blur(20px) saturate(1.8); -webkit-backdrop-filter: blur(20px) saturate(1.8); }
+  .cap.search { flex: 1; gap: 8px; padding: 0 16px; color: var(--sec); font-size: 17px; }
+  .cap.search svg { width: 18px; height: 18px; }
+  .cap.search .mic { margin-left: auto; width: 18px; height: 18px; }
+  .cap.btn { width: 48px; justify-content: center; color: var(--blue); }
+  .cap.btn svg { width: 22px; height: 22px; }
+  /* sheet */
+  .dim { position: absolute; inset: 0; background: rgba(0,0,0,.4); z-index: 6; }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 64px; background: var(--sheet, var(--bg)); border-radius: 38px 38px 0 0; display: flex; flex-direction: column; z-index: 7; }
+  .dark .sheet { --sheet: #1c1c1e; --grp: #2c2c2e; }
+  .grab { width: 36px; height: 5px; border-radius: 3px; background: var(--ter); margin: 6px auto 0; }
+  .shh { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px 6px; }
+  .shh .gb { width: 44px; height: 44px; background: var(--grp); box-shadow: none; }
+  .shh .h { font-size: 17px; font-weight: 600; }
+  .shh .start { height: 44px; border-radius: 22px; padding: 0 18px; display: flex; align-items: center; font-size: 17px; font-weight: 600; background: var(--blue); color: #fff; }
+  .ctx { display: flex; align-items: center; gap: 6px; padding: 10px 22px 10px; font-size: 15px; color: var(--sec); }
+  .ctx b { color: var(--fg); font-weight: 600; }
+  .ctx svg { width: 12px; height: 12px; color: var(--blue); }
+  .ta { margin: 0 16px; background: var(--grp); border-radius: 26px; padding: 16px 18px; min-height: 150px; font-size: 17px; position: relative; }
+  .ta .cur { display: inline-block; width: 2px; height: 21px; background: var(--blue); vertical-align: -4px; margin-left: 1px; }
+  .ta .mic { position: absolute; right: 12px; bottom: 12px; width: 40px; height: 40px; border-radius: 20px; background: var(--field); display: flex; align-items: center; justify-content: center; }
+  .ta .mic svg { width: 19px; height: 19px; }
+  .pr { display: flex; align-items: center; gap: 12px; padding: 12px 16px; font-size: 17px; position: relative; }
+  .pr + .pr::before { content: ""; position: absolute; top: 0; left: 50px; right: 0; height: .5px; background: var(--line); }
+  .pr svg.f { width: 22px; height: 22px; color: var(--sec); flex: none; }
+  .pr span { flex: 1; }
+  .pr .when { flex: none; font-size: 15px; color: var(--sec); }
+  .pr svg.ck { width: 18px; height: 18px; color: var(--blue); flex: none; }
+  .pr.more span { color: var(--blue); }
+</style>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="k-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="k-compose" viewBox="0 0 24 24"><path d="M11 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M17.8 3.7a1.9 1.9 0 0 1 2.7 2.7L12 14.9l-3.5.8.8-3.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="k-filter" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 9.5h9M9.5 12.5h5M11 15.5h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="k-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18" cy="12" r="1.7" fill="currentColor"/></symbol>
+    <symbol id="k-stack" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="4" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="11" width="16" height="4" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="17" width="16" height="3" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="k-check-c" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.8 12.3l2.8 2.8 5.6-5.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="k-chev" viewBox="0 0 8 14"><path d="M1.5 1.5l5 5.5-5 5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="k-down" viewBox="0 0 12 12"><path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="k-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></symbol>
+    <symbol id="k-folder" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+    <symbol id="k-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="k-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="k-sig" viewBox="0 0 34 11"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/><rect x="21" y="0.5" width="12" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="22.5" y="2" width="8" height="7" rx="1.3"/></symbol>
+  </defs>
+</svg>
+
+<template id="chrome-top">
+  <div class="island"></div>
+  <div class="sb"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#k-sig"/></svg></div>
+  <div class="navbtns"><span class="gb"><svg><use href="#k-filter"/></svg></span><span class="gb"><svg><use href="#k-more"/></svg></span></div>
+</template>
+<template id="toolbar">
+  <div class="tb"><div class="cap search"><svg><use href="#k-search"/></svg>Search<svg class="mic"><use href="#k-mic"/></svg></div><div class="cap btn"><svg><use href="#k-compose"/></svg></div></div>
+</template>
+<template id="onmac">
+  <div class="gh"><span>On your Mac · 14</span><a>See All</a></div>
+  <div class="grp">
+    <div class="q"><span class="t2">Weekly status draft</span><span class="p">research</span><span class="tm">11h</span></div>
+    <div class="q"><span class="t2">Database migration plan</span><span class="p">research</span><span class="tm">11h</span></div>
+    <div class="q"><span class="t2" dir="auto">ملاحظات اجتماع الفريق</span><span class="p">notes</span><span class="tm">12h</span></div>
+    <div class="q"><span class="t2">Release checklist review</span><span class="p">notes</span><span class="tm">12h</span></div>
+    <div class="q"><span class="t2">Screenshot-reported issues</span><span class="p">research</span><span class="tm">13h</span></div>
+    <div class="q"><span class="t2">web-shop PR #212 order export schema</span><span class="p">web-shop</span><span class="tm">14h</span></div>
+  </div>
+  <div class="grp" style="margin-top:18px">
+    <div class="row1"><svg class="ic"><use href="#k-stack"/></svg><span>All Sessions</span><span class="n">327</span><svg class="chev"><use href="#k-chev"/></svg></div>
+  </div>
+</template>
+<template id="home">
+  <div class="body">
+    <div class="lt">Now</div>
+    <div class="lts"><b>1 needs you</b> · 2 working</div>
+    <div class="grp">
+      <div class="r"><span class="dot" style="background:var(--amber)"></span><div class="b"><div class="l1"><span class="t">Push notifications</span><span class="tm">1m</span></div><div class="l2"><span class="s tw">Your turn</span><span class="sep">·</span><span class="x">Keychain or a file for the .p8 key?</span></div></div><svg class="chev"><use href="#k-chev"/></svg></div>
+      <div class="r"><span class="dot" style="background:var(--green)"></span><div class="b"><div class="l1"><span class="t">Aimux iOS app structure</span><span class="tm">now</span></div><div class="l2"><span class="s wk">Working</span><span class="sep">·</span><span class="x">Updating the home screen mockups</span></div></div><svg class="chev"><use href="#k-chev"/></svg></div>
+      <div class="r"><span class="dot" style="background:var(--green)"></span><div class="b"><div class="l1"><span class="t">web_fetch quota exceeded</span><span class="tm">4m</span></div><div class="l2"><span class="s wk">Working</span><span class="sep">·</span><span class="x">Running a tool</span></div></div><svg class="chev"><use href="#k-chev"/></svg></div>
+    </div>
+  </div>
+</template>
+
+<h2>Claude, round 10: Codex's critique applied</h2>
+<p class="subtitle">Native iOS 27 bottom toolbar (Mail-style: search field + compose), "1 needs you" first, chevrons on tappable rows, "On your Mac" and "All Sessions", an Arabic title, the empty state, and a new-session sheet with system buttons.</p>
+
+<div class="phones">
+  <div class="pw"><span class="tag">Home · light</span>
+    <div class="phone"><div class="screen lite"><div data-fill="chrome-top"></div><div data-fill="home"></div><div data-fill="onmac"></div><div data-fill="toolbar"></div></div></div>
+    <p>Mail's iOS 26 layout: filter and more as glass buttons top right, search and compose in the bottom toolbar within thumb reach. "Running a tool" stands in when Claude's last line is tool output.</p>
+  </div>
+  <div class="pw"><span class="tag">Home · dark</span>
+    <div class="phone"><div class="screen dark"><div data-fill="chrome-top"></div><div data-fill="home"></div><div data-fill="onmac"></div><div data-fill="toolbar"></div></div></div>
+    <p>Same content on true black. The Arabic title sits right-aligned in its own row while project and time stay put.</p>
+  </div>
+  <div class="pw"><span class="tag">Home · nothing active</span>
+    <div class="phone"><div class="screen lite"><div data-fill="chrome-top"></div>
+      <div class="body"><div class="lt">Now</div><div class="lts">Nothing needs you</div>
+        <div class="empty"><svg><use href="#k-check-c"/></svg><div><b>All quiet</b><span>No session has been active in the last 15 minutes.</span></div></div>
+      </div>
+      <div data-fill="onmac"></div><div data-fill="toolbar"></div></div></div>
+    <p>Zero active sessions: one calm line, and "On your Mac" moves up on its own. No gap.</p>
+  </div>
+  <div class="pw"><span class="tag">New session · dark</span>
+    <div class="phone"><div class="screen dark">
+      <div class="island"></div>
+      <div class="sb"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#k-sig"/></svg></div>
+      <div class="dim"></div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <div class="shh"><span class="gb"><svg><use href="#k-x"/></svg></span><span class="h">New Session</span><span class="start">Start</span></div>
+        <div class="ctx">in <b>aimux-ios</b><svg><use href="#k-down"/></svg></div>
+        <div class="ta">Add a dark mode toggle to the settings screen<span class="cur"></span><span class="mic"><svg><use href="#k-mic"/></svg></span></div>
+        <div class="gh" style="padding-top:22px"><span>Recent projects</span></div>
+        <div class="grp">
+          <div class="pr"><svg class="f"><use href="#k-folder"/></svg><span>aimux-ios</span><svg class="ck"><use href="#k-check"/></svg></div>
+          <div class="pr"><svg class="f"><use href="#k-folder"/></svg><span>web-shop</span><span class="when">Today</span></div>
+          <div class="pr"><svg class="f"><use href="#k-folder"/></svg><span>aimux</span><span class="when">Today</span></div>
+          <div class="pr"><svg class="f"><use href="#k-folder"/></svg><span>research</span><span class="when">Today</span></div>
+          <div class="pr more"><svg class="f" style="opacity:0"><use href="#k-folder"/></svg><span>All Projects…</span></div>
+        </div>
+      </div>
+    </div></div>
+    <p>iOS 26 sheet buttons: close (✕) left, Start right in the accent colour (disabled until there's a message). "in aimux-ios ⌄" sits right above the message, so the project is never missed.</p>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('[data-fill]').forEach(el => { el.innerHTML = document.getElementById(el.dataset.fill).innerHTML; });
+</script>

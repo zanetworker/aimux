@@ -1,0 +1,217 @@
+{
+  "name": "a finished turn not yet in history is drawn from its events; a reply splits steps groups; thoughts between calls stay in one group",
+  "now": "2026-10-26T08:30:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T08:00:00Z",
+      "user": "Check the build",
+      "reply": "It builds.",
+      "tools": []
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "f1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:20:00Z",
+      "data": {
+        "text": "Fix the warnings"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "f1",
+      "kind": "update",
+      "time": "2026-10-26T08:20:01Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "w1",
+        "title": "Search warnings",
+        "kind": "search",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "f1",
+      "kind": "update",
+      "time": "2026-10-26T08:20:02Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Two of them."
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "f1",
+      "kind": "update",
+      "time": "2026-10-26T08:20:04Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "w2",
+        "title": "Edit build.go",
+        "kind": "edit",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "f1",
+      "kind": "update",
+      "time": "2026-10-26T08:20:05Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "w2b",
+        "title": "Edit build.go",
+        "kind": "edit",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "f1",
+      "kind": "update",
+      "time": "2026-10-26T08:20:06Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Fixed both."
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "f1",
+      "kind": "update",
+      "time": "2026-10-26T08:20:07Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "w3",
+        "title": "go vet ./...",
+        "kind": "execute",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 8,
+      "turn": "f1",
+      "kind": "update",
+      "time": "2026-10-26T08:20:08Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Clean."
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "turn": "f1",
+      "kind": "turn_done",
+      "time": "2026-10-26T08:20:09Z",
+      "data": {
+        "stopReason": "end_turn"
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Check the build"
+      },
+      {
+        "kind": "reply",
+        "text": "It builds."
+      },
+      {
+        "kind": "user",
+        "text": "Fix the warnings"
+      },
+      {
+        "kind": "steps",
+        "count": 3,
+        "seconds": 4,
+        "filesChanged": [
+          "Edit build.go"
+        ],
+        "steps": [
+          {
+            "kind": "search",
+            "target": "Search warnings",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Edit build.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Edit build.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "thought",
+        "text": "Two of them.",
+        "seconds": 2
+      },
+      {
+        "kind": "reply",
+        "text": "Fixed both."
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": 0,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "run",
+            "target": "go vet ./...",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "Clean."
+      }
+    ],
+    "working": false,
+    "pendingApproval": null
+  }
+}

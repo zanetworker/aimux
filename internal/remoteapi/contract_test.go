@@ -4,6 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,8 +31,35 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/push"
+	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
+	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
+	"github.com/zanetworker/aimux/internal/terminput"
 )
+
+// contractTerminal types anything but "prompt showing" and presses only on
+// prompt p1.
+type contractTerminal struct{}
+
+func (contractTerminal) Send(_ context.Context, id, text, _ string) error {
+	switch {
+	case id == "nope":
+		return terminput.ErrNotInTerminal
+	case text == "prompt showing":
+		return terminput.ErrNotAtInput
+	case text == "while Claude works":
+		return terminput.ErrBusy
+	}
+	return nil
+}
+
+func (contractTerminal) Press(_ context.Context, _, promptID string, _ terminput.Key, _ string) error {
+	if promptID != "p1" {
+		return terminput.ErrPromptChanged
+	}
+	return nil
+}
 
 // The /v1 contract test: the server is driven through every operation in
 // api/remote-v1.openapi.yaml, including error responses and every event
@@ -42,6 +75,7 @@ var eventDataSchema = map[string]string{
 	KindApprovalResolved: "ApprovalResolvedData",
 	KindTurnDone:         "TurnDoneData",
 	KindTurnError:        "TurnErrorData",
+	KindQueue:            "QueueStatus",
 }
 
 type contract struct {
@@ -154,7 +188,13 @@ func (c *contract) checkEvent(raw []byte) map[string]any {
 // checking every frame.
 func (c *contract) stream(session string, after int64, until string) []map[string]any {
 	c.t.Helper()
-	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/v1/sessions/%s/events?after=%d", c.srv.URL, session, after), nil)
+	return c.streamQuery(session, fmt.Sprintf("after=%d", after), until)
+}
+
+// streamQuery is stream with the query string given.
+func (c *contract) streamQuery(session, query, until string) []map[string]any {
+	c.t.Helper()
+	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/v1/sessions/%s/events?%s", c.srv.URL, session, query), nil)
 	req.Header.Set("Tailscale-User-Login", testLogin)
 	route, _, err := c.router.FindRoute(req)
 	if err != nil {
@@ -229,12 +269,19 @@ func TestContract(t *testing.T) {
 	api := &API{Version: "test", Broker: b,
 		Sessions: func(context.Context, int, bool) ([]Session, error) { return sessions, nil },
 		Session: func(_ context.Context, id string, _ int) (SessionDetail, error) {
+			if id == "s9" {
+				return SessionDetail{Session: sessions[1], Turns: []Turn{}, Terminal: &TerminalStatus{Status: "idle", CanType: false,
+					Reason: "not_at_input", Prompt: &TerminalPrompt{PromptID: "p1", Question: "Do you want to create a.go?", Detail: "Create file\na.go\n  1 package a",
+						Options: []TerminalOption{{Key: "1", Label: "Yes"}, {Key: "2", Label: "Yes, and allow all edits"}, {Key: "3", Label: "No"}}}}}, nil
+			}
 			if id != "s1" {
 				return SessionDetail{}, acprun.ErrUnknownSession
 			}
 			return SessionDetail{Session: sessions[0], Turns: []Turn{
-				{Number: 1, Time: now, User: "make the TTL configurable", Reply: "Done.", Tools: []TurnTool{{Name: "Edit", Snippet: "cache.go", OK: true}}},
-			}}, nil
+				{Number: 1, Time: now, User: "make the TTL configurable", Reply: "Done.", Tools: []TurnTool{{Name: "Edit", Snippet: "cache.go", OK: true, Detail: &ToolDetail{Input: "cache.go", Old: "ttl := 5\n", New: "ttl := cfg.TTL\n"}}, {Name: "Bash", Snippet: "$ go test", OK: false, Detail: &ToolDetail{Error: "FAIL"}}}},
+			}, Stats: &SessionStats{CostUSD: 1.25, TokensIn: 1000, TokensOut: 200, CacheReadTokens: 5000, CacheWriteTokens: 300,
+				Turns: 12, StartTime: &now, DurationMin: 42.5, Model: "claude-opus-x", GitBranch: "main"},
+				Repo: &Repo{Web: "https://github.com/acme/widget", Branch: "main", Root: "/w/app"}}, nil
 		},
 		Search: func(context.Context, string, int) ([]SearchHit, error) {
 			return []SearchHit{{Session: sessions[0], Snippet: "the [cache] TTL"}}, nil
@@ -244,8 +291,36 @@ func TestContract(t *testing.T) {
 		},
 		Create: func(context.Context, string, string) (string, error) { return "new-1", nil },
 	}
+	api.TerminalInput, api.TerminalEnabled = &contractTerminal{}, true
+	queue, err := chatqueue.Open(filepath.Join(t.TempDir(), "remote-queue.json"), time.Now, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(queue.Close)
+	api.Queue = queue
+	queueCtx, stopQueue := context.WithCancel(context.Background())
+	defer stopQueue()
+	go api.QueueEvents(queueCtx)
+	api.Links = &Links{JiraBase: "https://jira.example.com", JiraProjects: []string{"WID"}}
 	devices := &push.DeviceStore{Path: filepath.Join(t.TempDir(), "devices.json")}
 	api.RegisterDevice, api.UnregisterDevice = devices.Add, devices.Remove
+	// Titles, descriptions, pins and Last on your Mac.
+	metaFile := filepath.Join(t.TempDir(), "s1.jsonl")
+	if err := os.WriteFile(metaFile, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	api.Record = func(_ context.Context, id string) (history.Session, error) {
+		if id != "s1" {
+			return history.Session{}, acprun.ErrUnknownSession
+		}
+		m := history.LoadMeta(metaFile)
+		return history.Session{ID: "s1", FilePath: metaFile, FirstPrompt: "make the TTL configurable", Title: m.Title,
+			Description: m.Description, DescriptionBy: m.DescriptionBy, DescribedAt: m.DescribedAt, Starred: m.Starred}, nil
+	}
+	naming := &fakeNaming{status: history.NamingStatus{Today: 3, Limit: 20, Failing: true, Reason: "timed out", Paused: true},
+		result: history.SummaryResult{Title: "TTL setting", Description: "Makes the cache TTL configurable.", Changed: []string{"title", "description"}}}
+	api.Naming, api.AutoName = naming, true
+	api.LastOnMac = func() (string, time.Time, bool) { return "s1", now, true }
 	c := newContract(t, api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
 	expect := func(want int, got int, body map[string]any, what string) {
 		t.Helper()
@@ -257,12 +332,21 @@ func TestContract(t *testing.T) {
 	// Reading.
 	st, body := c.call("GET", "/v1/health", "", testLogin)
 	expect(200, st, body, "health")
+	if links, _ := body["links"].(map[string]any); links["jiraBase"] != "https://jira.example.com" {
+		t.Fatalf("health links %v, want the configured Jira base", body["links"])
+	}
 	st, body = c.call("GET", "/v1/sessions?limit=10", "", testLogin)
 	expect(200, st, body, "list")
 	st, body = c.call("GET", "/v1/sessions?limit=0", "", testLogin)
 	expect(400, st, body, "list with a bad limit")
 	st, body = c.call("GET", "/v1/sessions/s1?turns=5", "", testLogin)
 	expect(200, st, body, "detail")
+	if stats, _ := body["stats"].(map[string]any); stats["costUsd"] != 1.25 || stats["turns"] != float64(12) {
+		t.Fatalf("detail stats %v, want the session's stats", body["stats"])
+	}
+	if repo, _ := body["repo"].(map[string]any); repo["web"] != "https://github.com/acme/widget" || repo["branch"] != "main" || repo["root"] != "/w/app" {
+		t.Fatalf("detail repo %v, want the session's repository", body["repo"])
+	}
 	st, body = c.call("GET", "/v1/sessions/nope", "", testLogin)
 	expect(404, st, body, "unknown session")
 	st, body = c.call("GET", "/v1/search?q=cache", "", testLogin)
@@ -353,9 +437,119 @@ func TestContract(t *testing.T) {
 		t.Fatalf("capabilities %v, want %s", body["capabilities"], CapPush)
 	}
 
-	// Every operation and event kind in the contract was exercised.
+	// Terminal input: a detail with its terminal status, typing, pressing.
+	st, body = c.call("GET", "/v1/sessions/s9", "", testLogin)
+	expect(200, st, body, "detail of a terminal session")
+	if term, _ := body["terminal"].(map[string]any); term["reason"] != "not_at_input" || term["prompt"] == nil {
+		t.Fatalf("terminal %v, want the status with its prompt", body["terminal"])
+	}
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/messages", `{"text":"run the tests","key":"t1"}`, testLogin)
+	expect(202, st, body, "type a message")
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/messages", `{"text":"prompt showing"}`, testLogin)
+	expect(409, st, body, "type while a prompt shows")
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/messages", `{"text":""}`, testLogin)
+	expect(400, st, body, "type nothing")
+	// A client without the queue sees a working session refuse a message.
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/messages", `{"text":"while Claude works"}`, testLogin)
+	expect(409, st, body, "type while Claude works")
+	if body["code"] != "busy" || body["error"] != terminalMessages["busy"].msg {
+		t.Fatalf("busy terminal: %v, want busy with its fixed message", body)
+	}
+	st, body = c.call("POST", "/v1/sessions/nope/terminal/messages", `{"text":"a"}`, testLogin)
+	expect(404, st, body, "type into an unknown session")
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/keys", `{"promptId":"p1","option":"1","key":"t2"}`, testLogin)
+	expect(202, st, body, "press an option")
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/keys", `{"promptId":"old","option":"1"}`, testLogin)
+	expect(409, st, body, "press on a prompt that changed")
+	_, body = c.call("GET", "/v1/health", "", testLogin)
+	if !strings.Contains(fmt.Sprint(body["capabilities"]), CapTerminalInput) {
+		t.Fatalf("capabilities %v, want %s", body["capabilities"], CapTerminalInput)
+	}
+	api.TerminalEnabled = false
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/keys", `{"promptId":"p1","option":"1"}`, testLogin)
+	expect(403, st, body, "press while terminal input is off")
+
+	// The chat queue: add, read, edit, move, delete, resume, its errors, the
+	// detail's queue and queue events.
+	st, body = c.call("GET", "/v1/sessions/s1/queue", "", testLogin)
+	expect(200, st, body, "empty queue")
+	st, body = c.call("POST", "/v1/sessions/s1/queue", `{"text":"run the tests","key":"q1"}`, testLogin)
+	expect(200, st, body, "queue a message")
+	first, _ := body["id"].(string)
+	st, body = c.call("POST", "/v1/sessions/s1/queue", `{"text":"then commit"}`, testLogin)
+	expect(200, st, body, "queue another")
+	second, _ := body["id"].(string)
+	st, body = c.call("POST", "/v1/sessions/s1/queue", `{"text":""}`, testLogin)
+	expect(400, st, body, "queue nothing")
+	st, body = c.call("POST", "/v1/sessions/s1/queue", `{"text":"!ls"}`, testLogin)
+	expect(409, st, body, "queue bash mode")
+	st, body = c.call("POST", "/v1/sessions/nope/queue", `{"text":"a"}`, testLogin)
+	expect(404, st, body, "queue into an unknown session")
+	st, body = c.call("PATCH", "/v1/sessions/s1/queue/"+first, `{"text":"run all the tests"}`, testLogin)
+	expect(200, st, body, "edit a queued message")
+	st, body = c.call("PATCH", "/v1/sessions/s1/queue/"+second, `{"position":0}`, testLogin)
+	expect(200, st, body, "move a queued message")
+	st, body = c.call("PATCH", "/v1/sessions/s1/queue/"+second, `{"position":0,"text":"x"}`, testLogin)
+	expect(400, st, body, "edit and move at once")
+	st, body = c.call("PATCH", "/v1/sessions/s1/queue/nope", `{"position":0}`, testLogin)
+	expect(404, st, body, "move an unknown message")
+	if _, err := queue.MarkSending("s1", second); err != nil {
+		t.Fatal(err)
+	}
+	st, body = c.call("DELETE", "/v1/sessions/s1/queue/"+second, "", testLogin)
+	expect(409, st, body, "delete the message being sent")
+	if err := queue.Pause("s1", chatqueue.ReasonNoAnswer); err != nil {
+		t.Fatal(err)
+	}
+	st, body = c.call("GET", "/v1/sessions/s1", "", testLogin)
+	expect(200, st, body, "detail with a queue")
+	if q, _ := body["queue"].(map[string]any); q["state"] != chatqueue.QueuePaused || q["reason"] != chatqueue.ReasonNoAnswer {
+		t.Fatalf("detail queue %v, want it paused with its reason", body["queue"])
+	}
+	st, body = c.call("POST", "/v1/sessions/s1/queue/resume", "", testLogin)
+	expect(200, st, body, "resume")
+	st, body = c.call("DELETE", "/v1/sessions/s1/queue/"+first, "", testLogin)
+	expect(200, st, body, "delete a queued message")
+	c.streamQuery("s1", "queue=1&after=0", KindQueue)
+	_, body = c.call("GET", "/v1/health", "", testLogin)
+	if !strings.Contains(fmt.Sprint(body["capabilities"]), CapQueue) {
+		t.Fatalf("capabilities %v, want %s", body["capabilities"], CapQueue)
+	}
+
+	// Titles, descriptions and pins.
+	st, body = c.call("GET", "/v1/sessions", "", testLogin)
+	expect(200, st, body, "list with Last on your Mac")
+	if lm, _ := body["lastOnMac"].(map[string]any); lm["id"] != "s1" {
+		t.Fatalf("lastOnMac %v", body["lastOnMac"])
+	}
+	st, body = c.call("PATCH", "/v1/sessions/s1/meta", `{"title":"Cache TTL","description":"Owner words.","pinned":true}`, testLogin)
+	expect(200, st, body, "edit title, description and pin")
+	st, body = c.call("PATCH", "/v1/sessions/s1/meta", `{}`, testLogin)
+	expect(400, st, body, "edit nothing")
+	st, body = c.call("PATCH", "/v1/sessions/nope/meta", `{"pinned":true}`, testLogin)
+	expect(404, st, body, "edit an unknown session")
+	st, body = c.call("PATCH", "/v1/sessions/s1/meta", `{"title":"","description":""}`, testLogin)
+	expect(200, st, body, "clear the owner's values")
+	st, body = c.call("POST", "/v1/sessions/s1/describe", "", testLogin)
+	expect(200, st, body, "update summary")
+	naming.set(func(f *fakeNaming) { f.err = history.ErrOwnerSet })
+	st, body = c.call("POST", "/v1/sessions/s1/describe", "", testLogin)
+	expect(409, st, body, "update summary over owner values")
+	naming.set(func(f *fakeNaming) { f.err = history.ErrTimeout })
+	st, body = c.call("POST", "/v1/sessions/s1/describe", "", testLogin)
+	expect(504, st, body, "update summary timing out")
+	_, body = c.call("GET", "/v1/health", "", testLogin)
+	if n, _ := body["naming"].(map[string]any); !strings.Contains(fmt.Sprint(body["capabilities"]), CapDescribe) || n["limit"] != 20.0 {
+		t.Fatalf("health %v, want describe and naming", body)
+	}
+
+	// Every operation and event kind in the contract was exercised; the
+	// /v1/auth operations by TestContract_DeviceLogin.
 	var missing []string
 	for path, item := range c.doc.Paths.Map() {
+		if strings.HasPrefix(path, "/v1/auth/") {
+			continue
+		}
 		for method, op := range item.Operations() {
 			if !c.ops[op.OperationID] {
 				missing = append(missing, method+" "+path)
@@ -416,6 +610,53 @@ func TestContract_ErrorCodes(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &body)
 		if err2 := schema.VisitJSON(body); err2 != nil {
 			t.Errorf("%v -> %s: not in the contract: %v", err, w.Body.String(), err2)
+		}
+	}
+	for _, err := range []error{
+		terminput.ErrDisabled, terminput.ErrNotInTerminal, terminput.ErrNotClaude, terminput.ErrMacInUse,
+		terminput.ErrNoDriver, terminput.ErrAutomationDenied, terminput.ErrNotAtInput, terminput.ErrNoPrompt,
+		terminput.ErrPromptChanged, terminput.ErrBadText, terminput.ErrNotSubmitted, errors.New("anything else"),
+	} {
+		w := httptest.NewRecorder()
+		writeTerminalFailure(w, err, io.Discard)
+		var body any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		if err2 := schema.VisitJSON(body); err2 != nil {
+			t.Errorf("%v -> %s: not in the contract: %v", err, w.Body.String(), err2)
+		}
+	}
+	for _, f := range namingFailures {
+		w := httptest.NewRecorder()
+		(&API{}).writeNamingFailure(w, "s1", f.err)
+		var body any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		if err2 := schema.VisitJSON(body); err2 != nil {
+			t.Errorf("%v -> %s: not in the contract: %v", f.err, w.Body.String(), err2)
+		}
+	}
+	for _, err := range []error{
+		chatqueue.ErrFull, chatqueue.ErrItemSending, chatqueue.ErrBadText, chatqueue.ErrNotFound, errors.New("anything else"),
+	} {
+		w := httptest.NewRecorder()
+		writeQueueFailure(w, err)
+		var body any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		if err2 := schema.VisitJSON(body); err2 != nil {
+			t.Errorf("%v -> %s: not in the contract: %v", err, w.Body.String(), err2)
+		}
+	}
+}
+
+// A PATCH of a queued message carries exactly one of text and position.
+func TestContract_QueuePatchHoldsOneField(t *testing.T) {
+	schema := loadContract(t).Components.Schemas["QueuePatchRequest"].Value
+	for body, ok := range map[string]bool{
+		`{"text":"a"}`: true, `{"position":0}`: true, `{}`: false, `{"text":"a","position":0}`: false,
+	} {
+		var v any
+		_ = json.Unmarshal([]byte(body), &v)
+		if err := schema.VisitJSON(v); (err == nil) != ok {
+			t.Errorf("%s: valid %v, want %v (%v)", body, err == nil, ok, err)
 		}
 	}
 }
@@ -485,4 +726,201 @@ func TestContract_RecordedTraffic(t *testing.T) {
 		n++
 	}
 	t.Logf("checked %d exchanges", n)
+}
+
+// callAs is call with a session token or cookie and extra headers.
+func (c *contract) callAs(method, path, body, bearer, cookie string, headers ...string) (int, map[string]any, http.Header) {
+	c.t.Helper()
+	req, _ := http.NewRequest(method, c.srv.URL+path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Tailscale-User-Login", testLogin)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	if cookie != "" {
+		req.Header.Set("Cookie", "__Host-aimux_session="+cookie)
+	}
+	for _, h := range headers {
+		k, v, _ := strings.Cut(h, ": ")
+		req.Header.Set(k, v)
+	}
+	route, params, err := c.router.FindRoute(req)
+	if err != nil {
+		c.t.Fatalf("%s %s is not in the contract: %v", method, path, err)
+	}
+	c.mu.Lock()
+	c.ops[route.Operation.OperationID] = true
+	c.mu.Unlock()
+	opts := &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc, IncludeResponseStatus: true}
+	check, _ := http.NewRequest(method, c.srv.URL+path, strings.NewReader(body))
+	check.Header = req.Header.Clone()
+	in := &openapi3filter.RequestValidationInput{Request: check, PathParams: params, Route: route, Options: opts}
+	reqErr := openapi3filter.ValidateRequest(context.Background(), in)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	in.Request = req
+	if err := openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
+		RequestValidationInput: in, Status: resp.StatusCode, Header: resp.Header,
+		Body: io.NopCloser(bytes.NewReader(raw)), Options: opts,
+	}); err != nil {
+		c.t.Fatalf("%s %s -> %d %s: response breaks the contract: %v", method, path, resp.StatusCode, raw, err)
+	}
+	if reqErr != nil && resp.StatusCode < 400 {
+		c.t.Fatalf("%s %s: the server accepted a request the contract rejects: %v", method, path, reqErr)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	return resp.StatusCode, out, resp.Header
+}
+
+// The /v1/auth operations and login_required, against the contract.
+func TestContract_DeviceLogin(t *testing.T) {
+	dir := t.TempDir()
+	dl, err := devicelogin.NewServer(devicelogin.Options{Store: devicelogin.Open(dir),
+		Login: func(r *http.Request) string { return LoginFrom(r.Context()) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &API{Version: "test", Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), DeviceLogin: dl,
+		Sessions: func(context.Context, int, bool) ([]Session, error) { return []Session{}, nil }}
+	c := newContract(t, api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	expect := func(want, got int, body map[string]any, what string) {
+		t.Helper()
+		if got != want {
+			t.Fatalf("%s: %d %v, want %d", what, got, body, want)
+		}
+	}
+	store := devicelogin.Open(dir)
+	b64 := base64.StdEncoding
+
+	st, body, _ := c.callAs("GET", "/v1/health", "", "", "")
+	expect(200, st, body, "health without a session")
+	if body["session"] != "none" {
+		t.Fatalf("health session %v, want none", body["session"])
+	}
+	if !strings.Contains(fmt.Sprint(body["capabilities"]), CapDeviceLogin) {
+		t.Fatalf("capabilities %v, want %s", body["capabilities"], CapDeviceLogin)
+	}
+	st, body, _ = c.callAs("GET", "/v1/sessions", "", "", "")
+	expect(401, st, body, "sessions without a session")
+	if body["code"] != "login_required" {
+		t.Fatalf("code %v, want login_required", body["code"])
+	}
+
+	// Pairing an iPhone: refused proof, then a good one.
+	code, hash := devicelogin.NewCode()
+	if err := store.SetPending("iphone", hash, time.Now().Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	signB64 := func(msg []byte) string {
+		h := sha256.Sum256(msg)
+		sig, _ := ecdsa.SignASN1(rand.Reader, k, h[:])
+		return b64.EncodeToString(sig)
+	}
+	canon, _ := devicelogin.CanonicalCode(code)
+	pairBody := func(sig string) string {
+		j, _ := json.Marshal(map[string]string{"code": code, "kind": "secure-enclave", "publicKey": b64.EncodeToString(der), "signature": sig})
+		return string(j)
+	}
+	st, body, _ = c.callAs("POST", "/v1/auth/pair", pairBody(signB64([]byte("other"))), "", "")
+	expect(401, st, body, "pair with a bad proof")
+	st, body, _ = c.callAs("POST", "/v1/auth/pair", `{"code":"ABCD-1234","kind":"secure-enclave","publicKey":"AAAA"}`, "", "")
+	expect(400, st, body, "pair with a bad key")
+	st, body, _ = c.callAs("POST", "/v1/auth/pair", pairBody(signB64(devicelogin.PairMessage("127.0.0.1", canon))), "", "")
+	expect(200, st, body, "pair")
+	token, _ := body["token"].(string)
+	deviceID, _ := body["deviceId"].(string)
+
+	// Pairing a browser: the session comes as a cookie.
+	code2, hash2 := devicelogin.NewCode()
+	if err := store.SetPending("safari", hash2, time.Now().Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	canon2, _ := devicelogin.CanonicalCode(code2)
+	ch := sha256.Sum256([]byte(canon2))
+	rp := sha256.Sum256([]byte("127.0.0.1"))
+	cd, _ := json.Marshal(map[string]string{"type": "webauthn.create", "challenge": base64.RawURLEncoding.EncodeToString(ch[:]), "origin": "https://" + c.srv.URL[len("http://"):]})
+	ad := append(append(rp[:], 0x45, 0, 0, 0, 0), make([]byte, 60)...) // UP, UV, AT
+	userHandle := base64.RawURLEncoding.EncodeToString(make([]byte, 16))
+	web, _ := json.Marshal(map[string]string{"code": code2, "kind": "webauthn", "publicKey": b64.EncodeToString(der),
+		"credentialId": "Y3JlZA", "userHandle": userHandle, "clientDataJSON": b64.EncodeToString(cd), "authenticatorData": b64.EncodeToString(ad)})
+	st, body, hdr := c.callAs("POST", "/v1/auth/pair", string(web), "", "")
+	expect(200, st, body, "pair a passkey")
+	cookie, _ := strings.CutPrefix(strings.Split(hdr.Get("Set-Cookie"), ";")[0], "__Host-aimux_session=")
+	if _, has := body["token"]; has || cookie == "" {
+		t.Fatalf("web pairing: body %v, Set-Cookie %q", body, hdr.Get("Set-Cookie"))
+	}
+	st, body, _ = c.callAs("POST", "/v1/auth/pair", string(web), "", "")
+	expect(401, st, body, "pair with a used code")
+
+	// Login.
+	st, body, _ = c.callAs("POST", "/v1/auth/challenge", `{"deviceId":"nope"}`, "", "")
+	expect(404, st, body, "challenge for an unknown device")
+	st, body, _ = c.callAs("POST", "/v1/auth/challenge", `{"deviceId":"`+deviceID+`"}`, "", "")
+	expect(200, st, body, "challenge")
+	challenge, _ := body["challenge"].(string)
+	login := func(sig string) string {
+		j, _ := json.Marshal(map[string]string{"deviceId": deviceID, "challenge": challenge, "signature": sig})
+		return string(j)
+	}
+	st, body, _ = c.callAs("POST", "/v1/auth/login", login(signB64([]byte("other"))), "", "")
+	expect(401, st, body, "login with a bad signature")
+	st, body, _ = c.callAs("POST", "/v1/auth/challenge", `{"deviceId":"`+deviceID+`"}`, "", "")
+	expect(200, st, body, "second challenge")
+	challenge, _ = body["challenge"].(string)
+	st, body, _ = c.callAs("POST", "/v1/auth/login", login(signB64(devicelogin.LoginMessage("127.0.0.1", challenge))), "", "")
+	expect(200, st, body, "login")
+	st, body, _ = c.callAs("POST", "/v1/auth/login", `{"deviceId":"nope","challenge":"x","signature":"AA=="}`, "", "")
+	expect(404, st, body, "login of an unknown device")
+
+	// Sessions in use.
+	st, body, _ = c.callAs("GET", "/v1/sessions", "", token, "", "Aimux-Interaction: 1")
+	expect(200, st, body, "sessions with a Bearer token")
+	st, body, _ = c.callAs("GET", "/v1/sessions", "", "", cookie)
+	expect(200, st, body, "sessions with the cookie")
+	st, body, _ = c.callAs("GET", "/v1/health", "", "", cookie)
+	expect(200, st, body, "health with a session")
+	if body["session"] != "live" {
+		t.Fatalf("health session %v, want live", body["session"])
+	}
+	st, body, _ = c.callAs("POST", "/v1/auth/logout", "", token, "")
+	expect(200, st, body, "logout")
+	st, body, _ = c.callAs("POST", "/v1/auth/logout", "", token, "")
+	expect(401, st, body, "logout twice")
+
+	var missing []string
+	for path, item := range c.doc.Paths.Map() {
+		for method, op := range item.Operations() {
+			if strings.HasPrefix(path, "/v1/auth/") && !c.ops[op.OperationID] {
+				missing = append(missing, method+" "+path)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("never exercised: %v", missing)
+	}
+}
+
+// The GET routes the clients mark with Aimux-Interaction when the person
+// acts (devicelogin's TestInteraction_ClientActionsContract checks that each
+// counts): the contract lists the header on each of them.
+func TestContract_InteractionHeaderListed(t *testing.T) {
+	doc := loadContract(t)
+	for _, p := range []string{"/v1/sessions", "/v1/sessions/{id}", "/v1/search", "/v1/projects", "/v1/sessions/{id}/events"} {
+		item := doc.Paths.Find(p)
+		if item == nil || item.Get == nil {
+			t.Fatalf("no GET %s in the contract", p)
+		}
+		if item.Get.Parameters.GetByInAndName("header", devicelogin.InteractionHeader) == nil {
+			t.Errorf("GET %s does not list %s", p, devicelogin.InteractionHeader)
+		}
+	}
 }

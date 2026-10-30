@@ -1,0 +1,368 @@
+{
+  "name": "twenty working sessions: five groups by count then newest, the rest summed",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "p1s1",
+      "provider": "claude",
+      "title": "Job 1",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s2",
+      "provider": "claude",
+      "title": "Job 2",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T08:46:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s3",
+      "provider": "claude",
+      "title": "Job 3",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T08:33:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s4",
+      "provider": "claude",
+      "title": "Job 4",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T08:20:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s5",
+      "provider": "claude",
+      "title": "Job 5",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T08:07:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s6",
+      "provider": "claude",
+      "title": "Job 6",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T07:54:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s7",
+      "provider": "claude",
+      "title": "Job 7",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T07:41:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s8",
+      "provider": "claude",
+      "title": "Job 8",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T07:28:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p1s9",
+      "provider": "claude",
+      "title": "Job 9",
+      "project": "/src/p1",
+      "lastActive": "2026-10-26T07:15:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p2s1",
+      "provider": "claude",
+      "title": "Job 10",
+      "project": "/src/p2",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p2s2",
+      "provider": "claude",
+      "title": "Job 11",
+      "project": "/src/p2",
+      "lastActive": "2026-10-26T08:44:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p2s3",
+      "provider": "claude",
+      "title": "Job 12",
+      "project": "/src/p2",
+      "lastActive": "2026-10-26T08:31:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p2s4",
+      "provider": "claude",
+      "title": "Job 13",
+      "project": "/src/p2",
+      "lastActive": "2026-10-26T08:18:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p3s1",
+      "provider": "claude",
+      "title": "Job 14",
+      "project": "/src/p3",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p3s2",
+      "provider": "claude",
+      "title": "Job 15",
+      "project": "/src/p3",
+      "lastActive": "2026-10-26T08:42:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p3s3",
+      "provider": "claude",
+      "title": "Job 16",
+      "project": "/src/p3",
+      "lastActive": "2026-10-26T08:29:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p4s1",
+      "provider": "claude",
+      "title": "Job 17",
+      "project": "/src/p4",
+      "lastActive": "2026-10-26T08:53:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p4s2",
+      "provider": "claude",
+      "title": "Job 18",
+      "project": "/src/p4",
+      "lastActive": "2026-10-26T08:40:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p5s1",
+      "provider": "claude",
+      "title": "Job 19",
+      "project": "/src/p5",
+      "lastActive": "2026-10-26T08:51:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "p6s1",
+      "provider": "claude",
+      "title": "Job 20",
+      "project": "/src/p6",
+      "lastActive": "2026-10-26T08:48:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Terminal session 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Terminal session 2",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T21:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m3",
+      "provider": "claude",
+      "title": "Terminal session 3",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T21:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m4",
+      "provider": "claude",
+      "title": "Terminal session 4",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T20:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m5",
+      "provider": "claude",
+      "title": "Terminal session 5",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T20:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m6",
+      "provider": "claude",
+      "title": "Terminal session 6",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T19:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m7",
+      "provider": "claude",
+      "title": "Terminal session 7",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T19:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m8",
+      "provider": "claude",
+      "title": "Terminal session 8",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T18:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m9",
+      "provider": "claude",
+      "title": "Terminal session 9",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T18:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m10",
+      "provider": "claude",
+      "title": "Terminal session 10",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T17:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m11",
+      "provider": "claude",
+      "title": "Terminal session 11",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T17:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m12",
+      "provider": "claude",
+      "title": "Terminal session 12",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T16:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m13",
+      "provider": "claude",
+      "title": "Terminal session 13",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T16:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m14",
+      "provider": "claude",
+      "title": "Terminal session 14",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T15:30:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "groups": [
+        {
+          "kind": "folder",
+          "project": "/src/p1",
+          "name": "p1",
+          "count": 9,
+          "expanded": true,
+          "newest": "p1s1",
+          "sessions": [
+            "p1s1",
+            "p1s2",
+            "p1s3",
+            "p1s4",
+            "p1s5",
+            "p1s6",
+            "p1s7",
+            "p1s8",
+            "p1s9"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/p2",
+          "name": "p2",
+          "count": 4,
+          "expanded": true,
+          "newest": "p2s1",
+          "sessions": [
+            "p2s1",
+            "p2s2",
+            "p2s3",
+            "p2s4"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/p3",
+          "name": "p3",
+          "count": 3,
+          "expanded": true,
+          "newest": "p3s1",
+          "sessions": [
+            "p3s1",
+            "p3s2",
+            "p3s3"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/p4",
+          "name": "p4",
+          "count": 2,
+          "expanded": true,
+          "newest": "p4s1",
+          "sessions": [
+            "p4s1",
+            "p4s2"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/p5",
+          "name": "p5",
+          "count": 1,
+          "expanded": true,
+          "newest": "p5s1",
+          "sessions": [
+            "p5s1"
+          ]
+        }
+      ],
+      "more": {
+        "projects": 1,
+        "sessions": 1
+      }
+    },
+    "onMac": [],
+    "onMacTotal": 14,
+    "summary": {
+      "needYou": 0,
+      "working": 20,
+      "onMac": 14
+    }
+  }
+}

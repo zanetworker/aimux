@@ -1,0 +1,56 @@
+{
+  "name": "paused-no-history",
+  "session": {
+    "state": "idle",
+    "queue": {
+      "state": "paused",
+      "reason": "Couldn't read this session on your Mac",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Rename the helper to parseConfig",
+          "state": "waiting",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Then add a test for the empty file",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "send",
+      "label": "Send"
+    },
+    "queue": {
+      "visible": true,
+      "state": "paused",
+      "line": "Couldn't read this session on your Mac",
+      "resume": true
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Rename the helper to parseConfig",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q2",
+        "text": "Then add a test for the empty file",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ]
+  }
+}

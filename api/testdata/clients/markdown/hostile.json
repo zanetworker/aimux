@@ -1,0 +1,60 @@
+{
+  "name": "javascript: and data: links become text, raw HTML stays literal text, entities decode to inert text",
+  "markdown": "[click me](javascript:alert(1))\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>\n\nEntities: &lt;b&gt;not bold&lt;/b&gt; &amp;amp; &quot;quoted&quot;\n\n[data](data:text/html,hi) and <javascript:alert(2)> stay text.\n\nInline <b>tag</b> stays literal.\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "click me"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "<script>alert(1)</script>"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "<img src=x onerror=alert(1)>"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Entities: <b>not bold</b> &amp; \"quoted\""
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "data and javascript:alert(2) stay text."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Inline <b>tag</b> stays literal."
+        }
+      ]
+    }
+  ]
+}

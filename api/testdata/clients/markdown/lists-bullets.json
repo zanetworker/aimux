@@ -1,0 +1,164 @@
+{
+  "name": "Bullet lists with -, * and +: a list interrupting a paragraph, a bullet change starting a new list, a loose list",
+  "markdown": "Steps:\n- one\n- two\n- three\n\n* star item\n* another\n+ plus item starts a new list\n\n- loose one\n\n  second paragraph of the same item\n- loose two\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Steps:"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "one"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "two"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "three"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "star item"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "another"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "plus item starts a new list"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "loose one"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "second paragraph of the same item"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "loose two"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

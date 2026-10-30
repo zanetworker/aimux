@@ -1,0 +1,14 @@
+────────────────────────────────────────────────────────────────────────────────
+ Ready to code?
+
+ Here is Claude's plan:
+ 1. Add the parser
+ 2. Add the tests
+
+ Would you like to proceed?
+
+ ❯ 1. Yes, and auto-accept edits
+   2. Yes, and manually approve edits
+   3. No, keep planning
+────────────────────────────────────────────────────────────────────────────────
+  [Model ◔ medium] │ demo-project

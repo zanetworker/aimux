@@ -1,0 +1,65 @@
+{
+  "name": "Soft breaks become one space, two trailing spaces or a backslash make br, entities and escapes decode",
+  "markdown": "First line of a paragraph\nsoft-wrapped onto a second line.\n\nTwo trailing spaces  \nmake a hard break.\n\nA backslash\\\nalso makes one.\n\nTrailing spaces at the end of a paragraph are dropped.  \n\nEntities: &amp; &copy; &#35; &#x41; and escaped \\*stars\\*.\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "First line of a paragraph soft-wrapped onto a second line."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Two trailing spaces"
+        },
+        {
+          "t": "br"
+        },
+        {
+          "t": "text",
+          "v": "make a hard break."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "A backslash"
+        },
+        {
+          "t": "br"
+        },
+        {
+          "t": "text",
+          "v": "also makes one."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Trailing spaces at the end of a paragraph are dropped."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Entities: & © # A and escaped *stars*."
+        }
+      ]
+    }
+  ]
+}

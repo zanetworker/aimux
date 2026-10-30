@@ -53,7 +53,7 @@ func TestToggleStar(t *testing.T) {
 }
 
 func TestToggleStar_InvalidPath(t *testing.T) {
-	// Non-existent directory should fail on SaveMeta
+	// Non-existent directory should fail on UpdateMeta
 	_, err := ToggleStar("/nonexistent/dir/session.jsonl")
 	if err == nil {
 		t.Error("expected error for non-existent path")
@@ -231,5 +231,26 @@ func TestSetROI_ZeroClears(t *testing.T) {
 	}
 	if meta.TaskType != "" {
 		t.Errorf("expected empty TaskType, got %q", meta.TaskType)
+	}
+}
+
+func TestSetStarred(t *testing.T) {
+	sf := tempSessionFile(t)
+	if err := SetNote(sf, "keep"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []bool{true, true, false} {
+		if err := SetStarred(sf, want); err != nil {
+			t.Fatalf("SetStarred(%v): %v", want, err)
+		}
+		if got := history.LoadMeta(sf); got.Starred != want || got.Note != "keep" {
+			t.Fatalf("after SetStarred(%v): starred=%v note=%q", want, got.Starred, got.Note)
+		}
+	}
+}
+
+func TestSetStarred_InvalidPath(t *testing.T) {
+	if err := SetStarred("/nonexistent/dir/session.jsonl", true); err == nil {
+		t.Error("expected error for non-existent path")
 	}
 }

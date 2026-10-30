@@ -1,0 +1,200 @@
+{
+  "name": "an approval waits; the earlier one was allowed; a non-string command is null",
+  "now": "2026-10-26T08:05:00Z",
+  "turns": [],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "t1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Run the checks"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:01Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c1",
+        "title": "List files",
+        "kind": "execute",
+        "status": "pending"
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "t1",
+      "kind": "approval",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "approvalId": "p0",
+        "title": "List files",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "toolCall": {
+          "toolCallId": "x-p0",
+          "rawInput": {
+            "command": [
+              "ls",
+              "-la"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "t1",
+      "kind": "approval_resolved",
+      "time": "2026-10-26T08:00:04Z",
+      "data": {
+        "approvalId": "p0",
+        "outcome": "allowed"
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:05Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c1",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:06Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c2",
+        "title": "Run make test",
+        "kind": "execute",
+        "status": "pending"
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "t1",
+      "kind": "approval",
+      "time": "2026-10-26T08:00:07Z",
+      "data": {
+        "approvalId": "p1",
+        "title": "Run make test",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "toolCall": {
+          "toolCallId": "x-p1",
+          "rawInput": {
+            "command": "make test"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Run the checks"
+      },
+      {
+        "kind": "steps",
+        "count": 2,
+        "seconds": 5,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "run",
+            "target": "List files",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "run",
+            "target": "Run make test",
+            "status": "running",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "approval",
+        "approvalId": "p0",
+        "title": "List files",
+        "command": null,
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "outcome": "allowed"
+      },
+      {
+        "kind": "approval",
+        "approvalId": "p1",
+        "title": "Run make test",
+        "command": "make test",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "outcome": null
+      }
+    ],
+    "working": true,
+    "pendingApproval": "p1"
+  }
+}

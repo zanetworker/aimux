@@ -1,0 +1,126 @@
+{
+  "name": "two folders with the same name are different groups, and a non-Latin title ranks like any other",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Fix the build",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "إصلاح الإشعارات",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:58:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "a3",
+      "provider": "claude",
+      "title": "Add tests",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "b1",
+      "provider": "claude",
+      "title": "Write the docs",
+      "project": "/work/aimux",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "b2",
+      "provider": "claude",
+      "title": "Update the site",
+      "project": "/work/aimux",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "c1",
+      "provider": "claude",
+      "title": "Sort the notes",
+      "project": "/src/notes",
+      "lastActive": "2026-10-26T08:54:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Plan the trip",
+      "project": "/src/trips",
+      "lastActive": "2026-10-26T08:53:00Z",
+      "state": "busy"
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "groups": [
+        {
+          "kind": "folder",
+          "project": "/src/aimux",
+          "name": "aimux",
+          "count": 3,
+          "expanded": true,
+          "newest": "a1",
+          "sessions": [
+            "a1",
+            "a2",
+            "a3"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/work/aimux",
+          "name": "aimux",
+          "count": 2,
+          "expanded": true,
+          "newest": "b1",
+          "sessions": [
+            "b1",
+            "b2"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/notes",
+          "name": "notes",
+          "count": 1,
+          "expanded": true,
+          "newest": "c1",
+          "sessions": [
+            "c1"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/trips",
+          "name": "trips",
+          "count": 1,
+          "expanded": true,
+          "newest": "d1",
+          "sessions": [
+            "d1"
+          ]
+        }
+      ]
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 7,
+      "onMac": 0
+    }
+  }
+}

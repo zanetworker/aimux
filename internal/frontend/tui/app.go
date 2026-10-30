@@ -941,28 +941,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.sessionsView.SetTagVocab(history.CollectTags(""))
 	case views.SessionAnnotateMsg:
 		// Persist session-level annotation
-		meta := history.LoadMeta(msg.Session.FilePath)
-		meta.Annotation = msg.Annotation
-		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = fmt.Sprintf("Session: [%s]", strings.ToUpper(msg.Annotation))
 		if msg.Annotation == "" {
 			a.statusHint = "Session: annotation removed"
 		}
+		if err := controller.SetAnnotation(msg.Session.FilePath, msg.Annotation); err != nil {
+			a.statusHint = fmt.Sprintf("Session: save failed: %v", err)
+		}
 	case views.SessionStarMsg:
-		meta := history.LoadMeta(msg.Session.FilePath)
-		meta.Starred = msg.Starred
-		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.cachedSessions = nil
 		if msg.Starred {
 			a.statusHint = "Session pinned ★"
 		} else {
 			a.statusHint = "Session unpinned"
 		}
+		if err := controller.SetStarred(msg.Session.FilePath, msg.Starred); err != nil {
+			a.statusHint = fmt.Sprintf("Session: save failed: %v", err)
+		}
 	case views.SessionTagMsg:
-		meta := history.LoadMeta(msg.Session.FilePath)
-		meta.Tags = msg.Tags
-		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = fmt.Sprintf("Session: tags updated (%d)", len(msg.Tags))
+		if err := controller.SetTags(msg.Session.FilePath, msg.Tags); err != nil {
+			a.statusHint = fmt.Sprintf("Session: save failed: %v", err)
+		}
 	case views.SessionGenerateTitlesMsg:
 		a.statusHint = "Generating titles..."
 		return a, func() tea.Msg {
@@ -998,19 +998,18 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		deleted, _ := controller.BulkDeleteSessions(msg.Sessions)
 		a.statusHint = fmt.Sprintf("Deleted %d sessions", deleted)
 	case views.SessionNoteMsg:
-		meta := history.LoadMeta(msg.Session.FilePath)
-		meta.Note = msg.Note
-		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		a.statusHint = "Session: note saved"
+		if err := controller.SetNote(msg.Session.FilePath, msg.Note); err != nil {
+			a.statusHint = fmt.Sprintf("Session: save failed: %v", err)
+		}
 	case views.SessionROIMsg:
-		meta := history.LoadMeta(msg.Session.FilePath)
-		meta.ROIMultiplier = msg.Multiplier
-		meta.TaskType = msg.TaskType
-		_ = history.SaveMeta(msg.Session.FilePath, meta)
 		if msg.Multiplier > 0 {
 			a.statusHint = fmt.Sprintf("Session: ROI set to %.1fx", msg.Multiplier)
 		} else {
 			a.statusHint = "Session: ROI cleared"
+		}
+		if err := controller.SetROI(msg.Session.FilePath, msg.Multiplier, msg.TaskType); err != nil {
+			a.statusHint = fmt.Sprintf("Session: save failed: %v", err)
 		}
 	case views.SessionContentSearchResultMsg:
 		a.sessionsView.HandleContentSearchResult(msg)

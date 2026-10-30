@@ -121,12 +121,32 @@ internal/
     helpers.go                  # Shared: process tree grouping, start time, CWD extraction
   spawn/spawn.go                # Launch agents into tmux/iTerm
   team/reader.go                # Team config reading
+  gitremote/
+    gitremote.go                # WebURL (git remote to web address, no credentials; ssh becomes https, http(s) keeps scheme and port), Lookup (origin + branch + repo root of a folder, 2 s git timeout, 60 s cache swept of expired entries on write); feeds SessionDetail.repo
+  remoteapi/devicelogin/
+    store.go                    # Paired devices (~/.aimux/remote-paired-devices.json), pending code (remote-pairing.json, SHA-256 only, attempts counted), last seen (remote-paired-seen.json); every write under flock on remote-paired-devices.lock; all 0600
+    codes.go                    # Pairing codes: 8 Crockford base32 characters shown XXXX-XXXX, CanonicalCode, ParseCode
+    verify.go                   # Signature checks, standard library only: Secure Enclave P-256 (aimux-pair-v1 / aimux-login-v1 strings) and WebAuthn create/get
+    sessions.go                 # Login sessions in memory (SHA-256 of the token), idle 1 h, absolute 12 h, Done() for streams
+    handler.go                  # /v1/auth/pair, challenge, login, logout; Middleware (401 login_required) inside RequireTailnetUser; health session state
+    audit.go                    # ~/.aimux/logs/remote-audit.log JSON lines (never codes, challenges, tokens, keys or text); identical failures collapse to one a minute
+  remoteapi/chatqueue/
+    queue.go                    # Item and queue types, states (waiting, sending, answering; queue running or paused), limits (20 per session), the text rules re-checked before a send
+    store.go                    # Queue per session in ~/.aimux/remote-queue.json (0600, atomic writes): add (idempotent by key), edit, move, delete, pause, resume; a restart pauses an in-flight item as "may have been sent"
+    dispatch.go                 # Dispatcher: one message at a time per session, next only after the answer finished (ACP turn done; iTerm2 history turn seen plus 2 s with Claude not working, or a later turn of the owner's); fixed pause reasons
+    prompt.go                   # Reads Claude Code's "while you were working" wrapper, paste tags and slash-command/bash-mode tags when matching an item to a history turn
+  terminput/
+    terminput.go                # Service: safety checks (enabled, registry pid, foreground is claude, in-use guard on the focused pane, busy refusal, empty input box, prompt id), Driver/System/Sessions interfaces, error codes
+    screen.go                   # Parses Claude Code's screen: InputBoxEmpty, ParsePrompt (fixtures in testdata/screens/)
+    probe.go                    # SystemProbe: tty, foreground process group (ps), HID idle time (ioreg)
+    log.go                      # Attempt log ~/.aimux/logs/terminal-input.log (0600, never the text)
+    iterm2/iterm2.go            # iTerm2 driver over a persistent JXA helper (helper.js, embedded); live tests behind the iterm2 build tag
   terminal/
     backend.go                  # SessionBackend interface
     embed.go                    # Direct PTY backend (Claude)
     tmux.go                     # Tmux mirror backend (Codex, Gemini)
     view.go                     # VT emulator rendering
-  trace/trace.go                # Shared Turn/ToolSpan types
+  trace/trace.go                # Shared Turn/ToolSpan types (ToolSpan.Input is the full tool input)
   tui/
     app.go                      # Root Bubble Tea model
     command.go                  # Command palette
@@ -181,7 +201,7 @@ Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
   config/      — global + project-local config, runtime/sandbox profiles
   cost/        — per-model pricing, token counting
   discovery/   — multi-provider orchestrator, process scanning
-  history/     — session scanning, metadata, titles, search
+  history/     — session scanning, metadata, titles, search; namer.go (economical naming, daily limit, pause on failures), namer_backend.go (API or `claude -p` safe mode), namer_proc_*.go (process group), metawrite.go (`UpdateMeta`: locked, atomic `.meta.json` writer; the only writer)
   evaluation/  — annotation persistence, JSONL export
   otel/        — OTLP receiver, span store, exporter
   provider/    — Provider interface, Claude/Codex/Gemini/K8s implementations
@@ -190,6 +210,8 @@ Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
   terminal/    — SessionBackend (PTY embed, tmux mirror)
   spawn/       — agent launch into tmux/direct
   team/        — team config reader
+  remoteapi/chatqueue/: per-session chat queue and its dispatcher (phone messages sent one at a time)
+  terminput/: typing phone messages and prompt keys into terminal Claude sessions; iterm2/ driver
 ```
 
 ### The Rule: Controller First, Frontend Second
@@ -289,7 +311,7 @@ Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't
 **CLI has, TUI and Web missing:**
 - Chat with an idle session (`aimux chat`, `internal/acprun`); web and phone come with the remote listener
 - MCP proxy (`aimux mcp proxy`); a daemon, no UI planned
-- Remote API (`aimux remote serve`, `internal/remoteapi`); a daemon whose clients are other devices, with its own phone web client at `/app/` (`internal/remoteclient`, a client of the published contract `api/remote-v1.openapi.yaml`); the local web dashboard has no chat view yet
+- Remote API (`aimux remote serve`, `internal/remoteapi`); a daemon whose clients are other devices; device login (`remote_access.device_login`, default true; `internal/remoteapi/devicelogin`) admits only devices paired with `aimux remote pair --name <name>` (listed by `aimux remote devices`, cut off by `aimux remote revoke <name>`, which writes the revoke audit line), logged in with a Secure Enclave key (iPhone) or a passkey (web) through `/v1/auth/*`; push registrations stay in `~/.aimux/remote-devices.json`; with `terminal_input.enabled` it also types into Claude Code sessions open in iTerm2 (`POST /v1/sessions/{id}/terminal/messages` and `/terminal/keys`, `terminal` on the session detail, `internal/terminput`; `repo` on the session detail (`internal/gitremote`) and `links` on health (`remote_access.links.jira_base`, `jira_projects`) feed the clients' reference links, pinned by `api/testdata/clients/references/`; `aimux remote terminal-input check` asks macOS for iTerm2 Automation), with its clients under `clients/`: the phone web client at `/app/` (`clients/web`, Go package `webclient`) and the iPhone app (`clients/ios`, SwiftUI, XcodeGen; see its AGENTS.md), the iPhone chat queue is in `clients/ios/AimuxKit/Sources/ChatQueue.swift`, `ChatModelQueue.swift` and `clients/ios/App/Components/QueueList.swift`; both clients of the published contract `api/remote-v1.openapi.yaml`, ranking Now and All with the shared fixtures in `api/testdata/clients/`. Web client files in `clients/web/webapp/`: `index.html`, `app.css`, `app.js` (chat transport and state, new session, settings), `voice.js`, `tabs.mjs` (tab bar and the Now, All and search screens), `now.mjs` (Now ranking and the chat's Next bar target), `nowModel.mjs` (Now state and polling), `nowView.mjs` (Now rendering), `all.mjs` (All sections), `rows.mjs` (shared rows, dots and icons), `apiDate.mjs` (timestamp parser), `timeline.mjs` (the chat timeline from history and events, and a saved message without Claude Code's wrappers, as text, slash commands and command output, pinned by `api/testdata/clients/display/`), `chatView.mjs` (chat rendering), `login.mjs` (passkey pairing, unlock state machine and the `/v1` request wrapper), `chatLoad.mjs` (reading an opened chat consistently, and which read carries `Aimux-Interaction`), `queue.mjs` (the chat queue: composer action, queue section and rows, pinned by `api/testdata/clients/queue/`), `queueView.mjs` (the queue under the composer: edit in place, Move up and down, Delete, Resume), `markdown.mjs` (Markdown to the shared block tree), `references.mjs` (issue, commit, Jira and path links in that tree, and media cards for a reply paragraph that is only a video, image or audio link, pinned by `api/testdata/clients/media/`), `render.mjs` (the tree as DOM, user bubbles' inline-only form, the inline text of thoughts, plan entries, step targets and errors, and an opened step's command, error or edit lines), `sessionInfo.mjs` (the session info sheet and its number formats), `terminal.mjs` (typing into a terminal session: reason lines, pending line, header, polling pause, prompt card); `all`, `apiDate`, `now`, `nowModel`, `tabs` (its poller), `timeline`, `sessionInfo`, `terminal`, `login`, `chatLoad`, `queue`, `queueView`, `markdown` and `references` (which also covers `render`'s pure helpers and, with a small fake document, its code, table, copy and media DOM) have a `.test.mjs`, as does `chatView` for the user bubble's commands and output; the other view files do not; the local web dashboard has no chat view yet; finding sessions: `description` and `pinned` on sessions, `lastOnMac` on the list (focus probe every 15 s in `cmd/aimux/cmd/remote.go`, memory only, clients hide it after 12 h), `PATCH /v1/sessions/{id}/meta` and `POST /v1/sessions/{id}/describe` (capability `describe`, `naming` on health) in `internal/remoteapi/naming_api.go`, names from the owner, then Claude Code's away summary, then its ai-title, then `history.Namer` (`sessions.auto_title`, `naming_daily_limit` 20, `title_model`); web files `now.mjs` (Last on your Mac, Pinned, folder rows, `descriptionLine`), `nowModel.mjs` (pin, `editMeta`, `describe`), `nowView.mjs`, `sessionInfo.mjs` (edit, Update summary, naming line), `tabs.mjs` (`localMatches`); iPhone files `SessionMeta.swift`, `NowRanking.swift`, `NowModel.swift`, `SearchModel.swift`, `FolderRows.swift`, `PinnableRow.swift`, `DemoFinding.swift`, pinned by `api/testdata/clients/now/`
 
 **Web has, TUI missing:**
 - Plugin listing/execution, AI insights, task complete/reopen
@@ -319,6 +341,8 @@ go test ./internal/agent/ -timeout 30s -run TestName  # Run one test
 ```bash
 go build -o aimux ./cmd/aimux    # Build
 go test ./... -timeout 30s              # All tests (120+ tests)
+node --test "clients/web/webapp/*.test.mjs"   # Phone web client (the plain directory form fails on Node 22)
+cd clients/ios && xcodegen generate && xcodebuild test -scheme Aimux -project Aimux.xcodeproj -destination 'platform=iOS Simulator,name=<iPhone>'   # iPhone app
 make build                              # Build via Makefile
 make install                            # Build and copy to /usr/local/bin
 ```

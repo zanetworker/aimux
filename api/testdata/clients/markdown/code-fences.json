@@ -1,0 +1,66 @@
+{
+  "name": "Fenced code: a language, none, ~~~ with extra info words, a fence inside a list item, a longer fence holding ```",
+  "markdown": "```go\nfunc main() {\n\tfmt.Println(\"hi\")\n}\n```\n\n```\nno language\n\nblank line kept\n```\n\n~~~python extra words\nprint(\"tilde\")\n~~~\n\n- item with code:\n  ```sh\n  make test\n  ```\n- next item\n\n````md\n```\nnested fence\n```\n````\n",
+  "blocks": [
+    {
+      "type": "code",
+      "lang": "go",
+      "text": "func main() {\n\tfmt.Println(\"hi\")\n}"
+    },
+    {
+      "type": "code",
+      "lang": null,
+      "text": "no language\n\nblank line kept"
+    },
+    {
+      "type": "code",
+      "lang": "python",
+      "text": "print(\"tilde\")"
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "item with code:"
+                }
+              ]
+            },
+            {
+              "type": "code",
+              "lang": "sh",
+              "text": "make test"
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "next item"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "code",
+      "lang": "md",
+      "text": "```\nnested fence\n```"
+    }
+  ]
+}

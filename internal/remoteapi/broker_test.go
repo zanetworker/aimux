@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -639,5 +640,30 @@ func TestBroker_ResolvedNoticeFollowsEveryOutcome(t *testing.T) {
 				t.Fatal("no resolved notice: the phone would keep showing a request nobody can answer")
 			}
 		})
+	}
+}
+
+// Queue events keep only the latest snapshot per session, so however many
+// queue changes there are they never push turn events out of the replay
+// window.
+func TestBrokerQueueEventsKeepOnlyTheLatest(t *testing.T) {
+	b := NewBroker(BrokerDeps{}, BrokerOptions{})
+	b.Publish("s1", KindTurnDone, map[string]string{"stopReason": "end_turn"})
+	for i := range maxEventsPerSession + 10 {
+		b.Publish("s1", KindQueue, map[string]int{"n": i})
+	}
+	b.Publish("s2", KindQueue, map[string]int{"n": 0})
+	evs := b.Events("s1", 0)
+	if len(evs) != 2 || evs[0].Kind != KindTurnDone || evs[1].Kind != KindQueue {
+		t.Fatalf("%d events, want the turn event and one queue event", len(evs))
+	}
+	if want := fmt.Sprintf(`{"n":%d}`, maxEventsPerSession+9); string(evs[1].Data) != want {
+		t.Fatalf("queue event %s, want the latest %s", evs[1].Data, want)
+	}
+	if evs[1].Seq != int64(maxEventsPerSession+11) {
+		t.Fatalf("seq %d: numbering must keep counting", evs[1].Seq)
+	}
+	if got := b.Events("s2", 0); len(got) != 1 {
+		t.Fatalf("other session: %+v", got)
 	}
 }

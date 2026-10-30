@@ -20,6 +20,11 @@ repos:
   # Go linting — uses locally installed golangci-lint
   - repo: local
     hooks:
+      - id: swiftlint
+        name: swiftlint (clients/ios)
+        entry: swiftlint lint --quiet --strict --config clients/ios/.swiftlint.yml
+        language: system
+        files: ^clients/ios/.*\.swift$
       - id: golangci-lint
         name: golangci-lint
         entry: scripts/golangci-lint-hook.sh

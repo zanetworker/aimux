@@ -1,0 +1,205 @@
+{
+  "name": "Star and underscore emphasis and strong, nesting, intraword underscores stay text, ~~ and ~ strikethrough",
+  "markdown": "*em* and _em_, **strong** and __strong__, ***both***.\n\n**Bold with *nested em* inside** and *em with **nested strong***.\n\nsnake_case_word stays text, and so does a_b_c.\n\nIntra*word*emphasis works with stars.\n\n~~struck~~ and ~single tilde~ strikes too.\n\n** spaced ** is not strong.\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "em"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "em"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "strong"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "strong"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "both"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "Bold with "
+            },
+            {
+              "t": "em",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "nested em"
+                }
+              ]
+            },
+            {
+              "t": "text",
+              "v": " inside"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "em with "
+            },
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "nested strong"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "snake_case_word stays text, and so does a_b_c."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Intra"
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "word"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "emphasis works with stars."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "del",
+          "c": [
+            {
+              "t": "text",
+              "v": "struck"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "del",
+          "c": [
+            {
+              "t": "text",
+              "v": "single tilde"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " strikes too."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "** spaced ** is not strong."
+        }
+      ]
+    }
+  ]
+}

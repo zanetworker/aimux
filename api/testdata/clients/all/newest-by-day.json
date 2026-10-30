@@ -1,0 +1,105 @@
+{
+  "name": "newest sessions group by day, today and yesterday named, a future time counts as now",
+  "now": "2026-10-26T12:00:00Z",
+  "timeZone": "UTC",
+  "project": null,
+  "sort": "newest",
+  "sessions": [
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Second tie",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T11:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "First tie",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T11:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "c1",
+      "provider": "claude",
+      "title": "Late on the 24th",
+      "project": "/src/notes",
+      "lastActive": "2026-10-24T23:59:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "b2",
+      "provider": "claude",
+      "title": "Start of yesterday",
+      "project": "/src/notes",
+      "lastActive": "2026-10-25T00:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "a3",
+      "provider": "claude",
+      "title": "Early today",
+      "project": "/src/trips",
+      "lastActive": "2026-10-26T08:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "c2",
+      "provider": "claude",
+      "title": "Last month",
+      "project": "/src/trips",
+      "lastActive": "2026-09-30T12:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "b1",
+      "provider": "claude",
+      "title": "End of yesterday",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T23:59:59Z",
+      "state": "idle"
+    },
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Clock ahead",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-27T05:00:00Z",
+      "state": "idle"
+    }
+  ],
+  "expect": {
+    "sections": [
+      {
+        "day": "today",
+        "ids": [
+          "f1",
+          "a1",
+          "a2",
+          "a3"
+        ]
+      },
+      {
+        "day": "yesterday",
+        "ids": [
+          "b1",
+          "b2"
+        ]
+      },
+      {
+        "day": "2026-10-24",
+        "ids": [
+          "c1"
+        ]
+      },
+      {
+        "day": "2026-09-30",
+        "ids": [
+          "c2"
+        ]
+      }
+    ]
+  }
+}

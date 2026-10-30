@@ -1,0 +1,50 @@
+{
+  "name": "project sort: equal newest times order projects by path, not by session id",
+  "now": "2026-10-26T12:00:00Z",
+  "timeZone": "UTC",
+  "project": null,
+  "sort": "project",
+  "sessions": [
+    {
+      "id": "a9",
+      "provider": "claude",
+      "title": "Zeta newest",
+      "project": "/src/zeta",
+      "lastActive": "2026-10-26T10:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "z9",
+      "provider": "claude",
+      "title": "Alpha newest",
+      "project": "/src/alpha",
+      "lastActive": "2026-10-26T10:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Alpha older",
+      "project": "/src/alpha",
+      "lastActive": "2026-10-26T09:00:00Z",
+      "state": "idle"
+    }
+  ],
+  "expect": {
+    "sections": [
+      {
+        "day": "/src/alpha",
+        "ids": [
+          "z9",
+          "m1"
+        ]
+      },
+      {
+        "day": "/src/zeta",
+        "ids": [
+          "a9"
+        ]
+      }
+    ]
+  }
+}

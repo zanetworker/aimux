@@ -1,0 +1,9 @@
+⏺ While Claude works on a turn, the status line under the spinner reads
+  esc to interrupt, and pressing Esc stops the turn.
+
+✻ Worked for 4s
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  [Model ◔ medium] │ demo-project

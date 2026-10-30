@@ -1,0 +1,3 @@
+demo@host project % ls
+notes.md  main.go
+demo@host project %

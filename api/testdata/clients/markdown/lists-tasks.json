@@ -1,0 +1,139 @@
+{
+  "name": "Task items [ ], [x] and [X] in bullet and ordered lists and nested; [ ] without a space is text",
+  "markdown": "- [ ] open task\n- [x] done task\n- [X] upper-case X is done too\n- plain item\n- [ ]no space is not a task\n\n1. [ ] ordered task\n2. [x] ordered done\n   - [ ] nested task\n",
+  "blocks": [
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": false,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "open task"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": true,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "done task"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": true,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "upper-case X is done too"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "plain item"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "[ ]no space is not a task"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "items": [
+        {
+          "task": false,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "ordered task"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": true,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "ordered done"
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "ordered": false,
+              "start": null,
+              "items": [
+                {
+                  "task": false,
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "inlines": [
+                        {
+                          "t": "text",
+                          "v": "nested task"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

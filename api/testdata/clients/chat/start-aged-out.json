@@ -1,0 +1,136 @@
+{
+  "name": "a running turn whose start aged out: history keeps its first part and its events continue it",
+  "now": "2026-10-26T10:10:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T10:00:00Z",
+      "user": "Translate the docs",
+      "reply": "Working through",
+      "tools": [
+        {
+          "name": "Read",
+          "snippet": "README.md",
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "s0",
+      "kind": "turn_done",
+      "time": "2026-10-26T09:00:00Z",
+      "data": {
+        "stopReason": "end_turn"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "s1",
+      "kind": "update",
+      "time": "2026-10-26T10:04:00Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c4",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "s1",
+      "kind": "update",
+      "time": "2026-10-26T10:05:00Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c5",
+        "title": "Edit docs/de.md",
+        "kind": "edit",
+        "status": "in_progress"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "s1",
+      "kind": "update",
+      "time": "2026-10-26T10:05:20Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c5",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "s1",
+      "kind": "update",
+      "time": "2026-10-26T10:05:30Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "German is done."
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Translate the docs"
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": null,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "read",
+            "target": "README.md",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "Working through"
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": 20,
+        "filesChanged": [
+          "Edit docs/de.md"
+        ],
+        "steps": [
+          {
+            "kind": "edit",
+            "target": "Edit docs/de.md",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "German is done."
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

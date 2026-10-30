@@ -13,6 +13,44 @@ info:
     Identity comes from the `Tailscale-User-Login` header that tailscale serve
     sets. Browser requests are accepted only from the API's own origin.
 
+    Device login (capability `device_login`, on unless the Mac sets
+    `remote_access.device_login: false`): on top of the tailnet check, every
+    route except `GET /v1/health`, `GET /v1/openapi.yaml`, `GET /app/*` and
+    `POST /v1/auth/{pair,challenge,login}` needs the session of a device
+    paired with `aimux remote pair`; without one the answer is
+    `401 login_required`. The iPhone app sends `Authorization: Bearer
+    <token>`; the web client gets the HttpOnly cookie `__Host-aimux_session`.
+    - Pair once: `aimux remote pair --name <name>` prints a code (`XXXX-XXXX`,
+      5 minutes, single use, five wrong codes burn it). `POST /v1/auth/pair`
+      sends it with a new P-256 key and a proof: the iPhone signs
+      `aimux-pair-v1\n<host>\n<code>` (code: 8 characters, uppercase, no
+      dash, I and L read as 1, O as 0); a passkey's `webauthn.create`
+      challenge is the SHA-256 of that code. Pairing also logs in.
+    - Log in: `POST /v1/auth/challenge`, then `POST /v1/auth/login` with the
+      challenge signed: the iPhone signs `aimux-login-v1\n<host>\n<challenge>`;
+      a passkey answers `webauthn.get` with the challenge's bytes. A
+      challenge works once, for 60 seconds; at most 5 are outstanding per
+      device (the oldest is dropped).
+    - `<host>` and the WebAuthn rp id are the host name without port; the
+      expected origin is `https://` + host name, with the port unless 443.
+      Signatures are ECDSA P-256 SHA-256 in ASN.1 DER; keys are SPKI DER.
+      Binary fields are standard base64, except `credentialId`, `userHandle`
+      (the device id, 16 bytes) and `challenge`, which are base64url without
+      padding.
+    - A session ends after 1 hour without use, after 12 hours in any case,
+      on `POST /v1/auth/logout`, when the device is revoked
+      (`aimux remote revoke`), when the server restarts, and is valid only
+      for the Tailscale login that paired the device. Use is any `POST`,
+      `PATCH` or `DELETE` and any request with the header `Aimux-Interaction: 1`, which clients
+      send only for something the person did (opening a chat, pull to
+      refresh, Retry), never on background polls. Event streams (`events`
+      without `wait=0`) never count as use and end within seconds when their
+      session ends.
+    - The server checks that the device holds its key; it cannot prove the
+      key is in a Secure Enclave or behind Face ID. Codes, challenges,
+      tokens and keys are never logged; each changing action is written to
+      the Mac's audit log without message text.
+
     Events: `GET /v1/sessions/{id}/events` streams server-sent events whose
     `data` is an `Event` (the SSE `event:` field repeats `kind`, and `id:` is
     `<log>.<seq>`). The data of each kind is described by the schema named in
@@ -39,6 +77,16 @@ info:
     - `update` event data follows ACP, whose version is `acpProtocolVersion`;
       an ACP version change is reported there, not hidden.
 
+    Chat queue (capability `queue`): each session has a queue of up to 20
+    messages held on the Mac, which sends the first one when the session is
+    free and the next only once that answer has finished, while the phone is
+    locked or offline. Clients add, edit, move and delete messages and
+    resume a paused queue (`/v1/sessions/{id}/queue`); the Mac never queues
+    a refused direct send by itself. `SessionDetail.queue` shows a queue
+    with messages, and `queue` events (with `queue=1` on the events request)
+    carry every change, including the waiting line (`note`). Each change is written to the audit log without its
+    text.
+
     Notifications while the client is not connected: with the `push`
     capability an app registers its APNs device token (`POST /v1/devices`)
     and each new approval reaches the lock screen. Other events still
@@ -54,12 +102,15 @@ servers:
         default: your-mac.your-tailnet.ts.net
 security:
   - tailscale: []
+  - { tailscale: [], deviceBearer: [] }
+  - { tailscale: [], deviceCookie: [] }
 
 paths:
   /v1/health:
     get:
       summary: Who you are and what this server offers
       operationId: health
+      security: [{ tailscale: [] }, { tailscale: [], deviceBearer: [] }, { tailscale: [], deviceCookie: [] }]
       responses:
         "200":
           description: OK
@@ -73,6 +124,7 @@ paths:
     get:
       summary: This contract
       operationId: openapi
+      security: [{ tailscale: [] }]
       responses:
         "200":
           description: The OpenAPI document this server implements
@@ -87,6 +139,7 @@ paths:
       summary: Recent Claude sessions, newest first
       operationId: listSessions
       parameters:
+        - $ref: "#/components/parameters/Interaction"
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
         - name: include_automated
           in: query
@@ -133,6 +186,7 @@ paths:
       summary: One session and its latest turns
       operationId: getSession
       parameters:
+        - $ref: "#/components/parameters/Interaction"
         - $ref: "#/components/parameters/SessionID"
         - { name: turns, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 20 } }
       responses:
@@ -147,6 +201,67 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
+  /v1/sessions/{id}/meta:
+    patch:
+      summary: Set the session's title, description or pin
+      description: >
+        Requires the `describe` capability. At least one field. A title (at
+        most 80 characters) or description (at most 300) is the owner's:
+        neither automatic naming nor "Update summary" changes it. An empty
+        string (or only spaces) clears the owner's value, and the session
+        shows the model's or Claude Code's again; it leaves a value the owner
+        did not write. One line each: control characters are refused.
+        `pinned` is aimux's star, shared with the TUI. Answers what clients
+        now show.
+      operationId: editSessionMeta
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MetaRequest" }
+      responses:
+        "200":
+          description: The session's title, description and pin as clients show them now
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetaResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/describe:
+    post:
+      summary: Update summary
+      description: >
+        Requires the `describe` capability. Asks the model now for a new
+        title and description from the session's first message and latest
+        turns (up to 1,200 characters of them are sent to Anthropic). Values
+        the owner wrote stay and are listed in `kept`. One at a time per
+        session (`409 describe_running`); `409 owner_set` when the owner
+        wrote both. Not limited by `sessions.naming_daily_limit`, but
+        counted.
+      operationId: describeSession
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: The title and description as clients show them now, and what changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DescribeResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+
   /v1/sessions/{id}/messages:
     post:
       summary: Continue a session with a message
@@ -154,6 +269,9 @@ paths:
         Starts a turn and returns at once. A retry with the same non-empty
         `key` returns the same turn. When every run slot is busy the message
         is still accepted and the turn ends with a `turn_error` event.
+        `409 busy` while a turn runs, and while the session's chat queue has
+        an item in flight or is running with items waiting (add it to the
+        queue instead).
       operationId: sendMessage
       parameters:
         - $ref: "#/components/parameters/SessionID"
@@ -176,6 +294,217 @@ paths:
         "500": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 
+  /v1/sessions/{id}/terminal/messages:
+    post:
+      summary: Type a message into a session open in a terminal on the Mac
+      description: >
+        Requires the `terminal_input` capability (`remote_access.terminal_input.enabled`
+        on the Mac). Types `text` into the session's own terminal pane, waits
+        300 ms, reads the screen again and presses Enter only if the input box
+        still holds the text and no prompt is showing, as if the owner typed it;
+        otherwise `409 not_submitted`: the text waits in the input box, nothing
+        was submitted, and a later send answers `not_at_input` until the owner
+        clears or sends it at the Mac. Follow the answer by re-reading
+        `GET /v1/sessions/{id}`. Checked on every request: the pane's foreground
+        process is the session's `claude` (`not_claude`), Claude is not working
+        on a turn and the session's chat queue is not sending (`busy`: offer
+        the queue; also while the queue has an item in flight or is running
+        with items waiting), the session is not the one in
+        front on the Mac while the Mac was used in the last 2 minutes, unless
+        `allow_while_in_use` is set (`mac_in_use`: iTerm2 is the frontmost app,
+        the session is the focused pane of its current window, and the Mac was
+        used in the last 2 minutes; other sessions take messages while the
+        owner works at the Mac), a driver
+        reaches the pane (`no_terminal_driver`, `automation_denied`), and the
+        input box is showing and empty (`not_at_input`: re-read the detail, a
+        prompt may be showing). Text with control characters other than newline
+        and tab is refused (`400 bad_text`), and so is text starting with `!`
+        after optional white space (Claude Code's bash mode runs it as a shell
+        command) and, unless `allow_slash_commands` is set on the Mac, text
+        starting with `/` (a slash command). A retry with the same non-empty
+        `key` within 10 minutes is answered without typing again. The server
+        never retries on its own. Bodies are at most 64 KiB. A driver failure
+        is `500 internal` with a fixed message; its detail stays in the
+        server's log. `403 disabled` when terminal input is off.
+      operationId: terminalMessage
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TerminalMessageRequest" }
+      responses:
+        "202":
+          description: Typed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/terminal/keys:
+    post:
+      summary: Answer the permission prompt showing in a terminal session
+      description: >
+        Requires the `terminal_input` capability. Presses `option` (one of the
+        prompt's option keys from `terminal.prompt`) if the prompt showing still
+        has `promptId`: `409 no_prompt` when none shows, `409 prompt_changed`
+        when another prompt shows or `option` is not one of its keys. The same
+        checks as typing a message apply, except the input box. `key` is the
+        idempotency key, as for messages.
+      operationId: terminalKey
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TerminalKeyRequest" }
+      responses:
+        "202":
+          description: Pressed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TerminalAccepted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/queue:
+    get:
+      summary: The session's chat queue
+      description: >
+        Requires the `queue` capability. A session with no queue has an empty
+        running one.
+      operationId: getQueue
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/Interaction"
+      responses:
+        "200":
+          description: The queue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Add a message to the end of the session's queue
+      description: >
+        Requires the `queue` capability. The Mac sends it when its turn comes:
+        into the terminal for a session open in iTerm2 (with terminal input
+        on), else as a turn from here. The text rules of terminal messages
+        apply now (`409 bad_text`: control characters, a leading `!`, a
+        leading `/` unless `allow_slash_commands`), at most 64 KiB; empty text
+        is `400 bad_request`; `409 queue_full` at 20 messages. A retry with the
+        same non-empty `key` answers the same message, or the message with
+        state `done` and no text once it was sent or deleted, and never queues
+        it twice.
+      operationId: addToQueue
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QueueAddRequest" }
+      responses:
+        "200":
+          description: The message as queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueItem" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/queue/{item}:
+    patch:
+      summary: Edit or move a queued message
+      description: >
+        Requires the `queue` capability. Exactly one of `text` (new text, the
+        same rules as adding) and `position` (0-based among the messages not
+        being sent, clamped to them). A message being sent or answered cannot
+        change (`409 item_sending`). Neither resumes a paused queue.
+      operationId: changeQueueItem
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/QueueItemID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QueuePatchRequest" }
+      responses:
+        "200":
+          description: The queue after the change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueStatus" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Remove a queued message
+      description: >
+        Requires the `queue` capability. The message being sent or answered
+        can be removed only while the queue is paused (`409 item_sending`);
+        the Mac then waits for its answer to finish before the next message.
+        It works for a session that no longer exists, so its queue can be
+        cleared (`404 unknown_item` only).
+      operationId: deleteQueueItem
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/QueueItemID"
+      responses:
+        "200":
+          description: The queue after the change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/queue/resume:
+    post:
+      summary: Resume a paused queue
+      description: >
+        Requires the `queue` capability. The only way a paused queue runs
+        again (a queue with no messages always runs). Resuming a running
+        queue changes nothing.
+      operationId: resumeQueue
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: The queue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
   /v1/sessions/{id}/events:
     get:
       summary: The session's events after a cursor
@@ -186,14 +515,17 @@ paths:
         log from its start: pass the page's `log` back as `log`, and a
         `Last-Event-ID` is either `<log>.<seq>` or a bare `<seq>` of the log
         named by `log`. The server keeps the latest 2,000 events per session,
-        in memory.
+        in memory. With device login a stream never counts as use, even with
+        `Aimux-Interaction: 1`; a `wait=0` page with it does.
       operationId: events
       parameters:
         - $ref: "#/components/parameters/SessionID"
         - { name: after, in: query, schema: { type: integer, minimum: 0, default: 0 } }
         - { name: log, in: query, schema: { type: string } }
         - { name: wait, in: query, description: "0 returns one JSON page instead of a stream.", schema: { type: string, enum: ["0"] } }
+        - { name: queue, in: query, description: "1 includes `queue` events; without it they are left out, so a client that predates the queue never sees an event of no turn.", schema: { type: string, enum: ["1"] } }
         - { name: Last-Event-ID, in: header, schema: { type: string } }
+        - $ref: "#/components/parameters/Interaction"
       responses:
         "200":
           description: The events
@@ -306,6 +638,7 @@ paths:
       description: Requires the `search` capability. Keyword ranking; every hit shows where it matched.
       operationId: search
       parameters:
+        - $ref: "#/components/parameters/Interaction"
         - { name: q, in: query, required: true, schema: { type: string, minLength: 1 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
@@ -324,6 +657,8 @@ paths:
     get:
       summary: Recent project folders, where a new session may start
       operationId: projects
+      parameters:
+        - $ref: "#/components/parameters/Interaction"
       responses:
         "200":
           description: OK
@@ -334,6 +669,89 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
+  /v1/auth/pair:
+    post:
+      summary: Pair this device with a code from `aimux remote pair`, and log in
+      description: >
+        Open without a session. The proof is checked before the code, so a
+        bad proof does not use up the code; a wrong code counts toward the
+        five that burn it, a malformed one does not. Answers a session as
+        `POST /v1/auth/login` does.
+      operationId: authPair
+      security: [{ tailscale: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PairRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/AuthSession" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/challenge:
+    post:
+      summary: A challenge to sign for a login
+      description: >
+        Open without a session. Send `{}` for a passkey login that names no
+        device (the browser lost its storage); the passkey's credential id
+        and user handle then find the device.
+      operationId: authChallenge
+      security: [{ tailscale: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChallengeRequest" }
+      responses:
+        "200":
+          description: A challenge, valid once for 60 seconds
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Challenge" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/login:
+    post:
+      summary: Log in with a signed challenge
+      description: >
+        Open without a session. Failed logins are audited, never locked out.
+        `deviceId` names the device; without it, a passkey is found by
+        `credentialId` and `userHandle`.
+      operationId: authLogin
+      security: [{ tailscale: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200": { $ref: "#/components/responses/AuthSession" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/logout:
+    post:
+      summary: End this session
+      description: Ends the session and any event stream it holds; a web client's cookie is cleared.
+      operationId: authLogout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
 components:
   securitySchemes:
     tailscale:
@@ -341,10 +759,29 @@ components:
       in: header
       name: Tailscale-User-Login
       description: Set by `tailscale serve` for the caller; must be in `remote_access.allowed_logins`.
+    deviceBearer:
+      type: http
+      scheme: bearer
+      description: With `device_login`, the iPhone app's session token from `/v1/auth/pair` or `/v1/auth/login`. Kept in memory only.
+    deviceCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-aimux_session
+      description: With `device_login`, the web client's session (Secure, HttpOnly, SameSite=Strict, Path=/), set by `/v1/auth/pair` or `/v1/auth/login`.
 
   parameters:
+    Interaction:
+      name: Aimux-Interaction
+      in: header
+      description: "`1` when the person asked for this (opening a chat or a tab, pull to refresh, Retry): it moves the 1-hour idle limit of a device login like a POST does. Never on background polls."
+      schema: { type: string, enum: ["1"] }
     SessionID:
       name: id
+      in: path
+      required: true
+      schema: { type: string }
+    QueueItemID:
+      name: item
       in: path
       required: true
       schema: { type: string }
@@ -355,6 +792,20 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorBody" }
+    AuthSession:
+      description: >
+        Logged in. A `secure-enclave` device gets `token` (send it as
+        `Authorization: Bearer`); a `webauthn` device gets no token, only the
+        cookie.
+      headers:
+        Set-Cookie:
+          description: "For a `webauthn` device: `__Host-aimux_session=<token>; Path=/; Secure; HttpOnly; SameSite=Strict` (no Max-Age; the server enforces the limits)."
+          schema: { type: string }
+        Cache-Control:
+          schema: { type: string, enum: [no-store] }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/AuthSession" }
 
   schemas:
     ErrorBody:
@@ -374,13 +825,41 @@ components:
             - no_such_approval   # 404: answered, expired, or never existed
             - not_supported      # 404: this server does not offer the endpoint (see capabilities)
             - open_in_terminal   # 409: read only here while open in a terminal on the Mac
-            - busy               # 409: a turn is already running
+            - busy               # 409: a turn is already running, Claude is working in the terminal session, or the session's queue is sending
             - in_use             # 409: another aimux process drives the session
             - not_running        # 409: cancel with no running turn
             - invalid_option     # 400: not one of the approval's options
             - ownership_unknown  # 503: Claude's session registry is unreadable
             - too_many_runs      # 503: every run slot is busy (session creation)
             - internal           # 500
+            - disabled           # 403: terminal input is off on the Mac
+            - bad_text           # 400 (terminal messages), 409 (queue): the text holds control characters, or starts with ! or / (see terminalMessage)
+            - not_in_terminal    # 409: the session is not open in a terminal
+            - not_claude         # 409: the terminal's foreground process is not the session's claude
+            - mac_in_use         # 409: you're using this session on your Mac: the focused pane of iTerm2 in front, the Mac used in the last 2 minutes
+            - no_terminal_driver # 409: no driver reaches the session's terminal (iTerm2 only)
+            - automation_denied  # 409: macOS refused aimux's Automation access to the terminal
+            - not_at_input       # 409: the input box is not showing or not empty
+            - not_submitted      # 409: the text was typed but Enter was not pressed; it waits in the input box
+            - no_prompt          # 409: no permission prompt is showing
+            - prompt_changed     # 409: a different prompt is showing, or the option is not one of its keys
+            - login_required     # 401: device login is on and the request has no live session (log in, or pair if that fails)
+            - pairing_failed     # 401: wrong, expired, used or burned code, or a proof that does not verify
+            - pairing_conflict   # 409: the name or device id is already paired
+            - unknown_device     # 404: no paired device by that id (revoked: pair again)
+            - login_failed       # 401: the challenge or signature did not verify, or another Tailscale login
+            - queue_full         # 409: the session's queue holds 20 messages
+            - item_sending       # 409: the queued message is being sent or answered
+            - unknown_item       # 404: no such message in the session's queue
+            - owner_set          # 409: Update summary, but the owner wrote both the title and the description
+            - describe_running   # 409: an Update summary for this session is already running
+            - no_content         # 409: the session has no messages to summarise
+            - naming_timeout     # 504: the model took too long
+            - naming_auth        # 502: the model API rejected the Mac's API key
+            - naming_model       # 502: the naming model (sessions.title_model) was not found
+            - naming_unreadable  # 502: the model's reply could not be read
+            - naming_failed      # 502: the model call failed
+            - naming_unavailable # 503: the Mac has no API key and no claude CLI
 
     Health:
       type: object
@@ -393,7 +872,43 @@ components:
         acpProtocolVersion: { type: integer, minimum: 1, description: "The Agent Client Protocol version `update` events follow." }
         capabilities:
           type: array
-          items: { type: string, enum: [sessions, search, new_sessions, push] }
+          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe] }
+        session:
+          type: string
+          enum: [live, none]
+          description: >
+            Present only with `device_login`: whether this request carries a
+            live session. A client whose event stream failed reads it to tell
+            a lost login (`none`: unlock, or pair again) from a lost network.
+            Reading it never counts as use and names no device.
+        links:
+          type: object
+          additionalProperties: false
+          description: >
+            Present only when the server has `remote_access.links.jira_base`
+            set. Clients link a Jira key in a reply to `{jiraBase}/browse/KEY`
+            when its project is in `jiraProjects`.
+          required: [jiraBase, jiraProjects]
+          properties:
+            jiraBase: { type: string, format: uri }
+            jiraProjects: { type: array, items: { type: string } }
+        naming:
+          type: object
+          additionalProperties: false
+          description: >
+            Present with the `describe` capability: automatic titles and
+            descriptions today. `today` counts sessions sent automatically
+            (local day), `limit` is `sessions.naming_daily_limit`. `failing`
+            after three failed calls in a row, with a fixed `reason`;
+            `paused` while automatic naming waits after them (Update summary
+            still runs).
+          required: [today, limit, failing]
+          properties:
+            today: { type: integer, minimum: 0 }
+            limit: { type: integer, minimum: 1 }
+            failing: { type: boolean }
+            reason: { type: string }
+            paused: { type: boolean }
 
     SessionState:
       type: string
@@ -407,7 +922,7 @@ components:
     Session:
       type: object
       additionalProperties: false
-      required: [id, provider, title, project, lastActive, state]
+      required: [id, provider, title, project, lastActive, state, pinned]
       properties:
         id: { type: string }
         provider: { type: string, enum: [claude] }
@@ -416,6 +931,8 @@ components:
         lastActive: { type: string, format: date-time }
         state: { $ref: "#/components/schemas/SessionState" }
         lastPrompt: { type: string, description: "The last message the person typed." }
+        description: { type: string, description: "One or two sentences about the session: the owner's, else Claude Code's latest away summary, else one aimux wrote. Absent when there is none." }
+        pinned: { type: boolean, description: "The session is pinned (aimux's star, shared with the TUI)." }
 
     SessionList:
       type: object
@@ -425,6 +942,18 @@ components:
         sessions:
           type: array
           items: { $ref: "#/components/schemas/Session" }
+        lastOnMac:
+          type: object
+          additionalProperties: false
+          description: >
+            The session last in front on the Mac (iTerm2's focused pane while
+            the Mac was in use), seen every 15 seconds with terminal input on.
+            Absent when unknown or when that session is gone; clients hide it
+            after 12 hours.
+          required: [id, at]
+          properties:
+            id: { type: string }
+            at: { type: string, format: date-time }
 
     Turn:
       type: object
@@ -441,7 +970,7 @@ components:
             Use it for order only, not as an identifier.
         time: { type: string, format: date-time }
         user: { type: string }
-        reply: { type: string, description: "Reply text, cut at 8 KiB." }
+        reply: { type: string, description: "Reply text as written (Markdown, blank lines kept), cut at 8 KiB at a line break when there is one, then a blank line and \"…\"." }
         tools:
           type: array
           items: { $ref: "#/components/schemas/TurnTool" }
@@ -454,11 +983,22 @@ components:
         name: { type: string }
         snippet: { type: string, description: "Its target: a path, a command." }
         ok: { type: boolean }
+        detail: { $ref: "#/components/schemas/ToolDetail" }
+
+    ToolDetail:
+      type: object
+      additionalProperties: false
+      description: "The step's full text, shown when a client opens it. Omitted when there is none."
+      properties:
+        input: { type: string, description: "The full command, pattern, url or path, trimmed; at most 4096 bytes, then cut with an ellipsis." }
+        error: { type: string, description: "The error output of a failed step, trimmed; at most 2048 bytes, then cut with an ellipsis." }
+        old: { type: string, description: "An edit's removed text, whitespace kept; at most 4096 bytes, then cut with an ellipsis." }
+        new: { type: string, description: "An edit's added text, or a write's content, whitespace kept; at most 4096 bytes, then cut with an ellipsis." }
 
     SessionDetail:
       type: object
       additionalProperties: false
-      required: [id, provider, title, project, lastActive, state, turns]
+      required: [id, provider, title, project, lastActive, state, pinned, turns]
       properties:
         id: { type: string }
         provider: { type: string, enum: [claude] }
@@ -467,14 +1007,107 @@ components:
         lastActive: { type: string, format: date-time }
         state: { $ref: "#/components/schemas/SessionState" }
         lastPrompt: { type: string }
+        description: { type: string, description: "One or two sentences about the session: the owner's, else Claude Code's latest away summary, else one aimux wrote. Absent when there is none." }
+        pinned: { type: boolean, description: "The session is pinned (aimux's star, shared with the TUI)." }
         turns:
           type: array
           items: { $ref: "#/components/schemas/Turn" }
+        stats: { $ref: "#/components/schemas/SessionStats" }
+        terminal: { $ref: "#/components/schemas/TerminalStatus" }
+        queue: { $ref: "#/components/schemas/QueueStatus" }
+        repo:
+          type: object
+          additionalProperties: false
+          description: >
+            Present only when the working directory the session recorded is
+            a git repository on GitHub or GitLab (a session with none
+            recorded has no repo). Clients build links to commits, issues
+            and files from it.
+          required: [web, branch]
+          properties:
+            web: { type: string, format: uri, description: "Web address of the repository, without `.git` or credentials: https for ssh and scp-like remotes; an http(s) remote keeps its scheme and a non-default port." }
+            branch: { type: string, description: "The branch checked out in the session's folder." }
+            root: { type: string, description: "The repository's top folder on the server's machine. Clients make absolute paths in a reply relative to it." }
+
+    TerminalStatus:
+      type: object
+      additionalProperties: false
+      description: >
+        Only for a session in state open_in_terminal. canType says whether
+        `POST .../terminal/messages` would be accepted now; reason says why not.
+        With terminal input off it is still present, with reason `disabled`.
+      required: [status, canType, working]
+      properties:
+        status:
+          type: string
+          enum: [busy, idle, unknown]
+          description: "From Claude Code's session registry: busy while it works, idle at its turn."
+        canType: { type: boolean }
+        working:
+          type: boolean
+          description: >
+            Claude Code is working on a turn (its working line is on screen, or
+            the registry says busy). A message is then refused with `409 busy`;
+            canType does not include it. Clients offer "Add to queue".
+        reason:
+          type: string
+          enum: [disabled, not_in_terminal, not_claude, mac_in_use, no_terminal_driver, automation_denied, not_at_input, error]
+          description: "Why canType is false; `error` means the terminal driver failed."
+        prompt: { $ref: "#/components/schemas/TerminalPrompt" }
+
+    TerminalPrompt:
+      type: object
+      additionalProperties: false
+      description: >
+        The permission prompt showing on the terminal's screen. promptId is a
+        hash of the prompt's body, question and option labels: the same prompt
+        keeps its id, a new one (also the same question about another command)
+        gets a new id. detail is what is being approved, for display in
+        monospace: the lines above the question, such as "Bash command", the
+        command and its description, or "Create file", the file name and a
+        preview; at most 20 lines and 2,000 characters, absent when the screen
+        shows none.
+      required: [promptId, question, options]
+      properties:
+        promptId: { type: string }
+        question: { type: string }
+        detail: { type: string, maxLength: 2000 }
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/TerminalOption" }
+
+    TerminalOption:
+      type: object
+      additionalProperties: false
+      required: [key, label]
+      properties:
+        key: { type: string, description: "What to press, \"1\" to \"9\"." }
+        label: { type: string }
+
+    SessionStats:
+      type: object
+      additionalProperties: false
+      description: >
+        What the session has cost and used so far. Absent while the session
+        is not in the index yet (just created, file not written). startTime
+        is left out when the index has no start time.
+      required: [costUsd, tokensIn, tokensOut, cacheReadTokens, cacheWriteTokens, turns, durationMin]
+      properties:
+        costUsd: { type: number }
+        tokensIn: { type: integer }
+        tokensOut: { type: integer }
+        cacheReadTokens: { type: integer }
+        cacheWriteTokens: { type: integer }
+        turns: { type: integer }
+        startTime: { type: string, format: date-time }
+        durationMin: { type: number }
+        model: { type: string }
+        gitBranch: { type: string }
 
     SearchHit:
       type: object
       additionalProperties: false
-      required: [id, provider, title, project, lastActive, state, snippet]
+      required: [id, provider, title, project, lastActive, state, pinned, snippet]
       properties:
         id: { type: string }
         provider: { type: string, enum: [claude] }
@@ -483,6 +1116,8 @@ components:
         lastActive: { type: string, format: date-time }
         state: { $ref: "#/components/schemas/SessionState" }
         lastPrompt: { type: string }
+        description: { type: string, description: "One or two sentences about the session: the owner's, else Claude Code's latest away summary, else one aimux wrote. Absent when there is none." }
+        pinned: { type: boolean, description: "The session is pinned (aimux's star, shared with the TUI)." }
         snippet: { type: string, description: "Where it matched; matched words are in [brackets]." }
 
     SearchResults:
@@ -520,6 +1155,119 @@ components:
       properties:
         text: { type: string, minLength: 1 }
         key: { type: string, description: "Idempotency key for retries." }
+
+    TerminalMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1 }
+        key: { type: string, description: "Idempotency key: a retry with it is not typed twice (10 minutes)." }
+
+    TerminalKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [promptId, option]
+      properties:
+        promptId: { type: string, minLength: 1, description: "terminal.prompt.promptId of the prompt being answered." }
+        option: { type: string, minLength: 1, description: "One of that prompt's option keys." }
+        key: { type: string, description: "Idempotency key, as for messages." }
+
+    QueueStatus:
+      type: object
+      additionalProperties: false
+      description: >
+        A session's chat queue; also the data of a `queue` event. While
+        `paused`, nothing is sent until Resume and `reason` says why (fixed
+        lines such as "You used this session on your Mac" or "This message may
+        have been sent. Check the session, then resume or delete it.").
+        `note` is a waiting line while it runs, such as "Waiting: you're using
+        this session on your Mac".
+      required: [state, items]
+      properties:
+        state: { type: string, enum: [running, paused] }
+        reason: { type: string }
+        note: { type: string }
+        items:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/QueueItem" }
+
+    QueueItem:
+      type: object
+      additionalProperties: false
+      required: [id, text, state, created]
+      properties:
+        id: { type: string }
+        text: { type: string }
+        state:
+          type: string
+          enum: [waiting, sending, answering, done]
+          description: >
+            waiting; sending (being typed or sent); answering (sent, its answer
+            not finished). At most one message is sending or answering, the
+            first. done only answers an add retried after the message was sent
+            or deleted; its text is then empty.
+        created: { type: string, format: date-time }
+
+    MetaRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: { type: string, maxLength: 80, description: "The owner's title; empty clears it." }
+        description: { type: string, maxLength: 300, description: "The owner's description; empty clears it." }
+        pinned: { type: boolean }
+
+    MetaResult:
+      type: object
+      additionalProperties: false
+      required: [title, pinned]
+      properties:
+        title: { type: string }
+        description: { type: string, description: "Absent when the session has none." }
+        pinned: { type: boolean }
+
+    DescribeResult:
+      type: object
+      additionalProperties: false
+      required: [title, changed, kept]
+      properties:
+        title: { type: string }
+        description: { type: string, description: "Absent when the session has none." }
+        changed:
+          type: array
+          description: The fields the model wrote.
+          items: { type: string, enum: [title, description] }
+        kept:
+          type: array
+          description: The fields left as they were (the owner's, or nothing usable came back).
+          items: { type: string, enum: [title, description] }
+
+    QueueAddRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1 }
+        key: { type: string, description: "Idempotency key: a retry with it never queues the message twice." }
+
+    QueuePatchRequest:
+      type: object
+      additionalProperties: false
+      description: Exactly one of text and position.
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        text: { type: string, minLength: 1 }
+        position: { type: integer, minimum: 0 }
+
+    TerminalAccepted:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [typed] }
 
     NewSessionRequest:
       type: object
@@ -563,7 +1311,56 @@ components:
       additionalProperties: false
       required: [status]
       properties:
-        status: { type: string, enum: [cancelling, answered, registered, unregistered] }
+        status: { type: string, enum: [cancelling, answered, registered, unregistered, logged_out] }
+
+    PairRequest:
+      type: object
+      additionalProperties: false
+      required: [code, kind, publicKey]
+      properties:
+        code: { type: string, description: "As `aimux remote pair` printed it, with or without the dash, any case." }
+        kind: { type: string, enum: [secure-enclave, webauthn] }
+        publicKey: { type: string, format: byte, description: "SPKI DER of a P-256 key: the Secure Enclave key, or a passkey's `getPublicKey()`." }
+        signature: { type: string, format: byte, description: "secure-enclave: the signature over `aimux-pair-v1\\n<host>\\n<code>`." }
+        credentialId: { type: string, description: "webauthn: the credential's rawId, base64url." }
+        userHandle: { type: string, description: "webauthn: the `user.id` the passkey was made with, 16 random bytes, base64url; it becomes the device id." }
+        clientDataJSON: { type: string, format: byte, description: "webauthn: from `create()`; type `webauthn.create`, challenge the SHA-256 of the canonical code." }
+        authenticatorData: { type: string, format: byte, description: "webauthn: from `getAuthenticatorData()`; UP, UV and attested credential data set." }
+
+    ChallengeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        deviceId: { type: string, description: "The paired device; leave out for a passkey login without stored state." }
+
+    Challenge:
+      type: object
+      additionalProperties: false
+      required: [challenge]
+      properties:
+        challenge: { type: string, description: "32 random bytes, base64url." }
+
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [challenge, signature]
+      properties:
+        deviceId: { type: string }
+        challenge: { type: string, description: "As `POST /v1/auth/challenge` gave it." }
+        signature: { type: string, format: byte, description: "secure-enclave: over `aimux-login-v1\\n<host>\\n<challenge>`; webauthn: the assertion signature." }
+        credentialId: { type: string, description: "webauthn: base64url." }
+        userHandle: { type: string, description: "webauthn: the returned user handle, base64url; required without deviceId." }
+        clientDataJSON: { type: string, format: byte, description: "webauthn: type `webauthn.get`." }
+        authenticatorData: { type: string, format: byte, description: "webauthn: UP and UV set." }
+
+    AuthSession:
+      type: object
+      additionalProperties: false
+      required: [deviceId, name]
+      properties:
+        deviceId: { type: string }
+        name: { type: string, description: "The name given to `aimux remote pair`." }
+        token: { type: string, description: "secure-enclave only: the session token; keep it in memory, never on disk." }
 
     EventPage:
       type: object
@@ -584,11 +1381,13 @@ components:
         turn: { type: string }
         kind:
           type: string
-          enum: [turn_started, update, approval, approval_resolved, turn_done, turn_error]
+          enum: [turn_started, update, approval, approval_resolved, turn_done, turn_error, queue]
           description: >
             data by kind: turn_started TurnStartedData, update UpdateData,
             approval ApprovalData, approval_resolved ApprovalResolvedData,
-            turn_done TurnDoneData, turn_error TurnErrorData.
+            turn_done TurnDoneData, turn_error TurnErrorData, queue
+            QueueStatus (the session's queue after a change; its turn is
+            empty, and it is sent only with `queue=1`).
         time: { type: string, format: date-time }
         data: { type: object }
 

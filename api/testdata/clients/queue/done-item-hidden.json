@@ -1,0 +1,45 @@
+{
+  "name": "done-item-hidden",
+  "session": {
+    "state": "idle",
+    "queue": {
+      "state": "running",
+      "items": [
+        {
+          "id": "q1",
+          "text": "",
+          "state": "done",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Add a changelog entry",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "running",
+      "resume": false
+    },
+    "items": [
+      {
+        "id": "q2",
+        "text": "Add a changelog entry",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ]
+  }
+}

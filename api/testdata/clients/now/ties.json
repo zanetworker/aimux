@@ -1,0 +1,156 @@
+{
+  "name": "equal times order by session id, ascending",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "p2",
+      "provider": "claude",
+      "title": "Second approval",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "p1",
+      "provider": "claude",
+      "title": "First approval",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "w2",
+      "provider": "claude",
+      "title": "Second worker",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "First worker",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Second terminal",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "First terminal",
+      "project": "/src/research",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {
+    "p2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:54:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "approvalId": "x2",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ],
+    "p1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:54:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "approvalId": "x1",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "p1",
+      "p2"
+    ],
+    "finished": [],
+    "working": {
+      "list": [
+        "w1",
+        "w2"
+      ]
+    },
+    "onMac": [
+      "m1",
+      "m2"
+    ],
+    "onMacTotal": 2,
+    "summary": {
+      "needYou": 2,
+      "working": 2,
+      "onMac": 2
+    }
+  }
+}

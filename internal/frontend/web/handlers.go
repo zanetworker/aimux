@@ -199,9 +199,9 @@ func (s *Server) handleGetAnnotations(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		FilePath      string   `json:"filePath"`
-		Annotation    string   `json:"annotation"`
+		Annotation    *string  `json:"annotation"`
 		Tags          []string `json:"tags"`
-		Note          string   `json:"note"`
+		Note          *string  `json:"note"`
 		Starred       *bool    `json:"starred"`
 		ROIMultiplier *float64 `json:"roiMultiplier"`
 		TaskType      *string  `json:"taskType"`
@@ -217,22 +217,27 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 	if !s.requireSessionFile(w, req.FilePath) {
 		return
 	}
-	meta := history.LoadMeta(req.FilePath)
-	meta.Annotation = req.Annotation
-	if req.Tags != nil {
-		meta.Tags = req.Tags
-	}
-	meta.Note = req.Note
-	if req.Starred != nil {
-		meta.Starred = *req.Starred
-	}
-	if req.ROIMultiplier != nil {
-		meta.ROIMultiplier = *req.ROIMultiplier
-	}
-	if req.TaskType != nil {
-		meta.TaskType = *req.TaskType
-	}
-	if err := history.SaveMeta(req.FilePath, meta); err != nil {
+	err := history.UpdateMeta(req.FilePath, func(meta *history.Meta) {
+		if req.Annotation != nil {
+			meta.Annotation = *req.Annotation
+		}
+		if req.Tags != nil {
+			meta.Tags = req.Tags
+		}
+		if req.Note != nil {
+			meta.Note = *req.Note
+		}
+		if req.Starred != nil {
+			meta.Starred = *req.Starred
+		}
+		if req.ROIMultiplier != nil {
+			meta.ROIMultiplier = *req.ROIMultiplier
+		}
+		if req.TaskType != nil {
+			meta.TaskType = *req.TaskType
+		}
+	})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

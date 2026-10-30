@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,30 +18,30 @@ var SupportedProviders = []string{"claude", "codex"}
 
 // Config holds the aimux configuration.
 type Config struct {
-	Providers       map[string]ProviderConfig `yaml:"providers"`
-	RefreshInterval string                    `yaml:"refresh_interval"`
-	Runtime         string                    `yaml:"runtime"`          // WHERE: "local" or "container" (default: local)
-	Execution       string                    `yaml:"execution"`        // WHERE tools run: "local" or "hybrid" (default: local)
-	Shell           string                    `yaml:"shell"`            // WHICH shell: e.g. "/bin/zsh" (default: $SHELL)
-	SessionManager  string                    `yaml:"session_manager"`  // SESSION: "tmux" or "direct" (default: tmux)
-	DefaultMode     string                    `yaml:"default_mode"`     // PERMISSIONS: "default", "bypass", "plan", "acceptEdits", "dontAsk"
-	Export          ExportConfig              `yaml:"export"`      // OTEL export settings
-	OTELReceiver    OTELReceiverConfig        `yaml:"otel"`        // OTEL receiver settings
-	Resume          ResumeConfig              `yaml:"resume"`      // resume defaults
-	Sessions        SessionsConfig            `yaml:"sessions"`    // session history settings
-	Notifications   NotificationsConfig       `yaml:"notifications"` // macOS notification settings
-	Kubernetes      K8sProviderConfig         `yaml:"kubernetes"`  // Kubernetes provider settings
-	Remote          RemoteConfig              `yaml:"remote"`      // Remote backend (OpenShell or K8s)
-	RemoteAccess    RemoteAccessConfig        `yaml:"remote_access"` // API for clients on other devices
-	QuickLaunch      QuickLaunchConfig         `yaml:"quick_launch"`       // quick launch directories
-	Tasks            TasksConfig               `yaml:"tasks"`              // Google Tasks integration
-	AutoArchiveAfter string                    `yaml:"auto_archive_after"` // idle duration before auto-archiving (e.g. "1h", "30m")
-	Badges           []BadgeRule               `yaml:"badges"`             // project file badge rules
-	Runtimes         map[string]RuntimeConfig  `yaml:"runtimes"`           // named runtime environments
-	ROI              ROIConfig                 `yaml:"roi"`                // per-session ROI settings
-	Coordination     CoordinationConfig        `yaml:"coordination"`       // coordination backend settings
-	Environments     map[string]EnvironmentConfig `yaml:"environments"`    // named environments for agent execution
-	AgentConfigs     []AgentConfig             `yaml:"-"`                  // loaded from agents.yaml, not config.yaml
+	Providers        map[string]ProviderConfig    `yaml:"providers"`
+	RefreshInterval  string                       `yaml:"refresh_interval"`
+	Runtime          string                       `yaml:"runtime"`            // WHERE: "local" or "container" (default: local)
+	Execution        string                       `yaml:"execution"`          // WHERE tools run: "local" or "hybrid" (default: local)
+	Shell            string                       `yaml:"shell"`              // WHICH shell: e.g. "/bin/zsh" (default: $SHELL)
+	SessionManager   string                       `yaml:"session_manager"`    // SESSION: "tmux" or "direct" (default: tmux)
+	DefaultMode      string                       `yaml:"default_mode"`       // PERMISSIONS: "default", "bypass", "plan", "acceptEdits", "dontAsk"
+	Export           ExportConfig                 `yaml:"export"`             // OTEL export settings
+	OTELReceiver     OTELReceiverConfig           `yaml:"otel"`               // OTEL receiver settings
+	Resume           ResumeConfig                 `yaml:"resume"`             // resume defaults
+	Sessions         SessionsConfig               `yaml:"sessions"`           // session history settings
+	Notifications    NotificationsConfig          `yaml:"notifications"`      // macOS notification settings
+	Kubernetes       K8sProviderConfig            `yaml:"kubernetes"`         // Kubernetes provider settings
+	Remote           RemoteConfig                 `yaml:"remote"`             // Remote backend (OpenShell or K8s)
+	RemoteAccess     RemoteAccessConfig           `yaml:"remote_access"`      // API for clients on other devices
+	QuickLaunch      QuickLaunchConfig            `yaml:"quick_launch"`       // quick launch directories
+	Tasks            TasksConfig                  `yaml:"tasks"`              // Google Tasks integration
+	AutoArchiveAfter string                       `yaml:"auto_archive_after"` // idle duration before auto-archiving (e.g. "1h", "30m")
+	Badges           []BadgeRule                  `yaml:"badges"`             // project file badge rules
+	Runtimes         map[string]RuntimeConfig     `yaml:"runtimes"`           // named runtime environments
+	ROI              ROIConfig                    `yaml:"roi"`                // per-session ROI settings
+	Coordination     CoordinationConfig           `yaml:"coordination"`       // coordination backend settings
+	Environments     map[string]EnvironmentConfig `yaml:"environments"`       // named environments for agent execution
+	AgentConfigs     []AgentConfig                `yaml:"-"`                  // loaded from agents.yaml, not config.yaml
 }
 
 // K8sProviderConfig holds connection settings for the Kubernetes agent provider.
@@ -49,15 +50,15 @@ type Config struct {
 // K8s is considered enabled when RedisURL is set (Enabled field is kept for
 // backward compatibility but RedisURL is the real gate).
 type K8sProviderConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	RedisURL     string `yaml:"redis_url"`      // e.g. "redis://:pass@localhost:6380"
-	TeamID       string `yaml:"team_id"`        // Redis team key prefix, e.g. "my-team"
-	Namespace    string `yaml:"namespace"`      // K8s namespace, e.g. "agents"
-	Kubeconfig   string `yaml:"kubeconfig"`     // path to kubeconfig; empty = KUBECONFIG env or in-cluster
-	OTELEndpoint string `yaml:"otel_endpoint"`  // e.g. "http://<elb>:4318" — OTel Collector for remote agent traces
-	MaxAgents    int            `yaml:"max_agents"`
-	MaxCostUSD   float64        `yaml:"max_cost_usd"`
-	MCP          K8sMCPConfig   `yaml:"mcp"`
+	Enabled      bool         `yaml:"enabled"`
+	RedisURL     string       `yaml:"redis_url"`     // e.g. "redis://:pass@localhost:6380"
+	TeamID       string       `yaml:"team_id"`       // Redis team key prefix, e.g. "my-team"
+	Namespace    string       `yaml:"namespace"`     // K8s namespace, e.g. "agents"
+	Kubeconfig   string       `yaml:"kubeconfig"`    // path to kubeconfig; empty = KUBECONFIG env or in-cluster
+	OTELEndpoint string       `yaml:"otel_endpoint"` // e.g. "http://<elb>:4318" — OTel Collector for remote agent traces
+	MaxAgents    int          `yaml:"max_agents"`
+	MaxCostUSD   float64      `yaml:"max_cost_usd"`
+	MCP          K8sMCPConfig `yaml:"mcp"`
 }
 
 // K8sMCPConfig holds settings for auto-registering the MCP server.
@@ -83,6 +84,37 @@ type RemoteAccessConfig struct {
 	MaxRuns         int        `yaml:"max_runs"`         // live adapters at once (default 2)
 	ApprovalTimeout string     `yaml:"approval_timeout"` // unanswered approvals are denied after this (default 10m)
 	Push            PushConfig `yaml:"push"`             // notify phones of approvals; off unless configured
+
+	TerminalInput TerminalInputConfig `yaml:"terminal_input"` // type phone messages into terminal sessions; off unless enabled
+	Links         LinksConfig         `yaml:"links"`          // where clients link Jira keys in replies
+
+	// DeviceLogin requires a paired device and Face ID on top of the tailnet
+	// check; nil (unset) means on. Read it with DeviceLoginOn.
+	DeviceLogin *bool `yaml:"device_login"`
+}
+
+// DeviceLoginOn reports whether the remote API requires device login: true
+// unless remote_access.device_login is set to false.
+func (c RemoteAccessConfig) DeviceLoginOn() bool {
+	return c.DeviceLogin == nil || *c.DeviceLogin
+}
+
+// LinksConfig tells clients which Jira keys to link. Nothing is linked
+// unless jira_base is set; only keys of a listed project become links, so
+// "UTF-8" never does.
+type LinksConfig struct {
+	JiraBase     string   `yaml:"jira_base"`     // e.g. https://issues.example.com
+	JiraProjects []string `yaml:"jira_projects"` // project keys, e.g. [WID, OPS]
+}
+
+// TerminalInputConfig controls typing phone messages into Claude Code sessions
+// open in a terminal. Everything is off by default.
+type TerminalInputConfig struct {
+	Enabled         bool `yaml:"enabled"`
+	AllowWhileInUse bool `yaml:"allow_while_in_use"` // skip the 120 s Mac-idle check
+	// AllowSlashCommands lets a message start with "/" (a Claude Code slash
+	// command such as /clear). A leading "!" (bash mode) is always refused.
+	AllowSlashCommands bool `yaml:"allow_slash_commands"`
 }
 
 // PushConfig turns on approval notifications; each sender is on when its
@@ -125,6 +157,9 @@ type SessionsConfig struct {
 	AutoTitle  bool   `yaml:"auto_title"`  // generate titles via LLM on discovery
 	TitleModel string `yaml:"title_model"` // "haiku" (default), "sonnet", "opus"
 	APIKey     string `yaml:"api_key"`     // API key for title generation (overrides env vars)
+	// NamingDailyLimit caps automatic titles and descriptions per local day
+	// (sessions sent to the model); "Update summary" is not limited.
+	NamingDailyLimit int `yaml:"naming_daily_limit"`
 }
 
 // NotificationsConfig controls macOS notification behavior.
@@ -141,8 +176,8 @@ type NotificationsConfig struct {
 
 // ExportConfig holds settings for exporting traces via OTLP/HTTP.
 type ExportConfig struct {
-	Endpoint string `yaml:"endpoint"` // OTLP/HTTP endpoint, e.g., "localhost:5001"
-	Insecure bool   `yaml:"insecure"` // true for HTTP (no TLS), default true
+	Endpoint string            `yaml:"endpoint"`          // OTLP/HTTP endpoint, e.g., "localhost:5001"
+	Insecure bool              `yaml:"insecure"`          // true for HTTP (no TLS), default true
 	Headers  map[string]string `yaml:"headers,omitempty"` // extra HTTP headers for the export endpoint
 
 	// Backend-specific settings
@@ -200,11 +235,11 @@ type CoordinationConfig struct {
 
 // EnvironmentConfig holds settings for a named environment where agents can execute.
 type EnvironmentConfig struct {
-	Type       string `yaml:"type"`       // "local", "openshell", "k8s"
-	Gateway    string `yaml:"gateway"`    // OpenShell gateway URL
+	Type       string `yaml:"type"`    // "local", "openshell", "k8s"
+	Gateway    string `yaml:"gateway"` // OpenShell gateway URL
 	Insecure   bool   `yaml:"insecure"`
 	Image      string `yaml:"image"`
-	RedisURL   string `yaml:"redis_url"`  // K8s only
+	RedisURL   string `yaml:"redis_url"` // K8s only
 	Namespace  string `yaml:"namespace"`
 	Kubeconfig string `yaml:"kubeconfig"`
 }
@@ -231,10 +266,11 @@ func Default() Config {
 			return m
 		}(),
 		RefreshInterval: "2s",
-		Runtime:        "local",
-		SessionManager: "tmux",
+		Runtime:         "local",
+		SessionManager:  "tmux",
 		Sessions: SessionsConfig{
-			TitleModel: "haiku",
+			TitleModel:       "haiku",
+			NamingDailyLimit: 20,
 		},
 		Notifications: NotificationsConfig{
 			Enabled:   true,
@@ -327,6 +363,9 @@ func Load(path string) (Config, error) {
 	if fileCfg.Sessions.APIKey != "" {
 		cfg.Sessions.APIKey = fileCfg.Sessions.APIKey
 	}
+	if fileCfg.Sessions.NamingDailyLimit > 0 {
+		cfg.Sessions.NamingDailyLimit = fileCfg.Sessions.NamingDailyLimit
+	}
 	// If the notifications section is present at all, take its values wholesale.
 	// Since YAML bool false and "not present" are indistinguishable, a user who
 	// sets e.g. notifications: { enabled: false } will also get on_waiting: false
@@ -342,6 +381,9 @@ func Load(path string) (Config, error) {
 		cfg.Remote = fileCfg.Remote
 	}
 	cfg.RemoteAccess = fileCfg.RemoteAccess // no defaults to keep; unset means nobody is admitted
+	if u, err := url.Parse(cfg.RemoteAccess.Links.JiraBase); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		cfg.RemoteAccess.Links.JiraBase = "" // a link must open a web page; no base, no Jira links
+	}
 	if len(fileCfg.QuickLaunch.Directories) > 0 {
 		cfg.QuickLaunch = fileCfg.QuickLaunch
 	}

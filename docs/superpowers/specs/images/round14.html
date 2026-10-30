@@ -1,0 +1,324 @@
+<style>
+  .phones { display: flex; gap: 26px; flex-wrap: wrap; justify-content: center; }
+  .pw { display: flex; flex-direction: column; align-items: center; gap: 14px; max-width: 433px; zoom: .7; }
+  .pw p { font-size: 18px; line-height: 1.45; margin: 0; color: #d1d1d6; }
+  .pw .tag { font: 600 15px -apple-system, system-ui; color: #8e8e93; letter-spacing: .04em; text-transform: uppercase; }
+  .phone { width: 413px; height: 872px; border-radius: 58px; padding: 10px; background: #1c1c1e; box-shadow: 0 40px 80px -30px rgba(0,0,0,.7), inset 0 0 0 1px #3a3a3c; }
+  .screen { width: 100%; height: 100%; border-radius: 48px; overflow: hidden; position: relative; display: flex; flex-direction: column;
+            font: 17px/1.32 -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; letter-spacing: -.2px; background: var(--bg); color: var(--fg); }
+  .lite { --bg: #fff; --fg: #000; --grp: #f2f2f7; --sec: rgba(60,60,67,.6); --ter: rgba(60,60,67,.3); --line: rgba(60,60,67,.14); --me: #007aff; --ai: #e9e9eb;
+          --amber: #c56f00; --amberbg: #fff4e5; --green: #1f8a3a; --blue: #007aff; --red: #d70015; --bar: rgba(249,249,249,.85); --barline: rgba(0,0,0,.1); --code: #f2f2f7; }
+  .dark { --bg: #000; --fg: #fff; --grp: #1c1c1e; --sec: rgba(235,235,245,.6); --ter: rgba(235,235,245,.3); --line: rgba(84,84,88,.55); --me: #0a84ff; --ai: #262628;
+          --amber: #ffb340; --amberbg: #2e2412; --green: #30d158; --blue: #0a84ff; --red: #ff453a; --bar: rgba(28,28,30,.85); --barline: rgba(255,255,255,.1); --code: #1c1c1e; }
+  .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; border-radius: 19px; background: #000; z-index: 9; }
+  .sb { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 14px 34px 0 40px; font-weight: 600; font-size: 17px; flex: none; }
+  .sb svg { height: 13px; }
+  .nav { display: flex; align-items: center; gap: 10px; padding: 2px 14px 10px; flex: none; border-bottom: .5px solid var(--line); }
+  .gb { width: 44px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; color: var(--fg); background: var(--grp); flex: none; }
+  .gb svg { width: 20px; height: 20px; }
+  .nt { flex: 1; min-width: 0; text-align: center; }
+  .nt b { display: block; font-size: 17px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nt small { font-size: 13px; color: var(--sec); }
+  .nt small i { font-style: normal; font-weight: 600; }
+  .feed { flex: 1; overflow: hidden; padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+  .day { text-align: center; font-size: 12px; color: var(--sec); font-weight: 600; }
+  .me { align-self: flex-end; max-width: 80%; background: var(--me); color: #fff; padding: 9px 14px; border-radius: 20px 20px 6px 20px; font-size: 16px; }
+  .ai { align-self: flex-start; max-width: 88%; font-size: 16px; line-height: 1.4; padding: 0 2px; }
+  .ai code, .step code { font: 14px ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  /* thought */
+  .thought { display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--sec); }
+  .thought svg { width: 15px; height: 15px; }
+  .thought .ch { width: 7px; height: 11px; color: var(--ter); }
+  .thought-open { border-left: 2px solid var(--line); padding: 2px 0 2px 12px; margin-left: 6px; font-size: 14px; color: var(--sec); line-height: 1.4; font-style: italic; }
+  /* steps */
+  .steps { border-radius: 16px; background: var(--grp); padding: 4px 0; }
+  .sh { display: flex; align-items: center; gap: 8px; padding: 8px 14px 6px; font-size: 14px; color: var(--sec); }
+  .sh b { color: var(--fg); font-weight: 600; }
+  .sh .ch { margin-left: auto; width: 11px; height: 7px; color: var(--ter); }
+  .step { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 14.5px; }
+  .step svg.ic { width: 16px; height: 16px; flex: none; color: var(--sec); }
+  .step .w { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .step .w code { font-size: 13px; }
+  .step .d { flex: none; font-size: 13px; color: var(--sec); font-variant-numeric: tabular-nums; }
+  .add { color: var(--green); } .del { color: var(--red); }
+  .ok { color: var(--green) !important; }
+  .spin { width: 14px; height: 14px; border-radius: 7px; border: 2px solid var(--line); border-top-color: var(--blue); flex: none; }
+  /* plan */
+  .plan { border-radius: 16px; background: var(--grp); padding: 10px 14px; font-size: 14.5px; }
+  .plan .ph { display: flex; justify-content: space-between; font-size: 13px; color: var(--sec); margin-bottom: 6px; }
+  .plan .it { display: flex; gap: 9px; align-items: center; padding: 3px 0; }
+  .plan .it svg { width: 16px; height: 16px; flex: none; }
+  .plan .done { color: var(--sec); text-decoration: line-through; text-decoration-color: var(--ter); }
+  .plan .cur { font-weight: 600; }
+  /* approval */
+  .appr { border-radius: 20px; background: var(--amberbg); padding: 14px; box-shadow: 0 0 0 .5px rgba(201,117,10,.25); }
+  .appr .ah { font-size: 13px; font-weight: 700; color: var(--amber); letter-spacing: .02em; display: flex; align-items: center; gap: 6px; }
+  .appr .ah svg { width: 15px; height: 15px; }
+  .appr .q { font-size: 16px; font-weight: 600; margin: 6px 0 8px; }
+  .appr pre { margin: 0 0 12px; font: 13.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; background: var(--bg); border-radius: 10px; padding: 9px 11px; white-space: pre-wrap; color: var(--fg); }
+  .appr .btns { display: flex; gap: 8px; }
+  .appr .btns span { flex: 1; text-align: center; height: 42px; line-height: 42px; border-radius: 21px; font-size: 15.5px; font-weight: 600; background: var(--bg); color: var(--blue); }
+  .appr .btns span.pri { background: var(--blue); color: #fff; }
+  .appr .btns span.neg { color: var(--red); }
+  /* bottom */
+  .bottom { flex: none; padding: 8px 12px 30px; display: flex; flex-direction: column; gap: 8px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
+  .next { display: flex; align-items: center; gap: 10px; height: 44px; border-radius: 22px; padding: 0 8px 0 14px; background: var(--bar); box-shadow: 0 0 0 .5px var(--barline);
+          backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); font-size: 14.5px; }
+  .next .dot { width: 8px; height: 8px; border-radius: 4px; flex: none; }
+  .next span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .next small { color: var(--sec); font-size: 13px; }
+  .next .gbs { width: 32px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: var(--blue); }
+  .next .gbs svg { width: 14px; height: 14px; }
+  .comp { display: flex; align-items: center; gap: 8px; }
+  .field { flex: 1; height: 44px; border-radius: 22px; padding: 0 14px; display: flex; align-items: center; color: var(--sec); font-size: 16.5px; background: var(--bar); box-shadow: 0 0 0 .5px var(--barline); }
+  .field svg { margin-left: auto; width: 18px; height: 18px; }
+  .send { width: 44px; height: 44px; border-radius: 22px; background: var(--grp); color: var(--fg); display: flex; align-items: center; justify-content: center; }
+  .send svg { width: 18px; height: 18px; }
+  .ro { display: flex; align-items: center; gap: 10px; height: 46px; border-radius: 23px; padding: 0 16px; background: var(--grp); font-size: 14.5px; color: var(--sec); }
+  .ro svg { width: 16px; height: 16px; flex: none; }
+</style>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="c-back" viewBox="0 0 24 24"><path d="M14.5 5.5 8 12l6.5 6.5" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="18" cy="12" r="1.7" fill="currentColor"/></symbol>
+    <symbol id="c-brain" viewBox="0 0 24 24"><path d="M12 4.5c-1.6-1.4-4.6-.8-5 1.6-2 .2-3.2 2.4-2.2 4.2-1.4 1.3-1 3.9.9 4.6-.2 2.2 2.1 3.8 4.1 2.8.9 1.5 2.2 1.8 2.2 1.8m0-15c1.6-1.4 4.6-.8 5 1.6 2 .2 3.2 2.4 2.2 4.2 1.4 1.3 1 3.9-.9 4.6.2 2.2-2.1 3.8-4.1 2.8-.9 1.5-2.2 1.8-2.2 1.8m0-15v15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-chev" viewBox="0 0 8 14"><path d="M1.5 1.5l5 5.5-5 5.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-up" viewBox="0 0 12 8"><path d="M1.5 6.5 6 2l4.5 4.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-doc" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.5v4h4" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="c-pencil" viewBox="0 0 24 24"><path d="M15.5 4.5l4 4L9 19H5v-4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="c-term" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 15.5 20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="c-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="currentColor" opacity=".9"/><path d="M8 12.3l2.7 2.7 5.3-5.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+    <symbol id="c-cur" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+    <symbol id="c-shield" viewBox="0 0 24 24"><path d="M12 3.5 5 6v5.5c0 4.2 3 7.6 7 9 4-1.4 7-4.8 7-9V6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="c-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></symbol>
+    <symbol id="c-arrow" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="c-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></symbol>
+    <symbol id="c-lock" viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="c-sig" viewBox="0 0 34 11"><rect x="0" y="7" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="6" rx="1"/><rect x="9" y="2.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="0" width="3" height="11" rx="1"/><rect x="21" y="0.5" width="12" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1"/><rect x="22.5" y="2" width="8" height="7" rx="1.3"/></symbol>
+  </defs>
+</svg>
+
+<style>
+  .hs { width: 100%; height: 100%; border-radius: 48px; overflow: hidden; position: relative; display: flex; flex-direction: column;
+        font: 17px/1.3 -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; letter-spacing: -.2px; background: var(--hbg); color: var(--hfg); }
+  .hl { --hbg: #f2f2f7; --hfg: #000; --hg: #fff; --h2: rgba(60,60,67,.6); --h3: rgba(60,60,67,.32); --hline: rgba(60,60,67,.14); --ham: #c56f00; --hgr: #34c759; --hbl: #007aff; --hbar: rgba(249,249,249,.82); --hbl2: rgba(0,0,0,.1); }
+  .hd { --hbg: #000; --hfg: #fff; --hg: #1c1c1e; --h2: rgba(235,235,245,.6); --h3: rgba(235,235,245,.3); --hline: rgba(84,84,88,.55); --ham: #ffb340; --hgr: #30d158; --hbl: #0a84ff; --hbar: rgba(30,30,32,.82); --hbl2: rgba(255,255,255,.1); }
+  .hs .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 124px; height: 36px; border-radius: 19px; background: #000; z-index: 9; }
+  .hs .sbar { height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 14px 34px 0 40px; font-weight: 600; font-size: 17px; flex: none; }
+  .hs .sbar svg { height: 13px; }
+  .htop { display: flex; align-items: center; justify-content: space-between; padding: 4px 16px 6px 20px; flex: none; }
+  .htop h1 { margin: 0; font: 700 28px/1.1 -apple-system, "SF Pro Display", system-ui; letter-spacing: .2px; }
+  .hgb { width: 40px; height: 40px; border-radius: 20px; display: flex; align-items: center; justify-content: center; color: var(--hfg); background: var(--hg); box-shadow: 0 0 0 .5px var(--hbl2); }
+  .hgb svg { width: 19px; height: 19px; }
+  .hh { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 600; color: var(--h2); padding: 14px 36px 6px; letter-spacing: .01em; }
+  .hh .c { font-weight: 400; }
+  .hh a { color: var(--hbl); font-weight: 400; font-size: 15px; }
+  .hgrp { margin: 0 16px; background: var(--hg); border-radius: 22px; overflow: hidden; }
+  .need { padding: 12px 16px 13px; }
+  .need .l1 { display: flex; align-items: center; gap: 8px; }
+  .need .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--ham); flex: none; }
+  .need .t { flex: 1; font-size: 17px; font-weight: 600; }
+  .need .tm, .w .tm, .m .tm { font-size: 15px; color: var(--h2); flex: none; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; }
+  .need .qq { margin: 5px 0 0 16px; font-size: 16px; line-height: 1.35; color: var(--hfg); }
+  .need .meta { margin: 6px 0 0 16px; font-size: 14px; color: var(--h2); display: flex; gap: 6px; align-items: center; }
+  .need .meta b { color: var(--hbl); font-weight: 600; margin-left: auto; }
+  .w { display: flex; align-items: center; gap: 10px; padding: 9px 16px; position: relative; }
+  .w + .w::before, .m + .m::before { content: ""; position: absolute; top: 0; left: 34px; right: 0; height: .5px; background: var(--hline); }
+  .w .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--hgr); flex: none; }
+  .w .bb { flex: 1; min-width: 0; }
+  .w .t { font-size: 16.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w .p { font-size: 14.5px; color: var(--h2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .w .p i { font-style: normal; color: var(--h3); }
+  .m { display: flex; align-items: center; gap: 10px; padding: 10px 16px; position: relative; font-size: 16.5px; }
+  .m .sp { width: 8px; flex: none; }
+  .m .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+  .m .t bdi { unicode-bidi: isolate; }
+  .htb { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 16px 30px; display: flex; gap: 10px; align-items: center; z-index: 5;
+         background: linear-gradient(to bottom, transparent, var(--hbg) 40%); }
+  .hcap { height: 48px; border-radius: 24px; display: flex; align-items: center; background: var(--hbar); box-shadow: 0 0 0 .5px var(--hbl2), 0 6px 20px rgba(0,0,0,.08);
+          backdrop-filter: blur(20px) saturate(1.8); -webkit-backdrop-filter: blur(20px) saturate(1.8); }
+  .hcap.s { flex: 1; gap: 8px; padding: 0 16px; color: var(--h2); font-size: 17px; }
+  .hcap.s svg { width: 18px; height: 18px; } .hcap.s .mic { margin-left: auto; }
+  .hcap.b { width: 48px; justify-content: center; color: var(--hbl); } .hcap.b svg { width: 22px; height: 22px; }
+</style>
+
+<template id="home12">
+  <div class="island"></div>
+  <div class="sbar"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#c-sig"/></svg></div>
+  <div class="htop"><h1>Now</h1><span class="hgb"><svg><use href="#c-more"/></svg></span></div>
+  <div class="hh"><span>NEEDS YOU</span></div>
+  <div class="hgrp need">
+    <div class="l1"><span class="dot"></span><span class="t">Push notifications</span><span class="tm">1m</span></div>
+    <div class="qq">Should the .p8 key come from the keychain or a file?</div>
+    <div class="meta">aimux · approval waiting<b>Answer</b></div>
+  </div>
+  <div class="hh"><span>WORKING <span class="c">· 2</span></span></div>
+  <div class="hgrp">
+    <div class="w"><span class="dot"></span><div class="bb"><div class="t">Aimux iOS app structure</div><div class="p"><i>aimux-ios ·</i> Updating the home screen mockups</div></div><span class="tm">now</span></div>
+    <div class="w"><span class="dot"></span><div class="bb"><div class="t">web_fetch quota exceeded</div><div class="p"><i>web-shop ·</i> Running a tool</div></div><span class="tm">4m</span></div>
+  </div>
+  <div class="hh"><span>ON YOUR MAC <span class="c">· idle · read-only</span></span><a>All 18</a></div>
+  <div class="hgrp">
+    <div class="m"><span class="sp"></span><span class="t">Weekly status draft</span><span class="tm">11h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Database migration plan</span><span class="tm">11h</span></div>
+    <div class="m"><span class="sp"></span><span class="t"><bdi>ملاحظات اجتماع الفريق</bdi></span><span class="tm">12h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Release checklist review</span><span class="tm">12h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Screenshot-reported issues</span><span class="tm">13h</span></div>
+  </div>
+  <div class="htb">
+    <div class="hcap b"><svg><use href="#h-tray"/></svg></div>
+    <div class="hcap s"><svg><use href="#c-search"/></svg>Search 327 sessions<svg class="mic"><use href="#c-mic"/></svg></div>
+    <div class="hcap b"><svg><use href="#h-compose"/></svg></div>
+  </div>
+</template>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="h-tray" viewBox="0 0 24 24"><path d="M4 13.5l2.2-7a2 2 0 0 1 1.9-1.5h7.8a2 2 0 0 1 1.9 1.5l2.2 7v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4 13.5h4.5l1 2h5l1-2H20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="h-compose" viewBox="0 0 24 24"><path d="M11 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M17.8 3.7a1.9 1.9 0 0 1 2.7 2.7L12 14.9l-3.5.8.8-3.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+</defs></svg>
+
+<h2>Round 14: All sessions in plain sight, and images in the chat</h2>
+<p class="subtitle">The tray icon hid "All". Now it is a labelled tab, with search as its own button (the iOS 26 pattern Apple uses in Music and Photos). The chat gains attachments.</p>
+<style>
+  /* iOS 26 tab bar: glass capsule with tabs + separate search button */
+  .tabbar { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 18px 30px; display: flex; gap: 10px; align-items: center; z-index: 5;
+            background: linear-gradient(to bottom, transparent, var(--hbg) 40%); }
+  .tabs { flex: 1; height: 58px; border-radius: 29px; display: flex; align-items: center; padding: 4px; gap: 2px; background: var(--hbar);
+          box-shadow: 0 0 0 .5px var(--hbl2), 0 8px 24px rgba(0,0,0,.1); backdrop-filter: blur(20px) saturate(1.8); -webkit-backdrop-filter: blur(20px) saturate(1.8); }
+  .tab { flex: 1; height: 50px; border-radius: 25px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; font-weight: 600; color: var(--hfg); }
+  .tab svg { width: 22px; height: 22px; }
+  .tab.on { background: var(--hsel); color: var(--hbl); }
+  .tsearch { width: 58px; height: 58px; border-radius: 29px; display: flex; align-items: center; justify-content: center; background: var(--hbar); color: var(--hfg);
+             box-shadow: 0 0 0 .5px var(--hbl2), 0 8px 24px rgba(0,0,0,.1); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  .tsearch svg { width: 22px; height: 22px; }
+  .hl { --hsel: rgba(0,0,0,.06); } .hd { --hsel: rgba(255,255,255,.12); }
+  .htop .acts { display: flex; gap: 8px; }
+  .htop .hgb.pri { color: var(--hbl); }
+  /* all sessions */
+  .flt { display: flex; gap: 8px; padding: 2px 16px 4px; }
+  .flt span { height: 34px; border-radius: 17px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; background: var(--hg); box-shadow: 0 0 0 .5px var(--hbl2); }
+  .flt span svg { width: 12px; height: 12px; color: var(--h2); }
+  .flt span.act { color: var(--hbl); }
+  .ar { display: flex; align-items: center; gap: 10px; padding: 9px 16px; position: relative; }
+  .ar + .ar::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: .5px; background: var(--hline); }
+  .ar .bb { flex: 1; min-width: 0; }
+  .ar .t { font-size: 16.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ar .p { font-size: 14px; color: var(--h2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .ar .tm { font-size: 14.5px; color: var(--h2); flex: none; font-variant-numeric: tabular-nums; }
+  .ar .lk { width: 13px; height: 13px; color: var(--h3); flex: none; }
+  /* chat with images */
+  .imgmsg { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 78%; }
+  .shot { width: 210px; height: 150px; border-radius: 18px; overflow: hidden; position: relative; background: linear-gradient(160deg,#eef1f6,#dfe5ee); box-shadow: 0 0 0 .5px rgba(0,0,0,.1); }
+  .shot .bar1 { position: absolute; left: 12px; right: 12px; top: 14px; height: 12px; border-radius: 6px; background: #c9d2df; }
+  .shot .ln { position: absolute; left: 12px; height: 9px; border-radius: 5px; background: #d6dde8; }
+  .shot .hl2 { position: absolute; left: 10px; top: 58px; width: 120px; height: 30px; border-radius: 8px; border: 2.5px solid #ff3b30; }
+  .att { display: flex; gap: 8px; padding: 0 2px 2px; }
+  .thumb { width: 64px; height: 64px; border-radius: 14px; position: relative; background: linear-gradient(160deg,#eef1f6,#cfd8e6); box-shadow: 0 0 0 .5px var(--barline); }
+  .thumb.b { background: linear-gradient(160deg,#2b3446,#1a1f2b); }
+  .thumb .x { position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 11px; background: var(--fg); color: var(--bg); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .plus { width: 44px; height: 44px; border-radius: 22px; background: var(--grp); display: flex; align-items: center; justify-content: center; color: var(--fg); flex: none; }
+  .plus svg { width: 20px; height: 20px; }
+  .menu { position: absolute; left: 14px; bottom: 176px; width: 230px; border-radius: 22px; background: var(--bar); box-shadow: 0 0 0 .5px var(--barline), 0 20px 40px rgba(0,0,0,.18);
+          backdrop-filter: blur(30px) saturate(1.8); -webkit-backdrop-filter: blur(30px) saturate(1.8); overflow: hidden; z-index: 8; }
+  .menu div { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; font-size: 16.5px; }
+  .menu div + div { border-top: .5px solid var(--line); }
+  .menu svg { width: 20px; height: 20px; color: var(--fg); }
+</style>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="t-now" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/></symbol>
+  <symbol id="t-all" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="t-down" viewBox="0 0 12 12"><path d="M2.5 4.5 6 8l3.5-3.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="t-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  <symbol id="t-photo" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="9" cy="10" r="1.8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+  <symbol id="t-cam" viewBox="0 0 24 24"><path d="M4 8.5a2 2 0 0 1 2-2h2l1.5-2h5L16 6.5h2a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="12.5" r="3.3" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+  <symbol id="t-file" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.5v4h4" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+  <symbol id="t-shot" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+</defs></svg>
+
+<template id="tabs-now"><div class="tabbar"><div class="tabs"><div class="tab on"><svg><use href="#t-now"/></svg>Now</div><div class="tab"><svg><use href="#t-all"/></svg>All</div></div><div class="tsearch"><svg><use href="#c-search"/></svg></div></div></template>
+<template id="tabs-all"><div class="tabbar"><div class="tabs"><div class="tab"><svg><use href="#t-now"/></svg>Now</div><div class="tab on"><svg><use href="#t-all"/></svg>All</div></div><div class="tsearch"><svg><use href="#c-search"/></svg></div></div></template>
+
+<template id="r14-home">
+  <div class="island"></div>
+  <div class="sbar"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#c-sig"/></svg></div>
+  <div class="htop"><h1>Now</h1><span class="acts"><span class="hgb pri"><svg><use href="#h-compose"/></svg></span></span></div>
+  <div class="hh"><span>NEEDS YOU</span></div>
+  <div class="hgrp need">
+    <div class="l1"><span class="dot"></span><span class="t">Push notifications</span><span class="tm">1m</span></div>
+    <div class="qq">Should the .p8 key come from the keychain or a file?</div>
+    <div class="meta">aimux · approval waiting<b>Answer</b></div>
+  </div>
+  <div class="hh"><span>WORKING <span class="c">· 2</span></span></div>
+  <div class="hgrp">
+    <div class="w"><span class="dot"></span><div class="bb"><div class="t">Aimux iOS app structure</div><div class="p"><i>aimux-ios ·</i> Updating the home screen mockups</div></div><span class="tm">now</span></div>
+    <div class="w"><span class="dot"></span><div class="bb"><div class="t">web_fetch quota exceeded</div><div class="p"><i>web-shop ·</i> Running a tool</div></div><span class="tm">4m</span></div>
+  </div>
+  <div class="hh"><span>ON YOUR MAC <span class="c">· idle · read-only</span></span><a>All 18</a></div>
+  <div class="hgrp">
+    <div class="m"><span class="sp"></span><span class="t">Weekly status draft</span><span class="tm">11h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Database migration plan</span><span class="tm">11h</span></div>
+    <div class="m"><span class="sp"></span><span class="t"><bdi>ملاحظات اجتماع الفريق</bdi></span><span class="tm">12h</span></div>
+    <div class="m"><span class="sp"></span><span class="t">Release checklist review</span><span class="tm">12h</span></div>
+  </div>
+  <div data-fill="tabs-now"></div>
+</template>
+
+<template id="r14-all">
+  <div class="island"></div>
+  <div class="sbar"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#c-sig"/></svg></div>
+  <div class="htop"><h1>All Sessions</h1><span class="acts"><span class="hgb pri"><svg><use href="#h-compose"/></svg></span></span></div>
+  <div class="flt"><span class="act">All projects<svg><use href="#t-down"/></svg></span><span>Newest<svg><use href="#t-down"/></svg></span></div>
+  <div class="hh"><span>TODAY</span><span class="c">37</span></div>
+  <div class="hgrp">
+    <div class="ar"><div class="bb"><div class="t">Aimux iOS app structure</div><div class="p">aimux-ios · Make the chat show thoughts and tool steps</div></div><span class="tm">now</span></div>
+    <div class="ar"><div class="bb"><div class="t">Push notifications</div><div class="p">aimux · wire APNs for approvals</div></div><span class="tm">1m</span></div>
+    <div class="ar"><div class="bb"><div class="t">Shared code between clients</div><div class="p">aimux-ios · do they share the mobile client's code?</div></div><span class="tm">9:18</span></div>
+    <div class="ar"><div class="bb"><div class="t">Weekly status draft</div><div class="p">research · and these won't be pushed right?</div></div><svg class="lk"><use href="#c-lock"/></svg><span class="tm">8:02</span></div>
+  </div>
+  <div class="hh"><span>YESTERDAY</span><span class="c">41</span></div>
+  <div class="hgrp">
+    <div class="ar"><div class="bb"><div class="t"><bdi>ملاحظات اجتماع الفريق</bdi></div><div class="p">notes · tidy the agenda and the dates</div></div><svg class="lk"><use href="#c-lock"/></svg><span class="tm">21:30</span></div>
+    <div class="ar"><div class="bb"><div class="t">Screenshot-reported issues</div><div class="p">research · fix both</div></div><svg class="lk"><use href="#c-lock"/></svg><span class="tm">19:10</span></div>
+    <div class="ar"><div class="bb"><div class="t">Storage cleanup</div><div class="p">research · what is taking the most space</div></div><span class="tm">16:44</span></div>
+    <div class="ar"><div class="bb"><div class="t">Sales dashboard charts</div><div class="p">web-shop · fix the chart taps</div></div><span class="tm">11:02</span></div>
+  </div>
+  <div data-fill="tabs-all"></div>
+</template>
+
+<div class="phones">
+  <div class="pw"><span class="tag">Now tab · light</span>
+    <div class="phone"><div class="hs hl" data-fill="r14-home"></div></div>
+    <p><b>A real tab bar.</b> "Now" and "All" are labelled tabs at the bottom, so all sessions are always one visible tap away. Search is the separate round button (Apple's iOS 26 pattern in Music, Photos). Compose moves to the top right.</p>
+  </div>
+  <div class="pw"><span class="tag">All tab · dark</span>
+    <div class="phone"><div class="hs hd" data-fill="r14-all"></div></div>
+    <p><b>All Sessions.</b> Every session, newest first, grouped by day with a count. Two compact filters: project, and sort (newest, most active, project). Each row: title, then project and your last prompt. A small lock marks sessions open on the Mac (read-only).</p>
+  </div>
+  <div class="pw"><span class="tag">Chat with images · light</span>
+    <div class="phone"><div class="screen lite">
+      <div class="island"></div>
+      <div class="sb"><span>9:41</span><svg viewBox="0 0 34 11" fill="currentColor"><use href="#c-sig"/></svg></div>
+      <div class="nav"><span class="gb"><svg><use href="#c-back"/></svg></span><div class="nt"><b>Aimux iOS app structure</b><small><i class="ok">Working</i> · aimux-ios</small></div><span class="gb"><svg><use href="#c-more"/></svg></span></div>
+      <div class="feed">
+        <div class="imgmsg"><div class="shot"><div class="bar1"></div><div class="ln" style="top:40px;width:150px"></div><div class="ln" style="top:66px;width:110px"></div><div class="ln" style="top:92px;width:170px"></div><div class="ln" style="top:118px;width:90px"></div><div class="hl2"></div></div>
+          <div class="me" style="align-self:flex-end">This row is cut off on my phone, fix it</div></div>
+        <div class="thought"><svg><use href="#c-brain"/></svg>Looked at the screenshot · 3s<svg class="ch"><use href="#c-chev"/></svg></div>
+        <div class="steps"><div class="sh"><b>3 steps</b> · edited <code style="font-size:13px">SessionRow.swift</code><svg class="ch" style="transform:rotate(180deg)"><use href="#c-up"/></svg></div></div>
+        <div class="ai">The project name had a fixed width. It now wraps under the title on small screens.</div>
+      </div>
+      <div class="menu"><div>Photo Library<svg><use href="#t-photo"/></svg></div><div>Take Photo<svg><use href="#t-cam"/></svg></div><div>Latest Screenshot<svg><use href="#t-shot"/></svg></div><div>Files<svg><use href="#t-file"/></svg></div></div>
+      <div class="bottom">
+        <div class="att"><div class="thumb"><span class="x">×</span></div><div class="thumb b"><span class="x">×</span></div></div>
+        <div class="comp"><div class="plus"><svg><use href="#t-plus"/></svg></div><div class="field">and this one too<svg><use href="#c-mic"/></svg></div><div class="send" style="background:var(--blue);color:#fff"><svg><use href="#c-arrow"/></svg></div></div>
+      </div>
+    </div></div>
+    <p><b>Images in the chat.</b> + opens Photo Library, Take Photo, Latest Screenshot (one tap for the common case) and Files. Attachments sit as thumbnails above the message box until you send; sent images show in your bubble. Needs the server to accept images (it's text-only today).</p>
+  </div>
+</div>
+<script>
+for (let i = 0; i < 4; i++) document.querySelectorAll('[data-fill]').forEach(el => { const t = document.getElementById(el.dataset.fill); if (t) { el.removeAttribute('data-fill'); el.innerHTML = t.innerHTML; } });
+</script>

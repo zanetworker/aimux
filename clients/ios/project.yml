@@ -1,0 +1,75 @@
+name: Aimux
+options:
+  bundleIdPrefix: me.adelzaalouk
+  deploymentTarget:
+    iOS: "27.0"
+  xcodeVersion: "27.0"
+settings:
+  base:
+    # Xcode's recommended settings, kept here because XcodeGen regenerates the project.
+    DEVELOPMENT_TEAM: KDDRCCVFU4
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  Aimux:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - target: AimuxKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: aimux
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.developer-tools
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiresFullScreen: true
+        NSFaceIDUsageDescription: Face ID unlocks aimux and pairs this iPhone with your Mac.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.adelzaalouk.Aimux
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "0.3"
+        CURRENT_PROJECT_VERSION: "21"
+    scheme:
+      testTargets: [AimuxKitTests, AimuxUITests]
+  AimuxKit:
+    type: framework
+    platform: iOS
+    sources: [AimuxKit/Sources]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.adelzaalouk.AimuxKit
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_MODULE_VERIFIER: YES
+  AimuxKitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AimuxKitTests
+      - path: ../../api/testdata/clients
+        type: folder
+    dependencies:
+      - target: AimuxKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.adelzaalouk.AimuxKitTests
+        GENERATE_INFOPLIST_FILE: YES
+  AimuxUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: Aimux
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.adelzaalouk.AimuxUITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Aimux

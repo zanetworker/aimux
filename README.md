@@ -109,7 +109,12 @@ aimux feedback "the X flag doesn't work"         # report friction
 aimux chat <session-id> "next step?"             # continue an idle Claude session
 aimux mcp proxy serve                            # lazy, shared MCP servers for all sessions
 aimux remote serve                               # your sessions from other devices (API, phone web client at /app/, approval notifications), via tailscale serve
+aimux remote pair --name iphone                  # one-time code that pairs a phone or browser (Face ID login); see also remote devices, remote revoke
 ```
+
+With `remote_access.terminal_input.enabled` on, the phone can also type into Claude Code sessions open in iTerm2 on the Mac, under the safety checks in the [remote access guide](https://zanetworker.github.io/aimux/guides/remote-access/#typing-into-terminal-sessions): a message is never typed into a shell, over a prompt or while someone uses the Mac, and text starting with `!` (Claude Code's bash mode) is always refused, as is text starting with `/` (a slash command) unless `terminal_input.allow_slash_commands` is set.
+
+The two phone clients live under `clients/`: the web client served by `remote serve` at `/app/` ([clients/web](clients/web)) and the iPhone app ([clients/ios](clients/ios)). Both follow [api/remote-v1.openapi.yaml](api/remote-v1.openapi.yaml) and rank sessions with the same fixtures in [api/testdata/clients](api/testdata/clients/README.md). Their tests: `node --test "clients/web/webapp/*.test.mjs"` for the web client (the plain directory form fails on Node 22) and, in `clients/ios`, `xcodebuild test -scheme Aimux -project Aimux.xcodeproj -destination 'platform=iOS Simulator,name=<iPhone>'` (see [clients/ios/README.md](clients/ios/README.md)).
 
 See [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) for the full guide and [SKILL.md](SKILL.md) for agent workflow recipes. The remote API's contract, for building clients, is [api/remote-v1.openapi.yaml](api/remote-v1.openapi.yaml) (each server also serves it at `/v1/openapi.yaml`).
 

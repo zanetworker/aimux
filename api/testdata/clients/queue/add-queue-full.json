@@ -1,0 +1,329 @@
+{
+  "name": "add-queue-full",
+  "session": {
+    "state": "idle",
+    "queue": {
+      "state": "running",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Step 1 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Step 2 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        },
+        {
+          "id": "q3",
+          "text": "Step 3 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:03:00Z"
+        },
+        {
+          "id": "q4",
+          "text": "Step 4 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:04:00Z"
+        },
+        {
+          "id": "q5",
+          "text": "Step 5 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:05:00Z"
+        },
+        {
+          "id": "q6",
+          "text": "Step 6 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:06:00Z"
+        },
+        {
+          "id": "q7",
+          "text": "Step 7 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:07:00Z"
+        },
+        {
+          "id": "q8",
+          "text": "Step 8 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:08:00Z"
+        },
+        {
+          "id": "q9",
+          "text": "Step 9 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:09:00Z"
+        },
+        {
+          "id": "q10",
+          "text": "Step 10 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:10:00Z"
+        },
+        {
+          "id": "q11",
+          "text": "Step 11 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:11:00Z"
+        },
+        {
+          "id": "q12",
+          "text": "Step 12 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:12:00Z"
+        },
+        {
+          "id": "q13",
+          "text": "Step 13 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:13:00Z"
+        },
+        {
+          "id": "q14",
+          "text": "Step 14 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:14:00Z"
+        },
+        {
+          "id": "q15",
+          "text": "Step 15 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:15:00Z"
+        },
+        {
+          "id": "q16",
+          "text": "Step 16 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:16:00Z"
+        },
+        {
+          "id": "q17",
+          "text": "Step 17 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:17:00Z"
+        },
+        {
+          "id": "q18",
+          "text": "Step 18 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:18:00Z"
+        },
+        {
+          "id": "q19",
+          "text": "Step 19 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:19:00Z"
+        },
+        {
+          "id": "q20",
+          "text": "Step 20 of the cleanup",
+          "state": "waiting",
+          "created": "2026-03-02T09:20:00Z"
+        }
+      ]
+    }
+  },
+  "add": {
+    "error": "queue_full"
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "running",
+      "resume": false
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Step 1 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q2",
+        "text": "Step 2 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q3",
+        "text": "Step 3 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q4",
+        "text": "Step 4 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q5",
+        "text": "Step 5 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q6",
+        "text": "Step 6 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q7",
+        "text": "Step 7 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q8",
+        "text": "Step 8 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q9",
+        "text": "Step 9 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q10",
+        "text": "Step 10 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q11",
+        "text": "Step 11 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q12",
+        "text": "Step 12 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q13",
+        "text": "Step 13 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q14",
+        "text": "Step 14 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q15",
+        "text": "Step 15 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q16",
+        "text": "Step 16 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q17",
+        "text": "Step 17 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q18",
+        "text": "Step 18 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q19",
+        "text": "Step 19 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q20",
+        "text": "Step 20 of the cleanup",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ],
+    "message": "The queue is full (20 messages). Delete one to add another.",
+    "keepText": true
+  }
+}

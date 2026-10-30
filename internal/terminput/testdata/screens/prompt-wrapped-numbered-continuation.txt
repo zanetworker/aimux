@@ -1,0 +1,7 @@
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and allow the following steps for this session:
+      3. the build and the lint run
+   3. No
+
+ Esc to cancel

@@ -1,0 +1,98 @@
+{
+  "name": "Two tables with paragraphs between them, as a history reply keeps its blank lines: each table ends at its blank line, the second header and delimiter start a new table, not rows of the first",
+  "markdown": "| Check | Result |\n|---|---|\n| a | yes |\n\nWhat's running there:\n\n| Item | Value |\n|---|---|\n| Nodes | 3 control-plane, 2 workers |\n\nEverything I ran was read-only.",
+  "blocks": [
+    {
+      "type": "table",
+      "align": [
+        "left",
+        "left"
+      ],
+      "header": [
+        [
+          {
+            "t": "text",
+            "v": "Check"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "Result"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "t": "text",
+              "v": "a"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "yes"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "What's running there:"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "align": [
+        "left",
+        "left"
+      ],
+      "header": [
+        [
+          {
+            "t": "text",
+            "v": "Item"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "Value"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "t": "text",
+              "v": "Nodes"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "3 control-plane, 2 workers"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Everything I ran was read-only."
+        }
+      ]
+    }
+  ]
+}

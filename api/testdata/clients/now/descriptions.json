@@ -1,0 +1,114 @@
+{
+  "name": "The description is the row's second line: present, absent, null, empty, blank and padded values",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "lastOnMac": {
+    "id": "d6",
+    "at": "2026-10-30T11:55:00Z"
+  },
+  "sessions": [
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Wire the share sheet",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:59:00Z",
+      "state": "busy",
+      "description": "Adds the share sheet to the chat screen and checks it on a small phone.",
+      "pinned": false
+    },
+    {
+      "id": "d2",
+      "provider": "claude",
+      "title": "Fix the icon spacing",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:58:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "d4",
+      "provider": "claude",
+      "title": "Merge the duplicate notes",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:56:00Z",
+      "state": "busy",
+      "description": "   ",
+      "pinned": false
+    },
+    {
+      "id": "d5",
+      "provider": "claude",
+      "title": "Tidy the bookmarks",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:00:00Z",
+      "state": "idle",
+      "pinned": true,
+      "description": "Sorts the bookmarks into four folders."
+    },
+    {
+      "id": "d6",
+      "provider": "claude",
+      "title": "Fix the login redirect",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:50:00Z",
+      "state": "open_in_terminal",
+      "description": "Finds why the login page loops back to itself.",
+      "pinned": false
+    },
+    {
+      "id": "d7",
+      "provider": "claude",
+      "title": "Sort the seed packets",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:55:00Z",
+      "state": "busy",
+      "description": "",
+      "pinned": false
+    },
+    {
+      "id": "d8",
+      "provider": "claude",
+      "title": "Label the jam jars",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:54:00Z",
+      "state": "busy",
+      "description": "   Writes labels for twelve jars. \n",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": "d6",
+    "pinned": [
+      "d5"
+    ],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "d1",
+        "d2",
+        "d4",
+        "d7",
+        "d8"
+      ]
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 6,
+      "onMac": 0
+    },
+    "descriptions": {
+      "d1": "Adds the share sheet to the chat screen and checks it on a small phone.",
+      "d2": null,
+      "d4": null,
+      "d5": "Sorts the bookmarks into four folders.",
+      "d6": "Finds why the login page loops back to itself.",
+      "d7": null,
+      "d8": "Writes labels for twelve jars."
+    }
+  }
+}

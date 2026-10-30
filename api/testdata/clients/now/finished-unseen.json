@@ -1,0 +1,63 @@
+{
+  "name": "a turn finished 3 minutes ago and never opened is Finished",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Draft the release notes",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Terminal session 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {
+    "d1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:57:00Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [],
+    "finished": [
+      "d1"
+    ],
+    "working": {
+      "list": []
+    },
+    "onMac": [
+      "m1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 1
+    }
+  }
+}

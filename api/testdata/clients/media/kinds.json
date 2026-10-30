@@ -1,0 +1,378 @@
+{
+  "name": "media cards for each kind",
+  "cases": [
+    {
+      "name": "YouTube watch link",
+      "markdown": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "youtube",
+          "href": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+          "title": "YouTube video"
+        }
+      ]
+    },
+    {
+      "name": "mobile YouTube with v after another parameter",
+      "markdown": "https://m.youtube.com/watch?feature=share&v=abc123",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "youtube",
+          "href": "https://m.youtube.com/watch?feature=share&v=abc123",
+          "title": "YouTube video"
+        }
+      ]
+    },
+    {
+      "name": "youtu.be short link with a time",
+      "markdown": "https://youtu.be/abc123?t=42",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "youtube",
+          "href": "https://youtu.be/abc123?t=42",
+          "title": "YouTube video"
+        }
+      ]
+    },
+    {
+      "name": "YouTube short",
+      "markdown": "https://youtube.com/shorts/xyz789",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "youtube",
+          "href": "https://youtube.com/shorts/xyz789",
+          "title": "YouTube video"
+        }
+      ]
+    },
+    {
+      "name": "Vimeo",
+      "markdown": "https://vimeo.com/123456789",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "vimeo",
+          "href": "https://vimeo.com/123456789",
+          "title": "Vimeo video"
+        }
+      ]
+    },
+    {
+      "name": "every video extension",
+      "markdown": "https://example.com/clips/demo.mp4\n\nhttps://example.com/a.mov\n\nhttps://example.com/b.m4v\n\nhttps://example.com/c.webm",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/clips/demo.mp4",
+          "title": "demo.mp4"
+        },
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/a.mov",
+          "title": "a.mov"
+        },
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/b.m4v",
+          "title": "b.m4v"
+        },
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/c.webm",
+          "title": "c.webm"
+        }
+      ]
+    },
+    {
+      "name": "every image extension",
+      "markdown": "https://example.com/i/a.png\n\nhttps://example.com/i/b.jpg\n\nhttps://example.com/i/c.jpeg\n\nhttps://example.com/i/d.gif\n\nhttps://example.com/i/e.webp",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/i/a.png",
+          "title": "a.png"
+        },
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/i/b.jpg",
+          "title": "b.jpg"
+        },
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/i/c.jpeg",
+          "title": "c.jpeg"
+        },
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/i/d.gif",
+          "title": "d.gif"
+        },
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/i/e.webp",
+          "title": "e.webp"
+        }
+      ]
+    },
+    {
+      "name": "every audio extension",
+      "markdown": "https://example.com/s/a.mp3\n\nhttps://example.com/s/b.m4a\n\nhttps://example.com/s/c.wav",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "audio",
+          "href": "https://example.com/s/a.mp3",
+          "title": "a.mp3"
+        },
+        {
+          "type": "media",
+          "kind": "audio",
+          "href": "https://example.com/s/b.m4a",
+          "title": "b.m4a"
+        },
+        {
+          "type": "media",
+          "kind": "audio",
+          "href": "https://example.com/s/c.wav",
+          "title": "c.wav"
+        }
+      ]
+    },
+    {
+      "name": "link text is the title",
+      "markdown": "[Release demo](https://cdn.example.com/v/demo.webm)",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://cdn.example.com/v/demo.webm",
+          "title": "Release demo"
+        }
+      ]
+    },
+    {
+      "name": "link text equal to the address is not a title",
+      "markdown": "[https://example.com/a.mp4](https://example.com/a.mp4)",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/a.mp4",
+          "title": "a.mp4"
+        }
+      ]
+    },
+    {
+      "name": "autolink",
+      "markdown": "<https://example.com/a.wav>",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "audio",
+          "href": "https://example.com/a.wav",
+          "title": "a.wav"
+        }
+      ]
+    },
+    {
+      "name": "query and fragment are ignored",
+      "markdown": "https://example.com/a/song.mp3?sig=abc.png#t=10",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "audio",
+          "href": "https://example.com/a/song.mp3?sig=abc.png#t=10",
+          "title": "song.mp3"
+        }
+      ]
+    },
+    {
+      "name": "uppercase extension",
+      "markdown": "https://example.com/IMG_0042.JPG",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/IMG_0042.JPG",
+          "title": "IMG_0042.JPG"
+        }
+      ]
+    },
+    {
+      "name": "scheme and host in capitals",
+      "markdown": "HTTPS://Example.COM:8443/x.MP4",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "HTTPS://Example.COM:8443/x.MP4",
+          "title": "x.MP4"
+        }
+      ]
+    },
+    {
+      "name": "percent-encoded file name is decoded in the title",
+      "markdown": "https://example.com/my%20clip.mp4",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/my%20clip.mp4",
+          "title": "my clip.mp4"
+        }
+      ]
+    },
+    {
+      "name": "spaces around the link",
+      "markdown": "   https://youtu.be/abc123   ",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "youtube",
+          "href": "https://youtu.be/abc123",
+          "title": "YouTube video"
+        }
+      ]
+    },
+    {
+      "name": "thumbnail image inside a link",
+      "markdown": "[![thumb](https://img.youtube.com/vi/abc123/0.jpg)](https://www.youtube.com/watch?v=abc123)",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "youtube",
+          "href": "https://www.youtube.com/watch?v=abc123",
+          "title": "thumb"
+        }
+      ]
+    },
+    {
+      "name": "image alone in its paragraph",
+      "markdown": "![Architecture](https://example.com/docs/arch.png)",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/docs/arch.png",
+          "title": "Architecture"
+        }
+      ]
+    },
+    {
+      "name": "image alone with empty alt text",
+      "markdown": "![](https://example.com/docs/arch.png)",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "image",
+          "href": "https://example.com/docs/arch.png",
+          "title": "arch.png"
+        }
+      ]
+    },
+    {
+      "name": "image syntax pointing at a video",
+      "markdown": "![Screen recording](https://example.com/rec.mov)",
+      "blocks": [
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/rec.mov",
+          "title": "Screen recording"
+        }
+      ]
+    },
+    {
+      "name": "between paragraphs",
+      "markdown": "Here is the demo:\n\nhttps://example.com/demo.mp4\n\nThat is all.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "Here is the demo:"
+            }
+          ]
+        },
+        {
+          "type": "media",
+          "kind": "video",
+          "href": "https://example.com/demo.mp4",
+          "title": "demo.mp4"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "That is all."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list items and quotes",
+      "markdown": "- https://youtu.be/abc123\n- notes\n\n> https://vimeo.com/42",
+      "blocks": [
+        {
+          "type": "list",
+          "ordered": false,
+          "start": null,
+          "items": [
+            {
+              "task": null,
+              "blocks": [
+                {
+                  "type": "media",
+                  "kind": "youtube",
+                  "href": "https://youtu.be/abc123",
+                  "title": "YouTube video"
+                }
+              ]
+            },
+            {
+              "task": null,
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": [
+                    {
+                      "t": "text",
+                      "v": "notes"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "quote",
+          "blocks": [
+            {
+              "type": "media",
+              "kind": "vimeo",
+              "href": "https://vimeo.com/42",
+              "title": "Vimeo video"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

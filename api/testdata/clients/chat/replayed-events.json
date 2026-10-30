@@ -1,0 +1,160 @@
+{
+  "name": "events replayed with the same seq (a snapshot overlapping the stream) are kept once",
+  "now": "2026-10-26T08:01:00Z",
+  "turns": [],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "t1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Say hello"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:01Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Hello"
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "t1",
+      "kind": "approval",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "approvalId": "a1",
+        "title": "Run echo",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "toolCall": {
+          "toolCallId": "c1",
+          "rawInput": {
+            "command": "echo hi"
+          }
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "t1",
+      "kind": "approval_resolved",
+      "time": "2026-10-26T08:00:03Z",
+      "data": {
+        "approvalId": "a1",
+        "outcome": "allowed"
+      }
+    },
+    {
+      "seq": 1,
+      "turn": "t1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Say hello"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:01Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Hello"
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "t1",
+      "kind": "approval",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "approvalId": "a1",
+        "title": "Run echo",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "toolCall": {
+          "toolCallId": "c1",
+          "rawInput": {
+            "command": "echo hi"
+          }
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "t1",
+      "kind": "approval_resolved",
+      "time": "2026-10-26T08:00:03Z",
+      "data": {
+        "approvalId": "a1",
+        "outcome": "allowed"
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Say hello"
+      },
+      {
+        "kind": "reply",
+        "text": "Hello"
+      },
+      {
+        "kind": "approval",
+        "approvalId": "a1",
+        "title": "Run echo",
+        "command": "echo hi",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "outcome": "allowed"
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

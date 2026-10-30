@@ -1,0 +1,127 @@
+{
+  "name": "twelve idle terminals: eight shown, newest first, all twelve counted",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "m12",
+      "provider": "claude",
+      "title": "Terminal session 12",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T16:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m11",
+      "provider": "claude",
+      "title": "Terminal session 11",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T17:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m10",
+      "provider": "claude",
+      "title": "Terminal session 10",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T17:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m9",
+      "provider": "claude",
+      "title": "Terminal session 9",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T18:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m8",
+      "provider": "claude",
+      "title": "Terminal session 8",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T18:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m7",
+      "provider": "claude",
+      "title": "Terminal session 7",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T19:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m6",
+      "provider": "claude",
+      "title": "Terminal session 6",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T19:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m5",
+      "provider": "claude",
+      "title": "Terminal session 5",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T20:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m4",
+      "provider": "claude",
+      "title": "Terminal session 4",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T20:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m3",
+      "provider": "claude",
+      "title": "Terminal session 3",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T21:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Terminal session 2",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T21:30:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Terminal session 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5",
+      "m6",
+      "m7",
+      "m8"
+    ],
+    "onMacTotal": 12,
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 12
+    }
+  }
+}

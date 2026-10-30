@@ -1,0 +1,84 @@
+{
+  "name": "a finish opened after it happened drops off Now; one opened before it stays",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {
+    "d1": "2026-10-26T08:58:00Z",
+    "d2": "2026-10-26T08:55:00Z"
+  },
+  "sessions": [
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Draft the release notes",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "d2",
+      "provider": "claude",
+      "title": "Tidy the changelog",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "idle"
+    }
+  ],
+  "events": {
+    "d1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:57:00Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ],
+    "d2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:56:00Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [],
+    "finished": [
+      "d2"
+    ],
+    "working": {
+      "list": []
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 0
+    }
+  }
+}

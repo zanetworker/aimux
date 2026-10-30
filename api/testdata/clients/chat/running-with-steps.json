@@ -1,0 +1,203 @@
+{
+  "name": "a running turn: thought, three tool calls with a titled and an untitled update, reply",
+  "now": "2026-10-26T08:00:30Z",
+  "turns": [],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "r1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Tidy the config loader"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:01Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Looking at "
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "the loader."
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:03.5Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c1",
+        "title": "Read config.go",
+        "kind": "read",
+        "status": "pending"
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:04Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c1",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:05Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c2",
+        "title": "Edit config.go",
+        "kind": "edit",
+        "status": "in_progress"
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:06Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c2",
+        "title": "Edit internal/config/config.go",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 8,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:07Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c3",
+        "title": "go test ./internal/config/",
+        "kind": "execute",
+        "status": "pending"
+      }
+    },
+    {
+      "seq": 9,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:09Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c3",
+        "status": "failed"
+      }
+    },
+    {
+      "seq": 10,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:10Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Cleaned up"
+        }
+      }
+    },
+    {
+      "seq": 11,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:11Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": " the loader; one test fails."
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Tidy the config loader"
+      },
+      {
+        "kind": "thought",
+        "text": "Looking at the loader.",
+        "seconds": 3
+      },
+      {
+        "kind": "steps",
+        "count": 3,
+        "seconds": 6,
+        "filesChanged": [
+          "Edit internal/config/config.go"
+        ],
+        "steps": [
+          {
+            "kind": "read",
+            "target": "Read config.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Edit internal/config/config.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "run",
+            "target": "go test ./internal/config/",
+            "status": "failed",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "Cleaned up the loader; one test fails."
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

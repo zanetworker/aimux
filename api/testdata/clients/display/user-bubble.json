@@ -1,0 +1,285 @@
+{
+  "name": "user-bubble",
+  "cases": [
+    {
+      "name": "plain",
+      "saved": "run the tests again",
+      "display": { "text": "run the tests again", "images": 0 }
+    },
+    {
+      "name": "typed lines and Markdown stay",
+      "saved": "  fix `parse()` in **both** files\nthen run make  \n",
+      "display": { "text": "fix `parse()` in **both** files\nthen run make", "images": 0 }
+    },
+    {
+      "name": "typed while busy",
+      "saved": "The user sent a new message while you were working:\nare you still blocked?",
+      "display": { "text": "are you still blocked?", "images": 0 }
+    },
+    {
+      "name": "a prefix that is not leading stays",
+      "saved": "quote this: The user sent a new message while you were working:",
+      "display": { "text": "quote this: The user sent a new message while you were working:", "images": 0 }
+    },
+    {
+      "name": "pasted content keeps its lines",
+      "saved": "\n\n<pasted_content id=\"6981\">\nline one\nline two\n</pasted_content>\n\n",
+      "display": { "text": "line one\nline two", "images": 0 }
+    },
+    {
+      "name": "busy, a paste and an image",
+      "saved": "The user sent a new message while you were working:\n[Image #1] the chart is cut off here\n<pasted_content id=\"7012\">\nwidth: 100%;\nheight: auto;\n</pasted_content>\n",
+      "display": { "text": "the chart is cut off here\n\nwidth: 100%;\nheight: auto;", "images": 1 }
+    },
+    {
+      "name": "numbered images inside a line",
+      "saved": "compare [Image #1] with [Image #2] please",
+      "display": { "text": "compare with please", "images": 2 }
+    },
+    {
+      "name": "an image at the end of a line",
+      "saved": "what is wrong here [Image #3]\nthanks",
+      "display": { "text": "what is wrong here\nthanks", "images": 1 }
+    },
+    {
+      "name": "a line of images is dropped",
+      "saved": "look at these\n  [Image #1] [Image #2]\nand tell me",
+      "display": { "text": "look at these\nand tell me", "images": 2 }
+    },
+    {
+      "name": "an image with a source",
+      "saved": "[Image: source: /tmp/screenshot-chart.png]\n\nwhy is the axis blank?",
+      "display": { "text": "why is the axis blank?", "images": 1 }
+    },
+    {
+      "name": "only an image",
+      "saved": "The user sent a new message while you were working:\n[Image #4]",
+      "display": { "text": "", "images": 1 }
+    },
+    {
+      "name": "look-alikes stay text",
+      "saved": "[image #1] [Image #x] [Image] [Image #2 and [Image:\nsplit]",
+      "display": { "text": "[image #1] [Image #x] [Image] [Image #2 and [Image:\nsplit]", "images": 0 }
+    },
+    {
+      "name": "empty paste",
+      "saved": "<pasted_content id=\"1\">\n</pasted_content>",
+      "display": { "text": "", "images": 0 }
+    },
+    {
+      "name": "a command with args",
+      "saved": "<command-name>/review-tools:tidy</command-name>\n<command-message>review-tools:tidy</command-message>\n<command-args>keep it short</command-args>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/review-tools:tidy", "args": "keep it short" }
+        ]
+      }
+    },
+    {
+      "name": "the message tag first, no args",
+      "saved": "<command-message>compact</command-message>\n<command-name>/compact</command-name>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/compact", "args": "" }
+        ]
+      }
+    },
+    {
+      "name": "empty args",
+      "saved": "<command-name>/status</command-name>\n<command-message>status</command-message>\n<command-args></command-args>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/status", "args": "" }
+        ]
+      }
+    },
+    {
+      "name": "args on several lines are trimmed",
+      "saved": "<command-message>plan</command-message>\n<command-name>/plan</command-name>\n<command-args>\n  first step\nsecond step  \n</command-args>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/plan", "args": "first step\nsecond step" }
+        ]
+      }
+    },
+    {
+      "name": "command output",
+      "saved": "<local-command-stdout>Total cost: $0.12\nTotal duration: 3m</local-command-stdout>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "output", "text": "Total cost: $0.12\nTotal duration: 3m", "error": false }
+        ]
+      }
+    },
+    {
+      "name": "colour codes are removed from output",
+      "saved": "<local-command-stdout>Set model to \u001b[1mFast\u001b[22m (\u001b[2;37mdefault\u001b[0m)</local-command-stdout>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "output", "text": "Set model to Fast (default)", "error": false }
+        ]
+      }
+    },
+    {
+      "name": "error output",
+      "saved": "<local-command-stderr>\n  unknown option --x\n</local-command-stderr>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "output", "text": "unknown option --x", "error": true }
+        ]
+      }
+    },
+    {
+      "name": "plain command output tags",
+      "saved": "<command-stdout>done</command-stdout><command-stderr>one warning</command-stderr>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "output", "text": "done", "error": false },
+          { "kind": "output", "text": "one warning", "error": true }
+        ]
+      }
+    },
+    {
+      "name": "bash mode input",
+      "saved": "<bash-input>git status --short</bash-input>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "!git status --short", "args": "" }
+        ]
+      }
+    },
+    {
+      "name": "bash output with empty error output",
+      "saved": "<bash-stdout> M main.go\n?? notes.txt</bash-stdout><bash-stderr></bash-stderr>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "output", "text": "M main.go\n?? notes.txt", "error": false }
+        ]
+      }
+    },
+    {
+      "name": "bash error output only",
+      "saved": "<bash-stdout></bash-stdout><bash-stderr>ls: nope: No such file or directory</bash-stderr>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "output", "text": "ls: nope: No such file or directory", "error": true }
+        ]
+      }
+    },
+    {
+      "name": "empty bash output shows nothing",
+      "saved": "<bash-stdout>\n</bash-stdout><bash-stderr>  </bash-stderr>",
+      "display": { "text": "", "images": 0, "parts": [] }
+    },
+    {
+      "name": "a caveat alone shows nothing",
+      "saved": "<local-command-caveat>Caveat: the messages below were made by local commands.</local-command-caveat>",
+      "display": { "text": "", "images": 0, "parts": [] }
+    },
+    {
+      "name": "a caveat before a command",
+      "saved": "<local-command-caveat>Caveat: generated.</local-command-caveat>\n<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/clear", "args": "" }
+        ]
+      }
+    },
+    {
+      "name": "text around a command",
+      "saved": "before you start\n<command-name>/tidy</command-name>\n<command-message>tidy</command-message>\n<command-args>docs only</command-args>\nand then report back",
+      "display": { "text": "before you start\n\nand then report back", "images": 0,
+        "parts": [
+          { "kind": "text", "text": "before you start" },
+          { "kind": "command", "text": "/tidy", "args": "docs only" },
+          { "kind": "text", "text": "and then report back" }
+        ]
+      }
+    },
+    {
+      "name": "a command and its output in one message",
+      "saved": "<command-name>/cost</command-name>\n<command-message>cost</command-message>\n<command-args></command-args>\n<local-command-stdout>Total cost: $1.50</local-command-stdout>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/cost", "args": "" },
+          { "kind": "output", "text": "Total cost: $1.50", "error": false }
+        ]
+      }
+    },
+    {
+      "name": "two commands",
+      "saved": "<bash-input>make test</bash-input>\n<bash-stdout>ok</bash-stdout><bash-stderr></bash-stderr>\n<bash-input>make lint</bash-input>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "!make test", "args": "" },
+          { "kind": "output", "text": "ok", "error": false },
+          { "kind": "command", "text": "!make lint", "args": "" }
+        ]
+      }
+    },
+    {
+      "name": "unknown tags stay text",
+      "saved": "<task-notes>keep me</task-notes> <command-names>x</command-names> <command-name a=\"1\">y</command-name>",
+      "display": { "text": "<task-notes>keep me</task-notes> <command-names>x</command-names> <command-name a=\"1\">y</command-name>", "images": 0,
+        "parts": [
+          { "kind": "text", "text": "<task-notes>keep me</task-notes> <command-names>x</command-names> <command-name a=\"1\">y</command-name>" }
+        ]
+      }
+    },
+    {
+      "name": "an unclosed tag stays text",
+      "saved": "see <command-name>/tidy and </bash-stdout> here",
+      "display": { "text": "see <command-name>/tidy and </bash-stdout> here", "images": 0,
+        "parts": [
+          { "kind": "text", "text": "see <command-name>/tidy and </bash-stdout> here" }
+        ]
+      }
+    },
+    {
+      "name": "args with no command are text",
+      "saved": "<command-args>orphan words</command-args>",
+      "display": { "text": "orphan words", "images": 0,
+        "parts": [
+          { "kind": "text", "text": "orphan words" }
+        ]
+      }
+    },
+    {
+      "name": "args after text are text",
+      "saved": "<command-name>/tidy</command-name> now <command-args>this</command-args>",
+      "display": { "text": "now this", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/tidy", "args": "" },
+          { "kind": "text", "text": "now this" }
+        ]
+      }
+    },
+    {
+      "name": "tags inside output stay as written",
+      "saved": "<local-command-stdout><command-name>/x</command-name> <b>bold</b> **not bold**</local-command-stdout>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "output", "text": "<command-name>/x</command-name> <b>bold</b> **not bold**", "error": false }
+        ]
+      }
+    },
+    {
+      "name": "an image with a command",
+      "saved": "[Image #1]\n<command-name>/review</command-name>\n<command-message>review</command-message>\n<command-args>this screen</command-args>",
+      "display": { "text": "", "images": 1,
+        "parts": [
+          { "kind": "command", "text": "/review", "args": "this screen" }
+        ]
+      }
+    },
+    {
+      "name": "a command typed while busy",
+      "saved": "The user sent a new message while you were working:\n<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>",
+      "display": { "text": "", "images": 0,
+        "parts": [
+          { "kind": "command", "text": "/compact", "args": "" }
+        ]
+      }
+    }
+  ]
+}

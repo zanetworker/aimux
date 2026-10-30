@@ -1,0 +1,12 @@
+{"log":"L1","events":[
+{"seq":1,"turn":"t1","kind":"turn_started","time":"2026-10-25T18:35:03.34Z","data":{"text":"Run the sample checks"}},
+{"seq":2,"turn":"t1","kind":"update","time":"2026-10-25T18:35:04Z","data":{"sessionUpdate":"tool_call","title":"Run sample tests","toolCallId":"c1"}},
+{"seq":3,"turn":"t1","kind":"approval","time":"2026-10-25T18:35:05.5Z","data":{"approvalId":"a1","title":"Run sample tests","toolCall":{"toolCallId":"c1","rawInput":{"command":"go test ./internal/remoteapi/... -run Push","description":"sample"}},"options":[
+{"optionId":"o1","name":"Allow once","kind":"allow_once"},
+{"optionId":"o2","name":"Always allow","kind":"allow_always"},
+{"optionId":"o3","name":"Reject","kind":"reject_once"}]}},
+{"seq":4,"turn":"t1","kind":"approval_resolved","time":"2026-10-25T18:35:09Z","data":{"approvalId":"a1","outcome":"allowed"}},
+{"seq":5,"turn":"t1","kind":"turn_done","time":"2026-10-25T18:35:10Z","data":{"stopReason":"end_turn"}},
+{"seq":6,"turn":"t2","kind":"turn_error","time":"2026-10-25T18:36:00Z","data":{"error":"sample failure"}},
+{"seq":7,"turn":"t2","kind":"telemetry","time":"2026-10-25T18:36:01Z","data":{"anything":1}}
+]}

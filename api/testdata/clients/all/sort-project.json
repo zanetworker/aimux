@@ -1,0 +1,96 @@
+{
+  "name": "project sort gives one section per project, newest project first, ties by path",
+  "now": "2026-10-26T12:00:00Z",
+  "timeZone": "UTC",
+  "project": null,
+  "sort": "project",
+  "sessions": [
+    {
+      "id": "z2",
+      "provider": "claude",
+      "title": "Zeta older",
+      "project": "/src/zeta",
+      "lastActive": "2026-10-26T08:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "a3",
+      "provider": "claude",
+      "title": "Alpha oldest",
+      "project": "/src/alpha",
+      "lastActive": "2026-10-20T08:00:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "z1",
+      "provider": "claude",
+      "title": "Zeta newest",
+      "project": "/src/zeta",
+      "lastActive": "2026-10-26T10:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Alpha second tie",
+      "project": "/src/alpha",
+      "lastActive": "2026-10-26T10:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Mid",
+      "project": "/src/mid",
+      "lastActive": "2026-10-26T11:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "l1",
+      "provider": "claude",
+      "title": "Clock ahead",
+      "project": "/src/late",
+      "lastActive": "2026-10-27T05:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Alpha first tie",
+      "project": "/src/alpha",
+      "lastActive": "2026-10-26T10:00:00Z",
+      "state": "idle"
+    }
+  ],
+  "expect": {
+    "sections": [
+      {
+        "day": "/src/late",
+        "ids": [
+          "l1"
+        ]
+      },
+      {
+        "day": "/src/mid",
+        "ids": [
+          "m1"
+        ]
+      },
+      {
+        "day": "/src/alpha",
+        "ids": [
+          "a1",
+          "a2",
+          "a3"
+        ]
+      },
+      {
+        "day": "/src/zeta",
+        "ids": [
+          "z1",
+          "z2"
+        ]
+      }
+    ]
+  }
+}

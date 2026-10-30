@@ -1,0 +1,427 @@
+{
+  "name": "Issue and pull request numbers become reference spans only after start, whitespace or an opening parenthesis",
+  "cases": [
+    {
+      "name": "hash number in a sentence",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Fixed in #123 and #45."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Fixed in "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#123",
+          "href": "https://github.com/acme/widget/issues/123"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#45",
+          "href": "https://github.com/acme/widget/issues/45"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "name": "start of text and after a parenthesis",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "#7 first, then (#8) and (see #9)"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#7",
+          "href": "https://github.com/acme/widget/issues/7"
+        },
+        {
+          "t": "text",
+          "v": " first, then ("
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#8",
+          "href": "https://github.com/acme/widget/issues/8"
+        },
+        {
+          "t": "text",
+          "v": ") and (see "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#9",
+          "href": "https://github.com/acme/widget/issues/9"
+        },
+        {
+          "t": "text",
+          "v": ")"
+        }
+      ]
+    },
+    {
+      "name": "one to six digits, then it is not a reference",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "#123456 links, #1234567 does not, #12abc does not, #0 links"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#123456",
+          "href": "https://github.com/acme/widget/issues/123456"
+        },
+        {
+          "t": "text",
+          "v": " links, #1234567 does not, #12abc does not, "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#0",
+          "href": "https://github.com/acme/widget/issues/0"
+        },
+        {
+          "t": "text",
+          "v": " links"
+        }
+      ]
+    },
+    {
+      "name": "owner/repo#N points at that repo on the same host",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "See acme/gadget#12 and other-org/tool.rs#3 but not acme/gadget#"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "See "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "acme/gadget#12",
+          "href": "https://github.com/acme/gadget/issues/12"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "other-org/tool.rs#3",
+          "href": "https://github.com/other-org/tool.rs/issues/3"
+        },
+        {
+          "t": "text",
+          "v": " but not acme/gadget#"
+        }
+      ]
+    },
+    {
+      "name": "not after a word character or another symbol",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "a#1 and x/#2 and [#3] and v#4"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "a#1 and x/#2 and [#3] and v#4"
+        }
+      ]
+    },
+    {
+      "name": "inside emphasis and strong, but not inside code",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "done in #10"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "and #11"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": "#12"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "del",
+          "c": [
+            {
+              "t": "text",
+              "v": "#13"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "done in "
+            },
+            {
+              "t": "ref",
+              "kind": "pr",
+              "v": "#10",
+              "href": "https://github.com/acme/widget/issues/10"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "and "
+            },
+            {
+              "t": "ref",
+              "kind": "pr",
+              "v": "#11",
+              "href": "https://github.com/acme/widget/issues/11"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": "#12"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "del",
+          "c": [
+            {
+              "t": "ref",
+              "kind": "pr",
+              "v": "#13",
+              "href": "https://github.com/acme/widget/issues/13"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "not inside a link",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "link",
+          "href": "https://example.com/x",
+          "c": [
+            {
+              "t": "text",
+              "v": "see #14"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " but #15 yes"
+        }
+      ],
+      "expect": [
+        {
+          "t": "link",
+          "href": "https://example.com/x",
+          "c": [
+            {
+              "t": "text",
+              "v": "see #14"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " but "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#15",
+          "href": "https://github.com/acme/widget/issues/15"
+        },
+        {
+          "t": "text",
+          "v": " yes"
+        }
+      ]
+    },
+    {
+      "name": "a hard break splits text; the next text starts fresh",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "first #16"
+        },
+        {
+          "t": "br"
+        },
+        {
+          "t": "text",
+          "v": "#17 second"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "first "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#16",
+          "href": "https://github.com/acme/widget/issues/16"
+        },
+        {
+          "t": "br"
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#17",
+          "href": "https://github.com/acme/widget/issues/17"
+        },
+        {
+          "t": "text",
+          "v": " second"
+        }
+      ]
+    }
+  ]
+}

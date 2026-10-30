@@ -20,37 +20,42 @@ import (
 
 // Session represents a past agent session discovered from session files.
 type Session struct {
-	ID          string    `json:"id"`
-	Provider    string    `json:"provider"`
-	Project     string    `json:"project"`      // decoded directory path
-	FilePath    string    `json:"file_path"`     // full path to session file
-	StartTime   time.Time `json:"start_time"`    // first entry timestamp
-	LastActive  time.Time `json:"last_active"`   // last entry timestamp
-	TurnCount   int       `json:"turn_count"`    // approximate conversation turns
+	ID               string    `json:"id"`
+	Provider         string    `json:"provider"`
+	Project          string    `json:"project"`     // decoded directory path
+	FilePath         string    `json:"file_path"`   // full path to session file
+	StartTime        time.Time `json:"start_time"`  // first entry timestamp
+	LastActive       time.Time `json:"last_active"` // last entry timestamp
+	TurnCount        int       `json:"turn_count"`  // approximate conversation turns
 	TokensIn         int64     `json:"tokens_in"`
 	TokensOut        int64     `json:"tokens_out"`
 	CacheReadTokens  int64     `json:"cache_read_tokens"`
 	CacheWriteTokens int64     `json:"cache_write_tokens"`
 	CostUSD          float64   `json:"cost_usd"`
-	FirstPrompt string    `json:"first_prompt"`  // first user message (cleaned, for display)
-	Title       string    `json:"title"`         // LLM-generated title (from meta, or empty)
-	AITitle     string    `json:"ai_title"`      // the name Claude Code gave the session (its latest ai-title entry)
-	Cwd         string    `json:"cwd"`           // working directory recorded in the session (Project is reconstructed from the folder name)
-	Resumable   bool      `json:"resumable"`     // true if provider supports resume
-	Annotation  string    `json:"annotation"`    // achieved/partial/failed/abandoned
-	Note        string    `json:"note"`          // free-text rationale
-	Tags        []string  `json:"tags"`          // failure mode tags
-	IsSubagent     bool   `json:"is_subagent"`
-	Automated      bool   `json:"automated"` // started by a program (cron, SDK, analyzers), see IsAutomated
-	PermissionMode string `json:"permission_mode"`
-	Starred        bool   `json:"starred"`
-	GitBranch      string `json:"git_branch"`
-	LastPrompt     string  `json:"last_prompt"`
-	LastAction     string  `json:"last_action"`
-	Model          string  `json:"model"`
-	ROIMultiplier  float64 `json:"roi_multiplier"`
-	TaskType       string  `json:"task_type"`
-	DurationMin    float64 `json:"duration_min"`
+	FirstPrompt      string    `json:"first_prompt"`             // first user message (cleaned, for display)
+	Title            string    `json:"title"`                    // LLM-generated title (from meta, or empty)
+	AITitle          string    `json:"ai_title"`                 // the name Claude Code gave the session (its latest ai-title entry)
+	AwaySummary      string    `json:"away_summary"`             // Claude Code's latest away_summary recap (trimmed, at most awaySummaryMax characters)
+	AwaySummaryAt    time.Time `json:"away_summary_at,omitzero"` // when Claude Code wrote that recap; omitted without one
+	Description      string    `json:"description"`              // description from meta (owner's or model's), or empty
+	DescriptionBy    string    `json:"description_by"`           // "owner" or "model" (from meta)
+	DescribedAt      string    `json:"described_at"`             // when the model last described it (from meta, RFC 3339)
+	Cwd              string    `json:"cwd"`                      // working directory recorded in the session (Project is reconstructed from the folder name)
+	Resumable        bool      `json:"resumable"`                // true if provider supports resume
+	Annotation       string    `json:"annotation"`               // achieved/partial/failed/abandoned
+	Note             string    `json:"note"`                     // free-text rationale
+	Tags             []string  `json:"tags"`                     // failure mode tags
+	IsSubagent       bool      `json:"is_subagent"`
+	Automated        bool      `json:"automated"` // started by a program (cron, SDK, analyzers), see IsAutomated
+	PermissionMode   string    `json:"permission_mode"`
+	Starred          bool      `json:"starred"`
+	GitBranch        string    `json:"git_branch"`
+	LastPrompt       string    `json:"last_prompt"`
+	LastAction       string    `json:"last_action"`
+	Model            string    `json:"model"`
+	ROIMultiplier    float64   `json:"roi_multiplier"`
+	TaskType         string    `json:"task_type"`
+	DurationMin      float64   `json:"duration_min"`
 
 	// scan-time only (not serialized): inputs to Automated
 	entrypoint string
@@ -67,6 +72,12 @@ type Meta struct {
 	ROIMultiplier float64  `json:"roi_multiplier,omitempty"`
 	TaskType      string   `json:"task_type,omitempty"`
 	UpdatedAt     string   `json:"updated_at,omitempty"`
+
+	Description    string `json:"description,omitempty"`
+	TitleBy        string `json:"title_by,omitempty"`       // "model" or "owner"; empty means model
+	DescriptionBy  string `json:"description_by,omitempty"` // "model" or "owner"
+	DescribedAt    string `json:"described_at,omitempty"`   // RFC 3339
+	DescribedTurns int    `json:"described_turns,omitempty"`
 }
 
 // DiscoverOpts controls the scope of session discovery.
@@ -197,6 +208,9 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 		sessions[i].Note = meta.Note
 		sessions[i].Tags = meta.Tags
 		sessions[i].Title = meta.Title
+		sessions[i].Description = meta.Description
+		sessions[i].DescriptionBy = meta.DescriptionBy
+		sessions[i].DescribedAt = meta.DescribedAt
 		sessions[i].Starred = meta.Starred
 		sessions[i].ROIMultiplier = meta.ROIMultiplier
 		sessions[i].TaskType = meta.TaskType
@@ -356,16 +370,35 @@ func scanSession(id, filePath, project string) (Session, error) {
 	return s, nil
 }
 
+// awaySummaryMax caps the stored recap, in characters.
+const awaySummaryMax = 600
+
+// awaySummaryText returns the trimmed, capped text of an away_summary
+// entry's content, or "" when it is not a non-empty string.
+func awaySummaryText(content json.RawMessage) string {
+	var text string
+	if json.Unmarshal(content, &text) != nil {
+		return ""
+	}
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len(r) > awaySummaryMax {
+		text = strings.TrimSpace(string(r[:awaySummaryMax]))
+	}
+	return text
+}
+
 // sessionEntry is the minimal structure for fast-scanning JSONL entries.
 type sessionEntry struct {
-	Type           string    `json:"type"`
-	IsMeta         bool      `json:"isMeta"` // text Claude Code adds in the user's place
-	AITitle        string    `json:"aiTitle"` // on ai-title entries
-	Entrypoint     string    `json:"entrypoint"`
-	CWD            string    `json:"cwd"`
-	Timestamp      time.Time `json:"timestamp"`
-	GitBranch      string    `json:"gitBranch"`
-	PermissionMode string    `json:"permissionMode"`
+	Type           string          `json:"type"`
+	IsMeta         bool            `json:"isMeta"`  // text Claude Code adds in the user's place
+	AITitle        string          `json:"aiTitle"` // on ai-title entries
+	Subtype        string          `json:"subtype"` // on system entries, e.g. away_summary
+	Content        json.RawMessage `json:"content"` // top-level content of system entries; raw so any shape parses
+	Entrypoint     string          `json:"entrypoint"`
+	CWD            string          `json:"cwd"`
+	Timestamp      time.Time       `json:"timestamp"`
+	GitBranch      string          `json:"gitBranch"`
+	PermissionMode string          `json:"permissionMode"`
 	Message        *struct {
 		Model   string          `json:"model"`
 		Role    string          `json:"role"`
@@ -481,6 +514,13 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (time
 
 	if entry.Type == "ai-title" && entry.AITitle != "" {
 		s.AITitle = entry.AITitle // the latest name wins
+	}
+
+	if entry.Type == "system" && entry.Subtype == "away_summary" {
+		if summary := awaySummaryText(entry.Content); summary != "" {
+			s.AwaySummary = summary // the latest recap wins
+			s.AwaySummaryAt = entry.Timestamp
+		}
 	}
 
 	if entry.Message == nil {
@@ -1002,48 +1042,6 @@ func LoadMeta(sessionFilePath string) Meta {
 		return Meta{}
 	}
 	return m
-}
-
-// SaveMeta writes session metadata to a sidecar .meta.json file.
-// Uses atomic write (temp file + rename) to prevent corruption.
-func SaveMeta(sessionFilePath string, m Meta) error {
-	m.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal session metadata: %w", err)
-	}
-	data = append(data, '\n')
-
-	metaPath := MetaPath(sessionFilePath)
-	dir := filepath.Dir(metaPath)
-
-	tmp, err := os.CreateTemp(dir, "meta.tmp.*")
-	if err != nil {
-		return fmt.Errorf("create temp file for session metadata: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	success := false
-	defer func() {
-		if !success {
-			_ = tmp.Close()
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		return fmt.Errorf("write session metadata: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp metadata file: %w", err)
-	}
-	if err := os.Rename(tmpPath, metaPath); err != nil {
-		return fmt.Errorf("rename temp metadata file: %w", err)
-	}
-
-	success = true
-	return nil
 }
 
 // CollectTags returns a deduplicated, sorted list of all tags used across

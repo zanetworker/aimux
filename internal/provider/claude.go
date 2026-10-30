@@ -832,6 +832,7 @@ type claudeContentBlock struct {
 	text          string
 	toolName      string
 	toolSnippet   string
+	toolInput     string
 	toolUseID     string
 	toolFilePath  string
 	editOldString string
@@ -877,9 +878,28 @@ func parseClaudeRawEntry(line string) claudeJSONLEntry {
 		e.parseClaudeUser(raw)
 	case "assistant":
 		e.parseClaudeAssistant(raw)
+	case "attachment":
+		e.parseClaudeQueuedCommand(raw)
 	}
 
 	return e
+}
+
+// parseClaudeQueuedCommand reads a message typed while Claude was busy:
+// Claude Code saves it as an attachment of type queued_command rather than a
+// user entry, so it is turned into one. Other attachments are ignored.
+func (e *claudeJSONLEntry) parseClaudeQueuedCommand(raw map[string]json.RawMessage) {
+	var att struct {
+		Type   string `json:"type"`
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(raw["attachment"], &att); err != nil || att.Type != "queued_command" || strings.TrimSpace(att.Prompt) == "" {
+		e.entryType = ""
+		return
+	}
+	e.entryType = "user"
+	e.isHumanMessage = true
+	e.textContent = att.Prompt
 }
 
 func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
@@ -1001,10 +1021,11 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 		case "tool_use":
 			name, _ := block["name"].(string)
 			id, _ := block["id"].(string)
-			snippet := ""
+			snippet, fullInput := "", ""
 			var editOld, editNew, filePath, writeContent string
 			if input, ok := block["input"].(map[string]interface{}); ok {
 				snippet = claudeToolInputSnippet(name, input)
+				fullInput = claudeToolInput(name, input)
 				if fp, ok := input["file_path"].(string); ok {
 					filePath = fp
 				}
@@ -1026,6 +1047,7 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 				blockType:     "tool_use",
 				toolName:      name,
 				toolSnippet:   snippet,
+				toolInput:     fullInput,
 				toolUseID:     id,
 				toolFilePath:  filePath,
 				editOldString: editOld,
@@ -1112,6 +1134,11 @@ func parseClaudeJSONL(data string) []trace.Turn {
 			for _, block := range e.blocks {
 				switch block.blockType {
 				case "text":
+					// block.text is trimmed and non-empty (parseClaudeRawEntry).
+					if current.OutputText != "" {
+						current.OutputText += "\n\n"
+					}
+					current.OutputText += block.text
 					for _, line := range strings.Split(block.text, "\n") {
 						trimmed := strings.TrimRight(line, " \t\r")
 						if strings.TrimSpace(trimmed) != "" {
@@ -1122,6 +1149,7 @@ func parseClaudeJSONL(data string) []trace.Turn {
 					span := trace.ToolSpan{
 						Name:      block.toolName,
 						Snippet:   block.toolSnippet,
+						Input:     block.toolInput,
 						Success:   true,
 						ToolUseID: block.toolUseID,
 						FilePath:  block.toolFilePath,
@@ -1199,4 +1227,28 @@ func claudeToolInputSnippet(toolName string, input map[string]interface{}) strin
 		}
 	}
 	return ""
+}
+
+// claudeToolInput returns the full, untruncated input of a tool call: the
+// command, pattern, query, url, description or path. Unknown tools give "".
+func claudeToolInput(toolName string, input map[string]interface{}) string {
+	key := ""
+	switch toolName {
+	case "Bash":
+		key = "command"
+	case "Read", "Write", "Edit":
+		key = "file_path"
+	case "Grep", "Glob":
+		key = "pattern"
+	case "Task":
+		key = "description"
+	case "WebSearch":
+		key = "query"
+	case "WebFetch":
+		key = "url"
+	default:
+		return ""
+	}
+	v, _ := input[key].(string)
+	return strings.TrimSpace(v)
 }

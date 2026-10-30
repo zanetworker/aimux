@@ -1,0 +1,91 @@
+{
+  "name": "an approval answered in the same page is not pending",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Wire push notifications",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:58:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Terminal session 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {
+    "a1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "approvalId": "p1",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      },
+      {
+        "seq": 3,
+        "turn": "t1",
+        "kind": "approval_resolved",
+        "time": "2026-10-26T08:57:00Z",
+        "data": {
+          "approvalId": "p1",
+          "outcome": "allow"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "a1"
+      ]
+    },
+    "onMac": [
+      "m1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 1,
+      "onMac": 1
+    }
+  }
+}

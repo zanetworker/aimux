@@ -1,0 +1,39 @@
+{
+  "name": "A hidden Last on your Mac session that is pinned still shows in Pinned",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "lastOnMac": {
+    "id": "t1",
+    "at": "2026-10-29T10:00:00Z"
+  },
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Plan the allotment layout",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T08:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": true
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [
+      "t1"
+    ],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 1
+    }
+  }
+}

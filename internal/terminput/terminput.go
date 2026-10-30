@@ -1,0 +1,561 @@
+package terminput
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"path"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/zanetworker/aimux/internal/config"
+)
+
+const (
+	idleRequired  = 120 * time.Second
+	idemTTL       = 10 * time.Minute
+	driverTimeout = 5 * time.Second
+	// settle is the pause between typing text and pressing Enter: Claude
+	// Code takes text and Enter as separate writes.
+	settle = 300 * time.Millisecond
+)
+
+// Keys other than digits that a driver can press.
+const (
+	KeyEscape Key = "escape"
+	KeyEnter  Key = "enter"
+)
+
+// Target is the session's claude process and its tty, e.g. "/dev/ttys001".
+type Target struct {
+	PID int
+	TTY string
+}
+
+// Pane is a driver's own handle, opaque to callers.
+type Pane struct{ Driver, ID string }
+
+// Driver moves bytes for one terminal. Every safety check lives in Service.
+type Driver interface {
+	Name() string
+	// Locate reports false when the pane is not this driver's.
+	Locate(ctx context.Context, t Target) (Pane, bool, error)
+	// Type types text without Enter; text for which PasteText is true goes
+	// in as a bracketed paste. The service presses Enter itself, after
+	// reading the screen again.
+	Type(ctx context.Context, p Pane, text string) error
+	Key(ctx context.Context, p Pane, k Key) error
+	Screen(ctx context.Context, p Pane) (string, error)
+}
+
+// FocusReporter is a driver that can say whether its terminal is the
+// frontmost app and which session has keyboard focus, by tty. Keystrokes
+// reach only that session, so only it can mix with the owner's typing.
+// It must never activate or focus anything.
+type FocusReporter interface {
+	Focused(ctx context.Context) (frontmost bool, tty string, err error)
+}
+
+// System answers questions about the machine.
+type System interface {
+	TTY(pid int) (string, error)
+	ForegroundIsPID(tty string, pid int) (bool, error)
+	// ForegroundCommand is the command name of the tty's foreground process
+	// group leader, such as "claude" or "/usr/local/bin/node".
+	ForegroundCommand(tty string) (string, error)
+	IdleSeconds() (float64, error)
+}
+
+// Sessions maps a session id to the pid of the terminal process holding it,
+// excluding sessions aimux itself owns.
+type Sessions interface {
+	TerminalPID(sessionID string) (int, bool)
+}
+
+// RegistryStatuses is Sessions that also reports a session's status in
+// Claude's registry ("busy", "idle" or ""). Send then refuses a session the
+// registry calls busy, as the chat queue's dispatcher does.
+type RegistryStatuses interface {
+	RegistryStatus(sessionID string) string
+}
+
+// Status is what a client needs to decide whether to offer a composer.
+type Status struct {
+	State   string // busy, idle or unknown
+	CanType bool
+	Reason  string // why CanType is false
+	Prompt  *Prompt
+	// Working is true while the screen shows Claude Code working on a turn;
+	// Send then answers ErrBusy. CanType does not include it, so clients
+	// without a queue keep their composer and get a fixed busy message.
+	Working bool
+}
+
+type codeError struct{ code, msg string }
+
+func (e *codeError) Error() string { return e.msg }
+
+func newErr(code, msg string) error { return &codeError{code, msg} }
+
+// Errors with stable codes.
+var (
+	ErrDisabled         = newErr("disabled", "terminal input is off")
+	ErrNotInTerminal    = newErr("not_in_terminal", "session is not open in a terminal")
+	ErrNotClaude        = newErr("not_claude", "the terminal is not running this session's claude")
+	ErrMacInUse         = newErr("mac_in_use", "the owner is using this session on the Mac")
+	ErrNoDriver         = newErr("no_terminal_driver", "no driver reaches this terminal")
+	ErrAutomationDenied = newErr("automation_denied", "macOS denied automation access")
+	ErrNotAtInput       = newErr("not_at_input", "the session is not waiting at an empty input box")
+	ErrNoPrompt         = newErr("no_prompt", "no permission prompt is showing")
+	ErrPromptChanged    = newErr("prompt_changed", "a different prompt is showing")
+	ErrBadText          = newErr("bad_text", "the text holds control characters or starts with ! or /")
+	ErrNotSubmitted     = newErr("not_submitted", "the text is in the input box but was not submitted")
+	ErrBusy             = newErr("busy", "Claude is working on a turn in this session")
+	// Submit's answers when the input box does not hold the message.
+	ErrBoxEmpty = newErr("box_empty", "the input box is empty")
+	ErrNotInBox = newErr("not_in_box", "the input box holds other text")
+)
+
+// CheckText returns ErrBadText when text holds a C0 control other than
+// newline and tab, DEL or a C1 control, or starts with "!" after optional
+// white space. Control bytes would reach the pty as keys: CR submits,
+// ESC[201~ ends a paste, Ctrl-Z suspends claude. A leading "!" switches
+// Claude Code to bash mode, where Enter runs a shell command unasked.
+func CheckText(text string) error {
+	for _, r := range text {
+		if (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f) {
+			return ErrBadText
+		}
+	}
+	if strings.HasPrefix(strings.TrimLeftFunc(text, unicode.IsSpace), "!") {
+		return ErrBadText
+	}
+	return nil
+}
+
+// CheckMessage applies every text rule a message must pass before it is
+// typed: CheckText, and no leading "/" unless allowSlash. It answers
+// ErrBadText or nil.
+func CheckMessage(text string, allowSlash bool) error {
+	if err := CheckText(text); err != nil {
+		return err
+	}
+	if slashCommand(text) && !allowSlash {
+		return ErrBadText
+	}
+	return nil
+}
+
+// slashCommand reports whether text starts with "/" after optional white
+// space: Claude Code runs it as a slash command.
+func slashCommand(text string) bool {
+	return strings.HasPrefix(strings.TrimLeftFunc(text, unicode.IsSpace), "/")
+}
+
+// Code returns the stable code for err: "ok" for nil, the sentinel's code, or
+// "error" for anything else.
+func Code(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	var ce *codeError
+	if errors.As(err, &ce) {
+		return ce.code
+	}
+	return "error"
+}
+
+// Service applies the safety checks and delegates byte-moving to drivers.
+type Service struct {
+	cfg      config.TerminalInputConfig
+	sessions Sessions
+	sys      System
+	log      io.Writer
+	drivers  []Driver
+	now      func() time.Time
+	timeout  time.Duration // per driver call
+	sleep    func(ctx context.Context, d time.Duration) error
+	goos     string // runtime.GOOS; terminal drivers exist for darwin only
+
+	mu   sync.Mutex // serialises attempts and guards done
+	done map[string]time.Time
+}
+
+// NewService builds a Service. log may be nil.
+func NewService(cfg config.TerminalInputConfig, sessions Sessions, sys System, log io.Writer, drivers ...Driver) *Service {
+	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// foregroundOK reports ErrNotClaude unless the tty's foreground process
+// group is t.PID's and its command is claude or node (Claude Code runs as
+// either). It runs in locate and again right before each write.
+func (s *Service) foregroundOK(t Target) error {
+	fg, err := s.sys.ForegroundIsPID(t.TTY, t.PID)
+	if err != nil || !fg {
+		return ErrNotClaude
+	}
+	cmd, err := s.sys.ForegroundCommand(t.TTY)
+	if err != nil {
+		return ErrNotClaude
+	}
+	switch path.Base(strings.TrimSpace(cmd)) {
+	case "claude", "node":
+		return nil
+	}
+	return ErrNotClaude
+}
+
+// locate runs checks 1 to 5 and returns the driver, pane and target.
+func (s *Service) locate(ctx context.Context, sessionID string) (Driver, Pane, Target, error) {
+	if !s.cfg.Enabled {
+		return nil, Pane{}, Target{}, ErrDisabled
+	}
+	pid, ok := s.sessions.TerminalPID(sessionID)
+	if !ok {
+		return nil, Pane{}, Target{}, ErrNotInTerminal
+	}
+	tty, err := s.sys.TTY(pid)
+	if err != nil || tty == "" {
+		return nil, Pane{}, Target{}, ErrNotInTerminal
+	}
+	t := Target{PID: pid, TTY: tty}
+	if err := s.foregroundOK(t); err != nil {
+		return nil, Pane{}, Target{}, err
+	}
+	if s.goos != "darwin" {
+		// No driver off macOS; answer that before the idle probe (ioreg),
+		// whose absence would otherwise read as mac_in_use.
+		return nil, Pane{}, Target{}, ErrNoDriver
+	}
+	for _, d := range s.drivers {
+		cctx, cancel := s.withTimeout(ctx)
+		p, found, err := d.Locate(cctx, t)
+		cancel()
+		if err != nil {
+			if errors.Is(err, ErrAutomationDenied) {
+				return nil, Pane{}, Target{}, ErrAutomationDenied
+			}
+			return nil, Pane{}, Target{}, fmt.Errorf("%s: locate: %w", d.Name(), err)
+		}
+		if found {
+			if err := s.inUse(ctx, d, t); err != nil {
+				return nil, Pane{}, Target{}, err
+			}
+			return d, p, t, nil
+		}
+	}
+	return nil, Pane{}, Target{}, ErrNoDriver
+}
+
+// inUse reports ErrMacInUse when the owner may be typing into t: the Mac
+// was used in the last 2 minutes, d's terminal is in front and its focused
+// session is t's tty. It fails closed: an idle or focus error, or a driver
+// that cannot report focus, counts as in use. allow_while_in_use skips it.
+func (s *Service) inUse(ctx context.Context, d Driver, t Target) error {
+	if s.cfg.AllowWhileInUse {
+		return nil
+	}
+	idle, err := s.sys.IdleSeconds()
+	if err != nil {
+		s.probeFailed(d, "idle", err)
+		return ErrMacInUse
+	}
+	if idle >= idleRequired.Seconds() {
+		return nil
+	}
+	fr, ok := d.(FocusReporter)
+	if !ok {
+		return ErrMacInUse
+	}
+	cctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+	front, tty, err := fr.Focused(cctx)
+	switch {
+	case errors.Is(err, ErrAutomationDenied):
+		return ErrAutomationDenied
+	case err != nil:
+		s.probeFailed(d, "focus", err)
+		return ErrMacInUse
+	case front && tty == t.TTY:
+		return ErrMacInUse
+	}
+	return nil
+}
+
+// probeFailed logs a guard probe that failed, so a broken probe is visible
+// rather than reading as the owner at the Mac. Probe errors carry no text.
+func (s *Service) probeFailed(d Driver, check string, err error) {
+	if s.log == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(s.log, "%s probe driver=%s check=%s error=%q\n", s.now().UTC().Format(time.RFC3339), d.Name(), check, err.Error())
+}
+
+func (s *Service) readScreen(ctx context.Context, d Driver, p Pane) (string, error) {
+	cctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+	scr, err := d.Screen(cctx, p)
+	if err != nil {
+		return "", fmt.Errorf("%s: read screen: %w", d.Name(), err)
+	}
+	return scr, nil
+}
+
+// Status reports state and whether Send would be accepted, without typing.
+func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) Status {
+	st := Status{State: "unknown"}
+	switch registryStatus {
+	case "busy", "idle":
+		st.State = registryStatus
+	}
+	d, p, _, err := s.locate(ctx, sessionID)
+	if err != nil {
+		st.Reason = Code(err)
+		return st
+	}
+	scr, err := s.readScreen(ctx, d, p)
+	if err != nil {
+		st.Reason = Code(err)
+		return st
+	}
+	st.Prompt = ParsePrompt(scr)
+	st.Working = Working(scr)
+	if !InputBoxEmpty(scr) {
+		st.Reason = Code(ErrNotAtInput)
+		return st
+	}
+	st.CanType = true
+	return st
+}
+
+func (s *Service) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, s.timeout)
+}
+
+func (s *Service) remembered(sessionID, idemKey string) bool {
+	if idemKey == "" {
+		return false
+	}
+	now := s.now()
+	for k, t := range s.done {
+		if now.Sub(t) > idemTTL {
+			delete(s.done, k)
+		}
+	}
+	_, ok := s.done[sessionID+"\x00"+idemKey]
+	return ok
+}
+
+func (s *Service) remember(sessionID, idemKey string) {
+	if idemKey != "" {
+		s.done[sessionID+"\x00"+idemKey] = s.now()
+	}
+}
+
+func (s *Service) record(sessionID, what string, err error) {
+	if s.log == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(s.log, "%s %q %s %s\n", s.now().UTC().Format(time.RFC3339), sessionID, what, Code(err))
+}
+
+// registryBusy reports whether Claude's registry, when the sessions source
+// reads it, calls the session busy.
+func (s *Service) registryBusy(sessionID string) bool {
+	r, ok := s.sessions.(RegistryStatuses)
+	return ok && r.RegistryStatus(sessionID) == "busy"
+}
+
+// Send types text into the session's pane when its input box is empty.
+func (s *Service) Send(ctx context.Context, sessionID, text, idemKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.send(ctx, sessionID, text, idemKey)
+	s.record(sessionID, fmt.Sprintf("text chars=%d", utf8.RuneCountInString(text)), err)
+	return err
+}
+
+func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) error {
+	if !s.cfg.Enabled {
+		return ErrDisabled
+	}
+	if err := CheckMessage(text, s.cfg.AllowSlashCommands); err != nil {
+		return err
+	}
+	// Safe before locate: only successes that passed every check are remembered.
+	if s.remembered(sessionID, idemKey) && s.cfg.Enabled {
+		return nil
+	}
+	d, p, t, err := s.locate(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	scr, err := s.readScreen(ctx, d, p)
+	if err != nil {
+		return err
+	}
+	if Working(scr) || s.registryBusy(sessionID) {
+		return ErrBusy
+	}
+	if !InputBoxEmpty(scr) {
+		return ErrNotAtInput
+	}
+	if err := s.foregroundOK(t); err != nil {
+		return err // changed since locate: a shell may have the pane now
+	}
+	cctx, cancel := s.withTimeout(ctx)
+	err = d.Type(cctx, p, text)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("%s: type: %w", d.Name(), err)
+	}
+	// A prompt may have appeared while typing (a background task), and
+	// Enter would then answer it; the owner may have focused this session.
+	// Look again first.
+	if err := s.sleep(ctx, settle); err != nil {
+		return ErrNotSubmitted
+	}
+	scr, err = s.readScreen(ctx, d, p)
+	if err != nil {
+		return err
+	}
+	if !TextInBox(scr, text) {
+		return ErrNotSubmitted
+	}
+	if err := s.inUse(ctx, d, t); err != nil {
+		return ErrNotSubmitted // the text is in the box either way
+	}
+	if err := s.foregroundOK(t); err != nil {
+		return err
+	}
+	cctx, cancel = s.withTimeout(ctx)
+	defer cancel()
+	if err := d.Key(cctx, p, KeyEnter); err != nil {
+		return fmt.Errorf("%s: enter: %w", d.Name(), err)
+	}
+	s.remember(sessionID, idemKey)
+	return nil
+}
+
+// Submit presses Enter for text a Send left in the input box (ErrNotSubmitted),
+// only if the box visibly holds exactly that text (TextShownInBox): a paste
+// marker could stand for anything, so it is not enough. It types nothing. ErrBoxEmpty: the box is empty;
+// ErrNotInBox: it holds something else; ErrNotAtInput: a prompt shows;
+// ErrBusy: Claude is working. The other checks are Send's; the in-use
+// guard runs again right before Enter.
+func (s *Service) Submit(ctx context.Context, sessionID, text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.submit(ctx, sessionID, text)
+	s.record(sessionID, fmt.Sprintf("submit chars=%d", utf8.RuneCountInString(text)), err)
+	return err
+}
+
+func (s *Service) submit(ctx context.Context, sessionID, text string) error {
+	d, p, t, err := s.locate(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	scr, err := s.readScreen(ctx, d, p)
+	if err != nil {
+		return err
+	}
+	switch {
+	case Working(scr):
+		return ErrBusy
+	case ParsePrompt(scr) != nil:
+		return ErrNotAtInput
+	case InputBoxEmpty(scr):
+		return ErrBoxEmpty
+	case !TextShownInBox(scr, text):
+		return ErrNotInBox
+	}
+	if err := s.inUse(ctx, d, t); err != nil {
+		return err // the owner may have focused this session since locate
+	}
+	if err := s.foregroundOK(t); err != nil {
+		return err
+	}
+	cctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+	if err := d.Key(cctx, p, KeyEnter); err != nil {
+		return fmt.Errorf("%s: enter: %w", d.Name(), err)
+	}
+	return nil
+}
+
+// Press presses option on the prompt identified by promptID, if that prompt
+// is still the one showing.
+func (s *Service) Press(ctx context.Context, sessionID, promptID string, option Key, idemKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.press(ctx, sessionID, promptID, option, idemKey)
+	s.record(sessionID, fmt.Sprintf("key option=%q", string(option)), err)
+	return err
+}
+
+var validKey = regexp.MustCompile(`^([1-9]|escape|enter)$`)
+
+func (s *Service) press(ctx context.Context, sessionID, promptID string, option Key, idemKey string) error {
+	if !validKey.MatchString(string(option)) {
+		return ErrNoPrompt
+	}
+	// Safe before locate: only successes that passed every check are remembered.
+	if s.remembered(sessionID, idemKey) && s.cfg.Enabled {
+		return nil
+	}
+	d, p, t, err := s.locate(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	scr, err := s.readScreen(ctx, d, p)
+	if err != nil {
+		return err
+	}
+	pr := ParsePrompt(scr)
+	if pr == nil {
+		return ErrNoPrompt
+	}
+	if pr.ID != promptID || !hasOption(pr, option) {
+		return ErrPromptChanged
+	}
+	if err := s.inUse(ctx, d, t); err != nil {
+		return err // the owner may have focused this session since locate
+	}
+	if err := s.foregroundOK(t); err != nil {
+		return err
+	}
+	cctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+	if err := d.Key(cctx, p, option); err != nil {
+		return fmt.Errorf("%s: key: %w", d.Name(), err)
+	}
+	s.remember(sessionID, idemKey)
+	return nil
+}
+
+func hasOption(p *Prompt, k Key) bool {
+	for _, o := range p.Options {
+		if o.Key == k {
+			return true
+		}
+	}
+	return false
+}

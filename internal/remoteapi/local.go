@@ -9,12 +9,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/search"
+	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/trace"
 )
 
@@ -45,25 +47,107 @@ type LocalIndex struct {
 	// SearchIndex ranks sessions for a query (aimux's session search),
 	// among the given sessions only.
 	SearchIndex func(ctx context.Context, query string, limit int, ids []string) ([]search.Result, error)
+	// Terminal, if set, gives the detail of a session open in a terminal its
+	// terminal status (terminput.Service).
+	Terminal TerminalStatusReader
+	// Repo gives the web address and branch of the git repository in a
+	// folder (gitremote.Lookup). Nil: details carry no repo.
+	Repo func(dir string) (web, branch, root string, ok bool)
+
+	mu   sync.Mutex
+	last map[string]history.Session // by id, from the latest scan
+}
+
+// TerminalStatusReader reports a terminal session's status; registryStatus
+// is the session's status in Claude's registry.
+type TerminalStatusReader interface {
+	Status(ctx context.Context, sessionID, registryStatus string) terminput.Status
 }
 
 func (x *LocalIndex) running(id string) bool { return x.Running != nil && x.Running(id) }
 
-func (x *LocalIndex) openSessions() map[string]bool {
-	open := map[string]bool{}
+// openSessions reads Claude's registry once: the sessions a live process
+// holds that is not aimux's own, by session id.
+func (x *LocalIndex) openSessions() map[string]discovery.ClaudeRegistryEntry {
+	open := map[string]discovery.ClaudeRegistryEntry{}
 	for pid, e := range discovery.ReadClaudeRegistry(x.RegistryDir) {
 		if discovery.IsLiveHolder(e) && (x.Owned == nil || !x.Owned(pid)) {
-			open[e.SessionID] = true
+			open[e.SessionID] = e
 		}
 	}
 	return open
 }
 
-func (x *LocalIndex) state(id string, open map[string]bool) string {
+// TerminalPIDs maps every session open in a terminal to the pid holding
+// it, by the rule TerminalPID uses.
+func (x *LocalIndex) TerminalPIDs() map[string]int {
+	out := map[string]int{}
+	for id, e := range x.openSessions() {
+		out[id] = e.PID
+	}
+	return out
+}
+
+// discover scans the history and remembers the result for Lookup.
+func (x *LocalIndex) discover() ([]history.Session, error) {
+	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]history.Session, len(all))
+	for _, s := range all {
+		byID[s.ID] = s
+	}
+	x.mu.Lock()
+	x.last = byID
+	x.mu.Unlock()
+	return all, nil
+}
+
+// Lookup is a session's history record from the latest scan, without
+// scanning again (the namer's Lookup).
+func (x *LocalIndex) Lookup(id string) (history.Session, bool) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	s, ok := x.last[id]
+	return s, ok
+}
+
+// Record is a session's history record (its file and metadata), freshly
+// scanned; acprun.ErrUnknownSession when the history has none.
+func (x *LocalIndex) Record(_ context.Context, id string) (history.Session, error) {
+	all, err := x.discover()
+	if err != nil {
+		return history.Session{}, fmt.Errorf("list sessions: %w", err)
+	}
+	for _, s := range all {
+		if s.ID == id && s.FilePath != "" {
+			return s, nil
+		}
+	}
+	return history.Session{}, fmt.Errorf("%w: %s", acprun.ErrUnknownSession, id)
+}
+
+// TerminalPID is the pid of the terminal process holding the session, by
+// the same rule that makes a session open_in_terminal (terminput.Sessions).
+func (x *LocalIndex) TerminalPID(sessionID string) (int, bool) {
+	e, ok := x.openSessions()[sessionID]
+	return e.PID, ok
+}
+
+// RegistryStatus is the session's status in Claude's registry ("busy",
+// "idle" or ""), "" when no terminal process holds it
+// (terminput.RegistryStatuses).
+func (x *LocalIndex) RegistryStatus(sessionID string) string {
+	return x.openSessions()[sessionID].Status
+}
+
+func (x *LocalIndex) state(id string, open map[string]discovery.ClaudeRegistryEntry) string {
+	_, inTerminal := open[id]
 	switch {
 	case x.Broker.Busy(id):
 		return StateBusy
-	case open[id]:
+	case inTerminal:
 		return StateOpenInTerminal
 	default:
 		return StateIdle
@@ -74,7 +158,7 @@ func (x *LocalIndex) state(id string, open map[string]bool) string {
 // includeAutomated is set.
 func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated bool) ([]Session, error) {
 	// No limit here: filtering happens below, and the index scan is cached.
-	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+	all, err := x.discover()
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -107,6 +191,14 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 }
 
 func summary(s history.Session, state string) Session {
+	desc, _ := history.ShownDescription(s)
+	return Session{ID: s.ID, Provider: s.Provider, Title: shownTitle(s), Project: s.Project, LastActive: s.LastActive, State: state,
+		LastPrompt: shorten(cleanPrompt(s.LastPrompt), 160), Description: desc, Pinned: s.Starred}
+}
+
+// shownTitle is the title clients show: aimux's metadata title, else
+// Claude Code's, else the first message.
+func shownTitle(s history.Session) string {
 	title := s.Title
 	if title == "" {
 		title = s.AITitle
@@ -114,8 +206,7 @@ func summary(s history.Session, state string) Session {
 	if title == "" {
 		title = shorten(cleanPrompt(s.FirstPrompt), 80)
 	}
-	return Session{ID: s.ID, Provider: s.Provider, Title: title, Project: s.Project, LastActive: s.LastActive, State: state,
-		LastPrompt: shorten(cleanPrompt(s.LastPrompt), 160)}
+	return title
 }
 
 var imageTag = regexp.MustCompile(`\[Image(?: #\d+|: [^\]]*)\]`)
@@ -147,6 +238,30 @@ func cleanPrompt(p string) string {
 
 // Session returns one session and its last turns.
 func (x *LocalIndex) Session(ctx context.Context, id string, turns int) (SessionDetail, error) {
+	return x.session(ctx, id, turns, true)
+}
+
+// SessionExists answers acprun.ErrUnknownSession for a session aimux does
+// not know: neither a session file nor one created here. It reads no
+// terminal, history or repository.
+func (x *LocalIndex) SessionExists(_ context.Context, id string) error {
+	if discovery.FindSessionFile(id, x.ProjectsDir) != "" {
+		return nil
+	}
+	if _, ok := x.Created.Get(id); ok {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", acprun.ErrUnknownSession, id)
+}
+
+// Title returns a session's title without reading its terminal (no screen
+// read, no Apple Event), for push notification titles.
+func (x *LocalIndex) Title(ctx context.Context, id string) (string, error) {
+	d, err := x.session(ctx, id, 1, false)
+	return d.Title, err
+}
+
+func (x *LocalIndex) session(ctx context.Context, id string, turns int, withTerminal bool) (SessionDetail, error) {
 	file := discovery.FindSessionFile(id, x.ProjectsDir)
 	if file == "" {
 		if c, ok := x.Created.Get(id); ok {
@@ -174,9 +289,21 @@ func (x *LocalIndex) Session(ctx context.Context, id string, turns int) (Session
 	if len(parsed) > turns {
 		parsed = parsed[len(parsed)-turns:]
 	}
-	d := SessionDetail{
-		Session: x.lookupSummary(id),
-		Turns:   make([]Turn, 0, len(parsed)),
+	open := x.openSessions()
+	sum, indexed := x.lookupSummary(id, open)
+	d := SessionDetail{Session: sum, Turns: make([]Turn, 0, len(parsed))}
+	if withTerminal && d.State == StateOpenInTerminal && x.Terminal != nil {
+		d.Terminal = terminalStatusOf(x.Terminal.Status(ctx, id, open[id].Status))
+	}
+	if dir := cwdOf(indexed); x.Repo != nil && dir != "" {
+		if web, branch, root, ok := x.Repo(dir); ok {
+			d.Repo = &Repo{Web: web, Branch: branch, Root: root}
+		}
+	}
+	if indexed != nil {
+		d.Stats = &SessionStats{CostUSD: indexed.CostUSD, TokensIn: indexed.TokensIn, TokensOut: indexed.TokensOut,
+			CacheReadTokens: indexed.CacheReadTokens, CacheWriteTokens: indexed.CacheWriteTokens, Turns: indexed.TurnCount,
+			StartTime: timeOrNil(indexed.StartTime), DurationMin: indexed.DurationMin, Model: indexed.Model, GitBranch: indexed.GitBranch}
 	}
 	for _, t := range parsed {
 		d.Turns = append(d.Turns, turnOf(t))
@@ -184,18 +311,81 @@ func (x *LocalIndex) Session(ctx context.Context, id string, turns int) (Session
 	return d, nil
 }
 
+// cwdOf is the working directory the session recorded, or "" when it has
+// none: Project is rebuilt from Claude's folder name, which different paths
+// can share, so looking a repo up there could name another folder's repo.
+func cwdOf(s *history.Session) string {
+	if s == nil {
+		return ""
+	}
+	return s.Cwd
+}
+
+// timeOrNil is nil for the zero time, which means the index has no value.
+func timeOrNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
 func turnOf(t trace.Turn) Turn {
 	tools := make([]TurnTool, 0, len(t.Actions))
 	for _, a := range t.Actions {
-		tools = append(tools, TurnTool{Name: a.Name, Snippet: shorten(a.Snippet, 200), OK: a.Success})
+		tools = append(tools, TurnTool{Name: a.Name, Snippet: shorten(a.Snippet, 200), OK: a.Success, Detail: detailOf(a)})
 	}
 	return Turn{
 		Number: t.Number,
 		Time:   t.Timestamp,
 		User:   shorten(strings.Join(t.UserLines, "\n"), maxTextLen),
-		Reply:  shorten(strings.Join(t.OutputLines, "\n"), maxTextLen),
+		Reply:  shortenLines(replyOf(t), maxTextLen),
 		Tools:  tools,
 	}
+}
+
+// Caps, in bytes, on the step detail a client can ask for.
+const (
+	maxDetailInput = 4096
+	maxDetailError = 2048
+	maxDetailDiff  = 4096 // each of old and new
+)
+
+// detailOf maps a tool span to its detail; nil when every field is empty.
+// Input and error are trimmed; old and new keep their whitespace. A Write's
+// content is its "new" text. An input the snippet already shows (a path, a
+// query, or a Grep pattern in slashes) is dropped, so the step does not open
+// just to repeat its line.
+func detailOf(a trace.ToolSpan) *ToolDetail {
+	input := strings.TrimSpace(a.Input)
+	if snip := strings.TrimSpace(a.Snippet); input == snip || "/"+input+"/" == snip {
+		input = ""
+	}
+	d := ToolDetail{
+		Input: shorten(input, maxDetailInput),
+		Error: shorten(a.ErrorMsg, maxDetailError),
+		Old:   capText(a.OldString, maxDetailDiff),
+		New:   capText(a.NewString, maxDetailDiff),
+	}
+	if d.New == "" {
+		d.New = capText(a.Content, maxDetailDiff)
+	}
+	if d == (ToolDetail{}) {
+		return nil
+	}
+	return &d
+}
+
+// capText cuts s to at most n bytes on a UTF-8 boundary and appends "…"; it
+// does not trim.
+func capText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8Start(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func shorten(s string, n int) string {
@@ -210,21 +400,46 @@ func shorten(s string, n int) string {
 	return s[:cut] + "…"
 }
 
+// replyOf is the reply as written, or the joined lines for a provider that
+// does not record it.
+func replyOf(t trace.Turn) string {
+	if t.OutputText != "" {
+		return t.OutputText
+	}
+	return strings.Join(t.OutputLines, "\n")
+}
+
+// shortenLines is shorten for Markdown text: over n bytes it cuts at the last
+// line break in the second half of the cap and appends "…" as a paragraph of
+// its own, so the cut cannot leave the ellipsis as a table row; a text with no
+// such line break is cut like shorten.
+func shortenLines(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	if nl := strings.LastIndexByte(s[:n+1], '\n'); nl > n/2 {
+		return strings.TrimRight(s[:nl], " \t\r\n") + "\n\n…"
+	}
+	return shorten(s, n)
+}
+
 func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
 
 // lookupSummary finds the session's title, project and last activity in the
-// session index; an unindexed session still gets its id, provider and state.
-func (x *LocalIndex) lookupSummary(id string) Session {
-	state := x.state(id, x.openSessions())
-	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+// session index, and returns the index entry too (nil when unindexed); an
+// unindexed session still gets its id, provider and state.
+func (x *LocalIndex) lookupSummary(id string, open map[string]discovery.ClaudeRegistryEntry) (Session, *history.Session) {
+	state := x.state(id, open)
+	all, err := x.discover()
 	if err == nil {
 		for _, s := range all {
 			if s.ID == id {
-				return summary(s, state)
+				return summary(s, state), &s
 			}
 		}
 	}
-	return Session{ID: id, Provider: "claude", State: state}
+	return Session{ID: id, Provider: "claude", State: state}, nil
 }
 
 // maxProjects is how many recent project folders a client may start a new
@@ -275,7 +490,7 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 // with a file, and sessions created here that have a file or a live run.
 func (x *LocalIndex) listableIDs() []string {
 	ids := []string{}
-	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+	all, err := x.discover()
 	if err == nil {
 		for _, s := range all {
 			if _, created := x.Created.Get(s.ID); s.Provider == "claude" && !s.IsSubagent && (!s.Automated || created) {
@@ -335,8 +550,13 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 		if title == "" {
 			title = c.Prompt
 		}
-		hits = append(hits, SearchHit{Session: Session{ID: r.SessionID, Provider: "claude", Title: title, Project: r.CWD,
-			LastActive: r.ModTime, State: x.state(r.SessionID, open)}, Snippet: r.Snippet})
+		hit := SearchHit{Session: Session{ID: r.SessionID, Provider: "claude", Title: title, Project: r.CWD,
+			LastActive: r.ModTime, State: x.state(r.SessionID, open)}, Snippet: r.Snippet}
+		if s, ok := x.Lookup(r.SessionID); ok {
+			hit.Description, _ = history.ShownDescription(s)
+			hit.Pinned = s.Starred
+		}
+		hits = append(hits, hit)
 		if len(hits) == limit {
 			break
 		}

@@ -1,0 +1,39 @@
+{
+  "name": "Last on your Mac naming a session that is not in the list is hidden",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "lastOnMac": {
+    "id": "gone",
+    "at": "2026-10-30T11:58:00Z"
+  },
+  "sessions": [
+    {
+      "id": "u1",
+      "provider": "claude",
+      "title": "Rename the photo folders",
+      "project": "/src/photos",
+      "lastActive": "2026-10-30T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [
+      "u1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 0,
+      "onMac": 1
+    }
+  }
+}

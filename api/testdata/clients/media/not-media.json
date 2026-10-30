@@ -1,0 +1,461 @@
+{
+  "name": "links that stay links",
+  "cases": [
+    {
+      "name": "media link inside prose",
+      "markdown": "Watch https://youtu.be/abc123 today.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "Watch "
+            },
+            {
+              "t": "link",
+              "href": "https://youtu.be/abc123",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://youtu.be/abc123"
+                }
+              ]
+            },
+            {
+              "t": "text",
+              "v": " today."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "inline media link inside prose",
+      "markdown": "The [demo](https://example.com/demo.mp4) is short.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "The "
+            },
+            {
+              "t": "link",
+              "href": "https://example.com/demo.mp4",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "demo"
+                }
+              ]
+            },
+            {
+              "t": "text",
+              "v": " is short."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "two links in one paragraph",
+      "markdown": "https://youtu.be/a1 https://youtu.be/b2",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://youtu.be/a1",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://youtu.be/a1"
+                }
+              ]
+            },
+            {
+              "t": "text",
+              "v": " "
+            },
+            {
+              "t": "link",
+              "href": "https://youtu.be/b2",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://youtu.be/b2"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "non-http scheme",
+      "markdown": "[clip](ftp://example.com/clip.mp4)\n\nftp://example.com/clip.mp4",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "clip"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "ftp://example.com/clip.mp4"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "not a media address",
+      "markdown": "https://example.com/page",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://example.com/page",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://example.com/page"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "extension only in the query",
+      "markdown": "https://example.com/watch?file=a.mp4",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://example.com/watch?file=a.mp4",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://example.com/watch?file=a.mp4"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "extension on a folder",
+      "markdown": "https://example.com/a.mp4/",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://example.com/a.mp4/",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://example.com/a.mp4/"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "YouTube pages that are not a video",
+      "markdown": "https://www.youtube.com/@channel\n\nhttps://www.youtube.com/watch?list=PL1\n\nhttps://www.youtube.com/watch?v=",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://www.youtube.com/@channel",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://www.youtube.com/@channel"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://www.youtube.com/watch?list=PL1",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://www.youtube.com/watch?list=PL1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://www.youtube.com/watch?v=",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://www.youtube.com/watch?v="
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Vimeo pages that are not a video",
+      "markdown": "https://vimeo.com/channels/staff",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://vimeo.com/channels/staff",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://vimeo.com/channels/staff"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a look-alike host",
+      "markdown": "https://notyoutube.com/watch?v=abc",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://notyoutube.com/watch?v=abc",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://notyoutube.com/watch?v=abc"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "emphasis around the link",
+      "markdown": "**https://example.com/a.mp4**",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "link",
+                  "href": "https://example.com/a.mp4",
+                  "c": [
+                    {
+                      "t": "text",
+                      "v": "https://example.com/a.mp4"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "heading",
+      "markdown": "# https://example.com/a.mp4",
+      "blocks": [
+        {
+          "type": "heading",
+          "level": 1,
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://example.com/a.mp4",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://example.com/a.mp4"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "image inside prose stays alt text",
+      "markdown": "See ![chart](https://example.com/c.png) above.",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "See chart above."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "image alone pointing at a page is a link",
+      "markdown": "![chart](https://example.com/render?id=3)",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://example.com/render?id=3",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "chart"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "image alone with a relative source stays alt text",
+      "markdown": "![logo](img/logo.png)",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "logo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "backslash before the path hides another host",
+      "markdown": "[demo](https://evil.example\\\\@youtube.com/watch?v=abc123)",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://evil.example\\@youtube.com/watch?v=abc123",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "demo"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "backslash before the path in an autolink",
+      "markdown": "<https://evil.example\\@cdn.example/clips/demo.mp4>",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://evil.example\\@cdn.example/clips/demo.mp4",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://evil.example\\@cdn.example/clips/demo.mp4"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "encoded backslash before the path",
+      "markdown": "[clip](https://evil.example%5C@vimeo.com/123456789)",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://evil.example%5C@vimeo.com/123456789",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "clip"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "host the URL parser reads differently",
+      "markdown": "https://cdn.ex%61mple/photo.png",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "link",
+              "href": "https://cdn.ex%61mple/photo.png",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://cdn.ex%61mple/photo.png"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

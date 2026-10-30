@@ -1,0 +1,92 @@
+{
+  "name": "Without a repository or a Jira base nothing links",
+  "cases": [
+    {
+      "name": "no repo, no Jira: text stays text",
+      "context": {
+        "repo": null,
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Fixed in #123 by a1b2c3d in internal/api/server.go:42, tracked as WID-5 and acme/gadget#12"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Fixed in #123 by a1b2c3d in internal/api/server.go:42, tracked as WID-5 and acme/gadget#12"
+        }
+      ]
+    },
+    {
+      "name": "inline code stays code",
+      "context": {
+        "repo": null,
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "code",
+          "v": "internal/api/server.go"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "code",
+          "v": "#12"
+        }
+      ],
+      "expect": [
+        {
+          "t": "code",
+          "v": "internal/api/server.go"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "code",
+          "v": "#12"
+        }
+      ]
+    },
+    {
+      "name": "jira without a repo only links the key",
+      "context": {
+        "repo": null,
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID"
+        ],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "WID-5 #5 a1b2c3d src/a.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-5",
+          "href": "https://jira.example.com/browse/WID-5"
+        },
+        {
+          "t": "text",
+          "v": " #5 a1b2c3d src/a.go"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "name": "a failed turn the agent never wrote shows with its prompt, placed in time; one older than all history is left out",
+  "now": "2026-10-26T09:00:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T08:00:00Z",
+      "user": "List the files",
+      "reply": "Here they are.",
+      "tools": []
+    },
+    {
+      "number": 2,
+      "time": "2026-10-26T08:10:00Z",
+      "user": "Sort them",
+      "reply": "Sorted.",
+      "tools": []
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "x2",
+      "kind": "turn_started",
+      "time": "2026-10-26T07:00:00Z",
+      "data": {
+        "text": "An old prompt"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "x2",
+      "kind": "turn_error",
+      "time": "2026-10-26T07:00:01Z",
+      "data": {
+        "error": "Too old to show."
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "x1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:05:00Z",
+      "data": {
+        "text": "Delete the temp folder"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "x1",
+      "kind": "turn_error",
+      "time": "2026-10-26T08:05:03Z",
+      "data": {
+        "error": "The agent could not start."
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "x3",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:20:00Z",
+      "data": {
+        "text": "Count them"
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "x3",
+      "kind": "update",
+      "time": "2026-10-26T08:20:01Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "k1",
+        "title": "Count lines",
+        "kind": "fetch",
+        "status": "in_progress"
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "x3",
+      "kind": "turn_error",
+      "time": "2026-10-26T08:20:04Z",
+      "data": {
+        "error": "Rate limited."
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "List the files"
+      },
+      {
+        "kind": "reply",
+        "text": "Here they are."
+      },
+      {
+        "kind": "user",
+        "text": "Delete the temp folder"
+      },
+      {
+        "kind": "error",
+        "text": "The agent could not start."
+      },
+      {
+        "kind": "user",
+        "text": "Sort them"
+      },
+      {
+        "kind": "reply",
+        "text": "Sorted."
+      },
+      {
+        "kind": "user",
+        "text": "Count them"
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": 0,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "other",
+            "target": "Count lines",
+            "status": "running",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "error",
+        "text": "Rate limited."
+      }
+    ],
+    "working": false,
+    "pendingApproval": null
+  }
+}

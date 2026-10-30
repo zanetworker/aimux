@@ -1,0 +1,46 @@
+{
+  "name": "A pinned working session appears once, in Pinned",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Build the seed catalogue",
+      "project": "/src/garden",
+      "lastActive": "2026-10-30T11:59:00Z",
+      "state": "busy",
+      "pinned": true
+    },
+    {
+      "id": "w2",
+      "provider": "claude",
+      "title": "Draft the garden checklist",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:58:00Z",
+      "state": "busy",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [
+      "w1"
+    ],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "w2"
+      ]
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 2,
+      "onMac": 0
+    }
+  }
+}

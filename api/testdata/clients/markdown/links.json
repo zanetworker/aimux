@@ -1,0 +1,325 @@
+{
+  "name": "Inline links, autolinks, bare URLs (start rule, case, entities, trailing punctuation, balanced parentheses), non-http links become text, link text flattened, bare URLs inside emphasis",
+  "markdown": "An [inline link](https://example.com/docs) and one [with **bold**](http://example.org).\n\nAn autolink <https://example.com/a?b=c>.\n\nA bare URL https://example.com/page. Ends before the period.\n\n(see https://example.com/x) and https://example.com/wiki/Thing_(disambiguation) keep balance.\n\nLists: https://example.com/a, https://example.com/b; done https://example.com/c!\n\nCode keeps it: `https://example.com/in-code`.\n\nA [relative link](docs/readme.md) and [mail](mailto:dev@example.com) are text.\n\nwww.example.com and dev@example.com stay text.\n\n![diagram](https://example.com/d.png) shows its alt text.\n\n**https://example.com/x** and _https://example.com/y_\n\n\"https://example.com/q\" and see:https://example.com/r but abchttps://example.com/s stays text, HTTPS://example.com/U works, and https://example.com/t?a=1&amp;b=2 decodes.\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "An "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/docs",
+          "c": [
+            {
+              "t": "text",
+              "v": "inline link"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and one "
+        },
+        {
+          "t": "link",
+          "href": "http://example.org",
+          "c": [
+            {
+              "t": "text",
+              "v": "with bold"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "An autolink "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/a?b=c",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/a?b=c"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "A bare URL "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/page",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/page"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": ". Ends before the period."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "(see "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/x",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/x"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": ") and "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/wiki/Thing_(disambiguation)",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/wiki/Thing_(disambiguation)"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " keep balance."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Lists: "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/a",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/a"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/b",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/b"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "; done "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/c",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/c"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "!"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Code keeps it: "
+        },
+        {
+          "t": "code",
+          "v": "https://example.com/in-code"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "A relative link and mail are text."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "www.example.com and dev@example.com stay text."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "diagram shows its alt text."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "link",
+              "href": "https://example.com/x",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://example.com/x"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "link",
+              "href": "https://example.com/y",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "https://example.com/y"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "\""
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/q",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/q"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "\" and see:"
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/r",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/r"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " but abchttps://example.com/s stays text, "
+        },
+        {
+          "t": "link",
+          "href": "HTTPS://example.com/U",
+          "c": [
+            {
+              "t": "text",
+              "v": "HTTPS://example.com/U"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " works, and "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/t?a=1&b=2",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://example.com/t?a=1&b=2"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " decodes."
+        }
+      ]
+    }
+  ]
+}

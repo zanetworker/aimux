@@ -1,0 +1,104 @@
+{
+  "name": "most active sort puts busy, then open in terminal, then the rest, each newest first, inside each day",
+  "now": "2026-10-26T12:00:00Z",
+  "timeZone": "UTC",
+  "project": null,
+  "sort": "mostActive",
+  "sessions": [
+    {
+      "id": "i1",
+      "provider": "claude",
+      "title": "Idle",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T11:30:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "b1",
+      "provider": "claude",
+      "title": "Busy early",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:00:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "t2",
+      "provider": "claude",
+      "title": "Terminal second tie",
+      "project": "/src/notes",
+      "lastActive": "2026-10-26T09:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "u1",
+      "provider": "claude",
+      "title": "Unavailable",
+      "project": "/src/notes",
+      "lastActive": "2026-10-26T11:50:00Z",
+      "state": "unavailable"
+    },
+    {
+      "id": "b2",
+      "provider": "claude",
+      "title": "Busy later",
+      "project": "/src/trips",
+      "lastActive": "2026-10-26T10:00:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Terminal first tie",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T09:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "x1",
+      "provider": "claude",
+      "title": "Unknown state",
+      "project": "/src/trips",
+      "lastActive": "2026-10-26T11:00:00Z",
+      "state": "weird"
+    },
+    {
+      "id": "i2",
+      "provider": "claude",
+      "title": "Idle yesterday",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T20:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "b3",
+      "provider": "claude",
+      "title": "Busy yesterday",
+      "project": "/src/notes",
+      "lastActive": "2026-10-25T01:00:00Z",
+      "state": "busy"
+    }
+  ],
+  "expect": {
+    "sections": [
+      {
+        "day": "today",
+        "ids": [
+          "b2",
+          "b1",
+          "t1",
+          "t2",
+          "u1",
+          "i1",
+          "x1"
+        ]
+      },
+      {
+        "day": "yesterday",
+        "ids": [
+          "b3",
+          "i2"
+        ]
+      }
+    ]
+  }
+}

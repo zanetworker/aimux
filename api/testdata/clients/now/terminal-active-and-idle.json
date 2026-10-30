@@ -1,0 +1,42 @@
+{
+  "name": "a terminal session active 4 minutes ago is Working; one idle for 11 hours is On your Mac",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Review the open PR",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Old terminal session",
+      "project": "/src/research",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "list": [
+        "t1"
+      ]
+    },
+    "onMac": [
+      "m1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 0,
+      "working": 1,
+      "onMac": 1
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "Thematic breaks ---, ***, ___ and - - -; *** right under a paragraph line is a rule",
+  "markdown": "Above\n\n---\n\n***\n\n___\n\n- - -\n\nParagraph\n***\nBelow\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Above"
+        }
+      ]
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Paragraph"
+        }
+      ]
+    },
+    {
+      "type": "rule"
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Below"
+        }
+      ]
+    }
+  ]
+}

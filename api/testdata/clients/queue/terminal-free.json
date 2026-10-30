@@ -1,0 +1,21 @@
+{
+  "name": "terminal-free",
+  "session": {
+    "state": "open_in_terminal",
+    "terminal": {
+      "status": "idle",
+      "canType": true,
+      "working": false
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "send",
+      "label": "Send"
+    },
+    "queue": {
+      "visible": false
+    },
+    "items": []
+  }
+}

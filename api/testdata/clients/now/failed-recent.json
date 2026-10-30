@@ -1,0 +1,63 @@
+{
+  "name": "a turn that failed 5 minutes ago needs you",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Migrate the schema",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Terminal session 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:52:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "f1"
+    ],
+    "finished": [],
+    "working": {
+      "list": []
+    },
+    "onMac": [
+      "m1"
+    ],
+    "onMacTotal": 1,
+    "summary": {
+      "needYou": 1,
+      "working": 0,
+      "onMac": 1
+    }
+  }
+}

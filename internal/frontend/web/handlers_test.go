@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/history"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -1160,5 +1162,40 @@ func TestHandleGetTrace_LocalAgent(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for local agent trace, got %d", resp.StatusCode)
+	}
+}
+
+// A POST sets only the fields it carries: starring from the dashboard must
+// not clear an annotation or note written elsewhere; "" still clears.
+func TestSessionMetaHandler_PartialUpdates(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "partial.jsonl")
+	_ = os.WriteFile(sessionFile, []byte("{\"type\":\"user\"}\n"), 0o600)
+	s := NewServer(0)
+	s.sessionRoots = []string{tmpDir}
+
+	post := func(fields map[string]any) {
+		t.Helper()
+		fields["filePath"] = sessionFile
+		body, _ := json.Marshal(fields)
+		rec := httptest.NewRecorder()
+		s.handleUpdateSessionMeta(rec, httptest.NewRequest(http.MethodPost, "/api/sessions/meta", bytes.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST %v: %d %s", fields, rec.Code, rec.Body.String())
+		}
+	}
+
+	post(map[string]any{"annotation": "achieved", "note": "kept note"})
+	post(map[string]any{"starred": true})
+	if m := history.LoadMeta(sessionFile); m.Annotation != "achieved" || m.Note != "kept note" || !m.Starred {
+		t.Fatalf("after starring: %+v", m)
+	}
+	post(map[string]any{"annotation": "failed"})
+	if m := history.LoadMeta(sessionFile); m.Annotation != "failed" || m.Note != "kept note" {
+		t.Fatalf("after annotation only: %+v", m)
+	}
+	post(map[string]any{"note": ""})
+	if m := history.LoadMeta(sessionFile); m.Note != "" || m.Annotation != "failed" {
+		t.Fatalf("empty note should clear only the note: %+v", m)
 	}
 }

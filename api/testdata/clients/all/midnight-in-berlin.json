@@ -1,0 +1,82 @@
+{
+  "name": "days follow the given time zone, not UTC",
+  "now": "2026-10-26T09:00:00Z",
+  "timeZone": "Europe/Berlin",
+  "project": null,
+  "sort": "newest",
+  "sessions": [
+    {
+      "id": "n3",
+      "provider": "claude",
+      "title": "Late on the 24th",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-24T21:30:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "n1",
+      "provider": "claude",
+      "title": "Just after midnight",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T23:30:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "n6",
+      "provider": "claude",
+      "title": "Midnight before the clocks change",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-24T22:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "n2",
+      "provider": "claude",
+      "title": "Late yesterday",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:30:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "n5",
+      "provider": "claude",
+      "title": "Exactly midnight",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T23:00:00Z",
+      "state": "idle"
+    },
+    {
+      "id": "n4",
+      "provider": "claude",
+      "title": "This morning",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:00:00Z",
+      "state": "idle"
+    }
+  ],
+  "expect": {
+    "sections": [
+      {
+        "day": "today",
+        "ids": [
+          "n4",
+          "n1",
+          "n5"
+        ]
+      },
+      {
+        "day": "yesterday",
+        "ids": [
+          "n2",
+          "n6"
+        ]
+      },
+      {
+        "day": "2026-10-24",
+        "ids": [
+          "n3"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "An unclosed fence runs to the end of the text as code (streaming prefix)",
+  "markdown": "Here is the fix:\n\n```go\nfunc add(a, b int) int {\n\t// **not bold**\n\treturn a + b\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Here is the fix:"
+        }
+      ]
+    },
+    {
+      "type": "code",
+      "lang": "go",
+      "text": "func add(a, b int) int {\n\t// **not bold**\n\treturn a + b"
+    }
+  ]
+}

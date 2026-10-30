@@ -1,0 +1,66 @@
+{
+  "name": "Code spans keep * and link syntax literal, double backticks, padding stripped, an unclosed backtick is text",
+  "markdown": "Run `make *all*` now.\n\n`[link](https://example.com)` stays code.\n\n``a `tick` inside`` and ` padded `.\n\n`unclosed backtick stays text\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Run "
+        },
+        {
+          "t": "code",
+          "v": "make *all*"
+        },
+        {
+          "t": "text",
+          "v": " now."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "code",
+          "v": "[link](https://example.com)"
+        },
+        {
+          "t": "text",
+          "v": " stays code."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "code",
+          "v": "a `tick` inside"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "code",
+          "v": "padded"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "`unclosed backtick stays text"
+        }
+      ]
+    }
+  ]
+}

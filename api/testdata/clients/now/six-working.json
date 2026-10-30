@@ -1,0 +1,113 @@
+{
+  "name": "six working sessions group by folder; the collapse hides On your Mac but still counts it",
+  "now": "2026-10-26T09:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Task number 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w2",
+      "provider": "claude",
+      "title": "Task number 2",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:58:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w3",
+      "provider": "claude",
+      "title": "Task number 3",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w4",
+      "provider": "claude",
+      "title": "Task number 4",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w5",
+      "provider": "claude",
+      "title": "Task number 5",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "w6",
+      "provider": "claude",
+      "title": "Task number 6",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:54:00Z",
+      "state": "busy"
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Terminal session 1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal"
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Terminal session 2",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T21:30:00Z",
+      "state": "open_in_terminal"
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "groups": [
+        {
+          "kind": "folder",
+          "project": "/src/aimux",
+          "name": "aimux",
+          "count": 3,
+          "expanded": true,
+          "newest": "w1",
+          "sessions": [
+            "w1",
+            "w3",
+            "w5"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/research",
+          "name": "research",
+          "count": 3,
+          "expanded": true,
+          "newest": "w2",
+          "sessions": [
+            "w2",
+            "w4",
+            "w6"
+          ]
+        }
+      ]
+    },
+    "onMac": [],
+    "onMacTotal": 2,
+    "summary": {
+      "needYou": 0,
+      "working": 6,
+      "onMac": 2
+    }
+  }
+}

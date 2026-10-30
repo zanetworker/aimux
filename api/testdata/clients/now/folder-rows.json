@@ -1,0 +1,166 @@
+{
+  "name": "Folder rows: multi-session and single-session folders, counted without the pinned session",
+  "now": "2026-10-30T12:00:00Z",
+  "seen": {},
+  "sessions": [
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Wire the share sheet",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:59:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Fix the icon spacing",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:58:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "a3",
+      "provider": "claude",
+      "title": "Review the sync notes",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-30T11:50:00Z",
+      "state": "busy",
+      "pinned": true
+    },
+    {
+      "id": "n1",
+      "provider": "claude",
+      "title": "Outline the reading list",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:57:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "n2",
+      "provider": "claude",
+      "title": "Merge the duplicate notes",
+      "project": "/src/notes",
+      "lastActive": "2026-10-30T11:56:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "x1",
+      "provider": "claude",
+      "title": "Speed up the landing page",
+      "project": "/src/web",
+      "lastActive": "2026-10-30T11:55:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "x2",
+      "provider": "claude",
+      "title": "Compress the hero images",
+      "project": "/src/web",
+      "lastActive": "2026-10-30T11:54:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Book the lake cabin",
+      "project": "/src/trips",
+      "lastActive": "2026-10-30T11:53:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Proofread the manual",
+      "project": "/src/docs",
+      "lastActive": "2026-10-30T11:52:00Z",
+      "state": "busy",
+      "pinned": false
+    }
+  ],
+  "events": {},
+  "expect": {
+    "lastOnMac": null,
+    "pinned": [
+      "a3"
+    ],
+    "needsYou": [],
+    "finished": [],
+    "working": {
+      "groups": [
+        {
+          "kind": "folder",
+          "project": "/src/aimux",
+          "name": "aimux",
+          "count": 2,
+          "expanded": true,
+          "newest": "a1",
+          "sessions": [
+            "a1",
+            "a2"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/notes",
+          "name": "notes",
+          "count": 2,
+          "expanded": true,
+          "newest": "n1",
+          "sessions": [
+            "n1",
+            "n2"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/web",
+          "name": "web",
+          "count": 2,
+          "expanded": true,
+          "newest": "x1",
+          "sessions": [
+            "x1",
+            "x2"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/trips",
+          "name": "trips",
+          "count": 1,
+          "expanded": true,
+          "newest": "t1",
+          "sessions": [
+            "t1"
+          ]
+        },
+        {
+          "kind": "folder",
+          "project": "/src/docs",
+          "name": "docs",
+          "count": 1,
+          "expanded": true,
+          "newest": "d1",
+          "sessions": [
+            "d1"
+          ]
+        }
+      ]
+    },
+    "onMac": [],
+    "onMacTotal": 0,
+    "summary": {
+      "needYou": 0,
+      "working": 9,
+      "onMac": 0
+    }
+  }
+}
