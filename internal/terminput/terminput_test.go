@@ -1256,3 +1256,23 @@ func TestSendCancelledAfterTypingCanBeRetried(t *testing.T) {
 		t.Fatalf("sent %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
 	}
 }
+
+// Once the box no longer holds what a send left (cleared or sent at the Mac),
+// that text is the owner's if it shows again: never submitted by a retry.
+func TestLeftTextIsForgottenOnceTheBoxChanges(t *testing.T) {
+	e := newEnv(t)
+	e.drv.afterType = boxWith("something else")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
+	e.drv.screen = idleScreen // the owner cleared it at the Mac
+	if st := e.svc.Status(context.Background(), "s1", "idle"); !st.CanType {
+		t.Fatalf("status = %+v", st)
+	}
+	e.drv.screen, e.drv.sent = boxWith("give me an example"), nil // typed again by the owner
+	if st := e.svc.Status(context.Background(), "s1", "idle"); st.CanType || st.Reason != "not_at_input" {
+		t.Fatalf("status = %+v, want not_at_input", st)
+	}
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_at_input")
+	if len(e.drv.keys) != 0 {
+		t.Fatalf("pressed %v on the owner's draft", e.drv.keys)
+	}
+}

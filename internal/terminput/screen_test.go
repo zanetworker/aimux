@@ -319,4 +319,18 @@ func TestWordsInBox(t *testing.T) {
 			t.Errorf("%s: WordsInBox = %v, want %v", c.name, got, c.want)
 		}
 	}
+	// A long path wrapped mid-word still matches; split differently it does not.
+	path := "⏺ Done.\n\n" + rule + "\n❯ open internal/terminput/scre\n  en.go now\n" + rule + "\n  [Model] │ demo\n"
+	for _, c := range []struct {
+		name, text string
+		want       bool
+	}{
+		{"wrapped inside a word", "open internal/terminput/screen.go now", true},
+		{"a space where the word broke", "open internal/terminput/scre en.go now", true},
+		{"spaces dropped elsewhere", "openinternal/terminput/screen.go now", false},
+	} {
+		if got := WordsInBox(path, c.text); got != c.want {
+			t.Errorf("%s: WordsInBox = %v, want %v", c.name, got, c.want)
+		}
+	}
 }

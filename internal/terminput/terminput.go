@@ -198,6 +198,15 @@ func (s *Service) leftText(sessionID string) string {
 	return s.left[sessionID]
 }
 
+// forgetLeftUnlessShown drops the record of text a send left once a screen
+// with no prompt shows the box without it (cleared, or sent, at the Mac):
+// that text, typed again, is the owner's.
+func (s *Service) forgetLeftUnlessShown(sessionID, scr string) {
+	if left := s.leftText(sessionID); left != "" && ParsePrompt(scr) == nil && !WordsInBox(scr, left) {
+		s.setLeft(sessionID, "")
+	}
+}
+
 func (s *Service) setLeft(sessionID, text string) {
 	s.leftMu.Lock()
 	defer s.leftMu.Unlock()
@@ -359,6 +368,7 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 	st.Prompt = ParsePrompt(scr)
 	st.Working = Working(scr)
 	// The text a send left waiting can be retried (Retry presses Enter).
+	s.forgetLeftUnlessShown(sessionID, scr)
 	left := s.leftText(sessionID)
 	if !InputBoxEmpty(scr) && (left == "" || !WordsInBox(scr, left)) {
 		st.Reason = Code(ErrNotAtInput)
@@ -453,6 +463,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	}
 	// A send that typed but did not press Enter (ErrNotSubmitted) left this
 	// very text in the box: its retry presses Enter and types nothing.
+	s.forgetLeftUnlessShown(sessionID, scr)
 	waiting := !InputBoxEmpty(scr) && s.leftText(sessionID) == text && WordsInBox(scr, text)
 	if !InputBoxEmpty(scr) && !waiting {
 		return ErrNotAtInput

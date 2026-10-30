@@ -131,33 +131,59 @@ func TextShownInBox(screen, text string) bool {
 }
 
 // WordsInBox is TextShownInBox keeping word breaks: the box holds the same
-// words as text, in order, with only the spacing and line wrapping changed.
-// A text that matches only with its spaces removed is someone else's.
+// words as text, in order, with only the spacing changed and its rows
+// wrapped either at a space or inside a word (a long path or URL). A text
+// that matches only with its spaces removed is someone else's.
 func WordsInBox(screen, text string) bool {
-	box, _, ok := boxText(screen)
-	words := strings.Fields(text)
-	return ok && len(words) > 0 && strings.Join(strings.Fields(box), " ") == strings.Join(words, " ")
+	rows, ok := boxRows(screen)
+	want := strings.Join(strings.Fields(text), " ")
+	if !ok || want == "" {
+		return false
+	}
+	pos := 0
+	for i, r := range rows {
+		r = strings.Join(strings.Fields(r), " ")
+		if !strings.HasPrefix(want[pos:], r) {
+			return false
+		}
+		pos += len(r)
+		// A row ends at a space or inside a word; rows are trimmed, so a
+		// space here in text can only be that break.
+		if i < len(rows)-1 && pos < len(want) && want[pos] == ' ' {
+			pos++
+		}
+	}
+	return pos == len(want)
 }
 
 // boxText is the text in Claude Code's input box and its row count, when
 // no prompt shows and the box has the form TextInBox describes.
 func boxText(screen string) (string, int, bool) {
-	if ParsePrompt(screen) != nil {
+	rows, ok := boxRows(screen)
+	if !ok {
 		return "", 0, false
+	}
+	return strings.Join(rows, " "), len(rows), true
+}
+
+// boxRows is the input box's rows, trimmed, chevron removed from the first.
+func boxRows(screen string) ([]string, bool) {
+	if ParsePrompt(screen) != nil {
+		return nil, false
 	}
 	rows, ok := bottomBox(screen)
 	if !ok || !strings.HasPrefix(rows[0], chevron) {
-		return "", 0, false
+		return nil, false
 	}
 	shown := []string{strings.TrimSpace(strings.TrimPrefix(rows[0], chevron))}
 	for _, r := range rows[1:] {
 		t := strings.TrimSpace(r)
 		if !strings.HasPrefix(r, "  ") || t == "" || strings.HasPrefix(t, chevron) || isRule(r) {
-			return "", 0, false
+			return nil, false
 		}
 		shown = append(shown, t)
 	}
-	return strings.Join(shown, " "), len(rows), true
+	return shown, true
 }
 
 // squeeze drops all whitespace.

@@ -302,9 +302,13 @@ paths:
         on the Mac). Types `text` into the session's own terminal pane, waits
         300 ms, reads the screen again and presses Enter only if the input box
         still holds the text and no prompt is showing, as if the owner typed it;
-        otherwise `409 not_submitted`: the text waits in the input box, nothing
-        was submitted, and a later send answers `not_at_input` until the owner
-        clears or sends it at the Mac. Follow the answer by re-reading
+        otherwise `409 not_submitted`: the text waits in the input box and
+        nothing was submitted. While the box still shows that text (the same
+        words; wrapping aside), the session's `terminal.canType` is true and
+        sending the same text again presses Enter without typing; any other
+        text answers `not_at_input`. Once the box shows anything else (cleared
+        or sent at the Mac), the record is dropped and the box is the owner's.
+        Follow the answer by re-reading
         `GET /v1/sessions/{id}`. Checked on every request: the pane's foreground
         process is the session's `claude` (`not_claude`), Claude is not working
         on a turn and the session's chat queue is not sending (`busy`: offer
