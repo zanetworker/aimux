@@ -123,7 +123,6 @@ func (r *Resolver) build(path string, c cached, git bool) Folder {
 		f.RepoPath = filepath.Dir(path)
 		f.Worktree = filepath.Base(path)
 	}
-	r.repos[f.RepoPath] = struct{}{}
 	f.Repo = r.repoName(f.RepoPath)
 
 	f.Label = f.Repo
@@ -184,7 +183,9 @@ func (r *Resolver) ResolveNow(path string) {
 		r.dirty = true
 	} else {
 		r.nonGit[path] = struct{}{}
-		r.repos[r.build(path, cached{}, false).RepoPath] = struct{}{}
+		if exists { // git said no: a real non-git folder, not a guess about a gone path
+			r.repos[r.build(path, cached{}, false).RepoPath] = struct{}{}
+		}
 	}
 }
 
@@ -236,6 +237,16 @@ func (r *Resolver) save() error {
 	if err != nil {
 		return err
 	}
+	if err := r.write(b); err != nil {
+		r.mu.Lock()
+		r.dirty = true
+		r.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (r *Resolver) write(b []byte) error {
 
 	dir := filepath.Dir(r.CachePath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

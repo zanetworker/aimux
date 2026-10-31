@@ -309,3 +309,40 @@ func TestGitTop_RealRepoAndWorktree(t *testing.T) {
 		t.Errorf("worktree: %+v", got)
 	}
 }
+
+func TestFolder_UnresolvedGuessDoesNotPrefixLaterRepo(t *testing.T) {
+	r, _ := newTestResolver(t, map[string][2]string{
+		"/work/aimux/clients/ios": {"/work/aimux", "/work/aimux/.git"},
+		"/other/clients":          {"/other/clients", "/other/clients/.git"},
+	})
+	// Unresolved: the non-git guess puts the repo at /work/aimux/clients.
+	r.Folder("/work/aimux/clients/ios")
+	r.ResolveNow("/work/aimux/clients/ios")
+	r.ResolveNow("/other/clients")
+	if got := r.Folder("/other/clients").Repo; got != "clients" {
+		t.Errorf("phantom guess caused a prefix: %q", got)
+	}
+}
+
+func TestSave_FailedWriteIsRetried(t *testing.T) {
+	r, _ := newTestResolver(t, map[string][2]string{
+		"/src/aimux": {"/src/aimux", "/src/aimux/.git"},
+	})
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	good := r.CachePath
+	r.CachePath = filepath.Join(blocker, "folders.json") // parent is a file
+	r.ResolveNow("/src/aimux")
+	if err := r.save(); err == nil {
+		t.Fatal("expected save error")
+	}
+	r.CachePath = good
+	if err := r.save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(good); err != nil {
+		t.Errorf("retry did not write cache: %v", err)
+	}
+}
