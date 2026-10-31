@@ -64,6 +64,7 @@ type fakeDriver struct {
 	// afterType, if set, is the screen once text is typed; otherwise the
 	// typed text shows in the input box.
 	afterType string
+	clearFails bool // KeyClear leaves the screen as it was
 	// lateReads: how many screen reads after Type still show the screen from
 	// before it, as a slow terminal does.
 	lateReads, lateLeft int
@@ -127,6 +128,9 @@ func (d *fakeDriver) Key(_ context.Context, _ Pane, k Key) error {
 	d.keys = append(d.keys, k)
 	if k == KeyEnter && d.afterType == "" {
 		d.screen = idleScreen // submitted: the box is empty again
+	}
+	if k == KeyClear && !d.clearFails {
+		d.screen = idleScreen
 	}
 	return nil
 }
@@ -1338,5 +1342,78 @@ func TestSendWaitsForTheTypedTextToShow(t *testing.T) {
 	wantCode(t, e.svc.Send(context.Background(), "s1", "hello there", ""), "not_submitted")
 	if e.drv.screenReads > 7 || len(e.drv.keys) != 0 {
 		t.Fatalf("reads %d keys %v, want a bounded wait and no Enter", e.drv.screenReads, e.drv.keys)
+	}
+}
+
+// Replace: on the owner's say-so, text in the box (a draft, or Claude Code's
+// grey suggestion) is cleared, the box checked empty, then the message sent.
+func TestSendReplacingClearsTheBoxThenSends(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = boxWith("yes, test it against my local gateway")
+	if err := e.svc.SendReplacing(context.Background(), "s1", "run the tests", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.sent) != 1 || e.drv.sent[0] != "run the tests" {
+		t.Fatalf("sent = %q", e.drv.sent)
+	}
+	clears := 0
+	for _, k := range e.drv.keys {
+		if k == KeyClear {
+			clears++
+		}
+	}
+	if clears != 2 || e.drv.keys[len(e.drv.keys)-1] != KeyEnter {
+		t.Fatalf("keys = %v, want two clears (one row, twice) then Enter", e.drv.keys)
+	}
+	if !strings.Contains(e.log.String(), "replace text chars=13 ok") {
+		t.Fatalf("log = %q", e.log.String())
+	}
+}
+
+func TestSendReplacingRefuses(t *testing.T) {
+	for name, set := range map[string]func(e *env){
+		"a prompt shows":     func(e *env) { e.drv.screen = fixture(t, "prompt-bash.txt") },
+		"owner at this pane": func(e *env) { e.drv.screen = boxWith("my draft"); e.sys.idle, e.drv.front, e.drv.focusTTY = 5, true, "/dev/ttys001" },
+		"claude is working":  func(e *env) { e.drv.screen = strings.Replace(boxWith("x"), "⏺ Done.", "✶ Ionizing… (10s · ↓ 76 tokens)", 1) },
+		"box will not clear": func(e *env) { e.drv.screen = boxWith("my draft"); e.drv.clearFails = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			set(e)
+			if err := e.svc.SendReplacing(context.Background(), "s1", "run the tests", ""); err == nil {
+				t.Fatal("sent")
+			}
+			if len(e.drv.sent) != 0 {
+				t.Fatalf("typed %q", e.drv.sent)
+			}
+			for _, k := range e.drv.keys {
+				if k == KeyEnter {
+					t.Fatalf("pressed Enter: %v", e.drv.keys)
+				}
+			}
+		})
+	}
+	// A plain send never clears.
+	e := newEnv(t)
+	e.drv.screen = boxWith("my draft")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "run the tests", ""), "not_at_input")
+	if len(e.drv.keys) != 0 {
+		t.Fatalf("keys = %v", e.drv.keys)
+	}
+}
+
+func TestStatusSaysTheBoxHasText(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = boxWith("yes, test it against my local gateway")
+	if st := e.svc.Status(context.Background(), "s1", "idle"); st.CanType || !st.BoxHasText || st.Reason != "not_at_input" {
+		t.Fatalf("status = %+v", st)
+	}
+	e.drv.screen = idleScreen
+	if st := e.svc.Status(context.Background(), "s1", "idle"); st.BoxHasText {
+		t.Fatalf("empty box: %+v", st)
+	}
+	e.drv.screen = fixture(t, "prompt-bash.txt")
+	if st := e.svc.Status(context.Background(), "s1", "idle"); st.BoxHasText {
+		t.Fatalf("prompt: %+v", st)
 	}
 }

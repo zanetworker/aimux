@@ -167,6 +167,14 @@ func WordsInBox(screen, text string) bool {
 	return pos == len(want)
 }
 
+// BoxHasText reports an input box, with no prompt showing, that holds text
+// on its chevron line: a draft, or Claude Code's grey suggestion (the screen
+// text carries no colour). Bash mode and unclear screens give false.
+func BoxHasText(screen string) bool {
+	box, _, ok := boxText(screen)
+	return ok && strings.TrimSpace(box) != ""
+}
+
 // boxText is the text in Claude Code's input box and its row count, when
 // no prompt shows and the box has the form TextInBox describes.
 func boxText(screen string) (string, int, bool) {

@@ -68,6 +68,9 @@ type SessionDetail struct {
 // own safety checks (terminput.Service).
 type TerminalInput interface {
 	Send(ctx context.Context, sessionID, text, idemKey string) error
+	// SendReplacing clears the input box first (the owner asked to replace
+	// its text); terminput.ErrNotCleared when it would not empty.
+	SendReplacing(ctx context.Context, sessionID, text, idemKey string) error
 	Press(ctx context.Context, sessionID, promptID string, option terminput.Key, idemKey string) error
 }
 
@@ -677,6 +680,7 @@ var terminalMessages = map[string]struct {
 	"automation_denied":  {http.StatusConflict, "macOS denied aimux Automation access to the terminal"},
 	"not_at_input":       {http.StatusConflict, "Claude Code is not at an empty input box"},
 	"not_submitted":      {http.StatusConflict, "the message is in the input box but was not sent; the screen changed, a prompt may be showing"},
+	"box_not_cleared":    {http.StatusConflict, "the text in the input box on the Mac could not be cleared; nothing was sent"},
 	"busy":               {http.StatusConflict, "Claude is working in this session; try again when it finishes"},
 	"no_prompt":          {http.StatusConflict, "no permission prompt is showing"},
 	"prompt_changed":     {http.StatusConflict, "a different permission prompt is showing"},
@@ -732,8 +736,9 @@ func (a *API) queueActive(session string) bool {
 // terminalMessage types text into the session's terminal pane.
 func (a *API) terminalMessage(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Text string `json:"text"`
-		Key  string `json:"key"`
+		Text    string `json:"text"`
+		Key     string `json:"key"`
+		Replace bool   `json:"replace"` // clear the input box's text first
 	}
 	if err := decodeStrict(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with a text field, at most 64 KiB: %w", err))
@@ -751,7 +756,11 @@ func (a *API) terminalMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "busy", errQueueActive)
 		return
 	}
-	if err := a.TerminalInput.Send(r.Context(), r.PathValue("id"), req.Text, req.Key); err != nil {
+	send := a.TerminalInput.Send
+	if req.Replace {
+		send = a.TerminalInput.SendReplacing
+	}
+	if err := send(r.Context(), r.PathValue("id"), req.Text, req.Key); err != nil {
 		a.terminalError(w, r, err)
 		return
 	}

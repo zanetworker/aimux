@@ -161,7 +161,7 @@ func (d *Driver) Type(ctx context.Context, p terminput.Pane, text string) error 
 	return err
 }
 
-var validKey = regexp.MustCompile(`^([1-9]|escape|enter)$`)
+var validKey = regexp.MustCompile(`^([1-9]|escape|enter|clear)$`)
 
 // Key presses one key: a digit 1 to 9, escape or enter.
 func (d *Driver) Key(ctx context.Context, p terminput.Pane, k terminput.Key) error {

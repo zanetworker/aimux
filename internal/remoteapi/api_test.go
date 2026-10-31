@@ -594,6 +594,13 @@ func (f *fakeTerminal) Send(_ context.Context, id, text, key string) error {
 	return f.err
 }
 
+func (f *fakeTerminal) SendReplacing(_ context.Context, id, text, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf("replace %s %q %s", id, text, key))
+	return f.err
+}
+
 func (f *fakeTerminal) Press(_ context.Context, id, promptID string, option terminput.Key, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -692,6 +699,25 @@ func TestAPI_TerminalBodyLimitsAndUnknownFields(t *testing.T) {
 	// Just under the limit is typed.
 	if resp, _ := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"`+strings.Repeat("a", 60<<10)+`"}`); resp.StatusCode != 202 {
 		t.Fatalf("60 KiB message: %d, want 202", resp.StatusCode)
+	}
+}
+
+// replace: true asks to clear the input box first; plain messages never do.
+func TestAPI_TerminalMessageReplace(t *testing.T) {
+	term := &fakeTerminal{}
+	srv := newTerminalAPI(t, term, true)
+	if resp, _ := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"run it","key":"k1","replace":true}`); resp.StatusCode != 202 {
+		t.Fatalf("replace: %d", resp.StatusCode)
+	}
+	if resp, _ := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"run it","key":"k2"}`); resp.StatusCode != 202 {
+		t.Fatalf("plain: %d", resp.StatusCode)
+	}
+	if got := strings.Join(term.calls, "|"); got != `replace s9 "run it" k1|send s9 "run it" k2` {
+		t.Fatalf("calls = %s", got)
+	}
+	term.err = terminput.ErrNotCleared
+	if resp, body := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"run it","replace":true}`); resp.StatusCode != 409 || body["code"] != "box_not_cleared" {
+		t.Fatalf("%d %v, want 409 box_not_cleared", resp.StatusCode, body)
 	}
 }
 

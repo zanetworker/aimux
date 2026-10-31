@@ -225,6 +225,9 @@ type TerminalStatus struct {
 	Working bool            `json:"working"`
 	Reason  string          `json:"reason,omitempty"` // why CanType is false
 	Prompt  *TerminalPrompt `json:"prompt,omitempty"`
+	// BoxHasText: the input box holds text (a draft, or Claude Code's grey
+	// suggestion); a message with replace: true clears it first.
+	BoxHasText bool `json:"boxHasText,omitempty"`
 }
 
 // QueueStatus is a session's chat queue (GET /v1/sessions/{id}/queue,
@@ -263,7 +266,7 @@ type TerminalOption struct {
 
 // terminalStatusOf turns the service's status into its wire shape.
 func terminalStatusOf(st terminput.Status) *TerminalStatus {
-	out := &TerminalStatus{Status: st.State, CanType: st.CanType, Working: st.Working, Reason: st.Reason}
+	out := &TerminalStatus{Status: st.State, CanType: st.CanType, Working: st.Working, Reason: st.Reason, BoxHasText: st.BoxHasText}
 	if p := st.Prompt; p != nil {
 		out.Prompt = &TerminalPrompt{PromptID: p.ID, Question: p.Question, Detail: p.Detail, Options: make([]TerminalOption, 0, len(p.Options))}
 		for _, o := range p.Options {

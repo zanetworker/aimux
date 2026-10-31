@@ -89,6 +89,10 @@ func (f *fakeQueueInput) Send(context.Context, string, string, string) error {
 	f.sends.Add(1)
 	return nil
 }
+func (f *fakeQueueInput) SendReplacing(context.Context, string, string, string) error {
+	f.sends.Add(1)
+	return nil
+}
 func (f *fakeQueueInput) Submit(context.Context, string, string) error {
 	f.submits.Add(1)
 	return nil

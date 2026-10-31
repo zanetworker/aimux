@@ -32,7 +32,15 @@ const (
 const (
 	KeyEscape Key = "escape"
 	KeyEnter  Key = "enter"
+	// KeyClear empties the input box row the cursor is on: a space (it
+	// dismisses Claude Code's grey suggestion, which no delete key removes),
+	// then Ctrl+K and Ctrl+U. Two per box row empty a draft from any cursor
+	// position.
+	KeyClear Key = "clear"
 )
+
+// clearRounds bounds the attempts to empty the box before Replace gives up.
+const clearRounds = 3
 
 // Target is the session's claude process and its tty, e.g. "/dev/ttys001".
 type Target struct {
@@ -97,6 +105,9 @@ type Status struct {
 	// Send then answers ErrBusy. CanType does not include it, so clients
 	// without a queue keep their composer and get a fixed busy message.
 	Working bool
+	// BoxHasText: the input box holds text (a draft, or Claude Code's grey
+	// suggestion; the screen does not say which). SendReplacing may clear it.
+	BoxHasText bool
 }
 
 type codeError struct{ code, msg string }
@@ -118,6 +129,7 @@ var (
 	ErrPromptChanged    = newErr("prompt_changed", "a different prompt is showing")
 	ErrBadText          = newErr("bad_text", "the text holds control characters or starts with ! or /")
 	ErrNotSubmitted     = newErr("not_submitted", "the text is in the input box but was not submitted")
+	ErrNotCleared       = newErr("box_not_cleared", "the text in the input box could not be cleared; nothing was sent")
 	ErrBusy             = newErr("busy", "Claude is working on a turn in this session")
 	// Submit's answers when the input box does not hold the message.
 	ErrBoxEmpty = newErr("box_empty", "the input box is empty")
@@ -394,6 +406,7 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 	left := s.leftText(sessionID)
 	if !InputBoxEmpty(scr) && (left == "" || !WordsInBox(scr, left)) {
 		st.Reason = Code(ErrNotAtInput)
+		st.BoxHasText = BoxHasText(scr)
 		return st
 	}
 	st.CanType = true
@@ -456,12 +469,56 @@ func (s *Service) registryBusy(sessionID string) bool {
 func (s *Service) Send(ctx context.Context, sessionID, text, idemKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.send(ctx, sessionID, text, idemKey)
+	err := s.send(ctx, sessionID, text, idemKey, false)
 	s.record(sessionID, fmt.Sprintf("text chars=%d", utf8.RuneCountInString(text)), err)
 	return err
 }
 
-func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) error {
+// SendReplacing is Send for when the owner asked to replace what the input
+// box holds: text there (a draft, or Claude Code's grey suggestion) is
+// cleared and the box checked empty before typing. Every other check is
+// Send's, and the box is never cleared while the owner uses this session
+// at the Mac, Claude works, or a prompt shows. ErrNotCleared: the box did
+// not read empty after clearRounds; nothing was typed.
+func (s *Service) SendReplacing(ctx context.Context, sessionID, text, idemKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.send(ctx, sessionID, text, idemKey, true)
+	s.record(sessionID, fmt.Sprintf("replace text chars=%d", utf8.RuneCountInString(text)), err)
+	return err
+}
+
+// clearBox empties the input box scr shows, up to clearRounds, and returns
+// once the box reads empty.
+func (s *Service) clearBox(ctx context.Context, d Driver, p Pane, scr string) error {
+	for range clearRounds {
+		rows, _ := boxRows(scr)
+		for range 2 * max(1, len(rows)) {
+			cctx, cancel := s.withTimeout(ctx)
+			err := d.Key(cctx, p, KeyClear)
+			cancel()
+			if err != nil {
+				return fmt.Errorf("%s: clear: %w", d.Name(), err)
+			}
+		}
+		if err := s.sleep(ctx, settle); err != nil {
+			return ErrNotCleared
+		}
+		var err error
+		if scr, err = s.readScreen(ctx, d, p); err != nil {
+			return err
+		}
+		if InputBoxEmpty(scr) {
+			return nil
+		}
+		if ParsePrompt(scr) != nil || Working(scr) {
+			return ErrNotCleared // something else took the screen: stop
+		}
+	}
+	return ErrNotCleared
+}
+
+func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, replace bool) error {
 	if !s.cfg.Enabled {
 		return ErrDisabled
 	}
@@ -489,7 +546,20 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
 	waiting := !InputBoxEmpty(scr) && s.leftText(sessionID) == text && WordsInBox(scr, text)
 	if !InputBoxEmpty(scr) && !waiting {
-		return ErrNotAtInput
+		if !replace || !BoxHasText(scr) {
+			return ErrNotAtInput
+		}
+		// Never clear text while the owner may be typing it at the Mac.
+		if err := s.inUse(ctx, d, t); err != nil {
+			return err
+		}
+		if err := s.foregroundOK(t); err != nil {
+			return err
+		}
+		if err := s.clearBox(ctx, d, p, scr); err != nil {
+			return err
+		}
+		s.setLeft(sessionID, "")
 	}
 	if err := s.foregroundOK(t); err != nil {
 		return err // changed since locate: a shell may have the pane now

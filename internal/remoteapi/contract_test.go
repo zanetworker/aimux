@@ -54,6 +54,10 @@ func (contractTerminal) Send(_ context.Context, id, text, _ string) error {
 	return nil
 }
 
+func (c contractTerminal) SendReplacing(ctx context.Context, id, text, key string) error {
+	return c.Send(ctx, id, text, key)
+}
+
 func (contractTerminal) Press(_ context.Context, _, promptID string, _ terminput.Key, _ string) error {
 	if promptID != "p1" {
 		return terminput.ErrPromptChanged

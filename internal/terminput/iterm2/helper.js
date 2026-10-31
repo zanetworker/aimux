@@ -86,7 +86,9 @@ function write(s, text) {
   s.write({ text: text, newline: false });
 }
 
-const KEYS = { escape: '\u001b', enter: '\r' };
+// clear: a space (dismisses Claude Code's grey suggestion), then Ctrl+K and
+// Ctrl+U as CSI-u sequences, so Claude Code reads them as keys in one burst.
+const KEYS = { escape: '\u001b', enter: '\r', clear: ' \u001b[107;5u\u001b[117;5u' };
 
 function handle(req) {
   switch (req.op) {
