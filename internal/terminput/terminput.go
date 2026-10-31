@@ -545,6 +545,9 @@ func (s *Service) makeRoom(ctx context.Context, d Driver, p Pane, scr string, ke
 		}
 		rows, _ := boxRows(scr)
 		for range 2 * max(1, len(rows)) {
+			if err := safe(); err != nil {
+				return err // each clear erases a row: never into a pane that is no longer safe
+			}
 			if err := s.pressKey(ctx, d, p, KeyClear); err != nil {
 				return err
 			}

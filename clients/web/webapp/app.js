@@ -936,7 +936,16 @@ function refusedBusy(session, p, e) {
   p.failure = 'the session is busy';
   p.queueOffer = true;
   if (here) queueText(p.text, (c2) => { if (pendings.get(c2.id) === p) pendings.delete(c2.id); });
+  else queueLeftChat(session, p);
   return true;
+}
+
+// queueLeftChat queues a message whose chat was left before its send was refused busy, through that
+// session's own queue; refused there too, it stays that chat's failed message with Add to queue.
+async function queueLeftChat(session, p) {
+  const r = await createQueueClient(api, session, { newKey }).add(p.text);
+  if (r.ok && pendings.get(session) === p) pendings.delete(session);
+  if (r.ok && chat && chat.id === session) render();
 }
 
 // The chat queue: add from the composer (or from a refused message's offer); edit, move, delete

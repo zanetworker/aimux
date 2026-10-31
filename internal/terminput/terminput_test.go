@@ -1534,3 +1534,20 @@ func TestClearingADraftStopsWhenThePaneStopsBeingSafe(t *testing.T) {
 		})
 	}
 }
+
+// The same holds between the keys that clear a draft: a shell that takes the
+// pane after the Backspace gets no Ctrl+E/Ctrl+U.
+func TestClearingADraftChecksBeforeEveryClear(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = boxWith("my draft")
+	e.sys.fgFlipAt = 4 // the check before the first clear
+	if err := e.svc.Send(context.Background(), "s1", "run the tests", ""); err == nil {
+		t.Fatal("sent")
+	}
+	if !slices.Contains(e.drv.keys, KeyBackspace) {
+		t.Fatalf("keys %v: stopped before the Backspace", e.drv.keys)
+	}
+	if slices.Contains(e.drv.keys, KeyClear) || len(e.drv.sent) != 0 {
+		t.Fatalf("keys %v typed %q after a shell took the pane", e.drv.keys, e.drv.sent)
+	}
+}
