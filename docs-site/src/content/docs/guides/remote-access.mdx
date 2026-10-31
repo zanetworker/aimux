@@ -43,13 +43,13 @@ From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:84
 
 On the iPhone, install Tailscale and sign in with the same account as the Mac. Then open `https://<your-mac>.<tailnet>.ts.net:8443/app/` in Safari (`remote serve` prints the address) and use Share, Add to Home Screen to open it like an app. The first time, it asks for a pairing code from `aimux remote pair` (see [Device login](#device-login)); after that it unlocks with Face ID.
 
-The web client's source is `clients/web` in the aimux repo. The iPhone app, a native app for the same API, is `clients/ios`; it has Now, All, Search and the chat, and is built from source with Xcode. Both clients rank sessions and build the chat timeline with the same shared test fixtures.
+The web client's source is `clients/web` in the aimux repo. The iPhone app, a native app for the same API, is `clients/ios`; it has Now, All and the chat, and is built from source with Xcode. Both clients rank sessions and build the chat timeline with the same shared test fixtures.
 
-The page has the iPhone app's layout: **Now** and **All** tabs in the bar at the bottom, with search as the round button beside them. It follows the phone's light or dark setting. Colour appears only as small status dots: green working, amber needs you, red failed, grey idle.
+The page has the iPhone app's layout: **Now** and **All** tabs in the bar at the bottom, and a search box at the top of each. It follows the phone's light or dark setting. Colour appears only as small status dots: green working, amber needs you, red failed, grey idle.
 
-- **Now:** what you can act on, refreshed every 15 seconds while the page is open. The line under the title counts what needs you, what is working and what is open on your Mac. Permission requests are cards with the request in large type, the command it wants to run and the agent's own options as buttons. When the screen is busy (more than five sessions need you, just finished or are working), each request is a one-line row instead; tap it to open its card in place. A failed turn shows its error and **Retry**, which sends the same message again. **Just finished** lists turns that ended since you last opened them. **Working** shows each session's current step, and above five sessions folds them by project (tap a project to open it). **On your Mac** lists sessions open in a terminal (the 8 newest), grouped by project folder like Working, with **All N** for the full list.
-- **All:** every session, grouped by day, filtered by project and sorted by newest or most active; **Folders** shows one folder per project instead (newest project first, its newest session beside the name), each opening in place to its sessions. A lock marks sessions open in a terminal on the Mac.
-- **Search:** title and folder matches appear at once; matches inside conversations follow from the server's index, with the matched words in bold (the index is described under `GET /v1/search` below; right after the first start it can take a few minutes to fill).
+- **Now:** the Mac as you see it, refreshed every 15 seconds while the page is open. See [Finding sessions](#finding-sessions) for the order. Permission requests are cards with the request in large type, the command it wants to run and the agent's own options as buttons; when more than five sessions need you, each is a one-line row that opens its card in place. A failed turn shows its error and **Retry**, which sends the same message again.
+- **All:** every session. **Recent** lists them newest first, by day; **Folders** shows the stable tree of repository, worktree and subfolder. The choice is remembered on the device.
+- **Search:** a box at the top of Now and All; see [Finding sessions](#finding-sessions).
 - **New session:** the pencil button at the top of Now and All starts a session in one of your recent project folders (only those; never an arbitrary path) with a first message. This sheet keeps its older style for now.
 - **In a session:** the header shows the title and the session's state ("Working", "Your turn", "Failed", or "Open on your Mac · 12h ago"); tap it, or the info button, for the session's cost, tokens, model, turns, duration, branch and folder. Your messages are dark bubbles on the right, with inline Markdown (code, bold, links), pasted code kept as code and Claude Code's own wrappers removed (a pasted image shows as an "Image 1" chip); Claude's replies are on the left, formatted: headings, lists and task lists, quotes, tables that scroll sideways, and code blocks with their language, syntax colours (Go, Swift, JS/TS, Python, shell, JSON, YAML and diffs) and a **Copy** button; inline code reads in its own colour on a tint. A reply line that is only a YouTube, Vimeo, video, image or audio link becomes a card; nothing loads from the other site until you tap it. Links open in a new tab, and issue numbers, commits, file paths and Jira keys become links (see [Links in replies](#links-in-replies)). A thought is one grey line ("Thought for 8s"), the tool calls between two replies fold into one line ("6 steps · 41s · 2 files changed"), and a plan is a checklist ("2 of 4"); tap a thought or the steps to open them, then tap a step to read it in full (with **Copy** on its command and error): a command with its whole text, coloured as shell, a failure with its error under a red "Failed", an edit as its removed and added lines (the first 40, then "N more lines"). A step with nothing more to show does not open. A permission request is a card in the conversation with the exact command and the agent's own options as buttons; once answered it folds to one line ("Allowed"). Above the message box, **Next** opens the next session that needs you (or the next working one) without going back; it hides while this session waits for an answer. While Claude works, **Stop** shows beside the send arrow, which then queues your message for when Claude finishes (see [Chat queue](#chat-queue)). A message that could not be sent stays with **Retry**, which sends it again without running it twice. A session open in a terminal on the Mac shows its latest turns and "Read-only here while it's open in a terminal on your Mac" instead of the message box, unless terminal input is on (see [Typing into terminal sessions](#typing-into-terminal-sessions)). When the connection drops, a grey "Reconnecting…" line shows under the header until it is back; in a terminal session a read that fails keeps the turns shown and says "Couldn't refresh" with **Retry** (iPhone). Scrolled up, a **Latest** button jumps back to the newest message. Not shown yet: what a command printed (aimux does not store command output yet) and attachments.
 - **Voice:** the mic dictates into the message box (the browser's speech recognition; on iPhone it runs through Apple's speech service, like keyboard dictation). In the session info sheet (and the voice menu on the new-session screen): read replies aloud (code is skipped), send when you stop talking, and hands-free conversation, which listens again after each reply. Permission requests are read out but only answered with a tap. iOS may need a tap on the mic again after the phone sleeps.
@@ -239,7 +239,7 @@ Pins are the existing star: the same flag in the TUI, the dashboard and the phon
 
 ### When a model is used
 
-Automatically only for a session the phone's Now screen can show (Last on your Mac, Pinned, working, open in a terminal, or finished in the last 15 minutes) or the chat you open, when it has no title or description of yours and nothing of ours, once. A session without an away summary gets a title (when its shown title is useless) and a description, made from its first message and the start of its latest reply. A session with an away summary gets only a title, and only when its shown title is useless; it is made from that summary alone, and no description is written (the summary is the description). aimux asks for up to 5 such sessions per request, with small calls: at most 500 characters of the session in, 60 tokens out per session. The rest is up to you:
+Automatically only for a session the phone's Now screen can show (Pinned, working, or open in a terminal) or the chat you open, when it has no title or description of yours and nothing of ours, once. A session without an away summary gets a title (when its shown title is useless) and a description, made from its first message and the start of its latest reply. A session with an away summary gets only a title, and only when its shown title is useless; it is made from that summary alone, and no description is written (the summary is the description). aimux asks for up to 5 such sessions per request, with small calls: at most 500 characters of the session in, 60 tokens out per session. The rest is up to you:
 
 - `sessions.auto_title: true` turns automatic naming on (default `false`). With it off, nothing is sent unless you press **Update summary**.
 - `sessions.naming_daily_limit` (default `20`) caps the sessions named automatically per local day. **Update summary** is not capped, but is counted.
@@ -257,18 +257,55 @@ What leaves your Mac, to Anthropic, as when you use Claude Code:
 
 No other session is sent, and nothing is sent automatically for a session that already has a name and description or that you named yourself. Names and descriptions are stored in `.meta.json` next to each transcript.
 
-### Last on your Mac
+### Now
 
-With terminal input on, aimux looks at iTerm2's focused pane every 15 seconds while the Mac is in use and remembers which session it showed. This is held in memory only, so a restart forgets it. `GET /v1/sessions` returns it as `lastOnMac`; clients hide it after 12 hours.
+From the top of the screen:
 
-### In the clients
+1. The search box and a **Working** chip that narrows Now to working sessions.
+2. **Needs you**: pending permission requests and recent failed turns of sessions started from the phone. Cards answer in place.
+3. **Pinned**: pinned sessions that are closed. A pinned session that is open shows a pin mark in its place below instead of appearing twice.
+4. **On your Mac**: sessions open in iTerm2, in iTerm2's order: window (its title, or "Window 1", "Window 2" in creation order), then tab, then pane. A row has the title, a state line (Working, Your turn, Shell), and the folder and pane number. Every tab is folded to one line (name, panes, working count) except the one holding the pane last in front; which tabs you open or close is remembered on the device. Nothing reorders while the screen is open; a status change happens in place.
+5. **Elsewhere**: open sessions not in an iTerm2 pane (started from the phone, other terminals, or a pane aimux could not match), grouped by folder.
 
-- **Now** order: Last on your Mac, Pinned, then the usual sections. A session appears once. Needs you wins: a session waiting for an answer stays in Needs you even when it is pinned or last on your Mac.
-- With more than 5 sessions working, Working groups them by folder under a folder row (folder icon, name, count). A folder with one session is one row.
-- Each row can show a one-line description under the title; All and search show them too.
+If no session has a place (iTerm2 is not running, or macOS has not granted Automation access), On your Mac lists open sessions by folder.
+
+### All
+
+**Recent | Folders** at the top, remembered on the device (Recent the first time). Folders lists repositories A to Z; under a repository the main checkout first, then worktrees A to Z; sessions newest first. A folder starts closed unless it holds the newest session, and open folders are remembered. Non-git folders are grouped by their parent folder, never in one catch-all bucket. A session's status is a mark on its row; it never moves to another section.
+
+### Search
+
+The same box on Now and All. As you type, it matches on the device: names, descriptions, folder, tab and window names and the last message. After a short pause it also searches conversation text on the Mac (`GET /v1/search`); those hits follow under "In conversations" with an excerpt. Open sessions come first, in the Mac's order, then the rest newest first. On Now, typing hides non-matching panes in place and counts hidden tabs; closed matches follow under "Other sessions". An empty box leaves the screen as usual.
+
+### The chat's Next bar
+
+The bar offers the next session that needs you, otherwise the next working one, in Now's order. It skips the session you are in and one whose approval you just answered.
+
+### Folder and place on the API
+
+`GET /v1/sessions` gives each listed session three optional fields, so clients never derive names themselves:
+
+| Field | Meaning |
+|-------|---------|
+| `folder` | `{repo, worktree, sub, label}`. Git: `repo` is the main worktree's folder name, `worktree` the linked worktree's (absent for the main checkout), `sub` the path below the worktree top. Non-git: `repo` is the parent folder's name and `worktree` the folder's own; the home folder is "Home". `label` is for display ("aimux / clients · ios"). |
+| `mac` | Present when the session's running `claude` is in an iTerm2 pane: `{window:{id,index,name}, tab:{index,name}, pane, panes, lastInFront}`. |
+| `working` | `true` when the session is open in a terminal and Claude's registry calls it busy. |
+
+`lastOnMac` stays in the list for older clients, which hide it after 12 hours.
+
+How it is built:
+
+- The layout is read from iTerm2 and joined to open sessions by tty. The read is read-only (it never focuses, types or starts iTerm2), takes about a tenth of a second, and is reused for 3 seconds. A failed read falls back to the last good one for 30 seconds, then `mac` is absent.
+- It needs macOS Automation access to iTerm2 (`aimux remote terminal-input check` asks for it), but works without `terminal_input.enabled`.
+- Folders are resolved in the background and kept in `~/.aimux/folders.json` (owner-only), so a deleted worktree keeps its name. A list call never waits on git.
+- The Mac layout and folder identity are phone-only for now; the TUI and CLI do not show them.
+
+### Pins and the info sheet
+
 - **Pin**: in the web client, the "..." menu on a row; on the iPhone, long press. Both need the `describe` capability.
 - **Info sheet**: edit the title (80 characters) and description (300), **Update summary**, Pin, and a line such as "Named 4 of 20 today." or "Naming paused.". An empty edit clears text you wrote and returns to the automatic text; clearing a title or description you did not write changes nothing and says "Nothing to clear".
-- **Search** also matches descriptions.
+- Each row can show a one-line description under the title.
+
 
 ## Security model
 
@@ -297,7 +334,7 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 | `POST /v1/auth/challenge` | Body `{"deviceId"}`, or `{}` for a passkey that finds its own device: `{"challenge"}`, valid 60 s, single use |
 | `POST /v1/auth/login` | Body `{"deviceId","challenge","signature",...}`: `{"deviceId","name"}`, plus `token` for the iPhone app (send it as `Authorization: Bearer <token>`); the web client gets the `__Host-aimux_session` cookie instead |
 | `POST /v1/auth/logout` | End this login: `{"status":"logged_out"}` |
-| `GET /v1/sessions?limit=50` | `{"sessions":[...],"lastOnMac":{"id","at"}}`: recent Claude sessions, newest first, with `state`, `lastPrompt`, `pinned` and an optional `description`; `lastPrompt` is the last message the person typed; `lastOnMac` is the session last in front on the Mac (absent when unknown). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`) |
+| `GET /v1/sessions?limit=50` | `{"sessions":[...],"lastOnMac":{"id","at"}}`: recent Claude sessions, newest first, with `state`, `lastPrompt`, `pinned` and an optional `description`; `lastPrompt` is the last message the person typed; `lastOnMac` is the session last in front on the Mac (absent when unknown; kept for older clients). Sessions also carry optional `folder`, `mac` and `working` (see [Finding sessions](#finding-sessions)). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`) |
 | `GET /v1/sessions/{id}?turns=20` | One session and its last turns: `{..session, "turns":[{"number","time","user","reply","tools":[{"name","snippet","ok","detail"}]}], "stats":{...}, "repo":{"web","branch","root"}}`. `repo` is the session folder's GitHub or GitLab repository (its `origin` remote as a web address without credentials: `https` for ssh remotes, while an `http` or `https` remote keeps its scheme and a non-default port; the checked-out branch; and `root`, the repository folder on the Mac; the session is looked up by the working directory it recorded); it is left out for any other folder and for a session that recorded no working directory. `stats` is what the session has cost and used so far: `costUsd`, `tokensIn`, `tokensOut`, `cacheReadTokens`, `cacheWriteTokens`, `turns`, `durationMin`, and `startTime`, `model` and `gitBranch` when known. It is left out for a session not in the index yet (just created, file not written). A tool's `detail` is optional and holds `input` (the full command or target; left out when `snippet` already shows it, as for a path or a search query), `error`, and for an edit `old` and `new` text (a Write's content arrives as `new`), cut at 4096, 2048, 4096 and 4096 bytes with a trailing `…`; it is left out when the tool has none. Long sessions are read from the end, so `number` counts turns in the part read: use it for order, not as a stable id. A session in state `open_in_terminal` also has `terminal`: `{"status","canType","working","reason","prompt"}` (see below). A session with messages queued also has `queue` (the same object as `GET …/queue`) |
 | `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn |
 | `POST /v1/sessions/{id}/terminal/messages` | Body `{"text","key","replace"}` (`replace` optional: replace a draft in the box even with `keep_drafts` on). Types the text into the session's terminal pane, then Enter: `202 {"status":"typed"}` (capability `terminal_input`). Bodies over 64 KiB or with unknown fields are `400 bad_request`; a driver failure is `500 internal` with a fixed message, its detail only in `remote serve`'s log |

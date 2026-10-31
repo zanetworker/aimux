@@ -1,6 +1,6 @@
 # aimux for iPhone
 
-A native iPhone app (SwiftUI) for [aimux](https://github.com/zanetworker/aimux)'s remote API v1: see what needs you on the Mac (Now: approvals you answer on the card, failed turns you retry, what just finished, what is working, what sits open in a terminal), browse every session by day (All, filtered by project and sorted), search titles and conversation content, open any session as a chat (follow it live, send a message, stop a turn, answer approvals, see its cost and tokens; sessions that never started are read only), type into Claude Code sessions open in iTerm2 on the Mac and answer their permission prompts (when the Mac turns on terminal input; otherwise those sessions are read only too), and (coming next) start sessions and use voice.
+A native iPhone app (SwiftUI) for [aimux](https://github.com/zanetworker/aimux)'s remote API v1: see the Mac as it is (Now: approvals you answer on the card, failed turns you retry, and the sessions open in iTerm2 by window, tab and pane), browse every session (All: Recent by day, or Folders by repository and worktree), search both screens by name, folder, place and conversation content, open any session as a chat (follow it live, send a message, stop a turn, answer approvals, see its cost and tokens; sessions that never started are read only), type into Claude Code sessions open in iTerm2 on the Mac and answer their permission prompts (when the Mac turns on terminal input; otherwise those sessions are read only too), and (coming next) start sessions and use voice.
 
 ## How it connects
 
