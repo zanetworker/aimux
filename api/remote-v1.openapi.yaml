@@ -946,6 +946,58 @@ components:
         lastPrompt: { type: string, description: "The last message the person typed." }
         description: { type: string, description: "One or two sentences about the session: the owner's, else Claude Code's latest away summary, else one aimux wrote. Absent when there is none." }
         pinned: { type: boolean, description: "The session is pinned (aimux's star, shared with the TUI)." }
+        folder: { $ref: "#/components/schemas/Folder" }
+        mac: { $ref: "#/components/schemas/MacPlace" }
+        working: { type: boolean, description: "The session is open in a terminal and Claude's registry calls it busy. Absent when not working. Listed sessions only." }
+
+    Folder:
+      type: object
+      additionalProperties: false
+      required: [repo, repoPath, label]
+      description: >
+        Where a session ran, named by the server so clients never derive
+        names themselves. Listed sessions only. Git folders: repo is the
+        folder name of the repository's main worktree; worktree is the linked
+        worktree's folder name (absent for the main checkout); sub is the
+        path below the worktree top (absent at the top). Non-git folders:
+        repo is the parent folder's name and worktree the folder's own name;
+        the home folder itself is "Home". Resolved once per path and kept, so
+        a deleted worktree keeps its identity.
+      properties:
+        repo: { type: string }
+        repoPath: { type: string, description: "The top folder's full path, the grouping key." }
+        worktree: { type: string }
+        sub: { type: string }
+        label: { type: string, description: "What clients print, for example \"aimux / clients · ios\"." }
+
+    MacPlace:
+      type: object
+      additionalProperties: false
+      required: [window, tab, pane, panes, lastInFront]
+      description: >
+        Where a session's running claude sits in iTerm2 on the Mac. Present
+        only for a session in an iTerm2 pane, and only in the session list.
+        Absent when iTerm2 is not running or cannot be read. The layout is
+        cached for 3 seconds.
+      properties:
+        window:
+          type: object
+          additionalProperties: false
+          required: [id, index, name]
+          properties:
+            id: { type: string }
+            index: { type: integer, minimum: 1, description: "Windows in creation order (ascending iTerm2 window id), not front-to-back, so switching windows does not renumber them." }
+            name: { type: string, description: "The title the owner set, else \"Window N\"." }
+        tab:
+          type: object
+          additionalProperties: false
+          required: [index, name]
+          properties:
+            index: { type: integer, minimum: 1 }
+            name: { type: string, description: "iTerm2's name for the tab (its current session's name)." }
+        pane: { type: integer, minimum: 1, description: "Position within the tab, 1-based." }
+        panes: { type: integer, minimum: 1, description: "Panes in the tab." }
+        lastInFront: { type: boolean, description: "This pane was in front the last time the Mac was used." }
 
     SessionList:
       type: object
@@ -1022,6 +1074,9 @@ components:
         lastPrompt: { type: string }
         description: { type: string, description: "One or two sentences about the session: the owner's, else Claude Code's latest away summary, else one aimux wrote. Absent when there is none." }
         pinned: { type: boolean, description: "The session is pinned (aimux's star, shared with the TUI)." }
+        folder: { $ref: "#/components/schemas/Folder" }
+        mac: { $ref: "#/components/schemas/MacPlace" }
+        working: { type: boolean, description: "The session is open in a terminal and Claude's registry calls it busy. Absent when not working. Listed sessions only." }
         turns:
           type: array
           items: { $ref: "#/components/schemas/Turn" }

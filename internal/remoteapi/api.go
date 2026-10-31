@@ -16,6 +16,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/push"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
@@ -47,6 +48,12 @@ type Session struct {
 	// owner's, else Claude Code's away summary, else aimux's.
 	Description string `json:"description,omitempty"`
 	Pinned      bool   `json:"pinned"` // the session's star
+	// Folder, Mac and Working are filled for the session list only.
+	Folder *folders.Folder `json:"folder,omitempty"` // where the session ran, named once per path
+	// Mac is set when the running claude is in an iTerm2 pane.
+	Mac *terminput.MacPlace `json:"mac,omitempty"`
+	// Working: the session is open in a terminal and Claude's registry calls it busy.
+	Working bool `json:"working,omitempty"`
 }
 
 // SessionDetail is a session plus its most recent turns.
@@ -102,6 +109,11 @@ type API struct {
 	// one there and returns its id.
 	Projects func(ctx context.Context) ([]Project, error)
 	Create   func(ctx context.Context, cwd, text string) (string, error)
+	// Places, if set, gives the iTerm2 pane of each open session by id, and
+	// Folder the named folder of a session's project path; both fill the
+	// session list only. Nil leaves the fields absent.
+	Places func(ctx context.Context) map[string]terminput.MacPlace
+	Folder func(path string) folders.Folder
 	// Client, if set, is a browser client served at /app/ behind the same
 	// identity check as /v1. It is any handler; the server knows nothing
 	// else about it.
@@ -331,6 +343,19 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	if list == nil {
 		list = []Session{}
+	}
+	var places map[string]terminput.MacPlace
+	if a.Places != nil {
+		places = a.Places(r.Context())
+	}
+	for i := range list {
+		if a.Folder != nil {
+			f := a.Folder(list[i].Project)
+			list[i].Folder = &f
+		}
+		if p, ok := places[list[i].ID]; ok {
+			list[i].Mac = &p
+		}
 	}
 	out := SessionList{Sessions: list, LastOnMac: a.lastOnMac(r.Context())}
 	writeJSON(w, http.StatusOK, out)

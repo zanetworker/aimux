@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/terminput"
 )
 
@@ -934,5 +935,76 @@ func TestAPI_TerminalSuccessInvalidatesStatus(t *testing.T) {
 	defer mu.Unlock()
 	if fmt.Sprint(typed) != "[s9 s8]" {
 		t.Fatalf("invalidated %v, want s9 and s8 only", typed)
+	}
+}
+
+func listJSON(t *testing.T, api *API) []map[string]any {
+	t.Helper()
+	srv := httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
+	defer srv.Close()
+	resp, body := do(t, srv, "GET", "/v1/sessions", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("list: %d %v", resp.StatusCode, body)
+	}
+	var out []map[string]any
+	for _, s := range body["sessions"].([]any) {
+		out = append(out, s.(map[string]any))
+	}
+	return out
+}
+
+func TestListSessions_FolderMacWorking(t *testing.T) {
+	sessions := func(context.Context, int, bool) ([]Session, error) {
+		return []Session{
+			{ID: "s1", Project: "/src/aimux", State: StateOpenInTerminal, Working: true},
+			{ID: "s2", Project: "/src/other", State: StateIdle},
+		}, nil
+	}
+	var asked []string
+	api := &API{Sessions: sessions,
+		Folder: func(path string) folders.Folder {
+			asked = append(asked, path)
+			return folders.Folder{Repo: "repo-" + path[len("/src/"):], Label: "label " + path}
+		},
+		Places: func(context.Context) map[string]terminput.MacPlace {
+			return map[string]terminput.MacPlace{"s1": {Window: terminput.MacWindow{ID: "w1", Index: 1, Name: "Window 1"},
+				Tab: terminput.MacTab{Index: 2, Name: "aimux"}, Pane: 1, Panes: 2, LastInFront: true}}
+		}}
+	got := listJSON(t, api)
+	if len(asked) != 2 {
+		t.Fatalf("Folder asked for %v, want both projects", asked)
+	}
+	f1 := got[0]["folder"].(map[string]any)
+	if f1["repo"] != "repo-aimux" || f1["label"] != "label /src/aimux" {
+		t.Fatalf("s1 folder = %v", f1)
+	}
+	if got[1]["folder"].(map[string]any)["repo"] != "repo-other" {
+		t.Fatalf("s2 folder = %v", got[1]["folder"])
+	}
+	m := got[0]["mac"].(map[string]any)
+	if m["window"].(map[string]any)["name"] != "Window 1" || m["tab"].(map[string]any)["index"] != float64(2) ||
+		m["pane"] != float64(1) || m["panes"] != float64(2) || m["lastInFront"] != true {
+		t.Fatalf("s1 mac = %v", m)
+	}
+	if _, ok := got[1]["mac"]; ok {
+		t.Fatalf("s2 is not in Places but has mac: %v", got[1]["mac"])
+	}
+	if got[0]["working"] != true {
+		t.Fatalf("s1 working = %v", got[0]["working"])
+	}
+	if _, ok := got[1]["working"]; ok {
+		t.Fatalf("s2 is not working but has the field: %v", got[1]["working"])
+	}
+}
+
+func TestListSessions_NoFolderNoPlaces(t *testing.T) {
+	api := &API{Sessions: func(context.Context, int, bool) ([]Session, error) {
+		return []Session{{ID: "s1", Project: "/src/aimux", State: StateIdle}}, nil
+	}}
+	got := listJSON(t, api)
+	for _, k := range []string{"folder", "mac", "working"} {
+		if _, ok := got[0][k]; ok {
+			t.Fatalf("%s present with no resolver: %v", k, got[0][k])
+		}
 	}
 }

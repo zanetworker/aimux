@@ -27,6 +27,7 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/gitremote"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
@@ -330,6 +331,28 @@ func buildLastFocus(cfg config.TerminalInputConfig, sessions func() map[string]i
 	}
 	return nil
 }
+
+// buildLayoutReader reads the iTerm2 layout for the session list, from the
+// first driver that can report one, whether or not terminal input is on.
+// lastFocus may be nil. Nil when no driver reports a layout.
+func buildLayoutReader(sessions func() map[string]int, lastFocus *terminput.LastFocus, log io.Writer, drivers ...terminput.Driver) *terminput.LayoutReader {
+	for _, d := range drivers {
+		if src, ok := d.(terminput.LayoutSource); ok {
+			r := &terminput.LayoutReader{Source: src, Sys: terminput.SystemProbe{}, Sessions: sessions, Now: time.Now, Log: log}
+			if lastFocus != nil {
+				r.LastOnMac = lastFocus.Last
+			}
+			return r
+		}
+	}
+	return nil
+}
+
+// Both the iTerm2 driver and the process probe feed the layout reader.
+var (
+	_ terminput.LayoutSource = (*iterm2.Driver)(nil)
+	_ terminput.LayoutSystem = terminput.SystemProbe{}
+)
 
 // buildDeviceLogin sets up device login when on: the paired devices in
 // ~/.aimux and the audit log ~/.aimux/logs/remote-audit.log (0600). Off,
@@ -674,6 +697,13 @@ func newRemoteServeCmd() *cobra.Command {
 			if lastFocus != nil {
 				api.LastOnMac = lastFocus.Last
 			}
+			// Folder names and the Mac layout of listed sessions. The layout
+			// is read with or without terminal input: it only reads.
+			resolver := folders.NewResolver(home, filepath.Join(home, ".aimux", "folders.json"))
+			api.Folder = resolver.Folder
+			if layout := buildLayoutReader(index.TerminalPIDs, lastFocus, cmd.ErrOrStderr(), drivers...); layout != nil {
+				api.Places = layout.Places
+			}
 			ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.port))
 			if err != nil {
 				return fmt.Errorf("listen on 127.0.0.1:%d: %w (choose another port with --port)", s.port, err)
@@ -702,9 +732,12 @@ func newRemoteServeCmd() *cobra.Command {
 					lastFocus.Run(ctx, lastFocusEvery)
 				}
 			}()
-			// The dispatcher, the namer and Last on your Mac stop before the
-			// terminal drivers close (deferred earlier, so run later).
-			defer func() { stop(); <-queueDone; <-namerDone; <-focusDone }()
+			foldersDone := make(chan struct{})
+			go func() { defer close(foldersDone); resolver.Run(ctx) }()
+			// The dispatcher, the namer, the folder resolver and Last on your
+			// Mac stop before the terminal drivers close (deferred earlier,
+			// so run later).
+			defer func() { stop(); <-queueDone; <-namerDone; <-focusDone; <-foldersDone }()
 			go func() {
 				t := time.NewTicker(time.Minute)
 				defer t.Stop()

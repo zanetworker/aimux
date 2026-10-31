@@ -173,7 +173,9 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 		if _, created := x.Created.Get(s.ID); s.Automated && !includeAutomated && !created {
 			continue
 		}
-		out = append(out, summary(s, x.state(s.ID, open)))
+		sum := summary(s, x.state(s.ID, open))
+		sum.Working = open[s.ID].Status == "busy"
+		out = append(out, sum)
 	}
 	// Sessions created here that have no file yet (still starting, or failed
 	// before the agent wrote one) are listed from their creation record.

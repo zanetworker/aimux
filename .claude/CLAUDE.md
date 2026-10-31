@@ -140,7 +140,9 @@ internal/
     screen.go                   # Parses Claude Code's screen: InputBoxEmpty, BoxHasText, WordsInBox, WorkingSeconds, ParsePrompt (none when its top rule is off the screen; fixtures in testdata/screens/)
     probe.go                    # SystemProbe: tty, foreground process group (ps), HID idle time (ioreg)
     log.go                      # Attempt log ~/.aimux/logs/terminal-input.log (0600, never the text)
+    layout.go                   # LayoutReader: joins the iTerm2 windows, tabs and panes to open sessions by tty (MacPlace for the session list; 3 s cache)
     iterm2/iterm2.go            # iTerm2 driver over a persistent JXA helper (helper.js, embedded); live tests behind the iterm2 build tag
+  folders/                      # Resolver: a session path to Folder{Repo, Worktree, Sub, Label} (git or not), cached in ~/.aimux/folders.json
   terminal/
     backend.go                  # SessionBackend interface
     embed.go                    # Direct PTY backend (Claude)

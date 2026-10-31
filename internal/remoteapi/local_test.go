@@ -719,3 +719,30 @@ func TestLocalIndex_RegistryStatus(t *testing.T) {
 		t.Fatalf("session not open: %q", got)
 	}
 }
+
+// Working marks an open session whose registry status is busy; an idle or
+// status-less one is not working.
+func TestLocalIndex_SessionsWorking(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	working := func() map[string]bool {
+		got, err := x.Sessions(context.Background(), 50, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, s := range got {
+			out[s.ID] = s.Working
+		}
+		return out
+	}
+	if w := working(); w["open"] || w["idle"] || w["busy"] {
+		t.Fatalf("no busy status in the registry, working = %v", w)
+	}
+	reg := fmt.Sprintf(`{"pid":%d,"sessionId":"open","status":"busy"}`, os.Getpid())
+	if err := os.WriteFile(filepath.Join(x.RegistryDir, "1.json"), []byte(reg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if w := working(); !w["open"] || w["idle"] {
+		t.Fatalf("working = %v, want only open", w)
+	}
+}

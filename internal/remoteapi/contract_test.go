@@ -31,6 +31,7 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/push"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
@@ -269,6 +270,10 @@ func TestContract(t *testing.T) {
 	sessions := []Session{
 		{ID: "s1", Provider: "claude", Title: "Fix the cache", Project: "/w/app", LastActive: now, State: StateIdle, LastPrompt: "make the TTL configurable"},
 		{ID: "s9", Provider: "claude", Title: "Read only", Project: "/w/app", LastActive: now, State: StateOpenInTerminal},
+		{ID: "s2", Provider: "claude", Title: "On the Mac", Project: "/w/app", LastActive: now, State: StateOpenInTerminal, Working: true,
+			Folder: &folders.Folder{Repo: "app", RepoPath: "/w/app", Worktree: "clients", Sub: "ios", Label: "app / clients · ios"},
+			Mac: &terminput.MacPlace{Window: terminput.MacWindow{ID: "w1", Index: 1, Name: "Window 1"}, Tab: terminput.MacTab{Index: 2, Name: "app"},
+				Pane: 1, Panes: 2, LastInFront: true}},
 	}
 	api := &API{Version: "test", Broker: b,
 		Sessions: func(context.Context, int, bool) ([]Session, error) { return sessions, nil },
