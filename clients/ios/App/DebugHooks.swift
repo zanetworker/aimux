@@ -10,24 +10,25 @@ enum DebugHooks {
     static var serverOverride: String? { UserDefaults.standard.string(forKey: "server") }
     /// -openSettings YES: open the server sheet at launch.
     static var openSettings: Bool { UserDefaults.standard.bool(forKey: "openSettings") }
-    /// -query <text>: start the search tab with this search.
+    /// -query <text>: start Now and All with this in their search boxes.
     static var initialQuery: String? { UserDefaults.standard.string(forKey: "query") }
-    /// -project <path>: start All filtered to this project.
-    static var initialProject: String? { UserDefaults.standard.string(forKey: "project") }
-    /// -sort folders: start All in the folder view.
-    static var initialSort: AllSort { UserDefaults.standard.string(forKey: "sort") == "folders" ? .project : .newest }
-    /// -collapse <path>: start Now with this working folder closed (folders start open).
-    static var collapsedProject: String? { UserDefaults.standard.string(forKey: "collapse") }
+    /// -resetFinding YES: forget All's Recent or Folders and the tabs and folders opened by hand, before launch.
+    /// (Start All in Folders for one run with `-allMode folders`.)
+    static func resetFindingIfAsked() {
+        guard UserDefaults.standard.bool(forKey: "resetFinding") else { return }
+        for key in ["allMode", "openTabs", "openFolders"] { UserDefaults.standard.removeObject(forKey: key) }
+    }
     /// -scrollToEnd YES: open lists scrolled to the bottom, for screenshots of the lower sections.
     static var scrollToEnd: Bool { UserDefaults.standard.bool(forKey: "scrollToEnd") }
-    /// -tab now|all|search: start on this tab.
+    /// -tab now|all: start on this tab.
     static var initialTab: AppTab {
         UserDefaults.standard.string(forKey: "tab").flatMap(AppTab.init(rawValue:)) ?? .now
     }
     /// -demo list|twenty|finding|error|empty|slow|chat|chat-approval|chat-readonly|chat-terminal|chat-format|
-    /// chat-items|chat-queue|chat-long: sample data without a server (finding: Last on your Mac, pins, folders,
-    /// descriptions and a fake Update summary; chat-queue: the terminal sessions of chat-terminal, and
-    /// queues; chat-long: every session a long terminal chat whose latest 30 turns move on by one each read).
+    /// chat-items|chat-queue|chat-long: sample data without a server (finding: two iTerm2 windows, one renamed,
+    /// with tabs and panes, pins, folders, worktrees and a fake Update summary; chat-queue: the terminal sessions of
+    /// chat-terminal, and queues; chat-long: every session a long terminal chat whose latest 30 turns move on by one
+    /// each read).
     static var demoSource: (any AppSource)? {
         UserDefaults.standard.string(forKey: "demo").map(DemoSource.init(mode:))
     }
@@ -82,9 +83,7 @@ enum DebugHooks {
     static let serverOverride: String? = nil
     static let openSettings = false
     static let initialQuery: String? = nil
-    static let initialProject: String? = nil
-    static let initialSort = AllSort.newest
-    static let collapsedProject: String? = nil
+    static func resetFindingIfAsked() {}
     static let scrollToEnd = false
     static let initialTab = AppTab.now
     static let demoSource: (any AppSource)? = nil
@@ -224,6 +223,9 @@ private struct DemoSource: AppSource {
     }
 
     func search(_ query: String, limit: Int) async throws -> [SearchHit] {
+        if isFinding {
+            return try APIDecoder.decode(SearchResultsDemo.self, from: Data(DemoFinding.hitsJSON(query).utf8)).results
+        }
         let rows = DemoData.list.suffix(3).map { session in
             #"{"id":"\#(session.id)-hit","provider":"claude","title":"\#(session.title)","# +
                 #""project":"\#(session.project)","lastActive":"2026-10-20T10:00:00Z","state":"idle","# +

@@ -26,7 +26,7 @@ private struct SortOnly: Decodable { let sort: String }
         guard sort.sort == "recent" else { return }
         let fixture: Fixture = try loadClientFixture("all", name)
         let zone = try #require(TimeZone(identifier: fixture.timeZone))
-        let sections = allSections(fixture.sessions, project: fixture.project, sort: .newest,
+        let sections = allSections(fixture.sessions, project: fixture.project,
                                    now: fixture.now, timeZone: zone)
         #expect(sections.map { Fixture.Section(day: $0.day, ids: $0.sessions.map(\.id)) } == fixture.expect.sections)
     }
@@ -37,12 +37,12 @@ private struct SortOnly: Decodable { let sort: String }
     }
 
     @Test func emptyInputGivesNoSections() {
-        #expect(allSections([], project: nil, sort: .newest, now: .now, timeZone: .gmt).isEmpty)
+        #expect(allSections([], project: nil, now: .now, timeZone: .gmt).isEmpty)
     }
 
     @Test func filterThatMatchesNothingGivesNoSections() throws {
         let fixture: Fixture = try loadClientFixture("all", "recent-by-day")
-        let sections = allSections(fixture.sessions, project: "/nowhere", sort: .newest, now: fixture.now,
+        let sections = allSections(fixture.sessions, project: "/nowhere", now: fixture.now,
                                    timeZone: .gmt)
         #expect(sections.isEmpty)
     }

@@ -177,35 +177,19 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// The session last in front on the Mac, and when it was seen there.
-public struct LastOnMac: Decodable, Equatable, Sendable {
-    public let id: String
-    // swiftlint:disable:next identifier_name
-    public let at: Date
-
-    // swiftlint:disable:next identifier_name
-    public init(id: String, at: Date) {
-        self.id = id
-        self.at = at
-    }
-}
-
+/// The session list; older servers also send `lastOnMac`, which is ignored.
 public struct SessionList: Decodable, Equatable, Sendable {
     public let sessions: [Session]
-    /// Absent when the server does not know it, and from older servers.
-    public let lastOnMac: LastOnMac?
 
-    private enum CodingKeys: String, CodingKey { case sessions, lastOnMac }
+    private enum CodingKeys: String, CodingKey { case sessions }
 
-    public init(sessions: [Session], lastOnMac: LastOnMac? = nil) {
+    public init(sessions: [Session]) {
         self.sessions = sessions
-        self.lastOnMac = lastOnMac
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sessions = try container.decode(LossyList<Session>.self, forKey: .sessions).elements
-        lastOnMac = try? container.decodeIfPresent(LastOnMac.self, forKey: .lastOnMac)
     }
 }
 

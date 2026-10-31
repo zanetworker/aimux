@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import AimuxKit
 
-// Finding sessions: descriptions, pins, Last on your Mac, owner edits and Update summary.
+// Finding sessions: descriptions, pins, owner edits and Update summary.
 
 private func json(_ text: String) -> Data { Data(text.utf8) }
 
@@ -21,17 +21,13 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
         #expect(list.sessions[1].description == nil)
         #expect(list.sessions[1].descriptionLine == nil)
         #expect(!list.sessions[1].pinned)
-        #expect(list.lastOnMac == LastOnMac(id: "a", at: try #require(APIDate.parse("2026-10-30T11:55:00Z"))))
     }
 
-    @Test func listWithoutLastOnMacOrWithABrokenOneHasNone() throws {
+    @Test func anOlderServersLastOnMacIsIgnored() throws {
         let row = #"{"id":"a","provider":"claude","title":"T","project":"/p","lastActive":"2026-10-30T11:00:00Z","# +
             #""state":"idle"}"#
-        let without = try APIDecoder.decode(SessionList.self, from: json(#"{"sessions":["# + row + "]}"))
-        #expect(without.lastOnMac == nil)
         let broken = try APIDecoder.decode(SessionList.self, from: json(
             #"{"sessions":["# + row + #"],"lastOnMac":{"id":"a"}}"#))
-        #expect(broken.lastOnMac == nil)
         #expect(broken.sessions.map(\.id) == ["a"])
     }
 
@@ -140,14 +136,14 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
         }
     }
 
-    @Test func listCarriesLastOnMac() async throws {
+    @Test func listAsksForTheLimit() async throws {
         let host = "last-on-mac.test"
         StubProtocol.stub(host: host, .success((200, json(
             #"{"sessions":[{"id":"a","provider":"claude","title":"T","project":"/p","# +
             #""lastActive":"2026-10-30T11:00:00Z","state":"idle"}],"lastOnMac":{"id":"a","at":"2026-10-30T11:55:00Z"}}"#
         ))))
         let list = try await client(host).sessionList(limit: 9)
-        #expect(list.lastOnMac?.id == "a")
+        #expect(list.sessions.map(\.id) == ["a"])
         #expect(StubProtocol.requests(host: host).first?.url?.query() == "limit=9")
     }
 }
@@ -264,22 +260,5 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
         #expect(edit.problem == "One line, without control characters.")
         // A Return typed while the pasted lines are still there does not save either.
         #expect(!type(&edit, "First line\nSecond line\n"))
-    }
-}
-
-@Suite struct SinceTextTests {
-    private let format = SessionRowFormat(locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "UTC")!)
-    // Sunday 2026-10-25 18:00:00 UTC
-    private let now = Date(timeIntervalSince1970: 1_792_951_200)
-
-    @Test(arguments: [
-        (-120.0, "just now"),  // a future time counts as now
-        (30.0, "just now"),
-        (240.0, "4 min ago"),
-        (10_800.0, "3 h ago"),
-        (68_400.0, "Yesterday")
-    ])
-    func lastOnMacSaysHowLongAgo(secondsAgo: Double, text: String) {
-        #expect(format.since(now.addingTimeInterval(-secondsAgo), now: now) == text)
     }
 }

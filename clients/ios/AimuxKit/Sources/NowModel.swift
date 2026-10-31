@@ -81,6 +81,8 @@ public final class NowModel {
         rebuild()
         async let healthRead: Void = readHealthOnce()
         await list.refresh()
+        // The hold clock runs from when a list arrives, not from each rebuild of the same list.
+        if list.error == nil { held = holdPlaces(previous: held, current: list.sessions, now: now()).held }
         rebuild()
         let sessions = list.sessions
         let current = now()
@@ -251,7 +253,6 @@ public final class NowModel {
             }
         }
         let kept = holdPlaces(previous: held, current: list.sessions, now: now())
-        held = kept.held
         view = rankNow(sessions: kept.sessions, activity: shown, now: now(), query: query, workingOnly: workingOnly)
     }
 }

@@ -117,89 +117,6 @@ extension SectionLabel where Trailing == EmptyView {
     }
 }
 
-/// "project · rest", with the project isolated so an Arabic name does not reorder the line.
-func projectLine(_ project: String, _ rest: String?, format: SessionRowFormat) -> String {
-    let name = isolated(format.projectName(project))
-    guard let rest, !rest.isEmpty else { return name }
-    return "\(name) · \(isolated(rest))"
-}
-
-/// A working session: "project · live step" (the step in monospace), "Thinking", or "Active".
-struct WorkingRow: View {
-    let item: NowItem
-    let format: SessionRowFormat
-
-    var body: some View {
-        DotRow(status: .working, title: item.session.displayTitle, description: item.session.descriptionLine,
-               date: item.session.lastActive, format: format) {
-            StepLine(project: item.session.project, activity: item.activity, format: format)
-        }
-    }
-}
-
-/// "project · live step": the step in monospace, or "Thinking", or "Active"; without a project, the step alone.
-struct StepLine: View {
-    var project: String?
-    let activity: Activity
-    let format: SessionRowFormat
-
-    var body: some View {
-        HStack(spacing: 0) {
-            if let project { Text(bidi: isolated(format.projectName(project)) + " · ") }
-            stepText
-        }
-        // Read as "aimux, Run tests", not with the separator.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel([project.map { isolated(format.projectName($0)) }, stepLabel].compactMap { $0 }
-            .joined(separator: ", "))
-    }
-
-    private var stepLabel: String {
-        guard case .working(let step?) = activity else { return "Active" }
-        return step == "Thinking" ? step : isolated(step)
-    }
-
-    private var stepText: Text {
-        guard case .working(let step?) = activity else { return Text("Active") }
-        return step == "Thinking" ? Text(step)
-            : Text(bidi: isolated(step)).font(.system(.subheadline, design: .monospaced))
-    }
-}
-
-/// A session with what it is doing, for a Pinned or Mac row.
-struct PlacedItem {
-    let session: Session
-    let activity: Activity
-    let isWorking: Bool
-}
-
-extension Activity {
-    var isWorking: Bool {
-        if case .working = self { return true }
-        return false
-    }
-}
-
-/// A Pinned or Mac-window row: the session's own dot, its description, then "project · step" while it
-/// works, else the project; the lock when it is open read-only on the Mac.
-struct PlacedRow: View {
-    let item: PlacedItem
-    let format: SessionRowFormat
-
-    var body: some View {
-        let session = item.session
-        DotRow(status: item.isWorking ? .working : .idle, title: session.displayTitle,
-               description: session.descriptionLine, date: session.lastActive, format: format,
-               locked: session.state == .openInTerminal && !item.isWorking) {
-            if item.isWorking {
-                StepLine(project: session.project, activity: item.activity, format: format)
-            } else {
-                Text(bidi: isolated(format.projectName(session.project)))
-            }
-        }
-    }
-}
-
 /// A session whose last turn failed: red dot, the error in one line, and Retry when there is a prompt to resend.
 struct FailedRow: View {
     let session: Session
@@ -243,83 +160,73 @@ struct FailedRow: View {
     }
 }
 
-/// A session inside an open folder: title then what it is doing, its description under them.
-struct CompactWorkingRow: View {
-    let item: NowItem
+/// A session row on Now, All and in search: the dot, the title with its marks (pinned in its pane, last in front),
+/// the state line when open ("Working · step", "Your turn · 4 min"), the quiet place line ("aimux / clients · pane 2")
+/// and, when `showsTime`, the time. At accessibility text sizes the time moves under the title.
+struct SessionLine: View {
+    let session: Session
+    let activity: Activity
+    let state: RowState?
+    let place: String
+    var showsPin = false
+    var showsTime = true
     let format: SessionRowFormat
-
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
-        HStack(alignment: stacked ? .firstTextBaseline : .center, spacing: 10) {
-            StatusDot(status: .working)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            StatusDot(status: isWorking(session, activity: activity) ? .working : .idle)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
             TimeLayout(stacked: stacked) {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 0) {
-                        Text(bidi: isolated(item.session.displayTitle)).font(.subheadline).layoutPriority(1)
-                        Text(" · ").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
-                        stepText.foregroundStyle(.secondary)
-                    }
-                    .lineLimit(stacked ? 3 : 1)
-                    if let description = item.session.descriptionLine {
-                        DescriptionLine(text: description, stacked: stacked)
+                    titleLine
+                    if let state { stateText(state) }
+                    if !place.isEmpty {
+                        Text(bidi: isolated(place))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(stacked ? 3 : 1)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                RowTime(date: item.session.lastActive, format: format)
+                if showsTime { RowTime(date: session.lastActive, format: format) }
             }
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
-    /// The live step in monospace; "Thinking" and "Active" in the normal font.
-    private var stepText: Text {
-        guard case .working(let step?) = item.activity else { return Text("Active").font(.caption) }
-        return step == "Thinking" ? Text(step).font(.caption)
-            : Text(bidi: isolated(step)).font(.system(.caption, design: .monospaced))
-    }
-}
-
-/// An idle session open in a terminal on the Mac: grey dot, title, idle time; one line.
-struct OnMacRow: View {
-    let session: Session
-    let format: SessionRowFormat
-
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        let stacked = typeSize.isAccessibilitySize
-        HStack(alignment: stacked ? .firstTextBaseline : .center, spacing: 10) {
-            StatusDot(status: .idle)
-            TimeLayout(stacked: stacked) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(bidi: isolated(session.displayTitle))
-                        .lineLimit(stacked ? 3 : 1)
-                    if let description = session.descriptionLine {
-                        DescriptionLine(text: description, stacked: stacked)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                RowTime(date: session.lastActive, format: format)
-            }
+    private var titleLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(bidi: isolated(session.displayTitle))
+                .font(.body.weight(.semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if showsPin { mark("pin.fill", label: "Pinned") }
+            if session.mac?.lastInFront == true { mark("diamond.fill", label: "Last in front on your Mac") }
         }
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
     }
-}
 
-/// A row in All and in search: title, then "project · last prompt"; a lock when open in a terminal.
-struct SessionRow: View {
-    let session: Session
-    let format: SessionRowFormat
+    private func mark(_ symbol: String, label: String) -> some View {
+        Image(systemName: symbol)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(label)
+    }
 
-    var body: some View {
-        DotRow(status: DotStatus(session.state), title: session.displayTitle, description: session.descriptionLine,
-               date: session.lastActive, format: format, locked: session.state == .openInTerminal) {
-            Text(bidi: projectLine(session.project, session.lastPrompt, format: format))
+    /// "Working · " then the live step in monospace, or "Your turn · 4 min".
+    private func stateText(_ state: RowState) -> some View {
+        let text: Text
+        if case .working(let step?) = state, step != "Thinking" {
+            text = Text("Working · ") + Text(bidi: isolated(step)).font(.system(.subheadline, design: .monospaced))
+        } else {
+            text = Text(state.text)
         }
+        return text
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 }
 
@@ -329,9 +236,9 @@ struct SearchHitRow: View {
 
     var body: some View {
         DotRow(status: DotStatus(hit.session.state), title: hit.session.displayTitle, date: hit.session.lastActive,
-               format: format, locked: hit.session.state == .openInTerminal) {
+               format: format) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(bidi: isolated(format.projectName(hit.session.project)))
+                Text(bidi: isolated(rowPlace(hit.session, withTab: true)))
                 Text(highlighted).lineLimit(3)
             }
         }

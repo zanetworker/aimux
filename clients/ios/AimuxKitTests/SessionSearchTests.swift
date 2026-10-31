@@ -39,20 +39,20 @@ private struct Fixture: Decodable {
     }
 
     @Test func aSessionWithAPaneIsOpenWhateverItsState() {
-        let found = searchSessions([session("a", mac: true), session("b")], query: "a")
+        let found = searchSessions([session("a", mac: true), session("b")], query: "a", now: now)
         #expect(found.open.map(\.id) == ["a"])
         #expect(found.other.isEmpty)
     }
 
     @Test func tabAndFolderNamesMatchAndAllWordsMustMatch() {
         let sessions = [session("s1", tab: "Deploy", label: "blog", mac: true), session("s2", label: "blog")]
-        #expect(searchSessions(sessions, query: "deploy blog").open.map(\.id) == ["s1"])
-        #expect(searchSessions(sessions, query: "deploy nothing").open.isEmpty)
-        #expect(searchSessions(sessions, query: "BLOG").other.map(\.id) == ["s2"])
+        #expect(searchSessions(sessions, query: "deploy blog", now: now).open.map(\.id) == ["s1"])
+        #expect(searchSessions(sessions, query: "deploy nothing", now: now).open.isEmpty)
+        #expect(searchSessions(sessions, query: "BLOG", now: now).other.map(\.id) == ["s2"])
     }
 
     @Test func blankQueryFindsNothing() {
-        let found = searchSessions([session("a")], query: "  \t ")
+        let found = searchSessions([session("a")], query: "  \t ", now: now)
         #expect(found.open.isEmpty && found.other.isEmpty)
     }
 

@@ -1,26 +1,27 @@
 import SwiftUI
 import AimuxKit
 
-/// Now: what needs you, the pinned sessions, the Mac's iTerm2 windows and tabs, and the rest open elsewhere, as a
-/// flat list until the screens are rebuilt on the Mac layout. With the server's `describe` capability, a long
-/// press pins or unpins.
+/// Now: the search box and Working chip, what needs you, the pinned sessions that are not open, the Mac's iTerm2
+/// windows and tabs as they are on the Mac, and the open sessions elsewhere. Typing hides the panes that do not
+/// match in place and lists closed matches under Other sessions, then conversation hits. With the server's
+/// `describe` capability, a long press pins or unpins.
 /// (`NowScreen`, because AimuxKit's ranking result is already called `NowView`.)
 struct NowScreen: View {
     let model: NowModel
+    let search: SearchModel
     let chat: ChatContext
     @Binding var serverAddress: String
-    /// Switches to the All tab with this filter.
-    let showAll: (AllFilter) -> Void
 
     @State private var path: [Session] = DebugHooks.initialPath
     /// Approvals opened in place from their compact row when Now is busy.
     @State private var openCards: Set<String> = []
     @State private var hasLoaded = false
     @State private var showingSettings = DebugHooks.openSettings
+    /// Tabs opened or folded by hand, by `OpenMemory.tabKey`.
+    @AppStorage("openTabs") private var openTabs = ""
     private let format = SessionRowFormat()
 
     private var view: AimuxKit.NowView { model.view }
-    private var isQuiet: Bool { view.needsYou.isEmpty && view.working == 0 }
     /// More than 5 needing you or working: approvals become rows.
     private var isBusy: Bool { view.needsYou.count + view.working > 5 }
 
@@ -33,7 +34,11 @@ struct NowScreen: View {
                             HeaderButton(label: "Server", systemImage: "gearshape") { showingSettings = true }
                                 .accessibilityIdentifier("settingsButton")
                         } below: {
-                            NowSummaryLine(view: view, isQuiet: isQuiet, hasLoaded: hasLoaded)
+                            NowSummaryLine(view: view, hasLoaded: hasLoaded, matches: matches)
+                            SearchField(text: query, prompt: "Search all sessions").padding(.top, 4)
+                            if view.working > 0 || model.workingOnly {
+                                WorkingChip(isOn: workingOnly, count: view.working)
+                            }
                         }
                     }
                     .listSectionSpacing(8)
@@ -49,8 +54,16 @@ struct NowScreen: View {
                     windowSections
                     elsewhereSection
                     otherSection
+                    ConversationsSection(search: search, query: model.query, shown: shownIDs, format: format) { hit in
+                        Button { open(hit.session) } label: { SearchHitRow(hit: hit, format: format) }
+                            .buttonStyle(.plain)
+                            .compactRow()
+                            .accessibilityIdentifier("hit-\(hit.id)")
+                    }
                 }
                 .listStyle(.insetGrouped)
+                .scrollDismissesKeyboard(.immediately)
+                .conversationSearch(search, query: model.query)
                 .listSectionSpacing(20)
                 .environment(\.defaultMinListRowHeight, 44)
                 .navigationTitle("Now")
@@ -159,17 +172,37 @@ struct NowScreen: View {
 
     // MARK: Sessions
 
-    private func placedRow(_ session: Session) -> some View {
+    private var query: Binding<String> { Binding { model.query } set: { model.query = $0 } }
+    private var workingOnly: Binding<Bool> { Binding { model.workingOnly } set: { model.workingOnly = $0 } }
+    /// A search or the Working chip: every tab left is held open, and counts read "1 of 4 panes".
+    private var isFiltered: Bool { !model.query.trimmingCharacters(in: .whitespaces).isEmpty || model.workingOnly }
+    private var hasQuery: Bool { !model.query.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// With a query, the open sessions that match: in panes, pinned and elsewhere.
+    private var matches: Int? {
+        guard hasQuery else { return nil }
+        return view.windows.flatMap(\.tabs).map(\.sessions.count).reduce(0, +)
+            + view.elsewhere.map(\.sessions.count).reduce(0, +)
+    }
+    /// Every session the screen lists, so conversation hits do not repeat them.
+    private var shownIDs: Set<String> {
+        Set(view.needsYou.map(\.session.id) + view.pinned.map(\.session.id)
+            + view.windows.flatMap(\.tabs).flatMap(\.sessions).map(\.id)
+            + view.elsewhere.flatMap(\.sessions).map(\.id) + view.other.map(\.id))
+    }
+
+    private func row(_ session: Session, inPane: Bool) -> some View {
         let activity = model.activity[session.id] ?? .none
-        let item = PlacedItem(session: session, activity: activity,
-                              isWorking: session.state == .busy || session.working || activity.isWorking)
-        return sessionButton(session) { PlacedRow(item: item, format: format) }
+        let state = rowState(session, activity: activity, now: .now, format: format)
+        return sessionButton(session) {
+            SessionLine(session: session, activity: activity, state: state, place: rowPlace(session, withTab: !inPane),
+                        showsPin: inPane && session.pinned, showsTime: state == nil, format: format)
+        }
     }
 
     @ViewBuilder private var pinnedSection: some View {
         if !view.pinned.isEmpty {
             Section {
-                ForEach(view.pinned, id: \.session.id) { placedRow($0.session) }
+                ForEach(view.pinned, id: \.session.id) { row($0.session, inPane: false) }
             } header: {
                 SectionLabel("Pinned")
             }
@@ -177,23 +210,50 @@ struct NowScreen: View {
     }
 
     @ViewBuilder private var windowSections: some View {
-        ForEach(view.windows, id: \.id) { window in
+        ForEach(Array(view.windows.enumerated()), id: \.element.id) { position, window in
             Section {
                 ForEach(window.tabs, id: \.index) { tab in
-                    ForEach(tab.sessions) { placedRow($0) }
+                    let isOpen = isOpen(tab, in: window)
+                    Button { if !isFiltered { toggle(tab, in: window) } } label: {
+                        FoldLine(name: tab.name, position: "tab \(tab.index)", counts: counts(tab), isOpen: isOpen,
+                                 canFold: !isFiltered)
+                    }
+                    .buttonStyle(.plain)
+                    .compactRow()
+                    .accessibilityIdentifier("tab-\(window.id)-\(tab.index)")
+                    if isOpen {
+                        ForEach(tab.sessions) { session in
+                            FolderItem { row(session, inPane: true) }.listRowInsets(.vertical, 0)
+                        }
+                    }
                 }
             } header: {
-                SectionLabel(window.name, detail: "on your Mac")
+                VStack(alignment: .leading, spacing: 10) {
+                    if position == 0 { SectionLabel("On your Mac") }
+                    Text(bidi: isolated(window.name))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .textCase(nil)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("window-\(window.id)")
+                }
+            } footer: {
+                if position == view.windows.count - 1, view.hiddenTabs > 0 { hiddenTabsLine }
             }
+        }
+        if view.windows.isEmpty, view.hiddenTabs > 0 {
+            Section {} header: { SectionLabel("On your Mac") } footer: { hiddenTabsLine }
         }
     }
 
+    /// Open sessions in no iTerm2 pane. With no layout from the Mac at all, they are the Mac's sessions by folder,
+    /// under its header.
     @ViewBuilder private var elsewhereSection: some View {
-        ForEach(view.elsewhere, id: \.label) { group in
+        if !view.elsewhere.isEmpty {
             Section {
-                ForEach(group.sessions) { placedRow($0) }
+                ForEach(view.elsewhere.flatMap(\.sessions)) { row($0, inPane: false) }
             } header: {
-                SectionLabel(group.label)
+                SectionLabel(view.windows.isEmpty && view.hiddenTabs == 0 ? "On your Mac" : "Elsewhere")
             }
         }
     }
@@ -201,7 +261,7 @@ struct NowScreen: View {
     @ViewBuilder private var otherSection: some View {
         if !view.other.isEmpty {
             Section {
-                ForEach(view.other) { placedRow($0) }
+                ForEach(view.other) { row($0, inPane: false) }
             } header: {
                 SectionLabel("Other sessions")
             }
@@ -213,44 +273,67 @@ struct NowScreen: View {
     }
 }
 
-/// "2 need you · 2 working · 14 on your Mac": counts in bold, only the first part amber;
-/// "Nothing needs you" when nothing needs you, finished or is working.
-private struct NowSummaryLine: View {
-    let view: AimuxKit.NowView
-    let isQuiet: Bool
-    let hasLoaded: Bool
+// MARK: Tabs
 
-    var body: some View {
-        if isQuiet {
-            Text(hasLoaded ? "Nothing needs you" : " ")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("nowSummary")
-        } else {
-            Text(summary)
-                .font(.subheadline)
-                .accessibilityIdentifier("nowSummary")
-        }
+extension NowScreen {
+    private var hiddenTabsLine: some View {
+        let count = view.hiddenTabs
+        return Text(count == 1 ? "1 tab with no match is hidden" : "\(count) tabs with no match are hidden")
+            .accessibilityIdentifier("hiddenTabs")
     }
 
-    /// "2 need you · 2 working · 14 on your Mac": counts in bold, only the first part amber.
+    /// "4 panes · 1 working"; with a search or the chip, "1 of 4 panes".
+    private func counts(_ tab: NowTab) -> String {
+        let panes = tab.panes == 1 ? "1 pane" : "\(tab.panes) panes"
+        if isFiltered { return "\(tab.sessions.count) of \(panes)" }
+        return tab.working > 0 ? "\(panes) · \(tab.working) working" : panes
+    }
+
+    private func isOpen(_ tab: NowTab, in window: NowWindow) -> Bool {
+        isFiltered || OpenMemory(openTabs).isOpen(OpenMemory.tabKey(window: window.name, tab: tab.name),
+                                                  otherwise: tab.open)
+    }
+
+    private func toggle(_ tab: NowTab, in window: NowWindow) {
+        let open = !isOpen(tab, in: window)
+        withAnimation(.snappy) {
+            openTabs = OpenMemory(openTabs).setting(OpenMemory.tabKey(window: window.name, tab: tab.name),
+                                                    open: open).raw
+        }
+    }
+}
+
+/// "2 need you · 25 open"; with a query "2 open match"; "Nothing open" once loaded with nothing open.
+/// One quiet line: counts in semibold, no colour.
+private struct NowSummaryLine: View {
+    let view: AimuxKit.NowView
+    let hasLoaded: Bool
+    /// With a query, the open sessions that match.
+    let matches: Int?
+
+    var body: some View {
+        Text(summary)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("nowSummary")
+    }
+
     private var summary: AttributedString {
-        var parts: [AttributedString] = []
-        func part(_ count: Int, _ label: String, color: Color) -> AttributedString {
+        func part(_ count: Int, _ label: String) -> AttributedString {
             var number = AttributedString("\(count)")
             number.font = .subheadline.weight(.semibold)
-            number.foregroundColor = color == .secondary ? .primary : color
-            var rest = AttributedString(" \(label)")
-            rest.foregroundColor = color
-            return number + rest
+            number.foregroundColor = .primary
+            return number + AttributedString(" " + label)
         }
-        if !view.needsYou.isEmpty { parts.append(part(view.needsYou.count, "need you", color: .amber)) }
-        if view.working > 0 { parts.append(part(view.working, "working", color: .secondary)) }
-        if view.open > 0 { parts.append(part(view.open, "open", color: .secondary)) }
-        var separator = AttributedString(" · ")
-        separator.foregroundColor = .secondary
+        if let matches {
+            return matches == 0 ? AttributedString("No open match") : part(matches, "open match")
+        }
+        guard hasLoaded || view.open > 0 || !view.needsYou.isEmpty else { return AttributedString(" ") }
+        var parts: [AttributedString] = []
+        if !view.needsYou.isEmpty { parts.append(part(view.needsYou.count, "need you")) }
+        parts.append(view.open == 0 ? AttributedString("Nothing open") : part(view.open, "open"))
         return parts.enumerated().reduce(into: AttributedString()) { line, entry in
-            if entry.offset > 0 { line += separator }
+            if entry.offset > 0 { line += AttributedString(" · ") }
             line += entry.element
         }
     }

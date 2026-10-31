@@ -1,78 +1,148 @@
 import XCTest
 
-/// Last on your Mac, pins, folders and owner edits on the `-demo finding` data (Update summary answered by a fake).
+/// Now mirroring the Mac, All's Recent and Folders, one search box, pins and owner edits on the `-demo finding`
+/// data (Update summary answered by a fake). Each launch forgets the folds and All's mode unless `keep` is set.
 final class FindingSessionsUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     @MainActor
-    private func launch(_ arguments: [String] = []) -> XCUIApplication {
+    private func launch(_ arguments: [String] = [], tab: String = "now", keep: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-demo", "finding", "-tab", "now", "-serverAddress", ""] + arguments
+        app.launchArguments = ["-demo", "finding", "-tab", tab, "-serverAddress", ""]
+            + (keep ? [] : ["-resetFinding", "YES"]) + arguments
         app.launch()
         return app
     }
 
     @MainActor
-    func testNowLeadsWithLastOnYourMacAndPinned() {
+    func testNowMirrorsTheMacsWindowsAndTabs() {
         let app = launch()
-        XCTAssertTrue(app.staticTexts["LAST ON YOUR MAC"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["session-fd-mac"].exists)
-        XCTAssertTrue(app.staticTexts["PINNED"].exists)
-        XCTAssertTrue(app.buttons["session-fd-pin1"].exists)
-        XCTAssertTrue(app.buttons["session-fd-pin2"].exists)
-        // A pinned working session is shown once: in Pinned, not in its folder.
-        XCTAssertTrue(app.buttons["group-aimux"].exists)
-        XCTAssertFalse(app.buttons["group-release-tools"].exists)
+        let window = app.staticTexts["window-w-1"]
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        XCTAssertEqual(plain(window.label), "Window 1")
+        // The tab holding the pane last in front starts open; the others are one line each.
+        XCTAssertTrue(app.buttons["session-fd-a1"].exists)
+        XCTAssertTrue(app.buttons["session-fd-q1"].exists)
+        let folded = app.buttons["tab-w-1-2"]
+        XCTAssertEqual(plain(folded.label), "openshell · tab 2 · 2 panes · 1 working")
+        XCTAssertEqual(folded.value as? String, "Collapsed")
+        XCTAssertFalse(app.buttons["session-fd-o1"].exists)
+
+        folded.tap()
+        XCTAssertTrue(app.buttons["session-fd-o1"].waitForExistence(timeout: 5))
+        XCTAssertEqual(folded.value as? String, "Expanded")
+        folded.tap()
+        XCTAssertTrue(app.buttons["session-fd-o1"].waitForNonExistence(timeout: 5))
+
+        // The renamed window keeps the owner's title.
+        for _ in 0..<4 where !app.staticTexts["window-w-2"].exists { app.swipeUp() }
+        XCTAssertEqual(plain(app.staticTexts["window-w-2"].label), "Reviews")
     }
 
     @MainActor
-    func testFoldersStartOpenAndCollapse() {
+    func testAFoldChosenByHandIsRemembered() {
         let app = launch()
-        let folder = app.buttons["group-aimux"]
-        XCTAssertTrue(folder.waitForExistence(timeout: 10))
-        XCTAssertEqual(folder.value as? String, "Expanded")
-        XCTAssertEqual(plain(folder.label), "aimux, 3 sessions")
-        XCTAssertTrue(app.buttons["session-fd-a2"].exists)
+        let tab = app.buttons["tab-w-1-2"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 10))
+        tab.tap()
+        XCTAssertTrue(app.buttons["session-fd-o1"].waitForExistence(timeout: 5))
+        app.terminate()
 
-        folder.tap()
-        XCTAssertTrue(app.buttons["session-fd-a2"].waitForNonExistence(timeout: 5))
-        XCTAssertEqual(folder.value as? String, "Collapsed")
-        folder.tap()
-        XCTAssertTrue(app.buttons["session-fd-a2"].waitForExistence(timeout: 5))
-
-        // A folder of one session is a row that opens the session.
-        XCTAssertFalse(app.buttons["group-trips"].exists)
-        XCTAssertTrue(open(app.buttons["session-fd-t1"], in: app))
+        let again = launch(keep: true)
+        XCTAssertTrue(again.buttons["session-fd-o1"].waitForExistence(timeout: 10))
     }
 
     @MainActor
-    func testLongPressPinsAndUnpins() {
+    func testTheTabBarHasNowAndAllOnly() {
+        let app = launch()
+        XCTAssertTrue(app.tabBars.buttons["Now"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.tabBars.buttons["All"].exists)
+        XCTAssertEqual(app.tabBars.buttons.count, 2)
+    }
+
+    @MainActor
+    func testAllStartsOnRecentAndRemembersFolders() {
+        let app = launch(tab: "all")
+        let recent = app.buttons["Recent"]
+        XCTAssertTrue(recent.waitForExistence(timeout: 10))
+        XCTAssertTrue(recent.isSelected)
+        XCTAssertTrue(app.staticTexts["TODAY"].exists)
+        app.buttons["Folders"].tap()
+        let aimux = app.buttons["folder-aimux"]
+        XCTAssertTrue(aimux.waitForExistence(timeout: 5))
+        // The folder (and worktree) holding the newest session starts open; the rest are closed.
+        XCTAssertEqual(aimux.value as? String, "Expanded")
+        XCTAssertEqual(app.buttons["worktree-aimux-clients"].value as? String, "Expanded")
+        XCTAssertTrue(app.buttons["session-fd-a1"].exists)
+        let openshell = app.buttons["folder-openshell"]
+        for _ in 0..<4 where !openshell.exists { app.swipeUp() }
+        XCTAssertEqual(openshell.value as? String, "Collapsed")
+        XCTAssertEqual(plain(openshell.label), "openshell · 4 · 2 working")
+        app.terminate()
+
+        let again = launch(tab: "all", keep: true)
+        XCTAssertTrue(again.buttons["folder-aimux"].waitForExistence(timeout: 10))
+        XCTAssertTrue(again.buttons["Folders"].isSelected)
+    }
+
+    @MainActor
+    func testTypingOnNowHidesOtherTabsAndListsOtherSessions() {
+        let app = launch()
+        let field = app.textFields["searchField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["session-fd-a1"].waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("queue")
+
+        XCTAssertTrue(app.buttons["session-fd-a1"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["session-fd-q1"].exists, "an open match stays in its pane")
+        XCTAssertEqual(plain(app.buttons["tab-w-1-3"].label), "aimux · tab 3 · 1 of 4 panes")
+        XCTAssertFalse(app.buttons["tab-w-1-1"].exists)
+        XCTAssertEqual(app.staticTexts["hiddenTabs"].label, "4 tabs with no match are hidden")
+        XCTAssertTrue(app.buttons["session-fd-v1"].exists)
+        for _ in 0..<3 where !app.buttons["hit-fd-fv"].exists { app.swipeUp() }
+        XCTAssertTrue(app.buttons["session-fd-c1"].exists, "a closed match is under Other sessions")
+        XCTAssertTrue(app.buttons["hit-fd-fv"].waitForExistence(timeout: 5), "then conversation hits")
+    }
+
+    @MainActor
+    func testTheWorkingChipNarrowsToWorkingSessions() {
+        let app = launch()
+        let chip = app.descendants(matching: .any)["workingChip"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["session-fd-q1"].waitForExistence(timeout: 10))
+        XCTAssertEqual(chip.label, "Working · 5")
+        chip.tap()
+        XCTAssertTrue(app.buttons["session-fd-q1"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["session-fd-a1"].exists)
+        XCTAssertTrue(app.buttons["session-fd-o1"].exists, "a filtered tab is held open")
+    }
+
+    @MainActor
+    func testLongPressPinsInPlaceAndUnpins() {
         let app = launch()
         let row = app.buttons["session-fd-a2"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertFalse(plain(row.label).contains("Pinned"))
 
         row.press(forDuration: 1.2)
         let pin = app.buttons["Pin"]
         XCTAssertTrue(pin.waitForExistence(timeout: 5))
         pin.tap()
-        // Pinned: it leaves its folder for the Pinned section (a row with its project), and the 5 working
-        // sessions left are a plain list again.
-        XCTAssertTrue(waitFor(row, label: "Working, Fix the icon spacing, aimux, Active, 3 min"))
-        let folder = app.buttons["group-aimux"]
-        XCTAssertTrue(folder.waitForNonExistence(timeout: 5))
+        // Pinned and open: it stays in its pane, with the pin mark, not in Pinned.
+        XCTAssertTrue(waitFor(row) { $0.contains("Pinned") })
 
         row.press(forDuration: 1.2)
         let unpin = app.buttons["Unpin"]
         XCTAssertTrue(unpin.waitForExistence(timeout: 5))
         unpin.tap()
-        XCTAssertTrue(waitFor(folder, label: "aimux, 3 sessions"))
+        XCTAssertTrue(waitFor(row) { !$0.contains("Pinned") })
     }
 
     @MainActor
     func testEditTitleShowsOnNow() {
         let app = launch()
-        XCTAssertTrue(app.buttons["group-aimux"].waitForExistence(timeout: 10))
-        XCTAssertTrue(open(app.buttons["session-fd-n2"], in: app))
+        XCTAssertTrue(open(app.buttons["session-fd-a2"], in: app))
         app.buttons["infoButton"].tap()
 
         let edit = app.buttons["edit-title"]
@@ -87,15 +157,15 @@ final class FindingSessionsUITests: XCTestCase {
         // Edit focuses the field with the caret at the end (a tap would move the caret).
         // The field's value reads truncated; delete more than the title holds.
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
-        field.typeText("Tidy the seed notes")
+        field.typeText("Tidy the icon grid")
         app.buttons["metaSave"].tap()
 
         let shown = app.staticTexts["meta-title"]
         XCTAssertTrue(shown.waitForExistence(timeout: 5))
-        XCTAssertEqual(plain(shown.label), "Tidy the seed notes")
+        XCTAssertEqual(plain(shown.label), "Tidy the icon grid")
         app.buttons["Done"].tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        let renamed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Tidy the seed notes"))
+        let renamed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Tidy the icon grid"))
         XCTAssertTrue(renamed.firstMatch.waitForExistence(timeout: 5))
     }
 
@@ -167,8 +237,13 @@ final class FindingSessionsUITests: XCTestCase {
 
     @MainActor
     private func waitFor(_ element: XCUIElement, label: String) -> Bool {
+        waitFor(element) { $0 == label }
+    }
+
+    @MainActor
+    private func waitFor(_ element: XCUIElement, _ test: (String) -> Bool) -> Bool {
         for _ in 0..<50 {
-            if element.exists && plain(element.label) == label { return true }
+            if element.exists && test(plain(element.label)) { return true }
             Thread.sleep(forTimeInterval: 0.1)
         }
         return false

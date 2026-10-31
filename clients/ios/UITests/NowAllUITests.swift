@@ -13,7 +13,7 @@ final class NowAllUITests: XCTestCase {
     }
 
     @MainActor
-    func testNowAnswersAnApprovalAndTheTabsReachAllAndSearch() {
+    func testNowAnswersAnApprovalAndAllSearches() {
         let app = launch(["-demo", "list", "-tab", "now"])
 
         // The approval card shows each of its options as a button.
@@ -35,13 +35,13 @@ final class NowAllUITests: XCTestCase {
         let today = app.staticTexts.matching(NSPredicate(format: "label ==[c] 'Today'")).firstMatch
         XCTAssertTrue(today.waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["Search"].tap()
-        let field = app.searchFields.firstMatch
+        // All's search box: the same local matches as Now's.
+        let field = app.textFields["searchField"].firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText("weekly")
         XCTAssertTrue(app.buttons["session-demo-3"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Weekly report"].exists)
+        XCTAssertFalse(app.buttons["session-demo-4"].exists)
     }
 
     @MainActor
@@ -52,7 +52,6 @@ final class NowAllUITests: XCTestCase {
         let row = app.buttons["approvalRow-ap-tw-a1"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Allow once"].exists)
-        XCTAssertTrue(app.buttons["group-research"].exists)
         row.tap()
         XCTAssertTrue(app.buttons["Allow once"].waitForExistence(timeout: 5))
     }

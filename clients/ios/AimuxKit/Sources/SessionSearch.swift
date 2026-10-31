@@ -39,7 +39,7 @@ func inMacOrder(_ lhs: Session, _ rhs: Session) -> Bool {
 /// The one search of Now and All, on the device: the matching open sessions (in Mac order, then those with no pane
 /// newest first), then every other match newest first. A query with no words finds nothing.
 public func searchSessions(_ sessions: [Session], query: String, activity: [String: Activity] = [:],
-                           now: Date = .distantFuture) -> (open: [Session], other: [Session]) {
+                           now: Date) -> (open: [Session], other: [Session]) {
     let words = queryWords(query)
     guard !words.isEmpty else { return ([], []) }
     func newestFirst(_ lhs: Session, _ rhs: Session) -> Bool {

@@ -3,9 +3,11 @@ import Synchronization
 import AimuxKit
 
 #if DEBUG
-/// `-demo finding`: made-up sessions for Last on your Mac (fd-mac), Pinned (fd-pin1 idle, fd-pin2 working),
-/// folders on Now (aimux with three sessions, notes with two, trips with one) and descriptions. Pins and owner
-/// edits are kept in memory like the Mac would; Update summary answers after a second with a made-up summary.
+/// `-demo finding`: made-up sessions laid out as on a Mac. Window 1 has five tabs (research, openshell, aimux with
+/// the pane last in front and a pinned open session, blog, scratch with 9 panes); Window 2 is renamed "Reviews".
+/// Also one session open elsewhere (no pane), a pinned closed one, closed ones in repos, worktrees and Home, and
+/// descriptions. Pins and owner edits are kept in memory like the Mac would; Update summary answers after a second
+/// with a made-up summary.
 enum DemoFinding {
     private struct Meta {
         var title: String?
@@ -13,39 +15,81 @@ enum DemoFinding {
         var pinned: Bool?
     }
 
+    private static let window1 = MacWindow(id: "w-1", index: 1, name: "Window 1")
+    private static let window2 = MacWindow(id: "w-2", index: 2, name: "Reviews")
+
+    private static func place(_ window: MacWindow, tab: Int, _ name: String, pane: Int, of panes: Int,
+                              front: Bool = false) -> MacPlace {
+        MacPlace(window: window, tab: MacTab(index: tab, name: name), pane: pane, panes: panes, lastInFront: front)
+    }
+
+    private static let aimux = "/Users/me/src/aimux"
+    private static func folder(_ repo: String, worktree: String? = nil, sub: String? = nil) -> Folder {
+        let label = [repo, worktree].compactMap { $0 }.joined(separator: " / ") + (sub.map { " · " + $0 } ?? "")
+        return Folder(repo: repo, repoPath: "/Users/me/src/" + repo, worktree: worktree, sub: sub, label: label)
+    }
+
     private static let base: [Session] = [
-        make("fd-mac", "Fix the login redirect", "web-shop", minutesAgo: 20, .openInTerminal),
-        make("fd-pin1", "Plan the allotment layout", "notes", minutesAgo: 120, .idle),
-        make("fd-pin2", "Release checklist", "release-tools", minutesAgo: 2, .busy),
-        make("fd-a1", "Wire the share sheet", "aimux", minutesAgo: 1, .busy),
-        make("fd-a2", "Fix the icon spacing", "aimux", minutesAgo: 3, .busy),
-        make("fd-a3", "Event log paging", "aimux", minutesAgo: 5, .busy),
-        make("fd-n1", "Outline the reading list", "notes", minutesAgo: 4, .busy),
-        make("fd-n2", "Merge the duplicate notes", "notes", minutesAgo: 6, .busy),
-        make("fd-t1", "Book the lake cabin", "trips", minutesAgo: 7, .busy),
+        // Window 1
+        make("fd-r1", "Weekly report draft", folder("research"), minutesAgo: 50, .openInTerminal,
+             mac: place(window1, tab: 1, "research", pane: 1, of: 2)),
+        make("fd-o1", "Sandbox policy reload", folder("openshell"), minutesAgo: 1, .openInTerminal,
+             mac: place(window1, tab: 2, "openshell", pane: 1, of: 2), working: true),
+        make("fd-o2", "Driver matrix notes", folder("openshell"), minutesAgo: 25, .openInTerminal,
+             mac: place(window1, tab: 2, "openshell", pane: 2, of: 2)),
+        make("fd-a1", "Wire the share sheet", folder("aimux", worktree: "clients"), minutesAgo: 1, .busy,
+             mac: place(window1, tab: 3, "aimux", pane: 1, of: 4, front: true)),
+        make("fd-q1", "Chat queue polish", folder("aimux", worktree: "clients"), minutesAgo: 2, .openInTerminal,
+             mac: place(window1, tab: 3, "aimux", pane: 2, of: 4)),
+        make("fd-a2", "Fix the icon spacing", folder("aimux", worktree: "clients", sub: "ios"), minutesAgo: 4,
+             .openInTerminal, mac: place(window1, tab: 3, "aimux", pane: 3, of: 4)),
+        make("fd-a3", "Release notes", folder("aimux"), minutesAgo: 180, .openInTerminal,
+             mac: place(window1, tab: 3, "aimux", pane: 4, of: 4)),
+        make("fd-b1", "Draft the folders post", folder("blog"), minutesAgo: 300, .openInTerminal,
+             mac: place(window1, tab: 4, "blog", pane: 1, of: 1)),
+        make("fd-s1", "Try the new linter", folder("scratch"), minutesAgo: 3, .openInTerminal,
+             mac: place(window1, tab: 5, "scratch", pane: 2, of: 9), working: true),
+        make("fd-s2", "Rename the sample files", folder("scratch"), minutesAgo: 90, .openInTerminal,
+             mac: place(window1, tab: 5, "scratch", pane: 5, of: 9)),
+        // Window 2, renamed by the owner
+        make("fd-v1", "Review queue PR", folder("openshell"), minutesAgo: 3, .openInTerminal,
+             mac: place(window2, tab: 1, "reviews", pane: 1, of: 5), working: true),
+        make("fd-v2", "Check the release branch", folder("openshell"), minutesAgo: 40, .openInTerminal,
+             mac: place(window2, tab: 1, "reviews", pane: 2, of: 5)),
+        // Open with no iTerm2 pane: started from the phone.
+        make("fd-e1", "Draft the health check idea", folder("aimux"), minutesAgo: 1, .busy),
+        // Closed
+        make("fd-pin1", "Plan the allotment layout", folder("notes"), minutesAgo: 1500, .idle),
+        make("fd-c1", "Chat queue design", folder("aimux", worktree: "clients"), minutesAgo: 2900, .idle),
+        make("fd-fv", "Folder view in All", folder("aimux", worktree: "clients"), minutesAgo: 1400, .idle),
+        make("fd-wt", "Worktrees explainer", folder("_experiments", worktree: "branches"), minutesAgo: 1450, .idle),
+        make("fd-n2", "Merge the duplicate notes", folder("notes"), minutesAgo: 6, .idle),
+        make("fd-t1", "Book the lake cabin", folder("trips"), minutesAgo: 700, .idle),
+        make("fd-h1", "Tidy the downloads", Folder(repo: "Home", repoPath: "/Users/me", label: "Home"),
+             minutesAgo: 2000, .idle),
         // Only its id as the title, as Claude Code leaves some sessions: shown and prefilled as "Session c0ffee12".
-        make(oldID, oldID, "scratch", minutesAgo: 600, .idle)
+        make(oldID, oldID, folder("scratch"), minutesAgo: 600, .idle)
     ]
 
     static let oldID = "c0ffee12-3c4d-4e5f-8a6b-7c8d9e0f1a2b"
 
     private static let descriptions = [
-        "fd-mac": "Finds why the login page loops back to itself.",
         "fd-pin1": "Lays out twelve beds and the paths between them.",
         "fd-a1": "Adds the share sheet to the chat screen and checks it on a small phone.",
-        "fd-a3": "Pages the event log by 200 entries.",
-        "fd-n1": "Groups the books by season.",
+        "fd-q1": "Folds the queue to one line under the composer.",
         "fd-t1": "Compares three cabins for May."
     ]
-    private static let pinned: Set = ["fd-pin1", "fd-pin2"]
+    private static let pinned: Set = ["fd-pin1", "fd-q1"]
 
     private static let edits = Mutex<[String: Meta]>([:])
 
-    private static func make(_ id: String, _ title: String, _ project: String, minutesAgo: Double,
-                             _ state: SessionState) -> Session {
-        Session(id: id, title: title, project: "/Users/me/src/\(project)",
-                lastActive: DemoData.ago(minutes: minutesAgo), state: state, lastPrompt: "carry on",
-                description: descriptions[id], pinned: pinned.contains(id))
+    private static func make(_ id: String, _ title: String, _ folder: Folder, minutesAgo: Double,
+                             _ state: SessionState, mac: MacPlace? = nil, working: Bool = false) -> Session {
+        let project = folder.worktree.map { folder.repoPath + "-" + $0 } ?? folder.repoPath
+        return Session(id: id, title: title, project: project + (folder.sub.map { "/" + $0 } ?? ""),
+                       lastActive: DemoData.ago(minutes: minutesAgo), state: state, lastPrompt: "carry on",
+                       description: descriptions[id], pinned: pinned.contains(id), folder: folder, mac: mac,
+                       working: working)
     }
 
     static var sessions: [Session] {
@@ -57,15 +101,19 @@ enum DemoFinding {
         }
     }
 
-    static var list: SessionList {
-        SessionList(sessions: sessions, lastOnMac: LastOnMac(id: "fd-mac", at: DemoData.ago(minutes: 4)))
-    }
+    static var list: SessionList { SessionList(sessions: sessions) }
 
     static let events: [String: [SessionEvent]] = [
-        "fd-pin2": DemoData.workingEvents(tool: "make release-notes", minutesAgo: 2),
-        "fd-a1": DemoData.workingEvents(tool: "xcodebuild test", minutesAgo: 1),
-        "fd-n1": DemoData.workingEvents(tool: "rg season", minutesAgo: 4)
+        "fd-a1": DemoData.workingEvents(tool: "go test ./...", minutesAgo: 1),
+        "fd-e1": DemoData.workingEvents(tool: "rg health", minutesAgo: 1)
     ]
+
+    /// The server's conversation search: one closed session whose text mentions the query.
+    static func hitsJSON(_ query: String) -> String {
+        #"{"results":[{"id":"fd-fv","provider":"claude","title":"Folder view in All","# +
+            #""project":"\#(aimux)-clients","lastActive":"2026-10-20T10:00:00Z","state":"idle","# +
+            #""snippet":"…the [\#(query)] folds to one line under the composer…"}]}"#
+    }
 
     static let health = Health(status: "ok", login: "demo", version: "demo", acpProtocolVersion: 1,
                                capabilities: ["sessions", "search", "new_sessions", "describe"],

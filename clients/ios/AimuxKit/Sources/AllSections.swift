@@ -1,52 +1,20 @@
 import Foundation
 
-/// A folder row of the App's All screen (until the screens are rebuilt on `folderTree`).
-public struct ProjectGroup: Equatable, Sendable {
-    public let project: String
-    /// The folder's last path component.
-    public let name: String
-    public let count: Int
-    public let newest: NowItem
-    public let items: [NowItem]
-
-    public init(project: String, name: String, count: Int, newest: NowItem, items: [NowItem]) {
-        self.project = project
-        self.name = name
-        self.count = count
-        self.newest = newest
-        self.items = items
-    }
-}
-
-public enum AllSort: String, CaseIterable, Sendable {
-    case newest, mostActive, project
-}
-
 public struct DaySection: Equatable, Sendable {
-    /// "today", "yesterday" or YYYY-MM-DD; the project path for the `project` sort.
+    /// "today", "yesterday" or YYYY-MM-DD.
     public let day: String
     public let sessions: [Session]
 }
 
-/// The All screen's sections, by the shared rules (api/testdata/clients/README.md).
-public func allSections(_ sessions: [Session], project: String?, sort: AllSort, now: Date,
-                        timeZone: TimeZone) -> [DaySection] {
+/// The All screen's Recent sections, newest first by day, by the shared rules (api/testdata/clients/README.md).
+public func allSections(_ sessions: [Session], project: String?, now: Date, timeZone: TimeZone) -> [DaySection] {
     func lastActive(_ session: Session) -> Date { min(session.lastActive, now) }
     // Equal times fall back to the session id, ascending, so the order is deterministic.
     func newestFirst(_ lhs: Session, _ rhs: Session) -> Bool {
         lastActive(lhs) == lastActive(rhs) ? lhs.id < rhs.id : lastActive(lhs) > lastActive(rhs)
     }
-    func activityRank(_ session: Session) -> Int {
-        switch session.state {
-        case .busy: 0
-        case .openInTerminal: 1
-        default: 2
-        }
-    }
 
     let shown = sessions.filter { project == nil || $0.project == project }
-    if sort == .project { return projectSections(shown, lastActive: lastActive, newestFirst: newestFirst) }
-
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = timeZone
     func dayKey(_ date: Date) -> String {
@@ -61,29 +29,10 @@ public func allSections(_ sessions: [Session], project: String?, sort: AllSort, 
         return key == yesterday ? "yesterday" : key
     }
 
-    let order: (Session, Session) -> Bool = sort == .mostActive
-        ? { activityRank($0) != activityRank($1) ? activityRank($0) < activityRank($1) : newestFirst($0, $1) }
-        : newestFirst
     var byDay: [String: [Session]] = [:]
     for session in shown { byDay[dayKey(lastActive(session)), default: []].append(session) }
     return byDay.keys.sorted(by: >).map { key in
-        let rows = byDay[key, default: []].sorted(by: order)
+        let rows = byDay[key, default: []].sorted(by: newestFirst)
         return DaySection(day: label(rows[0]), sessions: rows)
     }
-}
-
-private struct ProjectRows {
-    let path: String
-    /// Newest first.
-    let rows: [Session]
-}
-
-private func projectSections(_ sessions: [Session], lastActive: (Session) -> Date,
-                             newestFirst: (Session, Session) -> Bool) -> [DaySection] {
-    var byProject: [String: [Session]] = [:]
-    for session in sessions { byProject[session.project, default: []].append(session) }
-    return byProject.map { ProjectRows(path: $0.key, rows: $0.value.sorted(by: newestFirst)) }.sorted {
-        let (lhs, rhs) = (lastActive($0.rows[0]), lastActive($1.rows[0]))
-        return lhs == rhs ? $0.path < $1.path : lhs > rhs
-    }.map { DaySection(day: $0.path, sessions: $0.rows) }
 }

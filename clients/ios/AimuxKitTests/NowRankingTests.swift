@@ -183,3 +183,33 @@ private struct Fixture: Decodable {
         #expect(deriveActivity(events) == .working(step: nil))
     }
 }
+
+@Suite struct NowWindowKeyTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func placed(_ id: String, window name: String, index: Int, tab: Int, pane: Int) -> Session {
+        let place = MacPlace(window: MacWindow(id: "w1", index: index, name: name), tab: MacTab(index: tab, name: "t"),
+                             pane: pane, panes: 3, lastInFront: false)
+        return Session(id: id, title: id, project: "/src/x", lastActive: now, state: .openInTerminal, mac: place)
+    }
+
+    @Test func oneWindowPerIdNamedByItsFirstSessionInMacOrder() {
+        // The same window read with a name and index that changed between panes: still one window.
+        let sessions = [placed("b", window: "Reviews", index: 2, tab: 2, pane: 1),
+                        placed("a", window: "Window 1", index: 1, tab: 1, pane: 1)]
+        let view = rankNow(sessions: sessions, activity: [:], now: now)
+        #expect(view.windows.count == 1)
+        #expect(view.windows.first?.id == "w1")
+        #expect(view.windows.first?.name == "Window 1")
+        #expect(view.windows.first?.tabs.map(\.index) == [1, 2])
+    }
+
+    @Test func windowsOrderByTheirFirstSessionsIndex() {
+        var second = placed("z", window: "Window 2", index: 2, tab: 1, pane: 1)
+        second = second.placed(MacPlace(window: MacWindow(id: "w0", index: 2, name: "Window 2"),
+                                        tab: MacTab(index: 1, name: "t"), pane: 1, panes: 1, lastInFront: false))
+        let view = rankNow(sessions: [second, placed("a", window: "Window 1", index: 1, tab: 1, pane: 1)],
+                           activity: [:], now: now)
+        #expect(view.windows.map(\.id) == ["w1", "w0"])
+    }
+}

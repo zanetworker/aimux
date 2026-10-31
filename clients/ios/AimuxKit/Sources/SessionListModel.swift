@@ -3,12 +3,12 @@ import Observation
 
 public protocol SessionSource: Sendable {
     func sessions(limit: Int) async throws -> [Session]
-    /// The sessions and the one last in front on the Mac.
+    /// The sessions as the list endpoint answers them.
     func sessionList(limit: Int) async throws -> SessionList
 }
 
 extension SessionSource {
-    /// A source that knows nothing of the Mac's front session.
+    /// A source that only lists sessions.
     public func sessionList(limit: Int) async throws -> SessionList {
         SessionList(sessions: try await sessions(limit: limit))
     }
@@ -20,8 +20,6 @@ extension APIClient: SessionSource {}
 @MainActor @Observable
 public final class SessionListModel {
     public private(set) var sessions: [Session] = []
-    /// The session last in front on the Mac, from the latest live list; never cached.
-    public private(set) var lastOnMac: LastOnMac?
     /// When the rows on screen came from the cache, when they were saved; nil once live.
     public private(set) var cachedAt: Date?
     public private(set) var error: APIError?
@@ -70,7 +68,6 @@ public final class SessionListModel {
             let list = try await source.sessionList(limit: limit)
             let rows = list.sessions
             sessions = rows
-            lastOnMac = list.lastOnMac
             canShowMore = rows.count >= limit && limit < Self.maxLimit
             cachedAt = nil
             error = nil

@@ -5,6 +5,10 @@ import AimuxKit
 struct AimuxApp: App {
     @AppStorage("serverAddress") private var serverAddress = ""
 
+    init() {
+        DebugHooks.resetFindingIfAsked()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView(serverAddress: $serverAddress)

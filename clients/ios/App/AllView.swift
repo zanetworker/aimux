@@ -1,28 +1,32 @@
 import SwiftUI
 import AimuxKit
 
-/// What the All screen shows; Now sets it when it links here ("All 14", "N more projects").
-struct AllFilter: Equatable {
-    /// A session's full `project` path, or nil for all projects.
-    var project: String?
-    /// Only sessions open in a terminal on the Mac.
-    var onMacOnly = false
-    var sort: AllSort = .newest
+/// Recent or Folders, remembered on the device; Recent the first time.
+enum AllMode: String, CaseIterable {
+    case recent, folders
+
+    var title: String { self == .recent ? "Recent" : "Folders" }
 }
 
-/// Every session, grouped by day with counts, filtered by project and sorted three ways.
+/// Every session: the search box, then Recent (newest first, by day) or Folders (repos A to Z, the main checkout
+/// first, then worktrees). With a query, the same results as Now's search: open matches, then the rest, then
+/// conversation hits.
 struct AllScreen: View {
     let list: SessionListModel
+    let search: SearchModel
+    /// What Now last read each session doing, for search's open test and the dots.
+    let activity: [String: Activity]
     let chat: ChatContext
-    @Binding var filter: AllFilter
     @State private var path: [Session] = []
-    /// Folders opened in the folder view; they start closed.
-    @State private var openFolders: Set<String> = []
+    @State private var query = DebugHooks.initialQuery ?? ""
+    @AppStorage("allMode") private var mode = AllMode.recent
+    /// Folders opened or folded by hand, by `OpenMemory.folderKey`.
+    @AppStorage("openFolders") private var openFolders = ""
     private let format = SessionRowFormat()
 
+    private var hasQuery: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
     private var sections: [DaySection] {
-        let shown = filter.onMacOnly ? list.sessions.filter { $0.state == .openInTerminal } : list.sessions
-        return allSections(shown, project: filter.project, sort: filter.sort, now: .now, timeZone: .current)
+        allSections(list.sessions, project: nil, now: .now, timeZone: .current)
     }
 
     var body: some View {
@@ -30,21 +34,23 @@ struct AllScreen: View {
             ScrollViewReader { proxy in
                 List {
                     Section {
-                        ScreenHeader(title: "All Sessions") { EmptyView() } below: { filterMenus }
-                    }
-                    .listSectionSpacing(8)
-                    if filter.onMacOnly {
-                        Section {
-                            HStack {
-                                Label("Open on your Mac", systemImage: "lock")
-                                Spacer()
-                                Button("Show all") { filter.onMacOnly = false }
-                                    .buttonStyle(.borderless)
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityIdentifier("clearOnMac")
+                        ScreenHeader(title: "All") { EmptyView() } below: {
+                            Text(list.sessions.count == 1 ? "1 session" : "\(list.sessions.count) sessions")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                            SearchField(text: $query, prompt: "Search all sessions").padding(.top, 4)
+                            if !hasQuery {
+                                Picker("Show", selection: $mode) {
+                                    ForEach(AllMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                                }
+                                .pickerStyle(.segmented)
+                                .padding(.top, 2)
+                                .accessibilityIdentifier("allMode")
                             }
                         }
                     }
+                    .listSectionSpacing(8)
                     if let error = list.error {
                         Section {
                             ErrorBanner(message: error.userMessage) {
@@ -52,18 +58,12 @@ struct AllScreen: View {
                             }
                         }
                     }
-                    if filter.sort == .project {
+                    if hasQuery {
+                        resultSections
+                    } else if mode == .folders {
                         folderSection
                     } else {
-                        ForEach(sections, id: \.day) { section in
-                            Section {
-                                ForEach(section.sessions) { session in sessionRow(session) }
-                            } header: {
-                                SectionLabel(title: title(section.day)) {
-                                    Text("\(section.sessions.count)").monospacedDigit()
-                                }
-                            }
-                        }
+                        recentSections
                     }
                     if let cachedAt = list.cachedAt {
                         Section {} footer: {
@@ -73,12 +73,14 @@ struct AllScreen: View {
                 }
                 .listStyle(.insetGrouped)
                 .listSectionSpacing(20)
+                .scrollDismissesKeyboard(.immediately)
                 .overlay { emptyState }
                 .environment(\.defaultMinListRowHeight, 44)
-                .navigationTitle("All Sessions")
+                .navigationTitle("All")
                 .toolbar(.hidden, for: .navigationBar)
                 .chatDestination(chat, path: $path)
                 .refreshable { await Interaction.perform { await list.refresh() } }
+                .conversationSearch(search, query: query)
                 .task {
                     await Interaction.perform { await list.refresh() }
                     guard DebugHooks.scrollToEnd,
@@ -90,85 +92,31 @@ struct AllScreen: View {
         }
     }
 
-    private func sessionRow(_ session: Session) -> some View {
-        Button { path.append(session) } label: { SessionRow(session: session, format: format) }
-            .buttonStyle(.plain)
-            .compactRow()
-            .accessibilityIdentifier("session-\(session.id)")
+    /// A session row: its place with the tab when open on the Mac, the time on the right.
+    private func sessionRow(_ session: Session, place: String? = nil) -> some View {
+        Button { path.append(session) } label: {
+            SessionLine(session: session, activity: activity[session.id] ?? .none, state: nil,
+                        place: place ?? rowPlace(session, withTab: true), format: format)
+        }
+        .buttonStyle(.plain)
+        .compactRow()
+        .accessibilityIdentifier("session-\(session.id)")
     }
 
-    /// The Folders sort: one folder row per project (newest project first) that opens in place, its sessions
-    /// newest first under a guide line.
-    @ViewBuilder private var folderSection: some View {
-        if !sections.isEmpty {
+    // MARK: Recent
+
+    @ViewBuilder private var recentSections: some View {
+        ForEach(sections, id: \.day) { section in
             Section {
-                ForEach(sections, id: \.day) { section in
-                    let isOpen = openFolders.contains(section.day)
-                    Button {
-                        withAnimation(.snappy) {
-                            if isOpen { openFolders.remove(section.day) } else { openFolders.insert(section.day) }
-                        }
-                    } label: {
-                        ProjectGroupRow(group: folder(section), isExpanded: isOpen)
-                    }
-                    .buttonStyle(.plain)
-                    .compactRow()
-                    .accessibilityIdentifier("folder-\(format.projectName(section.day))")
-                    if isOpen {
-                        ForEach(section.sessions) { session in
-                            FolderItem { sessionRow(session) }.listRowInsets(.vertical, 0)
-                        }
-                    }
-                }
+                ForEach(section.sessions) { sessionRow($0) }
             } header: {
-                SectionLabel(title: "Folders") { Text("\(sections.count)").monospacedDigit() }
+                SectionLabel(title(section.day))
             }
         }
     }
 
-    /// A project section as a folder row.
-    private func folder(_ section: DaySection) -> ProjectGroup {
-        let items = section.sessions.map { NowItem(session: $0, activity: .none) }
-        return ProjectGroup(project: section.day, name: format.projectName(section.day), count: items.count,
-                            newest: items[0], items: items)
-    }
-
-    private var filterMenus: some View {
-        HStack(spacing: 8) {
-            Menu {
-                Picker("Project", selection: $filter.project) {
-                    Text("All projects").tag(String?.none)
-                    ForEach(ProjectSummary.list(list.sessions)) { project in
-                        Text("\(project.name)  \(project.count)").tag(String?.some(project.path))
-                    }
-                }
-            } label: {
-                MenuLabel(text: filter.project.map(format.projectName) ?? "All projects")
-            }
-            .accessibilityIdentifier("projectMenu")
-            Menu {
-                Picker("Sort", selection: $filter.sort) {
-                    ForEach(AllSort.allCases, id: \.self) { Text(sortName($0)).tag($0) }
-                }
-            } label: {
-                MenuLabel(text: sortName(filter.sort))
-            }
-            .accessibilityIdentifier("sortMenu")
-            Spacer()
-        }
-    }
-
-    private func sortName(_ sort: AllSort) -> String {
-        switch sort {
-        case .newest: "Newest"
-        case .mostActive: "Most active"
-        case .project: "Folders"
-        }
-    }
-
-    /// "Today", "Yesterday", "Mon, Oct 20"; the folder name when sorted by project.
+    /// "Today", "Yesterday", "Mon, Oct 20".
     private func title(_ day: String) -> String {
-        if filter.sort == .project { return format.projectName(day) }
         switch day {
         case "today": return "Today"
         case "yesterday": return "Yesterday"
@@ -184,6 +132,87 @@ struct AllScreen: View {
         }
     }
 
+    // MARK: Folders
+
+    @ViewBuilder private var folderSection: some View {
+        let repos = folderTree(list.sessions, now: .now)
+        if !repos.isEmpty {
+            Section {
+                ForEach(repos, id: \.repoPath) { repo in
+                    let key = OpenMemory.folderKey(repoPath: repo.repoPath)
+                    let isOpen = OpenMemory(openFolders).isOpen(key, otherwise: repo.open)
+                    foldButton(key, isOpen: isOpen, id: "folder-\(repo.name)") {
+                        FoldLine(name: repo.name, counts: counts(repo.count, working: repo.working), isOpen: isOpen)
+                    }
+                    if isOpen {
+                        ForEach(repo.sessions) { session in
+                            FolderItem { sessionRow(session, place: folderPlace(session)) }
+                                .listRowInsets(.vertical, 0)
+                        }
+                        ForEach(repo.worktrees, id: \.name) { worktree in
+                            worktreeRows(worktree, in: repo)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func worktreeRows(_ worktree: WorktreeNode, in repo: RepoNode) -> some View {
+        let key = OpenMemory.folderKey(repoPath: repo.repoPath, worktree: worktree.name)
+        let isOpen = OpenMemory(openFolders).isOpen(key, otherwise: worktree.open)
+        FolderItem {
+            foldButton(key, isOpen: isOpen, id: "worktree-\(repo.name)-\(worktree.name)") {
+                FoldLine(name: worktree.name, counts: counts(worktree.count, working: worktree.working),
+                         isOpen: isOpen)
+            }
+        }
+        .listRowInsets(.vertical, 0)
+        if isOpen {
+            ForEach(worktree.sessions) { session in
+                FolderItem(depth: 2) { sessionRow(session, place: folderPlace(session)) }
+                    .listRowInsets(.vertical, 0)
+            }
+        }
+    }
+
+    private func foldButton<Label: View>(_ key: String, isOpen: Bool, id: String,
+                                         @ViewBuilder label: () -> Label) -> some View {
+        Button {
+            withAnimation(.snappy) { openFolders = OpenMemory(openFolders).setting(key, open: !isOpen).raw }
+        } label: { label() }
+            .buttonStyle(.plain)
+            .compactRow()
+            .accessibilityIdentifier(id)
+    }
+
+    /// Inside a folder its name is already above: only the subfolder and the Mac place, if any.
+    private func folderPlace(_ session: Session) -> String {
+        var parts: [String] = []
+        if let sub = session.folder?.sub { parts.append(sub) }
+        if let mac = session.mac { parts += ["tab \(mac.tab.index)", "pane \(mac.pane)"] }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "38 · 2 working", "12".
+    private func counts(_ count: Int, working: Int) -> String {
+        working > 0 ? "\(count) · \(working) working" : "\(count)"
+    }
+
+    // MARK: Search
+
+    @ViewBuilder private var resultSections: some View {
+        let found = searchSessions(list.sessions, query: query, activity: activity, now: .now)
+        SearchResultSections(found: found) { sessionRow($0) }
+        ConversationsSection(search: search, query: query, shown: Set((found.open + found.other).map(\.id)),
+                             format: format) { hit in
+            Button { path.append(hit.session) } label: { SearchHitRow(hit: hit, format: format) }
+                .buttonStyle(.plain)
+                .compactRow()
+                .accessibilityIdentifier("hit-\(hit.id)")
+        }
+    }
+
     @ViewBuilder private var emptyState: some View {
         if list.sessions.isEmpty && list.error == nil {
             if list.isLoading {
@@ -192,25 +221,6 @@ struct AllScreen: View {
                 ContentUnavailableView("No sessions", systemImage: "terminal",
                                        description: Text("Sessions from Claude Code on your Mac show up here."))
             }
-        } else if sections.isEmpty && !list.sessions.isEmpty {
-            ContentUnavailableView("No sessions here", systemImage: "line.3.horizontal.decrease")
         }
-    }
-}
-
-/// A compact filter button: its value and a small chevron.
-private struct MenuLabel: View {
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(text).lineLimit(1)
-            Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
-        }
-        .font(.subheadline)
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(Color(.tertiarySystemFill), in: Capsule())
     }
 }

@@ -15,7 +15,7 @@ Native iPhone app (SwiftUI) for aimux's remote API v1: find, follow, continue an
 
 - `AimuxKit/Sources/`: the framework (API client, models, events, approvals, Now ranking and model, All sections, timestamps, device key and device login); no SwiftUI.
 - `AimuxKitTests/`: Swift Testing tests and JSON fixtures; the shared ranking fixtures come from `../../api/testdata/clients/`.
-- `App/`: SwiftUI screens (`NowView`, `AllView`, `SearchView`, `ChatView`, `RootTabs`, settings, `PairingView`, `UnlockView`) and `App/Components/` (header, rows, approval card, status dot, timeline rows, composer, Next bar, session info sheet); `DebugHooks.swift` holds the `-demo`, `-tab`, `-openChat`, `-openInfo`, `-openSteps`, `-openStepDetails` and `-deviceLogin` launch arguments for screenshots and UI tests.
+- `App/`: SwiftUI screens (`NowView`, `AllView`, `ChatView`, `RootTabs`, settings, `PairingView`, `UnlockView`) and `App/Components/` (header, rows, search field, fold lines, approval card, status dot, timeline rows, composer, Next bar, session info sheet); `DebugHooks.swift` holds the `-demo`, `-tab`, `-openChat`, `-openInfo`, `-openSteps`, `-openStepDetails` and `-deviceLogin` launch arguments for screenshots and UI tests.
 - `UITests/`: XCUITest flows on the demo data.
 - `docs/`: brief, project context and session logs. The code map is in `README.md`.
 

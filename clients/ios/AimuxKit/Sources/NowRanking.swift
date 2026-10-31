@@ -54,8 +54,8 @@ public struct NowView: Equatable, Sendable {
 
 private let recentFailure: TimeInterval = 900
 
-/// Working: busy, working activity, or the server's `working` flag.
-func isWorking(_ session: Session, activity: Activity) -> Bool {
+/// Working: busy, working activity, or the server's `working` flag. All's Folders pass `.none` (no activity).
+public func isWorking(_ session: Session, activity: Activity) -> Bool {
     if session.state == .busy || session.working { return true }
     if case .working = activity { return true }
     return false
@@ -133,29 +133,36 @@ private struct Ranking {
         return approvals.sorted(by: newestFirst).map(item) + failures.map { item($0.session) }
     }
 
-    /// Windows by index, tabs by index, panes by number; the count of tabs the filters left empty.
+    /// Windows by index, tabs by index, panes by number; the count of tabs the filters left empty. A window is
+    /// keyed by its id; its name and index come from its first session in Mac order.
     func windows(_ placed: [Session], words: [String], wanted: (Session) -> Bool) -> ([NowWindow], Int) {
         var existing = Set<TabKey>()
         var byTab: [TabKey: [Session]] = [:]
         var front = Set<TabKey>()
         for session in placed {
             guard let mac = session.mac else { continue }
-            let key = TabKey(window: mac.window, tab: mac.tab.index)
+            let key = TabKey(window: mac.window.id, tab: mac.tab.index)
             existing.insert(key)
             if mac.lastInFront { front.insert(key) }
             if wanted(session) { byTab[key, default: []].append(session) }
         }
-        var tabs: [MacWindow: [NowTab]] = [:]
+        var byWindow: [String: (first: Session, tabs: [NowTab])] = [:]
         for (key, listed) in byTab {
             let ordered = listed.sorted(by: inMacOrder)
-            guard let mac = ordered.first?.mac else { continue }
-            tabs[key.window, default: []].append(NowTab(
-                index: key.tab, name: mac.tab.name, panes: mac.panes, working: ordered.filter(isWorking).count,
-                open: words.isEmpty ? front.contains(key) : true, sessions: ordered))
+            guard let first = ordered.first, let mac = first.mac else { continue }
+            let tab = NowTab(index: key.tab, name: mac.tab.name, panes: mac.panes,
+                             working: ordered.filter(isWorking).count,
+                             open: words.isEmpty ? front.contains(key) : true, sessions: ordered)
+            var entry = byWindow[key.window] ?? (first, [])
+            if inMacOrder(first, entry.first) { entry.first = first }
+            entry.tabs.append(tab)
+            byWindow[key.window] = entry
         }
-        let windows = tabs.sorted { lhs, rhs in
-            lhs.key.index == rhs.key.index ? codePointsBefore(lhs.key.id, rhs.key.id) : lhs.key.index < rhs.key.index
-        }.map { NowWindow(id: $0.key.id, name: $0.key.name, tabs: $0.value.sorted { $0.index < $1.index }) }
+        let windows = byWindow.values.sorted { inMacOrder($0.first, $1.first) }.compactMap { entry in
+            entry.first.mac.map { mac in
+                NowWindow(id: mac.window.id, name: mac.window.name, tabs: entry.tabs.sorted { $0.index < $1.index })
+            }
+        }
         return (windows, existing.count - byTab.count)
     }
 
@@ -174,6 +181,6 @@ private struct Ranking {
 }
 
 private struct TabKey: Hashable {
-    let window: MacWindow
+    let window: String
     let tab: Int
 }

@@ -5,17 +5,18 @@ import AimuxKit
 typealias AppSource = SessionSource & SearchSource & ActivitySource & ChatSource & SessionMetaSource
 
 enum AppTab: String, Hashable {
-    case now, all, search
+    case now, all
 }
 
-/// Now and All as labelled tabs, search as the separate round button beside them.
+/// Now and All as labelled tabs; each has its own search box.
 struct RootTabs: View {
     @Binding var serverAddress: String
     @State private var list: SessionListModel
     @State private var now: NowModel
-    @State private var search: SearchModel
+    /// The conversation search of each screen's box, so one screen's hits never land on the other.
+    @State private var nowSearch: SearchModel
+    @State private var allSearch: SearchModel
     @State private var tab = DebugHooks.initialTab
-    @State private var allFilter = AllFilter(project: DebugHooks.initialProject, sort: DebugHooks.initialSort)
     @State private var drafts = ChatDrafts()
     /// The server's Jira settings for reference links; nil until read, or when it has none.
     @State private var links: HealthLinks?
@@ -34,8 +35,11 @@ struct RootTabs: View {
         let list = SessionListModel(source: source, cache: cache, limit: limit)
         list.showCached()
         _list = State(initialValue: list)
-        _now = State(initialValue: NowModel(list: list, source: source, meta: source))
-        _search = State(initialValue: SearchModel(source: source))
+        let now = NowModel(list: list, source: source, meta: source)
+        now.query = DebugHooks.initialQuery ?? ""
+        _now = State(initialValue: now)
+        _nowSearch = State(initialValue: SearchModel(source: source))
+        _allSearch = State(initialValue: SearchModel(source: source))
         _serverAddress = serverAddress
     }
 
@@ -44,16 +48,10 @@ struct RootTabs: View {
                                queueEnabled: queueEnabled)
         TabView(selection: $tab) {
             Tab("Now", systemImage: "record.circle", value: AppTab.now) {
-                NowScreen(model: now, chat: chat, serverAddress: $serverAddress) { filter in
-                    allFilter = filter
-                    tab = .all
-                }
+                NowScreen(model: now, search: nowSearch, chat: chat, serverAddress: $serverAddress)
             }
             Tab("All", systemImage: "line.3.horizontal", value: AppTab.all) {
-                AllScreen(list: list, chat: chat, filter: $allFilter)
-            }
-            Tab(value: AppTab.search, role: .search) {
-                SearchScreen(list: list, search: search, chat: chat)
+                AllScreen(list: list, search: allSearch, activity: now.activity, chat: chat)
             }
         }
         .tint(.primary)

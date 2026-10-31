@@ -31,7 +31,7 @@ public func folderTree(_ sessions: [Session], now: Date, project: String? = nil)
     func newestFirst(_ lhs: Session, _ rhs: Session) -> Bool {
         time(lhs) == time(rhs) ? codePointsBefore(lhs.id, rhs.id) : time(lhs) > time(rhs)
     }
-    func isWorking(_ session: Session) -> Bool { session.state == .busy || session.working }
+    func isWorking(_ session: Session) -> Bool { AimuxKit.isWorking(session, activity: .none) }
     func lowerFirst(_ lhs: String, _ rhs: String) -> Bool {
         let (left, right) = (lhs.lowercased(), rhs.lowercased())
         return left == right ? codePointsBefore(lhs, rhs) : codePointsBefore(left, right)

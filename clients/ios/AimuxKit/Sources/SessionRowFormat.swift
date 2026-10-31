@@ -45,13 +45,6 @@ public struct SessionRowFormat: Sendable {
         return date.formatted(style)
     }
 
-    /// "just now", "4 min ago", "3 h ago"; "Yesterday" and dates as `relativeTime` has them.
-    public func since(_ date: Date, now: Date = .now) -> String {
-        let text = relativeTime(min(date, now), now: now)
-        if text == "now" { return "just now" }
-        return text.hasSuffix(" min") || text.hasSuffix(" h") ? text + " ago" : text
-    }
-
     /// No badge for idle sessions, the normal case.
     public func badge(_ state: SessionState) -> String? {
         switch state {
