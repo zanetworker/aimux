@@ -96,9 +96,9 @@ public final class ChatModel {
     public internal(set) var isChangingQueue = false
     /// The server keeps a chat queue (its health says so); set again once health is read.
     public var queueEnabled: Bool
-    /// The last add that failed, so a retry of the same text keeps its key.
-    var failedAdd: (text: String, key: String)?
-    var isAdding = false, isQueueingRefused = false  // the second: a busy-refused message is on its way to the queue
+    var failedAdd: (text: String, key: String)?  // the last add that failed: a retry of that text keeps its key
+    var isAdding = false
+    var isQueueingRefused = false  // a message refused busy is on its way into the queue: not put back in the box
 
     public let sessionID: String
     let source: ChatSource
