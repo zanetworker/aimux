@@ -32,6 +32,31 @@ export function terminalReasonLine(detail, { queue = false } = {}) {
 
 const TERMINAL_CODES = new Set(['disabled', 'not_in_terminal', ...Object.keys(REASON)]);
 
+// The live line at the end of a terminal chat while Claude works on the Mac: "Working · 1m 20s ·
+// go test ./…", the time from Claude Code's working line and the step from the latest turn; ''
+// when it is not working. The same as terminalWorkingLine in the iPhone app.
+export function terminalWorkingLine(detail) {
+  const t = detail && detail.state === 'open_in_terminal' ? detail.terminal : null;
+  if (!t || !t.working) return '';
+  const parts = ['Working'];
+  if (t.workingSeconds > 0) parts.push(elapsedText(t.workingSeconds));
+  const turns = detail.turns || [];
+  const tools = turns.length ? turns[turns.length - 1].tools || [] : [];
+  if (tools.length) {
+    const step = tools[tools.length - 1];
+    parts.push(step.snippet || step.name);
+  }
+  return parts.join(' · ');
+}
+
+// elapsedText: a duration as Claude Code's working line shows it, "42s", "1m 20s", "2h 3m".
+export function elapsedText(seconds) {
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+  if (h) return m ? `${h}h ${m}m` : `${h}h`;
+  if (m) return s ? `${m}m ${s}s` : `${m}m`;
+  return `${s}s`;
+}
+
 // What a refused terminal request says: a terminal refusal as its reason line, bad text and text
 // typed but not submitted as their own lines, anything else its message.
 export function terminalErrorText(e) {

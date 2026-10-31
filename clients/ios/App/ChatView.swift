@@ -37,7 +37,10 @@ struct ChatContent: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            // Not lazy: a lazy stack guesses the heights of rows it has not drawn, and when a tall reply grows
+            // while scrolled up (a read every 2 s while Claude works) it can scroll into empty space, a black
+            // chat. The chat holds at most `ChatModel.historyTurns` turns, so drawing them all stays cheap.
+            VStack(alignment: .leading, spacing: 16) {
                 ForEach(timelineRows(result.items)) { row in
                     self.row(row.item, at: row.index)
                 }
@@ -45,6 +48,7 @@ struct ChatContent: View {
                     PendingMessageRow(pending: pending, model: model)
                 }
                 if let prompt = terminalPrompt { terminalPromptRow(prompt) }
+                if terminalPrompt == nil, let line = terminalWorkingLine(model.session) { WorkingLine(text: line) }
                 // The end of the timeline: out of view, the Latest button shows.
                 Color.clear.frame(height: 1)
                     .onScrollVisibilityChange(threshold: 0.01) { visible in awayFromLatest = !visible }

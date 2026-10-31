@@ -211,6 +211,8 @@ struct QueueList: View {
                     .accessibilityIdentifier("queueEditCancel")
                 Button("Save") { save(row.id) }
                     .buttonStyle(.borderedProminent)
+                    // The tint is the text colour (white in dark mode), so the label takes the background's.
+                    .foregroundStyle(Color(.systemBackground))
                     .disabled(model.isChangingQueue)
                     .accessibilityIdentifier("queueEditSave")
             }
@@ -308,6 +310,7 @@ struct LostEditOffers: View {
                             .buttonStyle(.bordered)
                         Button(ComposerAction.queue.label) { Task { await model.queueLostEdit(lost.id) } }
                             .buttonStyle(.borderedProminent)
+                            .foregroundStyle(Color(.systemBackground))
                     }
                     .font(.subheadline.weight(.semibold))
                     .buttonBorderShape(.capsule)

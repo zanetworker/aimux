@@ -751,3 +751,10 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 .login-error:empty { min-height: 0; }
 #login :focus-visible { outline: 2px solid var(--t-text); outline-offset: 2px; }
 #login .login-title:focus { outline: none; } /* focused only to move the reader there */
+
+/* While Claude works on the Mac: a breathing dot, then "Working · 1m 20s · go test ./…". */
+.working-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--t-secondary); min-width: 0; }
+.working-line span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.working-line .dot { animation: breathe 1.8s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .working-line .dot { animation: none; } }

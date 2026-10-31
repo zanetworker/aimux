@@ -5,12 +5,12 @@
 import { createTabs, poller } from './tabs.mjs';
 import { newKey } from './nowModel.mjs';
 import { nextSession } from './now.mjs';
-import { displayTitle, el, icon } from './rows.mjs';
+import { displayTitle, dot, el, icon } from './rows.mjs';
 import { buildTimeline, pendingShown } from './timeline.mjs';
 import { chatStatus, headerContent, nextBar, pendingNode, promptCard, readOnlyLine, timelineNodes } from './chatView.mjs';
 import { adoptDetail, composerAction, createQueueClient, sendRefusal, setQueue } from './queue.mjs';
 import { createQueueView, editOffersNode } from './queueView.mjs';
-import { terminalErrorText, terminalPollInterval, terminalReasonLine } from './terminal.mjs';
+import { terminalErrorText, terminalPollInterval, terminalReasonLine, terminalWorkingLine } from './terminal.mjs';
 import { announce, createInfoSheet, renderInfoSheet, renderMetaCard } from './sessionInfo.mjs';
 import { referenceContext } from './references.mjs';
 import { createLogin } from './login.mjs';
@@ -525,6 +525,13 @@ function render() {
       answering, answerErrors,
       onAnswer: (_, o) => answerPrompt(prompt, prompt.options.find((x) => x.key === o.optionId)),
     }));
+  }
+  // While Claude works on the Mac: a live line with how long and the current step.
+  const working = !prompt ? terminalWorkingLine(c.detail) : '';
+  if (working) {
+    const line = el('div', 'working-line');
+    line.append(dot('working'), el('span', '', working));
+    nodes.push(line);
   }
   if (c.mode === 'loading' && !nodes.length) nodes.push(el('div', 'chat-empty', 'Loading…'));
   if (c.mode === 'failed') {

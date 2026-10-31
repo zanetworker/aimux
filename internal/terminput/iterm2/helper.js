@@ -89,6 +89,9 @@ function write(s, text) {
 // clear: Ctrl+E (end of line), then Ctrl+U (delete to its start).
 const KEYS = { escape: '\u001b', enter: '\r', space: ' ', backspace: '\u007f', clear: '\u0005\u0015' };
 
+// SCREEN_LINES: how much of the pane's bottom a screen read returns.
+const SCREEN_LINES = 300;
+
 function handle(req) {
   switch (req.op) {
     case 'locate':
@@ -113,7 +116,10 @@ function handle(req) {
       const s = session(req);
       let text;
       try { text = s.contents(); } catch (e) { if (denied(e)) throw e; text = s.text(); }
-      return { text: String(text) };
+      // Only the bottom matters (the input box, the working line, a prompt): a pane can hold 10,000+
+      // lines of scrollback, so send the last SCREEN_LINES.
+      const lines = String(text).split('\n');
+      return { text: lines.slice(-SCREEN_LINES).join('\n') };
     }
     default:
       return { error: 'unknown op' };

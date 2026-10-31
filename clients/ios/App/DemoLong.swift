@@ -20,7 +20,7 @@ enum DemoLong {
                              lastActive: session.lastActive, state: .openInTerminal, lastPrompt: session.lastPrompt,
                              turns: turns, stats: nil,
                              terminal: TerminalStatus(status: "busy", canType: false, reason: "mac_in_use",
-                                                      prompt: nil, working: true))
+                                                      prompt: nil, working: true, workingSeconds: 60 + 2 * read))
     }
 
     private static func turn(_ number: Int) -> Turn {

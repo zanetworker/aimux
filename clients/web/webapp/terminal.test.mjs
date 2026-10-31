@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  promptItem, terminalErrorText, terminalPendingText, terminalPollInterval, terminalReasonLine, terminalReasonText,
+  elapsedText, terminalWorkingLine, promptItem, terminalErrorText, terminalPendingText, terminalPollInterval, terminalReasonLine, terminalReasonText,
   terminalStatus,
 } from './terminal.mjs';
 
@@ -96,4 +96,15 @@ test('terminalReasonLine: with the queue the Mac in use is one line (the spec wo
 test('a kept draft and a box that would not clear have their own lines', () => {
   assert.equal(terminalErrorText({ code: 'draft_in_box', message: 'm' }), 'Your draft on the Mac is kept; nothing was sent');
   assert.equal(terminalErrorText({ code: 'box_not_cleared', message: 'm' }), "The box on your Mac couldn't be cleared; nothing was sent");
+});
+
+test('the working line: how long, then the current step; nothing while idle', () => {
+  const detail = (terminal, tools = []) => ({ state: 'open_in_terminal', terminal, turns: [{ number: 1, user: 'go', reply: '', tools }] });
+  const tools = [{ name: 'Read', snippet: 'notes.md' }, { name: 'Bash', snippet: 'go test ./remote/...' }];
+  assert.equal(terminalWorkingLine(detail({ working: true, workingSeconds: 80 }, tools)), 'Working · 1m 20s · go test ./remote/...');
+  assert.equal(terminalWorkingLine(detail({ working: true })), 'Working');
+  assert.equal(terminalWorkingLine(detail({ working: true }, [{ name: 'WebSearch', snippet: '' }])), 'Working · WebSearch');
+  assert.equal(terminalWorkingLine(detail({ working: false, workingSeconds: 9 })), '');
+  assert.equal(terminalWorkingLine(null), '');
+  assert.deepEqual([0, 59, 60, 3599, 3600, 7380].map(elapsedText), ['0s', '59s', '1m', '59m 59s', '1h', '2h 3m']);
 });

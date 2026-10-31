@@ -81,6 +81,28 @@ public func terminalReasonText(_ reason: String?) -> String {
     }
 }
 
+/// The live line at the end of a terminal chat while Claude works on the Mac: "Working · 1m 20s · go test ./…",
+/// the time from Claude Code's working line and the step from the session's latest turn; nil when it is not working.
+public func terminalWorkingLine(_ detail: SessionDetail?) -> String? {
+    guard let detail, detail.state == .openInTerminal, let terminal = detail.terminal, terminal.working else {
+        return nil
+    }
+    var parts = ["Working"]
+    if terminal.workingSeconds > 0 { parts.append(elapsedText(terminal.workingSeconds)) }
+    if let step = detail.turns.last?.tools.last {
+        parts.append(step.snippet.isEmpty ? step.name : step.snippet)
+    }
+    return parts.joined(separator: " · ")
+}
+
+/// A duration as Claude Code's working line shows it: "42s", "1m 20s", "2h 3m".
+public func elapsedText(_ seconds: Int) -> String {
+    let (hours, minutes, secs) = (seconds / 3600, seconds % 3600 / 60, seconds % 60)
+    if hours > 0 { return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h" }
+    if minutes > 0 { return secs > 0 ? "\(minutes)m \(secs)s" : "\(minutes)m" }
+    return "\(secs)s"
+}
+
 /// The line under a message typed into the terminal, until the session's history shows it.
 public func terminalPendingText(sentAt: Date, now: Date) -> String {
     now.timeIntervalSince(sentAt) < 120 ? "Sent to your Mac's terminal" : "Sent; no answer yet"

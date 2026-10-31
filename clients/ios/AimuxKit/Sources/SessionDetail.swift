@@ -134,18 +134,22 @@ public struct TerminalStatus: Decodable, Equatable, Sendable {
     public let prompt: TerminalPrompt?
     /// Claude Code is working on a turn there: a direct message is refused `409 busy`; false from older servers.
     public let working: Bool
+    /// While working, how long Claude Code's working line says the turn has run; 0 when it shows no time.
+    public let workingSeconds: Int
 
-    public init(status: String, canType: Bool, reason: String?, prompt: TerminalPrompt?, working: Bool = false) {
+    public init(status: String, canType: Bool, reason: String?, prompt: TerminalPrompt?, working: Bool = false,
+                workingSeconds: Int = 0) {
         self.status = status
         self.canType = canType
         self.reason = reason
         self.prompt = prompt
         self.working = working
+        self.workingSeconds = workingSeconds
     }
 
     public var isBusy: Bool { status == "busy" }
 
-    private enum CodingKeys: String, CodingKey { case status, canType, reason, prompt, working }
+    private enum CodingKeys: String, CodingKey { case status, canType, reason, prompt, working, workingSeconds }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -154,6 +158,7 @@ public struct TerminalStatus: Decodable, Equatable, Sendable {
         reason = try? container.decodeIfPresent(String.self, forKey: .reason)
         prompt = try? container.decodeIfPresent(TerminalPrompt.self, forKey: .prompt)
         working = (try? container.decodeIfPresent(Bool.self, forKey: .working)) ?? false
+        workingSeconds = max(0, (try? container.decodeIfPresent(Int.self, forKey: .workingSeconds)) ?? 0)
     }
 }
 
