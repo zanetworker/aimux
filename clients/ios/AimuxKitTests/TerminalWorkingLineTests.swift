@@ -24,6 +24,13 @@ private func detail(working: Bool, seconds: Int = 0, tools: [TurnTool] = []) -> 
                 == "Working · WebSearch")
     }
 
+    @Test func busyInTheRegistryCountsEvenWithoutTheScreensSpinner() {
+        let status = TerminalStatus(status: "busy", canType: false, reason: "mac_in_use", prompt: nil, working: false)
+        let busy = SessionDetail(id: "s1", title: "S", project: "/p", lastActive: base, state: .openInTerminal,
+                                 turns: [], terminal: status)
+        #expect(terminalWorkingLine(busy) == "Working")
+    }
+
     @Test func nothingWhileIdleOrOutsideATerminal() {
         #expect(terminalWorkingLine(detail(working: false, seconds: 9)) == nil)
         #expect(terminalWorkingLine(nil) == nil)

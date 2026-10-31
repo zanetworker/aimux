@@ -3,7 +3,7 @@
 // Code is always left to right; paragraphs, headings and list items take their direction from
 // their text, so Arabic reads right to left.
 
-import { highlight } from './highlight.mjs';
+import { highlight, languageForPath } from './highlight.mjs';
 import { icon } from './rows.mjs';
 import { linkReferences, parsedHost } from './references.mjs';
 import { parseMarkdown } from './markdown.mjs';
@@ -101,6 +101,20 @@ function copyButton(text) {
   return b;
 }
 
+// withCopy puts node with a Copy button for the whole text (not just the capped part it shows).
+function withCopy(node, text) {
+  const wrap = h('div', 'step-copyable');
+  wrap.append(node, copyButton(text));
+  return wrap;
+}
+
+// colored appends text to parent with syntax colours (highlight.mjs): a span per coloured token,
+// plain text between them. Returns parent.
+function colored(parent, text, lang) {
+  for (const t of highlight(text, lang)) parent.append(t.k === 'plain' ? t.v : h('span', 'hl-' + t.k, t.v));
+  return parent;
+}
+
 function codeBlock(b) {
   const wrap = h('div', 'md-code');
   const head = h('div', 'md-code-head');
@@ -110,10 +124,7 @@ function codeBlock(b) {
   pre.tabIndex = 0; // a keyboard can scroll a long line
   pre.setAttribute('role', 'region');
   pre.setAttribute('aria-label', 'Code');
-  // Syntax colours (highlight.mjs): a span per coloured token, plain text between them.
-  const c = code('');
-  for (const t of highlight(b.text, b.lang)) c.append(t.k === 'plain' ? t.v : h('span', 'hl-' + t.k, t.v));
-  pre.append(c);
+  pre.append(colored(code(''), b.text, b.lang));
   wrap.append(head, pre);
   return wrap;
 }
@@ -382,27 +393,30 @@ export function stepDetail(step, links = []) {
   if (input && !repeats) {
     const pre = h('pre', 'step-input');
     pre.dir = 'ltr';
+    // A command reads as shell, with its colours; other inputs (a path, a pattern) stay plain.
     if (step.kind === 'run') pre.append(h('span', 'dim', '$ '));
-    pre.append(capped(input, CAP_INPUT));
-    box.append(pre);
+    colored(pre, capped(input, CAP_INPUT), step.kind === 'run' ? 'sh' : '');
+    box.append(withCopy(pre, input));
   }
   if (error) {
     const err = h('div', 'step-error failed');
     const text = h('pre', 'step-error-text', capped(error, CAP_ERROR));
     text.dir = 'ltr';
-    err.append(h('div', 'step-error-label', 'Failed'), text);
+    err.append(h('div', 'step-error-label', 'Failed'), withCopy(text, error));
     box.append(err);
   }
   if (removed.length || added.length) {
     const diff = h('div', 'diff');
     diff.dir = 'ltr';
     const all = [...removed.map((t) => ['del', '-', 'Removed: ', t]), ...added.map((t) => ['add', '+', 'Added: ', t])];
+    // The lines take the colours of the file's language, on their red and green.
+    const lang = languageForPath(step.target || input);
     for (const [cls, mark, spoken, text] of all.slice(0, DIFF_LINES)) {
       const line = h('div', 'diff-line ' + cls);
       // A screen reader hears "Removed: " or "Added: " instead of the mark, as on the iPhone.
       const markEl = h('span', 'diff-mark', mark);
       markEl.setAttribute('aria-hidden', 'true');
-      line.append(markEl, h('span', 'visually-hidden', spoken), h('span', 'diff-text', capped(text, CAP_LINE)));
+      line.append(markEl, h('span', 'visually-hidden', spoken), colored(h('span', 'diff-text'), capped(text, CAP_LINE), lang));
       diff.append(line);
     }
     const more = all.length - DIFF_LINES;

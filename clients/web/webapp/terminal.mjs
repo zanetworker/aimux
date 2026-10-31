@@ -37,7 +37,8 @@ const TERMINAL_CODES = new Set(['disabled', 'not_in_terminal', ...Object.keys(RE
 // when it is not working. The same as terminalWorkingLine in the iPhone app.
 export function terminalWorkingLine(detail) {
   const t = detail && detail.state === 'open_in_terminal' ? detail.terminal : null;
-  if (!t || !t.working) return '';
+  // Busy in Claude Code's registry counts too: the header says Working from it.
+  if (!t || !(t.working || t.status === 'busy')) return '';
   const parts = ['Working'];
   if (t.workingSeconds > 0) parts.push(elapsedText(t.workingSeconds));
   const turns = detail.turns || [];

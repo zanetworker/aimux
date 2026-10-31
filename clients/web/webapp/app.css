@@ -786,3 +786,8 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 .hl-meta { color: var(--hl-meta); }
 .hl-added { color: var(--hl-added); background: var(--hl-added-bg); }
 .hl-removed { color: var(--hl-removed); background: var(--hl-removed-bg); }
+
+/* A step's command and error carry a Copy button at their top right. */
+.step-copyable { position: relative; }
+.step-copyable > .md-copy { position: absolute; top: 2px; right: 2px; }
+.step-copyable > pre { padding-right: 64px; }

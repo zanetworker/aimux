@@ -35,4 +35,14 @@ private func highlightFixtures() throws -> [HighlightFixture] {
         #expect(highlight("", lang: "go").isEmpty)
         #expect(highlight("x", lang: nil) == [CodeToken(.plain, "x")])
     }
+
+    @Test func languageForPathReadsTheExtension() {
+        #expect(languageForPath("/w/internal/tls/pool.go") == "go")
+        #expect(languageForPath("App/ChatView.SWIFT") == "swift")
+        #expect(languageForPath("web/app.test.mjs") == "js")
+        #expect(languageForPath("config.yml") == "yaml")
+        #expect(languageForPath("Makefile") == nil)
+        #expect(languageForPath("notes.md") == nil)
+        #expect(languageForPath("") == nil)
+    }
 }

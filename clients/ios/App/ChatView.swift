@@ -257,6 +257,7 @@ struct ChatContent: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
+        withAnimation { position.scrollTo(edge: .bottom) }  // to the message just sent
         Task { await model.send(text) }
     }
 }

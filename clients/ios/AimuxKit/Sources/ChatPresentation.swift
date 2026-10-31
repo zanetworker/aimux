@@ -84,9 +84,9 @@ public func terminalReasonText(_ reason: String?) -> String {
 /// The live line at the end of a terminal chat while Claude works on the Mac: "Working · 1m 20s · go test ./…",
 /// the time from Claude Code's working line and the step from the session's latest turn; nil when it is not working.
 public func terminalWorkingLine(_ detail: SessionDetail?) -> String? {
-    guard let detail, detail.state == .openInTerminal, let terminal = detail.terminal, terminal.working else {
-        return nil
-    }
+    // Busy in Claude Code's registry counts too: the header says Working from it, so the chat must as well.
+    guard let detail, detail.state == .openInTerminal, let terminal = detail.terminal,
+          terminal.working || terminal.isBusy else { return nil }
     var parts = ["Working"]
     if terminal.workingSeconds > 0 { parts.append(elapsedText(terminal.workingSeconds)) }
     if let step = detail.turns.last?.tools.last {

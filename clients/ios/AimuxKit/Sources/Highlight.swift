@@ -28,6 +28,19 @@ public func highlight(_ code: String, lang: String?) -> [CodeToken] {
     return merged(scanner.tokens())
 }
 
+/// The language of a file from its extension (for an edit's lines), or nil when `highlight` has no rules for it.
+/// The same as languageForPath in highlight.mjs.
+public func languageForPath(_ path: String) -> String? {
+    let name = path.trimmingCharacters(in: .whitespaces)
+    guard let dot = name.lastIndex(of: "."), dot < name.index(before: name.endIndex) else { return nil }
+    let ext = name[name.index(after: dot)...].lowercased()
+    guard ext.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+    let map = ["go": "go", "swift": "swift", "js": "js", "mjs": "js", "cjs": "js", "jsx": "js", "ts": "ts",
+               "tsx": "tsx", "py": "python", "sh": "sh", "bash": "sh", "zsh": "sh", "json": "json",
+               "yaml": "yaml", "yml": "yaml"]
+    return map[ext]
+}
+
 struct HighlightLanguage: Sendable {
     var line: [String] = []
     var block: (open: String, close: String)?

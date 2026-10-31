@@ -35,7 +35,9 @@
 - Fix: a Stop hook's feedback no longer shows as your message; it is a "Stop hook" step of the turn, and other text Claude Code injects is not shown
 - Fix: naming covers sessions whose title is only an id even when Claude Code wrote an away summary, and names them from that summary
 - Fix (iPhone): Now shows the saved list at launch instead of a blank screen; a long, busy chat no longer scrolls into empty space; the queue editor's Save is readable in dark mode
-- The iPhone app is at version 0.3 (29)
+- Opened steps: a command reads as shell with its colours and an edit's lines take the file's language colours (from its extension) on their red and green; a command and an error carry **Copy** (the whole text)
+- The live working line also shows while Claude Code's registry says busy (the header's Working), and sending on the iPhone scrolls to your message
+- The iPhone app is at version 0.3 (30)
 
 ## aimux v0.13.0
 

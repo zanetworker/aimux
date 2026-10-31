@@ -43,6 +43,18 @@ const isIdentStart = (c) => /[A-Za-z_]/.test(c);
 const isIdent = (c) => /[A-Za-z0-9_]/.test(c);
 const isDigit = (c) => c >= '0' && c <= '9';
 
+const EXTENSIONS = {
+  go: 'go', swift: 'swift', js: 'js', mjs: 'js', cjs: 'js', jsx: 'js', ts: 'ts', tsx: 'tsx',
+  py: 'python', sh: 'sh', bash: 'sh', zsh: 'sh', json: 'json', yaml: 'yaml', yml: 'yaml',
+};
+
+// languageForPath is the language of a file from its extension (for an edit's lines), or '' when
+// highlight has no rules for it. The same as languageForPath in Highlight.swift.
+export function languageForPath(path) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(String(path || '').trim());
+  return m ? EXTENSIONS[m[1].toLowerCase()] || '' : '';
+}
+
 // highlight returns the tokens of code in lang (a fence's info string, case-insensitive).
 export function highlight(code, lang) {
   const name = ALIASES[String(lang || '').trim().toLowerCase()];

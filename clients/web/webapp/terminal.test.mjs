@@ -105,6 +105,7 @@ test('the working line: how long, then the current step; nothing while idle', ()
   assert.equal(terminalWorkingLine(detail({ working: true })), 'Working');
   assert.equal(terminalWorkingLine(detail({ working: true }, [{ name: 'WebSearch', snippet: '' }])), 'Working · WebSearch');
   assert.equal(terminalWorkingLine(detail({ working: false, workingSeconds: 9 })), '');
+  assert.equal(terminalWorkingLine(detail({ working: false, status: 'busy' })), 'Working', 'busy in the registry');
   assert.equal(terminalWorkingLine(null), '');
   assert.deepEqual([0, 59, 60, 3599, 3600, 7380].map(elapsedText), ['0s', '59s', '1m', '59m 59s', '1h', '2h 3m']);
 });

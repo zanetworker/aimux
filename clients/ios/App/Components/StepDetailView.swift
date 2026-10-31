@@ -29,8 +29,12 @@ struct StepDetailView: View {
                     .foregroundStyle(Color(.link))
                 }
             }
-            if !shown.input.isEmpty && !repeats { input(shown.input) }
-            if !shown.error.isEmpty { error(shown.error) }
+            if !shown.input.isEmpty && !repeats {
+                input(shown.input).overlay(alignment: .topTrailing) { CopyIcon(text: detail.input) }
+            }
+            if !shown.error.isEmpty {
+                error(shown.error).overlay(alignment: .topTrailing) { CopyIcon(text: detail.error) }
+            }
             if !shown.lines.isEmpty { lines(shown.lines, hidden: shown.hidden) }
         }
         .font(.system(size: monoSize, design: .monospaced))
@@ -44,11 +48,13 @@ struct StepDetailView: View {
             if step.kind == .run {
                 Text("$ ").foregroundStyle(.secondary).accessibilityHidden(true)
             }
-            Text(Self.shown(text))
+            // A command reads as shell, with its colours; other inputs (a path, a pattern) stay plain.
+            Text(CodeColors.attributed(Self.shown(text), lang: step.kind == .run ? "sh" : nil))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 10)
+        .padding(.trailing, 40)  // room for the Copy icon
         .padding(.vertical, 8)
         .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
@@ -62,17 +68,20 @@ struct StepDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.trailing, 40)  // room for the Copy icon
     }
 
     private func lines(_ lines: [DiffLine], hidden: Int) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // The lines take the colours of the file's language, on their red and green.
+        let lang = languageForPath(step.target) ?? languageForPath(step.detail.input)
+        return VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Text(line.kind == .removed ? "-" : "+")
                         .foregroundStyle(.secondary)
                         .frame(width: gutter)
                         .accessibilityHidden(true)
-                    Text(Self.shown(line.text))
+                    Text(CodeColors.attributed(Self.shown(line.text), lang: lang))
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -97,6 +106,33 @@ struct StepDetailView: View {
     /// Text as drawn: a tab is four columns, not the eight a text view would give it.
     static func shown(_ text: String) -> String {
         text.replacing("\t", with: "    ")
+    }
+}
+
+/// Copies a step's whole command or error (not just the part shown); "Copied" for a moment.
+private struct CopyIcon: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = text
+            withAnimation(.snappy) { copied = true }
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                withAnimation(.snappy) { copied = false }
+            }
+        } label: {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 44, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(copied ? "Copied" : "Copy")
+        .accessibilityIdentifier("stepCopy")
     }
 }
 
