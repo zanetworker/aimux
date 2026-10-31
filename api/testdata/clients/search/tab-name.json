@@ -1,0 +1,143 @@
+{
+  "name": "Tab and window names match: every session in a matching tab or window, in Mac order",
+  "now": "2026-10-31T12:00:00Z",
+  "query": "blog",
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Fix header",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "blog"
+        },
+        "pane": 2,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "t2",
+      "provider": "claude",
+      "title": "Write post",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "blog"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "t3",
+      "provider": "claude",
+      "title": "Edit drafts",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:55:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w2",
+          "index": 2,
+          "name": "Blog work"
+        },
+        "tab": {
+          "index": 1,
+          "name": "drafts"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "t4",
+      "provider": "claude",
+      "title": "Other",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:58:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "t5",
+      "provider": "claude",
+      "title": "Closed",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      }
+    }
+  ],
+  "expect": {
+    "open": [
+      "t2",
+      "t1",
+      "t3"
+    ],
+    "other": [
+      "t5"
+    ]
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "name": "Elsewhere groups by folder label (the project's last part without a folder), groups by their newest, ties by label, sessions newest first, ties by id",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "e1",
+      "provider": "claude",
+      "title": "Phone session",
+      "project": "/src/aimux-wt/clients",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "label": "aimux / clients"
+      }
+    },
+    {
+      "id": "e2",
+      "provider": "claude",
+      "title": "Simulator run",
+      "project": "/src/aimux-wt/clients/ios",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "sub": "ios",
+        "label": "aimux / clients · ios"
+      }
+    },
+    {
+      "id": "e3",
+      "provider": "claude",
+      "title": "Fix the poller",
+      "project": "/src/aimux-wt/clients",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "label": "aimux / clients"
+      }
+    },
+    {
+      "id": "e4",
+      "provider": "claude",
+      "title": "Draft the post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      }
+    },
+    {
+      "id": "e5",
+      "provider": "claude",
+      "title": "Not resolved yet",
+      "project": "/src/scratch",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false
+    },
+    {
+      "id": "e6",
+      "provider": "claude",
+      "title": "Same time as e1",
+      "project": "/src/aimux-wt/clients",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "label": "aimux / clients"
+      }
+    },
+    {
+      "id": "e7",
+      "provider": "claude",
+      "title": "Resolved later",
+      "project": "/src/scratch",
+      "lastActive": "2026-10-31T11:10:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "scratch",
+        "repoPath": "/src/scratch",
+        "label": "scratch"
+      }
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "In a pane",
+      "project": "/src/aimux-wt/clients",
+      "lastActive": "2026-10-31T11:55:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "label": "aimux / clients"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "aimux",
+            "panes": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "m1"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux / clients · ios",
+        "sessions": [
+          "e2"
+        ]
+      },
+      {
+        "label": "aimux / clients",
+        "sessions": [
+          "e3",
+          "e1",
+          "e6"
+        ]
+      },
+      {
+        "label": "blog",
+        "sessions": [
+          "e4"
+        ]
+      },
+      {
+        "label": "scratch",
+        "sessions": [
+          "e5",
+          "e7"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 1,
+    "open": 8
+  }
+}

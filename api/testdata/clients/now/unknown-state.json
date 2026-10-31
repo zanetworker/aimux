@@ -1,7 +1,6 @@
 {
-  "name": "an unknown state is on no section and does not crash",
+  "name": "an unknown state is closed, on no section, and does not crash",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "u1",
@@ -9,7 +8,12 @@
       "title": "Strange session",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:59:00Z",
-      "state": "hibernating"
+      "state": "hibernating",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "m1",
@@ -17,24 +21,30 @@
       "title": "Old terminal",
       "project": "/src/research",
       "lastActive": "2026-10-25T22:00:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     }
   ],
   "events": {},
   "expect": {
     "needsYou": [],
-    "finished": [],
-    "working": {
-      "list": []
-    },
-    "onMac": [
-      "m1"
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "research",
+        "sessions": [
+          "m1"
+        ]
+      }
     ],
-    "onMacTotal": 1,
-    "summary": {
-      "needYou": 0,
-      "working": 0,
-      "onMac": 1
-    }
+    "other": [],
+    "working": 0,
+    "open": 1
   }
 }

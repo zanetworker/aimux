@@ -1,0 +1,124 @@
+{
+  "name": "With no Mac layout, every open session that is not in Needs you or Pinned is in Elsewhere by folder",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Wire the poller",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Fix the rows",
+      "project": "/src/aimux-wt/clients",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "label": "aimux / clients"
+      }
+    },
+    {
+      "id": "a3",
+      "provider": "claude",
+      "title": "Plan the tree",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:20:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "b1",
+      "provider": "claude",
+      "title": "Draft the post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:45:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      }
+    },
+    {
+      "id": "p1",
+      "provider": "claude",
+      "title": "Pinned and open",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "open_in_terminal",
+      "pinned": true,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "c1",
+      "provider": "claude",
+      "title": "Closed",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:58:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [
+      "p1"
+    ],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "a1",
+          "a3"
+        ]
+      },
+      {
+        "label": "blog",
+        "sessions": [
+          "b1"
+        ]
+      },
+      {
+        "label": "aimux / clients",
+        "sessions": [
+          "a2"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 1,
+    "open": 5
+  }
+}

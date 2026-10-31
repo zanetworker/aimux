@@ -1,7 +1,6 @@
 {
   "name": "a failure 16 minutes old is not on Now",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "f1",
@@ -9,7 +8,12 @@
       "title": "Migrate the schema",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:44:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     }
   ],
   "events": {
@@ -36,16 +40,12 @@
   },
   "expect": {
     "needsYou": [],
-    "finished": [],
-    "working": {
-      "list": []
-    },
-    "onMac": [],
-    "onMacTotal": 0,
-    "summary": {
-      "needYou": 0,
-      "working": 0,
-      "onMac": 0
-    }
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 0,
+    "open": 0
   }
 }

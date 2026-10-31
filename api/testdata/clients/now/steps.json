@@ -1,7 +1,6 @@
 {
   "name": "the working step: newest titled tool call, Thinking for a thought, untitled updates skipped, none without updates",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "w1",
@@ -9,7 +8,12 @@
       "title": "T w1",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:59:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "w2",
@@ -17,7 +21,12 @@
       "title": "T w2",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:58:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "w3",
@@ -25,7 +34,12 @@
       "title": "T w3",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:57:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "w4",
@@ -33,7 +47,12 @@
       "title": "T w4",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:56:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     }
   ],
   "events": {
@@ -132,22 +151,23 @@
   },
   "expect": {
     "needsYou": [],
-    "finished": [],
-    "working": {
-      "list": [
-        "w1",
-        "w2",
-        "w3",
-        "w4"
-      ]
-    },
-    "onMac": [],
-    "onMacTotal": 0,
-    "summary": {
-      "needYou": 0,
-      "working": 4,
-      "onMac": 0
-    },
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "w1",
+          "w2",
+          "w3",
+          "w4"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 4,
+    "open": 4,
     "steps": {
       "w1": "Edit main.go",
       "w2": "Thinking",

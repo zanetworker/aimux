@@ -1,0 +1,222 @@
+{
+  "name": "Open sessions first: in Mac order, then those without a pane newest first; then the rest newest first, ties by id; pins and failures are not special",
+  "now": "2026-10-31T12:00:00Z",
+  "query": "deploy",
+  "sessions": [
+    {
+      "id": "o1",
+      "provider": "claude",
+      "title": "deploy one",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w2",
+          "index": 2,
+          "name": "Window 2"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "o2",
+      "provider": "claude",
+      "title": "deploy two",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "aimux"
+        },
+        "pane": 3,
+        "panes": 3,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "o3",
+      "provider": "claude",
+      "title": "deploy three",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 3,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "o4",
+      "provider": "claude",
+      "title": "deploy four",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o5",
+      "provider": "claude",
+      "title": "deploy five",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o6",
+      "provider": "claude",
+      "title": "deploy six",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o7",
+      "provider": "claude",
+      "title": "deploy seven",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:58:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o8",
+      "provider": "claude",
+      "title": "deploy eight",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:58:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o9",
+      "provider": "claude",
+      "title": "nothing",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "events": {
+    "o5": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:30:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      }
+    ],
+    "o7": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-31T11:58:00Z",
+        "data": {
+          "error": "the build failed"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "open": [
+      "o3",
+      "o2",
+      "o1",
+      "o5",
+      "o4"
+    ],
+    "other": [
+      "o6",
+      "o7",
+      "o8"
+    ]
+  }
+}

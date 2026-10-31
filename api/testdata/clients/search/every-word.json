@@ -1,0 +1,87 @@
+{
+  "name": "Every word must match, in any field and any case; a word may sit inside another word",
+  "now": "2026-10-31T12:00:00Z",
+  "query": "Login REDIRECT",
+  "sessions": [
+    {
+      "id": "v1",
+      "provider": "claude",
+      "title": "Fix the login redirect",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "v2",
+      "provider": "claude",
+      "title": "Fix login",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "v3",
+      "provider": "claude",
+      "title": "redirect loop",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "lastPrompt": "why does login fail",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "v4",
+      "provider": "claude",
+      "title": "loginredirect",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "v5",
+      "provider": "claude",
+      "title": "redirects",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:55:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "expect": {
+    "open": [
+      "v4"
+    ],
+    "other": [
+      "v3",
+      "v1"
+    ]
+  }
+}

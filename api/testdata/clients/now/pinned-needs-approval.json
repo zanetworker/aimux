@@ -1,7 +1,6 @@
 {
   "name": "A pinned session with a pending approval stays in Needs you and is not repeated in Pinned",
   "now": "2026-10-30T12:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "a1",
@@ -10,7 +9,12 @@
       "project": "/src/web",
       "lastActive": "2026-10-30T11:50:00Z",
       "state": "busy",
-      "pinned": true
+      "pinned": true,
+      "folder": {
+        "repo": "web",
+        "repoPath": "/src/web",
+        "label": "web"
+      }
     },
     {
       "id": "a2",
@@ -19,7 +23,12 @@
       "project": "/src/ops",
       "lastActive": "2026-10-30T11:55:00Z",
       "state": "busy",
-      "pinned": false
+      "pinned": false,
+      "folder": {
+        "repo": "ops",
+        "repoPath": "/src/ops",
+        "label": "ops"
+      }
     }
   ],
   "events": {
@@ -101,22 +110,16 @@
     ]
   },
   "expect": {
-    "lastOnMac": null,
-    "pinned": [],
     "needsYou": [
       "a2",
       "a1"
     ],
-    "finished": [],
-    "working": {
-      "list": []
-    },
-    "onMac": [],
-    "onMacTotal": 0,
-    "summary": {
-      "needYou": 2,
-      "working": 0,
-      "onMac": 0
-    }
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 2,
+    "open": 2
   }
 }

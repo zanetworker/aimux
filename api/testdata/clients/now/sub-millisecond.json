@@ -1,7 +1,6 @@
 {
-  "name": "times keep their sub-millisecond digits: events 0.4 ms apart order by time, and 900 s is measured to the microsecond",
+  "name": "times keep their sub-millisecond digits: failures 0.4 ms apart order by time, and 900 s is measured to the microsecond",
   "now": "2026-10-26T09:00:00.0004Z",
-  "seen": {},
   "sessions": [
     {
       "id": "a-first",
@@ -9,7 +8,12 @@
       "title": "T a-first",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:59:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "b-second",
@@ -17,7 +21,12 @@
       "title": "T b-second",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:59:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "f-late",
@@ -25,7 +34,12 @@
       "title": "T f-late",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:45:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "f-in",
@@ -33,7 +47,12 @@
       "title": "T f-in",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:45:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     }
   ],
   "events": {
@@ -41,10 +60,10 @@
       {
         "seq": 1,
         "turn": "t1",
-        "kind": "turn_done",
+        "kind": "turn_error",
         "time": "2026-10-26T08:59:00.0010Z",
         "data": {
-          "stopReason": "end_turn"
+          "error": "the build failed"
         }
       }
     ],
@@ -52,10 +71,10 @@
       {
         "seq": 1,
         "turn": "t1",
-        "kind": "turn_done",
+        "kind": "turn_error",
         "time": "2026-10-26T08:59:00.0014Z",
         "data": {
-          "stopReason": "end_turn"
+          "error": "the build failed"
         }
       }
     ],
@@ -84,21 +103,16 @@
   },
   "expect": {
     "needsYou": [
+      "b-second",
+      "a-first",
       "f-in"
     ],
-    "finished": [
-      "b-second",
-      "a-first"
-    ],
-    "working": {
-      "list": []
-    },
-    "onMac": [],
-    "onMacTotal": 0,
-    "summary": {
-      "needYou": 1,
-      "working": 0,
-      "onMac": 0
-    }
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 0,
+    "open": 0
   }
 }

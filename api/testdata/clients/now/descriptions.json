@@ -1,11 +1,6 @@
 {
   "name": "The description is the row's second line: present, absent, null, empty, blank and padded values",
   "now": "2026-10-30T12:00:00Z",
-  "seen": {},
-  "lastOnMac": {
-    "id": "d6",
-    "at": "2026-10-30T11:55:00Z"
-  },
   "sessions": [
     {
       "id": "d1",
@@ -15,7 +10,12 @@
       "lastActive": "2026-10-30T11:59:00Z",
       "state": "busy",
       "description": "Adds the share sheet to the chat screen and checks it on a small phone.",
-      "pinned": false
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "d2",
@@ -24,7 +24,12 @@
       "project": "/src/aimux",
       "lastActive": "2026-10-30T11:58:00Z",
       "state": "busy",
-      "pinned": false
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "d4",
@@ -34,7 +39,12 @@
       "lastActive": "2026-10-30T11:56:00Z",
       "state": "busy",
       "description": "   ",
-      "pinned": false
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
     },
     {
       "id": "d5",
@@ -44,7 +54,12 @@
       "lastActive": "2026-10-30T11:00:00Z",
       "state": "idle",
       "pinned": true,
-      "description": "Sorts the bookmarks into four folders."
+      "description": "Sorts the bookmarks into four folders.",
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
     },
     {
       "id": "d6",
@@ -54,7 +69,12 @@
       "lastActive": "2026-10-30T11:50:00Z",
       "state": "open_in_terminal",
       "description": "Finds why the login page loops back to itself.",
-      "pinned": false
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "d7",
@@ -64,7 +84,12 @@
       "lastActive": "2026-10-30T11:55:00Z",
       "state": "busy",
       "description": "",
-      "pinned": false
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
     },
     {
       "id": "d8",
@@ -74,33 +99,43 @@
       "lastActive": "2026-10-30T11:54:00Z",
       "state": "busy",
       "description": "   Writes labels for twelve jars. \n",
-      "pinned": false
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
     }
   ],
   "events": {},
   "expect": {
-    "lastOnMac": "d6",
+    "needsYou": [],
     "pinned": [
       "d5"
     ],
-    "needsYou": [],
-    "finished": [],
-    "working": {
-      "list": [
-        "d1",
-        "d2",
-        "d4",
-        "d7",
-        "d8"
-      ]
-    },
-    "onMac": [],
-    "onMacTotal": 0,
-    "summary": {
-      "needYou": 0,
-      "working": 6,
-      "onMac": 0
-    },
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "d1",
+          "d2",
+          "d6"
+        ]
+      },
+      {
+        "label": "notes",
+        "sessions": [
+          "d4",
+          "d7",
+          "d8"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 5,
+    "open": 6,
     "descriptions": {
       "d1": "Adds the share sheet to the chat screen and checks it on a small phone.",
       "d2": null,

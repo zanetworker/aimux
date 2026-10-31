@@ -1,0 +1,246 @@
+{
+  "name": "Repos A to Z ignoring case, main checkout then worktrees A to Z, sessions newest first; only the newest session's repo and worktree start open",
+  "now": "2026-10-31T12:00:00Z",
+  "timeZone": "UTC",
+  "project": null,
+  "sort": "folders",
+  "sessions": [
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Plan the tree",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Fix a command",
+      "project": "/src/aimux/cmd",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "sub": "cmd",
+        "label": "aimux · cmd"
+      }
+    },
+    {
+      "id": "c1",
+      "provider": "claude",
+      "title": "Wire the poller",
+      "project": "/src/aimux-wt/clients",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "label": "aimux / clients"
+      }
+    },
+    {
+      "id": "c2",
+      "provider": "claude",
+      "title": "Fix the rows",
+      "project": "/src/aimux-wt/clients",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "label": "aimux / clients"
+      }
+    },
+    {
+      "id": "c3",
+      "provider": "claude",
+      "title": "Simulator run",
+      "project": "/src/aimux-wt/clients/ios",
+      "lastActive": "2026-10-31T08:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "clients",
+        "sub": "ios",
+        "label": "aimux / clients · ios"
+      }
+    },
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Write the guide",
+      "project": "/src/aimux-wt/Docs-site",
+      "lastActive": "2026-10-31T07:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "working": true,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "worktree": "Docs-site",
+        "label": "aimux / Docs-site"
+      }
+    },
+    {
+      "id": "b1",
+      "provider": "claude",
+      "title": "Draft the post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-30T10:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      }
+    },
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Proofread",
+      "project": "/src/Docs",
+      "lastActive": "2026-10-29T10:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "Docs",
+        "repoPath": "/src/Docs",
+        "label": "Docs"
+      }
+    },
+    {
+      "id": "x1",
+      "provider": "claude",
+      "title": "Try branches",
+      "project": "/src/_experiments/branches",
+      "lastActive": "2026-10-20T10:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "_experiments",
+        "repoPath": "/src/_experiments",
+        "worktree": "branches",
+        "label": "_experiments / branches"
+      }
+    },
+    {
+      "id": "h1",
+      "provider": "claude",
+      "title": "Clean the downloads",
+      "project": "/home/owner",
+      "lastActive": "2026-10-31T06:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "Home",
+        "repoPath": "/home/owner",
+        "label": "Home"
+      }
+    }
+  ],
+  "expect": {
+    "repos": [
+      {
+        "repoPath": "/src/_experiments",
+        "name": "_experiments",
+        "count": 1,
+        "working": 0,
+        "open": false,
+        "sessions": [],
+        "worktrees": [
+          {
+            "name": "branches",
+            "count": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "x1"
+            ]
+          }
+        ]
+      },
+      {
+        "repoPath": "/src/aimux",
+        "name": "aimux",
+        "count": 6,
+        "working": 2,
+        "open": true,
+        "sessions": [
+          "m1",
+          "m2"
+        ],
+        "worktrees": [
+          {
+            "name": "clients",
+            "count": 3,
+            "working": 1,
+            "open": true,
+            "sessions": [
+              "c2",
+              "c1",
+              "c3"
+            ]
+          },
+          {
+            "name": "Docs-site",
+            "count": 1,
+            "working": 1,
+            "open": false,
+            "sessions": [
+              "w1"
+            ]
+          }
+        ]
+      },
+      {
+        "repoPath": "/src/blog",
+        "name": "blog",
+        "count": 1,
+        "working": 0,
+        "open": false,
+        "sessions": [
+          "b1"
+        ],
+        "worktrees": []
+      },
+      {
+        "repoPath": "/src/Docs",
+        "name": "Docs",
+        "count": 1,
+        "working": 0,
+        "open": false,
+        "sessions": [
+          "d1"
+        ],
+        "worktrees": []
+      },
+      {
+        "repoPath": "/home/owner",
+        "name": "Home",
+        "count": 1,
+        "working": 0,
+        "open": false,
+        "sessions": [
+          "h1"
+        ],
+        "worktrees": []
+      }
+    ]
+  }
+}

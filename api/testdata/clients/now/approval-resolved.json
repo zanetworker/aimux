@@ -1,7 +1,6 @@
 {
   "name": "an approval answered in the same page is not pending",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "a1",
@@ -9,7 +8,12 @@
       "title": "Wire push notifications",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:58:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "m1",
@@ -17,7 +21,12 @@
       "title": "Terminal session 1",
       "project": "/src/aimux",
       "lastActive": "2026-10-25T22:00:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     }
   ],
   "events": {
@@ -72,20 +81,20 @@
   },
   "expect": {
     "needsYou": [],
-    "finished": [],
-    "working": {
-      "list": [
-        "a1"
-      ]
-    },
-    "onMac": [
-      "m1"
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "a1",
+          "m1"
+        ]
+      }
     ],
-    "onMacTotal": 1,
-    "summary": {
-      "needYou": 0,
-      "working": 1,
-      "onMac": 1
-    }
+    "other": [],
+    "working": 1,
+    "open": 2
   }
 }

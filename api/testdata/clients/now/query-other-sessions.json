@@ -1,0 +1,250 @@
+{
+  "name": "Every word must match, in any field, any case; closed matches go to Other sessions; Needs you and Pinned keep only matches",
+  "now": "2026-10-31T12:00:00Z",
+  "query": "  Push   TOKEN ",
+  "sessions": [
+    {
+      "id": "o1",
+      "provider": "claude",
+      "title": "Push notifications",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "lastPrompt": "refresh the token",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o2",
+      "provider": "claude",
+      "title": "Push notifications again",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o3",
+      "provider": "claude",
+      "title": "Rotate the push token",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "unavailable",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o4",
+      "provider": "claude",
+      "title": "Expiry",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "hibernating",
+      "pinned": false,
+      "description": "Push token expiry.",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o5",
+      "provider": "claude",
+      "title": "Push token tests",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o6",
+      "provider": "claude",
+      "title": "Unrelated pin",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:30:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o7",
+      "provider": "claude",
+      "title": "Push token server",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:20:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o8",
+      "provider": "claude",
+      "title": "token push",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o9",
+      "provider": "claude",
+      "title": "Fix CI",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:58:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o10",
+      "provider": "claude",
+      "title": "push-token cleanup",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T08:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "o11",
+      "provider": "claude",
+      "title": "pushing tokens",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T12:30:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "events": {
+    "o8": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:40:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-31T11:50:00Z",
+        "data": {
+          "approvalId": "p1",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ],
+    "o9": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-31T11:58:00Z",
+        "data": {
+          "error": "the build failed"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "o8"
+    ],
+    "pinned": [
+      "o5"
+    ],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "o7"
+        ]
+      }
+    ],
+    "other": [
+      "o11",
+      "o1",
+      "o3",
+      "o4",
+      "o10"
+    ],
+    "working": 1,
+    "open": 2
+  }
+}

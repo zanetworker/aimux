@@ -1,7 +1,6 @@
 {
-  "name": "exactly 900 seconds still counts; 901 does not",
+  "name": "a failure exactly 900 seconds old still needs you; 901 does not; a finish places nothing",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "f1",
@@ -9,7 +8,12 @@
       "title": "Failed on the line",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:45:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "f2",
@@ -17,7 +21,12 @@
       "title": "Failed just late",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:44:59Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "d1",
@@ -25,7 +34,12 @@
       "title": "Finished on the line",
       "project": "/src/research",
       "lastActive": "2026-10-26T08:45:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     },
     {
       "id": "d2",
@@ -33,7 +47,12 @@
       "title": "Finished just late",
       "project": "/src/research",
       "lastActive": "2026-10-26T08:44:59Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     },
     {
       "id": "t1",
@@ -41,7 +60,12 @@
       "title": "Terminal on the line",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:45:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "t2",
@@ -49,7 +73,12 @@
       "title": "Terminal just late",
       "project": "/src/research",
       "lastActive": "2026-10-26T08:44:59Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     }
   ],
   "events": {
@@ -138,22 +167,25 @@
     "needsYou": [
       "f1"
     ],
-    "finished": [
-      "d1"
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "t1"
+        ]
+      },
+      {
+        "label": "research",
+        "sessions": [
+          "t2"
+        ]
+      }
     ],
-    "working": {
-      "list": [
-        "t1"
-      ]
-    },
-    "onMac": [
-      "t2"
-    ],
-    "onMacTotal": 1,
-    "summary": {
-      "needYou": 1,
-      "working": 1,
-      "onMac": 1
-    }
+    "other": [],
+    "working": 0,
+    "open": 2
   }
 }

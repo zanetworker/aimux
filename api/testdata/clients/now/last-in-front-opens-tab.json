@@ -1,0 +1,167 @@
+{
+  "name": "Only the tab holding the lastInFront pane starts unfolded",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "s1",
+      "provider": "claude",
+      "title": "Tidy the imports",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "s2",
+      "provider": "claude",
+      "title": "Review the plan",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 2,
+        "panes": 2,
+        "lastInFront": true
+      }
+    },
+    {
+      "id": "s3",
+      "provider": "claude",
+      "title": "Draft the post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "blog"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "s4",
+      "provider": "claude",
+      "title": "Fix the links",
+      "project": "/src/docs",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "docs",
+        "repoPath": "/src/docs",
+        "label": "docs"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 3,
+          "name": "docs"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "aimux",
+            "panes": 2,
+            "working": 0,
+            "open": true,
+            "sessions": [
+              "s1",
+              "s2"
+            ]
+          },
+          {
+            "index": 2,
+            "name": "blog",
+            "panes": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "s3"
+            ]
+          },
+          {
+            "index": 3,
+            "name": "docs",
+            "panes": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "s4"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 0,
+    "open": 4
+  }
+}

@@ -1,7 +1,6 @@
 {
-  "name": "an approval waits, however old, ahead of a newer one",
+  "name": "an approval waits, however old, ahead of a newer one; working and terminal sessions are elsewhere",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "a1",
@@ -9,7 +8,12 @@
       "title": "Wire push notifications",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T07:00:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "a2",
@@ -17,7 +21,12 @@
       "title": "Fix login redirect",
       "project": "/src/research",
       "lastActive": "2026-10-26T08:55:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     },
     {
       "id": "w1",
@@ -25,7 +34,12 @@
       "title": "Index the docs",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:59:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "m1",
@@ -33,7 +47,12 @@
       "title": "Terminal session 1",
       "project": "/src/aimux",
       "lastActive": "2026-10-25T22:00:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "m2",
@@ -41,7 +60,12 @@
       "title": "Terminal session 2",
       "project": "/src/aimux",
       "lastActive": "2026-10-25T21:30:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     }
   ],
   "events": {
@@ -127,21 +151,21 @@
       "a2",
       "a1"
     ],
-    "finished": [],
-    "working": {
-      "list": [
-        "w1"
-      ]
-    },
-    "onMac": [
-      "m1",
-      "m2"
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "w1",
+          "m1",
+          "m2"
+        ]
+      }
     ],
-    "onMacTotal": 2,
-    "summary": {
-      "needYou": 2,
-      "working": 1,
-      "onMac": 2
-    }
+    "other": [],
+    "working": 3,
+    "open": 5
   }
 }

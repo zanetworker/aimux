@@ -1,7 +1,6 @@
 {
   "name": "equal times order by session id, ascending",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "p2",
@@ -9,7 +8,12 @@
       "title": "Second approval",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:55:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "p1",
@@ -17,7 +21,12 @@
       "title": "First approval",
       "project": "/src/research",
       "lastActive": "2026-10-26T08:55:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     },
     {
       "id": "w2",
@@ -25,7 +34,12 @@
       "title": "Second worker",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:59:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "w1",
@@ -33,7 +47,12 @@
       "title": "First worker",
       "project": "/src/research",
       "lastActive": "2026-10-26T08:59:00Z",
-      "state": "busy"
+      "state": "busy",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     },
     {
       "id": "m2",
@@ -41,7 +60,12 @@
       "title": "Second terminal",
       "project": "/src/aimux",
       "lastActive": "2026-10-25T22:00:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "m1",
@@ -49,7 +73,12 @@
       "title": "First terminal",
       "project": "/src/research",
       "lastActive": "2026-10-25T22:00:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
     }
   ],
   "events": {
@@ -135,22 +164,27 @@
       "p1",
       "p2"
     ],
-    "finished": [],
-    "working": {
-      "list": [
-        "w1",
-        "w2"
-      ]
-    },
-    "onMac": [
-      "m1",
-      "m2"
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "w2",
+          "m2"
+        ]
+      },
+      {
+        "label": "research",
+        "sessions": [
+          "w1",
+          "m1"
+        ]
+      }
     ],
-    "onMacTotal": 2,
-    "summary": {
-      "needYou": 2,
-      "working": 2,
-      "onMac": 2
-    }
+    "other": [],
+    "working": 2,
+    "open": 4
   }
 }

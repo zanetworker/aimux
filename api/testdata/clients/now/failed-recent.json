@@ -1,7 +1,6 @@
 {
   "name": "a turn that failed 5 minutes ago needs you",
   "now": "2026-10-26T09:00:00Z",
-  "seen": {},
   "sessions": [
     {
       "id": "f1",
@@ -9,7 +8,12 @@
       "title": "Migrate the schema",
       "project": "/src/aimux",
       "lastActive": "2026-10-26T08:55:00Z",
-      "state": "idle"
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     },
     {
       "id": "m1",
@@ -17,7 +21,12 @@
       "title": "Terminal session 1",
       "project": "/src/aimux",
       "lastActive": "2026-10-25T22:00:00Z",
-      "state": "open_in_terminal"
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
     }
   ],
   "events": {
@@ -46,18 +55,19 @@
     "needsYou": [
       "f1"
     ],
-    "finished": [],
-    "working": {
-      "list": []
-    },
-    "onMac": [
-      "m1"
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "m1"
+        ]
+      }
     ],
-    "onMacTotal": 1,
-    "summary": {
-      "needYou": 1,
-      "working": 0,
-      "onMac": 1
-    }
+    "other": [],
+    "working": 0,
+    "open": 1
   }
 }

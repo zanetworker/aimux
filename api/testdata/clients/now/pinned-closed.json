@@ -1,0 +1,107 @@
+{
+  "name": "Pinned orders newest first (a future time counts as now), ties by id, whatever the state or the list order",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "k0",
+      "provider": "claude",
+      "title": "Unavailable pin",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "unavailable",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "k4",
+      "provider": "claude",
+      "title": "Unknown state pin",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "hibernating",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "k3",
+      "provider": "claude",
+      "title": "Pinned at now",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T12:00:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "n1",
+      "provider": "claude",
+      "title": "Not pinned",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "k1",
+      "provider": "claude",
+      "title": "Pinned at eleven",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "k2",
+      "provider": "claude",
+      "title": "Pinned in the future",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T12:30:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [
+      "k2",
+      "k3",
+      "k1",
+      "k4",
+      "k0"
+    ],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 0,
+    "open": 0
+  }
+}

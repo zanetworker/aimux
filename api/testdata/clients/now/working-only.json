@@ -1,0 +1,310 @@
+{
+  "name": "Working only keeps working sessions in Pinned, panes and Elsewhere, counts the tabs it hides, keeps Needs you whole and the counts whole",
+  "now": "2026-10-31T12:00:00Z",
+  "workingOnly": true,
+  "sessions": [
+    {
+      "id": "s1",
+      "provider": "claude",
+      "title": "Idle in front",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 3,
+        "lastInFront": true
+      }
+    },
+    {
+      "id": "s2",
+      "provider": "claude",
+      "title": "Registry busy",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:10:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "working": true,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 2,
+        "panes": 3,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "s3",
+      "provider": "claude",
+      "title": "Busy here",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:20:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 3,
+        "panes": 3,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "s4",
+      "provider": "claude",
+      "title": "Idle blog pane",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "blog"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "s5",
+      "provider": "claude",
+      "title": "Idle docs pane",
+      "project": "/src/docs",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "docs",
+        "repoPath": "/src/docs",
+        "label": "docs"
+      },
+      "mac": {
+        "window": {
+          "id": "w2",
+          "index": 2,
+          "name": "Window 2"
+        },
+        "tab": {
+          "index": 1,
+          "name": "docs"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "e1",
+      "provider": "claude",
+      "title": "Phone session",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "e2",
+      "provider": "claude",
+      "title": "Idle in another terminal",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      }
+    },
+    {
+      "id": "e3",
+      "provider": "claude",
+      "title": "Turn running",
+      "project": "/src/docs",
+      "lastActive": "2026-10-31T11:20:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "docs",
+        "repoPath": "/src/docs",
+        "label": "docs"
+      }
+    },
+    {
+      "id": "pc",
+      "provider": "claude",
+      "title": "Pinned and closed",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "pw",
+      "provider": "claude",
+      "title": "Pinned and busy",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:10:00Z",
+      "state": "busy",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Failed just now",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:58:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    }
+  ],
+  "events": {
+    "e3": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:20:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      }
+    ],
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-31T11:58:00Z",
+        "data": {
+          "error": "the build failed"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "f1"
+    ],
+    "pinned": [
+      "pw"
+    ],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "aimux",
+            "panes": 3,
+            "working": 2,
+            "open": true,
+            "sessions": [
+              "s2",
+              "s3"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 2,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "e1"
+        ]
+      },
+      {
+        "label": "docs",
+        "sessions": [
+          "e3"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 5,
+    "open": 9
+  }
+}
