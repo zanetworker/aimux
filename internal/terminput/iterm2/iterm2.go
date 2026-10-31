@@ -66,6 +66,18 @@ type request struct {
 	Key     string `json:"key,omitempty"`
 }
 
+type layoutTab struct {
+	Name  string   `json:"name"`
+	Panes []string `json:"panes"`
+}
+
+type layoutWindow struct {
+	ID     int         `json:"id"`
+	Name   string      `json:"name"`
+	Active string      `json:"active"`
+	Tabs   []layoutTab `json:"tabs"`
+}
+
 type response struct {
 	ID        int    `json:"id"`
 	Error     string `json:"error"`
@@ -73,6 +85,8 @@ type response struct {
 	Text      string `json:"text"`
 	Frontmost bool   `json:"frontmost"`
 	TTY       string `json:"tty"`
+
+	Windows []layoutWindow `json:"windows"`
 }
 
 // Driver implements terminput.Driver for iTerm2. Requests are serialised.
@@ -128,6 +142,30 @@ func (d *Driver) Focused(ctx context.Context) (bool, string, error) {
 		return false, "", fmt.Errorf("iterm2: focus: %w", err)
 	}
 	return r.Frontmost, r.TTY, nil
+}
+
+// Layout lists every pane in the order iTerm2 shows them: windows as iTerm2
+// lists them, then tabs, then panes. It is empty while iTerm2 is not
+// running, and it never activates or changes anything.
+func (d *Driver) Layout(ctx context.Context) ([]terminput.PaneRef, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	r, err := d.call(ctx, request{Op: "layout"})
+	if err != nil {
+		return nil, fmt.Errorf("iterm2: layout: %w", err)
+	}
+	refs := []terminput.PaneRef{}
+	for _, w := range r.Windows {
+		for t, tab := range w.Tabs {
+			for p, tty := range tab.Panes {
+				refs = append(refs, terminput.PaneRef{
+					WindowID: w.ID, WindowName: w.Name, ActiveName: w.Active,
+					Tab: t + 1, TabName: tab.Name, Pane: p + 1, Panes: len(tab.Panes), TTY: tty,
+				})
+			}
+		}
+	}
+	return refs, nil
 }
 
 // Locate finds the iTerm2 session whose tty is t.TTY, from the cache when it

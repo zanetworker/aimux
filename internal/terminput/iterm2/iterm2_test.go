@@ -72,6 +72,8 @@ func runFakeHelper() {
 				reply(map[string]any{"id": r.ID, "sessions": []loc{}})
 			case "focus":
 				reply(map[string]any{"id": r.ID, "frontmost": false, "tty": ""})
+			case "layout":
+				reply(map[string]any{"id": r.ID, "windows": []any{}})
 			default:
 				reply(map[string]any{"id": r.ID, "error": "missing"})
 			}
@@ -81,6 +83,14 @@ func runFakeHelper() {
 		case "focus":
 			var v map[string]any
 			_ = json.Unmarshal([]byte(os.Getenv("FAKE_FOCUS")), &v)
+			if v == nil {
+				v = map[string]any{}
+			}
+			v["id"] = r.ID
+			reply(v)
+		case "layout":
+			var v map[string]any
+			_ = json.Unmarshal([]byte(os.Getenv("FAKE_LAYOUT")), &v)
 			if v == nil {
 				v = map[string]any{}
 			}
@@ -600,5 +610,88 @@ func TestHelperFocusOnlyReads(t *testing.T) {
 	}
 	if !strings.Contains(helperJS, "case 'focus':") {
 		t.Fatal("helper.js does not route the focus op")
+	}
+}
+
+const layoutReply = `FAKE_LAYOUT={"windows":[
+ {"id":9,"name":"Window 1","active":"claude","tabs":[
+  {"name":"build","panes":["/dev/ttys010","/dev/ttys011"]},
+  {"name":"notes","panes":["/dev/ttys012"]}]},
+ {"id":4,"name":"Window 2","active":"zsh","tabs":[
+  {"name":"zsh","panes":["/dev/ttys020"]}]}]}`
+
+func TestLayoutParsesHelperReply(t *testing.T) {
+	ctx := context.Background()
+	t.Run("two windows in reply order", func(t *testing.T) {
+		f := newFake(t, scratch, layoutReply)
+		got, err := f.driver(time.Second).Layout(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []terminput.PaneRef{
+			{WindowID: 9, WindowName: "Window 1", ActiveName: "claude", Tab: 1, TabName: "build", Pane: 1, Panes: 2, TTY: "/dev/ttys010"},
+			{WindowID: 9, WindowName: "Window 1", ActiveName: "claude", Tab: 1, TabName: "build", Pane: 2, Panes: 2, TTY: "/dev/ttys011"},
+			{WindowID: 9, WindowName: "Window 1", ActiveName: "claude", Tab: 2, TabName: "notes", Pane: 1, Panes: 1, TTY: "/dev/ttys012"},
+			{WindowID: 4, WindowName: "Window 2", ActiveName: "zsh", Tab: 1, TabName: "zsh", Pane: 1, Panes: 1, TTY: "/dev/ttys020"},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("got %d refs %+v, want %d", len(got), got, len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("ref %d = %+v, want %+v", i, got[i], want[i])
+			}
+		}
+		if g := ops(f.requests()); g != "start,layout" {
+			t.Fatalf("ops = %s, want start,layout", g)
+		}
+	})
+	t.Run("helper error", func(t *testing.T) {
+		f := newFake(t, scratch, `FAKE_LAYOUT={"error":"Can't get object."}`)
+		if got, err := f.driver(time.Second).Layout(ctx); err == nil || got != nil {
+			t.Fatalf("got %v, %v; want nil and an error", got, err)
+		}
+	})
+	t.Run("denied", func(t *testing.T) {
+		f := newFake(t, scratch, "FAKE_MODE=deny")
+		if _, err := f.driver(time.Second).Layout(ctx); !errors.Is(err, terminput.ErrAutomationDenied) {
+			t.Fatalf("err = %v, want ErrAutomationDenied", err)
+		}
+	})
+	t.Run("no windows", func(t *testing.T) {
+		f := newFake(t, scratch, `FAKE_LAYOUT={"windows":[]}`)
+		got, err := f.driver(time.Second).Layout(ctx)
+		if err != nil || len(got) != 0 {
+			t.Fatalf("got %v, %v; want empty and nil", got, err)
+		}
+	})
+	t.Run("not running", func(t *testing.T) {
+		f := newFake(t, scratch, "FAKE_MODE=not-running")
+		got, err := f.driver(time.Second).Layout(ctx)
+		if err != nil || len(got) != 0 {
+			t.Fatalf("got %v, %v; want empty and nil", got, err)
+		}
+	})
+}
+
+// The layout op only reads: it never activates, selects or types.
+func TestHelperLayoutOnlyReads(t *testing.T) {
+	i := strings.Index(helperJS, "\nfunction layout(")
+	if i < 0 {
+		t.Fatal("helper.js has no layout function")
+	}
+	fn := helperJS[i:]
+	fn = fn[:strings.Index(fn[1:], "\nfunction ")+1]
+	for _, bad := range []string{"activate", "select", "reveal", "write(", "create", "close("} {
+		if strings.Contains(fn, bad) {
+			t.Fatalf("layout function contains %q:\n%s", bad, fn)
+		}
+	}
+	r, w := strings.Index(fn, "if (!app.running())"), strings.Index(fn, "app.windows")
+	if r < 0 || w < 0 || r > w {
+		t.Fatalf("layout must check app.running() before app.windows:\n%s", fn)
+	}
+	if !strings.Contains(helperJS, "case 'layout':") {
+		t.Fatal("helper.js does not route the layout op")
 	}
 }

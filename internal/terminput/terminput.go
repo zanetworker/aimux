@@ -54,6 +54,19 @@ type Target struct {
 // Pane is a driver's own handle, opaque to callers.
 type Pane struct{ Driver, ID string }
 
+// PaneRef is where a terminal shows one pane: its window, tab and position,
+// as the terminal orders them.
+type PaneRef struct {
+	WindowID   int    // terminal's window id
+	WindowName string // as the terminal shows it
+	ActiveName string // name of the window's current session
+	Tab        int    // 1-based position in the window
+	TabName    string // name of the tab's current session
+	Pane       int    // 1-based position in the tab
+	Panes      int    // panes in the tab
+	TTY        string
+}
+
 // Driver moves bytes for one terminal. Every safety check lives in Service.
 type Driver interface {
 	Name() string

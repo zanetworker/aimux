@@ -67,6 +67,26 @@ function focus() {
   return { frontmost: front, tty: String(w.currentSession().tty()) };
 }
 
+// layout lists windows, tabs and panes in the order iTerm2 shows them, with
+// names. It only reads.
+function layout() {
+  if (!app.running()) return { windows: [] };
+  const ids = app.windows.id();
+  const names = app.windows.name();
+  const active = app.windows.currentSession.name();
+  const tabNames = app.windows.tabs.currentSession.name();
+  const ttys = app.windows.tabs.sessions.tty();
+  const windows = [];
+  for (let w = 0; w < ids.length; w++) {
+    const tabs = [];
+    for (let t = 0; t < ttys[w].length; t++) {
+      tabs.push({ name: String(tabNames[w][t]), panes: ttys[w][t].map(String) });
+    }
+    windows.push({ id: ids[w], name: String(names[w]), active: String(active[w]), tabs: tabs });
+  }
+  return { windows: windows };
+}
+
 function session(req) {
   if (!app.running()) throw new Missing();
   let tabs;
@@ -98,6 +118,8 @@ function handle(req) {
       return { sessions: locate() };
     case 'focus':
       return focus();
+    case 'layout':
+      return layout();
     case 'send': {
       const s = session(req);
       const text = String(req.text);
