@@ -66,7 +66,7 @@ func TestScreenFixtures(t *testing.T) {
 		{file: "draft-with-indented-rule.txt"},
 		{file: "answered-prompt-tool-output.txt"},
 		{file: "answered-prompt-spinner.txt", working: true},
-		{file: "prompt-wrapped-numbered-continuation.txt", hasPrompt: true, question: "Do you want to proceed?", options: []Option{
+		{file: "prompt-wrapped-numbered-continuation.txt", hasPrompt: true, question: "Do you want to proceed?", detail: "Bash command\n\n  make build lint", options: []Option{
 			{"1", "Yes"},
 			{"2", "Yes, and allow the following steps for this session: 3. the build and the lint run"},
 			{"3", "No"},
@@ -169,7 +169,7 @@ func TestParsePromptRejectsMoreThanNineOptions(t *testing.T) {
 func TestParsePromptWrappedSelectedOption(t *testing.T) {
 	// "❯" is 3 bytes but one column: indentation is compared in columns.
 	for _, indent := range []string{"    ", "      "} {
-		screen := " Do you want to proceed?\n ❯ 1. Yes, and a label long enough\n" + indent + "to wrap\n   2. No\n\n Esc to cancel\n"
+		screen := strings.Repeat("─", 40) + "\n Do you want to proceed?\n ❯ 1. Yes, and a label long enough\n" + indent + "to wrap\n   2. No\n\n Esc to cancel\n"
 		p := ParsePrompt(screen)
 		if p == nil || len(p.Options) != 2 || p.Options[0].Label != "Yes, and a label long enough to wrap" {
 			t.Errorf("indent %d: got %+v", len(indent), p)
@@ -271,8 +271,8 @@ func TestPromptDetailLimits(t *testing.T) {
 	if n := utf8.RuneCountInString(wide.Detail); n != 2000 || !utf8.ValidString(wide.Detail) {
 		t.Fatalf("detail %d chars, valid %v", n, utf8.ValidString(wide.Detail))
 	}
-	if none := ParsePrompt(tail); none == nil || none.Detail != "" {
-		t.Fatalf("no rule above: %+v, want an empty detail", none)
+	if none := ParsePrompt(tail); none != nil {
+		t.Fatalf("no rule above: %+v, want no prompt (its top is off the screen)", none)
 	}
 }
 
@@ -360,5 +360,19 @@ func TestWorkingSeconds(t *testing.T) {
 	}
 	if got, ok := WorkingSeconds(fixture(t, "busy-empty.txt")); !ok || got != 10 {
 		t.Errorf("busy fixture: %d %v", got, ok)
+	}
+}
+
+// A preview taller than the screen aimux reads loses its top rule: without it the
+// body is unknown, and two such prompts with the same question and options would
+// share an id, so a stale card could approve another operation. No prompt then.
+func TestParsePromptWithoutItsTopRuleIsNone(t *testing.T) {
+	tail := " Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel\n"
+	if p := ParsePrompt(" rm -rf build\n" + tail); p != nil {
+		t.Fatalf("a prompt whose top scrolled off parsed: %+v", p)
+	}
+	rule := strings.Repeat("─", 40)
+	if p := ParsePrompt(rule + "\n rm -rf build\n" + tail); p == nil || !strings.Contains(p.Detail, "rm -rf build") {
+		t.Fatalf("a whole prompt: %+v", p)
 	}
 }

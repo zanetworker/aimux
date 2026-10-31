@@ -130,7 +130,7 @@ var (
 	ErrMacInUse         = newErr("mac_in_use", "the owner is using this session on the Mac")
 	ErrNoDriver         = newErr("no_terminal_driver", "no driver reaches this terminal")
 	ErrAutomationDenied = newErr("automation_denied", "macOS denied automation access")
-	ErrNotAtInput       = newErr("not_at_input", "the session is not waiting at an empty input box")
+	ErrNotAtInput       = newErr("not_at_input", "the session is not waiting at its input box")
 	ErrNoPrompt         = newErr("no_prompt", "no permission prompt is showing")
 	ErrPromptChanged    = newErr("prompt_changed", "a different prompt is showing")
 	ErrBadText          = newErr("bad_text", "the text holds control characters or starts with ! or /")

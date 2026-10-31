@@ -31,3 +31,10 @@ test('languageForPath reads the extension', () => {
   assert.equal(languageForPath('notes.md'), '');
   assert.equal(languageForPath(''), '');
 });
+
+test('a language or extension named like an object property is unknown, not a crash', () => {
+  for (const lang of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    assert.deepEqual(highlight('x = 1', lang), [{ k: 'plain', v: 'x = 1' }], lang);
+    assert.equal(languageForPath('a.' + lang), '', lang);
+  }
+});

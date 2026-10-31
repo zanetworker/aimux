@@ -39,6 +39,8 @@ const ALIASES = {
   json: 'json', yaml: 'yaml', yml: 'yaml', diff: 'diff', patch: 'diff',
 };
 
+// own reads a table's own entry only, so a name like 'constructor' is unknown, not Object's.
+const own = (table, key) => (Object.hasOwn(table, key) ? table[key] : undefined);
 const isIdentStart = (c) => /[A-Za-z_]/.test(c);
 const isIdent = (c) => /[A-Za-z0-9_]/.test(c);
 const isDigit = (c) => c >= '0' && c <= '9';
@@ -52,12 +54,12 @@ const EXTENSIONS = {
 // highlight has no rules for it. The same as languageForPath in Highlight.swift.
 export function languageForPath(path) {
   const m = /\.([A-Za-z0-9]+)$/.exec(String(path || '').trim());
-  return m ? EXTENSIONS[m[1].toLowerCase()] || '' : '';
+  return m ? own(EXTENSIONS, m[1].toLowerCase()) || '' : '';
 }
 
 // highlight returns the tokens of code in lang (a fence's info string, case-insensitive).
 export function highlight(code, lang) {
-  const name = ALIASES[String(lang || '').trim().toLowerCase()];
+  const name = own(ALIASES, String(lang || '').trim().toLowerCase());
   if (!name) return merge([{ k: 'plain', v: code }]);
   if (name === 'diff') return merge(diff(code));
   return merge(scan(code, LANGS[name]));

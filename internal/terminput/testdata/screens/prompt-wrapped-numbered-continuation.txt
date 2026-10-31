@@ -1,3 +1,8 @@
+────────────────────────────────────────────────────────────
+ Bash command
+
+   make build lint
+
  Do you want to proceed?
  ❯ 1. Yes
    2. Yes, and allow the following steps for this session:

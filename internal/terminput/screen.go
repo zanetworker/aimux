@@ -224,7 +224,10 @@ func ParsePrompt(screen string) *Prompt {
 		if len(opts) < 2 || !liveAfterFooter(rest) {
 			return nil
 		}
-		body := promptBody(lines[:i])
+		body, whole := promptBody(lines[:i])
+		if !whole {
+			return nil // its top scrolled off: the body, and so the id, would be incomplete
+		}
 		return &Prompt{ID: promptID(body, q, opts), Question: q, Detail: clip(body), Options: opts}
 	}
 	return nil
@@ -236,9 +239,9 @@ const (
 )
 
 // promptBody returns the lines between the bottom-most box rule in above and
-// its end, dedented and without leading or trailing blank lines; "" when
-// above has no box rule.
-func promptBody(above []string) string {
+// its end, dedented and without leading or trailing blank lines; false when
+// above has no box rule (the prompt's top is off the screen read).
+func promptBody(above []string) (string, bool) {
 	start := -1
 	for i := len(above) - 1; i >= 0; i-- {
 		if boxRule(above[i]) {
@@ -247,7 +250,7 @@ func promptBody(above []string) string {
 		}
 	}
 	if start < 0 {
-		return ""
+		return "", false
 	}
 	var rows []string
 	for _, l := range above[start:] {
@@ -276,7 +279,7 @@ func promptBody(above []string) string {
 			rows[i] = r[indent:]
 		}
 	}
-	return strings.Join(rows, "\n")
+	return strings.Join(rows, "\n"), true
 }
 
 // dashes reports whether a line is only a dashed or solid rule, which

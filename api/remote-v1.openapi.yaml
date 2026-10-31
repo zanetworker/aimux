@@ -306,7 +306,8 @@ paths:
         nothing was submitted. While the box still shows that text (the same
         words; wrapping aside), the session's `terminal.canType` is true and
         sending the same text again presses Enter without typing; any other
-        text answers `not_at_input`. Once the box shows anything else (cleared
+        text treats it like a draft (replaced, or `draft_in_box` with
+        `keep_drafts`). Once the box shows anything else (cleared
         or sent at the Mac), the record is dropped and the box is the owner's.
         Follow the answer by re-reading
         `GET /v1/sessions/{id}`. Checked on every request: the pane's foreground
@@ -320,8 +321,12 @@ paths:
         used in the last 2 minutes; other sessions take messages while the
         owner works at the Mac), a driver
         reaches the pane (`no_terminal_driver`, `automation_denied`), and the
-        input box is showing and empty (`not_at_input`: re-read the detail, a
-        prompt may be showing). Text with control characters other than newline
+        input box is showing (`not_at_input`: re-read the detail, a prompt may
+        be showing). Text already in the box never joins the message: Claude
+        Code's grey suggestion is typed over; a draft is cleared first
+        (`box_not_cleared` if it will not empty), or with `keep_drafts` kept
+        and the message refused (`draft_in_box`), unless `replace` is set.
+        Text with control characters other than newline
         and tab is refused (`400 bad_text`), and so is text starting with `!`
         after optional white space (Claude Code's bash mode runs it as a shell
         command) and, unless `allow_slash_commands` is set on the Mac, text
@@ -843,7 +848,7 @@ components:
             - mac_in_use         # 409: you're using this session on your Mac: the focused pane of iTerm2 in front, the Mac used in the last 2 minutes
             - no_terminal_driver # 409: no driver reaches the session's terminal (iTerm2 only)
             - automation_denied  # 409: macOS refused aimux's Automation access to the terminal
-            - not_at_input       # 409: the input box is not showing or not empty
+            - not_at_input       # 409: the input box is not showing (a prompt, Claude working)
             - not_submitted      # 409: the text was typed but Enter was not pressed; it waits in the input box
             - box_not_cleared    # 409: a draft in the input box would not empty; nothing was typed
             - draft_in_box       # 409: a draft in the input box is kept (keep_drafts); nothing was typed
