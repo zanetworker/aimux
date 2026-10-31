@@ -117,7 +117,7 @@ function macWindows(placed, words, wanted, working) {
 function byLabel(sessions, now) {
   const groups = new Map();
   for (const s of sessions) {
-    const label = s.folder?.label ?? projectName(s.project);
+    const label = s.folder?.label || projectName(s.project);
     if (!groups.has(label)) groups.set(label, []);
     groups.get(label).push(s);
   }

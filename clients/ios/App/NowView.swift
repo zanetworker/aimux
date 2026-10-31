@@ -289,16 +289,18 @@ extension NowScreen {
         return tab.working > 0 ? "\(panes) · \(tab.working) working" : panes
     }
 
+    private func key(_ tab: NowTab, in window: NowWindow) -> String {
+        OpenMemory.tabKey(window: window.name, index: tab.index, tab: tab.name)
+    }
+
     private func isOpen(_ tab: NowTab, in window: NowWindow) -> Bool {
-        isFiltered || OpenMemory(openTabs).isOpen(OpenMemory.tabKey(window: window.name, tab: tab.name),
-                                                  otherwise: tab.open)
+        isFiltered || OpenMemory(openTabs).isOpen(key(tab, in: window), otherwise: tab.open)
     }
 
     private func toggle(_ tab: NowTab, in window: NowWindow) {
         let open = !isOpen(tab, in: window)
         withAnimation(.snappy) {
-            openTabs = OpenMemory(openTabs).setting(OpenMemory.tabKey(window: window.name, tab: tab.name),
-                                                    open: open).raw
+            openTabs = OpenMemory(openTabs).setting(key(tab, in: window), open: open).raw
         }
     }
 }

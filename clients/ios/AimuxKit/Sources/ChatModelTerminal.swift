@@ -98,34 +98,38 @@ extension ChatModel {
     }
 
     /// Presses one of the terminal prompt's options. A prompt that changed or went away collapses; the screen
-    /// is read again either way.
-    public func answer(_ prompt: TerminalPrompt, option: TerminalOption) async {
+    /// is read again either way. True when the key was pressed, so the caller can note the session answered.
+    @discardableResult
+    public func answer(_ prompt: TerminalPrompt, option: TerminalOption) async -> Bool {
         let id = prompt.promptId
-        guard !answering.contains(id) else { return }
+        guard !answering.contains(id) else { return false }
         answering.insert(id)
         answerErrors[id] = nil
         defer { answering.remove(id) }
         let slot = "\(id)/\(option.key)"
         let key = pressKeys[slot] ?? UUID().uuidString
         pressKeys[slot] = key
+        var pressed = false
         do {
             try await source.terminalPress(sessionID: sessionID, promptID: id, option: option.key, key: key)
+            pressed = true
         } catch APIError.server(_, .noPrompt, _), APIError.server(_, .promptChanged, _) {
             // Answered on the Mac, or another prompt is up: this card is stale, not failed.
         } catch let failure as APIError {
             answerErrors[id] = failure
-            return
+            return false
         } catch {
             answerErrors[id] = .transport(.unknown)
-            return
+            return false
         }
         pressKeys[slot] = nil
         answeredPrompts.insert(id)
         rebuild()
-        guard state == .terminal else { return }
+        guard state == .terminal else { return pressed }
         _ = await readTerminal()
         // Collapsed only until the screen was read again: the same prompt still showing is asked again.
         answeredPrompts.remove(id)
         rebuild()
+        return pressed
     }
 }

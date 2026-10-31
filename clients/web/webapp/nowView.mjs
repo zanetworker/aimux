@@ -48,7 +48,7 @@ const queryText = (model) => model.query.trim();
 // A tab as one fold line, then its panes under a guide line when open. A search or the Working chip
 // holds every tab left open, and its counts read "1 of 4 panes".
 function tabRows(model, ui, w, t, filtered, row) {
-  const key = tabKey(w.name, t.name);
+  const key = tabKey(w.name, t.index, t.name);
   const open = filtered || isOpenChoice(ui.storage, TABS_KEY, key, t.open);
   const panes = t.panes === 1 ? '1 pane' : t.panes + ' panes';
   const counts = filtered ? t.sessions.length + ' of ' + panes : t.working ? panes + ' · ' + t.working + ' working' : panes;

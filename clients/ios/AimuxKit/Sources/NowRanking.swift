@@ -170,7 +170,7 @@ private struct Ranking {
     func groups(_ sessions: [Session]) -> [FolderGroup] {
         var byLabel: [String: [Session]] = [:]
         for session in sessions {
-            byLabel[session.folder?.label ?? projectName(session.project), default: []].append(session)
+            byLabel[folderLabel(session), default: []].append(session)
         }
         return byLabel.map { FolderGroup(label: $0.key, sessions: $0.value.sorted(by: newestFirst)) }.sorted {
             let (lhs, rhs) = ($0.sessions[0], $1.sessions[0])

@@ -32,8 +32,8 @@ public struct OpenMemory: Equatable, Sendable {
         return OpenMemory(choices: changed)
     }
 
-    /// A Now tab: "<window name>|<tab name>", best effort across iTerm2 restarts.
-    public static func tabKey(window: String, tab: String) -> String { window + "|" + tab }
+    /// A Now tab: "<window name>|<tab index>|<tab name>", best effort across iTerm2 restarts.
+    public static func tabKey(window: String, index: Int, tab: String) -> String { "\(window)|\(index)|\(tab)" }
 
     /// An All folder: the repo path, or "<repo path>|<worktree>".
     public static func folderKey(repoPath: String, worktree: String? = nil) -> String {
@@ -67,10 +67,16 @@ public func rowState(_ session: Session, activity: Activity, now: Date, format: 
     return .yourTurn(since: since == "now" ? "just now" : since)
 }
 
+/// The session's folder label, or its project's last component when it has none (an empty label is none).
+func folderLabel(_ session: Session) -> String {
+    if let label = session.folder?.label, !label.isEmpty { return label }
+    return projectName(session.project)
+}
+
 /// The quiet line: the folder label (or the project's last component), then "pane N", with "tab N" before it
 /// when `withTab` (search results and All, away from the tab's own heading).
 public func rowPlace(_ session: Session, withTab: Bool) -> String {
-    var parts = [session.folder?.label ?? projectName(session.project)]
+    var parts = [folderLabel(session)]
     if let mac = session.mac {
         if withTab { parts.append("tab \(mac.tab.index)") }
         parts.append("pane \(mac.pane)")

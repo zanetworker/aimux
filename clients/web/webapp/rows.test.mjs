@@ -37,4 +37,5 @@ test('rowPlace: the folder label (or the project name), then tab and pane', () =
   assert.equal(rowPlace({ project: '/src/aimux', folder: { label: 'aimux / clients · ios' }, mac }, false), 'aimux / clients · ios · pane 2');
   assert.equal(rowPlace({ project: '/src/aimux/', mac }, true), 'aimux · tab 3 · pane 2');
   assert.equal(rowPlace({ project: '/src/blog' }, true), 'blog');
+  assert.equal(rowPlace({ project: '/src/blog', folder: { label: '' } }, true), 'blog', 'an empty label is no label');
 });

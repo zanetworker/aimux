@@ -134,15 +134,16 @@ test('All mode: storage that throws is Recent and a save does not crash', () => 
   assert.doesNotThrow(() => saveAllMode(broken, 'folders'));
 });
 
-test('folds: an explicit true or false wins over the default; keys are window|tab and repo|worktree', () => {
+test('folds: an explicit true or false wins over the default; keys are window|tab index|tab and repo|worktree', () => {
   const storage = memoryStorage();
-  const key = tabKey('Window 1', 'aimux');
-  assert.equal(key, 'Window 1|aimux');
+  const key = tabKey('Window 1', 2, 'aimux');
+  assert.equal(key, 'Window 1|2|aimux');
+  assert.notEqual(tabKey('Window 1', 3, 'aimux'), key, 'two tabs with one name stay apart');
   assert.equal(isOpenChoice(storage, 'openTabs', key, true), true, 'no choice: the default');
   saveChoice(storage, 'openTabs', key, false);
   assert.equal(isOpenChoice(storage, 'openTabs', key, true), false, 'folded by hand over an open default');
-  saveChoice(storage, 'openTabs', tabKey('Window 1', 'blog'), true);
-  assert.deepEqual(JSON.parse(storage.data.openTabs), { 'Window 1|aimux': false, 'Window 1|blog': true });
+  saveChoice(storage, 'openTabs', tabKey('Window 1', 3, 'blog'), true);
+  assert.deepEqual(JSON.parse(storage.data.openTabs), { 'Window 1|2|aimux': false, 'Window 1|3|blog': true });
   assert.equal(folderKey('/src/aimux'), '/src/aimux');
   assert.equal(folderKey('/src/aimux', 'clients'), '/src/aimux|clients');
 });

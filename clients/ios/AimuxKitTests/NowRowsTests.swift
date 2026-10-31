@@ -31,7 +31,9 @@ import Testing
     }
 
     @Test func keys() {
-        #expect(OpenMemory.tabKey(window: "Window 1", tab: "aimux") == "Window 1|aimux")
+        #expect(OpenMemory.tabKey(window: "Window 1", index: 2, tab: "aimux") == "Window 1|2|aimux")
+        #expect(OpenMemory.tabKey(window: "Window 1", index: 3, tab: "aimux") != "Window 1|2|aimux",
+                "two tabs with one name stay apart")
         #expect(OpenMemory.folderKey(repoPath: "/src/aimux") == "/src/aimux")
         #expect(OpenMemory.folderKey(repoPath: "/src/aimux", worktree: "clients") == "/src/aimux|clients")
     }
@@ -84,5 +86,7 @@ import Testing
             == "aimux / clients · ios · tab 3 · pane 2")
         #expect(rowPlace(session(.idle, folder: folder), withTab: true) == "aimux / clients · ios")
         #expect(rowPlace(session(.idle), withTab: true) == "aimux", "no folder: the project's last component")
+        let empty = Folder(repo: "", repoPath: "", label: "")
+        #expect(rowPlace(session(.idle, folder: empty), withTab: true) == "aimux", "an empty label is no label")
     }
 }

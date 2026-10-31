@@ -230,7 +230,8 @@ struct ChatContent: View {
                          error: model.answerErrors[prompt.promptId]) { choice in
             guard let option = prompt.options.first(where: { $0.key == choice.optionId }) else { return }
             Task {
-                await model.answer(prompt, option: option)
+                // The Next bar skips this session as a working target until a read shows it not working.
+                if await model.answer(prompt, option: option) { context.now.noteAnswered(session.id) }
                 await context.now.refresh()
             }
         }

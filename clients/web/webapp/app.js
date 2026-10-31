@@ -10,7 +10,7 @@ import { buildTimeline, pendingShown } from './timeline.mjs';
 import { chatStatus, headerContent, nextBar, pendingNode, promptCard, readOnlyLine, timelineNodes } from './chatView.mjs';
 import { adoptDetail, composerAction, createQueueClient, sendRefusal, setQueue } from './queue.mjs';
 import { createQueueView, editOffersNode } from './queueView.mjs';
-import { terminalErrorText, terminalPollInterval, terminalReasonLine, terminalWorkingLine } from './terminal.mjs';
+import { pressPromptKey, terminalErrorText, terminalPollInterval, terminalReasonLine, terminalWorkingLine } from './terminal.mjs';
 import { announce, createInfoSheet, renderInfoSheet, renderMetaCard } from './sessionInfo.mjs';
 import { referenceContext } from './references.mjs';
 import { createLogin } from './login.mjs';
@@ -906,14 +906,12 @@ async function answerPrompt(prompt, option) {
   const key = c.pressKeys.get(slot) || newKey();
   c.pressKeys.set(slot, key);
   try {
-    await api('POST', '/v1/sessions/' + encodeURIComponent(c.id) + '/terminal/keys', { promptId: id, option: option.key, key });
+    await pressPromptKey(api, tabs.model, c.id, { promptId: id, option: option.key, key });
   } catch (e) {
-    if (!(e.code === 'no_prompt' || e.code === 'prompt_changed')) {
-      answerErrors.set(id, 'Could not answer: ' + terminalErrorText(e));
-      answering.delete(id);
-      if (chat === c) render();
-      return;
-    }
+    answerErrors.set(id, 'Could not answer: ' + terminalErrorText(e));
+    answering.delete(id);
+    if (chat === c) render();
+    return;
   }
   answering.delete(id);
   c.pressKeys.delete(slot);

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   elapsedText, terminalWorkingLine, promptItem, terminalErrorText, terminalPendingText, terminalPollInterval, terminalReasonLine, terminalReasonText,
-  terminalStatus,
+  terminalStatus, pressPromptKey,
 } from './terminal.mjs';
 
 test('terminalReasonText: one line per reason, the iPhone wording', () => {
@@ -108,4 +108,27 @@ test('the working line: how long, then the current step; nothing while idle', ()
   assert.equal(terminalWorkingLine(detail({ working: false, status: 'busy' })), 'Working', 'busy in the registry');
   assert.equal(terminalWorkingLine(null), '');
   assert.deepEqual([0, 59, 60, 3599, 3600, 7380].map(elapsedText), ['0s', '59s', '1m', '59m 59s', '1h', '2h 3m']);
+});
+
+test('pressPromptKey: a pressed key notes the session answered for the Next bar', async () => {
+  const calls = [];
+  const noted = [];
+  const api = async (method, path, body) => { calls.push([method, path, body]); return {}; };
+  const model = { noteAnswered: (id) => noted.push(id) };
+  const body = { promptId: 'p1', option: '1', key: 'k1' };
+  assert.equal(await pressPromptKey(api, model, 's 1', body), 'pressed');
+  assert.deepEqual(calls, [['POST', '/v1/sessions/s%201/terminal/keys', body]]);
+  assert.deepEqual(noted, ['s 1']);
+});
+
+test('pressPromptKey: a prompt gone or changed is not an answer; other refusals throw', async () => {
+  const noted = [];
+  const model = { noteAnswered: (id) => noted.push(id) };
+  for (const code of ['no_prompt', 'prompt_changed']) {
+    const api = async () => { throw Object.assign(new Error(code), { code }); };
+    assert.equal(await pressPromptKey(api, model, 's1', {}), 'gone');
+  }
+  const refused = async () => { throw Object.assign(new Error('busy'), { code: 'mac_in_use' }); };
+  await assert.rejects(pressPromptKey(refused, model, 's1', {}), { code: 'mac_in_use' });
+  assert.deepEqual(noted, []);
 });

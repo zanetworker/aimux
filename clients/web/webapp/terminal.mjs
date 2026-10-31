@@ -69,6 +69,20 @@ export function terminalErrorText(e) {
   return e.message;
 }
 
+// pressPromptKey presses one option of a terminal prompt (body: promptId, option, key). It resolves
+// 'pressed', and notes the session answered so the Next bar skips it until a read shows it not
+// working, or 'gone' when the prompt changed or went away; any other refusal is thrown.
+export async function pressPromptKey(api, model, sessionId, body) {
+  try {
+    await api('POST', '/v1/sessions/' + encodeURIComponent(sessionId) + '/terminal/keys', body);
+  } catch (e) {
+    if (e.code === 'no_prompt' || e.code === 'prompt_changed') return 'gone';
+    throw e;
+  }
+  model.noteAnswered(sessionId);
+  return 'pressed';
+}
+
 const FAST = 2000;
 const SLOW = 15000;
 const FAST_WINDOW = 120000;

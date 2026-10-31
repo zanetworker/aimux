@@ -143,7 +143,7 @@ export function rowState(session, activity, now = Date.now()) {
 // The quiet line: the folder label (or the project's last component), then "pane N", with "tab N"
 // before it when `withTab` (All and Elsewhere, away from the tab's own heading).
 export function rowPlace(session, withTab) {
-  const parts = [session.folder?.label ?? projectName(session.project)];
+  const parts = [session.folder?.label || projectName(session.project)];
   if (session.mac) {
     if (withTab) parts.push('tab ' + session.mac.tab.index);
     parts.push('pane ' + session.mac.pane);
@@ -259,8 +259,8 @@ export function saveChoice(storage, name, key, open) {
   }
 }
 
-// A Now tab: "<window name>|<tab name>", best effort across iTerm2 restarts.
-export const tabKey = (window, tab) => window + '|' + tab;
+// A Now tab: "<window name>|<tab index>|<tab name>", best effort across iTerm2 restarts.
+export const tabKey = (window, index, tab) => window + '|' + index + '|' + tab;
 // An All folder: the repo path, or "<repo path>|<worktree>".
 export const folderKey = (repoPath, worktree) => (worktree == null ? repoPath : repoPath + '|' + worktree);
 

@@ -130,8 +130,9 @@ final class TestClock: @unchecked Sendable {
         await chat.load()
         #expect(chat.result.pendingApproval == "p-1")
 
-        await chat.answer(yesNo, option: yesNo.options[1])
+        let pressed = await chat.answer(yesNo, option: yesNo.options[1])
 
+        #expect(pressed, "a pressed key is an answer, so the Next bar can skip this session")
         #expect(source.pressList.count == 1)
         #expect(source.pressList.first?.promptID == "p-1")
         #expect(source.pressList.first?.option == "2")
@@ -153,8 +154,9 @@ final class TestClock: @unchecked Sendable {
         let chat = model(source)
         await chat.load()
 
-        await chat.answer(yesNo, option: yesNo.options[0])
+        let pressed = await chat.answer(yesNo, option: yesNo.options[0])
 
+        #expect(!pressed, "a prompt that changed or went away was not answered here")
         #expect(chat.answerErrors["p-1"] == nil, "a stale card is not a failure")
         #expect(chat.result.pendingApproval == "p-2", "the screen is read again and its prompt shows")
         chat.close()
@@ -203,12 +205,12 @@ final class TestClock: @unchecked Sendable {
         let chat = model(source)
         await chat.load()
 
-        await chat.answer(yesNo, option: yesNo.options[0])
+        #expect(await !chat.answer(yesNo, option: yesNo.options[0]))
         #expect(chat.answerErrors["p-1"] == .transport(.timedOut))
         #expect(chat.result.pendingApproval == "p-1")
 
         source.pressFailure = nil
-        await chat.answer(yesNo, option: yesNo.options[0])
+        #expect(await chat.answer(yesNo, option: yesNo.options[0]))
         let presses = source.pressList
         #expect(presses.count == 2)
         #expect(presses[0].key == presses[1].key)
