@@ -12,9 +12,11 @@ import (
 )
 
 const (
-	layoutFresh    = 3 * time.Second  // a read newer than this is reused
-	layoutHold     = 30 * time.Second // a failed read falls back to a good one this young
-	lastInFrontMax = 12 * time.Hour
+	layoutFresh     = 3 * time.Second  // a read newer than this is reused
+	layoutHold      = 30 * time.Second // a failed read falls back to a good one this young
+	lastInFrontMax  = 12 * time.Hour
+	layoutFirstWait = 1500 * time.Millisecond // the first call waits this long at most
+	layoutReadMax   = 10 * time.Second        // a background read is cut off here
 )
 
 // LayoutSource reads the terminal's windows, tabs and panes.
@@ -61,39 +63,89 @@ type LayoutReader struct {
 	Now       func() time.Time                 // nil means time.Now
 	Log       io.Writer                        // may be nil
 
-	mu     sync.Mutex
-	places map[string]MacPlace
-	at     time.Time
-	good   bool
+	// FirstWait bounds how long the first call waits for the first read
+	// (0 means 1.5 s).
+	FirstWait time.Duration
+
+	mu       sync.Mutex
+	places   map[string]MacPlace
+	at       time.Time
+	good     bool          // places holds a read
+	ever     bool          // a read has succeeded once
+	inflight chan struct{} // closed when the running refresh ends; nil when none
+	failed   bool
+	failAt   time.Time
+}
+
+func (r *LayoutReader) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // Places returns each placed session's place; nil when unknown. A session
 // whose pid has no tty, whose tty is in no pane, or which is not its
 // tty's foreground is absent.
+//
+// Once a layout has been read, Places never waits: it returns the cached
+// value (up to 30 s old) and, when that is older than 3 s, starts one
+// background refresh. A failed read backs off for 3 s. Before the first
+// successful read it waits for the running read, for the request ctx and
+// at most FirstWait.
 func (r *LayoutReader) Places(ctx context.Context) map[string]MacPlace {
+	t := r.now()
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := time.Now
-	if r.Now != nil {
-		now = r.Now
-	}
-	t := now()
 	if r.good && t.Sub(r.at) < layoutFresh {
+		defer r.mu.Unlock()
 		return r.places
 	}
-	places, err := r.read(ctx, t)
+	backingOff := r.failed && t.Sub(r.failAt) < layoutFresh
+	if r.inflight == nil && !backingOff {
+		r.inflight = make(chan struct{})
+		go r.refresh(r.inflight) //nolint:gosec // the read must outlive the request that started it
+	}
+	wait, first := r.inflight, !r.ever
+	r.mu.Unlock()
+
+	if first && wait != nil {
+		bound := r.FirstWait
+		if bound <= 0 {
+			bound = layoutFirstWait
+		}
+		timer := time.NewTimer(bound)
+		defer timer.Stop()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.good && r.now().Sub(r.at) <= layoutHold {
+		return r.places
+	}
+	return nil
+}
+
+// refresh reads the layout with its own context, then records the result.
+func (r *LayoutReader) refresh(done chan struct{}) {
+	ctx, cancel := context.WithTimeout(context.Background(), layoutReadMax)
+	defer cancel()
+	places, err := r.read(ctx, r.now())
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err != nil {
 		if r.Log != nil {
 			_, _ = fmt.Fprintf(r.Log, "terminput: mac layout read failed (%T)\n", err)
 		}
-		if r.good && t.Sub(r.at) <= layoutHold {
-			return r.places
-		}
-		r.places, r.good = nil, false
-		return nil
+		r.failed, r.failAt = true, r.now()
+	} else {
+		r.places, r.at, r.good, r.ever, r.failed = places, r.now(), true, true, false
 	}
-	r.places, r.at, r.good = places, t, true
-	return places
+	r.inflight = nil
+	close(done)
 }
 
 func (r *LayoutReader) read(ctx context.Context, now time.Time) (map[string]MacPlace, error) {

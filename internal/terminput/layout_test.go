@@ -5,19 +5,51 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type fakeLayoutSource struct {
+	mu    sync.Mutex
 	panes []PaneRef
 	err   error
 	calls int
+	block chan struct{} // when set, Layout waits for it to close
 }
 
 func (f *fakeLayoutSource) Layout(context.Context) ([]PaneRef, error) {
+	f.mu.Lock()
 	f.calls++
-	return f.panes, f.err
+	panes, err, block := f.panes, f.err, f.block
+	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
+	return panes, err
+}
+
+func (f *fakeLayoutSource) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakeLayoutSource) setErr(err error) {
+	f.mu.Lock()
+	f.err = err
+	f.mu.Unlock()
+}
+
+// settle waits for the running background refresh, if any.
+func (r *LayoutReader) settle() {
+	r.mu.Lock()
+	ch := r.inflight
+	r.mu.Unlock()
+	if ch != nil {
+		<-ch
+	}
 }
 
 type fakeLayoutSys struct {
@@ -130,23 +162,138 @@ func TestPlaces_CachesAndHoldsLastGood(t *testing.T) {
 	r.Places(context.Background())
 	clock = clock.Add(2 * time.Second)
 	r.Places(context.Background())
-	if src.calls != 1 {
-		t.Fatalf("source read %d times within 3s, want 1", src.calls)
+	if src.count() != 1 {
+		t.Fatalf("source read %d times within 3s, want 1", src.count())
 	}
 
-	src.err = errors.New("boom SECRETWIN")
+	src.setErr(errors.New("boom SECRETWIN"))
 	clock = layoutNow.Add(10 * time.Second)
 	if got := r.Places(context.Background()); len(got) != 1 {
 		t.Errorf("10s after good, failing read gave %+v, want last good", got)
 	}
+	r.settle()
 	clock = layoutNow.Add(31 * time.Second)
+	if got := r.Places(context.Background()); len(got) != 0 {
+		t.Errorf("31s after good gave %+v, want nil (served stale one last time or nil)", got)
+	}
+	r.settle()
+	clock = layoutNow.Add(40 * time.Second)
 	if got := r.Places(context.Background()); got != nil {
 		t.Errorf("31s after good, failing read gave %+v, want nil", got)
 	}
+	r.settle()
 	if log.Len() == 0 {
 		t.Error("failure not logged")
 	}
 	if strings.Contains(log.String(), "SECRETWIN") {
 		t.Errorf("log leaks names: %q", log.String())
 	}
+}
+
+// testClock is a clock tests move while a background read may read it.
+type testClock struct{ ns atomic.Int64 }
+
+func newTestClock() *testClock               { c := &testClock{}; c.ns.Store(layoutNow.UnixNano()); return c }
+func (c *testClock) now() time.Time          { return time.Unix(0, c.ns.Load()).UTC() }
+func (c *testClock) advance(d time.Duration) { c.ns.Add(int64(d)) }
+
+func slowReader(src *fakeLayoutSource, clock *testClock) *LayoutReader {
+	sys := &fakeLayoutSys{ttys: map[int]string{11: "/dev/ttys001"}, fg: map[int]bool{11: true}}
+	r := newReader(src, sys, map[string]int{"s1": 11})
+	r.Now = clock.now
+	r.FirstWait = 30 * time.Millisecond
+	return r
+}
+
+func onePane() []PaneRef {
+	return []PaneRef{{WindowID: 1, Tab: 1, Pane: 1, Panes: 1, TTY: "/dev/ttys001"}}
+}
+
+func TestPlaces_SlowRefreshNeverBlocksAndRunsOnce(t *testing.T) {
+	src := &fakeLayoutSource{panes: onePane()}
+	clock := newTestClock()
+	r := slowReader(src, clock)
+	r.Places(context.Background()) // first read, quick
+	src.mu.Lock()
+	src.block = make(chan struct{})
+	src.mu.Unlock()
+	clock.advance(5 * time.Second)
+
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if got := r.Places(context.Background()); len(got) != 1 {
+				t.Errorf("during a slow refresh got %+v, want the cached place", got)
+			}
+		}()
+	}
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Places waited on the slow read")
+	}
+	for i := 0; i < 200 && src.count() < 2; i++ {
+		time.Sleep(5 * time.Millisecond) // the refresh goroutine starts
+	}
+	time.Sleep(20 * time.Millisecond)
+	if src.count() != 2 {
+		t.Errorf("Layout called %d times, want 2 (first read plus one refresh)", src.count())
+	}
+	close(src.block)
+	r.settle()
+}
+
+func TestPlaces_FailureBacksOffThreeSeconds(t *testing.T) {
+	src := &fakeLayoutSource{panes: onePane()}
+	clock := newTestClock()
+	r := slowReader(src, clock)
+	r.Places(context.Background())
+	src.setErr(errors.New("down"))
+	clock.advance(5 * time.Second)
+	r.Places(context.Background())
+	r.settle()
+	if src.count() != 2 {
+		t.Fatalf("calls = %d, want 2", src.count())
+	}
+	clock.advance(2 * time.Second)
+	if got := r.Places(context.Background()); len(got) != 1 {
+		t.Errorf("stale within 30s during failure gave %+v, want last good", got)
+	}
+	r.settle()
+	if src.count() != 2 {
+		t.Errorf("read again %v after a failure: calls = %d, want 2", 2*time.Second, src.count())
+	}
+	clock.advance(2 * time.Second)
+	r.Places(context.Background())
+	r.settle()
+	if src.count() != 3 {
+		t.Errorf("calls = %d after the back-off, want 3", src.count())
+	}
+}
+
+func TestPlaces_FirstCallBoundedWhenSourceHangs(t *testing.T) {
+	src := &fakeLayoutSource{panes: onePane(), block: make(chan struct{})}
+	clock := newTestClock()
+	r := slowReader(src, clock)
+	start := time.Now()
+	if got := r.Places(context.Background()); got != nil {
+		t.Errorf("hung source gave %+v, want nil", got)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("first call took %v, want about FirstWait", d)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start = time.Now()
+	r.FirstWait = time.Minute
+	r.Places(ctx)
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("cancelled ctx still waited %v", d)
+	}
+	close(src.block)
+	r.settle()
 }

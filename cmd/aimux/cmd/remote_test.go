@@ -841,3 +841,25 @@ func TestRemoteRevoke_WritesTheAuditLine(t *testing.T) {
 		t.Fatalf("audit line holds the key or id: %s", raw)
 	}
 }
+
+type layoutDriver struct{ terminput.Driver }
+
+func (layoutDriver) Layout(context.Context) ([]terminput.PaneRef, error) { return nil, nil }
+
+func TestBuildLayoutReader(t *testing.T) {
+	sessions := func() map[string]int { return nil }
+	if r := buildLayoutReader(sessions, nil, io.Discard, plainDriver{}); r != nil {
+		t.Fatal("a driver without a layout gave a reader")
+	}
+	if r := buildLayoutReader(sessions, nil, io.Discard); r != nil {
+		t.Fatal("no drivers gave a reader")
+	}
+	r := buildLayoutReader(sessions, nil, io.Discard, plainDriver{}, layoutDriver{})
+	if r == nil || r.Source == nil || r.LastOnMac != nil {
+		t.Fatalf("reader %+v: want a source and no LastOnMac without lastFocus", r)
+	}
+	r = buildLayoutReader(sessions, &terminput.LastFocus{}, io.Discard, layoutDriver{})
+	if r == nil || r.LastOnMac == nil {
+		t.Fatal("lastFocus given but LastOnMac unset")
+	}
+}
