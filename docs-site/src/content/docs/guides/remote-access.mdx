@@ -262,8 +262,8 @@ No other session is sent, and nothing is sent automatically for a session that a
 From the top of the screen:
 
 1. The search box and a **Working** chip that narrows Now to working sessions.
-2. **Needs you**: pending permission requests and recent failed turns of sessions started from the phone. Cards answer in place.
-3. **Pinned**: pinned sessions that are closed. A pinned session that is open shows a pin mark in its place below instead of appearing twice.
+2. **Needs you**: pending permission requests, and failed turns from the last 15 minutes; they appear here wherever the session is open or pinned. Cards answer in place.
+3. **Pinned**: pinned sessions that are not in an iTerm2 pane (closed, or open elsewhere). A pinned session in a pane stays in its pane with a pin mark.
 4. **On your Mac**: sessions open in iTerm2, in iTerm2's order: window (its title, or "Window 1", "Window 2" in creation order), then tab, then pane. A row has the title, a state line (Working, Your turn, Shell), and the folder and pane number. Every tab is folded to one line (name, panes, working count) except the one holding the pane last in front; which tabs you open or close is remembered on the device. Nothing reorders while the screen is open; a status change happens in place.
 5. **Elsewhere**: open sessions not in an iTerm2 pane (started from the phone, other terminals, or a pane aimux could not match), grouped by folder.
 
@@ -279,7 +279,7 @@ The same box on Now and All. As you type, it matches on the device: names, descr
 
 ### The chat's Next bar
 
-The bar offers the next session that needs you, otherwise the next working one, in Now's order. It skips the session you are in and one whose approval you just answered.
+The bar offers the next session that needs you, otherwise the next working one, in Now's order. It skips the session you are in; when picking a working session it also skips one whose approval you just answered (sessions that need you are offered regardless).
 
 ### Folder and place on the API
 
