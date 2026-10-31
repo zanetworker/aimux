@@ -13,6 +13,17 @@ const REASON = {
   not_at_input: "Claude isn't at its input box",
 };
 
+// The line for a Mac input box that holds text: a draft, or Claude Code's grey suggestion (the Mac
+// cannot tell which). Only the person's Replace clears it.
+export const BOX_TEXT_LINE = "There's text in the box on your Mac";
+
+// canReplaceBox: the Mac's input box holds text and nothing else stops a message, so the person may
+// replace that text (a message sent with replace: true clears it first).
+export function canReplaceBox(detail) {
+  const t = detail && detail.state === 'open_in_terminal' ? detail.terminal : null;
+  return !!t && !!t.boxHasText && !t.prompt && !t.working;
+}
+
 // Why the phone cannot type into the terminal now, from terminal.reason.
 export function terminalReasonText(reason) {
   return Object.hasOwn(REASON, reason) ? REASON[reason] : "Can't reach the terminal";
@@ -24,6 +35,7 @@ export function terminalReasonText(reason) {
 export function terminalReasonLine(detail, { queue = false } = {}) {
   const t = detail && detail.state === 'open_in_terminal' ? detail.terminal : null;
   if (!t || t.canType || t.prompt) return '';
+  if (t.boxHasText) return BOX_TEXT_LINE;
   if (!queue || t.reason !== 'mac_in_use') return terminalReasonText(t.reason);
   const section = queueSection(detail.queue);
   if (section.visible && section.state === 'running' && section.line) return '';
@@ -38,6 +50,7 @@ export function terminalErrorText(e) {
   if (TERMINAL_CODES.has(e.code)) return terminalReasonText(e.code);
   if (e.code === 'bad_text') return "The terminal can't take that text";
   if (e.code === 'not_submitted') return 'Your message is in the box on your Mac, not sent yet; Retry sends it';
+  if (e.code === 'box_not_cleared') return "The box on your Mac couldn't be cleared; nothing was sent";
   return e.message;
 }
 

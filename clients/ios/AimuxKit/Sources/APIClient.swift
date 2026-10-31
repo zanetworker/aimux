@@ -84,6 +84,14 @@ public final class APIClient: Sendable {
     }
 
     private struct SendMessageRequest: Encodable { let text: String; let key: String }
+    private struct ReplaceMessageRequest: Encodable { let text: String; let key: String; let replace = true }
+
+    /// terminalSend that first clears the text in the input box on the Mac (`replace: true`); the server refuses
+    /// with `box_not_cleared`, typing nothing, when it would not empty.
+    public func terminalReplace(sessionID: String, text: String, key: String) async throws {
+        let body = try JSONEncoder().encode(ReplaceMessageRequest(text: text, key: key))
+        let _: AnswerStatus = try await send("POST", "/v1/sessions/\(sessionID)/terminal/messages", body: body)
+    }
 
     /// Types `text` into the session's terminal pane on the Mac, then Enter. A retry with the same `key` is not
     /// typed twice; the server never retries on its own, and neither should a caller without the person asking.

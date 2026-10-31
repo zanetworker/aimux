@@ -134,18 +134,23 @@ public struct TerminalStatus: Decodable, Equatable, Sendable {
     public let prompt: TerminalPrompt?
     /// Claude Code is working on a turn there: a direct message is refused `409 busy`; false from older servers.
     public let working: Bool
+    /// The input box holds text: a draft, or Claude Code's grey suggestion (the Mac cannot tell which). A message
+    /// sent replacing clears it first; false from older servers.
+    public let boxHasText: Bool
 
-    public init(status: String, canType: Bool, reason: String?, prompt: TerminalPrompt?, working: Bool = false) {
+    public init(status: String, canType: Bool, reason: String?, prompt: TerminalPrompt?, working: Bool = false,
+                boxHasText: Bool = false) {
         self.status = status
         self.canType = canType
         self.reason = reason
         self.prompt = prompt
         self.working = working
+        self.boxHasText = boxHasText
     }
 
     public var isBusy: Bool { status == "busy" }
 
-    private enum CodingKeys: String, CodingKey { case status, canType, reason, prompt, working }
+    private enum CodingKeys: String, CodingKey { case status, canType, reason, prompt, working, boxHasText }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -154,6 +159,7 @@ public struct TerminalStatus: Decodable, Equatable, Sendable {
         reason = try? container.decodeIfPresent(String.self, forKey: .reason)
         prompt = try? container.decodeIfPresent(TerminalPrompt.self, forKey: .prompt)
         working = (try? container.decodeIfPresent(Bool.self, forKey: .working)) ?? false
+        boxHasText = (try? container.decodeIfPresent(Bool.self, forKey: .boxHasText)) ?? false
     }
 }
 

@@ -5,7 +5,8 @@ import AimuxKit
 /// Invented chats for `-demo chat`, `chat-approval`, `chat-readonly` and `chat-terminal`: demo-2 working (thought,
 /// plan, steps), demo-13 waiting for an approval, demo-16 open on the Mac with an Arabic exchange; with
 /// `chat-terminal`, demo-1 open on the Mac and ready to type into, demo-17 showing a permission prompt there
-/// (busy and typeable once answered), demo-18 refused because the Mac is in use.
+/// (busy and typeable once answered), demo-18 refused because the Mac is in use,
+/// demo-19 with text in its input box (Replace it).
 enum DemoChat {
     struct Detail: Sendable { let turns: [Turn]; let stats: SessionStats? }
 
@@ -65,6 +66,8 @@ enum DemoChat {
                 : TerminalStatus(status: "busy", canType: false, reason: "not_at_input", prompt: releasePrompt)
         case "demo-18":
             return TerminalStatus(status: "idle", canType: false, reason: "mac_in_use", prompt: nil)
+        case "demo-19":  // Claude Code's grey suggestion (or a draft) sits in its input box
+            return TerminalStatus(status: "idle", canType: false, reason: "not_at_input", prompt: nil, boxHasText: true)
         default:
             return nil
         }

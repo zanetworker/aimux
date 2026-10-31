@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  promptItem, terminalErrorText, terminalPendingText, terminalPollInterval, terminalReasonLine, terminalReasonText,
+  canReplaceBox, promptItem, terminalErrorText, terminalPendingText, terminalPollInterval, terminalReasonLine, terminalReasonText,
   terminalStatus,
 } from './terminal.mjs';
 
@@ -91,4 +91,17 @@ test('terminalReasonLine: with the queue the Mac in use is one line (the spec wo
   assert.equal(terminalReasonLine({ state: 'open_in_terminal', terminal: { status: 'idle', canType: true, working: false } }, { queue: true }), '');
   assert.equal(terminalReasonLine(blocked('not_at_input', { terminal: { prompt: { promptId: 'p', question: 'Q?', options: [] } } }), { queue: false }), '');
   assert.equal(terminalReasonLine(null, { queue: true }), '');
+});
+
+test('text in the Mac box: its own line, and Replace only when nothing else stops a message', () => {
+  const detail = (terminal) => ({ state: 'open_in_terminal', terminal });
+  const boxed = { status: 'idle', canType: false, reason: 'not_at_input', boxHasText: true, working: false };
+  assert.equal(terminalReasonLine(detail(boxed)), "There's text in the box on your Mac");
+  assert.equal(canReplaceBox(detail(boxed)), true);
+  assert.equal(canReplaceBox(detail({ ...boxed, prompt: { promptId: 'p1' } })), false);
+  assert.equal(canReplaceBox(detail({ ...boxed, working: true })), false);
+  assert.equal(canReplaceBox(detail({ ...boxed, boxHasText: false })), false);
+  assert.equal(canReplaceBox({ state: 'idle', terminal: boxed }), false);
+  assert.equal(canReplaceBox(null), false);
+  assert.equal(terminalErrorText({ code: 'box_not_cleared', message: 'm' }), "The box on your Mac couldn't be cleared; nothing was sent");
 });

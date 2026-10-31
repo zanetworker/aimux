@@ -1,54 +1,8 @@
 import SwiftUI
 import AimuxKit
 
-/// One session's chat: owns its `ChatModel` (made on first appear), follows the session while visible,
-/// and keeps Now's ranking fresh for the Next bar.
-struct ChatView: View {
-    let session: Session
-    let context: ChatContext
-    /// Opens another session in place of this one.
-    let goTo: (Session) -> Void
-
-    @State private var model: ChatModel?
-    @State private var isClosed = false
-
-    private static let nowRefresh: Duration = .seconds(15)
-
-    var body: some View {
-        Group {
-            if let model {
-                ChatContent(session: session, context: context, model: model, goTo: goTo)
-            } else {
-                Color(.systemBackground).toolbar(.hidden, for: .tabBar)
-            }
-        }
-        .task {
-            // First appear, or back after leaving (another tab, the chat after this one): a closed model
-            // ignores load(), so follow the session again with a new one.
-            if model == nil || isClosed {
-                model = context.makeModel(session.id)
-                isClosed = false
-            }
-            model?.queueEnabled = context.queueEnabled
-            await Interaction.perform { await model?.load() }
-        }
-        .task {
-            // Now stops polling while a chat covers it; the chat refreshes it, as often as Now does.
-            while !Task.isCancelled {
-                await context.now.refresh()
-                do { try await Task.sleep(for: Self.nowRefresh) } catch { break }
-            }
-        }
-        .onChange(of: context.queueEnabled) { _, enabled in model?.queueEnabled = enabled }
-        .onDisappear {
-            model?.close()
-            isClosed = true
-        }
-    }
-}
-
 /// The chat itself: header, timeline, Next bar and composer.
-private struct ChatContent: View {
+struct ChatContent: View {
     let session: Session
     let context: ChatContext
     let model: ChatModel
@@ -295,11 +249,12 @@ private struct ChatContent: View {
         }
     }
 
-    private func send() {
+    /// Sends the draft; `replacing` first clears the text in the Mac's input box (the person's Replace).
+    private func send(replacing: Bool = false) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
-        Task { await model.send(text) }
+        Task { await model.send(text, replacing: replacing) }
     }
 }
 
@@ -323,6 +278,10 @@ extension ChatContent {
             case .terminal where model.session?.terminal?.canType == true:
                 // Typed into the terminal on the Mac: Stop there is the Mac's, not this chat's.
                 composer(isWorking: false, canSend: true, stop: {})
+            case .terminal where model.canReplaceBox:  // only the person's Replace clears the Mac's box
+                let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ReplaceBoxLine(canReplace: hasDraft) { send(replacing: true) }
+                composer(isWorking: false, canSend: false, stop: {})
             case .terminal where model.queueEnabled:
                 // It cannot take typing now; the Mac sends queued messages when it can.
                 if terminalPrompt == nil,
@@ -366,7 +325,7 @@ extension ChatContent {
 
     fileprivate func composer(isWorking: Bool, canSend: Bool, stop: @escaping () -> Void) -> some View {
         Composer(text: $draft, isWorking: isWorking, canSend: canSend, action: model.composerAction,
-                 queueEnabled: model.queueEnabled, fieldFocus: $composerFocused, send: send, queue: addToQueue,
+                 queueEnabled: model.queueEnabled, fieldFocus: $composerFocused, send: { send() }, queue: addToQueue,
                  stop: stop)
     }
 
