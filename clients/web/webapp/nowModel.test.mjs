@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { NowModel } from './nowModel.mjs';
+import { nextSession } from './now.mjs';
 
 const NOW = Date.parse('2026-10-26T12:00:00Z');
 const iso = (agoSeconds) => new Date(NOW - agoSeconds * 1000).toISOString();
@@ -345,12 +346,12 @@ test('answered sessions: Now and the chat note them; a not-working read or leavi
   assert.deepEqual([...m.answeredSessions].sort(), ['a', 'b', 'c']);
   events.a = workingEvents; // the allowed tool runs
   await m.refresh();
-  assert.deepEqual([...m.answeredSessions].sort(), ['a', 'b', 'c'], 'kept while working; c (old and idle) is not read');
+  assert.deepEqual([...m.answeredSessions].sort(), ['a', 'b'], 'kept while working; c (old and idle, listed not working) is let go');
   events.a = [...workingEvents, { seq: 2, turn: 't', kind: 'turn_done', time: iso(5), data: { stopReason: 'end_turn' } }];
   events.b = () => { throw new Error('offline'); };
   list = [session('a', 'busy', 10), session('b', 'busy', 20)];
   await m.refresh();
-  assert.deepEqual([...m.answeredSessions].sort(), ['b'], 'a finished, c left the list, b failed to read: kept');
+  assert.deepEqual([...m.answeredSessions].sort(), ['b'], 'a finished, b failed to read: kept');
 });
 
 test('answered sessions: a refused read is a failed read, so it changes nothing', async () => {
@@ -362,6 +363,37 @@ test('answered sessions: a refused read is a failed read, so it changes nothing'
   events.a = () => { throw httpError(409); };
   await m.refresh();
   assert.deepEqual([...m.answeredSessions], ['a']);
+});
+
+test('answered terminal sessions are released by the list once it shows them not working, never by a failed list', async () => {
+  let list = [session('t', 'open_in_terminal', 10, { working: true })];
+  let fail = false;
+  const { api } = fakeAPI({ sessions: () => { if (fail) throw new Error('offline'); return { sessions: list }; } });
+  const m = model(api);
+  await m.refresh();
+  m.noteAnswered('t');
+  await m.refresh();
+  assert.deepEqual([...m.answeredSessions], ['t'], 'the list still shows it working');
+  fail = true;
+  list = [session('t', 'open_in_terminal', 10)];
+  await m.refresh();
+  assert.deepEqual([...m.answeredSessions], ['t'], 'a failed list changes nothing');
+  fail = false;
+  await m.refresh();
+  assert.deepEqual([...m.answeredSessions], [], 'the list shows it not working');
+});
+
+test('navigationView ignores the query and the Working chip', async () => {
+  const events = { a: approvalEvents('ap') };
+  const { api } = fakeAPI({ sessions: [session('a', 'busy', 10), session('b', 'busy', 20), session('zed', 'idle', 30)], events });
+  const m = model(api);
+  await m.refresh();
+  m.setQuery('zed');
+  m.setWorkingOnly(true);
+  assert.deepEqual(m.view.needsYou, [], 'the filtered view lost the approval');
+  assert.deepEqual(m.navigationView.needsYou.map((i) => i.session.id), ['a']);
+  assert.equal(nextSession(m.navigationView, 'x').session.id, 'a');
+  assert.equal(nextSession(m.navigationView, 'a', new Set(), m.activity).session.id, 'b');
 });
 
 // A fake /v1 for the meta routes: `answers[method + ' ' + path]` is a result or a function that throws.

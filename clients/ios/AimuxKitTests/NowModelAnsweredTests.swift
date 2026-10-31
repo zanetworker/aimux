@@ -31,6 +31,51 @@ private let start = Date(timeIntervalSince1970: 100_000)
         #expect(now.answeredSessions.isEmpty)
     }
 
+    private func terminal(working: Bool) -> Session {
+        Session(id: "t", title: "T t", project: "/p/t", lastActive: start, state: .openInTerminal, working: working)
+    }
+
+    @Test func aTerminalSessionIsReleasedByTheListOnceItIsNotWorking() async {
+        let sessions = SwitchableSessions([terminal(working: true)])
+        let now = NowModel(list: SessionListModel(source: sessions, cache: nil), source: SettableActivity(),
+                           now: { start })
+        now.noteAnswered("t")
+        await now.refresh()
+        #expect(now.answeredSessions == ["t"], "the list still shows it working")
+        sessions.fails = true
+        sessions.rows = [terminal(working: false)]
+        await now.refresh()
+        #expect(now.answeredSessions == ["t"], "a failed list changes nothing")
+        sessions.fails = false
+        await now.refresh()
+        #expect(now.answeredSessions.isEmpty, "the list shows it not working")
+    }
+
+    @Test func anIdThatLeftTheListIsReleased() async {
+        let sessions = SwitchableSessions([terminal(working: true)])
+        let now = NowModel(list: SessionListModel(source: sessions, cache: nil), source: SettableActivity(),
+                           now: { start })
+        now.noteAnswered("t")
+        sessions.rows = []
+        await now.refresh()
+        #expect(now.answeredSessions.isEmpty)
+    }
+
+    @Test func theNavigationViewIgnoresTheQueryAndTheWorkingChip() async {
+        let rows = [Session(id: "a", title: "T a", project: "/p/a", lastActive: start, state: .busy),
+                    Session(id: "b", title: "T b", project: "/p/b", lastActive: start, state: .busy),
+                    Session(id: "zed", title: "T zed", project: "/p/zed", lastActive: start, state: .idle)]
+        let source = SettableActivity()
+        let now = NowModel(list: SessionListModel(source: FixedSessions(rows), cache: nil), source: source,
+                           now: { start })
+        await now.refresh()
+        now.query = "zed"
+        now.workingOnly = true
+        #expect(now.view.elsewhere.flatMap(\.sessions).map(\.id) == [])
+        let next = nextSession(in: now.navigationView, excluding: "a", activity: now.activity)
+        #expect(next?.session.id == "b")
+    }
+
     @Test func answeringOnNowNotesTheSession() async {
         let source = SettableActivity()
         let now = model(source)
@@ -45,6 +90,16 @@ private final class FixedSessions: SessionSource, @unchecked Sendable {
     let rows: [Session]
     init(_ rows: [Session]) { self.rows = rows }
     func sessions(limit: Int) async throws -> [Session] { rows }
+}
+
+private final class SwitchableSessions: SessionSource, @unchecked Sendable {
+    var rows: [Session]
+    var fails = false
+    init(_ rows: [Session]) { self.rows = rows }
+    func sessions(limit: Int) async throws -> [Session] {
+        if fails { throw APIError.http(status: 500) }
+        return rows
+    }
 }
 
 private final class SettableActivity: ActivitySource, @unchecked Sendable {

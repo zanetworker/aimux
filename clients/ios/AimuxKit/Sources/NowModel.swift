@@ -15,6 +15,8 @@ extension APIClient: ActivitySource {}
 @MainActor @Observable
 public final class NowModel {
     public private(set) var view: NowView
+    /// The ranking before the query and Working chip: the chat's Next bar walks every working session and approval.
+    public private(set) var navigationView: NowView
     /// Approvals whose answer is on its way; a second answer for one of them is ignored.
     public private(set) var answering: Set<String> = []
     /// Why the last answer for an approval failed; cleared when it is tried again.
@@ -66,6 +68,7 @@ public final class NowModel {
         self.meta = meta
         self.now = now
         view = .empty
+        navigationView = .empty
     }
 
     public func refresh() async {
@@ -111,10 +114,17 @@ public final class NowModel {
             for await (id, derived) in group { fresh[id] = derived ?? activity[id] ?? Activity.none }
         }
         activity = fresh
+        let listError = list.error
+        let listed = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         answeredSessions = answeredSessions.filter { id in
-            guard let read = fresh[id] else { return true }
-            if case .working = read { return true }
-            return false
+            if let read = fresh[id] {
+                if case .working = read { return true }
+                return false
+            }
+            // Not read (a terminal session): only a good list decides, by dropping it or showing it not working.
+            guard listError == nil else { return true }
+            guard let session = listed[id] else { return false }
+            return isWorking(session, activity: .none)
         }
         rebuild()
         await healthRead
@@ -268,5 +278,6 @@ public final class NowModel {
         }
         let kept = holdPlaces(previous: held, current: list.sessions, now: now())
         view = rankNow(sessions: kept.sessions, activity: shown, now: now(), query: query, workingOnly: workingOnly)
+        navigationView = rankNow(sessions: kept.sessions, activity: shown, now: now())
     }
 }

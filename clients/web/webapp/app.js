@@ -550,7 +550,7 @@ function render() {
   scrollDown();
 
   // Bottom: the Next bar, a note, then the composer or the read-only line.
-  const next = c.mode === 'failed' || pendingApproval ? null : nextSession(tabs.model.view, c.id, tabs.model.answeredSessions, tabs.model.activity);
+  const next = c.mode === 'failed' || pendingApproval ? null : nextSession(tabs.model.navigationView, c.id, tabs.model.answeredSessions, tabs.model.activity);
   $('nextbar').replaceChildren(...(next ? [nextBar(next, displayTitle(next.session.title, next.session.id),
     () => { location.hash = '#/s/' + encodeURIComponent(next.session.id); })] : []));
   const note = notice || queueNotice || (stopError ? 'Could not stop · ' + stopError : '');

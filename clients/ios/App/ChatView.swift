@@ -34,7 +34,7 @@ struct ChatContent: View {
     }
     private var project: String { SessionRowFormat().projectName(model.session?.project ?? session.project) }
     private var next: NowItem? {
-        nextSession(in: context.now.view, excluding: session.id, answered: context.now.answeredSessions,
+        nextSession(in: context.now.navigationView, excluding: session.id, answered: context.now.answeredSessions,
                     activity: context.now.activity)
     }
 

@@ -1,5 +1,6 @@
 import { apiDate } from './apiDate.mjs';
 import { deriveActivity, holdPlaces, rankNow } from './now.mjs';
+import { isWorking } from './search.mjs';
 import { pinErrorText } from './sessionInfo.mjs';
 import { savedPromptAsTyped } from './timeline.mjs';
 
@@ -107,6 +108,13 @@ export class NowModel {
     this.activity = Object.fromEntries(results.map(([id, a]) => [id, a]));
     // Only a read that answered can show an answered session not working; a failed one changes nothing.
     for (const [id, a, read] of results) if (read && a.kind !== 'working') this.answeredSessions.delete(id);
+    // A session no event read covered (a terminal one) is released once the list shows it not working.
+    if (this.loadError === null) {
+      const covered = new Set(results.map(([id]) => id));
+      for (const s of this.sessions) {
+        if (this.answeredSessions.has(s.id) && !covered.has(s.id) && !isWorking(s, null)) this.answeredSessions.delete(s.id);
+      }
+    }
     this.rebuild();
   }
 
@@ -228,6 +236,8 @@ export class NowModel {
     const now = this.now();
     const kept = holdPlaces(this.held, this.sessions, now);
     this.view = rankNow({ sessions: kept.sessions, activity: shown, now, query: this.query, workingOnly: this.workingOnly });
+    // The chat's Next bar walks every working session and approval, whatever Now is filtered to.
+    this.navigationView = rankNow({ sessions: kept.sessions, activity: shown, now });
   }
 }
 
