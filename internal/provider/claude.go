@@ -13,8 +13,8 @@ import (
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
-	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/correlator"
+	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/jsonl"
 	"github.com/zanetworker/aimux/internal/statusdetect"
@@ -851,6 +851,7 @@ type claudeJSONLEntry struct {
 	timestamp      time.Time
 	isHumanMessage bool
 	textContent    string
+	hookFeedback   string // a Stop hook's feedback (isMeta string content): a step, not a message
 	blocks         []claudeContentBlock
 	tokensIn       int64
 	tokensOut      int64
@@ -918,9 +919,19 @@ func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
 		return
 	}
 
-	// Try as simple string (human message)
+	// Try as simple string (human message). Text Claude Code injects is
+	// marked isMeta and is never the person's: a Stop hook's feedback
+	// becomes a step of the turn; the rest (such as a caveat) is skipped.
 	var contentStr string
 	if err := json.Unmarshal(contentRaw, &contentStr); err == nil {
+		var meta bool
+		_ = json.Unmarshal(raw["isMeta"], &meta)
+		if meta {
+			if strings.HasPrefix(strings.TrimSpace(contentStr), stopHookPrefix) {
+				e.hookFeedback = strings.TrimSpace(contentStr)
+			}
+			return
+		}
 		e.isHumanMessage = true
 		e.textContent = contentStr
 		return
@@ -1058,6 +1069,22 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 	}
 }
 
+// stopHookPrefix starts the text Claude Code saves for a Stop hook's feedback.
+const stopHookPrefix = "Stop hook feedback:"
+
+// stopHookMessage is a Stop hook's feedback without its prefix and the hook's
+// command ("[/path/hook.py]: "): the first line of what the hook said.
+func stopHookMessage(feedback string) string {
+	msg := strings.TrimSpace(strings.TrimPrefix(feedback, stopHookPrefix))
+	if strings.HasPrefix(msg, "[") {
+		if i := strings.Index(msg, "]: "); i > 0 {
+			msg = msg[i+3:]
+		}
+	}
+	msg, _, _ = strings.Cut(msg, "\n")
+	return strings.TrimSpace(msg)
+}
+
 func parseClaudeJSONL(data string) []trace.Turn {
 	var entries []claudeJSONLEntry
 	for _, line := range strings.Split(data, "\n") {
@@ -1096,6 +1123,10 @@ func parseClaudeJSONL(data string) []trace.Turn {
 						current.UserLines = append(current.UserLines, trimmed)
 					}
 				}
+			} else if e.hookFeedback != "" && current != nil {
+				current.Actions = append(current.Actions, trace.ToolSpan{
+					Name: "Stop hook", Snippet: stopHookMessage(e.hookFeedback), Input: e.hookFeedback, Success: true,
+				})
 			} else if e.hasToolResults {
 				for _, tr := range e.toolResults {
 					if span, ok := pendingTools[tr.toolUseID]; ok {
