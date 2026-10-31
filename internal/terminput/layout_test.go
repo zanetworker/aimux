@@ -297,3 +297,101 @@ func TestPlaces_FirstCallBoundedWhenSourceHangs(t *testing.T) {
 	close(src.block)
 	r.settle()
 }
+
+func TestPlaces_StaleCacheWaitsForRefresh(t *testing.T) {
+	src := &fakeLayoutSource{panes: onePane()}
+	clock := newTestClock()
+	r := slowReader(src, clock)
+	r.FirstWait = 2 * time.Second
+	r.Places(context.Background())
+	src.mu.Lock()
+	src.panes = []PaneRef{{WindowID: 1, Tab: 3, Pane: 1, Panes: 1, TTY: "/dev/ttys001"}}
+	src.mu.Unlock()
+	clock.advance(40 * time.Second)
+	got := r.Places(context.Background())
+	if p, ok := got["s1"]; !ok || p.Tab.Index != 3 {
+		t.Errorf("40s after a good read got %+v, want the fresh layout (tab 3)", got)
+	}
+}
+
+func TestPlaces_StaleCacheWaitBoundedWhenSourceHangs(t *testing.T) {
+	src := &fakeLayoutSource{panes: onePane()}
+	clock := newTestClock()
+	r := slowReader(src, clock)
+	r.Places(context.Background())
+	src.mu.Lock()
+	src.block = make(chan struct{})
+	src.mu.Unlock()
+	clock.advance(40 * time.Second)
+	start := time.Now()
+	if got := r.Places(context.Background()); got != nil {
+		t.Errorf("hung source after 40s gave %+v, want nil", got)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("stale call took %v, want about FirstWait", d)
+	}
+	close(src.block)
+	r.settle()
+}
+
+func TestPlaces_LogsOncePerRunOfFailures(t *testing.T) {
+	src := &fakeLayoutSource{panes: onePane()}
+	clock := newTestClock()
+	r := slowReader(src, clock)
+	var log bytes.Buffer
+	r.Log = &log
+	lines := func() int { return strings.Count(log.String(), "\n") }
+	step := func() {
+		clock.advance(5 * time.Second)
+		r.Places(context.Background())
+		r.settle()
+	}
+	r.Places(context.Background())
+	src.setErr(errors.New("denied"))
+	step()
+	step()
+	step()
+	if lines() != 1 {
+		t.Fatalf("three failures in a row logged %d lines, want 1: %q", lines(), log.String())
+	}
+	src.setErr(nil)
+	step()
+	src.setErr(errors.New("denied"))
+	step()
+	if lines() != 2 {
+		t.Errorf("a failure after a success logged %d lines in all, want 2", lines())
+	}
+}
+
+func TestCleanName(t *testing.T) {
+	for in, want := range map[string]string{
+		"✳ Claude Code": "Claude Code",
+		"◐ fix tests":   "fix tests",
+		"⠋ build":       "build",
+		"aimux":         "aimux",
+		"✳":             "✳",
+		"":              "",
+		"✳ ◐  two":      "two",
+		"(dev) api":     "(dev) api",
+		"3 tests":       "3 tests",
+	} {
+		if got := cleanName(in); got != want {
+			t.Errorf("cleanName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPlaces_StripsStatusGlyphs(t *testing.T) {
+	src := &fakeLayoutSource{panes: []PaneRef{
+		{WindowID: 9, WindowName: "✳ Claude Code", ActiveName: "◐ Claude Code", Tab: 1, TabName: "✳ fix tests", Pane: 1, Panes: 1, TTY: "/dev/ttys001"},
+		{WindowID: 4, WindowName: "Project X", ActiveName: "⠋ claude", Tab: 2, TabName: "✳", Pane: 1, Panes: 1, TTY: "/dev/ttys002"},
+	}}
+	sys := &fakeLayoutSys{ttys: map[int]string{1: "/dev/ttys001", 2: "/dev/ttys002"}, fg: map[int]bool{1: true, 2: true}}
+	got := newReader(src, sys, map[string]int{"a": 1, "b": 2}).Places(context.Background())
+	if a := got["a"]; a.Tab.Name != "fix tests" || a.Window.Name != "Window 2" {
+		t.Errorf("a = %+v, want tab \"fix tests\" in Window 2 (echo of the stripped pane name)", a)
+	}
+	if b := got["b"]; b.Tab.Name != "✳" || b.Window.Name != "Project X" {
+		t.Errorf("b = %+v, want tab \"✳\" kept and Project X", b)
+	}
+}

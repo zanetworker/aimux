@@ -1008,3 +1008,26 @@ func TestListSessions_NoFolderNoPlaces(t *testing.T) {
 		}
 	}
 }
+
+func TestListSessions_EmptyProjectHasNoFolder(t *testing.T) {
+	var asked []string
+	api := &API{
+		Sessions: func(context.Context, int, bool) ([]Session, error) {
+			return []Session{{ID: "s1", Project: "", State: StateIdle}, {ID: "s2", Project: "/src/aimux", State: StateIdle}}, nil
+		},
+		Folder: func(path string) folders.Folder {
+			asked = append(asked, path)
+			return folders.Folder{Repo: "aimux", RepoPath: path, Label: "aimux"}
+		},
+	}
+	got := listJSON(t, api)
+	if f, ok := got[0]["folder"]; ok {
+		t.Fatalf("empty project has folder %v, want none", f)
+	}
+	if got[1]["folder"].(map[string]any)["label"] != "aimux" {
+		t.Fatalf("s2 folder = %v", got[1]["folder"])
+	}
+	if len(asked) != 1 || asked[0] != "/src/aimux" {
+		t.Fatalf("Folder asked for %q, want only /src/aimux", asked)
+	}
+}

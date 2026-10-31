@@ -9,13 +9,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
 	layoutFresh     = 3 * time.Second  // a read newer than this is reused
 	layoutHold      = 30 * time.Second // a failed read falls back to a good one this young
 	lastInFrontMax  = 12 * time.Hour
-	layoutFirstWait = 1500 * time.Millisecond // the first call waits this long at most
+	layoutFirstWait = 1500 * time.Millisecond // a call with no usable layout waits this long at most
 	layoutReadMax   = 10 * time.Second        // a background read is cut off here
 )
 
@@ -63,18 +64,18 @@ type LayoutReader struct {
 	Now       func() time.Time                 // nil means time.Now
 	Log       io.Writer                        // may be nil
 
-	// FirstWait bounds how long the first call waits for the first read
-	// (0 means 1.5 s).
+	// FirstWait bounds how long a call with no usable layout (none yet, or
+	// one older than 30 s) waits for the refresh (0 means 1.5 s).
 	FirstWait time.Duration
 
 	mu       sync.Mutex
 	places   map[string]MacPlace
 	at       time.Time
 	good     bool          // places holds a read
-	ever     bool          // a read has succeeded once
 	inflight chan struct{} // closed when the running refresh ends; nil when none
 	failed   bool
 	failAt   time.Time
+	logged   bool // this run of failures has been logged
 }
 
 func (r *LayoutReader) now() time.Time {
@@ -88,11 +89,11 @@ func (r *LayoutReader) now() time.Time {
 // whose pid has no tty, whose tty is in no pane, or which is not its
 // tty's foreground is absent.
 //
-// Once a layout has been read, Places never waits: it returns the cached
-// value (up to 30 s old) and, when that is older than 3 s, starts one
-// background refresh. A failed read backs off for 3 s. Before the first
-// successful read it waits for the running read, for the request ctx and
-// at most FirstWait.
+// While the cached layout is at most 30 s old, Places never waits: it
+// returns it and, when it is older than 3 s, starts one background
+// refresh. A failed read backs off for 3 s. With no layout yet, or one
+// older than 30 s, it waits for the running refresh (one for all callers),
+// for the request ctx and at most FirstWait.
 func (r *LayoutReader) Places(ctx context.Context) map[string]MacPlace {
 	t := r.now()
 	r.mu.Lock()
@@ -105,10 +106,10 @@ func (r *LayoutReader) Places(ctx context.Context) map[string]MacPlace {
 		r.inflight = make(chan struct{})
 		go r.refresh(r.inflight) //nolint:gosec // the read must outlive the request that started it
 	}
-	wait, first := r.inflight, !r.ever
+	wait, stale := r.inflight, !r.good || t.Sub(r.at) > layoutHold
 	r.mu.Unlock()
 
-	if first && wait != nil {
+	if stale && wait != nil {
 		bound := r.FirstWait
 		if bound <= 0 {
 			bound = layoutFirstWait
@@ -137,12 +138,12 @@ func (r *LayoutReader) refresh(done chan struct{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err != nil {
-		if r.Log != nil {
+		if r.Log != nil && !r.logged {
 			_, _ = fmt.Fprintf(r.Log, "terminput: mac layout read failed (%T)\n", err)
 		}
-		r.failed, r.failAt = true, r.now()
+		r.failed, r.failAt, r.logged = true, r.now(), true
 	} else {
-		r.places, r.at, r.good, r.ever, r.failed = places, r.now(), true, true, false
+		r.places, r.at, r.good, r.failed, r.logged = places, r.now(), true, false, false
 	}
 	r.inflight = nil
 	close(done)
@@ -202,17 +203,34 @@ func (r *LayoutReader) read(ctx context.Context, now time.Time) (map[string]MacP
 		if !ok {
 			continue
 		}
-		name := p.WindowName
-		if name == "" || (p.ActiveName != "" && strings.HasPrefix(name, p.ActiveName)) {
+		name, active := cleanName(p.WindowName), cleanName(p.ActiveName)
+		if name == "" || (active != "" && strings.HasPrefix(name, active)) {
 			name = "Window " + strconv.Itoa(index[p.WindowID])
 		}
 		out[id] = MacPlace{
 			Window:      MacWindow{ID: "w" + strconv.Itoa(p.WindowID), Index: index[p.WindowID], Name: name},
-			Tab:         MacTab{Index: p.Tab, Name: p.TabName},
+			Tab:         MacTab{Index: p.Tab, Name: cleanName(p.TabName)},
 			Pane:        p.Pane,
 			Panes:       p.Panes,
 			LastInFront: id == lastID,
 		}
 	}
 	return out, nil
+}
+
+// cleanName drops a leading run of symbol glyphs and the spaces after it,
+// such as the status mark Claude Code puts in its title ("✳ ", a spinner
+// frame "◐ " or "⠋ "), so a name stays the same while the session works.
+// A name that is only symbols is kept as it is.
+func cleanName(s string) string {
+	rest := strings.TrimLeftFunc(s, func(c rune) bool {
+		return unicode.IsSymbol(c) || unicode.Is(unicode.Variation_Selector, c) || unicode.IsSpace(c)
+	})
+	if rest == "" || rest == s {
+		return s
+	}
+	if first := []rune(s)[0]; !unicode.IsSymbol(first) {
+		return s // only leading spaces: not a status mark
+	}
+	return rest
 }

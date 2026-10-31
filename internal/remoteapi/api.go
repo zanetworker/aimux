@@ -349,7 +349,7 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		places = a.Places(r.Context())
 	}
 	for i := range list {
-		if a.Folder != nil {
+		if a.Folder != nil && list[i].Project != "" {
 			f := a.Folder(list[i].Project)
 			list[i].Folder = &f
 		}
