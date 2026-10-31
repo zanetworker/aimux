@@ -336,3 +336,29 @@ func TestWordsInBox(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkingSeconds(t *testing.T) {
+	box := "\n────────────────────\n❯\n────────────────────\n"
+	for _, c := range []struct {
+		line string
+		want int
+		ok   bool
+	}{
+		{"✶ Ionizing… (10s · ↓ 76 tokens)", 10, true},
+		{"✻ Brewing… (1m 20s · ↑ 2.1k tokens · esc to interrupt)", 80, true},
+		{"✢ Pondering… (2h 3m · esc to interrupt)", 2*3600 + 3*60, true},
+		{"✳ Thinking… (esc to interrupt)", 0, false},
+		{"⏺ Done. It took (10s · fast)", 0, false}, // a reply line, not the spinner
+	} {
+		got, ok := WorkingSeconds(c.line + "\n" + box)
+		if got != c.want || ok != c.ok {
+			t.Errorf("%q: got %d %v, want %d %v", c.line, got, ok, c.want, c.ok)
+		}
+	}
+	if _, ok := WorkingSeconds(fixture(t, "idle-empty.txt")); ok {
+		t.Error("idle screen: elapsed found")
+	}
+	if got, ok := WorkingSeconds(fixture(t, "busy-empty.txt")); !ok || got != 10 {
+		t.Errorf("busy fixture: %d %v", got, ok)
+	}
+}

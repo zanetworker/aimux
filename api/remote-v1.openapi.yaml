@@ -1060,6 +1060,12 @@ components:
           enum: [disabled, not_in_terminal, not_claude, mac_in_use, no_terminal_driver, automation_denied, not_at_input, error]
           description: "Why canType is false; `error` means the terminal driver failed."
         prompt: { $ref: "#/components/schemas/TerminalPrompt" }
+        workingSeconds:
+          type: integer
+          minimum: 0
+          description: >
+            While working: how long Claude Code's working line says the current
+            turn has run, in seconds. Absent when the line shows no time.
         boxHasText:
           type: boolean
           description: >

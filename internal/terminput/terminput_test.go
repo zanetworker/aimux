@@ -1498,3 +1498,11 @@ func TestStatusCanTypeOverTextInTheBox(t *testing.T) {
 		t.Fatalf("status = %+v", st)
 	}
 }
+
+func TestStatusSaysHowLongClaudeHasWorked(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = fixture(t, "busy-empty.txt")
+	if st := e.svc.Status(context.Background(), "s1", "busy"); !st.Working || st.WorkingSeconds != 10 {
+		t.Fatalf("status = %+v, want working 10 s", st)
+	}
+}

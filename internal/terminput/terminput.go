@@ -111,6 +111,9 @@ type Status struct {
 	// BoxHasText: the input box holds text (a draft, or Claude Code's grey
 	// suggestion; the screen does not say which). SendReplacing may clear it.
 	BoxHasText bool
+	// WorkingSeconds: how long the working line says the turn has run; 0
+	// when it shows no time.
+	WorkingSeconds int
 }
 
 type codeError struct{ code, msg string }
@@ -405,6 +408,9 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 	}
 	st.Prompt = ParsePrompt(scr)
 	st.Working = Working(scr)
+	if st.Working {
+		st.WorkingSeconds, _ = WorkingSeconds(scr)
+	}
 	// The text a send left waiting can be retried (Retry presses Enter).
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
 	left := s.leftText(sessionID)

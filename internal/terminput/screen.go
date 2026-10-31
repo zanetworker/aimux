@@ -393,6 +393,37 @@ func Working(screen string) bool {
 	return false
 }
 
+// elapsedPart reads the time a spinner line shows: "(10s ·", "(1m 20s ·",
+// "(2h 3m ·" at the start of its parentheses.
+var elapsedPart = regexp.MustCompile(`\((?:(\d+)h ?)?(?:(\d+)m ?)?(?:(\d+)s)?\s*·`)
+
+// WorkingSeconds is how long Claude Code's working line says the current turn
+// has run, from the spinner line above the input box; false when the screen
+// shows no spinner line with a time (idle, or only "(esc to interrupt)").
+func WorkingSeconds(screen string) (int, bool) {
+	lines := strings.Split(screen, "\n")
+	end := len(lines)
+	if upper, _, ok := bottomRules(lines); ok {
+		end = upper
+	}
+	for i := end - 1; i >= 0 && i >= end-workingScan; i-- {
+		l := lines[i]
+		if strings.HasPrefix(strings.TrimSpace(l), "⏺") {
+			return 0, false
+		}
+		if !spinnerLine.MatchString(l) {
+			continue
+		}
+		m := elapsedPart.FindStringSubmatch(l)
+		if m == nil || (m[1] == "" && m[2] == "" && m[3] == "") {
+			return 0, false
+		}
+		n := func(s string) int { v, _ := strconv.Atoi(s); return v }
+		return n(m[1])*3600 + n(m[2])*60 + n(m[3]), true
+	}
+	return 0, false
+}
+
 // interruptShown reports whether a line above the box carries Claude Code's
 // own interrupt hint, "(esc to interrupt" or "· esc to interrupt". The bare
 // phrase in a reply's prose is not the hint.
