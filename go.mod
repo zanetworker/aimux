@@ -12,7 +12,7 @@ require (
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/mark3labs/mcp-go v0.57.0
+	github.com/mark3labs/mcp-go v1.3.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
