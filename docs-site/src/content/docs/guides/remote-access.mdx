@@ -264,7 +264,7 @@ From the top of the screen:
 1. The search box and a **Working** chip that narrows Now to working sessions.
 2. **Needs you**: pending permission requests, and failed turns from the last 15 minutes; they appear here wherever the session is open or pinned. Cards answer in place.
 3. **Pinned**: pinned sessions that are not in an iTerm2 pane (closed, or open elsewhere). A pinned session in a pane stays in its pane with a pin mark.
-4. **On your Mac**: sessions open in iTerm2, in iTerm2's order: window (its title, or "Window 1", "Window 2" in creation order), then tab, then pane. A row has the title, a state line (Working, Your turn, Shell), and the folder and pane number. Every tab is folded to one line (name, panes, working count) except the one holding the pane last in front; which tabs you open or close is remembered on the device. Nothing reorders while the screen is open; a status change happens in place.
+4. **On your Mac**: sessions open in iTerm2, in iTerm2's order: window (its title, or "Window 1", "Window 2" in creation order), then tab, then pane. A row has the title, a state line ("Working · go test ./…" with the latest step, or "Your turn · 4 min"), and the folder and pane number. Every tab is folded to one line (name, panes, working count) except the one holding the pane last in front; which tabs you open or close is remembered on the device. Nothing reorders while the screen is open; a status change happens in place.
 5. **Elsewhere**: open sessions not in an iTerm2 pane (started from the phone, other terminals, or a pane aimux could not match), grouped by folder.
 
 If no session has a place (iTerm2 is not running, or macOS has not granted Automation access), On your Mac lists open sessions by folder.
@@ -288,15 +288,15 @@ The bar offers the next session that needs you, otherwise the next working one, 
 | Field | Meaning |
 |-------|---------|
 | `folder` | `{repo, worktree, sub, label}`. Git: `repo` is the main worktree's folder name, `worktree` the linked worktree's (absent for the main checkout), `sub` the path below the worktree top. Non-git: `repo` is the parent folder's name and `worktree` the folder's own; the home folder is "Home". `label` is for display ("aimux / clients · ios"). |
-| `mac` | Present when the session's running `claude` is in an iTerm2 pane: `{window:{id,index,name}, tab:{index,name}, pane, panes, lastInFront}`. |
+| `mac` | Present when the session's running `claude` is in an iTerm2 pane: `{window:{id,index,name}, tab:{index,name}, pane, panes, lastInFront}`. Window and tab names drop a leading status mark such as Claude Code's "✳" or a spinner frame, so a name stays the same while Claude works. |
 | `working` | `true` when the session is open in a terminal and Claude's registry calls it busy. |
 
 `lastOnMac` stays in the list for older clients, which hide it after 12 hours.
 
 How it is built:
 
-- The layout is read from iTerm2 and joined to open sessions by tty. The read is read-only (it never focuses, types or starts iTerm2), takes about a tenth of a second, and is reused for 3 seconds. A failed read falls back to the last good one for 30 seconds, then `mac` is absent.
-- It needs macOS Automation access to iTerm2 (`aimux remote terminal-input check` asks for it), but works without `terminal_input.enabled`.
+- The layout is read from iTerm2 and joined to open sessions by tty. The read is read-only (it never focuses, types or starts iTerm2), takes about a tenth of a second, and is reused for 3 seconds. A failed read falls back to the last good one for 30 seconds, then `mac` is absent. With no layout yet, or one older than 30 seconds (the first list after the phone was away), a list call waits up to 1.5 seconds for a fresh read.
+- It needs macOS Automation access to iTerm2 even when terminal input is off (`terminal_input.enabled` is not needed), so macOS may ask once after upgrading; `aimux remote terminal-input check` asks for it while you are at the Mac.
 - Folders are resolved in the background and kept in `~/.aimux/folders.json` (owner-only), so a deleted worktree keeps its name. A list call never waits on git.
 - The Mac layout and folder identity are phone-only for now; the TUI and CLI do not show them.
 
