@@ -305,7 +305,7 @@ public final class ChatModel {
             guard pending?.key == key else { return }
             let failure = error as? APIError ?? .transport(.unknown)
             pending?.failure = failure
-            offerQueueIfBusy(failure)
+            await queueIfRefusedBusy(failure)
             // Open in a terminal meanwhile: this view is out of date, and a retry could never succeed.
             if case .server(_, .openInTerminal, _) = failure { await load() }
         }

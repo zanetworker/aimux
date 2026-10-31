@@ -24,8 +24,12 @@ extension ChatModel {
                                         refusedBusy: refusedBusy)
     }
 
-    func offerQueueIfBusy(_ failure: APIError) {
-        if queueEnabled, ChatQueue.sendRefusal(failure) != nil { refusedBusy = true }
+    /// A message refused because the session is busy goes into the queue by itself; it stays a failed message
+    /// (with its text) only if the queue refuses it too.
+    func queueIfRefusedBusy(_ failure: APIError) async {
+        guard queueEnabled, ChatQueue.sendRefusal(failure) != nil else { return }
+        refusedBusy = true
+        _ = await queuePending()
     }
 
     /// The text of a message refused busy, for an empty composer: the failed message goes away, as its text is

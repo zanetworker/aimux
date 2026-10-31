@@ -583,18 +583,13 @@ function action() {
 let actionDrawn = '';
 function drawAction() {
   const a = action();
-  $('queue-add').hidden = !(queueOn() && a === 'send');
+  $('queue-add').hidden = true; // one send arrow, like any chat
   if (a === actionDrawn) return;
   actionDrawn = a;
+  // The same arrow; while Claude works it queues the message, which goes once Claude finishes.
   const b = $('send');
-  b.classList.toggle('queue-primary', a === 'queue');
-  if (a === 'queue') {
-    b.removeAttribute('aria-label');
-    b.replaceChildren('Add to queue');
-  } else {
-    b.setAttribute('aria-label', 'Send');
-    b.replaceChildren(icon('up'));
-  }
+  b.setAttribute('aria-label', a === 'queue' ? 'Send when Claude finishes' : 'Send');
+  b.replaceChildren(icon('up'));
 }
 
 // The queue under the composer (queueView.mjs); its requests go through this chat's client.
@@ -924,23 +919,16 @@ async function answerPrompt(prompt, option) {
   render();
 }
 
-// refusedBusy: a send refused 409 busy, with the queue: nothing was sent and nothing is queued by
-// itself (sendRefusal, the shared fixtures). The text goes back in an empty box and the composer
-// offers Add to queue; with other text in the box, the message stays shown with its own Add to
-// queue, so it is never dropped.
+// refusedBusy: a send refused 409 busy, with the queue: the message goes into the queue by itself
+// and goes once Claude finishes. It stays shown, with its own Add to queue, only if the queue
+// refuses it too, so it is never dropped.
 function refusedBusy(session, p, e) {
-  const offer = sendRefusal(e);
-  if (!offer || !queueOn()) return false;
+  if (!sendRefusal(e) || !queueOn()) return false;
   const here = chat && chat.id === session;
   if (here) chat.busyOffer = true;
-  const box = here ? $('prompt').value.trim() : drafts.get(session);
-  if (offer.keepText && box && box !== p.text) {
-    p.failure = 'the session is busy';
-    p.queueOffer = true;
-    return true;
-  }
-  if (pendings.get(session) === p) pendings.delete(session);
-  if (here) { $('prompt').value = p.text; autoResize(); } else drafts.set(session, p.text);
+  p.failure = 'the session is busy';
+  p.queueOffer = true;
+  if (here) queueText(p.text, (c2) => { if (pendings.get(c2.id) === p) pendings.delete(c2.id); });
   return true;
 }
 

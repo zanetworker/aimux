@@ -38,23 +38,16 @@ final class QueueUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, "Message", "the box empties once queued")
     }
 
-    /// demo-1 is a free terminal session with nothing queued: Send is the main action, the second button
-    /// queues, and once a message waits in the running queue the main action is Add to queue.
+    /// demo-1 is a free terminal session with nothing queued: one send arrow, no second queue button.
     @MainActor
-    func testAFreeSessionStillQueuesFromTheSecondButton() {
+    func testAFreeSessionHasOnlyTheSendArrow() {
         let app = launch(["-openChat", "demo-1"])
 
         let field = app.textFields["messageField"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["sendButton"].exists)
-        field.tap()
-        field.typeText("Then the appendix")
-        app.buttons["queueAddButton"].tap()
-
-        XCTAssertTrue(row(app, "dq7").waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["1 message"].exists)
-        XCTAssertTrue(app.buttons["sendButton"].waitForNonExistence(timeout: 5),
-                      "a message waits in the running queue: the main action is Add to queue")
+        XCTAssertFalse(app.buttons["queueAddButton"].exists)
+        XCTAssertFalse(app.buttons["queueButton"].exists)
     }
 
     /// demo-3's queue is paused with one message answering: the server refuses a direct send, so the main

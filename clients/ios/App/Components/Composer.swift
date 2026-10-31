@@ -1,9 +1,9 @@
 import SwiftUI
 import AimuxKit
 
-/// The message field and send; send becomes stop while Claude works. With the chat queue (`queueEnabled`), the
-/// main action is Send or Add to queue (`action`, from the shared fixtures), Stop shows beside Add to queue while
-/// Claude works, and a smaller Add to queue button sits beside Send so several messages can be lined up.
+/// The message field and one send arrow, like any chat; send becomes stop while Claude works. With the chat
+/// queue (`queueEnabled`) and `action` Add to queue (from the shared fixtures), the same arrow queues the message
+/// instead, and Stop shows beside it while Claude works: the message goes once Claude finishes.
 struct Composer: View {
     @Binding var text: String
     let isWorking: Bool
@@ -16,18 +16,8 @@ struct Composer: View {
     var queue: () -> Void = {}
     let stop: () -> Void
 
-    /// Below this the field is too narrow to type in, so Add to queue becomes an icon.
-    private static let minFieldWidth: CGFloat = 200
-    /// About the width of the Add to queue capsule at this text size.
-    @ScaledMetric(relativeTo: .subheadline) private var capsuleWidth: CGFloat = 124
-    @State private var width: CGFloat = 0
-
-    /// Whether the capsule's words fit beside a field at least `minFieldWidth` wide (and Stop, while working).
-    private var wordsFit: Bool {
-        width - capsuleWidth - (isWorking ? 52 : 0) - 8 >= Self.minFieldWidth
-    }
-
     private var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var queues: Bool { queueEnabled && action == .queue }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -45,75 +35,16 @@ struct Composer: View {
                     .accessibilityLabel("Stop")
                     .accessibilityIdentifier("stopButton")
             }
-            if queueEnabled && action == .queue { queueButton(words: wordsFit) } else { sendButtons }
-        }
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }, action: { width = $0 })
-    }
-
-    /// Add to queue as the main action: the words, or an icon where they do not fit.
-    @ViewBuilder private func queueButton(words: Bool) -> some View {
-        if words {
-            Button(action: queue) { Text(ComposerAction.queue.label).font(.subheadline.weight(.semibold)) }
-                .buttonStyle(CapsuleActionStyle())
-                .disabled(isEmpty || !canSend)
-                .accessibilityIdentifier("queueButton")
-        } else {
-            Button(action: queue) { Image(systemName: "text.badge.plus").font(.body.weight(.semibold)) }
+            if queues || !isWorking {
+                Button(action: queues ? queue : send) {
+                    Image(systemName: "arrow.up").font(.body.weight(.semibold))
+                }
                 .buttonStyle(RoundActionStyle())
                 .disabled(isEmpty || !canSend)
-                .accessibilityLabel(ComposerAction.queue.label)
-                .accessibilityIdentifier("queueButton")
-        }
-    }
-
-    @ViewBuilder private var sendButtons: some View {
-        if !isWorking {
-            if queueEnabled {
-                Button(action: queue) { Image(systemName: "text.badge.plus").font(.body) }
-                    .buttonStyle(OutlineActionStyle())
-                    .disabled(isEmpty || !canSend)
-                    .accessibilityLabel(ComposerAction.queue.label)
-                    .accessibilityIdentifier("queueAddButton")
+                .accessibilityLabel(queues ? "Send when Claude finishes" : "Send")
+                .accessibilityIdentifier(queues ? "queueButton" : "sendButton")
             }
-            Button(action: send) { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
-                .buttonStyle(RoundActionStyle())
-                .disabled(isEmpty || !canSend)
-                .accessibilityLabel("Send")
-                .accessibilityIdentifier("sendButton")
         }
-    }
-}
-
-/// The composer's Add to queue as its main action: a black capsule (white in dark mode) with the words.
-struct CapsuleActionStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(Color(.systemBackground))
-            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 16)
-            .frame(minHeight: 44)
-            .background(Color.primary, in: Capsule())
-            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.25)
-            .contentShape(Capsule())
-    }
-}
-
-/// A secondary round button: an outline in the text colour, beside the main one.
-struct OutlineActionStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(Color.primary)
-            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            .frame(width: 44, height: 44)
-            .overlay(Circle().strokeBorder(Color.primary.opacity(0.35), lineWidth: 1))
-            .opacity(isEnabled ? (configuration.isPressed ? 0.6 : 1) : 0.3)
-            .contentShape(Circle())
     }
 }
 

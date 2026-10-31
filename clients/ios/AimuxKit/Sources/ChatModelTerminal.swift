@@ -88,7 +88,7 @@ extension ChatModel {
             guard pending?.key == key else { return }
             let failure = error as? APIError ?? .transport(.unknown)
             pending?.failure = failure
-            offerQueueIfBusy(failure)
+            await queueIfRefusedBusy(failure)
             // The box is not showing, or a prompt came up before Enter: it shows as a card once read.
             switch failure {
             case .server(_, .notAtInput, _), .server(_, .notSubmitted, _): _ = await readTerminal()

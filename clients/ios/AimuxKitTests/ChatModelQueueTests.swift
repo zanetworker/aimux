@@ -206,7 +206,7 @@ private let busy = APIError.server(status: 409, code: .busy, message: "a turn is
         chat.close()
     }
 
-    @Test func aSendRefusedBusyOffersTheQueueAndKeepsTheText() async {
+    @Test func aSendRefusedBusyGoesIntoTheQueueByItself() async {
         let source = StubChat()
         source.details = [detail()]
         source.sendFailures = [busy]
@@ -214,28 +214,10 @@ private let busy = APIError.server(status: 409, code: .busy, message: "a turn is
         await chat.load()
 
         await chat.send("Run the tests")
-        #expect(chat.refusedBusy)
-        #expect(chat.composerAction == .queue)
-        #expect(chat.pending?.text == "Run the tests", "never dropped")
 
-        // Back in an empty composer: the failed message goes away.
-        #expect(chat.reclaimRefusedMessage() == "Run the tests")
-        #expect(chat.pending == nil)
-        #expect(chat.reclaimRefusedMessage() == nil)
-        chat.close()
-    }
-
-    @Test func aRefusedMessageCanBeQueuedFromItsRow() async {
-        let source = StubChat()
-        source.details = [detail()]
-        source.sendFailures = [busy]
-        let chat = model(source)
-        await chat.load()
-        await chat.send("Run the tests")
-
-        #expect(await chat.queuePending())
-        #expect(chat.pending == nil)
         #expect(source.queueCallList.first?.hasPrefix("add Run the tests ") == true)
+        #expect(chat.pending == nil, "queued: no failed message left to retry")
+        #expect(chat.composerAction == .queue)
         chat.close()
     }
 
