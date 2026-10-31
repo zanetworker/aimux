@@ -376,3 +376,18 @@ func TestParsePromptWithoutItsTopRuleIsNone(t *testing.T) {
 		t.Fatalf("a whole prompt: %+v", p)
 	}
 }
+
+// A named session's box has its name in the top rule. The working line above it
+// is still found when an older rule of the same width sits higher up.
+func TestWorkingSecondsAboveANamedBox(t *testing.T) {
+	rule := strings.Repeat("─", 60)
+	named := strings.Repeat("─", 50) + " my-task ─"
+	named += strings.Repeat("─", 60-utf8.RuneCountInString(named))
+	screen := rule + "\n old output\n\n✶ Ionizing… (1m 20s · ↓ 76 tokens)\n\n" + named + "\n❯\n" + rule + "\n  [Model] │ demo\n"
+	if got, ok := WorkingSeconds(screen); !ok || got != 80 {
+		t.Fatalf("WorkingSeconds = %d, %v; want 80, true", got, ok)
+	}
+	if !Working(screen) {
+		t.Fatal("Working = false above a named box")
+	}
+}

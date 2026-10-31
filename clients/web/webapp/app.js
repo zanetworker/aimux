@@ -973,10 +973,10 @@ async function queueText(text, onQueued) {
   render();
   const r = await c.queueClient.add(text);
   adding = false;
+  if (r.ok && onQueued) onQueued(c); // even if the chat was left: a queued message is no longer a failed one
   if (chat !== c) return;
   if (r.ok) {
-    if (onQueued) onQueued(c);
-    else {
+    if (!onQueued) {
       if ($('prompt').value.trim() === text) { $('prompt').value = ''; autoResize(); }
       drafts.delete(c.id);
     }

@@ -446,7 +446,8 @@ func bottomRules(lines []string) (upper, lower int, ok bool) {
 		}
 	}
 	for i := lower - 1; lower >= 0 && i >= 0; i-- {
-		if boxRule(lines[i]) {
+		// A named session's top rule carries its name, as in bottomBox.
+		if boxRule(lines[i]) || labeledTopRule(lines[i], ruleWidth(lines[lower])) {
 			if lower-i < 2 || ruleWidth(lines[i]) != ruleWidth(lines[lower]) {
 				return 0, 0, false
 			}
