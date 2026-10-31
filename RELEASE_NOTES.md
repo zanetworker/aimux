@@ -27,6 +27,16 @@
 - Both clients: Now shows Last on your Mac, then Pinned, then the usual sections (Needs you wins; a session appears once), groups sessions by folder, shows description lines, and searches descriptions. Pin from the web "..." menu or by long press on the iPhone; the info sheet edits the title and description and has Update summary. The iPhone app is at version 0.3 (21)
 - Remote API: `description`, `pinned` on sessions, `lastOnMac` on the list, `PATCH /v1/sessions/{id}/meta`, `POST /v1/sessions/{id}/describe` (errors `owner_set`, `describe_running`, `naming_timeout`, `naming_auth`, `naming_model`, `naming_unreadable`, `naming_failed`, `naming_unavailable`), capability `describe` and `naming` on health
 
+- **Sending into a terminal session just works**: Claude Code's grey suggested prompt is typed over (aimux types a space to tell it from a draft), and a draft left in the box is replaced (`remote_access.terminal_input.keep_drafts: true` keeps it and refuses the message with `draft_in_box`). A named session's box, whose top rule carries the name, is recognised; a send that typed but did not submit can be retried (Retry presses Enter on text aimux left there, never on a draft of yours); slow-drawing terminals get up to 1.5 s. Screen reads take the pane's last 300 lines
+- **Composer**: one send arrow, like any chat; while the session works it queues the message (Stop beside it), and a message refused busy is queued by itself. The queue folds to one line, "2 queued · next: …", that opens on a tap
+- **Live working line**: a terminal chat ends in "Working · 1m 20s · <latest step>" while Claude works (`terminal.workingSeconds` on the session detail)
+- **Syntax colours** in code blocks (Go, Swift, JS/TS, Python, shell, JSON, YAML, diffs), light and dark, and inline code in its own colour; one set of rules pinned by `api/testdata/clients/highlight/`
+- **On your Mac** on Now and All's new **Folders** view group sessions by project
+- Fix: a Stop hook's feedback no longer shows as your message; it is a "Stop hook" step of the turn, and other text Claude Code injects is not shown
+- Fix: naming covers sessions whose title is only an id even when Claude Code wrote an away summary, and names them from that summary
+- Fix (iPhone): Now shows the saved list at launch instead of a blank screen; a long, busy chat no longer scrolls into empty space; the queue editor's Save is readable in dark mode
+- The iPhone app is at version 0.3 (29)
+
 ## aimux v0.13.0
 
 ### Highlights
