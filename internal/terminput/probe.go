@@ -63,6 +63,41 @@ func ttysFrom(run func(string, ...string) (string, error), pids []int) (map[int]
 	return out, nil
 }
 
+// Foreground reports, for each pid, whether its process group is the
+// foreground group of its tty, from one ps.
+func (SystemProbe) Foreground(pids []int) (map[int]bool, error) { return foregroundFrom(run, pids) }
+
+// foregroundFrom runs one `ps -o pid=,pgid=,tpgid= -p p1,p2,...` through
+// run. A pid is foreground when its pgid equals a positive tpgid; pids ps
+// does not list are absent. ps exits 1 when some pid is gone.
+func foregroundFrom(run func(string, ...string) (string, error), pids []int) (map[int]bool, error) {
+	out := map[int]bool{}
+	if len(pids) == 0 {
+		return out, nil
+	}
+	list := make([]string, len(pids))
+	for i, p := range pids {
+		list[i] = strconv.Itoa(p)
+	}
+	text, err := run("ps", "-o", "pid=,pgid=,tpgid=", "-p", strings.Join(list, ","))
+	if err != nil && strings.TrimSpace(text) == "" {
+		return nil, err
+	}
+	for _, line := range strings.Split(text, "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 {
+			continue
+		}
+		pid, e1 := strconv.Atoi(f[0])
+		pgid, e2 := strconv.Atoi(f[1])
+		tpgid, e3 := strconv.Atoi(f[2])
+		if e1 == nil && e2 == nil && e3 == nil {
+			out[pid] = tpgid > 0 && pgid == tpgid
+		}
+	}
+	return out, nil
+}
+
 // foregroundPGID is the tty's foreground process group id.
 func foregroundPGID(tty string) (int, error) {
 	out, err := run("ps", "-o", "tpgid=", "-t", strings.TrimPrefix(tty, "/dev/"))

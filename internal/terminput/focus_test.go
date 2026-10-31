@@ -183,3 +183,19 @@ func TestTTYsFrom_OnePSForAllPids(t *testing.T) {
 		t.Fatalf("no pids: %v %v, ran ps %d times; want nothing run", got, err, n)
 	}
 }
+
+func TestForegroundFrom(t *testing.T) {
+	fake := func(name string, args ...string) (string, error) {
+		return "  10  10  10\n  20  25  30\nbad line\n  40  40  0\n", errors.New("exit status 1")
+	}
+	got, err := foregroundFrom(fake, []int{10, 20, 40, 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got[10] || got[20] || got[40] || got[50] {
+		t.Errorf("got %v", got)
+	}
+	if _, err := foregroundFrom(func(string, ...string) (string, error) { return "", errors.New("x") }, []int{1}); err == nil {
+		t.Error("want error when ps fails with no output")
+	}
+}
