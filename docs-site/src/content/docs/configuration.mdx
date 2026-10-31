@@ -299,6 +299,10 @@ remote_access:
 | `max_runs` | int | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | duration | `10m` | Unanswered permission requests are denied after this |
 | `device_login` | bool | `true` | Only devices paired with `aimux remote pair` may use the API, logged in with Face ID or Touch ID (see [Device login](/guides/remote-access/#device-login)); `false` admits any device of an allowed login and `remote serve` warns at start |
+| `terminal_input.enabled` | bool | `false` | Type phone messages into Claude Code sessions open in iTerm2 (see [Typing into terminal sessions](/guides/remote-access/#typing-into-terminal-sessions)) |
+| `terminal_input.allow_while_in_use` | bool | `false` | Type even into the session you are using on the Mac; for testing at the Mac only |
+| `terminal_input.allow_slash_commands` | bool | `false` | Let a phone message start with `/` (a slash command); a leading `!` is always refused |
+| `terminal_input.keep_drafts` | bool | `false` | Keep a draft you left in the input box: a phone message is then refused (`409 draft_in_box`) instead of replacing it. Claude Code's grey suggestion is always typed over |
 | `hostnames` | list | detected from `tailscale status` | `Host` names the API accepts (this machine's tailnet names); others are refused |
 | `push.ntfy.topic` | string | off | ntfy topic that gets an alert for each permission request; on when set |
 | `push.ntfy.server` | string | `https://ntfy.sh` | ntfy server (2.16 or later also takes the alert back once the request is settled) |
