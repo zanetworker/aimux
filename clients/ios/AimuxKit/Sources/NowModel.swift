@@ -49,6 +49,9 @@ public final class NowModel {
     /// The Working chip.
     public var workingOnly = false { didSet { if workingOnly != oldValue { rebuild() } } }
     private var answered: Set<String> = []
+    /// Sessions whose approval the owner answered (here or in their chat): the Next bar skips them as working
+    /// targets until an activity read shows them not working (done, failed, a new approval, nothing).
+    public private(set) var answeredSessions: Set<String> = []
     private var held: HeldPlaces?
     /// Refreshes run one after another, so an older result can never land after a newer one.
     private var tail: Task<Void, Never>?
@@ -108,6 +111,11 @@ public final class NowModel {
             for await (id, derived) in group { fresh[id] = derived ?? activity[id] ?? Activity.none }
         }
         activity = fresh
+        answeredSessions = answeredSessions.filter { id in
+            guard let read = fresh[id] else { return true }
+            if case .working = read { return true }
+            return false
+        }
         rebuild()
         await healthRead
     }
@@ -134,7 +142,13 @@ public final class NowModel {
             return
         }
         answered.insert(id)
+        answeredSessions.insert(session)
         rebuild()
+    }
+
+    /// The owner answered an approval of this session in its chat.
+    public func noteAnswered(_ sessionID: String) {
+        answeredSessions.insert(sessionID)
     }
 
     /// Sends the session's last prompt again as a new message, whole and as typed from its

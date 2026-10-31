@@ -1,12 +1,15 @@
 import Foundation
 
-/// The chat's Next bar target: the first other session in Now's Needs you, else the first working one
-/// (Pinned, the Mac's windows, then Elsewhere).
-public func nextSession(in view: NowView, excluding id: String, activity: [String: Activity] = [:]) -> NowItem? {
+/// The chat's Next bar target: the first other session in Now's Needs you, else the first working one (Pinned, the
+/// Mac's windows, then Elsewhere) that is not the open session and not one whose approval the owner `answered` (it
+/// is still busy with what was just allowed; going back to it would ping-pong).
+public func nextSession(in view: NowView, excluding id: String, answered: Set<String> = [],
+                        activity: [String: Activity] = [:]) -> NowItem? {
     if let item = view.needsYou.first(where: { $0.session.id != id }) { return item }
     let listed = view.pinned.map(\.session) + view.windows.flatMap { $0.tabs.flatMap(\.sessions) }
         + view.elsewhere.flatMap(\.sessions)
-    return listed.first { $0.id != id && isWorking($0, activity: activity[$0.id] ?? .none) }
+    let candidates = listed.filter { $0.id != id && !answered.contains($0.id) }
+    return candidates.first { isWorking($0, activity: activity[$0.id] ?? .none) }
         .map { NowItem(session: $0, activity: activity[$0.id] ?? .none) }
 }
 

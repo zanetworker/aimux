@@ -34,7 +34,8 @@ struct ChatContent: View {
     }
     private var project: String { SessionRowFormat().projectName(model.session?.project ?? session.project) }
     private var next: NowItem? {
-        nextSession(in: context.now.view, excluding: session.id, activity: context.now.activity)
+        nextSession(in: context.now.view, excluding: session.id, answered: context.now.answeredSessions,
+                    activity: context.now.activity)
     }
 
     var body: some View {
@@ -194,6 +195,7 @@ struct ChatContent: View {
                 chosen[item.approvalId] = option
                 Task {
                     await model.answer(item.approval, option: option)
+                    if model.answered.contains(item.approvalId) { context.now.noteAnswered(session.id) }
                     // The answered session may leave Needs you: update the Next bar now, not at the next poll.
                     await context.now.refresh()
                 }

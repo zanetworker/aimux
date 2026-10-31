@@ -177,7 +177,7 @@ struct NowScreen: View {
     /// A search or the Working chip: every tab left is held open, and counts read "1 of 4 panes".
     private var isFiltered: Bool { !model.query.trimmingCharacters(in: .whitespaces).isEmpty || model.workingOnly }
     private var hasQuery: Bool { !model.query.trimmingCharacters(in: .whitespaces).isEmpty }
-    /// With a query, the open sessions that match: in panes, pinned and elsewhere.
+    /// With a query, the open sessions that match: in the Mac's panes and elsewhere.
     private var matches: Int? {
         guard hasQuery else { return nil }
         return view.windows.flatMap(\.tabs).map(\.sessions.count).reduce(0, +)

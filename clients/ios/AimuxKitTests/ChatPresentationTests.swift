@@ -41,6 +41,18 @@ import Testing
         #expect(next?.session.id == "w2")
     }
 
+    @Test func skipsABusySessionWhoseApprovalTheOwnerAnswered() {
+        let next = nextSession(in: view(elsewhere: [group(["answered", "w2"])]), excluding: "self",
+                               answered: ["answered"])
+        #expect(next?.session.id == "w2")
+    }
+
+    @Test func anAnsweredSessionThatNeedsYouAgainIsStillOffered() {
+        let next = nextSession(in: view(needsYou: [item("answered", approval)], elsewhere: [group(["w2"])]),
+                               excluding: "self", answered: ["answered"])
+        #expect(next?.session.id == "answered")
+    }
+
     @Test func nilWhenNothingElse() {
         #expect(nextSession(in: view(needsYou: [item("self", approval)]), excluding: "self") == nil)
     }

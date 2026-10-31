@@ -23,10 +23,10 @@ enum DemoFinding {
         MacPlace(window: window, tab: MacTab(index: tab, name: name), pane: pane, panes: panes, lastInFront: front)
     }
 
-    private static let aimux = "/Users/me/src/aimux"
+    private static let aimux = "/src/aimux"
     private static func folder(_ repo: String, worktree: String? = nil, sub: String? = nil) -> Folder {
         let label = [repo, worktree].compactMap { $0 }.joined(separator: " / ") + (sub.map { " · " + $0 } ?? "")
-        return Folder(repo: repo, repoPath: "/Users/me/src/" + repo, worktree: worktree, sub: sub, label: label)
+        return Folder(repo: repo, repoPath: "/src/" + repo, worktree: worktree, sub: sub, label: label)
     }
 
     private static let base: [Session] = [
@@ -65,7 +65,7 @@ enum DemoFinding {
         make("fd-wt", "Worktrees explainer", folder("_experiments", worktree: "branches"), minutesAgo: 1450, .idle),
         make("fd-n2", "Merge the duplicate notes", folder("notes"), minutesAgo: 6, .idle),
         make("fd-t1", "Book the lake cabin", folder("trips"), minutesAgo: 700, .idle),
-        make("fd-h1", "Tidy the downloads", Folder(repo: "Home", repoPath: "/Users/me", label: "Home"),
+        make("fd-h1", "Tidy the downloads", Folder(repo: "Home", repoPath: "/home/me", label: "Home"),
              minutesAgo: 2000, .idle),
         // Only its id as the title, as Claude Code leaves some sessions: shown and prefilled as "Session c0ffee12".
         make(oldID, oldID, folder("scratch"), minutesAgo: 600, .idle)
