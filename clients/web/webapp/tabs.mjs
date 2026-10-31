@@ -5,7 +5,7 @@ import { announce } from './sessionInfo.mjs';
 import { renderNow } from './nowView.mjs';
 import { conversationSearch, queryWords, searchSessions } from './search.mjs';
 import {
-  displayTitle, dotRow, el, errorBanner, folderKey, foldLine, icon, isOpenChoice, projectLine, rowPlace, saveChoice,
+  displayTitle, dotRow, el, errorBanner, folderKey, foldLine, icon, isOpenChoice, rowPlace, saveChoice,
   screenHeader, searchBox, section, sectionLabel, sessionLine,
 } from './rows.mjs';
 
@@ -301,8 +301,9 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
   }
 
   function hitRow(hit) {
+    // The same place line as a session row: the folder label, then tab and pane when open on the Mac.
     const detail = el('span', 'detail stack');
-    detail.append(projectLine(hit.project), snippet(hit.snippet));
+    detail.append(el('span', 'detail place', rowPlace(hit, true)), snippet(hit.snippet));
     return dotRow({
       status: hit.state === 'busy' ? 'working' : 'idle', title: displayTitle(hit.title, hit.id), detail, time: hit.lastActive,
       locked: hit.state === 'open_in_terminal', onClick: () => ui.open(hit),

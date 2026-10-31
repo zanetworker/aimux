@@ -41,8 +41,14 @@ export function isOpen(session, activity) {
   return session.state === 'busy' || session.state === 'open_in_terminal' || session.mac != null || activity?.kind === 'working';
 }
 
+// The clock every order and window is measured against: required, epoch milliseconds.
+function requireNow(now) {
+  if (typeof now !== 'number' || !Number.isFinite(now)) throw new TypeError('now must be a finite time in milliseconds, got ' + String(now));
+}
+
 // Newest first by lastActive (a time after now counts as now), equal times by id.
 export function newestFirst(now) {
+  requireNow(now);
   const t = (s) => Math.min(s.lastActive, now);
   return (a, b) => t(b) - t(a) || compareCodePoints(a.id, b.id);
 }
@@ -58,6 +64,7 @@ export function macOrder(a, b) {
 // The matching open sessions (in Mac order, then those with no pane newest first), then every other
 // match newest first. A query with no words finds nothing.
 export function searchSessions(sessions, query, activity, now) {
+  requireNow(now);
   const words = queryWords(query);
   if (!words.length) return { open: [], other: [] };
   const found = sessions.filter((s) => matches(s, words));

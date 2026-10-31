@@ -267,7 +267,11 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 .segmented { display: flex; padding: 2px; border-radius: 10px; background: var(--t-fill); }
 #tabs .segment { flex: 1; min-height: 32px; border-radius: 8px; font-size: 15px; font-weight: 500; }
 #tabs .segment.selected { background: var(--t-card); box-shadow: 0 1px 3px var(--t-shadow); font-weight: 600; }
-@media (prefers-color-scheme: dark) { #tabs .segment.selected { background: var(--t-grey); } }
+@media (prefers-color-scheme: dark) {
+  .segmented { background: rgba(118, 118, 128, 0.24); }
+  #tabs .segment { color: var(--t-secondary); }
+  #tabs .segment.selected { background: #636366; color: var(--t-text); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
+}
 
 .search-box { position: relative; margin-top: 10px; }
 #tabs .search-box svg.search { position: absolute; left: 11px; top: 50%; width: 18px; height: 18px; transform: translateY(-50%); color: var(--t-secondary); }

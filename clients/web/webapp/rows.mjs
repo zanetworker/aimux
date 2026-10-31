@@ -97,14 +97,6 @@ export function icon(name, cls) {
   return svg;
 }
 
-// "project · rest": each part isolated, the rest optionally in monospace.
-export function projectLine(project, rest, restClass) {
-  const line = el('span', 'detail');
-  line.append(bidi(projectName(project)));
-  if (rest) line.append(' · ', bidi(rest, restClass));
-  return line;
-}
-
 // The session's description as one quiet line under the title (truncated by CSS); null for none.
 export function descriptionNode(text) {
   if (!text) return null;

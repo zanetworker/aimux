@@ -267,7 +267,7 @@ function approvalCard(model, ui, item, inList) {
     b.type = 'button';
     b.disabled = busy;
     b.addEventListener('click', async () => {
-      const pending = model.answer(a, o.optionId);
+      const pending = model.answer(a, o.optionId, session.id);
       ui.rerender(); // shows the buttons disabled while the answer is on its way
       await pending;
       ui.rerender();

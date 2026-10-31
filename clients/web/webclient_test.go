@@ -71,7 +71,7 @@ func TestHandler_ServesModulesAsJavaScript(t *testing.T) {
 func TestHandler_DoesNotServeTests(t *testing.T) {
 	srv := httptest.NewServer(Handler())
 	defer srv.Close()
-	for _, f := range []string{"now.test.mjs", "all.test.mjs", "nowModel.test.mjs", "sessionInfo.test.mjs", "terminal.test.mjs", "markdown.test.mjs", "references.test.mjs", "login.test.mjs", "chatLoad.test.mjs", "queue.test.mjs", "queueView.test.mjs", "chatView.test.mjs", "search.test.mjs", "folders.test.mjs"} {
+	for _, f := range []string{"now.test.mjs", "all.test.mjs", "nowModel.test.mjs", "sessionInfo.test.mjs", "terminal.test.mjs", "markdown.test.mjs", "references.test.mjs", "login.test.mjs", "chatLoad.test.mjs", "queue.test.mjs", "queueView.test.mjs", "chatView.test.mjs", "search.test.mjs", "folders.test.mjs", "nowView.test.mjs"} {
 		if resp, _ := get(t, srv.URL+"/app/"+f); resp.StatusCode != 404 {
 			t.Fatalf("GET /app/%s: %d, want 404", f, resp.StatusCode)
 		}

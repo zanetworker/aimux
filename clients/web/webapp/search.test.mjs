@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { apiDate } from './apiDate.mjs';
 import { deriveActivity } from './now.mjs';
-import { compareCodePoints, conversationSearch, isOpen, isWorking, matches, projectName, queryWords, searchSessions } from './search.mjs';
+import { compareCodePoints, conversationSearch, isOpen, isWorking, matches, newestFirst, projectName, queryWords, searchSessions } from './search.mjs';
 
 const dir = new URL('../../../api/testdata/clients/search/', import.meta.url);
 const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
@@ -112,4 +112,13 @@ test('conversation search: no search capability means unsupported; a failure is 
   await failing.timers[0].fn();
   assert.equal(failing.search.state.error.message, 'offline');
   assert.equal(failing.search.state.searching, false);
+});
+
+test('now is required: a missing or non-finite clock is a clear error, not a silent mis-order', () => {
+  const list = [s('a', { title: 'x', lastActive: 1 })];
+  for (const bad of [undefined, NaN, Infinity, '2026-10-31']) {
+    assert.throws(() => searchSessions(list, 'x', {}, bad), /now must be a finite time in milliseconds/);
+    assert.throws(() => newestFirst(bad), /now must be a finite time in milliseconds/);
+  }
+  assert.deepEqual(searchSessions(list, 'x', {}, 5).other.map((x) => x.id), ['a']);
 });
