@@ -68,6 +68,8 @@ enum DebugHooks {
     }
     /// -openQueueEdit <item id>: open this queued message for editing when the chat opens.
     static var openQueueEdit: String? { UserDefaults.standard.string(forKey: "openQueueEdit") }
+    /// -queueOpen YES: start with the chat's queue unfolded (it starts as one line).
+    static var queueOpen: Bool { UserDefaults.standard.bool(forKey: "queueOpen") }
     /// -chatAnchor top|center|bottom: where a chat opens (default bottom), for screenshots of long replies.
     static var chatAnchor: UnitPoint {
         switch UserDefaults.standard.string(forKey: "chatAnchor") {
@@ -95,6 +97,7 @@ enum DebugHooks {
     static let openStepDetails: Set<Int> = []
     static let chatAnchor = UnitPoint.bottom
     static let openQueueEdit: String? = nil
+    static let queueOpen = false
     #endif
 }
 

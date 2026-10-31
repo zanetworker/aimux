@@ -13,8 +13,9 @@ import { movePosition, queueItems, queueSection } from './queue.mjs';
 //
 // createQueueView({box, errorNode, client: () => queue client (queue.mjs), isTouch, onEditLost(text, hadFocus),
 // onQueue(queue), onGone() (focus elsewhere: a change emptied the queue)}) returns {update(queue), reset()}.
-export function createQueueView({ box, errorNode, client, isTouch = () => false, onEditLost = () => {}, onQueue = () => {}, onGone = () => {} }) {
+export function createQueueView({ box, errorNode, client, isTouch = () => false, onEditLost = () => {}, onQueue = () => {}, onGone = () => {}, open = false }) {
   let queue = null;
+  let expanded = open; // the rows are shown; folded, the queue is one line ("2 queued · next: ...")
   let drawn = '';      // what the section was last drawn from
   let editing = null;  // {id, original, text, row, box (the textarea)}
   let composing = false;
@@ -41,6 +42,7 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
   }
 
   function reset() {
+    expanded = open;
     editing = null;
     composing = false;
     held = null;
@@ -84,7 +86,9 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
     }
     if (!section) section = buildSection();
     section.node.className = 'queue' + (view.state === 'paused' ? ' paused' : '');
-    section.count.textContent = items.length === 1 ? '1 message' : items.length + ' messages';
+    section.count.textContent = items.length + ' queued' + (!expanded && items[0] ? ' · next: ' + items[0].text : '');
+    section.title.setAttribute('aria-expanded', String(expanded));
+    section.list.hidden = !(expanded || editing);
     focusable = new Map();
     section.status.replaceChildren();
     section.status.hidden = !(view.line || view.resume);
@@ -119,10 +123,14 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
     const node = el('section', 'queue');
     node.setAttribute('aria-labelledby', 'queue-heading');
     const head = el('div', 'queue-head');
-    const title = el('h2', 'queue-title', 'Queue');
+    // The one line, as a button: a tap unfolds or folds the rows.
+    const title = el('button', 'queue-title');
+    title.type = 'button';
     title.id = 'queue-heading';
     const count = el('span', 'queue-count');
-    head.append(title, count);
+    title.append(count);
+    title.addEventListener('click', () => { expanded = !expanded; draw('title'); });
+    head.append(title);
     const status = el('div', 'queue-status');
     const list = el('ol', 'queue-list');
     node.append(head, status, list);

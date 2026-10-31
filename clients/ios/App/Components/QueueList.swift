@@ -1,8 +1,9 @@
 import SwiftUI
 import AimuxKit
 
-/// The chat queue under the composer: a heading, the paused reason or waiting note with Resume, the last error,
-/// and one row per message (ChatQueue says what each shows and allows). Drag a row to reorder it, swipe or tap
+/// The chat queue under the composer, out of the way: one line ("2 queued · next: …") that unfolds to one row
+/// per message on a tap, the paused reason or waiting note with Resume (always shown: it needs the person), and
+/// the last error (ChatQueue says what each row shows and allows). Drag a row to reorder it, swipe or tap
 /// its bin to delete it, tap a waiting message to edit it in place.
 ///
 /// The open edit lives here, keyed by its message id, and a queue update never rewrites it: only when its message
@@ -17,6 +18,8 @@ struct QueueList: View {
     var focusComposer: () -> Void = {}
 
     @State private var edit: QueueEdit?
+    /// The rows are shown; folded, the queue is its one heading line.
+    @State private var expanded = DebugHooks.queueOpen
     /// `-openQueueEdit` was applied (once, when its message first shows).
     @State private var openedDebugEdit = false
     /// Another row was tapped while this edit had unsaved changes.
@@ -42,7 +45,7 @@ struct QueueList: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("queueError")
             }
-            if section.visible { list }
+            if section.visible && (expanded || edit != nil) { list }
         }
         .padding(.horizontal, section.visible ? 14 : 0)
         .padding(.vertical, section.visible ? 10 : 0)
@@ -51,6 +54,7 @@ struct QueueList: View {
         .onChange(of: model.queue) {
             closeLostEdit()
             openDebugEdit()
+            if rows.isEmpty { expanded = false }
         }
         .onAppear(perform: openDebugEdit)
         .onChange(of: model.queueError) { _, error in
@@ -59,15 +63,7 @@ struct QueueList: View {
     }
 
     private var heading: some View {
-        HStack(spacing: 6) {
-            Text("Queue").font(.subheadline.weight(.semibold))
-            Text(rows.count == 1 ? "1 message" : "\(rows.count) messages")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        QueueHeading(count: rows.count, next: rows.first?.text, expanded: $expanded)
     }
 
     /// The reason (or note) and Resume side by side; stacked at accessibility text sizes so neither is cut.
@@ -284,6 +280,7 @@ struct QueueList: View {
         guard !openedDebugEdit, let id = DebugHooks.openQueueEdit,
               let row = rows.first(where: { $0.id == id }) else { return }
         openedDebugEdit = true
+        expanded = true
         open(row)
     }
 }
@@ -335,5 +332,40 @@ extension View {
     /// The row's hint, only for a message that can be edited.
     @ViewBuilder fileprivate func editHint(_ canEdit: Bool) -> some View {
         if canEdit { accessibilityHint("Edits this queued message") } else { self }
+    }
+}
+
+/// The queue's one line: "2 queued · next: Check the docs links" and a chevron; a tap unfolds or folds the rows.
+struct QueueHeading: View {
+    let count: Int
+    let next: String?
+    @Binding var expanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text("\(count) queued").font(.subheadline.weight(.semibold))
+                if !expanded, let next {
+                    Text("· next: " + next)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(count == 1 ? "1 queued message" : "\(count) queued messages")
+        .accessibilityValue(expanded ? "Shown" : "Hidden")
+        .accessibilityHint(expanded ? "Hides the queued messages" : "Shows the queued messages")
+        .accessibilityIdentifier("queueHeading")
     }
 }

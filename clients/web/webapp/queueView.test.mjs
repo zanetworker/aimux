@@ -62,7 +62,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 const item = (id, text, state = 'waiting') => ({ id, text, state, created: '2026-03-02T09:01:00Z' });
 const running = (...items) => ({ state: 'running', items });
 
-async function setup({ touch = false } = {}) {
+async function setup({ touch = false, folded = false } = {}) {
   globalThis.document = fakeDocument();
   const { createQueueView } = await import('./queueView.mjs');
   const box = document.createElement('div');
@@ -79,6 +79,7 @@ async function setup({ touch = false } = {}) {
   const view = createQueueView({
     box, errorNode, client: () => client, isTouch: () => touch,
     onEditLost: (text, hadFocus) => { lost.push(text); lostFocus.push(hadFocus); }, onQueue: (q) => queues.push(q),
+    open: !folded,
   });
   return { view, box, errorNode, lost, lostFocus, queues, calls, answers };
 }
@@ -389,4 +390,17 @@ test('editOffersNode: two lost edits are two offers, each with its own buttons',
   fire(one(offers[0], cls('edit-offer-dismiss')), 'click');
   assert.deepEqual(queued, [1]);
   assert.deepEqual(dismissed, [0]);
+});
+
+test('the queue is one line until its heading is clicked', async () => {
+  const { view, box } = await setup({ folded: true });
+  view.update(running(item('q1', 'Check the docs links'), item('q2', 'b')));
+  const title = one(box, cls('queue-title'));
+  assert.equal(one(box, cls('queue-count')).textContent, '2 queued · next: Check the docs links');
+  assert.equal(one(box, cls('queue-list')).hidden, true);
+  assert.equal(title.attrs['aria-expanded'], 'false');
+  fire(title, 'click');
+  assert.equal(one(box, cls('queue-list')).hidden, false);
+  assert.equal(one(box, cls('queue-count')).textContent, '2 queued');
+  assert.equal(title.attrs['aria-expanded'], 'true');
 });

@@ -6,11 +6,26 @@ final class QueueUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
     @MainActor
-    private func launch(_ arguments: [String]) -> XCUIApplication {
+    /// The queue starts folded to one line; these tests work on its rows, so it starts unfolded unless `folded`.
+    private func launch(_ arguments: [String], folded: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demo", "chat-queue"] + arguments + ["-serverAddress", ""]
+            + (folded ? [] : ["-queueOpen", "YES"])
         app.launch()
         return app
+    }
+
+    @MainActor
+    func testTheQueueIsOneLineUntilTapped() {
+        let app = launch(["-openChat", "demo-2"], folded: true)
+
+        let heading = app.buttons["queueHeading"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 10))
+        XCTAssertFalse(row(app, "dq1").exists, "folded: no rows")
+        heading.tap()
+        XCTAssertTrue(row(app, "dq1").waitForExistence(timeout: 5))
+        heading.tap()
+        XCTAssertTrue(row(app, "dq1").waitForNonExistence(timeout: 5))
     }
 
     @MainActor
@@ -88,7 +103,7 @@ final class QueueUITests: XCTestCase {
         app.buttons["queueSwipeDelete"].tap()
 
         XCTAssertTrue(target.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["2 messages"].exists)
+        XCTAssertEqual(app.buttons["queueHeading"].label, "2 queued messages")
     }
 
     @MainActor

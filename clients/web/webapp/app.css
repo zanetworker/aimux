@@ -616,9 +616,12 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 #queue:empty { display: none; }
 .queue { border-radius: 18px; background: var(--c-panel); padding: 8px 0 4px; }
 .queue-head { display: flex; align-items: baseline; gap: 8px; padding: 0 14px 4px; }
-.queue-title { font-size: 13px; font-weight: 600; margin: 0; }
-.queue-title:focus { outline: none; }
-.queue-count { font-size: 13px; color: var(--t-secondary); font-variant-numeric: tabular-nums; }
+.queue-title { font: inherit; font-size: 13px; font-weight: 600; margin: 0; padding: 0; min-height: 44px; flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 6px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.queue-title::after { content: '›'; margin-left: auto; color: var(--t-secondary); transition: transform .15s; }
+.queue-title[aria-expanded="true"]::after { transform: rotate(90deg); }
+.queue-title:focus-visible { outline: 2px solid var(--t-secondary); outline-offset: 2px; }
+.queue-count { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-status { display: flex; align-items: center; gap: 10px; padding: 2px 14px 6px; }
 .queue-line { flex: 1; min-width: 0; font-size: 13px; color: var(--t-secondary); overflow-wrap: anywhere; }
 #session .queue-resume { flex-shrink: 0; padding: 6px 14px; border-radius: 999px; font-size: 15px; font-weight: 600; background: var(--t-text); color: var(--c-bg); }
