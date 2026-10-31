@@ -1,14 +1,13 @@
 import Foundation
 
-/// The chat's Next bar target: the first other session in Now's Needs you, else in Working.
-public func nextSession(in view: NowView, excluding id: String) -> NowItem? {
+/// The chat's Next bar target: the first other session in Now's Needs you, else the first working one
+/// (Pinned, the Mac's windows, then Elsewhere).
+public func nextSession(in view: NowView, excluding id: String, activity: [String: Activity] = [:]) -> NowItem? {
     if let item = view.needsYou.first(where: { $0.session.id != id }) { return item }
-    let working: [NowItem]
-    switch view.working {
-    case .list(let items): working = items
-    case .groups(let groups, _): working = groups.flatMap(\.items)
-    }
-    return working.first { $0.session.id != id }
+    let listed = view.pinned.map(\.session) + view.windows.flatMap { $0.tabs.flatMap(\.sessions) }
+        + view.elsewhere.flatMap(\.sessions)
+    return listed.first { $0.id != id && isWorking($0, activity: activity[$0.id] ?? .none) }
+        .map { NowItem(session: $0, activity: activity[$0.id] ?? .none) }
 }
 
 /// The colour of the chat header's dot.

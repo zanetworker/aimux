@@ -33,7 +33,9 @@ struct ChatContent: View {
         context.now.listedSession(session.id)?.displayTitle ?? model.session?.displayTitle ?? session.displayTitle
     }
     private var project: String { SessionRowFormat().projectName(model.session?.project ?? session.project) }
-    private var next: NowItem? { nextSession(in: context.now.view, excluding: session.id) }
+    private var next: NowItem? {
+        nextSession(in: context.now.view, excluding: session.id, activity: context.now.activity)
+    }
 
     var body: some View {
         ScrollView {

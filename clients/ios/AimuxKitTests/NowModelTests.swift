@@ -100,7 +100,7 @@ private func makeDefaults() -> (UserDefaults, String) {
 @MainActor
 private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: UserDefaults) -> NowModel {
     let list = SessionListModel(source: StubSessions(rows), cache: nil)
-    return NowModel(list: list, source: activity, defaults: defaults, now: { now })
+    return NowModel(list: list, source: activity, now: { now })
 }
 
 @MainActor @Suite struct NowModelTests {
@@ -255,7 +255,7 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         await model.refresh()
 
         #expect(model.view.needsYou.map(\.session.id) == ["ok"])
-        #expect(model.view.working.itemIDs == ["gone", "held", "offline"].sorted())
+        #expect(model.view.elsewhere.flatMap(\.sessions).map(\.id).sorted() == ["gone", "held", "offline"])
     }
 
     @Test func answeringRemovesTheCard() async {
@@ -357,8 +357,8 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         let model = makeModel([row("a", .busy), row("m", .openInTerminal, ago: 5000)], activity, defaults)
         let refresh = Task { await model.refresh() }
         await spin { activity.requestCount == 1 }  // the event read is still out: the list shows already
-        #expect(model.view.onMac.map(\.id) == ["m"])
-        #expect(model.view.summary.working == 1)
+        #expect(model.view.open == 2)
+        #expect(model.view.working == 1)
         await gate.open()
         await refresh.value
     }
@@ -374,27 +374,19 @@ private func makeModel(_ rows: [Session], _ activity: StubActivity, _ defaults: 
         #expect(activity.sent.isEmpty)
     }
 
-    @Test func seenClearsFinished() async {
+    @Test func queryAndWorkingChipNarrowTheView() async {
         let (defaults, suite) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
-        let activity = StubActivity()
-        activity.pages["a"] = page([event(1, .turnDone, .turnDone(stopReason: "end_turn"), ago: 60)])
-        let model = makeModel([row("a")], activity, defaults)
+        let model = makeModel([row("a", .busy), row("b", .openInTerminal)], StubActivity(), defaults)
         await model.refresh()
-        #expect(model.view.finished.map(\.session.id) == ["a"])
+        #expect(model.view.elsewhere.flatMap(\.sessions).map(\.id).sorted() == ["a", "b"])
 
-        model.markSeen("a")
+        model.workingOnly = true
+        #expect(model.view.elsewhere.flatMap(\.sessions).map(\.id) == ["a"])
+        #expect(model.view.open == 2, "the counts stay whole")
 
-        #expect(model.view.finished.isEmpty)
-        let reloaded = makeModel([row("a")], activity, defaults)
-        await reloaded.refresh()
-        #expect(reloaded.view.finished.isEmpty)
-    }
-}
-
-private extension WorkingSection {
-    var itemIDs: [String] {
-        if case .list(let items) = self { return items.map(\.session.id).sorted() }
-        return []
+        model.workingOnly = false
+        model.query = "T b"
+        #expect(model.view.elsewhere.flatMap(\.sessions).map(\.id) == ["b"])
     }
 }

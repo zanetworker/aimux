@@ -5,40 +5,44 @@ import Testing
 @Suite struct NextSessionTests {
     private let now = Date(timeIntervalSince1970: 1_792_951_200)
 
-    private func item(_ id: String, _ activity: Activity = .none) -> NowItem {
-        NowItem(session: Session(id: id, title: id, project: "/p", lastActive: now, state: .busy), activity: activity)
+    private func item(_ id: String, _ activity: Activity = .none, state: SessionState = .busy) -> NowItem {
+        NowItem(session: Session(id: id, title: id, project: "/p", lastActive: now, state: state), activity: activity)
     }
 
-    private func view(needsYou: [NowItem], working: WorkingSection) -> NowView {
-        NowView(lastOnMac: nil, lastOnMacAt: nil, pinned: [], needsYou: needsYou, finished: [], working: working,
-                onMac: [], onMacTotal: 0,
-                summary: NowSummary(needYou: needsYou.count, working: 0, onMac: 0))
+    private func group(_ ids: [String]) -> FolderGroup {
+        FolderGroup(label: "p", sessions: ids.map { item($0).session })
+    }
+
+    private func view(needsYou: [NowItem] = [], pinned: [NowItem] = [], windows: [NowWindow] = [],
+                      elsewhere: [FolderGroup] = []) -> NowView {
+        NowView(needsYou: needsYou, pinned: pinned, windows: windows, hiddenTabs: 0, elsewhere: elsewhere, other: [],
+                working: 0, open: 0)
     }
 
     private let approval = Activity.needsApproval(Approval(approvalId: "a", title: "t", options: [], command: nil))
 
     @Test func needsYouComesBeforeWorking() {
-        let next = nextSession(in: view(needsYou: [item("n1", approval)], working: .list([item("w1")])),
-                               excluding: "x")
+        let next = nextSession(in: view(needsYou: [item("n1", approval)], elsewhere: [group(["w1"])]), excluding: "x")
         #expect(next?.session.id == "n1")
     }
 
     @Test func skipsTheOpenSession() {
-        let next = nextSession(in: view(needsYou: [item("self", approval)], working: .list([item("w1")])),
+        let next = nextSession(in: view(needsYou: [item("self", approval)], elsewhere: [group(["w1"])]),
                                excluding: "self")
         #expect(next?.session.id == "w1")
     }
 
-    @Test func readsWorkingGroups() {
-        let group = ProjectGroup(project: "/p", name: "p", count: 2, newest: item("self"),
-                                 items: [item("self"), item("w2")])
-        let next = nextSession(in: view(needsYou: [], working: .groups([group], more: nil)), excluding: "self")
+    @Test func readsTheMacWindowsInOrderAndOnlyWorkingSessions() {
+        let tab = NowTab(index: 1, name: "t", panes: 2, working: 1, open: true,
+                         sessions: [item("self").session, item("idle", state: .openInTerminal).session,
+                                    item("w2").session])
+        let window = NowWindow(id: "w", name: "Window 1", tabs: [tab])
+        let next = nextSession(in: view(windows: [window]), excluding: "self")
         #expect(next?.session.id == "w2")
     }
 
     @Test func nilWhenNothingElse() {
-        #expect(nextSession(in: view(needsYou: [item("self", approval)], working: .list([])),
-                            excluding: "self") == nil)
+        #expect(nextSession(in: view(needsYou: [item("self", approval)]), excluding: "self") == nil)
     }
 }
 

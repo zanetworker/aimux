@@ -267,30 +267,6 @@ private func json(_ text: String) -> Data { Data(text.utf8) }
     }
 }
 
-@Suite struct LocalSearchTests {
-    private func session(_ id: String, title: String, description: String? = nil, project: String = "/src/x",
-                         prompt: String? = nil) -> Session {
-        Session(id: id, title: title, project: project, lastActive: Date(timeIntervalSince1970: 0), state: .idle,
-                lastPrompt: prompt, description: description)
-    }
-
-    @Test func titlesAndDescriptionsComeFirstInListOrder() {
-        let sessions = [
-            session("a", title: "Garden notes", project: "/src/login"),
-            session("b", title: "Fix the redirect", description: "Finds why the login page loops."),
-            session("c", title: "Login page", prompt: "x"),
-            session("d", title: "Other", prompt: "check the login")
-        ]
-        #expect(localMatches(sessions, query: "login").map(\.id) == ["b", "c", "a", "d"])
-    }
-
-    @Test func everyWordMustMatchAndEmptyMatchesNothing() {
-        let sessions = [session("a", title: "Login", description: "loops back"), session("b", title: "Login")]
-        #expect(localMatches(sessions, query: "LOGIN loops").map(\.id) == ["a"])
-        #expect(localMatches(sessions, query: "   ").isEmpty)
-    }
-}
-
 @Suite struct SinceTextTests {
     private let format = SessionRowFormat(locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "UTC")!)
     // Sunday 2026-10-25 18:00:00 UTC

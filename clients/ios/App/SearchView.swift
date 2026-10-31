@@ -15,7 +15,8 @@ struct SearchScreen: View {
         NavigationStack(path: $path) {
             List {
                 if !SessionFilter(query: query).words.isEmpty {
-                    let local = localMatches(list.sessions, query: query)
+                    let found = searchSessions(list.sessions, query: query, now: .now)
+                    let local = found.open + found.other
                     if !local.isEmpty {
                         Section {
                             ForEach(local) { session in

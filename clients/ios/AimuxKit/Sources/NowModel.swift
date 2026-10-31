@@ -41,28 +41,28 @@ public final class NowModel {
     private let list: SessionListModel
     private let source: ActivitySource
     private let meta: (any SessionMetaSource)?
-    private let defaults: UserDefaults
     private let now: @Sendable () -> Date
-    private var activity: [String: Activity] = [:]
+    /// What each recent session is doing, as last read.
+    public private(set) var activity: [String: Activity] = [:]
+    /// The search box's text; Now narrows to the sessions matching every word.
+    public var query = "" { didSet { if query != oldValue { rebuild() } } }
+    /// The Working chip.
+    public var workingOnly = false { didSet { if workingOnly != oldValue { rebuild() } } }
     private var answered: Set<String> = []
-    private var seen: [String: Date]
+    private var held: HeldPlaces?
     /// Refreshes run one after another, so an older result can never land after a newer one.
     private var tail: Task<Void, Never>?
 
-    private static let seenKey = "now.seen"
     private static let recentWindow: TimeInterval = 900
     private static let snapshotLimit = 10
 
     public init(list: SessionListModel, source: ActivitySource, meta: (any SessionMetaSource)? = nil,
-                defaults: UserDefaults = .standard, now: @escaping @Sendable () -> Date = { .now }) {
+                now: @escaping @Sendable () -> Date = { .now }) {
         self.list = list
         self.source = source
         self.meta = meta
-        self.defaults = defaults
         self.now = now
-        let stored = defaults.dictionary(forKey: Self.seenKey) as? [String: Double] ?? [:]
-        seen = stored.mapValues { Date(timeIntervalSince1970: $0) }
-        view = rankNow(sessions: [], activity: [:], seen: [:], now: now())
+        view = .empty
     }
 
     public func refresh() async {
@@ -235,12 +235,6 @@ public final class NowModel {
         rebuild()
     }
 
-    public func markSeen(_ id: String) {
-        seen[id] = now()
-        defaults.set(seen.mapValues(\.timeIntervalSince1970), forKey: Self.seenKey)
-        rebuild()
-    }
-
     private func isCandidate(_ session: Session, now: Date) -> Bool {
         switch session.state {
         case .openInTerminal: false
@@ -256,6 +250,8 @@ public final class NowModel {
                 shown[id] = Activity.none
             }
         }
-        view = rankNow(sessions: list.sessions, activity: shown, seen: seen, now: now(), lastOnMac: list.lastOnMac)
+        let kept = holdPlaces(previous: held, current: list.sessions, now: now())
+        held = kept.held
+        view = rankNow(sessions: kept.sessions, activity: shown, now: now(), query: query, workingOnly: workingOnly)
     }
 }

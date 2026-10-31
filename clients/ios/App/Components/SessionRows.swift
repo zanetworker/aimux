@@ -166,7 +166,21 @@ struct StepLine: View {
     }
 }
 
-/// A Last on your Mac or Pinned row: the session's own dot, its description, then "project · step" while it
+/// A session with what it is doing, for a Pinned or Mac row.
+struct PlacedItem {
+    let session: Session
+    let activity: Activity
+    let isWorking: Bool
+}
+
+extension Activity {
+    var isWorking: Bool {
+        if case .working = self { return true }
+        return false
+    }
+}
+
+/// A Pinned or Mac-window row: the session's own dot, its description, then "project · step" while it
 /// works, else the project; the lock when it is open read-only on the Mac.
 struct PlacedRow: View {
     let item: PlacedItem

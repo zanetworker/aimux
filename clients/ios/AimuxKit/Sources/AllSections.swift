@@ -1,5 +1,23 @@
 import Foundation
 
+/// A folder row of the App's All screen (until the screens are rebuilt on `folderTree`).
+public struct ProjectGroup: Equatable, Sendable {
+    public let project: String
+    /// The folder's last path component.
+    public let name: String
+    public let count: Int
+    public let newest: NowItem
+    public let items: [NowItem]
+
+    public init(project: String, name: String, count: Int, newest: NowItem, items: [NowItem]) {
+        self.project = project
+        self.name = name
+        self.count = count
+        self.newest = newest
+        self.items = items
+    }
+}
+
 public enum AllSort: String, CaseIterable, Sendable {
     case newest, mostActive, project
 }

@@ -38,6 +38,62 @@ public enum SessionState: Equatable, Hashable, Sendable, Codable {
     public var canContinue: Bool { self == .idle }
 }
 
+/// Where a session ran, named by the server (repo, worktree, sub-folder and the label to print).
+public struct Folder: Codable, Equatable, Hashable, Sendable {
+    public let repo: String
+    public let repoPath: String
+    public let worktree: String?
+    public let sub: String?
+    public let label: String
+
+    public init(repo: String, repoPath: String, worktree: String? = nil, sub: String? = nil, label: String) {
+        self.repo = repo
+        self.repoPath = repoPath
+        self.worktree = worktree
+        self.sub = sub
+        self.label = label
+    }
+}
+
+public struct MacWindow: Codable, Equatable, Hashable, Sendable {
+    public let id: String
+    public let index: Int
+    public let name: String
+
+    public init(id: String, index: Int, name: String) {
+        self.id = id
+        self.index = index
+        self.name = name
+    }
+}
+
+public struct MacTab: Codable, Equatable, Hashable, Sendable {
+    public let index: Int
+    public let name: String
+
+    public init(index: Int, name: String) {
+        self.index = index
+        self.name = name
+    }
+}
+
+/// Where a session's claude sits in iTerm2 on the Mac; `panes` counts the tab's panes, shells included.
+public struct MacPlace: Codable, Equatable, Hashable, Sendable {
+    public let window: MacWindow
+    public let tab: MacTab
+    public let pane: Int
+    public let panes: Int
+    public let lastInFront: Bool
+
+    public init(window: MacWindow, tab: MacTab, pane: Int, panes: Int, lastInFront: Bool) {
+        self.window = window
+        self.tab = tab
+        self.pane = pane
+        self.panes = panes
+        self.lastInFront = lastInFront
+    }
+}
+
 public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
     public let id: String
     public let provider: String
@@ -52,9 +108,16 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
     public let description: String?
     /// Pinned to the top of Now (aimux's star, shared with the TUI); false from older servers.
     public let pinned: Bool
+    /// Where it ran; absent from older servers.
+    public let folder: Folder?
+    /// Its iTerm2 pane on the Mac; absent when it has none, iTerm2 is not readable, and from older servers.
+    public let mac: MacPlace?
+    /// Open in a terminal whose Claude the registry calls busy; false when absent.
+    public let working: Bool
 
     public init(id: String, provider: String = "claude", title: String, project: String, lastActive: Date,
-                state: SessionState, lastPrompt: String? = nil, description: String? = nil, pinned: Bool = false) {
+                state: SessionState, lastPrompt: String? = nil, description: String? = nil, pinned: Bool = false,
+                folder: Folder? = nil, mac: MacPlace? = nil, working: Bool = false) {
         self.id = id
         self.provider = provider
         self.title = title
@@ -64,10 +127,13 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
         self.lastPrompt = lastPrompt
         self.description = description
         self.pinned = pinned
+        self.folder = folder
+        self.mac = mac
+        self.working = working
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, provider, title, project, lastActive, state, lastPrompt, description, pinned
+        case id, provider, title, project, lastActive, state, lastPrompt, description, pinned, folder, mac, working
     }
 
     public init(from decoder: Decoder) throws {
@@ -81,6 +147,9 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
         lastPrompt = try container.decodeIfPresent(String.self, forKey: .lastPrompt)
         description = try? container.decodeIfPresent(String.self, forKey: .description)
         pinned = (try? container.decodeIfPresent(Bool.self, forKey: .pinned)) ?? false
+        folder = try? container.decodeIfPresent(Folder.self, forKey: .folder)
+        mac = try? container.decodeIfPresent(MacPlace.self, forKey: .mac)
+        working = (try? container.decodeIfPresent(Bool.self, forKey: .working)) ?? false
     }
 
     /// The title to show: "Session " + the id's first 8 characters when the title is only the id.
@@ -96,7 +165,15 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
     /// a nil `pinned` keeps the pin.
     public func taking(title: String, description: String?, pinned: Bool?) -> Session {
         Session(id: id, provider: provider, title: title, project: project, lastActive: lastActive, state: state,
-                lastPrompt: lastPrompt, description: description, pinned: pinned ?? self.pinned)
+                lastPrompt: lastPrompt, description: description, pinned: pinned ?? self.pinned,
+                folder: folder, mac: mac, working: working)
+    }
+
+    /// This session with another Mac place (or none).
+    public func placed(_ place: MacPlace?) -> Session {
+        Session(id: id, provider: provider, title: title, project: project, lastActive: lastActive, state: state,
+                lastPrompt: lastPrompt, description: description, pinned: pinned,
+                folder: folder, mac: place, working: working)
     }
 }
 

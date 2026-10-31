@@ -85,24 +85,12 @@ private func row(_ id: String, _ state: SessionState = .idle, ago: TimeInterval 
 @MainActor
 private func makeModel(_ list: SessionList, meta: MetaStub) -> NowModel {
     let sessions = SessionListModel(source: ListStub(list), cache: nil)
-    let defaults = UserDefaults(suiteName: "NowModelMetaTests-\(UUID().uuidString)")!
-    return NowModel(list: sessions, source: NoActivity(), meta: meta, defaults: defaults, now: { now })
+    return NowModel(list: sessions, source: NoActivity(), meta: meta, now: { now })
 }
 
 @MainActor @Suite struct NowModelMetaTests {
     private func spin(until condition: () -> Bool) async {
         for _ in 0..<2000 where !condition() { await Task.yield() }
-    }
-
-    @Test func lastOnMacFromTheListLeadsNow() async {
-        let list = SessionList(sessions: [row("a", .openInTerminal, ago: 3600), row("b", pinned: true)],
-                               lastOnMac: LastOnMac(id: "a", at: now.addingTimeInterval(-240)))
-        let model = makeModel(list, meta: MetaStub())
-        await model.refresh()
-        #expect(model.view.lastOnMac?.session.id == "a")
-        #expect(model.view.lastOnMacAt == now.addingTimeInterval(-240))
-        #expect(model.view.pinned.map(\.session.id) == ["b"])
-        #expect(model.view.onMacTotal == 0, "shown once")
     }
 
     @Test func pinMovesTheSessionAndUnpinMovesItBack() async {

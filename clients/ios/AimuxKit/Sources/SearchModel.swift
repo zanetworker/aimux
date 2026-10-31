@@ -55,25 +55,3 @@ public final class SearchModel {
         }
     }
 }
-
-/// Search on this phone: sessions whose title, description, folder and last prompt hold every word of the query;
-/// those matched by title and description alone first, the list order kept inside each part.
-public func localMatches(_ sessions: [Session], query: String) -> [Session] {
-    let words = SessionFilter(query: query).words
-    guard !words.isEmpty else { return [] }
-    func matches(_ parts: [String]) -> Bool {
-        let haystack = parts.joined(separator: "\n").lowercased()
-        return words.allSatisfy { haystack.contains($0) }
-    }
-    var named: [Session] = []
-    var rest: [Session] = []
-    for session in sessions {
-        let own = [session.title, session.description ?? ""]
-        if matches(own) {
-            named.append(session)
-        } else if matches(own + [session.project, session.lastPrompt ?? ""]) {
-            rest.append(session)
-        }
-    }
-    return named + rest
-}

@@ -10,224 +10,170 @@ public struct NowItem: Equatable, Sendable {
     }
 }
 
-/// A session placed in the Last on your Mac row or in Pinned: it keeps its own status (the dot).
-public struct PlacedItem: Equatable, Sendable {
-    public let session: Session
-    public let activity: Activity
-    /// The Working rules select it: a green dot and its live step.
-    public let isWorking: Bool
-}
-
-/// A folder row on Now: a working project's sessions. It starts expanded; collapsing is the view's state.
-public struct ProjectGroup: Equatable, Sendable {
-    public let project: String
-    /// The folder's last path component.
+/// One tab of an iTerm2 window: the sessions listed for it, in pane order.
+public struct NowTab: Equatable, Sendable {
+    public let index: Int
     public let name: String
-    public let count: Int
-    public let newest: NowItem
-    /// The project's working sessions, newest first, for expanding the group in place.
-    public let items: [NowItem]
-
-    public init(project: String, name: String, count: Int, newest: NowItem, items: [NowItem]) {
-        self.project = project
-        self.name = name
-        self.count = count
-        self.newest = newest
-        self.items = items
-    }
-}
-
-public struct MoreProjects: Equatable, Sendable {
-    public let projects: Int
-    public let sessions: Int
-}
-
-public enum WorkingSection: Equatable, Sendable {
-    case list([NowItem])
-    case groups([ProjectGroup], more: MoreProjects?)
-}
-
-public struct NowSummary: Equatable, Sendable {
-    public let needYou: Int
+    /// The panes the tab has on the Mac, shells included; not the number of sessions listed.
+    public let panes: Int
+    /// The working sessions it lists.
     public let working: Int
-    public let onMac: Int
+    /// Starts unfolded.
+    public let open: Bool
+    public let sessions: [Session]
+}
+
+public struct NowWindow: Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let tabs: [NowTab]
+}
+
+/// Sessions sharing a folder label, newest first.
+public struct FolderGroup: Equatable, Sendable {
+    public let label: String
+    public let sessions: [Session]
 }
 
 public struct NowView: Equatable, Sendable {
-    /// The session last in front on the Mac, unless it needs you; nil when unknown or older than 12 hours.
-    public let lastOnMac: PlacedItem?
-    /// When it was seen there (clamped to now); nil when the row is hidden.
-    public let lastOnMacAt: Date?
-    /// Pinned sessions other than the Last on your Mac one and those in Needs you, newest first.
-    public let pinned: [PlacedItem]
     public let needsYou: [NowItem]
-    public let finished: [NowItem]
-    public let working: WorkingSection
-    public let onMac: [Session]
-    /// `onMac` grouped by project, the folder with the newest session first.
-    public var onMacFolders: [ProjectGroup] = []
-    public let onMacTotal: Int
-    public let summary: NowSummary
+    public let pinned: [NowItem]
+    public let windows: [NowWindow]
+    /// Tabs the query or Working chip left empty.
+    public let hiddenTabs: Int
+    public let elsewhere: [FolderGroup]
+    /// With a query: matching sessions that are not open.
+    public let other: [Session]
+    /// All sessions, before the query and Working chip.
+    public let working: Int
+    public let open: Int
+
+    public static let empty = NowView(needsYou: [], pinned: [], windows: [], hiddenTabs: 0, elsewhere: [], other: [],
+                                      working: 0, open: 0)
 }
 
-/// The windows and caps of the shared ranking rules (api/testdata/clients/README.md).
-private enum Rules {
-    static let recent: TimeInterval = 900
-    static let flatWorkingLimit = 5
-    static let onMacLimit = 8
-    static let onMacCollapseAbove = 5
-    static let lastOnMacWindow: TimeInterval = 12 * 3600
+private let recentFailure: TimeInterval = 900
+
+/// Working: busy, working activity, or the server's `working` flag.
+func isWorking(_ session: Session, activity: Activity) -> Bool {
+    if session.state == .busy || session.working { return true }
+    if case .working = activity { return true }
+    return false
 }
 
-private func newestEvent(_ lhs: (item: NowItem, time: Date), _ rhs: (item: NowItem, time: Date)) -> Bool {
-    lhs.time == rhs.time ? lhs.item.session.id < rhs.item.session.id : lhs.time > rhs.time
+/// The last path component of a project, trailing slashes trimmed first.
+func projectName(_ project: String) -> String {
+    var trimmed = Substring(project)
+    while trimmed.hasSuffix("/") { trimmed = trimmed.dropLast() }
+    let name = trimmed.split(separator: "/", omittingEmptySubsequences: true).last
+    return name.map(String.init) ?? project
 }
 
-/// Ranks Now by the shared rules (api/testdata/clients/README.md): Last on your Mac and Pinned take their
-/// sessions first, so the sections below never repeat them; Needs you is never moved.
-public func rankNow(sessions: [Session], activity: [String: Activity], seen: [String: Date], now: Date,
-                    lastOnMac: LastOnMac? = nil) -> NowView {
-    let ranking = Ranking(sessions: sessions, activity: activity, now: now)
-    let found = ranking.sort(seen: seen)
-    let needsYou = found.approvals + found.failures.map(\.item)
-    // Counted before Last on your Mac and Pinned take their sessions: the header is an overview of state.
-    let summary = NowSummary(needYou: needsYou.count, working: found.working.count, onMac: found.terminals.count)
+/// Ranks Now by the shared rules (api/testdata/clients/README.md): Needs you, Pinned, the Mac's windows,
+/// Elsewhere and, with a query, Other sessions. A session appears once, in the first section that takes it.
+public func rankNow(sessions: [Session], activity: [String: Activity], now: Date, query: String = "",
+                    workingOnly: Bool = false) -> NowView {
+    let ranking = Ranking(activity: activity, now: now)
+    let words = queryWords(query)
+    let hasQuery = !words.isEmpty
 
-    let placed = ranking.place(lastOnMac: lastOnMac, working: Set(found.working.map(\.session.id)),
-                               urgent: Set(needsYou.map(\.session.id)))
-    let taken = placed.taken
-    let finished = found.finishes.filter { !taken.contains($0.item.session.id) }.sorted(by: newestEvent).map(\.item)
-    let working = found.working.filter { !taken.contains($0.session.id) }
-        .sorted { ranking.newestFirst($0.session, $1.session) }
-    let onMac = found.terminals.filter { !taken.contains($0.id) }.sorted(by: ranking.newestFirst)
-    let showOnMac = needsYou.count + finished.count + working.count <= Rules.onMacCollapseAbove
-    let shownOnMac = showOnMac ? Array(onMac.prefix(Rules.onMacLimit)) : []
+    let needsYouAll = ranking.needsYou(sessions)
+    let urgent = Set(needsYouAll.map(\.session.id))
+    let needsYou = needsYouAll.filter { matches($0.session, words: words) }
+    let rest = sessions.filter { !urgent.contains($0.id) }
+    let wanted: (Session) -> Bool = { matches($0, words: words) && (!workingOnly || ranking.isWorking($0)) }
 
+    let pinned = rest.filter { $0.pinned && $0.mac == nil }
+    let placed = rest.filter { $0.mac != nil }
+    let unpinned = rest.filter { !($0.pinned && $0.mac == nil) }
+    let elsewhere = unpinned.filter { $0.mac == nil && ranking.isOpen($0) }
+    let other = unpinned.filter { !ranking.isOpen($0) }
+
+    let (windows, hidden) = ranking.windows(placed, words: words, wanted: wanted)
     return NowView(
-        lastOnMac: placed.last,
-        lastOnMacAt: placed.lastAt,
-        pinned: placed.pinned,
         needsYou: needsYou,
-        finished: finished,
-        working: workingSection(working, lastActive: ranking.lastActive),
-        onMac: shownOnMac,
-        onMacFolders: byProject(shownOnMac.map { NowItem(session: $0, activity: activity[$0.id] ?? .none) }),
-        onMacTotal: onMac.count,
-        summary: summary
+        pinned: pinned.filter(wanted).sorted(by: ranking.newestFirst).map(ranking.item),
+        windows: windows,
+        hiddenTabs: hidden,
+        elsewhere: ranking.groups(elsewhere.filter(wanted)),
+        other: hasQuery && !workingOnly ? other.filter(wanted).sorted(by: ranking.newestFirst) : [],
+        working: sessions.filter(ranking.isWorking).count,
+        open: sessions.filter(ranking.isOpen).count
     )
 }
 
-/// Every session in the first section whose rule it matches (Needs you, Finished, Working, On your Mac).
-private struct Found {
-    var approvals: [NowItem] = []
-    var failures: [(item: NowItem, time: Date)] = []
-    var finishes: [(item: NowItem, time: Date)] = []
-    var working: [NowItem] = []
-    var terminals: [Session] = []
-}
-
-private struct Placement {
-    let last: PlacedItem?
-    let lastAt: Date?
-    let pinned: [PlacedItem]
-    var taken: Set<String> { Set(([last].compactMap { $0 } + pinned).map(\.session.id)) }
-}
-
 private struct Ranking {
-    let sessions: [Session]
     let activity: [String: Activity]
     let now: Date
 
+    func current(_ session: Session) -> Activity { activity[session.id] ?? .none }
+    func item(_ session: Session) -> NowItem { NowItem(session: session, activity: current(session)) }
+    func isOpen(_ session: Session) -> Bool { AimuxKit.isOpen(session, activity: current(session)) }
+    func isWorking(_ session: Session) -> Bool { AimuxKit.isWorking(session, activity: current(session)) }
+
     func lastActive(_ session: Session) -> Date { min(session.lastActive, now) }
-    func isRecent(_ date: Date) -> Bool { now.timeIntervalSince(date) <= Rules.recent }
     /// Equal times fall back to the session id, ascending, so the order is deterministic.
     func newestFirst(_ lhs: Session, _ rhs: Session) -> Bool {
-        lastActive(lhs) == lastActive(rhs) ? lhs.id < rhs.id : lastActive(lhs) > lastActive(rhs)
+        lastActive(lhs) == lastActive(rhs) ? codePointsBefore(lhs.id, rhs.id) : lastActive(lhs) > lastActive(rhs)
     }
 
-    func sort(seen: [String: Date]) -> Found {
-        var found = Found()
+    /// Pending approvals (newest session first), then failures of the last 900 s (newest failure first).
+    func needsYou(_ sessions: [Session]) -> [NowItem] {
+        var approvals: [Session] = []
+        var failures: [(session: Session, time: Date)] = []
         for session in sessions {
-            let current = activity[session.id] ?? .none
-            let item = NowItem(session: session, activity: current)
-            switch current {
-            case .needsApproval:
-                found.approvals.append(item)
-                continue
-            case .failed(_, let time) where isRecent(time):
-                found.failures.append((item, time))
-                continue
-            case .finished(let time) where isRecent(time) && time > (seen[session.id] ?? .distantPast):
-                found.finishes.append((item, time))
-                continue
-            default:
-                break
+            switch current(session) {
+            case .needsApproval: approvals.append(session)
+            case .failed(_, let time) where now.timeIntervalSince(time) <= recentFailure:
+                failures.append((session, time))
+            default: break
             }
-
-            var isWorking = session.state == .busy
-            if case .working = current { isWorking = true }
-            if session.state == .openInTerminal {
-                if isRecent(lastActive(session)) {
-                    isWorking = true
-                } else if !isWorking {
-                    found.terminals.append(session)
-                }
-            }
-            if isWorking { found.working.append(item) }
         }
-        found.approvals.sort { newestFirst($0.session, $1.session) }
-        found.failures.sort(by: newestEvent)
-        return found
+        failures.sort { $0.time == $1.time ? codePointsBefore($0.session.id, $1.session.id) : $0.time > $1.time }
+        return approvals.sorted(by: newestFirst).map(item) + failures.map { item($0.session) }
     }
 
-    /// Last on your Mac (shown when known, listed and at most 12 hours old) and Pinned take their sessions first;
-    /// a session in Needs you (`urgent`) is never moved.
-    func place(lastOnMac: LastOnMac?, working: Set<String>, urgent: Set<String>) -> Placement {
-        func placed(_ session: Session) -> PlacedItem {
-            PlacedItem(session: session, activity: activity[session.id] ?? .none,
-                       isWorking: working.contains(session.id))
+    /// Windows by index, tabs by index, panes by number; the count of tabs the filters left empty.
+    func windows(_ placed: [Session], words: [String], wanted: (Session) -> Bool) -> ([NowWindow], Int) {
+        var existing = Set<TabKey>()
+        var byTab: [TabKey: [Session]] = [:]
+        var front = Set<TabKey>()
+        for session in placed {
+            guard let mac = session.mac else { continue }
+            let key = TabKey(window: mac.window, tab: mac.tab.index)
+            existing.insert(key)
+            if mac.lastInFront { front.insert(key) }
+            if wanted(session) { byTab[key, default: []].append(session) }
         }
-        var last: PlacedItem?
-        var lastAt: Date?
-        if let lastOnMac, !urgent.contains(lastOnMac.id),
-           let session = sessions.first(where: { $0.id == lastOnMac.id }),
-           now.timeIntervalSince(min(lastOnMac.at, now)) <= Rules.lastOnMacWindow {
-            last = placed(session)
-            lastAt = min(lastOnMac.at, now)
+        var tabs: [MacWindow: [NowTab]] = [:]
+        for (key, listed) in byTab {
+            let ordered = listed.sorted(by: inMacOrder)
+            guard let mac = ordered.first?.mac else { continue }
+            tabs[key.window, default: []].append(NowTab(
+                index: key.tab, name: mac.tab.name, panes: mac.panes, working: ordered.filter(isWorking).count,
+                open: words.isEmpty ? front.contains(key) : true, sessions: ordered))
         }
-        let pinned = sessions
-            .filter { $0.pinned && $0.id != last?.session.id && !urgent.contains($0.id) }
-            .sorted(by: newestFirst)
-            .map(placed)
-        return Placement(last: last, lastAt: lastAt, pinned: pinned)
+        let windows = tabs.sorted { lhs, rhs in
+            lhs.key.index == rhs.key.index ? codePointsBefore(lhs.key.id, rhs.key.id) : lhs.key.index < rhs.key.index
+        }.map { NowWindow(id: $0.key.id, name: $0.key.name, tabs: $0.value.sorted { $0.index < $1.index }) }
+        return (windows, existing.count - byTab.count)
+    }
+
+    /// Elsewhere groups by folder label (or the project's last component), newest group first.
+    func groups(_ sessions: [Session]) -> [FolderGroup] {
+        var byLabel: [String: [Session]] = [:]
+        for session in sessions {
+            byLabel[session.folder?.label ?? projectName(session.project), default: []].append(session)
+        }
+        return byLabel.map { FolderGroup(label: $0.key, sessions: $0.value.sorted(by: newestFirst)) }.sorted {
+            let (lhs, rhs) = ($0.sessions[0], $1.sessions[0])
+            return lastActive(lhs) == lastActive(rhs) ? codePointsBefore($0.label, $1.label)
+                : lastActive(lhs) > lastActive(rhs)
+        }
     }
 }
 
-/// Groups items by project path into folder rows, in the order first met. Items come newest first, so each
-/// folder's first item is its newest and folders follow their newest session.
-private func byProject(_ items: [NowItem]) -> [ProjectGroup] {
-    var order: [String] = []
-    var grouped: [String: [NowItem]] = [:]
-    for item in items {
-        if grouped[item.session.project] == nil { order.append(item.session.project) }
-        grouped[item.session.project, default: []].append(item)
-    }
-    return order.map { project -> ProjectGroup in
-        let items = grouped[project] ?? []
-        let name = project.split(separator: "/").last.map(String.init) ?? project
-        return ProjectGroup(project: project, name: name, count: items.count, newest: items[0], items: items)
-    }
-}
-
-private func workingSection(_ working: [NowItem], lastActive: (Session) -> Date) -> WorkingSection {
-    guard working.count > Rules.flatWorkingLimit else { return .list(working) }
-    let groups = byProject(working).sorted {
-        if $0.count != $1.count { return $0.count > $1.count }
-        let (lhs, rhs) = (lastActive($0.newest.session), lastActive($1.newest.session))
-        return lhs == rhs ? $0.project < $1.project : lhs > rhs
-    }
-    let kept = Array(groups.prefix(Rules.flatWorkingLimit))
-    let rest = groups.dropFirst(Rules.flatWorkingLimit)
-    let more = rest.isEmpty ? nil : MoreProjects(projects: rest.count, sessions: rest.reduce(0) { $0 + $1.count })
-    return .groups(kept, more: more)
+private struct TabKey: Hashable {
+    let window: MacWindow
+    let tab: Int
 }

@@ -1,8 +1,9 @@
 import SwiftUI
 import AimuxKit
 
-/// Now: the session last in front on the Mac, the pinned ones, what needs you, what just finished, what is
-/// working, and what sits open on your Mac. With the server's `describe` capability, a long press pins or unpins.
+/// Now: what needs you, the pinned sessions, the Mac's iTerm2 windows and tabs, and the rest open elsewhere, as a
+/// flat list until the screens are rebuilt on the Mac layout. With the server's `describe` capability, a long
+/// press pins or unpins.
 /// (`NowScreen`, because AimuxKit's ranking result is already called `NowView`.)
 struct NowScreen: View {
     let model: NowModel
@@ -12,8 +13,6 @@ struct NowScreen: View {
     let showAll: (AllFilter) -> Void
 
     @State private var path: [Session] = DebugHooks.initialPath
-    /// Folders start open; these are the ones closed.
-    @State private var collapsed = Set([DebugHooks.collapsedProject].compactMap { $0 })
     /// Approvals opened in place from their compact row when Now is busy.
     @State private var openCards: Set<String> = []
     @State private var hasLoaded = false
@@ -21,9 +20,9 @@ struct NowScreen: View {
     private let format = SessionRowFormat()
 
     private var view: AimuxKit.NowView { model.view }
-    private var isQuiet: Bool { view.needsYou.isEmpty && view.finished.isEmpty && view.working.isEmpty }
-    /// More than 5 needing you, finished or working: approvals become rows, like On your Mac shrinking.
-    private var isBusy: Bool { view.needsYou.count + view.finished.count + view.summary.working > 5 }
+    private var isQuiet: Bool { view.needsYou.isEmpty && view.working == 0 }
+    /// More than 5 needing you or working: approvals become rows.
+    private var isBusy: Bool { view.needsYou.count + view.working > 5 }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -34,7 +33,7 @@ struct NowScreen: View {
                             HeaderButton(label: "Server", systemImage: "gearshape") { showingSettings = true }
                                 .accessibilityIdentifier("settingsButton")
                         } below: {
-                            NowSummaryLine(counts: view.summary, isQuiet: isQuiet, hasLoaded: hasLoaded)
+                            NowSummaryLine(view: view, isQuiet: isQuiet, hasLoaded: hasLoaded)
                         }
                     }
                     .listSectionSpacing(8)
@@ -45,11 +44,11 @@ struct NowScreen: View {
                             }
                         }
                     }
-                    PlacedSections(view: view, model: model, format: format) { open($0) }
                     needsYouSections
-                    finishedSection
-                    workingSection
-                    onMacSection
+                    pinnedSection
+                    windowSections
+                    elsewhereSection
+                    otherSection
                 }
                 .listStyle(.insetGrouped)
                 .listSectionSpacing(20)
@@ -89,16 +88,12 @@ struct NowScreen: View {
 
     /// The bottom row, for the DEBUG `-scrollToEnd` screenshots.
     private var lastRowID: String? {
-        if let group = view.onMacFolders.last { return group.project }
-        switch view.working {
-        case .list(let items): return items.last?.session.id
-        case .groups(let groups, _): return groups.last?.project
-        }
+        view.other.last?.id ?? view.elsewhere.last?.sessions.last?.id
+            ?? view.windows.last?.tabs.last?.sessions.last?.id ?? view.pinned.last?.session.id
     }
 
-    private func sessionButton<Label: View>(_ session: Session, seen: Bool = false,
-                                            @ViewBuilder label: () -> Label) -> some View {
-        PinnableRow(session: session, model: model, open: { open(session, seen: seen) }, label: label)
+    private func sessionButton<Label: View>(_ session: Session, @ViewBuilder label: () -> Label) -> some View {
+        PinnableRow(session: session, model: model, open: { open(session) }, label: label)
             .compactRow()
     }
 
@@ -162,167 +157,66 @@ struct NowScreen: View {
         }
     }
 
-    // MARK: Finished
+    // MARK: Sessions
 
-    @ViewBuilder private var finishedSection: some View {
-        if !view.finished.isEmpty {
-            Section {
-                ForEach(view.finished, id: \.session.id) { item in
-                    sessionButton(item.session, seen: true) {
-                        DotRow(status: .idle, title: item.session.displayTitle,
-                               description: item.session.descriptionLine, date: finishedAt(item), format: format) {
-                            Text(bidi: "Finished · " + isolated(format.projectName(item.session.project)))
-                        }
-                    }
-                }
-            } header: {
-                SectionLabel("Just finished")
-            }
-        }
+    private func placedRow(_ session: Session) -> some View {
+        let activity = model.activity[session.id] ?? .none
+        let item = PlacedItem(session: session, activity: activity,
+                              isWorking: session.state == .busy || session.working || activity.isWorking)
+        return sessionButton(session) { PlacedRow(item: item, format: format) }
     }
 
-    private func finishedAt(_ item: NowItem) -> Date {
-        if case .finished(let time) = item.activity { return time }
-        return item.session.lastActive
-    }
-
-    // MARK: Working
-
-    @ViewBuilder private var workingSection: some View {
-        switch view.working {
-        case .list(let items) where !items.isEmpty:
-            Section {
-                ForEach(items, id: \.session.id) { item in
-                    sessionButton(item.session) { WorkingRow(item: item, format: format) }
-                }
-            } header: {
-                SectionLabel("Working")
-            }
-        case .groups(let groups, let more):
-            Section {
-                ForEach(groups, id: \.project) { group in
-                    groupRows(group)
-                }
-                if let more {
-                    Button { showAll(AllFilter(sort: .mostActive)) } label: {
-                        HStack(spacing: 10) {
-                            FolderIcon()
-                            Text(more.projects == 1 ? "1 more project" : "\(more.projects) more projects")
-                                .font(.body.weight(.semibold))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text("\(more.sessions)").foregroundStyle(.secondary).monospacedDigit()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .compactRow()
-                }
-            } header: {
-                SectionLabel("Working", detail: "\(view.summary.working), by project")
-            }
-        default:
-            EmptyView()
-        }
-    }
-
-    /// A Working folder (`onMac` false: working dots and steps) or an On your Mac one (idle rows, no step,
-    /// collapsed apart from a Working folder of the same project).
-    @ViewBuilder private func groupRows(_ group: ProjectGroup, onMac: Bool = false) -> some View {
-        if group.count == 1 {
-            sessionButton(group.newest.session) { SingleFolderRow(group: group, format: format, showsStep: !onMac) }
-        } else {
-            let key = (onMac ? "mac:" : "") + group.project
-            let isOpen = !collapsed.contains(key)
-            Button {
-                withAnimation(.snappy) {
-                    if isOpen { collapsed.insert(key) } else { collapsed.remove(key) }
-                }
-            } label: {
-                ProjectGroupRow(group: group, isExpanded: isOpen)
-            }
-            .buttonStyle(.plain)
-            .compactRow()
-            .accessibilityIdentifier((onMac ? "mac-group-" : "group-") + group.name)
-            if isOpen {
-                ForEach(group.items, id: \.session.id) { item in
-                    FolderItem {
-                        PinnableRow(session: item.session, model: model, open: { open(item.session) }, label: {
-                            if onMac {
-                                OnMacRow(session: item.session, format: format)
-                            } else {
-                                CompactWorkingRow(item: item, format: format)
-                            }
-                        })
-                    }
-                    .listRowInsets(.vertical, 0)
-                }
-            }
-        }
-    }
-
-    // MARK: On your Mac
-
-    @ViewBuilder private var onMacSection: some View {
-        if view.onMacTotal > 0 {
-            Section {
-                ForEach(view.onMacFolders, id: \.project) { group in
-                    groupRows(group, onMac: true)
-                }
-            } header: {
-                SectionLabel(title: "On your Mac", detail: "read-only, by project") {
-                    Button("All \(view.onMacTotal)") { showAll(AllFilter(onMacOnly: true)) }
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("allOnMac")
-                }
-            }
-        }
-    }
-
-    private func open(_ session: Session, seen: Bool = false) {
-        if seen { model.markSeen(session.id) }
-        path.append(session)
-    }
-}
-
-/// Last on your Mac (with how long ago it was in front) and Pinned, above the sections of state.
-private struct PlacedSections: View {
-    let view: AimuxKit.NowView
-    let model: NowModel
-    let format: SessionRowFormat
-    let open: (Session) -> Void
-
-    var body: some View {
-        if let item = view.lastOnMac {
-            Section {
-                row(item)
-            } header: {
-                SectionLabel("Last on your Mac", detail: view.lastOnMacAt.map { format.since($0) })
-            }
-        }
+    @ViewBuilder private var pinnedSection: some View {
         if !view.pinned.isEmpty {
             Section {
-                ForEach(view.pinned, id: \.session.id) { row($0) }
+                ForEach(view.pinned, id: \.session.id) { placedRow($0.session) }
             } header: {
                 SectionLabel("Pinned")
             }
         }
     }
 
-    private func row(_ item: PlacedItem) -> some View {
-        PinnableRow(session: item.session, model: model, open: { open(item.session) },
-                    label: { PlacedRow(item: item, format: format) })
-            .compactRow()
+    @ViewBuilder private var windowSections: some View {
+        ForEach(view.windows, id: \.id) { window in
+            Section {
+                ForEach(window.tabs, id: \.index) { tab in
+                    ForEach(tab.sessions) { placedRow($0) }
+                }
+            } header: {
+                SectionLabel(window.name, detail: "on your Mac")
+            }
+        }
+    }
+
+    @ViewBuilder private var elsewhereSection: some View {
+        ForEach(view.elsewhere, id: \.label) { group in
+            Section {
+                ForEach(group.sessions) { placedRow($0) }
+            } header: {
+                SectionLabel(group.label)
+            }
+        }
+    }
+
+    @ViewBuilder private var otherSection: some View {
+        if !view.other.isEmpty {
+            Section {
+                ForEach(view.other) { placedRow($0) }
+            } header: {
+                SectionLabel("Other sessions")
+            }
+        }
+    }
+
+    private func open(_ session: Session) {
+        path.append(session)
     }
 }
 
 /// "2 need you · 2 working · 14 on your Mac": counts in bold, only the first part amber;
 /// "Nothing needs you" when nothing needs you, finished or is working.
 private struct NowSummaryLine: View {
-    let counts: NowSummary
+    let view: AimuxKit.NowView
     let isQuiet: Bool
     let hasLoaded: Bool
 
@@ -350,23 +244,14 @@ private struct NowSummaryLine: View {
             rest.foregroundColor = color
             return number + rest
         }
-        if counts.needYou > 0 { parts.append(part(counts.needYou, "need you", color: .amber)) }
-        if counts.working > 0 { parts.append(part(counts.working, "working", color: .secondary)) }
-        if counts.onMac > 0 { parts.append(part(counts.onMac, "on your Mac", color: .secondary)) }
+        if !view.needsYou.isEmpty { parts.append(part(view.needsYou.count, "need you", color: .amber)) }
+        if view.working > 0 { parts.append(part(view.working, "working", color: .secondary)) }
+        if view.open > 0 { parts.append(part(view.open, "open", color: .secondary)) }
         var separator = AttributedString(" · ")
         separator.foregroundColor = .secondary
         return parts.enumerated().reduce(into: AttributedString()) { line, entry in
             if entry.offset > 0 { line += separator }
             line += entry.element
-        }
-    }
-}
-
-private extension WorkingSection {
-    var isEmpty: Bool {
-        switch self {
-        case .list(let items): items.isEmpty
-        case .groups(let groups, _): groups.isEmpty
         }
     }
 }
