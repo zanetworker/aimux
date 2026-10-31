@@ -136,8 +136,8 @@ internal/
     dispatch.go                 # Dispatcher: one message at a time per session, next only after the answer finished (ACP turn done; iTerm2 history turn seen plus 2 s with Claude not working, or a later turn of the owner's); fixed pause reasons
     prompt.go                   # Reads Claude Code's "while you were working" wrapper, paste tags and slash-command/bash-mode tags when matching an item to a history turn
   terminput/
-    terminput.go                # Service: safety checks (enabled, registry pid, foreground is claude, in-use guard on the focused pane, busy refusal, empty input box, prompt id), Driver/System/Sessions interfaces, error codes
-    screen.go                   # Parses Claude Code's screen: InputBoxEmpty, ParsePrompt (fixtures in testdata/screens/)
+    terminput.go                # Service: safety checks (enabled, registry pid, foreground is claude, in-use guard on the focused pane, busy refusal, input box showing, prompt id; makeRoom types over Claude Code's grey suggestion and clears a draft, or refuses it with keep_drafts, re-checking before every key), Driver/System/Sessions interfaces, error codes
+    screen.go                   # Parses Claude Code's screen: InputBoxEmpty, BoxHasText, WordsInBox, WorkingSeconds, ParsePrompt (none when its top rule is off the screen; fixtures in testdata/screens/)
     probe.go                    # SystemProbe: tty, foreground process group (ps), HID idle time (ioreg)
     log.go                      # Attempt log ~/.aimux/logs/terminal-input.log (0600, never the text)
     iterm2/iterm2.go            # iTerm2 driver over a persistent JXA helper (helper.js, embedded); live tests behind the iterm2 build tag

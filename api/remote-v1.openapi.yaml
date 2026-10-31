@@ -312,8 +312,8 @@ paths:
         Follow the answer by re-reading
         `GET /v1/sessions/{id}`. Checked on every request: the pane's foreground
         process is the session's `claude` (`not_claude`), Claude is not working
-        on a turn and the session's chat queue is not sending (`busy`: offer
-        the queue; also while the queue has an item in flight or is running
+        on a turn and the session's chat queue is not sending (`busy`: clients
+        queue the message; also while the queue has an item in flight or is running
         with items waiting), the session is not the one in
         front on the Mac while the Mac was used in the last 2 minutes, unless
         `allow_while_in_use` is set (`mac_in_use`: iTerm2 is the frontmost app,
@@ -326,6 +326,8 @@ paths:
         Code's grey suggestion is typed over; a draft is cleared first
         (`box_not_cleared` if it will not empty), or with `keep_drafts` kept
         and the message refused (`draft_in_box`), unless `replace` is set.
+        Every key that clears it follows a fresh check of the screen, the
+        foreground process and the in-use guard.
         Text with control characters other than newline
         and tab is refused (`400 bad_text`), and so is text starting with `!`
         after optional white space (Claude Code's bash mode runs it as a shell
@@ -1059,7 +1061,7 @@ components:
           description: >
             Claude Code is working on a turn (its working line is on screen, or
             the registry says busy). A message is then refused with `409 busy`;
-            canType does not include it. Clients offer "Add to queue".
+            canType does not include it. Clients add the message to the queue.
         reason:
           type: string
           enum: [disabled, not_in_terminal, not_claude, mac_in_use, no_terminal_driver, automation_denied, not_at_input, error]

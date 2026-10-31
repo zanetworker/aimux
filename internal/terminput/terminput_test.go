@@ -1506,3 +1506,31 @@ func TestStatusSaysHowLongClaudeHasWorked(t *testing.T) {
 		t.Fatalf("status = %+v, want working 10 s", st)
 	}
 }
+
+// Clearing a draft waits for the terminal between keys; the owner may focus the
+// pane or a shell may take it meanwhile. Every key after a wait is checked
+// again, so nothing more is pressed into a box that is no longer safe.
+func TestClearingADraftStopsWhenThePaneStopsBeingSafe(t *testing.T) {
+	for name, set := range map[string]func(e *env){
+		"owner focuses the pane": func(e *env) {
+			e.sys.idles = []float64{600, 600, 5} // in use from the check after the first key
+			e.drv.front, e.drv.focusTTY = true, "/dev/ttys001"
+		},
+		"a shell takes the pane": func(e *env) { e.sys.fgFlipAt = 3 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.drv.screen = boxWith("my draft")
+			set(e)
+			if err := e.svc.Send(context.Background(), "s1", "run the tests", ""); err == nil {
+				t.Fatal("sent")
+			}
+			if !slices.Contains(e.drv.keys, KeySpace) {
+				t.Fatalf("keys %v: the pane turned unsafe before clearing began", e.drv.keys)
+			}
+			if slices.Contains(e.drv.keys, KeyBackspace) || slices.Contains(e.drv.keys, KeyClear) || len(e.drv.sent) != 0 {
+				t.Fatalf("keys %v typed %q after the pane stopped being safe", e.drv.keys, e.drv.sent)
+			}
+		})
+	}
+}

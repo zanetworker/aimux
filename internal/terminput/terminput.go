@@ -503,14 +503,23 @@ func (s *Service) SendReplacing(ctx context.Context, sessionID, text, idemKey st
 // text gets a space first: Claude Code's grey suggestion vanishes when
 // typed over, so the box then reads empty, while a draft keeps its text and
 // the space is taken back out. A draft is then refused (keep) or cleared and
-// checked again, up to clearRounds. The caller ran the in-use guard.
-func (s *Service) makeRoom(ctx context.Context, d Driver, p Pane, scr string, keep bool) error {
+// checked again, up to clearRounds. Before each key, and so after every wait
+// for the terminal, the screen must still show the box with text and safe
+// (the in-use guard and the foreground check) must pass: the owner may have
+// focused the pane, a shell taken it or a prompt come up meanwhile.
+func (s *Service) makeRoom(ctx context.Context, d Driver, p Pane, scr string, keep bool, safe func() error) error {
+	ready := func(scr string) error {
+		if !BoxHasText(scr) || Working(scr) || ParsePrompt(scr) != nil {
+			return ErrNotAtInput
+		}
+		return safe()
+	}
 	for round := 0; ; round++ {
 		if InputBoxEmpty(scr) {
 			return nil
 		}
-		if !BoxHasText(scr) || Working(scr) {
-			return ErrNotAtInput
+		if err := ready(scr); err != nil {
+			return err
 		}
 		if err := s.pressKey(ctx, d, p, KeySpace); err != nil {
 			return err
@@ -521,6 +530,9 @@ func (s *Service) makeRoom(ctx context.Context, d Driver, p Pane, scr string, ke
 		}
 		if InputBoxEmpty(scr) {
 			return nil // it was a suggestion; the message follows the space
+		}
+		if err := ready(scr); err != nil {
+			return err // the space stays: no key goes into a box that is not safe
 		}
 		if err := s.pressKey(ctx, d, p, KeyBackspace); err != nil {
 			return err
@@ -591,14 +603,15 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 		if !BoxHasText(scr) {
 			return ErrNotAtInput
 		}
-		// Never press a key in a box the owner may be typing in at the Mac.
-		if err := s.inUse(ctx, d, t); err != nil {
-			return err
+		// Never press a key in a box the owner may be typing in at the Mac,
+		// or once a shell has the pane: checked again before every key.
+		safe := func() error {
+			if err := s.inUse(ctx, d, t); err != nil {
+				return err
+			}
+			return s.foregroundOK(t)
 		}
-		if err := s.foregroundOK(t); err != nil {
-			return err
-		}
-		if err := s.makeRoom(ctx, d, p, scr, s.cfg.KeepDrafts && !replace); err != nil {
+		if err := s.makeRoom(ctx, d, p, scr, s.cfg.KeepDrafts && !replace, safe); err != nil {
 			return err
 		}
 		s.setLeft(sessionID, "")
