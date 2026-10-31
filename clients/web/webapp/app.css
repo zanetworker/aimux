@@ -482,8 +482,9 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 .md del { color: var(--t-secondary); }
 .md code {
   font-family: var(--mono); font-size: 0.84em; padding: 1.5px 5px; border-radius: 5px;
-  background: var(--c-inset); overflow-wrap: anywhere;
+  background: var(--hl-inline-bg); color: var(--hl-inline); overflow-wrap: anywhere;
 }
+.md-code pre code { color: inherit; }
 .md a code { color: inherit; }
 .md blockquote { padding-inline-start: 12px; border-inline-start: 3px solid var(--t-sep); color: var(--t-secondary); }
 /* Past six levels of lists and quotes, indentation stops growing (the parser allows 100), so a
@@ -758,3 +759,30 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 .working-line .dot { animation: breathe 1.8s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .working-line .dot { animation: none; } }
+
+/* Syntax colours (highlight.mjs) and inline code, light and dark; GitHub-like so code reads at a glance. */
+#session {
+  --hl-keyword: #cf222e; --hl-string: #0a3069; --hl-comment: #6e7781; --hl-number: #0550ae;
+  --hl-function: #8250df; --hl-key: #116329; --hl-meta: #6e7781;
+  --hl-added: #116329; --hl-added-bg: rgba(46, 160, 67, 0.15);
+  --hl-removed: #82071e; --hl-removed-bg: rgba(248, 81, 73, 0.15);
+  --hl-inline: #953800; --hl-inline-bg: rgba(255, 140, 0, 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  #session {
+    --hl-keyword: #ff7b72; --hl-string: #a5d6ff; --hl-comment: #8b949e; --hl-number: #79c0ff;
+    --hl-function: #d2a8ff; --hl-key: #7ee787; --hl-meta: #8b949e;
+    --hl-added: #aff5b4; --hl-added-bg: rgba(46, 160, 67, 0.25);
+    --hl-removed: #ffdcd7; --hl-removed-bg: rgba(248, 81, 73, 0.25);
+    --hl-inline: #ffa657; --hl-inline-bg: rgba(255, 166, 87, 0.15);
+  }
+}
+.hl-keyword { color: var(--hl-keyword); }
+.hl-string { color: var(--hl-string); }
+.hl-comment { color: var(--hl-comment); font-style: italic; }
+.hl-number { color: var(--hl-number); }
+.hl-function { color: var(--hl-function); }
+.hl-key { color: var(--hl-key); }
+.hl-meta { color: var(--hl-meta); }
+.hl-added { color: var(--hl-added); background: var(--hl-added-bg); }
+.hl-removed { color: var(--hl-removed); background: var(--hl-removed-bg); }

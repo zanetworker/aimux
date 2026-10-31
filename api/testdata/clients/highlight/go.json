@@ -1,0 +1,119 @@
+{
+  "name": "go",
+  "lang": "go",
+  "code": "package main\n\n// Sum adds the numbers.\nfunc Sum(xs []int) int {\n\ttotal := 0\n\tfor _, x := range xs {\n\t\ttotal += x\n\t}\n\treturn total // done\n}\nvar raw = `C:\\path\nnext`\nfmt.Println(\"hi \\\"there\\\"\", 3.5)\n",
+  "tokens": [
+    [
+      "keyword",
+      "package"
+    ],
+    [
+      "plain",
+      " main\n\n"
+    ],
+    [
+      "comment",
+      "// Sum adds the numbers."
+    ],
+    [
+      "plain",
+      "\n"
+    ],
+    [
+      "keyword",
+      "func"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "function",
+      "Sum"
+    ],
+    [
+      "plain",
+      "(xs []int) int {\n\ttotal := "
+    ],
+    [
+      "number",
+      "0"
+    ],
+    [
+      "plain",
+      "\n\t"
+    ],
+    [
+      "keyword",
+      "for"
+    ],
+    [
+      "plain",
+      " _, x := "
+    ],
+    [
+      "keyword",
+      "range"
+    ],
+    [
+      "plain",
+      " xs {\n\t\ttotal += x\n\t}\n\t"
+    ],
+    [
+      "keyword",
+      "return"
+    ],
+    [
+      "plain",
+      " total "
+    ],
+    [
+      "comment",
+      "// done"
+    ],
+    [
+      "plain",
+      "\n}\n"
+    ],
+    [
+      "keyword",
+      "var"
+    ],
+    [
+      "plain",
+      " raw = "
+    ],
+    [
+      "string",
+      "`C:\\path\nnext`"
+    ],
+    [
+      "plain",
+      "\nfmt."
+    ],
+    [
+      "function",
+      "Println"
+    ],
+    [
+      "plain",
+      "("
+    ],
+    [
+      "string",
+      "\"hi \\\"there\\\"\""
+    ],
+    [
+      "plain",
+      ", "
+    ],
+    [
+      "number",
+      "3.5"
+    ],
+    [
+      "plain",
+      ")\n"
+    ]
+  ]
+}

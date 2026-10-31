@@ -1,0 +1,79 @@
+{
+  "name": "yaml",
+  "lang": "yaml",
+  "code": "remote_access:\n  enabled: true\n  # only on the tailnet\n  allow:\n    - me@example.com\n  port: 8443\n  name: \"phone\"\n",
+  "tokens": [
+    [
+      "key",
+      "remote_access"
+    ],
+    [
+      "plain",
+      ":\n  "
+    ],
+    [
+      "key",
+      "enabled"
+    ],
+    [
+      "plain",
+      ": "
+    ],
+    [
+      "keyword",
+      "true"
+    ],
+    [
+      "plain",
+      "\n  "
+    ],
+    [
+      "comment",
+      "# only on the tailnet"
+    ],
+    [
+      "plain",
+      "\n  "
+    ],
+    [
+      "key",
+      "allow"
+    ],
+    [
+      "plain",
+      ":\n    - me@example.com\n  "
+    ],
+    [
+      "key",
+      "port"
+    ],
+    [
+      "plain",
+      ": "
+    ],
+    [
+      "number",
+      "8443"
+    ],
+    [
+      "plain",
+      "\n  "
+    ],
+    [
+      "key",
+      "name"
+    ],
+    [
+      "plain",
+      ": "
+    ],
+    [
+      "string",
+      "\"phone\""
+    ],
+    [
+      "plain",
+      "\n"
+    ]
+  ]
+}

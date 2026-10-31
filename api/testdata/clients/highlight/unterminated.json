@@ -1,0 +1,31 @@
+{
+  "name": "unterminated",
+  "lang": "go",
+  "code": "msg := \"no end\nnext := 1 /* open\n",
+  "tokens": [
+    [
+      "plain",
+      "msg := "
+    ],
+    [
+      "string",
+      "\"no end"
+    ],
+    [
+      "plain",
+      "\nnext := "
+    ],
+    [
+      "number",
+      "1"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "comment",
+      "/* open\n"
+    ]
+  ]
+}

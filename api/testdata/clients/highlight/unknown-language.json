@@ -1,0 +1,11 @@
+{
+  "name": "unknown-language",
+  "lang": "brainfuck",
+  "code": "++>+<-[.]\n",
+  "tokens": [
+    [
+      "plain",
+      "++>+<-[.]\n"
+    ]
+  ]
+}

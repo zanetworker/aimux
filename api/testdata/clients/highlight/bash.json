@@ -1,0 +1,55 @@
+{
+  "name": "bash",
+  "lang": "bash",
+  "code": "export PATH=\"$HOME/bin:${PATH}\"\nif [ -f go.mod ]; then\n  go test ./... # all of it\nfi\n",
+  "tokens": [
+    [
+      "keyword",
+      "export"
+    ],
+    [
+      "plain",
+      " PATH="
+    ],
+    [
+      "string",
+      "\"$HOME/bin:${PATH}\""
+    ],
+    [
+      "plain",
+      "\n"
+    ],
+    [
+      "keyword",
+      "if"
+    ],
+    [
+      "plain",
+      " [ -f go.mod ]; "
+    ],
+    [
+      "keyword",
+      "then"
+    ],
+    [
+      "plain",
+      "\n  go test ./... "
+    ],
+    [
+      "comment",
+      "# all of it"
+    ],
+    [
+      "plain",
+      "\n"
+    ],
+    [
+      "keyword",
+      "fi"
+    ],
+    [
+      "plain",
+      "\n"
+    ]
+  ]
+}

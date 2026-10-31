@@ -1,0 +1,11 @@
+{
+  "name": "no-language",
+  "lang": "",
+  "code": "plain text, return 42 if ok\n",
+  "tokens": [
+    [
+      "plain",
+      "plain text, return 42 if ok\n"
+    ]
+  ]
+}

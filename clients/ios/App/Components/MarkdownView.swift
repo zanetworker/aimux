@@ -109,18 +109,16 @@ struct InlineTextView: View {
 /// Inlines to an `AttributedString`: emphasis as presentation intents (so they keep the Dynamic Type font), code
 /// spans in monospace on a faint fill, links and references tappable in the tint.
 enum InlineStyle {
-    static let codeFill = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.12) : UIColor(white: 0, alpha: 0.06)
-    })
+    static let codeFill = CodeColors.inlineFill
 
     /// The monospace for code spans in body text: a step smaller, since monospace runs wide and tall.
     static let bodyCode = Font.system(.callout, design: .monospaced)
 
     /// `codeFont` sizes code spans; nil keeps the surrounding font (headings).
     static func attributed(_ inlines: [MDInline], codeFont: Font? = bodyCode, codeFill: Color = codeFill,
-                           underlineLinks: Bool = false) -> AttributedString {
+                           codeInk: Color = CodeColors.inlineInk, underlineLinks: Bool = false) -> AttributedString {
         var out = AttributedString()
-        let style = Style(codeFont: codeFont, codeFill: codeFill, underlineLinks: underlineLinks)
+        let style = Style(codeFont: codeFont, codeFill: codeFill, codeInk: codeInk, underlineLinks: underlineLinks)
         append(inlines, intent: [], to: &out, style: style)
         return out
     }
@@ -128,6 +126,7 @@ enum InlineStyle {
     private struct Style {
         let codeFont: Font?
         let codeFill: Color
+        let codeInk: Color
         let underlineLinks: Bool
     }
 
@@ -162,6 +161,7 @@ enum InlineStyle {
         var piece = AttributedString(text)
         piece.inlinePresentationIntent = intent.union(.code)
         piece.backgroundColor = style.codeFill
+        piece.foregroundColor = style.codeInk
         if let font = style.codeFont { piece.font = font }
         return piece
     }
@@ -170,6 +170,7 @@ enum InlineStyle {
         guard isWebLink(href), let url = URL(string: href) else { return text }
         var text = text
         text.link = url
+        text.foregroundColor = nil  // a link (a path, a commit) keeps the link colour, as on the web
         if style.underlineLinks { text.underlineStyle = .single }
         return text
     }
@@ -196,7 +197,7 @@ struct CodeBlockView: View {
             .padding(.vertical, 2)
             Rectangle().fill(Color(.separator)).frame(height: 1 / 3)
             ScrollView(.horizontal) {
-                Text(text)
+                Text(CodeColors.attributed(text, lang: lang))
                     .font(.system(.footnote, design: .monospaced))
                     .fixedSize()
                     .padding(.horizontal, 14)

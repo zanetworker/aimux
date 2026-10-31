@@ -124,7 +124,8 @@ struct UserBubble: View {
                 .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .environment(\.layoutDirection, .leftToRight)
         case .paragraph(let inlines):
-            Text(InlineStyle.attributed(inlines, codeFill: .white.opacity(0.14), underlineLinks: true))
+            Text(InlineStyle.attributed(inlines, codeFill: .white.opacity(0.14), codeInk: CodeColors.inlineInkOnDark,
+                                        underlineLinks: true))
                 .environment(\.layoutDirection, isRightToLeft(inlines) ? .rightToLeft : .leftToRight)
         }
     }

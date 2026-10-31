@@ -37,7 +37,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: me.adelzaalouk.Aimux
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.3"
-        CURRENT_PROJECT_VERSION: "28"
+        CURRENT_PROJECT_VERSION: "29"
     scheme:
       testTargets: [AimuxKitTests, AimuxUITests]
   AimuxKit:

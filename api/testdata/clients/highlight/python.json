@@ -1,0 +1,95 @@
+{
+  "name": "python",
+  "lang": "python",
+  "code": "def greet(name):\n    # say hello\n    if name is None:\n        return 'nobody'\n    return f\"hi {name}\" * 2\n",
+  "tokens": [
+    [
+      "keyword",
+      "def"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "function",
+      "greet"
+    ],
+    [
+      "plain",
+      "(name):\n    "
+    ],
+    [
+      "comment",
+      "# say hello"
+    ],
+    [
+      "plain",
+      "\n    "
+    ],
+    [
+      "keyword",
+      "if"
+    ],
+    [
+      "plain",
+      " name "
+    ],
+    [
+      "keyword",
+      "is"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "keyword",
+      "None"
+    ],
+    [
+      "plain",
+      ":\n        "
+    ],
+    [
+      "keyword",
+      "return"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "string",
+      "'nobody'"
+    ],
+    [
+      "plain",
+      "\n    "
+    ],
+    [
+      "keyword",
+      "return"
+    ],
+    [
+      "plain",
+      " f"
+    ],
+    [
+      "string",
+      "\"hi {name}\""
+    ],
+    [
+      "plain",
+      " * "
+    ],
+    [
+      "number",
+      "2"
+    ],
+    [
+      "plain",
+      "\n"
+    ]
+  ]
+}

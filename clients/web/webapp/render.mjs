@@ -3,6 +3,7 @@
 // Code is always left to right; paragraphs, headings and list items take their direction from
 // their text, so Arabic reads right to left.
 
+import { highlight } from './highlight.mjs';
 import { icon } from './rows.mjs';
 import { linkReferences, parsedHost } from './references.mjs';
 import { parseMarkdown } from './markdown.mjs';
@@ -109,7 +110,10 @@ function codeBlock(b) {
   pre.tabIndex = 0; // a keyboard can scroll a long line
   pre.setAttribute('role', 'region');
   pre.setAttribute('aria-label', 'Code');
-  pre.append(code(b.text));
+  // Syntax colours (highlight.mjs): a span per coloured token, plain text between them.
+  const c = code('');
+  for (const t of highlight(b.text, b.lang)) c.append(t.k === 'plain' ? t.v : h('span', 'hl-' + t.k, t.v));
+  pre.append(c);
   wrap.append(head, pre);
   return wrap;
 }
