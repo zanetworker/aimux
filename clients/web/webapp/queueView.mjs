@@ -114,7 +114,7 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
     const id = want.slice(want.indexOf(':') + 1);
     const node = usable(want) || usable('text:' + id);
     if (node) node.focus({ preventScroll: true });
-    else { section.title.tabIndex = -1; section.title.focus({ preventScroll: true }); }
+    else section.title.focus({ preventScroll: true }); // a button: focusable, and it stays in the tab order
   }
 
   const usable = (key) => { const n = focusable.get(key); return n && !n.disabled ? n : null; };

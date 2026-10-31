@@ -337,3 +337,38 @@ private let busy = APIError.server(status: 409, code: .busy, message: "a turn is
         chat.close()
     }
 }
+
+/// A message refused busy while the composer is empty, on its way into the queue.
+extension ChatModelQueueTests {
+    @Test func aMessageBeingQueuedByItselfIsNotPutBackInTheComposer() async {
+        let source = StubChat()
+        source.details = [detail()]
+        source.sendFailures = [busy]
+        let gate = ChatGate()
+        source.addGate = gate
+        let chat = model(source)
+        await chat.load()
+
+        let send = Task { await chat.send("Run the tests") }
+        await spin { source.queueCallList.contains { $0.hasPrefix("add ") } }
+        #expect(chat.pending?.failure == busy, "the refused message shows while it is being queued")
+        #expect(chat.reclaimRefusedMessage() == nil, "not back in the composer: it would be sent twice")
+        await gate.open()
+        await send.value
+        #expect(chat.pending == nil)
+        chat.close()
+    }
+
+    @Test func aMessageTheQueueAlsoRefusesStaysAFailedMessageForTheComposer() async {
+        let source = StubChat()
+        source.details = [detail()]
+        source.sendFailures = [busy]
+        source.addFailures = [APIError.http(status: 502)]
+        let chat = model(source)
+        await chat.load()
+        await chat.send("Run the tests")
+        #expect(chat.pending?.failure == busy)
+        #expect(chat.reclaimRefusedMessage() == "Run the tests")
+        chat.close()
+    }
+}

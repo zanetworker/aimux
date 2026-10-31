@@ -403,4 +403,7 @@ test('the queue is one line until its heading is clicked', async () => {
   assert.equal(one(box, cls('queue-list')).hidden, false);
   assert.equal(one(box, cls('queue-count')).textContent, '2 queued');
   assert.equal(title.attrs['aria-expanded'], 'true');
+  fire(title, 'click');
+  assert.equal(document.activeElement, title, 'the toggle keeps focus');
+  assert.notEqual(title.tabIndex, -1, 'the toggle stays in the tab order');
 });

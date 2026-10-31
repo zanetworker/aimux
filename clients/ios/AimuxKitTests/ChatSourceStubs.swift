@@ -148,6 +148,8 @@ final class StubChat: ChatSource, @unchecked Sendable {
     var changeFailures: [Error?] = []
     /// When set, each change (not add or get) waits for it after being recorded.
     var changeGate: ChatGate?
+    /// When set, each add waits for it after being recorded.
+    var addGate: ChatGate?
     private(set) var queueCalls: [String] = []
     var queueCallList: [String] { lock.withLock { queueCalls } }
 
@@ -163,7 +165,9 @@ final class StubChat: ChatSource, @unchecked Sendable {
         return lock.withLock { queueAnswer }
     }
     func addToQueue(sessionID: String, text: String, key: String) async throws -> QueueItem {
-        if let failure = record("add \(text) \(key)", \.addFailures) { throw failure }
+        let failure = record("add \(text) \(key)", \.addFailures)
+        await addGate?.wait()
+        if let failure { throw failure }
         return QueueItem(id: "new", text: text, state: "waiting", created: .now)
     }
     private func change(_ call: String) async throws -> QueueStatus {

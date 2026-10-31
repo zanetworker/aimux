@@ -29,13 +29,15 @@ extension ChatModel {
     func queueIfRefusedBusy(_ failure: APIError) async {
         guard queueEnabled, ChatQueue.sendRefusal(failure) != nil else { return }
         refusedBusy = true
+        isQueueingRefused = true
+        defer { isQueueingRefused = false }
         _ = await queuePending()
     }
 
     /// The text of a message refused busy, for an empty composer: the failed message goes away, as its text is
-    /// back in the box. Nil when there is none.
+    /// back in the box. Nil when there is none, or while it is being queued.
     public func reclaimRefusedMessage() -> String? {
-        guard queueEnabled, let message = pending, let failure = message.failure,
+        guard queueEnabled, !isQueueingRefused, let message = pending, let failure = message.failure,
               ChatQueue.sendRefusal(failure) != nil else { return nil }
         pending = nil
         return message.text

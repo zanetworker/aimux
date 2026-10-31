@@ -98,7 +98,7 @@ public final class ChatModel {
     public var queueEnabled: Bool
     /// The last add that failed, so a retry of the same text keeps its key.
     var failedAdd: (text: String, key: String)?
-    var isAdding = false
+    var isAdding = false, isQueueingRefused = false  // the second: a busy-refused message is on its way to the queue
 
     public let sessionID: String
     let source: ChatSource
