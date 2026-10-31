@@ -237,30 +237,12 @@ test('retry does nothing without a last prompt', async () => {
   assert.equal(calls.filter((c) => c.method === 'POST').length, 0);
 });
 
-test('seen times persist in storage and hide Just finished', async () => {
-  const done = [
-    { seq: 1, turn: 't', kind: 'turn_started', time: iso(120), data: { text: 'go' } },
-    { seq: 2, turn: 't', kind: 'turn_done', time: iso(100), data: { stopReason: 'end_turn' } },
-  ];
-  const storage = memoryStorage();
-  const { api } = fakeAPI({ sessions: [session('d', 'idle', 100)], events: { d: done } });
-  const m = model(api, storage);
-  await m.refresh();
-  assert.equal(m.view.finished.length, 1);
-  m.markSeen('d');
-  assert.equal(m.view.finished.length, 0);
-  const again = model(api, storage);
-  await again.refresh();
-  assert.equal(again.view.finished.length, 0, 'a new model reads the stored seen time');
-});
-
-test('unreadable storage is no seen times, not a crash', async () => {
+test('unreadable storage is not a crash', async () => {
   const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
   const { api } = fakeAPI({ sessions: [session('a', 'busy', 10)], events: { a: workingEvents } });
   const m = model(api, broken);
   await m.refresh();
-  m.markSeen('a');
-  assert.equal(m.view.summary.working, 1);
+  assert.equal(m.view.working, 1);
 });
 
 test('a 404 with another code is a failure, not an approval resolved elsewhere', async () => {
@@ -300,24 +282,86 @@ test('retry holds its guard through the refresh after the send, like the app', a
   assert.equal(m.retrying.has('f'), false);
 });
 
-// Finding sessions: Last on your Mac, pins, owner edits and Update summary.
+// Finding sessions: the search box, the Working chip, the Mac's places held for 30 s, pins, owner edits and Update summary.
 
-test('the list carries Last on your Mac into the view', async () => {
-  const { api } = fakeAPI({ sessions: () => ({ sessions: [session('t', 'open_in_terminal', 3600)], lastOnMac: { id: 't', at: iso(240) } }) });
+const mac = (pane) => ({ window: { id: 'w1', index: 1, name: 'Window 1' }, tab: { index: 1, name: 'aimux' }, pane, panes: 2, lastInFront: false });
+
+test('query and workingOnly narrow the view at once, without a request', async () => {
+  const { api, calls } = fakeAPI({ sessions: [session('login', 'busy', 10), session('other', 'open_in_terminal', 20)] });
   const m = model(api);
   await m.refresh();
-  assert.equal(m.view.lastOnMac.session.id, 't');
-  assert.deepEqual(m.view.onMac, []);
+  const before = calls.length;
+  m.setQuery('LOGIN');
+  assert.deepEqual(m.view.elsewhere.flatMap((g) => g.sessions.map((s) => s.id)), ['login']);
+  m.setQuery('');
+  m.setWorkingOnly(true);
+  assert.deepEqual(m.view.elsewhere.flatMap((g) => g.sessions.map((s) => s.id)), ['login']);
+  assert.equal(m.view.working, 1, 'the chip counts before the filters');
+  assert.equal(calls.length, before);
 });
 
-test('a list without lastOnMac clears the one before', async () => {
-  let withIt = true;
-  const { api } = fakeAPI({ sessions: () => ({ sessions: [session('t', 'open_in_terminal', 3600)], ...(withIt ? { lastOnMac: { id: 't', at: iso(240) } } : {}) }) });
+test('the Mac layout is held for 30 s from the last list that had it, however often the view rebuilds', async () => {
+  let clock = NOW;
+  let places = true;
+  const { api } = fakeAPI({ sessions: () => ({ sessions: [session('a', 'open_in_terminal', 600, places ? { mac: mac(1) } : {})] }) });
+  const m = new NowModel({ api, storage: memoryStorage(), now: () => clock });
+  await m.refresh();
+  places = false;
+  clock += 20_000;
+  await m.refresh();
+  assert.equal(m.view.windows.length, 1, 'held 20 s after the last list with places');
+  clock += 10_000;
+  m.setQuery('a'); // a rebuild of the same list does not restart the hold
+  m.setQuery('');
+  assert.equal(m.view.windows.length, 1, 'still held at exactly 30 s');
+  clock += 1;
+  m.setQuery('a');
+  m.setQuery('');
+  assert.deepEqual(m.view.windows, [], 'dropped after 30 s');
+  assert.deepEqual(m.view.elsewhere.map((g) => g.sessions.map((s) => s.id)), [['a']]);
+});
+
+test('a failed list keeps the held layout and does not restart its clock', async () => {
+  let clock = NOW;
+  let fail = false;
+  const { api } = fakeAPI({ sessions: () => { if (fail) throw new Error('offline'); return { sessions: [session('a', 'open_in_terminal', 600, { mac: mac(1) })] }; } });
+  const m = new NowModel({ api, storage: memoryStorage(), now: () => clock });
+  await m.refresh();
+  fail = true;
+  clock += 25_000;
+  await m.refresh();
+  assert.equal(m.view.windows.length, 1, 'the last list still has its places');
+});
+
+test('answered sessions: Now and the chat note them; a not-working read or leaving the list lets them go', async () => {
+  const events = { a: approvalEvents('ap'), b: workingEvents };
+  let list = [session('a', 'busy', 10), session('b', 'busy', 20), session('c', 'idle', 5000)];
+  const { api } = fakeAPI({ sessions: () => ({ sessions: list }), events });
   const m = model(api);
   await m.refresh();
-  withIt = false;
+  await m.answer(m.view.needsYou[0].activity.approval, 'ok', 'a');
+  m.noteAnswered('b');
+  m.noteAnswered('c');
+  assert.deepEqual([...m.answeredSessions].sort(), ['a', 'b', 'c']);
+  events.a = workingEvents; // the allowed tool runs
   await m.refresh();
-  assert.equal(m.view.lastOnMac, null);
+  assert.deepEqual([...m.answeredSessions].sort(), ['a', 'b', 'c'], 'kept while working; c (old and idle) is not read');
+  events.a = [...workingEvents, { seq: 2, turn: 't', kind: 'turn_done', time: iso(5), data: { stopReason: 'end_turn' } }];
+  events.b = () => { throw new Error('offline'); };
+  list = [session('a', 'busy', 10), session('b', 'busy', 20)];
+  await m.refresh();
+  assert.deepEqual([...m.answeredSessions].sort(), ['b'], 'a finished, c left the list, b failed to read: kept');
+});
+
+test('answered sessions: a refused read is a failed read, so it changes nothing', async () => {
+  const events = { a: workingEvents };
+  const { api } = fakeAPI({ sessions: [session('a', 'busy', 10)], events });
+  const m = model(api);
+  await m.refresh();
+  m.noteAnswered('a');
+  events.a = () => { throw httpError(409); };
+  await m.refresh();
+  assert.deepEqual([...m.answeredSessions], ['a']);
 });
 
 // A fake /v1 for the meta routes: `answers[method + ' ' + path]` is a result or a function that throws.

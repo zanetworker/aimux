@@ -1,4 +1,4 @@
-// aimux web client: Now, All and search (tabs.mjs), follow a session,
+// aimux web client: Now and All with their search (tabs.mjs), follow a session,
 // continue it and answer its approvals. Served by `aimux remote serve` at /app
 // and talking to /v1 on the same origin; tailscale serve supplies the
 // identity, and with device login a passkey unlocks the session (login.mjs).
@@ -46,7 +46,7 @@ function setStatus(text, cls) {
   s.className = cls || '';
 }
 
-// Screens: the tabs (Now, All, search), the new-session sheet, a session.
+// Screens: the tabs (Now, All), the new-session sheet, a session.
 
 const tabs = createTabs(api, { headerButtons: () => (login.deviceLogin ? [lockButton()] : []) });
 
@@ -60,7 +60,7 @@ const infoSheet = createInfoSheet({
   alert: (text) => announce($('info-alert'), text),
 });
 
-const TAB_ROUTES = { '#/all': 'all', '#/search': 'search' };
+const TAB_ROUTES = { '#/all': 'all' };
 let lastTab = '#/'; // where Back returns to
 
 function showView(name) {
@@ -550,7 +550,7 @@ function render() {
   scrollDown();
 
   // Bottom: the Next bar, a note, then the composer or the read-only line.
-  const next = c.mode === 'failed' || pendingApproval ? null : nextSession(tabs.model.view, c.id);
+  const next = c.mode === 'failed' || pendingApproval ? null : nextSession(tabs.model.view, c.id, tabs.model.answeredSessions, tabs.model.activity);
   $('nextbar').replaceChildren(...(next ? [nextBar(next, displayTitle(next.session.title, next.session.id),
     () => { location.hash = '#/s/' + encodeURIComponent(next.session.id); })] : []));
   const note = notice || queueNotice || (stopError ? 'Could not stop · ' + stopError : '');
@@ -776,6 +776,7 @@ const BARE_ANSWER = /^(yes|no|yeah|nope|ok|okay|allow|deny|sure)[.!]?$/i;
 
 async function answer(item, option) {
   const id = item.approvalId;
+  const sessionId = chat && chat.id;
   if (answering.has(id)) return;
   answering.add(id);
   answerErrors.delete(id);
@@ -793,6 +794,8 @@ async function answer(item, option) {
     render();
   }
   if (!answered.has(id)) return;
+  // The Next bar skips this session as a working target until a read shows it not working.
+  if (sessionId) tabs.model.noteAnswered(sessionId);
   clearBareAnswer();
   // The answered session may leave Needs you: update the Next bar now, not at the next poll.
   try { await tabs.model.refresh(); } catch (_) { /* the poll tries again */ }
@@ -1181,8 +1184,8 @@ function setupVoice() {
   document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) menu.hidden = true; });
 }
 
-// Routing: #/s/<id> is a session, #/new the new-session sheet, #/all and
-// #/search those tabs, anything else Now.
+// Routing: #/s/<id> is a session, #/new the new-session sheet, #/all that
+// tab, anything else Now.
 
 function route() {
   dictationGen++; // a dictation in progress belongs to the screen being left

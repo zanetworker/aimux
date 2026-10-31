@@ -1,13 +1,11 @@
 import { apiDate } from './apiDate.mjs';
+import { compareCodePoints, isOpen, isWorking, macOrder, matches, newestFirst, projectName, queryWords } from './search.mjs';
 
 // The Now screen's ranking, by the shared rules in api/testdata/clients/README.md.
 // Times are milliseconds since the epoch; sessions carry `lastActive` in that form.
 
 const RECENT_MS = 900 * 1000;
-const FLAT_WORKING_LIMIT = 5;
-const ON_MAC_LIMIT = 8;
-const ON_MAC_COLLAPSE_ABOVE = 5;
-const LAST_ON_MAC_MS = 12 * 3600 * 1000;
+const HOLD_MS = 30 * 1000;
 
 const isTurnEvent = (e) => e.kind === 'turn_started' || e.kind === 'turn_done' || e.kind === 'turn_error';
 
@@ -42,91 +40,91 @@ function currentStep(ordered, turn) {
   return undefined;
 }
 
-const byString = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+// Now: Needs you, Pinned, the Mac's iTerm2 windows (tabs, panes), Elsewhere and, with a query,
+// Other sessions. A session appears once, in the first section that takes it.
+export function rankNow({ sessions, activity, now, query = '', workingOnly = false }) {
+  const current = (s) => (Object.hasOwn(activity, s.id) ? activity[s.id] : null) ?? { kind: 'none' };
+  const item = (s) => ({ session: s, activity: current(s) });
+  const working = (s) => isWorking(s, current(s));
+  const open = (s) => isOpen(s, current(s));
+  const newest = newestFirst(now);
+  const words = queryWords(query);
+  const wanted = (s) => matches(s, words) && (!workingOnly || working(s));
 
-// lastOnMac: {id, at} with `at` in epoch milliseconds, or null when the server does not know.
-export function rankNow({ sessions, activity, seen, now, lastOnMac = null }) {
-  const lastActive = (s) => Math.min(s.lastActive, now);
-  const isRecent = (t) => now - t <= RECENT_MS;
-  // Equal times fall back to the session id, ascending, so the order is deterministic.
-  const newestFirst = (a, b) => lastActive(b) - lastActive(a) || byString(a.id, b.id);
-  const newestEvent = (a, b) => b.time - a.time || byString(a.item.session.id, b.item.session.id);
-
+  // Pending approvals (newest session first), then failures of the last 900 s (newest failure first).
   const approvals = [];
   const failures = [];
-  const finishes = [];
-  const working = [];
-  const terminals = [];
-  const byId = new Map();
-  const status = new Map(); // a placed row keeps the session's own dot
-
-  for (const session of sessions) {
-    const current = (Object.hasOwn(activity, session.id) ? activity[session.id] : null) ?? { kind: 'none' };
-    const item = { session, activity: current };
-    byId.set(session.id, item);
-    status.set(session.id, 'idle');
-    if (current.kind === 'needsApproval') {
-      approvals.push(item);
-      continue;
-    }
-    if (current.kind === 'failed' && isRecent(current.at)) {
-      failures.push({ item, time: current.at });
-      continue;
-    }
-    if (current.kind === 'finished' && isRecent(current.at) && current.at > (seen[session.id] ?? -Infinity)) {
-      finishes.push({ item, time: current.at });
-      continue;
-    }
-
-    let isWorking = session.state === 'busy' || current.kind === 'working';
-    if (session.state === 'open_in_terminal') {
-      if (isRecent(lastActive(session))) isWorking = true;
-      else if (!isWorking) terminals.push(item);
-    }
-    if (isWorking) {
-      working.push(item);
-      status.set(session.id, 'working');
-    }
+  for (const s of sessions) {
+    const a = current(s);
+    if (a.kind === 'needsApproval') approvals.push(s);
+    else if (a.kind === 'failed' && now - a.at <= RECENT_MS) failures.push({ s, at: a.at });
   }
+  approvals.sort(newest);
+  failures.sort((x, y) => y.at - x.at || compareCodePoints(x.s.id, y.s.id));
+  const needsYouAll = [...approvals, ...failures.map((f) => f.s)];
+  const urgent = new Set(needsYouAll.map((s) => s.id));
+  const rest = sessions.filter((s) => !urgent.has(s.id));
+  const pinnedAway = (s) => s.pinned === true && !s.mac;
+  const unpinned = rest.filter((s) => !pinnedAway(s));
 
-  approvals.sort((a, b) => newestFirst(a.session, b.session));
-  failures.sort(newestEvent);
-  const needsYou = [...approvals, ...failures.map((f) => f.item)];
-  // Counted before Last on your Mac and Pinned take their sessions: the header is an overview of state.
-  const summary = { needYou: needsYou.length, working: working.length, onMac: terminals.length };
-
-  // Urgency wins: a session in Needs you is never moved into Last on your Mac or Pinned.
-  const urgent = new Set(needsYou.map((i) => i.session.id));
-  const placed = (item) => ({ session: item.session, activity: item.activity, status: status.get(item.session.id) });
-  let last = null;
-  if (lastOnMac && byId.has(lastOnMac.id) && !urgent.has(lastOnMac.id)
-    && now - Math.min(lastOnMac.at, now) <= LAST_ON_MAC_MS) {
-    last = placed(byId.get(lastOnMac.id));
-  }
-  const pinned = sessions
-    .filter((s) => s.pinned === true && s.id !== last?.session.id && !urgent.has(s.id))
-    .sort(newestFirst)
-    .map((s) => placed(byId.get(s.id)));
-  const taken = new Set([last?.session.id, ...pinned.map((i) => i.session.id)]);
-  const left = (item) => !taken.has(item.session.id);
-
-  const finished = finishes.filter((f) => left(f.item)).sort(newestEvent).map((f) => f.item);
-  const stillWorking = working.filter(left).sort((a, b) => newestFirst(a.session, b.session));
-  const stillOnMac = terminals.filter(left).map((i) => i.session).sort(newestFirst);
-  const showOnMac = needsYou.length + finished.length + stillWorking.length <= ON_MAC_COLLAPSE_ABOVE;
-  const onMac = showOnMac ? stillOnMac.slice(0, ON_MAC_LIMIT) : [];
-
+  const { windows, hiddenTabs } = macWindows(rest.filter((s) => s.mac), words, wanted, working);
   return {
-    lastOnMac: last,
-    pinned,
-    needsYou,
-    finished,
-    working: workingSection(stillWorking, lastActive),
-    onMac,
-    onMacFolders: byProject(onMac.map((session) => ({ session, activity: byId.get(session.id).activity }))),
-    onMacTotal: stillOnMac.length,
-    summary,
+    needsYou: needsYouAll.filter((s) => matches(s, words)).map(item),
+    pinned: rest.filter(pinnedAway).filter(wanted).sort(newest).map(item),
+    windows,
+    hiddenTabs,
+    elsewhere: byLabel(unpinned.filter((s) => !s.mac && open(s) && wanted(s)), now),
+    other: words.length && !workingOnly ? unpinned.filter((s) => !open(s) && wanted(s)).sort(newest) : [],
+    working: sessions.filter(working).length,
+    open: sessions.filter(open).length,
   };
+}
+
+// Windows by index, tabs by index, panes by number, and the tabs the filters left empty. A window is
+// keyed by its id; its name and order come from its first session in Mac order.
+function macWindows(placed, words, wanted, working) {
+  const existing = new Set();
+  const front = new Set();
+  const byTab = new Map();
+  for (const s of placed) {
+    const key = s.mac.window.id + '\u0000' + s.mac.tab.index;
+    existing.add(key);
+    if (s.mac.lastInFront === true) front.add(key);
+    if (!wanted(s)) continue;
+    if (!byTab.has(key)) byTab.set(key, []);
+    byTab.get(key).push(s);
+  }
+  const byWindow = new Map();
+  for (const [key, listed] of byTab) {
+    const ordered = listed.sort(macOrder);
+    const first = ordered[0];
+    const tab = {
+      index: first.mac.tab.index, name: first.mac.tab.name, panes: first.mac.panes,
+      working: ordered.filter(working).length, open: words.length ? true : front.has(key), sessions: ordered,
+    };
+    const entry = byWindow.get(first.mac.window.id) ?? { first, tabs: [] };
+    if (macOrder(first, entry.first) < 0) entry.first = first;
+    entry.tabs.push(tab);
+    byWindow.set(first.mac.window.id, entry);
+  }
+  const windows = [...byWindow.values()].sort((a, b) => macOrder(a.first, b.first)).map((e) => ({
+    id: e.first.mac.window.id, name: e.first.mac.window.name, tabs: e.tabs.sort((a, b) => a.index - b.index),
+  }));
+  return { windows, hiddenTabs: existing.size - byTab.size };
+}
+
+// Elsewhere: grouped by folder label (or the project's last component), newest group first.
+function byLabel(sessions, now) {
+  const groups = new Map();
+  for (const s of sessions) {
+    const label = s.folder?.label ?? projectName(s.project);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(s);
+  }
+  const newest = newestFirst(now);
+  const t = (s) => Math.min(s.lastActive, now);
+  return [...groups].map(([label, list]) => ({ label, sessions: list.sort(newest) }))
+    .sort((a, b) => t(b.sessions[0]) - t(a.sessions[0]) || compareCodePoints(a.label, b.label));
 }
 
 // The row's second line: the trimmed description, or null when it has no text.
@@ -135,42 +133,32 @@ export function descriptionLine(session) {
   return d || null;
 }
 
-// byProject groups items by project path into folder rows, in the order first met. Items come
-// newest first, so each folder's first item is its newest and folders follow their newest session.
-function byProject(items) {
-  const groups = new Map();
-  for (const item of items) {
-    if (!groups.has(item.session.project)) groups.set(item.session.project, []);
-    groups.get(item.session.project).push(item);
-  }
-  // A folder row starts expanded; collapsing it is the view's state.
-  return [...groups].map(([project, grouped]) => ({
-    kind: 'folder',
-    expanded: true,
-    project,
-    name: project.split('/').filter(Boolean).pop() ?? project,
-    count: grouped.length,
-    newest: grouped[0],
-    items: grouped,
-  }));
+// A list with no `mac` at all keeps the last places (by session id, for sessions still listed) until
+// 30 s, inclusive, after the last list that had some; a list with places replaces them. `previous` is
+// {places, since} or null. Call it with the time a list arrived to move the clock, and with the held
+// state to apply it.
+export function holdPlaces(previous, current, now) {
+  const fresh = current.filter((s) => s.mac);
+  if (fresh.length) return { sessions: current, held: { places: Object.fromEntries(fresh.map((s) => [s.id, s.mac])), since: now } };
+  if (!previous || now - previous.since > HOLD_MS) return { sessions: current, held: null };
+  return {
+    sessions: current.map((s) => (Object.hasOwn(previous.places, s.id) ? { ...s, mac: previous.places[s.id] } : s)),
+    held: previous,
+  };
 }
 
-function workingSection(working, lastActive) {
-  if (working.length <= FLAT_WORKING_LIMIT) return { list: working.map((item) => ({ kind: 'session', ...item })) };
-  const groups = byProject(working);
-  groups.sort((a, b) => b.count - a.count
-    || lastActive(b.newest.session) - lastActive(a.newest.session)
-    || byString(a.project, b.project));
-  const kept = groups.slice(0, FLAT_WORKING_LIMIT);
-  const rest = groups.slice(FLAT_WORKING_LIMIT);
-  const result = { groups: kept };
-  if (rest.length) result.more = { projects: rest.length, sessions: rest.reduce((n, g) => n + g.count, 0) };
-  return result;
-}
-
-// The chat's Next bar target: the first other session in Needs you, else in Working; null when none.
-export function nextSession(view, id) {
-  const other = (item) => item.session.id !== id;
-  const working = view.working.list ?? view.working.groups.flatMap((g) => g.items);
-  return view.needsYou.find(other) ?? working.find(other) ?? null;
+// The chat's Next bar: Needs you first (not the open session); otherwise the first working session in
+// Now's order (Pinned, the windows tab by tab and pane by pane, then Elsewhere) that is not the open
+// session and not one whose approval the owner just answered. Null when none.
+export function nextSession(view, id, answered = new Set(), activity = {}) {
+  const urgent = view.needsYou.find((i) => i.session.id !== id);
+  if (urgent) return urgent;
+  const listed = [
+    ...view.pinned.map((i) => i.session),
+    ...view.windows.flatMap((w) => w.tabs.flatMap((t) => t.sessions)),
+    ...view.elsewhere.flatMap((g) => g.sessions),
+  ];
+  const a = (s) => activity[s.id] ?? { kind: 'none' };
+  const next = listed.find((s) => s.id !== id && !answered.has(s.id) && isWorking(s, a(s)));
+  return next ? { session: next, activity: a(next) } : null;
 }

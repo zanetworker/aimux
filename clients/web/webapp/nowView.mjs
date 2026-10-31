@@ -1,64 +1,129 @@
-import { descriptionLine } from './now.mjs';
-import { displayTitle, el, bidi, dot, dotRow, descriptionNode, projectLine, projectName, relativeTime, sectionLabel, section, sinceText, icon, errorBanner, screenHeader } from './rows.mjs';
+import { bidi, card, displayTitle, dot, dotRow, el, errorBanner, foldLine, icon, isOpenChoice, projectName, relativeTime, rowPlace, rowState, saveChoice, section, sectionLabel, sessionLine, tabKey } from './rows.mjs';
 
-// Now: the session last in front on the Mac, the pinned ones, what needs you, what just finished,
-// what is working, and what sits open on your Mac.
-// ui: { collapsed: Set<project>, openCards: Set<approvalId>, menuFor: session id or null,
-//       focus: data-focus to focus after the next render, rendering: a render is replacing the
-//       rows, pointerDown: a pointer is pressed, announce(text): the persistent live region, open(session, seen), showAll(filter),
-//       rerender(), headerButton: Node }
+// Now: what needs you, the pinned sessions that are not open, the Mac's iTerm2 windows and tabs as
+// they are on the Mac, the open sessions elsewhere and, with a query, Other sessions. The search box
+// and the Working chip sit in the header (tabs.mjs), which keeps them across renders.
+// ui: { openCards: Set<approvalId>, menuFor: session id or null, focus: data-focus to focus after
+//       the next render, rendering: a render is replacing the rows, pointerDown: a pointer is
+//       pressed, announce(text): the persistent live region, open(session), rerender(), refresh(),
+//       storage: localStorage or a stand-in, conversations(shownIds): the In conversations section }
 
 const BUSY_ABOVE = 5;
+const TABS_KEY = 'openTabs';
 
 export function renderNow(model, ui) {
   const v = model.view;
-  const quiet = !v.needsYou.length && !v.finished.length && !v.summary.working;
-  const busy = v.needsYou.length + v.finished.length + v.summary.working > BUSY_ABOVE;
-  const out = [screenHeader('Now', ui.headerButton, summaryLine(v.summary, quiet, model.loaded))];
-  if (model.loadError) {
-    out.push(errorBanner('Could not reach your Mac', model.loadError.message, () => ui.refresh()));
+  const filtered = queryText(model) !== '' || model.workingOnly;
+  const busy = v.needsYou.length + v.working > BUSY_ABOVE;
+  const body = [];
+  if (model.loadError) body.push(errorBanner('Could not reach your Mac', model.loadError.message, () => ui.refresh()));
+  body.push(...needsYou(model, ui, busy));
+  const row = (session, inPane) => withMenu(model, ui, session, nowRow(model, ui, session, inPane));
+  if (v.pinned.length) body.push(section(sectionLabel('Pinned'), ...v.pinned.flatMap((i) => row(i.session, false))));
+  v.windows.forEach((w, n) => {
+    const s = el('section', 'group');
+    if (n === 0) s.append(sectionLabel('On your Mac'));
+    const name = el('h2', 'window-name');
+    name.append(bidi(w.name));
+    s.append(name, card(...w.tabs.flatMap((t) => tabRows(model, ui, w, t, filtered, row))));
+    if (n === v.windows.length - 1 && v.hiddenTabs) s.append(hiddenLine(v.hiddenTabs));
+    body.push(s);
+  });
+  if (!v.windows.length && v.hiddenTabs) {
+    const s = el('section', 'group');
+    s.append(sectionLabel('On your Mac'), hiddenLine(v.hiddenTabs));
+    body.push(s);
   }
-  if (v.lastOnMac) {
-    const { session } = v.lastOnMac;
-    out.push(section(sectionLabel('Last on your Mac', sinceText(model.lastOnMac.at)), ...withMenu(model, ui, session, placedRow(v.lastOnMac, ui))));
+  if (v.elsewhere.length) {
+    const label = !v.windows.length && !v.hiddenTabs ? 'On your Mac' : 'Elsewhere';
+    body.push(section(sectionLabel(label), ...v.elsewhere.flatMap((g) => g.sessions).flatMap((s) => row(s, false))));
   }
-  if (v.pinned.length) {
-    out.push(section(sectionLabel('Pinned'), ...v.pinned.flatMap((item) => withMenu(model, ui, item.session, placedRow(item, ui)))));
-  }
-  out.push(...needsYou(model, ui, busy));
-  if (v.finished.length) {
-    out.push(section(sectionLabel('Just finished'), ...v.finished.flatMap((item) => withMenu(model, ui, item.session, dotRow({
-      status: 'idle', title: displayTitle(item.session.title, item.session.id), description: descriptionLine(item.session),
-      time: item.activity.at, detail: finishedLine(item.session.project), onClick: () => ui.open(item.session, true),
-    })))));
-  }
-  out.push(...working(model, v, ui));
-  if (v.onMacTotal > 0) {
-    const all = el('button', 'link', 'All ' + v.onMacTotal);
-    all.type = 'button';
-    all.addEventListener('click', () => ui.showAll({ onMacOnly: true }));
-    const label = sectionLabel('On your Mac', 'read-only, by project', all);
-    if (v.onMacFolders.length) {
-      out.push(section(label, ...v.onMacFolders.map((g) => (g.count === 1
-        ? singleFolder(model, ui, g, ON_MAC_ROWS) : folder(model, ui, g, ON_MAC_ROWS)))));
-    } else {
-      const s = el('section', 'group');
-      s.append(label);
-      out.push(s);
-    }
-  }
-  return out;
+  if (v.other.length) body.push(section(sectionLabel('Other sessions'), ...v.other.flatMap((s) => row(s, false))));
+  body.push(...ui.conversations(shownIds(v)));
+  return { summary: summaryLine(model, v), chip: workingChip(model, ui, v), body };
 }
 
-// A Last on your Mac or Pinned row: the session's own status dot, its description, "project · step".
-function placedRow(item, ui) {
-  const { session } = item;
-  const detail = item.status === 'working' ? stepLine(item, true) : projectLine(session.project);
-  return dotRow({
-    status: item.status, title: displayTitle(session.title, session.id), description: descriptionLine(session),
-    detail, time: session.lastActive, locked: session.state === 'open_in_terminal' && item.status !== 'working',
-    onClick: () => ui.open(session),
+const queryText = (model) => model.query.trim();
+
+// A tab as one fold line, then its panes under a guide line when open. A search or the Working chip
+// holds every tab left open, and its counts read "1 of 4 panes".
+function tabRows(model, ui, w, t, filtered, row) {
+  const key = tabKey(w.name, t.name);
+  const open = filtered || isOpenChoice(ui.storage, TABS_KEY, key, t.open);
+  const panes = t.panes === 1 ? '1 pane' : t.panes + ' panes';
+  const counts = filtered ? t.sessions.length + ' of ' + panes : t.working ? panes + ' · ' + t.working + ' working' : panes;
+  const line = foldLine({
+    name: t.name, position: 'tab ' + t.index, counts, open, canFold: !filtered, focusKey: 'tab:' + w.id + ':' + t.index,
+    onToggle: () => { saveChoice(ui.storage, TABS_KEY, key, !open); ui.rerender(); },
   });
+  if (!open) return [line];
+  const items = el('div', 'folder-items');
+  for (const s of t.sessions) items.append(...row(s, true));
+  return [line, items];
+}
+
+function hiddenLine(n) {
+  return el('p', 'group-note', n === 1 ? '1 tab with no match is hidden' : n + ' tabs with no match are hidden');
+}
+
+// A session row: its state line, the quiet place line (with the tab away from its own tab), a pin
+// mark when pinned and open in its pane.
+function nowRow(model, ui, session, inPane) {
+  const activity = model.activity[session.id] ?? { kind: 'none' };
+  return sessionLine({
+    session, activity, state: rowState(session, activity, model.now()), place: rowPlace(session, !inPane),
+    showsPin: inPane && session.pinned === true, onClick: () => ui.open(session),
+  });
+}
+
+// Every session the screen lists, so conversation hits do not repeat them.
+function shownIds(v) {
+  return new Set([
+    ...v.needsYou.map((i) => i.session.id), ...v.pinned.map((i) => i.session.id),
+    ...v.windows.flatMap((w) => w.tabs.flatMap((t) => t.sessions.map((s) => s.id))),
+    ...v.elsewhere.flatMap((g) => g.sessions.map((s) => s.id)), ...v.other.map((s) => s.id),
+  ]);
+}
+
+// "2 need you · 25 open"; with a query "2 open match"; "Nothing open" once loaded with nothing open.
+// One quiet line: counts in semibold, no colour.
+function summaryLine(model, v) {
+  const line = el('p', 'summary');
+  const part = (n, label) => {
+    const p = el('span');
+    p.append(el('b', '', String(n)), ' ' + label);
+    return p;
+  };
+  if (queryText(model)) {
+    const n = v.windows.reduce((k, w) => k + w.tabs.reduce((j, t) => j + t.sessions.length, 0), 0)
+      + v.elsewhere.reduce((k, g) => k + g.sessions.length, 0);
+    line.append(n ? part(n, 'open match') : 'No open match');
+    return line;
+  }
+  if (!model.loaded && !v.open && !v.needsYou.length) {
+    line.textContent = ' ';
+    return line;
+  }
+  const parts = [];
+  if (v.needsYou.length) parts.push(part(v.needsYou.length, 'need you'));
+  parts.push(v.open ? part(v.open, 'open') : 'Nothing open');
+  parts.forEach((p, i) => line.append(...(i ? [' · ', p] : [p])));
+  return line;
+}
+
+// "Working · N": narrows Now to working sessions; shown when anything works or it is on.
+function workingChip(model, ui, v) {
+  if (!v.working && !model.workingOnly) return null;
+  const b = el('button', 'chip' + (model.workingOnly ? ' on' : ''), 'Working · ' + v.working);
+  b.type = 'button';
+  b.dataset.focus = 'working-chip';
+  b.setAttribute('aria-pressed', String(model.workingOnly));
+  b.addEventListener('click', () => {
+    model.setWorkingOnly(!model.workingOnly);
+    ui.focus = 'working-chip';
+    ui.rerender();
+  });
+  return b;
 }
 
 // The row with its menu button ("…": Pin or Unpin) beside it, when the server can pin; then the
@@ -136,33 +201,6 @@ function withMenu(model, ui, session, row) {
   const err = model.pinErrors.get(session.id);
   if (err) out.push(el('p', 'row-error', err));
   return out;
-}
-
-// "2 need you · 2 working · 14 on your Mac": counts in bold, only "need you" amber;
-// "Nothing needs you" when nothing needs you, finished or is working.
-function summaryLine(counts, quiet, loaded) {
-  const line = el('p', 'summary');
-  if (quiet) {
-    line.textContent = loaded ? 'Nothing needs you' : ' ';
-    return line;
-  }
-  const parts = [];
-  const part = (n, label, cls) => {
-    const p = el('span', cls);
-    p.append(el('b', '', String(n)), ' ' + label);
-    return p;
-  };
-  if (counts.needYou) parts.push(part(counts.needYou, 'need you', 'amber'));
-  if (counts.working) parts.push(part(counts.working, 'working'));
-  if (counts.onMac) parts.push(part(counts.onMac, 'on your Mac'));
-  parts.forEach((p, i) => line.append(...(i ? [' · ', p] : [p])));
-  return line;
-}
-
-function finishedLine(project) {
-  const d = el('span', 'detail', 'Finished · ');
-  d.append(bidi(projectName(project)));
-  return d;
 }
 
 function needsYou(model, ui, busy) {
@@ -269,118 +307,4 @@ function failedRow(model, ui, item) {
   const err = model.retryErrors.get(session.id);
   if (err) wrap.append(el('p', 'row-error', 'Could not retry: ' + err.message));
   return wrap;
-}
-
-// "project · live step": the step in monospace, or "Thinking", or "Active".
-function stepLine(item, withProject) {
-  const step = item.activity.kind === 'working' ? item.activity.step : undefined;
-  const text = step ?? 'Active';
-  const cls = step && step !== 'Thinking' ? 'mono' : '';
-  if (withProject) return projectLine(item.session.project, text, cls);
-  const d = el('span', 'detail');
-  d.append(bidi(text, cls));
-  return d;
-}
-
-function working(model, v, ui) {
-  const w = v.working;
-  if (w.list) {
-    if (!w.list.length) return [];
-    return [section(sectionLabel('Working'), ...w.list.flatMap((item) => withMenu(model, ui, item.session, dotRow({
-      status: 'working', title: displayTitle(item.session.title, item.session.id), description: descriptionLine(item.session),
-      time: item.session.lastActive, detail: stepLine(item, true), onClick: () => ui.open(item.session),
-    }))))];
-  }
-  const rows = w.groups.map((g) => (g.count === 1 ? singleFolder(model, ui, g) : folder(model, ui, g)));
-  if (w.more) {
-    const more = el('button', 'row folder-row');
-    more.type = 'button';
-    more.dataset.focus = 'more-projects';
-    const text = el('span', 'text one');
-    text.append(el('span', 'group-name', w.more.projects === 1 ? '1 more project' : w.more.projects + ' more projects'));
-    more.append(icon('folder'), text, el('span', 'count', String(w.more.sessions)), icon('chevron'));
-    more.addEventListener('click', () => ui.showAll({ sort: 'mostActive' }));
-    rows.push(more);
-  }
-  return [section(sectionLabel('Working', v.summary.working + ', by project'), ...rows)];
-}
-
-// How folder rows show their sessions: Working's with the working dot and the current step;
-// On your Mac's idle, without a step, and collapsed apart from a Working folder of the same project.
-const WORKING_ROWS = { status: 'working', steps: true, key: '' };
-const ON_MAC_ROWS = { status: 'idle', steps: false, key: 'mac:' };
-
-// A folder: its icon, the name in semibold, the count and a chevron; open, its sessions indented
-// under a guide line. Folders start open; ui.collapsed holds the ones closed.
-function folder(model, ui, g, rows = WORKING_ROWS) {
-  const key = rows.key + g.project;
-  const isOpen = !ui.collapsed.has(key);
-  const box = el('div', 'folder');
-  const head = el('button', 'row folder-row' + (isOpen ? ' open' : ''));
-  head.type = 'button';
-  head.dataset.focus = 'folder:' + key;
-  head.setAttribute('aria-expanded', String(isOpen));
-  const text = el('span', 'text one');
-  text.append(bidi(g.name, 'group-name'));
-  if (!isOpen) {
-    const newest = el('span', 'detail inline');
-    newest.append(' · ', bidi(displayTitle(g.newest.session.title, g.newest.session.id)));
-    text.append(newest);
-  }
-  head.append(icon('folder'), text, el('span', 'count', String(g.count)), icon('chevron'));
-  head.addEventListener('click', () => {
-    if (isOpen) ui.collapsed.add(key); else ui.collapsed.delete(key);
-    ui.rerender();
-  });
-  box.append(head);
-  if (isOpen) {
-    const items = el('div', 'folder-items');
-    for (const item of g.items) items.append(...withMenu(model, ui, item.session, compactRow(item, ui, rows)));
-    box.append(items);
-  }
-  return box;
-}
-
-// A folder of one session: the folder icon, its name and the session inline, opening the session.
-function singleFolder(model, ui, g, rows = WORKING_ROWS) {
-  const item = g.items[0];
-  const r = el('button', 'row folder-row single');
-  r.type = 'button';
-  const t = el('span', 'text');
-  const line = el('span', 'one');
-  const title = bidi(displayTitle(item.session.title, item.session.id), 'compact-title');
-  title.dir = 'auto';
-  line.append(bidi(g.name, 'group-name'), el('span', 'detail inline', ' · '), title);
-  t.append(line);
-  const desc = descriptionNode(descriptionLine(item.session));
-  if (desc) t.append(desc);
-  if (rows.steps) t.append(stepLine(item, false));
-  r.append(icon('folder'), t, el('span', 'time', relativeTime(item.session.lastActive)));
-  r.addEventListener('click', () => ui.open(item.session));
-  const box = el('div', 'folder');
-  box.append(...withMenu(model, ui, item.session, r));
-  return box;
-}
-
-// A session inside an open folder: dot, title · step, its description under them, the time.
-function compactRow(item, ui, rows = WORKING_ROWS) {
-  const r = el('button', 'row compact');
-  r.type = 'button';
-  const t = el('span', 'text');
-  const line = el('span', 'one');
-  const title = bidi(displayTitle(item.session.title, item.session.id), 'compact-title');
-  title.dir = 'auto';
-  line.append(title);
-  if (rows.steps) {
-    const step = stepLine(item, false);
-    step.className = 'detail inline';
-    step.prepend(' · ');
-    line.append(step);
-  }
-  t.append(line);
-  const desc = descriptionNode(descriptionLine(item.session));
-  if (desc) t.append(desc);
-  r.append(dot(rows.status), t, el('span', 'time', relativeTime(item.session.lastActive)));
-  r.addEventListener('click', () => ui.open(item.session));
-  return r;
 }

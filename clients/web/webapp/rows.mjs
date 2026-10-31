@@ -1,6 +1,8 @@
-import { descriptionLine } from './now.mjs';
+import { isOpen, isWorking, projectName } from './search.mjs';
 
-// The pieces Now, All and search share: rows, section labels, status dots and times.
+export { projectName };
+
+// The pieces Now and All share: rows, fold lines, the search box, section labels, status dots and times.
 // Everything is built as DOM nodes with textContent; session text is never parsed as HTML.
 
 export function el(tag, cls, text) {
@@ -23,18 +25,12 @@ export function dot(status) {
   return d;
 }
 
-export const stateDot = (state) => (state === 'busy' ? 'working' : 'idle');
-
 // A session with no real title is "Session <uuid>" or the bare id: show "Session " + the id's first 8 characters.
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const ID_ONLY = new RegExp('^(Session )?' + UUID + '$', 'i');
 export function displayTitle(title, id) {
   const t = (title || '').trim();
   return !t || t === id || ID_ONLY.test(t) ? 'Session ' + String(id).slice(0, 8) : t;
-}
-
-export function projectName(path) {
-  return (path || '').split('/').filter(Boolean).pop() || path || '';
 }
 
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -53,13 +49,6 @@ export function relativeTime(ms, now = Date.now()) {
   const opts = { month: 'short', day: 'numeric' };
   if (date.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
   return date.toLocaleDateString(undefined, opts);
-}
-
-// "just now", "4 min ago", "3 h ago"; "Yesterday" and dates as relativeTime has them.
-export function sinceText(ms, now = Date.now()) {
-  const r = relativeTime(Math.min(ms, now), now);
-  if (r === 'now') return 'just now';
-  return /^\d+ (min|h)$/.test(r) ? r + ' ago' : r;
 }
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -92,6 +81,9 @@ const ICONS = {
   play: 'M3 5h18v14H3zM10 9v6l5-3z',
   photo: 'M4 5h16v14H4zM4 16l5-5 4 4 2.5-2.5L20 17M15.5 8.5v.1',
   waveform: 'M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2',
+  // Row marks: pinned and open in its pane, the pane last in front on the Mac
+  pin: 'M9 3.5h6l-1 5.5 3 3v1.5H7V12l3-3zM12 13.5V20.5',
+  diamond: 'M12 5.5l5.5 6.5-5.5 6.5-5.5-6.5z',
 };
 
 export function icon(name, cls) {
@@ -144,14 +136,141 @@ export function dotRow({ status, title, description, detail, time, locked, onCli
   return row;
 }
 
-// A row in All and in search: title, then "project · last prompt"; a lock when open in a terminal.
-export function sessionRow(session, onClick) {
-  return dotRow({
-    status: stateDot(session.state), title: displayTitle(session.title, session.id), description: descriptionLine(session),
-    detail: projectLine(session.project, session.lastPrompt), time: session.lastActive,
-    locked: session.state === 'open_in_terminal', onClick,
-  });
+// What an open session is doing, for the line under its title: {kind, step?, text}, or null when closed.
+// "Working · go test ./...", "Working", "Your turn · 4 min".
+export function rowState(session, activity, now = Date.now()) {
+  if (isWorking(session, activity)) {
+    const step = activity?.kind === 'working' && activity.step ? activity.step : null;
+    return { kind: 'working', step, text: step ? 'Working · ' + step : 'Working' };
+  }
+  if (!isOpen(session, activity)) return null;
+  const since = relativeTime(Math.min(session.lastActive, now), now);
+  return { kind: 'yourTurn', text: 'Your turn · ' + (since === 'now' ? 'just now' : since) };
 }
+
+// The quiet line: the folder label (or the project's last component), then "pane N", with "tab N"
+// before it when `withTab` (All and Elsewhere, away from the tab's own heading).
+export function rowPlace(session, withTab) {
+  const parts = [session.folder?.label ?? projectName(session.project)];
+  if (session.mac) {
+    if (withTab) parts.push('tab ' + session.mac.tab.index);
+    parts.push('pane ' + session.mac.pane);
+  }
+  return parts.join(' · ');
+}
+
+function mark(name, label) {
+  const m = icon(name, 'mark ' + name);
+  m.removeAttribute('aria-hidden');
+  m.setAttribute('role', 'img');
+  m.setAttribute('aria-label', label);
+  return m;
+}
+
+// A session row on Now and All: the dot, the title with its marks (a pin when pinned and open in its
+// pane, a diamond for the pane last in front on the Mac), the state line, the quiet place line, and
+// the time when there is no state line.
+export function sessionLine({ session, activity, state, place, showsPin = false, onClick }) {
+  const row = el('button', 'row session-line');
+  row.type = 'button';
+  const text = el('span', 'text');
+  const titleLine = el('span', 'title-line');
+  const t = el('span', 'title', displayTitle(session.title, session.id));
+  t.dir = 'auto';
+  titleLine.append(t);
+  if (showsPin) titleLine.append(mark('pin', 'Pinned'));
+  if (session.mac?.lastInFront === true) titleLine.append(mark('diamond', 'Last in front on your Mac'));
+  text.append(titleLine);
+  if (state) {
+    const line = el('span', 'detail state');
+    if (state.step && state.step !== 'Thinking') line.append('Working · ', bidi(state.step, 'mono'));
+    else line.textContent = state.text;
+    text.append(line);
+  }
+  if (place) text.append(el('span', 'detail place', place));
+  row.append(dot(isWorking(session, activity) ? 'working' : 'idle'), text);
+  if (!state) row.append(el('span', 'time', relativeTime(session.lastActive)));
+  if (onClick) row.addEventListener('click', onClick);
+  return row;
+}
+
+// A fold: chevron, the name in semibold, its position ("tab 3"), its counts on the right. `canFold`
+// is false while a search or the Working chip holds it open.
+export function foldLine({ name, position, counts, open, canFold = true, onToggle, focusKey }) {
+  const b = el('button', 'row fold-line' + (open ? ' open' : '') + (canFold ? '' : ' held'));
+  b.type = 'button';
+  if (focusKey) b.dataset.focus = focusKey;
+  b.setAttribute('aria-expanded', String(open));
+  if (!canFold) b.setAttribute('aria-disabled', 'true');
+  b.setAttribute('aria-label', [name, position, counts].filter(Boolean).join(' · '));
+  const text = el('span', 'text one');
+  text.append(bidi(name, 'group-name'));
+  if (position) text.append(el('span', 'detail inline', position));
+  b.append(icon('chevron'), text, el('span', 'count', counts));
+  if (canFold && onToggle) b.addEventListener('click', onToggle);
+  return b;
+}
+
+// The one search box of Now and All: a magnifying glass, the text and a clear button. It is built
+// once per screen and kept across renders, so typing never loses focus.
+export function searchBox({ placeholder, onInput }) {
+  const wrap = el('div', 'search-box');
+  const field = el('input', 'search-field');
+  field.type = 'search';
+  field.placeholder = placeholder;
+  field.setAttribute('aria-label', placeholder);
+  field.autocomplete = 'off';
+  field.spellcheck = false;
+  field.setAttribute('autocapitalize', 'off');
+  field.enterKeyHint = 'search';
+  const clear = el('button', 'search-clear');
+  clear.type = 'button';
+  clear.setAttribute('aria-label', 'Clear search');
+  clear.append(icon('cross'));
+  const sync = () => { clear.hidden = !field.value; };
+  field.addEventListener('input', () => { sync(); onInput(field.value); });
+  clear.addEventListener('click', () => { field.value = ''; sync(); onInput(''); field.focus(); });
+  sync();
+  wrap.append(icon('search'), field, clear);
+  return { node: wrap, field };
+}
+
+// Folds opened or closed by hand, kept on the device as a JSON object of key to true or false under
+// `name` (openTabs, openFolders); a key with no choice falls back to the screen's own default.
+// Storage that refuses (private mode, blocked site data) keeps the choices here, for this visit only.
+const unsaved = new WeakMap(); // storage to a Map of name to choices
+
+function readChoices(storage, name) {
+  const kept = unsaved.get(storage)?.get(name);
+  if (kept) return kept;
+  try {
+    const parsed = JSON.parse(storage.getItem(name) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function isOpenChoice(storage, name, key, otherwise) {
+  const choice = readChoices(storage, name)[key];
+  return typeof choice === 'boolean' ? choice : otherwise;
+}
+
+export function saveChoice(storage, name, key, open) {
+  const choices = { ...readChoices(storage, name), [key]: open };
+  try {
+    storage.setItem(name, JSON.stringify(choices));
+    unsaved.get(storage)?.delete(name);
+  } catch {
+    if (!unsaved.has(storage)) unsaved.set(storage, new Map());
+    unsaved.get(storage).set(name, choices);
+  }
+}
+
+// A Now tab: "<window name>|<tab name>", best effort across iTerm2 restarts.
+export const tabKey = (window, tab) => window + '|' + tab;
+// An All folder: the repo path, or "<repo path>|<worktree>".
+export const folderKey = (repoPath, worktree) => (worktree == null ? repoPath : repoPath + '|' + worktree);
 
 // A small uppercase label over a group, with an optional detail and something on the right.
 export function sectionLabel(title, detail, trailing) {

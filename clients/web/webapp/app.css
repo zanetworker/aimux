@@ -85,8 +85,8 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 .menu .hint { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
 .empty { padding: 32px 16px; color: var(--text-dim); text-align: center; font-size: 14px; line-height: 1.6; }
 
-/* Now, All, search and the chat: near-monochrome, light and dark; colour only in the status
-   dots and the "need you" amber. */
+/* Now, All and the chat: near-monochrome, light and dark; colour only in the status dots and
+   the "need you" amber. */
 #tabs, #session, #login {
   --t-bg: #f2f2f7; --t-card: #fff; --t-text: #000;
   --t-secondary: rgba(60, 60, 67, 0.6); --t-tertiary: rgba(60, 60, 67, 0.3);
@@ -177,28 +177,38 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 .group-name { font-size: 17px; }
 .row .detail.inline { display: inline; font-size: 15px; }
 #tabs .row svg.chevron { width: 14px; height: 14px; color: var(--t-tertiary); stroke-width: 2.4; transition: transform 0.15s; }
-#tabs .folder-row.open svg.chevron { transform: rotate(90deg); }
-#tabs .row.compact { padding-left: 28px; min-height: 40px; }
-.compact-title { font-size: 15px; }
-.row.compact .detail.inline { font-size: 13px; }
-.row.compact .mono { font-size: 12.5px; }
 
-/* Finding sessions: the description line, folder rows and the row menu. */
+/* Finding sessions: session lines, fold lines (tabs, repos, worktrees), the row menu. */
 .row .desc {
   display: block; font-size: 15px; color: var(--t-secondary); text-align: start;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .row .text .one { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row.compact .desc { font-size: 13px; }
-#tabs .row svg.folder { width: 18px; height: 18px; margin-left: -5px; color: var(--t-secondary); }
-#tabs .folder + .folder .folder-row, #tabs .folder + .folder-row { padding-top: 16px; }
-.folder-row .group-name { font-weight: 600; }
-.folder-items { margin: 0 0 6px 20px; border-left: 1px solid var(--t-sep); }
+.title-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.title-line .title { min-width: 0; }
+#tabs svg.mark { width: 11px; height: 11px; color: var(--t-secondary); stroke-width: 2; }
+#tabs svg.mark.diamond, #tabs svg.mark.pin { fill: currentColor; }
+.row .detail.state { color: var(--t-secondary); }
+.row .detail.place { font-size: 13px; }
+#tabs .fold-line { gap: 6px; }
+#tabs .fold-line .text { display: flex; flex-direction: row; align-items: baseline; gap: 6px; }
+#tabs .fold-line .group-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#tabs .fold-line .detail.inline { flex-shrink: 0; font-size: 13px; }
+#tabs .fold-line .count { font-size: 13px; }
+#tabs .fold-line.open svg.chevron { transform: rotate(90deg); }
+#tabs .fold-line.held { cursor: default; }
+#tabs .fold-line.held svg.chevron { opacity: 0.5; }
+#tabs .fold-line.held:active { background: none; }
+.window-name { padding: 2px 16px 8px; font-size: 15px; font-weight: 600; }
+.label + .window-name { padding-top: 0; }
+.group-note { padding: 8px 16px 0; font-size: 13px; color: var(--t-secondary); }
+.folder-items { margin: 0 0 6px 22px; border-left: 1px solid var(--t-sep); }
+.folder-items .folder-items { margin-left: 22px; }
 .folder-items > * { position: relative; }
 .folder-items > * + *::before {
   content: ''; position: absolute; top: 0; left: 28px; right: 16px; height: 0.5px; background: var(--t-sep);
 }
-#tabs .folder-items .row.compact { padding-left: 12px; }
+#tabs .folder-items .row { padding-left: 12px; }
 .row-line { display: flex; align-items: stretch; }
 .row-line > .row { flex: 1; min-width: 0; }
 #tabs .row-line > .row { padding-right: 4px; }
@@ -247,33 +257,42 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 #tabs .row.static svg.lock { width: 16px; height: 16px; color: var(--t-text); }
 .row.note { font-size: 15px; color: var(--t-secondary); }
 
-.filters { display: flex; gap: 8px; margin-top: 10px; }
-.menu-pill { position: relative; display: inline-flex; align-items: center; min-width: 0; }
-.menu-pill select {
-  appearance: none; -webkit-appearance: none; max-width: 200px; text-overflow: ellipsis;
-  padding: 7px 30px 7px 13px; border: none; border-radius: 999px;
-  background: var(--t-fill); color: var(--t-text); font: inherit; font-size: 15px;
+.header-extra:empty { display: none; }
+.header-extra { margin-top: 10px; }
+#tabs .chip {
+  min-height: 32px; padding: 5px 14px; border-radius: 999px; background: var(--t-fill);
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
-#tabs .menu-pill svg.down { position: absolute; right: 11px; width: 12px; height: 12px; transform: rotate(90deg); pointer-events: none; stroke-width: 2.6; }
+#tabs .chip.on { background: var(--t-text); color: var(--t-bg); }
+.segmented { display: flex; padding: 2px; border-radius: 10px; background: var(--t-fill); }
+#tabs .segment { flex: 1; min-height: 32px; border-radius: 8px; font-size: 15px; font-weight: 500; }
+#tabs .segment.selected { background: var(--t-card); box-shadow: 0 1px 3px var(--t-shadow); font-weight: 600; }
+@media (prefers-color-scheme: dark) { #tabs .segment.selected { background: var(--t-grey); } }
 
 .search-box { position: relative; margin-top: 10px; }
 #tabs .search-box svg.search { position: absolute; left: 11px; top: 50%; width: 18px; height: 18px; transform: translateY(-50%); color: var(--t-secondary); }
 .search-field {
-  width: 100%; height: 42px; padding: 0 12px 0 36px; border: none; border-radius: 12px;
+  width: 100%; height: 42px; padding: 0 40px 0 36px; border: none; border-radius: 12px;
   background: var(--t-fill); color: var(--t-text); font: inherit; font-size: 17px; outline: none;
 }
 .search-field::placeholder { color: var(--t-secondary); }
+.search-field::-webkit-search-cancel-button { -webkit-appearance: none; }
+#tabs .search-clear {
+  position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px;
+  display: grid; place-items: center; color: var(--t-secondary);
+}
+#tabs .search-clear svg { width: 15px; height: 15px; stroke-width: 2.4; }
 .row .detail.stack { display: flex; flex-direction: column; gap: 2px; white-space: normal; }
 .row .detail.stack > .detail { font-size: 15px; }
 .snippet { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-align: left; }
 .snippet b { color: var(--t-text); font-weight: 700; }
 
-/* Tab bar: Now and All in one glass pill, search as the round button beside it. */
+/* Tab bar: Now and All in one glass pill. */
 #tabbar {
   position: absolute; left: 16px; right: 16px; bottom: max(14px, env(safe-area-inset-bottom));
   display: flex; align-items: center; gap: 10px; pointer-events: none;
 }
-.tab-pill, #tabs .round-tab {
+.tab-pill {
   pointer-events: auto; background: var(--t-bar); box-shadow: 0 6px 24px var(--t-shadow);
   border: 0.5px solid var(--t-sep);
   -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
@@ -286,7 +305,6 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 #tabs .tab svg { width: 24px; height: 24px; }
 #tabs .tab .core { fill: currentColor; stroke: none; }
 #tabs .tab.selected { background: var(--t-fill); }
-#tabs .round-tab { flex: 0 0 auto; width: 56px; height: 56px; border-radius: 50%; padding: 0; justify-content: center; }
 
 /* Chat: the same tokens on a plain background; panels (steps, plan, approvals, the composer) in
    the grouped grey. Colour only in the status dots, the Deny text, a failed step (its icon, mark and

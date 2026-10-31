@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { localMatches, poller } from './tabs.mjs';
+import { readFileSync } from 'node:fs';
+import { folderKey, isOpenChoice, poller, readAllMode, saveAllMode, saveChoice, tabKey } from './tabs.mjs';
 
 // A poller on a fake clock: `timers` holds what was scheduled.
 function harness({ load = async () => {}, render = () => {}, visible = true, active = true } = {}) {
@@ -103,25 +104,58 @@ test('schedule waits one pause before the next poll; never two timers, never whi
   assert.deepEqual(state.timers.filter((t) => t.live).map((t) => t.ms), [2000], 'the running poll sets the one next timer');
 });
 
-const s = (id, title, extra = {}) => ({ id, title, project: '/src/' + id, lastPrompt: '', ...extra });
-const ids = (list) => list.map((x) => x.id);
-
-test('search: titles and descriptions match first, then folders and last prompts, list order kept inside', () => {
-  const sessions = [
-    s('p1', 'Tidy up', { lastPrompt: 'fix the login page' }),
-    s('d1', 'Session 1234abcd', { description: 'Finds why the login page loops back.' }),
-    s('login', 'Something else'),
-    s('t1', 'Fix the LOGIN redirect'),
-  ];
-  assert.deepEqual(ids(localMatches(sessions, 'login')), ['d1', 't1', 'p1', 'login']);
+test('the tab bar has Now and All only: the Search tab is gone', () => {
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const tabs = [...html.matchAll(/data-tab="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(tabs, ['now', 'all']);
+  assert.equal(/id="search"/.test(html), false, 'no search screen');
 });
 
-test('search: every word must match, across title and description', () => {
-  const sessions = [s('a', 'Login redirect', { description: 'loops on Safari' }), s('b', 'Login redirect')];
-  assert.deepEqual(ids(localMatches(sessions, '  login   safari ')), ['a']);
+function memoryStorage() {
+  const data = {};
+  return { getItem: (k) => (k in data ? data[k] : null), setItem: (k, v) => { data[k] = String(v); }, data };
+}
+const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+
+test('All starts on Recent and remembers Folders; anything else stored reads as Recent', () => {
+  const storage = memoryStorage();
+  assert.equal(readAllMode(storage), 'recent');
+  saveAllMode(storage, 'folders');
+  assert.equal(storage.data.allMode, 'folders');
+  assert.equal(readAllMode(storage), 'folders', 'a new read (a reload) finds Folders');
+  saveAllMode(storage, 'recent');
+  assert.equal(readAllMode(storage), 'recent');
+  storage.data.allMode = 'mostActive';
+  assert.equal(readAllMode(storage), 'recent');
 });
 
-test('search: an empty query matches nothing; a missing description or prompt is no text', () => {
-  assert.deepEqual(localMatches([s('a', 'x')], '   '), []);
-  assert.deepEqual(ids(localMatches([{ id: 'a', title: 'x', project: '/p' }], 'x')), ['a']);
+test('All mode: storage that throws is Recent and a save does not crash', () => {
+  assert.equal(readAllMode(broken), 'recent');
+  assert.doesNotThrow(() => saveAllMode(broken, 'folders'));
+});
+
+test('folds: an explicit true or false wins over the default; keys are window|tab and repo|worktree', () => {
+  const storage = memoryStorage();
+  const key = tabKey('Window 1', 'aimux');
+  assert.equal(key, 'Window 1|aimux');
+  assert.equal(isOpenChoice(storage, 'openTabs', key, true), true, 'no choice: the default');
+  saveChoice(storage, 'openTabs', key, false);
+  assert.equal(isOpenChoice(storage, 'openTabs', key, true), false, 'folded by hand over an open default');
+  saveChoice(storage, 'openTabs', tabKey('Window 1', 'blog'), true);
+  assert.deepEqual(JSON.parse(storage.data.openTabs), { 'Window 1|aimux': false, 'Window 1|blog': true });
+  assert.equal(folderKey('/src/aimux'), '/src/aimux');
+  assert.equal(folderKey('/src/aimux', 'clients'), '/src/aimux|clients');
+});
+
+test('folds: unreadable or malformed storage falls back to the defaults; non-boolean values are ignored', () => {
+  assert.equal(isOpenChoice(broken, 'openFolders', 'x', true), true);
+  assert.doesNotThrow(() => saveChoice(broken, 'openFolders', 'x', false));
+  const storage = memoryStorage();
+  storage.data.openFolders = '{"a": "yes", "b": false}';
+  assert.equal(isOpenChoice(storage, 'openFolders', 'a', true), true);
+  assert.equal(isOpenChoice(storage, 'openFolders', 'b', true), false);
+  storage.data.openFolders = 'not json';
+  assert.equal(isOpenChoice(storage, 'openFolders', 'b', true), true);
+  storage.data.openFolders = '[true]';
+  assert.equal(isOpenChoice(storage, 'openFolders', '0', false), false);
 });

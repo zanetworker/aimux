@@ -1,19 +1,34 @@
 import { allSections } from './all.mjs';
-import { apiDate } from './apiDate.mjs';
+import { folderTree } from './folders.mjs';
 import { NowModel } from './nowModel.mjs';
 import { announce } from './sessionInfo.mjs';
 import { renderNow } from './nowView.mjs';
-import { bidi, displayTitle, el, icon, projectName, sectionLabel, section, sessionRow, dotRow, projectLine, errorBanner, screenHeader } from './rows.mjs';
+import { conversationSearch, queryWords, searchSessions } from './search.mjs';
+import {
+  displayTitle, dotRow, el, errorBanner, folderKey, foldLine, icon, isOpenChoice, projectLine, rowPlace, saveChoice,
+  screenHeader, searchBox, section, sectionLabel, sessionLine,
+} from './rows.mjs';
 
-// The Now / All / search screens and the tab bar under them, like RootTabs in the iPhone app.
-// One session list feeds all three; Now adds each candidate's activity.
+export { folderKey, isOpenChoice, saveChoice, tabKey } from './rows.mjs';
+
+// The Now and All screens and the tab bar under them, like RootTabs in the iPhone app. One session
+// list feeds both; Now adds each candidate's activity. Each screen has the one search box.
 
 const POLL_MS = 15000;
-const SEARCH_DEBOUNCE_MS = 400;
-const SORTS = [['newest', 'Newest'], ['mostActive', 'Most active'], ['project', 'Folders']];
+const MODE_KEY = 'allMode';
+const FOLDERS_KEY = 'openFolders';
 
 function storage() {
   try { return window.localStorage; } catch { return { getItem: () => null, setItem: () => {} }; }
+}
+
+// All's Recent or Folders, remembered on the device; Recent the first time.
+export function readAllMode(store) {
+  try { return store.getItem(MODE_KEY) === 'folders' ? 'folders' : 'recent'; } catch { return 'recent'; }
+}
+
+export function saveAllMode(store, mode) {
+  try { store.setItem(MODE_KEY, mode); } catch { /* private mode: for this visit only */ }
 }
 
 // Polls `every` ms (or every() ms, asked after each poll) while the tab is shown and the page
@@ -49,54 +64,61 @@ export function poller({ load, render, isActive, isVisible, every, setTimer = se
   return { tick, schedule: () => { if (!ticking) later(); }, stop: () => clearTimer(timer) };
 }
 
-// Search on this phone: sessions whose title, description, folder and last prompt hold every word
-// of the query; those matched by title and description alone first, the list order kept inside.
-export function localMatches(sessions, query) {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
-  const has = (parts) => { const hay = parts.join('\n').toLowerCase(); return words.every((w) => hay.includes(w)); };
-  const named = [], rest = [];
-  for (const s of sessions) {
-    const own = [s.title || '', s.description || ''];
-    if (has(own)) named.push(s);
-    else if (has([...own, s.project || '', s.lastPrompt || ''])) rest.push(s);
-  }
-  return [...named, ...rest];
-}
-
 // api: the page's /v1 helper (method, path, body, opts); opts.interaction marks what the person
 // asked for. Rows open a session at #/s/<id>; the compose button opens #/new. headerButtons()
 // gives extra buttons for Now's header (the Lock).
 export function createTabs(api, { headerButtons = () => [] } = {}) {
   // userAsked: the load running now is one the person asked for (a tab opened, Retry), not a poll.
   let userAsked = false;
+  const store = storage();
   // Only a GET the person caused is marked; a POST or PATCH counts as use on the server by itself.
-  const model = new NowModel({ api: (method, path, body) => api(method, path, body, userAsked && method === 'GET' ? { interaction: true } : undefined), storage: storage() });
+  const model = new NowModel({ api: (method, path, body) => api(method, path, body, userAsked && method === 'GET' ? { interaction: true } : undefined), storage: store });
   const $ = (id) => document.getElementById(id);
-  const screens = { now: $('now'), all: $('all'), search: $('search') };
+  const screens = { now: $('now'), all: $('all') };
   let tab = 'now';
   let active = false;
-  let allFilter = { project: null, onMacOnly: false, sort: 'newest' };
-  const openFolders = new Set(); // folders opened in All's folder view; they start closed
+  let allMode = readAllMode(store);
+  let allQuery = '';
   const ui = {
-    collapsed: new Set(),
     openCards: new Set(),
     menuFor: null, // the session whose row menu is open
     focus: null, // data-focus of the control to focus after the next render
     rendering: false, // a render is replacing Now's rows (focus moves are not the person's)
     pointerDown: false,
+    storage: store,
     announce: (text) => announce($('now-status'), text),
-    open(session, seen) {
-      if (seen) model.markSeen(session.id);
-      location.hash = '#/s/' + encodeURIComponent(session.id);
-    },
-    showAll(filter) {
-      allFilter = { project: null, onMacOnly: false, sort: 'newest', ...filter };
-      location.hash = '#/all';
-    },
+    open(session) { location.hash = '#/s/' + encodeURIComponent(session.id); },
     rerender: () => render(),
     refresh: () => userTick(),
+    conversations: (shown) => conversations(nowSearch.state, shown),
   };
+
+  // Each screen's header is built once and kept, so the search box keeps its focus and text while
+  // what is around it is drawn again.
+  function shell(screen, title, onInput) {
+    const trailing = el('span', 'header-buttons');
+    const summary = el('div', 'summary-slot');
+    const box = searchBox({ placeholder: 'Search all sessions', onInput });
+    const extra = el('div', 'header-extra');
+    const below = el('div', 'header-below');
+    below.append(summary, box.node, extra);
+    const body = el('div', 'screen-body');
+    screen.replaceChildren(screenHeader(title, trailing, below), body);
+    return { trailing, summary, extra, body };
+  }
+
+  const nowSearch = conversationSearch({ api, onChange: () => { if (active && tab === 'now') render(); } });
+  const allSearch = conversationSearch({ api, onChange: () => { if (active && tab === 'all') render(); } });
+  const nowShell = shell(screens.now, 'Now', (text) => {
+    model.setQuery(text);
+    nowSearch.typed(text);
+    render();
+  });
+  const allShell = shell(screens.all, 'All', (text) => {
+    allQuery = text;
+    allSearch.typed(text);
+    render();
+  });
 
   function composeButton() {
     const b = el('button', 'round');
@@ -107,29 +129,29 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
     return b;
   }
 
-  function nowButtons() {
-    const box = el('span', 'header-buttons');
-    box.append(...headerButtons(), composeButton());
-    return box;
-  }
-
   function render() {
-    if (tab === 'now') {
-      // A render replaces the rows: the focused row control (a menu button or item) gets focus back.
-      const had = document.activeElement?.dataset?.focus;
-      const want = ui.focus ?? (screens.now.contains(document.activeElement) ? had : null);
-      ui.focus = null;
-      ui.rendering = true;
-      try {
-        screens.now.replaceChildren(...renderNow(model, Object.assign(ui, { headerButton: nowButtons() })));
-        if (want) screens.now.querySelector(`[data-focus="${CSS.escape(want)}"]`)?.focus();
-      } finally {
-        ui.rendering = false;
+    // A render replaces the rows: the focused control (a row menu, a fold, the chip) gets focus back.
+    const screen = screens[tab];
+    const had = document.activeElement?.dataset?.focus;
+    const want = ui.focus ?? (screen.contains(document.activeElement) ? had : null);
+    ui.focus = null;
+    ui.rendering = true;
+    try {
+      if (tab === 'now') {
+        const out = renderNow(model, ui);
+        nowShell.trailing.replaceChildren(...headerButtons(), composeButton());
+        nowShell.summary.replaceChildren(out.summary);
+        nowShell.extra.replaceChildren(...(out.chip ? [out.chip] : []));
+        nowShell.body.replaceChildren(...out.body);
+      } else {
+        allShell.trailing.replaceChildren(composeButton());
+        allShell.summary.replaceChildren(allSummary());
+        allShell.extra.replaceChildren(...(queryWords(allQuery).length ? [] : [modeSwitch()]));
+        allShell.body.replaceChildren(...renderAll());
       }
-    } else if (tab === 'all') {
-      screens.all.replaceChildren(...renderAll());
-    } else {
-      renderSearchResults();
+      if (want) screen.querySelector(`[data-focus="${CSS.escape(want)}"]`)?.focus();
+    } finally {
+      ui.rendering = false;
     }
   }
 
@@ -158,73 +180,103 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
 
   // All
 
-  function renderAll() {
-    const out = [screenHeader('All Sessions', composeButton(), filterMenus())];
-    if (allFilter.onMacOnly) {
-      const row = el('div', 'row static');
-      const label = el('span', 'text');
-      label.append(el('span', 'title', 'Open on your Mac'));
-      const show = el('button', 'link', 'Show all');
-      show.type = 'button';
-      show.addEventListener('click', () => { allFilter.onMacOnly = false; render(); });
-      row.append(icon('lock'), label, show);
-      out.push(section(null, row));
-    }
-    if (model.loadError) out.push(errorBanner('Could not reach your Mac', model.loadError.message, () => userTick()));
-    const shown = allFilter.onMacOnly ? model.sessions.filter((s) => s.state === 'open_in_terminal') : model.sessions;
-    const sections = allSections({
-      sessions: shown, project: allFilter.project, sort: allFilter.sort, now: Date.now(),
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    });
-    if (allFilter.sort === 'project') {
-      if (sections.length) out.push(section(sectionLabel('Folders', null, String(sections.length)), ...sections.map(folder)));
-    } else {
-      for (const s of sections) {
-        out.push(section(sectionLabel(dayTitle(s.day), null, String(s.sessions.length)),
-          ...s.sessions.map((session) => sessionRow(session, () => ui.open(session)))));
-      }
-    }
-    if (!model.sessions.length && !model.loadError) {
-      out.push(el('p', 'empty', model.loaded ? 'No sessions yet. Sessions from Claude Code on your Mac show up here.' : 'Loading sessions…'));
-    } else if (!sections.length && model.sessions.length) {
-      out.push(el('p', 'empty', 'No sessions here.'));
-    }
-    return out;
+  function allSummary() {
+    const n = model.sessions.length;
+    return el('p', 'summary', n === 1 ? '1 session' : n + ' sessions');
   }
 
-  // A project in the folder view: its icon, name, newest session while closed, count and chevron;
-  // open, its sessions newest first under a guide line, as on Now.
-  function folder(s) {
-    const isOpen = openFolders.has(s.day);
-    const box = el('div', 'folder');
-    const head = el('button', 'row folder-row' + (isOpen ? ' open' : ''));
-    head.type = 'button';
-    head.dataset.focus = 'all-folder:' + s.day;
-    head.setAttribute('aria-expanded', String(isOpen));
-    const text = el('span', 'text one');
-    text.append(bidi(projectName(s.day), 'group-name'));
-    if (!isOpen) {
-      const newest = el('span', 'detail inline');
-      newest.append(' · ', bidi(displayTitle(s.sessions[0].title, s.sessions[0].id)));
-      text.append(newest);
-    }
-    head.append(icon('folder'), text, el('span', 'count', String(s.sessions.length)), icon('chevron'));
-    head.addEventListener('click', () => {
-      if (isOpen) openFolders.delete(s.day); else openFolders.add(s.day);
-      render();
-    });
-    box.append(head);
-    if (isOpen) {
-      const items = el('div', 'folder-items');
-      for (const session of s.sessions) items.append(sessionRow(session, () => ui.open(session)));
-      box.append(items);
+  // Recent | Folders: two buttons drawn as one segmented control.
+  function modeSwitch() {
+    const box = el('div', 'segmented');
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', 'Show');
+    for (const [mode, label] of [['recent', 'Recent'], ['folders', 'Folders']]) {
+      const b = el('button', 'segment' + (allMode === mode ? ' selected' : ''), label);
+      b.type = 'button';
+      b.dataset.focus = 'mode:' + mode;
+      b.setAttribute('aria-pressed', String(allMode === mode));
+      b.addEventListener('click', () => {
+        allMode = mode;
+        saveAllMode(store, mode);
+        render();
+      });
+      box.append(b);
     }
     return box;
   }
 
-  // "Today", "Yesterday", "Mon, Oct 20"; the folder name when sorted by project.
+  // A row in All: no state line, so the time shows; the place with its tab when open on the Mac.
+  function allRow(session, place = rowPlace(session, true)) {
+    const row = sessionLine({ session, activity: model.activity[session.id], state: null, place, onClick: () => ui.open(session) });
+    row.dataset.focus = 'all-row:' + session.id;
+    return row;
+  }
+
+  function renderAll() {
+    const out = [];
+    if (model.loadError) out.push(errorBanner('Could not reach your Mac', model.loadError.message, () => userTick()));
+    const now = Date.now();
+    if (queryWords(allQuery).length) {
+      const found = searchSessions(model.sessions, allQuery, model.activity, now);
+      if (found.open.length) out.push(section(sectionLabel('Open'), ...found.open.map((s) => allRow(s))));
+      if (found.other.length) out.push(section(sectionLabel('Other sessions'), ...found.other.map((s) => allRow(s))));
+      out.push(...conversations(allSearch.state, new Set([...found.open, ...found.other].map((s) => s.id))));
+      return out;
+    }
+    if (allMode === 'folders') {
+      const repos = folderTree(model.sessions, now);
+      if (repos.length) out.push(section(null, ...repos.flatMap(repoRows)));
+    } else {
+      const sections = allSections({ sessions: model.sessions, project: null, now, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+      for (const s of sections) out.push(section(sectionLabel(dayTitle(s.day)), ...s.sessions.map((x) => allRow(x))));
+    }
+    if (!model.sessions.length && !model.loadError) {
+      out.push(el('p', 'empty', model.loaded ? 'No sessions yet. Sessions from Claude Code on your Mac show up here.' : 'Loading sessions…'));
+    }
+    return out;
+  }
+
+  // "38 · 2 working", "12".
+  const counts = (count, working) => (working ? count + ' · ' + working + ' working' : String(count));
+
+  // Inside a folder its name is already above: only the subfolder and the Mac place, if any.
+  function folderPlace(session) {
+    const parts = [];
+    if (session.folder?.sub) parts.push(session.folder.sub);
+    if (session.mac) parts.push('tab ' + session.mac.tab.index, 'pane ' + session.mac.pane);
+    return parts.join(' · ');
+  }
+
+  function fold(key, name, count, working, startsOpen) {
+    const open = isOpenChoice(store, FOLDERS_KEY, key, startsOpen);
+    const line = foldLine({
+      name, counts: counts(count, working), open, focusKey: 'fold:' + key,
+      onToggle: () => { saveChoice(store, FOLDERS_KEY, key, !open); render(); },
+    });
+    return { open, line };
+  }
+
+  // A repo: its fold line, then the main checkout's sessions and its worktrees (each a fold of its
+  // own) under a guide line.
+  function repoRows(repo) {
+    const { open, line } = fold(folderKey(repo.repoPath), repo.name, repo.count, repo.working, repo.open);
+    if (!open) return [line];
+    const items = el('div', 'folder-items');
+    for (const s of repo.sessions) items.append(allRow(s, folderPlace(s)));
+    for (const w of repo.worktrees) {
+      const sub = fold(folderKey(repo.repoPath, w.name), w.name, w.count, w.working, w.open);
+      items.append(sub.line);
+      if (sub.open) {
+        const inner = el('div', 'folder-items');
+        for (const s of w.sessions) inner.append(allRow(s, folderPlace(s)));
+        items.append(inner);
+      }
+    }
+    return [line, items];
+  }
+
+  // "Today", "Yesterday", "Mon, Oct 20".
   function dayTitle(day) {
-    if (allFilter.sort === 'project') return projectName(day);
     if (day === 'today') return 'Today';
     if (day === 'yesterday') return 'Yesterday';
     const [y, m, d] = day.split('-').map(Number);
@@ -235,104 +287,17 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
       : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
-  function filterMenus() {
-    const box = el('div', 'filters');
-    const project = menu('Project', [['', 'All projects'], ...projects().map((p) => [p.path, p.name + '  ' + p.count])],
-      allFilter.project ?? '', (value) => { allFilter.project = value || null; render(); });
-    const sort = menu('Sort', SORTS, allFilter.sort, (value) => { allFilter.sort = value; render(); });
-    box.append(project, sort);
-    return box;
-  }
-
-  // A native select drawn as a capsule: its value and a small chevron.
-  function menu(label, options, value, onChange) {
-    const wrap = el('label', 'menu-pill');
-    const select = el('select');
-    select.setAttribute('aria-label', label);
-    for (const [v, text] of options) {
-      const o = el('option', '', text);
-      o.value = v;
-      select.append(o);
+  // In conversations: the server's hits for the query (after 400 ms), without the sessions the
+  // screen already shows; nothing without a query or when the server cannot search.
+  function conversations(state, shown) {
+    if (!state.query || state.supported === false) return [];
+    const rows = state.hits.filter((h) => !shown.has(h.id)).map(hitRow);
+    if (!rows.length) {
+      const note = state.searching ? 'Searching your Mac…'
+        : state.error ? 'Search failed: ' + state.error.message : 'No other matches in conversations';
+      rows.push(el('p', 'row static note', note));
     }
-    select.value = value;
-    select.addEventListener('change', () => onChange(select.value));
-    wrap.append(select, icon('chevron', 'down'));
-    return wrap;
-  }
-
-  // One entry per folder, most sessions first; ties keep the order of the newest session.
-  function projects() {
-    const counts = new Map();
-    for (const s of model.sessions) counts.set(s.project, (counts.get(s.project) || 0) + 1);
-    return [...counts].map(([path, count], i) => ({ path, count, i, name: projectName(path) }))
-      .sort((a, b) => b.count - a.count || a.i - b.i);
-  }
-
-  // Search: title matches from the loaded list at once, the server's hits after a pause.
-
-  const search = { query: '', hits: [], error: null, searching: false, supported: null, timer: null };
-  const field = el('input', 'search-field');
-  field.type = 'search';
-  field.setAttribute('aria-label', 'Search sessions');
-  field.autocomplete = 'off';
-  field.enterKeyHint = 'search';
-  const results = el('div', 'results');
-  const fieldWrap = el('div', 'search-box');
-  fieldWrap.append(icon('search'), field);
-  screens.search.replaceChildren(screenHeader('Search'), fieldWrap, results);
-  field.addEventListener('input', () => {
-    clearTimeout(search.timer);
-    search.query = field.value.trim();
-    search.hits = [];
-    search.error = null;
-    search.searching = !!search.query;
-    renderSearchResults();
-    if (search.query) search.timer = setTimeout(() => runSearch(search.query), SEARCH_DEBOUNCE_MS);
-  });
-
-  async function runSearch(query) {
-    if (search.supported === null) {
-      try {
-        const health = await api('GET', '/v1/health');
-        search.supported = (health.capabilities || []).includes('search');
-      } catch { /* ask again next time */ }
-    }
-    if (query !== search.query) return;
-    if (search.supported === false) { search.searching = false; renderSearchResults(); return; }
-    try {
-      const data = await api('GET', '/v1/search?q=' + encodeURIComponent(query) + '&limit=30', undefined, { interaction: true });
-      if (query !== search.query) return; // a newer query is on its way
-      search.hits = (data.results || []).map((h) => ({ ...h, lastActive: apiDate(h.lastActive) }));
-      search.error = null;
-    } catch (e) {
-      if (query !== search.query) return;
-      search.hits = [];
-      search.error = e;
-    }
-    search.searching = false;
-    renderSearchResults();
-  }
-
-  function renderSearchResults() {
-    field.placeholder = model.sessions.length ? 'Search ' + model.sessions.length + ' sessions' : 'Search sessions';
-    if (!search.query) { results.replaceChildren(); return; }
-    const local = localMatches(model.sessions, search.query);
-    const out = [];
-    if (local.length) {
-      out.push(section(sectionLabel('Titles and descriptions'), ...local.map((s) => sessionRow(s, () => ui.open(s)))));
-    }
-    if (search.supported !== false) {
-      const shown = new Set(local.map((s) => s.id));
-      const hits = search.hits.filter((h) => !shown.has(h.id));
-      const rows = hits.map(hitRow);
-      if (!rows.length) {
-        const note = search.searching ? 'Searching your Mac…'
-          : search.error ? 'Search failed: ' + search.error.message : 'No other matches in conversations';
-        rows.push(el('p', 'row static note', note));
-      }
-      out.push(section(sectionLabel('In conversations'), ...rows));
-    }
-    results.replaceChildren(...out);
+    return [section(sectionLabel('In conversations'), ...rows)];
   }
 
   function hitRow(hit) {
@@ -367,7 +332,7 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
   return {
     // The Now state; the chat reads it for its Next bar and refreshes it while open.
     model,
-    // Shows a tab ('now', 'all' or 'search'), and polls while it is shown.
+    // Shows a tab ('now' or 'all'), and polls while it is shown.
     show(name) {
       const changed = !active || tab !== name;
       tab = name;
@@ -379,7 +344,6 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
       }
       render();
       if (changed) userTick();
-      if (name === 'search') field.focus();
     },
     hide() {
       active = false;

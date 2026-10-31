@@ -60,7 +60,7 @@ func TestHandler_OnlyItsOwnFiles(t *testing.T) {
 func TestHandler_ServesModulesAsJavaScript(t *testing.T) {
 	srv := httptest.NewServer(Handler())
 	defer srv.Close()
-	for _, f := range []string{"now.mjs", "all.mjs", "apiDate.mjs", "nowModel.mjs", "nowView.mjs", "rows.mjs", "tabs.mjs", "timeline.mjs", "chatView.mjs", "sessionInfo.mjs", "terminal.mjs", "markdown.mjs", "references.mjs", "render.mjs", "login.mjs", "chatLoad.mjs", "queue.mjs", "queueView.mjs"} {
+	for _, f := range []string{"now.mjs", "all.mjs", "apiDate.mjs", "nowModel.mjs", "nowView.mjs", "rows.mjs", "tabs.mjs", "timeline.mjs", "chatView.mjs", "sessionInfo.mjs", "terminal.mjs", "markdown.mjs", "references.mjs", "render.mjs", "login.mjs", "chatLoad.mjs", "queue.mjs", "queueView.mjs", "search.mjs", "folders.mjs"} {
 		resp, body := get(t, srv.URL+"/app/"+f)
 		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/javascript") || body == "" {
 			t.Fatalf("GET /app/%s: %d %q", f, resp.StatusCode, resp.Header.Get("Content-Type"))
@@ -71,7 +71,7 @@ func TestHandler_ServesModulesAsJavaScript(t *testing.T) {
 func TestHandler_DoesNotServeTests(t *testing.T) {
 	srv := httptest.NewServer(Handler())
 	defer srv.Close()
-	for _, f := range []string{"now.test.mjs", "all.test.mjs", "nowModel.test.mjs", "sessionInfo.test.mjs", "terminal.test.mjs", "markdown.test.mjs", "references.test.mjs", "login.test.mjs", "chatLoad.test.mjs", "queue.test.mjs", "queueView.test.mjs", "chatView.test.mjs"} {
+	for _, f := range []string{"now.test.mjs", "all.test.mjs", "nowModel.test.mjs", "sessionInfo.test.mjs", "terminal.test.mjs", "markdown.test.mjs", "references.test.mjs", "login.test.mjs", "chatLoad.test.mjs", "queue.test.mjs", "queueView.test.mjs", "chatView.test.mjs", "search.test.mjs", "folders.test.mjs"} {
 		if resp, _ := get(t, srv.URL+"/app/"+f); resp.StatusCode != 404 {
 			t.Fatalf("GET /app/%s: %d, want 404", f, resp.StatusCode)
 		}

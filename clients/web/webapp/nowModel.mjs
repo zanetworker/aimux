@@ -1,15 +1,15 @@
 import { apiDate } from './apiDate.mjs';
-import { deriveActivity, rankNow } from './now.mjs';
+import { deriveActivity, holdPlaces, rankNow } from './now.mjs';
 import { pinErrorText } from './sessionInfo.mjs';
 import { savedPromptAsTyped } from './timeline.mjs';
 
 // The Now screen's state, like NowModel in the iPhone app: the session list, what each
-// candidate is doing (from its event snapshot), and the ranked view. The page polls refresh().
+// candidate is doing (from its event snapshot), the search box and Working chip, the Mac's places
+// held for 30 s, and the ranked view. The page polls refresh().
 
 const RECENT_MS = 900 * 1000;
 const SNAPSHOT_LIMIT = 10;
 const LIST_LIMIT = 500; // the server's largest; it has no paging
-const SEEN_KEY = 'now.seen';
 
 export function newKey() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -27,7 +27,7 @@ export class NowModel {
     this.storage = storage;
     this.now = now;
     this.sessions = []; // as served, with lastActive in epoch milliseconds
-    this.lastOnMac = null; // {id, at} with at in epoch milliseconds
+    this.held = null; // the Mac places of the last list that had any: {places, since}
     this.health = null; // /v1/health once read: capabilities, naming
     this.pinning = new Set();
     this.pinErrors = new Map(); // session id to the fixed line for the row
@@ -39,8 +39,12 @@ export class NowModel {
     this.retrying = new Set();
     this.retryErrors = new Map();
     this.activity = {};
-    this.answered = new Set();
-    this.seen = this.readSeen();
+    this.answered = new Set(); // approval ids answered here
+    // Sessions whose approval the owner answered (here or in their chat): the Next bar skips them as
+    // working targets until an activity read shows them not working, or they leave the list.
+    this.answeredSessions = new Set();
+    this.query = ''; // the search box
+    this.workingOnly = false; // the Working chip
     this.tail = Promise.resolve();
     this.rebuild();
   }
@@ -61,8 +65,11 @@ export class NowModel {
     try {
       const data = await this.api('GET', '/v1/sessions?limit=' + LIST_LIMIT);
       this.sessions = (data.sessions || []).map((s) => ({ ...s, lastActive: apiDate(s.lastActive) }));
-      this.lastOnMac = data.lastOnMac ? { id: data.lastOnMac.id, at: apiDate(data.lastOnMac.at) } : null;
+      // The hold clock runs from when a list arrives, not from each rebuild of the same list.
+      this.held = holdPlaces(this.held, this.sessions, this.now()).held;
       this.loadError = null;
+      const listed = new Set(this.sessions.map((s) => s.id));
+      for (const id of this.answeredSessions) if (!listed.has(id)) this.answeredSessions.delete(id);
     } catch (e) {
       this.loadError = e; // keep the last list on screen
     }
@@ -92,16 +99,34 @@ export class NowModel {
     const results = await Promise.all(candidates.map(async (s) => {
       try {
         const page = await this.api('GET', '/v1/sessions/' + encodeURIComponent(s.id) + '/events?wait=0');
-        return [s.id, deriveActivity(page.events || [])];
+        return [s.id, deriveActivity(page.events || []), true];
       } catch (e) {
-        return [s.id, refused(e) ? { kind: 'none' } : this.activity[s.id] ?? { kind: 'none' }];
+        return [s.id, refused(e) ? { kind: 'none' } : this.activity[s.id] ?? { kind: 'none' }, false];
       }
     }));
-    this.activity = Object.fromEntries(results);
+    this.activity = Object.fromEntries(results.map(([id, a]) => [id, a]));
+    // Only a read that answered can show an answered session not working; a failed one changes nothing.
+    for (const [id, a, read] of results) if (read && a.kind !== 'working') this.answeredSessions.delete(id);
     this.rebuild();
   }
 
-  async answer(approval, optionId) {
+  // The search box's text and the Working chip narrow the view at once.
+  setQuery(text) {
+    if (text === this.query) return;
+    this.query = text;
+    this.rebuild();
+  }
+
+  setWorkingOnly(on) {
+    if (on === this.workingOnly) return;
+    this.workingOnly = on;
+    this.rebuild();
+  }
+
+  // The owner answered an approval of this session in its chat.
+  noteAnswered(sessionId) { this.answeredSessions.add(sessionId); }
+
+  async answer(approval, optionId, sessionId) {
     const id = approval.approvalId;
     if (this.answering.has(id)) return;
     this.answering.add(id);
@@ -118,6 +143,7 @@ export class NowModel {
       this.answering.delete(id);
     }
     this.answered.add(id);
+    if (sessionId) this.answeredSessions.add(sessionId);
     this.rebuild();
   }
 
@@ -194,27 +220,14 @@ export class NowModel {
     this.rebuild();
   }
 
-  markSeen(id) {
-    this.seen[id] = this.now();
-    try { this.storage.setItem(SEEN_KEY, JSON.stringify(this.seen)); } catch { /* private mode: seen for this visit only */ }
-    this.rebuild();
-  }
-
-  readSeen() {
-    try {
-      const parsed = JSON.parse(this.storage.getItem(SEEN_KEY) || '{}');
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
   rebuild() {
     const shown = { ...this.activity };
     for (const [id, a] of Object.entries(this.activity)) {
       if (a.kind === 'needsApproval' && this.answered.has(a.approval.approvalId)) shown[id] = { kind: 'none' };
     }
-    this.view = rankNow({ sessions: this.sessions, activity: shown, seen: this.seen, now: this.now(), lastOnMac: this.lastOnMac });
+    const now = this.now();
+    const kept = holdPlaces(this.held, this.sessions, now);
+    this.view = rankNow({ sessions: kept.sessions, activity: shown, now, query: this.query, workingOnly: this.workingOnly });
   }
 }
 
