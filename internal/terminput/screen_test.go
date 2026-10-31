@@ -31,6 +31,8 @@ func TestScreenFixtures(t *testing.T) {
 		working   bool
 	}{
 		{file: "idle-empty.txt", empty: true},
+		{file: "idle-labeled-rule.txt", empty: true}, // a session name in the top rule
+		{file: "draft-labeled-rule.txt"},
 		{file: "idle-placeholder.txt", empty: true},
 		{file: "busy-empty.txt", empty: true, working: true},
 		{file: "busy-queued-hint.txt", empty: true, working: true},

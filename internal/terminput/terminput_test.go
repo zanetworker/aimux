@@ -64,6 +64,11 @@ type fakeDriver struct {
 	// afterType, if set, is the screen once text is typed; otherwise the
 	// typed text shows in the input box.
 	afterType string
+	// lateReads: how many screen reads after Type still show the screen from
+	// before it, as a slow terminal does.
+	lateReads, lateLeft int
+	beforeType          string
+	screenReads         int
 	// What Focused answers: iTerm2 in front, its focused session's tty.
 	// focusTTYs, if set, answers the calls in turn, the last repeating.
 	front      bool
@@ -103,6 +108,7 @@ func (d *fakeDriver) Locate(_ context.Context, t Target) (Pane, bool, error) {
 }
 func (d *fakeDriver) Type(_ context.Context, _ Pane, text string) error {
 	d.sent = append(d.sent, text)
+	d.lateLeft, d.beforeType = d.lateReads, d.screen
 	if d.afterType != "" {
 		d.screen = d.afterType
 	} else {
@@ -124,7 +130,14 @@ func (d *fakeDriver) Key(_ context.Context, _ Pane, k Key) error {
 	}
 	return nil
 }
-func (d *fakeDriver) Screen(context.Context, Pane) (string, error) { return d.screen, d.screenErr }
+func (d *fakeDriver) Screen(context.Context, Pane) (string, error) {
+	d.screenReads++
+	if d.lateLeft > 0 { // the terminal has not drawn the typed text yet
+		d.lateLeft--
+		return d.beforeType, d.screenErr
+	}
+	return d.screen, d.screenErr
+}
 
 type env struct {
 	svc *Service
@@ -1306,5 +1319,24 @@ func TestReadWhileTheTextSettlesKeepsTheRecord(t *testing.T) {
 	e.svc.forgetLeftUnlessShown("s1", idleScreen, e.svc.leftGeneration())
 	if e.svc.leftText("s1") != "" {
 		t.Fatal("record kept after the box showed empty")
+	}
+}
+
+// The terminal may draw typed text later than 300 ms: the send looks again a
+// few times before giving up, and gives up within a bounded number of reads.
+func TestSendWaitsForTheTypedTextToShow(t *testing.T) {
+	e := newEnv(t)
+	e.drv.lateReads = 2
+	if err := e.svc.Send(context.Background(), "s1", "hello there", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.keys) != 1 {
+		t.Fatalf("keys = %v, want Enter once the text showed", e.drv.keys)
+	}
+	e = newEnv(t)
+	e.drv.lateReads = 100
+	wantCode(t, e.svc.Send(context.Background(), "s1", "hello there", ""), "not_submitted")
+	if e.drv.screenReads > 7 || len(e.drv.keys) != 0 {
+		t.Fatalf("reads %d keys %v, want a bounded wait and no Enter", e.drv.screenReads, e.drv.keys)
 	}
 }

@@ -33,6 +33,17 @@ func boxRule(line string) bool {
 	return strings.HasPrefix(line, "─") && isRule(line)
 }
 
+// labeledTopRule reports a box's top rule with a label in it, as Claude Code
+// draws a session's name ("────── name ─"): dashes from column 0, ending in a
+// dash, mostly dashes, and exactly width wide like the rule below the box.
+func labeledTopRule(line string, width int) bool {
+	t := strings.TrimRight(line, " \t\r")
+	if !strings.HasPrefix(t, "─") || !strings.HasSuffix(t, "─") || ruleWidth(t) != width {
+		return false
+	}
+	return 2*strings.Count(t, "─") > width
+}
+
 func ruleWidth(line string) int {
 	return utf8.RuneCountInString(strings.TrimRight(line, " \t\r"))
 }
@@ -83,7 +94,7 @@ func bottomBox(screen string) ([]string, bool) {
 	}
 	upper := -1
 	for i := lower - 1; i >= 0; i-- {
-		if boxRule(lines[i]) {
+		if boxRule(lines[i]) || labeledTopRule(lines[i], ruleWidth(lines[lower])) {
 			upper = i
 			break
 		}

@@ -24,6 +24,8 @@ const (
 	// settle is the pause between typing text and pressing Enter: Claude
 	// Code takes text and Enter as separate writes.
 	settle = 300 * time.Millisecond
+	// settleReads bounds the looks after typing: up to 1.5 s in all.
+	settleReads = 5
 )
 
 // Keys other than digits that a driver can press.
@@ -502,15 +504,22 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string) err
 		s.setLeft(sessionID, text) // typed: until Enter, the box may hold it
 		// A prompt may have appeared while typing (a background task), and
 		// Enter would then answer it; the owner may have focused this session.
-		// Look again first.
-		if err := s.sleep(ctx, settle); err != nil {
-			return notSubmitted("cancelled")
+		// Look again first, a few times: a busy terminal can draw the typed
+		// text later than settle.
+		shown := false
+		for range settleReads {
+			if err := s.sleep(ctx, settle); err != nil {
+				return notSubmitted("cancelled")
+			}
+			scr, err = s.readScreen(ctx, d, p)
+			if err != nil {
+				return err
+			}
+			if shown = TextInBox(scr, text); shown || ParsePrompt(scr) != nil {
+				break // shown, or a prompt took the screen: no point waiting
+			}
 		}
-		scr, err = s.readScreen(ctx, d, p)
-		if err != nil {
-			return err
-		}
-		if !TextInBox(scr, text) {
+		if !shown {
 			return notSubmitted("not_in_box")
 		}
 	}
