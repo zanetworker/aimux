@@ -133,39 +133,6 @@ struct RoundActionStyle: ButtonStyle {
     }
 }
 
-/// Above the composer while the Mac's input box holds text (a draft, or Claude Code's grey suggestion): Replace
-/// clears that text, then sends the draft.
-struct ReplaceBoxLine: View {
-    let canReplace: Bool
-    let replace: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "text.cursor")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text(boxHasTextLine)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("boxHasTextLine")
-            Button("Replace it", action: replace)
-                .font(.footnote.weight(.semibold))
-                .buttonStyle(.borderless)
-                .foregroundStyle(canReplace ? .primary : .tertiary)
-                .disabled(!canReplace)
-                .frame(minHeight: 44)
-                .accessibilityHint("Clears the text in the box on your Mac, then sends your message")
-                .accessibilityIdentifier("replaceBoxButton")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-}
-
 /// Replaces the composer for a read-only session: open in a terminal on the Mac, or never started.
 struct ReadOnlyLine: View {
     let text: String

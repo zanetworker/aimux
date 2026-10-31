@@ -115,6 +115,10 @@ type TerminalInputConfig struct {
 	// AllowSlashCommands lets a message start with "/" (a Claude Code slash
 	// command such as /clear). A leading "!" (bash mode) is always refused.
 	AllowSlashCommands bool `yaml:"allow_slash_commands"`
+	// KeepDrafts keeps a draft left in the input box: a message is refused
+	// (draft_in_box) instead of replacing it. Claude Code's grey suggestion
+	// is never a draft and is always typed over.
+	KeepDrafts bool `yaml:"keep_drafts"`
 }
 
 // PushConfig turns on approval notifications; each sender is on when its

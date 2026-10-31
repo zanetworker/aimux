@@ -503,7 +503,10 @@ func (d *Dispatcher) notFree(ctx context.Context, s string, w *watch, st terminp
 		note = NoteWorking
 	}
 	d.setNote(s, note)
-	if st.Reason != terminput.Code(terminput.ErrNotAtInput) || st.Prompt != nil {
+	// A full box: text that will not go (not_at_input), or a draft kept by
+	// keep_drafts. Held back too long, the queue pauses.
+	full := st.Reason == terminput.Code(terminput.ErrNotAtInput) || st.Reason == terminput.Code(terminput.ErrDraftInBox)
+	if !full || st.Prompt != nil {
 		w.heldItem = ""
 		return false
 	}
@@ -717,7 +720,7 @@ var terminalPauses = map[string]pauseReason{
 const codeError = "error"
 
 // terminalWaits are not free yet: wait silently.
-var terminalWaits = map[string]bool{"busy": true, "not_at_input": true, "mac_in_use": true}
+var terminalWaits = map[string]bool{"busy": true, "not_at_input": true, "draft_in_box": true, "mac_in_use": true}
 
 func terminalPause(code string) (pauseReason, bool) {
 	if terminalWaits[code] || code == "" {

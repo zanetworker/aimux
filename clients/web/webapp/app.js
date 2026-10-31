@@ -7,10 +7,10 @@ import { newKey } from './nowModel.mjs';
 import { nextSession } from './now.mjs';
 import { displayTitle, el, icon } from './rows.mjs';
 import { buildTimeline, pendingShown } from './timeline.mjs';
-import { chatStatus, headerContent, nextBar, pendingNode, promptCard, readOnlyLine, replaceLine, timelineNodes } from './chatView.mjs';
+import { chatStatus, headerContent, nextBar, pendingNode, promptCard, readOnlyLine, timelineNodes } from './chatView.mjs';
 import { adoptDetail, composerAction, createQueueClient, sendRefusal, setQueue } from './queue.mjs';
 import { createQueueView, editOffersNode } from './queueView.mjs';
-import { canReplaceBox, terminalErrorText, terminalPollInterval, terminalReasonLine } from './terminal.mjs';
+import { terminalErrorText, terminalPollInterval, terminalReasonLine } from './terminal.mjs';
 import { announce, createInfoSheet, renderInfoSheet, renderMetaCard } from './sessionInfo.mjs';
 import { referenceContext } from './references.mjs';
 import { createLogin } from './login.mjs';
@@ -518,9 +518,7 @@ function render() {
   if (p && !readOnly) {
     nodes.push(p.queueOffer
       ? pendingNode(p, () => queueText(p.text, (c2) => { if (pendings.get(c2.id) === p) pendings.delete(c2.id); }), { retryLabel: 'Add to queue', now: Date.now(), refs })
-      : canReplaceBox(c.detail) && p.failure
-        ? pendingNode(p, () => sendText(c.id, p.text, { replace: true }), { terminal: true, retryLabel: 'Replace it', now: Date.now(), refs })
-        : pendingNode(p, () => sendText(c.id, p.text), { terminal: !!terminal, canRetry: !terminal || terminal.canType, now: Date.now(), refs }));
+      : pendingNode(p, () => sendText(c.id, p.text), { terminal: !!terminal, canRetry: !terminal || terminal.canType, now: Date.now(), refs }));
   }
   if (prompt) {
     nodes.push(promptCard(prompt, {
@@ -557,15 +555,11 @@ function render() {
   const reason = terminal && !prompt
     ? terminalReasonLine({ ...c.detail, terminal: { ...terminal, prompt: null }, queue: c.queue }, { queue: queueOn() })
     : '';
-  const replaceable = !prompt && canReplaceBox(c.detail);
   $('readonly').replaceChildren(...(readOnly ? [readOnlyLine(unavailable
     ? 'This session never started: its first message failed before Claude saved it. Start a new session from Now.'
-    : "Read-only here while it's open in a terminal on your Mac")]
-    : replaceable ? [replaceLine(reason, replaceAndSend)]
-      : reason ? [readOnlyLine(reason)] : []));
-  // With the queue, a terminal that cannot take typing still takes messages to queue; with text in
-  // the Mac's box, it takes a message to send with Replace.
-  $('composer').hidden = readOnly || c.mode === 'failed' || (!!terminal && !terminal.canType && !queueOn() && !replaceable);
+    : "Read-only here while it's open in a terminal on your Mac")] : reason ? [readOnlyLine(reason)] : []));
+  // With the queue, a terminal that cannot take typing still takes messages to queue.
+  $('composer').hidden = readOnly || c.mode === 'failed' || (!!terminal && !terminal.canType && !queueOn());
   $('mic').hidden = !Voice.canListen;
   drawAction();
   drawQueue();
@@ -816,21 +810,6 @@ function clearBareAnswer() {
 
 // Sending and stopping
 
-// replaceAndSend is the Replace it of the line about text in the Mac's box: that text is cleared,
-// then the composer's message is sent. Without a message it only focuses the composer.
-async function replaceAndSend() {
-  const text = $('prompt').value.trim();
-  if (!text || !chat || chat.mode !== 'terminal' || sending.has(chat.id) || !canReplaceBox(chat.detail)) {
-    $('prompt').focus();
-    return;
-  }
-  stick = true;
-  $('prompt').value = '';
-  autoResize();
-  drafts.delete(chat.id);
-  await sendText(chat.id, text, { replace: true });
-}
-
 async function send(ev) {
   ev.preventDefault();
   if (action() === 'queue') { await addToQueue(); return; }
@@ -862,10 +841,10 @@ async function send(ev) {
 // after a failure is a retry and keeps its key. In a terminal session it is
 // typed into the terminal and never retried here: a timeout may have typed
 // part of it already, so only the person retries (same key).
-async function sendText(session, text, { replace = false } = {}) {
+async function sendText(session, text) {
   if (sending.has(session)) return;
   const c = chat && chat.id === session ? chat : null;
-  if (c && c.mode === 'terminal') { await typeIntoTerminal(c, text, { replace }); return; }
+  if (c && c.mode === 'terminal') { await typeIntoTerminal(c, text); return; }
   const prior = pendings.get(session);
   const key = prior && prior.text === text && prior.failure ? prior.key : newKey();
   const p = { text, key, turn: null, sentAt: Date.now(), failure: null };
@@ -885,23 +864,23 @@ async function sendText(session, text, { replace = false } = {}) {
   }
 }
 
-async function typeIntoTerminal(c, text, { replace = false } = {}) {
+async function typeIntoTerminal(c, text) {
   const prior = pendings.get(c.id);
-  if (prior && prior.failure && !c.detail.terminal.canType && !replace) return; // Retry waits for the terminal
+  if (prior && prior.failure && !c.detail.terminal.canType) return; // Retry waits for the terminal
   const key = prior && prior.text === text && prior.failure ? prior.key : newKey();
   const p = { text, key, turn: null, sentAt: Date.now(), failure: null };
   pendings.set(c.id, p);
   sending.add(c.id);
   render();
   try {
-    await api('POST', '/v1/sessions/' + encodeURIComponent(c.id) + '/terminal/messages', replace ? { text, key, replace: true } : { text, key });
+    await api('POST', '/v1/sessions/' + encodeURIComponent(c.id) + '/terminal/messages', { text, key });
     c.lastSend = Date.now();
     if (chat === c) termPoll.schedule(); // reads every 2 s from now on, for 2 minutes
   } catch (e) {
     if (refusedBusy(c.id, p, e)) return;
     p.failure = terminalErrorText(e);
     // The box is not showing, or a prompt came up before Enter: it shows as a card once read.
-    if (e.code === 'not_at_input' || e.code === 'not_submitted' || e.code === 'box_not_cleared') await readTerminal();
+    if (e.code === 'not_at_input' || e.code === 'not_submitted') await readTerminal();
   } finally {
     sending.delete(c.id);
     if (chat === c) render();

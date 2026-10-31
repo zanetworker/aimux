@@ -1432,3 +1432,21 @@ func TestUnsavedDoneOfAFailedTurnStillPauses(t *testing.T) {
 		t.Fatalf("sent after a failed turn without a Resume: %q", r.acp.starts)
 	}
 }
+
+// A draft kept by keep_drafts holds the queue like a full box: no send, and
+// after holding too long the queue pauses (box not empty).
+func TestTerminalKeptDraftHoldsThenPauses(t *testing.T) {
+	r := newRig(t)
+	r.openTerm("s")
+	r.add("s", "first")
+	if err := r.store.BindTerminal("s"); err != nil {
+		t.Fatal(err)
+	}
+	r.term.status = terminput.Status{Reason: "draft_in_box"}
+	r.step()
+	r.wantQueue("s", QueueRunning, "")
+	r.now = r.now.Add(3 * time.Minute)
+	r.step()
+	r.wantQueue("s", QueuePaused, ReasonBoxNotEmpty)
+	r.wantSends()
+}

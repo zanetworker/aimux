@@ -845,7 +845,8 @@ components:
             - automation_denied  # 409: macOS refused aimux's Automation access to the terminal
             - not_at_input       # 409: the input box is not showing or not empty
             - not_submitted      # 409: the text was typed but Enter was not pressed; it waits in the input box
-            - box_not_cleared    # 409: replace: true, but the input box would not empty; nothing was typed
+            - box_not_cleared    # 409: a draft in the input box would not empty; nothing was typed
+            - draft_in_box       # 409: a draft in the input box is kept (keep_drafts); nothing was typed
             - no_prompt          # 409: no permission prompt is showing
             - prompt_changed     # 409: a different prompt is showing, or the option is not one of its keys
             - login_required     # 401: device login is on and the request has no live session (log in, or pair if that fails)
@@ -1062,9 +1063,11 @@ components:
         boxHasText:
           type: boolean
           description: >
-            With reason not_at_input: the input box holds text, either a draft
-            or Claude Code's grey suggested prompt (the screen does not say
-            which). A message sent with `replace: true` clears it first.
+            The input box holds text, either a draft or Claude Code's grey
+            suggested prompt (the screen does not say which). It does not stop
+            a message (canType stays true): a send types over a suggestion and
+            replaces a draft, or refuses with `draft_in_box` when the Mac sets
+            `keep_drafts`.
 
     TerminalPrompt:
       type: object
@@ -1177,12 +1180,12 @@ components:
         replace:
           type: boolean
           description: >
-            The owner asked to replace what the input box holds (see
-            TerminalStatus.boxHasText): it is cleared and checked empty before
-            the text is typed; `409 box_not_cleared` when it would not empty,
-            with nothing typed. Every other check still applies; the box is
-            never cleared while the owner uses the session on the Mac
-            (`mac_in_use`), Claude works (`busy`) or a prompt shows
+            Replace a draft left in the input box even when the Mac sets
+            `keep_drafts` (see TerminalStatus.boxHasText). It is cleared and
+            checked empty before the text is typed; `409 box_not_cleared` when
+            it would not empty, with nothing typed. Every other check still
+            applies; the box is never touched while the owner uses the session
+            on the Mac (`mac_in_use`), Claude works (`busy`) or a prompt shows
             (`not_at_input`).
 
     TerminalKeyRequest:

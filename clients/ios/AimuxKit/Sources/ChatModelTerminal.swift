@@ -6,12 +6,6 @@ extension ChatModel {
     /// Whether a failed message can be tried again now: in a terminal session only while it can be typed into.
     public var canRetryPending: Bool { state != .terminal || session?.terminal?.canType == true }
 
-    /// The Mac's input box holds text and nothing else stops a message: the person may replace that text.
-    public var canReplaceBox: Bool {
-        guard state == .terminal, let terminal = session?.terminal else { return false }
-        return terminal.boxHasText && terminal.prompt == nil && !terminal.working
-    }
-
     /// How long to wait before reading a terminal session again: 2 s while Claude works there or within
     /// 2 minutes of a message typed from here, else 15 s.
     static func terminalPollInterval(busy: Bool, lastSend: Date?, now: Date) -> Duration {
@@ -83,13 +77,9 @@ extension ChatModel {
 
     /// Types the message into the terminal. Never retried here: a timeout may have typed part of it already,
     /// so only the person retries (same key; the server refuses with not_at_input if the box is not empty).
-    func typeIntoTerminal(_ text: String, key: String, replacing: Bool = false) async {
+    func typeIntoTerminal(_ text: String, key: String) async {
         do {
-            if replacing {
-                try await source.terminalReplace(sessionID: sessionID, text: text, key: key)
-            } else {
-                try await source.terminalSend(sessionID: sessionID, text: text, key: key)
-            }
+            try await source.terminalSend(sessionID: sessionID, text: text, key: key)
             guard pending?.key == key else { return }
             lastTerminalSend = now()
             clearShownPending()
@@ -101,8 +91,7 @@ extension ChatModel {
             offerQueueIfBusy(failure)
             // The box is not showing, or a prompt came up before Enter: it shows as a card once read.
             switch failure {
-            case .server(_, .notAtInput, _), .server(_, .notSubmitted, _), .server(_, .boxNotCleared, _):
-                _ = await readTerminal()
+            case .server(_, .notAtInput, _), .server(_, .notSubmitted, _): _ = await readTerminal()
             default: break
             }
         }
@@ -138,30 +127,5 @@ extension ChatModel {
         // Collapsed only until the screen was read again: the same prompt still showing is asked again.
         answeredPrompts.remove(id)
         rebuild()
-    }
-}
-
-extension ChatSource {
-    /// terminalSend that first clears the text in the Mac's input box (the person asked to replace it). Sources
-    /// without Replace refuse it, so nothing is typed over the box.
-    public func terminalReplace(sessionID: String, text: String, key: String) async throws {
-        throw APIError.http(status: 501)
-    }
-}
-
-extension ChatModel {
-    /// Reads the session again once a turn ends, so the turn's record and the stats come from the session file.
-    /// A failure is left to the next load; a load or close meanwhile drops the result.
-    func refreshDetail() {
-        let mine = generation
-        let revision = queueRevision
-        let source = source
-        let sessionID = sessionID
-        _ = Interaction.background { Task { [weak self] in
-            guard let detail = try? await source.session(id: sessionID, turns: Self.historyTurns) else { return }
-            guard let self, mine == self.generation, !self.closed else { return }
-            self.adopt(detail, readSince: revision)
-            self.rebuild()
-        } }
     }
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -63,8 +64,9 @@ type fakeDriver struct {
 	targets   []Target
 	// afterType, if set, is the screen once text is typed; otherwise the
 	// typed text shows in the input box.
-	afterType string
+	afterType  string
 	clearFails bool // KeyClear leaves the screen as it was
+	suggestion bool // the box's text is Claude Code's grey suggestion: a typed key dismisses it
 	// lateReads: how many screen reads after Type still show the screen from
 	// before it, as a slow terminal does.
 	lateReads, lateLeft int
@@ -131,6 +133,16 @@ func (d *fakeDriver) Key(_ context.Context, _ Pane, k Key) error {
 	}
 	if k == KeyClear && !d.clearFails {
 		d.screen = idleScreen
+	}
+	if k == KeySpace {
+		if d.suggestion {
+			d.screen, d.suggestion = idleScreen, false // typing dismissed the grey suggestion
+		} else if strings.Contains(d.screen, "❯ ") {
+			d.screen = strings.Replace(d.screen, "\n────", " \n────", 1) // a draft gains a space
+		}
+	}
+	if k == KeyBackspace {
+		d.screen = strings.Replace(d.screen, " \n────", "\n────", 1)
 	}
 	return nil
 }
@@ -252,8 +264,9 @@ func TestSendNotAtInputWhenPromptShowing(t *testing.T) {
 	e := newEnv(t)
 	e.drv.screen = fixture(t, "prompt-bash.txt")
 	wantCode(t, e.svc.Send(context.Background(), "s1", "hi", ""), "not_at_input")
+	e.svc.cfg.KeepDrafts = true
 	e.drv.screen = fixture(t, "draft-in-box.txt")
-	wantCode(t, e.svc.Send(context.Background(), "s1", "hi", ""), "not_at_input")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "hi", ""), "draft_in_box")
 	if len(e.drv.sent) != 0 {
 		t.Fatal("typed over a prompt or draft")
 	}
@@ -458,7 +471,6 @@ func TestStatusReasons(t *testing.T) {
 		{"mac_in_use", func(e *env) { e.sys.idle, e.drv.front, e.drv.focusTTY = 3, true, "/dev/ttys001" }, "mac_in_use"},
 		{"no_driver", func(e *env) { e.drv.locateOK = false }, "no_terminal_driver"},
 		{"automation", func(e *env) { e.drv.locateErr = ErrAutomationDenied }, "automation_denied"},
-		{"draft", func(e *env) { e.drv.screen = fixture(t, "draft-in-box.txt") }, "not_at_input"},
 	}
 	for _, c := range cases {
 		e := newEnv(t)
@@ -1222,9 +1234,10 @@ func TestSendNeverSubmitsTheOwnersDraft(t *testing.T) {
 				wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
 				e.drv.sent = nil
 			}
-			e.drv.screen = boxWith(draft)
-			wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_at_input")
-			if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+			e.svc.cfg.KeepDrafts = true
+			e.drv.screen, e.drv.keys = boxWith(draft), nil
+			wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "draft_in_box")
+			if len(e.drv.sent) != 0 || slices.Contains(e.drv.keys, KeyEnter) || e.drv.screen != boxWith(draft) {
 				t.Fatalf("sent %q keys %v over a draft", e.drv.sent, e.drv.keys)
 			}
 		})
@@ -1243,7 +1256,7 @@ func TestSendLogsWhyItWasNotSubmitted(t *testing.T) {
 }
 
 // A message a send left in the box can be retried: Status says so, so the
-// clients enable Retry; another draft still reads as not at input.
+// clients enable Retry; another draft reads as text in the box.
 func TestStatusCanRetryTheTextASendLeft(t *testing.T) {
 	e := newEnv(t)
 	e.drv.afterType = boxWith("something else")
@@ -1253,8 +1266,8 @@ func TestStatusCanRetryTheTextASendLeft(t *testing.T) {
 		t.Fatalf("status = %+v, want can type", st)
 	}
 	e.drv.screen = boxWith("my own draft")
-	if st := e.svc.Status(context.Background(), "s1", "idle"); st.CanType || st.Reason != "not_at_input" {
-		t.Fatalf("status = %+v, want not_at_input", st)
+	if st := e.svc.Status(context.Background(), "s1", "idle"); !st.BoxHasText {
+		t.Fatalf("status = %+v, want text in the box", st)
 	}
 }
 
@@ -1286,11 +1299,10 @@ func TestLeftTextIsForgottenOnceTheBoxChanges(t *testing.T) {
 		t.Fatalf("status = %+v", st)
 	}
 	e.drv.screen, e.drv.sent = boxWith("give me an example"), nil // typed again by the owner
-	if st := e.svc.Status(context.Background(), "s1", "idle"); st.CanType || st.Reason != "not_at_input" {
-		t.Fatalf("status = %+v, want not_at_input", st)
-	}
-	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_at_input")
-	if len(e.drv.keys) != 0 {
+	_ = e.svc.Status(context.Background(), "s1", "idle")
+	e.svc.cfg.KeepDrafts = true
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "draft_in_box")
+	if slices.Contains(e.drv.keys, KeyEnter) || len(e.drv.sent) != 0 {
 		t.Fatalf("pressed %v on the owner's draft", e.drv.keys)
 	}
 }
@@ -1372,9 +1384,14 @@ func TestSendReplacingClearsTheBoxThenSends(t *testing.T) {
 
 func TestSendReplacingRefuses(t *testing.T) {
 	for name, set := range map[string]func(e *env){
-		"a prompt shows":     func(e *env) { e.drv.screen = fixture(t, "prompt-bash.txt") },
-		"owner at this pane": func(e *env) { e.drv.screen = boxWith("my draft"); e.sys.idle, e.drv.front, e.drv.focusTTY = 5, true, "/dev/ttys001" },
-		"claude is working":  func(e *env) { e.drv.screen = strings.Replace(boxWith("x"), "⏺ Done.", "✶ Ionizing… (10s · ↓ 76 tokens)", 1) },
+		"a prompt shows": func(e *env) { e.drv.screen = fixture(t, "prompt-bash.txt") },
+		"owner at this pane": func(e *env) {
+			e.drv.screen = boxWith("my draft")
+			e.sys.idle, e.drv.front, e.drv.focusTTY = 5, true, "/dev/ttys001"
+		},
+		"claude is working": func(e *env) {
+			e.drv.screen = strings.Replace(boxWith("x"), "⏺ Done.", "✶ Ionizing… (10s · ↓ 76 tokens)", 1)
+		},
 		"box will not clear": func(e *env) { e.drv.screen = boxWith("my draft"); e.drv.clearFails = true },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1393,11 +1410,12 @@ func TestSendReplacingRefuses(t *testing.T) {
 			}
 		})
 	}
-	// A plain send never clears.
+	// With keep_drafts a plain send never clears a draft.
 	e := newEnv(t)
+	e.svc.cfg.KeepDrafts = true
 	e.drv.screen = boxWith("my draft")
-	wantCode(t, e.svc.Send(context.Background(), "s1", "run the tests", ""), "not_at_input")
-	if len(e.drv.keys) != 0 {
+	wantCode(t, e.svc.Send(context.Background(), "s1", "run the tests", ""), "draft_in_box")
+	if slices.Contains(e.drv.keys, KeyClear) || len(e.drv.sent) != 0 {
 		t.Fatalf("keys = %v", e.drv.keys)
 	}
 }
@@ -1405,7 +1423,7 @@ func TestSendReplacingRefuses(t *testing.T) {
 func TestStatusSaysTheBoxHasText(t *testing.T) {
 	e := newEnv(t)
 	e.drv.screen = boxWith("yes, test it against my local gateway")
-	if st := e.svc.Status(context.Background(), "s1", "idle"); st.CanType || !st.BoxHasText || st.Reason != "not_at_input" {
+	if st := e.svc.Status(context.Background(), "s1", "idle"); !st.CanType || !st.BoxHasText || st.Reason != "" {
 		t.Fatalf("status = %+v", st)
 	}
 	e.drv.screen = idleScreen
@@ -1415,5 +1433,68 @@ func TestStatusSaysTheBoxHasText(t *testing.T) {
 	e.drv.screen = fixture(t, "prompt-bash.txt")
 	if st := e.svc.Status(context.Background(), "s1", "idle"); st.BoxHasText {
 		t.Fatalf("prompt: %+v", st)
+	}
+}
+
+// Claude Code's grey suggestion: a space dismisses it, so a plain send types
+// the message over it, never asking anything.
+func TestSendTypesOverAGreySuggestion(t *testing.T) {
+	e := newEnv(t)
+	e.svc.cfg.KeepDrafts = true // even when drafts are kept
+	e.drv.screen, e.drv.suggestion = boxWith("yes, test it against my local gateway"), true
+	if err := e.svc.Send(context.Background(), "s1", "what are we doing here?", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.sent) != 1 || e.drv.keys[0] != KeySpace || e.drv.keys[len(e.drv.keys)-1] != KeyEnter {
+		t.Fatalf("sent %q keys %v", e.drv.sent, e.drv.keys)
+	}
+}
+
+// A draft the owner left: kept by keep_drafts (the space is taken back out
+// and nothing is typed), else replaced.
+func TestSendWithADraftInTheBox(t *testing.T) {
+	e := newEnv(t)
+	e.svc.cfg.KeepDrafts = true
+	e.drv.screen = boxWith("my own draft")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "run it", ""), "draft_in_box")
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 2 || e.drv.keys[0] != KeySpace || e.drv.keys[1] != KeyBackspace {
+		t.Fatalf("sent %q keys %v, want a space taken back and nothing typed", e.drv.sent, e.drv.keys)
+	}
+
+	e = newEnv(t) // the default replaces it
+	e.drv.screen = boxWith("my own draft")
+	if err := e.svc.Send(context.Background(), "s1", "run it", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.sent) != 1 || e.drv.sent[0] != "run it" {
+		t.Fatalf("sent = %q", e.drv.sent)
+	}
+	hasClear := false
+	for _, k := range e.drv.keys {
+		hasClear = hasClear || k == KeyClear
+	}
+	if !hasClear {
+		t.Fatalf("keys = %v, want the draft cleared", e.drv.keys)
+	}
+}
+
+// Nothing is pressed in a box the owner is using at the Mac.
+func TestSendNeverTouchesTheBoxWhileTheOwnerUsesIt(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen, e.drv.suggestion = boxWith("a suggestion"), true
+	e.sys.idle, e.drv.front, e.drv.focusTTY = 5, true, "/dev/ttys001"
+	wantCode(t, e.svc.Send(context.Background(), "s1", "run it", ""), "mac_in_use")
+	if len(e.drv.keys) != 0 || len(e.drv.sent) != 0 {
+		t.Fatalf("keys %v sent %q", e.drv.keys, e.drv.sent)
+	}
+}
+
+// Status: text in the box does not stop typing; Send sorts it out.
+func TestStatusCanTypeOverTextInTheBox(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = boxWith("yes, test it against my local gateway")
+	st := e.svc.Status(context.Background(), "s1", "idle")
+	if !st.CanType || !st.BoxHasText || st.Reason != "" {
+		t.Fatalf("status = %+v", st)
 	}
 }

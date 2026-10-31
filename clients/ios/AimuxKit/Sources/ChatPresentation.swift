@@ -50,7 +50,7 @@ public func readOnlyText(_ detail: SessionDetail?) -> String {
             + "Start a new session from Now."
     }
     if detail?.state == .openInTerminal, let terminal = detail?.terminal, !terminal.canType {
-        return terminal.boxHasText ? boxHasTextLine : terminalReasonText(terminal.reason)
+        return terminalReasonText(terminal.reason)
     }
     return "Read-only here while it's open in a terminal on your Mac"
 }
@@ -62,15 +62,11 @@ public func readOnlyText(_ detail: SessionDetail?) -> String {
 public func terminalReasonLine(_ detail: SessionDetail?, queue: Bool, queueStatus: QueueStatus?) -> String? {
     guard let detail, detail.state == .openInTerminal, let terminal = detail.terminal, !terminal.canType
     else { return nil }
-    if terminal.boxHasText { return boxHasTextLine }
     guard queue, terminal.reason == "mac_in_use" else { return terminalReasonText(terminal.reason) }
     let section = ChatQueue.section(queueStatus)
     if section.visible && section.state == "running" && section.line != nil { return nil }
     return "You're using this session on your Mac."
 }
-
-/// The line for a Mac input box that holds text (a draft, or Claude Code's grey suggestion).
-public let boxHasTextLine = "There's text in the box on your Mac"
 
 /// Why the phone cannot type into the terminal now, from `terminal.reason`.
 public func terminalReasonText(_ reason: String?) -> String {

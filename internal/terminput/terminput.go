@@ -32,10 +32,13 @@ const (
 const (
 	KeyEscape Key = "escape"
 	KeyEnter  Key = "enter"
-	// KeyClear empties the input box row the cursor is on: a space (it
-	// dismisses Claude Code's grey suggestion, which no delete key removes),
-	// then Ctrl+K and Ctrl+U. Two per box row empty a draft from any cursor
-	// position.
+	// KeySpace tells Claude Code's grey suggestion from a draft: typing
+	// dismisses a suggestion, so the box then reads empty; a draft keeps its
+	// text and gains the space, which KeyBackspace takes back out.
+	KeySpace     Key = "space"
+	KeyBackspace Key = "backspace"
+	// KeyClear empties the input box row the cursor is on (Ctrl+E, then
+	// Ctrl+U); two per box row empty a draft from any cursor position.
 	KeyClear Key = "clear"
 )
 
@@ -130,6 +133,7 @@ var (
 	ErrBadText          = newErr("bad_text", "the text holds control characters or starts with ! or /")
 	ErrNotSubmitted     = newErr("not_submitted", "the text is in the input box but was not submitted")
 	ErrNotCleared       = newErr("box_not_cleared", "the text in the input box could not be cleared; nothing was sent")
+	ErrDraftInBox       = newErr("draft_in_box", "a draft left in the input box is kept (keep_drafts); nothing was sent")
 	ErrBusy             = newErr("busy", "Claude is working on a turn in this session")
 	// Submit's answers when the input box does not hold the message.
 	ErrBoxEmpty = newErr("box_empty", "the input box is empty")
@@ -404,9 +408,11 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 	// The text a send left waiting can be retried (Retry presses Enter).
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
 	left := s.leftText(sessionID)
-	if !InputBoxEmpty(scr) && (left == "" || !WordsInBox(scr, left)) {
+	st.BoxHasText = BoxHasText(scr)
+	// Text in the box (a grey suggestion or a draft) does not stop a message:
+	// Send types over a suggestion and replaces or keeps a draft.
+	if !InputBoxEmpty(scr) && !st.BoxHasText && (left == "" || !WordsInBox(scr, left)) {
 		st.Reason = Code(ErrNotAtInput)
-		st.BoxHasText = BoxHasText(scr)
 		return st
 	}
 	st.CanType = true
@@ -474,12 +480,11 @@ func (s *Service) Send(ctx context.Context, sessionID, text, idemKey string) err
 	return err
 }
 
-// SendReplacing is Send for when the owner asked to replace what the input
-// box holds: text there (a draft, or Claude Code's grey suggestion) is
-// cleared and the box checked empty before typing. Every other check is
-// Send's, and the box is never cleared while the owner uses this session
-// at the Mac, Claude works, or a prompt shows. ErrNotCleared: the box did
-// not read empty after clearRounds; nothing was typed.
+// SendReplacing is Send that replaces a draft left in the input box even
+// with keep_drafts. Every other check is Send's: the box is never touched
+// while the owner uses this session at the Mac, Claude works, or a prompt
+// shows. ErrNotCleared: the box did not read empty after clearRounds;
+// nothing was typed.
 func (s *Service) SendReplacing(ctx context.Context, sessionID, text, idemKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -488,34 +493,65 @@ func (s *Service) SendReplacing(ctx context.Context, sessionID, text, idemKey st
 	return err
 }
 
-// clearBox empties the input box scr shows, up to clearRounds, and returns
-// once the box reads empty.
-func (s *Service) clearBox(ctx context.Context, d Driver, p Pane, scr string) error {
-	for range clearRounds {
-		rows, _ := boxRows(scr)
-		for range 2 * max(1, len(rows)) {
-			cctx, cancel := s.withTimeout(ctx)
-			err := d.Key(cctx, p, KeyClear)
-			cancel()
-			if err != nil {
-				return fmt.Errorf("%s: clear: %w", d.Name(), err)
-			}
-		}
-		if err := s.sleep(ctx, settle); err != nil {
-			return ErrNotCleared
-		}
-		var err error
-		if scr, err = s.readScreen(ctx, d, p); err != nil {
-			return err
-		}
+// makeRoom gets the input box scr shows ready for a message. A box with
+// text gets a space first: Claude Code's grey suggestion vanishes when
+// typed over, so the box then reads empty, while a draft keeps its text and
+// the space is taken back out. A draft is then refused (keep) or cleared and
+// checked again, up to clearRounds. The caller ran the in-use guard.
+func (s *Service) makeRoom(ctx context.Context, d Driver, p Pane, scr string, keep bool) error {
+	for round := 0; ; round++ {
 		if InputBoxEmpty(scr) {
 			return nil
 		}
-		if ParsePrompt(scr) != nil || Working(scr) {
-			return ErrNotCleared // something else took the screen: stop
+		if !BoxHasText(scr) || Working(scr) {
+			return ErrNotAtInput
+		}
+		if err := s.pressKey(ctx, d, p, KeySpace); err != nil {
+			return err
+		}
+		var err error
+		if scr, err = s.settledScreen(ctx, d, p); err != nil {
+			return err
+		}
+		if InputBoxEmpty(scr) {
+			return nil // it was a suggestion; the message follows the space
+		}
+		if err := s.pressKey(ctx, d, p, KeyBackspace); err != nil {
+			return err
+		}
+		if keep {
+			return ErrDraftInBox
+		}
+		if round == clearRounds {
+			return ErrNotCleared
+		}
+		rows, _ := boxRows(scr)
+		for range 2 * max(1, len(rows)) {
+			if err := s.pressKey(ctx, d, p, KeyClear); err != nil {
+				return err
+			}
+		}
+		if scr, err = s.settledScreen(ctx, d, p); err != nil {
+			return err
 		}
 	}
-	return ErrNotCleared
+}
+
+func (s *Service) pressKey(ctx context.Context, d Driver, p Pane, k Key) error {
+	cctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+	if err := d.Key(cctx, p, k); err != nil {
+		return fmt.Errorf("%s: key %s: %w", d.Name(), k, err)
+	}
+	return nil
+}
+
+// settledScreen waits settle for the terminal to redraw, then reads it.
+func (s *Service) settledScreen(ctx context.Context, d Driver, p Pane) (string, error) {
+	if err := s.sleep(ctx, settle); err != nil {
+		return "", ErrNotCleared
+	}
+	return s.readScreen(ctx, d, p)
 }
 
 func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, replace bool) error {
@@ -546,17 +582,17 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
 	waiting := !InputBoxEmpty(scr) && s.leftText(sessionID) == text && WordsInBox(scr, text)
 	if !InputBoxEmpty(scr) && !waiting {
-		if !replace || !BoxHasText(scr) {
+		if !BoxHasText(scr) {
 			return ErrNotAtInput
 		}
-		// Never clear text while the owner may be typing it at the Mac.
+		// Never press a key in a box the owner may be typing in at the Mac.
 		if err := s.inUse(ctx, d, t); err != nil {
 			return err
 		}
 		if err := s.foregroundOK(t); err != nil {
 			return err
 		}
-		if err := s.clearBox(ctx, d, p, scr); err != nil {
+		if err := s.makeRoom(ctx, d, p, scr, s.cfg.KeepDrafts && !replace); err != nil {
 			return err
 		}
 		s.setLeft(sessionID, "")

@@ -681,6 +681,7 @@ var terminalMessages = map[string]struct {
 	"not_at_input":       {http.StatusConflict, "Claude Code is not at an empty input box"},
 	"not_submitted":      {http.StatusConflict, "the message is in the input box but was not sent; the screen changed, a prompt may be showing"},
 	"box_not_cleared":    {http.StatusConflict, "the text in the input box on the Mac could not be cleared; nothing was sent"},
+	"draft_in_box":       {http.StatusConflict, "a draft you left in the input box on the Mac is kept (keep_drafts); nothing was sent"},
 	"busy":               {http.StatusConflict, "Claude is working in this session; try again when it finishes"},
 	"no_prompt":          {http.StatusConflict, "no permission prompt is showing"},
 	"prompt_changed":     {http.StatusConflict, "a different permission prompt is showing"},

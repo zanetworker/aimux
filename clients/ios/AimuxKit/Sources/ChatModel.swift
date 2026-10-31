@@ -9,7 +9,6 @@ public protocol ChatSource: Sendable {
     func answer(approvalID: String, optionID: String) async throws
     func sendMessage(sessionID: String, text: String, key: String) async throws -> TurnAccepted
     func terminalSend(sessionID: String, text: String, key: String) async throws
-    func terminalReplace(sessionID: String, text: String, key: String) async throws
     func terminalPress(sessionID: String, promptID: String, option: String, key: String) async throws
     func queue(sessionID: String) async throws -> QueueStatus
     func addToQueue(sessionID: String, text: String, key: String) async throws -> QueueItem
@@ -284,7 +283,7 @@ public final class ChatModel {
     /// Sends a message. The user item shows at once; sending the same text again after a failure
     /// is a retry and keeps the idempotency key, anything else is a new message with a new key.
     /// A read-only session takes no messages; a refusal because it is open in a terminal loads it again.
-    public func send(_ text: String, replacing: Bool = false) async {
+    public func send(_ text: String) async {
         guard state != .readOnly else { return }
         let key: String
         if let previous = pending, previous.text == text, previous.failure != nil {
@@ -294,7 +293,7 @@ public final class ChatModel {
         }
         pending = PendingMessage(text: text, key: key, failure: nil, turn: nil, sentAt: now())
         if state == .terminal {
-            await typeIntoTerminal(text, key: key, replacing: replacing)
+            await typeIntoTerminal(text, key: key)
             return
         }
         do {
@@ -380,5 +379,22 @@ extension ChatModel {
         }
         answered.insert(id)
         rebuild()
+    }
+}
+
+extension ChatModel {
+    /// Reads the session again once a turn ends, so the turn's record and the stats come from the session file.
+    /// A failure is left to the next load; a load or close meanwhile drops the result.
+    fileprivate func refreshDetail() {
+        let mine = generation
+        let revision = queueRevision
+        let source = source
+        let sessionID = sessionID
+        _ = Interaction.background { Task { [weak self] in
+            guard let detail = try? await source.session(id: sessionID, turns: Self.historyTurns) else { return }
+            guard let self, mine == self.generation, !self.closed else { return }
+            self.adopt(detail, readSince: revision)
+            self.rebuild()
+        } }
     }
 }

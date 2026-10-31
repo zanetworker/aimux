@@ -249,12 +249,11 @@ struct ChatContent: View {
         }
     }
 
-    /// Sends the draft; `replacing` first clears the text in the Mac's input box (the person's Replace).
-    private func send(replacing: Bool = false) {
+    private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
-        Task { await model.send(text, replacing: replacing) }
+        Task { await model.send(text) }
     }
 }
 
@@ -278,10 +277,6 @@ extension ChatContent {
             case .terminal where model.session?.terminal?.canType == true:
                 // Typed into the terminal on the Mac: Stop there is the Mac's, not this chat's.
                 composer(isWorking: false, canSend: true, stop: {})
-            case .terminal where model.canReplaceBox:  // only the person's Replace clears the Mac's box
-                let hasDraft = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ReplaceBoxLine(canReplace: hasDraft) { send(replacing: true) }
-                composer(isWorking: false, canSend: false, stop: {})
             case .terminal where model.queueEnabled:
                 // It cannot take typing now; the Mac sends queued messages when it can.
                 if terminalPrompt == nil,
@@ -325,7 +320,7 @@ extension ChatContent {
 
     fileprivate func composer(isWorking: Bool, canSend: Bool, stop: @escaping () -> Void) -> some View {
         Composer(text: $draft, isWorking: isWorking, canSend: canSend, action: model.composerAction,
-                 queueEnabled: model.queueEnabled, fieldFocus: $composerFocused, send: { send() }, queue: addToQueue,
+                 queueEnabled: model.queueEnabled, fieldFocus: $composerFocused, send: send, queue: addToQueue,
                  stop: stop)
     }
 

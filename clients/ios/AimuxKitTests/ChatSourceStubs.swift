@@ -82,8 +82,6 @@ final class StubChat: ChatSource, @unchecked Sendable {
     func count(_ name: String) -> Int { lock.withLock { calls.filter { $0 == name }.count } }
     var sentList: [Sent] { lock.withLock { sent } }
     var terminalSentList: [Sent] { lock.withLock { terminalSent } }
-    private(set) var terminalReplaced: [Sent] = []
-    var terminalReplacedList: [Sent] { lock.withLock { terminalReplaced } }
     var pressList: [Press] { lock.withLock { presses } }
 
     /// Whether each snapshot read ran as something the person asked for.
@@ -129,14 +127,6 @@ final class StubChat: ChatSource, @unchecked Sendable {
     func terminalSend(sessionID: String, text: String, key: String) async throws {
         let failure = lock.withLock { () -> Error? in
             terminalSent.append(Sent(text: text, key: key))
-            return terminalFailures.isEmpty ? nil : terminalFailures.removeFirst()
-        }
-        if let failure { throw failure }
-    }
-
-    func terminalReplace(sessionID: String, text: String, key: String) async throws {
-        let failure = lock.withLock { () -> Error? in
-            terminalReplaced.append(Sent(text: text, key: key))
             return terminalFailures.isEmpty ? nil : terminalFailures.removeFirst()
         }
         if let failure { throw failure }

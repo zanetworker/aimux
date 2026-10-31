@@ -35,14 +35,6 @@ struct PendingMessageRow: View {
                         .buttonStyle(.borderless)
                         .foregroundStyle(.primary)
                         .accessibilityIdentifier("pendingQueueButton")
-                    } else if model.canReplaceBox {
-                        // Refused for text in the Mac's input box: the person may replace it.
-                        Button("Replace it") { Task { await model.send(pending.text, replacing: true) } }
-                            .fontWeight(.semibold)
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(.primary)
-                            .accessibilityHint("Clears the text in the box on your Mac, then sends this message")
-                            .accessibilityIdentifier("pendingReplaceButton")
                     } else {
                         Button("Retry") { Task { await model.send(pending.text) } }
                             .disabled(!model.canRetryPending)

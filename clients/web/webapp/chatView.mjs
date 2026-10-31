@@ -340,16 +340,3 @@ export function readOnlyLine(text) {
   line.append(icon('lock'), el('span', '', text));
   return line;
 }
-
-// replaceLine says the Mac's input box holds text (a draft, or Claude Code's grey suggestion), with
-// Replace it, which clears that text and sends the composer's message (onReplace).
-export function replaceLine(text, onReplace, { canReplace = true } = {}) {
-  const line = el('div', 'readonly-line');
-  const button = el('button', 'link', 'Replace it');
-  button.type = 'button';
-  button.disabled = !canReplace;
-  button.title = 'Clears the text in the box on your Mac, then sends your message';
-  button.addEventListener('click', onReplace);
-  line.append(el('span', '', text), button);
-  return line;
-}
