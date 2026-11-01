@@ -498,7 +498,7 @@ func TestOpenTerminalSessions(t *testing.T) {
 // fixedLive is a harness.LiveSessions with fixed holders.
 type fixedLive []harness.Holder
 
-func (f fixedLive) Live() ([]harness.Holder, error) { return f, nil }
+func (f fixedLive) Holders(harness.Mode) ([]harness.Holder, error) { return f, nil }
 
 func TestOpenTerminalSessions_OneRowPerSessionWithTheServersPID(t *testing.T) {
 	got := openTerminalSessions(fixedLive{

@@ -23,7 +23,11 @@ import (
 )
 
 // Claude is a Provider implementation for the Claude Code CLI.
-type Claude struct{}
+type Claude struct {
+	// ProjectsDir is where the session store reads transcripts
+	// (SessionFile, Fingerprint); "": ~/.claude/projects.
+	ProjectsDir string
+}
 
 func (c *Claude) Name() string { return "claude" }
 

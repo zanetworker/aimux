@@ -106,8 +106,8 @@ internal/
     process.go                  # Process scanning, subagent filtering (ancestor chain)
     session.go                  # Session file discovery, JSONL parsing
     tmux.go                     # Tmux session listing, matching
-    registry.go                 # Claude Code's session registry (~/.claude/sessions/<pid>.json): ReadClaudeRegistry, ReadClaudeRegistryStrict, IsLiveHolder (pid alive, start time within 2 s)
-    live.go                     # LiveCache: harness.LiveSessions for Claude Code over the registry by IsLiveHolder's rule; 1 s TTL (LiveTTL), single-flight, one batched `ps -o pid=,lstart=` per read; a read is stamped when it starts; remote serve creates one and every open-session reader (LocalIndex, queue, terminal input, waiting, LastFocus, LayoutReader) shares it, so open/closed and the registry busy status may be up to 1 s old; the send path's safety does not depend on that (terminput's locate re-checks the tty, foreground pid and command fresh before typing, Enter and every key); acprun's ClaudeLookup still reads the registry itself
+    registry.go                 # Claude Code's session registry (~/.claude/sessions/<pid>.json): ReadClaudeRegistry and ReadClaudeRegistryStrict over one read (readClaudeRegistry: every decodable entry plus the first failure), IsLiveHolder (pid alive, start time within 2 s)
+    live.go                     # LiveCache: harness.LiveSessions for Claude Code, Holders(List) and Holders(Strict) from one read (the table on harness.Mode): registry holders by IsLiveHolder's rule, and for Strict an unreadable registry is an error and a live `claude` process naming the session on its command line (no live entry of its own) holds it too; 1 s TTL (LiveTTL), single-flight, one batched `ps -o pid=,lstart=` per read; the `ps -axo pid=,args=` scan (CommandLines, injectable) runs only for Strict; a Strict read is never served from the cache (it takes only a read begun after the call, so callers arriving together share one, and the router always sees a terminal opened a moment ago), while its result serves List for the TTL; a read is stamped when it starts; remote serve creates one and every open-session reader (LocalIndex, queue, terminal input, waiting, LastFocus, LayoutReader) and the router share it, so open/closed and the registry busy status may be up to 1 s old; the send path's safety does not depend on that for terminal input (terminput's locate re-checks the tty, foreground pid and command fresh before typing, Enter and every key); `aimux chat` makes its own with TTL 0
   evaluation/                   # Annotation persistence, JSONL export
   jump/                         # Session resumption (tmux split, iTerm2)
   otel/
@@ -121,6 +121,7 @@ internal/
     codex.go                    # Codex: full discovery, tmux mirror, JSONL parsing
     gemini.go                   # Gemini: full discovery, tmux mirror, JSON parsing
     helpers.go                  # Shared: process tree grouping, start time, CWD extraction
+    claude_store.go             # Claude's harness.SessionStore: SessionFile (under ProjectsDir, default ~/.claude/projects), SessionCwd (history.SessionCwd: the first recorded cwd, the session list's line, read only up to it), Fingerprint (size and mtime); the router and the chat manager read transcripts through it
     (RecentDirs vs remoteapi LocalIndex.Projects: kept, they differ. RecentDirs decodes ~/.claude/projects dir keys with no filters; Projects uses recorded cwd, drops automated and subagent sessions unless created here, stats the dir and honours injected Discover and ProjectsDir. Not duplicates.)
   spawn/spawn.go                # Launch agents into tmux/iTerm
   team/reader.go                # Team config reading
@@ -137,8 +138,10 @@ internal/
     audit.go                    # ~/.aimux/logs/remote-audit.log JSON lines (never codes, challenges, tokens, keys or text); identical failures collapse to one a minute
   harness/
     harness.go                  # Leaf package of types shared by the core and harness-specific code: Key and its constants, Option, Prompt, Screen, Match, RoomKeys, PasteText, the Composer interface (Read, BoxShows, IsAgentProcess, RefuseText, RoomKeys, ClearKeys); imports no internal package; boundary_test.go enforces the Harness Boundary imports
-    live.go                     # Holder{PID, SessionID, Status}, the LiveSessions interface (Live: every live holder, one per process) and OpenSessions (by session, leaving out the caller's own processes, the highest pid when two hold one session: the open_in_terminal rule); Live's error is always nil for Claude Code and callers read it as none open
+    live.go                     # Holder{PID, SessionID, Status}, Mode (List: the session list's rule, never fails; Strict: the router's, an unreadable registry is an error and command-line holders count; a comment table of every case), the LiveSessions interface (Holders(mode): every live holder, one per process and session) and OpenSessions (by session, leaving out the caller's own processes, the highest pid when two hold one session: the open_in_terminal rule)
+    store.go                    # SessionStore interface (SessionFile, SessionCwd, Fingerprint): a harness's transcripts as continuing a session needs them
     claude/screen.go            # Parses Claude Code's screen: InputBoxEmpty, BoxHasText, WordsInBox, WorkingSeconds, ParsePrompt (none when its top rule is off the screen; fixtures in testdata/screens/, also read by terminput's tests)
+    claude/cmdline.go           # CommandLineSessions: the words of a `claude` command line that may name its session (each argument, and the text after an argument's last =); LiveCache's Strict fallback
     claude/composer.go          # Composer: Claude Code's harness.Composer over screen.go (one prompt and one box parse per Read); processes claude and node; refuses a leading ! (bash mode) and, unless allowed, / (slash command); the grey-suggestion probe (space, then backspace) and the clear keys
   remoteapi/chatqueue/
     queue.go                    # Item and queue types, states (waiting, sending, answering; queue running or paused), limits (20 per session), the text rules re-checked before a send
@@ -214,7 +217,7 @@ Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
   config/      — global + project-local config, runtime/sandbox profiles
   cost/        — per-model pricing, token counting
   discovery/   — multi-provider orchestrator, process scanning
-  history/     — session scanning, metadata, titles, search; namer.go (economical naming, daily limit, pause on failures), namer_backend.go (API or `claude -p` safe mode), namer_proc_*.go (process group), metawrite.go (`UpdateMeta`: locked, atomic `.meta.json` writer; the only writer)
+  history/     — session scanning, metadata, titles, search; namer.go (economical naming, daily limit, pause on failures), namer_backend.go (API or `claude -p` safe mode), namer_proc_*.go (process group), metawrite.go (`UpdateMeta`: locked, atomic `.meta.json` writer; the only writer), cwd.go (`SessionCwd`: a session's first recorded cwd, decoding each line as scanSession does, stopping at that line); history must never import provider (provider imports history)
   evaluation/  — annotation persistence, JSONL export
   otel/        — OTLP receiver, span store, exporter
   provider/    — Provider interface, Claude/Codex/Gemini/K8s implementations
@@ -225,7 +228,8 @@ Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
   team/        — team config reader
   remoteapi/chatqueue/: per-session chat queue and its dispatcher (phone messages sent one at a time)
   terminput/: typing phone messages and prompt keys into terminal Claude sessions; iterm2/ driver
-  harness/: types and interfaces for harness-specific knowledge (Composer); claude/ is Claude Code's
+  harness/: types and interfaces for harness-specific knowledge (Composer, LiveSessions, SessionStore); claude/ is Claude Code's
+  acprun/: continuing idle sessions through an ACP adapter; Router refuses a session a terminal holds (SessionLookup: harness.SessionStore plus LiveSessions under Strict)
 ```
 
 ### The Rule: Controller First, Frontend Second
@@ -351,7 +355,12 @@ Knowledge of one harness (its screen layout, prompt wording, working line, paste
 - `internal/terminput` must not import `internal/provider`; `internal/provider` must not import `internal/terminput`.
 - `internal/harness/boundary_test.go` enforces these imports.
 
-The Claude Code implementation lives in `internal/harness/claude`, not `internal/provider`: `terminput.NewService` defaults to it, and taking it from provider would make terminput depend on provider and everything it imports. When the Service looks up a Composer per session, provider can expose it as an optional capability and the default can go.
+Capabilities, and who implements them for Claude Code:
+- `harness.Composer`: the terminal composer (screen reads, process names, text rules, room and clear keys); `internal/harness/claude`.
+- `harness.LiveSessions`: which processes hold a session, `Holders(harness.List)` for the session list (LocalIndex, terminal input, queue, waiting, layout) and `Holders(harness.Strict)` for the router (`acprun.SessionLookup`); `discovery.LiveCache` over the registry, with `claude.CommandLineSessions` for Strict's command-line fallback. One source and one table of cases (`internal/harness/live.go`), so the list and the router differ only where it says.
+- `harness.SessionStore`: transcript file, recorded cwd, fingerprint; `provider.Claude`.
+
+The Claude Code implementation of the Composer lives in `internal/harness/claude`, not `internal/provider`: `terminput.NewService` defaults to it, and taking it from provider would make terminput depend on provider and everything it imports. When the Service looks up a Composer per session, provider can expose it as an optional capability and the default can go.
 
 Known exceptions, next steps:
 - Error codes and texts name Claude (`not_claude`, "Claude is working"); they are API contract and change with a contract version.

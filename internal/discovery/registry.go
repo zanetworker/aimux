@@ -37,34 +37,52 @@ func (e ClaudeRegistryEntry) StartedAt() (time.Time, bool) {
 // missing directory yields an empty map: the registry is an accuracy
 // improvement, never a requirement.
 func ReadClaudeRegistry(dir string) map[int]ClaudeRegistryEntry {
+	reg, _ := readClaudeRegistry(dir)
+	return reg
+}
+
+// readClaudeRegistry is the one registry read: every entry it can decode
+// (never nil), and the first file, or the directory, it could not read or
+// decode. ReadClaudeRegistry drops the error, ReadClaudeRegistryStrict the
+// entries when there is one.
+func readClaudeRegistry(dir string) (map[int]ClaudeRegistryEntry, error) {
 	reg := make(map[int]ClaudeRegistryEntry)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return reg
+		return reg, fmt.Errorf("read Claude session registry %s: %w", dir, err)
 	}
+	var first error
 	for _, de := range entries {
 		if de.IsDir() || !strings.HasSuffix(de.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, de.Name())) // #nosec G304 -- fixed registry dir
+		path := filepath.Join(dir, de.Name())
+		data, err := os.ReadFile(path) // #nosec G304 -- fixed registry dir
 		if err != nil {
+			if first == nil {
+				first = fmt.Errorf("read Claude session registry entry %s: %w", path, err)
+			}
 			continue
 		}
 		var e ClaudeRegistryEntry
-		if json.Unmarshal(data, &e) != nil || e.PID <= 0 || e.SessionID == "" {
+		if err := json.Unmarshal(data, &e); err != nil {
+			if first == nil {
+				first = fmt.Errorf("decode Claude session registry entry %s: %w", path, err)
+			}
 			continue
 		}
-		reg[e.PID] = e
+		if e.PID > 0 && e.SessionID != "" {
+			reg[e.PID] = e
+		}
 	}
-	return reg
+	return reg, first
 }
 
 // ProcessStartTime returns when a process started, or the zero time if
 // unknown. It is a variable so tests can override it. Only IsLiveHolder uses
-// it, and only acprun's lookup calls that (the TUI's Claude discovery has
-// its own start-time reader in provider); the remote stack's LiveCache
-// checks start times with one batched ps of its own, so overriding this hook
-// does not reach it.
+// it, and nothing outside tests calls that: both are kept as the pinned
+// reference for LiveCache's rule. LiveCache checks start times with one
+// batched ps of its own, so overriding this hook does not reach it.
 var ProcessStartTime = ReadProcessStartTime
 
 // ReadProcessStartTime asks ps for pid's start time (UTC), or the zero time on
@@ -87,7 +105,9 @@ func ReadProcessStartTime(pid int) time.Time {
 // IsLiveHolder reports whether the registry entry's process is still the one
 // that wrote it: the PID is alive and, when both start times are known, it
 // started when the entry says. A stale entry whose PID was reused by an
-// unrelated process does not count.
+// unrelated process does not count. No production caller: it is kept as the
+// pinned reference for the rule LiveCache applies to every entry at once
+// (liveHolders; TestLiveHolders_SameRuleAsIsLiveHolder).
 func IsLiveHolder(e ClaudeRegistryEntry) bool {
 	if e.PID <= 0 || syscall.Kill(e.PID, 0) != nil {
 		return false
@@ -114,27 +134,9 @@ func startMatches(recorded, actual time.Time) bool {
 // guess: any registry file it cannot read or decode is an error, since that
 // file may be the live terminal holding a session.
 func ReadClaudeRegistryStrict(dir string) (map[int]ClaudeRegistryEntry, error) {
-	entries, err := os.ReadDir(dir)
+	reg, err := readClaudeRegistry(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read Claude session registry %s: %w", dir, err)
-	}
-	reg := make(map[int]ClaudeRegistryEntry)
-	for _, de := range entries {
-		if de.IsDir() || !strings.HasSuffix(de.Name(), ".json") {
-			continue
-		}
-		path := filepath.Join(dir, de.Name())
-		data, err := os.ReadFile(path) // #nosec G304 -- fixed registry dir
-		if err != nil {
-			return nil, fmt.Errorf("read Claude session registry entry %s: %w", path, err)
-		}
-		var e ClaudeRegistryEntry
-		if err := json.Unmarshal(data, &e); err != nil {
-			return nil, fmt.Errorf("decode Claude session registry entry %s: %w", path, err)
-		}
-		if e.PID > 0 && e.SessionID != "" {
-			reg[e.PID] = e
-		}
+		return nil, err
 	}
 	return reg, nil
 }

@@ -2,19 +2,10 @@ package acprun
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
-	"time"
 
-	"github.com/zanetworker/aimux/internal/discovery"
-	"github.com/zanetworker/aimux/internal/jsonl"
+	"github.com/zanetworker/aimux/internal/harness"
 )
 
 // Router errors.
@@ -89,133 +80,41 @@ func (r *Router) route(sessionID string) (SessionInfo, error) {
 	return info, nil
 }
 
-// ClaudeLookup finds Claude Code sessions: the session file under
-// projectsDir gives the working directory, and a live process in Claude's
-// registry (registryDir) holding the session means it is open in a terminal.
-func ClaudeLookup(projectsDir, registryDir string) Lookup {
-	return func(sessionID string) (SessionInfo, error) {
-		file := discovery.FindSessionFile(sessionID, projectsDir)
-		if file == "" {
-			return SessionInfo{}, fmt.Errorf("%w: %s", ErrUnknownSession, sessionID)
-		}
-		cwd, err := sessionCwd(file)
-		if err != nil {
-			return SessionInfo{}, err
-		}
-		registry, err := discovery.ReadClaudeRegistryStrict(registryDir)
-		if err != nil {
-			// A registry aimux cannot fully read may hide the terminal that
-			// holds this session.
-			return SessionInfo{}, fmt.Errorf("%w: %v", ErrOwnershipUnknown, err)
-		}
-		info := SessionInfo{Provider: "claude", Cwd: cwd}
-		seen := map[int]bool{}
-		for pid, e := range registry {
-			if e.SessionID == sessionID && discovery.IsLiveHolder(e) {
-				seen[pid] = true
-			}
-		}
-		// The registry can miss a session (an older Claude Code, a
-		// half-written entry); a Claude process with the session id on its
-		// command line holds it too, unless its own live registry entry says
-		// it moved on (/clear, a fork) to another session.
-		if procs, err := listProcesses(); err == nil {
-			for _, p := range procs {
-				if e, ok := registry[p.PID]; ok && discovery.IsLiveHolder(e) {
-					continue
-				}
-				if commandLineHolds(p.Args, sessionID) && syscall.Kill(p.PID, 0) == nil {
-					seen[p.PID] = true
-				}
-			}
-		}
-		for pid := range seen {
-			info.Holders = append(info.Holders, pid)
-		}
-		info.OpenInTerminal = len(info.Holders) > 0
-		return info, nil
-	}
+// SessionLookup finds one harness's sessions: its session store gives the
+// working directory, and its live sessions under the Strict rule
+// (harness.Mode) say which processes hold the session. The session list
+// reads the same source under List, so the two can differ only where that
+// table says.
+type SessionLookup struct {
+	Provider string               // SessionInfo.Provider, e.g. "claude"
+	Store    harness.SessionStore // provider.Claude for Claude Code
+	Live     harness.LiveSessions // discovery.LiveCache for Claude Code
 }
 
-// sessionCwd returns the first working directory recorded in a Claude
-// session file.
-func sessionCwd(path string) (string, error) {
-	f, err := os.Open(path) // #nosec G304 -- path found under the Claude projects dir
+// Lookup is a Router.Lookup.
+func (l SessionLookup) Lookup(sessionID string) (SessionInfo, error) {
+	file := l.Store.SessionFile(sessionID)
+	if file == "" {
+		return SessionInfo{}, fmt.Errorf("%w: %s", ErrUnknownSession, sessionID)
+	}
+	cwd, err := l.Store.SessionCwd(file)
 	if err != nil {
-		return "", fmt.Errorf("open session file %s: %w", path, err)
+		return SessionInfo{}, err
 	}
-	defer func() { _ = f.Close() }()
-	s := jsonl.NewScanner(f)
-	for s.Scan() {
-		var line struct {
-			Cwd string `json:"cwd"`
-		}
-		if json.Unmarshal(s.Bytes(), &line) == nil && line.Cwd != "" {
-			return line.Cwd, nil
-		}
-	}
-	if err := s.Err(); err != nil {
-		return "", fmt.Errorf("read session file %s: %w", path, err)
-	}
-	return "", fmt.Errorf("session file %s records no working directory", path)
-}
-
-// ClaudeFingerprint fingerprints a Claude session by its file's size and
-// modification time, for ManagerOptions.Fingerprint.
-func ClaudeFingerprint(projectsDir string) func(sessionID string) string {
-	return func(sessionID string) string {
-		file := discovery.FindSessionFile(sessionID, projectsDir)
-		if file == "" {
-			return ""
-		}
-		info, err := os.Stat(file)
-		if err != nil {
-			return ""
-		}
-		return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
-	}
-}
-
-type processArgs struct {
-	PID  int
-	Args string
-}
-
-// listProcesses lists processes with their command lines. A variable so
-// tests can replace it.
-var listProcesses = func() ([]processArgs, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,args=").Output()
+	hs, err := l.Live.Holders(harness.Strict)
 	if err != nil {
-		return nil, err
+		// A registry aimux cannot fully read may hide the terminal that
+		// holds this session.
+		return SessionInfo{}, fmt.Errorf("%w: %v", ErrOwnershipUnknown, err)
 	}
-	var procs []processArgs
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil {
-			continue
-		}
-		procs = append(procs, processArgs{PID: pid, Args: strings.Join(fields[1:], " ")})
-	}
-	return procs, nil
-}
-
-// commandLineHolds reports whether a process command line is Claude Code
-// working on sessionID (for example `claude --resume <id>`).
-func commandLineHolds(args, sessionID string) bool {
-	fields := strings.Fields(args)
-	if len(fields) == 0 || filepath.Base(fields[0]) != "claude" {
-		return false
-	}
-	for _, f := range fields[1:] {
-		if f == sessionID || strings.HasSuffix(f, "="+sessionID) {
-			return true
+	info := SessionInfo{Provider: l.Provider, Cwd: cwd}
+	seen := map[int]bool{}
+	for _, h := range hs {
+		if h.SessionID == sessionID && !seen[h.PID] {
+			seen[h.PID] = true
+			info.Holders = append(info.Holders, h.PID)
 		}
 	}
-	return false
+	info.OpenInTerminal = len(info.Holders) > 0
+	return info, nil
 }

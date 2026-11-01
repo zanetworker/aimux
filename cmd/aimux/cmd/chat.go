@@ -17,6 +17,8 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/provider"
 	"golang.org/x/term"
 )
 
@@ -51,10 +53,14 @@ func newChatCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve home directory: %w", err)
 			}
+			claude := &provider.Claude{ProjectsDir: filepath.Join(home, ".claude", "projects")}
+			// TTL 0: one command, a read per send as before; remote serve
+			// shares one cached reader instead.
+			live := discovery.NewLiveCache(filepath.Join(home, ".claude", "sessions"), 0)
 			router := &acprun.Router{
-				Lookup: acprun.ClaudeLookup(filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".claude", "sessions")),
+				Lookup: acprun.SessionLookup{Provider: "claude", Store: claude, Live: live}.Lookup,
 				Manager: acprun.NewManager(acprun.ManagerOptions{Start: start, MaxRuns: 1,
-					Fingerprint: acprun.ClaudeFingerprint(filepath.Join(home, ".claude", "projects")),
+					Fingerprint: claude.Fingerprint,
 					Reserve:     sessionReservation(home)}),
 			}
 			defer router.Manager.Close()

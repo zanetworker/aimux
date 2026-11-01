@@ -596,9 +596,15 @@ func newRemoteServeCmd() *cobra.Command {
 
 			var broker *remoteapi.Broker
 			var dispatcher *chatqueue.Dispatcher // set before the server takes requests, so before any turn
+			claude := &provider.Claude{ProjectsDir: projects}
+			// The one reader of which sessions are open in a terminal: the
+			// list, details, terminal input, the queue, waiting, Last on your
+			// Mac and the layout read it through the index (harness.List),
+			// the router before a send (harness.Strict).
+			live := discovery.NewLiveCache(registry, discovery.LiveTTL)
 			manager := acprun.NewManager(acprun.ManagerOptions{
 				MaxRuns:     s.maxRuns,
-				Fingerprint: acprun.ClaudeFingerprint(projects),
+				Fingerprint: claude.Fingerprint,
 				Reserve:     sessionReservation(home),
 				Start: func(ctx context.Context, id, cwd string) (acprun.Runner, error) {
 					return acprun.Start(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, id, broker.Approver())
@@ -612,12 +618,11 @@ func newRemoteServeCmd() *cobra.Command {
 				},
 			})
 			defer manager.Close()
-			router := &acprun.Router{Lookup: acprun.ClaudeLookup(projects, registry), Manager: manager}
+			router := &acprun.Router{Lookup: acprun.SessionLookup{Provider: "claude", Store: claude, Live: live}.Lookup, Manager: manager}
 			broker = remoteapi.NewBroker(remoteapi.BrokerDeps{
 				Check: router.Check, Send: router.Send, Cancel: manager.Cancel,
 			}, remoteapi.BrokerOptions{ApprovalTimeout: s.approvalTimeout, OnApproval: asked, OnApprovalResolved: resolved,
 				OnTurnEnd: func(string) { dispatcher.Kick() }})
-			claude := &provider.Claude{}
 			// Keyword ranking only (below), in an index of its own: without
 			// embeddings, refreshing the shared index would mark changed
 			// sessions as seen before the CLI and TUI embed them. One service
@@ -629,10 +634,6 @@ func newRemoteServeCmd() *cobra.Command {
 			searcher.Embedder, searcher.DBPath = nil, remoteIndex
 			reader := search.DefaultService(io.Discard)
 			reader.Embedder, reader.DBPath = nil, remoteIndex
-			// The one reader of which sessions are open in a terminal: the
-			// list, details, terminal input, the queue, waiting, Last on your
-			// Mac and the layout all read it through the index.
-			live := discovery.NewLiveCache(registry, discovery.LiveTTL)
 			index = &remoteapi.LocalIndex{
 				ProjectsDir: projects, Live: live, Broker: broker,
 				Discover: history.Discover, ParseTrace: claude.ParseTrace, ParseTail: claude.ParseTraceTail, Owned: manager.Owns,
@@ -943,7 +944,7 @@ func shortID(id string) string {
 // (harness.OpenSessions), one per session with the pid the server types
 // into (the highest when two processes hold it), sorted by id.
 func openTerminalSessions(live harness.LiveSessions, owned func(pid int) bool) []terminalSession {
-	hs, _ := live.Live() // the registry is optional: none open
+	hs, _ := live.Holders(harness.List) // the registry is optional: none open
 	var out []terminalSession
 	for id, h := range harness.OpenSessions(hs, owned) {
 		out = append(out, terminalSession{ID: id, PID: h.PID})

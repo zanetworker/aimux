@@ -9,14 +9,42 @@ type Holder struct {
 	Status    string
 }
 
+// Mode picks the rule a LiveSessions read applies. There is one source of
+// holders and two rules, so the session list and the router can differ only
+// where this table says (Claude Code's, discovery.LiveCache):
+//
+//	case                                         List            Strict
+//	registry holder live (pid alive, start ok)    holder          holder
+//	registry stale (pid gone or reused)           none            none
+//	registry unreadable (dir, a file, a decode)   readable ones   error
+//	found only by command line (claude <id>)      none            holder
+//	command line names id, live registry another  the other       the other
+//	aimux-owned adapter                           holder          holder
+//
+// Both modes return aimux's own adapter processes; callers leave them out
+// (OpenSessions' exclude, the router's Manager.Owns), so an owned holder is
+// never open in a terminal under either rule.
+type Mode int
+
+const (
+	// List is the session list's rule (open_in_terminal, terminal input,
+	// the queue, waiting): it never fails, and a registry entry it cannot
+	// read counts as no holder.
+	List Mode = iota
+	// Strict is the router's rule before an agent writes to a session: an
+	// unreadable registry is an error, since the entry aimux cannot read may
+	// be the terminal holding the session, and a live process with the
+	// session on its command line holds it too.
+	Strict
+)
+
 // LiveSessions reports the sessions a harness has open right now: every
-// live holder, one per process, so a caller can leave out processes of its
-// own before keying by session (OpenSessions). The error is for sources that
-// can fail; Claude Code's (discovery.LiveCache) always returns nil, and
-// callers read an error as no session open. It stays so a strict source
-// (acprun's lookup, step 4) can share the interface.
+// live holder by mode's rule, one per process and session, so a caller can
+// leave out processes of its own before keying by session (OpenSessions).
+// The error is Strict's; a List read never fails, and callers read an error
+// as no session open.
 type LiveSessions interface {
-	Live() ([]Holder, error)
+	Holders(mode Mode) ([]Holder, error)
 }
 
 // OpenSessions keys holders by session, leaving out the processes exclude

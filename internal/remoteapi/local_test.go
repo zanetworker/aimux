@@ -740,7 +740,7 @@ type countingLive struct {
 	reads int
 }
 
-func (c *countingLive) Live() ([]harness.Holder, error) { c.reads++; return c.hs, nil }
+func (c *countingLive) Holders(harness.Mode) ([]harness.Holder, error) { c.reads++; return c.hs, nil }
 
 // TestLocalIndex_EveryOpenReadGoesThroughLive: the terminal pid, registry
 // status, pid map and the queue's Open all read the one injected source and

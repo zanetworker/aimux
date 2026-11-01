@@ -74,7 +74,7 @@ func (x *LocalIndex) running(id string) bool { return x.Running != nil && x.Runn
 func (x *LocalIndex) openSessions() map[string]harness.Holder {
 	var hs []harness.Holder
 	if x.Live != nil {
-		hs, _ = x.Live.Live() // nothing open beats failing the list
+		hs, _ = x.Live.Holders(harness.List) // nothing open beats failing the list
 	}
 	return harness.OpenSessions(hs, x.Owned)
 }
