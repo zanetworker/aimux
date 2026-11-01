@@ -583,8 +583,22 @@ func (s *Service) registryBusy(sessionID string) bool {
 func (s *Service) Send(ctx context.Context, sessionID, text, idemKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.send(ctx, sessionID, text, idemKey, false)
+	err := s.send(ctx, sessionID, text, idemKey, false, false)
 	s.record(sessionID, fmt.Sprintf("text chars=%d", utf8.RuneCountInString(text)), err)
+	return err
+}
+
+// SendNow is Send that is allowed while Claude works on a turn: the harness
+// takes the message during the turn. Every other check is Send's, and the
+// box is never touched mid-turn: a permission prompt is ErrNotAtInput, text
+// in the box other than aimux's own unsent message is ErrDraftInBox (or
+// ErrBoxHasUnsent, ErrUnsentUnconfirmed by Send's rules), nothing pressed.
+// While Claude is not working it is Send.
+func (s *Service) SendNow(ctx context.Context, sessionID, text, idemKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err := s.send(ctx, sessionID, text, idemKey, false, true)
+	s.record(sessionID, fmt.Sprintf("now text chars=%d", utf8.RuneCountInString(text)), err)
 	return err
 }
 
@@ -596,7 +610,7 @@ func (s *Service) Send(ctx context.Context, sessionID, text, idemKey string) err
 func (s *Service) SendReplacing(ctx context.Context, sessionID, text, idemKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err := s.send(ctx, sessionID, text, idemKey, true)
+	err := s.send(ctx, sessionID, text, idemKey, true, false)
 	s.record(sessionID, fmt.Sprintf("replace text chars=%d", utf8.RuneCountInString(text)), err)
 	return err
 }
@@ -681,7 +695,7 @@ func (s *Service) settledScreen(ctx context.Context, d Driver, p Pane) (string, 
 	return s.readScreen(ctx, d, p)
 }
 
-func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, replace bool) error {
+func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, replace, now bool) error {
 	if !s.cfg.Enabled {
 		return ErrDisabled
 	}
@@ -702,8 +716,12 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 		return err
 	}
 	v := s.composer.Read(scr)
-	if v.Working || s.registryBusy(sessionID) {
+	working := v.Working || s.registryBusy(sessionID)
+	switch {
+	case working && !now:
 		return ErrBusy
+	case now && v.Prompt != nil:
+		return ErrNotAtInput
 	}
 	// A send that typed but did not press Enter (ErrNotSubmitted) left this
 	// very text in the box (or the paste marker recorded for it, markerOK):
@@ -724,6 +742,9 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 	if !v.InputEmpty && !waiting {
 		if !v.BoxHasText {
 			return ErrNotAtInput
+		}
+		if working {
+			return ErrDraftInBox // Send now never clears or probes the box mid-turn
 		}
 		// Never press a key in a box the owner may be typing in at the Mac,
 		// or once a shell has the pane: checked again before every key.
@@ -779,6 +800,26 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 	if err := s.foregroundOK(t); err != nil {
 		return err
 	}
+	// The checks above take a moment, in which a permission prompt (routine
+	// mid-turn) can appear, and Enter would approve its highlighted option:
+	// look once more, right before Enter.
+	scr, err = s.readScreen(ctx, d, p)
+	if err != nil {
+		return err
+	}
+	if s.composer.Read(scr).Prompt != nil {
+		return notSubmitted("prompt")
+	}
+	m := s.composer.BoxShows(scr, text)
+	// Just typed, any placeholder is the paste that just went in (Typed);
+	// on the retry path only the text itself or aimux's recorded marker is.
+	shows := m.Typed
+	if waiting {
+		shows = m.Shown || m.Words
+	}
+	if !shows && !s.markerOK(sessionID, text, scr, t) {
+		return notSubmitted("not_in_box")
+	}
 	cctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if err := d.Key(cctx, p, KeyEnter); err != nil {
@@ -831,6 +872,16 @@ func (s *Service) submit(ctx context.Context, sessionID, text string) error {
 	}
 	if err := s.foregroundOK(t); err != nil {
 		return err
+	}
+	// As in send: a prompt drawn during the checks would take Enter.
+	if scr, err = s.readScreen(ctx, d, p); err != nil {
+		return err
+	}
+	if s.composer.Read(scr).Prompt != nil {
+		return ErrNotAtInput
+	}
+	if !s.composer.BoxShows(scr, text).Shown && !s.markerOK(sessionID, text, scr, t) {
+		return ErrNotInBox
 	}
 	cctx, cancel := s.withTimeout(ctx)
 	defer cancel()

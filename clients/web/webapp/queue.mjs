@@ -17,6 +17,28 @@ const MESSAGES = {
 };
 const NO_TEXT = 'A queued message needs some text.';
 
+// Send now (capability send_now): a waiting message, or the composer's text, goes to Claude at
+// once, during the turn. Only for sessions open in a terminal on the Mac.
+export const SEND_NOW = { label: 'Send now', sent: 'Sent now; Claude sees it during this turn' };
+const SEND_NOW_LINES = {
+  not_supported: 'Send now works only for sessions open in a terminal on your Mac.',
+  item_sending: MESSAGES.item_sending,
+  unknown_item: MESSAGES.unknown_item,
+};
+
+// sendNowOffer: where Send now is offered. A session started from the phone (no terminal) never
+// offers it. The composer offers it while its main action is Add to queue, the terminal takes
+// typing and no queued message is being typed (the server would refuse busy); a row offers it
+// for each waiting message (the Mac says why when it refuses).
+export function sendNowOffer(session, { capable = false } = {}) {
+  const none = { composer: false, items: [] };
+  if (!capable || !session || !session.terminal) return none;
+  const items = shown(session.queue);
+  const typing = items.some((it) => it.state === 'sending');
+  const composer = !typing && !!session.terminal.canType && composerAction(session).action === 'queue';
+  return { composer, items: items.filter((it) => it.state === 'waiting').map((it) => it.id) };
+}
+
 // composerAction: Send while the session is free; Add to queue while it works,
 // while its terminal cannot take typing (the Mac sends when it can), while its
 // queue is sending (queueActive: the server refuses a direct send then), and
@@ -136,8 +158,27 @@ export function createQueueClient(request, session, { newKey }) {
     }
   }
 
+  // sendNow answers {ok: true, queue} or {ok: false, message} for a queue refusal; a terminal
+  // refusal (mac_in_use, not_at_input, ...) comes back as {ok: false, message: null, error} for the
+  // caller's terminal line. A retry after a failure reuses the item's key.
+  const nowKeys = new Map(); // item id -> key of a Send now that failed
+  async function sendNow(id) {
+    const key = nowKeys.get(id) || newKey();
+    try {
+      const queue = await request('POST', itemURL(id) + '/send-now', { key });
+      nowKeys.delete(id);
+      return { ok: true, queue };
+    } catch (e) {
+      if (e && e.code) nowKeys.delete(id); // refused: nothing was typed, a new try is new
+      else nowKeys.set(id, key);           // no answer: it may have gone
+      if (e && Object.hasOwn(SEND_NOW_LINES, e.code)) return { ok: false, message: SEND_NOW_LINES[e.code] };
+      return { ok: false, message: null, error: e };
+    }
+  }
+
   return {
     add,
+    sendNow,
     edit: (id, raw) => {
       const text = String(raw || '').trim();
       return text ? change('PATCH', itemURL(id), { text }) : Promise.resolve({ ok: false, message: NO_TEXT });

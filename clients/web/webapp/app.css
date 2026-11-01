@@ -663,6 +663,8 @@ button.mic.listening { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(2
 #session .queue-tool:disabled { opacity: 0.3; }
 #session .queue-tool svg { width: 17px; height: 17px; stroke-width: 2.2; }
 #session .queue-tool:not(:disabled):active, #session .queue-text:active { color: var(--t-text); }
+#session .queue-now { flex-shrink: 0; align-self: center; margin-right: 4px; padding: 6px 10px; border-radius: 999px; font-size: 14px; font-weight: 600; color: var(--t-text); border: 1px solid var(--t-secondary); }
+#session .queue-now:active { opacity: 0.6; }
 .queue-item:has(.queue-edit) { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 14px; }
 .queue-edit {
   width: 100%; min-height: 44px; padding: 8px 12px; resize: vertical; border: 0.5px solid var(--t-sep); border-radius: 12px;

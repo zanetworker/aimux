@@ -10,9 +10,11 @@ struct ChatContext {
     let drafts: ChatDrafts
     let links: HealthLinks?
     var queueEnabled = false
+    var sendNowEnabled = false
 
     @MainActor func makeModel(_ sessionID: String) -> ChatModel {
-        ChatModel(sessionID: sessionID, source: source, stream: stream, drafts: drafts, queueEnabled: queueEnabled)
+        ChatModel(sessionID: sessionID, source: source, stream: stream, drafts: drafts, queueEnabled: queueEnabled,
+                  sendNowEnabled: sendNowEnabled)
     }
 }
 

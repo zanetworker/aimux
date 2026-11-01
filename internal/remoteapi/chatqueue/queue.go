@@ -56,6 +56,9 @@ var (
 	ErrBadText     = errors.New("chatqueue: the text is empty, too long, holds control characters, or starts with ! or /")
 	ErrNotFound    = errors.New("chatqueue: no such item in this session's queue")
 	ErrWrongState  = errors.New("chatqueue: the item is not in the state this step needs")
+	// ErrBusy: another message of the session is being typed (an item
+	// sending, or another Send now), so Send now waits.
+	ErrBusy = errors.New("chatqueue: another message is being typed into this session")
 )
 
 // errNoChange ends a mutation that succeeds without changing anything.
@@ -92,6 +95,9 @@ type queue struct {
 	// terminal: its items then never go another way (ACP). It goes with
 	// the queue once that is empty.
 	Terminal bool `json:"terminal,omitempty"`
+	// SendingNow is the item a Send now holds (Store.ClaimNow), saved before
+	// it is typed, so a restart before DoneNow treats it as maybe sent.
+	SendingNow string `json:"sendingNow,omitempty"`
 }
 
 type retired struct {
@@ -279,6 +285,10 @@ func (q *queue) next() (Item, bool) {
 // recoverAfterRestart pauses a queue whose item was in flight when the
 // server stopped; the item waits again so the owner can resume or delete it.
 func (q *queue) recoverAfterRestart() {
+	if q.SendingNow != "" && q.find(q.SendingNow) >= 0 {
+		q.State, q.Reason = QueuePaused, ReasonMaybeSent // typed, maybe, before the server stopped
+	}
+	q.SendingNow = ""
 	for i := range q.Items {
 		if inFlight(q.Items[i]) {
 			q.Items[i].State = StateWaiting

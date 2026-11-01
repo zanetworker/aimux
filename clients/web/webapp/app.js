@@ -8,7 +8,7 @@ import { nextSession } from './now.mjs';
 import { displayTitle, dot, el, icon } from './rows.mjs';
 import { buildTimeline, pendingShown } from './timeline.mjs';
 import { chatStatus, headerContent, nextBar, pendingNode, promptCard, readOnlyLine, timelineNodes } from './chatView.mjs';
-import { adoptDetail, composerAction, createQueueClient, sendRefusal, setQueue } from './queue.mjs';
+import { adoptDetail, composerAction, createQueueClient, SEND_NOW, sendNowOffer, sendRefusal, setQueue } from './queue.mjs';
 import { createQueueView, editOffersNode } from './queueView.mjs';
 import { pressPromptKey, terminalErrorText, terminalPollInterval, terminalReasonLine, terminalWorkingLine } from './terminal.mjs';
 import { announce, createInfoSheet, renderInfoSheet, renderMetaCard } from './sessionInfo.mjs';
@@ -587,10 +587,19 @@ function action() {
   return composerAction({ ...live, queue: chat.queue }, { refusedBusy: chat.busyOffer }).action;
 }
 
+// sendNowHere: where this chat offers Send now (queue.mjs sendNowOffer): a terminal session, with
+// the server's send_now capability; queue is the queue to judge (default the chat's).
+function sendNowHere(queue) {
+  const capable = !!health && (health.capabilities || []).includes('send_now');
+  if (!chat || chat.mode !== 'terminal' || !chat.detail) return { composer: false, items: [] };
+  return sendNowOffer({ ...chat.detail, queue: queue === undefined ? chat.queue : queue }, { capable });
+}
+
 let actionDrawn = '';
 function drawAction() {
   const a = action();
   $('queue-add').hidden = true; // one send arrow, like any chat
+  $('send-now').hidden = !sendNowHere().composer; // the secondary action: the box's text, now
   if (a === actionDrawn) return;
   actionDrawn = a;
   // The same arrow; while Claude works it queues the message, which goes once Claude finishes.
@@ -607,6 +616,13 @@ const queueView = createQueueView({
   isTouch: () => 'ontouchstart' in window,
   onQueue: (q) => { if (chat) setQueue(chat, q); },
   onGone: () => $('prompt').focus(),
+  sendNowIds: (q) => sendNowHere(q).items,
+  onSentNow: () => sentNow(chat),
+  errorText: (r) => terminalErrorText(r.error || { message: 'Could not send it now' }),
+  // As for the composer's Send now: a prompt, or text left in the box, shows once the screen is read.
+  onSendNowRefused: (r) => {
+    if (r.error && (r.error.code === 'not_at_input' || r.error.code === 'not_submitted')) readTerminal();
+  },
   // An edit whose message was sent first: its text goes to an empty box, else it is kept in an
   // offer (Add to queue, Dismiss) until one of them is used; each lost edit has its own. Focus
   // that was in the editor follows the text.
@@ -673,6 +689,7 @@ function canSend() {
 function updateSend() {
   const empty = !$('prompt').value.trim();
   $('queue-add').disabled = !chat || !chat.detail || empty; // a tap while an add runs is ignored, not disabled
+  $('send-now').disabled = empty || !chat || sending.has(chat.id);
   if (action() === 'queue') { $('send').disabled = $('queue-add').disabled; return; }
   $('send').disabled = !canSend() || sending.has(chat.id) || empty;
 }
@@ -869,20 +886,48 @@ async function sendText(session, text) {
   }
 }
 
-async function typeIntoTerminal(c, text) {
+// sendComposerNow: Send now for the box's text: typed into the terminal during Claude's turn.
+async function sendComposerNow() {
+  const text = $('prompt').value.trim();
+  const c = chat;
+  if (!text || !c || c.mode !== 'terminal' || sending.has(c.id) || !sendNowHere().composer) return;
+  dictationGen++;
+  Voice.stopListening();
+  notice = '';
+  stick = true;
+  $('prompt').value = '';
+  autoResize();
+  drafts.delete(c.id);
+  if (await typeIntoTerminal(c, text, { now: true })) sentNow(c);
+}
+
+// sentNow: a message went with Send now; say so and read the terminal often while it shows.
+function sentNow(c) {
+  if (!c || chat !== c) return;
+  notice = SEND_NOW.sent;
+  c.lastSend = Date.now();
+  termPoll.schedule();
+  render();
+}
+
+// typeIntoTerminal answers true once the text was typed (now: Send now, also mid-turn).
+async function typeIntoTerminal(c, text, { now = false } = {}) {
   const prior = pendings.get(c.id);
   if (prior && prior.failure && !c.detail.terminal.canType) return; // Retry waits for the terminal
-  const key = prior && prior.text === text && prior.failure ? prior.key : newKey();
-  const p = { text, key, turn: null, sentAt: Date.now(), failure: null };
+  const retry = !!prior && prior.text === text && !!prior.failure;
+  const key = retry ? prior.key : newKey();
+  now = now || (retry && !!prior.now); // Retry of a Send now is a Send now
+  const p = { text, key, turn: null, sentAt: Date.now(), failure: null, now };
   pendings.set(c.id, p);
   sending.add(c.id);
   render();
   try {
-    await api('POST', '/v1/sessions/' + encodeURIComponent(c.id) + '/terminal/messages', { text, key });
+    await api('POST', '/v1/sessions/' + encodeURIComponent(c.id) + '/terminal/messages', now ? { text, key, now } : { text, key });
     c.lastSend = Date.now();
     if (chat === c) termPoll.schedule(); // reads every 2 s from now on, for 2 minutes
+    return true;
   } catch (e) {
-    if (refusedBusy(c.id, p, e)) return;
+    if (refusedBusy(c.id, p, e)) return false;
     p.failure = terminalErrorText(e);
     // The box is not showing, or a prompt came up before Enter: it shows as a card once read.
     if (e.code === 'not_at_input' || e.code === 'not_submitted') await readTerminal();
@@ -1199,6 +1244,7 @@ $('chat-info').append(icon('info'));
 $('mic').append(icon('mic'));
 $('queue-add').append(icon('enqueue'));
 $('queue-add').addEventListener('click', addToQueue);
+$('send-now').addEventListener('click', sendComposerNow);
 $('stop').append(icon('stop'));
 $('back').addEventListener('click', () => { location.hash = lastTab; });
 $('chat-back').addEventListener('click', () => { location.hash = lastTab; });

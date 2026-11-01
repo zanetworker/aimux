@@ -30,6 +30,10 @@ const (
 	// CapDescribe: PATCH /v1/sessions/{id}/meta (title, description, pin)
 	// and POST /v1/sessions/{id}/describe ("Update summary"); Health.Naming.
 	CapDescribe = "describe"
+	// CapSendNow: `now` on terminal messages and POST
+	// /v1/sessions/{id}/queue/{item}/send-now (Send now, mid-turn); offered
+	// with terminal input.
+	CapSendNow = "send_now"
 )
 
 // Health is GET /v1/health: who the caller is and what this server offers.

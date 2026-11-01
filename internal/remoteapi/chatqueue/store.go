@@ -25,6 +25,7 @@ type Store struct {
 
 	mu     sync.Mutex
 	queues map[string]*queue // never changed in place; see queue
+	claims map[string]string // session -> item held by ClaimNow; memory only
 
 	pending   map[string]bool // sessions changed since the pump last ran; under mu
 	wake      chan struct{}   // capacity 1: the pump has work
@@ -53,6 +54,7 @@ func Open(path string, now func() time.Time, allowSlash bool) (*Store, error) {
 	s := &Store{
 		path: path, now: now, allowSlash: allowSlash,
 		queues:  queues,
+		claims:  map[string]string{},
 		pending: map[string]bool{},
 		wake:    make(chan struct{}, 1),
 		out:     make(chan string),
@@ -170,19 +172,34 @@ func (s *Store) Edit(session, item, text string) error {
 	if err := checkText(text, s.allowSlash); err != nil {
 		return err
 	}
-	return s.mutate(session, func(q *queue) error { return q.edit(item, text) })
+	return s.mutate(session, func(q *queue) error {
+		if s.claimed(session, item) {
+			return ErrItemSending
+		}
+		return q.edit(item, text)
+	})
 }
 
 // Move puts a waiting item at position, 0-based among the items not in
 // flight and clamped to them. Errors: ErrNotFound, ErrItemSending.
 func (s *Store) Move(session, item string, position int) error {
-	return s.mutate(session, func(q *queue) error { return q.move(item, position) })
+	return s.mutate(session, func(q *queue) error {
+		if s.claimed(session, item) {
+			return ErrItemSending
+		}
+		return q.move(item, position)
+	})
 }
 
 // Delete removes an item; the item in flight only while the queue is
 // paused. Errors: ErrNotFound, ErrItemSending.
 func (s *Store) Delete(session, item string) error {
-	return s.mutate(session, func(q *queue) error { return q.del(item) })
+	return s.mutate(session, func(q *queue) error {
+		if s.claimed(session, item) {
+			return ErrItemSending
+		}
+		return q.del(item)
+	})
 }
 
 // Pause stops the queue with reason (the latest reason wins). Items keep
@@ -215,7 +232,9 @@ func (s *Store) Next(session string) (Item, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if q := s.queues[session]; q != nil {
-		return q.next()
+		if it, ok := q.next(); ok && !s.claimed(session, it.ID) {
+			return it, true
+		}
 	}
 	return Item{}, false
 }
@@ -228,6 +247,9 @@ func (s *Store) Next(session string) (Item, bool) {
 func (s *Store) MarkSending(session, item string) (Item, error) {
 	var out Item
 	err := s.mutate(session, func(q *queue) error {
+		if s.claimed(session, item) {
+			return ErrWrongState
+		}
 		var err error
 		out, err = q.markSending(item, s.allowSlash)
 		return err
@@ -372,4 +394,102 @@ func newID() string {
 	b := make([]byte, 9)
 	_, _ = rand.Read(b) // crypto/rand.Read never fails (Go 1.24+)
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// ClaimNow claims a waiting item for Send now: it stays at its place and
+// waiting, but the dispatcher cannot take it and it cannot be edited, moved
+// or deleted until DoneNow or ReleaseNow. One claim per session at a time.
+// The claim is saved before the caller types (SendingNow), so after a
+// restart before DoneNow the queue pauses as "may have been sent". Errors:
+// ErrNotFound, ErrItemSending (the item in flight or already claimed),
+// ErrBusy (another message is being typed: an item sending, or another
+// claim), a save failure (nothing claimed).
+func (s *Store) ClaimNow(session, item string) (Item, error) {
+	var got Item
+	claimed := false
+	err := s.mutate(session, func(q *queue) error {
+		i := q.find(item)
+		if i < 0 {
+			return ErrNotFound
+		}
+		switch {
+		case q.Items[i].State != StateWaiting || s.claims[session] == item:
+			return ErrItemSending
+		case s.typing(session, q):
+			return ErrBusy
+		}
+		got, claimed = q.Items[i], true
+		q.SendingNow = item
+		s.claims[session] = item
+		return nil
+	})
+	if err != nil {
+		if claimed {
+			s.ReleaseNow(session, item) // not saved: nothing may be typed
+		}
+		return Item{}, err
+	}
+	return got, nil
+}
+
+// Typing reports whether a message is being typed into session: a queued
+// item sending, or a Send now's claim. Send now waits then.
+func (s *Store) Typing(session string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := s.queues[session]
+	return s.claims[session] != "" || q != nil && s.typing(session, q)
+}
+
+// typing is Typing over q; s.mu is held.
+func (s *Store) typing(session string, q *queue) bool {
+	return s.claims[session] != "" || slices.ContainsFunc(q.Items, func(it Item) bool { return it.State == StateSending })
+}
+
+// ReleaseNow ends a claim whose send was refused; the item waits on where
+// it was. Clearing the saved claim is best effort: if it cannot be saved, a
+// restart pauses the queue as "may have been sent" (never a second send).
+func (s *Store) ReleaseNow(session, item string) {
+	s.mu.Lock()
+	if s.claims[session] != item {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.claims, session)
+	s.mu.Unlock()
+	_ = s.mutate(session, func(q *queue) error {
+		if q.SendingNow != item {
+			return errNoChange
+		}
+		q.SendingNow = ""
+		return nil
+	})
+}
+
+// DoneNow ends a claim whose send went through: the item leaves the queue
+// and its key is retired. A change that cannot be saved keeps the claim, so
+// the item is never sent again before a restart. Errors: ErrWrongState (not
+// claimed).
+func (s *Store) DoneNow(session, item string) error {
+	err := s.mutate(session, func(q *queue) error {
+		if !s.claimed(session, item) {
+			return ErrWrongState
+		}
+		if i := q.find(item); i >= 0 {
+			q.remove(i)
+		}
+		q.SendingNow = ""
+		return nil
+	})
+	if err == nil {
+		s.mu.Lock()
+		delete(s.claims, session)
+		s.mu.Unlock()
+	}
+	return err
+}
+
+// claimed reports whether item is held by ClaimNow; s.mu is held.
+func (s *Store) claimed(session, item string) bool {
+	return item != "" && s.claims[session] == item
 }

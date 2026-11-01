@@ -1,10 +1,10 @@
 import { el, icon } from './rows.mjs';
-import { movePosition, queueItems, queueSection } from './queue.mjs';
+import { movePosition, queueItems, queueSection, SEND_NOW } from './queue.mjs';
 
 // The chat queue under the composer: a heading, the paused reason or waiting note with Resume, and
 // one row per message (queue.mjs says what each shows and allows). A waiting message's text is a
 // button that opens it for editing in place (Save, Cancel; Enter saves on a keyboard, Escape
-// cancels). Move up, Move down and Delete follow its state.
+// cancels). Send now (where sendNowIds offers it), Move up, Move down and Delete follow its state.
 //
 // The open editor's textarea is never rebuilt or detached while it is open: a queue update redraws
 // the other rows around it, so its value, selection and focus survive; while an input method is
@@ -12,8 +12,16 @@ import { movePosition, queueItems, queueSection } from './queue.mjs';
 // onEditLost. Errors go to errorNode, one live region that stays in place; a new queue clears it.
 //
 // createQueueView({box, errorNode, client: () => queue client (queue.mjs), isTouch, onEditLost(text, hadFocus),
-// onQueue(queue), onGone() (focus elsewhere: a change emptied the queue)}) returns {update(queue), reset()}.
-export function createQueueView({ box, errorNode, client, isTouch = () => false, onEditLost = () => {}, onQueue = () => {}, onGone = () => {}, open = false }) {
+// onQueue(queue), onGone() (focus elsewhere: a change emptied the queue), sendNowIds(queue) (the
+// waiting messages offering Send now, queue.mjs sendNowOffer), onSentNow(), errorText(answer) (the
+// line for a refusal without a message: a terminal refusal), onSendNowRefused(answer) (a refused
+// Send now, after its line shows: the caller reads the screen, as for the composer's)}) returns
+// {update(queue), reset()}.
+export function createQueueView({
+  box, errorNode, client, isTouch = () => false, onEditLost = () => {}, onQueue = () => {}, onGone = () => {}, open = false,
+  sendNowIds = () => [], onSentNow = () => {}, errorText = () => 'Could not send it now',
+  onSendNowRefused = () => {},
+}) {
   let queue = null;
   let expanded = open; // the rows are shown; folded, the queue is one line ("2 queued · next: ...")
   let drawn = '';      // what the section was last drawn from
@@ -34,7 +42,7 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
       const it = items.find((x) => x.id === editing.id);
       if (!it || !it.canEdit) closeEditor({ lost: true }); // sent (or being sent) or deleted meanwhile
     }
-    const key = JSON.stringify([queueSection(q), items, editing && editing.id]);
+    const key = JSON.stringify([queueSection(q), items, editing && editing.id, sendNowIds(q)]);
     if (key === drawn) return;
     if (drawn) setError('');
     drawn = key;
@@ -177,6 +185,11 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
       b.disabled = !enabled;
       return b;
     };
+    if (sendNowIds(queue).includes(it.id)) {
+      const now = button('queue-now', SEND_NOW.label, 'now:' + it.id, () => sendNow(it.id));
+      now.setAttribute('aria-describedby', span.id);
+      tools.append(now);
+    }
     tools.append(
       tool('moveUp', 'Move up', 'up', it.canMove, movePosition(queue, it.id, -1) !== null, () => move(it.id, -1)),
       tool('moveDown', 'Move down', 'down', it.canMove, movePosition(queue, it.id, 1) !== null, () => move(it.id, 1)),
@@ -252,6 +265,13 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
     run((c) => c.move(id, position), (delta < 0 ? 'up:' : 'down:') + id);
   }
 
+  function sendNow(id) {
+    const items = queueItems(queue);
+    const i = items.findIndex((it) => it.id === id);
+    const near = items[i + 1] || items[i - 1];
+    run((c) => c.sendNow(id), near ? 'text:' + near.id : 'title', () => { onSentNow(); return null; }, onSendNowRefused);
+  }
+
   function remove(id) {
     const items = queueItems(queue);
     const i = items.findIndex((it) => it.id === id);
@@ -261,13 +281,13 @@ export function createQueueView({ box, errorNode, client, isTouch = () => false,
 
   // run sends one change; on success the answer's queue is drawn (onOk first) and focus goes to
   // focusKey (or its message's text, or the heading); on failure the error shows and nothing moves.
-  async function run(request, focusKey, onOk) {
+  async function run(request, focusKey, onOk, onRefused = () => {}) {
     if (busy) return;
     busy = true;
     setError('');
     let r;
     try { r = await request(client()); } finally { busy = false; }
-    if (!r.ok) { setError(r.message); return; }
+    if (!r.ok) { setError(r.message || errorText(r)); onRefused(r); return; }
     const h = onOk ? onOk() : null; // the update held while composing, if any
     if (r.queue) { onQueue(r.queue); queue = r.queue; } else if (h) queue = h.queue;
     drawn = '';

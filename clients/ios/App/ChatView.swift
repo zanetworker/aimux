@@ -96,6 +96,10 @@ struct ChatContent: View {
         .onChange(of: draft) {
             context.drafts.setDraft(draft, for: session.id)
             if model.addNotice != nil { model.clearAddNotice() }  // it was about the text before this change
+            if !draft.isEmpty && model.sendNowNotice != nil { model.clearSendNowNotice() }
+        }
+        .onChange(of: model.sendNowNotice) { _, notice in
+            if let notice { AccessibilityNotification.Announcement(notice).post() }
         }
         .onChange(of: model.pending) { reclaimRefused() }
         .onChange(of: model.addNotice) { _, notice in
@@ -305,6 +309,13 @@ extension ChatContent {
                 composer(isWorking: result.working, canSend: model.session != nil,
                          stop: { Task { await model.stop() } })
             }
+            if let notice = model.sendNowNotice {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("sendNowNotice")
+            }
             if let notice = model.addNotice {
                 Text(notice)
                     .font(.footnote)
@@ -329,9 +340,18 @@ extension ChatContent {
     }
 
     fileprivate func composer(isWorking: Bool, canSend: Bool, stop: @escaping () -> Void) -> some View {
-        Composer(text: $draft, isWorking: isWorking, canSend: canSend, action: model.composerAction,
-                 queueEnabled: model.queueEnabled, fieldFocus: $composerFocused, send: send, queue: addToQueue,
-                 stop: stop)
+        let now: (() -> Void)? = model.sendNowOffer.composer ? { sendDraftNow() } : nil
+        return Composer(text: $draft, isWorking: isWorking, canSend: canSend, action: model.composerAction,
+                        queueEnabled: model.queueEnabled, fieldFocus: $composerFocused, send: send,
+                        queue: addToQueue, sendNow: now, stop: stop)
+    }
+
+    /// Send now for the composer's text: it leaves the box and goes to Claude during this turn.
+    fileprivate func sendDraftNow() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        draft = ""
+        Task { await model.sendNow(text) }
     }
 
     /// Queues the composer's text; it leaves the box once queued, and stays (with why) when refused.

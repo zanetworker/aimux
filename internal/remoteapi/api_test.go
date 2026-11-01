@@ -602,6 +602,13 @@ func (f *fakeTerminal) SendReplacing(_ context.Context, id, text, key string) er
 	return f.err
 }
 
+func (f *fakeTerminal) SendNow(_ context.Context, id, text, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf("now %s %q %s", id, text, key))
+	return f.err
+}
+
 func (f *fakeTerminal) Press(_ context.Context, id, promptID string, option terminput.Key, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

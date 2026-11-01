@@ -9,6 +9,8 @@ public protocol ChatSource: Sendable {
     func answer(approvalID: String, optionID: String) async throws
     func sendMessage(sessionID: String, text: String, key: String) async throws -> TurnAccepted
     func terminalSend(sessionID: String, text: String, key: String) async throws
+    /// Send now: typed also while Claude works on a turn (`now` on the terminal message).
+    func terminalSendNow(sessionID: String, text: String, key: String) async throws
     func terminalPress(sessionID: String, promptID: String, option: String, key: String) async throws
     func queue(sessionID: String) async throws -> QueueStatus
     func addToQueue(sessionID: String, text: String, key: String) async throws -> QueueItem
@@ -16,6 +18,8 @@ public protocol ChatSource: Sendable {
     func moveQueueItem(sessionID: String, itemID: String, position: Int) async throws -> QueueStatus
     func deleteQueueItem(sessionID: String, itemID: String) async throws -> QueueStatus
     func resumeQueue(sessionID: String) async throws -> QueueStatus
+    /// Send now for a waiting message: it leaves the queue once typed; the answer is the queue then.
+    func sendQueueItemNow(sessionID: String, itemID: String, key: String) async throws -> QueueStatus
 }
 
 extension APIClient: ChatSource {}
@@ -96,6 +100,13 @@ public final class ChatModel {
     public internal(set) var isChangingQueue = false
     /// The server keeps a chat queue (its health says so); set again once health is read.
     public var queueEnabled: Bool
+    /// The server offers Send now (`send_now`); set again once health is read.
+    public var sendNowEnabled: Bool
+    /// Says a message went with Send now; cleared by the next send or queue change.
+    public internal(set) var sendNowNotice: String?
+    /// The pending message went with Send now, so its Retry does too.
+    var pendingIsNow = false
+    var nowKeys: [String: String] = [:]  // queued message id -> key of a Send now whose answer was lost
     var failedAdd: (text: String, key: String)?  // the last add that failed: a retry of that text keeps its key
     var isAdding = false
     var isQueueingRefused = false  // a message refused busy is on its way into the queue: not put back in the box
@@ -132,7 +143,7 @@ public final class ChatModel {
 
     /// `drafts` restores a message that failed to send in an earlier chat on this session, and keeps one for the next.
     public init(sessionID: String, source: ChatSource, stream: EventStreaming, drafts: ChatDrafts? = nil,
-                queueEnabled: Bool = false,
+                queueEnabled: Bool = false, sendNowEnabled: Bool = false,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
                 now: @escaping @Sendable () -> Date = { .now }) {
         self.sessionID = sessionID
@@ -140,6 +151,7 @@ public final class ChatModel {
         self.stream = stream
         self.drafts = drafts
         self.queueEnabled = queueEnabled
+        self.sendNowEnabled = sendNowEnabled
         self.pending = drafts?.pending(for: sessionID)
         self.sleep = sleep
         self.now = now
@@ -277,37 +289,6 @@ public final class ChatModel {
         if event.kind == .turnDone || event.kind == .turnError {
             refusedBusy = false
             refreshDetail()
-        }
-    }
-
-    /// Sends a message. The user item shows at once; sending the same text again after a failure
-    /// is a retry and keeps the idempotency key, anything else is a new message with a new key.
-    /// A read-only session takes no messages; a refusal because it is open in a terminal loads it again.
-    public func send(_ text: String) async {
-        guard state != .readOnly else { return }
-        let key: String
-        if let previous = pending, previous.text == text, previous.failure != nil {
-            key = previous.key
-        } else {
-            key = UUID().uuidString
-        }
-        pending = PendingMessage(text: text, key: key, failure: nil, turn: nil, sentAt: now())
-        if state == .terminal {
-            await typeIntoTerminal(text, key: key)
-            return
-        }
-        do {
-            let accepted = try await source.sendMessage(sessionID: sessionID, text: text, key: key)
-            guard pending?.key == key else { return }
-            pending?.turn = accepted.turn
-            clearShownPending()
-        } catch {
-            guard pending?.key == key else { return }
-            let failure = error as? APIError ?? .transport(.unknown)
-            pending?.failure = failure
-            await queueIfRefusedBusy(failure)
-            // Open in a terminal meanwhile: this view is out of date, and a retry could never succeed.
-            if case .server(_, .openInTerminal, _) = failure { await load() }
         }
     }
 

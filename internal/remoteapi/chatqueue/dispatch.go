@@ -135,7 +135,24 @@ type Dispatcher struct {
 
 	notesMu sync.Mutex
 	notes   map[string]string
+
+	sentNowMu sync.Mutex
+	sentNow   map[string][]*sentNow // session -> messages sent with Send now, not seen in history yet
 }
+
+// sentNow is a message typed with Send now: its history turn is aimux's
+// own, not a turn of the owner's that pauses the queue.
+type sentNow struct {
+	text string
+	at   time.Time
+}
+
+// sentNowTTL is how long a Send now's turn is waited for in history.
+const sentNowTTL = 10 * time.Minute
+
+// sentNowSlack: a session file may stamp the turn a little before the API
+// recorded the send.
+const sentNowSlack = 2 * time.Second
 
 // watch is what the dispatcher remembers about one session with items.
 type watch struct {
@@ -180,7 +197,65 @@ func New(cfg Config) *Dispatcher {
 	if cfg.After == nil {
 		cfg.After = time.After
 	}
-	return &Dispatcher{cfg: cfg, kick: make(chan struct{}, 1), watches: map[string]*watch{}, notes: map[string]string{}}
+	return &Dispatcher{cfg: cfg, kick: make(chan struct{}, 1), watches: map[string]*watch{}, notes: map[string]string{},
+		sentNow: map[string][]*sentNow{}}
+}
+
+// NoteSentNow records that text is about to be typed into session with
+// Send now at at (a queued item or the composer's text), so its history
+// turn does not pause the queue as the owner's. Taken before typing, so a
+// read right after Enter already knows it; forget drops it when the send
+// fails (safe to call more than once). Each call also drops every
+// session's expired notes, so they stay bounded. Safe from any goroutine.
+func (d *Dispatcher) NoteSentNow(session, text string, at time.Time) (forget func()) {
+	d.sentNowMu.Lock()
+	defer d.sentNowMu.Unlock()
+	now := d.cfg.Now()
+	for id, notes := range d.sentNow {
+		if notes = d.unexpired(notes, now); len(notes) == 0 {
+			delete(d.sentNow, id)
+		} else {
+			d.sentNow[id] = notes
+		}
+	}
+	n := &sentNow{text: text, at: at}
+	d.sentNow[session] = append(d.sentNow[session], n)
+	return func() {
+		d.sentNowMu.Lock()
+		defer d.sentNowMu.Unlock()
+		notes := slices.DeleteFunc(d.sentNow[session], func(m *sentNow) bool { return m == n })
+		if len(notes) == 0 {
+			delete(d.sentNow, session)
+		} else {
+			d.sentNow[session] = notes
+		}
+	}
+}
+
+// unexpired is notes without those older than sentNowTTL.
+func (d *Dispatcher) unexpired(notes []*sentNow, now time.Time) []*sentNow {
+	return slices.DeleteFunc(notes, func(n *sentNow) bool { return now.Sub(n.at) > sentNowTTL })
+}
+
+// takeSentNow reports whether t is the turn of a noted Send now, and if so
+// forgets that note (each serves once). Notes older than sentNowTTL go.
+func (d *Dispatcher) takeSentNow(session string, t Turn) bool {
+	d.sentNowMu.Lock()
+	defer d.sentNowMu.Unlock()
+	now := d.cfg.Now()
+	notes := d.unexpired(d.sentNow[session], now)
+	i := slices.IndexFunc(notes, func(n *sentNow) bool {
+		return !t.Time.Before(n.at.Add(-sentNowSlack)) && SamePrompt(t.User, n.text)
+	})
+	if i >= 0 {
+		notes = slices.Delete(notes, i, i+1)
+	}
+	if len(notes) == 0 {
+		delete(d.sentNow, session)
+	} else {
+		d.sentNow[session] = notes
+	}
+	return i >= 0
 }
 
 // Run works until ctx ends: every 2 s, and at once after Kick.
@@ -593,6 +668,9 @@ func (d *Dispatcher) readHistory(ctx context.Context, s string, q Queue, w *watc
 			if !midTurn(t.User) {
 				f.over = true // Claude Code starts a turn only after the one before ended
 			}
+		}
+		if d.takeSentNow(s, t) {
+			continue // aimux's own Send now, not the owner at the Mac
 		}
 		if !resumed {
 			foreign = true

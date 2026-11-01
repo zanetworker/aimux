@@ -82,6 +82,9 @@ type TerminalInput interface {
 	// SendReplacing clears the input box first (the owner asked to replace
 	// its text); terminput.ErrNotCleared when it would not empty.
 	SendReplacing(ctx context.Context, sessionID, text, idemKey string) error
+	// SendNow is Send allowed while Claude works on a turn (Send now): the
+	// harness takes the message during the turn; every other check stays.
+	SendNow(ctx context.Context, sessionID, text, idemKey string) error
 	Press(ctx context.Context, sessionID, promptID string, option terminput.Key, idemKey string) error
 }
 
@@ -146,10 +149,14 @@ type API struct {
 	DeviceLogin *devicelogin.Server
 	// Queue, if set, serves /v1/sessions/{id}/queue. QueueKick (the
 	// dispatcher's Kick) is called after each change; QueueNote gives a
-	// session's waiting line. Either may be nil.
-	Queue     *chatqueue.Store
-	QueueKick func()
-	QueueNote func(session string) string
+	// session's waiting line. QueueSentNow (the dispatcher's NoteSentNow)
+	// is told the text of each Send now before it is typed, so its history
+	// turn is not taken for the owner's; the func it returns is called when
+	// the send fails. Any of them may be nil.
+	Queue        *chatqueue.Store
+	QueueKick    func()
+	QueueNote    func(session string) string
+	QueueSentNow func(session, text string) (forget func())
 	// Record, if set, gives a session's history record (its file and
 	// metadata) and serves PATCH /v1/sessions/{id}/meta; with Naming it also
 	// serves POST /v1/sessions/{id}/describe.
@@ -168,6 +175,9 @@ type API struct {
 
 	createMu sync.Mutex        // one creation at a time, so a retried key cannot create twice
 	created  map[string]string // client key -> new session id
+
+	nowMu   sync.Mutex           // guards nowDone
+	nowDone map[string]time.Time // session and key of a Send now that went through
 }
 
 // Handler returns the /v1 routes, admitting only allowed Tailscale logins
@@ -193,6 +203,7 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux.HandleFunc("PATCH /v1/sessions/{id}/queue/{item}", a.queuePatch)
 	mux.HandleFunc("DELETE /v1/sessions/{id}/queue/{item}", a.audited(devicelogin.ActionQueueDelete, true, a.queueDelete))
 	mux.HandleFunc("POST /v1/sessions/{id}/queue/resume", a.audited(devicelogin.ActionQueueResume, true, a.queueResume))
+	mux.HandleFunc("POST /v1/sessions/{id}/queue/{item}/send-now", a.audited(devicelogin.ActionQueueSendNow, true, a.queueSendNow))
 	mux.HandleFunc("POST /v1/approvals/{id}", a.audited(devicelogin.ActionApprove, false, a.answer))
 	mux.HandleFunc("POST /v1/devices", a.registerDevice)
 	mux.HandleFunc("DELETE /v1/devices/{token}", a.unregisterDevice)
@@ -226,7 +237,18 @@ func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.
 		if withSession {
 			session = r.PathValue("id")
 		}
+		if rec.action != "" {
+			action = rec.action
+		}
 		a.DeviceLogin.Record(r, action, session, result)
+	}
+}
+
+// auditAs makes the audit line of this request carry action instead of
+// its route's (a variant of the route, such as a terminal Send now).
+func auditAs(w http.ResponseWriter, action string) {
+	if rec, ok := w.(*statusRecorder); ok {
+		rec.action = action
 	}
 }
 
@@ -234,6 +256,7 @@ func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
+	action string // set by auditAs
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
@@ -321,6 +344,9 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.describing() {
 		caps = append(caps, CapDescribe)
+	}
+	if a.terminalOn() {
+		caps = append(caps, CapSendNow)
 	}
 	h := Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
 		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps}
@@ -538,7 +564,7 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := r.PathValue("id")
-	if a.queueActive(session) {
+	if a.queueActive(session, false) {
 		writeError(w, http.StatusConflict, "busy", errQueueActive)
 		return
 	}
@@ -769,9 +795,14 @@ var errQueueActive = errors.New("messages are queued for this session; add this 
 
 // queueActive reports whether session's chat queue has an item in flight,
 // or is running with items waiting: the dispatcher may type at any moment.
-func (a *API) queueActive(session string) bool {
+// For Send now (now) only an item being typed counts: a message mid-turn
+// may join the turn the queue's item started, and jumps ahead of the rest.
+func (a *API) queueActive(session string, now bool) bool {
 	if a.Queue == nil {
 		return false
+	}
+	if now {
+		return a.Queue.Typing(session) // as Send now from the queue refuses (chatqueue.ErrBusy)
 	}
 	q := a.Queue.Get(session)
 	for _, it := range q.Items {
@@ -788,6 +819,7 @@ func (a *API) terminalMessage(w http.ResponseWriter, r *http.Request) {
 		Text    string `json:"text"`
 		Key     string `json:"key"`
 		Replace bool   `json:"replace"` // clear the input box's text first
+		Now     bool   `json:"now"`     // Send now: also while Claude works
 	}
 	if err := decodeStrict(w, r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with a text field, at most 64 KiB: %w", err))
@@ -801,20 +833,44 @@ func (a *API) terminalMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", errors.New("text is empty"))
 		return
 	}
-	if a.queueActive(r.PathValue("id")) {
+	if req.Now && req.Replace {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("give at most one of now and replace"))
+		return
+	}
+	if req.Now {
+		auditAs(w, devicelogin.ActionTerminalSendNow)
+	}
+	if a.queueActive(r.PathValue("id"), req.Now) {
 		writeError(w, http.StatusConflict, "busy", errQueueActive)
 		return
 	}
 	send := a.TerminalInput.Send
-	if req.Replace {
+	switch {
+	case req.Replace:
 		send = a.TerminalInput.SendReplacing
+	case req.Now:
+		send = a.TerminalInput.SendNow
+	}
+	forget := func() {}
+	if req.Now {
+		forget = a.noteSentNow(r.PathValue("id"), req.Text) // before typing: a read right after Enter knows it
 	}
 	if err := send(r.Context(), r.PathValue("id"), req.Text, req.Key); err != nil {
+		forget()
 		a.terminalError(w, r, err)
 		return
 	}
 	a.typed(r.PathValue("id"))
 	writeJSON(w, http.StatusAccepted, Status{Status: "typed"})
+}
+
+// noteSentNow tells the dispatcher a Send now is about to be typed
+// (QueueSentNow); the answer forgets it again after a failed send.
+func (a *API) noteSentNow(session, text string) (forget func()) {
+	if a.QueueSentNow == nil {
+		return func() {}
+	}
+	return a.QueueSentNow(session, text)
 }
 
 // terminalKey presses one option of the permission prompt promptId.

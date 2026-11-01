@@ -85,6 +85,9 @@ extension ChatModel {
     /// The composer's text changed: a notice about the earlier text no longer applies.
     public func clearAddNotice() { addNotice = nil }
 
+    /// The person typed again: the line about the last Send now has served.
+    public func clearSendNowNotice() { sendNowNotice = nil }
+
     /// Saves new text for a waiting message.
     public func editQueueItem(_ id: String, text raw: String) async -> Bool {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -129,6 +132,36 @@ extension ChatModel {
     public func resumeQueue() async {
         let source = source, sessionID = sessionID
         _ = await changeQueue { try await source.resumeQueue(sessionID: sessionID) }
+    }
+
+    /// Where this chat offers Send now: a terminal session, with the server's `send_now` capability.
+    public var sendNowOffer: SendNowOffer {
+        guard sendNowEnabled, state == .terminal else { return .none }
+        return ChatQueue.sendNowOffer(state: session?.state, terminal: session?.terminal, queue: queue, capable: true)
+    }
+
+    /// Send now for a waiting message: it leaves the queue once typed, and `sendNowNotice` says so. Refused, it
+    /// stays at its place and `queueError` says why. A retry after a lost answer keeps the key.
+    public func sendQueueItemNow(_ id: String) async -> Bool {
+        guard !isChangingQueue else { return false }
+        isChangingQueue = true
+        defer { isChangingQueue = false }
+        queueError = nil
+        sendNowNotice = nil
+        let key = nowKeys[id] ?? UUID().uuidString
+        do {
+            queue = try await source.sendQueueItemNow(sessionID: sessionID, itemID: id, key: key)
+        } catch {
+            // Refused: nothing was typed, so a new try is new. No answer: it may have gone, so keep the key.
+            if case APIError.server = error { nowKeys[id] = nil } else { nowKeys[id] = key }
+            queueError = ChatQueue.sendNowErrorText(error)
+            return false
+        }
+        nowKeys[id] = nil
+        sendNowNotice = ChatQueue.sentNowLine
+        lastTerminalSend = now()
+        pollTerminal()
+        return true
     }
 
     /// Sends one change; its answer is the queue now. On failure `queueError` says why and nothing changes.

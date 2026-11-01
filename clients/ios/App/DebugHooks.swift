@@ -167,7 +167,8 @@ private struct DemoSource: AppSource {
         return SessionDetail(id: id, title: session.title, project: session.project, lastActive: session.lastActive,
                              state: session.state, lastPrompt: session.lastPrompt, turns: chat?.turns ?? [],
                              stats: chat?.stats,
-                             terminal: mode == "chat-terminal" || hasQueue ? DemoChat.terminal(id) : nil,
+                             terminal: hasQueue ? DemoQueue.terminal(id) ?? DemoChat.terminal(id)
+                                : mode == "chat-terminal" ? DemoChat.terminal(id) : nil,
                              repo: DemoChat.repo(session.project), queue: hasQueue ? DemoQueue.status(id) : nil,
                              description: session.description, pinned: session.pinned)
     }
@@ -184,6 +185,10 @@ private struct DemoSource: AppSource {
     }
 
     func terminalSend(sessionID: String, text: String, key: String) async throws {
+        try await Task.sleep(for: .milliseconds(300))
+    }
+
+    func terminalSendNow(sessionID: String, text: String, key: String) async throws {
         try await Task.sleep(for: .milliseconds(300))
     }
 
@@ -213,9 +218,14 @@ private struct DemoSource: AppSource {
 
     func resumeQueue(sessionID: String) async throws -> QueueStatus { DemoQueue.resume(sessionID) }
 
+    func sendQueueItemNow(sessionID: String, itemID: String, key: String) async throws -> QueueStatus {
+        try await Task.sleep(for: .milliseconds(200))
+        return try DemoQueue.sendNow(sessionID, id: itemID)
+    }
+
     func health() async throws -> Health {
         if isFinding { return DemoFinding.health }
-        let queue = hasQueue ? #","queue""# : ""
+        let queue = hasQueue ? #","queue","send_now""# : ""
         let json = #"{"status":"ok","login":"demo","version":"demo","acpProtocolVersion":1,"# +
             #""capabilities":["sessions","search","new_sessions"\#(queue)],"# +
             #""links":{"jiraBase":"https://jira.example.com","jiraProjects":["EDGE","OPS"]}}"#
@@ -236,13 +246,6 @@ private struct DemoSource: AppSource {
     }
 
     private struct SearchResultsDemo: Decodable { let results: [SearchHit] }
-}
-
-/// An open stream that sends nothing, so a demo chat stays live.
-private struct DemoStream: EventStreaming {
-    func events(sessionID: String, after: Int, log: String) -> AsyncThrowingStream<StreamEvent, Error> {
-        AsyncThrowingStream { _ in }
-    }
 }
 
 enum DemoData {

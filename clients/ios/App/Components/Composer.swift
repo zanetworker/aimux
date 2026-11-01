@@ -3,7 +3,8 @@ import AimuxKit
 
 /// The message field and one send arrow, like any chat; send becomes stop while Claude works. With the chat
 /// queue (`queueEnabled`) and `action` Add to queue (from the shared fixtures), the same arrow queues the message
-/// instead, and Stop shows beside it while Claude works: the message goes once Claude finishes.
+/// instead, and Stop shows beside it while Claude works: the message goes once Claude finishes. With `sendNow`
+/// (Send now offered), a long press on the arrow offers Send now: the text goes to Claude during this turn.
 struct Composer: View {
     @Binding var text: String
     let isWorking: Bool
@@ -14,6 +15,7 @@ struct Composer: View {
     var fieldFocus: AccessibilityFocusState<Bool>.Binding
     let send: () -> Void
     var queue: () -> Void = {}
+    var sendNow: (() -> Void)?
     let stop: () -> Void
 
     private var isEmpty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -43,7 +45,26 @@ struct Composer: View {
                 .disabled(isEmpty || !canSend)
                 .accessibilityLabel(queues ? "Send when Claude finishes" : "Send")
                 .accessibilityIdentifier(queues ? "queueButton" : "sendButton")
+                .modifier(SendNowMenu(sendNow: isEmpty || !canSend ? nil : sendNow))
             }
+        }
+    }
+}
+
+/// The send arrow's long press: a menu with Send now, and the same as a VoiceOver action.
+private struct SendNowMenu: ViewModifier {
+    let sendNow: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let sendNow {
+            content
+                .contextMenu {
+                    Button(ChatQueue.sendNowLabel, systemImage: "bolt", action: sendNow)
+                        .accessibilityIdentifier("sendNowButton")
+                }
+                .accessibilityAction(named: Text(ChatQueue.sendNowLabel), sendNow)
+        } else {
+            content
         }
     }
 }

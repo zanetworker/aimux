@@ -61,6 +61,20 @@ public struct SendRefusalOffer: Equatable, Sendable {
     public let message: String?
 }
 
+/// Where Send now is offered: the composer's secondary action (a long press on the send arrow), and the
+/// waiting messages (by id) whose row offers it.
+public struct SendNowOffer: Equatable, Sendable {
+    public let composer: Bool
+    public let items: [String]
+
+    public init(composer: Bool, items: [String]) {
+        self.composer = composer
+        self.items = items
+    }
+
+    public static let none = SendNowOffer(composer: false, items: [])
+}
+
 /// The queue section: hidden when empty; paused shows its reason and Resume, running its waiting note if any.
 public struct QueueSection: Equatable, Sendable {
     public let visible: Bool
@@ -131,6 +145,38 @@ public enum ChatQueue {
     }
 
     private static let labels = ["waiting": "Waiting", "sending": "Sending", "answering": "Answer in progress"]
+
+    // Send now (capability `send_now`): a waiting message, or the composer's text, goes to Claude at once,
+    // during the turn. Only for sessions open in a terminal on the Mac.
+    public static let sendNowLabel = "Send now"
+    public static let sentNowLine = "Sent now; Claude sees it during this turn"
+    static let sendNowTerminalOnly = "Send now works only for sessions open in a terminal on your Mac."
+
+    /// A session started from the phone (no terminal) never offers it. The composer offers it while its main
+    /// action is Add to queue, the terminal takes typing and no queued message is being typed (the server would
+    /// refuse busy); a row offers it for each waiting message (the Mac says why when it refuses).
+    public static func sendNowOffer(state: SessionState?, terminal: TerminalStatus?, queue: QueueStatus?,
+                                    capable: Bool) -> SendNowOffer {
+        guard capable, let terminal else { return .none }
+        let items = shown(queue)
+        let typing = items.contains { $0.state == "sending" }
+        let composer = !typing && terminal.canType
+            && composerAction(state: state, terminal: terminal, queue: queue, refusedBusy: false) == .queue
+        return SendNowOffer(composer: composer, items: items.filter { $0.state == "waiting" }.map(\.id))
+    }
+
+    /// The line for a refused Send now of a queued message: the queue's own refusals, a session no terminal
+    /// holds, else the terminal's line (mac_in_use, not_at_input, a draft kept ...).
+    public static func sendNowErrorText(_ error: Error) -> String {
+        guard case APIError.server(_, let code, _) = error, let failure = error as? APIError else {
+            return errorText(error)
+        }
+        switch code {
+        case .notSupported: return sendNowTerminalOnly
+        case .itemSending, .unknownItem: return errorText(error)
+        default: return failure.userMessage.title
+        }
+    }
 
     /// Send while the session is free; Add to queue while it works, while its terminal cannot take typing (the
     /// Mac sends when it can), while its queue is sending (`isActive`: the server refuses a direct send then),

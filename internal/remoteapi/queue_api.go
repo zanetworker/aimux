@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
+	"github.com/zanetworker/aimux/internal/terminput"
 )
 
 // Client-facing messages for the queue's errors; never the store's own text.
@@ -25,6 +28,8 @@ func writeQueueFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, chatqueue.ErrFull):
 		writeError(w, http.StatusConflict, "queue_full", errQueueFull)
+	case errors.Is(err, chatqueue.ErrBusy):
+		writeError(w, http.StatusConflict, "busy", errQueueActive)
 	case errors.Is(err, chatqueue.ErrItemSending):
 		writeError(w, http.StatusConflict, "item_sending", errItemSending)
 	case errors.Is(err, chatqueue.ErrBadText):
@@ -193,6 +198,93 @@ func (a *API) queueResume(w http.ResponseWriter, r *http.Request) {
 		writeQueueFailure(w, err)
 		return
 	}
+	a.changed(w, session)
+}
+
+// errSendNowTerminal answers Send now for a session no terminal holds, such
+// as one started from the phone (its runs take one turn at a time).
+var errSendNowTerminal = errors.New("Send now works only for sessions open in a terminal on the Mac")
+
+// nowTTL is how long a Send now's key is remembered, as terminput's are.
+const nowTTL = 10 * time.Minute
+
+// nowSent reports whether a Send now with key went through for session in
+// the last nowTTL, dropping older records.
+func (a *API) nowSent(session, key string) bool {
+	if key == "" {
+		return false
+	}
+	a.nowMu.Lock()
+	defer a.nowMu.Unlock()
+	now := time.Now()
+	for k, at := range a.nowDone {
+		if now.Sub(at) > nowTTL {
+			delete(a.nowDone, k)
+		}
+	}
+	_, ok := a.nowDone[session+"\x00"+key]
+	return ok
+}
+
+func (a *API) rememberNow(session, key string) {
+	if key == "" {
+		return
+	}
+	a.nowMu.Lock()
+	defer a.nowMu.Unlock()
+	if a.nowDone == nil {
+		a.nowDone = map[string]time.Time{}
+	}
+	a.nowDone[session+"\x00"+key] = time.Now()
+}
+
+// queueSendNow sends a waiting message at once, mid-turn (Send now): it is
+// claimed in place, typed with SendNow, and leaves the queue only once
+// typed; a refused send keeps it at its place and answers the terminal's
+// code. Idempotent by key.
+func (a *API) queueSendNow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := decodeStrict(w, r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with an optional key: %w", err))
+		return
+	}
+	session, ok := a.queueSession(w, r)
+	if !ok {
+		return
+	}
+	if !a.terminalOn() {
+		writeTerminalFailure(w, terminput.ErrDisabled, a.Log)
+		return
+	}
+	if a.nowSent(session, req.Key) {
+		writeJSON(w, http.StatusOK, a.queueStatus(session))
+		return
+	}
+	item := r.PathValue("item")
+	it, err := a.Queue.ClaimNow(session, item)
+	if err != nil {
+		writeQueueFailure(w, err)
+		return
+	}
+	forget := a.noteSentNow(session, it.Text)
+	if err := a.TerminalInput.SendNow(r.Context(), session, it.Text, "queue-"+it.ID); err != nil {
+		forget()
+		a.Queue.ReleaseNow(session, item)
+		if errors.Is(err, terminput.ErrNotInTerminal) {
+			writeError(w, http.StatusConflict, "not_supported", errSendNowTerminal)
+			return
+		}
+		a.terminalError(w, r, err)
+		return
+	}
+	a.typed(session)
+	if err := a.Queue.DoneNow(session, item); err != nil {
+		writeFailure(w, err) // typed, but the queue could not be saved
+		return
+	}
+	a.rememberNow(session, req.Key)
 	a.changed(w, session)
 }
 

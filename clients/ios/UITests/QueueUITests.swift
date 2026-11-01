@@ -1,7 +1,8 @@
 import XCTest
 
 /// The chat queue on the demo data (`-demo chat-queue`): demo-1 is free with nothing queued, demo-2 works with
-/// three messages waiting, demo-3 is paused with one answering and one waiting.
+/// three messages waiting, demo-3 is paused with one answering and one waiting, demo-19 works in a terminal on the
+/// Mac with two waiting (Send now).
 final class QueueUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
@@ -165,5 +166,74 @@ final class QueueUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Save or cancel this edit first."].waitForExistence(timeout: 3))
         XCTAssertEqual(editor.value as? String, "Summarize the changes in three bullets now", "the edit stays open")
+    }
+
+    /// Send now on a waiting message (demo-19 works in a terminal on the Mac): a swipe sends it at once; it
+    /// leaves the queue, the others stay in order, and the line says Claude sees it during this turn.
+    @MainActor
+    func testSwipeSendsAQueuedMessageNow() {
+        let app = launch(["-openChat", "demo-19"])
+
+        let target = row(app, "dn2")
+        XCTAssertTrue(target.waitForExistence(timeout: 10))
+        target.swipeRight()
+        let now = app.buttons["queueSwipeSendNow"]
+        XCTAssertTrue(now.waitForExistence(timeout: 5))
+        now.tap()
+
+        XCTAssertTrue(target.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(row(app, "dn1").exists, "the others stay, in order")
+        let notice = app.staticTexts["sendNowNotice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertEqual(notice.label, "Sent now; Claude sees it during this turn")
+    }
+
+    /// A long press on the send arrow offers Send now for the composer's text while Claude works.
+    @MainActor
+    func testLongPressOnTheArrowSendsTheTextNow() {
+        let app = launch(["-openChat", "demo-19"])
+
+        XCTAssertTrue(row(app, "dn1").waitForExistence(timeout: 10))
+        let field = app.textFields["messageField"]
+        field.tap()
+        field.typeText("Stop, the config is in config/app.yaml")
+        app.buttons["queueButton"].press(forDuration: 1.0)
+        let now = app.buttons["sendNowButton"]
+        XCTAssertTrue(now.waitForExistence(timeout: 5))
+        now.tap()
+
+        let notice = app.staticTexts["sendNowNotice"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Message", "the box empties")
+        XCTAssertEqual(app.buttons["queueHeading"].label, "2 queued messages", "nothing was queued")
+    }
+
+    /// demo-2 was started from the phone (no terminal): one turn at a time, so no Send now on rows or arrow.
+    @MainActor
+    func testAPhoneStartedSessionOffersNoSendNow() {
+        let app = launch(["-openChat", "demo-2"])
+
+        let target = row(app, "dq2")
+        XCTAssertTrue(target.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["stopButton"].exists, "Stop is this chat's own")
+        target.press(forDuration: 1.0)
+        XCTAssertFalse(app.buttons["queueMenuSendNow"].waitForExistence(timeout: 2))
+    }
+
+    /// The row's context menu (touch and hold) offers Send now too.
+    @MainActor
+    func testContextMenuSendsAQueuedMessageNow() {
+        let app = launch(["-openChat", "demo-19"])
+
+        let target = row(app, "dn1")
+        XCTAssertTrue(target.waitForExistence(timeout: 10))
+        target.press(forDuration: 1.0)
+        let now = app.buttons["queueMenuSendNow"]
+        XCTAssertTrue(now.waitForExistence(timeout: 5))
+        now.tap()
+
+        XCTAssertTrue(target.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(row(app, "dn2").exists)
+        XCTAssertTrue(app.staticTexts["sendNowNotice"].waitForExistence(timeout: 5))
     }
 }

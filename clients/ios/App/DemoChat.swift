@@ -371,4 +371,11 @@ extension DemoChat {
         ]]
     }
 }
+
+/// An open stream that sends nothing, so a demo chat stays live.
+struct DemoStream: EventStreaming {
+    func events(sessionID: String, after: Int, log: String) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { _ in }
+    }
+}
 #endif

@@ -60,6 +60,13 @@ func (c contractTerminal) SendReplacing(ctx context.Context, id, text, key strin
 	return c.Send(ctx, id, text, key)
 }
 
+func (c contractTerminal) SendNow(ctx context.Context, id, text, key string) error {
+	if text == "while Claude works" {
+		return nil // Send now is allowed mid-turn
+	}
+	return c.Send(ctx, id, text, key)
+}
+
 func (contractTerminal) Press(_ context.Context, _, promptID string, _ terminput.Key, _ string) error {
 	if promptID != "p1" {
 		return terminput.ErrPromptChanged
@@ -469,6 +476,10 @@ func TestContract(t *testing.T) {
 	if body["code"] != "busy" || body["error"] != terminalMessages["busy"].msg {
 		t.Fatalf("busy terminal: %v, want busy with its fixed message", body)
 	}
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/messages", `{"text":"while Claude works","now":true}`, testLogin)
+	expect(202, st, body, "send now while Claude works")
+	st, body = c.call("POST", "/v1/sessions/s9/terminal/messages", `{"text":"a","now":true,"replace":true}`, testLogin)
+	expect(400, st, body, "now and replace at once")
 	st, body = c.call("POST", "/v1/sessions/nope/terminal/messages", `{"text":"a"}`, testLogin)
 	expect(404, st, body, "type into an unknown session")
 	st, body = c.call("POST", "/v1/sessions/s9/terminal/keys", `{"promptId":"p1","option":"1","key":"t2"}`, testLogin)
@@ -522,6 +533,27 @@ func TestContract(t *testing.T) {
 	}
 	st, body = c.call("POST", "/v1/sessions/s1/queue/resume", "", testLogin)
 	expect(200, st, body, "resume")
+	api.TerminalEnabled = true
+	st, body = c.call("POST", "/v1/sessions/s1/queue", `{"text":"while Claude works"}`, testLogin)
+	expect(200, st, body, "queue one to send now")
+	third, _ := body["id"].(string)
+	st, body = c.call("POST", "/v1/sessions/s1/queue/"+third+"/send-now", `{"key":"sn1"}`, testLogin)
+	expect(409, st, body, "send now while another message is typed")
+	if err := queue.Release("s1", second); err != nil {
+		t.Fatal(err)
+	}
+	st, body = c.call("POST", "/v1/sessions/s1/queue/"+third+"/send-now", `{"key":"sn1"}`, testLogin)
+	expect(200, st, body, "send a queued message now")
+	st, body = c.call("POST", "/v1/sessions/s1/queue/nope/send-now", "", testLogin)
+	expect(404, st, body, "send now an unknown message")
+	st, body = c.call("POST", "/v1/sessions/s1/queue", `{"text":"prompt showing"}`, testLogin)
+	expect(200, st, body, "queue one a prompt refuses")
+	fourth, _ := body["id"].(string)
+	st, body = c.call("POST", "/v1/sessions/s1/queue/"+fourth+"/send-now", "", testLogin)
+	expect(409, st, body, "send now while a prompt shows")
+	st, body = c.call("DELETE", "/v1/sessions/s1/queue/"+fourth, "", testLogin)
+	expect(200, st, body, "delete the refused message")
+	api.TerminalEnabled = false
 	st, body = c.call("DELETE", "/v1/sessions/s1/queue/"+first, "", testLogin)
 	expect(200, st, body, "delete a queued message")
 	c.streamQuery("s1", "queue=1&after=0", KindQueue)

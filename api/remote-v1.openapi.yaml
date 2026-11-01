@@ -85,7 +85,9 @@ info:
     a refused direct send by itself. `SessionDetail.queue` shows a queue
     with messages, and `queue` events (with `queue=1` on the events request)
     carry every change, including the waiting line (`note`). Each change is written to the audit log without its
-    text.
+    text. Send now (capability `send_now`, sessions open in a terminal only): a waiting message,
+    or the composer's text (`now` on a terminal message), goes to Claude at
+    once, during the turn (`/v1/sessions/{id}/queue/{item}/send-now`).
 
     Notifications while the client is not connected: with the `push`
     capability an app registers its APNs device token (`POST /v1/devices`)
@@ -301,8 +303,10 @@ paths:
         Requires the `terminal_input` capability (`remote_access.terminal_input.enabled`
         on the Mac). Types `text` into the session's own terminal pane, waits
         300 ms, reads the screen again and presses Enter only if the input box
-        still holds the text and no prompt is showing, as if the owner typed it;
-        otherwise `409 not_submitted`: the text waits in the input box and
+        still holds the text and no prompt is showing, as if the owner typed it
+        (after the in-use and process checks the screen is read once more,
+        right before Enter, so a permission prompt drawn meanwhile never takes
+        the Enter); otherwise `409 not_submitted`: the text waits in the input box and
         nothing was submitted. While the box still shows that text (the same
         words; wrapping aside, or for pasted text the exact paste marker seen
         after pasting, while the same `claude` runs and the Mac had no input
@@ -315,7 +319,7 @@ paths:
         Follow the answer by re-reading
         `GET /v1/sessions/{id}`. Checked on every request: the pane's foreground
         process is the session's `claude` (`not_claude`), Claude is not working
-        on a turn and the session's chat queue is not sending (`busy`: clients
+        on a turn, unless `now` is set, and the session's chat queue is not sending (`busy`: clients
         queue the message; also while the queue has an item in flight or is running
         with items waiting), the session is not the one in
         front on the Mac while the Mac was used in the last 2 minutes, unless
@@ -492,6 +496,50 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/QueueStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/sessions/{id}/queue/{item}/send-now:
+    post:
+      summary: Send a queued message now, during Claude's turn
+      description: >
+        Requires the `queue` and `terminal_input` capabilities (`403 disabled`
+        when terminal input is off). For a session open in a terminal on the
+        Mac: the waiting message is held in place, typed with `now` (see
+        TerminalMessageRequest.now) and leaves the queue once typed; the other
+        messages keep their order. A refused send keeps the message at its
+        place and answers the terminal's code (`not_at_input`, `mac_in_use`,
+        `draft_in_box`, `box_has_unsent`, `not_submitted` ...). Any session
+        not open in a terminal (such as one started from the phone) is
+        `409 not_supported`: clients offer Send now only when the session
+        detail has `terminal`. The message itself being sent or answered, or
+        already held by a Send now, is `409 item_sending`; another message
+        being typed (a queued item sending, or another Send now) is
+        `409 busy`, as for `now` on a terminal message. The hold is saved
+        before typing: after a restart before the message left the queue, the
+        queue pauses as "may have been sent" and nothing is typed again. A
+        retry with the same non-empty `key` within 10 minutes answers the
+        queue without typing again. The body may be empty. Audited as
+        `queue_send_now`, without text.
+      operationId: sendQueueItemNow
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+        - $ref: "#/components/parameters/QueueItemID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QueueSendNowRequest" }
+      responses:
+        "200":
+          description: The queue after the message went
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QueueStatus" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -837,7 +885,7 @@ components:
             - bad_request        # 400
             - unknown_session    # 404
             - no_such_approval   # 404: answered, expired, or never existed
-            - not_supported      # 404: this server does not offer the endpoint (see capabilities)
+            - not_supported      # 404: this server does not offer the endpoint (see capabilities); 409 on Send now: any session not open in a terminal
             - open_in_terminal   # 409: read only here while open in a terminal on the Mac
             - busy               # 409: a turn is already running, Claude is working in the terminal session, or the session's queue is sending
             - in_use             # 409: another aimux process drives the session
@@ -890,7 +938,7 @@ components:
         acpProtocolVersion: { type: integer, minimum: 1, description: "The Agent Client Protocol version `update` events follow." }
         capabilities:
           type: array
-          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe] }
+          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe, send_now] }
         session:
           type: string
           enum: [live, none]
@@ -1278,7 +1326,20 @@ components:
             it would not empty, with nothing typed. Every other check still
             applies; the box is never touched while the owner uses the session
             on the Mac (`mac_in_use`), Claude works (`busy`) or a prompt shows
-            (`not_at_input`).
+            (`not_at_input`). Not together with `now` (`400 bad_request`).
+        now:
+          type: boolean
+          description: >
+            Send now: type the message also while Claude works on a turn;
+            Claude Code hands it to Claude during the turn. Every other check
+            still applies: a permission prompt is `not_at_input`, and the input
+            box must be empty or hold only aimux's own unsent message (another
+            message of aimux's is `box_has_unsent`; a draft is never cleared
+            mid-turn, `draft_in_box`). The text must show in the box before
+            Enter. A queue with messages waiting, or answering one, does not
+            stop it; a queued message being typed, or another Send now, does
+            (`busy`). Audited as `terminal_send_now`, without text. While Claude
+            is not working it is a plain message.
 
     TerminalKeyRequest:
       type: object
@@ -1367,6 +1428,12 @@ components:
       properties:
         text: { type: string, minLength: 1 }
         key: { type: string, description: "Idempotency key: a retry with it never queues the message twice." }
+
+    QueueSendNowRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        key: { type: string, description: "Idempotency key: a retry with it is not typed twice (10 minutes)." }
 
     QueuePatchRequest:
       type: object

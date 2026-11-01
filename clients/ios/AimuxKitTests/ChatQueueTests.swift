@@ -32,7 +32,14 @@ private struct QueueFixture: Decodable {
         let keepText: Bool
         let message: String?
     }
+    struct SendNow: Decodable, Equatable {
+        let composer: Bool
+        let items: [String]
+        let label: String?
+        let sent: String?
+    }
     struct Expect: Decodable {
+        let sendNow: SendNow?
         let composer: Composer
         let queue: Section
         let items: [Row]
@@ -80,7 +87,7 @@ private func item(_ id: String, _ state: String = "waiting", _ text: String? = n
 
 @Suite struct ChatQueueFixtureTests {
     @Test func everyFixtureIsRead() throws {
-        #expect(try queueFixtures().count == 39)
+        #expect(try queueFixtures().count == 42)
     }
 
     @Test func composerSectionAndRowsMatchEveryFixture() throws {
@@ -99,6 +106,13 @@ private func item(_ id: String, _ state: String = "waiting", _ text: String? = n
                                        message: $0.message)
                 }
                 #expect(offer == fixture.expect.offer, "\(fixture.name): offer")
+            }
+            if let want = fixture.expect.sendNow {
+                let offer = ChatQueue.sendNowOffer(state: fixture.session.state, terminal: fixture.session.terminal,
+                                                   queue: fixture.session.queue, capable: true)
+                #expect(offer == SendNowOffer(composer: want.composer, items: want.items), "\(fixture.name): send now")
+                if let label = want.label { #expect(ChatQueue.sendNowLabel == label, "\(fixture.name)") }
+                if let sent = want.sent { #expect(ChatQueue.sentNowLine == sent, "\(fixture.name)") }
             }
             if let delete = fixture.delete {
                 #expect(ChatQueue.errorText(refusal(delete.error)) == fixture.expect.message, "\(fixture.name)")

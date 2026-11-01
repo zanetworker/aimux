@@ -23,6 +23,8 @@ const (
 	ActionApprove         = "approve"
 	ActionTerminalMessage = "terminal_message"
 	ActionTerminalKey     = "terminal_key"
+	// A terminal message with now (the composer's Send now).
+	ActionTerminalSendNow = "terminal_send_now"
 	// The chat queue's dispatcher: an item sent, a queue paused. Result is
 	// a code, never the text or the reason line.
 	ActionQueueSend   = "queue_send"
@@ -33,6 +35,8 @@ const (
 	ActionQueueMove   = "queue_move"
 	ActionQueueDelete = "queue_delete"
 	ActionQueueResume = "queue_resume"
+	// Send now: a queued message sent at once, mid-turn.
+	ActionQueueSendNow = "queue_send_now"
 	// Session titles, descriptions and pins.
 	ActionDescribe = "describe"
 	ActionMetaEdit = "meta_edit"

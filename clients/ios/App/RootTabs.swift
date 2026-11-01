@@ -24,6 +24,8 @@ struct RootTabs: View {
     @State private var linksRead = false
     /// The server keeps a chat queue (health capability `queue`).
     @State private var queueEnabled = false
+    /// The server offers Send now (health capability `send_now`).
+    @State private var sendNowEnabled = false
     @Environment(\.scenePhase) private var scenePhase
     private let source: any AppSource
     private let stream: any EventStreaming
@@ -45,7 +47,7 @@ struct RootTabs: View {
 
     var body: some View {
         let chat = ChatContext(source: source, stream: stream, now: now, drafts: drafts, links: links,
-                               queueEnabled: queueEnabled)
+                               queueEnabled: queueEnabled, sendNowEnabled: sendNowEnabled)
         TabView(selection: $tab) {
             Tab("Now", systemImage: "record.circle", value: AppTab.now) {
                 NowScreen(model: now, search: nowSearch, chat: chat, serverAddress: $serverAddress)
@@ -65,6 +67,7 @@ struct RootTabs: View {
         guard let health = try? await source.health() else { return }
         links = health.links
         queueEnabled = health.supports(.queue)
+        sendNowEnabled = health.supports(.sendNow)
         linksRead = true
     }
 }

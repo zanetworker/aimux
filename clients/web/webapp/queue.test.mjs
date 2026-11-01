@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createLogin } from './login.mjs';
 import {
   adoptDetail, composerAction, createQueueClient, movePosition, queueActive, queueErrorText, queueItems, queueSection,
-  sendRefusal, setQueue,
+  SEND_NOW, sendNowOffer, sendRefusal, setQueue,
 } from './queue.mjs';
 
 const DIR = new URL('../../../api/testdata/clients/queue/', import.meta.url);
@@ -13,7 +13,7 @@ const Q = '/v1/sessions/s%201/queue';
 const err = (code, message = 'm', status = 409) => Object.assign(new Error(message), { code, status });
 
 test('the queue fixtures are all there', () => {
-  assert.equal(fixtures.length, 39);
+  assert.equal(fixtures.length, 42);
 });
 
 for (const f of fixtures) {
@@ -23,6 +23,12 @@ for (const f of fixtures) {
     assert.deepEqual(queueSection(f.session.queue), f.expect.queue, 'queue section');
     assert.deepEqual(queueItems(f.session.queue), f.expect.items, 'items');
     if (f.send) assert.deepEqual(sendRefusal(err(f.send.error)), f.expect.offer, 'offer');
+    if (f.expect.sendNow) {
+      const { composer, items } = f.expect.sendNow;
+      assert.deepEqual(sendNowOffer(f.session, { capable: true }), { composer, items }, 'send now');
+      if (f.expect.sendNow.label) assert.equal(SEND_NOW.label, f.expect.sendNow.label, 'send now label');
+      if (f.expect.sendNow.sent) assert.equal(SEND_NOW.sent, f.expect.sendNow.sent, 'send now line');
+    }
     if (f.delete) assert.equal(queueErrorText(err(f.delete.error)), f.expect.message, 'message');
     if (f.add) {
       const { client } = harness({ ['POST ' + Q]: [409, { error: 'refused', code: f.add.error }] });
@@ -194,4 +200,37 @@ test('a detail read before a queue change keeps the newer queue; otherwise it sa
   setQueue(chat, null);
   assert.equal(chat.queue, null);
   assert.ok(chat.queueRev > now);
+});
+
+test('sendNowOffer: nothing without the send_now capability, or without a session', () => {
+  const f = fixtures.find((x) => x.name === 'send-now-terminal');
+  assert.deepEqual(sendNowOffer(f.session, { capable: false }), { composer: false, items: [] });
+  assert.deepEqual(sendNowOffer(null, { capable: true }), { composer: false, items: [] });
+  const cannotType = { ...f.session, terminal: { ...f.session.terminal, canType: false } };
+  assert.deepEqual(sendNowOffer(cannotType, { capable: true }), { composer: false, items: ['q2', 'q3'] }, 'a row stays offered; the Mac says why it refuses');
+});
+
+test('sendNow: POSTs the item with a key, the queue from the answer; a lost answer retries with the same key', async () => {
+  const after = status([item('q1', 'a')]);
+  const path = Q + '/q%2F2/send-now';
+  const { calls, client } = harness({ ['POST ' + path]: [new TypeError('Failed to fetch'), [200, after]] });
+  const first = await client.sendNow('q/2');
+  assert.equal(first.ok, false);
+  assert.deepEqual(await client.sendNow('q/2'), { ok: true, queue: after });
+  assert.deepEqual(calls.map((c) => [c.method, c.path, c.body]), [['POST', path, { key: 'k1' }], ['POST', path, { key: 'k1' }]]);
+});
+
+test('sendNow refused: queue codes get their line; a terminal refusal is handed back as the error', async () => {
+  const path = Q + '/q1/send-now';
+  const { client } = harness({ ['POST ' + path]: [
+    [409, { error: 'x', code: 'not_supported' }],
+    [404, { error: 'x', code: 'unknown_item' }],
+    [409, { error: 'x', code: 'mac_in_use' }],
+  ] });
+  assert.deepEqual(await client.sendNow('q1'), { ok: false, message: 'Send now works only for sessions open in a terminal on your Mac.' });
+  assert.deepEqual(await client.sendNow('q1'), { ok: false, message: 'This message is no longer in the queue.' });
+  const r = await client.sendNow('q1');
+  assert.equal(r.ok, false);
+  assert.equal(r.message, null);
+  assert.equal(r.error.code, 'mac_in_use');
 });

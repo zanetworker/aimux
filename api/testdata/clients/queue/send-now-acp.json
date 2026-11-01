@@ -1,0 +1,43 @@
+{
+  "name": "send-now-acp",
+  "session": {
+    "state": "busy",
+    "queue": {
+      "state": "running",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Then add a test for the empty file",
+          "state": "waiting",
+          "created": "2026-03-02T09:01:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "running",
+      "resume": false
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Then add a test for the empty file",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ],
+    "sendNow": {
+      "composer": false,
+      "items": []
+    }
+  }
+}

@@ -107,6 +107,7 @@ struct QueueList: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparatorTint(Color(.separator))
                 .moveDisabled(!row.canMove || edit != nil)
+                .modifier(SendNowRowActions(sendNow: sendNowAction(row)))
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     if row.canDelete {
                         Button("Delete", role: .destructive) { delete(row) }
@@ -185,7 +186,14 @@ struct QueueList: View {
         if row.canMove && ChatQueue.position(in: model.queue, moving: row.id, by: 1) != nil {
             Button("Move down") { Task { await model.moveQueueItem(row.id, by: 1) } }
         }
+        if let now = sendNowAction(row) { Button(ChatQueue.sendNowLabel, action: now) }
         if row.canDelete { Button("Delete") { delete(row) } }
+    }
+
+    /// Send now for a waiting message, where the chat offers it and no edit is open.
+    private func sendNowAction(_ row: QueueRow) -> (() -> Void)? {
+        guard edit == nil, model.sendNowOffer.items.contains(row.id) else { return nil }
+        return { Task { await model.sendQueueItemNow(row.id) } }
     }
 
     private func editor(_ row: QueueRow) -> some View {

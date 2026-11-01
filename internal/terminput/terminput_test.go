@@ -73,6 +73,9 @@ type fakeDriver struct {
 	lateReads, lateLeft int
 	beforeType          string
 	screenReads         int
+	// onRead, if set, runs on every screen read with its number (from 1)
+	// before the screen is answered: a prompt drawn at a given read.
+	onRead func(read int)
 	// What Focused answers: iTerm2 in front, its focused session's tty.
 	// focusTTYs, if set, answers the calls in turn, the last repeating.
 	front      bool
@@ -149,6 +152,9 @@ func (d *fakeDriver) Key(_ context.Context, _ Pane, k Key) error {
 }
 func (d *fakeDriver) Screen(context.Context, Pane) (string, error) {
 	d.screenReads++
+	if d.onRead != nil {
+		d.onRead(d.screenReads)
+	}
 	if d.lateLeft > 0 { // the terminal has not drawn the typed text yet
 		d.lateLeft--
 		return d.beforeType, d.screenErr
@@ -1711,9 +1717,9 @@ func TestMarkerNotConfirmedWhenIdleFails(t *testing.T) {
 // readings, so a Mac asleep in between never counts as less.
 func TestLongerElapsed(t *testing.T) {
 	for _, c := range []struct{ mono, wall, want time.Duration }{
-		{time.Second, time.Hour, time.Hour},            // asleep: the monotonic clock stood still
-		{time.Minute, time.Second, time.Minute},        // wall clock set back a little
-		{time.Minute, -time.Hour, time.Minute},         // wall clock set far back
+		{time.Second, time.Hour, time.Hour},     // asleep: the monotonic clock stood still
+		{time.Minute, time.Second, time.Minute}, // wall clock set back a little
+		{time.Minute, -time.Hour, time.Minute},  // wall clock set far back
 		{2 * time.Second, 2 * time.Second, 2 * time.Second},
 	} {
 		if got := longerElapsed(c.mono, c.wall); got != c.want {
@@ -1766,5 +1772,217 @@ func TestSendReplacingClearsTheUnsentMessage(t *testing.T) {
 	}
 	if len(e.drv.sent) != 1 || e.drv.sent[0] != "the next message" {
 		t.Fatalf("typed %q", e.drv.sent)
+	}
+}
+
+// workingWith is a working screen whose input box holds text.
+func workingWith(t *testing.T, text string) string {
+	t.Helper()
+	return strings.Replace(fixture(t, "busy-empty.txt"), "❯\n", "❯ "+text+"\n", 1)
+}
+
+// Send now types while Claude works, waits to see the text in the box and
+// presses Enter: Claude Code hands it to Claude during the turn.
+func TestSendNowWhileWorking(t *testing.T) {
+	ctx := context.Background()
+	for _, f := range []string{"busy-empty.txt", "busy-queued-hint.txt", "working-todos.txt"} {
+		e := newEnv(t)
+		e.drv.screen = fixture(t, f)
+		e.drv.afterType = workingWith(t, "use the other branch")
+		if err := e.svc.SendNow(ctx, "s1", "use the other branch", "k1"); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if len(e.drv.sent) != 1 || !slices.Equal(e.drv.keys, []Key{KeyEnter}) {
+			t.Fatalf("%s: sent %q keys %v, want the text then Enter", f, e.drv.sent, e.drv.keys)
+		}
+	}
+}
+
+// The registry calling the session busy does not stop Send now either.
+func TestSendNowWhenRegistryBusy(t *testing.T) {
+	e := newEnv(t)
+	e.svc.sessions = registrySessions{fakeSessions{"s1": 42}, map[string]string{"s1": "busy"}}
+	if err := e.svc.SendNow(context.Background(), "s1", "hi", ""); err != nil || len(e.drv.sent) != 1 {
+		t.Fatalf("err %v, sent %q", err, e.drv.sent)
+	}
+}
+
+// A permission prompt on screen: nothing is typed or pressed, whatever the
+// box underneath reads.
+func TestSendNowRefusesAPrompt(t *testing.T) {
+	for _, f := range []string{"prompt-bash.txt", "stale-box-over-prompt.txt", "plan-approval.txt"} {
+		e := newEnv(t)
+		e.drv.screen = fixture(t, f)
+		wantCode(t, e.svc.SendNow(context.Background(), "s1", "hi", ""), "not_at_input")
+		if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+			t.Fatalf("%s: sent %q keys %v", f, e.drv.sent, e.drv.keys)
+		}
+	}
+}
+
+// The owner's draft in the box mid-turn is never cleared or probed, even
+// when drafts are not kept: draft_in_box, nothing pressed.
+func TestSendNowKeepsTheOwnersDraft(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		e := newEnv(t)
+		e.svc.cfg.KeepDrafts = keep
+		e.drv.screen = workingWith(t, "my own draft")
+		wantCode(t, e.svc.SendNow(context.Background(), "s1", "run it", ""), "draft_in_box")
+		if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+			t.Fatalf("keep=%v: sent %q keys %v", keep, e.drv.sent, e.drv.keys)
+		}
+	}
+}
+
+// aimux's own unsent text mid-turn follows the rules as today: other text
+// is refused with box_has_unsent; the same text is submitted with Enter.
+func TestSendNowWithAimuxsUnsentText(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	e.drv.screen = fixture(t, "busy-empty.txt")
+	e.drv.afterType = fixture(t, "busy-empty.txt") // the text never shows: not submitted
+	wantCode(t, e.svc.SendNow(ctx, "s1", "first message", ""), "not_submitted")
+	e.drv.screen, e.drv.afterType, e.drv.sent, e.drv.keys = workingWith(t, "first message"), "", nil, nil
+	wantCode(t, e.svc.SendNow(ctx, "s1", "another one", ""), "box_has_unsent")
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+		t.Fatalf("sent %q keys %v", e.drv.sent, e.drv.keys)
+	}
+	if err := e.svc.SendNow(ctx, "s1", "first message", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.sent) != 0 || !slices.Equal(e.drv.keys, []Key{KeyEnter}) {
+		t.Fatalf("sent %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
+	}
+}
+
+// Every other check stays: the owner at the Mac, a shell in the pane.
+func TestSendNowKeepsTheGuards(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = fixture(t, "busy-empty.txt")
+	e.sys.idle, e.drv.front, e.drv.focusTTY = 5, true, "/dev/ttys001"
+	wantCode(t, e.svc.SendNow(context.Background(), "s1", "hi", ""), "mac_in_use")
+	e = newEnv(t)
+	e.drv.screen = fixture(t, "busy-empty.txt")
+	e.sys.cmd = "zsh"
+	wantCode(t, e.svc.SendNow(context.Background(), "s1", "hi", ""), "not_claude")
+	e = newEnv(t)
+	e.drv.screen = fixture(t, "busy-empty.txt")
+	e.drv.afterType = fixture(t, "prompt-bash.txt") // a prompt took the screen while typing
+	wantCode(t, e.svc.SendNow(context.Background(), "s1", "hi", ""), "not_submitted")
+	if slices.Contains(e.drv.keys, KeyEnter) {
+		t.Fatalf("pressed Enter into a prompt: %v", e.drv.keys)
+	}
+}
+
+// Send now is idempotent by key like Send, and its log line names it
+// without the text.
+func TestSendNowIdempotentAndLogged(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = fixture(t, "busy-empty.txt")
+	e.drv.afterType = workingWith(t, "secret words")
+	if err := e.svc.SendNow(context.Background(), "s1", "secret words", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.SendNow(context.Background(), "s1", "secret words", "k1"); err != nil || len(e.drv.sent) != 1 {
+		t.Fatalf("retry: %v, sent %q", err, e.drv.sent)
+	}
+	if !strings.Contains(e.log.String(), " now text chars=12 ok\n") || strings.Contains(e.log.String(), "secret") {
+		t.Fatalf("log = %q", e.log.String())
+	}
+}
+
+// A permission prompt can appear between the read that saw the typed text
+// and Enter (the in-use and foreground checks take a moment): the screen is
+// read once more right before Enter, and a prompt there stops it, since
+// Enter would approve the prompt's highlighted option.
+func TestSendLooksAgainRightBeforeEnter(t *testing.T) {
+	for _, now := range []bool{false, true} {
+		e := newEnv(t)
+		if now {
+			e.drv.screen = fixture(t, "busy-empty.txt")
+			e.drv.afterType = workingWith(t, "hello")
+		}
+		prompt := fixture(t, "prompt-bash.txt")
+		e.drv.onRead = func(read int) {
+			if read == 3 { // 1: before typing, 2: the text shows, 3: right before Enter
+				e.drv.screen = prompt
+			}
+		}
+		send := e.svc.Send
+		if now {
+			send = e.svc.SendNow
+		}
+		wantCode(t, send(context.Background(), "s1", "hello", "k1"), "not_submitted")
+		if len(e.drv.keys) != 0 || e.drv.screenReads != 3 {
+			t.Fatalf("now=%v: keys %v after %d reads, want no key after 3", now, e.drv.keys, e.drv.screenReads)
+		}
+		if !strings.Contains(e.log.String(), " not_submitted prompt\n") {
+			t.Fatalf("now=%v: log = %q", now, e.log.String())
+		}
+	}
+}
+
+// The text gone from the box by the last look (the owner cleared it at the
+// Mac): no Enter either.
+func TestSendNoEnterWhenTheTextLeftTheBoxAtTheLastLook(t *testing.T) {
+	e := newEnv(t)
+	e.drv.onRead = func(read int) {
+		if read == 3 {
+			e.drv.screen = idleScreen
+		}
+	}
+	wantCode(t, e.svc.Send(context.Background(), "s1", "hello", ""), "not_submitted")
+	if len(e.drv.keys) != 0 {
+		t.Fatalf("pressed %v", e.drv.keys)
+	}
+}
+
+// The retry of a send that typed but did not press Enter looks again too.
+func TestSendRetryLooksAgainRightBeforeEnter(t *testing.T) {
+	e := newEnv(t)
+	e.drv.afterType = boxWith("my own draft")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", "k1"), "not_submitted")
+	e.drv.screen, e.drv.afterType, e.drv.sent, e.drv.screenReads = boxWith("give me an example"), "", nil, 0
+	e.drv.onRead = func(read int) {
+		if read == 2 { // 1: the waiting text, 2: right before Enter
+			e.drv.screen = fixture(t, "prompt-bash.txt")
+		}
+	}
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", "k2"), "not_submitted")
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+		t.Fatalf("sent %q keys %v, want nothing", e.drv.sent, e.drv.keys)
+	}
+}
+
+// Submit looks again right before Enter as well.
+func TestSubmitLooksAgainRightBeforeEnter(t *testing.T) {
+	e := newEnv(t)
+	e.drv.screen = boxWith("hello")
+	e.drv.onRead = func(read int) {
+		if read == 2 {
+			e.drv.screen = fixture(t, "prompt-bash.txt")
+		}
+	}
+	wantCode(t, e.svc.Submit(context.Background(), "s1", "hello"), "not_at_input")
+	if len(e.drv.keys) != 0 {
+		t.Fatalf("pressed %v", e.drv.keys)
+	}
+}
+
+// The retry of a paste aimux left: when the last look before Enter shows
+// another paste placeholder (the owner pasted meanwhile), only the recorded
+// marker counts, so nothing is pressed.
+func TestSendRetryLastLookRefusesAnotherPastePlaceholder(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	e.drv.screenReads, e.drv.keys = 0, nil
+	e.drv.onRead = func(read int) {
+		if read == 2 { // 1: the recorded marker, 2: right before Enter
+			e.drv.screen = strings.Replace(idleScreen, "❯\n", "❯ [Pasted text #2 +2 lines]\n", 1)
+		}
+	}
+	wantCode(t, e.svc.Send(context.Background(), "s1", long, ""), "not_submitted")
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 0 {
+		t.Fatalf("typed %q keys %v, want nothing", e.drv.sent, e.drv.keys)
 	}
 }

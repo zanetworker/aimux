@@ -92,6 +92,14 @@ public final class APIClient: Sendable {
         let _: AnswerStatus = try await send("POST", "/v1/sessions/\(sessionID)/terminal/messages", body: body)
     }
 
+    /// Send now: types `text` also while Claude works on a turn (`now: true`); every other check stays.
+    public func terminalSendNow(sessionID: String, text: String, key: String) async throws {
+        let body = try JSONEncoder().encode(SendNowRequest(text: text, key: key, now: true))
+        let _: AnswerStatus = try await send("POST", "/v1/sessions/\(sessionID)/terminal/messages", body: body)
+    }
+
+    private struct SendNowRequest: Encodable { let text: String; let key: String; let now: Bool }
+
     /// Presses `option` (one of the prompt's keys) if the prompt showing in the terminal is still `promptID`.
     public func terminalPress(sessionID: String, promptID: String, option: String, key: String) async throws {
         let body = try JSONEncoder().encode(TerminalKeyRequest(promptId: promptID, option: option, key: key))
@@ -125,6 +133,12 @@ public final class APIClient: Sendable {
 
     public func deleteQueueItem(sessionID: String, itemID: String) async throws -> QueueStatus {
         try await send("DELETE", "/v1/sessions/\(sessionID)/queue/\(itemID)")
+    }
+
+    /// Send now for a waiting message (`send-now`); a retry with the same `key` is not typed twice.
+    public func sendQueueItemNow(sessionID: String, itemID: String, key: String) async throws -> QueueStatus {
+        let body = try JSONEncoder().encode(["key": key])
+        return try await send("POST", "/v1/sessions/\(sessionID)/queue/\(itemID)/send-now", body: body)
     }
 
     /// The only way a paused queue runs again.

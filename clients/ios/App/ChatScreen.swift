@@ -30,6 +30,7 @@ struct ChatView: View {
                 isClosed = false
             }
             model?.queueEnabled = context.queueEnabled
+            model?.sendNowEnabled = context.sendNowEnabled
             await Interaction.perform { await model?.load() }
         }
         .task {
@@ -40,6 +41,7 @@ struct ChatView: View {
             }
         }
         .onChange(of: context.queueEnabled) { _, enabled in model?.queueEnabled = enabled }
+        .onChange(of: context.sendNowEnabled) { _, enabled in model?.sendNowEnabled = enabled }
         .onDisappear {
             model?.close()
             isClosed = true

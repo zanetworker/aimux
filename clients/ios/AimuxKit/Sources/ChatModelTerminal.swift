@@ -77,10 +77,15 @@ extension ChatModel {
 
     /// Types the message into the terminal. Never retried here: a timeout may have typed part of it already,
     /// so only the person retries (same key; the server refuses with not_at_input if the box is not empty).
-    func typeIntoTerminal(_ text: String, key: String) async {
+    func typeIntoTerminal(_ text: String, key: String, now sendNow: Bool = false) async {
         do {
-            try await source.terminalSend(sessionID: sessionID, text: text, key: key)
+            if sendNow {
+                try await source.terminalSendNow(sessionID: sessionID, text: text, key: key)
+            } else {
+                try await source.terminalSend(sessionID: sessionID, text: text, key: key)
+            }
             guard pending?.key == key else { return }
+            if sendNow { sendNowNotice = ChatQueue.sentNowLine }
             lastTerminalSend = now()
             clearShownPending()
             pollTerminal()

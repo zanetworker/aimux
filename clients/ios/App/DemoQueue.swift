@@ -4,7 +4,8 @@ import AimuxKit
 
 #if DEBUG
 /// The chat queues of `-demo chat-queue`, kept in memory like the Mac would: demo-2 works with three messages
-/// waiting, demo-3 is paused with one answering and one waiting, demo-18 (blocked on the Mac) waits with a note.
+/// waiting, demo-3 is paused with one answering and one waiting, demo-18 (blocked on the Mac) waits with a note,
+/// demo-19 works in a terminal on the Mac with two waiting (Send now offered).
 enum DemoQueue {
     private static let queues = Mutex<[String: QueueStatus]>([
         "demo-2": QueueStatus(state: "running", items: [
@@ -18,12 +19,22 @@ enum DemoQueue {
         ]),
         "demo-18": QueueStatus(state: "running", note: "Waiting: you're using this session on your Mac", items: [
             item("dq6", "Fold the sections you are not reading")
+        ]),
+        "demo-19": QueueStatus(state: "running", items: [
+            item("dn1", "Link each fix to its pull request"),
+            item("dn2", "Keep it under one page")
         ])
     ])
     private static let next = Mutex(7)
 
     private static func item(_ id: String, _ text: String, state: String = "waiting") -> QueueItem {
         QueueItem(id: id, text: text, state: state, created: DemoData.ago(minutes: 1))
+    }
+
+    /// demo-19's terminal: Claude works on a turn and the box takes typing (a Send now goes in mid-turn).
+    static func terminal(_ sessionID: String) -> TerminalStatus? {
+        sessionID == "demo-19" ? TerminalStatus(status: "busy", canType: true, reason: nil, prompt: nil, working: true)
+            : nil
     }
 
     /// The queue for a session's detail: nil when it holds nothing.
@@ -66,6 +77,12 @@ enum DemoQueue {
             return items.isEmpty ? QueueStatus(state: "running", items: [])
                 : QueueStatus(state: queue.state, reason: queue.reason, note: queue.note, items: items)
         }
+    }
+
+    /// Send now: the waiting message is typed mid-turn and leaves the queue.
+    static func sendNow(_ sessionID: String, id: String) throws -> QueueStatus {
+        try waiting(sessionID, id)
+        return delete(sessionID, id: id)
     }
 
     static func resume(_ sessionID: String) -> QueueStatus {

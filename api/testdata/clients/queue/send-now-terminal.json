@@ -1,0 +1,80 @@
+{
+  "name": "send-now-terminal",
+  "session": {
+    "state": "open_in_terminal",
+    "terminal": {
+      "status": "busy",
+      "canType": true,
+      "working": true
+    },
+    "queue": {
+      "state": "running",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Run the tests",
+          "state": "answering",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Stop, the config lives in config/app.yaml",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        },
+        {
+          "id": "q3",
+          "text": "Then commit",
+          "state": "waiting",
+          "created": "2026-03-02T09:03:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "running",
+      "resume": false
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Run the tests",
+        "state": "answering",
+        "label": "Answer in progress",
+        "canEdit": false,
+        "canMove": false,
+        "canDelete": false
+      },
+      {
+        "id": "q2",
+        "text": "Stop, the config lives in config/app.yaml",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q3",
+        "text": "Then commit",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ],
+    "sendNow": {
+      "composer": true,
+      "items": ["q2", "q3"],
+      "label": "Send now",
+      "sent": "Sent now; Claude sees it during this turn"
+    }
+  }
+}

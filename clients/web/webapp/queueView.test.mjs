@@ -62,7 +62,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 const item = (id, text, state = 'waiting') => ({ id, text, state, created: '2026-03-02T09:01:00Z' });
 const running = (...items) => ({ state: 'running', items });
 
-async function setup({ touch = false, folded = false } = {}) {
+async function setup({ touch = false, folded = false, options = {} } = {}) {
   globalThis.document = fakeDocument();
   const { createQueueView } = await import('./queueView.mjs');
   const box = document.createElement('div');
@@ -73,13 +73,13 @@ async function setup({ touch = false, folded = false } = {}) {
   const calls = [];
   const answers = {}; // kind -> function returning the answer (or a promise of it)
   const client = {};
-  for (const kind of ['edit', 'move', 'remove', 'resume']) {
+  for (const kind of ['edit', 'move', 'remove', 'resume', 'sendNow']) {
     client[kind] = async (...args) => { calls.push([kind, ...args]); return answers[kind] ? answers[kind](...args) : { ok: true, queue: null }; };
   }
   const view = createQueueView({
     box, errorNode, client: () => client, isTouch: () => touch,
     onEditLost: (text, hadFocus) => { lost.push(text); lostFocus.push(hadFocus); }, onQueue: (q) => queues.push(q),
-    open: !folded,
+    open: !folded, ...options,
   });
   return { view, box, errorNode, lost, lostFocus, queues, calls, answers };
 }
@@ -406,4 +406,27 @@ test('the queue is one line until its heading is clicked', async () => {
   fire(title, 'click');
   assert.equal(document.activeElement, title, 'the toggle keeps focus');
   assert.notEqual(title.tabIndex, -1, 'the toggle stays in the tab order');
+});
+
+test('a row Send now the terminal refuses shows its line and hands the answer on, so the screen is read', async () => {
+  const refused = [];
+  let sent = 0;
+  const { view, box, errorNode, answers, calls } = await setup({ options: {
+    sendNowIds: () => ['q2'], onSentNow: () => { sent++; },
+    errorText: (r) => 'terminal: ' + r.error.code, onSendNowRefused: (r) => refused.push(r),
+  } });
+  view.update(running(item('q1', 'First', 'answering'), item('q2', 'More')));
+  answers.sendNow = () => ({ ok: false, message: null, error: { code: 'not_submitted' } });
+  fire(button(box, 'now:q2'), 'click');
+  await tick();
+  assert.deepEqual(calls, [['sendNow', 'q2']]);
+  assert.equal(errorNode.textContent, 'terminal: not_submitted');
+  assert.deepEqual(refused.map((r) => r.error.code), ['not_submitted']);
+  assert.equal(sent, 0);
+
+  answers.sendNow = () => ({ ok: true, queue: running(item('q1', 'First', 'answering')) });
+  fire(button(box, 'now:q2'), 'click');
+  await tick();
+  assert.equal(sent, 1);
+  assert.equal(refused.length, 1, 'a Send now that went is not a refusal');
 });

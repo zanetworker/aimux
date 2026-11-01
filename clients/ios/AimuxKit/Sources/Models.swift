@@ -249,6 +249,7 @@ public struct Health: Decodable, Equatable, Sendable {
         case deviceLogin = "device_login"
         case queue
         case describe
+        case sendNow = "send_now"
     }
 
     public let status: String

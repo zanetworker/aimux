@@ -695,6 +695,8 @@ func newRemoteServeCmd() *cobra.Command {
 			defer queue.Close()
 			dispatcher = d
 			api.Queue, api.QueueKick, api.QueueNote, api.SessionExists = queue, d.Kick, d.Note, index.SessionExists
+			// A Send now's history turn is aimux's own, not the owner's.
+			api.QueueSentNow = func(session, text string) func() { return d.NoteSentNow(session, text, time.Now()) }
 			// Titles and descriptions: "Update summary" always; automatic
 			// naming of the sessions clients show only with sessions.auto_title.
 			namer := history.NewNamer(namingConfig(cfg.Sessions, home, index.Lookup, cmd.ErrOrStderr()))

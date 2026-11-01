@@ -132,6 +132,17 @@ final class StubChat: ChatSource, @unchecked Sendable {
         if let failure { throw failure }
     }
 
+    private(set) var terminalNow: [Sent] = []
+    var terminalNowList: [Sent] { lock.withLock { terminalNow } }
+    /// Send now's typing takes its failures from `terminalFailures`, as a plain terminal send does.
+    func terminalSendNow(sessionID: String, text: String, key: String) async throws {
+        let failure = lock.withLock { () -> Error? in
+            terminalNow.append(Sent(text: text, key: key))
+            return terminalFailures.isEmpty ? nil : terminalFailures.removeFirst()
+        }
+        if let failure { throw failure }
+    }
+
     func terminalPress(sessionID: String, promptID: String, option: String, key: String) async throws {
         let failure = lock.withLock { () -> Error? in
             presses.append(Press(promptID: promptID, option: option, key: key))
@@ -186,11 +197,18 @@ final class StubChat: ChatSource, @unchecked Sendable {
         try await change("delete \(itemID)")
     }
     func resumeQueue(sessionID: String) async throws -> QueueStatus { try await change("resume") }
+    func sendQueueItemNow(sessionID: String, itemID: String, key: String) async throws -> QueueStatus {
+        try await change("now \(itemID) \(key)")
+    }
 }
 
 /// The sources that never reach a queue.
 extension ChatSource {
     func queue(sessionID: String) async throws -> QueueStatus { throw APIError.http(status: 502) }
+    func terminalSendNow(sessionID: String, text: String, key: String) async throws { throw APIError.http(status: 502) }
+    func sendQueueItemNow(sessionID: String, itemID: String, key: String) async throws -> QueueStatus {
+        throw APIError.http(status: 502)
+    }
     func addToQueue(sessionID: String, text: String, key: String) async throws -> QueueItem {
         throw APIError.http(status: 502)
     }
