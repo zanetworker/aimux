@@ -1,0 +1,9 @@
+# Recording environment for the README demo. Inside the container, ps only
+# shows the stand-in agents, so no real sessions leak into the GIF.
+FROM ghcr.io/charmbracelet/vhs:v0.10.0
+RUN apt-get update --allow-releaseinfo-change && apt-get install -y --no-install-recommends tmux lsof procps python3 fonts-jetbrains-mono socat && rm -rf /var/lib/apt/lists/*
+COPY bin/aimux bin/claude /usr/local/bin/
+COPY seed.py entrypoint.sh demo.tape /demo/
+ENV HOME=/home/demo TERM=xterm-256color
+RUN mkdir -p /home/demo /work
+ENTRYPOINT ["/demo/entrypoint.sh"]

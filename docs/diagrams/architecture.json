@@ -1,0 +1,309 @@
+{
+ "elements": [
+  {
+   "type": "container",
+   "kind": "gray",
+   "x": 20,
+   "y": 20,
+   "w": 240,
+   "h": 310,
+   "label": "where agents run"
+  },
+  {
+   "type": "card",
+   "x": 35,
+   "y": 56,
+   "w": 210,
+   "h": 42,
+   "title": "local sessions",
+   "desc": "Claude Code, Codex in tmux",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 35,
+   "y": 108,
+   "w": 210,
+   "h": 42,
+   "title": "OpenShell sandboxes",
+   "desc": "isolated, remote",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 35,
+   "y": 160,
+   "w": 210,
+   "h": 42,
+   "title": "Kubernetes pods",
+   "desc": "your cluster",
+   "kind": "closed"
+  },
+  {
+   "type": "container",
+   "kind": "open",
+   "x": 370,
+   "y": 20,
+   "w": 280,
+   "h": 310,
+   "label": "aimux core: one Go binary"
+  },
+  {
+   "type": "card",
+   "x": 390,
+   "y": 56,
+   "w": 240,
+   "h": 42,
+   "title": "discovery",
+   "desc": "running and past sessions"
+  },
+  {
+   "type": "card",
+   "x": 390,
+   "y": 106,
+   "w": 240,
+   "h": 42,
+   "title": "trace + labels",
+   "desc": "turns, diffs, good / bad / waste",
+   "tone": "amber"
+  },
+  {
+   "type": "card",
+   "x": 390,
+   "y": 156,
+   "w": 240,
+   "h": 42,
+   "title": "export",
+   "desc": "OTLP or JSONL",
+   "tone": "amber"
+  },
+  {
+   "type": "card",
+   "x": 390,
+   "y": 206,
+   "w": 240,
+   "h": 56,
+   "title": "launcher",
+   "sub": "aimux spawn",
+   "desc": "start, attach, kill agents"
+  },
+  {
+   "type": "card",
+   "x": 390,
+   "y": 270,
+   "w": 240,
+   "h": 56,
+   "title": "MCP proxy",
+   "sub": "aimux mcp proxy serve",
+   "desc": "shared MCP servers for sessions",
+   "tone": "green"
+  },
+  {
+   "type": "container",
+   "kind": "gray",
+   "x": 760,
+   "y": 20,
+   "w": 220,
+   "h": 310,
+   "label": "clients"
+  },
+  {
+   "type": "card",
+   "x": 775,
+   "y": 56,
+   "w": 190,
+   "h": 56,
+   "title": "TUI",
+   "sub": "aimux",
+   "desc": "keyboard, split panes"
+  },
+  {
+   "type": "card",
+   "x": 775,
+   "y": 120,
+   "w": 190,
+   "h": 56,
+   "title": "web dashboard",
+   "sub": "aimux web",
+   "desc": "browser, port 3000"
+  },
+  {
+   "type": "card",
+   "x": 775,
+   "y": 184,
+   "w": 190,
+   "h": 56,
+   "title": "phone",
+   "sub": "aimux remote serve",
+   "desc": "follow, continue, approve",
+   "tone": "green"
+  },
+  {
+   "type": "card",
+   "x": 775,
+   "y": 248,
+   "w": 190,
+   "h": 56,
+   "title": "agents and scripts",
+   "sub": "--json, aimux mcp serve",
+   "desc": "search and resume sessions",
+   "tone": "green"
+  },
+  {
+   "type": "container",
+   "kind": "gray",
+   "x": 370,
+   "y": 390,
+   "w": 280,
+   "h": 78,
+   "label": "eval backends"
+  },
+  {
+   "type": "card",
+   "x": 385,
+   "y": 416,
+   "w": 120,
+   "h": 42,
+   "title": "MLflow",
+   "desc": "feedback",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 515,
+   "y": 416,
+   "w": 120,
+   "h": 42,
+   "title": "Jaeger",
+   "desc": "any OTLP",
+   "kind": "closed"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     260,
+     77
+    ],
+    [
+     370,
+     77
+    ]
+   ]
+  },
+  {
+   "type": "text",
+   "x": 266,
+   "y": 56,
+   "w": 100,
+   "text": "read-only",
+   "italic": true
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     370,
+     234
+    ],
+    [
+     260,
+     234
+    ]
+   ]
+  },
+  {
+   "type": "text",
+   "x": 266,
+   "y": 213,
+   "w": 100,
+   "text": "spawn, kill",
+   "italic": true
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     370,
+     298
+    ],
+    [
+     260,
+     298
+    ]
+   ]
+  },
+  {
+   "type": "text",
+   "x": 266,
+   "y": 277,
+   "w": 100,
+   "text": "MCP tools",
+   "italic": true
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     650,
+     160
+    ],
+    [
+     760,
+     160
+    ]
+   ],
+   "both": true
+  },
+  {
+   "type": "text",
+   "x": 656,
+   "y": 139,
+   "w": 100,
+   "text": "session index",
+   "italic": true
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     510,
+     330
+    ],
+    [
+     510,
+     390
+    ]
+   ],
+   "label": "OTLP, JSONL"
+  },
+  {
+   "type": "legend",
+   "x": 20,
+   "y": 485,
+   "items": [
+    {
+     "kind": "open",
+     "text": "aimux",
+     "w": 60
+    },
+    {
+     "kind": "open",
+     "tone": "amber",
+     "text": "trace and evals",
+     "w": 110
+    },
+    {
+     "kind": "open",
+     "tone": "green",
+     "text": "serve endpoints",
+     "w": 110
+    },
+    {
+     "kind": "closed",
+     "text": "external"
+    }
+   ]
+  }
+ ]
+}
