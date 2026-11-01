@@ -122,7 +122,9 @@ const pasteOver = 200
 // prompt is showing, the bottom-most box starts with one chevron line and its
 // other rows are indented continuations, and the box holds text (compared
 // without whitespace, since Claude Code wraps it) or, for pasted text,
-// Claude Code's "[Pasted text #n]" marker. Anything else gives false.
+// Claude Code's "[Pasted text #n]" marker (any number: right after typing,
+// it is this text's; a send records the exact marker for a later retry).
+// Anything else gives false.
 func TextInBox(screen, text string) bool {
 	box, rows, ok := boxText(screen)
 	if !ok || squeeze(text) == "" {
@@ -197,7 +199,10 @@ func boxRows(screen string) ([]string, bool) {
 	shown := []string{strings.TrimSpace(strings.TrimPrefix(rows[0], chevron))}
 	for _, r := range rows[1:] {
 		t := strings.TrimSpace(r)
-		if !strings.HasPrefix(r, "  ") || t == "" || strings.HasPrefix(t, chevron) || isRule(r) {
+		if t == "" {
+			continue // a blank line of the message (paragraphs), not the end of the box
+		}
+		if !strings.HasPrefix(r, "  ") || strings.HasPrefix(t, chevron) || isRule(r) {
 			return nil, false
 		}
 		shown = append(shown, t)

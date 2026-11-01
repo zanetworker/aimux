@@ -66,6 +66,8 @@ export function terminalErrorText(e) {
   if (e.code === 'not_submitted') return 'Your message is in the box on your Mac, not sent yet; Retry sends it';
   if (e.code === 'draft_in_box') return 'Your draft on the Mac is kept; nothing was sent';
   if (e.code === 'box_not_cleared') return "The box on your Mac couldn't be cleared; nothing was sent";
+  if (e.code === 'box_has_unsent') return 'Your earlier message is still in the box on your Mac; Retry it, or clear the box';
+  if (e.code === 'unsent_unconfirmed') return "Your message may still be in the box on your Mac, but aimux can't confirm it's yours. Send or clear it at the Mac.";
   return e.message;
 }
 

@@ -1105,3 +1105,77 @@ func TestClaudeParseTrace_StopHookFeedbackIsAStepNotAMessage(t *testing.T) {
 		t.Errorf("hook step = %+v", hook)
 	}
 }
+
+// A background task's notification is saved as a user entry (origin kind
+// task-notification) but is never the person's: it becomes a step with the
+// task's summary, and the turn's reply continues.
+func TestClaudeParseTrace_TaskNotificationIsAStepNotAMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	note := "<task-notification>\\n<task-id>abc123</task-id>\\n<status>completed</status>\\n<summary>Agent \\\"Review the parser\\\" finished</summary>\\n<result>All good.</result>\\n</task-notification>"
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Review the parser"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Started a reviewer."}]}}
+{"type":"user","origin":{"kind":"task-notification","producer":"session-task"},"timestamp":"2026-01-01T10:01:00Z","message":{"role":"user","content":"` + note + `"}}
+{"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","content":[{"type":"text","text":"The review is clean."}]}}
+{"type":"user","timestamp":"2026-01-01T10:02:00Z","message":{"role":"user","content":"<task-notification>\n<summary>Without an origin field</summary>\n</task-notification>"}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("got %d turns, want 1: %+v", len(turns), turns)
+	}
+	if got := strings.Join(turns[0].UserLines, "\n"); got != "Review the parser" {
+		t.Errorf("user = %q", got)
+	}
+	if got := strings.Join(turns[0].OutputLines, "\n"); !strings.Contains(got, "Started a reviewer.") || !strings.Contains(got, "The review is clean.") {
+		t.Errorf("reply = %q, want both replies in the turn", got)
+	}
+	if len(turns[0].Actions) != 2 {
+		t.Fatalf("actions = %+v, want two task steps", turns[0].Actions)
+	}
+	first := turns[0].Actions[0]
+	if first.Name != "Background task" || first.Snippet != `Agent "Review the parser" finished` || !first.Success {
+		t.Errorf("task step = %+v", first)
+	}
+	if !strings.Contains(first.Input, "All good.") {
+		t.Errorf("task step input = %q, want the result", first.Input)
+	}
+	if second := turns[0].Actions[1]; second.Snippet != "Without an origin field" {
+		t.Errorf("second task step = %+v", second)
+	}
+}
+
+// A notification that arrives while Claude works is saved as a queued_command
+// attachment with commandMode task-notification: also a step, not a message.
+// A message the person typed meanwhile (commandMode prompt) stays theirs.
+func TestClaudeParseTrace_QueuedTaskNotificationIsAStep(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Build the feature"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Working on it."}]}}
+{"type":"attachment","timestamp":"2026-01-01T10:00:30Z","attachment":{"type":"queued_command","commandMode":"task-notification","origin":{"kind":"task-notification"},"prompt":"<task-notification>\n<status>completed</status>\n<summary>Agent \"Run the tests\" finished</summary>\n<result>12 passed</result>\n</task-notification>"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:40Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests pass."}]}}
+{"type":"attachment","timestamp":"2026-01-01T10:00:50Z","attachment":{"type":"queued_command","commandMode":"prompt","origin":{"kind":"human"},"prompt":"also update the docs"}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("got %d turns, want 2 (the typed message starts one): %+v", len(turns), turns)
+	}
+	if got := strings.Join(turns[0].OutputLines, "\n"); !strings.Contains(got, "Tests pass.") {
+		t.Errorf("first turn reply = %q, want it to continue past the notification", got)
+	}
+	if len(turns[0].Actions) != 1 || turns[0].Actions[0].Name != "Background task" ||
+		turns[0].Actions[0].Snippet != `Agent "Run the tests" finished` || turns[0].Actions[0].Input != "12 passed" {
+		t.Errorf("actions = %+v, want the task step", turns[0].Actions)
+	}
+	if got := strings.Join(turns[1].UserLines, "\n"); got != "also update the docs" {
+		t.Errorf("typed message = %q", got)
+	}
+}

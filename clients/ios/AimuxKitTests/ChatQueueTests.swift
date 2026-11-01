@@ -80,7 +80,7 @@ private func item(_ id: String, _ state: String = "waiting", _ text: String? = n
 
 @Suite struct ChatQueueFixtureTests {
     @Test func everyFixtureIsRead() throws {
-        #expect(try queueFixtures().count == 37)
+        #expect(try queueFixtures().count == 39)
     }
 
     @Test func composerSectionAndRowsMatchEveryFixture() throws {

@@ -82,6 +82,17 @@ func TestQueueACP_StartErrors(t *testing.T) {
 type fakeQueueInput struct {
 	sends, submits atomic.Int32
 	status         terminput.Status
+	left           map[string]bool
+}
+
+func (f *fakeQueueInput) LeftInBox(id string) bool { return f.left[id] }
+
+// LeftInBox asks the input service about that session only.
+func TestQueueTerminalLeftInBoxAsksTheInputService(t *testing.T) {
+	q := QueueTerminal{Input: &fakeQueueInput{left: map[string]bool{"s1": true}}}
+	if !q.LeftInBox("s1") || q.LeftInBox("s2") {
+		t.Fatalf("LeftInBox s1=%v s2=%v, want true false", q.LeftInBox("s1"), q.LeftInBox("s2"))
+	}
 }
 
 func (f *fakeQueueInput) Status(context.Context, string, string) terminput.Status { return f.status }

@@ -45,6 +45,7 @@ type QueueInput interface {
 	Status(ctx context.Context, sessionID, registryStatus string) terminput.Status
 	Send(ctx context.Context, sessionID, text, idemKey string) error
 	Submit(ctx context.Context, sessionID, text string) error
+	LeftInBox(sessionID string) bool
 }
 
 // QueueTerminal is the dispatcher's way into sessions open in a terminal:
@@ -83,6 +84,13 @@ func (q QueueTerminal) Send(ctx context.Context, session, text, key string) erro
 // Submit presses Enter for text left in the box (terminput.Service.Submit).
 func (q QueueTerminal) Submit(ctx context.Context, session, text string) error {
 	return q.Input.Submit(ctx, session, text)
+}
+
+// LeftInBox reports whether the box holds a message a send left unsent, as
+// of the latest screen read, without reading it again
+// (terminput.Service.LeftInBox).
+func (q QueueTerminal) LeftInBox(session string) bool {
+	return q.Input.LeftInBox(session)
 }
 
 // Turns returns the session's latest turns the owner (or the queue) typed,

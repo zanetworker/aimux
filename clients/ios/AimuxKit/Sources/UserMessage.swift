@@ -37,6 +37,13 @@ extension APIError {
             UserMessage(title: "Your draft on the Mac is kept; nothing was sent", detail: message)
         case .server(_, .boxNotCleared, let message):
             UserMessage(title: "The box on your Mac couldn't be cleared; nothing was sent", detail: message)
+        case .server(_, .boxHasUnsent, let message):
+            UserMessage(title: "Your earlier message is still in the box on your Mac; Retry it, or clear the box",
+                        detail: message)
+        case .server(_, .unsentUnconfirmed, let message):
+            UserMessage(title: "Your message may still be in the box on your Mac, but aimux can't confirm it's yours. "
+                            + "Send or clear it at the Mac.",
+                        detail: message)
         case .server(let status, _, let message):
             UserMessage(title: "Something went wrong", detail: "\(message) (HTTP \(status))")
         case .http(401):

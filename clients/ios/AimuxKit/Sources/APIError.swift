@@ -5,7 +5,7 @@ public enum APIErrorCode: Equatable, Hashable, Sendable {
     case openInTerminal, busy, inUse, notRunning, invalidOption, ownershipUnknown, tooManyRuns, `internal`
     // Typing into a terminal on the Mac.
     case disabled, badText, notInTerminal, notClaude, macInUse, noTerminalDriver, automationDenied, notAtInput
-    case noPrompt, promptChanged, notSubmitted, boxNotCleared, draftInBox
+    case noPrompt, promptChanged, notSubmitted, boxNotCleared, draftInBox, boxHasUnsent, unsentUnconfirmed
     // The chat queue.
     case queueFull, itemSending, unknownItem
     // Device login.
@@ -24,7 +24,8 @@ public enum APIErrorCode: Equatable, Hashable, Sendable {
         "not_claude": .notClaude, "mac_in_use": .macInUse, "no_terminal_driver": .noTerminalDriver,
         "automation_denied": .automationDenied, "not_at_input": .notAtInput, "no_prompt": .noPrompt,
         "prompt_changed": .promptChanged, "not_submitted": .notSubmitted, "box_not_cleared": .boxNotCleared,
-        "draft_in_box": .draftInBox,
+        "draft_in_box": .draftInBox, "box_has_unsent": .boxHasUnsent,
+        "unsent_unconfirmed": .unsentUnconfirmed,
         "queue_full": .queueFull, "item_sending": .itemSending, "unknown_item": .unknownItem,
         "login_required": .loginRequired, "pairing_failed": .pairingFailed, "pairing_conflict": .pairingConflict,
         "unknown_device": .unknownDevice, "login_failed": .loginFailed,

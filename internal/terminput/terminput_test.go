@@ -1149,11 +1149,16 @@ func TestSubmitLogHasNoText(t *testing.T) {
 	}
 }
 
+// A paste marker aimux did not record after typing could stand for the
+// owner's own paste: refused. The text itself in the box is enough.
 func TestSubmitNeedsTheTextItselfNotAPasteMarker(t *testing.T) {
 	long := strings.Repeat("word ", 60) // pasted: over 200 characters
 	e := newEnv(t)
 	e.drv.screen = boxWith(long) // the fake shows the marker for pasted text
 	wantCode(t, e.svc.Submit(context.Background(), "s1", long), "not_in_box")
+	if e.svc.LeftInBox("s1") {
+		t.Fatal("LeftInBox with no send")
+	}
 	if len(e.drv.keys) != 0 {
 		t.Fatalf("pressed %v on a paste marker", e.drv.keys)
 	}
@@ -1549,5 +1554,216 @@ func TestClearingADraftChecksBeforeEveryClear(t *testing.T) {
 	}
 	if slices.Contains(e.drv.keys, KeyClear) || len(e.drv.sent) != 0 {
 		t.Fatalf("keys %v typed %q after a shell took the pane", e.drv.keys, e.drv.sent)
+	}
+}
+
+// leaveAPaste sends a long message whose paste marker shows in the box, but
+// the owner focuses the session before Enter: not submitted. The Mac then
+// goes idle again and a few seconds pass.
+func leaveAPaste(t *testing.T, e *env) string {
+	t.Helper()
+	long := strings.Repeat("plan the garden beds ", 15) // over 200 characters: pasted
+	e.sys.idle = 5
+	e.drv.front, e.drv.focusTTYs = true, []string{"/dev/ttys009", "/dev/ttys001"}
+	wantCode(t, e.svc.Send(context.Background(), "s1", long, ""), "not_submitted")
+	if !strings.Contains(e.drv.screen, "[Pasted text #1 +2 lines]") {
+		t.Fatalf("screen = %q, want the paste marker", e.drv.screen)
+	}
+	e.sys.idle, e.drv.focusTTYs, e.drv.sent = 600, nil, nil
+	e.now = e.now.Add(3 * time.Second)
+	return long
+}
+
+// The marker aimux saw right after pasting stands for its own text: Retry
+// presses Enter, and nothing is typed.
+func TestRetrySubmitsAPasteThatWasNotSubmitted(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	if st := e.svc.Status(context.Background(), "s1", "idle"); !st.CanType {
+		t.Fatalf("status = %+v, want can type", st)
+	}
+	if !e.svc.LeftInBox("s1") {
+		t.Fatal("LeftInBox = false with the paste still in the box")
+	}
+	if err := e.svc.Submit(context.Background(), "s1", long); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 1 || e.drv.keys[0] != KeyEnter {
+		t.Fatalf("typed %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
+	}
+	if e.svc.LeftInBox("s1") {
+		t.Fatal("LeftInBox after the retry submitted")
+	}
+}
+
+// A send of the same text again presses Enter on the recorded marker too.
+func TestSendAgainSubmitsAPasteWaitingInTheBox(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	if err := e.svc.Send(context.Background(), "s1", long, ""); err != nil {
+		t.Fatalf("send again: %v", err)
+	}
+	if len(e.drv.sent) != 0 || len(e.drv.keys) != 1 || e.drv.keys[0] != KeyEnter {
+		t.Fatalf("typed %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
+	}
+}
+
+// Another paste number is another paste (the owner's): refused, no key, and
+// a message of other text never matches the record either.
+func TestRetryRefusesADifferentPasteMarker(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	e.drv.screen = strings.Replace(idleScreen, "❯\n", "❯ [Pasted text #2 +2 lines]\n", 1)
+	wantCode(t, e.svc.Submit(context.Background(), "s1", long), "not_in_box")
+	if len(e.drv.keys) != 0 {
+		t.Fatalf("pressed %v on another paste", e.drv.keys)
+	}
+	e.drv.screen = boxWith(long)
+	wantCode(t, e.svc.Submit(context.Background(), "s1", long+" and more"), "not_in_box")
+	if len(e.drv.keys) != 0 {
+		t.Fatalf("pressed %v for other text", e.drv.keys)
+	}
+}
+
+// Once the box showed empty, the record is gone: the same marker shown again
+// is a new paste, refused.
+func TestRetryRefusesAPasteAfterTheBoxWasEmptied(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	e.drv.screen = idleScreen
+	_ = e.svc.Status(context.Background(), "s1", "idle")
+	if e.svc.LeftInBox("s1") {
+		t.Fatal("LeftInBox after the box showed empty")
+	}
+	e.drv.screen = boxWith(long) // the owner pasted something: marker #1 again
+	wantCode(t, e.svc.Submit(context.Background(), "s1", long), "not_in_box")
+	if len(e.drv.keys) != 0 {
+		t.Fatalf("pressed %v on a new paste", e.drv.keys)
+	}
+}
+
+// The owner cleared the box at the Mac and pasted their own text of the
+// same size, with no aimux read in between: the box shows an identical
+// marker, but the Mac had input since aimux recorded it. Refused.
+func TestRetryRefusesAMarkerAfterMacInput(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	e.sys.idle = 1 // input 1 s ago, after the marker was recorded 3 s ago
+	wantCode(t, e.svc.Submit(context.Background(), "s1", long), "not_in_box")
+	if len(e.drv.keys) != 0 || len(e.drv.sent) != 0 {
+		t.Fatalf("pressed %v typed %q on a marker after Mac input", e.drv.keys, e.drv.sent)
+	}
+	e.sys.idle = 3 // no input since the record: exactly the boundary
+	if err := e.svc.Submit(context.Background(), "s1", long); err != nil {
+		t.Fatalf("retry with no input since: %v", err)
+	}
+}
+
+// claude was restarted in the pane (a new pid): the marker is not aimux's.
+func TestRetryRefusesAMarkerFromAnotherClaude(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	e.svc.sessions = fakeSessions{"s1": 43}
+	wantCode(t, e.svc.Submit(context.Background(), "s1", long), "not_in_box")
+	wantCode(t, e.svc.Send(context.Background(), "s1", long, ""), "unsent_unconfirmed")
+	if len(e.drv.keys) != 0 || len(e.drv.sent) != 0 {
+		t.Fatalf("pressed %v typed %q for another claude", e.drv.keys, e.drv.sent)
+	}
+}
+
+// A send of the same text again presses Enter on the marker only when the
+// Mac had no input since it was recorded.
+func TestSendAgainRefusesAMarkerAfterMacInput(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	e.sys.idle = 1
+	wantCode(t, e.svc.Send(context.Background(), "s1", long, ""), "unsent_unconfirmed")
+	if len(e.drv.keys) != 0 || len(e.drv.sent) != 0 {
+		t.Fatalf("pressed %v typed %q", e.drv.keys, e.drv.sent)
+	}
+	// Other text over the same box is still box_has_unsent.
+	wantCode(t, e.svc.Send(context.Background(), "s1", "the next message", ""), "box_has_unsent")
+	if len(e.drv.keys) != 0 || len(e.drv.sent) != 0 {
+		t.Fatalf("pressed %v typed %q", e.drv.keys, e.drv.sent)
+	}
+}
+
+// The idle time cannot be read: the marker is not confirmed (fail safe).
+func TestMarkerNotConfirmedWhenIdleFails(t *testing.T) {
+	e := newEnv(t)
+	long := leaveAPaste(t, e)
+	tgt := Target{PID: 42, TTY: "/dev/ttys001"}
+	if !e.svc.markerOK("s1", long, e.drv.screen, tgt) {
+		t.Fatal("markerOK = false with no input since")
+	}
+	e.sys.idleErr = errors.New("ioreg failed")
+	if e.svc.markerOK("s1", long, e.drv.screen, tgt) {
+		t.Fatal("markerOK = true with the idle read failing")
+	}
+	wantCode(t, e.svc.Send(context.Background(), "s1", long, ""), "mac_in_use") // locate's guard fails closed first
+	if len(e.drv.keys) != 0 || len(e.drv.sent) != 0 {
+		t.Fatalf("pressed %v typed %q", e.drv.keys, e.drv.sent)
+	}
+}
+
+// The time since a marker is the longer of the monotonic and wall-clock
+// readings, so a Mac asleep in between never counts as less.
+func TestLongerElapsed(t *testing.T) {
+	for _, c := range []struct{ mono, wall, want time.Duration }{
+		{time.Second, time.Hour, time.Hour},            // asleep: the monotonic clock stood still
+		{time.Minute, time.Second, time.Minute},        // wall clock set back a little
+		{time.Minute, -time.Hour, time.Minute},         // wall clock set far back
+		{2 * time.Second, 2 * time.Second, 2 * time.Second},
+	} {
+		if got := longerElapsed(c.mono, c.wall); got != c.want {
+			t.Errorf("longerElapsed(%v, %v) = %v, want %v", c.mono, c.wall, got, c.want)
+		}
+	}
+	at := time.Now()
+	if got := elapsedSince(at.Add(3*time.Second), at); got != 3*time.Second {
+		t.Fatalf("elapsedSince = %v, want 3s", got)
+	}
+}
+
+// With keep_drafts off, another message never erases aimux's own unsent
+// message: refused with box_has_unsent, nothing pressed. The same text is
+// the retry path; replace may clear it.
+func TestSendOtherTextKeepsTheUnsentMessage(t *testing.T) {
+	for name, long := range map[string]bool{"typed": false, "pasted": true} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			text := "give me an example"
+			if long {
+				text = leaveAPaste(t, e)
+			} else {
+				e.drv.afterType = boxWith("something else")
+				wantCode(t, e.svc.Send(context.Background(), "s1", text, ""), "not_submitted")
+				e.drv.screen, e.drv.afterType, e.drv.sent = boxWith(text), "", nil
+			}
+			e.drv.keys = nil
+			wantCode(t, e.svc.Send(context.Background(), "s1", "the next message", ""), "box_has_unsent")
+			if len(e.drv.keys) != 0 || len(e.drv.sent) != 0 || e.drv.screen != boxWith(text) {
+				t.Fatalf("pressed %v typed %q over the unsent message", e.drv.keys, e.drv.sent)
+			}
+			if err := e.svc.Send(context.Background(), "s1", text, ""); err != nil {
+				t.Fatalf("same text: %v", err)
+			}
+			if len(e.drv.sent) != 0 || len(e.drv.keys) != 1 || e.drv.keys[0] != KeyEnter {
+				t.Fatalf("same text: typed %q keys %v, want Enter only", e.drv.sent, e.drv.keys)
+			}
+		})
+	}
+}
+
+func TestSendReplacingClearsTheUnsentMessage(t *testing.T) {
+	e := newEnv(t)
+	e.drv.afterType = boxWith("something else")
+	wantCode(t, e.svc.Send(context.Background(), "s1", "give me an example", ""), "not_submitted")
+	e.drv.screen, e.drv.afterType, e.drv.sent = boxWith("give me an example"), "", nil
+	if err := e.svc.SendReplacing(context.Background(), "s1", "the next message", ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.drv.sent) != 1 || e.drv.sent[0] != "the next message" {
+		t.Fatalf("typed %q", e.drv.sent)
 	}
 }

@@ -14,22 +14,24 @@ import (
 
 // Reasons a dispatcher pauses a queue with. Fixed lines: clients show them.
 const (
-	ReasonNoAnswer         = "No answer seen yet"
-	ReasonUsedOnMac        = "You used this session on your Mac"
-	ReasonClosed           = "This session closed on your Mac"
-	ReasonInBox            = "Your message is in the input box on your Mac"
-	ReasonClearBox         = "Clear the input box on your Mac, then resume"
-	ReasonInTerminal       = "This session is open in a terminal on your Mac"
-	ReasonBoxNotEmpty      = "The input box on your Mac isn't empty. Clear it, then resume."
-	ReasonNotClaude        = "Claude Code isn't running in this session's terminal"
-	ReasonAutomationDenied = "macOS isn't letting aimux type into iTerm2"
-	ReasonNoDriver         = "Only sessions in iTerm2 can take queued messages"
-	ReasonDisabled         = "Typing into terminal sessions is off on the Mac"
-	ReasonNotRunning       = "Session not running"
-	ReasonTurnFailed       = "Claude stopped with an error. Check the session, then resume."
-	ReasonNoHistory        = "Couldn't read this session on your Mac"
-	ReasonSendFailed       = "This message couldn't be sent. Check the session, then resume."
-	ReasonReadFailed       = "Couldn't read the session on your Mac. Check iTerm2, then resume."
+	ReasonNoAnswer          = "No answer seen yet"
+	ReasonUsedOnMac         = "You used this session on your Mac"
+	ReasonClosed            = "This session closed on your Mac"
+	ReasonInBox             = "Your message is in the input box on your Mac"
+	ReasonClearBox          = "Clear the input box on your Mac, then resume"
+	ReasonInTerminal        = "This session is open in a terminal on your Mac"
+	ReasonBoxNotEmpty       = "The input box on your Mac isn't empty. Clear it, then resume."
+	ReasonBoxHasUnsent      = "Your earlier message is still in the box on your Mac. Retry it in the chat, or clear the box, then resume."
+	ReasonUnsentUnconfirmed = "Your message may still be in the box on your Mac. If you sent it there, delete it from the queue; otherwise clear the box, then resume."
+	ReasonNotClaude         = "Claude Code isn't running in this session's terminal"
+	ReasonAutomationDenied  = "macOS isn't letting aimux type into iTerm2"
+	ReasonNoDriver          = "Only sessions in iTerm2 can take queued messages"
+	ReasonDisabled          = "Typing into terminal sessions is off on the Mac"
+	ReasonNotRunning        = "Session not running"
+	ReasonTurnFailed        = "Claude stopped with an error. Check the session, then resume."
+	ReasonNoHistory         = "Couldn't read this session on your Mac"
+	ReasonSendFailed        = "This message couldn't be sent. Check the session, then resume."
+	ReasonReadFailed        = "Couldn't read the session on your Mac. Check iTerm2, then resume."
 )
 
 // NoteMacInUse is the waiting line (not a pause) while the guard holds the
@@ -83,6 +85,11 @@ type Terminal interface {
 	Submit(ctx context.Context, session, text string) error
 	// Turns returns the session's latest person turns.
 	Turns(ctx context.Context, session string) ([]Turn, error)
+	// LeftInBox reports whether the input box holds a message a send typed
+	// but did not submit, as of the latest screen read: it answers from
+	// terminput's record without reading the screen again
+	// (terminput.Service.LeftInBox).
+	LeftInBox(session string) bool
 }
 
 // ACP runs turns for sessions not open in a terminal (the broker).
@@ -460,6 +467,15 @@ func (d *Dispatcher) stepTerminal(ctx context.Context, s string, q Queue, w *wat
 		d.answering(s, w.flight)
 		return
 	}
+	if p, ok := boxRefusals[code]; ok {
+		// Nothing typed: the item waits. aimux's own earlier message is in
+		// the box, never erased by the next one; or a paste marker for this
+		// text that aimux cannot confirm is its own: the owner clears it.
+		_ = d.cfg.Store.Release(s, it.ID)
+		d.setNote(s, "")
+		d.pause(s, p)
+		return
+	}
 	p, pause := terminalPause(code)
 	if !pause {
 		// Refused before typing anything: still not free.
@@ -510,7 +526,11 @@ func (d *Dispatcher) notFree(ctx context.Context, s string, w *watch, st terminp
 		w.heldItem = ""
 		return false
 	}
-	return d.hold(s, w, key, now, pauseBoxNotEmpty)
+	p := pauseBoxNotEmpty
+	if d.cfg.Terminal != nil && d.cfg.Terminal.LeftInBox(s) {
+		p = pauseBoxHasUnsent // aimux's own message: Retry can still send it
+	}
+	return d.hold(s, w, key, now, p)
 }
 
 // hold pauses with p once key has been held back, unbroken, for more than
@@ -689,20 +709,29 @@ func (d *Dispatcher) finish(s string, w *watch) bool {
 type pauseReason struct{ code, reason string }
 
 var (
-	pauseNoAnswer    = pauseReason{"no_answer", ReasonNoAnswer}
-	pauseUsedOnMac   = pauseReason{"used_on_mac", ReasonUsedOnMac}
-	pauseClosed      = pauseReason{"closed", ReasonClosed}
-	pauseClearBox    = pauseReason{"clear_box", ReasonClearBox}
-	pauseBoxNotEmpty = pauseReason{"box_not_empty", ReasonBoxNotEmpty}
-	pauseInTerminal  = pauseReason{"in_terminal", ReasonInTerminal}
-	pauseDisabled    = pauseReason{"disabled", ReasonDisabled}
-	pauseNotRunning  = pauseReason{"not_running", ReasonNotRunning}
-	pauseTurnFailed  = pauseReason{"turn_failed", ReasonTurnFailed}
-	pauseNoHistory   = pauseReason{"no_history", ReasonNoHistory}
-	pauseSendFailed  = pauseReason{"error", ReasonSendFailed}
-	pauseReadFailed  = pauseReason{"read_failed", ReasonReadFailed}
-	pauseMaybeSent   = pauseReason{"maybe_sent", ReasonMaybeSent}
+	pauseNoAnswer     = pauseReason{"no_answer", ReasonNoAnswer}
+	pauseUsedOnMac    = pauseReason{"used_on_mac", ReasonUsedOnMac}
+	pauseClosed       = pauseReason{"closed", ReasonClosed}
+	pauseClearBox     = pauseReason{"clear_box", ReasonClearBox}
+	pauseBoxNotEmpty  = pauseReason{"box_not_empty", ReasonBoxNotEmpty}
+	pauseBoxHasUnsent = pauseReason{"box_has_unsent", ReasonBoxHasUnsent}
+	pauseUnconfirmed  = pauseReason{"unsent_unconfirmed", ReasonUnsentUnconfirmed}
+	pauseInTerminal   = pauseReason{"in_terminal", ReasonInTerminal}
+	pauseDisabled     = pauseReason{"disabled", ReasonDisabled}
+	pauseNotRunning   = pauseReason{"not_running", ReasonNotRunning}
+	pauseTurnFailed   = pauseReason{"turn_failed", ReasonTurnFailed}
+	pauseNoHistory    = pauseReason{"no_history", ReasonNoHistory}
+	pauseSendFailed   = pauseReason{"error", ReasonSendFailed}
+	pauseReadFailed   = pauseReason{"read_failed", ReasonReadFailed}
+	pauseMaybeSent    = pauseReason{"maybe_sent", ReasonMaybeSent}
 )
+
+// boxRefusals are Send's refusals over text in the box that typed nothing:
+// the item is released and the queue pauses with the reason.
+var boxRefusals = map[string]pauseReason{
+	"box_has_unsent":     pauseBoxHasUnsent,
+	"unsent_unconfirmed": pauseUnconfirmed,
+}
 
 // terminalPauses are the terminput codes that pause; the wait codes are
 // absent. Any other code pauses with pauseSendFailed.

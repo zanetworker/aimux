@@ -304,10 +304,13 @@ paths:
         still holds the text and no prompt is showing, as if the owner typed it;
         otherwise `409 not_submitted`: the text waits in the input box and
         nothing was submitted. While the box still shows that text (the same
-        words; wrapping aside), the session's `terminal.canType` is true and
-        sending the same text again presses Enter without typing; any other
-        text treats it like a draft (replaced, or `draft_in_box` with
-        `keep_drafts`). Once the box shows anything else (cleared
+        words; wrapping aside, or for pasted text the exact paste marker seen
+        after pasting, while the same `claude` runs and the Mac had no input
+        since), the session's `terminal.canType` is true and sending the same
+        text again presses Enter without typing (a paste marker aimux cannot
+        confirm answers `unsent_unconfirmed` instead); any other text is refused
+        with `box_has_unsent` and nothing is typed, unless `replace` is set
+        (then it is cleared like a draft). Once the box shows anything else (cleared
         or sent at the Mac), the record is dropped and the box is the owner's.
         Follow the answer by re-reading
         `GET /v1/sessions/{id}`. Checked on every request: the pane's foreground
@@ -854,6 +857,8 @@ components:
             - not_submitted      # 409: the text was typed but Enter was not pressed; it waits in the input box
             - box_not_cleared    # 409: a draft in the input box would not empty; nothing was typed
             - draft_in_box       # 409: a draft in the input box is kept (keep_drafts); nothing was typed
+            - box_has_unsent     # 409: the input box holds aimux's own earlier message, typed but not sent; Retry it, or clear the box; nothing was typed
+            - unsent_unconfirmed # 409: the box shows a paste marker for this same text, but aimux can't confirm it's its own (Mac input since, or claude restarted); send or clear it at the Mac; nothing was typed
             - no_prompt          # 409: no permission prompt is showing
             - prompt_changed     # 409: a different prompt is showing, or the option is not one of its keys
             - login_required     # 401: device login is on and the request has no live session (log in, or pair if that fails)

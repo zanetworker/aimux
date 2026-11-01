@@ -96,6 +96,8 @@ test('terminalReasonLine: with the queue the Mac in use is one line (the spec wo
 test('a kept draft and a box that would not clear have their own lines', () => {
   assert.equal(terminalErrorText({ code: 'draft_in_box', message: 'm' }), 'Your draft on the Mac is kept; nothing was sent');
   assert.equal(terminalErrorText({ code: 'box_not_cleared', message: 'm' }), "The box on your Mac couldn't be cleared; nothing was sent");
+  assert.equal(terminalErrorText({ code: 'box_has_unsent', message: 'm' }), 'Your earlier message is still in the box on your Mac; Retry it, or clear the box');
+  assert.equal(terminalErrorText({ code: 'unsent_unconfirmed', message: 'm' }), "Your message may still be in the box on your Mac, but aimux can't confirm it's yours. Send or clear it at the Mac.");
 });
 
 test('the working line: how long, then the current step; nothing while idle', () => {

@@ -31,6 +31,13 @@ type fakeTerm struct {
 	turnsErr  error
 	calls     int // Status and Turns calls: polling
 	onStatus  func()
+	left      bool // LeftInBox: aimux's own unsent message is in the box
+}
+
+func (f *fakeTerm) LeftInBox(string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.left
 }
 
 func (f *fakeTerm) Open(session string) (string, bool) {
@@ -820,6 +827,52 @@ func TestTerminalBoxNotEmptyPausesAfterTwoMinutes(t *testing.T) {
 	r.wantQueue("s", QueuePaused, ReasonBoxNotEmpty)
 	r.wantFirst("s", "first", StateWaiting)
 	r.wantSends()
+}
+
+// The box holds aimux's own unsent message: the pause says so, and how to
+// get it out (Retry in the chat, or clear the box).
+func TestTerminalBoxWithTheUnsentMessagePausesWithItsOwnReason(t *testing.T) {
+	r := newRig(t)
+	r.openTerm("s")
+	r.add("s", "second")
+	r.term.left = true
+	r.term.status, r.term.sendErr = free, terminput.ErrDraftInBox
+	r.step()
+	r.now = r.now.Add(31 * time.Second) // idle long enough: the send is refused, the hold starts
+	r.step()
+	r.now = r.now.Add(2 * time.Minute)
+	r.step() // idle again
+	r.now = r.now.Add(3 * time.Second)
+	r.step() // refused again, held over two minutes
+	r.wantQueue("s", QueuePaused, ReasonBoxHasUnsent)
+	if got := r.audit.entries[len(r.audit.entries)-1]; got.Action != devicelogin.ActionQueuePaused || got.Result != "box_has_unsent" {
+		t.Fatalf("last audit = %+v, want queue paused box_has_unsent", got)
+	}
+}
+
+// A send refused because aimux's own unsent message is in the box pauses
+// at once with that reason; nothing is held back unseen.
+func TestTerminalSendRefusedBoxHasUnsentPauses(t *testing.T) {
+	r := newRig(t)
+	r.openTerm("s")
+	r.add("s", "second")
+	r.term.status, r.term.sendErr = free, terminput.ErrBoxHasUnsent
+	r.settle()
+	r.wantQueue("s", QueuePaused, ReasonBoxHasUnsent)
+	r.wantFirst("s", "second", StateWaiting)
+}
+
+// A send refused because the box may hold an unconfirmed paste asks the
+// owner to clear the box at the Mac; nothing was typed, the item waits.
+func TestTerminalSendRefusedUnsentUnconfirmedPauses(t *testing.T) {
+	r := newRig(t)
+	r.openTerm("s")
+	r.add("s", "second")
+	r.term.status, r.term.sendErr = free, terminput.ErrUnsentUnconfirmed
+	r.settle()
+	// The owner may send it at the Mac: the line says to delete it here then, so it never goes twice.
+	r.wantQueue("s", QueuePaused, ReasonUnsentUnconfirmed)
+	r.wantFirst("s", "second", StateWaiting)
 }
 
 func TestTerminalBoxNotEmptyCountsOnlyAnUnbrokenHold(t *testing.T) {

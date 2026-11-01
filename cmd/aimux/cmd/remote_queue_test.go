@@ -43,6 +43,8 @@ func (r *recordingInput) Submit(context.Context, string, string) error {
 	return nil
 }
 
+func (r *recordingInput) LeftInBox(string) bool { return false }
+
 // queueRig is the queue as remote serve wires it, for a session open in a
 // terminal (held by this test's own process in Claude's registry).
 func queueRig(t *testing.T, tcfg config.TerminalInputConfig) (*chatqueue.Store, *recordingInput, string) {

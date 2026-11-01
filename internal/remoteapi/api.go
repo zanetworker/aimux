@@ -707,6 +707,8 @@ var terminalMessages = map[string]struct {
 	"not_submitted":      {http.StatusConflict, "the message is in the input box but was not sent; the screen changed, a prompt may be showing"},
 	"box_not_cleared":    {http.StatusConflict, "the text in the input box on the Mac could not be cleared; nothing was sent"},
 	"draft_in_box":       {http.StatusConflict, "a draft you left in the input box on the Mac is kept (keep_drafts); nothing was sent"},
+	"box_has_unsent":     {http.StatusConflict, "Your earlier message is still in the box on your Mac; Retry it, or clear the box"},
+	"unsent_unconfirmed": {http.StatusConflict, "Your message may still be in the box on your Mac, but aimux can't confirm it's yours. Send or clear it at the Mac."},
 	"busy":               {http.StatusConflict, "Claude is working in this session; try again when it finishes"},
 	"no_prompt":          {http.StatusConflict, "no permission prompt is showing"},
 	"prompt_changed":     {http.StatusConflict, "a different permission prompt is showing"},

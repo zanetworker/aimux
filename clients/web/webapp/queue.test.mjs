@@ -13,7 +13,7 @@ const Q = '/v1/sessions/s%201/queue';
 const err = (code, message = 'm', status = 409) => Object.assign(new Error(message), { code, status });
 
 test('the queue fixtures are all there', () => {
-  assert.equal(fixtures.length, 37);
+  assert.equal(fixtures.length, 39);
 });
 
 for (const f of fixtures) {

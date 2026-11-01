@@ -391,3 +391,28 @@ func TestWorkingSecondsAboveANamedBox(t *testing.T) {
 		t.Fatal("Working = false above a named box")
 	}
 }
+
+// A message with a blank line between paragraphs shows in the box with an
+// empty row; it is still that message, so Enter (and Retry) may submit it.
+func TestTextInBoxWithABlankLine(t *testing.T) {
+	rule := strings.Repeat("─", 60)
+	text := "Why are the phone sessions not in a terminal\n\nAnd why no permission alert"
+	screen := "⏺ Done.\n\n" + rule + "\n❯ Why are the phone sessions not in a terminal\n\n  And why no permission alert\n" + rule + "\n  [Model] │ demo\n"
+	if !TextInBox(screen, text) {
+		t.Error("TextInBox = false for a message with a blank line")
+	}
+	if !TextShownInBox(screen, text) {
+		t.Error("TextShownInBox = false: Retry could not submit it")
+	}
+	if !WordsInBox(screen, text) {
+		t.Error("WordsInBox = false for a message with a blank line")
+	}
+	other := strings.Replace(screen, "permission alert", "permission alerts please", 1)
+	if TextInBox(other, text) || TextShownInBox(other, text) {
+		t.Error("another text in the box counted as the message")
+	}
+	trailing := "⏺ Done.\n\n" + rule + "\n❯ Why are the phone sessions not in a terminal\n\n" + rule + "\n  [Model] │ demo\n"
+	if !TextInBox(trailing, "Why are the phone sessions not in a terminal\n") {
+		t.Error("a trailing blank row broke the box")
+	}
+}

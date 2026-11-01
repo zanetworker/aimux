@@ -852,6 +852,7 @@ type claudeJSONLEntry struct {
 	isHumanMessage bool
 	textContent    string
 	hookFeedback   string // a Stop hook's feedback (isMeta string content): a step, not a message
+	taskNote       string // a background task's notification: a step, not a message
 	blocks         []claudeContentBlock
 	tokensIn       int64
 	tokensOut      int64
@@ -888,17 +889,25 @@ func parseClaudeRawEntry(line string) claudeJSONLEntry {
 
 // parseClaudeQueuedCommand reads a message typed while Claude was busy:
 // Claude Code saves it as an attachment of type queued_command rather than a
-// user entry, so it is turned into one. Other attachments are ignored.
+// user entry, so it is turned into one. A background task's notification
+// delivered the same way (commandMode task-notification) becomes a step.
+// Other attachments are ignored.
 func (e *claudeJSONLEntry) parseClaudeQueuedCommand(raw map[string]json.RawMessage) {
 	var att struct {
-		Type   string `json:"type"`
-		Prompt string `json:"prompt"`
+		Type        string          `json:"type"`
+		Prompt      string          `json:"prompt"`
+		CommandMode string          `json:"commandMode"`
+		Origin      json.RawMessage `json:"origin"`
 	}
 	if err := json.Unmarshal(raw["attachment"], &att); err != nil || att.Type != "queued_command" || strings.TrimSpace(att.Prompt) == "" {
 		e.entryType = ""
 		return
 	}
 	e.entryType = "user"
+	if att.CommandMode == "task-notification" || isTaskNotification(map[string]json.RawMessage{"origin": att.Origin}, att.Prompt) {
+		e.taskNote = strings.TrimSpace(att.Prompt)
+		return
+	}
 	e.isHumanMessage = true
 	e.textContent = att.Prompt
 }
@@ -930,6 +939,10 @@ func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
 			if strings.HasPrefix(strings.TrimSpace(contentStr), stopHookPrefix) {
 				e.hookFeedback = strings.TrimSpace(contentStr)
 			}
+			return
+		}
+		if isTaskNotification(raw, contentStr) {
+			e.taskNote = strings.TrimSpace(contentStr)
 			return
 		}
 		e.isHumanMessage = true
@@ -1085,6 +1098,45 @@ func stopHookMessage(feedback string) string {
 	return strings.TrimSpace(msg)
 }
 
+// isTaskNotification reports a background task's notification, which Claude
+// Code saves as a user entry: marked by its origin, or by its opening tag.
+func isTaskNotification(raw map[string]json.RawMessage, content string) bool {
+	var origin struct {
+		Kind string `json:"kind"`
+	}
+	_ = json.Unmarshal(raw["origin"], &origin)
+	return origin.Kind == "task-notification" || strings.HasPrefix(strings.TrimSpace(content), "<task-notification>")
+}
+
+// taskNoteStep is a background task's notification as a step: its summary,
+// and its result (or the summary) as the step's detail.
+func taskNoteStep(note string) trace.ToolSpan {
+	summary := tagText(note, "summary")
+	if summary == "" {
+		summary = "Background task finished"
+	}
+	status := tagText(note, "status")
+	detail := tagText(note, "result")
+	if detail == "" {
+		detail = summary
+	}
+	return trace.ToolSpan{Name: "Background task", Snippet: summary, Input: detail,
+		Success: status == "" || status == "completed"}
+}
+
+// tagText is the trimmed text between <tag> and </tag>, or "".
+func tagText(s, tag string) string {
+	_, rest, ok := strings.Cut(s, "<"+tag+">")
+	if !ok {
+		return ""
+	}
+	inner, _, ok := strings.Cut(rest, "</"+tag+">")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(inner)
+}
+
 func parseClaudeJSONL(data string) []trace.Turn {
 	var entries []claudeJSONLEntry
 	for _, line := range strings.Split(data, "\n") {
@@ -1127,6 +1179,8 @@ func parseClaudeJSONL(data string) []trace.Turn {
 				current.Actions = append(current.Actions, trace.ToolSpan{
 					Name: "Stop hook", Snippet: stopHookMessage(e.hookFeedback), Input: e.hookFeedback, Success: true,
 				})
+			} else if e.taskNote != "" && current != nil {
+				current.Actions = append(current.Actions, taskNoteStep(e.taskNote))
 			} else if e.hasToolResults {
 				for _, tr := range e.toolResults {
 					if span, ok := pendingTools[tr.toolUseID]; ok {

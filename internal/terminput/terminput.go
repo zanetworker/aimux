@@ -150,7 +150,11 @@ var (
 	ErrNotSubmitted     = newErr("not_submitted", "the text is in the input box but was not submitted")
 	ErrNotCleared       = newErr("box_not_cleared", "the text in the input box could not be cleared; nothing was sent")
 	ErrDraftInBox       = newErr("draft_in_box", "a draft left in the input box is kept (keep_drafts); nothing was sent")
-	ErrBusy             = newErr("busy", "Claude is working on a turn in this session")
+	ErrBoxHasUnsent     = newErr("box_has_unsent", "Your earlier message is still in the box on your Mac; Retry it, or clear the box")
+	// ErrUnsentUnconfirmed: the box shows a paste marker for the same text,
+	// but it may be the owner's paste; a retry would only be refused again.
+	ErrUnsentUnconfirmed = newErr("unsent_unconfirmed", "Your message may still be in the box on your Mac, but aimux can't confirm it's yours. Send or clear it at the Mac.")
+	ErrBusy              = newErr("busy", "Claude is working on a turn in this session")
 	// Submit's answers when the input box does not hold the message.
 	ErrBoxEmpty = newErr("box_empty", "the input box is empty")
 	ErrNotInBox = newErr("not_in_box", "the input box holds other text")
@@ -226,6 +230,19 @@ type Service struct {
 	left    map[string]string
 	leftGen int // counts records, so a screen read before one never drops it
 	leftAt  map[string]time.Time
+	// leftMarker: per session, the exact paste marker ("[Pasted text #3
+	// +2 lines]") the box showed right after a send pasted left's text, with
+	// the claude pid it was typed into and when. Only that marker stands for
+	// aimux's text, and only while the same claude runs and the Mac had no
+	// input since: the owner may clear the box and paste text of their own
+	// that Claude Code shows with the same marker.
+	leftMarker map[string]pasteMark
+}
+
+type pasteMark struct {
+	marker string
+	pid    int
+	at     time.Time
 }
 
 // leftSettle is how long after typing a screen may not show the text yet.
@@ -244,6 +261,81 @@ func (s *Service) leftText(sessionID string) string {
 	return s.left[sessionID]
 }
 
+// leftShownLocked reports whether scr's box shows the text a send left:
+// its words, or exactly the paste marker recorded for it. leftMu is held.
+func (s *Service) leftShownLocked(sessionID, scr string) bool {
+	left := s.left[sessionID]
+	if left == "" {
+		return false
+	}
+	if WordsInBox(scr, left) {
+		return true
+	}
+	m := s.leftMarker[sessionID].marker
+	box, rows, ok := boxText(scr)
+	return m != "" && ok && rows == 1 && box == m
+}
+
+// leftShown is leftShownLocked taking leftMu.
+func (s *Service) leftShown(sessionID, scr string) bool {
+	s.leftMu.Lock()
+	defer s.leftMu.Unlock()
+	return s.leftShownLocked(sessionID, scr)
+}
+
+// LeftInBox reports whether the input box holds a message a send typed but
+// did not submit, as of the latest screen read: it answers from the record
+// without reading the screen again. Any read (Status, Send) that shows the
+// box without the message drops the record; within leftSettle of typing a
+// read never does.
+func (s *Service) LeftInBox(sessionID string) bool {
+	return s.leftText(sessionID) != ""
+}
+
+// setLeftMarker records the paste marker scr's box shows for text, the
+// send's own text just pasted into pid's claude, when the box is exactly one
+// marker row.
+func (s *Service) setLeftMarker(sessionID, text, scr string, pid int) {
+	box, rows, ok := boxText(scr)
+	if !ok || rows != 1 || !PasteText(text) || !pastedMarker.MatchString(box) {
+		return
+	}
+	s.leftMu.Lock()
+	defer s.leftMu.Unlock()
+	if s.left[sessionID] == text {
+		s.leftMarker[sessionID] = pasteMark{marker: box, pid: pid, at: s.now()}
+	}
+}
+
+// markerOK reports whether the box scr shows stands for text a send left
+// as its recorded paste marker: text is the record's, the box is exactly
+// that marker, t runs the same claude, and the Mac has had no keyboard or
+// mouse input since the marker was recorded. Anything else, an idle read
+// error included, is false (fail safe).
+func (s *Service) markerOK(sessionID, text, scr string, t Target) bool {
+	s.leftMu.Lock()
+	m, left := s.leftMarker[sessionID], s.left[sessionID]
+	s.leftMu.Unlock()
+	box, rows, ok := boxText(scr)
+	if m.marker == "" || left != text || !ok || rows != 1 || box != m.marker || m.pid != t.PID {
+		return false
+	}
+	idle, err := s.sys.IdleSeconds()
+	return err == nil && idle >= elapsedSince(s.now(), m.at).Seconds()
+}
+
+// elapsedSince is the time from at to now by the longer of the monotonic
+// and the wall clock: the monotonic clock stops while the Mac sleeps, and
+// input during or after a sleep must never fall inside an undercount.
+func elapsedSince(now, at time.Time) time.Duration {
+	return longerElapsed(now.Sub(at), now.Round(0).Sub(at.Round(0)))
+}
+
+// longerElapsed is the longer of two readings of the same span.
+func longerElapsed(mono, wall time.Duration) time.Duration {
+	return max(mono, wall)
+}
+
 // forgetLeftUnlessShown drops the record of text a send left once a screen
 // with no prompt shows the box without it (cleared, or sent, at the Mac):
 // that text, typed again, is the owner's. gen is leftGeneration from before
@@ -253,14 +345,16 @@ func (s *Service) forgetLeftUnlessShown(sessionID, scr string, gen int) {
 	defer s.leftMu.Unlock()
 	left := s.left[sessionID]
 	settling := s.now().Sub(s.leftAt[sessionID]) < leftSettle
-	if left != "" && s.leftGen == gen && !settling && ParsePrompt(scr) == nil && !WordsInBox(scr, left) {
+	if left != "" && s.leftGen == gen && !settling && ParsePrompt(scr) == nil && !s.leftShownLocked(sessionID, scr) {
 		delete(s.left, sessionID)
+		delete(s.leftMarker, sessionID)
 	}
 }
 
 func (s *Service) setLeft(sessionID, text string) {
 	s.leftMu.Lock()
 	defer s.leftMu.Unlock()
+	delete(s.leftMarker, sessionID) // a new record, or none: any marker is stale
 	if text == "" {
 		delete(s.left, sessionID)
 	} else {
@@ -272,7 +366,7 @@ func (s *Service) setLeft(sessionID, text string) {
 
 // NewService builds a Service. log may be nil.
 func NewService(cfg config.TerminalInputConfig, sessions Sessions, sys System, log io.Writer, drivers ...Driver) *Service {
-	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}, left: map[string]string{}, leftAt: map[string]time.Time{}}
+	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}, left: map[string]string{}, leftAt: map[string]time.Time{}, leftMarker: map[string]pasteMark{}}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -426,11 +520,10 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 	}
 	// The text a send left waiting can be retried (Retry presses Enter).
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
-	left := s.leftText(sessionID)
 	st.BoxHasText = BoxHasText(scr)
 	// Text in the box (a grey suggestion or a draft) does not stop a message:
 	// Send types over a suggestion and replaces or keeps a draft.
-	if !InputBoxEmpty(scr) && !st.BoxHasText && (left == "" || !WordsInBox(scr, left)) {
+	if !InputBoxEmpty(scr) && !st.BoxHasText && !s.leftShown(sessionID, scr) {
 		st.Reason = Code(ErrNotAtInput)
 		return st
 	}
@@ -612,9 +705,21 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 		return ErrBusy
 	}
 	// A send that typed but did not press Enter (ErrNotSubmitted) left this
-	// very text in the box: its retry presses Enter and types nothing.
+	// very text in the box (or the paste marker recorded for it, markerOK):
+	// its retry presses Enter and types nothing. Other text never erases it
+	// unless replacing: ErrBoxHasUnsent, nothing pressed. The same text on
+	// a marker markerOK cannot confirm (Mac input since, another claude)
+	// may be the owner's paste: ErrUnsentUnconfirmed, nothing pressed.
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
-	waiting := !InputBoxEmpty(scr) && s.leftText(sessionID) == text && WordsInBox(scr, text)
+	shown := !InputBoxEmpty(scr) && s.leftShown(sessionID, scr)
+	same := shown && s.leftText(sessionID) == text
+	waiting := same && (WordsInBox(scr, text) || s.markerOK(sessionID, text, scr, t))
+	switch {
+	case same && !waiting && !replace:
+		return ErrUnsentUnconfirmed
+	case shown && !waiting && !replace:
+		return ErrBoxHasUnsent
+	}
 	if !InputBoxEmpty(scr) && !waiting {
 		if !BoxHasText(scr) {
 			return ErrNotAtInput
@@ -660,6 +765,9 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 				break // shown, or a prompt took the screen: no point waiting
 			}
 		}
+		if shown {
+			s.setLeftMarker(sessionID, text, scr, t.PID) // a marker seen now stands for this text
+		}
 		if !shown {
 			return notSubmitted("not_in_box")
 		}
@@ -681,8 +789,11 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 }
 
 // Submit presses Enter for text a Send left in the input box (ErrNotSubmitted),
-// only if the box visibly holds exactly that text (TextShownInBox): a paste
-// marker could stand for anything, so it is not enough. It types nothing. ErrBoxEmpty: the box is empty;
+// only if the box visibly holds exactly that text (TextShownInBox), or, for
+// pasted text a send left (leftText), exactly the paste marker that send saw
+// in the box right after pasting, while the same claude runs and the Mac has
+// had no input since (markerOK). Any other marker, or that one after Mac
+// input, could stand for the owner's own paste and is ErrNotInBox. It types nothing. ErrBoxEmpty: the box is empty;
 // ErrNotInBox: it holds something else; ErrNotAtInput: a prompt shows;
 // ErrBusy: Claude is working. The other checks are Send's; the in-use
 // guard runs again right before Enter.
@@ -710,7 +821,7 @@ func (s *Service) submit(ctx context.Context, sessionID, text string) error {
 		return ErrNotAtInput
 	case InputBoxEmpty(scr):
 		return ErrBoxEmpty
-	case !TextShownInBox(scr, text):
+	case !TextShownInBox(scr, text) && !s.markerOK(sessionID, text, scr, t):
 		return ErrNotInBox
 	}
 	if err := s.inUse(ctx, d, t); err != nil {

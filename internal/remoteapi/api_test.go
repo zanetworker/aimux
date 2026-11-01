@@ -722,6 +722,29 @@ func TestAPI_TerminalMessageReplace(t *testing.T) {
 	}
 }
 
+// aimux's own unsent message in the box refuses another message: 409 with
+// the fixed text the clients show.
+func TestAPI_TerminalMessageBoxHasUnsent(t *testing.T) {
+	term := &fakeTerminal{err: terminput.ErrBoxHasUnsent}
+	srv := newTerminalAPI(t, term, true)
+	resp, body := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"the next message"}`)
+	if resp.StatusCode != 409 || body["code"] != "box_has_unsent" || body["error"] != "Your earlier message is still in the box on your Mac; Retry it, or clear the box" {
+		t.Fatalf("%d %v, want 409 box_has_unsent", resp.StatusCode, body)
+	}
+}
+
+// A paste marker aimux cannot confirm is its own: 409 with copy that does
+// not offer Retry.
+func TestAPI_TerminalMessageUnsentUnconfirmed(t *testing.T) {
+	term := &fakeTerminal{err: terminput.ErrUnsentUnconfirmed}
+	srv := newTerminalAPI(t, term, true)
+	resp, body := do(t, srv, "POST", "/v1/sessions/s9/terminal/messages", `{"text":"the same long message"}`)
+	want := "Your message may still be in the box on your Mac, but aimux can't confirm it's yours. Send or clear it at the Mac."
+	if resp.StatusCode != 409 || body["code"] != "unsent_unconfirmed" || body["error"] != want {
+		t.Fatalf("%d %v, want 409 unsent_unconfirmed", resp.StatusCode, body)
+	}
+}
+
 // Without a Session func, ErrNotInTerminal stays a 409 instead of panicking.
 func TestAPI_TerminalErrorWithoutSessionFunc(t *testing.T) {
 	api := &API{Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), TerminalInput: &fakeTerminal{err: terminput.ErrNotInTerminal}, TerminalEnabled: true}
