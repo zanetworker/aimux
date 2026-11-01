@@ -65,9 +65,11 @@ func ReadClaudeRegistry(dir string) map[int]ClaudeRegistryEntry {
 // its own start-time reader in provider); the remote stack's LiveCache
 // checks start times with one batched ps of its own, so overriding this hook
 // does not reach it.
-var ProcessStartTime = processStartTimeImpl
+var ProcessStartTime = ReadProcessStartTime
 
-func processStartTimeImpl(pid int) time.Time {
+// ReadProcessStartTime asks ps for pid's start time (UTC), or the zero time on
+// any failure. The one `ps -o lstart=` reader; provider uses it too.
+func ReadProcessStartTime(pid int) time.Time {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output() // #nosec G204 -- pid is an int

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/jsonl"
@@ -87,6 +88,61 @@ func ShownTitle(s Session) string {
 	default:
 		return s.FirstPrompt
 	}
+}
+
+// DisplayTitle is ShownTitle as remote clients see it: a metadata or Claude
+// Code title as written, a first-message fallback labelled by PromptLabel and
+// cut at 80 bytes.
+func DisplayTitle(s Session) string {
+	if s.Title != "" || s.AITitle != "" {
+		return ShownTitle(s)
+	}
+	return Shorten(PromptLabel(s.FirstPrompt), 80)
+}
+
+var imageTag = regexp.MustCompile(`\[Image(?: #\d+|: [^\]]*)\]`)
+
+// PromptLabel turns a stored prompt into what a person would call it:
+// without image placeholders, and with the messages Claude Code itself puts
+// in the user's place (hook feedback, notifications) named, not quoted.
+// Unlike singleLinePrompt it keeps the whole prompt, not its first sentence.
+func PromptLabel(p string) string {
+	p = strings.TrimSpace(p)
+	switch {
+	case p == "":
+		return ""
+	case strings.HasPrefix(p, "The user sent a new message while you were working:"):
+		p = strings.TrimPrefix(p, "The user sent a new message while you were working:")
+	case strings.HasPrefix(p, "Stop hook feedback:"):
+		return "(hook feedback)"
+	case strings.HasPrefix(p, "Another Claude session sent a message"):
+		return "(message from another session)"
+	case strings.HasPrefix(p, "<"):
+		return "(notification)"
+	}
+	hadImage := imageTag.MatchString(p)
+	p = strings.Join(strings.Fields(imageTag.ReplaceAllString(p, " ")), " ")
+	if p == "" && hadImage {
+		return "(image)"
+	}
+	return p
+}
+
+// Shorten trims s and cuts it to at most n bytes on a UTF-8 boundary,
+// appending "…" when it cut.
+func Shorten(s string, n int) string { return CutBytes(strings.TrimSpace(s), n) }
+
+// CutBytes cuts s to at most n bytes on a UTF-8 boundary and appends "…"; it
+// does not trim.
+func CutBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut-- // do not split a UTF-8 sequence
+	}
+	return s[:cut] + "…"
 }
 
 const (

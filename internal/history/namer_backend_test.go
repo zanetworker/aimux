@@ -110,7 +110,7 @@ func fakeClaude(t *testing.T, out string, exit int) string {
 
 func TestCLIBackend_RunsInAnEmptyFolderAndReadsUsage(t *testing.T) {
 	bin := fakeClaude(t, `{"type":"result","is_error":false,"result":"files=FILES","usage":{"input_tokens":12,"cache_creation_input_tokens":100,"cache_read_input_tokens":3,"output_tokens":7},"total_cost_usd":0.002}`, 0)
-	b := &cliBackend{bin: bin, timeout: 10 * time.Second}
+	b := &cliBackend{bin: bin, timeout: cliTestTimeout}
 	reply, err := b.Complete(context.Background(), NamingRequest{Model: "haiku", Prompt: "p"})
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestCLIBackend_RunsInAnEmptyFolderAndReadsUsage(t *testing.T) {
 
 func TestCLIBackend_EstimatesWithoutUsage(t *testing.T) {
 	bin := fakeClaude(t, `{"type":"result","result":"abcdefghijklmnop"}`, 0)
-	b := &cliBackend{bin: bin, timeout: 10 * time.Second}
+	b := &cliBackend{bin: bin, timeout: cliTestTimeout}
 	reply, err := b.Complete(context.Background(), NamingRequest{Model: "haiku", System: strings.Repeat("s", 40), Prompt: strings.Repeat("p", 360)})
 	if err != nil {
 		t.Fatal(err)
@@ -137,12 +137,12 @@ func TestCLIBackend_EstimatesWithoutUsage(t *testing.T) {
 
 func TestCLIBackend_Failures(t *testing.T) {
 	bin := fakeClaude(t, `{"type":"result","is_error":true,"result":"`+privateText+`"}`, 0)
-	_, err := (&cliBackend{bin: bin, timeout: 10 * time.Second}).Complete(context.Background(), NamingRequest{Prompt: "p"})
+	_, err := (&cliBackend{bin: bin, timeout: cliTestTimeout}).Complete(context.Background(), NamingRequest{Prompt: "p"})
 	if !errors.Is(err, ErrModelCall) || strings.Contains(err.Error(), privateText) {
 		t.Errorf("is_error: err = %v", err)
 	}
 	bin = fakeClaude(t, privateText, 3)
-	_, err = (&cliBackend{bin: bin, timeout: 10 * time.Second}).Complete(context.Background(), NamingRequest{Prompt: "p"})
+	_, err = (&cliBackend{bin: bin, timeout: cliTestTimeout}).Complete(context.Background(), NamingRequest{Prompt: "p"})
 	if err == nil || strings.Contains(err.Error(), privateText) {
 		t.Errorf("exit 3: err = %v", err)
 	}
@@ -156,7 +156,7 @@ func TestCLIBackend_RemovesItsFolder(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
 	bin := fakeClaude(t, `{"result":"x"}`, 0)
-	if _, err := (&cliBackend{bin: bin, timeout: 10 * time.Second}).Complete(context.Background(), NamingRequest{Prompt: "p"}); err != nil {
+	if _, err := (&cliBackend{bin: bin, timeout: cliTestTimeout}).Complete(context.Background(), NamingRequest{Prompt: "p"}); err != nil {
 		t.Fatal(err)
 	}
 	left, _ := os.ReadDir(tmp)
@@ -214,3 +214,8 @@ func TestCLIBackend_TimeoutKillsTheWholeProcessGroup(t *testing.T) {
 		t.Error("the child survived the timeout")
 	}
 }
+
+// cliTestTimeout bounds each fake claude run. A new script's first run can be
+// slow on a busy Mac (macOS checks a new executable before running it), so the
+// tests allow more than the real 10 s; the timeout tests use their own value.
+const cliTestTimeout = 30 * time.Second

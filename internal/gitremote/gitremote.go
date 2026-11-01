@@ -5,11 +5,11 @@ package gitremote
 import (
 	"context"
 	"net/url"
-	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/gitinfo"
 )
 
 // knownHosts are the hosts that serve the /issues, /commit and /blob URLs
@@ -117,7 +117,7 @@ func Lookup(dir string) (web, branch, root string, ok bool) {
 func lookup(dir string) (string, string, string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	remote, err := runGit(ctx, dir, "remote", "get-url", "origin")
+	remote, err := gitinfo.Origin(ctx, dir)
 	if err != nil {
 		return "", "", "", false
 	}
@@ -125,23 +125,13 @@ func lookup(dir string) (string, string, string, bool) {
 	if !ok {
 		return "", "", "", false
 	}
-	root, err := runGit(ctx, dir, "rev-parse", "--show-toplevel")
+	root, _, err := gitinfo.Top(ctx, dir)
 	if err != nil || root == "" {
 		return "", "", "", false
 	}
-	branch, err := runGit(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil { // a repo with no commit yet has no HEAD to resolve
-		branch, err = runGit(ctx, dir, "symbolic-ref", "--short", "HEAD")
-	}
+	branch, err := gitinfo.Branch(ctx, dir)
 	if err != nil || branch == "" || branch == "HEAD" { // detached: no branch to link to
 		return "", "", "", false
 	}
 	return web, branch, root, true
-}
-
-func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...) //nolint:gosec // fixed command; dir is a session folder passed as a -C argument
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
 }

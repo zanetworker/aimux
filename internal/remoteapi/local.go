@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -196,48 +195,8 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 
 func summary(s history.Session, state string) Session {
 	desc, _ := history.ShownDescription(s)
-	return Session{ID: s.ID, Provider: s.Provider, Title: shownTitle(s), Project: s.Project, LastActive: s.LastActive, State: state,
-		LastPrompt: shorten(cleanPrompt(s.LastPrompt), 160), Description: desc, Pinned: s.Starred}
-}
-
-// shownTitle is the title clients show: aimux's metadata title, else
-// Claude Code's, else the first message.
-func shownTitle(s history.Session) string {
-	title := s.Title
-	if title == "" {
-		title = s.AITitle
-	}
-	if title == "" {
-		title = shorten(cleanPrompt(s.FirstPrompt), 80)
-	}
-	return title
-}
-
-var imageTag = regexp.MustCompile(`\[Image(?: #\d+|: [^\]]*)\]`)
-
-// cleanPrompt turns a stored prompt into what a person would call it:
-// without image placeholders, and with the messages Claude Code itself puts
-// in the user's place (hook feedback, notifications) named, not quoted.
-func cleanPrompt(p string) string {
-	p = strings.TrimSpace(p)
-	switch {
-	case p == "":
-		return ""
-	case strings.HasPrefix(p, "The user sent a new message while you were working:"):
-		p = strings.TrimPrefix(p, "The user sent a new message while you were working:")
-	case strings.HasPrefix(p, "Stop hook feedback:"):
-		return "(hook feedback)"
-	case strings.HasPrefix(p, "Another Claude session sent a message"):
-		return "(message from another session)"
-	case strings.HasPrefix(p, "<"):
-		return "(notification)"
-	}
-	hadImage := imageTag.MatchString(p)
-	p = strings.Join(strings.Fields(imageTag.ReplaceAllString(p, " ")), " ")
-	if p == "" && hadImage {
-		return "(image)"
-	}
-	return p
+	return Session{ID: s.ID, Provider: s.Provider, Title: history.DisplayTitle(s), Project: s.Project, LastActive: s.LastActive, State: state,
+		LastPrompt: history.Shorten(history.PromptLabel(s.LastPrompt), 160), Description: desc, Pinned: s.Starred}
 }
 
 // Session returns one session and its last turns.
@@ -336,12 +295,12 @@ func timeOrNil(t time.Time) *time.Time {
 func turnOf(t trace.Turn) Turn {
 	tools := make([]TurnTool, 0, len(t.Actions))
 	for _, a := range t.Actions {
-		tools = append(tools, TurnTool{Name: a.Name, Snippet: shorten(a.Snippet, 200), OK: a.Success, Detail: detailOf(a)})
+		tools = append(tools, TurnTool{Name: a.Name, Snippet: history.Shorten(a.Snippet, 200), OK: a.Success, Detail: detailOf(a)})
 	}
 	return Turn{
 		Number: t.Number,
 		Time:   t.Timestamp,
-		User:   shorten(strings.Join(t.UserLines, "\n"), maxTextLen),
+		User:   history.Shorten(strings.Join(t.UserLines, "\n"), maxTextLen),
 		Reply:  shortenLines(replyOf(t), maxTextLen),
 		Tools:  tools,
 	}
@@ -365,43 +324,18 @@ func detailOf(a trace.ToolSpan) *ToolDetail {
 		input = ""
 	}
 	d := ToolDetail{
-		Input: shorten(input, maxDetailInput),
-		Error: shorten(a.ErrorMsg, maxDetailError),
-		Old:   capText(a.OldString, maxDetailDiff),
-		New:   capText(a.NewString, maxDetailDiff),
+		Input: history.Shorten(input, maxDetailInput),
+		Error: history.Shorten(a.ErrorMsg, maxDetailError),
+		Old:   history.CutBytes(a.OldString, maxDetailDiff),
+		New:   history.CutBytes(a.NewString, maxDetailDiff),
 	}
 	if d.New == "" {
-		d.New = capText(a.Content, maxDetailDiff)
+		d.New = history.CutBytes(a.Content, maxDetailDiff)
 	}
 	if d == (ToolDetail{}) {
 		return nil
 	}
 	return &d
-}
-
-// capText cuts s to at most n bytes on a UTF-8 boundary and appends "…"; it
-// does not trim.
-func capText(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	cut := n
-	for cut > 0 && !utf8Start(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…"
-}
-
-func shorten(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= n {
-		return s
-	}
-	cut := n
-	for cut > 0 && !utf8Start(s[cut]) {
-		cut-- // do not split a UTF-8 sequence
-	}
-	return s[:cut] + "…"
 }
 
 // replyOf is the reply as written, or the joined lines for a provider that
@@ -425,10 +359,8 @@ func shortenLines(s string, n int) string {
 	if nl := strings.LastIndexByte(s[:n+1], '\n'); nl > n/2 {
 		return strings.TrimRight(s[:nl], " \t\r\n") + "\n\n…"
 	}
-	return shorten(s, n)
+	return history.Shorten(s, n)
 }
-
-func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
 
 // lookupSummary finds the session's title, project and last activity in the
 // session index, and returns the index entry too (nil when unindexed); an
@@ -550,7 +482,7 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 			continue
 		}
 		c, _ := x.Created.Get(r.SessionID)
-		title := shorten(cleanPrompt(r.Title), 80)
+		title := history.Shorten(history.PromptLabel(r.Title), 80)
 		if title == "" {
 			title = c.Prompt
 		}

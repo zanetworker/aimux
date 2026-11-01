@@ -210,7 +210,7 @@ func (a *API) editMeta(w http.ResponseWriter, r *http.Request, req metaRequest, 
 	}
 	s.Title, s.Description, s.DescriptionBy, s.DescribedAt, s.Starred = saved.Title, saved.Description, saved.DescriptionBy, saved.DescribedAt, saved.Starred
 	shown, _ := history.ShownDescription(s)
-	writeJSON(w, http.StatusOK, MetaResult{Title: shownTitle(s), Description: shown, Pinned: s.Starred})
+	writeJSON(w, http.StatusOK, MetaResult{Title: history.DisplayTitle(s), Description: shown, Pinned: s.Starred})
 }
 
 // setOwner stores an owner value; an empty one clears the field only when
@@ -248,7 +248,7 @@ func (a *API) describe(w http.ResponseWriter, r *http.Request) {
 		s = fresh
 	}
 	shown, _ := history.ShownDescription(s)
-	writeJSON(w, http.StatusOK, DescribeResult{Title: shownTitle(s), Description: shown,
+	writeJSON(w, http.StatusOK, DescribeResult{Title: history.DisplayTitle(s), Description: shown,
 		Changed: nonNil(res.Changed), Kept: nonNil(res.Kept)})
 }
 

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 // CreatedSession is a session started through the remote API.
@@ -79,7 +81,7 @@ func (s *CreatedStore) Add(id, cwd, prompt string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.load()
-	s.byID[id] = CreatedSession{Cwd: cwd, Prompt: shorten(prompt, 200), Created: time.Now().UTC()}
+	s.byID[id] = CreatedSession{Cwd: cwd, Prompt: history.Shorten(prompt, 200), Created: time.Now().UTC()}
 	data, err := json.MarshalIndent(s.byID, "", "  ")
 	if err != nil {
 		return err

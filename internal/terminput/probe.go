@@ -28,7 +28,7 @@ func (SystemProbe) TTY(pid int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return parseTTY(out)
+	return ParseTTY(out)
 }
 
 // TTYs returns the controlling ttys of pids that have one, from one ps.
@@ -55,7 +55,7 @@ func ttysFrom(run func(string, ...string) (string, error), pids []int) (map[int]
 			continue
 		}
 		pid, perr := strconv.Atoi(f[0])
-		tty, _ := parseTTY(f[1])
+		tty, _ := ParseTTY(f[1])
 		if perr == nil && tty != "" {
 			out[pid] = tty
 		}
@@ -164,7 +164,8 @@ func firstLine(s string) string {
 	return ""
 }
 
-func parseTTY(out string) (string, error) {
+// ParseTTY maps `ps -o tty=` output to /dev/<tty>, or "" when the process has none.
+func ParseTTY(out string) (string, error) {
 	t := strings.TrimSpace(out)
 	if t == "" || t == "??" || t == "-" {
 		return "", nil

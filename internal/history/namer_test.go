@@ -71,3 +71,22 @@ func TestShownTitle(t *testing.T) {
 		t.Errorf("meta title: got %q", got)
 	}
 }
+
+func TestPromptLabel(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"fix the cache", "fix the cache"},
+		{"[Image #1] what is this?", "what is this?"},
+		{"[Image: original 3445x2245, displayed at 2000x1303. Multiply coordinates by 1.72 to map to original image.]", "(image)"},
+		{"[Image #1]", "(image)"},
+		{"The user sent a new message while you were working:\nare you still blocked?", "are you still blocked?"},
+		{"Stop hook feedback:\n[python3 hook]: Docs check", "(hook feedback)"},
+		{"Another Claude session sent a message: deploy done", "(message from another session)"},
+		{"<task-notification>\n<task-id>x</task-id>", "(notification)"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := PromptLabel(tt.in); got != tt.want {
+			t.Errorf("PromptLabel(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}

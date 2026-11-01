@@ -271,25 +271,6 @@ func TestLocalIndex_LimitAppliesAfterFiltering(t *testing.T) {
 	}
 }
 
-func TestCleanPrompt(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"fix the cache", "fix the cache"},
-		{"[Image #1] what is this?", "what is this?"},
-		{"[Image: original 3445x2245, displayed at 2000x1303. Multiply coordinates by 1.72 to map to original image.]", "(image)"},
-		{"[Image #1]", "(image)"},
-		{"The user sent a new message while you were working:\nare you still blocked?", "are you still blocked?"},
-		{"Stop hook feedback:\n[python3 hook]: Docs check", "(hook feedback)"},
-		{"Another Claude session sent a message: deploy done", "(message from another session)"},
-		{"<task-notification>\n<task-id>x</task-id>", "(notification)"},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		if got := cleanPrompt(tt.in); got != tt.want {
-			t.Errorf("cleanPrompt(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 // The session view reads only the end of the file when it can: session files
 // grow to hundreds of MB and only the latest turns are shown.
 func TestLocalIndex_SessionReadsTheTail(t *testing.T) {
@@ -616,19 +597,19 @@ func TestTurnOf_ToolDetailDropsRepeatedInput(t *testing.T) {
 }
 
 func TestCapText(t *testing.T) {
-	if got := capText("  a\n", 10); got != "  a\n" {
+	if got := history.CutBytes("  a\n", 10); got != "  a\n" {
 		t.Errorf("capText trimmed: %q", got)
 	}
-	if got := capText("", 3); got != "" {
+	if got := history.CutBytes("", 3); got != "" {
 		t.Errorf("empty: %q", got)
 	}
-	if got := capText("abcd", 4); got != "abcd" {
+	if got := history.CutBytes("abcd", 4); got != "abcd" {
 		t.Errorf("at cap: %q", got)
 	}
-	if got := capText("abcde", 4); got != "abcd…" {
+	if got := history.CutBytes("abcde", 4); got != "abcd…" {
 		t.Errorf("over cap: %q", got)
 	}
-	if got := capText("aéé", 2); got != "a…" {
+	if got := history.CutBytes("aéé", 2); got != "a…" {
 		t.Errorf("rune boundary: %q", got)
 	}
 }
@@ -790,5 +771,29 @@ func TestLocalIndex_EveryOpenReadGoesThroughLive(t *testing.T) {
 	}
 	if (&LocalIndex{}).TerminalPIDs() == nil {
 		t.Error("nil Live: want an empty map")
+	}
+}
+
+// shownTitle pins the title clients see: metadata title, else Claude Code's,
+// else the first message cleaned and cut at 80 bytes.
+func TestShownTitle(t *testing.T) {
+	long := strings.Repeat("a", 100)
+	tests := []struct {
+		name string
+		s    history.Session
+		want string
+	}{
+		{"meta wins", history.Session{Title: "Meta", AITitle: "AI", FirstPrompt: "first"}, "Meta"},
+		{"ai title next", history.Session{AITitle: "AI", FirstPrompt: "first"}, "AI"},
+		{"first prompt cleaned", history.Session{FirstPrompt: "[Image #1] fix it"}, "fix it"},
+		{"first prompt notification", history.Session{FirstPrompt: "<task-notification>"}, "(notification)"},
+		{"first prompt cut at 80", history.Session{FirstPrompt: long}, strings.Repeat("a", 80) + "…"},
+		{"nothing", history.Session{}, ""},
+		{"meta not cut", history.Session{Title: long}, long},
+	}
+	for _, tt := range tests {
+		if got := history.DisplayTitle(tt.s); got != tt.want {
+			t.Errorf("%s: DisplayTitle = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }

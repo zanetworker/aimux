@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/terminput"
 )
@@ -102,7 +103,7 @@ func (q QueueTerminal) Turns(ctx context.Context, session string) ([]chatqueue.T
 	}
 	out := make([]chatqueue.Turn, 0, len(d.Turns))
 	for _, t := range d.Turns {
-		switch cleanPrompt(t.User) {
+		switch history.PromptLabel(t.User) {
 		case "(hook feedback)", "(message from another session)", "(notification)":
 			continue
 		}

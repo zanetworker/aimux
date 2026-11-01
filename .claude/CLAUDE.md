@@ -121,8 +121,11 @@ internal/
     codex.go                    # Codex: full discovery, tmux mirror, JSONL parsing
     gemini.go                   # Gemini: full discovery, tmux mirror, JSON parsing
     helpers.go                  # Shared: process tree grouping, start time, CWD extraction
+    (RecentDirs vs remoteapi LocalIndex.Projects: kept, they differ. RecentDirs decodes ~/.claude/projects dir keys with no filters; Projects uses recorded cwd, drops automated and subagent sessions unless created here, stats the dir and honours injected Discover and ProjectsDir. Not duplicates.)
   spawn/spawn.go                # Launch agents into tmux/iTerm
   team/reader.go                # Team config reading
+  gitinfo/                      # The one place git is asked about a folder: Top (top-level and common dir in one rev-parse, remembered 60 s per folder), Origin, Branch; folders and gitremote both read through it
+  (Known inconsistency: the TUI and web dashboard show the raw first prompt as the title; the remote API shows history.DisplayTitle, the cleaned first prompt cut at 80 bytes.)
   gitremote/
     gitremote.go                # WebURL (git remote to web address, no credentials; ssh becomes https, http(s) keeps scheme and port), Lookup (origin + branch + repo root of a folder, 2 s git timeout, 60 s cache swept of expired entries on write); feeds SessionDetail.repo
   remoteapi/devicelogin/
@@ -150,7 +153,7 @@ internal/
     layout.go                   # LayoutReader: joins the iTerm2 windows, tabs and panes to open sessions by tty (MacPlace for the session list; 3 s cache)
     iterm2/iterm2.go            # iTerm2 driver over a persistent JXA helper (helper.js, embedded); live tests behind the iterm2 build tag
   waiting/                      # Permission alerts for terminal sessions: markers in ~/.aimux/waiting (0700/0600, atomic; Write, Remove, Read, List), HandleHook (Claude Code hook stdin: Notification permission_prompt sets, keeping transcript_path and agent_id; PostToolUse, PostToolUseFailure (not a subagent's for a main-thread marker), UserPromptSubmit, Stop, SessionEnd clear), Install/Uninstall/Status (merge into ~/.claude/settings.json with a backup, key order and the owner's hooks kept; `<path> remote hooks notify || true`, either form recognised, also inside a group of the owner's; CommandBinary), Tracker (open sessions only; drops a marker once its transcript is written 2 s after the prompt; a missing session's marker goes once its pid is gone or after 5 s of misses; the first Poll skips markers older than 2 min); used by `aimux remote hooks` (cmd/aimux/cmd/remote_hooks.go) and remote serve (`waiting` on sessions)
-  folders/                      # Resolver: a session path to Folder{Repo, Worktree, Sub, Label} (git or not), cached in ~/.aimux/folders.json
+  folders/                      # Resolver (git through gitinfo): a session path to Folder{Repo, Worktree, Sub, Label} (git or not), cached in ~/.aimux/folders.json
   terminal/
     backend.go                  # SessionBackend interface
     embed.go                    # Direct PTY backend (Claude)

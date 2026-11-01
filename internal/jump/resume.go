@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/provider"
 )
 
 // ResumeResult describes what happened when we tried to open a session.
@@ -64,44 +67,14 @@ func ResumeInPane(sessionID, workingDir string) (*ResumeResult, error) {
 // This suspends the TUI and runs Claude directly. When the user
 // exits Claude (/exit or Ctrl+C), the TUI resumes.
 func ResumeCmd(sessionID, workingDir string) *exec.Cmd {
-	claudeBin := findClaudeBinary()
-
-	var cmd *exec.Cmd
-	if sessionID != "" {
-		cmd = exec.Command(claudeBin, "--resume", sessionID) // #nosec G204 -- claude binary path from system
-	} else if workingDir != "" {
-		cmd = exec.Command(claudeBin, "--continue") // #nosec G204 -- claude binary path from system
-	} else {
-		return nil
-	}
-
-	if workingDir != "" {
-		cmd.Dir = workingDir
-	}
-	return cmd
+	return (&provider.Claude{}).ResumeCommand(agent.Agent{SessionID: sessionID, WorkingDir: workingDir})
 }
 
 // buildClaudeCommand builds a shell command string for tmux/iTerm2 panes.
 func buildClaudeCommand(sessionID, workingDir string) string {
-	claudeBin := findClaudeBinary()
-
-	var parts []string
-	if sessionID != "" {
-		parts = append(parts, claudeBin, "--resume", sessionID)
-	} else if workingDir != "" {
-		parts = append(parts, claudeBin, "--continue")
-	} else {
+	cmd := ResumeCmd(sessionID, workingDir)
+	if cmd == nil {
 		return ""
 	}
-
-	return strings.Join(parts, " ")
-}
-
-// findClaudeBinary returns the path to the claude binary.
-func findClaudeBinary() string {
-	path, err := exec.LookPath("claude")
-	if err != nil {
-		return "claude"
-	}
-	return path
+	return strings.Join(cmd.Args, " ")
 }

@@ -7,11 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/gitinfo"
 )
 
 const (
@@ -275,17 +276,5 @@ func (r *Resolver) write(b []byte) error {
 func gitTop(dir string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel", "--git-common-dir").Output() //nolint:gosec // dir is a session path passed as an argument, no shell
-	if err != nil {
-		return "", "", err
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) < 2 {
-		return "", "", os.ErrNotExist
-	}
-	top, common := lines[0], lines[1]
-	if !filepath.IsAbs(common) {
-		common = filepath.Join(dir, common)
-	}
-	return top, common, nil
+	return gitinfo.Top(ctx, dir)
 }

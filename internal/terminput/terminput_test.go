@@ -544,12 +544,12 @@ func TestParseIdle(t *testing.T) {
 }
 
 func TestParsePS(t *testing.T) {
-	if got, err := parseTTY("ttys001\n"); err != nil || got != "/dev/ttys001" {
+	if got, err := ParseTTY("ttys001\n"); err != nil || got != "/dev/ttys001" {
 		t.Fatalf("tty = %q, %v", got, err)
 	}
 	for _, none := range []string{"??\n", "\n", "-\n"} {
-		if got, _ := parseTTY(none); got != "" {
-			t.Fatalf("parseTTY(%q) = %q, want empty", none, got)
+		if got, _ := ParseTTY(none); got != "" {
+			t.Fatalf("ParseTTY(%q) = %q, want empty", none, got)
 		}
 	}
 	if n, err := parseInt("  1234 \n"); err != nil || n != 1234 {

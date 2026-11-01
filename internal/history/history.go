@@ -316,7 +316,7 @@ func scanSession(id, filePath, project string) (Session, error) {
 
 	// Extract last prompt and action once (not per-line)
 	if raw := imagePlaceholder.ReplaceAllString(allUserText(lastUserContent), ""); strings.TrimSpace(raw) != "" {
-		if text := cleanPrompt(raw); text != "" && text != "(no prompt)" {
+		if text := singleLinePrompt(raw); text != "" && text != "(no prompt)" {
 			s.LastPrompt = text
 		}
 	}
@@ -570,7 +570,7 @@ func extractUserText(content json.RawMessage) string {
 	if raw == "" {
 		return ""
 	}
-	return cleanPrompt(raw)
+	return singleLinePrompt(raw)
 }
 
 // allUserText joins every text block of a user message, as stored.
@@ -626,10 +626,10 @@ func rawUserText(content json.RawMessage) string {
 	return raw
 }
 
-// cleanPrompt normalizes a user prompt for single-line display.
+// singleLinePrompt normalizes a user prompt for single-line display.
 // Extracts the first meaningful sentence, strips noise like pasted
 // content, markdown headers, Slack messages, and system prompts.
-func cleanPrompt(text string) string {
+func singleLinePrompt(text string) string {
 	// Split into lines and find the first meaningful one
 	lines := strings.Split(text, "\n")
 	var best string
