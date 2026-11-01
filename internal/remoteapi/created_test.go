@@ -83,7 +83,7 @@ func TestLocalIndex_Projects(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	x := &LocalIndex{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+	x := &LocalIndex{Providers: stubProviders(&stubStore{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
 		return []history.Session{
 			{ID: "1", Provider: "claude", Project: a, LastActive: now},
 			{ID: "2", Provider: "claude", Project: b, LastActive: now.Add(-time.Hour)},
@@ -92,7 +92,7 @@ func TestLocalIndex_Projects(t *testing.T) {
 			{ID: "5", Provider: "claude", Project: "/tmp/x", Automated: true, LastActive: now},
 			{ID: "6", Provider: "codex", Project: b, LastActive: now},
 		}, nil
-	}}
+	}}, nil)}
 	got, err := x.Projects(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -212,9 +212,9 @@ func TestLocalIndex_ProjectsUseTheRecordedCwd(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "my", "app"), 0o700); err != nil { // the look-alike
 		t.Fatal(err)
 	}
-	x := &LocalIndex{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+	x := &LocalIndex{Providers: stubProviders(&stubStore{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
 		return []history.Session{{ID: "1", Provider: "claude", Project: filepath.Join(root, "my", "app"), Cwd: real, LastActive: time.Now()}}, nil
-	}}
+	}}, nil)}
 	got, err := x.Projects(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -282,9 +282,9 @@ func TestCreatedStore_NullFileIsEmpty(t *testing.T) {
 func TestLocalIndex_ProjectsIncludeFoldersOfCreatedSessions(t *testing.T) {
 	dir := t.TempDir()
 	x := &LocalIndex{Created: &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")},
-		Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+		Providers: stubProviders(&stubStore{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
 			return []history.Session{{ID: "phone", Provider: "claude", Cwd: dir, Automated: true, LastActive: time.Now()}}, nil
-		}}
+		}}, nil)}
 	if err := x.Created.Add("phone", dir, "x"); err != nil {
 		t.Fatal(err)
 	}

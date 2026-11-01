@@ -20,7 +20,7 @@ func namingFixture(t *testing.T) (*LocalIndex, *int) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
 	now := time.Now()
 	scans := 0
-	x.Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
+	stubOf(x).Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
 		scans++
 		return []history.Session{
 			{ID: "idle", Provider: "claude", Title: "Fix the cache", FilePath: "/p/idle.jsonl", LastActive: now,

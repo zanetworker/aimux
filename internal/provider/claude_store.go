@@ -8,6 +8,7 @@ import (
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 var _ harness.SessionStore = (*Claude)(nil)
@@ -49,4 +50,16 @@ func (c *Claude) Fingerprint(id string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UnixNano())
+}
+
+// Sessions lists the transcripts under the projects dir (history.Discover);
+// opts.Provider other than Claude's lists none.
+func (c *Claude) Sessions(opts history.DiscoverOpts) ([]history.Session, error) {
+	return history.Discover(opts, c.projectsDir())
+}
+
+// ParseTail returns at least the last n turns of the transcript at path,
+// reading only the end of the file (ParseTraceTail).
+func (c *Claude) ParseTail(path string, n int) ([]trace.Turn, error) {
+	return c.ParseTraceTail(path, n)
 }

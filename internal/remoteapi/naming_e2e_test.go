@@ -69,7 +69,8 @@ func TestNaming_RepeatedPollsNameEachSessionOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	index := &LocalIndex{ProjectsDir: projects, Live: discovery.NewLiveCache(registry, 0), Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), Discover: history.Discover}
+	index := &LocalIndex{Providers: stubProviders(&stubStore{ProjectsDir: projects, Discover: history.Discover}, discovery.NewLiveCache(registry, 0)),
+		NewProvider: "claude", Broker: NewBroker(BrokerDeps{}, BrokerOptions{})}
 	backend := &countingBackend{topics: map[string]int{}}
 	namer := history.NewNamer(history.NamerConfig{Lookup: index.Lookup, Primary: backend, BatchWait: 20 * time.Millisecond,
 		RecordUsage: func(cost.Usage) error { return nil }, Logf: func(string, ...any) {}})

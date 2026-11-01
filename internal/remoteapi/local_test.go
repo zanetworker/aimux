@@ -40,8 +40,8 @@ func localFixture(t *testing.T, b *Broker) *LocalIndex {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	return &LocalIndex{
-		ProjectsDir: projects, Live: discovery.NewLiveCache(registry, 0), Broker: b,
+	return &LocalIndex{Broker: b, NewProvider: "claude", Providers: stubProviders(&stubStore{
+		ProjectsDir: projects,
 		Discover: func(opts history.DiscoverOpts, dir string) ([]history.Session, error) {
 			return []history.Session{
 				{ID: "idle", Provider: "claude", Title: "Fix the cache", Project: "/w", Cwd: "/w", LastActive: now},
@@ -60,7 +60,7 @@ func localFixture(t *testing.T, b *Broker) *LocalIndex {
 			}
 			return turns, nil
 		},
-	}
+	}, discovery.NewLiveCache(registry, 0))}
 }
 
 func TestLocalIndex_Sessions(t *testing.T) {
@@ -190,7 +190,7 @@ func TestLocalIndex_SessionDetailCarriesRepo(t *testing.T) {
 // session with no recorded cwd gets no repo rather than a guessed folder's.
 func TestLocalIndex_RepoUsesRecordedCwd(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
-	x.Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
+	stubOf(x).Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
 		return []history.Session{
 			{ID: "idle", Provider: "claude", Title: "t", Project: "/a/b/c", Cwd: "/a/b-c"},
 			{ID: "open", Provider: "claude", Title: "u", Project: "/a/b/d"},
@@ -253,7 +253,7 @@ func TestLocalIndex_OwnAdapterIsNotATerminal(t *testing.T) {
 
 func TestLocalIndex_LimitAppliesAfterFiltering(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
-	x.Discover = func(opts history.DiscoverOpts, dir string) ([]history.Session, error) {
+	stubOf(x).Discover = func(opts history.DiscoverOpts, dir string) ([]history.Session, error) {
 		all := []history.Session{
 			{ID: "cron1", Provider: "claude", Automated: true},
 			{ID: "cron2", Provider: "claude", Automated: true},
@@ -275,9 +275,9 @@ func TestLocalIndex_LimitAppliesAfterFiltering(t *testing.T) {
 // grow to hundreds of MB and only the latest turns are shown.
 func TestLocalIndex_SessionReadsTheTail(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
-	x.ParseTrace = func(string) ([]trace.Turn, error) { t.Fatal("whole file parsed"); return nil, nil }
+	stubOf(x).ParseTrace = func(string) ([]trace.Turn, error) { t.Fatal("whole file parsed"); return nil, nil }
 	var asked int
-	x.ParseTail = func(path string, n int) ([]trace.Turn, error) {
+	stubOf(x).Tail = func(path string, n int) ([]trace.Turn, error) {
 		asked = n
 		var turns []trace.Turn
 		for i := 1; i <= n+1; i++ { // a tail may hold a turn more than asked
@@ -298,7 +298,7 @@ func TestLocalIndexSessionCarriesStats(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
 	start := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	calls := 0
-	x.Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
+	stubOf(x).Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
 		calls++
 		return []history.Session{{ID: "idle", Provider: "claude", Title: "Fix the cache", StartTime: start,
 			CostUSD: 1.25, TokensIn: 1000, TokensOut: 200, CacheReadTokens: 5000, CacheWriteTokens: 300,
@@ -325,7 +325,7 @@ func TestLocalIndexSessionCarriesStats(t *testing.T) {
 
 func TestLocalIndexSessionWithoutStartTimeOmitsIt(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
-	x.Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
+	stubOf(x).Discover = func(history.DiscoverOpts, string) ([]history.Session, error) {
 		return []history.Session{{ID: "idle", Provider: "claude", Title: "Fix the cache", TurnCount: 2}}, nil
 	}
 	d, err := x.Session(context.Background(), "idle", 1)
@@ -366,7 +366,7 @@ func TestLocalIndexSessionWithoutIndexHasNoStats(t *testing.T) {
 		t.Fatalf("stats %+v, want none for a session not in the index", d.Stats)
 	}
 	// A file exists but the index does not list it yet: also no stats.
-	x.Discover = func(history.DiscoverOpts, string) ([]history.Session, error) { return nil, nil }
+	stubOf(x).Discover = func(history.DiscoverOpts, string) ([]history.Session, error) { return nil, nil }
 	d, err = x.Session(context.Background(), "idle", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -732,7 +732,7 @@ func TestLocalIndex_SessionsWorking(t *testing.T) {
 
 // registryDir is the fixture's registry (a temp dir), read with no TTL so a
 // test's rewrite shows at once.
-func registryDir(x *LocalIndex) string { return x.Live.(*discovery.LiveCache).Dir }
+func registryDir(x *LocalIndex) string { return x.Providers[0].Live.(*discovery.LiveCache).Dir }
 
 // countingLive is a harness.LiveSessions that counts its reads.
 type countingLive struct {
@@ -750,7 +750,7 @@ func TestLocalIndex_EveryOpenReadGoesThroughLive(t *testing.T) {
 		{PID: 7, SessionID: "open", Status: "busy"},
 		{PID: 8, SessionID: "mine", Status: "idle"},
 	}}
-	x := &LocalIndex{Live: live, Owned: func(pid int) bool { return pid == 8 }}
+	x := &LocalIndex{Providers: stubProviders(&stubStore{}, live), Owned: func(pid int) bool { return pid == 8 }}
 	if pid, ok := x.TerminalPID("open"); !ok || pid != 7 {
 		t.Errorf("TerminalPID = %d, %v", pid, ok)
 	}

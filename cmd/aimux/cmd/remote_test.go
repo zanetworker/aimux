@@ -882,3 +882,33 @@ func TestBuildLayoutReader(t *testing.T) {
 		t.Fatal("lastFocus given but LastOnMac unset")
 	}
 }
+
+// remote serve registers exactly one provider today, Claude's, reading
+// ~/.claude: the API's provider value stays "claude".
+func TestRemoteProviders_OnlyClaude(t *testing.T) {
+	home := t.TempDir()
+	ps := remoteProviders(home)
+	if len(ps) != 1 {
+		t.Fatalf("%d providers, want 1", len(ps))
+	}
+	if name := ps[0].Store.Name(); name != "claude" {
+		t.Fatalf("default provider %q, want claude", name)
+	}
+	live, ok := ps[0].Live.(*discovery.LiveCache)
+	if !ok || live.Dir != filepath.Join(home, ".claude", "sessions") {
+		t.Fatalf("live %#v, want the registry under %s", ps[0].Live, home)
+	}
+	file := filepath.Join(home, ".claude", "projects", "-w", "s-1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(`{"cwd":"/w"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ps[0].Store.SessionFile("s-1"); got != file {
+		t.Fatalf("SessionFile = %q, want %q", got, file)
+	}
+	if got := ps[0].Store.SessionFile("missing"); got != "" {
+		t.Fatalf("SessionFile(missing) = %q, want none", got)
+	}
+}

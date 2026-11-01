@@ -121,14 +121,15 @@ internal/
     codex.go                    # Codex: full discovery, tmux mirror, JSONL parsing
     gemini.go                   # Gemini: full discovery, tmux mirror, JSON parsing
     helpers.go                  # Shared: process tree grouping, start time, CWD extraction
-    claude_store.go             # Claude's harness.SessionStore: SessionFile (under ProjectsDir, default ~/.claude/projects), SessionCwd (history.SessionCwd: the first recorded cwd, the session list's line, read only up to it), Fingerprint (size and mtime); the router and the chat manager read transcripts through it
-    (RecentDirs vs remoteapi LocalIndex.Projects: kept, they differ. RecentDirs decodes ~/.claude/projects dir keys with no filters; Projects uses recorded cwd, drops automated and subagent sessions unless created here, stats the dir and honours injected Discover and ProjectsDir. Not duplicates.)
+    claude_store.go             # Claude's harness.SessionStore: SessionFile (under ProjectsDir, default ~/.claude/projects), SessionCwd (history.SessionCwd: the first recorded cwd, the session list's line, read only up to it), Fingerprint (size and mtime); the router and the chat manager read transcripts through it; also remoteapi.Store's Sessions (history.Discover over ProjectsDir) and ParseTail (ParseTraceTail)
+    (RecentDirs vs remoteapi LocalIndex.Projects: kept, they differ. RecentDirs decodes ~/.claude/projects dir keys with no filters; Projects uses recorded cwd, drops automated and subagent sessions unless created here, stats the dir and reads every registered provider's Sessions. Not duplicates.)
   spawn/spawn.go                # Launch agents into tmux/iTerm
   team/reader.go                # Team config reading
   gitinfo/                      # The one place git is asked about a folder: Top (top-level and common dir in one rev-parse, remembered 60 s per folder), Origin, Branch; folders and gitremote both read through it
   (Known inconsistency: the TUI and web dashboard show the raw first prompt as the title; the remote API shows history.DisplayTitle, the cleaned first prompt cut at 80 bytes.)
   gitremote/
     gitremote.go                # WebURL (git remote to web address, no credentials; ssh becomes https, http(s) keeps scheme and port), Lookup (origin + branch + repo root of a folder, 2 s git timeout, 60 s cache swept of expired entries on write); feeds SessionDetail.repo
+  remoteapi/local.go            # LocalIndex: the session list, detail, search and projects over Providers ([]remoteapi.Provider: a Store, which is harness.SessionStore plus Name, Sessions and ParseTail, and the provider's harness.LiveSessions); Session.Provider is the store's Name(), records a store gives for another provider are dropped, a session belongs to the first store with its file, open sessions merge every provider's Holders(List); NewProvider (default: the first provider's name) is the Provider of sessions created here (Created records), the one provider that can be continued today; no harness names inside
   remoteapi/devicelogin/
     store.go                    # Paired devices (~/.aimux/remote-paired-devices.json), pending code (remote-pairing.json, SHA-256 only, attempts counted), last seen (remote-paired-seen.json); every write under flock on remote-paired-devices.lock; all 0600
     codes.go                    # Pairing codes: 8 Crockford base32 characters shown XXXX-XXXX, CanonicalCode, ParseCode
@@ -359,6 +360,9 @@ Capabilities, and who implements them for Claude Code:
 - `harness.Composer`: the terminal composer (screen reads, process names, text rules, room and clear keys); `internal/harness/claude`.
 - `harness.LiveSessions`: which processes hold a session, `Holders(harness.List)` for the session list (LocalIndex, terminal input, queue, waiting, layout) and `Holders(harness.Strict)` for the router (`acprun.SessionLookup`); `discovery.LiveCache` over the registry, with `claude.CommandLineSessions` for Strict's command-line fallback. One source and one table of cases (`internal/harness/live.go`), so the list and the router differ only where it says.
 - `harness.SessionStore`: transcript file, recorded cwd, fingerprint; `provider.Claude`.
+- `remoteapi.Store`: `harness.SessionStore` plus `Name` (the API's `provider` value), `Sessions` and `ParseTail`; `provider.Claude`. It lives in remoteapi, not harness, because its types (`history.Session`, `trace.Turn`) may not enter `internal/harness`.
+
+Adding a harness to the remote API: implement `remoteapi.Store` and `harness.LiveSessions` for it, and add one `remoteapi.Provider` entry in `remoteProviders` (`cmd/aimux/cmd/remote.go`), the only place `remote serve` registers providers; nothing inside remoteapi changes. Today it registers only Claude, which is also the default (the first entry; `NewProvider` falls back to it when unset): sessions a client creates (`NewProvider`), the router's `SessionLookup` and the chat manager's fingerprint are its, since the ACP adapter is Claude Code's. A non-default provider's sessions are listed, followed and searched, but cannot be continued until the router (`SessionLookup`) and the manager's `Fingerprint` dispatch per provider; that comes with the harness's own ACP adapter. When two providers report the same session id, the first store wins.
 
 The Claude Code implementation of the Composer lives in `internal/harness/claude`, not `internal/provider`: `terminput.NewService` defaults to it, and taking it from provider would make terminput depend on provider and everything it imports. When the Service looks up a Composer per session, provider can expose it as an optional capability and the default can go.
 
@@ -367,6 +371,7 @@ Known exceptions, next steps:
 - `settle` and `settleReads` in terminput (the pause between typing and Enter, the reads after typing) are tuned to Claude Code's redraw; they belong on the Composer.
 - The package functions `terminput.CheckText` and `CheckMessage` apply Claude Code's rules for their callers (the iTerm2 driver, the chat queue); those callers should ask the session's Composer.
 - terminput's package doc, `Target` and `ForegroundCommand` docs still say claude.
+- Still Claude-only in the remote API: the hooks installer (`internal/waiting`, `~/.claude/settings.json`), the ACP adapter command (`--adapter`, `defaultClaudeAdapter`), the OpenAPI `provider` enum (`enum: [claude]` in `api/remote-v1.openapi.yaml`, a contract change that comes with the Codex work) and the clients' parsing of Claude Code's message wrappers (`timeline.mjs`, `chatqueue/prompt.go`).
 
 ## Single-File Verification
 

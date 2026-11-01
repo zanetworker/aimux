@@ -574,8 +574,6 @@ func newRemoteServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve home directory: %w", err)
 			}
-			projects := filepath.Join(home, ".claude", "projects")
-			registry := filepath.Join(home, ".claude", "sessions")
 			hosts, err := resolveTrustedHosts(cfg.RemoteAccess.Hostnames, tailscaleDNSName)
 			if err != nil {
 				return err
@@ -596,15 +594,17 @@ func newRemoteServeCmd() *cobra.Command {
 
 			var broker *remoteapi.Broker
 			var dispatcher *chatqueue.Dispatcher // set before the server takes requests, so before any turn
-			claude := &provider.Claude{ProjectsDir: projects}
-			// The one reader of which sessions are open in a terminal: the
-			// list, details, terminal input, the queue, waiting, Last on your
-			// Mac and the layout read it through the index (harness.List),
-			// the router before a send (harness.Strict).
-			live := discovery.NewLiveCache(registry, discovery.LiveTTL)
+			// Each provider's Live is the one reader of which of its sessions
+			// are open in a terminal: the list, details, terminal input, the
+			// queue, waiting, Last on your Mac and the layout read it through
+			// the index (harness.List), the router before a send
+			// (harness.Strict). New sessions and continuing ones run on the
+			// default provider's ACP adapter.
+			providers := remoteProviders(home)
+			def := providers[0]
 			manager := acprun.NewManager(acprun.ManagerOptions{
 				MaxRuns:     s.maxRuns,
-				Fingerprint: claude.Fingerprint,
+				Fingerprint: def.Store.Fingerprint,
 				Reserve:     sessionReservation(home),
 				Start: func(ctx context.Context, id, cwd string) (acprun.Runner, error) {
 					return acprun.Start(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, id, broker.Approver())
@@ -618,7 +618,7 @@ func newRemoteServeCmd() *cobra.Command {
 				},
 			})
 			defer manager.Close()
-			router := &acprun.Router{Lookup: acprun.SessionLookup{Provider: "claude", Store: claude, Live: live}.Lookup, Manager: manager}
+			router := &acprun.Router{Lookup: acprun.SessionLookup{Provider: def.Store.Name(), Store: def.Store, Live: def.Live}.Lookup, Manager: manager}
 			broker = remoteapi.NewBroker(remoteapi.BrokerDeps{
 				Check: router.Check, Send: router.Send, Cancel: manager.Cancel,
 			}, remoteapi.BrokerOptions{ApprovalTimeout: s.approvalTimeout, OnApproval: asked, OnApprovalResolved: resolved,
@@ -635,8 +635,7 @@ func newRemoteServeCmd() *cobra.Command {
 			reader := search.DefaultService(io.Discard)
 			reader.Embedder, reader.DBPath = nil, remoteIndex
 			index = &remoteapi.LocalIndex{
-				ProjectsDir: projects, Live: live, Broker: broker,
-				Discover: history.Discover, ParseTrace: claude.ParseTrace, ParseTail: claude.ParseTraceTail, Owned: manager.Owns,
+				Providers: providers, NewProvider: def.Store.Name(), Broker: broker, Owned: manager.Owns,
 				Repo:    gitremote.Lookup,
 				Created: &remoteapi.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")},
 				Running: manager.Running,
@@ -848,7 +847,7 @@ func newRemoteTerminalInputCmd() *cobra.Command {
 			owned := func(pid int) bool { return aimuxAncestor(pid, discovery.GetParentPID, processName) }
 			return runTerminalInputCheck(cmd.Context(), cmd.OutOrStdout(), terminalCheck{
 				Enabled:  cfg.RemoteAccess.TerminalInput.Enabled,
-				Sessions: openTerminalSessions(discovery.NewLiveCache(filepath.Join(home, ".claude", "sessions"), discovery.LiveTTL), owned),
+				Sessions: openTerminalSessions(remoteProviders(home)[0].Live, owned),
 				TTY:      terminput.SystemProbe{}.TTY,
 				Probe:    drv.Probe,
 				Driver:   drv,
@@ -938,6 +937,21 @@ func shortID(id string) string {
 		return id[:8]
 	}
 	return id
+}
+
+// remoteProviders is the harnesses remote serve lists, follows and
+// continues sessions of, and the only place one is registered: a new
+// harness implements remoteapi.Store and harness.LiveSessions and
+// adds an entry, with no change inside remoteapi. The first is the default:
+// sessions a client creates, the router and the chat manager are its, since
+// the ACP adapter (--adapter) is Claude Code's. Another entry's sessions are
+// listed but cannot be continued until the router and the manager dispatch
+// per provider.
+func remoteProviders(home string) []remoteapi.Provider {
+	claude := &provider.Claude{ProjectsDir: filepath.Join(home, ".claude", "projects")}
+	return []remoteapi.Provider{
+		{Store: claude, Live: discovery.NewLiveCache(filepath.Join(home, ".claude", "sessions"), discovery.LiveTTL)},
+	}
 }
 
 // openTerminalSessions lists the live sessions that aimux does not own

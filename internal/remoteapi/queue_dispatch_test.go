@@ -116,7 +116,7 @@ func TestQueueTerminal_OpenAndTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 29, 10, 0, 0, 0, time.UTC)
-	x.ParseTrace = func(string) ([]trace.Turn, error) {
+	stubOf(x).ParseTrace = func(string) ([]trace.Turn, error) {
 		return []trace.Turn{
 			{Number: 1, Timestamp: at, UserLines: []string{"fix the cache"}},
 			{Number: 2, Timestamp: at.Add(time.Minute), UserLines: []string{"Stop hook feedback: lint failed"}},

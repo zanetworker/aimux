@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
-	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/search"
@@ -23,22 +22,48 @@ import (
 // maxTextLen caps each turn's user text and reply sent to clients.
 const maxTextLen = 8 * 1024
 
-// LocalIndex answers the session list and detail from this machine's Claude
-// Code sessions. Only Claude sessions are listed, since only they can be
-// continued; subagent and automated sessions are left out.
+// Store is a harness's sessions as the remote API serves them: the
+// harness.SessionStore capability plus the list of its sessions and the
+// latest turns of a transcript. provider.Claude implements it.
+type Store interface {
+	harness.SessionStore
+	// Name is the harness's provider name, the Provider of its sessions.
+	Name() string
+	// Sessions lists the harness's sessions; records of another provider
+	// are left out of the index.
+	Sessions(opts history.DiscoverOpts) ([]history.Session, error)
+	// ParseTail returns at least the last n turns of the transcript at
+	// path, reading only the end of the file.
+	ParseTail(path string, n int) ([]trace.Turn, error)
+}
+
+// Provider is one harness the index serves: its sessions and the processes
+// holding them open.
+type Provider struct {
+	Store Store
+	// Live is the sessions a process of this harness holds open (remote
+	// serve shares one discovery.LiveCache with every other reader). Nil:
+	// none.
+	Live harness.LiveSessions
+}
+
+// LocalIndex answers the session list and detail from this machine's
+// sessions of the registered providers; subagent and automated sessions are
+// left out. Every provider's sessions are listed; the default, NewProvider,
+// is the one that can be continued today, since the router (SessionLookup)
+// and the chat manager's Fingerprint serve one provider (remote serve's
+// remoteProviders).
 type LocalIndex struct {
-	ProjectsDir string // ~/.claude/projects
-	// Live is the sessions a harness process holds open (one
-	// discovery.LiveCache shared by every reader of the registry). Nil: none.
-	Live       harness.LiveSessions
-	Broker     *Broker
-	Discover   func(opts history.DiscoverOpts, projectsDir string) ([]history.Session, error)
-	ParseTrace func(path string) ([]trace.Turn, error)
-	// ParseTail returns at least the last n turns, reading only the end of
-	// the file; used instead of ParseTrace when set.
-	ParseTail func(path string, n int) ([]trace.Turn, error)
+	// Providers are the harnesses listed, in order; a session belongs to
+	// the first whose store has its file.
+	Providers []Provider
+	// NewProvider is the Provider of sessions created here (Created
+	// records without a file yet): the harness acprun starts them with.
+	// "": the first provider's name.
+	NewProvider string
+	Broker      *Broker
 	// Owned reports aimux's own adapter processes, which hold a session in
-	// Claude's registry without it being open in a terminal.
+	// a harness's registry without it being open in a terminal.
 	Owned func(pid int) bool
 	// Created is the sessions aimux started; they are listed although the
 	// agent SDK marks them automated. Nil: none.
@@ -61,7 +86,7 @@ type LocalIndex struct {
 }
 
 // TerminalStatusReader reports a terminal session's status; registryStatus
-// is the session's status in Claude's registry.
+// is the session's status in its harness's registry.
 type TerminalStatusReader interface {
 	Status(ctx context.Context, sessionID, registryStatus string) terminput.Status
 }
@@ -69,14 +94,59 @@ type TerminalStatusReader interface {
 func (x *LocalIndex) running(id string) bool { return x.Running != nil && x.Running(id) }
 
 // openSessions is the sessions a live process holds that is not aimux's
-// own, by session id (harness.OpenSessions over Live). The registry is
-// optional, so an error reads as no session open.
+// own, by session id (harness.OpenSessions over every provider's Live). A
+// registry is optional, so an error reads as no session open.
 func (x *LocalIndex) openSessions() map[string]harness.Holder {
 	var hs []harness.Holder
-	if x.Live != nil {
-		hs, _ = x.Live.Holders(harness.List) // nothing open beats failing the list
+	for _, p := range x.Providers {
+		if p.Live != nil {
+			got, _ := p.Live.Holders(harness.List) // nothing open beats failing the list
+			hs = append(hs, got...)
+		}
 	}
 	return harness.OpenSessions(hs, x.Owned)
+}
+
+// newProvider is NewProvider, or the first provider's name when unset, so a
+// session created here never carries provider ""; "" without providers.
+func (x *LocalIndex) newProvider() string {
+	if x.NewProvider == "" && len(x.Providers) > 0 {
+		return x.Providers[0].Store.Name()
+	}
+	return x.NewProvider
+}
+
+// sessionFile is session id's transcript and the store that has it, the
+// first in order (the first store wins when two providers report the same
+// id); "" and nil when none has.
+func (x *LocalIndex) sessionFile(id string) (string, Store) {
+	for _, p := range x.Providers {
+		if f := p.Store.SessionFile(id); f != "" {
+			return f, p.Store
+		}
+	}
+	return "", nil
+}
+
+// scan lists every provider's sessions with Provider set to the provider's
+// name, leaving out records a store gives for another provider.
+func (x *LocalIndex) scan() ([]history.Session, error) {
+	var all []history.Session
+	for _, p := range x.Providers {
+		name := p.Store.Name()
+		got, err := p.Store.Sessions(history.DiscoverOpts{})
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		for _, s := range got {
+			if s.Provider != "" && s.Provider != name {
+				continue
+			}
+			s.Provider = name
+			all = append(all, s)
+		}
+	}
+	return all, nil
 }
 
 // TerminalPIDs maps every session open in a terminal to the pid holding
@@ -91,7 +161,7 @@ func (x *LocalIndex) TerminalPIDs() map[string]int {
 
 // discover scans the history and remembers the result for Lookup.
 func (x *LocalIndex) discover() ([]history.Session, error) {
-	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+	all, err := x.scan()
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +206,7 @@ func (x *LocalIndex) TerminalPID(sessionID string) (int, bool) {
 	return e.PID, ok
 }
 
-// RegistryStatus is the session's status in Claude's registry ("busy",
+// RegistryStatus is the session's status in its harness's registry ("busy",
 // "idle" or ""), "" when no terminal process holds it
 // (terminput.RegistryStatuses).
 func (x *LocalIndex) RegistryStatus(sessionID string) string {
@@ -168,7 +238,7 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 	seen := map[string]bool{}
 	for _, s := range all {
 		seen[s.ID] = true
-		if s.Provider != "claude" || s.IsSubagent {
+		if s.IsSubagent {
 			continue
 		}
 		if _, created := x.Created.Get(s.ID); s.Automated && !includeAutomated && !created {
@@ -182,7 +252,7 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 	// before the agent wrote one) are listed from their creation record.
 	for id, c := range x.Created.All() {
 		if !seen[id] && x.running(id) {
-			out = append(out, Session{ID: id, Provider: "claude", Title: c.Prompt, Project: c.Cwd,
+			out = append(out, Session{ID: id, Provider: x.newProvider(), Title: c.Prompt, Project: c.Cwd,
 				LastActive: c.Created, State: x.state(id, open)})
 		}
 	}
@@ -208,7 +278,7 @@ func (x *LocalIndex) Session(ctx context.Context, id string, turns int) (Session
 // not know: neither a session file nor one created here. It reads no
 // terminal, history or repository.
 func (x *LocalIndex) SessionExists(_ context.Context, id string) error {
-	if discovery.FindSessionFile(id, x.ProjectsDir) != "" {
+	if file, _ := x.sessionFile(id); file != "" {
 		return nil
 	}
 	if _, ok := x.Created.Get(id); ok {
@@ -225,7 +295,7 @@ func (x *LocalIndex) Title(ctx context.Context, id string) (string, error) {
 }
 
 func (x *LocalIndex) session(ctx context.Context, id string, turns int, withTerminal bool) (SessionDetail, error) {
-	file := discovery.FindSessionFile(id, x.ProjectsDir)
+	file, store := x.sessionFile(id)
 	if file == "" {
 		if c, ok := x.Created.Get(id); ok {
 			// Created here, and the agent has not written its file yet. Without
@@ -234,18 +304,14 @@ func (x *LocalIndex) session(ctx context.Context, id string, turns int, withTerm
 			if x.running(id) {
 				state = x.state(id, x.openSessions())
 			}
-			return SessionDetail{Session: Session{ID: id, Provider: "claude", Title: c.Prompt, Project: c.Cwd,
+			return SessionDetail{Session: Session{ID: id, Provider: x.newProvider(), Title: c.Prompt, Project: c.Cwd,
 				LastActive: c.Created, State: state}, Turns: []Turn{}}, nil
 		}
 		return SessionDetail{}, fmt.Errorf("%w: %s", acprun.ErrUnknownSession, id)
 	}
-	var parsed []trace.Turn
-	var err error
-	if x.ParseTail != nil {
-		parsed, err = x.ParseTail(file, turns)
-	} else {
-		parsed, err = x.ParseTrace(file)
-	}
+	// store is the first with the file: when two providers report the same
+	// id, the first store wins (sessionFile).
+	parsed, err := store.ParseTail(file, turns)
 	if err != nil {
 		return SessionDetail{}, fmt.Errorf("read session %s: %w", id, err)
 	}
@@ -253,7 +319,7 @@ func (x *LocalIndex) session(ctx context.Context, id string, turns int, withTerm
 		parsed = parsed[len(parsed)-turns:]
 	}
 	open := x.openSessions()
-	sum, indexed := x.lookupSummary(id, open)
+	sum, indexed := x.lookupSummary(id, store.Name(), open)
 	d := SessionDetail{Session: sum, Turns: make([]Turn, 0, len(parsed))}
 	if withTerminal && d.State == StateOpenInTerminal && x.Terminal != nil {
 		d.Terminal = terminalStatusOf(x.Terminal.Status(ctx, id, open[id].Status))
@@ -365,7 +431,7 @@ func shortenLines(s string, n int) string {
 // lookupSummary finds the session's title, project and last activity in the
 // session index, and returns the index entry too (nil when unindexed); an
 // unindexed session still gets its id, provider and state.
-func (x *LocalIndex) lookupSummary(id string, open map[string]harness.Holder) (Session, *history.Session) {
+func (x *LocalIndex) lookupSummary(id, provider string, open map[string]harness.Holder) (Session, *history.Session) {
 	state := x.state(id, open)
 	all, err := x.discover()
 	if err == nil {
@@ -375,24 +441,24 @@ func (x *LocalIndex) lookupSummary(id string, open map[string]harness.Holder) (S
 			}
 		}
 	}
-	return Session{ID: id, Provider: "claude", State: state}, nil
+	return Session{ID: id, Provider: provider, State: state}, nil
 }
 
 // maxProjects is how many recent project folders a client may start a new
 // session in.
 const maxProjects = 12
 
-// Project is a folder recent Claude sessions ran in.
+// Project is a folder recent sessions ran in.
 type Project struct {
 	Path       string    `json:"path"`
 	Name       string    `json:"name"`
 	LastActive time.Time `json:"lastActive"`
 }
 
-// Projects lists the folders of recent interactive Claude sessions, most
-// recent first: the only places a client may start a new session.
+// Projects lists the folders of recent interactive sessions, most recent
+// first: the only places a client may start a new session.
 func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
-	all, err := x.Discover(history.DiscoverOpts{Provider: "claude"}, x.ProjectsDir)
+	all, err := x.scan()
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -400,14 +466,14 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 	seen := map[string]bool{}
 	out := []Project{}
 	for _, s := range all {
-		// The recorded working directory: Project is rebuilt from Claude's
-		// folder name, which different paths can share.
+		// The recorded working directory: Project may be rebuilt from a
+		// folder name (Claude's), which different paths can share.
 		dir := s.Cwd
 		if dir == "" {
 			dir = s.Project
 		}
 		_, created := x.Created.Get(s.ID)
-		if s.Provider != "claude" || s.IsSubagent || (s.Automated && !created) || dir == "" || seen[dir] {
+		if s.IsSubagent || (s.Automated && !created) || dir == "" || seen[dir] {
 			continue
 		}
 		seen[dir] = true
@@ -422,14 +488,14 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 	return out, nil
 }
 
-// listableIDs are the sessions the list shows: interactive Claude sessions
+// listableIDs are the sessions the list shows: interactive sessions
 // with a file, and sessions created here that have a file or a live run.
 func (x *LocalIndex) listableIDs() []string {
 	ids := []string{}
 	all, err := x.discover()
 	if err == nil {
 		for _, s := range all {
-			if _, created := x.Created.Get(s.ID); s.Provider == "claude" && !s.IsSubagent && (!s.Automated || created) {
+			if _, created := x.Created.Get(s.ID); !s.IsSubagent && (!s.Automated || created) {
 				ids = append(ids, s.ID)
 			}
 		}
@@ -442,18 +508,21 @@ func (x *LocalIndex) listableIDs() []string {
 	return ids
 }
 
-// searchable reports a search result the user can open and continue: it
-// matched some text, it is not automated (unless aimux created it), and it
-// still has a session file or, created here, a live run.
-func (x *LocalIndex) searchable(r search.Result) bool {
+// searchable reports a search result the user can open and continue, and
+// its provider: it matched some text, it is not automated (unless aimux
+// created it), and it still has a session file or, created here, a live run.
+func (x *LocalIndex) searchable(r search.Result) (string, bool) {
 	if r.Snippet == "" {
-		return false
+		return "", false
 	}
 	_, created := x.Created.Get(r.SessionID)
 	if r.Automated && !created {
-		return false
+		return "", false
 	}
-	return discovery.FindSessionFile(r.SessionID, x.ProjectsDir) != "" || (created && x.running(r.SessionID))
+	if file, store := x.sessionFile(r.SessionID); file != "" {
+		return store.Name(), true
+	}
+	return x.newProvider(), created && x.running(r.SessionID)
 }
 
 // SearchHit is a session matching a search, with the matching text.
@@ -462,7 +531,7 @@ type SearchHit struct {
 	Snippet string `json:"snippet"`
 }
 
-// Search ranks this machine's Claude sessions for query. Like the list, it
+// Search ranks this machine's sessions for query. Like the list, it
 // leaves out automated sessions (unless aimux created them) and sessions
 // that are only in aimux's archive, which cannot be continued.
 func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]SearchHit, error) {
@@ -478,7 +547,8 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 	open := x.openSessions()
 	hits := []SearchHit{}
 	for _, r := range results {
-		if !x.searchable(r) {
+		provider, ok := x.searchable(r)
+		if !ok {
 			continue
 		}
 		c, _ := x.Created.Get(r.SessionID)
@@ -486,7 +556,7 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 		if title == "" {
 			title = c.Prompt
 		}
-		hit := SearchHit{Session: Session{ID: r.SessionID, Provider: "claude", Title: title, Project: r.CWD,
+		hit := SearchHit{Session: Session{ID: r.SessionID, Provider: provider, Title: title, Project: r.CWD,
 			LastActive: r.ModTime, State: x.state(r.SessionID, open)}, Snippet: r.Snippet}
 		if s, ok := x.Lookup(r.SessionID); ok {
 			hit.Description, _ = history.ShownDescription(s)

@@ -14,6 +14,7 @@ import (
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/terminput"
@@ -74,12 +75,11 @@ func queueRigWith(t *testing.T, tcfg config.TerminalInputConfig, input *recordin
 	if err := os.WriteFile(filepath.Join(projects, "-w", "open.jsonl"), []byte(`{"cwd":"/w"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	index := &remoteapi.LocalIndex{Live: discovery.NewLiveCache(registry, 0), ProjectsDir: projects, Broker: broker,
-		Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
-			return []history.Session{{ID: "open", Provider: "claude", LastActive: time.Now()}}, nil
-		},
-		ParseTrace: func(string) ([]trace.Turn, error) { return nil, nil },
-	}
+	index := &remoteapi.LocalIndex{Broker: broker, Providers: []remoteapi.Provider{{
+		Store: queueStore{Claude: &provider.Claude{ProjectsDir: projects},
+			sessions: []history.Session{{ID: "open", Provider: "claude", LastActive: time.Now()}}},
+		Live: discovery.NewLiveCache(registry, 0),
+	}}}
 	store, d, err := openChatQueue(home, tcfg, broker, index, input, nil, nil, noteChanged)
 	if err != nil {
 		t.Fatal(err)
@@ -165,3 +165,12 @@ func TestOpenChatQueue_NoteChangeReachesTheHook(t *testing.T) {
 		t.Fatal("the waiting line never reached the hook")
 	}
 }
+
+// queueStore is Claude's session store with a fixed list and no turns.
+type queueStore struct {
+	*provider.Claude
+	sessions []history.Session
+}
+
+func (q queueStore) Sessions(history.DiscoverOpts) ([]history.Session, error) { return q.sessions, nil }
+func (q queueStore) ParseTail(string, int) ([]trace.Turn, error)              { return nil, nil }
