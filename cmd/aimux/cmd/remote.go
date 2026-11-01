@@ -38,6 +38,7 @@ import (
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/terminput/iterm2"
+	"github.com/zanetworker/aimux/internal/waiting"
 )
 
 type remoteSettings struct {
@@ -426,7 +427,7 @@ func newRemoteCmd() *cobra.Command {
 		Use:   "remote",
 		Short: "API for your sessions from other devices, through tailscale serve",
 	}
-	cmd.AddCommand(newRemoteServeCmd(), newRemoteTerminalInputCmd(), newRemotePairCmd(), newRemoteDevicesCmd(), newRemoteRevokeCmd())
+	cmd.AddCommand(newRemoteServeCmd(), newRemoteTerminalInputCmd(), newRemotePairCmd(), newRemoteDevicesCmd(), newRemoteRevokeCmd(), newRemoteHooksCmd())
 	return cmd
 }
 
@@ -704,6 +705,10 @@ func newRemoteServeCmd() *cobra.Command {
 			if layout := buildLayoutReader(index.TerminalPIDs, lastFocus, cmd.ErrOrStderr(), drivers...); layout != nil {
 				api.Places = layout.Places
 			}
+			// Terminal sessions at a permission prompt, from the markers
+			// aimux remote hooks notify writes.
+			waits := &waiting.Tracker{Dir: waiting.Dir(home), Live: index.TerminalPIDs}
+			api.Waiting = waits.Current
 			ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.port))
 			if err != nil {
 				return fmt.Errorf("listen on 127.0.0.1:%d: %w (choose another port with --port)", s.port, err)
@@ -734,10 +739,22 @@ func newRemoteServeCmd() *cobra.Command {
 			}()
 			foldersDone := make(chan struct{})
 			go func() { defer close(foldersDone); resolver.Run(ctx) }()
+			waitsDone := make(chan struct{})
+			go func() {
+				defer close(waitsDone)
+				runWaitingAlerts(ctx, waits, waitingAlerts(pushes, sessionTitle, cmd.ErrOrStderr()))
+			}()
 			// The dispatcher, the namer, the folder resolver and Last on your
 			// Mac stop before the terminal drivers close (deferred earlier,
 			// so run later).
-			defer func() { stop(); <-queueDone; <-namerDone; <-focusDone; <-foldersDone }()
+			defer func() {
+				stop()
+				<-queueDone
+				<-namerDone
+				<-focusDone
+				<-foldersDone
+				<-waitsDone
+			}()
 			go func() {
 				t := time.NewTicker(time.Minute)
 				defer t.Stop()
@@ -775,6 +792,7 @@ func newRemoteServeCmd() *cobra.Command {
 			if len(pushes.notifiers) > 0 {
 				_, _ = fmt.Fprintf(out, "Approval notifications: %s\n", pushSummary(cfg.RemoteAccess.Push))
 			}
+			_, _ = fmt.Fprintln(out, hooksSummary(filepath.Join(home, ".claude", "settings.json")))
 			if cfg.RemoteAccess.TerminalInput.Enabled {
 				_, _ = fmt.Fprintf(out, "Terminal input: on (%d terminal driver(s)); run `aimux remote terminal-input check` once at the Mac\n", len(drivers))
 			}

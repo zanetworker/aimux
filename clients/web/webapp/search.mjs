@@ -36,6 +36,12 @@ export function isWorking(session, activity) {
   return session.state === 'busy' || session.working === true || activity?.kind === 'working';
 }
 
+// A terminal session at a permission prompt: `waiting` of kind "permission" (other kinds are not
+// known yet and count as none).
+export function isWaitingForPermission(session) {
+  return session.waiting?.kind === 'permission';
+}
+
 // Open: busy, open in a terminal, in an iTerm2 pane (whatever its state), or working activity.
 export function isOpen(session, activity) {
   return session.state === 'busy' || session.state === 'open_in_terminal' || session.mac != null || activity?.kind === 'working';

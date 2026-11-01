@@ -41,6 +41,7 @@ private struct Fixture: Decodable {
         let open: Int
         let steps: [String: String?]?
         let descriptions: [String: String?]?
+        let rowStates: [String: String?]?
     }
 
     let name: String
@@ -85,6 +86,12 @@ private struct Fixture: Decodable {
         for (id, line) in expect.descriptions ?? [:] {
             let session = try #require(fixture.sessions.first { $0.id == id })
             #expect(session.descriptionLine == line, "description of \(id)")
+        }
+        let format = SessionRowFormat(locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "UTC")!)
+        for (id, text) in expect.rowStates ?? [:] {
+            let session = try #require(fixture.sessions.first { $0.id == id })
+            let state = rowState(session, activity: activity[id] ?? .none, now: fixture.now, format: format)
+            #expect(state?.text == text, "row state of \(id)")
         }
     }
 

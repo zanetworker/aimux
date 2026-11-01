@@ -1,0 +1,116 @@
+{
+  "name": "a waiting session stays in Needs you with the Working chip, and a query narrows it like an approval",
+  "now": "2026-10-26T09:00:00Z",
+  "query": "beds",
+  "workingOnly": true,
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Plan the raised beds",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:30:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "waiting": {
+        "kind": "permission",
+        "message": "Claude needs your permission to use Bash",
+        "since": "2026-10-26T08:58:00Z"
+      }
+    },
+    {
+      "id": "t2",
+      "provider": "claude",
+      "title": "Water the tomatoes",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:31:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "garden"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      },
+      "waiting": {
+        "kind": "permission",
+        "message": "Claude needs your permission to use Bash",
+        "since": "2026-10-26T08:59:00Z"
+      }
+    },
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "Weed the beds",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "working": true,
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "garden"
+        },
+        "pane": 2,
+        "panes": 2,
+        "lastInFront": false
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [
+      "t1"
+    ],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "garden",
+            "panes": 2,
+            "working": 1,
+            "open": true,
+            "sessions": [
+              "w1"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 1,
+    "open": 3
+  }
+}

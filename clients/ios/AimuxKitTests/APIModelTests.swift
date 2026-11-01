@@ -52,6 +52,27 @@ private func fixture(_ name: String) throws -> Data {
         #expect(rows[0].project == "/Users/me/src/aimux-ios")
     }
 
+    @Test func decodesWaitingAndToleratesItsAbsence() throws {
+        func row(_ id: String, _ waiting: String) -> String {
+            #"{"id":"\#(id)","provider":"claude","title":"t","project":"/p","#
+                + #""lastActive":"2026-10-26T08:30:00Z","state":"open_in_terminal","waiting":\#(waiting)}"#
+        }
+        let marker = #"{"kind":"permission","message":"Claude needs your permission to use Bash","#
+            + #""since":"2026-10-26T08:58:00.5Z"}"#
+        let json = #"{"sessions":["# + [row("s1", marker), row("s2", "null"), row("s3", #"{"kind":7}"#)]
+            .joined(separator: ",") + "]}"
+        let rows = try APIDecoder.decode(SessionList.self, from: Data(json.utf8)).sessions
+        let waiting = try #require(rows[0].waiting)
+        let since = try #require(APIDate.parse("2026-10-26T08:58:00.5Z"))
+        #expect(waiting.kind == "permission")
+        #expect(waiting.message == "Claude needs your permission to use Bash")
+        #expect(abs(waiting.since.timeIntervalSince(since)) < 0.001)
+        #expect(rows[1].waiting == nil)
+        #expect(rows.count == 3 && rows[2].waiting == nil, "a broken waiting is dropped, the row kept")
+        #expect(rows[0].placed(nil).waiting == waiting, "placing keeps waiting")
+        #expect(rows[0].taking(title: "x", description: nil, pinned: nil).waiting == waiting)
+    }
+
     @Test func onlyIdleSessionsCanBeContinued() {
         #expect(SessionState.idle.canContinue)
         #expect(!SessionState.openInTerminal.canContinue)

@@ -22,6 +22,7 @@ import (
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
 	"github.com/zanetworker/aimux/internal/terminput"
+	"github.com/zanetworker/aimux/internal/waiting"
 )
 
 // Session states as clients see them.
@@ -54,6 +55,9 @@ type Session struct {
 	Mac *terminput.MacPlace `json:"mac,omitempty"`
 	// Working: the session is open in a terminal and Claude's registry calls it busy.
 	Working bool `json:"working,omitempty"`
+	// Waiting is set while a session open in a terminal shows a permission
+	// prompt, from the marker its Claude Code hook wrote (internal/waiting).
+	Waiting *waiting.Waiting `json:"waiting,omitempty"`
 }
 
 // SessionDetail is a session plus its most recent turns.
@@ -158,6 +162,9 @@ type API struct {
 	// LastOnMac, if set, is the session last in front on the Mac
 	// (terminput.LastFocus.Last).
 	LastOnMac func() (id string, at time.Time, ok bool)
+	// Waiting, if set, gives the open sessions waiting for permission by id
+	// (waiting.Tracker.Current); it fills `waiting` on the list and detail.
+	Waiting func() map[string]waiting.Waiting
 
 	createMu sync.Mutex        // one creation at a time, so a retried key cannot create twice
 	created  map[string]string // client key -> new session id
@@ -344,6 +351,7 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []Session{}
 	}
+	waits := a.waiting()
 	var places map[string]terminput.MacPlace
 	if a.Places != nil {
 		places = a.Places(r.Context())
@@ -356,10 +364,20 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		if p, ok := places[list[i].ID]; ok {
 			list[i].Mac = &p
 		}
+		if wt, ok := waits[list[i].ID]; ok {
+			list[i].Waiting = &wt
+		}
 	}
 	out := SessionList{Sessions: list, LastOnMac: a.lastOnMac(r.Context())}
 	writeJSON(w, http.StatusOK, out)
 	a.want(shownIDs(list, out.LastOnMac, time.Now()))
+}
+
+func (a *API) waiting() map[string]waiting.Waiting {
+	if a.Waiting == nil {
+		return nil
+	}
+	return a.Waiting()
 }
 
 func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
@@ -377,6 +395,9 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 		if q := a.queueStatus(d.ID); len(q.Items) > 0 {
 			d.Queue = &q
 		}
+	}
+	if wt, ok := a.waiting()[d.ID]; ok {
+		d.Waiting = &wt
 	}
 	writeJSON(w, http.StatusOK, d)
 	a.want([]string{d.ID})

@@ -35,8 +35,10 @@ enum DemoFinding {
              mac: place(window1, tab: 1, "research", pane: 1, of: 2)),
         make("fd-o1", "Sandbox policy reload", folder("openshell"), minutesAgo: 1, .openInTerminal,
              mac: place(window1, tab: 2, "openshell", pane: 1, of: 2), working: true),
+        // At a permission prompt in its pane: Needs you, "Waiting for permission".
         make("fd-o2", "Driver matrix notes", folder("openshell"), minutesAgo: 25, .openInTerminal,
-             mac: place(window1, tab: 2, "openshell", pane: 2, of: 2)),
+             mac: place(window1, tab: 2, "openshell", pane: 2, of: 2),
+             waiting: Waiting(message: "Claude needs your permission to use Bash", since: DemoData.ago(minutes: 2))),
         make("fd-a1", "Wire the share sheet", folder("aimux", worktree: "clients"), minutesAgo: 1, .busy,
              mac: place(window1, tab: 3, "aimux", pane: 1, of: 4, front: true)),
         make("fd-q1", "Chat queue polish", folder("aimux", worktree: "clients"), minutesAgo: 2, .openInTerminal,
@@ -84,12 +86,13 @@ enum DemoFinding {
     private static let edits = Mutex<[String: Meta]>([:])
 
     private static func make(_ id: String, _ title: String, _ folder: Folder, minutesAgo: Double,
-                             _ state: SessionState, mac: MacPlace? = nil, working: Bool = false) -> Session {
+                             _ state: SessionState, mac: MacPlace? = nil, working: Bool = false,
+                             waiting: Waiting? = nil) -> Session {
         let project = folder.worktree.map { folder.repoPath + "-" + $0 } ?? folder.repoPath
         return Session(id: id, title: title, project: project + (folder.sub.map { "/" + $0 } ?? ""),
                        lastActive: DemoData.ago(minutes: minutesAgo), state: state, lastPrompt: "carry on",
                        description: descriptions[id], pinned: pinned.contains(id), folder: folder, mac: mac,
-                       working: working)
+                       working: working, waiting: waiting)
     }
 
     static var sessions: [Session] {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { apiDate } from './apiDate.mjs';
 import { deriveActivity, descriptionLine, holdPlaces, nextSession, rankNow } from './now.mjs';
+import { rowState } from './rows.mjs';
 
 const dir = new URL('../../../api/testdata/clients/now/', import.meta.url);
 const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
@@ -38,6 +39,10 @@ for (const file of files) {
     }
     for (const [id, line] of Object.entries(want.descriptions ?? {})) {
       assert.equal(descriptionLine(sessions.find((s) => s.id === id)), line, `description of ${id}`);
+    }
+    for (const [id, text] of Object.entries(want.rowStates ?? {})) {
+      const state = rowState(sessions.find((s) => s.id === id), activity[id] ?? { kind: 'none' }, apiDate(fx.now));
+      assert.equal(state?.text ?? null, text, `row state of ${id}`);
     }
   });
 }

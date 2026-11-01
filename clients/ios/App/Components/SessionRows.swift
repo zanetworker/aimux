@@ -176,7 +176,8 @@ struct SessionLine: View {
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            StatusDot(status: isWorking(session, activity: activity) ? .working : .idle)
+            StatusDot(status: session.isWaitingForPermission ? .needsYou
+                      : isWorking(session, activity: activity) ? .working : .idle)
                 .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
             TimeLayout(stacked: stacked) {
                 VStack(alignment: .leading, spacing: 2) {

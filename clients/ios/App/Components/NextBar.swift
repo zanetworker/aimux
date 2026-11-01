@@ -10,6 +10,7 @@ struct NextBar: View {
     private var state: (status: DotStatus, label: String) {
         switch item.activity {
         case .needsApproval: (.needsYou, "your turn")
+        case _ where item.session.isWaitingForPermission: (.needsYou, "waiting for permission")
         case .failed: (.failed, "failed")
         default: (.working, "working")
         }

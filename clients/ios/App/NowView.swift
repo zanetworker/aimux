@@ -112,29 +112,27 @@ struct NowScreen: View {
 
     // MARK: Needs you
 
+    /// Needs you in ranking order: an approval as its card (a row when busy), a terminal session waiting for
+    /// permission as its session row (the chat's prompt card answers), then failures.
     @ViewBuilder private var needsYouSections: some View {
         let failures = view.needsYou.filter { if case .failed = $0.activity { true } else { false } }
+        let asks = view.needsYou.filter { if case .failed = $0.activity { false } else { true } }
         if isBusy, !view.needsYou.isEmpty {
             Section {
-                ForEach(approvals, id: \.1.approvalId) { item, approval in
-                    if openCards.contains(approval.approvalId) {
-                        card(item, approval)
-                    } else {
-                        Button { _ = withAnimation(.snappy) { openCards.insert(approval.approvalId) } } label: {
-                            ApprovalRow(session: item.session, approval: approval, format: format)
-                        }
-                        .buttonStyle(.plain)
-                        .compactRow()
-                        .accessibilityIdentifier("approvalRow-\(approval.approvalId)")
-                    }
-                }
+                ForEach(asks, id: \.session.id) { compactAsk($0) }
                 ForEach(failures, id: \.session.id) { failedRow($0).compactRow() }
             } header: {
                 SectionLabel("Needs you", detail: "\(view.needsYou.count)")
             }
         } else if !isBusy {
-            ForEach(approvals, id: \.1.approvalId) { item, approval in
-                Section { card(item, approval) }
+            ForEach(asks, id: \.session.id) { item in
+                Section {
+                    if case .needsApproval(let approval) = item.activity {
+                        card(item, approval)
+                    } else {
+                        row(item.session, inPane: false)
+                    }
+                }
             }
             if !failures.isEmpty {
                 Section {
@@ -144,10 +142,20 @@ struct NowScreen: View {
         }
     }
 
-    private var approvals: [(NowItem, Approval)] {
-        view.needsYou.compactMap { item in
-            if case .needsApproval(let approval) = item.activity { return (item, approval) }
-            return nil
+    @ViewBuilder private func compactAsk(_ item: NowItem) -> some View {
+        if case .needsApproval(let approval) = item.activity {
+            if openCards.contains(approval.approvalId) {
+                card(item, approval)
+            } else {
+                Button { _ = withAnimation(.snappy) { openCards.insert(approval.approvalId) } } label: {
+                    ApprovalRow(session: item.session, approval: approval, format: format)
+                }
+                .buttonStyle(.plain)
+                .compactRow()
+                .accessibilityIdentifier("approvalRow-\(approval.approvalId)")
+            }
+        } else {
+            row(item.session, inPane: false)
         }
     }
 

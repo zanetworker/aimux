@@ -5,6 +5,7 @@ import { parseMarkdown } from './markdown.mjs';
 import { linkReferences, mediaCards } from './references.mjs';
 import { bubbleBlocks, formatsAsMarkdown, inlineBlocks, renderBlocks, renderInlines, renderPlain, stepDetail, stepInlines, unlinkedInlines } from './render.mjs';
 import { userDisplay } from './timeline.mjs';
+import { isWaitingForPermission } from './search.mjs';
 
 // The chat's rendering, like ChatView and TimelineRows in the iPhone app: the header, the
 // timeline items from buildTimeline (timeline.mjs), a pending message, the Next bar and the
@@ -320,9 +321,15 @@ export function pendingNode(pending, onRetry, { terminal = false, canRetry = tru
 
 const NEXT_STATE = { needsApproval: ['needs', 'your turn'], failed: ['failed', 'failed'] };
 
+// The Next bar's dot and label for a Now item.
+export function nextState(item) {
+  if (item.activity.kind !== 'needsApproval' && isWaitingForPermission(item.session)) return ['needs', 'waiting for permission'];
+  return NEXT_STATE[item.activity.kind] || ['working', 'working'];
+}
+
 // "Next · <title> · your turn ›".
 export function nextBar(item, title, onClick) {
-  const [status, label] = NEXT_STATE[item.activity.kind] || ['working', 'working'];
+  const [status, label] = nextState(item);
   const b = el('button', 'next-bar');
   b.type = 'button';
   b.setAttribute('aria-label', `Next: ${title}, ${label}`);

@@ -92,10 +92,12 @@ struct AllScreen: View {
         }
     }
 
-    /// A session row: its place with the tab when open on the Mac, the time on the right.
+    /// A session row: "Waiting for permission" at a permission prompt, its place with the tab when open on the
+    /// Mac, the time on the right.
     private func sessionRow(_ session: Session, place: String? = nil) -> some View {
         Button { path.append(session) } label: {
-            SessionLine(session: session, activity: activity[session.id] ?? .none, state: nil,
+            SessionLine(session: session, activity: activity[session.id] ?? .none,
+                        state: session.isWaitingForPermission ? .waitingForPermission : nil,
                         place: place ?? rowPlace(session, withTab: true), format: format)
         }
         .buttonStyle(.plain)

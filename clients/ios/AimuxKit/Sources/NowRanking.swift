@@ -117,20 +117,25 @@ private struct Ranking {
         lastActive(lhs) == lastActive(rhs) ? codePointsBefore(lhs.id, rhs.id) : lastActive(lhs) > lastActive(rhs)
     }
 
-    /// Pending approvals (newest session first), then failures of the last 900 s (newest failure first).
+    /// Pending approvals (by the session's lastActive) and terminal sessions waiting for permission (by
+    /// `waiting.since`), newest first; then failures of the last 900 s (newest failure first).
     func needsYou(_ sessions: [Session]) -> [NowItem] {
-        var approvals: [Session] = []
+        var asks: [(session: Session, time: Date)] = []
         var failures: [(session: Session, time: Date)] = []
         for session in sessions {
             switch current(session) {
-            case .needsApproval: approvals.append(session)
+            case .needsApproval: asks.append((session, lastActive(session)))
+            case _ where session.isWaitingForPermission:
+                asks.append((session, min(session.waiting?.since ?? now, now)))
             case .failed(_, let time) where now.timeIntervalSince(time) <= recentFailure:
                 failures.append((session, time))
             default: break
             }
         }
-        failures.sort { $0.time == $1.time ? codePointsBefore($0.session.id, $1.session.id) : $0.time > $1.time }
-        return approvals.sorted(by: newestFirst).map(item) + failures.map { item($0.session) }
+        let newest = { (lhs: (session: Session, time: Date), rhs: (session: Session, time: Date)) in
+            lhs.time == rhs.time ? codePointsBefore(lhs.session.id, rhs.session.id) : lhs.time > rhs.time
+        }
+        return (asks.sorted(by: newest) + failures.sorted(by: newest)).map { item($0.session) }
     }
 
     /// Windows by index, tabs by index, panes by number; the count of tabs the filters left empty. A window is

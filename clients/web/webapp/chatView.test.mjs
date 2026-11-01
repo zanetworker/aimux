@@ -15,7 +15,7 @@ function fakeDocument() {
   return { createElement: el, createElementNS: (_, tag) => el(tag) };
 }
 globalThis.document = fakeDocument();
-const { userItemNode } = await import('./chatView.mjs');
+const { nextState, userItemNode } = await import('./chatView.mjs');
 
 function all(node, pred, out = []) {
   if (pred(node)) out.push(node);
@@ -52,4 +52,12 @@ test('parts keep their order next to text; nothing left shows no bubble', () => 
   assert.deepEqual(order.filter((t) => t), ['first', '!make', 'last']);
   assert.equal(userItemNode('<local-command-caveat>generated</local-command-caveat>'), null);
   assert.equal(userItemNode('<bash-stdout> </bash-stdout><bash-stderr></bash-stderr>'), null);
+});
+
+test('nextState: an approval is your turn, a terminal session at a permission prompt is waiting for permission', () => {
+  const s = { id: 's1' };
+  assert.deepEqual(nextState({ session: s, activity: { kind: 'needsApproval' } }), ['needs', 'your turn']);
+  assert.deepEqual(nextState({ session: { ...s, waiting: { kind: 'permission' } }, activity: { kind: 'working' } }), ['needs', 'waiting for permission']);
+  assert.deepEqual(nextState({ session: s, activity: { kind: 'failed' } }), ['failed', 'failed']);
+  assert.deepEqual(nextState({ session: s, activity: { kind: 'working' } }), ['working', 'working']);
 });

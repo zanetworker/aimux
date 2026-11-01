@@ -94,6 +94,21 @@ public struct MacPlace: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+/// A terminal session waiting for the owner at a permission prompt, from its Claude Code hook.
+public struct Waiting: Codable, Equatable, Hashable, Sendable {
+    /// "permission".
+    public let kind: String
+    /// Claude Code's notification line, never the tool's input.
+    public let message: String
+    public let since: Date
+
+    public init(kind: String = "permission", message: String, since: Date) {
+        self.kind = kind
+        self.message = message
+        self.since = since
+    }
+}
+
 public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
     public let id: String
     public let provider: String
@@ -114,10 +129,13 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
     public let mac: MacPlace?
     /// Open in a terminal whose Claude the registry calls busy; false when absent.
     public let working: Bool
+    /// At a permission prompt in a terminal on the Mac; absent when not, and from older servers.
+    public let waiting: Waiting?
 
     public init(id: String, provider: String = "claude", title: String, project: String, lastActive: Date,
                 state: SessionState, lastPrompt: String? = nil, description: String? = nil, pinned: Bool = false,
-                folder: Folder? = nil, mac: MacPlace? = nil, working: Bool = false) {
+                folder: Folder? = nil, mac: MacPlace? = nil, working: Bool = false,
+                waiting: Waiting? = nil) {
         self.id = id
         self.provider = provider
         self.title = title
@@ -130,10 +148,12 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
         self.folder = folder
         self.mac = mac
         self.working = working
+        self.waiting = waiting
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, provider, title, project, lastActive, state, lastPrompt, description, pinned, folder, mac, working
+        case waiting
     }
 
     public init(from decoder: Decoder) throws {
@@ -150,7 +170,11 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
         folder = try? container.decodeIfPresent(Folder.self, forKey: .folder)
         mac = try? container.decodeIfPresent(MacPlace.self, forKey: .mac)
         working = (try? container.decodeIfPresent(Bool.self, forKey: .working)) ?? false
+        waiting = try? container.decodeIfPresent(Waiting.self, forKey: .waiting)
     }
+
+    /// At a permission prompt: `waiting` of kind "permission" (other kinds are not known yet and count as none).
+    public var isWaitingForPermission: Bool { waiting?.kind == "permission" }
 
     /// The title to show: "Session " + the id's first 8 characters when the title is only the id.
     public var displayTitle: String { SessionRowFormat.displayTitle(title, id: id) }
@@ -166,14 +190,14 @@ public struct Session: Codable, Equatable, Hashable, Sendable, Identifiable {
     public func taking(title: String, description: String?, pinned: Bool?) -> Session {
         Session(id: id, provider: provider, title: title, project: project, lastActive: lastActive, state: state,
                 lastPrompt: lastPrompt, description: description, pinned: pinned ?? self.pinned,
-                folder: folder, mac: mac, working: working)
+                folder: folder, mac: mac, working: working, waiting: waiting)
     }
 
     /// This session with another Mac place (or none).
     public func placed(_ place: MacPlace?) -> Session {
         Session(id: id, provider: provider, title: title, project: project, lastActive: lastActive, state: state,
                 lastPrompt: lastPrompt, description: description, pinned: pinned,
-                folder: folder, mac: place, working: working)
+                folder: folder, mac: place, working: working, waiting: waiting)
     }
 }
 

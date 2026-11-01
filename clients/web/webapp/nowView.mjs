@@ -203,13 +203,17 @@ function withMenu(model, ui, session, row) {
   return out;
 }
 
+// Needs you in ranking order: an approval as its card (a row when busy), a terminal session waiting
+// for permission as its session row (the chat's prompt card answers), then failures.
 function needsYou(model, ui, busy) {
   const v = model.view;
-  const approvals = v.needsYou.filter((i) => i.activity.kind === 'needsApproval');
   const failures = v.needsYou.filter((i) => i.activity.kind === 'failed');
+  const asks = v.needsYou.filter((i) => i.activity.kind !== 'failed');
+  const waitingRow = (item) => nowRow(model, ui, item.session, false);
   if (busy) {
     if (!v.needsYou.length) return [];
-    const rows = approvals.map((item) => {
+    const rows = asks.map((item) => {
+      if (item.activity.kind !== 'needsApproval') return waitingRow(item);
       const a = item.activity.approval;
       if (ui.openCards.has(a.approvalId)) return approvalCard(model, ui, item, true);
       return dotRow({
@@ -221,7 +225,8 @@ function needsYou(model, ui, busy) {
     rows.push(...failures.map((item) => failedRow(model, ui, item)));
     return [section(sectionLabel('Needs you', String(v.needsYou.length)), ...rows)];
   }
-  const out = approvals.map((item) => {
+  const out = asks.map((item) => {
+    if (item.activity.kind !== 'needsApproval') return section(null, waitingRow(item));
     const s = el('section', 'group');
     s.append(approvalCard(model, ui, item, false));
     return s;

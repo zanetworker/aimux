@@ -3,9 +3,9 @@ import { folderTree } from './folders.mjs';
 import { NowModel } from './nowModel.mjs';
 import { announce } from './sessionInfo.mjs';
 import { renderNow } from './nowView.mjs';
-import { conversationSearch, queryWords, searchSessions } from './search.mjs';
+import { conversationSearch, isWaitingForPermission, queryWords, searchSessions } from './search.mjs';
 import {
-  displayTitle, dotRow, el, errorBanner, folderKey, foldLine, icon, isOpenChoice, rowPlace, saveChoice,
+  displayTitle, dotRow, el, errorBanner, folderKey, foldLine, icon, isOpenChoice, rowPlace, rowState, saveChoice,
   screenHeader, searchBox, section, sectionLabel, sessionLine,
 } from './rows.mjs';
 
@@ -205,9 +205,12 @@ export function createTabs(api, { headerButtons = () => [] } = {}) {
     return box;
   }
 
-  // A row in All: no state line, so the time shows; the place with its tab when open on the Mac.
+  // A row in All: no state line, so the time shows, except "Waiting for permission" for a session at a
+  // permission prompt; the place with its tab when open on the Mac.
   function allRow(session, place = rowPlace(session, true)) {
-    const row = sessionLine({ session, activity: model.activity[session.id], state: null, place, onClick: () => ui.open(session) });
+    const activity = model.activity[session.id];
+    const state = isWaitingForPermission(session) ? rowState(session, activity) : null;
+    const row = sessionLine({ session, activity, state, place, onClick: () => ui.open(session) });
     row.dataset.focus = 'all-row:' + session.id;
     return row;
   }

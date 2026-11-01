@@ -110,6 +110,7 @@ aimux chat <session-id> "next step?"             # continue an idle Claude sessi
 aimux mcp proxy serve                            # lazy, shared MCP servers for all sessions
 aimux remote serve                               # your sessions from other devices (API, phone web client at /app/, approval notifications), via tailscale serve
 aimux remote pair --name iphone                  # one-time code that pairs a phone or browser (Face ID login); see also remote devices, remote revoke
+aimux remote hooks install                       # Claude Code hooks: terminal sessions at a permission prompt push and list under Needs you
 ```
 
 With `remote_access.terminal_input.enabled` on, the phone can also type into Claude Code sessions open in iTerm2 on the Mac, under the safety checks in the [remote access guide](https://zanetworker.github.io/aimux/guides/remote-access/#typing-into-terminal-sessions): a message is never typed into a shell, over a prompt or while someone uses the Mac, and text starting with `!` (Claude Code's bash mode) is always refused, as is text starting with `/` (a slash command) unless `terminal_input.allow_slash_commands` is set.

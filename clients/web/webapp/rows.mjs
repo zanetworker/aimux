@@ -1,4 +1,4 @@
-import { isOpen, isWorking, projectName } from './search.mjs';
+import { isOpen, isWaitingForPermission, isWorking, projectName } from './search.mjs';
 
 export { projectName };
 
@@ -131,6 +131,7 @@ export function dotRow({ status, title, description, detail, time, locked, onCli
 // What an open session is doing, for the line under its title: {kind, step?, text}, or null when closed.
 // "Working · go test ./...", "Working", "Your turn · 4 min".
 export function rowState(session, activity, now = Date.now()) {
+  if (isWaitingForPermission(session)) return { kind: 'waiting', text: 'Waiting for permission' };
   if (isWorking(session, activity)) {
     const step = activity?.kind === 'working' && activity.step ? activity.step : null;
     return { kind: 'working', step, text: step ? 'Working · ' + step : 'Working' };
@@ -180,7 +181,7 @@ export function sessionLine({ session, activity, state, place, showsPin = false,
     text.append(line);
   }
   if (place) text.append(el('span', 'detail place', place));
-  row.append(dot(isWorking(session, activity) ? 'working' : 'idle'), text);
+  row.append(dot(isWaitingForPermission(session) ? 'needs' : isWorking(session, activity) ? 'working' : 'idle'), text);
   if (!state) row.append(el('span', 'time', relativeTime(session.lastActive)));
   if (onClick) row.addEventListener('click', onClick);
   return row;

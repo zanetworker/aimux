@@ -39,6 +39,12 @@ From another device on the tailnet: `curl https://<your-mac>.<tailnet>.ts.net:84
 
    Type the code it prints into the iPhone app or the web client within 5 minutes.
 
+5. Optional: let Claude Code sessions open in a terminal tell aimux when they wait for permission (see [Permission alerts for terminal sessions](#permission-alerts-for-terminal-sessions)):
+
+   ```bash
+   aimux remote hooks install
+   ```
+
 ## Web client
 
 On the iPhone, install Tailscale and sign in with the same account as the Mac. Then open `https://<your-mac>.<tailnet>.ts.net:8443/app/` in Safari (`remote serve` prints the address) and use Share, Add to Home Screen to open it like an app. The first time, it asks for a pairing code from `aimux remote pair` (see [Device login](#device-login)); after that it unlocks with Face ID.
@@ -121,6 +127,32 @@ remote_access:
 ```
 
 A notification says "Approval needed" and names the session and the tool call (for a shell command, the command itself, shortened). It never carries the tool's full input. It only tells you to look: answer in the app or web client, never from the notification. When nothing is configured, nothing is sent. A half-done `apns` block, a key that is not P-256, or an unset `token_env` variable stops `remote serve` at startup. Each sender and each phone is tried at the same time, so a slow one does not hold up the rest. A request answered before its alert is out sends none. A failed delivery is logged and the approval still waits as usual.
+
+## Permission alerts for terminal sessions
+
+A Claude Code session you started in a terminal on the Mac waits silently at a permission prompt. With aimux's Claude Code hooks installed, such a session lists under **Needs you** in both phone clients with "Waiting for permission" on its row, and `remote serve` sends the same push as a phone approval (ntfy, APNs; see [Approval notifications](#approval-notifications)). Open the session to answer: the chat shows the prompt card from the screen (with [terminal input](#typing-into-terminal-sessions) on), or answer at the Mac.
+
+```bash
+aimux remote hooks install     # add the hooks
+aimux remote hooks status      # are they installed, and do they run this binary?
+aimux remote hooks uninstall   # remove only aimux's hooks
+```
+
+What `install` writes:
+
+- It merges hook entries into `~/.claude/settings.json` (from `HOME`; created if missing) and keeps every other setting and hook you have. Before writing, it copies the file to `~/.claude/settings.json.aimux-bak-<time>`. A file that is not valid JSON is left alone and the command fails. Running it again changes nothing; after you move the aimux binary it points the hooks at the new path.
+- One entry per event, each running `<absolute path to aimux> remote hooks notify || true` with a 10 s timeout: `Notification` with the matcher `permission_prompt` marks the session as waiting; `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `Stop` and `SessionEnd` clear it. Sessions started after the install use the hooks; restart open ones to pick them up.
+- The path is the `aimux` on your `PATH` when that is the same file as the one you ran (so a Homebrew link survives upgrades), otherwise the binary you ran. A build in the temp folder or the Go build cache (`go run`, `go test`) is refused, since it disappears. If the binary is removed later, `|| true` keeps Claude Code from showing a hook error, alerts stop, and `aimux remote hooks status` says the binary does not exist.
+- `uninstall` removes only aimux's entries, also from a matcher group you share with your own hooks (an event list or the `hooks` object left empty goes too), after the same backup.
+
+How it works:
+
+- The hook command reads Claude Code's JSON on stdin and writes or removes one marker, `~/.aimux/waiting/<session id>.json` (directory 0700, file 0600): the session id, `kind` (`permission`), Claude Code's notification line (such as "Claude needs your permission to use Bash", at most 200 characters, never the tool's input), the time, the session's transcript path and, inside a subagent, its agent id. A tool that a subagent ran does not clear a prompt of the main conversation. It makes no network call, prints nothing, always exits 0 so Claude Code never sees a failure, and logs a failed call to `~/.aimux/logs/hooks.log` without its text.
+- Claude Code sends the `permission_prompt` notification once a prompt has waited about six seconds, so a prompt you answer at the Mac right away sends nothing.
+- `remote serve` reads the markers when it lists sessions and adds `waiting` only for a session open in a terminal (Claude's registry shows it live). A marker of a session that is not open is ignored, and removed once it is older than 30 seconds and the session's process is gone (or, for a session `remote serve` never saw open, once it has been missing for 5 seconds), so one unreadable registry file does not remove it.
+- A marker also goes once the session's transcript is written more than 2 seconds after the prompt was reported: answering runs the tool, and denying with Esc writes "[Request interrupted by user]", which fires no hook.
+- It reads the directory every 2 seconds and sends one push per new marker, worded like a phone approval ("Approval needed", the session's title and the notification line), and takes it back (ntfy) when the marker goes: a tool ran, you sent a prompt, the turn ended, the transcript moved on or the session closed. When `remote serve` starts, markers older than 2 minutes count as already pushed; newer ones are pushed.
+- At startup `remote serve` prints whether the hooks are installed.
 
 ## Typing into terminal sessions
 
@@ -264,7 +296,7 @@ No other session is sent, and nothing is sent automatically for a session that a
 From the top of the screen:
 
 1. The search box and a **Working** chip that narrows Now to working sessions.
-2. **Needs you**: pending permission requests, and failed turns from the last 15 minutes; they appear here wherever the session is open or pinned. Cards answer in place.
+2. **Needs you**: pending permission requests and terminal sessions waiting for permission (with the [hooks](#permission-alerts-for-terminal-sessions) installed; their row says "Waiting for permission" and opens the chat), together newest first, then failed turns from the last 15 minutes; they appear here wherever the session is open or pinned. Cards answer in place.
 3. **Pinned**: pinned sessions that are not in an iTerm2 pane (closed, or open elsewhere). A pinned session in a pane stays in its pane with a pin mark.
 4. **On your Mac**: sessions open in iTerm2, in iTerm2's order: window (its title, or "Window 1", "Window 2" in creation order), then tab, then pane. A row has the title, a state line ("Working · go test ./…" with the latest step, or "Your turn · 4 min"), and the folder and pane number. Every tab is folded to one line (name, panes, working count) except the one holding the pane last in front; which tabs you open or close is remembered on the device. Windows, tabs and panes keep iTerm2's order, so a session moves only when you move it on the Mac; a status change shows on its row.
 5. **Elsewhere**: open sessions not in an iTerm2 pane (started from the phone, other terminals, or a pane aimux could not match), each row showing its folder.
@@ -281,17 +313,18 @@ The same box on Now and All. As you type, it matches on the device: names, descr
 
 ### The chat's Next bar
 
-The bar offers the next session that needs you, otherwise the next working one, in Now's order. It skips the session you are in; when picking a working session it also skips one whose approval you just answered (sessions that need you are offered regardless).
+The bar offers the next session that needs you ("your turn", or "waiting for permission" for a terminal session at a prompt), otherwise the next working one, in Now's order. It skips the session you are in; when picking a working session it also skips one whose approval you just answered (sessions that need you are offered regardless).
 
 ### Folder and place on the API
 
-`GET /v1/sessions` gives each listed session three optional fields, so clients never derive names themselves:
+`GET /v1/sessions` gives each listed session these optional fields, so clients never derive names themselves:
 
 | Field | Meaning |
 |-------|---------|
 | `folder` | `{repo, repoPath, worktree, sub, label}`. Git: `repo` is the main worktree's folder name, `repoPath` its full path (the key clients group Folders by), `worktree` the linked worktree's (absent for the main checkout), `sub` the path below the worktree top. Non-git: `repo` is the parent folder's name and `worktree` the folder's own; the home folder is "Home". `label` is for display ("aimux / clients · ios"). |
 | `mac` | Present when the session's running `claude` is in an iTerm2 pane: `{window:{id,index,name}, tab:{index,name}, pane, panes, lastInFront}`. Window and tab names drop a leading status mark such as Claude Code's "✳" or a spinner frame, so a name stays the same while Claude works. |
 | `working` | `true` when the session is open in a terminal and Claude's registry calls it busy. |
+| `waiting` | `{kind, message, since}` while a session open in a terminal shows a permission prompt (from the [hooks](#permission-alerts-for-terminal-sessions)); also on `GET /v1/sessions/{id}`. |
 
 `lastOnMac` stays in the list for older clients, which hide it after 12 hours.
 

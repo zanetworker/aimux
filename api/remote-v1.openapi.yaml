@@ -954,6 +954,24 @@ components:
         folder: { $ref: "#/components/schemas/Folder" }
         mac: { $ref: "#/components/schemas/MacPlace" }
         working: { type: boolean, description: "The session is open in a terminal and Claude's registry calls it busy. Absent when not working. Listed sessions only." }
+        waiting: { $ref: "#/components/schemas/Waiting" }
+
+    Waiting:
+      type: object
+      additionalProperties: false
+      required: [kind, message, since]
+      description: >
+        A session open in a terminal on the Mac is waiting for the owner:
+        Claude Code shows a permission prompt and told aimux through its
+        Notification hook (`aimux remote hooks install`). Absent when it is
+        not waiting, when the hooks are not installed, or when the session is
+        not open. It goes once a tool runs, the owner sends a prompt, or the
+        turn ends. Clients list such a session under Needs you with the
+        state line "Waiting for permission"; the chat's prompt card answers.
+      properties:
+        kind: { type: string, enum: [permission] }
+        message: { type: string, description: "Claude Code's notification line, for example \"Claude needs your permission to use Bash\"; at most 200 characters, never the tool's input." }
+        since: { type: string, format: date-time, description: "When Claude Code reported the prompt." }
 
     Folder:
       type: object
@@ -1082,6 +1100,7 @@ components:
         folder: { $ref: "#/components/schemas/Folder" }
         mac: { $ref: "#/components/schemas/MacPlace" }
         working: { type: boolean, description: "The session is open in a terminal and Claude's registry calls it busy. Absent when not working. Listed sessions only." }
+        waiting: { $ref: "#/components/schemas/Waiting" }
         turns:
           type: array
           items: { $ref: "#/components/schemas/Turn" }

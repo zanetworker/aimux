@@ -1,0 +1,227 @@
+{
+  "name": "terminal sessions waiting for permission join Needs you with approvals, ordered by since, ahead of failures, Pinned and windows; their rows say Waiting for permission",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Water the tomatoes",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:30:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "pinned": true,
+      "working": true,
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "garden"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      },
+      "waiting": {
+        "kind": "permission",
+        "message": "Claude needs your permission to use Bash",
+        "since": "2026-10-26T08:58:00Z"
+      }
+    },
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Sort the seed packets",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:50:00Z",
+      "state": "busy",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      }
+    },
+    {
+      "id": "t2",
+      "provider": "claude",
+      "title": "Plan the raised beds",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "pinned": true,
+      "waiting": {
+        "kind": "permission",
+        "message": "Claude needs your permission to use Edit",
+        "since": "2026-10-26T08:40:00Z"
+      }
+    },
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Fix the sprinkler timer",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:59:30Z",
+      "state": "idle",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      }
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Count the beans",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:20:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "working": true,
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "garden"
+        },
+        "pane": 2,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "p1",
+      "provider": "claude",
+      "title": "Compost notes",
+      "project": "/src/garden",
+      "lastActive": "2026-10-25T10:00:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "pinned": true
+    }
+  ],
+  "events": {
+    "a1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:45:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "approvalId": "p1",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ],
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:59:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:59:30Z",
+        "data": {
+          "error": "the agent stopped"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "t1",
+      "a1",
+      "t2",
+      "f1"
+    ],
+    "pinned": [
+      "p1"
+    ],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "garden",
+            "panes": 2,
+            "working": 1,
+            "open": false,
+            "sessions": [
+              "m1"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 3,
+    "open": 4,
+    "rowStates": {
+      "t1": "Waiting for permission",
+      "t2": "Waiting for permission",
+      "m1": "Working",
+      "p1": null
+    }
+  }
+}

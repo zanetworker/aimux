@@ -43,12 +43,14 @@ public struct OpenMemory: Equatable, Sendable {
 
 /// What an open session is doing, for the line under its title.
 public enum RowState: Equatable, Sendable {
+    case waitingForPermission
     case working(step: String?)
     case yourTurn(since: String)
 
-    /// "Working · go test ./...", "Working", "Your turn · 4 min".
+    /// "Waiting for permission", "Working · go test ./...", "Working", "Your turn · 4 min".
     public var text: String {
         switch self {
+        case .waitingForPermission: "Waiting for permission"
         case .working(let step?): "Working · " + step
         case .working: "Working"
         case .yourTurn(let since): "Your turn · " + since
@@ -56,8 +58,10 @@ public enum RowState: Equatable, Sendable {
     }
 }
 
-/// Working (Now's test, with activity) or, when open, your turn since its last activity; nil when not open.
+/// Waiting for permission (the server's `waiting`), working (Now's test, with activity) or, when open, your turn
+/// since its last activity; nil when not open.
 public func rowState(_ session: Session, activity: Activity, now: Date, format: SessionRowFormat) -> RowState? {
+    if session.isWaitingForPermission { return .waitingForPermission }
     if isWorking(session, activity: activity) {
         if case .working(let step) = activity { return .working(step: step) }
         return .working(step: nil)

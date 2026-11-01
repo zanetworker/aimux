@@ -37,6 +37,7 @@ import (
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
 	"github.com/zanetworker/aimux/internal/terminput"
+	"github.com/zanetworker/aimux/internal/waiting"
 )
 
 // contractTerminal types anything but "prompt showing" and presses only on
@@ -311,6 +312,10 @@ func TestContract(t *testing.T) {
 	defer stopQueue()
 	go api.QueueEvents(queueCtx)
 	api.Links = &Links{JiraBase: "https://jira.example.com", JiraProjects: []string{"WID"}}
+	// s9 waits at a permission prompt (its Claude Code hook's marker).
+	api.Waiting = func() map[string]waiting.Waiting {
+		return map[string]waiting.Waiting{"s9": {Kind: waiting.KindPermission, Message: "Claude needs your permission to use Bash", Since: now}}
+	}
 	devices := &push.DeviceStore{Path: filepath.Join(t.TempDir(), "devices.json")}
 	api.RegisterDevice, api.UnregisterDevice = devices.Add, devices.Remove
 	// Titles, descriptions, pins and Last on your Mac.

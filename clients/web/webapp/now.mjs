@@ -1,5 +1,5 @@
 import { apiDate } from './apiDate.mjs';
-import { compareCodePoints, isOpen, isWorking, macOrder, matches, newestFirst, projectName, queryWords } from './search.mjs';
+import { compareCodePoints, isOpen, isWaitingForPermission, isWorking, macOrder, matches, newestFirst, projectName, queryWords } from './search.mjs';
 
 // The Now screen's ranking, by the shared rules in api/testdata/clients/README.md.
 // Times are milliseconds since the epoch; sessions carry `lastActive` in that form.
@@ -51,17 +51,20 @@ export function rankNow({ sessions, activity, now, query = '', workingOnly = fal
   const words = queryWords(query);
   const wanted = (s) => matches(s, words) && (!workingOnly || working(s));
 
-  // Pending approvals (newest session first), then failures of the last 900 s (newest failure first).
+  // Pending approvals (by the session's lastActive) and terminal sessions waiting for permission (by
+  // waiting.since), newest first; then failures of the last 900 s (newest failure first).
   const approvals = [];
   const failures = [];
   for (const s of sessions) {
     const a = current(s);
-    if (a.kind === 'needsApproval') approvals.push(s);
+    if (a.kind === 'needsApproval') approvals.push({ s, at: Math.min(s.lastActive, now) });
+    else if (isWaitingForPermission(s)) approvals.push({ s, at: Math.min(apiDate(s.waiting.since), now) });
     else if (a.kind === 'failed' && now - a.at <= RECENT_MS) failures.push({ s, at: a.at });
   }
-  approvals.sort(newest);
-  failures.sort((x, y) => y.at - x.at || compareCodePoints(x.s.id, y.s.id));
-  const needsYouAll = [...approvals, ...failures.map((f) => f.s)];
+  const byTime = (x, y) => y.at - x.at || compareCodePoints(x.s.id, y.s.id);
+  approvals.sort(byTime);
+  failures.sort(byTime);
+  const needsYouAll = [...approvals, ...failures].map((x) => x.s);
   const urgent = new Set(needsYouAll.map((s) => s.id));
   const rest = sessions.filter((s) => !urgent.has(s.id));
   const pinnedAway = (s) => s.pinned === true && !s.mac;
