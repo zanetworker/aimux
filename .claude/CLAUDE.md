@@ -130,14 +130,18 @@ internal/
     sessions.go                 # Login sessions in memory (SHA-256 of the token), idle 1 h, absolute 12 h, Done() for streams
     handler.go                  # /v1/auth/pair, challenge, login, logout; Middleware (401 login_required) inside RequireTailnetUser; health session state
     audit.go                    # ~/.aimux/logs/remote-audit.log JSON lines (never codes, challenges, tokens, keys or text); identical failures collapse to one a minute
+  harness/
+    harness.go                  # Leaf package of types shared by the core and harness-specific code: Key and its constants, Option, Prompt, Screen, Match, RoomKeys, PasteText, the Composer interface (Read, BoxShows, IsAgentProcess, RefuseText, RoomKeys, ClearKeys); imports no internal package; boundary_test.go enforces the Harness Boundary imports
+    claude/screen.go            # Parses Claude Code's screen: InputBoxEmpty, BoxHasText, WordsInBox, WorkingSeconds, ParsePrompt (none when its top rule is off the screen; fixtures in testdata/screens/, also read by terminput's tests)
+    claude/composer.go          # Composer: Claude Code's harness.Composer over screen.go (one prompt and one box parse per Read); processes claude and node; refuses a leading ! (bash mode) and, unless allowed, / (slash command); the grey-suggestion probe (space, then backspace) and the clear keys
   remoteapi/chatqueue/
     queue.go                    # Item and queue types, states (waiting, sending, answering; queue running or paused), limits (20 per session), the text rules re-checked before a send
     store.go                    # Queue per session in ~/.aimux/remote-queue.json (0600, atomic writes): add (idempotent by key), edit, move, delete, pause, resume; a restart pauses an in-flight item as "may have been sent"
     dispatch.go                 # Dispatcher: one message at a time per session, next only after the answer finished (ACP turn done; iTerm2 history turn seen plus 2 s with Claude not working, or a later turn of the owner's); fixed pause reasons
     prompt.go                   # Reads Claude Code's "while you were working" wrapper, paste tags and slash-command/bash-mode tags when matching an item to a history turn
   terminput/
-    terminput.go                # Service: safety checks (enabled, registry pid, foreground is claude, in-use guard on the focused pane, busy refusal, input box showing, prompt id; makeRoom types over Claude Code's grey suggestion and clears a draft, or refuses it with keep_drafts, re-checking before every key), Driver/System/Sessions interfaces, error codes
-    screen.go                   # Parses Claude Code's screen: InputBoxEmpty, BoxHasText, WordsInBox, WorkingSeconds, ParsePrompt (none when its top rule is off the screen; fixtures in testdata/screens/)
+    terminput.go                # Service: safety checks (enabled, registry pid, foreground is the harness's process, in-use guard on the focused pane, busy refusal, input box showing, prompt id; makeRoom presses the harness's probe and clear keys to replace a suggestion or clear a draft, or refuses it with keep_drafts, re-checking before every key), Driver/System/Sessions interfaces, error codes; every screen read, the process check, the text rule and the room keys go through its Composer (NewService: Claude Code's; NewServiceFor: another, nil panics); CheckText and CheckMessage apply Claude Code's rules
+    types.go                    # Aliases of the harness types (Key, Option, Prompt, Composer), PasteText
     probe.go                    # SystemProbe: tty, foreground process group (ps), HID idle time (ioreg)
     log.go                      # Attempt log ~/.aimux/logs/terminal-input.log (0600, never the text)
     layout.go                   # LayoutReader: joins the iTerm2 windows, tabs and panes to open sessions by tty (MacPlace for the session list; 3 s cache)
@@ -215,6 +219,7 @@ Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
   team/        — team config reader
   remoteapi/chatqueue/: per-session chat queue and its dispatcher (phone messages sent one at a time)
   terminput/: typing phone messages and prompt keys into terminal Claude sessions; iterm2/ driver
+  harness/: types and interfaces for harness-specific knowledge (Composer); claude/ is Claude Code's
 ```
 
 ### The Rule: Controller First, Frontend Second
@@ -330,6 +335,23 @@ All agent types implement `provider.Provider` (11 methods). This interface must 
 4. **Local assumptions are isolated.** Methods like `ResumeCommand() *exec.Cmd` and `SpawnCommand() *exec.Cmd` assume local execution. When adding remote providers, these may return nil (not applicable) — the provider signals capabilities via `CanEmbed()`, and future methods like `CanSpawnLocally() bool` can be added. Do NOT force remote semantics into the existing interface; extend it instead.
 5. **Trace format is provider-owned.** Each provider implements `ParseTrace` for its own log format. Never add provider-specific parsing logic outside the provider's file.
 6. **New providers = one file + register.** Adding a provider should require only creating `internal/provider/yourprovider.go` and registering in `app.go` NewApp(). If it requires changes to other providers or core packages, the abstraction is leaking.
+
+## Harness Boundary
+
+Knowledge of one harness (its screen layout, prompt wording, working line, paste marker, process names, text rules, composer keys) must live behind the interfaces in `internal/harness`, implemented once per harness (`internal/harness/claude` for Claude Code). Core packages such as `terminput` call the interface (`terminput.Service` holds a `harness.Composer`) and must not branch on a harness themselves. A new harness (Codex) adds its own implementation and screen fixtures; it adds no cases to the core.
+
+- `internal/harness` must not import any internal package.
+- `internal/harness/<name>` must import no internal package other than `internal/harness`.
+- `internal/terminput` must not import `internal/provider`; `internal/provider` must not import `internal/terminput`.
+- `internal/harness/boundary_test.go` enforces these imports.
+
+The Claude Code implementation lives in `internal/harness/claude`, not `internal/provider`: `terminput.NewService` defaults to it, and taking it from provider would make terminput depend on provider and everything it imports. When the Service looks up a Composer per session, provider can expose it as an optional capability and the default can go.
+
+Known exceptions, next steps:
+- Error codes and texts name Claude (`not_claude`, "Claude is working"); they are API contract and change with a contract version.
+- `settle` and `settleReads` in terminput (the pause between typing and Enter, the reads after typing) are tuned to Claude Code's redraw; they belong on the Composer.
+- The package functions `terminput.CheckText` and `CheckMessage` apply Claude Code's rules for their callers (the iTerm2 driver, the chat queue); those callers should ask the session's Composer.
+- terminput's package doc, `Target` and `ForegroundCommand` docs still say claude.
 
 ## Single-File Verification
 

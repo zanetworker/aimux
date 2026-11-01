@@ -25,6 +25,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/harness/claude"
 	"github.com/zanetworker/aimux/internal/terminput"
 )
 
@@ -288,7 +289,7 @@ func TestServiceLive(t *testing.T) {
 		t.Errorf("10: want bad_text, got %v", err)
 	}
 	time.Sleep(time.Second)
-	if after := screen(); strings.Contains(after, "LIVEBAD") || !terminput.InputBoxEmpty(after) {
+	if after := screen(); strings.Contains(after, "LIVEBAD") || !claude.InputBoxEmpty(after) {
 		t.Errorf("10: something was typed; tail:\n%s", tail(after, 10))
 	}
 	_ = before

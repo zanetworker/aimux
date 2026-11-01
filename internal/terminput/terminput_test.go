@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/harness/claude"
 )
 
 type fakeSessions map[string]int
@@ -341,7 +342,7 @@ func TestSendFailureNotRemembered(t *testing.T) {
 
 func bashPromptID(t *testing.T, screen string) (string, *Prompt) {
 	t.Helper()
-	p := ParsePrompt(screen)
+	p := claude.ParsePrompt(screen)
 	if p == nil {
 		t.Fatal("fixture has no prompt")
 	}

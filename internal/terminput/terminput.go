@@ -5,16 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path"
 	"regexp"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/harness"
+	"github.com/zanetworker/aimux/internal/harness/claude"
 )
 
 const (
@@ -30,16 +29,11 @@ const (
 
 // Keys other than digits that a driver can press.
 const (
-	KeyEscape Key = "escape"
-	KeyEnter  Key = "enter"
-	// KeySpace tells Claude Code's grey suggestion from a draft: typing
-	// dismisses a suggestion, so the box then reads empty; a draft keeps its
-	// text and gains the space, which KeyBackspace takes back out.
-	KeySpace     Key = "space"
-	KeyBackspace Key = "backspace"
-	// KeyClear empties the input box row the cursor is on (Ctrl+E, then
-	// Ctrl+U); two per box row empty a draft from any cursor position.
-	KeyClear Key = "clear"
+	KeyEscape    = harness.KeyEscape
+	KeyEnter     = harness.KeyEnter
+	KeySpace     = harness.KeySpace
+	KeyBackspace = harness.KeyBackspace
+	KeyClear     = harness.KeyClear
 )
 
 // clearRounds bounds the attempts to empty the box before Replace gives up.
@@ -161,39 +155,33 @@ var (
 )
 
 // CheckText returns ErrBadText when text holds a C0 control other than
-// newline and tab, DEL or a C1 control, or starts with "!" after optional
-// white space. Control bytes would reach the pty as keys: CR submits,
-// ESC[201~ ends a paste, Ctrl-Z suspends claude. A leading "!" switches
-// Claude Code to bash mode, where Enter runs a shell command unasked.
+// newline and tab, DEL or a C1 control, or when Claude Code would not take
+// it as a message even with slash commands allowed (a leading "!", see
+// claude.Composer.RefuseText). Control bytes would reach the pty as keys:
+// CR submits, ESC[201~ ends a paste, Ctrl-Z suspends the harness.
 func CheckText(text string) error {
+	return checkText(claude.Composer{}, text, true)
+}
+
+// CheckMessage applies every text rule a message for Claude Code must pass
+// before it is typed: CheckText, and no leading "/" unless allowSlash. It
+// answers ErrBadText or nil.
+func CheckMessage(text string, allowSlash bool) error {
+	return checkText(claude.Composer{}, text, allowSlash)
+}
+
+// checkText is CheckMessage for any harness: the control-byte rule is the
+// pty's, the rest is the harness's (RefuseText).
+func checkText(c Composer, text string, allowCommands bool) error {
 	for _, r := range text {
 		if (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f) {
 			return ErrBadText
 		}
 	}
-	if strings.HasPrefix(strings.TrimLeftFunc(text, unicode.IsSpace), "!") {
+	if c.RefuseText(text, allowCommands) {
 		return ErrBadText
 	}
 	return nil
-}
-
-// CheckMessage applies every text rule a message must pass before it is
-// typed: CheckText, and no leading "/" unless allowSlash. It answers
-// ErrBadText or nil.
-func CheckMessage(text string, allowSlash bool) error {
-	if err := CheckText(text); err != nil {
-		return err
-	}
-	if slashCommand(text) && !allowSlash {
-		return ErrBadText
-	}
-	return nil
-}
-
-// slashCommand reports whether text starts with "/" after optional white
-// space: Claude Code runs it as a slash command.
-func slashCommand(text string) bool {
-	return strings.HasPrefix(strings.TrimLeftFunc(text, unicode.IsSpace), "/")
 }
 
 // Code returns the stable code for err: "ok" for nil, the sentinel's code, or
@@ -214,6 +202,7 @@ type Service struct {
 	cfg      config.TerminalInputConfig
 	sessions Sessions
 	sys      System
+	composer Composer // the harness's screen, process, text and key knowledge
 	log      io.Writer
 	drivers  []Driver
 	now      func() time.Time
@@ -268,12 +257,11 @@ func (s *Service) leftShownLocked(sessionID, scr string) bool {
 	if left == "" {
 		return false
 	}
-	if WordsInBox(scr, left) {
+	if s.composer.BoxShows(scr, left).Words {
 		return true
 	}
 	m := s.leftMarker[sessionID].marker
-	box, rows, ok := boxText(scr)
-	return m != "" && ok && rows == 1 && box == m
+	return m != "" && s.composer.Read(scr).PasteMarker == m
 }
 
 // leftShown is leftShownLocked taking leftMu.
@@ -296,13 +284,16 @@ func (s *Service) LeftInBox(sessionID string) bool {
 // send's own text just pasted into pid's claude, when the box is exactly one
 // marker row.
 func (s *Service) setLeftMarker(sessionID, text, scr string, pid int) {
-	box, rows, ok := boxText(scr)
-	if !ok || rows != 1 || !PasteText(text) || !pastedMarker.MatchString(box) {
+	box := s.composer.Read(scr).PasteMarker
+	if box == "" || !PasteText(text) {
 		return
 	}
 	s.leftMu.Lock()
 	defer s.leftMu.Unlock()
 	if s.left[sessionID] == text {
+		// Invariant: box is a real paste marker (Screen.PasteMarker is never
+		// other text), so leftShownLocked and markerOK may compare the next
+		// read's PasteMarker with it by plain equality.
 		s.leftMarker[sessionID] = pasteMark{marker: box, pid: pid, at: s.now()}
 	}
 }
@@ -316,8 +307,7 @@ func (s *Service) markerOK(sessionID, text, scr string, t Target) bool {
 	s.leftMu.Lock()
 	m, left := s.leftMarker[sessionID], s.left[sessionID]
 	s.leftMu.Unlock()
-	box, rows, ok := boxText(scr)
-	if m.marker == "" || left != text || !ok || rows != 1 || box != m.marker || m.pid != t.PID {
+	if m.marker == "" || left != text || s.composer.Read(scr).PasteMarker != m.marker || m.pid != t.PID {
 		return false
 	}
 	idle, err := s.sys.IdleSeconds()
@@ -345,7 +335,7 @@ func (s *Service) forgetLeftUnlessShown(sessionID, scr string, gen int) {
 	defer s.leftMu.Unlock()
 	left := s.left[sessionID]
 	settling := s.now().Sub(s.leftAt[sessionID]) < leftSettle
-	if left != "" && s.leftGen == gen && !settling && ParsePrompt(scr) == nil && !s.leftShownLocked(sessionID, scr) {
+	if left != "" && s.leftGen == gen && !settling && s.composer.Read(scr).Prompt == nil && !s.leftShownLocked(sessionID, scr) {
 		delete(s.left, sessionID)
 		delete(s.leftMarker, sessionID)
 	}
@@ -364,9 +354,18 @@ func (s *Service) setLeft(sessionID, text string) {
 	}
 }
 
-// NewService builds a Service. log may be nil.
+// NewService builds a Service for Claude Code sessions. log may be nil.
 func NewService(cfg config.TerminalInputConfig, sessions Sessions, sys System, log io.Writer, drivers ...Driver) *Service {
-	return &Service{cfg: cfg, sessions: sessions, sys: sys, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}, left: map[string]string{}, leftAt: map[string]time.Time{}, leftMarker: map[string]pasteMark{}}
+	return NewServiceFor(cfg, sessions, sys, claude.Composer{}, log, drivers...)
+}
+
+// NewServiceFor is NewService for the harness that composer describes. A
+// nil composer is a programming error and panics.
+func NewServiceFor(cfg config.TerminalInputConfig, sessions Sessions, sys System, composer Composer, log io.Writer, drivers ...Driver) *Service {
+	if composer == nil {
+		panic("terminput: NewServiceFor needs a Composer")
+	}
+	return &Service{cfg: cfg, sessions: sessions, sys: sys, composer: composer, log: log, drivers: drivers, now: time.Now, timeout: driverTimeout, sleep: sleepCtx, goos: runtime.GOOS, done: map[string]time.Time{}, left: map[string]string{}, leftAt: map[string]time.Time{}, leftMarker: map[string]pasteMark{}}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -381,8 +380,7 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 }
 
 // foregroundOK reports ErrNotClaude unless the tty's foreground process
-// group is t.PID's and its command is claude or node (Claude Code runs as
-// either). It runs in locate and again right before each write.
+// group is t.PID's and its command is the harness's (IsAgentProcess). It runs in locate and again right before each write.
 func (s *Service) foregroundOK(t Target) error {
 	fg, err := s.sys.ForegroundIsPID(t.TTY, t.PID)
 	if err != nil || !fg {
@@ -392,8 +390,7 @@ func (s *Service) foregroundOK(t Target) error {
 	if err != nil {
 		return ErrNotClaude
 	}
-	switch path.Base(strings.TrimSpace(cmd)) {
-	case "claude", "node":
+	if s.composer.IsAgentProcess(cmd) {
 		return nil
 	}
 	return ErrNotClaude
@@ -513,17 +510,16 @@ func (s *Service) Status(ctx context.Context, sessionID, registryStatus string) 
 		st.Reason = Code(err)
 		return st
 	}
-	st.Prompt = ParsePrompt(scr)
-	st.Working = Working(scr)
-	if st.Working {
-		st.WorkingSeconds, _ = WorkingSeconds(scr)
-	}
+	v := s.composer.Read(scr)
+	st.Prompt = v.Prompt
+	st.Working = v.Working
+	st.WorkingSeconds = v.WorkingSeconds
 	// The text a send left waiting can be retried (Retry presses Enter).
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
-	st.BoxHasText = BoxHasText(scr)
+	st.BoxHasText = v.BoxHasText
 	// Text in the box (a grey suggestion or a draft) does not stop a message:
 	// Send types over a suggestion and replaces or keeps a draft.
-	if !InputBoxEmpty(scr) && !st.BoxHasText && !s.leftShown(sessionID, scr) {
+	if !v.InputEmpty && !st.BoxHasText && !s.leftShown(sessionID, scr) {
 		st.Reason = Code(ErrNotAtInput)
 		return st
 	}
@@ -605,43 +601,48 @@ func (s *Service) SendReplacing(ctx context.Context, sessionID, text, idemKey st
 	return err
 }
 
-// makeRoom gets the input box scr shows ready for a message. A box with
-// text gets a space first: Claude Code's grey suggestion vanishes when
-// typed over, so the box then reads empty, while a draft keeps its text and
-// the space is taken back out. A draft is then refused (keep) or cleared and
-// checked again, up to clearRounds. Before each key, and so after every wait
+// makeRoom gets the input box scr shows ready for a message, with the keys
+// the harness names (RoomKeys, ClearKeys). A box with text gets the probe
+// key first: a box that then reads empty held only a suggestion, while a
+// draft keeps its text and the probe is taken back out (Unprobe). A draft
+// is then refused (keep) or cleared and checked again, up to clearRounds. Before each key, and so after every wait
 // for the terminal, the screen must still show the box with text and safe
 // (the in-use guard and the foreground check) must pass: the owner may have
 // focused the pane, a shell taken it or a prompt come up meanwhile.
 func (s *Service) makeRoom(ctx context.Context, d Driver, p Pane, scr string, keep bool, safe func() error) error {
 	ready := func(scr string) error {
-		if !BoxHasText(scr) || Working(scr) || ParsePrompt(scr) != nil {
+		if v := s.composer.Read(scr); !v.BoxHasText || v.Working || v.Prompt != nil {
 			return ErrNotAtInput
 		}
 		return safe()
 	}
+	room := s.composer.RoomKeys()
 	for round := 0; ; round++ {
-		if InputBoxEmpty(scr) {
+		if s.composer.Read(scr).InputEmpty {
 			return nil
 		}
 		if err := ready(scr); err != nil {
 			return err
 		}
-		if err := s.pressKey(ctx, d, p, KeySpace); err != nil {
-			return err
-		}
 		var err error
-		if scr, err = s.settledScreen(ctx, d, p); err != nil {
-			return err
-		}
-		if InputBoxEmpty(scr) {
-			return nil // it was a suggestion; the message follows the space
-		}
-		if err := ready(scr); err != nil {
-			return err // the space stays: no key goes into a box that is not safe
-		}
-		if err := s.pressKey(ctx, d, p, KeyBackspace); err != nil {
-			return err
+		if room.Probe != "" {
+			if err := s.pressKey(ctx, d, p, room.Probe); err != nil {
+				return err
+			}
+			if scr, err = s.settledScreen(ctx, d, p); err != nil {
+				return err
+			}
+			if s.composer.Read(scr).InputEmpty {
+				return nil // it was a suggestion; the message follows the probe
+			}
+			if err := ready(scr); err != nil {
+				return err // the probe stays: no key goes into a box that is not safe
+			}
+			if room.Unprobe != "" {
+				if err := s.pressKey(ctx, d, p, room.Unprobe); err != nil {
+					return err
+				}
+			}
 		}
 		if keep {
 			return ErrDraftInBox
@@ -649,12 +650,11 @@ func (s *Service) makeRoom(ctx context.Context, d Driver, p Pane, scr string, ke
 		if round == clearRounds {
 			return ErrNotCleared
 		}
-		rows, _ := boxRows(scr)
-		for range 2 * max(1, len(rows)) {
+		for _, k := range s.composer.ClearKeys(s.composer.Read(scr).BoxRows) {
 			if err := safe(); err != nil {
 				return err // each clear erases a row: never into a pane that is no longer safe
 			}
-			if err := s.pressKey(ctx, d, p, KeyClear); err != nil {
+			if err := s.pressKey(ctx, d, p, k); err != nil {
 				return err
 			}
 		}
@@ -685,7 +685,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 	if !s.cfg.Enabled {
 		return ErrDisabled
 	}
-	if err := CheckMessage(text, s.cfg.AllowSlashCommands); err != nil {
+	if err := checkText(s.composer, text, s.cfg.AllowSlashCommands); err != nil {
 		return err
 	}
 	// Safe before locate: only successes that passed every check are remembered.
@@ -701,7 +701,8 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 	if err != nil {
 		return err
 	}
-	if Working(scr) || s.registryBusy(sessionID) {
+	v := s.composer.Read(scr)
+	if v.Working || s.registryBusy(sessionID) {
 		return ErrBusy
 	}
 	// A send that typed but did not press Enter (ErrNotSubmitted) left this
@@ -711,17 +712,17 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 	// a marker markerOK cannot confirm (Mac input since, another claude)
 	// may be the owner's paste: ErrUnsentUnconfirmed, nothing pressed.
 	s.forgetLeftUnlessShown(sessionID, scr, gen)
-	shown := !InputBoxEmpty(scr) && s.leftShown(sessionID, scr)
+	shown := !v.InputEmpty && s.leftShown(sessionID, scr)
 	same := shown && s.leftText(sessionID) == text
-	waiting := same && (WordsInBox(scr, text) || s.markerOK(sessionID, text, scr, t))
+	waiting := same && (s.composer.BoxShows(scr, text).Words || s.markerOK(sessionID, text, scr, t))
 	switch {
 	case same && !waiting && !replace:
 		return ErrUnsentUnconfirmed
 	case shown && !waiting && !replace:
 		return ErrBoxHasUnsent
 	}
-	if !InputBoxEmpty(scr) && !waiting {
-		if !BoxHasText(scr) {
+	if !v.InputEmpty && !waiting {
+		if !v.BoxHasText {
 			return ErrNotAtInput
 		}
 		// Never press a key in a box the owner may be typing in at the Mac,
@@ -761,7 +762,7 @@ func (s *Service) send(ctx context.Context, sessionID, text, idemKey string, rep
 			if err != nil {
 				return err
 			}
-			if shown = TextInBox(scr, text); shown || ParsePrompt(scr) != nil {
+			if shown = s.composer.BoxShows(scr, text).Typed; shown || s.composer.Read(scr).Prompt != nil {
 				break // shown, or a prompt took the screen: no point waiting
 			}
 		}
@@ -814,14 +815,15 @@ func (s *Service) submit(ctx context.Context, sessionID, text string) error {
 	if err != nil {
 		return err
 	}
+	v := s.composer.Read(scr)
 	switch {
-	case Working(scr):
+	case v.Working:
 		return ErrBusy
-	case ParsePrompt(scr) != nil:
+	case v.Prompt != nil:
 		return ErrNotAtInput
-	case InputBoxEmpty(scr):
+	case v.InputEmpty:
 		return ErrBoxEmpty
-	case !TextShownInBox(scr, text) && !s.markerOK(sessionID, text, scr, t):
+	case !s.composer.BoxShows(scr, text).Shown && !s.markerOK(sessionID, text, scr, t):
 		return ErrNotInBox
 	}
 	if err := s.inUse(ctx, d, t); err != nil {
@@ -867,7 +869,7 @@ func (s *Service) press(ctx context.Context, sessionID, promptID string, option 
 	if err != nil {
 		return err
 	}
-	pr := ParsePrompt(scr)
+	pr := s.composer.Read(scr).Prompt
 	if pr == nil {
 		return ErrNoPrompt
 	}

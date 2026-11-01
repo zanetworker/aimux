@@ -2,25 +2,22 @@
 // open in a terminal, after checking what the screen shows.
 package terminput
 
+import "github.com/zanetworker/aimux/internal/harness"
+
 // Key is a single key sent to a terminal, such as "1" for a prompt option.
-type Key string
+type Key = harness.Key
 
 // Option is one numbered choice in a permission prompt.
-type Option struct {
-	Key   Key
-	Label string
-}
+type Option = harness.Option
 
-// Prompt is a Claude Code permission prompt read from the screen.
-type Prompt struct {
-	// ID is stable for the same body, question and labels, so a retried key
-	// can be matched against the prompt it was meant for.
-	ID       string
-	Question string
-	// Detail is what the prompt is about: the lines between the rule above
-	// it and the question, such as "Bash command" and the command, or
-	// "Create file", the name and a preview. Dedented, at most 20 lines and
-	// 2,000 characters; empty when no rule is found above the question.
-	Detail  string
-	Options []Option
-}
+// Prompt is a permission prompt read from the screen.
+type Prompt = harness.Prompt
+
+// Composer is the harness knowledge the Service relies on: what its screen
+// shows, which foreground process is the harness, which texts it refuses
+// and which keys make room in its input box.
+type Composer = harness.Composer
+
+// PasteText reports whether text goes in as a bracketed paste
+// (harness.PasteText); drivers paste such text.
+func PasteText(text string) bool { return harness.PasteText(text) }

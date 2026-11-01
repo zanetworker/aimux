@@ -1,4 +1,7 @@
-package terminput
+// Package claude is Claude Code's harness.Composer: it parses the
+// screen Claude Code draws in a terminal (input box, permission prompt,
+// working line, paste marker) and knows its process names.
+package claude
 
 import (
 	"crypto/sha256"
@@ -7,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/zanetworker/aimux/internal/harness"
 )
 
 const (
@@ -58,7 +63,11 @@ func ruleWidth(line string) int {
 // colour, so they are recognised by their wording. Known gap: a draft typed
 // exactly in the placeholder form Try "..." is accepted as empty.
 func InputBoxEmpty(screen string) bool {
-	rows, ok := bottomBox(screen)
+	return inputEmpty(bottomBox(screen))
+}
+
+// inputEmpty is InputBoxEmpty over the rows bottomBox returned.
+func inputEmpty(rows []string, ok bool) bool {
 	if !ok || len(rows) != 1 {
 		return false
 	}
@@ -108,15 +117,6 @@ func bottomBox(screen string) ([]string, bool) {
 // pastedMarker is how Claude Code shows a long paste in its input box.
 var pastedMarker = regexp.MustCompile(`^\[Pasted text #\d+( \+\d+ lines?)?\]$`)
 
-// PasteText reports whether text goes in as a bracketed paste: it has a
-// newline or a tab, or more than 200 characters.
-func PasteText(text string) bool {
-	return strings.ContainsAny(text, "\n\t") || utf8.RuneCountInString(text) > pasteOver
-}
-
-// pasteOver is the length in characters above which text is pasted.
-const pasteOver = 200
-
 // TextInBox reports whether the screen shows text, just typed, waiting in
 // Claude Code's input box, so pressing Enter submits it and nothing else: no
 // prompt is showing, the bottom-most box starts with one chevron line and its
@@ -126,20 +126,32 @@ const pasteOver = 200
 // it is this text's; a send records the exact marker for a later retry).
 // Anything else gives false.
 func TextInBox(screen, text string) bool {
-	box, rows, ok := boxText(screen)
+	rows, ok := boxRows(screen)
+	return textIn(rows, ok, text)
+}
+
+// textIn is TextInBox over the rows boxRows returned.
+func textIn(shown []string, ok bool, text string) bool {
+	box, rows, ok := boxText(shown, ok)
 	if !ok || squeeze(text) == "" {
 		return false
 	}
 	if squeeze(box) == squeeze(text) {
 		return true
 	}
-	return rows == 1 && PasteText(text) && pastedMarker.MatchString(box)
+	return rows == 1 && harness.PasteText(text) && pastedMarker.MatchString(box)
 }
 
 // TextShownInBox is TextInBox without the paste marker: the box visibly
 // holds text itself (compared without whitespace).
 func TextShownInBox(screen, text string) bool {
-	box, _, ok := boxText(screen)
+	rows, ok := boxRows(screen)
+	return textShownIn(rows, ok, text)
+}
+
+// textShownIn is TextShownInBox over the rows boxRows returned.
+func textShownIn(shown []string, ok bool, text string) bool {
+	box, _, ok := boxText(shown, ok)
 	return ok && squeeze(text) != "" && squeeze(box) == squeeze(text)
 }
 
@@ -149,6 +161,11 @@ func TextShownInBox(screen, text string) bool {
 // that matches only with its spaces removed is someone else's.
 func WordsInBox(screen, text string) bool {
 	rows, ok := boxRows(screen)
+	return wordsIn(rows, ok, text)
+}
+
+// wordsIn is WordsInBox over the rows boxRows returned.
+func wordsIn(rows []string, ok bool, text string) bool {
 	want := strings.Join(strings.Fields(text), " ")
 	if !ok || want == "" {
 		return false
@@ -173,14 +190,19 @@ func WordsInBox(screen, text string) bool {
 // on its chevron line: a draft, or Claude Code's grey suggestion (the screen
 // text carries no colour). Bash mode and unclear screens give false.
 func BoxHasText(screen string) bool {
-	box, _, ok := boxText(screen)
+	return hasText(boxRows(screen))
+}
+
+// hasText is BoxHasText over the rows boxRows returned.
+func hasText(rows []string, ok bool) bool {
+	box, _, ok := boxText(rows, ok)
 	return ok && strings.TrimSpace(box) != ""
 }
 
 // boxText is the text in Claude Code's input box and its row count, when
-// no prompt shows and the box has the form TextInBox describes.
-func boxText(screen string) (string, int, bool) {
-	rows, ok := boxRows(screen)
+// no prompt shows and the box has the form TextInBox describes; rows and ok
+// are boxRows'.
+func boxText(rows []string, ok bool) (string, int, bool) {
 	if !ok {
 		return "", 0, false
 	}
@@ -192,7 +214,11 @@ func boxRows(screen string) ([]string, bool) {
 	if ParsePrompt(screen) != nil {
 		return nil, false
 	}
-	rows, ok := bottomBox(screen)
+	return composerRows(bottomBox(screen))
+}
+
+// composerRows is boxRows over bottomBox's rows, for a screen with no prompt.
+func composerRows(rows []string, ok bool) ([]string, bool) {
 	if !ok || !strings.HasPrefix(rows[0], chevron) {
 		return nil, false
 	}
@@ -218,7 +244,7 @@ func squeeze(s string) string { return strings.Join(strings.Fields(s), "") }
 // the "Esc to cancel" footer, with no input box or output after the footer.
 // Any other screen, including a prompt scrolled partly off or already
 // answered, gives nil.
-func ParsePrompt(screen string) *Prompt {
+func ParsePrompt(screen string) *harness.Prompt {
 	lines := strings.Split(screen, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		q := strings.TrimSpace(lines[i])
@@ -233,7 +259,7 @@ func ParsePrompt(screen string) *Prompt {
 		if !whole {
 			return nil // its top scrolled off: the body, and so the id, would be incomplete
 		}
-		return &Prompt{ID: promptID(body, q, opts), Question: q, Detail: clip(body), Options: opts}
+		return &harness.Prompt{ID: promptID(body, q, opts), Question: q, Detail: clip(body), Options: opts}
 	}
 	return nil
 }
@@ -321,8 +347,8 @@ func liveAfterFooter(lines []string) bool {
 // lines may separate options; a wrapped label line is indented deeper than the
 // option's number and is joined with one space. It returns the lines after the
 // footer, or nil options when the block is malformed or the footer is missing.
-func parseOptions(lines []string) ([]Option, []string) {
-	var opts []Option
+func parseOptions(lines []string) ([]harness.Option, []string) {
+	var opts []harness.Option
 	numberCol := 0
 	blank := true // blank lines are allowed before the first option
 	for n, raw := range lines {
@@ -344,7 +370,7 @@ func parseOptions(lines []string) ([]Option, []string) {
 			return nil, nil
 		}
 		numberCol = utf8.RuneCountInString(raw[:strings.Index(raw, m[1])])
-		opts = append(opts, Option{Key: Key(m[1]), Label: strings.TrimSpace(m[2])})
+		opts = append(opts, harness.Option{Key: harness.Key(m[1]), Label: strings.TrimSpace(m[2])})
 		blank = false
 	}
 	return nil, nil
@@ -352,7 +378,7 @@ func parseOptions(lines []string) ([]Option, []string) {
 
 // promptID hashes the whole body (not the clipped Detail), the question and
 // the labels, so two prompts asking the same about different commands differ.
-func promptID(body, question string, opts []Option) string {
+func promptID(body, question string, opts []harness.Option) string {
 	parts := []string{body, question}
 	for _, o := range opts {
 		parts = append(parts, o.Label)

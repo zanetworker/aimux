@@ -1,4 +1,4 @@
-package terminput
+package claude
 
 import (
 	"os"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/zanetworker/aimux/internal/harness"
 )
 
 func fixture(t *testing.T, name string) string {
@@ -20,12 +22,12 @@ func fixture(t *testing.T, name string) string {
 }
 
 func TestScreenFixtures(t *testing.T) {
-	yesNo := []Option{{"1", "Yes"}, {"2", "Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)"}, {"3", "No"}}
+	yesNo := []harness.Option{{Key: "1", Label: "Yes"}, {Key: "2", Label: "Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)"}, {Key: "3", Label: "No"}}
 	tests := []struct {
 		file      string
 		empty     bool
 		question  string
-		options   []Option
+		options   []harness.Option
 		detail    string
 		hasPrompt bool
 		working   bool
@@ -43,33 +45,33 @@ func TestScreenFixtures(t *testing.T) {
 		{file: "draft-in-box.txt"},
 		{file: "prompt-create-file.txt", hasPrompt: true, question: "Do you want to create made.txt?", options: yesNo,
 			detail: "Create file\nmade.txt\n" + strings.Repeat("╌", 80) + "\n 1 hi\n" + strings.Repeat("╌", 80)},
-		{file: "prompt-bash.txt", hasPrompt: true, question: "Do you want to proceed?", detail: "Bash command\n\n  ls -la\n  List files in the current directory", options: []Option{
-			{"1", "Yes"},
-			{"2", "Yes, and don't ask again for ls commands in /home/demo/project"},
-			{"3", "No, and tell Claude what to do differently (esc)"},
+		{file: "prompt-bash.txt", hasPrompt: true, question: "Do you want to proceed?", detail: "Bash command\n\n  ls -la\n  List files in the current directory", options: []harness.Option{
+			{Key: "1", Label: "Yes"},
+			{Key: "2", Label: "Yes, and don't ask again for ls commands in /home/demo/project"},
+			{Key: "3", Label: "No, and tell Claude what to do differently (esc)"},
 		}},
 		{file: "prompt-wrapped-label.txt", hasPrompt: true, question: "Do you want to make this edit to app.go?",
-			detail: "Edit file\napp.go\n" + strings.Repeat("╌", 80) + "\n 3 -old line\n 3 +new line\n" + strings.Repeat("╌", 80), options: []Option{
-				{"1", "Yes"},
-				{"2", "Yes, allow all edits during this session and also auto-approve common shell commands that only read files in this project (shift+tab)"},
-				{"3", "No, and tell Claude what to do differently (esc)"},
+			detail: "Edit file\napp.go\n" + strings.Repeat("╌", 80) + "\n 3 -old line\n 3 +new line\n" + strings.Repeat("╌", 80), options: []harness.Option{
+				{Key: "1", Label: "Yes"},
+				{Key: "2", Label: "Yes, allow all edits during this session and also auto-approve common shell commands that only read files in this project (shift+tab)"},
+				{Key: "3", Label: "No, and tell Claude what to do differently (esc)"},
 			}},
 		{file: "prompt-half-scrolled.txt"},
 		{file: "shell-prompt.txt"},
 		{file: "plan-approval.txt"},
 		{file: "stale-box-wrapped-draft.txt"},
 		{file: "stale-box-cut-bottom.txt"},
-		{file: "stale-box-over-prompt.txt", hasPrompt: true, question: "Do you want to proceed?", detail: "Bash command\n\n  ls -la", options: []Option{{"1", "Yes"}, {"2", "No"}}},
+		{file: "stale-box-over-prompt.txt", hasPrompt: true, question: "Do you want to proceed?", detail: "Bash command\n\n  ls -la", options: []harness.Option{{Key: "1", Label: "Yes"}, {Key: "2", Label: "No"}}},
 		{file: "stale-box-bash-mode.txt"},
 		{file: "answered-prompt-in-scrollback.txt", empty: true},
 		{file: "prose-then-prompt.txt"},
 		{file: "draft-with-indented-rule.txt"},
 		{file: "answered-prompt-tool-output.txt"},
 		{file: "answered-prompt-spinner.txt", working: true},
-		{file: "prompt-wrapped-numbered-continuation.txt", hasPrompt: true, question: "Do you want to proceed?", detail: "Bash command\n\n  make build lint", options: []Option{
-			{"1", "Yes"},
-			{"2", "Yes, and allow the following steps for this session: 3. the build and the lint run"},
-			{"3", "No"},
+		{file: "prompt-wrapped-numbered-continuation.txt", hasPrompt: true, question: "Do you want to proceed?", detail: "Bash command\n\n  make build lint", options: []harness.Option{
+			{Key: "1", Label: "Yes"},
+			{Key: "2", Label: "Yes, and allow the following steps for this session: 3. the build and the lint run"},
+			{Key: "3", Label: "No"},
 		}},
 	}
 	for _, tt := range tests {
@@ -209,21 +211,6 @@ func TestTextInBox(t *testing.T) {
 				t.Errorf("TextInBox = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestPasteText(t *testing.T) {
-	for text, want := range map[string]bool{
-		"short":                  false,
-		"two\nlines":             true,
-		"a\tb":                   true,
-		strings.Repeat("a", 200): false,
-		strings.Repeat("a", 201): true,
-		strings.Repeat("س", 200): false,
-	} {
-		if got := PasteText(text); got != want {
-			t.Errorf("PasteText(%d chars) = %v, want %v", len([]rune(text)), got, want)
-		}
 	}
 }
 
