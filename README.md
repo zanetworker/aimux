@@ -1,6 +1,6 @@
 <h1 align="center"><img src="assets/aimux-lockup.svg" alt="aimux" height="56"></h1>
 
-<p align="center">A dashboard for every Claude and Codex session on your machine.</p>
+<p align="center">Mission control for AI coding agents: see, steer and evaluate every session.</p>
 
 <p align="center">
   <a href="https://github.com/zanetworker/aimux/releases/latest"><img src="https://img.shields.io/github/v/release/zanetworker/aimux?style=flat-square" alt="release"></a>
