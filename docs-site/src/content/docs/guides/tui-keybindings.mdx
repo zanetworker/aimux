@@ -27,16 +27,25 @@ description: Keyboard shortcuts for the terminal dashboard.
 
 ## Split View (Trace + Session)
 
+Opening a running agent starts with focus on the trace. Resuming a past session or opening an OpenShell sandbox session starts with focus on the session pane: press `Tab` before using the trace keys below.
+
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Scroll trace up/down |
-| `g` | Annotate turn as GOOD |
-| `b` | Annotate turn as BAD |
-| `w` | Annotate turn as WASTE |
-| `n` | Add note to current turn |
+| `j` / `k` | Next/previous turn; inside an expanded turn, scroll it line by line |
+| `J` / `K` | Scroll an expanded turn by 10 lines |
+| `n` / `p` or `Space` | Next/previous turn, even when the current one is expanded |
+| `Enter` | Expand or collapse the selected turn |
+| `a` | Cycle the turn's label: GOOD, BAD, WASTE, none |
+| `N` | Add a note to the current turn |
+| `g` / `G` | Jump to the first/last turn |
+| `c` | Collapse all turns |
+| `/` | Filter turns (`Esc` clears the filter) |
 | `e` | Open export menu |
-| `Esc` | Close split view |
 | `Tab` | Switch focus between trace and session panes |
+| `Ctrl+f` | Full-screen the focused pane |
+| `Ctrl+]` or `Ctrl+g` | Close split view |
+
+`Esc` does not close the split view: it is sent to the agent's terminal, so the agent's own shortcuts (cancel, reverse search) keep working.
 
 ## Export Menu
 
