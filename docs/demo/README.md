@@ -7,7 +7,7 @@ Records `assets/demo.gif` and `assets/web-dashboard.png` from seeded data in a c
 SKIP_WEB=1 ./docs/demo/record.sh   # GIF only
 ```
 
-Host needs: podman or docker, Go, ffmpeg, pnpm (builds the embedded web UI on a fresh checkout via `make web-build`). The web screenshot also needs Node (the script installs Playwright and its Chromium) and Python 3 with Pillow (`python3 -m pip install pillow`).
+Host needs: podman or docker, Go, ffmpeg, pnpm (builds the embedded web UI on a fresh checkout via `make web-build`). The web screenshot also needs curl, Node (the script installs Playwright and its Chromium) and Python 3 with Pillow (`python3 -m pip install pillow`). Before the screenshot, the script waits up to 60 s for the dashboard to list the 4 demo agents and exits 1 if it doesn't.
 
 Smoke test (exit 1 unless discovery finds the 4 seeded agents with the expected statuses):
 

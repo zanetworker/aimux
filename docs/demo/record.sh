@@ -23,7 +23,14 @@ if [ "${SKIP_WEB:-}" != 1 ] && command -v node >/dev/null; then
   "$ENGINE" rm -f aimux-demo-web >/dev/null 2>&1 || true
   "$ENGINE" run -d --name aimux-demo-web -e DEMO_MODE=web -p 127.0.0.1:3000:3001 localhost/aimux-demo >/dev/null
   trap '"$ENGINE" rm -f aimux-demo-web >/dev/null 2>&1' EXIT
-  sleep 5
+  # Wait until the dashboard serves all 4 seeded agents (up to 60 s).
+  ready=
+  for _ in $(seq 60); do
+    n=$(curl -fs http://127.0.0.1:3000/api/agents 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["agents"]))' 2>/dev/null || true)
+    [ "$n" = 4 ] && { ready=1; break; }
+    sleep 1
+  done
+  [ -n "$ready" ] || { echo "web dashboard did not list the 4 demo agents within 60 s" >&2; exit 1; }
   python3 -c 'import PIL' 2>/dev/null || { echo "web screenshot needs Pillow: python3 -m pip install pillow" >&2; exit 1; }
   npm ls playwright >/dev/null 2>&1 || npm i -s --no-save --no-package-lock playwright@1.47.2 >/dev/null
   npx playwright install chromium >/dev/null

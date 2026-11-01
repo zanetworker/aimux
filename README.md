@@ -56,7 +56,7 @@ aimux web      # browser UI at localhost:3000
 - **See every agent at once.** Running and past Claude Code and Codex sessions in one list, with live status, CPU, tokens and cost, and search across all of them ("which agent edited auth.go?").
 - **Know what each agent actually did.** A turn-by-turn trace of prompts, tool calls and diffs, with a PR-style review panel. [Tracing →](https://aimux.ai/guides/tracing/)
 - **Turn real runs into evals.** Label turns GOOD, BAD or WASTE and export them as MLflow feedback, to any OTLP backend, or as JSONL. [MLflow →](https://aimux.ai/guides/mlflow-integration/)
-- **Run and reach agents anywhere.** Launch them locally, in OpenShell sandboxes or on Kubernetes, then follow and approve them from your phone. [Remote sandboxes →](https://aimux.ai/guides/remote-sandboxes/)
+- **Run and reach agents anywhere.** Launch them locally, in OpenShell sandboxes or on Kubernetes. From your phone, follow your Claude sessions, continue idle ones and answer approvals. [Remote sandboxes →](https://aimux.ai/guides/remote-sandboxes/)
 
 ## What's inside
 
@@ -68,7 +68,7 @@ aimux web      # browser UI at localhost:3000
 | Evaluate | GOOD / BAD / WASTE labels with notes; export to MLflow, Jaeger or any OTLP backend, or JSONL | [MLflow](https://aimux.ai/guides/mlflow-integration/) |
 | Launch | Six-axis launcher, saved profiles, quick-launch directories, launches from Google Tasks, continue an idle session with `aimux chat` | [Launch modes](https://aimux.ai/guides/launch-modes/), [Tasks](https://aimux.ai/guides/tasks/), [Chat](https://aimux.ai/guides/chat/) |
 | Run remotely | OpenShell sandboxes with terminal, traces and kill; agents on Kubernetes pods | [Remote sandboxes](https://aimux.ai/guides/remote-sandboxes/), [Kubernetes](https://aimux.ai/advanced/k8s-quickstart/) |
-| Reach | `aimux remote serve`: follow sessions, continue idle ones and answer approvals from your phone, over tailscale | [Remote access](https://aimux.ai/guides/remote-access/) |
+| Reach | `aimux remote serve`: follow Claude sessions from your phone over tailscale, continue idle ones and answer approvals; sessions open in a terminal on the Mac are read-only | [Remote access](https://aimux.ai/guides/remote-access/) |
 | Share MCP | `aimux mcp proxy serve`: one shared endpoint for your stdio MCP servers, each started on first call and stopped when idle; `aimux mcp serve`: session search and resume tools for agents | [MCP proxy](https://aimux.ai/guides/mcp-proxy/) |
 | Interfaces | Keyboard TUI with split panes; web dashboard with cards, filters and dark/light themes; desktop and terminal-bell notifications | [TUI keys](https://aimux.ai/guides/tui-keybindings/), [Notifications](https://aimux.ai/guides/notifications/) |
 | Extend | Plugin tabs, new providers, `--json` on every listing command, `aimux agent-context` for the full CLI contract | [Plugins](https://aimux.ai/guides/plugins/), [Agent usage](https://aimux.ai/guides/agent-usage/), [Add a provider](https://aimux.ai/advanced/adding-a-provider/) |
@@ -92,13 +92,13 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 
 | Task | Command |
 |---|---|
-| Search past sessions | `aimux sessions --list --json --limit 5` |
+| Search past sessions in all projects | `aimux sessions "auth.go" --all --list --json --limit 5` |
 | Start an agent and wait for it | `aimux spawn claude --dir ./proj --wait --json` |
 | Resume a past session | `aimux resume <session-id>` |
 | Jump to a running agent's iTerm2 pane | `aimux jump <session-id or pid>` |
-| Continue an idle Claude session | `aimux chat <session-id> "next step?"` |
+| Continue a Claude session that is not open in a terminal | `aimux chat <session-id> "next step?"` |
 | Export a trace | `aimux export <session-id>` |
-| Reach your sessions from your phone | `aimux remote serve` (via tailscale serve) |
+| Follow Claude sessions from your phone | `aimux remote serve` (via tailscale serve) |
 | Share MCP servers across sessions | `aimux mcp proxy refresh`, then `aimux mcp proxy serve` |
 
 <details>

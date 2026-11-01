@@ -74,7 +74,7 @@
    "w": 240,
    "h": 42,
    "title": "export",
-   "desc": "OTLP or JSONL",
+   "desc": "OTLP, or JSONL files",
    "tone": "amber"
   },
   {
@@ -104,7 +104,7 @@
    "x": 760,
    "y": 20,
    "w": 220,
-   "h": 310,
+   "h": 324,
    "label": "clients"
   },
   {
@@ -132,16 +132,16 @@
    "x": 775,
    "y": 184,
    "w": 190,
-   "h": 56,
+   "h": 70,
    "title": "phone",
    "sub": "aimux remote serve",
-   "desc": "follow, continue, approve",
+   "desc": "Claude sessions only;\nread-only while open in a terminal",
    "tone": "green"
   },
   {
    "type": "card",
    "x": 775,
-   "y": 248,
+   "y": 262,
    "w": 190,
    "h": 56,
    "title": "agents and scripts",
@@ -275,7 +275,7 @@
      390
     ]
    ],
-   "label": "OTLP, JSONL"
+   "label": "OTLP"
   },
   {
    "type": "legend",
