@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/push"
 	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
@@ -398,10 +400,10 @@ func TestTerminalInputCheck_ReportsEachSession(t *testing.T) {
 	for _, want := range []string{
 		"Terminal input: on\n",
 		"iTerm2 Automation: allowed\n",
-		"Open Claude sessions: 3\n",
-		"  01234567  /dev/ttys001  reachable\n",
-		"  fedcba98  -             not in a terminal\n",
-		"  55556666  /dev/ttys002  not in iTerm2\n",
+		"Open Claude sessions: 3 (one row per session, with the pid aimux types into)\n",
+		"  01234567  pid 10      /dev/ttys001  reachable\n",
+		"  fedcba98  pid 11      -             not in a terminal\n",
+		"  55556666  pid 12      /dev/ttys002  not in iTerm2\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %q:\n%s", want, got)
@@ -427,7 +429,7 @@ func TestTerminalInputCheck_DisabledStillProbes(t *testing.T) {
 	if !probed {
 		t.Fatal("probe not run while disabled: macOS should still ask for Automation")
 	}
-	if got := out.String(); !strings.Contains(got, "Terminal input: off (set remote_access.terminal_input.enabled: true") || !strings.Contains(got, "Open Claude sessions: 0\n") {
+	if got := out.String(); !strings.Contains(got, "Terminal input: off (set remote_access.terminal_input.enabled: true") || !strings.Contains(got, "Open Claude sessions: 0 (") {
 		t.Fatalf("output:\n%s", got)
 	}
 }
@@ -442,7 +444,7 @@ func TestTerminalInputCheck_AutomationDenied(t *testing.T) {
 	if !strings.Contains(got, "iTerm2 Automation: denied") || !strings.Contains(got, "Privacy & Security > Automation") {
 		t.Fatalf("output:\n%s", got)
 	}
-	if !strings.Contains(got, "  01234567  /dev/ttys001  unknown (Automation denied)\n") || len(drv.located) != 0 {
+	if !strings.Contains(got, "  01234567  pid 10      /dev/ttys001  unknown (Automation denied)\n") || len(drv.located) != 0 {
 		t.Fatalf("sessions should not be located when denied: %v\n%s", drv.located, got)
 	}
 }
@@ -454,7 +456,7 @@ func TestTerminalInputCheck_ProbeAndLocateErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "iTerm2 Automation: error: helper exited\n") || !strings.Contains(got, "  01234567  /dev/ttys001  error: helper exited\n") {
+	if !strings.Contains(got, "iTerm2 Automation: error: helper exited\n") || !strings.Contains(got, "  01234567  pid 10      /dev/ttys001  error: helper exited\n") {
 		t.Fatalf("output:\n%s", got)
 	}
 }
@@ -487,9 +489,26 @@ func TestOpenTerminalSessions(t *testing.T) {
 	write("a.json", fmt.Sprintf(`{"pid":%d,"sessionId":"live-mine"}`, me))
 	write("b.json", `{"pid":999999999,"sessionId":"dead"}`)
 	write("c.json", fmt.Sprintf(`{"pid":%d,"sessionId":"owned"}`, os.Getppid()))
-	got := openTerminalSessions(dir, func(pid int) bool { return pid == os.Getppid() })
+	got := openTerminalSessions(discovery.NewLiveCache(dir, 0), func(pid int) bool { return pid == os.Getppid() })
 	if len(got) != 1 || got[0].ID != "live-mine" || got[0].PID != me {
 		t.Fatalf("got %+v, want only the live, not aimux-owned session", got)
+	}
+}
+
+// fixedLive is a harness.LiveSessions with fixed holders.
+type fixedLive []harness.Holder
+
+func (f fixedLive) Live() ([]harness.Holder, error) { return f, nil }
+
+func TestOpenTerminalSessions_OneRowPerSessionWithTheServersPID(t *testing.T) {
+	got := openTerminalSessions(fixedLive{
+		{PID: 9, SessionID: "shared"},
+		{PID: 5, SessionID: "shared"},
+		{PID: 7, SessionID: "other"},
+	}, func(int) bool { return false })
+	want := []terminalSession{{ID: "other", PID: 7}, {ID: "shared", PID: 9}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("got %+v, want %+v: one row per session, the highest pid as the server types into", got, want)
 	}
 }
 
@@ -509,7 +528,7 @@ func TestTerminalInputCheck_ErrorsCutToOneLine(t *testing.T) {
 			t.Fatalf("automation error not cut to 200 chars: %d", len(l))
 		}
 	}
-	if !strings.Contains(got, "  01234567  /dev/ttys001  error: first\n") {
+	if !strings.Contains(got, "  01234567  pid 10      /dev/ttys001  error: first\n") {
 		t.Fatalf("output:\n%s", got)
 	}
 }

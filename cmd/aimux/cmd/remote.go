@@ -29,6 +29,7 @@ import (
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/gitremote"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/push"
@@ -628,8 +629,12 @@ func newRemoteServeCmd() *cobra.Command {
 			searcher.Embedder, searcher.DBPath = nil, remoteIndex
 			reader := search.DefaultService(io.Discard)
 			reader.Embedder, reader.DBPath = nil, remoteIndex
+			// The one reader of which sessions are open in a terminal: the
+			// list, details, terminal input, the queue, waiting, Last on your
+			// Mac and the layout all read it through the index.
+			live := discovery.NewLiveCache(registry, discovery.LiveTTL)
 			index = &remoteapi.LocalIndex{
-				ProjectsDir: projects, RegistryDir: registry, Broker: broker,
+				ProjectsDir: projects, Live: live, Broker: broker,
 				Discover: history.Discover, ParseTrace: claude.ParseTrace, ParseTail: claude.ParseTraceTail, Owned: manager.Owns,
 				Repo:    gitremote.Lookup,
 				Created: &remoteapi.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")},
@@ -842,7 +847,7 @@ func newRemoteTerminalInputCmd() *cobra.Command {
 			owned := func(pid int) bool { return aimuxAncestor(pid, discovery.GetParentPID, processName) }
 			return runTerminalInputCheck(cmd.Context(), cmd.OutOrStdout(), terminalCheck{
 				Enabled:  cfg.RemoteAccess.TerminalInput.Enabled,
-				Sessions: openTerminalSessions(filepath.Join(home, ".claude", "sessions"), owned),
+				Sessions: openTerminalSessions(discovery.NewLiveCache(filepath.Join(home, ".claude", "sessions"), discovery.LiveTTL), owned),
 				TTY:      terminput.SystemProbe{}.TTY,
 				Probe:    drv.Probe,
 				Driver:   drv,
@@ -870,7 +875,7 @@ type terminalCheck struct {
 const checkTimeout = 5 * time.Second
 
 // runTerminalInputCheck prints whether input is on, the Automation result and,
-// per session, its short id, tty and whether the driver reaches its pane.
+// per session, its short id, pid, tty and whether the driver reaches its pane.
 // It prints no titles and no text.
 func runTerminalInputCheck(ctx context.Context, out io.Writer, c terminalCheck) error {
 	if c.Enabled {
@@ -890,7 +895,7 @@ func runTerminalInputCheck(ctx context.Context, out io.Writer, c terminalCheck) 
 	default:
 		_, _ = fmt.Fprintf(out, "iTerm2 Automation: error: %s\n", firstLine(perr))
 	}
-	_, _ = fmt.Fprintf(out, "Open Claude sessions: %d\n", len(c.Sessions))
+	_, _ = fmt.Fprintf(out, "Open Claude sessions: %d (one row per session, with the pid aimux types into)\n", len(c.Sessions))
 	for _, s := range c.Sessions {
 		tty, err := c.TTY(s.PID)
 		reach := ""
@@ -912,7 +917,7 @@ func runTerminalInputCheck(ctx context.Context, out io.Writer, c terminalCheck) 
 				reach = "not in iTerm2"
 			}
 		}
-		_, _ = fmt.Fprintf(out, "  %-8s  %-12s  %s\n", shortID(s.ID), tty, reach)
+		_, _ = fmt.Fprintf(out, "  %-8s  pid %-6d  %-12s  %s\n", shortID(s.ID), s.PID, tty, reach)
 	}
 	return nil
 }
@@ -934,14 +939,14 @@ func shortID(id string) string {
 	return id
 }
 
-// openTerminalSessions lists the registry's live sessions that aimux does not
-// own, sorted by id.
-func openTerminalSessions(registryDir string, owned func(pid int) bool) []terminalSession {
+// openTerminalSessions lists the live sessions that aimux does not own
+// (harness.OpenSessions), one per session with the pid the server types
+// into (the highest when two processes hold it), sorted by id.
+func openTerminalSessions(live harness.LiveSessions, owned func(pid int) bool) []terminalSession {
+	hs, _ := live.Live() // the registry is optional: none open
 	var out []terminalSession
-	for pid, e := range discovery.ReadClaudeRegistry(registryDir) {
-		if discovery.IsLiveHolder(e) && !owned(pid) {
-			out = append(out, terminalSession{ID: e.SessionID, PID: pid})
-		}
+	for id, h := range harness.OpenSessions(hs, owned) {
+		out = append(out, terminalSession{ID: id, PID: h.PID})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/history"
 )
 
@@ -68,7 +69,7 @@ func TestNaming_RepeatedPollsNameEachSessionOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	index := &LocalIndex{ProjectsDir: projects, RegistryDir: registry, Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), Discover: history.Discover}
+	index := &LocalIndex{ProjectsDir: projects, Live: discovery.NewLiveCache(registry, 0), Broker: NewBroker(BrokerDeps{}, BrokerOptions{}), Discover: history.Discover}
 	backend := &countingBackend{topics: map[string]int{}}
 	namer := history.NewNamer(history.NamerConfig{Lookup: index.Lookup, Primary: backend, BatchWait: 20 * time.Millisecond,
 		RecordUsage: func(cost.Usage) error { return nil }, Logf: func(string, ...any) {}})

@@ -12,6 +12,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
@@ -73,7 +74,7 @@ func queueRigWith(t *testing.T, tcfg config.TerminalInputConfig, input *recordin
 	if err := os.WriteFile(filepath.Join(projects, "-w", "open.jsonl"), []byte(`{"cwd":"/w"}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	index := &remoteapi.LocalIndex{RegistryDir: registry, ProjectsDir: projects, Broker: broker,
+	index := &remoteapi.LocalIndex{Live: discovery.NewLiveCache(registry, 0), ProjectsDir: projects, Broker: broker,
 		Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
 			return []history.Session{{ID: "open", Provider: "claude", LastActive: time.Now()}}, nil
 		},

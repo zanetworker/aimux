@@ -112,7 +112,7 @@ func (f *fakeQueueInput) Submit(context.Context, string, string) error {
 func TestQueueTerminal_OpenAndTurns(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
 	reg := fmt.Sprintf(`{"pid":%d,"sessionId":"open","status":"busy"}`, os.Getpid())
-	if err := os.WriteFile(filepath.Join(x.RegistryDir, "1.json"), []byte(reg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(registryDir(x), "1.json"), []byte(reg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 29, 10, 0, 0, 0, time.UTC)

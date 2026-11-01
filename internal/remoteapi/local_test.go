@@ -13,6 +13,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/terminput"
@@ -39,7 +41,7 @@ func localFixture(t *testing.T, b *Broker) *LocalIndex {
 	}
 	now := time.Now()
 	return &LocalIndex{
-		ProjectsDir: projects, RegistryDir: registry, Broker: b,
+		ProjectsDir: projects, Live: discovery.NewLiveCache(registry, 0), Broker: b,
 		Discover: func(opts history.DiscoverOpts, dir string) ([]history.Session, error) {
 			return []history.Session{
 				{ID: "idle", Provider: "claude", Title: "Fix the cache", Project: "/w", Cwd: "/w", LastActive: now},
@@ -409,7 +411,7 @@ func (f *fakeTerminalStatus) Status(_ context.Context, id, registryStatus string
 func TestLocalIndex_SessionCarriesTerminal(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
 	reg := fmt.Sprintf(`{"pid":%d,"sessionId":"open","status":"busy"}`, os.Getpid())
-	if err := os.WriteFile(filepath.Join(x.RegistryDir, "1.json"), []byte(reg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(registryDir(x), "1.json"), []byte(reg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeTerminalStatus{st: terminput.Status{State: "busy", Reason: "not_at_input",
@@ -454,7 +456,7 @@ func TestLocalIndex_SessionCarriesTerminal(t *testing.T) {
 func TestLocalIndex_TitleSkipsTerminal(t *testing.T) {
 	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
 	reg := fmt.Sprintf(`{"pid":%d,"sessionId":"open","status":"busy"}`, os.Getpid())
-	if err := os.WriteFile(filepath.Join(x.RegistryDir, "1.json"), []byte(reg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(registryDir(x), "1.json"), []byte(reg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeTerminalStatus{st: terminput.Status{State: "busy"}}
@@ -709,7 +711,7 @@ func TestLocalIndex_RegistryStatus(t *testing.T) {
 		t.Fatalf("no status in the registry: %q", got)
 	}
 	reg := fmt.Sprintf(`{"pid":%d,"sessionId":"open","status":"busy"}`, os.Getpid())
-	if err := os.WriteFile(filepath.Join(x.RegistryDir, "1.json"), []byte(reg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(registryDir(x), "1.json"), []byte(reg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := x.RegistryStatus("open"); got != "busy" {
@@ -739,10 +741,54 @@ func TestLocalIndex_SessionsWorking(t *testing.T) {
 		t.Fatalf("no busy status in the registry, working = %v", w)
 	}
 	reg := fmt.Sprintf(`{"pid":%d,"sessionId":"open","status":"busy"}`, os.Getpid())
-	if err := os.WriteFile(filepath.Join(x.RegistryDir, "1.json"), []byte(reg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(registryDir(x), "1.json"), []byte(reg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if w := working(); !w["open"] || w["idle"] {
 		t.Fatalf("working = %v, want only open", w)
+	}
+}
+
+// registryDir is the fixture's registry (a temp dir), read with no TTL so a
+// test's rewrite shows at once.
+func registryDir(x *LocalIndex) string { return x.Live.(*discovery.LiveCache).Dir }
+
+// countingLive is a harness.LiveSessions that counts its reads.
+type countingLive struct {
+	hs    []harness.Holder
+	reads int
+}
+
+func (c *countingLive) Live() ([]harness.Holder, error) { c.reads++; return c.hs, nil }
+
+// TestLocalIndex_EveryOpenReadGoesThroughLive: the terminal pid, registry
+// status, pid map and the queue's Open all read the one injected source and
+// apply the same rule (not aimux's own).
+func TestLocalIndex_EveryOpenReadGoesThroughLive(t *testing.T) {
+	live := &countingLive{hs: []harness.Holder{
+		{PID: 7, SessionID: "open", Status: "busy"},
+		{PID: 8, SessionID: "mine", Status: "idle"},
+	}}
+	x := &LocalIndex{Live: live, Owned: func(pid int) bool { return pid == 8 }}
+	if pid, ok := x.TerminalPID("open"); !ok || pid != 7 {
+		t.Errorf("TerminalPID = %d, %v", pid, ok)
+	}
+	if _, ok := x.TerminalPID("mine"); ok {
+		t.Error("aimux's own holder counted as a terminal")
+	}
+	if st := x.RegistryStatus("open"); st != "busy" {
+		t.Errorf("RegistryStatus = %q", st)
+	}
+	if pids := x.TerminalPIDs(); len(pids) != 1 || pids["open"] != 7 {
+		t.Errorf("TerminalPIDs = %v", pids)
+	}
+	if st, ok := (QueueTerminal{Index: x}).Open("open"); !ok || st != "busy" {
+		t.Errorf("Open = %q, %v", st, ok)
+	}
+	if live.reads != 5 {
+		t.Errorf("%d reads of Live, want 5 (one per call)", live.reads)
+	}
+	if (&LocalIndex{}).TerminalPIDs() == nil {
+		t.Error("nil Live: want an empty map")
 	}
 }

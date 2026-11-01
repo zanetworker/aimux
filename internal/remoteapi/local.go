@@ -14,6 +14,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/terminput"
@@ -28,10 +29,12 @@ const maxTextLen = 8 * 1024
 // continued; subagent and automated sessions are left out.
 type LocalIndex struct {
 	ProjectsDir string // ~/.claude/projects
-	RegistryDir string // ~/.claude/sessions
-	Broker      *Broker
-	Discover    func(opts history.DiscoverOpts, projectsDir string) ([]history.Session, error)
-	ParseTrace  func(path string) ([]trace.Turn, error)
+	// Live is the sessions a harness process holds open (one
+	// discovery.LiveCache shared by every reader of the registry). Nil: none.
+	Live       harness.LiveSessions
+	Broker     *Broker
+	Discover   func(opts history.DiscoverOpts, projectsDir string) ([]history.Session, error)
+	ParseTrace func(path string) ([]trace.Turn, error)
 	// ParseTail returns at least the last n turns, reading only the end of
 	// the file; used instead of ParseTrace when set.
 	ParseTail func(path string, n int) ([]trace.Turn, error)
@@ -66,16 +69,15 @@ type TerminalStatusReader interface {
 
 func (x *LocalIndex) running(id string) bool { return x.Running != nil && x.Running(id) }
 
-// openSessions reads Claude's registry once: the sessions a live process
-// holds that is not aimux's own, by session id.
-func (x *LocalIndex) openSessions() map[string]discovery.ClaudeRegistryEntry {
-	open := map[string]discovery.ClaudeRegistryEntry{}
-	for pid, e := range discovery.ReadClaudeRegistry(x.RegistryDir) {
-		if discovery.IsLiveHolder(e) && (x.Owned == nil || !x.Owned(pid)) {
-			open[e.SessionID] = e
-		}
+// openSessions is the sessions a live process holds that is not aimux's
+// own, by session id (harness.OpenSessions over Live). The registry is
+// optional, so an error reads as no session open.
+func (x *LocalIndex) openSessions() map[string]harness.Holder {
+	var hs []harness.Holder
+	if x.Live != nil {
+		hs, _ = x.Live.Live() // nothing open beats failing the list
 	}
-	return open
+	return harness.OpenSessions(hs, x.Owned)
 }
 
 // TerminalPIDs maps every session open in a terminal to the pid holding
@@ -142,7 +144,7 @@ func (x *LocalIndex) RegistryStatus(sessionID string) string {
 	return x.openSessions()[sessionID].Status
 }
 
-func (x *LocalIndex) state(id string, open map[string]discovery.ClaudeRegistryEntry) string {
+func (x *LocalIndex) state(id string, open map[string]harness.Holder) string {
 	_, inTerminal := open[id]
 	switch {
 	case x.Broker.Busy(id):
@@ -431,7 +433,7 @@ func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
 // lookupSummary finds the session's title, project and last activity in the
 // session index, and returns the index entry too (nil when unindexed); an
 // unindexed session still gets its id, provider and state.
-func (x *LocalIndex) lookupSummary(id string, open map[string]discovery.ClaudeRegistryEntry) (Session, *history.Session) {
+func (x *LocalIndex) lookupSummary(id string, open map[string]harness.Holder) (Session, *history.Session) {
 	state := x.state(id, open)
 	all, err := x.discover()
 	if err == nil {

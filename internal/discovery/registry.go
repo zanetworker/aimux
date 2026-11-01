@@ -60,7 +60,11 @@ func ReadClaudeRegistry(dir string) map[int]ClaudeRegistryEntry {
 }
 
 // ProcessStartTime returns when a process started, or the zero time if
-// unknown. It is a variable so tests can override it.
+// unknown. It is a variable so tests can override it. Only IsLiveHolder uses
+// it, and only acprun's lookup calls that (the TUI's Claude discovery has
+// its own start-time reader in provider); the remote stack's LiveCache
+// checks start times with one batched ps of its own, so overriding this hook
+// does not reach it.
 var ProcessStartTime = processStartTimeImpl
 
 func processStartTimeImpl(pid int) time.Time {
@@ -90,7 +94,13 @@ func IsLiveHolder(e ClaudeRegistryEntry) bool {
 	if !ok {
 		return true
 	}
-	actual := ProcessStartTime(e.PID)
+	return startMatches(recorded, ProcessStartTime(e.PID))
+}
+
+// startMatches reports whether a process that started at actual can be the
+// one recorded as starting at recorded: within 2 s, or actual unknown (zero),
+// since an unknown start time must not hide a live holder.
+func startMatches(recorded, actual time.Time) bool {
 	if actual.IsZero() {
 		return true
 	}

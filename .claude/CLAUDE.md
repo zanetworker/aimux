@@ -106,6 +106,8 @@ internal/
     process.go                  # Process scanning, subagent filtering (ancestor chain)
     session.go                  # Session file discovery, JSONL parsing
     tmux.go                     # Tmux session listing, matching
+    registry.go                 # Claude Code's session registry (~/.claude/sessions/<pid>.json): ReadClaudeRegistry, ReadClaudeRegistryStrict, IsLiveHolder (pid alive, start time within 2 s)
+    live.go                     # LiveCache: harness.LiveSessions for Claude Code over the registry by IsLiveHolder's rule; 1 s TTL (LiveTTL), single-flight, one batched `ps -o pid=,lstart=` per read; a read is stamped when it starts; remote serve creates one and every open-session reader (LocalIndex, queue, terminal input, waiting, LastFocus, LayoutReader) shares it, so open/closed and the registry busy status may be up to 1 s old; the send path's safety does not depend on that (terminput's locate re-checks the tty, foreground pid and command fresh before typing, Enter and every key); acprun's ClaudeLookup still reads the registry itself
   evaluation/                   # Annotation persistence, JSONL export
   jump/                         # Session resumption (tmux split, iTerm2)
   otel/
@@ -132,6 +134,7 @@ internal/
     audit.go                    # ~/.aimux/logs/remote-audit.log JSON lines (never codes, challenges, tokens, keys or text); identical failures collapse to one a minute
   harness/
     harness.go                  # Leaf package of types shared by the core and harness-specific code: Key and its constants, Option, Prompt, Screen, Match, RoomKeys, PasteText, the Composer interface (Read, BoxShows, IsAgentProcess, RefuseText, RoomKeys, ClearKeys); imports no internal package; boundary_test.go enforces the Harness Boundary imports
+    live.go                     # Holder{PID, SessionID, Status}, the LiveSessions interface (Live: every live holder, one per process) and OpenSessions (by session, leaving out the caller's own processes, the highest pid when two hold one session: the open_in_terminal rule); Live's error is always nil for Claude Code and callers read it as none open
     claude/screen.go            # Parses Claude Code's screen: InputBoxEmpty, BoxHasText, WordsInBox, WorkingSeconds, ParsePrompt (none when its top rule is off the screen; fixtures in testdata/screens/, also read by terminput's tests)
     claude/composer.go          # Composer: Claude Code's harness.Composer over screen.go (one prompt and one box parse per Read); processes claude and node; refuses a leading ! (bash mode) and, unless allowed, / (slash command); the grey-suggestion probe (space, then backspace) and the clear keys
   remoteapi/chatqueue/
