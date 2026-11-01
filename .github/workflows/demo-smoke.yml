@@ -1,0 +1,46 @@
+name: Demo smoke test
+
+# End-to-end check of the real aimux binary: the docs/demo container starts
+# stand-in agents and seeded Claude sessions, then `aimux agents --json` must
+# find all 4 with the expected statuses (docs/demo/entrypoint.sh, DEMO_CHECK=1).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'docs/demo/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/demo-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Build web frontend
+        run: |
+          npm i -g pnpm && cd web && pnpm install --frozen-lockfile && pnpm build
+          mkdir -p ../internal/frontend/web/dist
+          cp -r dist/* ../internal/frontend/web/dist/
+      - name: Build aimux and the stand-in agent for linux
+        working-directory: docs/demo
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/aimux ../../cmd/aimux
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/claude ./fakeagent
+      - name: Build the demo image
+        working-directory: docs/demo
+        run: docker build -q -t aimux-demo -f Containerfile .
+      - name: Discovery finds the 4 seeded agents
+        run: docker run --rm -e DEMO_CHECK=1 aimux-demo
