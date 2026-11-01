@@ -9,7 +9,7 @@ SKIP_WEB=1 ./docs/demo/record.sh   # GIF only
 
 Host needs: podman or docker, Go, ffmpeg, pnpm (builds the embedded web UI on a fresh checkout via `make web-build`). The web screenshot also needs curl, Node (the script installs Playwright and its Chromium) and Python 3 with Pillow (`python3 -m pip install pillow`). Before the screenshot, the script waits up to 60 s for the dashboard to list the 4 demo agents and exits 1 if it doesn't.
 
-Smoke test (exit 1 unless discovery finds the 4 seeded agents with the expected statuses):
+Smoke test (exit 1 unless discovery finds the 4 seeded agents with the expected statuses). CI runs it on every push to main and on pull requests that touch `cmd/`, `internal/`, `docs/demo/` or `go.mod` (`.github/workflows/demo-smoke.yml`):
 
 ```sh
 podman run --rm -e DEMO_CHECK=1 localhost/aimux-demo
