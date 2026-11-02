@@ -6,4 +6,4 @@ Please don't open a public issue. Report it privately through [GitHub security a
 
 ## Supported versions
 
-Fixes go into the latest release. Upgrade to it before reporting, if you can.
+Only the latest release gets security fixes; older releases don't. Fixes ship in a new release, so upgrade to it once it's out, and check the latest release before reporting.
