@@ -17,7 +17,7 @@
 
 <p align="center">
   <img src="assets/demo.gif" alt="aimux TUI: the agent list, then a split view with the trace and diff on the left and the live Claude Code session on the right, a GOOD label, and the costs view" width="800">
-  <br><em>Four agents in one list, then one agent's trace beside its live session, a turn labeled GOOD, and cost per project. (<a href="docs/demo/demo.tape">source</a>)</em>
+  <br><em>Four agents in one list, then one agent's trace beside its live session, a turn labeled GOOD, and cost per project.</em>
 </p>
 
 You run five agents in five tmux panes and lose track of which one rewrote `auth.go`. aimux finds every running and past session, shows each one turn by turn (prompts, tool calls, diffs), and lets you label turns so the good and bad runs become eval data.
