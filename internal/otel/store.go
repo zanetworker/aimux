@@ -98,6 +98,11 @@ type SpanStore struct {
 	seenToolUseIDs map[string]bool
 	// lastUpdate tracks when data was last received
 	lastUpdate time.Time
+	// convLastSeen and traceLastSeen record the last Add per session and
+	// per trace, so TakeIdle can drop finished sessions.
+	convLastSeen  map[string]time.Time
+	traceLastSeen map[string]time.Time
+	now           func() time.Time
 }
 
 // NewSpanStore creates an empty span store.
@@ -106,6 +111,9 @@ func NewSpanStore() *SpanStore {
 		byConversation: make(map[string]*Span),
 		byTraceID:      make(map[string][]*Span),
 		seenToolUseIDs: make(map[string]bool),
+		convLastSeen:   make(map[string]time.Time),
+		traceLastSeen:  make(map[string]time.Time),
+		now:            time.Now,
 	}
 }
 
@@ -128,7 +136,8 @@ func (ss *SpanStore) Add(span *Span) {
 	}
 
 	ss.byTraceID[span.TraceID] = append(ss.byTraceID[span.TraceID], span)
-	ss.lastUpdate = time.Now()
+	ss.lastUpdate = ss.now()
+	ss.traceLastSeen[span.TraceID] = ss.lastUpdate
 
 	// Index by conversation/session ID
 	convID := span.AttrStr("gen_ai.conversation.id")
@@ -137,6 +146,7 @@ func (ss *SpanStore) Add(span *Span) {
 	}
 
 	if convID != "" {
+		ss.convLastSeen[convID] = ss.lastUpdate
 		if existing, ok := ss.byConversation[convID]; ok {
 			if span.ParentID == "" && span.SpanID != existing.SpanID {
 				existing.Children = append(existing.Children, span)
@@ -157,6 +167,45 @@ func (ss *SpanStore) Add(span *Span) {
 			}
 		}
 	}
+}
+
+// TakeIdle removes every session and trace with no span added since cutoff
+// and returns the removed sessions' root spans by session ID (an
+// aimux.session_id alias maps to the same root). Removal and return happen
+// under one lock, so no span can arrive between reading and dropping.
+func (ss *SpanStore) TakeIdle(cutoff time.Time) map[string]*Span {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+
+	// A root can be indexed under several IDs (an aimux.session_id alias);
+	// it is idle only when none of them has seen activity since cutoff.
+	latest := make(map[*Span]time.Time)
+	for id, root := range ss.byConversation {
+		if seen := ss.convLastSeen[id]; seen.After(latest[root]) {
+			latest[root] = seen
+		}
+	}
+	taken := make(map[string]*Span)
+	for id, root := range ss.byConversation {
+		if latest[root].Before(cutoff) {
+			taken[id] = root
+			delete(ss.byConversation, id)
+			delete(ss.convLastSeen, id)
+		}
+	}
+	// IDs seen only on child spans have no root of their own.
+	for id, seen := range ss.convLastSeen {
+		if _, ok := ss.byConversation[id]; !ok && seen.Before(cutoff) {
+			delete(ss.convLastSeen, id)
+		}
+	}
+	for trace, seen := range ss.traceLastSeen {
+		if seen.Before(cutoff) {
+			delete(ss.traceLastSeen, trace)
+			delete(ss.byTraceID, trace)
+		}
+	}
+	return taken
 }
 
 // GetByConversation returns the root span tree for a conversation/session ID.
