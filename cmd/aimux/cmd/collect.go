@@ -65,7 +65,9 @@ func newCollectCmd() *cobra.Command {
 					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "shutting down...")
 					receiver.Stop()
 					// Save every session so a restart keeps its counts.
-					_ = tracker.Compact(store, time.Now().Add(time.Second))
+					if err := tracker.Compact(store, time.Now().Add(time.Second)); err != nil {
+						_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "aimux collect: final save failed: %v\n", err)
+					}
 					return nil
 				}
 			}

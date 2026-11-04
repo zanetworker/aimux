@@ -281,3 +281,38 @@ func TestTracker_PendingRetryDoesNotOverwriteResumedSession(t *testing.T) {
 		t.Errorf("calls = %d after pending retry, want 2 (old + resumed)", d.Calls)
 	}
 }
+
+func TestTracker_RejectsUnsafeSessionIDs(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim.json")
+	if err := os.WriteFile(victim, []byte(`{"calls":7}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tr := NewTracker(dir)
+	s := NewSpanStore()
+	for _, id := range []string{"../victim", "a/b", ".", ".."} {
+		addTurn(s, id, "Read", "tu-"+id, 1000, 0)
+	}
+	addTurn(s, "ok-Session_1", "Read", "tu-ok", 1000, 0)
+
+	if err := tr.Flush(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Compact(s, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	if b, _ := os.ReadFile(victim); string(b) != `{"calls":7}` { // #nosec G304
+		t.Errorf("victim.json overwritten via a session ID: %s", b)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "victim.json")); !os.IsNotExist(err) {
+		t.Error("file written outside the data directory")
+	}
+	if d := readTracker(t, dir, "ok-Session_1"); d.Calls != 1 {
+		t.Errorf("safe session calls = %d, want 1", d.Calls)
+	}
+	entries, _ := os.ReadDir(filepath.Join(dir, stateDirName))
+	if len(entries) != 1 {
+		t.Errorf("state files = %d, want 1 (only the safe session)", len(entries))
+	}
+}

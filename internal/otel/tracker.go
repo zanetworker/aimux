@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,11 @@ type ToolDetail struct {
 // session that resumes after compaction, or after a collector restart,
 // keeps its earlier counts.
 const stateDirName = ".state"
+
+// safeSessionID matches session IDs that are safe as file names. IDs come
+// from any local client (headers, query, log attributes), so anything else
+// could write outside the data directory or onto another session's file.
+var safeSessionID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // sessionState is a session's raw running totals, before token and cost
 // distribution. It is what Compact saves to disk.
@@ -97,7 +103,7 @@ func (t *Tracker) Flush(store *SpanStore) error {
 	defer t.mu.Unlock()
 	for _, sessionID := range ids {
 		root := store.GetByConversation(sessionID)
-		if root == nil {
+		if root == nil || !safeSessionID.MatchString(sessionID) {
 			continue
 		}
 		st := t.loadBase(sessionID).clone()
@@ -125,6 +131,9 @@ func (t *Tracker) Compact(store *SpanStore, cutoff time.Time) error {
 	}
 	toSave := make(map[string]*sessionState, len(taken)+len(t.pending))
 	for sessionID, root := range taken {
+		if !safeSessionID.MatchString(sessionID) {
+			continue // dropped with its spans; never written to disk
+		}
 		st := t.loadBase(sessionID).clone()
 		accumulate(st, root)
 		toSave[sessionID] = st
