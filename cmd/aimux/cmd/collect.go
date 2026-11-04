@@ -13,6 +13,10 @@ import (
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 )
 
+// idleCompact is how long a session goes without events before the
+// collector saves its totals and drops its spans from memory.
+const idleCompact = 30 * time.Minute
+
 func newCollectCmd() *cobra.Command {
 	var port int
 	var flushInterval time.Duration
@@ -42,6 +46,7 @@ func newCollectCmd() *cobra.Command {
 
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "aimux collect: listening on :%d, flushing every %s to %s\n", port, flushInterval, dataDir)
 
+			tracker := aimuxotel.NewTracker(dataDir)
 			ticker := time.NewTicker(flushInterval)
 			defer ticker.Stop()
 
@@ -52,14 +57,15 @@ func newCollectCmd() *cobra.Command {
 				select {
 				case <-ticker.C:
 					if store.HasData() {
-						_ = aimuxotel.FlushTracker(store, dataDir)
+						_ = tracker.Flush(store)
 					}
+					// Every tick, even when empty: retries failed state saves.
+					_ = tracker.Compact(store, time.Now().Add(-idleCompact))
 				case <-sig:
 					_, _ = fmt.Fprintln(cmd.OutOrStdout(), "shutting down...")
-					if store.HasData() {
-						_ = aimuxotel.FlushTracker(store, dataDir)
-					}
 					receiver.Stop()
+					// Save every session so a restart keeps its counts.
+					_ = tracker.Compact(store, time.Now().Add(time.Second))
 					return nil
 				}
 			}
