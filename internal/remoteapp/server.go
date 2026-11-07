@@ -58,6 +58,10 @@ type Options struct {
 	Getenv     func(string) string                 // default os.Getenv
 	DetectHost func() (string, error)              // default: tailscale's MagicDNS name
 	Drivers    func() ([]terminput.Driver, func()) // default: iTerm2 on macOS
+	// OpenTab opens a pane running argv in dir for Open on Mac; default: a
+	// pane in iTerm2's aimux window (windowOpener). Used only with an
+	// iTerm2 driver and terminal input on.
+	OpenTab func(ctx context.Context, title string, argv []string, dir string) error
 }
 
 // Server is remote serve, ready to run.
@@ -88,6 +92,9 @@ func New(cfg config.Config, opts Options) *Server {
 	}
 	if opts.Drivers == nil {
 		opts.Drivers = terminalDrivers
+	}
+	if opts.OpenTab == nil {
+		opts.OpenTab = windowOpener().OpenTab
 	}
 	return &Server{cfg: cfg, opts: opts}
 }
@@ -350,6 +357,12 @@ func (s *Server) build(w *wiring) error {
 			return id, nil
 		},
 	}
+
+	// Open on Mac: only with an iTerm2 driver and terminal input on.
+	api.Handoff = buildHandoff(cfg.RemoteAccess.TerminalInput, drivers, handoffDeps{
+		index: index, broker: broker, manager: manager, open: o.OpenTab,
+		resume: resumeCommand(home, def.Store.Name()),
+	})
 
 	if pushes.devices != nil {
 		api.RegisterDevice, api.UnregisterDevice = pushes.devices.Add, pushes.devices.Remove

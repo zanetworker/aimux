@@ -36,12 +36,15 @@ type loginRig struct {
 	term  *fakeTerminal
 	b     *Broker
 	queue *chatqueue.Store
+	// handoff is the fake behind Open on Mac.
+	handoff *handoffRig
 }
 
 // newLoginAPI is a server with every capability and device login on.
 func newLoginAPI(t *testing.T, f *fakeBackend) *loginRig {
 	t.Helper()
-	r := &loginRig{t: t, dir: t.TempDir(), audit: &syncBuffer{}, term: &fakeTerminal{}, clock: &testClock{t: time.Now()}}
+	r := &loginRig{t: t, dir: t.TempDir(), audit: &syncBuffer{}, term: &fakeTerminal{}, clock: &testClock{t: time.Now()},
+		handoff: &handoffRig{state: StateIdle, turn: true}}
 	dl, err := devicelogin.NewServer(devicelogin.Options{
 		Store: devicelogin.Open(r.dir),
 		Now:   r.clock.now,
@@ -78,6 +81,7 @@ func newLoginAPI(t *testing.T, f *fakeBackend) *loginRig {
 		Create:           func(context.Context, string, string) (string, error) { return "new-1", nil },
 		RegisterDevice:   func(push.Device) error { return nil },
 		UnregisterDevice: func(string) error { return nil },
+		Handoff:          r.handoff.handoff(),
 	}
 	r.srv = httptest.NewServer(api.Handler([]string{testLogin}, []string{"127.0.0.1"}))
 	t.Cleanup(r.srv.Close)
@@ -163,6 +167,7 @@ var routes = []struct {
 	{"POST", "/v1/sessions/s1/queue/resume", "", false},
 	{"PATCH", "/v1/sessions/s1/meta", `{"pinned":true}`, false},
 	{"POST", "/v1/sessions/s1/describe", "", false},
+	{"POST", "/v1/sessions/s1/open-on-mac", "", false},
 	{"POST", "/v1/devices", `{"token":"t","environment":"sandbox"}`, false},
 	{"DELETE", "/v1/devices/t", "", false},
 	{"GET", "/v1/unknown", "", false},
@@ -315,6 +320,7 @@ func TestDeviceLogin_AuditActionsCarryNoText(t *testing.T) {
 	r.do("PATCH", "/v1/sessions/s1/meta", `{"pinned":false}`, tok)
 	r.do("PATCH", "/v1/sessions/s1/meta", `{"title":"`+secretText+`\nmore"}`, tok)
 	r.do("POST", "/v1/sessions/s1/describe", "", tok)
+	r.do("POST", "/v1/sessions/s1/open-on-mac", "", tok)
 
 	log := r.audit.String()
 	var got []string
@@ -330,7 +336,7 @@ func TestDeviceLogin_AuditActionsCarryNoText(t *testing.T) {
 	}
 	want := []string{"pair//ok", "send/s1/ok", "approve//ok", "new_session//ok", "cancel/s1/http_409", "terminal_message/s1/ok", "terminal_send_now/s1/ok", "terminal_message/s1/ok", "terminal_key/s1/ok",
 		"queue_add/s1/ok", "queue_edit/s1/ok", "queue_move/s1/ok", "queue_edit/s1/http_409", "queue_delete/s1/ok", "queue_add/s1/ok", "queue_send_now/s1/ok", "queue_resume/s1/ok",
-		"meta_edit/s1/ok", "pin/s1/ok", "unpin/s1/ok", "meta_edit/s1/http_400", "describe/s1/ok"}
+		"meta_edit/s1/ok", "pin/s1/ok", "unpin/s1/ok", "meta_edit/s1/http_400", "describe/s1/ok", "open_on_mac/s1/ok"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("audit %v\nwant  %v", got, want)
 	}

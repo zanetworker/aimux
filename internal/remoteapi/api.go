@@ -173,6 +173,9 @@ type API struct {
 	// Waiting, if set, gives the open sessions waiting for permission by id
 	// (waiting.Tracker.Current); it fills `waiting` on the list and detail.
 	Waiting func() map[string]waiting.Waiting
+	// Handoff, if set, serves POST /v1/sessions/{id}/open-on-mac (health
+	// openOnMac); nil answers 503 no_terminal.
+	Handoff *Handoff
 
 	createMu sync.Mutex        // one creation at a time, so a retried key cannot create twice
 	created  map[string]string // client key -> new session id
@@ -194,6 +197,7 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux.HandleFunc("GET /v1/projects", a.projects)
 	mux.HandleFunc("PATCH /v1/sessions/{id}/meta", a.patchMeta)
 	mux.HandleFunc("POST /v1/sessions/{id}/describe", a.audited(devicelogin.ActionDescribe, true, a.describe))
+	mux.HandleFunc("POST /v1/sessions/{id}/open-on-mac", a.audited(devicelogin.ActionOpenOnMac, true, a.openOnMac))
 	mux.HandleFunc("POST /v1/sessions/{id}/messages", a.audited(devicelogin.ActionSend, true, a.sendMessage))
 	mux.HandleFunc("POST /v1/sessions/{id}/terminal/messages", a.audited(devicelogin.ActionTerminalMessage, true, a.terminalMessage))
 	mux.HandleFunc("POST /v1/sessions/{id}/terminal/keys", a.audited(devicelogin.ActionTerminalKey, true, a.terminalKey))
@@ -301,6 +305,14 @@ func writeFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "bad_request", err)
 	case errors.Is(err, errNotAProject):
 		writeError(w, http.StatusBadRequest, "bad_request", err)
+	case errors.Is(err, ErrNotStarted):
+		writeError(w, http.StatusConflict, "not_started", err)
+	case errors.Is(err, ErrNoTerminal):
+		writeError(w, http.StatusServiceUnavailable, "no_terminal", err)
+	case errors.Is(err, ErrNotAuthorized):
+		writeError(w, http.StatusForbidden, "not_authorized", err)
+	case errors.Is(err, ErrHandoffTimeout):
+		writeError(w, http.StatusGatewayTimeout, "timeout", err)
 	default:
 		writeError(w, http.StatusInternalServerError, "internal", err)
 	}
@@ -351,7 +363,7 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 		caps = append(caps, CapSendNow)
 	}
 	h := Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
-		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps}
+		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps, OpenOnMac: a.Handoff != nil}
 	if a.DeviceLogin != nil {
 		h.Session = a.DeviceLogin.SessionState(r)
 	}
@@ -363,6 +375,20 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 		h.Naming = &NamingHealth{Today: st.Today, Limit: st.Limit, Failing: st.Failing, Reason: st.Reason, Paused: st.Paused}
 	}
 	writeJSON(w, http.StatusOK, h)
+}
+
+// openOnMac hands the session to a new iTerm2 tab on the Mac and answers
+// once the terminal holds it.
+func (a *API) openOnMac(w http.ResponseWriter, r *http.Request) {
+	if a.Handoff == nil {
+		writeError(w, http.StatusServiceUnavailable, "no_terminal", ErrNoTerminal)
+		return
+	}
+	if err := a.Handoff.Run(r.Context(), r.PathValue("id")); err != nil {
+		writeFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, OpenOnMacResult{State: StateOpenInTerminal})
 }
 
 func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {

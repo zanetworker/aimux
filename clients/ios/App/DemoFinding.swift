@@ -120,7 +120,8 @@ enum DemoFinding {
 
     static let health = Health(status: "ok", login: "demo", version: "demo", acpProtocolVersion: 1,
                                capabilities: ["sessions", "search", "new_sessions", "describe"],
-                               naming: NamingStatus(today: 3, limit: 20, failing: false, reason: nil, paused: nil))
+                               naming: NamingStatus(today: 3, limit: 20, failing: false, reason: nil, paused: nil),
+                               openOnMac: true)
 
     /// "" clears the owner's value: the session shows its automatic one again.
     static func edit(_ id: String, _ change: MetaChange) throws -> SessionMeta {

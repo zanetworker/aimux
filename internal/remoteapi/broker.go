@@ -107,6 +107,7 @@ type Broker struct {
 	mu        sync.Mutex
 	sessions  map[string]*sessionLog
 	approvals map[string]*pendingApproval
+	held      map[string]bool // sessions held during a handoff
 }
 
 // NewBroker returns a Broker.
@@ -114,7 +115,7 @@ func NewBroker(deps BrokerDeps, opt BrokerOptions) *Broker {
 	if opt.ApprovalTimeout <= 0 {
 		opt.ApprovalTimeout = 10 * time.Minute
 	}
-	return &Broker{deps: deps, opt: opt, logID: newID(), sessions: map[string]*sessionLog{}, approvals: map[string]*pendingApproval{}}
+	return &Broker{deps: deps, opt: opt, logID: newID(), sessions: map[string]*sessionLog{}, approvals: map[string]*pendingApproval{}, held: map[string]bool{}}
 }
 
 func (b *Broker) log(session string) *sessionLog {
@@ -167,8 +168,8 @@ func (b *Broker) Publish(session, kind string, data any) { b.emit(session, "", k
 
 // Start begins a turn and returns its id. The same non-empty key returns
 // the same turn, so a client may retry a send safely. It fails fast with
-// acprun.ErrBusy while the session has a running turn, or with Check's
-// error.
+// acprun.ErrBusy while the session has a running turn or is held, or with
+// Check's error.
 func (b *Broker) Start(session, text, key string) (string, error) {
 	b.mu.Lock()
 	l := b.log(session)
@@ -176,7 +177,7 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 		b.mu.Unlock()
 		return id, nil
 	}
-	if l.active != "" {
+	if l.active != "" || b.held[session] {
 		b.mu.Unlock()
 		return "", acprun.ErrBusy
 	}
@@ -197,7 +198,7 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 		b.mu.Unlock()
 		return id, nil
 	}
-	if l.active != "" {
+	if l.active != "" || b.held[session] {
 		b.mu.Unlock()
 		return "", acprun.ErrBusy
 	}
@@ -304,11 +305,33 @@ func (b *Broker) Subscribe(session string, after int64) (<-chan Event, func()) {
 	}
 }
 
-// Busy reports whether the session has a running turn.
+// Hold keeps the session from starting a turn, for handoff between
+// environments. It refuses with acprun.ErrBusy when a turn is running or
+// another hold exists. While held, Busy returns true and Start returns
+// ErrBusy. The release function is idempotent.
+func (b *Broker) Hold(session string) (release func(), err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l := b.log(session)
+	if l.active != "" || b.held[session] {
+		return nil, acprun.ErrBusy
+	}
+	b.held[session] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			delete(b.held, session)
+		})
+	}, nil
+}
+
+// Busy reports whether the session has a running turn or is held.
 func (b *Broker) Busy(session string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.log(session).active != ""
+	return b.log(session).active != "" || b.held[session]
 }
 
 // TurnEnded reports whether turn is over, and whether it ended with a

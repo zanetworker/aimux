@@ -106,7 +106,8 @@ struct NowScreen: View {
     }
 
     private func sessionButton<Label: View>(_ session: Session, @ViewBuilder label: () -> Label) -> some View {
-        PinnableRow(session: session, model: model, open: { open(session) }, label: label)
+        PinnableRow(session: session, model: model, openOnMac: chat.openOnMac, open: { open(session) },
+                    label: label)
             .compactRow()
     }
 

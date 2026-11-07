@@ -67,6 +67,7 @@ struct ChatContent: View {
         .overlay { emptyState }
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) { ChatTopLine(model: model) }
+        .modifier(OpenOnMacChatActions(session: session, context: context, model: model))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             // The Latest button takes its own row above the composer, so it never covers the timeline.
             VStack(spacing: 0) {

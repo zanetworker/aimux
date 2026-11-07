@@ -1,4 +1,5 @@
 import { bidi, card, displayTitle, dot, dotRow, el, errorBanner, foldLine, icon, isOpenChoice, projectName, relativeTime, rowPlace, rowState, saveChoice, section, sectionLabel, sessionLine, tabKey } from './rows.mjs';
+import { canOpenOnMac } from './openOnMac.mjs';
 
 // Now: what needs you, the pinned sessions that are not open, the Mac's iTerm2 windows and tabs as
 // they are on the Mac, the open sessions elsewhere and, with a query, Other sessions. The search box
@@ -174,6 +175,29 @@ function withMenu(model, ui, session, row) {
       ui.rerender();
     });
     menu.append(pin);
+    // Open on Mac when available
+    if (canOpenOnMac(session, model.health)) {
+      const openMac = el('button', 'row-menu-item', 'Open on Mac');
+      openMac.type = 'button';
+      openMac.setAttribute('role', 'menuitem');
+      openMac.dataset.focus = 'menu:' + session.id;
+      openMac.addEventListener('click', async () => {
+        if (model.openingOnMac.has(session.id)) return;
+        const pending = model.openOnMacAction(session);
+        close();
+        await pending;
+        const err = model.openOnMacErrors.get(session.id);
+        if (err) {
+          ui.announce(err);
+          ui.focus = 'more:' + session.id;
+        } else {
+          ui.announce('Opening ' + title + ' on your Mac');
+          ui.focus = 'row:' + session.id; // may have moved to a different section
+        }
+        ui.rerender();
+      });
+      menu.append(openMac);
+    }
     // Escape on the menu or its button closes it; so does focus leaving both.
     for (const node of [more, menu]) {
       node.addEventListener('keydown', (e) => {
@@ -198,8 +222,10 @@ function withMenu(model, ui, session, row) {
     }
     out.push(menu);
   }
-  const err = model.pinErrors.get(session.id);
-  if (err) out.push(el('p', 'row-error', err));
+  const pinErr = model.pinErrors.get(session.id);
+  if (pinErr) out.push(el('p', 'row-error', pinErr));
+  const macErr = model.openOnMacErrors.get(session.id);
+  if (macErr) out.push(el('p', 'row-error', macErr));
   return out;
 }
 

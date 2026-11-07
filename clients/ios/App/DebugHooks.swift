@@ -165,8 +165,8 @@ private struct DemoSource: AppSource {
         let chat = mode == "chat-format" ? DemoChat.formatted(id) : mode == "chat-items" ? DemoChat.items(id)
             : isChat ? DemoChat.details[id] : nil
         return SessionDetail(id: id, title: session.title, project: session.project, lastActive: session.lastActive,
-                             state: session.state, lastPrompt: session.lastPrompt, turns: chat?.turns ?? [],
-                             stats: chat?.stats,
+                             state: DemoOpenOnMac.state(id, session.state), lastPrompt: session.lastPrompt,
+                             turns: chat?.turns ?? [], stats: chat?.stats,
                              terminal: hasQueue ? DemoQueue.terminal(id) ?? DemoChat.terminal(id)
                                 : mode == "chat-terminal" ? DemoChat.terminal(id) : nil,
                              repo: DemoChat.repo(session.project), queue: hasQueue ? DemoQueue.status(id) : nil,
@@ -174,6 +174,8 @@ private struct DemoSource: AppSource {
     }
 
     func cancel(sessionID: String) async throws {}
+
+    func openOnMac(sessionID: String) async throws -> OpenOnMacResult { try await DemoOpenOnMac.open(sessionID) }
 
     func answer(approvalID: String, optionID: String) async throws {
         try await Task.sleep(for: .milliseconds(300))
@@ -227,7 +229,7 @@ private struct DemoSource: AppSource {
         if isFinding { return DemoFinding.health }
         let queue = hasQueue ? #","queue","send_now""# : ""
         let json = #"{"status":"ok","login":"demo","version":"demo","acpProtocolVersion":1,"# +
-            #""capabilities":["sessions","search","new_sessions"\#(queue)],"# +
+            #""capabilities":["sessions","search","new_sessions"\#(queue)],"openOnMac":true,"# +
             #""links":{"jiraBase":"https://jira.example.com","jiraProjects":["EDGE","OPS"]}}"#
         return try APIDecoder.decode(Health.self, from: Data(json.utf8))
     }

@@ -3,11 +3,14 @@ package remoteapp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,7 +21,9 @@ import (
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/terminput"
+	"github.com/zanetworker/aimux/internal/terminput/iterm2"
 	"github.com/zanetworker/aimux/internal/waiting"
 )
 
@@ -481,5 +486,285 @@ func TestRun_NoHostIsAnError(t *testing.T) {
 	s.cfg.RemoteAccess.Hostnames = nil
 	if err := s.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "hostnames") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+// fakeITerm2 is a terminal driver named like iTerm2's; it never types.
+type fakeITerm2 struct{}
+
+func (fakeITerm2) Name() string { return "iterm2" }
+func (fakeITerm2) Locate(context.Context, terminput.Target) (terminput.Pane, bool, error) {
+	return terminput.Pane{}, false, nil
+}
+func (fakeITerm2) Type(context.Context, terminput.Pane, string) error {
+	return errors.New("no typing in tests")
+}
+func (fakeITerm2) Key(context.Context, terminput.Pane, terminput.Key) error {
+	return errors.New("no keys in tests")
+}
+func (fakeITerm2) Screen(context.Context, terminput.Pane) (string, error) { return "", nil }
+
+// openCall is one call of the fake opener.
+type openCall struct {
+	title, dir string
+	argv       []string
+}
+
+// fakeClaudeOnPath puts an executable named claude first on PATH, so the
+// provider's resume command resolves without Claude Code installed, and
+// returns its path. It is never run.
+func fakeClaudeOnPath(t *testing.T) string {
+	t.Helper()
+	bin := t.TempDir()
+	claude := filepath.Join(bin, "claude")
+	if err := os.WriteFile(claude, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil { // #nosec G306 -- test executable
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return claude
+}
+
+// openOnMacRig is remote serve built over a temp HOME with device login off
+// and terminal input on, its drivers and opener given by the test, and a
+// fake claude on PATH. It returns the handler and the HOME.
+func openOnMacRig(t *testing.T, drivers []terminput.Driver, open func(ctx context.Context, title string, argv []string, dir string) error) (http.Handler, string) {
+	t.Helper()
+	fakeClaudeOnPath(t)
+	off := false
+	cfg := config.Config{}
+	cfg.RemoteAccess.DeviceLogin = &off
+	cfg.RemoteAccess.TerminalInput.Enabled = true
+	var out, errOut syncBuffer
+	s, home := testServer(t, cfg, &out, &errOut)
+	s.opts.Drivers = func() ([]terminput.Driver, func()) { return drivers, func() {} }
+	s.opts.OpenTab = open
+	w := &wiring{}
+	t.Cleanup(w.close)
+	if err := s.build(w); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "" {
+		t.Fatalf("build printed %q", out.String())
+	}
+	return w.srv.Handler, home
+}
+
+// serveRig sends one request through the handler as tailscale serve would.
+func serveRig(h http.Handler, method, path string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, path, nil)
+	r.Host = "mac.tail1.ts.net"
+	r.RemoteAddr = "127.0.0.1:5000"
+	r.Header.Set("Tailscale-User-Login", "me@example.com")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	return rec
+}
+
+// seedClaudeSession writes a Claude Code transcript for id, recorded in cwd.
+func seedClaudeSession(t *testing.T, home, id, cwd, prompt string) {
+	t.Helper()
+	dir := filepath.Join(home, ".claude", "projects", "-w")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	line, _ := json.Marshal(map[string]any{"type": "user", "timestamp": "2026-11-01T10:00:00Z", "cwd": cwd, "sessionId": id, "entrypoint": "cli",
+		"message": map[string]any{"role": "user", "content": prompt}})
+	if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// holdInTerminal writes Claude Code's registry entry for this test process
+// holding id, so the session reads as open in a terminal.
+func holdInTerminal(home, id string) error {
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	reg := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"status":"idle"}`, os.Getpid(), id)
+	return os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", os.Getpid())), []byte(reg), 0o600)
+}
+
+func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body %q: %v", rec.Body.String(), err)
+	}
+	return body.Code
+}
+
+func healthOpenOnMac(t *testing.T, h http.Handler) bool {
+	t.Helper()
+	rec := serveRig(h, http.MethodGet, "/v1/health")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("health %d %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	on, ok := body["openOnMac"].(bool)
+	if !ok {
+		t.Fatalf("health %s has no openOnMac", rec.Body.String())
+	}
+	return on
+}
+
+func neverOpen(t *testing.T) func(context.Context, string, []string, string) error {
+	return func(context.Context, string, []string, string) error {
+		t.Error("the opener ran")
+		return errors.New("must not open")
+	}
+}
+
+// Without an iTerm2 driver, Open on Mac is off: health says so and the
+// route answers no_terminal without opening anything.
+func TestOpenOnMac_NoDriverIsOff(t *testing.T) {
+	h, home := openOnMacRig(t, nil, neverOpen(t))
+	seedClaudeSession(t, home, "s1", t.TempDir(), "fix the build")
+	if healthOpenOnMac(t, h) {
+		t.Fatal("openOnMac true with no terminal driver")
+	}
+	rec := serveRig(h, http.MethodPost, "/v1/sessions/s1/open-on-mac")
+	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "no_terminal" {
+		t.Fatalf("%d %s, want 503 no_terminal", rec.Code, rec.Body.String())
+	}
+}
+
+// With terminal input off, an iTerm2 driver alone does not turn it on.
+func TestOpenOnMac_TerminalInputOffIsOff(t *testing.T) {
+	off := false
+	cfg := config.Config{}
+	cfg.RemoteAccess.DeviceLogin = &off
+	var out, errOut syncBuffer
+	s, _ := testServer(t, cfg, &out, &errOut)
+	s.opts.Drivers = func() ([]terminput.Driver, func()) { return []terminput.Driver{fakeITerm2{}}, func() {} }
+	s.opts.OpenTab = neverOpen(t)
+	w := &wiring{}
+	defer w.close()
+	if err := s.build(w); err != nil {
+		t.Fatal(err)
+	}
+	if healthOpenOnMac(t, w.srv.Handler) {
+		t.Fatal("openOnMac true with terminal input off")
+	}
+}
+
+// With an iTerm2 driver and terminal input on, the route opens the
+// provider's resume command in the session's folder, titled with the
+// shown title cut to 60 runes, and answers once the terminal holds the
+// session (the hold it takes meanwhile must not hide that).
+func TestOpenOnMac_OpensTheResumeCommandInTheSessionFolder(t *testing.T) {
+	var calls []openCall
+	var home string
+	h, home := openOnMacRig(t, []terminput.Driver{fakeITerm2{}}, func(ctx context.Context, title string, argv []string, dir string) error {
+		calls = append(calls, openCall{title: title, argv: argv, dir: dir})
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("the opener's context has no deadline")
+		}
+		return holdInTerminal(home, "s1") // the new tab's claude takes the session
+	})
+	cwd := t.TempDir()
+	prompt := strings.Repeat("a", 70) // under history's own cap on the first message
+	seedClaudeSession(t, home, "s1", cwd, prompt)
+	if !healthOpenOnMac(t, h) {
+		t.Fatal("openOnMac false with an iTerm2 driver and terminal input on")
+	}
+	rec := serveRig(h, http.MethodPost, "/v1/sessions/s1/open-on-mac")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"open_in_terminal"`) {
+		t.Fatalf("%d %s, want 200 open_in_terminal", rec.Code, rec.Body.String())
+	}
+	if len(calls) != 1 {
+		t.Fatalf("opener ran %d times", len(calls))
+	}
+	c := calls[0]
+	if want := []string{exec.Command("claude").Path, "--resume", "s1"}; strings.Join(c.argv, " ") != strings.Join(want, " ") {
+		t.Fatalf("argv %q, want %q", c.argv, want)
+	}
+	if c.dir != cwd {
+		t.Fatalf("dir %q, want %q", c.dir, cwd)
+	}
+	if c.title != strings.Repeat("a", 60) {
+		t.Fatalf("title %q, want the first message cut to 60 runes", c.title)
+	}
+}
+
+// A session created here whose agent wrote no transcript yet has nothing
+// to resume: not_started, nothing opened.
+func TestOpenOnMac_CreatedWithoutFileIsNotStarted(t *testing.T) {
+	h, home := openOnMacRig(t, []terminput.Driver{fakeITerm2{}}, neverOpen(t))
+	created := &remoteapi.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")}
+	if err := created.Add("new1", t.TempDir(), "start here"); err != nil {
+		t.Fatal(err)
+	}
+	rec := serveRig(h, http.MethodPost, "/v1/sessions/new1/open-on-mac")
+	if rec.Code != http.StatusConflict || errorCode(t, rec) != "not_started" {
+		t.Fatalf("%d %s, want 409 not_started", rec.Code, rec.Body.String())
+	}
+	rec = serveRig(h, http.MethodPost, "/v1/sessions/nobody/open-on-mac")
+	if rec.Code != http.StatusNotFound || errorCode(t, rec) != "unknown_session" {
+		t.Fatalf("unknown: %d %s, want 404 unknown_session", rec.Code, rec.Body.String())
+	}
+}
+
+// Another aimux process continuing the session (its lock held) answers
+// in_use before anything is opened.
+func TestOpenOnMac_LockedElsewhereIsInUse(t *testing.T) {
+	h, home := openOnMacRig(t, []terminput.Driver{fakeITerm2{}}, neverOpen(t))
+	seedClaudeSession(t, home, "s1", t.TempDir(), "fix the build")
+	release, err := acprun.Reservation(home)("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	rec := serveRig(h, http.MethodPost, "/v1/sessions/s1/open-on-mac")
+	if rec.Code != http.StatusConflict || errorCode(t, rec) != "in_use" {
+		t.Fatalf("%d %s, want 409 in_use", rec.Code, rec.Body.String())
+	}
+}
+
+// macOS refusing aimux control of iTerm2 answers not_authorized.
+func TestOpenOnMac_NotAuthorized(t *testing.T) {
+	h, home := openOnMacRig(t, []terminput.Driver{fakeITerm2{}}, func(context.Context, string, []string, string) error {
+		return fmt.Errorf("iterm2: open tab: %w", iterm2.ErrNotAuthorized)
+	})
+	seedClaudeSession(t, home, "s1", t.TempDir(), "fix the build")
+	rec := serveRig(h, http.MethodPost, "/v1/sessions/s1/open-on-mac")
+	if rec.Code != http.StatusForbidden || errorCode(t, rec) != "not_authorized" {
+		t.Fatalf("%d %s, want 403 not_authorized", rec.Code, rec.Body.String())
+	}
+}
+
+// The default opener is iTerm2's, and it keeps no state under HOME.
+func TestNew_DefaultOpener(t *testing.T) {
+	home := t.TempDir()
+	if New(config.Config{}, Options{Home: home}).opts.OpenTab == nil {
+		t.Fatal("no default opener")
+	}
+	if a, b := windowOpener(), windowOpener(); a == b {
+		t.Fatal("windowOpener shares one Opener between servers")
+	}
+	if ents, _ := os.ReadDir(filepath.Join(home, ".aimux")); len(ents) != 0 {
+		t.Fatalf("~/.aimux has %d entries, want none", len(ents))
+	}
+}
+
+func TestCutRunes(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{strings.Repeat("é", 70), 60, strings.Repeat("é", 60)}, // runes, not bytes
+		{"short", 60, "short"},
+		{strings.Repeat("x", 60), 60, strings.Repeat("x", 60)}, // exactly n stays
+		{"", 60, ""},
+	} {
+		if got := cutRunes(c.in, c.n); got != c.want {
+			t.Errorf("cutRunes(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
 	}
 }

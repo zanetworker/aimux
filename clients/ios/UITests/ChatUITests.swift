@@ -244,4 +244,44 @@ final class ChatUITests: XCTestCase {
         XCTAssertEqual(line.label, "Your Mac is in use right now")
         XCTAssertFalse(app.buttons["sendButton"].exists)
     }
+
+    @MainActor
+    func testOpenOnMacFromTheChatMenuTurnsItIntoATerminalChat() {
+        let app = launch(["-demo", "chat-format", "-openChat", "demo-4"])
+
+        let menu = app.buttons["chatMenu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap()
+        let item = app.buttons["Open on Mac"]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "ios-open-on-mac"
+        shot.lifetime = .keepAlways
+        add(shot)
+        item.tap()
+
+        // Opened (the progress line shows for the demo's 1.5 s; its copy is pinned by OpenOnMacTests): the chat
+        // reads the session again, now open in a terminal, so it is read only and the menu goes.
+        XCTAssertTrue(app.staticTexts["readOnlyLine"].waitForExistence(timeout: 10))
+        XCTAssertFalse(menu.exists)
+        XCTAssertFalse(app.staticTexts["openOnMacLine"].exists)
+    }
+
+    @MainActor
+    func testOpenOnMacOnARowsLongPress() {
+        let app = launch(["-demo", "chat", "-tab", "now"])
+
+        let row = app.buttons["session-demo-2"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.press(forDuration: 1.2)
+        XCTAssertTrue(app.buttons["Open on Mac"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testNoOpenOnMacForASessionAlreadyInATerminal() {
+        let app = launch(["-demo", "chat", "-openChat", "demo-16"])
+
+        XCTAssertTrue(app.buttons["infoButton"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["chatMenu"].exists)
+    }
 }

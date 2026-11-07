@@ -589,6 +589,22 @@ func TestContract(t *testing.T) {
 		t.Fatalf("health %v, want describe and naming", body)
 	}
 
+	// Open on Mac.
+	handoff := &handoffRig{state: StateIdle, turn: true}
+	api.Handoff = handoff.handoff()
+	st, body = c.call("POST", "/v1/sessions/s1/open-on-mac", "", testLogin)
+	expect(200, st, body, "open on Mac")
+	handoff.set(func(r *handoffRig) { r.state = StateOpenInTerminal })
+	st, body = c.call("POST", "/v1/sessions/s1/open-on-mac", "", testLogin)
+	expect(409, st, body, "open on Mac, already in a terminal")
+	handoff.set(func(r *handoffRig) { r.state, r.opened, r.openE = StateIdle, false, ErrNotAuthorized })
+	st, body = c.call("POST", "/v1/sessions/s1/open-on-mac", "", testLogin)
+	expect(403, st, body, "open on Mac, iTerm2 not allowed")
+	_, body = c.call("GET", "/v1/health", "", testLogin)
+	if body["openOnMac"] != true {
+		t.Fatalf("health %v, want openOnMac", body)
+	}
+
 	// Every operation and event kind in the contract was exercised; the
 	// /v1/auth operations by TestContract_DeviceLogin.
 	var missing []string
@@ -649,6 +665,7 @@ func TestContract_ErrorCodes(t *testing.T) {
 		acprun.ErrUnknownSession, acprun.ErrOpenInTerminal, acprun.ErrBusy, acprun.ErrInUseElsewhere,
 		acprun.ErrOwnershipUnknown, acprun.ErrNotRunning, acprun.ErrTooManyRuns,
 		ErrNoSuchApproval, ErrInvalidOption, errNotAProject, errors.New("anything else"),
+		ErrNotStarted, ErrNoTerminal, ErrNotAuthorized, ErrHandoffTimeout,
 	} {
 		w := httptest.NewRecorder()
 		writeFailure(w, err)

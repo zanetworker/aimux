@@ -42,6 +42,8 @@ const (
 	ActionMetaEdit = "meta_edit"
 	ActionPin      = "pin"
 	ActionUnpin    = "unpin"
+	// ActionOpenOnMac: a session handed from the phone to an iTerm2 tab.
+	ActionOpenOnMac = "open_on_mac"
 )
 
 // AuditEntry is one audit line. Device is the device's name; Session is the

@@ -68,6 +68,12 @@ public final class APIClient: Sendable {
         let _: AnswerStatus = try await send("POST", "/v1/sessions/\(sessionID)/cancel")
     }
 
+    /// Open on Mac: answers once the terminal holds the session; refusals are `APIError.server` with the codes of
+    /// api/testdata/clients/terminal/open-on-mac.json.
+    public func openOnMac(sessionID: String) async throws -> OpenOnMacResult {
+        try await send("POST", "/v1/sessions/\(sessionID)/open-on-mac", timeout: OpenOnMacCopy.requestTimeout)
+    }
+
     /// Answers a permission request with one of its `optionId`s.
     public func answer(approvalID: String, optionID: String) async throws {
         let body = try JSONEncoder().encode(["option": optionID])

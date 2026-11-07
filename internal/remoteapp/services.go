@@ -3,17 +3,23 @@ package remoteapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/remoteapi"
@@ -214,4 +220,196 @@ func hooksSummary(settingsPath string) string {
 		return "Permission alerts for terminal sessions: off; run `aimux remote hooks install`"
 	}
 	return "Permission alerts for terminal sessions: on (Claude Code hooks)"
+}
+
+// windowOpener opens Open on Mac's panes in iTerm2's aimux windows (up to
+// iterm2.MaxPanes a window), found by their user.aimux session variable.
+func windowOpener() *iterm2.Opener {
+	return &iterm2.Opener{}
+}
+
+// resumeCommand is the registry provider name's ResumeCommand; nil when the
+// registry has no such provider.
+func resumeCommand(home, name string) func(agent.Agent) *exec.Cmd {
+	p := provider.NewRegistry(home, config.Config{}).ByName(name)
+	if p == nil {
+		return nil
+	}
+	return p.ResumeCommand
+}
+
+// maxTabTitle is how many runes of the shown title name the new pane.
+const maxTabTitle = 60
+
+// handoffDeps is what Open on Mac is built from.
+type handoffDeps struct {
+	index   *remoteapi.LocalIndex
+	broker  *remoteapi.Broker
+	manager *acprun.Manager
+	resume  func(agent.Agent) *exec.Cmd // the default provider's ResumeCommand
+	open    func(ctx context.Context, title string, argv []string, dir string) error
+	dropped *droppedPIDs // set by buildHandoff
+}
+
+// buildHandoff is Open on Mac: nil (the route answers no_terminal) unless
+// terminal input is on, an iTerm2 driver is configured and the default
+// provider can resume a session.
+func buildHandoff(cfg config.TerminalInputConfig, drivers []terminput.Driver, d handoffDeps) *remoteapi.Handoff {
+	if !cfg.Enabled || d.resume == nil || d.open == nil || !hasDriver(drivers, "iterm2") {
+		return nil
+	}
+	d.dropped = &droppedPIDs{bySession: map[string]map[int]bool{}}
+	return &remoteapi.Handoff{
+		Hold:   d.broker.Hold,
+		Drop:   d.drop,
+		State:  func(_ context.Context, id string) (string, error) { return d.state(id), nil },
+		Target: d.target,
+		Open: func(ctx context.Context, title string, argv []string, dir string) error {
+			err := d.open(ctx, title, argv, dir)
+			if errors.Is(err, iterm2.ErrNotAuthorized) {
+				return fmt.Errorf("%w: %w", remoteapi.ErrNotAuthorized, err)
+			}
+			return err
+		},
+	}
+}
+
+func hasDriver(drivers []terminput.Driver, name string) bool {
+	for _, dr := range drivers {
+		if dr.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+// droppedPIDs are, per session, the processes of the run the last handoff
+// dropped. Once dropped, Manager.Owns no longer knows them, while the live
+// read may still list them (cached up to discovery.LiveTTL, or still
+// exiting).
+type droppedPIDs struct {
+	mu        sync.Mutex
+	bySession map[string]map[int]bool
+}
+
+func (p *droppedPIDs) set(id string, pids map[int]bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bySession[id] = pids
+}
+
+func (p *droppedPIDs) has(id string, pid int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.bySession[id][pid]
+}
+
+// drop closes the session's idle run, first noting the processes of that
+// run holding the session (aimux's own, by Manager.Owns), so state does
+// not take them for the new tab.
+func (d handoffDeps) drop(id string) error {
+	own := map[int]bool{}
+	for _, p := range d.index.Providers {
+		if p.Live == nil {
+			continue
+		}
+		hs, _ := p.Live.Holders(harness.List)
+		for _, h := range hs {
+			if h.SessionID == id && d.manager.Owns(h.PID) {
+				own[h.PID] = true
+			}
+		}
+	}
+	if err := d.manager.Drop(id); err != nil {
+		return err
+	}
+	d.dropped.set(id, own)
+	return nil
+}
+
+// state is the session's state from the live sessions read (in memory,
+// refreshed at most once a LiveTTL), polled while the tab starts. A
+// terminal holding the session wins over busy, since the handoff's own
+// hold makes the Broker report busy until the handoff ends. A holder that
+// is aimux's own, belonged to the run the handoff dropped, or whose
+// process is gone is no terminal.
+func (d handoffDeps) state(id string) string {
+	cat := d.index.Catalog()
+	owned := cat.Owned
+	cat.Owned = func(pid int) bool {
+		return (owned != nil && owned(pid)) || d.dropped.has(id, pid) || !processAlive(pid)
+	}
+	open := cat.Open()
+	if _, ok := open[id]; ok {
+		return remoteapi.StateOpenInTerminal
+	}
+	return cat.StateOf(id, open)
+}
+
+// processAlive reports whether pid is a running process (signal 0; EPERM
+// means it runs as another user).
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// target is the new tab's title and the command resuming the session:
+// ErrNotStarted for a session created here without a transcript,
+// ErrUnknownSession for one aimux does not know, ErrInUseElsewhere while
+// another aimux process holds its lock. It runs once per handoff, so the
+// lock is probed once and never taken: between Drop and the tab's claude
+// starting, another aimux process could claim the session, as it could
+// against a claude --resume typed by hand. A command whose binary did not
+// resolve to an absolute path is refused, so it never reaches the shell
+// line.
+func (d handoffDeps) target(ctx context.Context, id string) (string, []string, string, error) {
+	cat := d.index.Catalog()
+	file, store := cat.File(id)
+	if file == "" {
+		if _, ok := d.index.Created.Get(id); ok {
+			return "", nil, "", remoteapi.ErrNotStarted
+		}
+		return "", nil, "", fmt.Errorf("%w: %s", acprun.ErrUnknownSession, id)
+	}
+	if err := d.manager.ProbeReserved(id); err != nil {
+		return "", nil, "", err
+	}
+	rec, ok := d.index.Lookup(id)
+	if !ok {
+		var err error
+		if rec, err = d.index.Record(ctx, id); err != nil {
+			return "", nil, "", err
+		}
+	}
+	cwd := rec.Cwd
+	if cwd == "" {
+		cwd, _ = store.SessionCwd(file)
+	}
+	if cwd == "" {
+		return "", nil, "", fmt.Errorf("session %s recorded no working directory to resume it in", id)
+	}
+	cmd := d.resume(agent.Agent{SessionID: id, WorkingDir: cwd})
+	if cmd == nil {
+		return "", nil, "", fmt.Errorf("session %s: the provider has no resume command", id)
+	}
+	if cmd.Err != nil {
+		return "", nil, "", fmt.Errorf("session %s: resume command: %w", id, cmd.Err)
+	}
+	if !filepath.IsAbs(cmd.Path) {
+		return "", nil, "", fmt.Errorf("session %s: resume command %q is not an absolute path", id, cmd.Path)
+	}
+	dir := cmd.Dir
+	if dir == "" {
+		dir = cwd
+	}
+	argv := append([]string{cmd.Path}, cmd.Args[1:]...)
+	return cutRunes(history.ShownTitle(rec), maxTabTitle), argv, dir, nil
+}
+
+// cutRunes is s cut to its first n runes.
+func cutRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }

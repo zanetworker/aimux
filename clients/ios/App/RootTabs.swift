@@ -2,7 +2,7 @@ import SwiftUI
 import AimuxKit
 
 /// Everything the tabs read from: the server, or the DEBUG demo data.
-typealias AppSource = SessionSource & SearchSource & ActivitySource & ChatSource & SessionMetaSource
+typealias AppSource = SessionSource & SearchSource & ActivitySource & ChatSource & SessionMetaSource & OpenOnMacSource
 
 enum AppTab: String, Hashable {
     case now, all
@@ -18,6 +18,8 @@ struct RootTabs: View {
     @State private var allSearch: SearchModel
     @State private var tab = DebugHooks.initialTab
     @State private var drafts = ChatDrafts()
+    /// Open on Mac in flight, shared by the chat menu and the row menus.
+    @State private var openOnMac: OpenOnMacModel
     /// The server's Jira settings for reference links; nil until read, or when it has none.
     @State private var links: HealthLinks?
     /// Whether the health read that gives `links` has succeeded; until then the app retries when it becomes active.
@@ -42,12 +44,13 @@ struct RootTabs: View {
         _now = State(initialValue: now)
         _nowSearch = State(initialValue: SearchModel(source: source))
         _allSearch = State(initialValue: SearchModel(source: source))
+        _openOnMac = State(initialValue: OpenOnMacModel(source: source))
         _serverAddress = serverAddress
     }
 
     var body: some View {
         let chat = ChatContext(source: source, stream: stream, now: now, drafts: drafts, links: links,
-                               queueEnabled: queueEnabled, sendNowEnabled: sendNowEnabled)
+                               openOnMac: openOnMac, queueEnabled: queueEnabled, sendNowEnabled: sendNowEnabled)
         TabView(selection: $tab) {
             Tab("Now", systemImage: "record.circle", value: AppTab.now) {
                 NowScreen(model: now, search: nowSearch, chat: chat, serverAddress: $serverAddress)

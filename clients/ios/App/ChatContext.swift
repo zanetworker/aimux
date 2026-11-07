@@ -2,19 +2,22 @@ import SwiftUI
 import AimuxKit
 
 /// What a chat needs from the app: the server, its event stream, Now (for the Next bar), the drafts and
-/// failed messages kept per session, the server's Jira links for references, and whether it keeps a chat queue.
+/// failed messages kept per session, the server's Jira links for references, Open on Mac in flight, and whether it
+/// keeps a chat queue.
 struct ChatContext {
     let source: any ChatSource
     let stream: any EventStreaming
     let now: NowModel
     let drafts: ChatDrafts
     let links: HealthLinks?
+    let openOnMac: OpenOnMacModel
     var queueEnabled = false
     var sendNowEnabled = false
 
     @MainActor func makeModel(_ sessionID: String) -> ChatModel {
-        ChatModel(sessionID: sessionID, source: source, stream: stream, drafts: drafts, queueEnabled: queueEnabled,
-                  sendNowEnabled: sendNowEnabled)
+        openOnMac.clearError(sessionID)  // about an earlier try, as the web client does on opening a chat
+        return ChatModel(sessionID: sessionID, source: source, stream: stream, drafts: drafts,
+                         queueEnabled: queueEnabled, sendNowEnabled: sendNowEnabled)
     }
 }
 

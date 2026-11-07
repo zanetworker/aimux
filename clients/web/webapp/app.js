@@ -15,6 +15,7 @@ import { announce, createInfoSheet, renderInfoSheet, renderMetaCard } from './se
 import { referenceContext } from './references.mjs';
 import { createLogin } from './login.mjs';
 import { readChat } from './chatLoad.mjs';
+import { canOpenOnMac, openOnMac, openOnMacMessage } from './openOnMac.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -209,6 +210,7 @@ let notice = '';
 let infoOpen = false;
 let adding = false;     // an add to the queue is on its way
 let queueNotice = '';   // why the text in the box was not queued; cleared when it changes
+let openOnMacError = null;  // {id, message}: why the last Open on Mac of that session failed
 
 function closeSession() {
   nav++;
@@ -223,6 +225,7 @@ function closeSession() {
   nowPoll.stop();
   termPoll.stop();
   setRunning(false);
+  openOnMacError = null;
 }
 
 // /v1/health's links (Jira) for reference links in the chat; read once, absent on failure.
@@ -504,6 +507,7 @@ function render() {
   const status = chatStatus({ detail: c.detail, readOnly, result, pendingApproval });
   $('chat-title').replaceChildren(...headerContent(title, status, c.detail ? c.detail.project : ''));
   $('reconnecting').hidden = c.mode !== 'reconnecting';
+  $('open-on-mac').hidden = !c.detail || !canOpenOnMac(c.detail, health) || tabs.model.openingOnMac.has(c.id);
 
   const box = $('messages');
   const refs = referenceContext(c.detail, health);
@@ -553,7 +557,7 @@ function render() {
   const next = c.mode === 'failed' || pendingApproval ? null : nextSession(tabs.model.navigationView, c.id, tabs.model.answeredSessions, tabs.model.activity);
   $('nextbar').replaceChildren(...(next ? [nextBar(next, displayTitle(next.session.title, next.session.id),
     () => { location.hash = '#/s/' + encodeURIComponent(next.session.id); })] : []));
-  const note = notice || queueNotice || (stopError ? 'Could not stop · ' + stopError : '');
+  const note = notice || queueNotice || (tabs.model.openingOnMac.has(c.id) ? openOnMacMessage('progress') : '') || (openOnMacError && openOnMacError.id === c.id ? openOnMacError.message : '') || (stopError ? 'Could not stop · ' + stopError : '');
   $('notice').textContent = note;
   $('notice').hidden = !note;
   const unavailable = c.detail && c.detail.state === 'unavailable';
@@ -1057,6 +1061,33 @@ async function stop() {
   }
 }
 
+async function openOnMacAction() {
+  if (!chat) return;
+  const id = chat.id;
+  if (tabs.model.openingOnMac.has(id)) return;
+  tabs.model.openingOnMac.add(id);
+  openOnMacError = null;
+  render();
+  try {
+    const signal = AbortSignal.timeout(60000);
+    const apiWithTimeout = (method, path, body, opts) => api(method, path, body, { ...opts, signal });
+    const result = await openOnMac(apiWithTimeout, id);
+    // The owner may have opened another chat meanwhile: act on this one only.
+    if (result.ok) {
+      if (chat && chat.id === id) await reload();
+    } else {
+      openOnMacError = { id, message: result.message };
+      render();
+    }
+  } catch (e) {
+    openOnMacError = { id, message: e.message || 'Could not open on Mac' };
+    render();
+  } finally {
+    tabs.model.openingOnMac.delete(id);
+    render();
+  }
+}
+
 // Now stays fresh while a chat covers it, for the Next bar: on open, then every
 // 15 s while the page is visible.
 const nowPoll = poller({
@@ -1250,6 +1281,7 @@ $('back').addEventListener('click', () => { location.hash = lastTab; });
 $('chat-back').addEventListener('click', () => { location.hash = lastTab; });
 $('chat-title').addEventListener('click', openInfo);
 $('chat-info').addEventListener('click', openInfo);
+$('open-on-mac').addEventListener('click', openOnMacAction);
 $('newform').addEventListener('submit', startNew);
 setupVoice();
 $('refresh').addEventListener('click', () => { if (location.hash === '#/new') showNew(); });

@@ -52,6 +52,13 @@ type Health struct {
 	Session string `json:"session,omitempty"`
 	// Naming is present when the server makes titles and descriptions.
 	Naming *NamingHealth `json:"naming,omitempty"`
+	// OpenOnMac: POST /v1/sessions/{id}/open-on-mac can open a terminal tab.
+	OpenOnMac bool `json:"openOnMac"`
+}
+
+// OpenOnMacResult answers POST /v1/sessions/{id}/open-on-mac.
+type OpenOnMacResult struct {
+	State string `json:"state"` // always open_in_terminal
 }
 
 // NamingHealth is Health.Naming: today's automatic naming and its state.

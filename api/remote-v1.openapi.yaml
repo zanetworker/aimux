@@ -264,6 +264,37 @@ paths:
         "503": { $ref: "#/components/responses/Error" }
         "504": { $ref: "#/components/responses/Error" }
 
+  /v1/sessions/{id}/open-on-mac:
+    post:
+      summary: Open on Mac
+      description: >
+        Hands a session the Mac runs in the background to a new pane of the
+        aimux window in iTerm2, where Claude resumes it; offered when health
+        has `openOnMac` true. Answers once the terminal holds the session
+        (its state is then `open_in_terminal`), or after about 20 seconds
+        with `504 timeout`. Refusals: `409 busy` while a turn runs or
+        another Open on Mac is in progress, `409 open_in_terminal`,
+        `409 in_use`, `409 not_started` (no messages yet), `503 no_terminal`
+        (the Mac cannot open iTerm2), `403 not_authorized` (macOS refused
+        aimux control of iTerm2). Clients show the copy in
+        `api/testdata/clients/terminal/open-on-mac.json`.
+      operationId: openOnMac
+      parameters:
+        - $ref: "#/components/parameters/SessionID"
+      responses:
+        "200":
+          description: The session is open in a terminal on the Mac
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenOnMacResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+
   /v1/sessions/{id}/messages:
     post:
       summary: Continue a session with a message
@@ -927,6 +958,10 @@ components:
             - naming_unreadable  # 502: the model's reply could not be read
             - naming_failed      # 502: the model call failed
             - naming_unavailable # 503: the Mac has no API key and no claude CLI
+            - not_started        # 409: Open on Mac, but the session has no messages yet
+            - no_terminal        # 503: Open on Mac, but this Mac cannot open an iTerm2 tab
+            - not_authorized     # 403: macOS refused aimux control of iTerm2 (Open on Mac)
+            - timeout            # 504: Open on Mac: the tab opened but Claude did not pick up the session in time
 
     Health:
       type: object
@@ -976,6 +1011,11 @@ components:
             failing: { type: boolean }
             reason: { type: string }
             paused: { type: boolean }
+        openOnMac:
+          type: boolean
+          description: >
+            True when POST /v1/sessions/{id}/open-on-mac can open a terminal
+            tab on the Mac. Absent from older servers: treat as false.
 
     SessionState:
       type: string
@@ -1405,6 +1445,13 @@ components:
         title: { type: string }
         description: { type: string, description: "Absent when the session has none." }
         pinned: { type: boolean }
+
+    OpenOnMacResult:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: { type: string, enum: [open_in_terminal] }
 
     DescribeResult:
       type: object

@@ -263,9 +263,11 @@ public struct Health: Decodable, Equatable, Sendable {
     public let links: HealthLinks?
     /// Today's automatic naming; present with the `describe` capability.
     public let naming: NamingStatus?
+    /// Open on Mac is offered (an iTerm2 terminal driver is set up); false when absent, and from older servers.
+    public let openOnMac: Bool
 
     public init(status: String, login: String, version: String, acpProtocolVersion: Int, capabilities: [String],
-                links: HealthLinks? = nil, naming: NamingStatus? = nil) {
+                links: HealthLinks? = nil, naming: NamingStatus? = nil, openOnMac: Bool = false) {
         self.status = status
         self.login = login
         self.version = version
@@ -273,10 +275,11 @@ public struct Health: Decodable, Equatable, Sendable {
         self.capabilities = capabilities
         self.links = links
         self.naming = naming
+        self.openOnMac = openOnMac
     }
 
     private enum CodingKeys: String, CodingKey {
-        case status, login, version, acpProtocolVersion, capabilities, links, naming
+        case status, login, version, acpProtocolVersion, capabilities, links, naming, openOnMac
     }
 
     public init(from decoder: Decoder) throws {
@@ -288,6 +291,7 @@ public struct Health: Decodable, Equatable, Sendable {
         capabilities = try container.decode([String].self, forKey: .capabilities)
         links = try? container.decodeIfPresent(HealthLinks.self, forKey: .links)
         naming = try? container.decodeIfPresent(NamingStatus.self, forKey: .naming)
+        openOnMac = (try? container.decodeIfPresent(Bool.self, forKey: .openOnMac)) ?? false
     }
 
     public func supports(_ capability: Capability) -> Bool {

@@ -3,6 +3,7 @@ import { deriveActivity, holdPlaces, rankNow } from './now.mjs';
 import { isWorking } from './search.mjs';
 import { pinErrorText } from './sessionInfo.mjs';
 import { savedPromptAsTyped } from './timeline.mjs';
+import { canOpenOnMac, openOnMac } from './openOnMac.mjs';
 
 // The Now screen's state, like NowModel in the iPhone app: the session list, what each
 // candidate is doing (from its event snapshot), the search box and Working chip, the Mac's places
@@ -39,6 +40,8 @@ export class NowModel {
     this.answerErrors = new Map();
     this.retrying = new Set();
     this.retryErrors = new Map();
+    this.openingOnMac = new Set(); // session ids with Open on Mac in flight
+    this.openOnMacErrors = new Map(); // session id to error message
     this.activity = {};
     this.answered = new Set(); // approval ids answered here
     // Sessions whose approval the owner answered (here or in their chat): the Next bar skips them as
@@ -193,6 +196,27 @@ export class NowModel {
       this.pinErrors.set(id, pinErrorText(e, pinned));
     } finally {
       this.pinning.delete(id);
+    }
+  }
+
+  // Open on Mac from the row menu; a refusal is kept for the row until the next try.
+  async openOnMacAction(session) {
+    const id = session.id;
+    if (this.openingOnMac.has(id)) return;
+    this.openingOnMac.add(id);
+    this.openOnMacErrors.delete(id);
+    try {
+      const signal = AbortSignal.timeout(60000);
+      const apiWithTimeout = (method, path, body, opts) => this.api(method, path, body, { ...opts, signal });
+      const result = await openOnMac(apiWithTimeout, id);
+      if (!result.ok) {
+        this.openOnMacErrors.set(id, result.message);
+      }
+      // On success, the session will update to open_in_terminal on next refresh
+    } catch (e) {
+      this.openOnMacErrors.set(id, e.message || 'Could not open on Mac');
+    } finally {
+      this.openingOnMac.delete(id);
     }
   }
 

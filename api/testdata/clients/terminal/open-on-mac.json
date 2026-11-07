@@ -1,0 +1,29 @@
+{
+  "name": "open-on-mac",
+  "copy": {
+    "action": "Open on Mac",
+    "progress": "Opening on your Mac…",
+    "done": "Open in the aimux window on your Mac",
+    "busy": "Claude is answering. Wait for it to finish, or Stop it first.",
+    "open_in_terminal": "Already open in a terminal on your Mac.",
+    "no_terminal": "Open on Mac needs iTerm2 on your Mac.",
+    "not_authorized": "aimux may not control iTerm2. Allow it in System Settings, Privacy & Security, Automation.",
+    "in_use": "Another aimux process is using this session.",
+    "not_started": "This session has no messages yet, so there is nothing to open.",
+    "timeout": "The pane opened, but Claude did not pick up the session. Check the aimux window on your Mac."
+  },
+  "success": {
+    "status": 200,
+    "state": "open_in_terminal"
+  },
+  "codes": {
+    "busy": 409,
+    "open_in_terminal": 409,
+    "in_use": 409,
+    "not_started": 409,
+    "no_terminal": 503,
+    "not_authorized": 403,
+    "timeout": 504,
+    "unknown_session": 404
+  }
+}

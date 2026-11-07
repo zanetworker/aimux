@@ -95,14 +95,23 @@ struct AllScreen: View {
     /// A session row: "Waiting for permission" at a permission prompt, its place with the tab when open on the
     /// Mac, the time on the right.
     private func sessionRow(_ session: Session, place: String? = nil) -> some View {
-        Button { path.append(session) } label: {
-            SessionLine(session: session, activity: activity[session.id] ?? .none,
-                        state: session.isWaitingForPermission ? .waitingForPermission : nil,
-                        place: place ?? rowPlace(session, withTab: true), format: format)
+        VStack(alignment: .leading, spacing: 4) {
+            Button { path.append(session) } label: {
+                SessionLine(session: session, activity: activity[session.id] ?? .none,
+                            state: session.isWaitingForPermission ? .waitingForPermission : nil,
+                            place: place ?? rowPlace(session, withTab: true), format: format)
+            }
+            .buttonStyle(.plain)
+            .modifier(OpenOnMacMenu(session: session, now: chat.now, openOnMac: chat.openOnMac))
+            .accessibilityIdentifier("session-\(session.id)")
+            if let error = chat.openOnMac.errors[session.id] {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 17)
+            }
         }
-        .buttonStyle(.plain)
         .compactRow()
-        .accessibilityIdentifier("session-\(session.id)")
     }
 
     // MARK: Recent
@@ -223,6 +232,25 @@ struct AllScreen: View {
                 ContentUnavailableView("No sessions", systemImage: "terminal",
                                        description: Text("Sessions from Claude Code on your Mac show up here."))
             }
+        }
+    }
+}
+
+/// Open on Mac on a long press (and as a VoiceOver action) when the server can open the session in a terminal.
+private struct OpenOnMacMenu: ViewModifier {
+    let session: Session
+    let now: NowModel
+    let openOnMac: OpenOnMacModel
+
+    func body(content: Content) -> some View {
+        if canOpenOnMac(session, health: now.health) {
+            content
+                .contextMenu { OpenOnMacButton(session: session, now: now, openOnMac: openOnMac) }
+                .accessibilityAction(named: OpenOnMacCopy.action) {
+                    OpenOnMacButton.open(session, now: now, openOnMac: openOnMac)
+                }
+        } else {
+            content
         }
     }
 }

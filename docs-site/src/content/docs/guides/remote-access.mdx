@@ -202,6 +202,26 @@ A session is blocked only when all three hold: iTerm2 is the app in front, the s
 
 The scope is the focused pane only, because keystrokes reach only that pane: typing into a visible split pane, another window or a background tab cannot mix with what you type. A hotkey window and Stage Manager are not yet verified live. If the check cannot be made (the probe fails or iTerm2 does not answer), the session counts as in use.
 
+## Open on Mac
+
+A session started or continued from the phone runs on the Mac as a background Claude process with no window. **Open on Mac** (the chat's More menu, or a long press on a row in Now or All) hands any session that is not already open in a terminal to iTerm2: aimux closes the background process, opens the session in a new pane of its own iTerm2 window with the harness's resume command (`claude --resume <id>` in the session's folder), and waits until Claude holds the session there. The chat then turns into a terminal chat, with the queue, Send now and permission alerts. Background stays the default; nothing moves to iTerm2 unless you ask.
+
+aimux's window holds up to 10 panes, in two columns of up to five; the eleventh open starts a new aimux window, and later opens fill the newest aimux window that has room. Each pane aimux opens is named `aimux · <session title>` and carries the iTerm2 session variable `user.aimux` set to `1` (with `user.aimux_col` for its column and `user.aimux_seq` for its place in the open order), which is how aimux finds its windows; it stores no window id. Panes you split yourself in that window do not count toward the 10 and are never split by aimux, and closing panes frees their places. Opens run one at a time, so several sessions opened together land in the same window. aimux never brings iTerm2 to the front, focuses or closes anything.
+
+It is offered only when terminal input is on and the iTerm2 driver is available (`/v1/health` reports `openOnMac`). The first time, macOS asks whether aimux may control iTerm2; allow it in System Settings, Privacy & Security, Automation.
+
+| Refusal | Shown on the phone |
+|---|---|
+| `busy` | Claude is answering. Wait for it to finish, or Stop it first. |
+| `open_in_terminal` | Already open in a terminal on your Mac. |
+| `no_terminal` | Open on Mac needs iTerm2 on your Mac. |
+| `not_authorized` | aimux may not control iTerm2. Allow it in System Settings, Privacy & Security, Automation. |
+| `in_use` | Another aimux process is using this session. |
+| `not_started` | This session has no messages yet, so there is nothing to open. |
+| `timeout` | The pane opened, but Claude did not pick up the session. Check the aimux window on your Mac. |
+
+While a handoff runs, no new turn starts for that session, from the queue or the phone. A handoff that has started finishes or times out even if the phone goes away. After a timeout the background process stays closed; the next message from the phone starts a new one.
+
 ## Chat queue
 
 Each session has a queue held by the Mac, so what you line up keeps going while the phone is locked or offline. It works for sessions started from the phone and for Claude Code sessions in iTerm2 (with terminal input on). It needs no setting; the server offers the `queue` capability.
@@ -388,6 +408,7 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 | `DELETE /v1/sessions/{id}/queue/{item}` | Removes a message and answers the queue; `409 item_sending` for one being sent or answered while the queue runs. Works for a session that no longer exists |
 | `POST /v1/sessions/{id}/queue/resume` | Resumes a paused queue; answers the queue |
 | `POST /v1/sessions/{id}/queue/{item}/send-now` | Body `{"key"}` (optional, may be empty; capability `send_now`). Send now: types a waiting message during Claude's turn and answers the queue without it; the others keep their order. A refusal keeps the message at its place and answers the terminal's code (`not_at_input`, `mac_in_use`, `draft_in_box`, `box_has_unsent` ...). `409 not_supported` for a session no terminal holds (started from the phone), `409 item_sending` for a message being sent or answered, `409 busy` while another message is being typed (a queued one or another Send now), `403 disabled` with terminal input off. A retry with the same `key` within 10 minutes answers the queue without typing again |
+| `POST /v1/sessions/{id}/open-on-mac` | No body. Open on Mac: closes the session's idle background process and opens it in a pane of aimux's iTerm2 window; answers `{"state":"open_in_terminal"}` once Claude holds it there (up to about 50 s). `409 busy`, `409 open_in_terminal`, `409 in_use`, `409 not_started`, `503 no_terminal`, `403 not_authorized`, `504 timeout`, `404 unknown_session`. Audit action `open_on_mac` |
 | `PATCH /v1/sessions/{id}/meta` | Body with `title`, `description` and/or `pinned` (at least one; title up to 80 characters, description up to 300, one line, an empty string clears your text). Answers the title, description and pin as clients show them (capability `describe`) |
 | `POST /v1/sessions/{id}/describe` | Update summary: asks the model now for a new title and description; `{title, description, changed, kept}`. `409 owner_set` when you wrote both, `409 describe_running`; `502 naming_auth`, `naming_model`, `naming_unreadable`, `naming_failed`, `503 naming_unavailable`, `504 naming_timeout` (capability `describe`) |
 | `POST /v1/approvals/{id}` | Body `{"option": "<optionId>"}` from the approval event, or `{"option": ""}` to deny |

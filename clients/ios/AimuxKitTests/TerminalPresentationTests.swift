@@ -31,7 +31,7 @@ private func matchCases() throws -> [MatchCase] {
     @Test func fixtureListCoversTheFolder() throws {
         let bundle = Bundle(for: TerminalBundleToken.self)
         let urls = bundle.urls(forResourcesWithExtension: "json", subdirectory: "clients/terminal") ?? []
-        #expect(Set(urls.map { $0.deletingPathExtension().lastPathComponent }) == ["saved-prompt-match"])
+        #expect(Set(urls.map { $0.deletingPathExtension().lastPathComponent }) == ["saved-prompt-match", "open-on-mac"])
     }
 
     @Test func unwrapKeepsTheMessage() {

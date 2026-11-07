@@ -143,13 +143,14 @@ export function createLogin({
     return data;
   }
 
-  function options(method, body, interaction) {
+  function options(method, body, interaction, signal) {
     const opts = { method, headers: {} };
     if (interaction) opts.headers['Aimux-Interaction'] = '1';
     if (body !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
+    if (signal) opts.signal = signal;
     return opts;
   }
 
@@ -168,8 +169,8 @@ export function createLogin({
 
   // request is the page's /v1 call. Without a session it waits for the
   // unlock (or pairing) and then goes out again.
-  async function request(method, path, body, { interaction = false } = {}) {
-    const opts = options(method, body, interaction);
+  async function request(method, path, body, { interaction = false, signal } = {}) {
+    const opts = options(method, body, interaction, signal);
     if (login.state === 'locked' || login.state === 'unpaired') return hold(path, opts);
     const sentUnder = generation;
     try {
@@ -177,7 +178,7 @@ export function createLogin({
     } catch (e) {
       if (!isLoginRequired(e)) throw e;
       // Refused under an older login that a newer unlock replaced: try the new one.
-      if (sentUnder !== generation) return request(method, path, body, { interaction });
+      if (sentUnder !== generation) return request(method, path, body, { interaction, signal });
       if (login.state !== 'locked' && login.state !== 'unpaired') set({ state: signedOut(), error: '' });
       return hold(path, opts);
     }
