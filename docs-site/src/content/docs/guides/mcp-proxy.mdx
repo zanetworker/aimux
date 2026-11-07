@@ -121,7 +121,7 @@ aimux mcp proxy install --unskip slack
 
 The daemon reloads in place when you change a server (`edit`) or move a new one (re-run `install`). It does not restart. The daemon restarts only when it crashes (launchd brings it back) or when the aimux binary itself is upgraded.
 
-A crash or upgrade restart can leave open Claude Code sessions without these tools until they reconnect or restart. Claude Code may not reconnect to a restarted daemon on its own mid-session.
+Open sessions survive a restart. In a live check, a Claude Code session made a tool call through the proxy, the daemon was restarted with `launchctl kickstart -k` (the same restart launchd does after a crash), and the next tool call from that session worked, with no session restart. The first call after a restart starts that server's backend again, so it can take a moment longer.
 
 `status` says when an upgrade restart is pending:
 
