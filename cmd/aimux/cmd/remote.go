@@ -942,18 +942,24 @@ func shortID(id string) string {
 }
 
 // remoteProviders is the harnesses remote serve lists, follows and
-// continues sessions of, and the only place one is registered: a new
-// harness implements remoteapi.Store and harness.LiveSessions and
-// adds an entry, with no change inside remoteapi. The first is the default:
-// sessions a client creates, the router and the chat manager are its, since
-// the ACP adapter (--adapter) is Claude Code's. Another entry's sessions are
-// listed but cannot be continued until the router and the manager dispatch
-// per provider.
+// continues sessions of: every provider in the registry (provider.Registry
+// Local, in its order) that implements remoteapi.Store and
+// provider.LiveSource, so a new harness implements those two and needs no
+// change here or inside remoteapi. Today that is Claude only. The first is
+// the default: sessions a client creates, the router and the chat manager
+// are its, since the ACP adapter (--adapter) is Claude Code's. Another
+// entry's sessions are listed but cannot be continued until the router and
+// the manager dispatch per provider.
 func remoteProviders(home string) []remoteapi.Provider {
-	claude := &provider.Claude{ProjectsDir: filepath.Join(home, ".claude", "projects")}
-	return []remoteapi.Provider{
-		{Store: claude, Live: discovery.NewLiveCache(filepath.Join(home, ".claude", "sessions"), discovery.LiveTTL)},
+	var out []remoteapi.Provider
+	for _, p := range provider.NewRegistry(home, config.Config{}).Local() {
+		store, isStore := p.(remoteapi.Store)
+		live, isLive := p.(provider.LiveSource)
+		if isStore && isLive {
+			out = append(out, remoteapi.Provider{Store: store, Live: live.LiveSessions(discovery.LiveTTL)})
+		}
 	}
+	return out
 }
 
 // openTerminalSessions lists the live sessions that aimux does not own

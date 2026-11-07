@@ -96,3 +96,20 @@ func TestClaudeSessionStore_SessionsAndTail(t *testing.T) {
 		t.Fatal("ParseTail of a missing file: no error")
 	}
 }
+
+// With no home directory known, the transcripts dir falls back to the
+// relative .claude/projects, as before the registry, never "" (which would
+// make a glob look in the current directory).
+func TestTranscriptsDir_NoHomeFallsBackToRelative(t *testing.T) {
+	t.Setenv("HOME", "")
+	got := (&Claude{}).TranscriptsDir()
+	if got == "" {
+		t.Fatal("TranscriptsDir is empty with no home directory")
+	}
+	if !strings.HasSuffix(got, filepath.Join(".claude", "projects")) {
+		t.Fatalf("TranscriptsDir = %q, want it to end in .claude/projects", got)
+	}
+	if got := (&Claude{ProjectsDir: "/w/projects"}).TranscriptsDir(); got != "/w/projects" {
+		t.Fatalf("explicit ProjectsDir = %q", got)
+	}
+}

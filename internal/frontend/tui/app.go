@@ -250,30 +250,11 @@ func NewApp() App {
 		coord = coordination.NewLocalCoordinator()
 	}
 
-	allProviders := []provider.Provider{
-		&provider.Claude{},
-		&provider.Codex{},
-	}
-
-	// K8s provider participates in provider-level operations (ParseTrace).
-	// Discovery and lifecycle are handled by K8sEnvironment.
-	if cfg.Kubernetes.IsActive() {
-		k8s := provider.NewK8s(provider.K8sConfig{
-			RedisURL:   cfg.Kubernetes.RedisURL,
-			TeamID:     cfg.Kubernetes.TeamID,
-			Namespace:  cfg.Kubernetes.Namespace,
-			Kubeconfig: cfg.Kubernetes.Kubeconfig,
-		})
-		allProviders = append(allProviders, k8s)
-	}
-
-	// Filter to enabled providers only.
-	var providers []provider.Provider
-	for _, p := range allProviders {
-		if cfg.IsProviderEnabled(p.Name()) {
-			providers = append(providers, p)
-		}
-	}
+	// Enabled providers: Claude, Codex, then K8s when active (it takes part
+	// in provider-level operations such as ParseTrace; discovery and
+	// lifecycle are handled by K8sEnvironment).
+	home, _ := os.UserHomeDir() // "": the providers' own defaults
+	providers := provider.NewRegistry(home, cfg).Enabled()
 
 	// Build AgentProvider slice for the orchestrator from the same providers.
 	agentProviders := make([]discovery.AgentProvider, len(providers))

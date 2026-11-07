@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/harness"
@@ -20,9 +21,42 @@ func (c *Claude) projectsDir() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		home = "" // relative .claude/projects, as before the registry; never "" (a glob of "" reads the current dir)
 	}
 	return filepath.Join(home, ".claude", "projects")
+}
+
+// TranscriptRoot is the optional capability of a provider whose sessions
+// are transcript files under one directory (the search index reads it).
+type TranscriptRoot interface {
+	TranscriptsDir() string
+}
+
+// LiveSource is the optional capability of a provider whose harness records
+// which processes hold a session; ttl is the reader's cache time.
+type LiveSource interface {
+	LiveSessions(ttl time.Duration) harness.LiveSessions
+}
+
+var (
+	_ TranscriptRoot = (*Claude)(nil)
+	_ LiveSource     = (*Claude)(nil)
+)
+
+// TranscriptsDir is ProjectsDir, or ~/.claude/projects (the relative
+// .claude/projects when the home directory is unknown).
+func (c *Claude) TranscriptsDir() string { return c.projectsDir() }
+
+// LiveSessions reads Claude Code's session registry under RegistryDir, or
+// ~/.claude/sessions, caching a read for ttl (discovery.LiveCache).
+func (c *Claude) LiveSessions(ttl time.Duration) harness.LiveSessions {
+	dir := c.RegistryDir
+	if dir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, ".claude", "sessions")
+		}
+	}
+	return discovery.NewLiveCache(dir, ttl)
 }
 
 // SessionFile is session id's transcript under the projects dir, or "".

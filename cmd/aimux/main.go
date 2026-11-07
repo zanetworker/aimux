@@ -16,15 +16,15 @@ import (
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
-	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/environment"
 	"github.com/zanetworker/aimux/internal/frontend/tui"
 	"github.com/zanetworker/aimux/internal/frontend/web"
 	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/profile"
+	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/plugin"
+	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/sessions"
@@ -46,16 +46,14 @@ func main() {
 		return
 	}
 
-	disco := discovery.NewOrchestrator(
-		&provider.Claude{},
-		&provider.Codex{},
-	)
-
 	cfg, _ := config.Load(config.DefaultPath())
 	// Merge project-local config if running from a project directory
 	if cwd, err := os.Getwd(); err == nil {
 		cfg, _ = config.LoadProject(cwd, cfg)
 	}
+	home, _ := os.UserHomeDir() // "": the providers' own defaults
+	registry := provider.NewRegistry(home, cfg)
+	disco := discovery.NewOrchestrator(agentProviders(registry.Local())...)
 
 	cmd.AutoRegisterMCP(cfg)
 
@@ -136,19 +134,43 @@ func main() {
 		},
 		SkipPermissions: cfg.Resume.SkipPermissions,
 		DefaultMode:     cfg.DefaultMode,
-		Providers:       []string{"claude", "codex"},
+		Providers:       providerNames(registry.Local()),
 		ProfileStore:    profileStore,
-		TraceParsers: map[string]func(filePath string) ([]trace.Turn, error){
-			"claude": (&provider.Claude{}).ParseTrace,
-			"codex":  (&provider.Codex{}).ParseTrace,
-		},
-		ComposeEngine: cliComposeEngine,
-		Environments:  cfg.Environments,
-		AgentConfigs:  cfg.AgentConfigs,
+		TraceParsers:    traceParsers(registry.Local()),
+		ComposeEngine:   cliComposeEngine,
+		Environments:    cfg.Environments,
+		AgentConfigs:    cfg.AgentConfigs,
 	}
 
 	cmd.RegisterAll(deps)
 	cmd.Execute(version)
+}
+
+// agentProviders is ps as the orchestrator's discovery.AgentProvider list.
+func agentProviders(ps []provider.Provider) []discovery.AgentProvider {
+	out := make([]discovery.AgentProvider, len(ps))
+	for i, p := range ps {
+		out[i] = p
+	}
+	return out
+}
+
+// providerNames is the names of ps, in order.
+func providerNames(ps []provider.Provider) []string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = p.Name()
+	}
+	return out
+}
+
+// traceParsers maps each provider's name to its ParseTrace.
+func traceParsers(ps []provider.Provider) map[string]func(filePath string) ([]trace.Turn, error) {
+	out := make(map[string]func(filePath string) ([]trace.Turn, error), len(ps))
+	for _, p := range ps {
+		out[p.Name()] = p.ParseTrace
+	}
+	return out
 }
 
 // buildResumeBuilder returns a function that looks up a session's work dir
@@ -290,10 +312,10 @@ func createWebServer(port int) *web.Server {
 	if cwd, err := os.Getwd(); err == nil {
 		cfg, _ = config.LoadProject(cwd, cfg)
 	}
-	disco := discovery.NewOrchestrator(
-		&provider.Claude{},
-		&provider.Codex{},
-	)
+	home, _ := os.UserHomeDir() // "": the providers' own defaults
+	registry := provider.NewRegistry(home, cfg)
+	disco := discovery.NewOrchestrator(agentProviders(registry.Local())...)
+	claude := registry.ByName("claude")
 
 	// Register environments for remote agent discovery
 	if cfg.Remote.Backend == "openshell" {
@@ -375,19 +397,15 @@ func createWebServer(port int) *web.Server {
 	})
 
 	// Wire provider lookup for trace parsing
-	s.SetProviderLookup(func(name string) interface{ ParseTrace(string) ([]trace.Turn, error) } {
-		p := disco.ProviderFor(name)
-		if p == nil {
-			return &provider.Claude{}
-		}
-		type tracer interface {
-			ParseTrace(string) ([]trace.Turn, error)
-		}
-		if t, ok := p.(tracer); ok {
-			return t
-		}
-		return &provider.Claude{}
-	})
+	s.SetProviderLookup(func(name string) interface {
+		ParseTrace(string) ([]trace.Turn, error)
+	} { p := disco.ProviderFor(name); if p == nil {
+		return claude
+	}; type tracer interface {
+		ParseTrace(string) ([]trace.Turn, error)
+	}; if t, ok := p.(tracer); ok {
+		return t
+	}; return claude })
 
 	s.SetController(controller.New(cfg))
 	s.SetConfig(cfg)
@@ -411,8 +429,7 @@ func createWebServer(port int) *web.Server {
 			lastUsed time.Time
 		}
 		byPath := make(map[string]*dirEntry)
-		providers := []provider.Provider{&provider.Claude{}, &provider.Codex{}}
-		for _, p := range providers {
+		for _, p := range registry.Local() {
 			for _, rd := range p.RecentDirs(max) {
 				if existing, ok := byPath[rd.Path]; ok {
 					if rd.LastUsed.After(existing.lastUsed) {

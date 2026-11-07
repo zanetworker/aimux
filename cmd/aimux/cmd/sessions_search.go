@@ -15,8 +15,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/clipboard"
+	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/jump"
+	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/sessions"
 )
@@ -50,9 +52,20 @@ func validMode(m string) error {
 	return fmt.Errorf("invalid --mode %q: valid values are %s", m, strings.Join(search.Modes, ", "))
 }
 
+// claudeProjectsDir is where Claude's transcripts live, as the provider
+// says (~/.claude/projects): the directory the search index reads.
 func claudeProjectsDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "projects")
+	return projectsDirOf(provider.NewRegistry(home, config.Config{}), "claude")
+}
+
+// projectsDirOf is the transcript directory of the registry's provider
+// called name, or "" when it has none.
+func projectsDirOf(r *provider.Registry, name string) string {
+	if tr, ok := r.ByName(name).(provider.TranscriptRoot); ok {
+		return tr.TranscriptsDir()
+	}
+	return ""
 }
 
 // envEmbedder returns the OpenAI embedder, or a nil interface when no key is

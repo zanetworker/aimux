@@ -117,6 +117,7 @@ internal/
     exporter.go                 # trace.Turn -> OTLP/HTTP export
   provider/
     provider.go                 # Provider interface (10 methods)
+    registry.go                 # Registry: the one place providers are built (NewRegistry(home, cfg)); Local() is Claude then Codex whatever the config (CLI, web dashboard, orchestrator), Enabled() adds K8s when active and keeps cfg.IsProviderEnabled ones (TUI), ByName(name); Claude's paths come from home; TestNoProviderConstructionOutsideRegistry fails on a provider struct literal or New constructor outside internal/provider (tests excepted)
     claude.go                   # Claude: full discovery, PTY embed, JSONL parsing
     codex.go                    # Codex: full discovery, tmux mirror, JSONL parsing
     gemini.go                   # Gemini: full discovery, tmux mirror, JSON parsing
@@ -181,7 +182,7 @@ internal/
 
 ## Key Patterns
 
-- **Provider interface**: All agent types implement `provider.Provider` with 10 methods: Name, Discover, ResumeCommand, CanEmbed, FindSessionFile, RecentDirs, SpawnCommand, SpawnArgs, ParseTrace, OTELEnv. Adding a provider = one Go file + register in app.go.
+- **Provider interface**: All agent types implement `provider.Provider` with 10 methods: Name, Discover, ResumeCommand, CanEmbed, FindSessionFile, RecentDirs, SpawnCommand, SpawnArgs, ParseTrace, OTELEnv. Adding a provider = one Go file + register in `provider.NewRegistry` (`internal/provider/registry.go`).
 - **SessionBackend interface**: `terminal.SessionBackend` (Read/Write/Resize/Close/Alive) with two implementations: direct PTY (Claude) and tmux mirror (Codex/Gemini). `DirectRenderer` optional interface skips VT emulator for tmux.
 - **Trace parsing**: Each provider owns its parser via `ParseTrace`. Shared types in `internal/trace/`. LogsView receives a `TraceParser` function from app.go.
 - **OTEL dual mode**: File-based parsing for display (full responses). OTEL receiver (port 4318) collects live telemetry for export. `parserForProvider` checks file first, falls back to OTEL for new sessions. Trace header shows [FILE] (otel:N). Claude Code sends events via OTEL logs protocol (no response text -- Anthropic privacy design). Export to MLflow via `e` → `o` in split view or `:export-otel`.
@@ -345,7 +346,7 @@ All agent types implement `provider.Provider` (11 methods). This interface must 
 3. **Discovery is provider-owned.** Each provider knows how to find its agents (local process scan, Kubernetes API, SSH, etc.). The orchestrator just calls `Discover()` and merges results.
 4. **Local assumptions are isolated.** Methods like `ResumeCommand() *exec.Cmd` and `SpawnCommand() *exec.Cmd` assume local execution. When adding remote providers, these may return nil (not applicable) — the provider signals capabilities via `CanEmbed()`, and future methods like `CanSpawnLocally() bool` can be added. Do NOT force remote semantics into the existing interface; extend it instead.
 5. **Trace format is provider-owned.** Each provider implements `ParseTrace` for its own log format. Never add provider-specific parsing logic outside the provider's file.
-6. **New providers = one file + register.** Adding a provider should require only creating `internal/provider/yourprovider.go` and registering in `app.go` NewApp(). If it requires changes to other providers or core packages, the abstraction is leaking.
+6. **New providers = one file + register.** Adding a provider should require only creating `internal/provider/yourprovider.go` and registering it in `provider.NewRegistry` (`internal/provider/registry.go`), the only place providers are built. Callers get providers from the registry (`Local`, `Enabled`, `ByName`) and reach a provider-specific capability through an interface (`harness.SessionStore`, `remoteapi.Store`, `provider.LiveSource`, `provider.TranscriptRoot`), never a concrete type. If it requires changes to other providers or core packages, the abstraction is leaking.
 
 ## Harness Boundary
 
@@ -360,9 +361,10 @@ Capabilities, and who implements them for Claude Code:
 - `harness.Composer`: the terminal composer (screen reads, process names, text rules, room and clear keys); `internal/harness/claude`.
 - `harness.LiveSessions`: which processes hold a session, `Holders(harness.List)` for the session list (LocalIndex, terminal input, queue, waiting, layout) and `Holders(harness.Strict)` for the router (`acprun.SessionLookup`); `discovery.LiveCache` over the registry, with `claude.CommandLineSessions` for Strict's command-line fallback. One source and one table of cases (`internal/harness/live.go`), so the list and the router differ only where it says.
 - `harness.SessionStore`: transcript file, recorded cwd, fingerprint; `provider.Claude`.
+- `provider.LiveSource` (`LiveSessions(ttl)`: the harness's `harness.LiveSessions`) and `provider.TranscriptRoot` (`TranscriptsDir()`: the transcript directory the search index reads); `provider.Claude`, whose `RegistryDir` and `ProjectsDir` the registry sets from home (`~/.claude/sessions`, `~/.claude/projects`), so cmd holds no Claude paths for them.
 - `remoteapi.Store`: `harness.SessionStore` plus `Name` (the API's `provider` value), `Sessions` and `ParseTail`; `provider.Claude`. It lives in remoteapi, not harness, because its types (`history.Session`, `trace.Turn`) may not enter `internal/harness`.
 
-Adding a harness to the remote API: implement `remoteapi.Store` and `harness.LiveSessions` for it, and add one `remoteapi.Provider` entry in `remoteProviders` (`cmd/aimux/cmd/remote.go`), the only place `remote serve` registers providers; nothing inside remoteapi changes. Today it registers only Claude, which is also the default (the first entry; `NewProvider` falls back to it when unset): sessions a client creates (`NewProvider`), the router's `SessionLookup` and the chat manager's fingerprint are its, since the ACP adapter is Claude Code's. A non-default provider's sessions are listed, followed and searched, but cannot be continued until the router (`SessionLookup`) and the manager's `Fingerprint` dispatch per provider; that comes with the harness's own ACP adapter. When two providers report the same session id, the first store wins.
+Adding a harness to the remote API: register its provider in `provider.NewRegistry` and implement `remoteapi.Store` and `provider.LiveSource` on it; `remoteProviders` (`cmd/aimux/cmd/remote.go`) lists every registry provider (`Local()`, in order) with both, so neither it nor remoteapi changes. Today only Claude has both, which is also the default (the first entry; `NewProvider` falls back to it when unset): sessions a client creates (`NewProvider`), the router's `SessionLookup` and the chat manager's fingerprint are its, since the ACP adapter is Claude Code's. A non-default provider's sessions are listed, followed and searched, but cannot be continued until the router (`SessionLookup`) and the manager's `Fingerprint` dispatch per provider; that comes with the harness's own ACP adapter. When two providers report the same session id, the first store wins.
 
 The Claude Code implementation of the Composer lives in `internal/harness/claude`, not `internal/provider`: `terminput.NewService` defaults to it, and taking it from provider would make terminput depend on provider and everything it imports. When the Service looks up a Composer per session, provider can expose it as an optional capability and the default can go.
 
@@ -403,7 +405,7 @@ make install                            # Build and copy to /usr/local/bin
 
 See `docs/adding-a-provider.md` for the full guide. Summary:
 1. Create `internal/provider/yourprovider.go` implementing all 10 Provider interface methods
-2. Register in `tui/app.go` `NewApp()` and `config/config.go` `Default()`
+2. Register in `provider/registry.go` `NewRegistry()` and `config/config.go` `Default()`
 3. Add model pricing to `cost/tracker.go`
 4. Add tests (compile-time interface check + all methods)
 

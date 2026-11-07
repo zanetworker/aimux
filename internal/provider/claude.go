@@ -27,6 +27,9 @@ type Claude struct {
 	// ProjectsDir is where the session store reads transcripts
 	// (SessionFile, Fingerprint); "": ~/.claude/projects.
 	ProjectsDir string
+	// RegistryDir is Claude Code's session registry that LiveSessions
+	// reads; "": ~/.claude/sessions.
+	RegistryDir string
 }
 
 func (c *Claude) Name() string { return "claude" }

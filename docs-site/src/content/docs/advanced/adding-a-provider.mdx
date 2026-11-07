@@ -58,14 +58,10 @@ func (a *Aider) SpawnArgs() SpawnArgs {
 }
 ```
 
-**2. Register in `internal/frontend/tui/app.go` -- add to the `allProviders` slice in `NewApp()`:**
+**2. Register in `internal/provider/registry.go` -- add to the local list in `NewRegistry()`:**
 
 ```go
-allProviders := []provider.Provider{
-	&provider.Claude{},
-	&provider.Codex{},
-	&provider.Aider{},  // <-- add this
-}
+r := &Registry{local: []Provider{claude, &Codex{}, &Aider{}}, cfg: cfg} // <-- add &Aider{}
 ```
 
 **3. Add to `internal/config/config.go` -- add to `Default()` providers map:**
@@ -325,19 +321,15 @@ func (a *Aider) SpawnArgs() SpawnArgs {
 
 Two files need a one-line change each:
 
-### 1. `internal/frontend/tui/app.go` -- `NewApp()`
+### 1. `internal/provider/registry.go` -- `NewRegistry()`
 
-Add your provider to the `allProviders` slice:
+Add your provider to the local list:
 
 ```go
-allProviders := []provider.Provider{
-	&provider.Claude{},
-	&provider.Codex{},
-	&provider.Aider{},  // <-- add here
-}
+r := &Registry{local: []Provider{claude, &Codex{}, &Aider{}}, cfg: cfg} // <-- add &Aider{}
 ```
 
-The orchestrator and all views pick it up automatically from this single registration point.
+The registry is the only place providers are built: the TUI (`Enabled()`, which honours `providers.<name>.enabled`), the CLI, the web dashboard and the orchestrator (`Local()`), and lookups by name (`ByName()`) all take them from it. A test (`TestNoProviderConstructionOutsideRegistry`) fails if code outside `internal/provider` builds a provider itself. `aimux remote serve` lists every registered provider that also implements `remoteapi.Store` and `provider.LiveSource`.
 
 ### 2. `internal/config/config.go` -- `Default()`
 
@@ -781,16 +773,12 @@ func extractFlag(args, flag string) string {
 }
 ```
 
-### Step 2: Register in `internal/frontend/tui/app.go`
+### Step 2: Register in `internal/provider/registry.go`
 
-In `NewApp()`, add to the `allProviders` slice:
+In `NewRegistry()`, add to the local list:
 
 ```go
-allProviders := []provider.Provider{
-	&provider.Claude{},
-	&provider.Codex{},
-	&provider.Aider{},
-}
+r := &Registry{local: []Provider{claude, &Codex{}, &Aider{}}, cfg: cfg}
 ```
 
 ### Step 3: Register in `internal/config/config.go`
