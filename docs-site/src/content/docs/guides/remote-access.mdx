@@ -130,7 +130,7 @@ A notification says "Approval needed" and names the session and the tool call (f
 
 ## Permission alerts for terminal sessions
 
-A Claude Code session you started in a terminal on the Mac waits silently at a permission prompt. With aimux's Claude Code hooks installed, such a session lists under **Needs you** in both phone clients with "Waiting for permission" on its row, and `remote serve` sends the same push as a phone approval (ntfy, APNs; see [Approval notifications](#approval-notifications)). Open the session to answer: the chat shows the prompt card from the screen (with [terminal input](#typing-into-terminal-sessions) on), or answer at the Mac.
+A Claude Code session you started in a terminal on the Mac waits silently at a permission prompt. Claude Code's own session registry reports such a session as waiting, so its `activity` is `needs_you` (and the TUI and dashboard show it) even without the hooks; the phone clients' Needs you list and the push come from the hooks' markers. With aimux's Claude Code hooks installed, such a session lists under **Needs you** in both phone clients with "Waiting for permission" on its row, and `remote serve` sends the same push as a phone approval (ntfy, APNs; see [Approval notifications](#approval-notifications)). Open the session to answer: the chat shows the prompt card from the screen (with [terminal input](#typing-into-terminal-sessions) on), or answer at the Mac.
 
 ```bash
 aimux remote hooks install     # add the hooks

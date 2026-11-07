@@ -58,7 +58,7 @@ func (l *LocalActivity) now() time.Time {
 
 // HooksHint is the muted line the TUI and the dashboard show while
 // HooksInstalled is false.
-const HooksHint = "Permission prompts need `aimux remote hooks install`"
+const HooksHint = "Permission alerts need `aimux remote hooks install`"
 
 // HooksRecheck is how long HooksInstalled keeps its answer: installing the
 // hooks is rare, and the TUI asks every refresh.

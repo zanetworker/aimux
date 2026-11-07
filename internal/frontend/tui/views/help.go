@@ -22,7 +22,7 @@ type HelpView struct {
 }
 
 // SetHooksMissing adds, muted under the status icons, that permission
-// prompts need the hooks (controller.HooksHint).
+// alerts need the hooks (controller.HooksHint).
 func (v *HelpView) SetHooksMissing(missing bool) {
 	v.hooksMissing = missing
 }
@@ -51,7 +51,7 @@ func (v *HelpView) View() string {
 	b.WriteString("\n")
 	writeHelp(&b, activeStyle.Render("▶")+" working", "Running a turn")
 	writeHelp(&b, idleStyle.Render("■")+" idle", "Open, waiting for your next message")
-	writeHelp(&b, waitingStyle.Render("⏸")+" needs you", "A permission prompt waits (aimux remote hooks install)")
+	writeHelp(&b, waitingStyle.Render("⏸")+" needs you", "A permission prompt waits (alerts: aimux remote hooks install)")
 	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
 	writeHelp(&b, errorStyle.Render("✕")+" Error", "Agent crashed or context overflow")
 	writeHelp(&b, unknownStyle.Render("?")+" Unknown", "Agent status could not be determined")

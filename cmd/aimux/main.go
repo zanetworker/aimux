@@ -499,7 +499,7 @@ func dashboardSearchOpts(includeAutomated bool) search.QueryOpts {
 
 // localActivity is the session state service for the dashboard and the CLI:
 // every local provider's live sessions, the hook markers under home, and the
-// hooks' settings file for the "Permission prompts need ..." hint.
+// hooks' settings file for the "Permission alerts need ..." hint.
 func localActivity(registry *provider.Registry, home string) *controller.LocalActivity {
 	l := controller.NewLocalActivity(provider.LiveOf(registry.Local(), discovery.LiveTTL), waiting.Dir(home))
 	if home != "" {

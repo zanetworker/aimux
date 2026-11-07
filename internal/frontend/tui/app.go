@@ -378,7 +378,7 @@ func (a App) Init() tea.Cmd {
 
 // newLocalActivity is the TUI's session state service: every enabled
 // provider's live sessions, the hook markers under home, and the hooks'
-// settings file for the "Permission prompts need ..." hint.
+// settings file for the "Permission alerts need ..." hint.
 func newLocalActivity(providers []provider.Provider, home string) *controller.LocalActivity {
 	l := controller.NewLocalActivity(provider.LiveOf(providers, discovery.LiveTTL), waiting.Dir(home))
 	if home != "" {

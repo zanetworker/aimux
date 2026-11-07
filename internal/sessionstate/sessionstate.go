@@ -18,7 +18,8 @@
 //
 // The precedence rule, written once (Decide):
 //
-//	needs_you  a marker or a pending approval
+//	needs_you  a marker, a pending approval, or a held session whose registry
+//	           status is "waiting"
 //	working    an aimux turn, registry busy, or the screen shows working
 //	           (else, for a held session nothing above describes, the
 //	           fallback's needs_you or working)
@@ -112,7 +113,9 @@ func Decide(f Facts) State {
 
 func activity(f Facts) Activity {
 	switch {
-	case f.Waiting != nil || f.Approval:
+	case f.Waiting != nil || f.Approval || (f.Held && f.RegistryStatus == "waiting"):
+		// The harness's registry reports "waiting" at a permission prompt,
+		// so a session needs you even without the hook markers.
 		return NeedsYou
 	case f.Background || (f.Held && f.RegistryStatus == "busy") || f.Screen == ScreenWorking:
 		return Working

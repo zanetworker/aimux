@@ -15,7 +15,7 @@ aimux web --port 8080  # custom port
 The main view shows agent cards grouped by project. Each card displays:
 
 - **Provider badge** (Claude, Codex) with color coding
-- **State**: needs you, working, idle (or error), the words the TUI and the phone use. A Claude Code session at a permission prompt reads "needs you" once `aimux remote hooks install` has run
+- **State**: needs you, working, idle (or error), the words the TUI and the phone use. A Claude Code session at a permission prompt reads "needs you" when Claude Code's session registry reports it waiting, and also from `aimux remote hooks install`'s markers
 - **Launch mode badge** (tmux or direct)
 - **Title**: the title you wrote, else your `/rename` name, else one aimux generated, else Claude Code's own name for the session, else its first message (chosen as in the TUI, `aimux sessions` and the phone clients)
 - **Project name** and git branch
@@ -157,7 +157,7 @@ The **Trace** tab shows turn-by-turn conversation with assistant replies read fr
 
 The header shows aggregate statistics:
 
-- Session count, working/idle/needs you/error counts; without the hooks, a muted "Permission prompts need `aimux remote hooks install`" (a permission prompt then shows as working)
+- Session count, working/idle/needs you/error counts; without the hooks, a muted "Permission alerts need `aimux remote hooks install`" (a permission prompt still reads needs you when Claude Code's registry reports the session waiting)
 - Repository count
 - Total tokens in/out
 - Total cost across all agents

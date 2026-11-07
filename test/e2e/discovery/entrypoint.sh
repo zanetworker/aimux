@@ -15,7 +15,8 @@ while read -r project sid; do
   pid=$(pgrep -f "^claude --model opus" | while read -r p; do
           [ "$(readlink /proc/$p/cwd)" = "/work/$project" ] && echo "$p"; done | head -1 || true)
   lstart=$(ps -o lstart= -p "$pid" | awk '{$1=$1};1')
-  status=idle; [ "$project" = payments-api ] && status=busy
+  # As Claude Code writes them: busy while working, waiting at a permission prompt.
+  status=idle; [ "$project" = payments-api ] && status=busy; [ "$project" = infra ] && status=waiting
   printf '{"pid":%s,"sessionId":"%s","cwd":"/work/%s","status":"%s","procStart":"%s"}\n' \
     "$pid" "$sid" "$project" "$status" "$lstart" > "$HOME/.claude/sessions/$pid.json"
 done < /tmp/sessions.txt

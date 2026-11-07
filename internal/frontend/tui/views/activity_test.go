@@ -87,7 +87,7 @@ func TestSessionsView_ActivityWord(t *testing.T) {
 	}
 }
 
-const hooksHint = "Permission prompts need `aimux remote hooks install`"
+const hooksHint = "Permission alerts need `aimux remote hooks install`"
 
 // Without the hooks a permission prompt cannot read "needs you": the header
 // and the help say so, muted; with them nothing shows.

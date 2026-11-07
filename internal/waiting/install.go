@@ -311,7 +311,7 @@ func edit(path string, now time.Time, change func(*settings) Change) (Change, er
 	backup := ""
 	if s.exists && len(bytes.TrimSpace(s.raw)) > 0 {
 		backup = path + ".aimux-bak-" + now.UTC().Format("20060102T150405.000000000Z")
-		if err := os.WriteFile(backup, s.raw, 0o600); err != nil {
+		if err := os.WriteFile(backup, s.raw, 0o600); err != nil { // #nosec G703 -- next to the owner's settings.json (HooksSettings), not external input
 			return Change{}, fmt.Errorf("back up %s: %w", path, err)
 		}
 	} else if err := startObject(path); err != nil {

@@ -22,6 +22,10 @@ func TestDecide(t *testing.T) {
 		{"held, screen working, registry idle", Facts{Held: true, RegistryStatus: "idle", Screen: ScreenWorking}, Working, Terminal},
 		{"held, screen idle, registry busy", Facts{Held: true, RegistryStatus: "busy", Screen: ScreenIdle}, Working, Terminal},
 		{"held, marker", Facts{Held: true, Waiting: marker}, NeedsYou, Terminal},
+		// The harness's registry reports "waiting" at a permission prompt: needs you without the hooks.
+		{"held, registry waiting", Facts{Held: true, RegistryStatus: "waiting"}, NeedsYou, Terminal},
+		{"held, registry waiting beats a screen read as idle", Facts{Held: true, RegistryStatus: "waiting", Screen: ScreenIdle}, NeedsYou, Terminal},
+		{"registry waiting without a holder is gone", Facts{RegistryStatus: "waiting"}, Gone, None},
 		{"held, marker beats registry busy", Facts{Held: true, RegistryStatus: "busy", Waiting: marker}, NeedsYou, Terminal},
 		{"held, marker beats screen working", Facts{Held: true, Screen: ScreenWorking, Waiting: marker}, NeedsYou, Terminal},
 		{"aimux turn", Facts{Background: true}, Working, Background},

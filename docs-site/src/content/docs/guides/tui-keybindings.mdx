@@ -29,11 +29,11 @@ description: Keyboard shortcuts for the terminal dashboard.
 
 The agent list, its preview, the header counts and the sessions view use the words the phone uses, from one answer aimux computes for every surface:
 
-- **needs you**: a permission prompt waits (with `aimux remote hooks install`, see [Permission alerts](/guides/remote-access/#permission-alerts-for-terminal-sessions)). The LAST column says "needs you" in amber.
+- **needs you**: a permission prompt waits (Claude Code's session registry reports it; `aimux remote hooks install` adds the alerts, see [Permission alerts](/guides/remote-access/#permission-alerts-for-terminal-sessions)). The LAST column says "needs you" in amber.
 - **working**: Claude Code's registry says the session is busy. Harnesses without a registry (Codex) fall back to reading the transcript's last lines.
 - **idle**: open in a terminal and not working.
 
-An error (a crash or a full context) keeps its ✕ and the word "Error". The hooks' markers are read by the TUI itself; `remote serve` need not run. Without the hooks a permission prompt shows as working, and the header and help say, muted, "Permission prompts need `aimux remote hooks install`" (checked at start and every 5 minutes).
+An error (a crash or a full context) keeps its ✕ and the word "Error". The hooks' markers are read by the TUI itself; `remote serve` need not run. Without the hooks a permission prompt still shows as needs you when Claude Code's registry reports the session waiting, and the header and help say, muted, "Permission alerts need `aimux remote hooks install`" (checked at start and every 5 minutes).
 
 ## Split View (Trace + Session)
 
