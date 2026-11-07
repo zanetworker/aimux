@@ -46,23 +46,25 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.discoverFromAgents(agents, discovery.ListTmuxSessions())
+	return c.discoverFromAgents(agents, discovery.ListTmuxSessions(), nil)
 }
 
 // DiscoverWithSnapshot uses a shared ps/tmux snapshot instead of running
 // its own subprocess calls.
 func (c *Claude) DiscoverWithSnapshot(snap *discovery.Snapshot) ([]agent.Agent, error) {
 	agents := discovery.ScanProcessesFromOutput(snap.PsOutput)
-	return c.discoverFromAgents(agents, snap.TmuxSessions)
+	return c.discoverFromAgents(agents, snap.TmuxSessions, snap)
 }
 
-func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discovery.TmuxSession) ([]agent.Agent, error) {
+// discoverFromAgents enriches the scanned processes; snap, when not nil,
+// supplies parents and start times so no per-process ps runs.
+func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discovery.TmuxSession, snap *discovery.Snapshot) ([]agent.Agent, error) {
 	home, _ := os.UserHomeDir()
 	projectsDir := filepath.Join(home, ".claude", "projects")
 
 	// Batch CWD and start-time lookups in parallel — each is a subprocess
 	// call (~50-100ms) that blocks when done sequentially per agent.
-	c.batchResolveProcessInfo(agents)
+	c.batchResolveProcessInfo(agents, snap)
 
 	// Claude Code records each running session's ID by PID. It is more
 	// accurate than the command line (stale after /clear or a fork) and than
@@ -88,8 +90,16 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 
 	// Phase 1: match session files sequentially (cheap glob + stat calls,
 	// needs assignedFiles tracking to avoid double-claiming).
+	// The transcript is normally in the working directory's project folder:
+	// look there first (one stat) before searching every project folder.
+	cwdOf := make(map[string]string)
+	for i := range agents {
+		if fromRegistry[i] {
+			cwdOf[agents[i].SessionID] = agents[i].WorkingDir
+		}
+	}
 	assignSessionFiles(agents, fromRegistry,
-		func(id string) string { return discovery.FindSessionFile(id, projectsDir) },
+		func(id string) string { return discovery.FindSessionFileAt(id, cwdOf[id], projectsDir) },
 		func(a *agent.Agent, assigned map[string]bool) { c.matchSessionFile(a, projectsDir, assigned) })
 	for i := range agents {
 		agents[i].ProviderName = "claude"
@@ -102,7 +112,7 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	c.batchParseSessionFiles(agents)
 
 	// Tag subagent relationships from process tree before dedup.
-	correlator.TagFromProcessTree(agents, discovery.GetParentPID)
+	correlator.TagFromProcessTree(agents, snap.ParentPID)
 
 	// Deduplicate: group SDK agents by (WorkingDir, Model), CLI by PID.
 	// Subagents are excluded — they'll be nested under parents in the TUI.
@@ -111,33 +121,39 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	return agents, nil
 }
 
-// batchResolveProcessInfo resolves CWD and start time for all agents
-// concurrently. These are independent per-process subprocess calls that
-// benefit significantly from parallelism (8 agents: ~500ms → ~70ms).
-func (c *Claude) batchResolveProcessInfo(agents []agent.Agent) {
+// batchResolveProcessInfo resolves CWD and start time for all agents: the
+// working directories with one lsof, the start times from snap, and with
+// one ps per process (in parallel) only for those snap lacks.
+func (c *Claude) batchResolveProcessInfo(agents []agent.Agent, snap *discovery.Snapshot) {
+	pids := make([]int, len(agents))
+	for i := range agents {
+		pids[i] = agents[i].PID
+	}
+	cwds := discovery.GetProcessCwds(pids)
+
 	type result struct {
 		idx       int
-		cwd       string
 		startTime time.Time
 	}
 	ch := make(chan result, len(agents))
-	for i, a := range agents {
-		go func(idx int, pid int) {
-			var r result
-			r.idx = idx
-			r.cwd, _ = discovery.GetProcessCwd(pid)
-			r.startTime = getProcessStartTime(pid)
-			ch <- r
-		}(i, a.PID)
+	asked := 0
+	for i := range agents {
+		if agents[i].WorkingDir == "" {
+			agents[i].WorkingDir = cwds[agents[i].PID]
+		}
+		if !agents[i].StartTime.IsZero() {
+			continue
+		}
+		if t, ok := snap.StartTime(agents[i].PID); ok {
+			agents[i].StartTime = t
+			continue
+		}
+		asked++
+		go func(idx, pid int) { ch <- result{idx, getProcessStartTime(pid)} }(i, agents[i].PID)
 	}
-	for range agents {
+	for range asked {
 		r := <-ch
-		if agents[r.idx].WorkingDir == "" {
-			agents[r.idx].WorkingDir = r.cwd
-		}
-		if agents[r.idx].StartTime.IsZero() {
-			agents[r.idx].StartTime = r.startTime
-		}
+		agents[r.idx].StartTime = r.startTime
 	}
 }
 
@@ -192,7 +208,7 @@ func applyRegistryEntry(inst *agent.Agent, registry map[int]discovery.ClaudeRegi
 func (c *Claude) matchSessionFile(inst *agent.Agent, projectsDir string, assignedFiles map[string]bool) {
 	sessionFile := ""
 	if inst.SessionID != "" {
-		sessionFile = discovery.FindSessionFile(inst.SessionID, projectsDir)
+		sessionFile = discovery.FindSessionFileAt(inst.SessionID, inst.WorkingDir, projectsDir)
 	}
 	if sessionFile == "" && inst.WorkingDir != "" {
 		sessionFile = c.matchSessionFileByStartTime(inst.PID, inst.WorkingDir, assignedFiles)

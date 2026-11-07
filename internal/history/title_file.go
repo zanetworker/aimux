@@ -34,21 +34,38 @@ func ShownTitleForFileMeta(path string, meta Meta) string {
 
 // WarmTitles reads the new lines of these transcripts now, off the render
 // path (the TUI's agent refresh), so ShownTitleForFile in a view only stats
-// the file and reads its .meta.json.
+// the file and reads its .meta.json. Files are read in parallel: the first
+// read of a live transcript parses all of it.
 func WarmTitles(paths []string) {
+	const workers = 8
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	for range min(workers, len(paths)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range jobs {
+				transcriptTitles(p)
+			}
+		}()
+	}
 	for _, p := range paths {
 		if p != "" {
-			transcriptTitles(p)
+			jobs <- p
 		}
 	}
+	close(jobs)
+	wg.Wait()
 }
 
 // titleFilesMax bounds the parse cache; the oldest file is dropped first.
 const titleFilesMax = 512
 
 // titleFile is what has been read of one transcript: the complete lines up
-// to offset, parsed as scanSession parses them.
+// to offset, parsed as scanSession parses them. mu is held while reading,
+// so one file's read never holds up another file's lookup.
 type titleFile struct {
+	mu     sync.Mutex
 	offset int64
 	s      Session
 }
@@ -59,32 +76,42 @@ var titleFiles = struct {
 	order []string // insertion order, oldest first
 }{m: map[string]*titleFile{}}
 
+// titleFileFor returns path's cache entry, adding it (and dropping the
+// oldest beyond the cap) when new.
+func titleFileFor(path string) *titleFile {
+	titleFiles.Lock()
+	defer titleFiles.Unlock()
+	if tf := titleFiles.m[path]; tf != nil {
+		return tf
+	}
+	tf := &titleFile{}
+	titleFiles.m[path] = tf
+	titleFiles.order = append(titleFiles.order, path)
+	for len(titleFiles.m) > titleFilesMax && len(titleFiles.order) > 0 {
+		oldest := titleFiles.order[0]
+		titleFiles.order = titleFiles.order[1:]
+		if oldest != path {
+			delete(titleFiles.m, oldest)
+		}
+	}
+	return tf
+}
+
 // transcriptTitles returns what a transcript says about its title (latest
 // ai-title and /rename, first prompt), reading only what was appended since
 // the last call. A file that shrank was rewritten and is read again from the
 // start; a file rewritten at an equal or larger size keeps the old parse of
 // its first bytes (Claude Code only appends to transcripts).
 func transcriptTitles(path string) Session {
-	titleFiles.Lock()
-	defer titleFiles.Unlock()
 	info, err := os.Stat(path)
 	if err != nil {
 		return Session{} // a gone file's entry ages out under the cap
 	}
-	tf := titleFiles.m[path]
-	if tf == nil || info.Size() < tf.offset {
-		if tf == nil {
-			titleFiles.order = append(titleFiles.order, path)
-		}
-		tf = &titleFile{}
-		titleFiles.m[path] = tf
-		for len(titleFiles.m) > titleFilesMax && len(titleFiles.order) > 0 {
-			oldest := titleFiles.order[0]
-			titleFiles.order = titleFiles.order[1:]
-			if oldest != path {
-				delete(titleFiles.m, oldest)
-			}
-		}
+	tf := titleFileFor(path)
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if info.Size() < tf.offset {
+		tf.offset, tf.s = 0, Session{}
 	}
 	if info.Size() > tf.offset {
 		tf.readFrom(path)

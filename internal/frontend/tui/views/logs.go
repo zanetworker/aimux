@@ -1,8 +1,11 @@
 package views
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -104,6 +107,12 @@ type ToolSpan = trace.ToolSpan
 // Each provider supplies its own parser via Provider.ParseTrace.
 type TraceParser func(filePath string) ([]trace.Turn, error)
 
+// ErrLiveTrace is returned by a TraceParser with turns that did not come
+// from the file (an OTEL fallback): they are valid, but they change while
+// the file does not, so the views reload them on every refresh instead of
+// skipping an unchanged file.
+var ErrLiveTrace = errors.New("trace turns are not from the session file")
+
 // LogsView renders a structured conversation trace grouped by turns.
 // Each turn shows INPUT (user), ACTIONS (tools), and OUTPUT (assistant)
 // sections inspired by MLflow/Braintrust trace UIs.
@@ -129,6 +138,30 @@ type LogsView struct {
 	scrollOffset int            // line-level scroll offset within the rendered view
 	warning      string         // provider-specific warning shown above turns
 	showCostPerTurn bool        // when true, shows cost/tokens inline after each turn
+	partial         bool        // turns are the end of the session only (a tail read)
+	stamp           fileStamp   // the file as it was when turns were parsed
+	stampPath       string      // the path stamp belongs to; "" when turns may be stale
+}
+
+// fileStamp is a file's size and modification time: Claude Code and the
+// other harnesses only append to their transcripts, so an unchanged stamp
+// means an unchanged trace.
+type fileStamp struct {
+	size int64
+	mod  time.Time
+}
+
+// statStamp returns path's stamp; false when it cannot be read (no path,
+// no file yet).
+func statStamp(path string) (fileStamp, bool) {
+	if path == "" {
+		return fileStamp{}, false
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}, false
+	}
+	return fileStamp{size: fi.Size(), mod: fi.ModTime()}, true
 }
 
 // NewLogsView creates a new LogsView for the given PID and log file path.
@@ -265,19 +298,40 @@ func (v *LogsView) SetAnnotations(a map[int]string) {
 
 // Reload reads and parses the session file into turns using the provider's
 // parser. Preserves the cursor position unless new turns were added while
-// the cursor was at the bottom (auto-follow mode).
+// the cursor was at the bottom (auto-follow mode). It does nothing when the
+// file's size and mtime are those of the last parse that gave turns: a
+// refresh calls it every few seconds and transcripts reach hundreds of MB.
+// An empty or live result (ErrLiveTrace: OTEL data, which grows without
+// the file changing) is never trusted that way.
 func (v *LogsView) Reload() {
 	if v.parser == nil {
 		v.turns = nil
 		return
 	}
 
-	turns, err := v.parser(v.filePath)
-	if err != nil {
-		v.turns = nil
+	stamp, stamped := statStamp(v.filePath)
+	if stamped && len(v.turns) > 0 && v.stampPath == v.filePath && stamp == v.stamp {
 		return
 	}
 
+	turns, err := v.parser(v.filePath)
+	live := errors.Is(err, ErrLiveTrace)
+	if err != nil && !live {
+		v.turns = nil
+		v.stampPath = ""
+		return
+	}
+	v.SetTurns(turns)
+	if stamped && len(turns) > 0 && !live {
+		v.stamp, v.stampPath = stamp, v.filePath
+	} else {
+		v.stampPath = ""
+	}
+}
+
+// SetTurns replaces the turns with ones parsed elsewhere (the preview parses
+// off the UI goroutine), keeping the cursor as Reload does.
+func (v *LogsView) SetTurns(turns []trace.Turn) {
 	prevCount := len(v.turns)
 	prevCursor := v.cursor
 	atBottom := prevCursor >= prevCount-1
@@ -298,6 +352,12 @@ func (v *LogsView) Reload() {
 	} else {
 		v.cursor = len(v.turns) - 1
 	}
+}
+
+// SetPartial marks the turns as the end of the session only, so the summary
+// says "last N turns" rather than presenting N as the session's total.
+func (v *LogsView) SetPartial(partial bool) {
+	v.partial = partial
 }
 
 // visibleTurns returns the turns that match the current filter.
@@ -668,8 +728,12 @@ func (v *LogsView) renderStats() string {
 		}
 	}
 
+	turnsLabel := fmt.Sprintf("%d turns", totalTurns)
+	if v.partial {
+		turnsLabel = "last " + turnsLabel
+	}
 	parts := []string{
-		fmt.Sprintf("%d turns", totalTurns),
+		turnsLabel,
 		fmt.Sprintf("%d actions", totalActions),
 	}
 

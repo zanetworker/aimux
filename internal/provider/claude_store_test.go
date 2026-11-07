@@ -136,7 +136,7 @@ func TestClaude_SharesOneLiveCache(t *testing.T) {
 	if c.LiveSessions(0) == c.LiveSessions(discovery.LiveTTL) {
 		t.Fatal("another ttl shares the reader")
 	}
-	agents, err := c.discoverFromAgents([]agent.Agent{{PID: me}}, nil)
+	agents, err := c.discoverFromAgents([]agent.Agent{{PID: me}}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

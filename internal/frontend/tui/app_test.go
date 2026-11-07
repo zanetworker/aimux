@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,7 +121,7 @@ func TestParserForProvider_PrefersOTEL(t *testing.T) {
 	})
 
 	turns, err := parser("")
-	if err != nil {
+	if !errors.Is(err, views.ErrLiveTrace) { // OTEL turns are live
 		t.Fatalf("parser error: %v", err)
 	}
 	if len(turns) != 1 {
@@ -1065,7 +1066,7 @@ func TestParserForRemote_DirectLookup(t *testing.T) {
 
 	parser := app.parserForRemote("aimux-remote-claude-12345", "")
 	turns, err := parser("")
-	if err != nil {
+	if !errors.Is(err, views.ErrLiveTrace) { // OTEL turns are live
 		t.Fatalf("parser error: %v", err)
 	}
 	if len(turns) != 1 {
@@ -1119,7 +1120,7 @@ func TestParserForRemote_FallbackFindsRemote(t *testing.T) {
 	// Direct lookup for our generated ID will fail (no alias)
 	parser := app.parserForRemote("aimux-remote-claude-99999", "")
 	turns, err := parser("")
-	if err != nil {
+	if !errors.Is(err, views.ErrLiveTrace) { // OTEL turns are live
 		t.Fatalf("parser error: %v", err)
 	}
 	if len(turns) != 1 {

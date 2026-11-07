@@ -38,9 +38,16 @@ type LiveSource interface {
 	LiveSessions(ttl time.Duration) harness.LiveSessions
 }
 
+// TailParser is the optional capability of parsing only the end of a
+// transcript: at least the last n turns, numbered from the part read.
+type TailParser interface {
+	ParseTail(path string, n int) ([]trace.Turn, error)
+}
+
 var (
 	_ TranscriptRoot = (*Claude)(nil)
 	_ LiveSource     = (*Claude)(nil)
+	_ TailParser     = (*Claude)(nil)
 )
 
 // TranscriptsDir is ProjectsDir, or ~/.claude/projects (the relative

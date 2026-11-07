@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"os"
@@ -16,7 +17,6 @@ import (
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
-	"github.com/zanetworker/aimux/internal/coordination"
 	"github.com/zanetworker/aimux/internal/correlator"
 	"github.com/zanetworker/aimux/internal/debuglog"
 	"github.com/zanetworker/aimux/internal/discovery"
@@ -111,6 +111,11 @@ type App struct {
 	sessionsView   *views.SessionsView
 	starredView    *views.SessionsView
 	cachedSessions []history.Session
+	// sessionsLoadSeq identifies the latest sessions scan; older results
+	// are dropped.
+	sessionsLoadSeq uint64
+	sessionsLoadPending bool   // a scan for sessionsLoadSeq is running
+	sessionsLoadDir     string // the directory it scans ("" for all)
 	helpView       *views.HelpView
 	healthView     *views.HealthView
 
@@ -195,7 +200,6 @@ type App struct {
 	// Config
 	cfg       config.Config
 	ctrl      *controller.Controller
-	coord     coordination.Coordinator
 	launchDir string // CWD when aimux was started; used as default session scope
 
 	// OTEL receiver (optional)
@@ -219,6 +223,11 @@ type App struct {
 	// traceRefresh when new lines are appended.
 	activeTailer *trace.Tailer
 	traceRefresh chan struct{}
+
+	// refreshing is set while a timed discovery runs: a refresh takes
+	// seconds, so ticks arriving meanwhile skip theirs instead of piling up.
+	// Shared by the App copies Bubble Tea passes around; nil disables it.
+	refreshing *atomic.Bool
 }
 
 // NewApp creates a new root TUI application.
@@ -240,17 +249,6 @@ func NewApp() App {
 	}
 
 	ctrl := controller.New(cfg)
-
-	// Create coordinator based on config
-	var coord coordination.Coordinator
-	if cfg.Coordination.RedisURL != "" {
-		coord, _ = coordination.NewRedisCoordinator(cfg.Coordination.RedisURL, cfg.Coordination.TeamID)
-	} else if cfg.Kubernetes.RedisURL != "" {
-		coord, _ = coordination.NewRedisCoordinator(cfg.Kubernetes.RedisURL, cfg.Kubernetes.TeamID)
-	}
-	if coord == nil {
-		coord = coordination.NewLocalCoordinator()
-	}
 
 	// Enabled providers: Claude, Codex, then K8s when active (it takes part
 	// in provider-level operations such as ParseTrace; discovery and
@@ -325,7 +323,6 @@ func NewApp() App {
 		doneTimestamps:   make(map[int]time.Time),
 		cfg:              cfg,
 		ctrl:             ctrl,
-		coord:            coord,
 		launchDir:        launchDir,
 		otelStore:        aimuxotel.NewSpanStore(),
 		environments:     envs,
@@ -335,6 +332,7 @@ func NewApp() App {
 		remoteSessionIDs: controller.NewSessionStore(aimuxConfigDir()),
 		sessionMgr:       session.NewManager(session.NewFileStore(filepath.Join(aimuxConfigDir(), "sessions.json"))),
 		traceRefresh:     make(chan struct{}, 1),
+		refreshing:       new(atomic.Bool),
 	}
 
 	// Start OTEL receiver if enabled
@@ -369,7 +367,7 @@ func NewApp() App {
 
 func (a App) Init() tea.Cmd {
 	return tea.Batch(
-		a.discoverInstances,
+		a.discoverUnlessRunning,
 		a.discoverTeams,
 		a.tick(),
 	)
@@ -390,6 +388,18 @@ func (a App) tick() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+// discoverUnlessRunning is discoverInstances for the timer: it returns nil
+// (no message) when the previous timed discovery has not finished.
+func (a App) discoverUnlessRunning() tea.Msg {
+	if a.refreshing != nil {
+		if !a.refreshing.CompareAndSwap(false, true) {
+			return nil
+		}
+		defer a.refreshing.Store(false)
+	}
+	return a.discoverInstances()
 }
 
 func (a App) discoverInstances() tea.Msg {
@@ -417,7 +427,35 @@ func (a App) discoverTeams() tea.Msg {
 	return teamsMsg(teams)
 }
 
+// Update handles msg, then keeps the preview pane on the selected agent:
+// any message may move the selection (keys, a refresh re-sorting the list).
+// The preview's conversation loads in a command, never here or in View.
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if loaded, ok := msg.(views.PreviewLoadedMsg); ok {
+		if a.previewPane != nil {
+			a.previewPane.ApplyLoaded(loaded)
+		}
+		return a, nil
+	}
+	m, cmd := a.update(msg)
+	app, ok := m.(App)
+	if !ok {
+		return m, cmd
+	}
+	if rescan := app.rescanSessionsAfter(msg); rescan != nil {
+		cmd = tea.Batch(cmd, rescan)
+	}
+	if app.currentView != viewAgents || app.previewPane == nil || app.agentsView == nil {
+		return app, cmd
+	}
+	cmds := []tea.Cmd{cmd, app.syncPreview()}
+	if _, refresh := msg.(instancesMsg); refresh {
+		cmds = append(cmds, app.previewPane.Reload()) // nil when unchanged or already loading
+	}
+	return app, tea.Batch(cmds...)
+}
+
+func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
@@ -435,7 +473,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tickMsg:
-		cmds := []tea.Cmd{a.discoverInstances, a.tick()}
+		cmds := []tea.Cmd{a.discoverUnlessRunning, a.tick()}
 		if a.cfg.Remote.Backend == "openshell" {
 			cmds = append(cmds, a.checkOpenShellStatus)
 		}
@@ -599,10 +637,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.currentView == viewLogs && a.logsView != nil {
 			a.logsView.Reload()
 		}
-		// Refresh preview pane conversation data on tick
-		if a.currentView == viewAgents {
-			a.previewPane.Reload()
-		}
+		// The preview pane reloads in Update, off the UI goroutine.
 		// Clear stale status hints on tick (unless sticky)
 		if !a.stickyHint {
 			a.statusHint = ""
@@ -925,10 +960,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.ShowAll {
 			dir = a.sessionsView.CurrentDir()
 		}
-		sessions, _ := history.Discover(history.DiscoverOpts{Dir: dir}, "")
-		a.cachedSessions = sessions
-		a.sessionsView.SetSessions(sessions)
-		a.sessionsView.SetTagVocab(history.CollectTags(""))
+		return a, a.loadSessions(dir)
+	case sessionsLoadedMsg:
+		a.applySessions(msg)
+		return a, nil
 	case views.SessionAnnotateMsg:
 		// Persist session-level annotation
 		a.statusHint = fmt.Sprintf("Session: [%s]", strings.ToUpper(msg.Annotation))
@@ -976,6 +1011,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.cachedSessions = nil
 		sessions, _ := history.Discover(history.DiscoverOpts{}, "")
+		a.sessionsLoadSeq++ // a scan still running predates these titles
+		a.sessionsLoadPending = false
 		a.cachedSessions = sessions
 		a.sessionsView.SetSessions(sessions)
 	case views.SessionDeleteMsg:
@@ -1586,9 +1623,7 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Delegate navigation keys to the current view
 	switch a.currentView {
 	case viewAgents:
-		a.agentsView.Update(msg)
-		// Update preview pane when cursor moves
-		a.syncPreview()
+		a.agentsView.Update(msg) // Update syncs the preview with the new selection
 	case viewLogs:
 		if a.logsView != nil {
 			cmd := a.logsView.Update(msg)

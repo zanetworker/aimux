@@ -65,10 +65,7 @@ func (a App) View() string {
 		leftW, rightW := a.layout.SplitVertical(35)
 		a.agentsView.SetSize(leftW, contentHeight)
 		a.previewPane.SetSize(rightW, contentHeight)
-
-		// Update preview with currently selected agent
-		selected := a.agentsView.Selected()
-		a.previewPane.SetAgent(selected)
+		// The preview follows the selection in Update; View has no side effects.
 
 		content = lipgloss.JoinHorizontal(lipgloss.Top,
 			a.agentsView.View(),

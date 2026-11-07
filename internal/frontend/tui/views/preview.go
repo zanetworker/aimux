@@ -2,6 +2,7 @@ package views
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -9,10 +10,12 @@ import (
 	"sync"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/diff"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/trace"
 )
 
 var (
@@ -44,6 +47,11 @@ type PreviewPane struct {
 	agent          *agent.Agent
 	logsView       *LogsView
 	parser         TraceParser // parser function set by app.go for the current agent
+	tail           bool        // parser reads only the end of the session
+	loadSeq        uint64      // identifies the latest load; older results are dropped
+	loading        bool        // a load for loadSeq is running
+	stamp          fileStamp   // the file as the shown turns were parsed from it
+	stamped        bool        // stamp is valid: Reload may skip an unchanged file
 	width          int
 	height         int
 	cachedPodLogs  string   // cached kubectl logs output
@@ -63,25 +71,62 @@ func NewPreviewPane() *PreviewPane {
 	return &PreviewPane{}
 }
 
-// SetParser updates the trace parser used for creating LogsViews.
-// Called by app.go when the selected agent changes and the provider's
-// ParseTrace method should be used.
-func (p *PreviewPane) SetParser(parser TraceParser) {
-	p.parser = parser
+// PreviewLoadedMsg carries the selected agent's trace, parsed off the UI
+// goroutine by the command SetAgent or Reload returned. ApplyLoaded drops it
+// when the selection moved on or a newer load started.
+type PreviewLoadedMsg struct {
+	PID   int
+	Path  string
+	Seq   uint64
+	Turns []trace.Turn
+	Err   error
+
+	stamp   fileStamp
+	stamped bool
 }
 
-// SetAgent updates the agent whose conversation is displayed. It reloads the
-// conversation from the agent's SessionFile only if the agent changed.
-// If the agent is nil or has no SessionFile, the pane shows a placeholder.
-func (p *PreviewPane) SetAgent(a *agent.Agent) {
+// SetParser updates the trace parser used for creating LogsViews.
+// Called by app.go when the selected agent changes and the provider's
+// ParseTrace method should be used. The parser runs on another goroutine,
+// so it must not read state the UI goroutine changes.
+func (p *PreviewPane) SetParser(parser TraceParser) {
+	p.parser = parser
+	p.tail = false
+}
+
+// SetTailParser is SetParser for a parser that returns only the last turns
+// of the session; the trace summary then says "last N turns".
+func (p *PreviewPane) SetTailParser(parser TraceParser) {
+	p.parser = parser
+	p.tail = true
+}
+
+// SetAgent updates the agent whose conversation is displayed. It never
+// parses: when the agent (by PID) or its session file changed, or the
+// conversation was not loaded yet, it returns a command that parses the
+// trace and returns a PreviewLoadedMsg for ApplyLoaded. A same-PID call
+// refreshes the header's data. If the agent is nil or has no SessionFile,
+// the pane shows a placeholder.
+func (p *PreviewPane) SetAgent(a *agent.Agent) tea.Cmd {
 	if a == nil {
 		p.agent = nil
 		p.logsView = nil
-		return
+		p.stopLoad()
+		return nil
 	}
-	// Skip reload if same agent (by PID)
 	if p.agent != nil && p.agent.PID == a.PID {
-		return
+		fileChanged := a.SessionFile != p.agent.SessionFile
+		p.agent = a
+		if p.logsView != nil && !fileChanged {
+			p.logsView.SetSessionCost(a.EstCostUSD)
+			return nil
+		}
+		if a.SessionFile == "" || p.parser == nil {
+			p.logsView = nil
+			p.stopLoad()
+			return nil
+		}
+		return p.startTrace(a)
 	}
 	p.agent = a
 
@@ -112,19 +157,77 @@ func (p *PreviewPane) SetAgent(a *agent.Agent) {
 	}
 	if a.SessionFile == "" || p.parser == nil {
 		p.logsView = nil
-		return
+		p.stopLoad()
+		return nil
 	}
-	p.logsView = NewLogsView(a.PID, a.SessionFile, p.parser)
-	p.logsView.SetSessionCost(a.EstCostUSD)
-	p.logsView.compact = true // no interactive hints in preview
-	p.resizeLogsView()
+	return p.startTrace(a)
 }
 
-// Reload re-reads the session file and refreshes the conversation trace.
-func (p *PreviewPane) Reload() {
-	if p.logsView != nil {
-		p.logsView.Reload()
+// startTrace shows an empty trace for a and returns the command loading it.
+func (p *PreviewPane) startTrace(a *agent.Agent) tea.Cmd {
+	p.logsView = NewLogsView(a.PID, a.SessionFile, nil)
+	p.logsView.SetSessionCost(a.EstCostUSD)
+	p.logsView.SetPartial(p.tail)
+	p.logsView.compact = true // no interactive hints in preview
+	p.resizeLogsView()
+	p.stamped = false
+	return p.load()
+}
+
+// load starts a new load of the current trace. The command stats the file
+// before parsing, so an append during the parse shows as a change later.
+func (p *PreviewPane) load() tea.Cmd {
+	p.loadSeq++
+	p.loading = true
+	seq, pid, path, parser := p.loadSeq, p.agent.PID, p.logsView.FilePath(), p.parser
+	return func() tea.Msg {
+		stamp, stamped := statStamp(path)
+		turns, err := parser(path)
+		return PreviewLoadedMsg{PID: pid, Path: path, Seq: seq, Turns: turns, Err: err, stamp: stamp, stamped: stamped}
 	}
+}
+
+// stopLoad makes any running load's result stale.
+func (p *PreviewPane) stopLoad() {
+	p.loadSeq++
+	p.loading = false
+	p.stamped = false
+}
+
+// ApplyLoaded shows a load's turns and reports whether it did: a result for
+// an agent no longer selected, or from a load a newer one replaced, is dropped.
+func (p *PreviewPane) ApplyLoaded(msg PreviewLoadedMsg) bool {
+	if msg.Seq != p.loadSeq || p.agent == nil || p.logsView == nil ||
+		p.agent.PID != msg.PID || p.logsView.FilePath() != msg.Path {
+		return false
+	}
+	p.loading = false
+	live := errors.Is(msg.Err, ErrLiveTrace)
+	if msg.Err != nil && !live {
+		p.logsView.SetTurns(nil)
+		p.stamped = false
+		return true
+	}
+	p.logsView.SetTurns(msg.Turns)
+	// Only turns parsed from the file let Reload skip an unchanged file:
+	// an empty result or OTEL's (live) grows without the file changing.
+	p.stamp, p.stamped = msg.stamp, msg.stamped && len(msg.Turns) > 0 && !live
+	return true
+}
+
+// Reload returns a command re-reading the conversation, or nil when there
+// is nothing to do: no trace, a load already running, or a file whose size
+// and mtime are those the shown turns came from.
+func (p *PreviewPane) Reload() tea.Cmd {
+	if p.logsView == nil || p.parser == nil || p.loading || p.agent == nil {
+		return nil
+	}
+	if p.stamped {
+		if stamp, ok := statStamp(p.logsView.FilePath()); ok && stamp == p.stamp {
+			return nil
+		}
+	}
+	return p.load()
 }
 
 // SetSize sets the available width and height for the preview pane.
@@ -243,6 +346,12 @@ func (p *PreviewPane) View() string {
 		usedLines := strings.Count(header, "\n") + 2
 		remaining := p.height - usedLines
 		for i := 0; i < remaining; i++ {
+			b.WriteString(border + "\n")
+		}
+	} else if p.loading && len(p.logsView.Turns()) == 0 {
+		b.WriteString(border + " " + previewDimStyle.Render("Loading conversation...") + "\n")
+		usedLines := strings.Count(header, "\n") + 2
+		for i := 0; i < p.height-usedLines; i++ {
 			b.WriteString(border + "\n")
 		}
 	} else {
