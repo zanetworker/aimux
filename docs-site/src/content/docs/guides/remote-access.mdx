@@ -79,7 +79,7 @@ It prints a code such as `7K2M-Q9XD`. Type it on the device: the iPhone app and 
 
 **Unlock.** The iPhone app asks for Face ID when a login is needed. The web client never starts Face ID on its own: it shows **Unlock with Face ID**, and the tap does it. Requests that hit the lock are sent again after the unlock. A device that was revoked shows "This device is no longer paired." and the pairing screen.
 
-**When a login ends.** After 1 hour without use, after 12 hours in any case, when you lock it (**Lock** in the iPhone app's server settings, or in the header of Now in the web client), when the device is revoked, or when `remote serve` restarts. Only things you do count as use: any `POST`, and a request the client marks with `Aimux-Interaction: 1` (opening a chat or a tab, pull to refresh, Retry, a search). Background polling and event streams do not, so a phone left open locks after an hour. An open event stream closes when its login ends.
+**When a login ends.** After 1 hour without use, after 12 hours in any case, when you lock it (**Lock** in the iPhone app's server settings, or in the header of Now in the web client; the web client locks at once, and ends the login on the Mac in the background, so a Mac that is unreachable never keeps the chat open), when the device is revoked, or when `remote serve` restarts. Only things you do count as use: any `POST`, and a request the client marks with `Aimux-Interaction: 1` (opening a chat or a tab, pull to refresh, Retry, a search). Background polling and event streams do not, so a phone left open locks after an hour. An open event stream closes when its login ends.
 
 **List and revoke.**
 
