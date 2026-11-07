@@ -87,6 +87,7 @@ type InstallPlan struct {
 	Move    []string // stdio servers that would move behind the proxy
 	Skip    []string // left direct with --skip
 	Moved   []string // already behind the proxy (the manifest)
+	Remove  []string // moved, but their entry is gone from the Claude config: install takes them off
 	Refresh []string // missing from the catalog (after DryRun: the ones it could not list)
 	Listed  []string // DryRun started these once to list their tools into a temporary catalog
 }
@@ -250,7 +251,17 @@ func (i Installer) plan(skip []string) (InstallPlan, map[string]ServerConfig, *M
 	var recorded []string
 	if m != nil {
 		recorded = m.Skipped
-		p.Moved = sortedKeys(m.Servers)
+		_, members, err := readMCPServers(i.ClaudeConfig)
+		if err != nil {
+			return InstallPlan{}, nil, nil, err
+		}
+		for _, name := range sortedKeys(m.Servers) {
+			if _, ok := members[name]; ok {
+				p.Moved = append(p.Moved, name)
+			} else {
+				p.Remove = append(p.Remove, name)
+			}
+		}
 	}
 	for _, s := range i.Unskip {
 		if !contains(recorded, s) {
@@ -312,6 +323,11 @@ func (i Installer) Install(skip []string) (err error) {
 		return fmt.Errorf("the proxy is installed on port %d but this run would use %d; pass --port %d, "+
 			"or run `aimux mcp proxy uninstall` and install again to change the port; nothing changed", m.Port, i.Port, m.Port)
 	}
+	gone, err := i.forgetRemoved(m)
+	if err != nil {
+		return err
+	}
+	p.Moved = slices.DeleteFunc(p.Moved, func(n string) bool { return slices.Contains(gone, n) })
 	if len(p.Move) == 0 {
 		if m != nil {
 			if !slices.Equal(m.Skipped, p.Skip) {
@@ -430,6 +446,46 @@ func (i Installer) Install(skip []string) (err error) {
 		i.ensureIdleTimeout(final)
 	}
 	return nil
+}
+
+// forgetRemoved takes moved servers whose entry the owner removed from the
+// Claude config (claude mcp remove) off the proxy: their saved definitions
+// and manifest entries go, and the daemon reloads in place. A removed entry
+// is deliberate: a stale session that saves its settings writes the old
+// entry back (drift), it does not delete it.
+func (i Installer) forgetRemoved(m *Manifest) ([]string, error) {
+	if m == nil || len(m.Servers) == 0 {
+		return nil, nil
+	}
+	_, members, err := readMCPServers(i.ClaudeConfig)
+	if err != nil {
+		return nil, err
+	}
+	var gone []string
+	for _, name := range sortedKeys(m.Servers) {
+		if _, ok := members[name]; !ok {
+			gone = append(gone, name)
+		}
+	}
+	if len(gone) == 0 {
+		return nil, nil
+	}
+	if err := i.dropMoved(gone, true, false); err != nil {
+		return nil, fmt.Errorf("take %s off the proxy: %w", strings.Join(gone, ", "), err)
+	}
+	for _, name := range gone {
+		delete(m.Servers, name)
+	}
+	if err := i.saveManifest(m); err != nil {
+		return nil, err
+	}
+	if i.Reload != nil {
+		if _, err := i.Reload(); err != nil {
+			i.printf("Note: the proxy did not reload (%v); it keeps serving %s, unused, until it restarts.\n", err, strings.Join(gone, ", "))
+		}
+	}
+	i.printf("No longer in %s, so taken off the proxy: %s\n", i.ClaudeConfig, strings.Join(gone, ", "))
+	return gone, nil
 }
 
 // saveDefinitions writes the moved servers' definitions, variables resolved
@@ -571,7 +627,7 @@ func (i Installer) stopServing(names []string) {
 	if len(names) == 0 {
 		return
 	}
-	if err := i.dropMoved(names, false); err != nil {
+	if err := i.dropMoved(names, false, false); err != nil {
 		i.printf("Note: could not take %s off the proxy's list (%v); it keeps serving them until the next install or uninstall.\n", strings.Join(names, ", "), err)
 		return
 	}
@@ -899,7 +955,7 @@ func (i Installer) Uninstall() error {
 		i.printf("  %s\n", n)
 	}
 	names := sortedKeys(m.Servers)
-	if err := i.dropMoved(names, true); err != nil {
+	if err := i.dropMoved(names, true, true); err != nil {
 		return fmt.Errorf("%w; the Claude config is restored; run `aimux mcp proxy uninstall` again to finish", err)
 	}
 	i.dropIdleTimeout(m)
@@ -917,9 +973,11 @@ func (i Installer) Uninstall() error {
 }
 
 // dropMoved takes names off the servers file's moved list (the daemon no
-// longer serves them) and, with forget (uninstall), deletes their saved
-// definitions, which hold resolved env values, and the list once empty.
-func (i Installer) dropMoved(names []string, forget bool) error {
+// longer serves them); with forget it also deletes their saved definitions,
+// which hold resolved env values. Only uninstalling drops the list once it
+// is empty: an installed proxy keeps an empty list (serve nothing), since a
+// missing list means not installed (a manual serve serves everything).
+func (i Installer) dropMoved(names []string, forget, uninstalling bool) error {
 	servers, resolved, err := LoadServerFile(i.ServersPath)
 	if err != nil {
 		return err
@@ -940,11 +998,14 @@ func (i Installer) dropMoved(names []string, forget bool) error {
 			}
 		}
 	}
+	if uninstalling && len(keep) == 0 {
+		// uninstalled: no list, a manual serve serves everything; an empty
+		// list left by taking every server off counts as a change too
+		changed = changed || resolved != nil
+		keep = nil
+	}
 	if !changed {
 		return nil
-	}
-	if forget && len(keep) == 0 {
-		keep = nil // uninstalled: no list, a manual serve serves everything
 	}
 	return SaveServerFile(i.ServersPath, servers, keep)
 }
@@ -1022,7 +1083,7 @@ func (i Installer) PrintInstallStatus(st InstallState) {
 			strings.Join(st.Drifted, ", "), driftFix)
 	}
 	if len(st.Removed) > 0 {
-		i.printf("  Removed from %s: %s (the proxy still serves them, unused).\n", i.ClaudeConfig, strings.Join(st.Removed, ", "))
+		i.printf("  Removed from %s: %s (the proxy still serves them, unused; `aimux mcp proxy install` takes them off).\n", i.ClaudeConfig, strings.Join(st.Removed, ", "))
 	}
 	if len(st.NotProxied) > 0 {
 		i.printf("  Not behind the proxy: %s (run `aimux mcp proxy install` to move them)\n", strings.Join(st.NotProxied, ", "))
@@ -1038,8 +1099,15 @@ func (i Installer) PrintPlan(p InstallPlan) {
 	if len(p.Moved) > 0 {
 		i.printf("Already behind the proxy: %s\n", strings.Join(p.Moved, ", "))
 	}
+	if len(p.Remove) > 0 {
+		i.printf("Would take off the proxy (removed from %s): %s\n", i.ClaudeConfig, strings.Join(p.Remove, ", "))
+	}
 	if len(p.Move) == 0 {
-		i.printf("No stdio servers to move; nothing would change.\n")
+		if len(p.Remove) == 0 {
+			i.printf("No stdio servers to move; nothing would change.\n")
+		} else {
+			i.printf("No stdio servers to move.\n")
+		}
 		return
 	}
 	i.printf("Would move %d stdio servers behind the proxy, each keeping its name:\n", len(p.Move))

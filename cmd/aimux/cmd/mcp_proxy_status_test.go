@@ -258,3 +258,42 @@ func TestPrintInstallState_CountsRemovedDriftAndUpgrade(t *testing.T) {
 		t.Fatalf("a removed entry is reported as drift:\n%s", got)
 	}
 }
+
+func tableNames(t *testing.T, out string) []string {
+	t.Helper()
+	row := regexp.MustCompile(`^\s+(\S+)\s+[●○◐] `)
+	var names []string
+	for _, line := range strings.Split(ansiRE.ReplaceAllString(out, ""), "\n") {
+		if m := row.FindStringSubmatch(line); m != nil {
+			names = append(names, m[1])
+		}
+	}
+	return names
+}
+
+// What needs attention comes first: failed, then active, then at rest.
+func TestPrintProxyStatus_SortsByStateThenName(t *testing.T) {
+	rep := styledReport() // slack running, github failed, nanobanana idle, brief not started
+	rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "aimux", State: mcpproxy.StateRunning}})
+	var out bytes.Buffer
+	printProxyStatus(&out, "127.0.0.1:7381", rep, statusNow, false)
+	want := []string{"github", "aimux", "slack", "nanobanana-image-creation", "brief"}
+	if got := tableNames(t, out.String()); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rows %v, want %v", got, want)
+	}
+}
+
+// A server removed from ~/.claude.json shows as removed, last, and counts as
+// removed rather than in its live state.
+func TestPrintProxyStatus_RemovedServerIsMarkedAndLast(t *testing.T) {
+	var out bytes.Buffer
+	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, false, "nanobanana-image-creation")
+	got := out.String()
+	names := tableNames(t, got)
+	if names[len(names)-1] != "nanobanana-image-creation" {
+		t.Fatalf("removed server not last: %v", names)
+	}
+	if !strings.Contains(got, "○ removed") || !strings.Contains(got, "1 removed") || strings.Contains(got, "1 idle") {
+		t.Fatalf("removed server not marked or counted apart:\n%s", got)
+	}
+}

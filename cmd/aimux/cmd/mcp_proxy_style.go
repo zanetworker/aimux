@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -62,13 +64,40 @@ func stateLabel(st mcpproxy.ServerState) (string, string) {
 	return "○ " + string(st), styleDim
 }
 
+// stateRank orders the table by what needs attention: failed, then active,
+// then at rest; removed servers go last.
+var stateRank = map[mcpproxy.ServerState]int{mcpproxy.StateFailed: 0, mcpproxy.StateStarting: 1, mcpproxy.StateRunning: 2,
+	mcpproxy.StateIdleStopped: 3, mcpproxy.StateNotStarted: 4}
+
 // printProxyStatus prints the daemon line, a summary of server states, the
-// server table, then the stderr tail of each failed server.
-func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now time.Time, color bool) {
+// server table (failed and active first), then the stderr tail of each
+// failed server. removed are servers whose entry left ~/.claude.json: shown
+// as removed, last, and counted apart.
+func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now time.Time, color bool, removed ...string) {
+	isRemoved := func(name string) bool { return slices.Contains(removed, name) }
+	servers := slices.Clone(rep.Servers)
+	sort.SliceStable(servers, func(a, b int) bool {
+		ra, rb := stateRank[servers[a].State], stateRank[servers[b].State]
+		if isRemoved(servers[a].Server) {
+			ra = 9
+		}
+		if isRemoved(servers[b].Server) {
+			rb = 9
+		}
+		if ra != rb {
+			return ra < rb
+		}
+		return servers[a].Server < servers[b].Server
+	})
 	_, _ = fmt.Fprintf(out, "%s on %s · pid %d · started %s\n", paint(color, styleBold, "MCP proxy"), addr, rep.PID, mcpproxy.Ago(now, rep.StartedAt))
 
 	count := map[mcpproxy.ServerState]int{}
-	for _, s := range rep.Servers {
+	nRemoved := 0
+	for _, s := range servers {
+		if isRemoved(s.Server) {
+			nRemoved++
+			continue
+		}
 		count[s.State]++
 	}
 	parts := []string{fmt.Sprintf("%d servers", len(rep.Servers))}
@@ -86,13 +115,17 @@ func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now
 	part(count[mcpproxy.StateIdleStopped], "idle", styleDim, false)
 	part(count[mcpproxy.StateNotStarted], "not started", styleDim, false)
 	part(count[mcpproxy.StateFailed], "failed", styleRed, true)
+	part(nRemoved, "removed", styleDim, false)
 	_, _ = fmt.Fprintf(out, "%s\n\n", strings.Join(parts, paint(color, styleDim, " · ")))
 
 	type row struct{ name, state, stateStyle, tools, last, err string }
-	rows := make([]row, 0, len(rep.Servers))
+	rows := make([]row, 0, len(servers))
 	w := [4]int{len("SERVER"), len("STATE"), len("TOOLS"), len("LAST CALL")}
-	for _, s := range rep.Servers {
+	for _, s := range servers {
 		label, style := stateLabel(s.State)
+		if isRemoved(s.Server) {
+			label, style = "○ removed", styleDim
+		}
 		lastErr := s.LastError
 		if s.ProbeError != "" {
 			lastErr = s.ProbeError
@@ -118,7 +151,7 @@ func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now
 		_, _ = fmt.Fprintf(out, "  %s  %s  %s  %s  %s\n", pad(r.name, w[0]), paint(color, r.stateStyle, pad(r.state, w[1])),
 			pad(r.tools, w[2]), last, errText)
 	}
-	for _, s := range rep.Servers {
+	for _, s := range servers {
 		if s.State != mcpproxy.StateFailed || len(s.StderrTail) == 0 {
 			continue
 		}
@@ -155,7 +188,7 @@ func printInstallState(out io.Writer, st mcpproxy.InstallState, claudeConfig, up
 		warn("%s", upgradeText)
 	}
 	if len(st.Removed) > 0 {
-		note("removed from %s: %s (still served by the proxy, unused)", claudeConfig, strings.Join(st.Removed, ", "))
+		note("removed from %s: %s (still served by the proxy, unused; `aimux mcp proxy install` takes them off)", claudeConfig, strings.Join(st.Removed, ", "))
 	}
 	if len(st.Skipped) > 0 {
 		note("kept direct: %s (`aimux mcp proxy install --unskip <name>` moves one)", strings.Join(st.Skipped, ", "))

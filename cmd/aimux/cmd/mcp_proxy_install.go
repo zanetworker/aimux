@@ -199,13 +199,16 @@ func openSessionIDs(lives []harness.LiveSessions) ([]string, error) {
 }
 
 // printInstallSection prints whether the proxy is installed and in place.
-func printInstallSection(in mcpproxy.Installer, out io.Writer, color bool) {
+// printInstallSection prints the install section and returns the state it
+// printed, so the table can mark removed servers.
+func printInstallSection(in mcpproxy.Installer, out io.Writer, color bool) mcpproxy.InstallState {
 	st, err := in.InstallStatus()
 	if err != nil {
 		_, _ = fmt.Fprintf(out, "Install: unknown (%v)\n", err)
-		return
+		return mcpproxy.InstallState{}
 	}
 	printInstallState(out, st, in.ClaudeConfig, in.UpgradeText(st.DaemonVersion), color)
+	return st
 }
 
 func newMCPProxyInstallCmd() *cobra.Command {
@@ -222,7 +225,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			"proxy reload in place) and probes the servers, backs up ~/.claude.json to ~/.aimux/backups, then replaces each " +
 			"server's entry with an HTTP entry of the same name pointing at its own proxy endpoint, in one atomic edit. " +
 			"Tool names stay the same, so permission rules keep working unchanged; no settings file is read or written. " +
-			"Run it again to move servers added later; servers kept direct with --skip stay direct until --unskip. Moved servers are configured with `aimux mcp proxy edit`, not in " +
+			"Run it again to move servers added later, and to take off the proxy any moved server you removed from ~/.claude.json (claude mcp remove); servers kept direct with --skip stay direct until --unskip. Moved servers are configured with `aimux mcp proxy edit`, not in " +
 			"~/.claude.json. What changed is recorded in ~/.aimux/mcp-proxy-install.json; `uninstall` undoes it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()

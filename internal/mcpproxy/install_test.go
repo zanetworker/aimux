@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1321,5 +1322,104 @@ func TestInstallStatus_RemovedEntryIsNotDrift(t *testing.T) {
 	fx.in.PrintInstallStatus(st)
 	if out := fx.out.String(); !strings.Contains(out, "Removed from") || !strings.Contains(out, "slack") {
 		t.Fatalf("status output does not report the removed entry:\n%s", out)
+	}
+}
+
+// Re-running install tidies up servers the owner removed from
+// ~/.claude.json: their saved definitions and manifest entries go, and the
+// daemon reloads in place, also when there is nothing new to move.
+func TestInstall_RerunDropsServersRemovedFromTheConfig(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	must(t, jsonedit.EditKeyVerbatim(fx.claude, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
+		return jsonedit.SetMember(old, "slack", nil)
+	}))
+	reloads := fx.reloads
+	fx.out.Reset()
+	must(t, fx.in.Install(nil))
+	m, err := LoadManifest(fx.manifest)
+	must(t, err)
+	if _, ok := m.Servers["slack"]; ok || len(m.Servers) == 0 {
+		t.Fatalf("manifest still records slack (or lost the others): %v", sortedKeys(m.Servers))
+	}
+	servers, resolved, err := LoadServerFile(fx.servers)
+	must(t, err)
+	if _, ok := servers["slack"]; ok || slices.Contains(resolved, "slack") {
+		t.Fatalf("the proxy still has slack: servers %v, served %v", sortedKeys(servers), resolved)
+	}
+	if fx.reloads <= reloads {
+		t.Fatal("the daemon was not reloaded after dropping slack")
+	}
+	if out := fx.out.String(); strings.Contains(out, "Already behind it") && strings.Contains(out[strings.Index(out, "Already behind it"):], "slack") {
+		t.Fatalf("install lists the dropped slack as still behind the proxy:\n%s", out)
+	}
+	if out := fx.out.String(); !strings.Contains(out, "slack") || !strings.Contains(out, "taken off the proxy") {
+		t.Fatalf("install did not say it dropped slack:\n%s", out)
+	}
+	st, err := fx.in.InstallStatus()
+	must(t, err)
+	if len(st.Removed) != 0 {
+		t.Fatalf("status still reports removed %v after install tidied up", st.Removed)
+	}
+}
+
+// Taking the last moved server off keeps the proxy installed: an empty moved
+// list (serve nothing), not a missing one (not installed: serve everything).
+func TestInstall_RerunDroppingEveryServerKeepsAnEmptyMovedList(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	m, err := LoadManifest(fx.manifest)
+	must(t, err)
+	for name := range m.Servers {
+		name := name
+		must(t, jsonedit.EditKeyVerbatim(fx.claude, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
+			return jsonedit.SetMember(old, name, nil)
+		}))
+	}
+	_ = fx.in.Install(nil) // nothing left to move; the tidy-up still runs
+	_, resolved, err := LoadServerFile(fx.servers)
+	must(t, err)
+	if resolved == nil || len(resolved) != 0 {
+		t.Fatalf("moved list = %#v, want an empty list (installed, serving nothing), not a missing one", resolved)
+	}
+}
+
+// After every server was taken off (an empty moved list), uninstall still
+// drops the list: a missing list is what says the proxy is not installed.
+func TestUninstall_AfterEveryServerWasTakenOffDropsTheEmptyList(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	m, err := LoadManifest(fx.manifest)
+	must(t, err)
+	for name := range m.Servers {
+		name := name
+		must(t, jsonedit.EditKeyVerbatim(fx.claude, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
+			return jsonedit.SetMember(old, name, nil)
+		}))
+	}
+	_ = fx.in.Install(nil)
+	must(t, fx.in.Uninstall())
+	if _, resolved, err := LoadServerFile(fx.servers); err == nil && resolved != nil {
+		t.Fatalf("uninstall left the moved list %#v behind (installed-mode marker)", resolved)
+	}
+}
+
+// The dry run shows the tidy-up a real install would do.
+func TestPlan_ShowsServersInstallWouldTakeOff(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	must(t, jsonedit.EditKeyVerbatim(fx.claude, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
+		return jsonedit.SetMember(old, "slack", nil)
+	}))
+	p, err := fx.in.Plan(nil)
+	must(t, err)
+	if !reflect.DeepEqual(p.Remove, []string{"slack"}) || slices.Contains(p.Moved, "slack") {
+		t.Fatalf("plan = %+v, want slack to remove and not listed as already moved", p)
+	}
+	fx.out.Reset()
+	fx.in.PrintPlan(p)
+	out := fx.out.String()
+	if !strings.Contains(out, "Would take off the proxy") || !strings.Contains(out, "slack") || strings.Contains(out, "nothing would change") {
+		t.Fatalf("dry-run output:\n%s", out)
 	}
 }

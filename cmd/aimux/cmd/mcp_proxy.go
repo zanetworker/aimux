@@ -241,7 +241,7 @@ func newMCPProxyStatusCmd() *cobra.Command {
 						o.install = &st
 					}
 				} else {
-					printInstallSection(in, cmd.OutOrStdout(), o.color)
+					o.removed = printInstallSection(in, cmd.OutOrStdout(), o.color).Removed
 				}
 			}
 			return proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now())
@@ -261,6 +261,7 @@ type proxyStatusOpts struct {
 	timeout time.Duration          // for probe; default one minute
 	install *mcpproxy.InstallState // added to --json output when set
 	color   bool                   // ANSI styles (a terminal without NO_COLOR)
+	removed []string               // moved servers whose entry left the Claude config
 }
 
 // proxyStatusJSON is the --json answer: the daemon's report plus the install state.
@@ -321,7 +322,7 @@ func proxyStatus(ctx context.Context, o proxyStatusOpts, out io.Writer, now time
 		enc.SetIndent("", "  ")
 		return enc.Encode(proxyStatusJSON{rep, o.install})
 	}
-	printProxyStatus(out, o.addr, rep, now, o.color)
+	printProxyStatus(out, o.addr, rep, now, o.color, o.removed...)
 	return nil
 }
 
