@@ -1,6 +1,6 @@
 //go:build darwin
 
-package cmd
+package remoteapp
 
 import (
 	"github.com/zanetworker/aimux/internal/terminput"

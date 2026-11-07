@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -106,5 +107,31 @@ func TestRouter_ReportsInUseElsewhereBeforeOwnership(t *testing.T) {
 	defer me.Manager.Close()
 	if err := me.Check("idle-1"); !errors.Is(err, ErrInUseElsewhere) {
 		t.Fatalf("got %v, want ErrInUseElsewhere", err)
+	}
+}
+
+// Reservation is the session lock every aimux process shares, under
+// ~/.aimux/locks: a second claim, from this or another reservation of the
+// same home, is refused until the first lets go.
+func TestReservation_SharedLockUnderHome(t *testing.T) {
+	home := t.TempDir()
+	release, err := Reservation(home)("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".aimux", "locks", "s1.lock")); err != nil {
+		t.Fatalf("lock file: %v", err)
+	}
+	if _, err := Reservation(home)("s1"); !errors.Is(err, ErrInUseElsewhere) {
+		t.Fatalf("second claim: %v, want ErrInUseElsewhere", err)
+	}
+	release()
+	again, err := Reservation(home)("s1")
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	again()
+	if _, err := Reservation(home)(""); err == nil {
+		t.Fatal("an empty session id was accepted")
 	}
 }

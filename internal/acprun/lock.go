@@ -39,3 +39,11 @@ func SessionLock(dir, sessionID string) (release func(), err error) {
 		_ = f.Close()
 	}, nil
 }
+
+// Reservation is the session lock every aimux process shares: SessionLock
+// in home/.aimux/locks, for ManagerOptions.Reserve. aimux chat and remote
+// serve both use it, so they never continue one session at once.
+func Reservation(home string) func(sessionID string) (release func(), err error) {
+	dir := filepath.Join(home, ".aimux", "locks")
+	return func(sessionID string) (func(), error) { return SessionLock(dir, sessionID) }
+}

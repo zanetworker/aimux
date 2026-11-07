@@ -13,6 +13,7 @@ CORE_PKGS=(
   internal/terminal
   internal/mcpserver
   internal/config
+  internal/remoteapp
 )
 
 fail=0

@@ -51,8 +51,8 @@ type Provider struct {
 // sessions of the registered providers; subagent and automated sessions are
 // left out. Every provider's sessions are listed; the default, NewProvider,
 // is the one that can be continued today, since the router (SessionLookup)
-// and the chat manager's Fingerprint serve one provider (remote serve's
-// remoteProviders).
+// and the chat manager's Fingerprint serve one provider (remoteapp.Providers,
+// which remote serve lists).
 type LocalIndex struct {
 	// Providers are the harnesses listed, in order; a session belongs to
 	// the first whose store has its file.

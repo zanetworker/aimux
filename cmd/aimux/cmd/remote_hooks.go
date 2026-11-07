@@ -1,19 +1,14 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zanetworker/aimux/internal/push"
 	"github.com/zanetworker/aimux/internal/waiting"
 )
 
@@ -87,9 +82,6 @@ func sameFile(a, b string) bool {
 	fb, err := os.Stat(b)
 	return err == nil && os.SameFile(fa, fb)
 }
-
-// waitingPollEvery is how often remote serve reads the waiting markers.
-const waitingPollEvery = 2 * time.Second
 
 func claudeSettingsPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -254,72 +246,4 @@ func logHookFailure(home string) {
 	}
 	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "%s remote hooks notify: a hook call was not applied\n", time.Now().UTC().Format(time.RFC3339))
-}
-
-// waitingAlerts is the push loop's handler for what Tracker.Poll found: one
-// notification per new marker, worded like a phone approval, taken back
-// when the marker goes. Nil when nothing is on.
-func waitingAlerts(p pushSetup, sessionTitle func(ctx context.Context, id string) string, errOut io.Writer) func(appeared, gone []waiting.Entry) {
-	if len(p.notifiers) == 0 {
-		return nil
-	}
-	// Stays under APNs' 64-byte collapse id: "w-" + a UUID + "-" + 13 digits.
-	id := func(e waiting.Entry) string {
-		return "w-" + e.SessionID + "-" + strconv.FormatInt(e.Since.UnixMilli(), 10)
-	}
-	return func(appeared, gone []waiting.Entry) {
-		for _, e := range gone {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := push.Retract(ctx, p.notifiers, push.Message{ApprovalID: id(e), SessionID: e.SessionID}); err != nil {
-				_, _ = fmt.Fprintln(errOut, "permission notification (taking it back):", err)
-			}
-			cancel()
-		}
-		for _, e := range appeared {
-			m := push.ForApproval(lookupTitle(sessionTitle, e.SessionID), e.Message)
-			m.ApprovalID, m.SessionID = id(e), e.SessionID
-			if p.clickURL != "" {
-				m.Link = p.clickURL + "#/s/" + url.PathEscape(e.SessionID)
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := push.Send(ctx, p.notifiers, m); err != nil {
-				_, _ = fmt.Fprintln(errOut, "permission notification:", err)
-			}
-			cancel()
-		}
-	}
-}
-
-// runWaitingAlerts polls the markers until ctx ends, handing changes to
-// alerts (which may be nil: the list still shows waiting sessions).
-func runWaitingAlerts(ctx context.Context, tracker *waiting.Tracker, alerts func(appeared, gone []waiting.Entry)) {
-	if alerts == nil {
-		return
-	}
-	t := time.NewTicker(waitingPollEvery)
-	defer t.Stop()
-	for {
-		appeared, gone := tracker.Poll()
-		if len(appeared)+len(gone) > 0 {
-			alerts(appeared, gone)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
-// hooksSummary is remote serve's startup line about permission alerts for
-// terminal sessions.
-func hooksSummary(settingsPath string) string {
-	st, err := waiting.Status(settingsPath)
-	switch {
-	case err != nil:
-		return "Permission alerts for terminal sessions: cannot read " + settingsPath
-	case len(st.Missing) > 0:
-		return "Permission alerts for terminal sessions: off; run `aimux remote hooks install`"
-	}
-	return "Permission alerts for terminal sessions: on (Claude Code hooks)"
 }

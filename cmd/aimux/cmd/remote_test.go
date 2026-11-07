@@ -2,12 +2,7 @@ package cmd
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +17,6 @@ import (
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/push"
-	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
 	"github.com/zanetworker/aimux/internal/terminput"
 )
@@ -59,34 +52,6 @@ func TestResolveRemoteSettings_Errors(t *testing.T) {
 	}
 }
 
-func TestTailscaleServeHint(t *testing.T) {
-	h := tailscaleServeHint(7382, []string{"mac.tail1.ts.net"})
-	if !strings.Contains(h, "tailscale serve --bg --https=8443 http://127.0.0.1:7382") {
-		t.Fatalf("hint %q", h)
-	}
-	if !strings.Contains(h, "https://mac.tail1.ts.net:8443/app/") {
-		t.Fatalf("hint %q does not say where the web client is", h)
-	}
-	if h := tailscaleServeHint(7382, nil); strings.Contains(h, "/app/") {
-		t.Fatalf("hint %q names a web client URL with no host", h)
-	}
-}
-
-func TestResolveTrustedHosts(t *testing.T) {
-	detected := func() (string, error) { return "mac.tail1.ts.net.", nil }
-	failing := func() (string, error) { return "", errors.New("tailscale not running") }
-
-	if got, err := resolveTrustedHosts(nil, detected); err != nil || len(got) != 1 || got[0] != "mac.tail1.ts.net" {
-		t.Fatalf("auto-detect: %v %v", got, err)
-	}
-	if got, err := resolveTrustedHosts([]string{"a.ts.net", "b.ts.net"}, failing); err != nil || len(got) != 2 {
-		t.Fatalf("configured names must not need detection: %v %v", got, err)
-	}
-	if _, err := resolveTrustedHosts(nil, failing); err == nil || !strings.Contains(err.Error(), "hostnames") {
-		t.Fatalf("no names at all: %v, want an error naming remote_access.hostnames", err)
-	}
-}
-
 // A config file that does not parse must stop the server with that error,
 // not run it on defaults the user never chose.
 func TestRemoteServe_MalformedConfigIsAnError(t *testing.T) {
@@ -106,254 +71,6 @@ func TestRemoteServe_MalformedConfigIsAnError(t *testing.T) {
 	}
 }
 
-func writeAPNsKey(t *testing.T, path string) {
-	t.Helper()
-	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	der, err := x509.MarshalPKCS8PrivateKey(k)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestBuildPush_OffByDefault(t *testing.T) {
-	p, err := buildPush(config.PushConfig{}, []string{"mac.ts.net"}, nil, t.TempDir(), func(string) string { return "" })
-	if err != nil || len(p.notifiers) != 0 || p.devices != nil {
-		t.Fatalf("%+v %v, want nothing on", p, err)
-	}
-}
-
-func TestBuildPush_Ntfy(t *testing.T) {
-	env := map[string]string{"NTFY_TOKEN": "tk_1"}
-	p, err := buildPush(config.PushConfig{Ntfy: config.NtfyConfig{Topic: "aimux-k3x9", TokenEnv: "NTFY_TOKEN"}}, //nolint:gosec // an environment variable name, not a credential
-		[]string{"mac.ts.net"}, nil, t.TempDir(), func(k string) string { return env[k] })
-	if err != nil || len(p.notifiers) != 1 {
-		t.Fatalf("%+v %v", p, err)
-	}
-	n, ok := p.notifiers[0].(*push.Ntfy)
-	if !ok || n.Server != "https://ntfy.sh" || n.Topic != "aimux-k3x9" || n.Token != "tk_1" {
-		t.Fatalf("ntfy %+v", p.notifiers[0])
-	}
-	if p.clickURL != "https://mac.ts.net:8443/app/" || p.devices != nil {
-		t.Fatalf("click %q devices %v", p.clickURL, p.devices)
-	}
-	// A token variable that is not set would fail every publish later: refuse now.
-	_, err = buildPush(config.PushConfig{Ntfy: config.NtfyConfig{Topic: "t", TokenEnv: "UNSET"}}, nil, nil, t.TempDir(), func(string) string { return "" })
-	if err == nil || !strings.Contains(err.Error(), "UNSET") {
-		t.Fatalf("unset token variable: %v", err)
-	}
-}
-
-func TestBuildPush_APNs(t *testing.T) {
-	home := t.TempDir()
-	keyFile := filepath.Join(home, ".aimux", "AuthKey_ABC.p8")
-	if err := os.MkdirAll(filepath.Dir(keyFile), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	writeAPNsKey(t, keyFile)
-	cfg := config.APNsConfig{KeyFile: "~/.aimux/AuthKey_ABC.p8", KeyID: "ABC", TeamID: "TEAM", Topic: "me.example.aimux"}
-	p, err := buildPush(config.PushConfig{APNs: cfg}, nil, []string{"me@example.com"}, home, func(string) string { return "" })
-	if err != nil || len(p.notifiers) != 1 || p.devices == nil {
-		t.Fatalf("%+v %v", p, err)
-	}
-	if a, ok := p.notifiers[0].(*push.APNs); !ok || a.KeyID != "ABC" || a.TeamID != "TEAM" || a.Topic != "me.example.aimux" || a.Devices != p.devices ||
-		fmt.Sprint(a.AllowedLogins) != "[me@example.com]" {
-		t.Fatalf("apns %+v", p.notifiers[0])
-	}
-	if p.devices.Path != filepath.Join(home, ".aimux", "remote-devices.json") {
-		t.Fatalf("devices at %s", p.devices.Path)
-	}
-
-	partial := cfg
-	partial.TeamID = ""
-	if _, err := buildPush(config.PushConfig{APNs: partial}, nil, nil, home, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "team_id") {
-		t.Fatalf("missing team_id: %v", err)
-	}
-	missing := cfg
-	missing.KeyFile = filepath.Join(home, "nope.p8")
-	if _, err := buildPush(config.PushConfig{APNs: missing}, nil, nil, home, func(string) string { return "" }); err == nil || !strings.Contains(err.Error(), "nope.p8") {
-		t.Fatalf("missing key file: %v", err)
-	}
-}
-
-type recordingNotifier struct {
-	got chan push.Message
-	err error
-}
-
-func (r *recordingNotifier) Notify(_ context.Context, m push.Message) error {
-	r.got <- m
-	return r.err
-}
-
-func TestApprovalHooks_SendsTheWordedMessageWithALink(t *testing.T) {
-	rec := &recordingNotifier{got: make(chan push.Message, 1), err: errors.New("relay down")}
-	var errOut strings.Builder
-	exp := time.Now().Add(10 * time.Minute)
-	notify, _ := approvalHooks(pushSetup{notifiers: []push.Notifier{rec}, clickURL: "https://mac.ts.net:8443/app/"},
-		func(_ context.Context, id string) string {
-			if id != "s/1" {
-				t.Errorf("title asked for %q", id)
-			}
-			return "Fix the cache"
-		}, &errOut)
-	notify(remoteapi.ApprovalNotice{ApprovalID: "ap1", Session: "s/1", Title: "Bash", Expires: exp})
-	m := <-rec.got
-	if m.Body != "Fix the cache: Bash" || m.ApprovalID != "ap1" || m.SessionID != "s/1" || !m.Expires.Equal(exp) ||
-		m.Link != "https://mac.ts.net:8443/app/#/s/s%2F1" {
-		t.Fatalf("message %+v", m)
-	}
-	if !strings.Contains(errOut.String(), "relay down") {
-		t.Fatalf("a failed notification must be logged, got %q", errOut.String())
-	}
-}
-
-func TestApprovalHooks_OffWithoutNotifiers(t *testing.T) {
-	if asked, resolved := approvalHooks(pushSetup{}, nil, io.Discard); asked != nil || resolved != nil {
-		t.Fatal("hooks with nothing to send to")
-	}
-}
-
-type retractingNotifier struct {
-	recordingNotifier
-	retracted chan push.Message
-}
-
-func (r *retractingNotifier) Retract(_ context.Context, m push.Message) error {
-	r.retracted <- m
-	return errors.New("old ntfy server")
-}
-
-func TestApprovalHooks_ResolvedTakesTheNotificationBack(t *testing.T) {
-	rec := &retractingNotifier{recordingNotifier{got: make(chan push.Message, 1)}, make(chan push.Message, 1)}
-	var errOut strings.Builder
-	asked, resolved := approvalHooks(pushSetup{notifiers: []push.Notifier{rec}}, func(context.Context, string) string { return "" }, &errOut)
-	asked(remoteapi.ApprovalNotice{ApprovalID: "ap1", Session: "s1", Title: "Bash"})
-	<-rec.got
-	resolved(remoteapi.ApprovalNotice{ApprovalID: "ap1", Session: "s1", Outcome: remoteapi.OutcomeAllowed})
-	if m := <-rec.retracted; m.ApprovalID != "ap1" || m.SessionID != "s1" {
-		t.Fatalf("retracted %+v", m)
-	}
-	if !strings.Contains(errOut.String(), "old ntfy server") {
-		t.Fatalf("a failed retraction must be logged, got %q", errOut.String())
-	}
-}
-
-func TestApprovalHooks_SlowTitleLookupStillNotifies(t *testing.T) {
-	rec := &recordingNotifier{got: make(chan push.Message, 1)}
-	stuck := make(chan struct{})
-	defer close(stuck)
-	asked, _ := approvalHooks(pushSetup{notifiers: []push.Notifier{rec}}, func(context.Context, string) string {
-		<-stuck // a session read that ignores its context, as the real one does
-		return "Late title"
-	}, io.Discard)
-	start := time.Now()
-	go asked(remoteapi.ApprovalNotice{ApprovalID: "ap1", Session: "s1", Title: "Bash"})
-	select {
-	case m := <-rec.got:
-		if m.Body != "Bash" {
-			t.Fatalf("body %q", m.Body)
-		}
-		if d := time.Since(start); d > titleLookupTimeout+2*time.Second {
-			t.Fatalf("notified after %v", d)
-		}
-	case <-time.After(titleLookupTimeout + 3*time.Second):
-		t.Fatal("a slow title lookup used up the delivery time")
-	}
-}
-
-func TestPushSummary(t *testing.T) {
-	both := config.PushConfig{Ntfy: config.NtfyConfig{Topic: "k3x9"}, APNs: config.APNsConfig{Topic: "me.example.aimux"}}
-	if got := pushSummary(both); got != "ntfy topic k3x9, APNs for me.example.aimux" {
-		t.Fatalf("%q", got)
-	}
-	if got := pushSummary(config.PushConfig{}); got != "" {
-		t.Fatalf("nothing on: %q", got)
-	}
-}
-
-// orderNotifier records sends and retractions in order.
-type orderNotifier struct {
-	mu  sync.Mutex
-	log []string
-}
-
-func (o *orderNotifier) Notify(_ context.Context, m push.Message) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.log = append(o.log, "send "+m.ApprovalID)
-	return nil
-}
-
-func (o *orderNotifier) Retract(_ context.Context, m push.Message) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.log = append(o.log, "retract "+m.ApprovalID)
-	return nil
-}
-
-func (o *orderNotifier) events() []string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return append([]string(nil), o.log...)
-}
-
-// An approval answered while its title is still being read: the alert must
-// not land after it was taken back (seen live with a large session).
-func TestApprovalHooks_AnsweredDuringTheTitleLookupLeavesNoAlert(t *testing.T) {
-	o := &orderNotifier{}
-	reading := make(chan struct{})
-	finish := make(chan struct{})
-	asked, resolved := approvalHooks(pushSetup{notifiers: []push.Notifier{o}}, func(context.Context, string) string {
-		close(reading)
-		<-finish
-		return "Big session"
-	}, io.Discard)
-	n := remoteapi.ApprovalNotice{ApprovalID: "ap1", Session: "s1", Title: "Bash"}
-	askedDone := make(chan struct{})
-	go func() { asked(n); close(askedDone) }()
-	<-reading
-	resolvedDone := make(chan struct{})
-	go func() { resolved(n); close(resolvedDone) }()
-	time.Sleep(50 * time.Millisecond) // resolved is now waiting on the lookup
-	close(finish)
-	<-askedDone
-	<-resolvedDone
-	if got := o.events(); len(got) != 0 {
-		t.Fatalf("events %v, want none: the approval was settled before the alert went out", got)
-	}
-}
-
-func TestApprovalHooks_ResolvedBeforeAskedRunsSendsNothing(t *testing.T) {
-	o := &orderNotifier{}
-	asked, resolved := approvalHooks(pushSetup{notifiers: []push.Notifier{o}}, func(context.Context, string) string { return "" }, io.Discard)
-	n := remoteapi.ApprovalNotice{ApprovalID: "ap1", Session: "s1", Title: "Bash"}
-	done := make(chan struct{})
-	go func() { resolved(n); close(done) }() // the goroutines may run in either order
-	time.Sleep(20 * time.Millisecond)
-	asked(n)
-	<-done
-	if got := o.events(); len(got) != 0 {
-		t.Fatalf("events %v, want none", got)
-	}
-}
-
-func TestApprovalHooks_SentThenResolvedIsTakenBackAfterTheSend(t *testing.T) {
-	o := &orderNotifier{}
-	asked, resolved := approvalHooks(pushSetup{notifiers: []push.Notifier{o}}, func(context.Context, string) string { return "" }, io.Discard)
-	n := remoteapi.ApprovalNotice{ApprovalID: "ap1", Session: "s1", Title: "Bash"}
-	asked(n)
-	resolved(n)
-	if got := o.events(); fmt.Sprint(got) != "[send ap1 retract ap1]" {
-		t.Fatalf("events %v", got)
-	}
-}
-
 type checkDriver struct {
 	panes   map[string]bool
 	err     error
@@ -361,16 +78,20 @@ type checkDriver struct {
 }
 
 func (d *checkDriver) Name() string { return "fake" }
+
 func (d *checkDriver) Locate(_ context.Context, t terminput.Target) (terminput.Pane, bool, error) {
 	d.located = append(d.located, t.TTY)
 	return terminput.Pane{Driver: "fake", ID: t.TTY}, d.panes[t.TTY], d.err
 }
+
 func (d *checkDriver) Type(context.Context, terminput.Pane, string) error {
 	return errors.New("check must not send")
 }
+
 func (d *checkDriver) Key(context.Context, terminput.Pane, terminput.Key) error {
 	return errors.New("check must not press keys")
 }
+
 func (d *checkDriver) Screen(context.Context, terminput.Pane) (string, error) {
 	return "", errors.New("check must not read screens")
 }
@@ -786,53 +507,6 @@ func TestRemotePair_NoticeWhenDeviceLoginIsOff(t *testing.T) {
 	}
 }
 
-func TestBuildDeviceLogin_On(t *testing.T) {
-	home := t.TempDir()
-	var out strings.Builder
-	dl, closeLog, err := buildDeviceLogin(true, home, &out)
-	if err != nil || dl == nil {
-		t.Fatalf("buildDeviceLogin(on) = %v, %v", dl, err)
-	}
-	defer closeLog()
-	fi, err := os.Stat(filepath.Join(home, ".aimux", "logs", "remote-audit.log"))
-	if err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("audit log: %v %v, want mode 0600", fi, err)
-	}
-	if !strings.Contains(out.String(), "aimux remote pair") {
-		t.Fatalf("banner %q does not say how to pair", out.String())
-	}
-}
-
-func TestBuildDeviceLogin_OffWarns(t *testing.T) {
-	home := t.TempDir()
-	var out strings.Builder
-	dl, closeLog, err := buildDeviceLogin(false, home, &out)
-	if err != nil || dl != nil {
-		t.Fatalf("buildDeviceLogin(off) = %v, %v; want nil", dl, err)
-	}
-	closeLog()
-	if !strings.Contains(out.String(), "Warning") || !strings.Contains(out.String(), "device_login") {
-		t.Fatalf("no warning: %q", out.String())
-	}
-	if _, err := os.Stat(filepath.Join(home, ".aimux", "logs", "remote-audit.log")); !os.IsNotExist(err) {
-		t.Fatalf("audit log opened with device login off: %v", err)
-	}
-}
-
-func TestBuildDeviceLogin_CorruptDevicesFileIsAnError(t *testing.T) {
-	home := t.TempDir()
-	dir := filepath.Join(home, ".aimux")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "remote-paired-devices.json"), []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := buildDeviceLogin(true, home, io.Discard); err == nil || !strings.Contains(err.Error(), "remote-paired-devices.json") {
-		t.Fatalf("corrupt devices file: %v, want an error naming it", err)
-	}
-}
-
 func TestRemoteRevoke_WritesTheAuditLine(t *testing.T) {
 	home := t.TempDir()
 	store := devicelogin.Open(filepath.Join(home, ".aimux"))
@@ -858,57 +532,5 @@ func TestRemoteRevoke_WritesTheAuditLine(t *testing.T) {
 	}
 	if strings.Contains(string(raw), d.PublicKey) || strings.Contains(string(raw), d.ID) {
 		t.Fatalf("audit line holds the key or id: %s", raw)
-	}
-}
-
-type layoutDriver struct{ terminput.Driver }
-
-func (layoutDriver) Layout(context.Context) ([]terminput.PaneRef, error) { return nil, nil }
-
-func TestBuildLayoutReader(t *testing.T) {
-	sessions := func() map[string]int { return nil }
-	if r := buildLayoutReader(sessions, nil, io.Discard, plainDriver{}); r != nil {
-		t.Fatal("a driver without a layout gave a reader")
-	}
-	if r := buildLayoutReader(sessions, nil, io.Discard); r != nil {
-		t.Fatal("no drivers gave a reader")
-	}
-	r := buildLayoutReader(sessions, nil, io.Discard, plainDriver{}, layoutDriver{})
-	if r == nil || r.Source == nil || r.LastOnMac != nil {
-		t.Fatalf("reader %+v: want a source and no LastOnMac without lastFocus", r)
-	}
-	r = buildLayoutReader(sessions, &terminput.LastFocus{}, io.Discard, layoutDriver{})
-	if r == nil || r.LastOnMac == nil {
-		t.Fatal("lastFocus given but LastOnMac unset")
-	}
-}
-
-// remote serve registers exactly one provider today, Claude's, reading
-// ~/.claude: the API's provider value stays "claude".
-func TestRemoteProviders_OnlyClaude(t *testing.T) {
-	home := t.TempDir()
-	ps := remoteProviders(home)
-	if len(ps) != 1 {
-		t.Fatalf("%d providers, want 1", len(ps))
-	}
-	if name := ps[0].Store.Name(); name != "claude" {
-		t.Fatalf("default provider %q, want claude", name)
-	}
-	live, ok := ps[0].Live.(*discovery.LiveCache)
-	if !ok || live.Dir != filepath.Join(home, ".claude", "sessions") {
-		t.Fatalf("live %#v, want the registry under %s", ps[0].Live, home)
-	}
-	file := filepath.Join(home, ".claude", "projects", "-w", "s-1.jsonl")
-	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(file, []byte(`{"cwd":"/w"}`+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got := ps[0].Store.SessionFile("s-1"); got != file {
-		t.Fatalf("SessionFile = %q, want %q", got, file)
-	}
-	if got := ps[0].Store.SessionFile("missing"); got != "" {
-		t.Fatalf("SessionFile(missing) = %q, want none", got)
 	}
 }

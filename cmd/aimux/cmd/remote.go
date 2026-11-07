@@ -2,44 +2,28 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 	webclient "github.com/zanetworker/aimux/clients/web"
-	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
-	"github.com/zanetworker/aimux/internal/folders"
-	"github.com/zanetworker/aimux/internal/gitremote"
 	"github.com/zanetworker/aimux/internal/harness"
-	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/provider"
-	"github.com/zanetworker/aimux/internal/push"
-	"github.com/zanetworker/aimux/internal/remoteapi"
-	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
-	"github.com/zanetworker/aimux/internal/search"
+	"github.com/zanetworker/aimux/internal/remoteapp"
 	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/terminput/iterm2"
-	"github.com/zanetworker/aimux/internal/waiting"
 )
 
 type remoteSettings struct {
@@ -82,331 +66,6 @@ func resolveRemoteSettings(cfg config.RemoteAccessConfig, port int, allow []stri
 	return s, nil
 }
 
-// pushSetup is what remote serve notifies approvals through.
-type pushSetup struct {
-	notifiers []push.Notifier
-	devices   *push.DeviceStore // set when APNs is on: the app registers here
-	clickURL  string            // web client a tapped ntfy notification opens
-}
-
-// buildPush turns remote_access.push into senders, refusing a half-done
-// setup at startup rather than failing on the first approval.
-func buildPush(cfg config.PushConfig, hosts, allowedLogins []string, home string, getenv func(string) string) (pushSetup, error) {
-	var p pushSetup
-	if n := cfg.Ntfy; n.Topic != "" {
-		server := n.Server
-		if server == "" {
-			server = "https://ntfy.sh"
-		}
-		token := ""
-		if n.TokenEnv != "" {
-			if token = getenv(n.TokenEnv); token == "" {
-				return p, fmt.Errorf("remote_access.push.ntfy.token_env names %s, which is not set", n.TokenEnv)
-			}
-		}
-		p.notifiers = append(p.notifiers, &push.Ntfy{Server: server, Topic: n.Topic, Token: token})
-		p.clickURL = n.ClickURL
-		if p.clickURL == "" && len(hosts) > 0 {
-			p.clickURL = "https://" + hosts[0] + ":8443/app/"
-		}
-	}
-	if a := cfg.APNs; a != (config.APNsConfig{}) {
-		var missing []string
-		for _, f := range []struct{ name, v string }{{"key_file", a.KeyFile}, {"key_id", a.KeyID}, {"team_id", a.TeamID}, {"topic", a.Topic}} {
-			if f.v == "" {
-				missing = append(missing, f.name)
-			}
-		}
-		if len(missing) > 0 {
-			return p, fmt.Errorf("remote_access.push.apns needs %s", strings.Join(missing, ", "))
-		}
-		keyFile := a.KeyFile
-		if rest, ok := strings.CutPrefix(keyFile, "~/"); ok {
-			keyFile = filepath.Join(home, rest)
-		}
-		key, err := push.LoadAPNsKey(keyFile)
-		if err != nil {
-			return p, err
-		}
-		p.devices = &push.DeviceStore{Path: filepath.Join(home, ".aimux", "remote-devices.json")}
-		p.notifiers = append(p.notifiers, &push.APNs{Key: key, KeyID: a.KeyID, TeamID: a.TeamID, Topic: a.Topic, Devices: p.devices, AllowedLogins: allowedLogins})
-	}
-	return p, nil
-}
-
-// titleLookupTimeout bounds reading the session's title, so a slow read of
-// a large session leaves the delivery its own time.
-const titleLookupTimeout = 5 * time.Second
-
-// lookupTitle reads the session's title, giving up after
-// titleLookupTimeout even when the read ignores its context (the session
-// reader does): the alert then goes out without it.
-func lookupTitle(sessionTitle func(ctx context.Context, id string) string, id string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), titleLookupTimeout)
-	defer cancel()
-	got := make(chan string, 1) // buffered: a late read finishes and is dropped
-	go func() { got <- sessionTitle(ctx, id) }()
-	select {
-	case t := <-got:
-		return t
-	case <-ctx.Done():
-		return ""
-	}
-}
-
-// approvalHooks are the broker's OnApproval and OnApprovalResolved: the
-// first names the session and sends the notification, the second takes it
-// back once the approval is settled. The broker runs them in goroutines of
-// their own, so an approval answered quickly can be resolved before its
-// alert is out: the alert is then skipped, or taken back only after it was
-// sent. Failures are logged. Both are nil when nothing is on.
-func approvalHooks(p pushSetup, sessionTitle func(ctx context.Context, id string) string, errOut io.Writer) (asked, resolved func(remoteapi.ApprovalNotice)) {
-	if len(p.notifiers) == 0 {
-		return nil, nil
-	}
-	type alert struct {
-		resolved bool
-		sent     bool
-		done     chan struct{} // closed once asked has sent or skipped the alert
-	}
-	var mu sync.Mutex
-	alerts := map[string]*alert{}
-	get := func(id string) *alert { // under mu
-		a, ok := alerts[id]
-		if !ok {
-			a = &alert{done: make(chan struct{})}
-			alerts[id] = a
-		}
-		return a
-	}
-	asked = func(n remoteapi.ApprovalNotice) {
-		mu.Lock()
-		a := get(n.ApprovalID)
-		mu.Unlock()
-		defer close(a.done)
-		title := lookupTitle(sessionTitle, n.Session)
-		mu.Lock()
-		skip := a.resolved
-		a.sent = !skip
-		mu.Unlock()
-		if skip {
-			return // answered or expired already: nothing to look at
-		}
-		m := push.ForApproval(title, n.Title)
-		m.ApprovalID, m.SessionID, m.Expires = n.ApprovalID, n.Session, n.Expires
-		if p.clickURL != "" {
-			m.Link = p.clickURL + "#/s/" + url.PathEscape(n.Session)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := push.Send(ctx, p.notifiers, m); err != nil {
-			_, _ = fmt.Fprintln(errOut, "approval notification:", err)
-		}
-	}
-	resolved = func(n remoteapi.ApprovalNotice) {
-		mu.Lock()
-		a := get(n.ApprovalID)
-		a.resolved = true
-		mu.Unlock()
-		select {
-		case <-a.done:
-		case <-time.After(titleLookupTimeout + 40*time.Second): // asked is bounded well inside this
-		}
-		mu.Lock()
-		sent := a.sent
-		delete(alerts, n.ApprovalID)
-		mu.Unlock()
-		if !sent {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := push.Retract(ctx, p.notifiers, push.Message{ApprovalID: n.ApprovalID, SessionID: n.Session}); err != nil {
-			_, _ = fmt.Fprintln(errOut, "approval notification (taking it back):", err)
-		}
-	}
-	return asked, resolved
-}
-
-// pushSummary names the senders that are on, for the startup banner.
-func pushSummary(cfg config.PushConfig) string {
-	var on []string
-	if cfg.Ntfy.Topic != "" {
-		on = append(on, "ntfy topic "+cfg.Ntfy.Topic)
-	}
-	if cfg.APNs.Topic != "" {
-		on = append(on, "APNs for "+cfg.APNs.Topic)
-	}
-	return strings.Join(on, ", ")
-}
-
-// resolveTrustedHosts returns the Host names the API accepts: configured
-// names, or this machine's MagicDNS name from tailscale.
-func resolveTrustedHosts(configured []string, detect func() (string, error)) ([]string, error) {
-	if len(configured) > 0 {
-		return configured, nil
-	}
-	name, err := detect()
-	if err != nil || strings.TrimSuffix(name, ".") == "" {
-		return nil, fmt.Errorf("cannot tell which Host names to trust: set remote_access.hostnames (your tailnet name, e.g. mac.tailnet.ts.net) or start tailscale (%v)", err)
-	}
-	return []string{strings.TrimSuffix(name, ".")}, nil
-}
-
-// tailscaleDNSName asks tailscale for this machine's MagicDNS name.
-func tailscaleDNSName() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "tailscale", "status", "--json").Output()
-	if err != nil {
-		return "", fmt.Errorf("tailscale status: %w", err)
-	}
-	var st struct {
-		Self struct {
-			DNSName string `json:"DNSName"`
-		} `json:"Self"`
-	}
-	if err := json.Unmarshal(out, &st); err != nil {
-		return "", fmt.Errorf("tailscale status: %w", err)
-	}
-	return st.Self.DNSName, nil
-}
-
-func tailscaleServeHint(port int, hosts []string) string {
-	hint := fmt.Sprintf("Expose it on your tailnet (HTTPS, tailnet only):\n  tailscale serve --bg --https=8443 http://127.0.0.1:%d\n", port)
-	if len(hosts) > 0 {
-		hint += fmt.Sprintf("Then open the web client on your phone: https://%s:8443/app/\n", hosts[0])
-	}
-	return hint
-}
-
-// buildTerminalInput builds the service that types phone messages into
-// terminal sessions. The attempt log (~/.aimux/logs/terminal-input.log,
-// 0600, never the text) is opened only when terminal input is on.
-func buildTerminalInput(cfg config.TerminalInputConfig, home string, sessions terminput.Sessions, drivers ...terminput.Driver) (*terminput.Service, func(), error) {
-	var log io.WriteCloser
-	if cfg.Enabled {
-		var err error
-		if log, err = terminput.OpenLog(filepath.Join(home, ".aimux", "logs", "terminal-input.log")); err != nil {
-			return nil, nil, fmt.Errorf("open the terminal input log: %w", err)
-		}
-	}
-	closeLog := func() {
-		if log != nil {
-			_ = log.Close()
-		}
-	}
-	var w io.Writer
-	if log != nil {
-		w = log
-	}
-	return terminput.NewService(cfg, sessions, terminput.SystemProbe{}, w, drivers...), closeLog, nil
-}
-
-// namingConfig wires the session namer from sessions config: the API key
-// from sessions.api_key or the environment (never logged), else claude -p;
-// today's counts in ~/.aimux/naming-state.json (0600). Usage goes to the
-// namer's default, ~/.aimux/data/usage.jsonl, under "naming".
-func namingConfig(cfg config.SessionsConfig, home string, lookup func(string) (history.Session, bool), logw io.Writer) history.NamerConfig {
-	primary, fallback := history.NamingBackends(cfg.APIKey)
-	nc := history.NamerConfig{Model: cfg.TitleModel, DailyLimit: cfg.NamingDailyLimit, Lookup: lookup,
-		Primary: primary, Fallback: fallback, StatePath: filepath.Join(home, ".aimux", "naming-state.json")}
-	if logw != nil {
-		nc.Logf = func(format string, args ...any) { _, _ = fmt.Fprintf(logw, format+"\n", args...) }
-	}
-	return nc
-}
-
-// lastFocusEvery is how often Last on your Mac looks at the Mac.
-const lastFocusEvery = 15 * time.Second
-
-// buildLastFocus is Last on your Mac: nil unless terminal input is on and
-// a driver can report focus. It only reads which pane has focus.
-func buildLastFocus(cfg config.TerminalInputConfig, sessions func() map[string]int, drivers ...terminput.Driver) *terminput.LastFocus {
-	if !cfg.Enabled {
-		return nil
-	}
-	for _, d := range drivers {
-		if fr, ok := d.(terminput.FocusReporter); ok {
-			return &terminput.LastFocus{Enabled: true, Sys: terminput.SystemProbe{}, Focus: fr, Sessions: sessions, Now: time.Now}
-		}
-	}
-	return nil
-}
-
-// buildLayoutReader reads the iTerm2 layout for the session list, from the
-// first driver that can report one, whether or not terminal input is on.
-// lastFocus may be nil. Nil when no driver reports a layout.
-func buildLayoutReader(sessions func() map[string]int, lastFocus *terminput.LastFocus, log io.Writer, drivers ...terminput.Driver) *terminput.LayoutReader {
-	for _, d := range drivers {
-		if src, ok := d.(terminput.LayoutSource); ok {
-			r := &terminput.LayoutReader{Source: src, Sys: terminput.SystemProbe{}, Sessions: sessions, Now: time.Now, Log: log}
-			if lastFocus != nil {
-				r.LastOnMac = lastFocus.Last
-			}
-			return r
-		}
-	}
-	return nil
-}
-
-// Both the iTerm2 driver and the process probe feed the layout reader.
-var (
-	_ terminput.LayoutSource = (*iterm2.Driver)(nil)
-	_ terminput.LayoutSystem = terminput.SystemProbe{}
-)
-
-// buildDeviceLogin sets up device login when on: the paired devices in
-// ~/.aimux and the audit log ~/.aimux/logs/remote-audit.log (0600). Off,
-// it returns nil and prints a warning to out: the tailnet check alone admits
-// any device of an allowed login.
-func buildDeviceLogin(on bool, home string, out io.Writer) (*devicelogin.Server, func(), error) {
-	if !on {
-		_, _ = fmt.Fprintln(out, "Warning: remote_access.device_login is false: any device signed in to your tailnet as an allowed login can use this API, with no pairing and no Face ID.")
-		return nil, func() {}, nil
-	}
-	path := auditPath(home)
-	log, err := terminput.OpenLog(path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open the audit log %s: %w", path, err)
-	}
-	dl, err := devicelogin.NewServer(devicelogin.Options{
-		Store: devicelogin.Open(filepath.Join(home, ".aimux")),
-		Audit: devicelogin.NewAudit(log, time.Now, out),
-		Login: func(r *http.Request) string { return remoteapi.LoginFrom(r.Context()) },
-		Log:   out,
-	})
-	if err != nil {
-		_ = log.Close()
-		return nil, nil, err
-	}
-	_, _ = fmt.Fprintln(out, "Device login: on; pair a phone or browser with `aimux remote pair --name <name>`")
-	return dl, func() { _ = log.Close() }, nil
-}
-
-// openChatQueue opens the chat queue (~/.aimux/remote-queue.json, 0600) and
-// its dispatcher, which sends through the broker (sessions started from
-// the phone) and through input (sessions open in a terminal) under the
-// same switches as the terminal routes: with terminal input off it never
-// reads or types into a terminal. noteChanged hears changes of a session's
-// waiting line. The caller runs the dispatcher.
-func openChatQueue(home string, tcfg config.TerminalInputConfig, broker *remoteapi.Broker, index *remoteapi.LocalIndex,
-	input remoteapi.QueueInput, audit chatqueue.Auditor, typed, noteChanged func(string)) (*chatqueue.Store, *chatqueue.Dispatcher, error) {
-	store, err := chatqueue.Open(filepath.Join(home, ".aimux", "remote-queue.json"), time.Now, tcfg.AllowSlashCommands)
-	if err != nil {
-		return nil, nil, err
-	}
-	d := chatqueue.New(chatqueue.Config{
-		Store: store, ACP: remoteapi.QueueACP{Broker: broker},
-		Terminal: remoteapi.QueueTerminal{Index: index, Input: input}, TerminalEnabled: tcfg.Enabled,
-		Audit: audit, Typed: typed, NoteChanged: noteChanged,
-	})
-	return store, d, nil
-}
-
-// auditPath is the remote API's audit log, shared by the server and the CLI.
-func auditPath(home string) string { return filepath.Join(home, ".aimux", "logs", "remote-audit.log") }
-
 // auditRevoke writes the revoke line for d to the audit log, as the server
 // writes its own lines; the server does not see who revoked.
 func auditRevoke(d devicelogin.Device, errOut io.Writer) error {
@@ -414,9 +73,9 @@ func auditRevoke(d devicelogin.Device, errOut io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("audit the revoke: resolve home directory: %w", err)
 	}
-	log, err := terminput.OpenLog(auditPath(home))
+	log, err := terminput.OpenLog(remoteapp.AuditPath(home))
 	if err != nil {
-		return fmt.Errorf("audit the revoke: open %s: %w", auditPath(home), err)
+		return fmt.Errorf("audit the revoke: open %s: %w", remoteapp.AuditPath(home), err)
 	}
 	defer func() { _ = log.Close() }()
 	devicelogin.NewAudit(log, time.Now, errOut).Write(devicelogin.AuditEntry{Login: d.Login, Device: d.Name, Action: devicelogin.ActionRevoke, Result: "ok"})
@@ -574,240 +233,11 @@ func newRemoteServeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve home directory: %w", err)
 			}
-			hosts, err := resolveTrustedHosts(cfg.RemoteAccess.Hostnames, tailscaleDNSName)
-			if err != nil {
-				return err
-			}
-			pushes, err := buildPush(cfg.RemoteAccess.Push, hosts, s.allowed, home, os.Getenv)
-			if err != nil {
-				return err
-			}
-			var index *remoteapi.LocalIndex // set below, before the server takes requests
-			sessionTitle := func(ctx context.Context, id string) string {
-				title, err := index.Title(ctx, id) // never reads the terminal
-				if err != nil {
-					return "" // a session not written yet: the tool alone still says what is asked
-				}
-				return title
-			}
-			asked, resolved := approvalHooks(pushes, sessionTitle, cmd.ErrOrStderr())
-
-			var broker *remoteapi.Broker
-			var dispatcher *chatqueue.Dispatcher // set before the server takes requests, so before any turn
-			// Each provider's Live is the one reader of which of its sessions
-			// are open in a terminal: the list, details, terminal input, the
-			// queue, waiting, Last on your Mac and the layout read it through
-			// the index (harness.List), the router before a send
-			// (harness.Strict). New sessions and continuing ones run on the
-			// default provider's ACP adapter.
-			providers := remoteProviders(home)
-			def := providers[0]
-			manager := acprun.NewManager(acprun.ManagerOptions{
-				MaxRuns:     s.maxRuns,
-				Fingerprint: def.Store.Fingerprint,
-				Reserve:     sessionReservation(home),
-				Start: func(ctx context.Context, id, cwd string) (acprun.Runner, error) {
-					return acprun.Start(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, id, broker.Approver())
-				},
-				StartNew: func(ctx context.Context, cwd string) (acprun.Runner, string, error) {
-					r, err := acprun.StartNew(ctx, acprun.Spec{Command: name, Args: adapterArgs, Cwd: cwd}, broker.Approver())
-					if err != nil {
-						return nil, "", err
-					}
-					return r, r.SessionID(), nil
-				},
-			})
-			defer manager.Close()
-			router := &acprun.Router{Lookup: acprun.SessionLookup{Provider: def.Store.Name(), Store: def.Store, Live: def.Live}.Lookup, Manager: manager}
-			broker = remoteapi.NewBroker(remoteapi.BrokerDeps{
-				Check: router.Check, Send: router.Send, Cancel: manager.Cancel,
-			}, remoteapi.BrokerOptions{ApprovalTimeout: s.approvalTimeout, OnApproval: asked, OnApprovalResolved: resolved,
-				OnTurnEnd: func(string) { dispatcher.Kick() }})
-			// Keyword ranking only (below), in an index of its own: without
-			// embeddings, refreshing the shared index would mark changed
-			// sessions as seen before the CLI and TUI embed them. One service
-			// refreshes it in the background; a second one answers queries, so
-			// a search reads the last committed index (SQLite WAL) instead of
-			// waiting for a refresh that can take minutes.
-			remoteIndex := filepath.Join(home, ".aimux", "remote-search.db")
-			searcher := search.DefaultService(io.Discard)
-			searcher.Embedder, searcher.DBPath = nil, remoteIndex
-			reader := search.DefaultService(io.Discard)
-			reader.Embedder, reader.DBPath = nil, remoteIndex
-			index = &remoteapi.LocalIndex{
-				Providers: providers, NewProvider: def.Store.Name(), Broker: broker, Owned: manager.Owns,
-				Repo:    gitremote.Lookup,
-				Created: &remoteapi.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")},
-				Running: manager.Running,
-				// Keyword ranking: every hit shows where the words matched, and a
-				// query nothing contains finds nothing. The index is refreshed in
-				// the background (below); refreshing per query takes seconds.
-				SearchIndex: func(ctx context.Context, q string, limit int, ids []string) ([]search.Result, error) {
-					rs, _, err := reader.Query(ctx, q, search.QueryOpts{Mode: search.ModeKeyword, Limit: limit, IncludeAutomated: true, NoRefresh: true, IDs: ids})
-					return rs, err
-				},
-			}
-			// Terminal input: the service reaches a session through the same
-			// registry rule (live holder, not aimux's own) that makes it
-			// open_in_terminal.
-			drivers, closeDrivers := terminalDrivers()
-			defer closeDrivers()
-			terminal, closeLog, err := buildTerminalInput(cfg.RemoteAccess.TerminalInput, home, index, drivers...)
-			if err != nil {
-				return err
-			}
-			defer closeLog()
-			statusCache := remoteapi.NewStatusCache(terminal, time.Second) // detail reads only; sends read fresh
-			index.Terminal = statusCache
-			api := &remoteapi.API{Version: cmd.Root().Version, TerminalInput: terminal, TerminalEnabled: cfg.RemoteAccess.TerminalInput.Enabled,
-				Links:         &remoteapi.Links{JiraBase: cfg.RemoteAccess.Links.JiraBase, JiraProjects: cfg.RemoteAccess.Links.JiraProjects},
-				TerminalTyped: statusCache.Invalidate, Log: cmd.ErrOrStderr(), Client: webclient.Handler(), Broker: broker, Sessions: index.Sessions, Session: index.Session,
-				Search: index.Search, Projects: index.Projects,
-				Create: func(ctx context.Context, cwd, text string) (string, error) {
-					id, err := manager.New(ctx, cwd)
-					if err != nil {
-						return "", err
-					}
-					if err := index.Created.Add(id, cwd, text); err != nil {
-						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err) // the session works; it may only be hidden from the list
-					}
-					return id, nil
-				},
-			}
-
-			if pushes.devices != nil {
-				api.RegisterDevice, api.UnregisterDevice = pushes.devices.Add, pushes.devices.Remove
-			}
-			deviceLogin, closeAudit, err := buildDeviceLogin(cfg.RemoteAccess.DeviceLoginOn(), home, cmd.ErrOrStderr())
-			if err != nil {
-				return err
-			}
-			defer closeAudit()
-			api.DeviceLogin = deviceLogin
-			var audit chatqueue.Auditor
-			if deviceLogin != nil {
-				audit = deviceLogin.Audit()
-			}
-			queue, d, err := openChatQueue(home, cfg.RemoteAccess.TerminalInput, broker, index, terminal, audit, statusCache.Invalidate, api.PublishQueue)
-			if err != nil {
-				return err
-			}
-			defer queue.Close()
-			dispatcher = d
-			api.Queue, api.QueueKick, api.QueueNote, api.SessionExists = queue, d.Kick, d.Note, index.SessionExists
-			// A Send now's history turn is aimux's own, not the owner's.
-			api.QueueSentNow = func(session, text string) func() { return d.NoteSentNow(session, text, time.Now()) }
-			// Titles and descriptions: "Update summary" always; automatic
-			// naming of the sessions clients show only with sessions.auto_title.
-			namer := history.NewNamer(namingConfig(cfg.Sessions, home, index.Lookup, cmd.ErrOrStderr()))
-			api.Record, api.Naming, api.AutoName = index.Record, namer, cfg.Sessions.AutoTitle
-			lastFocus := buildLastFocus(cfg.RemoteAccess.TerminalInput, index.TerminalPIDs, drivers...)
-			if lastFocus != nil {
-				api.LastOnMac = lastFocus.Last
-			}
-			// Folder names and the Mac layout of listed sessions. The layout
-			// is read with or without terminal input: it only reads.
-			resolver := folders.NewResolver(home, filepath.Join(home, ".aimux", "folders.json"))
-			api.Folder = resolver.Folder
-			if layout := buildLayoutReader(index.TerminalPIDs, lastFocus, cmd.ErrOrStderr(), drivers...); layout != nil {
-				api.Places = layout.Places
-			}
-			// Terminal sessions at a permission prompt, from the markers
-			// aimux remote hooks notify writes.
-			waits := &waiting.Tracker{Dir: waiting.Dir(home), Live: index.TerminalPIDs}
-			api.Waiting = waits.Current
-			ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.port))
-			if err != nil {
-				return fmt.Errorf("listen on 127.0.0.1:%d: %w (choose another port with --port)", s.port, err)
-			}
-			srv := &http.Server{Handler: api.Handler(s.allowed, hosts), ReadHeaderTimeout: 10 * time.Second}
-
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
-			if deviceLogin != nil {
-				go deviceLogin.Watch(ctx) // ends streams of revoked or expired logins
-			}
-			go api.QueueEvents(ctx)
-			queueDone := make(chan struct{})
-			go func() { defer close(queueDone); dispatcher.Run(ctx) }()
-			namerDone := make(chan struct{})
-			go func() {
-				defer close(namerDone)
-				if cfg.Sessions.AutoTitle {
-					namer.Run(ctx)
-				}
-			}()
-			focusDone := make(chan struct{})
-			go func() {
-				defer close(focusDone)
-				if lastFocus != nil {
-					lastFocus.Run(ctx, lastFocusEvery)
-				}
-			}()
-			foldersDone := make(chan struct{})
-			go func() { defer close(foldersDone); resolver.Run(ctx) }()
-			waitsDone := make(chan struct{})
-			go func() {
-				defer close(waitsDone)
-				runWaitingAlerts(ctx, waits, waitingAlerts(pushes, sessionTitle, cmd.ErrOrStderr()))
-			}()
-			// The dispatcher, the namer, the folder resolver and Last on your
-			// Mac stop before the terminal drivers close (deferred earlier,
-			// so run later).
-			defer func() {
-				stop()
-				<-queueDone
-				<-namerDone
-				<-focusDone
-				<-foldersDone
-				<-waitsDone
-			}()
-			go func() {
-				t := time.NewTicker(time.Minute)
-				defer t.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-t.C:
-						manager.Reap()
-					}
-				}
-			}()
-			go func() {
-				for {
-					if err := searcher.Refresh(ctx); err != nil && ctx.Err() == nil {
-						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(time.Minute):
-					}
-				}
-			}()
-			shutDown := make(chan struct{})
-			go func() {
-				defer close(shutDown)
-				<-ctx.Done()
-				shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				_ = srv.Shutdown(shut)
-			}()
-			out := cmd.OutOrStdout()
-			_, _ = fmt.Fprintf(out, "aimux remote API on http://%s/v1 for %v via %v\n%s", ln.Addr(), s.allowed, hosts, tailscaleServeHint(s.port, hosts))
-			if len(pushes.notifiers) > 0 {
-				_, _ = fmt.Fprintf(out, "Approval notifications: %s\n", pushSummary(cfg.RemoteAccess.Push))
-			}
-			_, _ = fmt.Fprintln(out, hooksSummary(filepath.Join(home, ".claude", "settings.json")))
-			if cfg.RemoteAccess.TerminalInput.Enabled {
-				_, _ = fmt.Fprintf(out, "Terminal input: on (%d terminal driver(s)); run `aimux remote terminal-input check` once at the Mac\n", len(drivers))
-			}
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return err
-			}
-			<-shutDown // in-flight requests end before the terminal drivers close
-			return nil
+			return remoteapp.New(cfg, remoteapp.Options{
+				Home: home, Port: s.port, Allowed: s.allowed, AdapterCommand: name, AdapterArgs: adapterArgs,
+				MaxRuns: s.maxRuns, ApprovalTimeout: s.approvalTimeout,
+				Version: cmd.Root().Version, Client: webclient.Handler(), Out: cmd.OutOrStdout(), ErrOut: cmd.ErrOrStderr(),
+			}).Run(cmd.Context())
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 0, "Port on 127.0.0.1 (default 7382, or remote_access.port)")
@@ -849,7 +279,7 @@ func newRemoteTerminalInputCmd() *cobra.Command {
 			owned := func(pid int) bool { return aimuxAncestor(pid, discovery.GetParentPID, processName) }
 			return runTerminalInputCheck(cmd.Context(), cmd.OutOrStdout(), terminalCheck{
 				Enabled:  cfg.RemoteAccess.TerminalInput.Enabled,
-				Sessions: openTerminalSessions(remoteProviders(home)[0].Live, owned),
+				Sessions: openTerminalSessions(remoteapp.Providers(home)[0].Live, owned),
 				TTY:      terminput.SystemProbe{}.TTY,
 				Probe:    drv.Probe,
 				Driver:   drv,
@@ -939,27 +369,6 @@ func shortID(id string) string {
 		return id[:8]
 	}
 	return id
-}
-
-// remoteProviders is the harnesses remote serve lists, follows and
-// continues sessions of: every provider in the registry (provider.Registry
-// Local, in its order) that implements remoteapi.Store and
-// provider.LiveSource, so a new harness implements those two and needs no
-// change here or inside remoteapi. Today that is Claude only. The first is
-// the default: sessions a client creates, the router and the chat manager
-// are its, since the ACP adapter (--adapter) is Claude Code's. Another
-// entry's sessions are listed but cannot be continued until the router and
-// the manager dispatch per provider.
-func remoteProviders(home string) []remoteapi.Provider {
-	var out []remoteapi.Provider
-	for _, p := range provider.NewRegistry(home, config.Config{}).Local() {
-		store, isStore := p.(remoteapi.Store)
-		live, isLive := p.(provider.LiveSource)
-		if isStore && isLive {
-			out = append(out, remoteapi.Provider{Store: store, Live: live.LiveSessions(discovery.LiveTTL)})
-		}
-	}
-	return out
 }
 
 // openTerminalSessions lists the live sessions that aimux does not own

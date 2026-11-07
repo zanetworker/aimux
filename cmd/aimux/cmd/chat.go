@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,7 +62,7 @@ func newChatCmd() *cobra.Command {
 				Lookup: acprun.SessionLookup{Provider: "claude", Store: claude, Live: live}.Lookup,
 				Manager: acprun.NewManager(acprun.ManagerOptions{Start: start, MaxRuns: 1,
 					Fingerprint: claude.Fingerprint,
-					Reserve:     sessionReservation(home)}),
+					Reserve:     acprun.Reservation(home)}),
 			}
 			defer router.Manager.Close()
 
@@ -240,12 +239,6 @@ func denyNoTerminal(out io.Writer) acprun.Approver {
 		_, _ = fmt.Fprintf(out, "\ndenied: %s (no terminal to ask for approval)\n", title)
 		return "", false
 	}
-}
-
-// sessionReservation keeps two aimux processes from continuing one session.
-func sessionReservation(home string) func(string) (func(), error) {
-	dir := filepath.Join(home, ".aimux", "locks")
-	return func(sessionID string) (func(), error) { return acprun.SessionLock(dir, sessionID) }
 }
 
 // chatProvider is the registry's provider called name as the session store
