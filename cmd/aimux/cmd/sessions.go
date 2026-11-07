@@ -215,12 +215,9 @@ func printSessionsTableCobra(cmd *cobra.Command, sessions []history.Session, fie
 				}
 				vals = append(vals, a)
 			case "prompt":
-				p := s.Title
-				if p == "" {
-					p = s.FirstPrompt
-				}
-				if len(p) > 40 {
-					p = p[:37] + "..."
+				p := history.ShownTitle(s)
+				if r := []rune(p); len(r) > 40 {
+					p = string(r[:37]) + "..."
 				}
 				if p == "" {
 					p = "-"

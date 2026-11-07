@@ -18,7 +18,7 @@ const (
 )
 
 func human(cwd, text string) string {
-	return `{"type":"user","entrypoint":"cli","cwd":"` + cwd + `","message":{"content":"` + text + `"}}`
+	return `{"type":"user","entrypoint":"cli","cwd":"` + cwd + `","message":{"role":"user","content":"` + text + `"}}`
 }
 
 func reply(text string) string {

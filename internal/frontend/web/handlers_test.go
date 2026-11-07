@@ -187,7 +187,7 @@ func TestHistoryHandler_AllSessionFieldsMapped(t *testing.T) {
 	expectedFields := []string{
 		"id", "provider", "project", "filePath", "startTime", "lastActive",
 		"turnCount", "tokensIn", "tokensOut", "costUSD", "firstPrompt",
-		"title", "resumable", "annotation", "tags", "note",
+		"title", "shownTitle", "resumable", "annotation", "tags", "note",
 		"isSubagent", "permissionMode", "starred",
 	}
 

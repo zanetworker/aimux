@@ -44,13 +44,7 @@ const (
 func FormatLine(s history.Session) string {
 	proj := shortProject(s.Project)
 	age := shortAge(s.LastActive)
-	title := s.Title
-	if title == "" {
-		title = s.FirstPrompt
-	}
-	if len(title) > 60 {
-		title = title[:57] + "..."
-	}
+	title := cutRunes(history.ShownTitle(s), 60)
 	if title == "" {
 		title = "-"
 	}
@@ -61,19 +55,23 @@ func FormatLine(s history.Session) string {
 }
 
 // FormatPreview returns a second line with the first prompt in dim text,
-// shown below the main FormatLine for extra context.
+// shown below the main FormatLine for extra context; empty when the first
+// prompt is already the title.
 func FormatPreview(s history.Session) string {
 	preview := s.FirstPrompt
-	if preview == "" {
+	if preview == "" || preview == history.ShownTitle(s) {
 		return ""
 	}
-	if s.Title != "" && preview == s.Title {
-		return ""
+	return fmt.Sprintf("%s    %s%s", ansiDim, cutRunes(preview, 90), ansiReset)
+}
+
+// cutRunes keeps s within n runes, ending a cut line with "...".
+func cutRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
 	}
-	if len(preview) > 90 {
-		preview = preview[:87] + "..."
-	}
-	return fmt.Sprintf("%s    %s%s", ansiDim, preview, ansiReset)
+	return string(r[:n-3]) + "..."
 }
 
 // ParseSelectedID extracts the session ID from a picker output line.
@@ -165,7 +163,8 @@ func (m pickerModel) filteredSessions() []history.Session {
 	needle := strings.ToLower(m.filter)
 	var result []history.Session
 	for _, s := range m.sessions {
-		if strings.Contains(strings.ToLower(s.Title), needle) ||
+		if strings.Contains(strings.ToLower(history.ShownTitle(s)), needle) ||
+			strings.Contains(strings.ToLower(s.Title), needle) ||
 			strings.Contains(strings.ToLower(s.FirstPrompt), needle) ||
 			strings.Contains(strings.ToLower(s.Project), needle) ||
 			strings.Contains(strings.ToLower(s.ID), needle) {

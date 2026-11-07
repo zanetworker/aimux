@@ -4,14 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/badge"
 	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -90,10 +88,8 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 		enriched[i] = enrichedAgent{Agent: a}
 		if a.SessionFile != "" {
 			meta := history.LoadMeta(a.SessionFile)
-			enriched[i].Title = meta.Title
-			if enriched[i].Title == "" {
-				enriched[i].Title = firstPromptFromJSONL(a.SessionFile)
-			}
+			// cards clamp to two lines; no need to send a whole first message
+			enriched[i].Title = history.Shorten(history.ShownTitleForFileMeta(a.SessionFile, meta), 120)
 			enriched[i].Starred = meta.Starred
 		}
 	}
@@ -123,56 +119,4 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 	}
 	_, _ = fmt.Fprintf(w, "event: agents\ndata: %s\n\n", data)
 	flusher.Flush()
-}
-
-func firstPromptFromJSONL(sessionFile string) string {
-	f, err := os.Open(sessionFile) // #nosec G304
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := jsonl.NewScanner(f)
-	for scanner.Scan() {
-		var entry struct {
-			Type    string `json:"type"`
-			Message *struct {
-				Role    string          `json:"role"`
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue
-		}
-		if entry.Type == "user" && entry.Message != nil && entry.Message.Role == "user" {
-			// Handle both string content and array content
-			var text string
-
-			// Try parsing as string first
-			var contentStr string
-			if err := json.Unmarshal(entry.Message.Content, &contentStr); err == nil {
-				text = contentStr
-			} else {
-				// Try parsing as array of content blocks
-				var contentBlocks []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				}
-				if err := json.Unmarshal(entry.Message.Content, &contentBlocks); err == nil {
-					for _, block := range contentBlocks {
-						if block.Type == "text" && block.Text != "" {
-							text = block.Text
-							break
-						}
-					}
-				}
-			}
-
-			if len(text) > 120 {
-				text = text[:117] + "..."
-			}
-			return text
-		}
-	}
-	return ""
 }

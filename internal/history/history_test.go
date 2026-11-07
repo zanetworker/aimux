@@ -562,28 +562,6 @@ func TestDiscover_CostCalculation(t *testing.T) {
 	}
 }
 
-func TestTitleForSessionFile(t *testing.T) {
-	dir := t.TempDir()
-	sessionFile := filepath.Join(dir, "test.jsonl")
-	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
-
-	// No meta file — should return ""
-	if got := TitleForSessionFile(sessionFile); got != "" {
-		t.Errorf("expected empty title, got %q", got)
-	}
-
-	// With meta file
-	_ = UpdateMeta(sessionFile, func(m *Meta) { *m = Meta{Title: "Fix markdown rendering"} })
-	if got := TitleForSessionFile(sessionFile); got != "Fix markdown rendering" {
-		t.Errorf("expected title, got %q", got)
-	}
-
-	// Empty path
-	if got := TitleForSessionFile(""); got != "" {
-		t.Errorf("expected empty for empty path, got %q", got)
-	}
-}
-
 func TestScanSession_SubagentDetection(t *testing.T) {
 	tests := map[string]struct {
 		lines    []map[string]interface{}
@@ -1200,6 +1178,34 @@ func TestScanSession_AITitle(t *testing.T) {
 	}
 	if s.AITitle != "Remote session access plan" {
 		t.Fatalf("AITitle = %q", s.AITitle)
+	}
+}
+
+// Claude Code's /rename writes custom-title entries; the latest wins, and
+// Discover carries who wrote the meta title.
+func TestScanSession_CustomTitleAndTitleBy(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "-w")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":"hello there"}}
+{"type":"custom-title","customTitle":"first-name"}
+{"type":"custom-title","customTitle":"agent-ops"}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateMeta(path, func(m *Meta) { m.Title, m.TitleBy = "Mine", "owner" }); err != nil {
+		t.Fatal(err)
+	}
+	all, err := Discover(DiscoverOpts{}, root)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("Discover: %v, %d sessions", err, len(all))
+	}
+	if all[0].CustomTitle != "agent-ops" || all[0].TitleBy != "owner" {
+		t.Fatalf("CustomTitle = %q, TitleBy = %q", all[0].CustomTitle, all[0].TitleBy)
 	}
 }
 

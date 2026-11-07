@@ -1043,7 +1043,7 @@ func (l *LauncherView) viewResume() string {
 			style = launcherSelectedStyle
 		}
 
-		prompt := s.FirstPrompt
+		prompt := history.ShownTitle(s)
 		if prompt == "" {
 			prompt = "(no prompt)"
 		}

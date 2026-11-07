@@ -182,7 +182,7 @@ export default function App() {
       TMuxSession: '',
       TeamName: '',
       TaskSubject: '',
-      Title: session.title || session.firstPrompt || '',
+      Title: session.shownTitle || '',
       PermissionMode: session.permissionMode || '',
     });
   }, []);

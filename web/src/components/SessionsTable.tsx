@@ -14,6 +14,7 @@ export interface HistorySession {
   costUSD: number;
   firstPrompt: string;
   title: string;
+  shownTitle: string; // the title to show, chosen by the server (history.ShownTitle)
   resumable: boolean;
   annotation: string;
   tags: string[];
@@ -228,6 +229,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
   if (filter) {
     const q = filter.toLowerCase();
     visible = visible.filter(s =>
+      (s.shownTitle || '').toLowerCase().includes(q) ||
       (s.title || '').toLowerCase().includes(q) ||
       (s.firstPrompt || '').toLowerCase().includes(q) ||
       (s.lastPrompt || '').toLowerCase().includes(q) ||
@@ -261,7 +263,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
       }
       case 'cost': cmp = a.costUSD - b.costUSD; break;
       case 'turns': cmp = a.turnCount - b.turnCount; break;
-      case 'title': cmp = (a.title || a.lastPrompt || a.firstPrompt || '').localeCompare(b.title || b.lastPrompt || b.firstPrompt || ''); break;
+      case 'title': cmp = (a.shownTitle || '').localeCompare(b.shownTitle || ''); break;
       case 'project': cmp = shortProject(a.project).localeCompare(shortProject(b.project)); break;
       case 'roi': {
         const ar = computeROI(a)?.netROI || 0;
@@ -470,7 +472,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
             {sorted.map(s => {
               const isSelected = selectedId === s.id;
               const snippet = deepMatches?.get(s.id);
-              const title = s.title || s.lastPrompt || s.firstPrompt || '(no prompt)';
+              const title = s.shownTitle || '(no prompt)';
               return (
                 <React.Fragment key={s.id}>
                 <tr

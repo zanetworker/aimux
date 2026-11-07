@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
+	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/history"
 )
 
@@ -221,5 +223,34 @@ func TestSessionsExport_KeepsAutomatedSessions(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "sess-002") {
 		t.Errorf("--export must keep automated sessions (evaluation pipelines rely on the full set):\n%s", stdout.String())
+	}
+}
+
+// The table's prompt column shows the one title rule: the meta title, then
+// Claude Code's ai-title, then the first message.
+func TestSessionsTable_PromptColumnUsesShownTitle(t *testing.T) {
+	sessions := []history.Session{
+		{ID: "meta", Title: "Meta title", AITitle: "AI name", FirstPrompt: "first a"},
+		{ID: "ai", AITitle: "AI name", FirstPrompt: "first b"},
+		{ID: "first", FirstPrompt: "first c"},
+	}
+	var out bytes.Buffer
+	c := &cobra.Command{}
+	c.SetOut(&out)
+	printSessionsTableCobra(c, sessions, []string{"id", "prompt"})
+	for _, want := range []string{"meta\tMeta title\n", "ai\tAI name\n", "first\tfirst c\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestSessionsTable_PromptColumnCutsByRunes(t *testing.T) {
+	var out bytes.Buffer
+	c := &cobra.Command{}
+	c.SetOut(&out)
+	printSessionsTableCobra(c, []history.Session{{ID: "u", Title: strings.Repeat("é", 50)}}, []string{"id", "prompt"})
+	if !utf8.ValidString(out.String()) || !strings.Contains(out.String(), "u\t"+strings.Repeat("é", 37)+"...\n") {
+		t.Errorf("want 37 runes and ..., got:\n%q", out.String())
 	}
 }

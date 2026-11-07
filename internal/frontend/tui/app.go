@@ -399,6 +399,11 @@ func (a App) tick() tea.Cmd {
 
 func (a App) discoverInstances() tea.Msg {
 	instances, _ := a.orchestrator.Discover()
+	files := make([]string, 0, len(instances))
+	for _, in := range instances {
+		files = append(files, in.SessionFile)
+	}
+	history.WarmTitles(files) // the preview's title, parsed here rather than in View
 	return instancesMsg(instances)
 }
 

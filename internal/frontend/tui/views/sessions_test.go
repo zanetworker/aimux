@@ -977,7 +977,9 @@ func TestSessionsView_LastAction(t *testing.T) {
 	}
 }
 
-func TestSessionsView_TitlePrefersLastPrompt(t *testing.T) {
+// Without a meta title or ai-title the row shows the first message, as every
+// other surface does (history.ShownTitle); it used to show the last prompt.
+func TestSessionsView_TitleIsFirstMessageWithoutATitle(t *testing.T) {
 	v := NewSessionsView()
 	v.SetSize(140, 30)
 	sessions := []history.Session{
@@ -995,7 +997,7 @@ func TestSessionsView_TitlePrefersLastPrompt(t *testing.T) {
 	v.SetSessions(sessions)
 
 	output := v.View()
-	if !strings.Contains(output, "final refined") {
-		t.Errorf("expected last prompt in output, got:\n%s", output)
+	if !strings.Contains(output, "initial question") || strings.Contains(output, "final refined") {
+		t.Errorf("expected the first message as the title, got:\n%s", output)
 	}
 }

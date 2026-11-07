@@ -16,6 +16,8 @@ import (
 	"unicode"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite with FTS5
+
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 // Index is a persistent full-text index over session transcripts.
@@ -86,7 +88,7 @@ const schema = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY, path TEXT, cwd TEXT, title TEXT, first_prompt TEXT,
-	automated INTEGER, mtime INTEGER, size INTEGER
+	automated INTEGER, mtime INTEGER, size INTEGER, meta_mtime INTEGER
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
 	session_id UNINDEXED, seq UNINDEXED, prompt UNINDEXED, prose UNINDEXED, title, text, more,
@@ -122,7 +124,7 @@ func Open(path string) (*Index, error) {
 
 // schemaVersion is bumped whenever the table layout or tokenizer changes; an index with an
 // older version is dropped and rebuilt from the session files on next Update.
-const schemaVersion = 6
+const schemaVersion = 7 // 7: sessions.meta_mtime, so a .meta.json title change is re-read
 
 func migrate(db *sql.DB) error {
 	var v int
@@ -147,7 +149,7 @@ func migrate(db *sql.DB) error {
 // table layout changing. Sessions are then re-read on the next Update while
 // embeddings stay: they are matched by text hash, so unchanged prose is not
 // re-embedded.
-const extractVersion = 2
+const extractVersion = 3 // 3: titles by history.ShownTitle
 
 func rereadIfExtractorChanged(db *sql.DB) error {
 	var v string
@@ -183,8 +185,8 @@ func DefaultArchiveDir() string {
 }
 
 type fileState struct {
-	path        string
-	mtime, size int64
+	path                   string
+	mtime, size, metaMtime int64
 }
 
 // Update brings the index in line with the session files under projectsDir
@@ -210,14 +212,14 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...str
 	}
 
 	known := map[string]fileState{}
-	rows, err := ix.db.Query(`SELECT id, path, mtime, size FROM sessions`)
+	rows, err := ix.db.Query(`SELECT id, path, mtime, size, meta_mtime FROM sessions`)
 	if err != nil {
 		return st, err
 	}
 	for rows.Next() {
 		var id string
 		var fs fileState
-		if err := rows.Scan(&id, &fs.path, &fs.mtime, &fs.size); err != nil {
+		if err := rows.Scan(&id, &fs.path, &fs.mtime, &fs.size, &fs.metaMtime); err != nil {
 			_ = rows.Close()
 			return st, err
 		}
@@ -231,7 +233,10 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...str
 		if err != nil {
 			continue
 		}
-		if fs, ok := known[id]; ok && fs.path == f && fs.mtime == info.ModTime().UnixNano() && fs.size == info.Size() {
+		// a session's title also lives in its .meta.json, which changes
+		// without the transcript changing
+		if fs, ok := known[id]; ok && fs.path == f && fs.mtime == info.ModTime().UnixNano() && fs.size == info.Size() &&
+			fs.metaMtime == history.MetaModTime(f) {
 			continue
 		}
 		changed = append(changed, f)
@@ -311,9 +316,9 @@ func writeDoc(tx *sql.Tx, d Doc) error {
 	if _, err := tx.Exec(`DELETE FROM embeddings WHERE session_id = ? AND seq >= ?`, d.SessionID, len(d.Chunks)); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT OR REPLACE INTO sessions (id, path, cwd, title, first_prompt, automated, mtime, size)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.SessionID, d.Path, d.CWD, d.Title, d.FirstPrompt, boolInt(d.Automated), info.ModTime().UnixNano(), info.Size()); err != nil {
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO sessions (id, path, cwd, title, first_prompt, automated, mtime, size, meta_mtime)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.SessionID, d.Path, d.CWD, d.Title, d.FirstPrompt, boolInt(d.Automated), info.ModTime().UnixNano(), info.Size(), d.MetaModTime); err != nil {
 		return err
 	}
 	for _, c := range d.Chunks {

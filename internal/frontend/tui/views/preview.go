@@ -273,10 +273,10 @@ func (p *PreviewPane) renderHeader() string {
 	}
 	nameLine := previewHeaderStyle.Render(truncatePreview(name, maxW))
 
-	// Session title (from LLM-generated meta)
+	// Session title: the one title rule (meta title, ai-title, first message)
 	var titleLine string
 	if a.SessionFile != "" {
-		title := history.TitleForSessionFile(a.SessionFile)
+		title := history.ShownTitleForFile(a.SessionFile)
 		if title != "" {
 			titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Italic(true)
 			titleLine = titleStyle.Render(truncatePreview(title, maxW))

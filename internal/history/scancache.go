@@ -15,7 +15,7 @@ import (
 
 // scanCacheVersion must be bumped whenever scanSession's output changes, so
 // stale cached parses are discarded.
-const scanCacheVersion = 8 // 2: Session.Automated; 3: first prompt past line 10; 4-5: LastPrompt is what the person typed; 6: AITitle, Cwd; 7: AwaySummary; 8: AwaySummaryAt
+const scanCacheVersion = 9 // 2: Session.Automated; 3: first prompt past line 10; 4-5: LastPrompt is what the person typed; 6: AITitle, Cwd; 7: AwaySummary; 8: AwaySummaryAt; 9: CustomTitle
 
 // scanSessionFn is swapped in tests to count parses.
 var scanSessionFn = scanSession

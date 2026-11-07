@@ -77,10 +77,17 @@ func UselessTitle(title string) bool {
 	return m != nil && strings.ContainsAny(m[3], "0123456789")
 }
 
-// ShownTitle is the title the owner sees: aimux's metadata title, else
-// Claude Code's own name for the session, else the first message.
+// ShownTitle is the one title rule, used by every surface: a title the owner
+// wrote in .meta.json, else the name given with Claude Code's /rename, else
+// aimux's namer's .meta.json title, else Claude Code's own ai-title, else the
+// first message. The owner's and the namer's titles share Meta.Title and are
+// told apart by TitleBy.
 func ShownTitle(s Session) string {
 	switch {
+	case s.Title != "" && s.TitleBy == "owner":
+		return s.Title
+	case s.CustomTitle != "":
+		return s.CustomTitle
 	case s.Title != "":
 		return s.Title
 	case s.AITitle != "":
@@ -90,11 +97,11 @@ func ShownTitle(s Session) string {
 	}
 }
 
-// DisplayTitle is ShownTitle as remote clients see it: a metadata or Claude
-// Code title as written, a first-message fallback labelled by PromptLabel and
-// cut at 80 bytes.
+// DisplayTitle is ShownTitle as remote clients see it: a written title as
+// written, a first-message fallback labelled by PromptLabel and cut at 80
+// bytes.
 func DisplayTitle(s Session) string {
-	if s.Title != "" || s.AITitle != "" {
+	if s.Title != "" || s.CustomTitle != "" || s.AITitle != "" {
 		return ShownTitle(s)
 	}
 	return Shorten(PromptLabel(s.FirstPrompt), 80)

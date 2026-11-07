@@ -262,10 +262,13 @@ Every session in the phone clients shows a name and, when there is one, a short 
 
 The **title** is the first of:
 
-1. The owner's text: a title you typed (info sheet, `PATCH /v1/sessions/{id}/meta`, or the TUI or dashboard). It is never overwritten.
-2. Ours: a title a model wrote (below). **Update summary** writes this one.
-3. Claude Code's own `ai-title`.
-4. The session's first message.
+1. The owner's text: a title you typed (info sheet or `PATCH /v1/sessions/{id}/meta`). It is never overwritten.
+2. The name you gave the session with Claude Code's `/rename`.
+3. Ours: a title a model wrote (below). **Update summary** writes this one.
+4. Claude Code's own `ai-title`.
+5. The session's first message (shortened to 80 bytes).
+
+The TUI, `aimux sessions`, the web dashboard and session search choose the title the same way. Search picks up a title you or the model wrote on its next refresh, even though the transcript did not change.
 
 The **description** is the owner's when you wrote one; otherwise the newer of Claude Code's away summary (the recap it writes after about 3 minutes idle in an interactive session) and ours.
 

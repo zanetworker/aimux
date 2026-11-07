@@ -853,15 +853,9 @@ func (v *SessionsView) cycleSortField() {
 	}
 }
 
-// sessionTitle returns the display title for sorting purposes.
+// sessionTitle returns the shown title (history.ShownTitle) for sorting.
 func sessionTitle(s history.Session) string {
-	if s.Title != "" {
-		return strings.ToLower(s.Title)
-	}
-	if s.LastPrompt != "" {
-		return strings.ToLower(s.LastPrompt)
-	}
-	return strings.ToLower(s.FirstPrompt)
+	return strings.ToLower(history.ShownTitle(s))
 }
 
 // visibleSessions returns sessions matching the current filter, sorted
@@ -1012,6 +1006,9 @@ func isHookSession(s history.Session) bool {
 }
 
 func sessionMatchesFilter(s history.Session, needle string) bool {
+	if strings.Contains(strings.ToLower(history.ShownTitle(s)), needle) {
+		return true
+	}
 	if strings.Contains(strings.ToLower(s.FirstPrompt), needle) {
 		return true
 	}
@@ -1318,12 +1315,9 @@ func (v *SessionsView) View() string {
 	if v.deleteMode {
 		s := v.SelectedSession()
 		if s != nil {
-			title := s.Title
-			if title == "" {
-				title = s.FirstPrompt
-			}
-			if len(title) > 50 {
-				title = title[:47] + "..."
+			title := history.ShownTitle(*s)
+			if r := []rune(title); len(r) > 50 {
+				title = string(r[:47]) + "..."
 			}
 			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
 			dimWarn := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
@@ -1424,14 +1418,8 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	}
 	age := formatAge(ageTime)
 
-	// Use LLM-generated title if available, fall back to last prompt, then first prompt
-	prompt := s.Title
-	if prompt == "" {
-		prompt = s.LastPrompt
-	}
-	if prompt == "" {
-		prompt = s.FirstPrompt
-	}
+	// The one title rule: meta title, then Claude Code's ai-title, then the first message
+	prompt := history.ShownTitle(s)
 	if prompt == "" {
 		prompt = "(no prompt)"
 	}
@@ -1759,15 +1747,12 @@ func (v *SessionsView) renderCleanupView(w int) string {
 		}
 
 		reason := sessDimStyle.Render(fmt.Sprintf("(%s)", item.reason))
-		prompt := item.session.Title
-		if prompt == "" {
-			prompt = item.session.FirstPrompt
-		}
+		prompt := history.ShownTitle(item.session)
 		if prompt == "" {
 			prompt = "(no prompt)"
 		}
-		if len(prompt) > 50 {
-			prompt = prompt[:47] + "..."
+		if r := []rune(prompt); len(r) > 50 {
+			prompt = string(r[:47]) + "..."
 		}
 
 		turnStr := sessTurnStyle.Render(fmt.Sprintf("%dt", item.session.TurnCount))

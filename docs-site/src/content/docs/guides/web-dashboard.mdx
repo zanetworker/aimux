@@ -17,7 +17,7 @@ The main view shows agent cards grouped by project. Each card displays:
 - **Provider badge** (Claude, Codex) with color coding
 - **Status** (Active, Idle, Waiting, Error)
 - **Launch mode badge** (tmux or direct)
-- **Title** from the session's first prompt or auto-generated
+- **Title**: the title you wrote, else your `/rename` name, else one aimux generated, else Claude Code's own name for the session, else its first message (chosen as in the TUI, `aimux sessions` and the phone clients)
 - **Project name** and git branch
 - **Last activity snippet** showing the most recent tool call
 - **CPU%** and **memory** usage with color-coded thresholds
@@ -68,7 +68,7 @@ Additional features:
 Click the **Sessions** tab to browse past agent sessions. The sessions table shows:
 
 - **Provider** and **project** name
-- **Title** (auto-generated or from first prompt)
+- **Title**, chosen as on the agent cards; the session filter also matches it
 - **Age** since last activity
 - **Turn count**, token usage, and cost
 - **Resumable** indicator for sessions that can be continued

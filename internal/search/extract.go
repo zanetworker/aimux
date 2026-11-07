@@ -22,10 +22,11 @@ type Doc struct {
 	SessionID   string
 	Path        string
 	CWD         string
-	Title       string // custom title > latest ai-title > first prompt
+	Title       string // history.ShownTitle: owner's meta title, /rename, namer's meta title, ai-title, first message
 	FirstPrompt string
 	Automated   bool
 	ModTime     time.Time
+	MetaModTime int64 // .meta.json mtime (UnixNano) when Title was read; 0 without one
 	Chunks      []Chunk
 }
 
@@ -97,6 +98,7 @@ func ExtractFile(path string, opts ExtractOpts) (Doc, error) {
 	var curPrompt string
 	var prose *strings.Builder
 	var aiTitle, customTitle, entrypoint string
+	var first history.FirstPromptReader // history's first-message form, for the title
 
 	flush := func() {
 		if cur != nil && cur.Len() > 0 {
@@ -139,6 +141,9 @@ func ExtractFile(path string, opts ExtractOpts) (Doc, error) {
 				if entrypoint == "" && rec.Entrypoint != "" {
 					entrypoint = rec.Entrypoint
 				}
+				if rec.Type == "user" && first.FirstPrompt() == "" {
+					first.Add(line)
+				}
 				switch rec.Type {
 				case "ai-title":
 					if rec.AITitle != "" {
@@ -179,14 +184,13 @@ func ExtractFile(path string, opts ExtractOpts) (Doc, error) {
 	}
 	flush()
 
-	switch {
-	case customTitle != "":
-		doc.Title = customTitle
-	case aiTitle != "":
-		doc.Title = aiTitle
-	default:
-		doc.Title = doc.FirstPrompt
-	}
+	// the shown title, by the one rule (history.ShownTitle); the .meta.json
+	// mtime is taken before its read so a title written meanwhile is picked
+	// up by the next Update
+	doc.MetaModTime = history.MetaModTime(path)
+	meta := history.LoadMeta(path)
+	doc.Title = history.ShownTitle(history.Session{Title: meta.Title, TitleBy: meta.TitleBy,
+		CustomTitle: customTitle, AITitle: aiTitle, FirstPrompt: first.FirstPrompt()})
 	doc.Automated = history.IsAutomated(entrypoint, doc.CWD, doc.FirstPrompt, opts.AutomatedPrefixes)
 	return doc, nil
 }

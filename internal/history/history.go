@@ -33,7 +33,9 @@ type Session struct {
 	CacheWriteTokens int64     `json:"cache_write_tokens"`
 	CostUSD          float64   `json:"cost_usd"`
 	FirstPrompt      string    `json:"first_prompt"`             // first user message (cleaned, for display)
-	Title            string    `json:"title"`                    // LLM-generated title (from meta, or empty)
+	Title            string    `json:"title"`                    // title from meta (the owner's or the namer's), or empty
+	TitleBy          string    `json:"title_by"`                 // who wrote Title: "owner", or "model"/empty for the namer (from meta)
+	CustomTitle      string    `json:"custom_title"`             // the name given with Claude Code's /rename (its latest custom-title entry)
 	AITitle          string    `json:"ai_title"`                 // the name Claude Code gave the session (its latest ai-title entry)
 	AwaySummary      string    `json:"away_summary"`             // Claude Code's latest away_summary recap (trimmed, at most awaySummaryMax characters)
 	AwaySummaryAt    time.Time `json:"away_summary_at,omitzero"` // when Claude Code wrote that recap; omitted without one
@@ -208,6 +210,7 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 		sessions[i].Note = meta.Note
 		sessions[i].Tags = meta.Tags
 		sessions[i].Title = meta.Title
+		sessions[i].TitleBy = meta.TitleBy
 		sessions[i].Description = meta.Description
 		sessions[i].DescriptionBy = meta.DescriptionBy
 		sessions[i].DescribedAt = meta.DescribedAt
@@ -390,10 +393,11 @@ func awaySummaryText(content json.RawMessage) string {
 // sessionEntry is the minimal structure for fast-scanning JSONL entries.
 type sessionEntry struct {
 	Type           string          `json:"type"`
-	IsMeta         bool            `json:"isMeta"`  // text Claude Code adds in the user's place
-	AITitle        string          `json:"aiTitle"` // on ai-title entries
-	Subtype        string          `json:"subtype"` // on system entries, e.g. away_summary
-	Content        json.RawMessage `json:"content"` // top-level content of system entries; raw so any shape parses
+	IsMeta         bool            `json:"isMeta"`      // text Claude Code adds in the user's place
+	AITitle        string          `json:"aiTitle"`     // on ai-title entries
+	CustomTitle    string          `json:"customTitle"` // on custom-title entries (/rename)
+	Subtype        string          `json:"subtype"`     // on system entries, e.g. away_summary
+	Content        json.RawMessage `json:"content"`     // top-level content of system entries; raw so any shape parses
 	Entrypoint     string          `json:"entrypoint"`
 	CWD            string          `json:"cwd"`
 	Timestamp      time.Time       `json:"timestamp"`
@@ -514,6 +518,9 @@ func parseSessionLine(raw json.RawMessage, s *Session, extractPrompt bool) (time
 
 	if entry.Type == "ai-title" && entry.AITitle != "" {
 		s.AITitle = entry.AITitle // the latest name wins
+	}
+	if entry.Type == "custom-title" && entry.CustomTitle != "" {
+		s.CustomTitle = entry.CustomTitle // the latest /rename wins
 	}
 
 	if entry.Type == "system" && entry.Subtype == "away_summary" {
@@ -1012,21 +1019,22 @@ func FindDuplicates(sessions []Session) []Session {
 	return dupes
 }
 
-// TitleForSessionFile returns the LLM-generated title from the sidecar
-// .meta.json file, or "" if none exists.
-func TitleForSessionFile(sessionFilePath string) string {
-	if sessionFilePath == "" {
-		return ""
-	}
-	meta := LoadMeta(sessionFilePath)
-	return meta.Title
-}
-
 // MetaPath returns the sidecar metadata file path for a session file.
 // e.g., /path/to/abc123.jsonl → /path/to/abc123.meta.json
 func MetaPath(sessionFilePath string) string {
 	base := strings.TrimSuffix(sessionFilePath, filepath.Ext(sessionFilePath))
 	return base + ".meta.json"
+}
+
+// MetaModTime is the mtime (UnixNano) of a session's .meta.json, 0 without
+// one: readers that cache a session (the search index) re-read it when this
+// changes.
+func MetaModTime(sessionFilePath string) int64 {
+	info, err := os.Stat(MetaPath(sessionFilePath))
+	if err != nil {
+		return 0
+	}
+	return info.ModTime().UnixNano()
 }
 
 // LoadMeta reads session metadata from a sidecar .meta.json file.

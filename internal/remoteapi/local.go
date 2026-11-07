@@ -552,6 +552,10 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 			continue
 		}
 		c, _ := x.Created.Get(r.SessionID)
+		// Fallbacks for a session the latest scan does not know (created here
+		// and not yet on disk, or written after the scan): the index's title,
+		// then the prompt it was created with. A known session takes the
+		// list's title below.
 		title := history.Shorten(history.PromptLabel(r.Title), 80)
 		if title == "" {
 			title = c.Prompt
@@ -559,6 +563,7 @@ func (x *LocalIndex) Search(ctx context.Context, query string, limit int) ([]Sea
 		hit := SearchHit{Session: Session{ID: r.SessionID, Provider: provider, Title: title, Project: r.CWD,
 			LastActive: r.ModTime, State: x.state(r.SessionID, open)}, Snippet: r.Snippet}
 		if s, ok := x.Lookup(r.SessionID); ok {
+			hit.Title = history.DisplayTitle(s) // the list's title, not the index's
 			hit.Description, _ = history.ShownDescription(s)
 			hit.Pinned = s.Starred
 		}

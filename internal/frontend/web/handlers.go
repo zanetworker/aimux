@@ -357,6 +357,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			"costUSD":     s.CostUSD,
 			"firstPrompt": s.FirstPrompt,
 			"title":       s.Title,
+			"shownTitle":  history.ShownTitle(s), // the title to show; the client never picks one
 			"resumable":   s.Resumable,
 			"annotation":  s.Annotation,
 			"tags":        s.Tags,

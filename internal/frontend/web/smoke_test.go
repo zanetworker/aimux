@@ -35,6 +35,7 @@ func (p *stubParser) ParseTrace(_ string) ([]trace.Turn, error) {
 //
 // Run with: go test ./internal/frontend/web/ -run Smoke -timeout 60s -v
 func TestAPISmoke_AllEndpoints(t *testing.T) {
+	fakeHome(t) // sessions come from a temp ~/.claude/projects, never the real one
 	s := NewServer(0)
 	cfg := config.Default()
 	s.SetConfig(cfg)
@@ -113,6 +114,29 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 			checkResponse(t, "GET", path, resp.StatusCode, body)
 		})
 	}
+
+	// --- fields the React app reads instead of computing them ---
+	t.Run("GET /api/history shownTitle", func(t *testing.T) {
+		resp, err := http.Get(addr + "/api/history") // #nosec G107
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var payload struct {
+			Sessions []map[string]any `json:"sessions"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(payload.Sessions) == 0 {
+			t.Fatal("no sessions from the fake home")
+		}
+		for _, sess := range payload.Sessions {
+			if title, _ := sess["shownTitle"].(string); title == "" {
+				t.Errorf("session %v has no shownTitle", sess["id"])
+			}
+		}
+	})
 
 	// --- SSE endpoint ---
 	t.Run("GET /api/events (SSE)", func(t *testing.T) {
