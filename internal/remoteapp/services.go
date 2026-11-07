@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/history"
@@ -190,25 +191,16 @@ func openChatQueue(home string, tcfg config.TerminalInputConfig, broker *remotea
 // AuditPath is the remote API's audit log, shared by the server and the CLI (aimux remote revoke).
 func AuditPath(home string) string { return filepath.Join(home, ".aimux", "logs", "remote-audit.log") }
 
-// Providers is the harnesses remote serve lists, follows and
-// continues sessions of: every provider in the registry (provider.Registry
-// Local, in its order) that implements remoteapi.Store and
-// provider.LiveSource, so a new harness implements those two and needs no
-// change here or inside remoteapi. Today that is Claude only. The first is
-// the default: sessions a client creates, the router and the chat manager
-// are its, since the ACP adapter (--adapter) is Claude Code's. Another
-// entry's sessions are listed but cannot be continued until the router and
-// the manager dispatch per provider.
+// Providers is the harnesses remote serve lists, follows and continues
+// sessions of (catalog.ProvidersOf over the registry): every registry
+// provider that implements catalog.Store and provider.LiveSource, so a new harness implements those
+// two and needs no change here or inside remoteapi. Today that is Claude
+// only. The first is the default: sessions a client creates, the router and
+// the chat manager are its, since the ACP adapter (--adapter) is Claude
+// Code's. Another entry's sessions are listed but cannot be continued until
+// the router and the manager dispatch per provider.
 func Providers(home string) []remoteapi.Provider {
-	var out []remoteapi.Provider
-	for _, p := range provider.NewRegistry(home, config.Config{}).Local() {
-		store, isStore := p.(remoteapi.Store)
-		live, isLive := p.(provider.LiveSource)
-		if isStore && isLive {
-			out = append(out, remoteapi.Provider{Store: store, Live: live.LiveSessions(discovery.LiveTTL)})
-		}
-	}
-	return out
+	return catalog.ProvidersOf(provider.NewRegistry(home, config.Config{}).Local(), discovery.LiveTTL)
 }
 
 // hooksSummary is remote serve's startup line about permission alerts for

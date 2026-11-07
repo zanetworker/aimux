@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestSessionLock(t *testing.T) {
@@ -77,9 +79,23 @@ func TestManager_ReservationReleasedOnReap(t *testing.T) {
 	dir := t.TempDir()
 	reserve := func(id string) (func(), error) { return SessionLock(dir, id) }
 	fs := &fakeRunStarter{}
-	m := NewManager(ManagerOptions{Start: fs.start, Reserve: reserve, IdleTimeout: 1})
+	// A clock the test moves: with time.Now, Send's last-use stamp and
+	// Reap's read can be the same instant (the monotonic clock ticks every
+	// ~42 ns on Apple silicon), and 0 is not past a 1 ns idle timeout.
+	var clock sync.Mutex
+	now := time.Unix(1_000_000, 0)
+	m := NewManager(ManagerOptions{Start: fs.start, Reserve: reserve, IdleTimeout: time.Minute,
+		Now: func() time.Time { clock.Lock(); defer clock.Unlock(); return now }})
 	defer m.Close()
-	_, _ = send(m, "a")
+	if _, err := send(m, "a"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if n := m.Reap(); n != 0 {
+		t.Fatalf("reaped %d before the idle timeout", n)
+	}
+	clock.Lock()
+	now = now.Add(time.Minute + time.Second)
+	clock.Unlock()
 	if n := m.Reap(); n != 1 {
 		t.Fatalf("reaped %d", n)
 	}

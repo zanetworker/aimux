@@ -50,15 +50,32 @@ const sessionTools = "continue_session,create_virtual_session,get_session,list_s
 
 func TestNewServeMCP_SessionsOnly(t *testing.T) {
 	var notes bytes.Buffer
-	srv := newServeMCP(false, agentsFlags{}, &config.Config{}, testService(t), &notes)
+	srv := newServeMCP(false, agentsFlags{}, &config.Config{}, testService(t), nil, &notes)
 	if got := toolNames(srv); got != sessionTools {
+		t.Errorf("tools = %s, want %s", got, sessionTools)
+	}
+}
+
+// mcp serve's catalog: the registry's providers (Claude, under home) and
+// the sessions remote serve created, so the phone's sessions list too.
+func TestMCPCatalog(t *testing.T) {
+	home := t.TempDir()
+	c := mcpCatalog(home)
+	if len(c.Providers) != 1 || c.Providers[0].Store.Name() != "claude" || c.Providers[0].Live == nil {
+		t.Fatalf("providers %+v, want Claude with its live sessions", c.Providers)
+	}
+	if want := filepath.Join(home, ".aimux", "remote-created.json"); c.Created == nil || c.Created.Path != want {
+		t.Fatalf("created %+v, want %s", c.Created, want)
+	}
+	var notes bytes.Buffer
+	if got := toolNames(newServeMCP(false, agentsFlags{}, &config.Config{}, testService(t), c, &notes)); got != sessionTools {
 		t.Errorf("tools = %s, want %s", got, sessionTools)
 	}
 }
 
 func TestNewServeMCP_AgentsFailureKeepsSessions(t *testing.T) {
 	var notes bytes.Buffer
-	srv := newServeMCP(true, agentsFlags{backend: "k8s"}, &config.Config{}, testService(t), &notes)
+	srv := newServeMCP(true, agentsFlags{backend: "k8s"}, &config.Config{}, testService(t), nil, &notes)
 	if got := toolNames(srv); got != sessionTools {
 		t.Errorf("tools = %s, want only the session tools", got)
 	}

@@ -14,6 +14,7 @@ CORE_PKGS=(
   internal/mcpserver
   internal/config
   internal/remoteapp
+  internal/catalog
 )
 
 fail=0

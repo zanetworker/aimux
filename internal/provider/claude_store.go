@@ -92,6 +92,12 @@ func (c *Claude) Sessions(opts history.DiscoverOpts) ([]history.Session, error) 
 	return history.Discover(opts, c.projectsDir())
 }
 
+// Reread is one session's record read again (history.Reread), so the
+// session catalog can refresh one session without a full scan.
+func (c *Claude) Reread(s history.Session) (history.Session, error) {
+	return history.Reread(s)
+}
+
 // ParseTail returns at least the last n turns of the transcript at path,
 // reading only the end of the file (ParseTraceTail).
 func (c *Claude) ParseTail(path string, n int) ([]trace.Turn, error) {

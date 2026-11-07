@@ -16,6 +16,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/push"
@@ -25,14 +26,14 @@ import (
 	"github.com/zanetworker/aimux/internal/waiting"
 )
 
-// Session states as clients see them.
+// Session states as clients see them: the catalog's.
 const (
-	StateIdle           = "idle"             // can be continued from here
-	StateOpenInTerminal = "open_in_terminal" // follow only
-	StateBusy           = "busy"             // aimux is running a turn
+	StateIdle           = catalog.StateIdle           // can be continued from here
+	StateOpenInTerminal = catalog.StateOpenInTerminal // follow only
+	StateBusy           = catalog.StateBusy           // aimux is running a turn
 	// StateUnavailable: created here, but its first prompt failed before the
 	// agent wrote the session, so there is nothing to continue.
-	StateUnavailable = "unavailable"
+	StateUnavailable = catalog.StateUnavailable
 )
 
 // Session is one entry in the session list. Automated sessions (started by

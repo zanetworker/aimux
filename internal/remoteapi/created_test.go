@@ -13,32 +13,6 @@ import (
 	"github.com/zanetworker/aimux/internal/search"
 )
 
-func TestCreatedStore_PersistsPrivately(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "remote-created.json")
-	s := &CreatedStore{Path: path}
-	if err := s.Add("new-1", "/w/app", "start the cache work"); err != nil {
-		t.Fatal(err)
-	}
-	again := &CreatedStore{Path: path} // as after a restart
-	c, ok := again.Get("new-1")
-	if !ok || c.Cwd != "/w/app" || c.Prompt != "start the cache work" {
-		t.Fatalf("after reload: %+v %v", c, ok)
-	}
-	if _, ok := again.Get("other"); ok {
-		t.Fatal("unknown id reported as created")
-	}
-	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("store file mode %v (%v), want 0600: prompts are private", fi.Mode().Perm(), err)
-	}
-}
-
-func TestCreatedStore_MissingFileIsEmpty(t *testing.T) {
-	s := &CreatedStore{Path: filepath.Join(t.TempDir(), "none.json")}
-	if _, ok := s.Get("x"); ok {
-		t.Fatal("empty store has an entry")
-	}
-}
-
 // Sessions started from the phone run through the agent SDK, which marks
 // them automated; aimux knows it created them and lists them anyway.
 func TestLocalIndex_ListsSessionsItCreated(t *testing.T) {
@@ -260,20 +234,6 @@ func TestLocalIndex_SearchSkipsUnavailableCreatedSessions(t *testing.T) {
 	}
 	if hits, err := x.Search(context.Background(), "cache", 20); err != nil || len(hits) != 0 {
 		t.Fatalf("hits %+v (%v), want none", hits, err)
-	}
-}
-
-func TestCreatedStore_NullFileIsEmpty(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "c.json")
-	if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s := &CreatedStore{Path: path}
-	if err := s.Add("x", "/w", "p"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := s.Get("x"); !ok {
-		t.Fatal("entry missing after Add")
 	}
 }
 

@@ -165,3 +165,22 @@ func TestExchanges_Ordered(t *testing.T) {
 		t.Errorf("exchange = %+v", ex[0])
 	}
 }
+
+// Recent rows carry the first prompt, so a caller can classify them as the
+// history list does (history.Visible's analyzer kind).
+func TestRecent_CarriesFirstPrompt(t *testing.T) {
+	root := newProjects(t)
+	ix := openIndex(t)
+	if _, err := ix.Update(root, DefaultExtractOpts()); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := ix.Recent(SearchOpts{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rs {
+		if r.SessionID == sidDeck && !strings.Contains(r.FirstPrompt, "hypotheses proposals") {
+			t.Errorf("deck first prompt %q", r.FirstPrompt)
+		}
+	}
+}

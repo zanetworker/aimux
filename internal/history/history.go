@@ -205,18 +205,7 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 
 	// Sidecar metadata is always read fresh: it changes without the session file.
 	for i := range sessions {
-		meta := LoadMeta(sessions[i].FilePath)
-		sessions[i].Annotation = meta.Annotation
-		sessions[i].Note = meta.Note
-		sessions[i].Tags = meta.Tags
-		sessions[i].Title = meta.Title
-		sessions[i].TitleBy = meta.TitleBy
-		sessions[i].Description = meta.Description
-		sessions[i].DescriptionBy = meta.DescriptionBy
-		sessions[i].DescribedAt = meta.DescribedAt
-		sessions[i].Starred = meta.Starred
-		sessions[i].ROIMultiplier = meta.ROIMultiplier
-		sessions[i].TaskType = meta.TaskType
+		applyMeta(&sessions[i])
 	}
 
 	// Auto-infer ROI from skill-usage data for sessions without user-set values
@@ -232,6 +221,40 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 	}
 
 	return sessions, nil
+}
+
+// applyMeta copies the session's .meta.json fields onto it.
+func applyMeta(s *Session) {
+	meta := LoadMeta(s.FilePath)
+	s.Annotation = meta.Annotation
+	s.Note = meta.Note
+	s.Tags = meta.Tags
+	s.Title = meta.Title
+	s.TitleBy = meta.TitleBy
+	s.Description = meta.Description
+	s.DescriptionBy = meta.DescriptionBy
+	s.DescribedAt = meta.DescribedAt
+	s.Starred = meta.Starred
+	s.ROIMultiplier = meta.ROIMultiplier
+	s.TaskType = meta.TaskType
+}
+
+// Reread is one session's record read again, as Discover would give it
+// now: its transcript (a /rename, new turns) and its .meta.json. It keeps
+// s's ID and Project and reads only s.FilePath; an error when the record
+// has no file or the file cannot be read.
+func Reread(s Session) (Session, error) {
+	if s.FilePath == "" {
+		return Session{}, fmt.Errorf("reread session %s: no session file", s.ID)
+	}
+	fresh, err := scanSession(s.ID, s.FilePath, s.Project)
+	if err != nil {
+		return Session{}, err
+	}
+	applyMeta(&fresh)
+	one := []Session{fresh}
+	ApplyAutoROI(one)
+	return one[0], nil
 }
 
 // scanSession reads the first and last few lines of a session JSONL file

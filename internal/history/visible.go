@@ -9,7 +9,7 @@ import "strings"
 // revealed (Reveal: a toggle, a flag, a search); a session shows when none
 // of its hidden kinds is left unrevealed. The surfaces differ only in their
 // options, kept side by side below (TUIOpts, DashboardOpts, RemoteOpts,
-// CLIOpts).
+// CLIOpts, MCPOpts).
 // Live agents (controller.DropEphemeral, DedupBySession) are a different
 // rule and are not covered here.
 
@@ -155,6 +155,18 @@ func CLIOpts(includeAutomated bool) VisibleOpts {
 	o := VisibleOpts{Hide: KindSubagent | KindAutomated | KindNearEmpty | KindUndated}
 	if includeAutomated {
 		o.Reveal = KindAutomated
+	}
+	return o
+}
+
+// MCPOpts: the MCP server's list_sessions (with a catalog). Subagents are
+// never listed; automated sessions and aimux's own analyzer sessions only
+// with include_automated. A session aimux created (the catalog's exception)
+// reveals automated, and so is not hidden as noise either.
+func MCPOpts(includeAutomated bool) VisibleOpts {
+	o := VisibleOpts{Hide: KindSubagent | KindAutomated | KindAnalyzer, AutomatedOverridesNoise: true}
+	if includeAutomated {
+		o.Reveal = KindAutomated | KindAnalyzer
 	}
 	return o
 }

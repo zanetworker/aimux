@@ -11,10 +11,12 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	pkgcompose "github.com/zanetworker/agent-compose/pkg/compose"
+	"github.com/zanetworker/aimux/internal/catalog"
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/coordination"
 	"github.com/zanetworker/aimux/internal/mcpserver"
+	"github.com/zanetworker/aimux/internal/remoteapp"
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/sessionmcp"
 )
@@ -70,7 +72,12 @@ func newMCPServeCmd() *cobra.Command {
 			notes := cmd.ErrOrStderr()
 			svc := search.DefaultService(notes)
 			svc.EmbedInBackground = true // long-lived: tool calls never wait on the embedding API
-			return mcplib.ServeStdio(newServeMCP(agents, f, &cfg, svc, notes))
+			// No home: the session tools read the index only.
+			var cat *catalog.Catalog
+			if home, err := os.UserHomeDir(); err == nil {
+				cat = mcpCatalog(home)
+			}
+			return mcplib.ServeStdio(newServeMCP(agents, f, &cfg, svc, cat, notes))
 		},
 	}
 
@@ -89,11 +96,21 @@ func newMCPServeCmd() *cobra.Command {
 	return cmd
 }
 
-// newServeMCP builds the server: session tools always, agent tools when
-// asked and they start; an agents failure is reported to notes, not fatal.
-func newServeMCP(agents bool, f agentsFlags, cfg *config.Config, svc *search.Service, notes io.Writer) *mcplib.MCPServer {
+// mcpCatalog is the session catalog list_sessions and get_session read:
+// the registry's providers (remoteapp.Providers, as remote serve lists
+// them) and the sessions remote serve created. No broker or runs here, so
+// a state is idle or open_in_terminal.
+func mcpCatalog(home string) *catalog.Catalog {
+	return &catalog.Catalog{Providers: remoteapp.Providers(home),
+		Created: &catalog.CreatedStore{Path: filepath.Join(home, ".aimux", "remote-created.json")}}
+}
+
+// newServeMCP builds the server: session tools always (over cat when not
+// nil), agent tools when asked and they start; an agents failure is
+// reported to notes, not fatal.
+func newServeMCP(agents bool, f agentsFlags, cfg *config.Config, svc *search.Service, cat *catalog.Catalog, notes io.Writer) *mcplib.MCPServer {
 	srv := mcplib.NewMCPServer("aimux", rootCmd.Version)
-	sessionmcp.New(svc).Register(srv)
+	sessionmcp.New(svc).WithCatalog(cat).Register(srv)
 	if agents {
 		s, err := buildAgentsServer(f, cfg)
 		if err != nil {

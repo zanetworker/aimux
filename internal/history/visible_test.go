@@ -167,6 +167,8 @@ func TestSurfaceOpts(t *testing.T) {
 		{"cli", CLIOpts(false), set("plain", "six", "hook", "analyzer", "halfDated")},
 		{"cli automated", CLIOpts(true), set("plain", "six", "hook", "analyzer", "halfDated", "auto")},
 		{"remote created", RemoteOpts(false, true), set("plain", "empty", "six", "hook", "analyzer", "undated", "halfDated", "auto", "autoEmpty")},
+		{"mcp", MCPOpts(false), set("plain", "empty", "six", "undated", "halfDated")},
+		{"mcp automated", MCPOpts(true), set("plain", "empty", "six", "hook", "analyzer", "undated", "halfDated", "auto", "autoEmpty")},
 	}
 	for _, c := range cases {
 		if got := shown(c.o); !reflect.DeepEqual(got, c.want) {

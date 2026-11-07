@@ -49,3 +49,32 @@ func TestHarnessBoundary(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalogBoundary: the session catalog is core. It imports net/http
+// itself never, and no HTTP layer, terminal input or frontend at any depth
+// (.claude/CLAUDE.md, package map). Nor the provider registry, discovery or
+// acprun, which bring the cluster clients into `aimux mcp serve`'s session
+// tools (cmd's TestSessionMCP_NoClusterDeps).
+func TestCatalogBoundary(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go tool")
+	}
+	out, err := exec.Command("go", "list", "-f", `{{join .Imports " "}}`, module+"internal/catalog").Output()
+	if err != nil {
+		t.Fatalf("go list internal/catalog: %v", err)
+	}
+	for _, imp := range strings.Fields(string(out)) {
+		if imp == "net/http" {
+			t.Error("internal/catalog must not import net/http")
+		}
+	}
+	banned := []string{"internal/remoteapi", "internal/remoteapp", "internal/terminput", "internal/frontend", "internal/tui", "internal/sessionmcp",
+		"internal/provider", "internal/discovery", "internal/acprun"}
+	for _, d := range internalDeps(t, "internal/catalog") {
+		for _, b := range banned {
+			if d == b || strings.HasPrefix(d, b+"/") {
+				t.Errorf("internal/catalog must not import %s", d)
+			}
+		}
+	}
+}

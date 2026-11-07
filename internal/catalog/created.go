@@ -1,4 +1,4 @@
-package remoteapi
+package catalog
 
 import (
 	"encoding/json"
@@ -27,14 +27,34 @@ type CreatedStore struct {
 
 	mu     sync.Mutex
 	loaded bool
+	stamp  fileStamp // the file as last read; another process's write changes it
 	byID   map[string]CreatedSession
 }
 
+// fileStamp identifies a version of the store's file.
+type fileStamp struct {
+	exists bool
+	mod    time.Time
+	size   int64
+}
+
+func stampOf(path string) fileStamp {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}
+	}
+	return fileStamp{exists: true, mod: fi.ModTime(), size: fi.Size()}
+}
+
+// load reads the file when it changed since the last read: remote serve
+// adds sessions through its own store while aimux mcp serve keeps reading.
 func (s *CreatedStore) load() {
-	if s.loaded {
+	st := stampOf(s.Path)
+	if s.loaded && st == s.stamp {
 		return
 	}
 	s.loaded = true
+	s.stamp = st
 	s.byID = map[string]CreatedSession{}
 	data, err := os.ReadFile(s.Path)
 	if err != nil {
@@ -96,5 +116,6 @@ func (s *CreatedStore) Add(id, cwd, prompt string) error {
 	if err := os.Rename(tmp, s.Path); err != nil {
 		return fmt.Errorf("save created sessions: %w", err)
 	}
+	s.stamp = stampOf(s.Path)
 	return nil
 }
