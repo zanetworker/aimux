@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { totalShowable, defaultSwitches } from './components/sessionFilter.ts';
 import { useAgentStream } from './hooks/useAgentStream';
 import type { Agent } from './types';
 import { StatsBar } from './components/StatsBar';
@@ -64,7 +65,7 @@ export default function App() {
         if (d?.sessions) {
           const s = (d.sessions as HistorySession[]).map(sess => ({ ...sess, note: sess.note || '' }));
           setCachedSessions(s);
-          setSessionCount(s.length);
+          setSessionCount(totalShowable(s, defaultSwitches));
           setStarredCount(s.filter(sess => sess.starred).length);
         }
       })

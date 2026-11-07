@@ -332,8 +332,8 @@ The web dashboard exposes a REST API on `http://127.0.0.1:<port>`. All endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/history` | List session history with metadata |
-| `GET` | `/api/search` | Search session content |
+| `GET` | `/api/history` | List session history with metadata. Every session the dashboard can reveal is returned, each with `shownTitle` and `hidden` (the switches that must all be on to show it: `subagents`, `automated`, `analyzers`, `search`); sessions no switch can reveal are left out |
+| `GET` | `/api/search` | Search session content (`q`); automated sessions are left out unless `automated=1` (the dashboard's Automated switch) |
 | `DELETE` | `/api/sessions/{id}` | Delete a session |
 | `POST` | `/api/sessions/{id}/annotate` | Add an annotation to a session turn |
 | `GET` | `/api/sessions/{id}/annotations` | Get annotations for a session |

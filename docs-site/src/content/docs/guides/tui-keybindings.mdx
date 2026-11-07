@@ -66,7 +66,7 @@ A session's title is the one you wrote, else the name you gave it with Claude Co
 | `p` | Toggle trace preview pane |
 | `d` | Delete session (with confirmation) |
 | `D` | Cleanup mode (find duplicates/empty sessions) |
-| `H` | Show/hide subagent sessions |
+| `H` | Show/hide subagent and automated sessions. Automated ones show in full; a subagent session stays hidden if it is near-empty (no cost, at most 5 turns) or an analyzer session (aimux's own analysis or hook prompts, or mentioning "session analyzer"). Near-empty, analyzer and undated sessions stay hidden otherwise; any search shows every session |
 | `Esc` | Clear filters (path first, then text), then exit view |
 
 `F` searches the same ranked index as `aimux sessions`: keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. The TUI refreshes the index when it starts and embeds changed sessions in the background, so a search doesn't wait for them; only a new query's own embedding calls the API (cached after the first time). New messages match by keyword right away and usually join semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed.

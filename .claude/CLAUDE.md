@@ -219,7 +219,7 @@ Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
   config/      — global + project-local config, runtime/sandbox profiles
   cost/        — per-model pricing, token counting
   discovery/   — multi-provider orchestrator, process scanning
-  history/     — session scanning, metadata, titles, search; namer.go (economical naming, daily limit, pause on failures), namer_backend.go (API or `claude -p` safe mode), namer_proc_*.go (process group), metawrite.go (`UpdateMeta`: locked, atomic `.meta.json` writer; the only writer), cwd.go (`SessionCwd`: a session's first recorded cwd, decoding each line as scanSession does, stopping at that line); history must never import provider (provider imports history)
+  history/     — session scanning, metadata, titles, search; namer.go (economical naming, daily limit, pause on failures), namer_backend.go (API or `claude -p` safe mode), namer_proc_*.go (process group), metawrite.go (`UpdateMeta`: locked, atomic `.meta.json` writer; the only writer), cwd.go (`SessionCwd`: a session's first recorded cwd, decoding each line as scanSession does, stopping at that line), visible.go (`Visible`: which history sessions a list shows; `Kinds` classifies, each surface's options side by side: `TUIOpts`, `DashboardOpts` with `DashboardReveals` (subagents, automated, analyzers, search: the `hidden` list on `/api/history`); one `KindAnalyzer` (hook prompts or SESSION ANALYZER text) on every surface, `RemoteOpts`, `CLIOpts`; live agents are `controller.DropEphemeral`/`DedupBySession`, a different rule); history must never import provider (provider imports history)
   evaluation/  — annotation persistence, JSONL export
   otel/        — OTLP receiver, span store, exporter
   provider/    — Provider interface, Claude/Codex/Gemini/K8s implementations
@@ -268,6 +268,7 @@ If a feature exists in only one frontend, it is tech debt. Track it.
 | Export OTEL | `ExportOTEL()` | `:export-otel` | `POST /export/otel` | -- TODO |
 | Delete session | `DeleteSession()` | `d` key | -- TODO | -- TODO |
 | Filter hidden | `FilterHidden()` | auto | auto | -- |
+| History sessions shown | `history.Visible()` | sessions view (`TUIOpts`: H, search) | `GET /api/history` (`DashboardOpts`, `hidden` read by React, `sessionFilter.ts` applies it; Subagents, Automated and Analyzers switches) | `aimux sessions` (`CLIOpts`; `--live` and the query filter stay outside); remote API uses `RemoteOpts` |
 | Project badges | `ApplyBadges()` | agent refresh | SSE `/api/events` | -- |
 | Drop ephemeral agents | `DropEphemeral()` | -- (shows all) | SSE `/api/events` | -- |
 | One agent per session | `DedupBySession()` | -- (shows all) | SSE `/api/events` | -- |
@@ -393,6 +394,7 @@ go test ./internal/agent/ -timeout 30s -run TestName  # Run one test
 go build -o aimux ./cmd/aimux    # Build
 go test ./... -timeout 30s              # All tests (120+ tests)
 node --test "clients/web/webapp/*.test.mjs"   # Phone web client (the plain directory form fails on Node 22)
+node --test web/src/components/*.test.ts      # Dashboard pure modules (sessionFilter.ts; Node strips the types)
 cd clients/ios && xcodegen generate && xcodebuild test -scheme Aimux -project Aimux.xcodeproj -destination 'platform=iOS Simulator,name=<iPhone>'   # iPhone app
 make build                              # Build via Makefile
 make install                            # Build and copy to /usr/local/bin

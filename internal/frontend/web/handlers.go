@@ -302,19 +302,71 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// visibleHistory drops automated (cron/SDK) sessions unless asked for them,
-// matching the TUI and search defaults.
-func visibleHistory(sessions []history.Session, includeAutomated bool) []history.Session {
-	if includeAutomated {
-		return sessions
+// dashboardHistory is /api/history's list: history.Visible with the
+// dashboard's options. Each row's hidden names the reveals
+// (history.DashboardReveals) that must all be on for the React app to show
+// it; the app reads it and applies no rule.
+func dashboardHistory(sessions []history.Session) []map[string]any {
+	return historyRows(sessions, history.DashboardOpts(), history.DashboardReveals)
+}
+
+// historyRows drops a session hidden by a kind no reveal covers, so the
+// client never shows it by default.
+func historyRows(sessions []history.Session, opts history.VisibleOpts, reveals []history.Reveal) []map[string]any {
+	var covered history.Kind
+	for _, r := range reveals {
+		covered |= r.Kinds
 	}
-	out := sessions[:0:0]
+	result := []map[string]any{}
 	for _, s := range sessions {
-		if !s.Automated {
-			out = append(out, s)
+		if history.HiddenBy(s, opts)&^covered != 0 {
+			continue
 		}
+		result = append(result, historyRow(s, history.HiddenUntil(s, opts, reveals)))
 	}
-	return out
+	return result
+}
+
+// historyRow is one session of /api/history.
+func historyRow(s history.Session, hidden []string) map[string]any {
+	return map[string]any{
+		"id":             s.ID,
+		"provider":       s.Provider,
+		"project":        s.Project,
+		"filePath":       s.FilePath,
+		"startTime":      s.StartTime.Format(time.RFC3339),
+		"lastActive":     s.LastActive.Format(time.RFC3339),
+		"turnCount":      s.TurnCount,
+		"tokensIn":       s.TokensIn,
+		"tokensOut":      s.TokensOut,
+		"costUSD":        s.CostUSD,
+		"firstPrompt":    s.FirstPrompt,
+		"title":          s.Title,
+		"shownTitle":     history.ShownTitle(s), // the title to show; the client never picks one
+		"hidden":         hidden,                // reveals needed to show it; the client never decides
+		"resumable":      s.Resumable,
+		"annotation":     s.Annotation,
+		"tags":           s.Tags,
+		"note":           s.Note,
+		"isSubagent":     s.IsSubagent,
+		"permissionMode": s.PermissionMode,
+		"starred":        s.Starred,
+		"gitBranch":      s.GitBranch,
+		"lastPrompt":     s.LastPrompt,
+		"lastAction":     s.LastAction,
+		"model":          s.Model,
+		"roiMultiplier":  s.ROIMultiplier,
+		"taskType":       s.TaskType,
+		"durationMin":    s.DurationMin,
+		// Infer location from file path: sandbox sessions run in /sandbox
+		// so their project hash is "-sandbox".
+		"location": func() string {
+			if strings.Contains(s.FilePath, "/-sandbox/") {
+				return "remote"
+			}
+			return "local"
+		}(),
+	}
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -325,51 +377,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	sessions = visibleHistory(sessions, r.URL.Query().Get("automated") == "1")
-	if sessions == nil {
-		sessions = []history.Session{}
-	}
-
-	result := make([]map[string]any, len(sessions))
-	for i, s := range sessions {
-		result[i] = map[string]any{
-			"id":          s.ID,
-			"provider":    s.Provider,
-			"project":     s.Project,
-			"filePath":    s.FilePath,
-			"startTime":   s.StartTime.Format(time.RFC3339),
-			"lastActive":  s.LastActive.Format(time.RFC3339),
-			"turnCount":   s.TurnCount,
-			"tokensIn":    s.TokensIn,
-			"tokensOut":   s.TokensOut,
-			"costUSD":     s.CostUSD,
-			"firstPrompt": s.FirstPrompt,
-			"title":       s.Title,
-			"shownTitle":  history.ShownTitle(s), // the title to show; the client never picks one
-			"resumable":   s.Resumable,
-			"annotation":  s.Annotation,
-			"tags":        s.Tags,
-			"note":        s.Note,
-			"isSubagent":     s.IsSubagent,
-			"permissionMode": s.PermissionMode,
-			"starred":        s.Starred,
-			"gitBranch":      s.GitBranch,
-			"lastPrompt":     s.LastPrompt,
-			"lastAction":     s.LastAction,
-			"model":          s.Model,
-			"roiMultiplier":  s.ROIMultiplier,
-			"taskType":       s.TaskType,
-			"durationMin":    s.DurationMin,
-			// Infer location from file path: sandbox sessions run in /sandbox
-			// so their project hash is "-sandbox".
-			"location": func() string {
-				if strings.Contains(s.FilePath, "/-sandbox/") {
-					return "remote"
-				}
-				return "local"
-			}(),
-		}
-	}
+	result := dashboardHistory(sessions)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"sessions": result}); err != nil {
@@ -542,7 +550,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	results := []map[string]string{}
 	if s.searchFn != nil {
-		matches, err := s.searchFn(q)
+		matches, err := s.searchFn(q, r.URL.Query().Get("automated") == "1")
 		if err != nil {
 			debuglog.Log("session search %q: %v", q, err) // details stay in the log
 			http.Error(w, "search failed", http.StatusInternalServerError)

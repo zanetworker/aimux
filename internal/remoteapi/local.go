@@ -238,10 +238,7 @@ func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated b
 	seen := map[string]bool{}
 	for _, s := range all {
 		seen[s.ID] = true
-		if s.IsSubagent {
-			continue
-		}
-		if _, created := x.Created.Get(s.ID); s.Automated && !includeAutomated && !created {
+		if !x.listable(s, includeAutomated) {
 			continue
 		}
 		sum := summary(s, x.state(s.ID, open))
@@ -472,8 +469,7 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 		if dir == "" {
 			dir = s.Project
 		}
-		_, created := x.Created.Get(s.ID)
-		if s.IsSubagent || (s.Automated && !created) || dir == "" || seen[dir] {
+		if !x.listable(s, false) || dir == "" || seen[dir] {
 			continue
 		}
 		seen[dir] = true
@@ -488,6 +484,13 @@ func (x *LocalIndex) Projects(ctx context.Context) ([]Project, error) {
 	return out, nil
 }
 
+// listable is history.Visible with the remote API's options: never a
+// subagent, an automated session only when asked for or created here.
+func (x *LocalIndex) listable(s history.Session, includeAutomated bool) bool {
+	_, created := x.Created.Get(s.ID)
+	return history.Visible(s, history.RemoteOpts(includeAutomated, created))
+}
+
 // listableIDs are the sessions the list shows: interactive sessions
 // with a file, and sessions created here that have a file or a live run.
 func (x *LocalIndex) listableIDs() []string {
@@ -495,7 +498,7 @@ func (x *LocalIndex) listableIDs() []string {
 	all, err := x.discover()
 	if err == nil {
 		for _, s := range all {
-			if _, created := x.Created.Get(s.ID); !s.IsSubagent && (!s.Automated || created) {
+			if x.listable(s, false) {
 				ids = append(ids, s.ID)
 			}
 		}
@@ -516,6 +519,8 @@ func (x *LocalIndex) searchable(r search.Result) (string, bool) {
 		return "", false
 	}
 	_, created := x.Created.Get(r.SessionID)
+	// The search scope is listableIDs (history.RemoteOpts); this clause only
+	// guards against the index and history disagreeing about automated.
 	if r.Automated && !created {
 		return "", false
 	}

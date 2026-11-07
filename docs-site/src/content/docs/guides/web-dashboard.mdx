@@ -74,6 +74,8 @@ Click the **Sessions** tab to browse past agent sessions. The sessions table sho
 - **Resumable** indicator for sessions that can be continued
 - **Star icon**: Click to pin/unpin sessions for quick access
 
+Some sessions are hidden until you ask for them. Sessions started by a program (`claude -p`, the agent SDK) show when you turn on **Automated**, in full, as `H` shows them in the TUI. Subagent sessions show when you turn on **Subagents**, analyzer sessions (started by aimux's own analysis or hook prompts, or mentioning "session analyzer") when you turn on **Analyzers**, and near-empty sessions (no cost and at most 5 turns) while a search is active. The Sessions tab count and the total under the table follow the switches: they count automated, subagent and analyzer sessions only while their switch is on, and near-empty sessions always (a search shows them). Content search also finds automated sessions; the switches decide whether they show. The server decides which sessions each switch reveals (the `hidden` list on each `/api/history` session), with the same rule the TUI and the phone clients use, each with its own switches.
+
 ### Starring Sessions
 
 Click the star icon (☆/★) on any session row or agent card to pin it. Starred sessions:
@@ -91,7 +93,7 @@ Click any row to open its trace in the right panel. The toolbar provides two fil
 - **Filter sessions**: Search by title, prompt, project, annotation, or tags
 - **Filter by path**: Narrow to sessions in a specific directory (type a directory name like "research" or "aimux")
 
-Both filters stack: filter by path first, then search within those results. Use the content search for deep matches inside session files.
+Both filters stack: filter by path first, then search within those results. Use the content search for deep matches inside session files. Content search results follow the same rules: Starred, the path filter and the Subagents, Automated and Analyzers switches still apply, and a row matching either the text filter or the content search is shown.
 
 ### CLI Session Commands
 

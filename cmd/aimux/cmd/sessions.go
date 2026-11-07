@@ -75,22 +75,15 @@ func newSessionsCmd(discover sessionsDiscoverFn, picker sessionsPickerFn, resume
 					liveSet[id] = true
 				}
 			}
+			// cron/SDK runs hidden when browsing; exports stay complete
+			visible := history.CLIOpts(includeAutomated || exportMode)
 			var filtered []history.Session
 			for _, s := range allSessions {
 				if live && !liveSet[s.ID] {
 					continue // --live: only sessions running in a terminal now
 				}
-				if s.TurnCount <= 5 && s.CostUSD == 0 {
+				if !history.Visible(s, visible) {
 					continue
-				}
-				if s.LastActive.IsZero() {
-					continue
-				}
-				if s.IsSubagent {
-					continue
-				}
-				if s.Automated && !includeAutomated && !exportMode {
-					continue // cron/SDK runs hidden when browsing; exports stay complete
 				}
 				filtered = append(filtered, s)
 			}

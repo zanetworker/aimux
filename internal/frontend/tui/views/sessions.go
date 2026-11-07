@@ -17,11 +17,11 @@ type SortField int
 
 const (
 	SortByAge         SortField = iota // default: most recent first
-	SortByCost                        // highest cost first
-	SortByTurns                       // most turns first
-	SortByTitle                       // alphabetical by title/prompt
-	SortByFailureMode                 // tagged sessions first
-	SortByROI                         // highest ROI multiplier first
+	SortByCost                         // highest cost first
+	SortByTurns                        // most turns first
+	SortByTitle                        // alphabetical by title/prompt
+	SortByFailureMode                  // tagged sessions first
+	SortByROI                          // highest ROI multiplier first
 )
 
 // sortFieldOrder defines the cycle order when pressing 's'.
@@ -172,10 +172,10 @@ type SessionsView struct {
 	filterText  string
 
 	// Tag input
-	tagMode     bool
-	tagInput    TextInput
-	tagVocab    []string // autocomplete vocabulary
-	tagCursor   int      // selected suggestion index (-1 = typing custom)
+	tagMode   bool
+	tagInput  TextInput
+	tagVocab  []string // autocomplete vocabulary
+	tagCursor int      // selected suggestion index (-1 = typing custom)
 
 	// Note input
 	noteMode  bool
@@ -233,8 +233,8 @@ type SessionsView struct {
 	resumeMode string // "bypass", "default", "plan", etc.
 
 	// Trace preview (reused LogsView)
-	previewLogs  *LogsView
-	traceParser  TraceParser
+	previewLogs *LogsView
+	traceParser TraceParser
 }
 
 // NewSessionsView creates a new sessions browser.
@@ -859,33 +859,14 @@ func sessionTitle(s history.Session) string {
 }
 
 // visibleSessions returns sessions matching the current filter, sorted
-// by the active sort field.
-// Near-empty sessions (1 turn, $0 cost) are hidden unless a filter is active.
-// hiddenUntilH is the one rule for what H reveals (subagent and automated
-// sessions while not searching); the list and the header count both use it.
-func (v *SessionsView) hiddenUntilH(s history.Session, isSearching bool) bool {
-	return !v.showSubagents && !isSearching && (s.IsSubagent || s.Automated)
-}
-
+// by the active sort field. Which sessions are hidden is history.Visible's
+// rule with the TUI's options (H and search).
 func (v *SessionsView) visibleSessions() []history.Session {
 	isSearching := v.filterText != "" || v.contentSearchIDs != nil
+	opts := history.TUIOpts(v.showSubagents, isSearching)
 	var result []history.Session
 	for _, s := range v.sessions {
-		if v.hiddenUntilH(s, isSearching) {
-			continue
-		}
-		// H promises automated sessions: the noise filters below must not
-		// take them away again.
-		revealed := v.showSubagents && s.Automated
-		if !isSearching && !revealed && isHookSession(s) {
-			continue
-		}
-		// Hide near-empty sessions (auto-memory, system operations) unless searching
-		if !isSearching && !revealed && s.CostUSD == 0 && s.TurnCount <= 5 {
-			continue
-		}
-		// Hide sessions with no timestamps (broken/incomplete files)
-		if !isSearching && s.StartTime.IsZero() && s.LastActive.IsZero() {
+		if !history.Visible(s, opts) {
 			continue
 		}
 		// Directory filter
@@ -982,27 +963,12 @@ func (v *SessionsView) compareSessions(a, b history.Session) bool {
 		}
 		return aTag < bTag
 	case SortByROI:
-		aROI := a.DurationMin * (a.ROIMultiplier - 1) * (150.0 / 60.0) - a.CostUSD
-		bROI := b.DurationMin * (b.ROIMultiplier - 1) * (150.0 / 60.0) - b.CostUSD
+		aROI := a.DurationMin*(a.ROIMultiplier-1)*(150.0/60.0) - a.CostUSD
+		bROI := b.DurationMin*(b.ROIMultiplier-1)*(150.0/60.0) - b.CostUSD
 		return aROI < bROI
 	default: // SortByAge
 		return a.StartTime.Before(b.StartTime)
 	}
-}
-
-var hookSessionPrefixes = []string{
-	"YOU ARE A SESSION ANALYZER",
-	"YOU ARE A ",
-	"Analyze the session transcript",
-}
-
-func isHookSession(s history.Session) bool {
-	for _, prefix := range hookSessionPrefixes {
-		if strings.HasPrefix(s.FirstPrompt, prefix) || strings.HasPrefix(s.Title, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func sessionMatchesFilter(s history.Session, needle string) bool {
@@ -1079,8 +1045,10 @@ func (v *SessionsView) View() string {
 	if !v.showSubagents {
 		hiddenCount, automatedCount := 0, 0
 		isSearching := v.filterText != "" || v.contentSearchIDs != nil
+		// Count what H would show: hidden now, visible with H.
+		now, withH := history.TUIOpts(false, isSearching), history.TUIOpts(true, isSearching)
 		for _, s := range v.sessions {
-			if !v.hiddenUntilH(s, isSearching) {
+			if history.Visible(s, now) || !history.Visible(s, withH) {
 				continue
 			}
 			if s.IsSubagent {
@@ -1229,7 +1197,7 @@ func (v *SessionsView) View() string {
 		// Render divider between pinned and unpinned sections
 		if !pinnedDividerRendered && v.pinnedCount > 0 && i == v.pinnedCount {
 			divStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
-			b.WriteString(divStyle.Render("  " + strings.Repeat("─", w-4)) + "\n")
+			b.WriteString(divStyle.Render("  "+strings.Repeat("─", w-4)) + "\n")
 			pinnedDividerRendered = true
 		}
 
@@ -1257,7 +1225,7 @@ func (v *SessionsView) View() string {
 	if v.previewLogs != nil {
 		b.WriteString("\n")
 		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
-		b.WriteString(sepStyle.Render("  " + strings.Repeat("─", w-4)) + "\n")
+		b.WriteString(sepStyle.Render("  "+strings.Repeat("─", w-4)) + "\n")
 		b.WriteString(v.previewLogs.View())
 	}
 
@@ -1291,16 +1259,16 @@ func (v *SessionsView) View() string {
 			prefix := "    "
 			if i == v.tagCursor {
 				selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
-				b.WriteString("\n" + prefix + selectedStyle.Render("▸ " + tag))
+				b.WriteString("\n" + prefix + selectedStyle.Render("▸ "+tag))
 			} else {
-				b.WriteString("\n" + prefix + sessDimStyle.Render("  " + tag))
+				b.WriteString("\n" + prefix + sessDimStyle.Render("  "+tag))
 			}
 		}
 		if len(suggestions) > maxVisible {
 			b.WriteString("\n    " + sessDimStyle.Render(fmt.Sprintf("  ... and %d more (type to filter)", len(suggestions)-maxVisible)))
 		}
 		if len(suggestions) == 0 && v.tagInput.Value() != "" {
-			b.WriteString("\n    " + sessDimStyle.Render("(new tag: \"" + v.tagInput.Value() + "\")"))
+			b.WriteString("\n    " + sessDimStyle.Render("(new tag: \""+v.tagInput.Value()+"\")"))
 		}
 	}
 	if v.noteMode {

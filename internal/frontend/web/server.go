@@ -35,7 +35,7 @@ type Server struct {
 	cfg              config.Config
 	taskProvider     tasks.Provider
 	recentDirsFn     func(int) []RecentDirInfo
-	searchFn         func(query string) ([]search.Result, error)
+	searchFn         func(query string, includeAutomated bool) ([]search.Result, error)
 	composeEngine    *aimuxcompose.Engine
 	sessionStore     *controller.SessionStore
 	otelStore        controller.OTELLookup
@@ -132,8 +132,9 @@ type RecentDirInfo struct {
 	Age     string `json:"age"`
 }
 
-// SetSearchFunc wires session search (the shared internal/search index).
-func (s *Server) SetSearchFunc(fn func(query string) ([]search.Result, error)) {
+// SetSearchFunc wires session search (the shared internal/search index);
+// includeAutomated is the dashboard's Automated switch.
+func (s *Server) SetSearchFunc(fn func(query string, includeAutomated bool) ([]search.Result, error)) {
 	s.searchFn = fn
 }
 

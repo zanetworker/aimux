@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +37,16 @@ func (p *stubParser) ParseTrace(_ string) ([]trace.Turn, error) {
 //
 // Run with: go test ./internal/frontend/web/ -run Smoke -timeout 60s -v
 func TestAPISmoke_AllEndpoints(t *testing.T) {
-	fakeHome(t) // sessions come from a temp ~/.claude/projects, never the real one
+	// sessions come from a temp ~/.claude/projects, never the real one
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projects := filepath.Join(home, ".claude", "projects", "-tmp-titles")
+	titleFixture(t, projects)
+	// an automated (agent SDK) session, which the list sends behind the Automated switch
+	sdk := `{"type":"user","entrypoint":"sdk-cli","message":{"role":"user","content":"nightly job"},"timestamp":"2026-10-01T10:00:00Z"}` + "\n"
+	if err := os.WriteFile(filepath.Join(projects, "44444444-sdk.jsonl"), []byte(sdk), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	s := NewServer(0)
 	cfg := config.Default()
 	s.SetConfig(cfg)
@@ -116,7 +127,7 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 	}
 
 	// --- fields the React app reads instead of computing them ---
-	t.Run("GET /api/history shownTitle", func(t *testing.T) {
+	t.Run("GET /api/history shownTitle and hidden", func(t *testing.T) {
 		resp, err := http.Get(addr + "/api/history") // #nosec G107
 		if err != nil {
 			t.Fatal(err)
@@ -131,10 +142,33 @@ func TestAPISmoke_AllEndpoints(t *testing.T) {
 		if len(payload.Sessions) == 0 {
 			t.Fatal("no sessions from the fake home")
 		}
+		sawSDK := false
 		for _, sess := range payload.Sessions {
 			if title, _ := sess["shownTitle"].(string); title == "" {
 				t.Errorf("session %v has no shownTitle", sess["id"])
 			}
+			hidden, ok := sess["hidden"].([]any)
+			if !ok {
+				t.Errorf("session %v has no hidden list (got %T)", sess["id"], sess["hidden"])
+			}
+			names := map[string]bool{}
+			for _, h := range hidden {
+				switch h {
+				case "subagents", "automated", "analyzers", "search":
+					names[h.(string)] = true
+				default:
+					t.Errorf("session %v: unknown reveal %v", sess["id"], h)
+				}
+			}
+			if sess["id"] == "44444444-sdk" {
+				sawSDK = true
+				if !names["automated"] {
+					t.Errorf("automated session hidden = %v, want automated", hidden)
+				}
+			}
+		}
+		if !sawSDK {
+			t.Error("the automated session is not listed")
 		}
 	})
 

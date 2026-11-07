@@ -341,8 +341,8 @@ func createWebServer(port int) *web.Server {
 		s.SetComposeEngine(composeEngine)
 	}
 	s.SetDiscoverFunc(disco.Discover)
-	s.SetSearchFunc(func(q string) ([]search.Result, error) {
-		rs, _, err := interactiveSearch.Query(context.Background(), q, search.QueryOpts{Limit: 50})
+	s.SetSearchFunc(func(q string, automated bool) ([]search.Result, error) {
+		rs, _, err := interactiveSearch.Query(context.Background(), q, dashboardSearchOpts(automated))
 		return rs, err
 	})
 	s.SetLaunchFunc(func(opts spawn.LaunchOpts) (spawn.LaunchResult, error) {
@@ -484,4 +484,12 @@ func createWebServer(port int) *web.Server {
 	}
 
 	return s
+}
+
+// dashboardSearchOpts is the web dashboard's content search: automated
+// sessions only while its Automated switch is on (automated=1), so they never
+// take places in the limit when they cannot show; the dashboard drops hits its
+// other switches hide (web/src/components/sessionFilter.ts).
+func dashboardSearchOpts(includeAutomated bool) search.QueryOpts {
+	return search.QueryOpts{Limit: 50, IncludeAutomated: includeAutomated}
 }
