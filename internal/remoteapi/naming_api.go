@@ -208,7 +208,7 @@ func (a *API) editMeta(w http.ResponseWriter, r *http.Request, req metaRequest, 
 		writeError(w, http.StatusInternalServerError, "internal", errors.New("the session's metadata could not be saved"))
 		return
 	}
-	s.Title, s.Description, s.DescriptionBy, s.DescribedAt, s.Starred = saved.Title, saved.Description, saved.DescriptionBy, saved.DescribedAt, saved.Starred
+	s.Title, s.TitleBy, s.Description, s.DescriptionBy, s.DescribedAt, s.Starred = saved.Title, saved.TitleBy, saved.Description, saved.DescriptionBy, saved.DescribedAt, saved.Starred
 	shown, _ := history.ShownDescription(s)
 	writeJSON(w, http.StatusOK, MetaResult{Title: history.DisplayTitle(s), Description: shown, Pinned: s.Starred})
 }

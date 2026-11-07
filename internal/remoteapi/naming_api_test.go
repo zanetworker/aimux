@@ -600,3 +600,17 @@ func TestShownIDs_OnlySessionsNowCanShow(t *testing.T) {
 		t.Fatalf("shownIDs %v, want Last on your Mac, pinned, then busy, in a terminal or finished within 900 s", got)
 	}
 }
+
+// A session renamed with Claude Code's /rename gets the owner's new title in
+// the answer at once: the saved TitleBy is copied with the title, so the
+// owner's value wins over CustomTitle when the answer is computed.
+func TestAPI_PatchMeta_OwnerTitleBeatsRenameInTheAnswer(t *testing.T) {
+	r := newMetaRig(t)
+	s := r.base["s1"]
+	s.CustomTitle = "Renamed in Claude Code"
+	r.base["s1"] = s
+	st, body := r.patch("s1", `{"title":"Owner's title"}`)
+	if st != 200 || body["title"] != "Owner's title" {
+		t.Fatalf("patch over a /rename title: %d %v, want the owner's title", st, body)
+	}
+}
