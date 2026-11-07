@@ -194,3 +194,5 @@ Commands can be any language (Python, bash, Go binary, etc.) as long as they out
 ## Data Directory
 
 Plugins that collect data over time should write to `~/.aimux/data/<plugin-name>/`. This directory persists across reboots (unlike `/tmp/`). The context-dashboard plugin uses `~/.aimux/data/context/` for its tracker files.
+
+`aimux collect` writes one `<session-id>.json` tracker file there for each session that has at least one tool call. A session with no events for 30 minutes is compacted: its running totals are saved to `~/.aimux/data/context/.state/<session-id>.json` and its spans are dropped from memory, so the collector holds only sessions that are still active. When the session resumes, or the collector restarts after a normal shutdown, new calls add to those saved totals instead of replacing them. A collector that is killed outright (`SIGKILL`) loses each active session's calls since its last compaction; tracker files already written stay on disk.

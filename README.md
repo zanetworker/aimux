@@ -1,147 +1,137 @@
+<h1 align="center"><img src="assets/aimux-lockup.svg" alt="aimux" height="56"></h1>
+
+<p align="center">Mission control for AI coding agents: see, steer and evaluate every session.</p>
+
 <p align="center">
-  <img src="assets/logo.png" width="128" alt="aimux logo">
-  <br>
-  <strong>aimux</strong><br>
-  <sub>Tame the agent sprawl.</sub>
-  <br><br>
-  <sub>See all your agents. Trace what they did. Judge if it was good.</sub>
+  <a href="https://github.com/zanetworker/aimux/releases/latest"><img src="https://img.shields.io/github/v/release/zanetworker/aimux?style=flat-square" alt="release"></a>
+  <a href="https://github.com/zanetworker/aimux/actions"><img src="https://img.shields.io/github/actions/workflow/status/zanetworker/aimux/ci.yml?style=flat-square" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/zanetworker/aimux/releases/latest"><img src="https://img.shields.io/github/v/release/zanetworker/aimux?style=flat-square" alt="Release"></a>
-  <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License">
-  <img src="https://img.shields.io/badge/go-1.24%2B-00ADD8?style=flat-square&logo=go" alt="Go 1.24+">
-  <a href="https://zanetworker.github.io/aimux/"><img src="https://img.shields.io/badge/docs-online-FF3131?style=flat-square" alt="Docs"></a>
+  <a href="https://aimux.ai">Docs</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="https://github.com/zanetworker/aimux/releases">Changelog</a>
 </p>
 
 <p align="center">
-  <img src="assets/demo.gif" alt="aimux demo" width="800">
+  <img src="assets/demo.gif" alt="aimux TUI: the agent list, then a split view with the trace and diff on the left and the live Claude Code session on the right, a GOOD label, and the costs view" width="800">
+  <br><em>Four agents in one list, then one agent's trace beside its live session, a turn labeled GOOD, and cost per project.</em>
 </p>
 
-One agent just silently deleted your auth config. Another rewrote 47 files. aimux shows you exactly what happened, and lets you judge if it was good.
+You run five agents in five tmux panes and lose track of which one rewrote `auth.go`. aimux finds every running and past session, shows each one turn by turn (prompts, tool calls, diffs), and lets you label turns so the good and bad runs become eval data.
 
-## Quick Start
+## Install
 
-```bash
+```sh
 brew install zanetworker/aimux/aimux
-aimux          # terminal dashboard
-aimux web      # browser dashboard at localhost:9090
 ```
 
-Requires **tmux**. Auto-discovers running Claude and Codex agents.
+Requires tmux. No config, SDK or instrumentation: aimux reads the session files Claude Code and Codex already write.
 
-## What It Does
+## Quickstart
 
-**See everything.** Live trace of every prompt, response, and tool call as agents work. Watch file edits, bash commands, and API calls turn by turn.
+```sh
+aimux agents
+```
 
-**Judge quality.** Label turns GOOD, BAD, or WASTE. Add notes. Build eval datasets from real production sessions, not synthetic benchmarks.
+```text
+PID   PROVIDER  STATUS   PROJECT       MODEL
+7     claude    Active   payments-api  opus
+25    claude    Idle     docs          opus
+13    claude    Idle     web           opus
+19    claude    Waiting  infra         opus
+```
 
-**Export anywhere.** OTEL to MLflow or Jaeger for evaluation pipelines. JSONL to disk for offline analysis. Your annotations become feedback assessments.
+Then open the dashboard:
 
-**Zero setup.** No config, no instrumentation, no SDK. Run `aimux` and it finds every running agent on your machine.
+```sh
+aimux          # terminal UI
+aimux web      # browser UI at localhost:3000
+```
 
-## Features
+## Why aimux
 
-<table>
-<tr>
-<td width="50%">
+- **See every agent at once.** Running and past Claude Code and Codex sessions in one list, with live status, CPU, tokens and cost, and search across all of them ("which agent edited auth.go?").
+- **Know what each agent actually did.** A turn-by-turn trace of prompts, tool calls and diffs, with a PR-style review panel. [Tracing →](https://aimux.ai/guides/tracing/)
+- **Turn real runs into evals.** Label turns GOOD, BAD or WASTE and export them as MLflow feedback, to any OTLP backend, or as JSONL. [MLflow →](https://aimux.ai/guides/mlflow-integration/)
+- **Run and reach agents anywhere.** Launch them locally, in OpenShell sandboxes or on Kubernetes. From your phone, follow your Claude sessions, continue idle ones and answer approvals. [Remote sandboxes →](https://aimux.ai/guides/remote-sandboxes/)
 
-**Discovery & Monitoring**
-- Auto-discovers Claude and Codex agents
-- Live status: working, idle, needs you, error (the same words on the phone)
-- Per-agent CPU%, memory, token usage, and cost tracking
-- Model-aware pricing (Opus, Sonnet, Haiku, GPT)
-- Cross-session search ("which agent edited auth.go?")
+## What's inside
 
-</td>
-<td width="50%">
+| Area | What you get | Docs |
+|---|---|---|
+| Discover | Auto-discovery of Claude Code and Codex, live status (working, idle, needs you, error; the same words on the phone), cross-session search, starred sessions, generated titles | [Web dashboard](https://aimux.ai/guides/web-dashboard/) |
+| Trace and review | Turn-by-turn trace, inline diffs, PR-style review panel, live diff pane beside the session terminal | [Tracing](https://aimux.ai/guides/tracing/) |
+| Cost | Per-agent and per-turn cost with model-aware pricing | [Cost tracking](https://aimux.ai/guides/cost-tracking/) |
+| Evaluate | GOOD / BAD / WASTE labels with notes; export to MLflow, Jaeger or any OTLP backend, or JSONL | [MLflow](https://aimux.ai/guides/mlflow-integration/) |
+| Launch | Six-axis launcher, saved profiles, quick-launch directories, launches from Google Tasks, continue an idle session with `aimux chat` | [Launch modes](https://aimux.ai/guides/launch-modes/), [Tasks](https://aimux.ai/guides/tasks/), [Chat](https://aimux.ai/guides/chat/) |
+| Run remotely | OpenShell sandboxes with terminal, traces and kill; agents on Kubernetes pods | [Remote sandboxes](https://aimux.ai/guides/remote-sandboxes/), [Kubernetes](https://aimux.ai/advanced/k8s-quickstart/) |
+| Reach | `aimux remote serve`: follow and continue Claude sessions from the iPhone app or the phone web client over tailscale, answer approvals, type into sessions open in iTerm2, and open a phone session on the Mac | [Remote access](https://aimux.ai/guides/remote-access/) |
+| Share MCP | `aimux mcp proxy install`: your stdio MCP servers run once in a shared daemon, each at its own endpoint under its original name (permission rules unchanged), started on first call and stopped when idle; `aimux mcp serve`: session search and resume tools for agents | [MCP proxy](https://aimux.ai/guides/mcp-proxy/) |
+| Interfaces | Keyboard TUI with split panes; web dashboard with cards, filters and dark/light themes; desktop and terminal-bell notifications | [TUI keys](https://aimux.ai/guides/tui-keybindings/), [Notifications](https://aimux.ai/guides/notifications/) |
+| Extend | Plugin tabs, new providers, `--json` on every listing command, `aimux agent-context` for the full CLI contract | [Plugins](https://aimux.ai/guides/plugins/), [Agent usage](https://aimux.ai/guides/agent-usage/), [Add a provider](https://aimux.ai/advanced/adding-a-provider/) |
 
-**Tracing & Code Review**
-- Turn-by-turn trace of prompts, responses, tool calls
-- PR-style diff review panel with file tree hierarchy
-- Inline diffs for Edit/Write tool calls with syntax coloring
-- Live diff pane alongside session terminal (auto-refreshes)
-- Annotate turns as GOOD / BAD / WASTE with notes
-- Export to MLflow, Jaeger, or any OTLP backend
+Use the Claude Code or Codex built-in history instead if you run one agent at a time; aimux pays off when several run in parallel.
 
-</td>
-</tr>
-<tr>
-<td>
-
-**Two Interfaces**
-- **TUI**: keyboard-driven, split-pane trace + live session
-- **Web**: card grid, filtering, session history, trace + diff panels
-- Dark and light themes (web dashboard)
-- Plugin system for custom dashboard tabs
-
-</td>
-<td>
-
-**Agent Management**
-- Launch and spawn agents from CLI or UI
-- Star/pin sessions to find them later across restarts
-- Profiles: save named flag bundles for repeated use
-- Session history with browse, search, path filter, and resume
-- LLM-powered title generation for untitled sessions
-- Kubernetes support: run agents on K8s pods
-
-</td>
-</tr>
-</table>
+**What it doesn't do:** it doesn't plan or orchestrate multi-agent work, and it only supports Claude Code and Codex today ([add a provider](https://aimux.ai/advanced/adding-a-provider/)).
 
 <p align="center">
-  <img src="assets/annotations.png" alt="Trace with annotations" width="380">
-  <img src="assets/costs.png" alt="Cost tracking" width="380">
+  <img src="assets/web-dashboard.png" alt="aimux web dashboard: agents grouped by project with status and cost, and the selected agent's trace with its tool calls on the right, dark theme" width="820">
+  <br><em>The web dashboard (<code>aimux web</code>): every agent by project, and one agent's trace.</em>
 </p>
 
-## Agent-Ready CLI
+## How it works
 
-aimux is built for AI agents. Commands support `--json` for structured output (the `mcp proxy` commands other than `mcp proxy status`, `remote serve` and `remote hooks install|uninstall|status` print text, and `chat --json` streams JSON lines), errors include valid values, and `agent-context` dumps the full CLI contract.
+<p align="center">
+  <img src="assets/architecture.png" alt="aimux reads Claude Code and Codex sessions read-only, feeds discovery, trace and export, and serves the TUI, web dashboard, remote API and MCP proxy; it launches agents into OpenShell sandboxes or Kubernetes, and exports go to MLflow or Jaeger" width="820">
+</p>
 
-```bash
-aimux agents --json                              # discover running agents
-aimux sessions --list --json --limit 5           # search past sessions
-aimux spawn claude --dir ./proj --wait --json    # start and wait for completion
-aimux agent-context                              # full CLI schema for agents
-aimux profile save work --provider claude        # save reusable config
-aimux feedback "the X flag doesn't work"         # report friction
-aimux chat <session-id> "next step?"             # continue an idle Claude session
-aimux mcp proxy serve                            # lazy, shared MCP servers for all sessions
-aimux mcp proxy status --json                    # proxied servers: state, tools, last call, last error
-aimux remote serve                               # your sessions from other devices (API, phone web client at /app/, approval notifications), via tailscale serve
-aimux remote pair --name iphone                  # one-time code that pairs a phone or browser (Face ID login); see also remote devices, remote revoke
-aimux remote hooks install                       # Claude Code hooks: terminal sessions at a permission prompt push and list under Needs you
+## Usage
+
+| Task | Command |
+|---|---|
+| Search past sessions in all projects | `aimux sessions "auth.go" --all --list --json --limit 5` |
+| Start an agent and wait for it | `aimux spawn claude --dir ./proj --wait --json` |
+| Resume a past session | `aimux resume <session-id>` |
+| Jump to a running agent's iTerm2 pane | `aimux jump <session-id or pid>` |
+| Continue a Claude session that is not open in a terminal | `aimux chat <session-id> "next step?"` |
+| Export a trace | `aimux export <session-id>` |
+| Follow Claude sessions from your phone | `aimux remote serve` (via tailscale serve) |
+| Share MCP servers across sessions | `aimux mcp proxy install --dry-run`, then `aimux mcp proxy install` |
+
+<details>
+<summary>All commands</summary>
+
+```text
+agent-context  Machine-readable CLI surface for agents
+agents         List running AI agents
+chat           Send a message to an existing Claude session and stream the reply
+collect        Run headless OTEL collector
+configs        List named agent configurations
+environments   List configured environments
+export         Export a session trace
+feedback       Send feedback about the CLI
+jump           Bring a running agent's terminal pane to the front
+kill           Kill a running agent
+mcp            MCP server for session search and remote agents
+profile        Manage saved configuration profiles
+remote         API for your sessions from other devices, through tailscale serve
+resume         Resume a past session
+sessions       Browse and search past sessions
+spawn          Start a new AI agent session
+version        Show aimux version
+web            Launch web dashboard
 ```
 
-With `remote_access.terminal_input.enabled` on, the phone can also type into Claude Code sessions open in iTerm2 on the Mac, under the safety checks in the [remote access guide](https://zanetworker.github.io/aimux/guides/remote-access/#typing-into-terminal-sessions): a message is never typed into a shell, over a prompt or while someone uses the Mac, and text starting with `!` (Claude Code's bash mode) is always refused, as is text starting with `/` (a slash command) unless `terminal_input.allow_slash_commands` is set.
+</details>
 
-The two phone clients live under `clients/`: the web client served by `remote serve` at `/app/` ([clients/web](clients/web)) and the iPhone app ([clients/ios](clients/ios)). Both follow [api/remote-v1.openapi.yaml](api/remote-v1.openapi.yaml) and rank sessions with the same fixtures in [api/testdata/clients](api/testdata/clients/README.md). Their tests: `node --test "clients/web/webapp/*.test.mjs"` for the web client (the plain directory form fails on Node 22) and, in `clients/ios`, `xcodebuild test -scheme Aimux -project Aimux.xcodeproj -destination 'platform=iOS Simulator,name=<iPhone>'` (see [clients/ios/README.md](clients/ios/README.md)).
+Full docs: [getting started](https://aimux.ai/getting-started/), [configuration](https://aimux.ai/configuration/).
 
-See [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) for the full guide and [SKILL.md](SKILL.md) for agent workflow recipes. The remote API's contract, for building clients, is [api/remote-v1.openapi.yaml](api/remote-v1.openapi.yaml) (each server also serves it at `/v1/openapi.yaml`).
+## Contributing
 
-## Documentation
-
-Full documentation at **[zanetworker.github.io/aimux](https://zanetworker.github.io/aimux/)**
-
-- [Getting Started](https://zanetworker.github.io/aimux/getting-started/) - install, first run, CLI commands
-- [Configuration](https://zanetworker.github.io/aimux/configuration/) - full config.yaml reference
-- [Agent Usage](https://zanetworker.github.io/aimux/guides/agent-usage/) - structured output, profiles, feedback
-- [Web Dashboard](https://zanetworker.github.io/aimux/guides/web-dashboard/) - cards, filters, sessions, diff review
-- [TUI Keybindings](https://zanetworker.github.io/aimux/guides/tui-keybindings/) - keyboard shortcuts
-- [Tracing & Annotations](https://zanetworker.github.io/aimux/guides/tracing/) - trace view, OTEL, JSONL
-- [Launch Modes](https://zanetworker.github.io/aimux/guides/launch-modes/) - tmux, direct, task-driven
-- [Adding a Provider](https://zanetworker.github.io/aimux/advanced/adding-a-provider/) - extend with new agents
-- [Kubernetes](https://zanetworker.github.io/aimux/advanced/k8s-quickstart/) - run agents on K8s
-
-## Built With
-
-[Bubble Tea](https://github.com/charmbracelet/bubbletea) |
-[Lip Gloss](https://github.com/charmbracelet/lipgloss) |
-[charmbracelet/x/vt](https://github.com/charmbracelet/x) |
-[creack/pty](https://github.com/creack/pty) |
-[OpenTelemetry](https://opentelemetry.io/) |
-[Starlight](https://starlight.astro.build/)
+Issues and PRs welcome. Run `aimux feedback "..."` to report friction straight from the CLI.
 
 ## License
 

@@ -4,6 +4,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	aimuxcompose "github.com/zanetworker/aimux/internal/compose"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/search"
@@ -51,6 +52,7 @@ func RegisterAll(d Deps) {
 	}
 	rootCmd.AddCommand(newFeedbackCmd(d.FeedbackPath))
 	rootCmd.AddCommand(newKillCmd(d.Discover, d.ComposeEngine))
+	rootCmd.AddCommand(newJumpCmd(d.Discover, controller.DefaultFocuser()))
 	rootCmd.AddCommand(newCollectCmd())
 	rootCmd.AddCommand(newMCPCmd())
 	rootCmd.AddCommand(newChatCmd())

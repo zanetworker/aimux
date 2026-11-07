@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="216 244 592 510" role="img" aria-label="aimux">
+  <g fill="none" stroke="#4F7DF0" stroke-width="32" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="242" y="270" width="540" height="458" rx="72"/>
+    <path d="M242 349 H782"/>
+    <path d="M512 349 V728"/>
+    <path d="M638 349 V512"/>
+    <path d="M512 512 H782"/>
+    <path d="M270 515 H486"/>
+    <path d="M270 606 H384"/>
+    <path d="M384 515 V700"/>
+  </g>
+  <circle cx="324" cy="431" r="28" fill="#4F7DF0"/>
+  <circle cx="577" cy="431" r="28" fill="#2FBF71"/>
+  <circle cx="447" cy="617" r="28" fill="#F2B33D"/>
+  <circle cx="584" cy="595" r="28" fill="#4F7DF0"/>
+</svg>

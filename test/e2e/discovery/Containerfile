@@ -1,0 +1,9 @@
+# End-to-end discovery test image. Inside it, ps shows only the stand-in
+# agents, so the check sees exactly the seeded sessions.
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends tmux lsof procps python3 && rm -rf /var/lib/apt/lists/*
+COPY bin/aimux bin/claude /usr/local/bin/
+COPY seed.py entrypoint.sh /e2e/
+ENV HOME=/home/e2e TERM=xterm-256color
+RUN mkdir -p /home/e2e /work
+ENTRYPOINT ["/e2e/entrypoint.sh"]

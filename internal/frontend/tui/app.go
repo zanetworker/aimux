@@ -160,6 +160,9 @@ type App struct {
 	// Temporary status hint (shown once then cleared)
 	statusHint string
 
+	// focuser raises an agent's terminal pane (F key); nil callbacks fall back to the real ones.
+	focuser controller.Focuser
+
 	// Launcher overlay
 	launcherActive bool
 	launcherView   *views.LauncherView
@@ -1107,6 +1110,10 @@ func (a App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case focusResultMsg:
+		a.statusHint = msg.hint
+		return a, nil
+
 	case remoteLaunchResultMsg:
 		if msg.err != nil {
 			debuglog.Log("remote launch FAILED: %v", msg.err)
@@ -1376,6 +1383,10 @@ func (a App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "S":
 		if a.currentView == viewAgents {
 			return a.openSessions()
+		}
+	case "F":
+		if a.currentView == viewAgents {
+			return a.focusSelectedPane()
 		}
 	case "C":
 		if a.currentView == viewAgents {

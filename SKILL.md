@@ -40,6 +40,14 @@ aimux resume <session-id>
 
 Use `--dry-run` first to verify the command before executing.
 
+## Jumping to a running session
+
+```bash
+aimux jump <session-id|prefix|pid> --json
+```
+
+Brings the iTerm2 window, tab and pane running that session to the front; use it instead of `resume` when the session is already live. Returns `{session_id, pid, tty, focused, where}`. It exits 1 when no running agent matches, when a prefix matches several (the error lists them), or when the agent has no iTerm2 pane; for agents in tmux the JSON carries a `hint` with the attach command.
+
 ## Spawning agents
 
 ```bash
@@ -131,7 +139,7 @@ aimux spawn gpt
 # Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
-Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config. `aimux chat`, `aimux remote serve` and `aimux mcp proxy` return 1 for every failure, including missing arguments, an unknown session and a bad setting.
+Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config. `aimux chat`, `aimux jump`, `aimux remote serve` and `aimux mcp proxy` return 1 for every failure, including missing arguments, an unknown session and a bad setting.
 
 With `--json`, errors go to stderr as structured JSON (except `aimux chat`, whose `--json` covers the event stream; its errors stay plain text):
 
