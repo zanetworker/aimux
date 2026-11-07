@@ -326,11 +326,12 @@ export function createLogin({
     }
   }
 
-  // lock ends the session on the server and shows the lock.
+  // lock shows the lock at once, then ends the session on the server: a Mac
+  // that is unreachable or slow must not keep the chat open after a tap.
   async function lock() {
-    try { await post('/v1/auth/logout', {}); } catch { /* locked here either way; the server ends it within the hour */ }
     justUnlocked = false;
     set({ state: signedOut(), error: '' });
+    try { await post('/v1/auth/logout', {}); } catch { /* locked here either way; the server ends it within the hour */ }
   }
 
   return login;

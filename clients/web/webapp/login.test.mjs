@@ -436,3 +436,13 @@ test('a 401 that arrives after a newer unlock is retried on the new login, not l
   assert.deepEqual(await projects, { projects: ['p'] });
   assert.equal(late.state, 'live');
 });
+
+test('Lock locks at once, even when the logout request never answers', async () => {
+  const server = fakeServer({ 'GET /v1/health': health('live') });
+  const hang = (url, opts) => (String(url).endsWith('/v1/auth/logout') ? new Promise(() => {}) : server.fetch(url, opts));
+  const { login } = rig({ routes: {}, fetch: hang });
+  assert.equal(await login.start(), 'live');
+  login.lock(); // the Mac is unreachable: never awaited to completion
+  await settle();
+  assert.equal(login.state, 'locked');
+});
