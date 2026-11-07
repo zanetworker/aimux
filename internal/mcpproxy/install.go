@@ -435,7 +435,7 @@ func (i Installer) Install(skip []string) (err error) {
 
 	i.printf("Moved behind the MCP proxy, each under its own name: %s\n", strings.Join(sortedKeys(moved), ", "))
 	if len(p.Moved) > 0 {
-		i.printf("  Already behind it: %s\n", strings.Join(p.Moved, ", "))
+		i.printf("  Already behind it: %d servers (`aimux mcp proxy status` lists them)\n", len(p.Moved))
 	}
 	i.printSkipped(p.Skip)
 	i.printf("  Backup: %s\n", backup)
@@ -854,8 +854,40 @@ func (i Installer) UpgradeText(daemon string) string {
 	if daemon == "" {
 		daemon = "an older version"
 	}
-	return fmt.Sprintf("upgrade restart pending: the running proxy is aimux %s, this binary is %s; restart it when convenient with `launchctl kickstart -k gui/%d/%s`",
-		daemon, i.Version, i.Agent.UID, i.Agent.Label)
+	return fmt.Sprintf("upgrade restart pending: the running proxy is aimux %s, this binary is %s; restart it when convenient with `aimux mcp proxy restart`",
+		daemon, i.Version)
+}
+
+// Restart restarts the daemon under launchd (after an upgrade), in place,
+// and waits until a new daemon (another
+// pid) answers, then returns its report. Open sessions reconnect on their
+// next call.
+func (i Installer) Restart() (StatusReport, error) {
+	a := i.Agent
+	if !fileExists(a.PlistPath) {
+		return StatusReport{}, fmt.Errorf("the MCP proxy is not installed (no launchd agent at %s); `aimux mcp proxy install` sets it up", a.PlistPath)
+	}
+	before, _ := i.Status()
+	// In place (kickstart -k): the job stays loaded, so no failed bootstrap
+	// can leave the daemon down. An upgrade keeps the plist as it is.
+	if err := a.Kickstart(); err != nil {
+		return StatusReport{}, fmt.Errorf("restart the MCP proxy's launchd agent %s: %w", a.Label, err)
+	}
+	wait := i.Wait
+	if wait <= 0 {
+		wait = defaultWait
+	}
+	deadline := i.now().Add(wait)
+	for {
+		rep, err := i.Status()
+		if err == nil && rep.Running && (!before.Running || rep.PID != before.PID) {
+			return rep, nil
+		}
+		if !i.now().Before(deadline) {
+			return StatusReport{}, fmt.Errorf("the MCP proxy did not answer within %v after the restart (launchd agent %s, logs in %s)", wait, a.Label, a.LogDir)
+		}
+		i.sleep(statusPoll)
+	}
 }
 
 // probeMoved has the daemon start each server in move and list its tools,
@@ -1097,7 +1129,7 @@ func (i Installer) PrintInstallStatus(st InstallState) {
 // PrintPlan prints p by name only.
 func (i Installer) PrintPlan(p InstallPlan) {
 	if len(p.Moved) > 0 {
-		i.printf("Already behind the proxy: %s\n", strings.Join(p.Moved, ", "))
+		i.printf("Already behind the proxy: %d servers (`aimux mcp proxy status` lists them)\n", len(p.Moved))
 	}
 	if len(p.Remove) > 0 {
 		i.printf("Would take off the proxy (removed from %s): %s\n", i.ClaudeConfig, strings.Join(p.Remove, ", "))

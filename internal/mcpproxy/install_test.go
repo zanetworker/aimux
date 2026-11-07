@@ -75,8 +75,26 @@ func (f *installLaunchctl) run(name string, args ...string) ([]byte, error) {
 	case "bootstrap":
 		f.loaded = true
 		return nil, nil
+	case "kickstart":
+		if !f.loaded {
+			return []byte("Could not find service"), errors.New("exit status 113")
+		}
+		return nil, nil
 	}
 	return nil, fmt.Errorf("unexpected launchctl %v", args)
+}
+
+// bootstraps is how many times launchctl started the daemon (bootstrap or kickstart).
+func (f *installLaunchctl) bootstraps() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "bootstrap ") || strings.HasPrefix(c, "kickstart ") {
+			n++
+		}
+	}
+	return n
 }
 
 func (f *installLaunchctl) isLoaded() bool {
@@ -208,7 +226,7 @@ func (fx *installFX) status() (StatusReport, error) {
 	if !fx.running() {
 		return StatusReport{}, nil
 	}
-	rep := StatusReport{Running: true, Version: fx.daemonVersion}
+	rep := StatusReport{Running: true, Version: fx.daemonVersion, PID: 1000 + fx.lc.bootstraps()}
 	for _, n := range fx.served() {
 		rep.Servers = append(rep.Servers, ServerReport{ServerStatus: ServerStatus{Server: n}, Endpoint: !fx.noEndpoint[n]})
 	}
@@ -743,7 +761,7 @@ func TestInstallStatus_UpgradeRestartPending(t *testing.T) {
 	}
 	fx.out.Reset()
 	fx.in.PrintInstallStatus(st)
-	if !strings.Contains(fx.out.String(), "upgrade restart pending") || !strings.Contains(fx.out.String(), "kickstart -k gui/501/com.aimux.mcp-proxy") {
+	if !strings.Contains(fx.out.String(), "upgrade restart pending") || !strings.Contains(fx.out.String(), "aimux mcp proxy restart") {
 		t.Fatalf("output:\n%s", fx.out.String())
 	}
 	fx.daemonVersion = "1.2.0"
@@ -1420,6 +1438,63 @@ func TestPlan_ShowsServersInstallWouldTakeOff(t *testing.T) {
 	fx.in.PrintPlan(p)
 	out := fx.out.String()
 	if !strings.Contains(out, "Would take off the proxy") || !strings.Contains(out, "slack") || strings.Contains(out, "nothing would change") {
+		t.Fatalf("dry-run output:\n%s", out)
+	}
+}
+
+
+// After an upgrade, restart kickstarts the daemon in place (the job is never
+// unloaded) and waits for the new daemon (a new pid) to answer.
+func TestRestart_RestartsTheAgentAndWaitsForTheNewDaemon(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	before, err := fx.in.Status()
+	must(t, err)
+	from := len(fx.lc.calls)
+	rep, err := fx.in.Restart()
+	must(t, err)
+	if !rep.Running || rep.PID == before.PID {
+		t.Fatalf("restart reported %+v, want the new daemon (pid other than %d)", rep, before.PID)
+	}
+	if fx.lc.ran("bootout", from) || !fx.lc.ran("kickstart", from) {
+		t.Fatalf("launchctl calls %v, want a kickstart in place and no bootout", fx.lc.calls[from:])
+	}
+}
+
+func TestRestart_NotInstalledSaysHowToInstall(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	_, err := fx.in.Restart()
+	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy install") {
+		t.Fatalf("err = %v, want one pointing at install", err)
+	}
+	if len(fx.lc.calls) != 0 {
+		t.Fatalf("launchctl ran %v without an installed agent", fx.lc.calls)
+	}
+}
+
+func TestRestart_DaemonThatDoesNotComeBackIsAnError(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	fx.daemonDown = true
+	_, err := fx.in.Restart()
+	if err == nil || !strings.Contains(err.Error(), fx.in.Agent.LogDir) {
+		t.Fatalf("err = %v, want a timeout naming the log directory", err)
+	}
+}
+
+func TestUpgradeText_PointsAtRestart(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	if txt := fx.in.UpgradeText("v1"); !strings.Contains(txt, "aimux mcp proxy restart") {
+		t.Fatalf("upgrade text %q does not point at aimux mcp proxy restart", txt)
+	}
+}
+
+// The dry run counts the servers already behind the proxy (status lists them).
+func TestPrintPlan_CountsServersAlreadyMoved(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	fx.in.PrintPlan(InstallPlan{Moved: []string{"aimux", "github", "slack"}})
+	out := fx.out.String()
+	if !strings.Contains(out, "Already behind the proxy: 3 servers") || strings.Contains(out, "aimux, github") {
 		t.Fatalf("dry-run output:\n%s", out)
 	}
 }

@@ -314,3 +314,42 @@ func TestProxyOnly(t *testing.T) {
 		t.Fatal("serve lacks --only")
 	}
 }
+
+func TestMCPProxyRestartCmd_IsRegisteredAndNeedsAnInstall(t *testing.T) {
+	var found bool
+	for _, c := range newMCPProxyCmd().Commands() {
+		if c.Name() == "restart" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("aimux mcp proxy restart is not registered")
+	}
+	var out bytes.Buffer
+	err := runProxyRestart(proxyInstaller(t.TempDir(), 7381, &out), &out)
+	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy install") {
+		t.Fatalf("err = %v, want the not-installed message pointing at install", err)
+	}
+}
+
+// restart waits on the port the proxy was installed on, unless --port says
+// otherwise; with no install it keeps the flag's value.
+func TestRestartPort_UsesTheInstalledPort(t *testing.T) {
+	home := t.TempDir()
+	if got := restartPort(home, 7381, false); got != 7381 {
+		t.Fatalf("no install: port %d, want the flag's 7381", got)
+	}
+	dir := filepath.Join(home, ".aimux")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mcp-proxy-install.json"), []byte(`{"version":2,"port":7399,"servers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := restartPort(home, 7381, false); got != 7399 {
+		t.Fatalf("installed on 7399: port %d, want 7399", got)
+	}
+	if got := restartPort(home, 7500, true); got != 7500 {
+		t.Fatalf("explicit --port 7500: port %d, want 7500", got)
+	}
+}

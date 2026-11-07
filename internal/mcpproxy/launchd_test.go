@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeRun records launchctl calls for verification
@@ -467,12 +469,13 @@ func TestAgent_Restart_ReloadsThePlistOnDiskAsIs(t *testing.T) {
 	}
 	fake := newFakeRun()
 	fake.setOutput("launchctl bootout gui/501/com.aimux.mcp-proxy", []byte("No such process"), errors.New("exit status 3"))
-	a := Agent{Label: "com.aimux.mcp-proxy", PlistPath: plistPath, Binary: "/x/aimux", UID: 501, Run: fake.run}
+	a := Agent{Label: "com.aimux.mcp-proxy", PlistPath: plistPath, Binary: "/x/aimux", UID: 501, Run: fake.run, Sleep: func(time.Duration) {}}
 	if err := a.Restart(); err != nil {
 		t.Fatal(err)
 	}
 	want := [][]string{
 		{"launchctl", "bootout", "gui/501/com.aimux.mcp-proxy"},
+		{"launchctl", "print", "gui/501/com.aimux.mcp-proxy"}, // waits for launchd to unload it
 		{"launchctl", "bootstrap", "gui/501", plistPath},
 	}
 	if !reflect.DeepEqual(fake.calls, want) {
@@ -521,5 +524,93 @@ func TestAgent_PlistUsesSelfClosingTrue(t *testing.T) {
 	}
 	if strings.Count(p, "<true/>") != 2 {
 		t.Fatalf("want RunAtLoad and KeepAlive as <true/>:\n%s", p)
+	}
+}
+
+// laggyLaunchctl behaves like launchd: bootout returns before the job is
+// unloaded, so for `lag` more calls print still shows it loaded and
+// bootstrap fails with exit status 5 (Input/output error).
+type laggyLaunchctl struct {
+	loaded, unloading bool
+	lag               int
+	calls             []string
+}
+
+func (l *laggyLaunchctl) run(name string, args ...string) ([]byte, error) {
+	l.calls = append(l.calls, args[0])
+	if l.unloading {
+		if l.lag--; l.lag <= 0 {
+			l.unloading, l.loaded = false, false
+		}
+	}
+	switch args[0] {
+	case "print":
+		if l.loaded {
+			return []byte("state = running"), nil
+		}
+		return []byte("Could not find service"), errors.New("exit status 113")
+	case "bootout":
+		if !l.loaded {
+			return []byte("No such process"), errors.New("exit status 3")
+		}
+		l.unloading = true
+		return nil, nil
+	case "bootstrap":
+		if l.loaded {
+			return []byte("Bootstrap failed: 5: Input/output error"), errors.New("exit status 5")
+		}
+		l.loaded = true
+		return nil, nil
+	case "kickstart":
+		if !l.loaded {
+			return []byte("Could not find service"), errors.New("exit status 113")
+		}
+		return nil, nil
+	}
+	return nil, errors.New("unexpected launchctl " + args[0])
+}
+
+func laggyAgent(t *testing.T, l *laggyLaunchctl) Agent {
+	t.Helper()
+	plist := filepath.Join(t.TempDir(), "com.aimux.mcp-proxy.plist")
+	must(t, os.WriteFile(plist, []byte("plist"), 0o600))
+	return Agent{Label: "com.aimux.mcp-proxy", PlistPath: plist, Binary: "/x/aimux", UID: 501, Run: l.run, Sleep: func(time.Duration) {}}
+}
+
+// The live bug: a bootstrap right after bootout fails with exit 5 while
+// launchd is still unloading, leaving the daemon down.
+func TestAgent_Restart_WaitsForLaunchdToUnloadBeforeBootstrapping(t *testing.T) {
+	l := &laggyLaunchctl{loaded: true, lag: 4}
+	a := laggyAgent(t, l)
+	if err := a.Restart(); err != nil {
+		t.Fatalf("restart failed: %v (calls %v)", err, l.calls)
+	}
+	if !l.loaded {
+		t.Fatalf("the agent is not loaded after the restart (calls %v)", l.calls)
+	}
+}
+
+func TestAgent_Restart_ReportsABootstrapThatKeepsFailing(t *testing.T) {
+	l := &laggyLaunchctl{loaded: true, lag: 1_000_000}
+	a := laggyAgent(t, l)
+	if err := a.Restart(); err == nil {
+		t.Fatal("a bootstrap that never succeeds was not reported")
+	}
+}
+
+// Kickstart restarts the process without unloading the job: no window in
+// which a failed bootstrap leaves the daemon down.
+func TestAgent_Kickstart_RestartsInPlaceOrBootstrapsWhenNotLoaded(t *testing.T) {
+	l := &laggyLaunchctl{loaded: true}
+	a := laggyAgent(t, l)
+	must(t, a.Kickstart())
+	if slices.Contains(l.calls, "bootout") || !slices.Contains(l.calls, "kickstart") || !l.loaded {
+		t.Fatalf("calls %v, want a kickstart and no bootout, still loaded", l.calls)
+	}
+	l2 := &laggyLaunchctl{loaded: false}
+	a2 := laggyAgent(t, l2)
+	must(t, a2.Kickstart())
+	if !l2.loaded || !slices.Contains(l2.calls, "bootstrap") {
+		t.Fatalf("calls %v, want a bootstrap for an agent that is not loaded", l2.calls)
 	}
 }

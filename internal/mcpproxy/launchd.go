@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Agent manages a launchd agent for the MCP proxy daemon.
@@ -19,7 +20,9 @@ type Agent struct {
 	LogDir    string                                            // directory for stdout/stderr logs
 	Args      []string                                          // arguments to binary (e.g., ["mcp","proxy","serve","--port","7381"])
 	Run       func(name string, args ...string) ([]byte, error) // launchctl runner (injected)
-	UID       int                                               // user ID for gui/<uid>
+	// Sleep waits between launchctl checks; default time.Sleep (tests pass a no-op).
+	Sleep func(time.Duration)
+	UID   int // user ID for gui/<uid>
 	// Env is the agent's EnvironmentVariables. The plist is world-readable:
 	// only non-secret values such as PATH and HOME belong here.
 	Env map[string]string
@@ -215,11 +218,64 @@ func (a Agent) Restart() error {
 	if err != nil && !isServiceNotFoundError(out, err) {
 		return fmt.Errorf("failed to bootout: %w", err)
 	}
-	if _, err := a.Run("launchctl", "bootstrap", fmt.Sprintf("gui/%d", a.UID), a.PlistPath); err != nil {
-		return fmt.Errorf("failed to bootstrap: %w", err)
+	// bootout returns before launchd has unloaded the job; a bootstrap in
+	// that window fails with exit status 5 and leaves the daemon down.
+	for i := 0; i < unloadChecks; i++ {
+		if loaded, err := a.Loaded(); err == nil && !loaded {
+			break
+		}
+		a.sleep(launchdPoll)
+	}
+	return a.bootstrap()
+}
+
+// Kickstart restarts the daemon in place (launchctl kickstart -k): the job
+// stays loaded, so no failed bootstrap can leave it down. An agent that is
+// not loaded is bootstrapped. The plist is not re-read; use Restart for that.
+func (a Agent) Kickstart() error {
+	loaded, err := a.Loaded()
+	if err != nil {
+		return err
+	}
+	if !loaded {
+		return a.bootstrap()
+	}
+	if out, err := a.Run("launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/%s", a.UID, a.Label)); err != nil {
+		return fmt.Errorf("failed to kickstart: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
+
+// bootstrap loads the agent, retrying while launchd still finishes an
+// unload (exit status 5).
+func (a Agent) bootstrap() error {
+	var err error
+	for i := 0; i < bootstrapTries; i++ {
+		var out []byte
+		if out, err = a.Run("launchctl", "bootstrap", fmt.Sprintf("gui/%d", a.UID), a.PlistPath); err == nil {
+			return nil
+		}
+		if text := string(out) + " " + err.Error(); !strings.Contains(text, "exit status 5") && !strings.Contains(text, "Input/output error") {
+			break // not the unload race: retrying will not help
+		}
+		a.sleep(launchdPoll)
+	}
+	return fmt.Errorf("failed to bootstrap: %w", err)
+}
+
+func (a Agent) sleep(d time.Duration) {
+	if a.Sleep != nil {
+		a.Sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+const (
+	launchdPoll    = 100 * time.Millisecond
+	unloadChecks   = 50 // up to 5 s for launchd to unload a job
+	bootstrapTries = 20 // up to 2 s more of exit status 5
+)
 
 // Uninstall bootouts the service and removes the plist (both idempotent)
 func (a Agent) Uninstall() error {

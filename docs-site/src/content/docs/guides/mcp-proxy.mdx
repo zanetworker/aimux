@@ -140,10 +140,10 @@ aimux mcp proxy status
 To restart the daemon after an upgrade:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.aimux.mcp-proxy
+aimux mcp proxy restart
 ```
 
-You can do this at a convenient time.
+It restarts the daemon in place (`launchctl kickstart -k`: the launchd job stays loaded, and its plist is not re-read), waits until the new daemon answers on the port the proxy was installed on, and prints its pid and version; a restart that fails or times out says so (and a note if the daemon runs another aimux binary than the one you ran, which `aimux mcp proxy install` from the new one fixes). You can do this at a convenient time; open sessions keep working.
 
 ### Tradeoffs
 
@@ -211,7 +211,7 @@ The same data is at `GET http://127.0.0.1:7381/status` (and `POST /status/probe?
 | `--servers` | `refresh`, `serve`, `config` | `~/.aimux/mcp-servers.json` | The proxy's saved backend definitions, written by `refresh` |
 | `--catalog` | `refresh`, `serve`, `config` | `~/.aimux/mcp-catalog.json` | Tool catalog file |
 | `--exclude` | `refresh`, `serve`, `config` | none | Servers to leave out of the proxy. On `serve` it applies to that run only: the saved catalog keeps their tools |
-| `--port` | `serve`, `config`, `status`, `install` | `7381` | Port on `127.0.0.1` |
+| `--port` | `serve`, `config`, `status`, `install`, `restart` | `7381` | Port on `127.0.0.1` |
 | `--per-session` | `serve` | `playwright,chrome-devtools,linkedin` | Servers that get one process per client session, for browser automation |
 | `--only` | `serve` | the moved list, else all | Serve only these servers. Without it, a servers file with a moved list (written by `install`) is served as exactly that list, even when it is empty; without a list every configured server is served |
 | `--idle` | `serve` | `10m` | Stop a shared server after it has been unused this long; also the limit for a session whose Claude Code process cannot be found |

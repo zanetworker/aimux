@@ -282,3 +282,50 @@ func newMCPProxyUninstallCmd() *cobra.Command {
 		},
 	}
 }
+
+func newMCPProxyRestartCmd() *cobra.Command {
+	var port int
+	cmd := &cobra.Command{
+		Use:   "restart",
+		Short: "Restart the MCP proxy daemon, e.g. after upgrading aimux",
+		Long: "Restarts the proxy's daemon in place (launchctl kickstart -k; the launchd job stays loaded and its plist " +
+			"is not re-read) and waits until the new daemon answers, on the port the proxy was installed on unless " +
+			"--port is given. Use it after upgrading aimux (status says when a restart is pending). Open Claude Code " +
+			"sessions keep working: each server starts again on its next call.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			port = restartPort(home, port, cmd.Flags().Changed("port"))
+			return runProxyRestart(proxyInstaller(home, port, cmd.OutOrStdout()), cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().IntVar(&port, "port", 7381, "Port the proxy listens on at 127.0.0.1")
+	return cmd
+}
+
+// restartPort is the port to wait on after a restart: the one the proxy
+// was installed on (its manifest), unless --port was given.
+func restartPort(home string, flagPort int, explicit bool) int {
+	if explicit {
+		return flagPort
+	}
+	if m, err := mcpproxy.LoadManifest(filepath.Join(home, ".aimux", "mcp-proxy-install.json")); err == nil && m != nil && m.Port > 0 {
+		return m.Port
+	}
+	return flagPort
+}
+
+// runProxyRestart restarts the daemon and says which version now runs.
+func runProxyRestart(in mcpproxy.Installer, out io.Writer) error {
+	rep, err := in.Restart()
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "Restarted the MCP proxy: pid %d, aimux %s. Open sessions keep working; each server starts again on its next call.\n", rep.PID, rep.Version)
+	if in.Version != "" && rep.Version != "" && rep.Version != in.Version {
+		_, _ = fmt.Fprintf(out, "Note: the daemon runs aimux %s but this binary is %s: the launchd agent starts another aimux binary; run `aimux mcp proxy install` from this one to switch.\n", rep.Version, in.Version)
+	}
+	return nil
+}
