@@ -88,7 +88,8 @@ func TestLease_AbandonedListingIsNotRepeatedAndKeepsLastUsed(t *testing.T) {
 
 func TestLease_AbandonedListingWatchdogDropsTheBackend(t *testing.T) {
 	b := newDeafListBackend()
-	p := NewPool(func(context.Context, string) (Backend, error) { return b, nil }, PoolOptions{CallTimeout: 100 * time.Millisecond})
+	// The listing watchdog follows ListTimeout, not the (long) call limit.
+	p := NewPool(func(context.Context, string) (Backend, error) { return b, nil }, PoolOptions{CallTimeout: time.Hour, ListTimeout: 100 * time.Millisecond})
 	defer p.Close()
 	l, err := p.Lease(context.Background(), "s")
 	must(t, err)

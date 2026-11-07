@@ -99,6 +99,22 @@ func runTestServer() {
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return mcp.NewToolResultText(os.Getenv(req.GetString("name", ""))), nil
 		})
+	// progress sends three progress notifications with the token it was
+	// given, then answers with that token.
+	s.AddTool(mcp.NewTool("progress", mcp.WithDescription("Report progress three times")),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			var tok any
+			if req.Params.Meta != nil {
+				tok = req.Params.Meta.ProgressToken
+			}
+			srv := server.ServerFromContext(ctx)
+			for i := 1; i <= 3; i++ {
+				_ = srv.SendNotificationToClient(ctx, "notifications/progress",
+					map[string]any{"progressToken": tok, "progress": i, "total": 3})
+				time.Sleep(20 * time.Millisecond)
+			}
+			return mcp.NewToolResultText(fmt.Sprint(tok)), nil
+		})
 	s.AddTool(mcp.NewTool("crash", mcp.WithDescription("Exit the process")),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			os.Exit(3)
@@ -223,8 +239,8 @@ func TestStdioBackend_ListToolsRawKeepsSchemas(t *testing.T) {
 		}
 		names[tool.Name] = string(tool.RawInputSchema)
 	}
-	if len(names) != 3 {
-		t.Fatalf("got tools %v, want echo, getenv and crash", names)
+	if len(names) != 4 {
+		t.Fatalf("got tools %v, want echo, getenv, progress and crash", names)
 	}
 	if !strings.Contains(names["echo"], "anyOf") {
 		t.Fatalf("echo schema lost anyOf: %s", names["echo"])

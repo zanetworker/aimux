@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strings"
@@ -30,7 +31,17 @@ type DaemonOptions struct {
 	// Log receives one line per catalog tool a reload could not serve.
 	// nil discards them.
 	Log io.Writer
+
+	// lookupPeers and processIdentity find and check the process that owns a
+	// client session (tests); default lsof and kill 0.
+	lookupPeers     func(port int) map[int]int
+	processIdentity func(pid int) (int64, bool)
 }
+
+// sessionTransportTTL is how long the HTTP transport keeps an idle
+// session's state: only a leak backstop now. When a session's per-session
+// backends stop is decided by its owner process (sessionOwners).
+const sessionTransportTTL = 24 * time.Hour
 
 // EndpointPath is where the daemon serves the named server.
 func EndpointPath(server string) string { return "/mcp/" + url.PathEscape(server) }
@@ -39,9 +50,11 @@ func EndpointPath(server string) string { return "/mcp/" + url.PathEscape(server
 // handler. The map is replaced under mu, so endpoints can be added and
 // removed while requests are served.
 type endpoints struct {
-	ttl time.Duration
-	mu  sync.RWMutex
-	m   map[string]*endpoint
+	ttl    time.Duration
+	owners *sessionOwners // records each request's session and client
+	conns  *connTracker   // which connection each request came on
+	mu     sync.RWMutex
+	m      map[string]*endpoint
 }
 
 type endpoint struct {
@@ -114,6 +127,16 @@ func (e *endpoints) closeAll() {
 
 // close ends the endpoint's sessions (running their unregister hooks) and
 // stops its idle-session sweeper.
+// terminate ends one client session the way the client's DELETE would, so
+// the transport drops its state for it now rather than at the backstop TTL.
+// The transport is stateless about ids, so a later request with the same id
+// is served as a fresh session, as after the TTL.
+func (ep *endpoint) terminate(session string) {
+	req := httptest.NewRequest(http.MethodDelete, "/", nil)
+	req.Header.Set("Mcp-Session-Id", session)
+	ep.http.ServeHTTP(httptest.NewRecorder(), req)
+}
+
 func (ep *endpoint) close() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -149,6 +172,9 @@ func (e *endpoints) handler(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		if e.owners != nil {
+			e.owners.seen(r.Header.Get("Mcp-Session-Id"), name, r.RemoteAddr, e.conns.idOf(r))
+		}
 		// A reload may remove this endpoint between the lookup and here. The
 		// request then finishes on the old server, whose sessions remove
 		// already closed; a session it creates now is never swept (that
@@ -170,7 +196,26 @@ func Serve(ctx context.Context, ln net.Listener, servers map[string]*server.MCPS
 	if opt.ReapEvery <= 0 {
 		opt.ReapEvery = time.Minute
 	}
-	eps := newEndpoints(opt.IdleTimeout)
+	if opt.lookupPeers == nil {
+		opt.lookupPeers = lsofPeers
+	}
+	if opt.processIdentity == nil {
+		opt.processIdentity = processIdentity
+	}
+	port := 0
+	if a, ok := ln.Addr().(*net.TCPAddr); ok {
+		port = a.Port
+	}
+	eps := newEndpoints(sessionTransportTTL)
+	eps.conns = newConnTracker()
+	eps.owners = &sessionOwners{
+		open:     eps.conns.open,
+		idle:     opt.IdleTimeout,
+		now:      time.Now,
+		lookup:   func() map[int]int { return opt.lookupPeers(port) },
+		identity: opt.processIdentity,
+		busy:     pool.SessionBusy,
+	}
 	for name, srv := range servers {
 		eps.add(name, srv)
 	}
@@ -182,8 +227,12 @@ func Serve(ctx context.Context, ln net.Listener, servers map[string]*server.MCPS
 	if opt.Reload != nil {
 		r := &reloader{opt: *opt.Reload, cur: opt.Reload.Current, eps: eps, pool: pool, mon: opt.Status, log: opt.Log}
 		r.handle(mux)
+		if opt.Reload.Changes != nil {
+			go r.follow(ctx, opt.Reload.Changes)
+		}
 	}
-	httpSrv := &http.Server{Handler: netguard.LocalOnly(eps.handler(mux)), ReadHeaderTimeout: 10 * time.Second}
+	httpSrv := &http.Server{Handler: netguard.LocalOnly(eps.handler(mux)), ReadHeaderTimeout: 10 * time.Second,
+		ConnState: eps.conns.state, ConnContext: eps.conns.context}
 
 	go func() {
 		t := time.NewTicker(opt.ReapEvery)
@@ -194,6 +243,16 @@ func Serve(ctx context.Context, ln net.Listener, servers map[string]*server.MCPS
 				return
 			case <-t.C:
 				pool.Reap(opt.IdleTimeout)
+				for _, s := range eps.owners.sweep() {
+					// Its owner exited, or it idled with no owner found. Ending it in
+					// the transport drops the transport's state for it and, through
+					// the unregister hook (newServer), stops its per-session backends.
+					if ep := eps.get(s.Endpoint); ep != nil {
+						ep.terminate(s.ID)
+					} else {
+						pool.CloseSession(s.ID) // its endpoint was removed by a reload
+					}
+				}
 			}
 		}
 	}()

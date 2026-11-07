@@ -40,6 +40,7 @@ func proxyInstaller(home string, port int, out io.Writer) mcpproxy.Installer {
 		BackupDir:    filepath.Join(aimuxDir, "backups"),
 		ServersPath:  servers,
 		CatalogPath:  catalog,
+		Settings:     filepath.Join(home, ".claude", "settings.json"),
 		Port:         port,
 		Version:      rootCmd.Version,
 		Agent: mcpproxy.Agent{

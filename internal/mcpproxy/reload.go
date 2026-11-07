@@ -63,6 +63,9 @@ type ReloadOptions struct {
 	// Apply, when set, receives the new set before any backend is closed,
 	// so the next start uses the new definitions.
 	Apply func(ServerSet)
+	// Changes, when set, triggers a reload on each value received
+	// (CatalogUpdater.Changes): tools a backend start found are published.
+	Changes <-chan struct{}
 }
 
 // reloadToolsPublished, when set (tests), runs right after a changed
@@ -268,4 +271,19 @@ func sortedServerNames[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// follow reloads on each value from changes until ctx ends. A failed reload
+// is logged; the next change or POST /reload tries again.
+func (r *reloader) follow(ctx context.Context, changes <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-changes:
+			if _, err := r.reload(); err != nil && r.log != nil {
+				_, _ = fmt.Fprintf(r.log, "reload after a tools change: %v\n", err)
+			}
+		}
+	}
 }

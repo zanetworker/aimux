@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -231,11 +232,17 @@ func TestServe_PerSessionBackendsOverHTTP(t *testing.T) {
 func TestServe_AbandonedSessionStopsItsBackends(t *testing.T) {
 	fs := newFakeStarter()
 	pool := NewPool(fs.start, PoolOptions{PerSession: map[string]bool{"playwright": true}})
-	base, _ := serveCatalog(t, browserCatalog(), pool, DaemonOptions{IdleTimeout: 300 * time.Millisecond, ReapEvery: time.Hour})
+	var gone atomic.Bool
+	base, _ := serveCatalog(t, browserCatalog(), pool, DaemonOptions{IdleTimeout: time.Hour, ReapEvery: 20 * time.Millisecond,
+		lookupPeers:     func(int) map[int]int { return anyPort(100) },
+		processIdentity: func(int) (int64, bool) { return 1, !gone.Load() }})
 
 	c := httpClient(t, endpointURL(base, "playwright"))
 	mustCall(t, c, "click")
-	// No c.Close(): the client just goes away. ReapEvery is an hour, so only
-	// session expiry can stop the backend here.
+	// No c.Close(): the client's process exits later, as Claude Code does.
+	// A few sweeps (20 ms each) find it running first; the idle limit is an
+	// hour, so only the owner check can stop the backend here.
+	time.Sleep(150 * time.Millisecond)
+	gone.Store(true)
 	waitFor(t, "abandoned session's per-session backend stopped", fs.backends[0].closed.Load)
 }

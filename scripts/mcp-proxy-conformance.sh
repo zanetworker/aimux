@@ -18,7 +18,26 @@ pids=()
 cleanup() { for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null || true; done; }
 trap cleanup EXIT
 
-go build -o "$WORK/aimux" "$ROOT/cmd/aimux"
+# The binary embeds the web dashboard's build output (internal/frontend/web/dist,
+# gitignored). A fresh checkout, like git ship's temporary worktree, has none;
+# this suite tests the proxy, so build against a placeholder page then, and
+# remove only what this script created.
+DIST="$ROOT/internal/frontend/web/dist"
+made_dist=""
+if [ ! -d "$DIST" ]; then
+  mkdir -p "$DIST" && made_dist="dir"
+fi
+if [ -z "$(ls -A "$DIST")" ]; then
+  printf '<!doctype html><title>aimux</title>\n' > "$DIST/index.html"
+  [ -n "$made_dist" ] || made_dist="file"
+fi
+build_rc=0
+go build -o "$WORK/aimux" "$ROOT/cmd/aimux" || build_rc=$?
+case "$made_dist" in
+  dir) rm -rf "$DIST" ;;
+  file) rm -f "$DIST/index.html" ;;
+esac
+[ "$build_rc" -eq 0 ] || exit "$build_rc"
 cat > "$WORK/claude.json" <<JSON
 {"mcpServers":{"everything":{"command":"npx","args":["-y","@modelcontextprotocol/server-everything"]}}}
 JSON

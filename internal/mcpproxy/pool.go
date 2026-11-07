@@ -29,13 +29,22 @@ type RequestError struct {
 func (e *RequestError) Error() string { return e.Err.Error() }
 func (e *RequestError) Unwrap() error { return e.Err }
 
+// DefaultCallTimeout is Claude Code's default MCP_TOOL_TIMEOUT (1e8 ms in
+// Claude Code 2.1.319): how long it lets a direct stdio tool call run.
+const DefaultCallTimeout = 100_000_000 * time.Millisecond
+
 // Starter starts the named backend.
 type Starter func(ctx context.Context, server string) (Backend, error)
 
 // PoolOptions configures a Pool. Zero values give the defaults.
 type PoolOptions struct {
-	// CallTimeout bounds each tool call. Default 2 minutes.
+	// CallTimeout bounds each tool call. Default DefaultCallTimeout, the
+	// limit Claude Code puts on a direct stdio call, so a slow tool that
+	// works direct works through the proxy too.
 	CallTimeout time.Duration
+	// ListTimeout bounds a tools/list on a leased backend (probes, catalog
+	// refreshes). Default 2 minutes.
+	ListTimeout time.Duration
 	// StartTimeout bounds starting and initializing a backend, so a server
 	// that never answers cannot hold its callers. Default 2 minutes (npx and
 	// uvx may download the server first).
@@ -73,6 +82,8 @@ type Pool struct {
 	slots  map[slotKey]*slot
 	health map[string]*serverStats // per server; outlives its slots
 	closed bool
+	// calls counts each client session's calls in flight, on any server.
+	calls map[string]int
 }
 
 var (
@@ -84,7 +95,10 @@ var (
 // NewPool returns a Pool that starts backends with start.
 func NewPool(start Starter, opt PoolOptions) *Pool {
 	if opt.CallTimeout <= 0 {
-		opt.CallTimeout = 2 * time.Minute
+		opt.CallTimeout = DefaultCallTimeout
+	}
+	if opt.ListTimeout <= 0 {
+		opt.ListTimeout = 2 * time.Minute
 	}
 	if opt.StartTimeout <= 0 {
 		opt.StartTimeout = 2 * time.Minute
@@ -92,7 +106,7 @@ func NewPool(start Starter, opt PoolOptions) *Pool {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
-	return &Pool{start: start, opt: opt, slots: map[slotKey]*slot{}, health: map[string]*serverStats{}}
+	return &Pool{start: start, opt: opt, slots: map[slotKey]*slot{}, health: map[string]*serverStats{}, calls: map[string]int{}}
 }
 
 func (p *Pool) key(server, session string) slotKey {
@@ -267,7 +281,19 @@ func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToo
 	st := p.stats(server)
 	st.calls++
 	st.lastCall = p.opt.Now()
+	if session != "" {
+		p.calls[session]++
+	}
 	p.mu.Unlock()
+	if session != "" {
+		defer func() {
+			p.mu.Lock()
+			if p.calls[session]--; p.calls[session] <= 0 {
+				delete(p.calls, session)
+			}
+			p.mu.Unlock()
+		}()
+	}
 	// No deadline of our own: the shared start is bounded by StartTimeout
 	// and reports its outcome, so a retry never joins an attempt that is
 	// still winding down after its deadline.
@@ -326,7 +352,7 @@ func (p *Pool) countFailure(server string) {
 	p.mu.Unlock()
 }
 
-// Reap closes started backends with no call in flight that have been idle
+// Reap closes started shared backends with no call in flight that have been idle
 // longer than idle, and returns how many it closed.
 func (p *Pool) Reap(idle time.Duration) int {
 	now := p.opt.Now()
@@ -338,7 +364,9 @@ func (p *Pool) Reap(idle time.Duration) int {
 		default:
 			continue // still starting
 		}
-		if s.err == nil && s.inflight == 0 && now.Sub(s.lastUsed) > idle {
+		// A per-session backend ends with its session (CloseSession), as a
+		// direct server ends with its Claude Code process.
+		if k.session == "" && s.err == nil && s.inflight == 0 && now.Sub(s.lastUsed) > idle {
 			delete(p.slots, k)
 			victims = append(victims, s.backend)
 		}
@@ -352,6 +380,16 @@ func (p *Pool) Reap(idle time.Duration) int {
 
 // CloseSession closes the per-session backends of one client session. A
 // backend with a call still running is closed when that call returns.
+// SessionBusy reports whether a call of session is in flight on any server.
+func (p *Pool) SessionBusy(session string) bool {
+	if session == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls[session] > 0
+}
+
 func (p *Pool) CloseSession(session string) {
 	if session == "" {
 		return
@@ -489,7 +527,7 @@ var errListingStuck = errors.New("an earlier tools/list to this server has not r
 // transport, or when the server stopped reading. A listing abandoned that
 // way is watched: until it returns, other leases get errListingStuck
 // instead of queueing another write, and if it has not returned after
-// CallTimeout the backend is dropped as a timed-out call would be. A lease
+// ListTimeout the backend is dropped as a timed-out call would be. A lease
 // whose listing was abandoned does not count as use when it closes, so
 // repeated probes cannot keep a stuck backend from being reaped. A
 // JSON-RPC error answer keeps the backend, as in Call; another failure
@@ -526,14 +564,14 @@ func (l *lease) ListToolsRaw(ctx context.Context) ([]json.RawMessage, error) {
 }
 
 // watchListing marks s's listing stuck until done delivers, and drops the
-// backend if that takes longer than CallTimeout.
+// backend if that takes longer than ListTimeout.
 func (p *Pool) watchListing(k slotKey, s *slot, done <-chan struct{}) {
 	p.mu.Lock()
 	s.listStuck = true
 	p.mu.Unlock()
-	timedOut := fmt.Sprintf("tools/list timed out after %v", p.opt.CallTimeout)
+	timedOut := fmt.Sprintf("tools/list timed out after %v", p.opt.ListTimeout)
 	go func() {
-		timer := time.NewTimer(p.opt.CallTimeout)
+		timer := time.NewTimer(p.opt.ListTimeout)
 		defer timer.Stop()
 		select {
 		case <-done:

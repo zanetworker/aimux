@@ -61,7 +61,8 @@ func forwarder(pool *Pool, backend, name string) server.ToolHandlerFunc {
 		fwd := mcp.CallToolRequest{}
 		fwd.Params.Name = name
 		fwd.Params.Arguments = req.Params.Arguments
-		fwd.Params.Meta = req.Params.Meta // keeps the progress token
+		fwd.Params.Meta = req.Params.Meta
+		ctx, fwd = relayProgress(ctx, fwd) // its progress comes back to this session
 		return pool.Call(ctx, backend, session, fwd), nil
 	}
 }

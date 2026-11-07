@@ -172,6 +172,7 @@ type CatalogUpdater struct {
 	// refresh from a backend started with another definition is dropped.
 	// Nil, or false (unknown), keeps every refresh.
 	Current func(server string) (ServerConfig, bool)
+	changes chan struct{}
 }
 
 // lockCatalog takes an exclusive flock beside the catalog file. The
@@ -199,8 +200,13 @@ func lockCatalog(path string) (func(), error) {
 // copy is its own: callers (the reloader's current set) may go on reading
 // cat while backend starts refresh the updater's catalog.
 func NewCatalogUpdater(cat *Catalog, path string) *CatalogUpdater {
-	return &CatalogUpdater{cat: copyCatalog(cat), path: path}
+	return &CatalogUpdater{cat: copyCatalog(cat), path: path, changes: make(chan struct{}, 1)}
 }
+
+// Changes receives a value after a Refresh saved a server's tools that
+// differ from the ones it had: the daemon reloads, so the endpoint serves
+// them. Changes not yet received collapse into one.
+func (u *CatalogUpdater) Changes() <-chan struct{} { return u.changes }
 
 func copyCatalog(cat *Catalog) *Catalog {
 	c := &Catalog{Servers: make(map[string]CatalogEntry, len(cat.Servers))}
@@ -231,13 +237,23 @@ func (u *CatalogUpdater) Refresh(ctx context.Context, server string, b Backend) 
 		return nil // an edit or reload replaced the definition it ran
 	}
 	now := time.Now()
-	u.cat.Set(server, tools, now)
+	changed := ToolsFingerprint(u.cat.Servers[server].Tools) != ToolsFingerprint(tools)
 	onDisk, err := LoadCatalog(u.path)
 	if err != nil {
 		return fmt.Errorf("refresh catalog for %s: %w", server, err)
 	}
 	onDisk.Set(server, tools, now)
-	return onDisk.Save(u.path)
+	if err := onDisk.Save(u.path); err != nil {
+		return err // the served copy keeps the old tools, so the next save still signals
+	}
+	u.cat.Set(server, tools, now)
+	if changed {
+		select {
+		case u.changes <- struct{}{}:
+		default: // a change is already pending; its reload reads this one too
+		}
+	}
+	return nil
 }
 
 // superseded reports whether b was started with a definition of server

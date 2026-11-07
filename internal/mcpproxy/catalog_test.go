@@ -307,3 +307,76 @@ func TestStdioBackend_ReportsItsDefinition(t *testing.T) {
 		t.Fatalf("definition %+v (ok %v), want the one it was started with", d, ok)
 	}
 }
+
+func TestCatalogUpdater_Changes_SignalsOnlyWhenToolsChange(t *testing.T) {
+	cat := &Catalog{}
+	cat.Set("slack", toolJSON("post"), time.Unix(0, 0))
+	update := NewCatalogUpdater(cat, filepath.Join(t.TempDir(), "catalog.json"))
+	signaled := func() bool {
+		select {
+		case <-update.Changes():
+			return true
+		default:
+			return false
+		}
+	}
+
+	if err := update.Refresh(context.Background(), "slack", &listingBackend{tools: toolJSON("post")}); err != nil {
+		t.Fatal(err)
+	}
+	if signaled() {
+		t.Fatal("an unchanged tool list signalled a change")
+	}
+
+	if err := update.Refresh(context.Background(), "slack", &listingBackend{err: errors.New("list failed")}); err == nil {
+		t.Fatal("want the listing error")
+	}
+	if signaled() {
+		t.Fatal("a failed listing signalled a change")
+	}
+
+	if err := update.Refresh(context.Background(), "slack", &listingBackend{tools: toolJSON("post", "learnings_list")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.Refresh(context.Background(), "slack", &listingBackend{tools: toolJSON("post", "learnings_list", "third")}); err != nil {
+		t.Fatal(err)
+	}
+	if !signaled() {
+		t.Fatal("a changed tool list did not signal")
+	}
+	if signaled() {
+		t.Fatal("two changes before a read should collapse into one signal")
+	}
+}
+
+// A refresh whose save fails must not count its tools as published: the
+// next refresh that saves them still signals the change (Codex review P2).
+func TestCatalogUpdater_FailedSaveKeepsTheChangePending(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cat")
+	must(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "catalog.json")
+	cat := &Catalog{}
+	cat.Set("slack", toolJSON("post"), time.Unix(0, 0))
+	must(t, cat.Save(path))
+	must(t, os.WriteFile(path+".lock", nil, 0o600)) // the lock still opens; only the save fails
+	update := NewCatalogUpdater(cat, path)
+
+	must(t, os.Chmod(dir, 0o500)) // #nosec G302 -- a test directory made unwritable on purpose
+	err := update.Refresh(context.Background(), "slack", &listingBackend{tools: toolJSON("post", "new_tool")})
+	must(t, os.Chmod(dir, 0o700)) // #nosec G302 -- the test directory made writable again
+	if err == nil {
+		t.Fatal("want the save error")
+	}
+	select {
+	case <-update.Changes():
+		t.Fatal("a refresh that was not saved signalled a change")
+	default:
+	}
+
+	must(t, update.Refresh(context.Background(), "slack", &listingBackend{tools: toolJSON("post", "new_tool")}))
+	select {
+	case <-update.Changes():
+	default:
+		t.Fatal("the change whose first save failed was never signalled")
+	}
+}

@@ -460,7 +460,7 @@ func startServeLike(t *testing.T) (*CatalogUpdater, string, int) {
 	pool := NewPool(newFakeStarter().start, PoolOptions{})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	opt := DaemonOptions{Reload: &ReloadOptions{Current: set, Load: load, Apply: func(n ServerSet) { updater.Replace(n.Catalog) }}}
+	opt := DaemonOptions{Reload: &ReloadOptions{Current: set, Load: load, Apply: func(n ServerSet) { updater.Replace(n.Catalog) }, Changes: updater.Changes()}}
 	servers := NewServers(set.Catalog, pool) // built before any refresh, as serve does
 	go func() { done <- Serve(ctx, ln, servers, pool, opt) }()
 	t.Cleanup(func() { cancel(); <-done })
@@ -660,5 +660,27 @@ func TestReload_ChangedToolsPublishedOnlyAfterTheOldBackendIsRetired(t *testing.
 	close(release)
 	if got := resultText(t, <-inflight); got != "ok" {
 		t.Fatalf("in-flight call on the old backend = %q", got)
+	}
+}
+
+// A backend start that finds new tools publishes them by itself: sessions
+// see them without anyone posting /reload (brief's learnings_list case).
+func TestReload_ToolsRefreshedByABackendStartReachTheEndpointWithoutAReload(t *testing.T) {
+	updater, base, _ := startServeLike(t)
+	if err := updater.Refresh(context.Background(), "slack", &listBackend{tools: toolJSON("old_tool", "new_tool")}); err != nil {
+		t.Fatal(err)
+	}
+	c := httpClient(t, endpointURL(base, "slack"))
+	defer func() { _ = c.Close() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := toolNames(t, c)
+		if sameNames(got, []string{"new_tool", "old_tool"}) || sameNames(got, []string{"old_tool", "new_tool"}) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("/mcp/slack lists %v, want old_tool and new_tool without a reload", got)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

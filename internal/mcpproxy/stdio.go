@@ -87,6 +87,8 @@ type stdioBackend struct {
 
 	def     ServerConfig // the definition it was started with, before expansion
 	noTools bool         // its initialize result has no tools capability
+
+	progress progressRoutes // in-flight calls' progress tokens
 }
 
 // lookPathIn finds an executable named name in the directories of path (a
@@ -178,6 +180,14 @@ func startStdioIn(ctx context.Context, server string, cfg ServerConfig, expand b
 		return nil, b.failure(fmt.Errorf("start MCP server %s (%s): %w", server, cfg.Command, err))
 	}
 	b.c = c
+	// The constructor starts only the transport; Start installs the client's
+	// notification dispatch (progress) and its answers to the server's own
+	// requests (ping; others get an error instead of no answer at all).
+	if err := c.Start(ctx); err != nil {
+		_ = c.Close()
+		return nil, b.failure(fmt.Errorf("start MCP server %s (%s): %w", server, cfg.Command, err))
+	}
+	c.OnNotification(b.progress.deliver)
 	// Read the server's stderr: the client opens the pipe but never reads it,
 	// and a server that logs more than the pipe holds would block and hang.
 	drained := make(chan struct{})
@@ -254,6 +264,9 @@ func (b *stdioBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, err
 }
 
 func (b *stdioBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if sink, ok := progressSinkFrom(ctx); ok {
+		defer b.progress.track(sink)()
+	}
 	res, err := b.c.CallTool(ctx, req)
 	var terr *transport.Error
 	if err != nil && !errors.As(err, &terr) {

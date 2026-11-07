@@ -65,6 +65,9 @@ type Manifest struct {
 	// Skipped are the stdio servers kept direct with --skip; a re-run keeps
 	// them direct until --unskip.
 	Skipped []string `json:"skipped,omitempty"`
+	// IdleTimeout is what install did to Claude Code's http idle limit in
+	// settings.json (idleAdded, idleAddedEnv, or empty: nothing).
+	IdleTimeout string `json:"idleTimeout,omitempty"`
 }
 
 // MovedEntry is one moved server's mcpServers entry: Original is its raw
@@ -107,6 +110,7 @@ type Installer struct {
 	BackupDir    string // ~/.aimux/backups
 	ServersPath  string // the proxy's saved backend definitions
 	CatalogPath  string // the tool catalog
+	Settings     string // ~/.claude/settings.json, for the http idle limit; empty leaves it alone
 	Port         int    // the daemon's port on 127.0.0.1
 	Version      string // this aimux's version, compared with the daemon's
 	// Unskip are recorded --skip servers this run moves after all.
@@ -311,6 +315,7 @@ func (i Installer) Install(skip []string) (err error) {
 			}
 			i.printf("The MCP proxy is installed (%d servers behind it); no new stdio servers to move.\n", len(m.Servers))
 			i.printSkipped(p.Skip)
+			i.ensureIdleTimeout(m)
 			return nil
 		}
 		return fmt.Errorf("no stdio MCP servers to move in %s", i.ClaudeConfig)
@@ -414,6 +419,9 @@ func (i Installer) Install(skip []string) (err error) {
 	i.printf("New Claude Code sessions use the proxy; running sessions keep their direct servers until they restart.\n")
 	i.printf("From now on, %s.\n", editHint)
 	i.printf("Undo with: aimux mcp proxy uninstall\n")
+	if final, err := i.loadManifest(); err == nil {
+		i.ensureIdleTimeout(final)
+	}
 	return nil
 }
 
@@ -512,6 +520,7 @@ func restoreServers(old json.RawMessage, servers map[string]MovedEntry) (json.Ra
 func (i Installer) extended(m *Manifest, servers map[string]MovedEntry, skipped []string) *Manifest {
 	out := &Manifest{Version: manifestVersion, Port: i.Port, Servers: map[string]MovedEntry{}, Skipped: skipped}
 	if m != nil {
+		out.IdleTimeout = m.IdleTimeout
 		for name, e := range m.Servers {
 			out.Servers[name] = e
 		}
@@ -884,6 +893,7 @@ func (i Installer) Uninstall() error {
 	if err := i.dropMoved(names, true); err != nil {
 		return fmt.Errorf("%w; the Claude config is restored; run `aimux mcp proxy uninstall` again to finish", err)
 	}
+	i.dropIdleTimeout(m)
 	// Without the manifest, uninstall again only removes the agent: the way
 	// to finish if removing it fails below.
 	if err := removeManifest(i.ManifestPath); err != nil {

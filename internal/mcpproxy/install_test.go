@@ -951,8 +951,20 @@ func TestInstall_ConcurrentWriter_NoHalfState(t *testing.T) {
 			}
 			continue
 		}
-		if m == nil || proxied != 3 {
+		if m == nil {
 			t.Fatalf("round %d: install succeeded without a manifest", round)
+		}
+		if proxied == 0 {
+			// The writer ignores locks and saves from a stale read, so it can
+			// put the old entries back after install verified its own (as a
+			// stale Claude Code could). No lock prevents that; status must
+			// then report every moved server as drifted, for the owner to
+			// re-run install.
+			st, serr := fx.in.InstallStatus()
+			must(t, serr)
+			if !reflect.DeepEqual(st.Drifted, []string{"aimux", "github", "slack"}) {
+				t.Fatalf("round %d: entries reverted after install but status reports drift %v", round, st.Drifted)
+			}
 		}
 		must(t, fx.in.Uninstall())
 		for _, s := range []string{"aimux", "github", "slack"} {

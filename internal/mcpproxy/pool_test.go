@@ -676,3 +676,49 @@ func TestPool_CloseServerDuringStartSaysRetry(t *testing.T) {
 		t.Fatalf("reconfigure counted %d failures, want 0", s.Failures)
 	}
 }
+
+// A tool call through the proxy may run as long as Claude Code lets a
+// direct stdio call run (MCP_TOOL_TIMEOUT's default, 1e8 ms in Claude Code
+// 2.1.319), so the proxy is never the stricter side; a listing keeps the
+// short limit Claude Code uses for requests other than tool calls.
+func TestNewPool_DefaultsMatchClaudeCode(t *testing.T) {
+	p := NewPool(newFakeStarter().start, PoolOptions{})
+	defer p.Close()
+	if want := 100_000_000 * time.Millisecond; p.opt.CallTimeout != want {
+		t.Fatalf("default CallTimeout = %v, want %v (Claude Code's MCP_TOOL_TIMEOUT default)", p.opt.CallTimeout, want)
+	}
+	if p.opt.ListTimeout != 2*time.Minute {
+		t.Fatalf("default ListTimeout = %v, want 2m", p.opt.ListTimeout)
+	}
+	set := NewPool(newFakeStarter().start, PoolOptions{CallTimeout: time.Second, ListTimeout: 3 * time.Second})
+	defer set.Close()
+	if set.opt.CallTimeout != time.Second || set.opt.ListTimeout != 3*time.Second {
+		t.Fatalf("explicit options overridden: %v, %v", set.opt.CallTimeout, set.opt.ListTimeout)
+	}
+}
+
+// A per-session backend (a browser) lives as long as its session, as a
+// direct server lives as long as its Claude Code process; the idle reaper
+// stops only shared backends. Session ends are the owner sweep's job.
+func TestPool_ReapLeavesPerSessionBackendsToTheirSession(t *testing.T) {
+	fs := newFakeStarter()
+	now := time.Unix(1_000_000, 0)
+	p := NewPool(fs.start, PoolOptions{PerSession: map[string]bool{"browser": true}, Now: func() time.Time { return now }})
+	defer p.Close()
+	p.Call(context.Background(), "browser", "s1", callReq("snapshot", nil))
+	p.Call(context.Background(), "slack", "s1", callReq("post", nil))
+	now = now.Add(time.Hour)
+	if n := p.Reap(10 * time.Minute); n != 1 {
+		t.Fatalf("reaped %d backends, want only the idle shared one", n)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	for _, b := range fs.backends {
+		if b.lastReq.Params.Name == "snapshot" && b.closed.Load() {
+			t.Fatal("the browser was reaped while its session lives")
+		}
+		if b.lastReq.Params.Name == "post" && !b.closed.Load() {
+			t.Fatal("the idle shared backend was not reaped")
+		}
+	}
+}

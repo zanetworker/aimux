@@ -46,7 +46,7 @@ func (f *proxyFlags) bind(cmd *cobra.Command, serve, withPort bool) {
 	if serve {
 		cmd.Flags().StringSliceVar(&f.perSession, "per-session", []string{"playwright", "chrome-devtools", "linkedin"},
 			"Servers that get one process per client session instead of a shared one")
-		cmd.Flags().DurationVar(&f.idle, "idle", 10*time.Minute, "Stop a backend after it has been unused this long")
+		cmd.Flags().DurationVar(&f.idle, "idle", 10*time.Minute, "Stop a shared backend after it has been unused this long; a per-session backend lives as long as its Claude Code process, this long idle only when that process cannot be found")
 		cmd.Flags().StringSliceVar(&f.only, "only", nil, "Serve only these servers (default: the servers install moved, else every configured one)")
 	}
 }
@@ -56,7 +56,7 @@ func newMCPProxyCmd() *cobra.Command {
 		Use:   "proxy",
 		Short: "Serve your stdio MCP servers lazily from one shared process",
 		Long: "One shared process for all stdio MCP servers in ~/.claude.json, each at its own endpoint under its own name. Tools are listed from a cached " +
-			"catalog, each server starts on its first tool call, is shared by every session, and stops when idle. " +
+			"catalog, each server starts on its first tool call, is shared by every session, and stops when idle (a per-session server lives as long as the Claude Code process using it). " +
 			"Run `install` to switch Claude Code to it (and `uninstall` to switch back), or run `refresh` and `serve` " +
 			"yourself and add the entries printed by `config`.",
 	}
@@ -205,6 +205,8 @@ func newMCPProxyServeCmd() *cobra.Command {
 					starter.Set(next.Configs, next.Resolved)
 					updater.Replace(next.Catalog)
 				},
+				// Tools a backend start found are published without a /reload.
+				Changes: updater.Changes(),
 			}
 			skipped := mcpproxy.SkippedTools(served)
 			for _, s := range skipped {
