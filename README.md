@@ -97,7 +97,7 @@ Requires **tmux**. Auto-discovers running Claude and Codex agents.
 
 ## Agent-Ready CLI
 
-aimux is built for AI agents. Commands support `--json` for structured output (the `mcp proxy` commands and `remote serve` print text, and `chat --json` streams JSON lines), errors include valid values, and `agent-context` dumps the full CLI contract.
+aimux is built for AI agents. Commands support `--json` for structured output (the `mcp proxy` commands, `remote serve` and `remote hooks install|uninstall|status` print text, and `chat --json` streams JSON lines), errors include valid values, and `agent-context` dumps the full CLI contract.
 
 ```bash
 aimux agents --json                              # discover running agents

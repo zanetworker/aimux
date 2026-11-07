@@ -321,7 +321,8 @@ paths:
         process is the session's `claude` (`not_claude`), Claude is not working
         on a turn, unless `now` is set, and the session's chat queue is not sending (`busy`: clients
         queue the message; also while the queue has an item in flight or is running
-        with items waiting), the session is not the one in
+        with items waiting; with `now` set, only a message being typed refuses it, and
+        waiting or answering items are passed), the session is not the one in
         front on the Mac while the Mac was used in the last 2 minutes, unless
         `allow_while_in_use` is set (`mac_in_use`: iTerm2 is the frontmost app,
         the session is the focused pane of its current window, and the Mac was

@@ -237,10 +237,11 @@ func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.
 		if withSession {
 			session = r.PathValue("id")
 		}
+		act := action // per request: the route's action must not change for later requests
 		if rec.action != "" {
-			action = rec.action
+			act = rec.action
 		}
-		a.DeviceLogin.Record(r, action, session, result)
+		a.DeviceLogin.Record(r, act, session, result)
 	}
 }
 

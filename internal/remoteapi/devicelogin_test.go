@@ -297,6 +297,8 @@ func TestDeviceLogin_AuditActionsCarryNoText(t *testing.T) {
 	r.do("POST", "/v1/sessions/s1/cancel", "", tok)
 	r.do("POST", "/v1/sessions/s1/terminal/messages", `{"text":"`+secretText+`"}`, tok)
 	r.do("POST", "/v1/sessions/s1/terminal/messages", `{"text":"`+secretText+`","now":true}`, tok)
+	// A plain message after a Send now is still a terminal_message (the action is per request).
+	r.do("POST", "/v1/sessions/s1/terminal/messages", `{"text":"`+secretText+` later"}`, tok)
 	r.do("POST", "/v1/sessions/s1/terminal/keys", `{"promptId":"p1","option":"1"}`, tok)
 	_, item := r.do("POST", "/v1/sessions/s1/queue", `{"text":"`+secretText+`"}`, tok)
 	id, _ := item["id"].(string)
@@ -326,7 +328,7 @@ func TestDeviceLogin_AuditActionsCarryNoText(t *testing.T) {
 		}
 		got = append(got, e.Action+"/"+e.Session+"/"+e.Result)
 	}
-	want := []string{"pair//ok", "send/s1/ok", "approve//ok", "new_session//ok", "cancel/s1/http_409", "terminal_message/s1/ok", "terminal_send_now/s1/ok", "terminal_key/s1/ok",
+	want := []string{"pair//ok", "send/s1/ok", "approve//ok", "new_session//ok", "cancel/s1/http_409", "terminal_message/s1/ok", "terminal_send_now/s1/ok", "terminal_message/s1/ok", "terminal_key/s1/ok",
 		"queue_add/s1/ok", "queue_edit/s1/ok", "queue_move/s1/ok", "queue_edit/s1/http_409", "queue_delete/s1/ok", "queue_add/s1/ok", "queue_send_now/s1/ok", "queue_resume/s1/ok",
 		"meta_edit/s1/ok", "pin/s1/ok", "unpin/s1/ok", "meta_edit/s1/http_400", "describe/s1/ok"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {

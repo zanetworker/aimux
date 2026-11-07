@@ -22,12 +22,11 @@ extension ChatModel {
         var sendNow = sendNow
         if let previous = pending, previous.text == text, previous.failure != nil {
             key = previous.key
-            sendNow = sendNow || pendingIsNow  // a Retry of a Send now is a Send now
+            sendNow = sendNow || previous.now  // a Retry of a Send now is a Send now
         } else {
             key = UUID().uuidString
         }
-        pending = PendingMessage(text: text, key: key, failure: nil, turn: nil, sentAt: now())
-        pendingIsNow = sendNow
+        pending = PendingMessage(text: text, key: key, failure: nil, turn: nil, sentAt: now(), now: sendNow)
         sendNowNotice = nil
         if state == .terminal {
             await typeIntoTerminal(text, key: key, now: sendNow)

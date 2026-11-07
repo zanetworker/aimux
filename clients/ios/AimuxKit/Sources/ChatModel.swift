@@ -50,6 +50,8 @@ public struct PendingMessage: Equatable, Sendable {
     public var turn: String?
     /// When the person sent it (this device's clock).
     public let sentAt: Date
+    /// Sent with Send now: its Retry is a Send now too, also after the chat is opened again.
+    public var now = false
 }
 
 /// One session's chat: history and events merged into a timeline, kept live from the event stream.
@@ -104,8 +106,6 @@ public final class ChatModel {
     public var sendNowEnabled: Bool
     /// Says a message went with Send now; cleared by the next send or queue change.
     public internal(set) var sendNowNotice: String?
-    /// The pending message went with Send now, so its Retry does too.
-    var pendingIsNow = false
     var nowKeys: [String: String] = [:]  // queued message id -> key of a Send now whose answer was lost
     var failedAdd: (text: String, key: String)?  // the last add that failed: a retry of that text keeps its key
     var isAdding = false

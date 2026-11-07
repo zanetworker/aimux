@@ -120,4 +120,30 @@ private func refusal(_ code: APIErrorCode) -> APIError { .server(status: 409, co
         #expect(source.terminalSentList.isEmpty)
         chat.close()
     }
+
+    @Test func aFailedSendNowRestoredInANewChatRetriesAsSendNow() async {
+        let source = StubChat()
+        source.details = [working(queue: nil), working(queue: nil)]
+        source.terminalFailures = [refusal(.macInUse), nil]
+        let drafts = ChatDrafts()
+        let first = ChatModel(sessionID: "s1", source: source, stream: StubStreams(), drafts: drafts,
+                              queueEnabled: true, sendNowEnabled: true,
+                              sleep: { _ in try await Task.sleep(for: .seconds(3600)) }, now: { base })
+        await first.load()
+        await first.sendNow("Stop, wrong file")
+        #expect(first.pending?.failure != nil)
+        first.close()
+
+        // The chat is left and opened again: the failed message comes back from drafts.
+        let second = ChatModel(sessionID: "s1", source: source, stream: StubStreams(), drafts: drafts,
+                               queueEnabled: true, sendNowEnabled: true,
+                               sleep: { _ in try await Task.sleep(for: .seconds(3600)) }, now: { base })
+        await second.load()
+        #expect(second.pending?.text == "Stop, wrong file")
+        await second.send("Stop, wrong file") // its Retry
+        let sent = source.terminalNowList
+        #expect(sent.count == 2 && sent[0].key == sent[1].key, "the Retry is a Send now with the same key")
+        #expect(source.terminalSentList.isEmpty, "never a plain send that could be queued")
+        second.close()
+    }
 }
