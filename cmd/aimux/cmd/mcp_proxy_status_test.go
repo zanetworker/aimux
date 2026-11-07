@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -175,5 +176,85 @@ func TestProxyStatus_NeverPrintsEnvValues(t *testing.T) {
 	}
 	if strings.Contains(all.String(), secret) {
 		t.Fatalf("status output contains the env value:\n%s", all.String())
+	}
+}
+
+func styledReport() mcpproxy.StatusReport {
+	rep := fixtureReport()
+	rep.Servers = append(rep.Servers,
+		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateIdleStopped,
+			LastCall: statusNow.Add(-30 * time.Minute)}, Tools: 4},
+		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "brief", State: mcpproxy.StateNotStarted}, Tools: 13})
+	return rep
+}
+
+var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func TestPrintProxyStatus_ColorStatesAndSummary(t *testing.T) {
+	var out bytes.Buffer
+	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, true)
+	got := out.String()
+	for _, want := range []string{
+		"\x1b[32m● running", "\x1b[31m● failed", "\x1b[2m○ idle", "\x1b[2m○ not started",
+		"4 servers", "1 running", "1 idle", "1 not started", "1 failed",
+		"pid 99", "line one", // the failed server's stderr tail
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("styled status lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b[31mred") || !strings.Contains(got, "?[31mred") {
+		t.Fatalf("a server's own escape sequence reached the terminal:\n%q", got)
+	}
+}
+
+func TestPrintProxyStatus_ColumnsStayAlignedWithColor(t *testing.T) {
+	var out bytes.Buffer
+	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, true)
+	row := regexp.MustCompile(`^(\s*\S+\s+)([●○◐] [a-z ]+?)\s{2,}(\d+)\s`)
+	var stateCols, toolCols []int
+	for _, line := range strings.Split(ansiRE.ReplaceAllString(out.String(), ""), "\n") {
+		m := row.FindStringSubmatchIndex(line)
+		if m == nil {
+			continue
+		}
+		stateCols = append(stateCols, len([]rune(line[:m[4]])))
+		toolCols = append(toolCols, len([]rune(line[:m[6]])))
+	}
+	if len(stateCols) != 4 {
+		t.Fatalf("found %d table rows, want 4:\n%s", len(stateCols), out.String())
+	}
+	for i := range stateCols {
+		if stateCols[i] != stateCols[0] || toolCols[i] != toolCols[0] {
+			t.Fatalf("columns misaligned with colour on: state %v, tools %v\n%s", stateCols, toolCols, out.String())
+		}
+	}
+}
+
+func TestPrintProxyStatus_PlainHasNoEscapes(t *testing.T) {
+	var out bytes.Buffer
+	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, false)
+	if got := out.String(); strings.Contains(got, "\x1b") || !strings.Contains(got, "● running") || !strings.Contains(got, "4 servers") {
+		t.Fatalf("plain status:\n%q", got)
+	}
+}
+
+func TestPrintInstallState_CountsRemovedDriftAndUpgrade(t *testing.T) {
+	st := mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"aimux", "github", "minutes", "slack"},
+		Drifted: []string{"slack"}, Removed: []string{"minutes"}, UpgradePending: true, DaemonVersion: "v1"}
+	var out bytes.Buffer
+	printInstallState(&out, st, "/home/x/.claude.json", "restart with `launchctl kickstart -k gui/501/com.aimux.mcp-proxy`", false)
+	got := out.String()
+	for _, want := range []string{"4 servers behind the proxy", "aimux mcp proxy edit", "minutes", "removed from /home/x/.claude.json",
+		"slack", "drifted", "launchctl kickstart"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("install section lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "aimux, github") {
+		t.Fatalf("install section lists every server again (the table does):\n%s", got)
+	}
+	if strings.Contains(got, "minutes") && strings.Contains(got, "drifted: minutes") {
+		t.Fatalf("a removed entry is reported as drift:\n%s", got)
 	}
 }

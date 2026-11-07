@@ -199,14 +199,13 @@ func openSessionIDs(lives []harness.LiveSessions) ([]string, error) {
 }
 
 // printInstallSection prints whether the proxy is installed and in place.
-func printInstallSection(in mcpproxy.Installer, out io.Writer) {
+func printInstallSection(in mcpproxy.Installer, out io.Writer, color bool) {
 	st, err := in.InstallStatus()
 	if err != nil {
 		_, _ = fmt.Fprintf(out, "Install: unknown (%v)\n", err)
 		return
 	}
-	in.Out = out
-	in.PrintInstallStatus(st)
+	printInstallState(out, st, in.ClaudeConfig, in.UpgradeText(st.DaemonVersion), color)
 }
 
 func newMCPProxyInstallCmd() *cobra.Command {

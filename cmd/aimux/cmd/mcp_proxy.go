@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 	"time"
 	"unicode"
 
@@ -234,6 +233,7 @@ func newMCPProxyStatusCmd() *cobra.Command {
 			"reporting. Not running is reported, not an error.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.addr = fmt.Sprintf("127.0.0.1:%d", port)
+			o.color = statusColor(cmd.OutOrStdout())
 			if home, err := os.UserHomeDir(); err == nil {
 				in := proxyInstaller(home, port, cmd.OutOrStdout())
 				if o.json {
@@ -241,7 +241,7 @@ func newMCPProxyStatusCmd() *cobra.Command {
 						o.install = &st
 					}
 				} else {
-					printInstallSection(in, cmd.OutOrStdout())
+					printInstallSection(in, cmd.OutOrStdout(), o.color)
 				}
 			}
 			return proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now())
@@ -260,6 +260,7 @@ type proxyStatusOpts struct {
 	probe   bool
 	timeout time.Duration          // for probe; default one minute
 	install *mcpproxy.InstallState // added to --json output when set
+	color   bool                   // ANSI styles (a terminal without NO_COLOR)
 }
 
 // proxyStatusJSON is the --json answer: the daemon's report plus the install state.
@@ -320,37 +321,8 @@ func proxyStatus(ctx context.Context, o proxyStatusOpts, out io.Writer, now time
 		enc.SetIndent("", "  ")
 		return enc.Encode(proxyStatusJSON{rep, o.install})
 	}
-	printProxyStatus(out, o.addr, rep, now)
+	printProxyStatus(out, o.addr, rep, now, o.color)
 	return nil
-}
-
-// printProxyStatus prints the status table, then the stderr tail of each
-// failed server.
-func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now time.Time) {
-	_, _ = fmt.Fprintf(out, "MCP proxy on %s (pid %d, started %s)\n\n", addr, rep.PID, mcpproxy.Ago(now, rep.StartedAt))
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "SERVER\tSTATE\tTOOLS\tLAST CALL\tLAST ERROR")
-	for _, s := range rep.Servers {
-		lastErr := s.LastError
-		if s.ProbeError != "" {
-			lastErr = s.ProbeError
-		}
-		if lastErr == "" {
-			lastErr = "-"
-		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", printable(s.Server), s.State, s.Tools,
-			mcpproxy.Ago(now, s.LastCall), printable(lastErr))
-	}
-	_ = w.Flush()
-	for _, s := range rep.Servers {
-		if s.State != mcpproxy.StateFailed || len(s.StderrTail) == 0 {
-			continue
-		}
-		_, _ = fmt.Fprintf(out, "\n%s stderr:\n", printable(s.Server))
-		for _, line := range s.StderrTail {
-			_, _ = fmt.Fprintf(out, "  %s\n", printable(line))
-		}
-	}
 }
 
 // printable replaces control characters, so a server's output cannot move

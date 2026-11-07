@@ -1274,7 +1274,9 @@ func TestInstall_CrashAfterTheEdit_UninstallRestoresTheOriginals(t *testing.T) {
 
 func TestInstall_EditFails_ManifestBackToItsPreviousBytes(t *testing.T) {
 	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
-	fail := func(string, string, func(json.RawMessage) (json.RawMessage, error)) error { return errors.New("locked") }
+	fail := func(string, string, func(json.RawMessage) (json.RawMessage, error)) error {
+		return errors.New("locked")
+	}
 
 	fx.in.edit = fail // first install: no manifest before, none after
 	if err := fx.in.Install(nil); err == nil {
@@ -1292,5 +1294,32 @@ func TestInstall_EditFails_ManifestBackToItsPreviousBytes(t *testing.T) {
 	}
 	if fx.read(fx.manifest) != before {
 		t.Fatalf("manifest not back to its previous bytes:\n%s", fx.read(fx.manifest))
+	}
+}
+
+// A moved server the owner removed from ~/.claude.json (claude mcp remove)
+// is reported as removed, not as drift: nothing points at a stale copy, and
+// the drift advice (uninstall, install) would churn every server for nothing.
+func TestInstallStatus_RemovedEntryIsNotDrift(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	must(t, jsonedit.EditKeyVerbatim(fx.claude, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
+		return jsonedit.SetMember(old, "slack", nil)
+	}))
+	st, err := fx.in.InstallStatus()
+	must(t, err)
+	if !reflect.DeepEqual(st.Removed, []string{"slack"}) || len(st.Drifted) != 0 || st.State != InstallInPlace {
+		t.Fatalf("status = %+v, want slack removed, no drift, still in place", st)
+	}
+	fx.setEntry("github", json.RawMessage(`{"command": "gh-mcp"}`)) // and a real drift
+	st, err = fx.in.InstallStatus()
+	must(t, err)
+	if !reflect.DeepEqual(st.Removed, []string{"slack"}) || !reflect.DeepEqual(st.Drifted, []string{"github"}) || st.State != InstallDrifted {
+		t.Fatalf("status = %+v, want slack removed and github drifted", st)
+	}
+	fx.out.Reset()
+	fx.in.PrintInstallStatus(st)
+	if out := fx.out.String(); !strings.Contains(out, "Removed from") || !strings.Contains(out, "slack") {
+		t.Fatalf("status output does not report the removed entry:\n%s", out)
 	}
 }

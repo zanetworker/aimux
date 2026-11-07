@@ -47,11 +47,15 @@ const (
 	statusPoll  = 250 * time.Millisecond
 	defaultWait = 10 * time.Second
 	editHint    = "moved servers are configured with `aimux mcp proxy edit <server>`, not in ~/.claude.json"
-	driftFix    = "run `aimux mcp proxy uninstall`, then `aimux mcp proxy install`"
+	driftFix    = DriftFix
 )
 
 // manifestVersion is the manifest format this aimux writes and reads.
 const manifestVersion = 2
+
+// DriftFix is the advice for a moved server whose entry is no longer its
+// proxy URL.
+const DriftFix = "run `aimux mcp proxy uninstall`, then `aimux mcp proxy install`"
 
 // errManifestCorrupt marks a manifest that does not parse.
 var errManifestCorrupt = errors.New("the install manifest is unreadable")
@@ -93,6 +97,9 @@ type InstallState struct {
 	Moved []string `json:"moved,omitempty"`
 	// Drifted are moved servers whose entry is no longer their proxy URL.
 	Drifted []string `json:"drifted,omitempty"`
+	// Removed are moved servers whose entry is gone from the Claude config
+	// (the owner removed it); the proxy still serves them, unused.
+	Removed []string `json:"removed,omitempty"`
 	// NotProxied are stdio servers in mcpServers not behind the proxy.
 	NotProxied []string `json:"notProxied,omitempty"`
 	// Skipped are stdio servers kept direct with --skip.
@@ -781,11 +788,13 @@ func (i Installer) upgradePending(rep StatusReport) bool {
 
 func (i Installer) noteUpgrade(rep StatusReport) {
 	if i.upgradePending(rep) {
-		i.printf("Note: %s.\n", i.upgradeText(rep.Version))
+		i.printf("Note: %s.\n", i.UpgradeText(rep.Version))
 	}
 }
 
-func (i Installer) upgradeText(daemon string) string {
+// UpgradeText says the running daemon is another version than this aimux and
+// how to restart it.
+func (i Installer) UpgradeText(daemon string) string {
 	if daemon == "" {
 		daemon = "an older version"
 	}
@@ -962,7 +971,11 @@ func (i Installer) InstallStatus() (InstallState, error) {
 		return InstallState{}, err
 	}
 	for _, name := range st.Moved {
-		if entryURL(members[name]) != EntryURL(m.Port, name) {
+		raw, ok := members[name]
+		switch {
+		case !ok:
+			st.Removed = append(st.Removed, name)
+		case entryURL(raw) != EntryURL(m.Port, name):
 			st.Drifted = append(st.Drifted, name)
 		}
 	}
@@ -1008,12 +1021,15 @@ func (i Installer) PrintInstallStatus(st InstallState) {
 		i.printf("  Drifted, the entry is no longer its proxy URL (a running session saved an old copy, or it was edited): %s. To fix it, %s.\n",
 			strings.Join(st.Drifted, ", "), driftFix)
 	}
+	if len(st.Removed) > 0 {
+		i.printf("  Removed from %s: %s (the proxy still serves them, unused).\n", i.ClaudeConfig, strings.Join(st.Removed, ", "))
+	}
 	if len(st.NotProxied) > 0 {
 		i.printf("  Not behind the proxy: %s (run `aimux mcp proxy install` to move them)\n", strings.Join(st.NotProxied, ", "))
 	}
 	i.printSkipped(st.Skipped)
 	if st.UpgradePending {
-		i.printf("  Note: %s.\n", i.upgradeText(st.DaemonVersion))
+		i.printf("  Note: %s.\n", i.UpgradeText(st.DaemonVersion))
 	}
 }
 
