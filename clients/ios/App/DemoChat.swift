@@ -34,7 +34,18 @@ enum DemoChat {
                  user: "Propose the app structure and the first screen to build",
                  reply: "Three tabs: Now, All and Search, with the logic in a framework the tests can reach. "
                      + "Start with Now: it is the screen you open most.",
-                 tools: [TurnTool(name: "Read", snippet: "docs/brief.md", ok: true)])
+                 tools: [TurnTool(name: "Read", snippet: "docs/brief.md", ok: true)]),
+            // Long unbroken paths and commands, as a terminal session's screenshot steps show them, and a small
+            // table that fits the width (it once widened the whole chat past the screen).
+            Turn(number: 2, time: DemoData.ago(minutes: 2), user: "screenshot the basics screen and check it",
+                 reply: "Saved the screenshot to " + scratchpad + "/u-basics.png and the build log to "
+                     + "`" + scratchpad + "/build-35-simulator-iphone-17e.log`; the screen looks right.\n\n"
+                     + "| File | Question it answers |\n|---|---|\n"
+                     + "| Signature | Did NVIDIA publish exactly `abc`? |\n| SBOM | What's inside `abc`? |\n"
+                     + "| Provenance | How and from which source was `abc` built? |",
+                 tools: [TurnTool(name: "Bash", snippet: "$ S=" + scratchpad + " && xcrun simctl io booted "
+                                    + "screenshot $S/u-basics.png", ok: true),
+                         TurnTool(name: "Read", snippet: scratchpad + "/u-basics.png", ok: true)])
         ], stats: nil),
         "demo-17": Detail(turns: [
             Turn(number: 1, time: DemoData.ago(minutes: 12), user: "check the open items",
@@ -109,6 +120,9 @@ enum DemoChat {
                                  "description": "Run the remote client tests"])
         ]
     }
+
+    private static let scratchpad = "/private/tmp/claude-501/-Users-azaalouk-go-src-github-com-zanetworker-aimux/"
+        + "0b6f2c1e-9d4a-4f7e-8a21-5c3e7d9f1a42/scratchpad"
 
     private static let streamOld = "\tcase <-time.After(200 * time.Millisecond):\n\t\treturn errTimeout\n"
     private static let streamNew = "\tcase <-c.reconnected:\n\t\treturn nil\n"

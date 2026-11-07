@@ -45,7 +45,7 @@ struct ChatContent: View {
             // chat. The chat holds at most `ChatModel.historyTurns` turns, so drawing them all stays cheap.
             VStack(alignment: .leading, spacing: 16) {
                 ForEach(timelineRows(result.items)) { row in
-                    self.row(row.item, at: row.index)
+                    WithinWidth { self.row(row.item, at: row.index) }
                 }
                 if let pending = model.pending, model.state != .readOnly {
                     PendingMessageRow(pending: pending, model: model)
@@ -380,5 +380,20 @@ extension ChatContent {
                       get: { openStepDetails[index] ?? DebugHooks.openStepDetails },
                       set: { openStepDetails[index] = $0 }
                   ))
+    }
+}
+
+/// A timeline row that never reports more than the width it is offered. The timeline's stack is not lazy, and such a
+/// stack takes the width of its widest row: one row wider than the screen widened the whole chat, timeline, Next bar
+/// and composer, which then showed centred and cut off on both sides. A row that still overflows draws past the
+/// right edge on its own.
+private struct WithinWidth: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let size = subviews.first?.sizeThatFits(proposal) ?? .zero
+        return CGSize(width: min(size.width, proposal.width ?? size.width), height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: proposal)
     }
 }

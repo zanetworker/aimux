@@ -194,6 +194,28 @@ final class ChatUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Sent to your Mac's terminal"].waitForExistence(timeout: 5))
     }
 
+    /// A small table and long unbroken paths stay inside the screen: no row may widen the chat, which would push
+    /// the reply, the Next bar and the composer off both edges.
+    @MainActor
+    func testChatFitsTheScreenWidth() {
+        let app = launch(["-demo", "chat-terminal", "-openChat", "demo-1"])
+
+        let field = app.descendants(matching: .any)["messageField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        let saved = NSPredicate(format: "label BEGINSWITH %@", "Saved the screenshot")
+        let reply = app.staticTexts.matching(saved).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 5))
+        let table = app.descendants(matching: .any)["Table, 3 rows"]
+        XCTAssertTrue(table.waitForExistence(timeout: 5))
+
+        let screen = app.windows.firstMatch.frame
+        for (name, element) in [("reply", reply), ("composer", field), ("table", table)] {
+            let frame = element.frame
+            XCTAssertGreaterThanOrEqual(frame.minX, screen.minX, "\(name) \(frame) starts left of \(screen)")
+            XCTAssertLessThanOrEqual(frame.maxX, screen.maxX, "\(name) \(frame) ends right of \(screen)")
+        }
+    }
+
     @MainActor
     func testTerminalPromptCardAnswers() {
         let app = launch(["-demo", "chat-terminal", "-openChat", "demo-17"])

@@ -1,8 +1,8 @@
 import SwiftUI
 import AimuxKit
 
-/// A table on a `Grid` with hairline borders and an emphasised header row. It fills the width when it fits, and
-/// scrolls sideways when it does not; a short cell stays on one line, a long one wraps at a readable width.
+/// A table on a `Grid` with hairline borders and an emphasised header row. It shows at its own width when that fits,
+/// and scrolls sideways when it does not; a short cell stays on one line, a long one wraps at a readable width.
 struct MarkdownTableView: View {
     let table: MDTable
     @Environment(\.displayScale) private var displayScale
@@ -14,7 +14,9 @@ struct MarkdownTableView: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            grid
+            // At its own width, the width that was checked to fit: offered the whole width, the grid shares it out
+            // among its stretching cells and comes out wider than offered, which widened the whole chat.
+            grid.fixedSize(horizontal: true, vertical: false)
             ScrollView(.horizontal) { grid }
                 .scrollIndicators(.visible)
         }
