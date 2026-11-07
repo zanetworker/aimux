@@ -1,0 +1,298 @@
+{
+  "cases": [
+    {
+      "name": "closed, never ran here",
+      "session": {
+        "id": "c1",
+        "provider": "claude",
+        "title": "Session c1",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "idle",
+        "pinned": false
+      },
+      "events": [],
+      "expect": "gone"
+    },
+    {
+      "name": "created here, first message failed",
+      "session": {
+        "id": "c2",
+        "provider": "claude",
+        "title": "Session c2",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "unavailable",
+        "pinned": false
+      },
+      "events": [],
+      "expect": "gone"
+    },
+    {
+      "name": "aimux's turn finished",
+      "session": {
+        "id": "c3",
+        "provider": "claude",
+        "title": "Session c3",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "idle",
+        "pinned": false
+      },
+      "events": [
+        {
+          "seq": 1,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "turn_started",
+          "data": {}
+        },
+        {
+          "seq": 2,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "turn_done",
+          "data": {}
+        }
+      ],
+      "expect": "gone"
+    },
+    {
+      "name": "aimux's turn failed",
+      "session": {
+        "id": "c4",
+        "provider": "claude",
+        "title": "Session c4",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "idle",
+        "pinned": false
+      },
+      "events": [
+        {
+          "seq": 1,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "turn_started",
+          "data": {}
+        },
+        {
+          "seq": 2,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "turn_error",
+          "data": {
+            "error": "the agent stopped"
+          }
+        }
+      ],
+      "expect": "gone"
+    },
+    {
+      "name": "open in a terminal, registry idle",
+      "session": {
+        "id": "t1",
+        "provider": "claude",
+        "title": "Session t1",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "open_in_terminal",
+        "pinned": false
+      },
+      "events": [],
+      "expect": "idle"
+    },
+    {
+      "name": "open in an iTerm2 pane, registry idle",
+      "session": {
+        "id": "t2",
+        "provider": "claude",
+        "title": "Session t2",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "open_in_terminal",
+        "pinned": false,
+        "mac": {
+          "window": {
+            "id": "w1",
+            "index": 1,
+            "name": "Window 1"
+          },
+          "tab": {
+            "index": 1,
+            "name": "garden"
+          },
+          "pane": 1,
+          "panes": 1,
+          "lastInFront": false
+        }
+      },
+      "events": [],
+      "expect": "idle"
+    },
+    {
+      "name": "open in a terminal, registry busy",
+      "session": {
+        "id": "t3",
+        "provider": "claude",
+        "title": "Session t3",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "open_in_terminal",
+        "pinned": false,
+        "working": true
+      },
+      "events": [],
+      "expect": "working"
+    },
+    {
+      "name": "terminal at a permission prompt",
+      "session": {
+        "id": "t4",
+        "provider": "claude",
+        "title": "Session t4",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "open_in_terminal",
+        "pinned": false,
+        "waiting": {
+          "kind": "permission",
+          "message": "Claude needs your permission to use Bash",
+          "since": "2026-11-01T08:58:00Z"
+        }
+      },
+      "events": [],
+      "expect": "needs_you"
+    },
+    {
+      "name": "terminal at a permission prompt while registry busy",
+      "session": {
+        "id": "t5",
+        "provider": "claude",
+        "title": "Session t5",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "open_in_terminal",
+        "pinned": false,
+        "working": true,
+        "waiting": {
+          "kind": "permission",
+          "message": "Claude needs your permission to use Bash",
+          "since": "2026-11-01T08:58:00Z"
+        }
+      },
+      "events": [],
+      "expect": "needs_you"
+    },
+    {
+      "name": "aimux runs a turn",
+      "session": {
+        "id": "b1",
+        "provider": "claude",
+        "title": "Session b1",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "busy",
+        "pinned": false
+      },
+      "events": [
+        {
+          "seq": 1,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "turn_started",
+          "data": {}
+        }
+      ],
+      "expect": "working"
+    },
+    {
+      "name": "aimux runs a turn, no events yet",
+      "session": {
+        "id": "b2",
+        "provider": "claude",
+        "title": "Session b2",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "busy",
+        "pinned": false
+      },
+      "events": [],
+      "expect": "working"
+    },
+    {
+      "name": "aimux's turn asks for approval",
+      "session": {
+        "id": "b3",
+        "provider": "claude",
+        "title": "Session b3",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "busy",
+        "pinned": false
+      },
+      "events": [
+        {
+          "seq": 1,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "turn_started",
+          "data": {}
+        },
+        {
+          "seq": 2,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "approval",
+          "data": {
+            "approvalId": "ap1",
+            "title": "Run go test"
+          }
+        }
+      ],
+      "expect": "needs_you"
+    },
+    {
+      "name": "approval answered, turn goes on",
+      "session": {
+        "id": "b4",
+        "provider": "claude",
+        "title": "Session b4",
+        "project": "/src/garden",
+        "lastActive": "2026-11-01T08:59:00Z",
+        "state": "busy",
+        "pinned": false
+      },
+      "events": [
+        {
+          "seq": 1,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "turn_started",
+          "data": {}
+        },
+        {
+          "seq": 2,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "approval",
+          "data": {
+            "approvalId": "ap1",
+            "title": "Run go test"
+          }
+        },
+        {
+          "seq": 3,
+          "time": "2026-11-01T09:00:00Z",
+          "turn": "t1",
+          "kind": "approval_resolved",
+          "data": {
+            "approvalId": "ap1",
+            "outcome": "allowed"
+          }
+        }
+      ],
+      "expect": "working"
+    }
+  ]
+}

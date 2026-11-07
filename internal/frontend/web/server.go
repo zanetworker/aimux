@@ -40,6 +40,7 @@ type Server struct {
 	sessionStore     *controller.SessionStore
 	otelStore        controller.OTELLookup
 	sessionRoots     []string // nil means defaultSessionRoots()
+	activity         *controller.LocalActivity
 
 	// Discovery cache to avoid redundant ps/tmux scans
 	cacheMu     sync.Mutex
@@ -53,6 +54,12 @@ func NewServer(port int) *Server {
 
 func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
 	s.discoverFn = fn
+}
+
+// SetActivity makes every discovery carry the state service's activity
+// (controller.LocalActivity), the words the TUI and the phone show.
+func (s *Server) SetActivity(a *controller.LocalActivity) {
+	s.activity = a
 }
 
 func (s *Server) SetLaunchFunc(fn func(opts spawn.LaunchOpts) (spawn.LaunchResult, error)) {
@@ -80,6 +87,7 @@ func (s *Server) cachedDiscover() ([]agent.Agent, error) {
 		return nil, err
 	}
 	s.enrichRemoteAgents(agents)
+	s.activity.Apply(agents)
 	s.cacheAgents = agents
 	s.cacheTime = time.Now()
 	return agents, nil

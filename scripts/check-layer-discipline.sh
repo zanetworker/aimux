@@ -15,6 +15,7 @@ CORE_PKGS=(
   internal/config
   internal/remoteapp
   internal/catalog
+  internal/sessionstate
 )
 
 fail=0

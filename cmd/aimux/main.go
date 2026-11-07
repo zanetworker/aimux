@@ -31,6 +31,7 @@ import (
 	"github.com/zanetworker/aimux/internal/spawn"
 	"github.com/zanetworker/aimux/internal/tasks"
 	"github.com/zanetworker/aimux/internal/trace"
+	"github.com/zanetworker/aimux/internal/waiting"
 )
 
 // version is set via ldflags at build time: -X main.version=v0.3.0
@@ -119,8 +120,9 @@ func main() {
 		})
 	}
 
+	activity := localActivity(registry, home) // agents, kill and focus show what the TUI, dashboard and phone show
 	deps := cmd.Deps{
-		Discover:         disco.Discover,
+		Discover:         activity.Wrap(disco.Discover),
 		DiscoverSessions: history.Discover,
 		PickSession:      sessions.PickSession,
 		ResumeBuilder:    buildResumeBuilder(cfg),
@@ -341,6 +343,7 @@ func createWebServer(port int) *web.Server {
 		s.SetComposeEngine(composeEngine)
 	}
 	s.SetDiscoverFunc(disco.Discover)
+	s.SetActivity(localActivity(registry, home))
 	s.SetSearchFunc(func(q string, automated bool) ([]search.Result, error) {
 		rs, _, err := interactiveSearch.Query(context.Background(), q, dashboardSearchOpts(automated))
 		return rs, err
@@ -492,4 +495,15 @@ func createWebServer(port int) *web.Server {
 // other switches hide (web/src/components/sessionFilter.ts).
 func dashboardSearchOpts(includeAutomated bool) search.QueryOpts {
 	return search.QueryOpts{Limit: 50, IncludeAutomated: includeAutomated}
+}
+
+// localActivity is the session state service for the dashboard and the CLI:
+// every local provider's live sessions, the hook markers under home, and the
+// hooks' settings file for the "Permission prompts need ..." hint.
+func localActivity(registry *provider.Registry, home string) *controller.LocalActivity {
+	l := controller.NewLocalActivity(provider.LiveOf(registry.Local(), discovery.LiveTTL), waiting.Dir(home))
+	if home != "" {
+		l.HooksSettings = filepath.Join(home, ".claude", "settings.json")
+	}
+	return l
 }

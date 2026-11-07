@@ -430,3 +430,27 @@ func TestRefresh_FallsBackToGet(t *testing.T) {
 		t.Fatal("unknown session refreshed")
 	}
 }
+
+// ListWith lists with the open sessions given, not a read of its own, so a
+// caller sharing one read with the state service gets matching state and
+// working.
+func TestListWith_UsesTheGivenOpenSessions(t *testing.T) {
+	c, _ := fixture(t) // its Live holds open (busy) and mine (owned)
+	got, err := c.ListWith(history.RemoteOpts(false, false), Open{"idle": {PID: 20, SessionID: "idle", Status: "busy"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Entry{}
+	for _, e := range got {
+		by[e.ID] = e
+	}
+	if e := by["idle"]; e.State != StateOpenInTerminal || !e.Working {
+		t.Errorf("idle, open in the given map: %+v", e)
+	}
+	if e := by["open"]; e.State != StateIdle || e.Working {
+		t.Errorf("open, absent from the given map: %+v", e)
+	}
+	if e := by["busy"]; e.State != StateBusy {
+		t.Errorf("busy: %+v", e)
+	}
+}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/controller"
 )
 
 var (
@@ -54,6 +55,9 @@ type HeaderView struct {
 
 	// Attention counter
 	attentionCount int
+
+	// hooksMissing: the permission hooks are not installed (hint shown)
+	hooksMissing bool
 }
 
 // NewHeaderView creates a new HeaderView.
@@ -107,6 +111,12 @@ func (h *HeaderView) SetSilenced(silenced bool) {
 }
 
 // SetAttentionCount updates the attention counter (agents waiting + recently done).
+// SetHooksMissing shows, muted on the crumb line, that permission prompts
+// need the hooks (controller.HooksHint).
+func (h *HeaderView) SetHooksMissing(missing bool) {
+	h.hooksMissing = missing
+}
+
 func (h *HeaderView) SetAttentionCount(n int) {
 	h.attentionCount = n
 }
@@ -206,8 +216,8 @@ func (h *HeaderView) renderInfoBoxes() string {
 	valueStyle := lipgloss.NewStyle().Foreground(colorHeaderText).Bold(true)
 
 	// Agent count box with labeled status icons
-	activeStr := lipgloss.NewStyle().Foreground(colorActive).Render(fmt.Sprintf("●%d active", active))
-	waitingStr := lipgloss.NewStyle().Foreground(colorWaiting).Render(fmt.Sprintf("◐%d wait", waiting))
+	activeStr := lipgloss.NewStyle().Foreground(colorActive).Render(fmt.Sprintf("●%d working", active))
+	waitingStr := lipgloss.NewStyle().Foreground(colorWaiting).Render(fmt.Sprintf("◐%d needs you", waiting))
 	idleStr := lipgloss.NewStyle().Foreground(colorIdle).Render(fmt.Sprintf("○%d idle", idle))
 	errorStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(fmt.Sprintf("✕%d err", errors))
 
@@ -371,5 +381,10 @@ func (h *HeaderView) renderCrumbs() string {
 		}
 	}
 
-	return " " + strings.Join(parts, "")
+	line := " " + strings.Join(parts, "")
+	if h.hooksMissing {
+		hint := lipgloss.NewStyle().Foreground(colorMutedText).Render(controller.HooksHint + " ")
+		line += h.fillGap(line, hint) + hint
+	}
+	return line
 }

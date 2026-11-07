@@ -1026,6 +1026,20 @@ components:
         unavailable: created here, but its first message failed before Claude
         saved it.
 
+    Activity:
+      type: string
+      enum: [working, needs_you, idle, gone]
+      description: >
+        What the session is doing now, one answer the server computes for
+        the phone, the TUI and the web dashboard (internal/sessionstate).
+        needs_you: a permission prompt (waiting) or an approval of aimux's
+        own turn waits for the owner. working: aimux runs a turn, the
+        terminal's registry says busy, or (detail only) the terminal screen
+        shows Claude working. idle: open in a terminal, or an aimux run, and
+        not working. gone: no process holds it and nothing runs. The first
+        that applies wins, in that order. Present on the session list and
+        the detail; absent in search hits.
+
     Session:
       type: object
       additionalProperties: false
@@ -1044,6 +1058,7 @@ components:
         mac: { $ref: "#/components/schemas/MacPlace" }
         working: { type: boolean, description: "The session is open in a terminal and Claude's registry calls it busy. Absent when not working. Listed sessions only." }
         waiting: { $ref: "#/components/schemas/Waiting" }
+        activity: { $ref: "#/components/schemas/Activity" }
 
     Waiting:
       type: object
@@ -1190,6 +1205,7 @@ components:
         mac: { $ref: "#/components/schemas/MacPlace" }
         working: { type: boolean, description: "The session is open in a terminal and Claude's registry calls it busy. Absent when not working. Listed sessions only." }
         waiting: { $ref: "#/components/schemas/Waiting" }
+        activity: { $ref: "#/components/schemas/Activity" }
         turns:
           type: array
           items: { $ref: "#/components/schemas/Turn" }

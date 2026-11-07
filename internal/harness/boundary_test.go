@@ -78,3 +78,31 @@ func TestCatalogBoundary(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionStateBoundary: the session state service is core and harness
+// neutral. It imports net/http never, and no HTTP layer, frontend, catalog
+// or harness-specific package at any depth; harness readers come in as
+// inputs (.claude/CLAUDE.md, package map).
+func TestSessionStateBoundary(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go tool")
+	}
+	out, err := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", module+"internal/sessionstate").Output()
+	if err != nil {
+		t.Fatalf("go list internal/sessionstate: %v", err)
+	}
+	for _, imp := range strings.Fields(string(out)) {
+		if imp == "net/http" {
+			t.Error("internal/sessionstate must not import net/http")
+		}
+	}
+	banned := []string{"internal/remoteapi", "internal/remoteapp", "internal/frontend", "internal/tui", "internal/catalog",
+		"internal/provider", "internal/discovery", "internal/waiting", "internal/statusdetect", "internal/terminput", "internal/harness/"}
+	for _, d := range internalDeps(t, "internal/sessionstate") {
+		for _, b := range banned {
+			if d == b || strings.HasPrefix(d, strings.TrimSuffix(b, "/")+"/") {
+				t.Errorf("internal/sessionstate must not import %s", d)
+			}
+		}
+	}
+}

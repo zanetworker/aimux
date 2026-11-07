@@ -182,3 +182,77 @@ func TestCurrentNeedsTwoMissesForAnUnknownProcess(t *testing.T) {
 		t.Fatal("kept after misses spanning MissFor")
 	}
 }
+
+// removeIfSince deletes a marker only while it is still the one read: a
+// newer prompt written since is kept.
+func TestRemoveIfSince(t *testing.T) {
+	dir := t.TempDir()
+	_ = Write(dir, "s", "first", t0)
+	_ = Write(dir, "s", "second", t0.Add(time.Minute)) // a newer prompt replaced it
+	if err := removeIfSince(dir, "s", t0); err != nil {
+		t.Fatal(err)
+	}
+	if w, ok := Read(dir, "s"); !ok || w.Message != "second" {
+		t.Fatalf("the newer marker was removed: %+v %v", w, ok)
+	}
+	if err := removeIfSince(dir, "s", t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Read(dir, "s"); ok {
+		t.Fatal("the matching marker was kept")
+	}
+	if err := removeIfSince(dir, "gone", t0); err != nil {
+		t.Fatalf("a missing marker: %v", err)
+	}
+}
+
+// Another process (a hook, another aimux) rewrites a marker between the
+// Tracker's list and its removal of the closed session's old one: the new
+// prompt survives. The Alive probe runs in that gap.
+func TestCurrentKeepsAMarkerRewrittenBeforeRemoval(t *testing.T) {
+	now := t0
+	live := map[string]int{"s": 10}
+	tr := newTracker(t, live, &now)
+	_ = Write(tr.Dir, "s", "old", t0)
+	tr.Current() // seen open with pid 10
+	delete(live, "s")
+	now = t0.Add(StaleAfter + time.Second)
+	tr.Alive = func(int) bool {
+		_ = Write(tr.Dir, "s", "new prompt", now) // the session reopened and asked again
+		return false
+	}
+	tr.Current()
+	if w, ok := Read(tr.Dir, "s"); !ok || w.Message != "new prompt" {
+		t.Fatalf("the rewritten marker was removed: %+v %v", w, ok)
+	}
+}
+
+// A ReadOnly Tracker (the TUI's and the dashboard's, whose liveness may
+// leave out a harness) shows the same markers but never deletes one: a
+// closed-looking session's marker and a moved-on one stay for remote
+// serve's Tracker to judge.
+func TestCurrentReadOnlyNeverRemoves(t *testing.T) {
+	now := t0
+	tr := newTracker(t, map[string]int{"moved": 7}, &now)
+	tr.ReadOnly = true
+	tr.Alive = func(int) bool { return false }
+	_ = Write(tr.Dir, "unseen", "m", t0)
+	transcript := filepath.Join(t.TempDir(), "t.jsonl")
+	if err := os.WriteFile(transcript, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMarker(tr.Dir, marker{SessionID: "moved", TranscriptPath: transcript, Waiting: Waiting{Kind: KindPermission, Message: "m", Since: t0.Add(-time.Hour)}}); err != nil {
+		t.Fatal(err)
+	}
+	now = t0.Add(StaleAfter + time.Second)
+	if got := tr.Current(); len(got) != 0 {
+		t.Fatalf("Current = %v, want none (unseen is not open, moved moved on)", got)
+	}
+	now = now.Add(MissFor)
+	tr.Current()
+	for _, id := range []string{"unseen", "moved"} {
+		if _, ok := Read(tr.Dir, id); !ok {
+			t.Errorf("a ReadOnly Tracker removed %s's marker", id)
+		}
+	}
+}

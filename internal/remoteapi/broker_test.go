@@ -772,3 +772,27 @@ func TestBroker_ReleaseTwiceIsSafe(t *testing.T) {
 		t.Fatalf("Start after double-release: %v", err)
 	}
 }
+
+// AwaitingApproval is true from the approval event until it is answered
+// (the session state service's Approvals input).
+func TestBroker_AwaitingApproval(t *testing.T) {
+	var b0 *Broker
+	if NewBroker(BrokerDeps{}, BrokerOptions{}).AwaitingApproval("s1") {
+		t.Fatal("a fresh broker awaits an approval")
+	}
+	_, _, _ = approvalFlow(t, 5*time.Second, func(b *Broker, approval string) {
+		b0 = b
+		if !b.AwaitingApproval("s1") {
+			t.Error("AwaitingApproval(s1) = false while the approval is pending")
+		}
+		if b.AwaitingApproval("s2") {
+			t.Error("AwaitingApproval(s2) = true for a session without one")
+		}
+		if err := b.Answer(approval, "allow"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if b0.AwaitingApproval("s1") {
+		t.Fatal("AwaitingApproval(s1) = true after the answer")
+	}
+}

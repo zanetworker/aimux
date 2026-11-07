@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/sessionstate"
 )
 
 // SortField identifies which column to sort by.
@@ -44,7 +45,9 @@ var (
 			Foreground(lipgloss.Color("#06B6D4"))
 	sessDimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280"))
-	sessProjectStyle = lipgloss.NewStyle().
+	// sessNeedsYouStyle is the waiting colour of the agents view's icon.
+	sessNeedsYouStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	sessProjectStyle  = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#A78BFA"))
 	sessBranchStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#A78BFA"))
@@ -213,6 +216,9 @@ type SessionsView struct {
 	// Pinned count (starred sessions at the top of visible list)
 	pinnedCount int
 
+	// activity is each live session's state service answer, by session id
+	activity map[string]string
+
 	// Title generation
 	generatingTitles bool
 
@@ -251,6 +257,13 @@ func (v *SessionsView) SetSessions(sessions []history.Session) {
 	if v.cursor < 0 {
 		v.cursor = 0
 	}
+}
+
+// SetActivity sets each session's activity (sessionstate values, from the
+// agents refresh); a row shows "needs you", "working" or "idle" before its
+// title, nothing for gone or unknown sessions.
+func (v *SessionsView) SetActivity(activity map[string]string) {
+	v.activity = activity
 }
 
 // SetSize sets the available width and height.
@@ -1443,6 +1456,20 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 		projStr := fmt.Sprintf("%-*s", cols.project, truncate(proj, cols.project))
 		b.WriteString(sessProjectStyle.Render(projStr))
 		b.WriteString("   ")
+	}
+
+	// A live session's activity leads the prompt column, in the same words
+	// and the one state colour (needs you) as the agents view.
+	if word := sessionstate.Activity(v.activity[s.ID]).Label(); word != "" {
+		style := sessDimStyle
+		if word == sessionstate.NeedsYou.Label() {
+			style = sessNeedsYouStyle
+		}
+		b.WriteString(style.Render(word) + " ")
+		cols.prompt -= len(word) + 1
+		if cols.prompt < 1 {
+			cols.prompt = 1
+		}
 	}
 
 	// Prompt column (fixed width, padded)

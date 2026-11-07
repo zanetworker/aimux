@@ -307,12 +307,16 @@ func (c *Catalog) createdEntry(id string, cr CreatedSession, state string) Entry
 // List is the sessions a list with options o shows, most recently active
 // first: the scanned sessions Visible admits, then the sessions created
 // here that have no file yet but a live run.
-func (c *Catalog) List(o history.VisibleOpts) ([]Entry, error) {
+func (c *Catalog) List(o history.VisibleOpts) ([]Entry, error) { return c.ListWith(o, c.Open()) }
+
+// ListWith is List with the open sessions given (an Open read the caller
+// shares, e.g. with the session state service), so State and Working agree
+// with what the caller derives from the same read.
+func (c *Catalog) ListWith(o history.VisibleOpts, open Open) ([]Entry, error) {
 	all, err := c.Scan()
 	if err != nil {
 		return nil, err
 	}
-	open := c.Open()
 	out := []Entry{}
 	seen := map[string]bool{}
 	for _, s := range all {

@@ -350,6 +350,7 @@ The bar offers the next session that needs you ("your turn", or "waiting for per
 | `mac` | Present when the session's running `claude` is in an iTerm2 pane: `{window:{id,index,name}, tab:{index,name}, pane, panes, lastInFront}`. Window and tab names drop a leading status mark such as Claude Code's "✳" or a spinner frame, so a name stays the same while Claude works. |
 | `working` | `true` when the session is open in a terminal and Claude's registry calls it busy. |
 | `waiting` | `{kind, message, since}` while a session open in a terminal shows a permission prompt (from the [hooks](#permission-alerts-for-terminal-sessions)); also on `GET /v1/sessions/{id}`. |
+| `activity` | What the session is doing now: `needs_you` (a permission prompt, or an approval of a turn aimux runs), else `working` (aimux runs a turn, Claude's registry says busy, or on the detail the terminal screen shows Claude working), else `idle` (open, or an aimux run, and not working), else `gone`. The TUI and the web dashboard show the same answer. Also on `GET /v1/sessions/{id}`; absent in search hits. The clients still derive their own for now; `api/testdata/clients/activity/` pins that both agree. |
 
 `lastOnMac` stays in the list for older clients, which hide it after 12 hours.
 

@@ -56,11 +56,12 @@ type LiveCache struct {
 
 // liveRead is one read of the registry and, for Strict, the command lines.
 type liveRead struct {
-	holders []harness.Holder // registry holders by IsLiveHolder's rule
-	regErr  error            // the registry could not be fully read
-	strict  bool             // cmd was looked for
-	cmd     []harness.Holder // command-line holders without a live entry
-	seq     int              // which read this is (LiveCache.started when it began)
+	reg     map[int]ClaudeRegistryEntry // every decodable entry, live or not (Registry)
+	holders []harness.Holder            // registry holders by IsLiveHolder's rule
+	regErr  error                       // the registry could not be fully read
+	strict  bool                        // cmd was looked for
+	cmd     []harness.Holder            // command-line holders without a live entry
+	seq     int                         // which read this is (LiveCache.started when it began)
 }
 
 // servesStrict reports whether r answers a Strict call made when callSeq
@@ -118,12 +119,27 @@ func (c *LiveCache) Holders(mode harness.Mode) ([]harness.Holder, error) {
 	return c.resultUnlock(mode)
 }
 
+// Registry is every entry of the registry read List would serve now
+// (ReadClaudeRegistry's answer, from the same cached read), in a map of the
+// caller's own: Claude's discovery reads it, so a refresh that also asks
+// for holders reads the registry and runs ps once.
+func (c *LiveCache) Registry() map[int]ClaudeRegistryEntry {
+	_, _ = c.Holders(harness.List) // never fails; makes the cached read current
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[int]ClaudeRegistryEntry, len(c.snap.reg))
+	for pid, e := range c.snap.reg {
+		out[pid] = e
+	}
+	return out
+}
+
 // load reads the registry and, when strict and the registry read fully, the
 // command lines. A failed command-line read finds no extra holders, as the
 // registry alone would.
 func (c *LiveCache) load(strict bool) liveRead {
 	reg, err := c.read(c.Dir)
-	r := liveRead{holders: liveHolders(reg, c.alive, c.ps), regErr: err, strict: strict}
+	r := liveRead{reg: reg, holders: liveHolders(reg, c.alive, c.ps), regErr: err, strict: strict}
 	if !strict || err != nil {
 		return r
 	}

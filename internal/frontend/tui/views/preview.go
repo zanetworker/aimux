@@ -41,13 +41,13 @@ var (
 // split pane layout. It shows the conversation trace of the currently selected
 // agent, parsed from its session JSONL file.
 type PreviewPane struct {
-	agent         *agent.Agent
-	logsView      *LogsView
-	parser        TraceParser // parser function set by app.go for the current agent
-	width         int
-	height        int
-	cachedPodLogs string // cached kubectl logs output
-	cachedPodPID  int    // PID (or 0) the cached logs belong to
+	agent          *agent.Agent
+	logsView       *LogsView
+	parser         TraceParser // parser function set by app.go for the current agent
+	width          int
+	height         int
+	cachedPodLogs  string   // cached kubectl logs output
+	cachedPodPID   int      // PID (or 0) the cached logs belong to
 	diffStat       string   // cached git diff --stat output
 	diffFull       string   // cached git diff output (for expanded view)
 	diffExpanded   bool     // true when showing full diff instead of trace
@@ -367,7 +367,7 @@ func (p *PreviewPane) renderHeader() string {
 
 	// Status line
 	statusIcon := a.Icon()
-	statusText := a.Status.String()
+	statusText := a.StateWord()
 	statusLine := fmt.Sprintf("%s %s  %s  %s",
 		statusIcon,
 		statusText,

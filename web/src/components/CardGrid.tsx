@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { Agent } from '../types';
 import type { ContentSearchResult } from '../App';
 import { AgentCard } from './AgentCard';
+import { stateLabel } from './stateLabel';
 import { formatAge, normalizeLocation } from '../utils';
 
 interface Props {
@@ -271,7 +272,6 @@ export function CardGrid({
                   const id = agent.SessionID || agent.PID.toString();
                   const isSelected = selectedId === id;
                   const statusColors: Record<number, string> = { 0: 'var(--green)', 1: 'var(--fg-3)', 2: 'var(--orange)', 3: 'var(--accent)' };
-                  const statusLabels: Record<number, string> = { 0: 'ACTIVE', 1: 'IDLE', 2: 'WAITING', 3: 'ERROR' };
                   const providerColors: Record<string, string> = { claude: 'var(--accent)', codex: 'var(--green)' };
                   const age = agent.LastActivity ? formatAge(agent.LastActivity) : '';
                   return (
@@ -289,8 +289,8 @@ export function CardGrid({
                       <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', color: providerColors[agent.ProviderName] || 'var(--fg-3)', width: 55, flexShrink: 0 }}>
                         {agent.ProviderName}
                       </span>
-                      <span style={{ fontSize: 11, color: statusColors[agent.Status], width: 55, flexShrink: 0 }}>
-                        {statusLabels[agent.Status] || ''}
+                      <span style={{ fontSize: 11, color: statusColors[agent.Status], width: 70, flexShrink: 0, textTransform: 'uppercase' }}>
+                        {stateLabel(agent)}
                       </span>
                       <span style={{ fontSize: 13, color: 'var(--fg)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {agent.Title || agent.Name}

@@ -3,6 +3,7 @@ import type { Agent } from '../types';
 
 interface Props {
   agents: Agent[];
+  hooksHint?: string; // muted: permission prompts need the hooks
   onLaunch: () => void;
   onHome?: () => void;
   onToggleTasks?: () => void;
@@ -12,7 +13,7 @@ interface Props {
   onToggleTheme?: () => void;
 }
 
-export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, tasksOpen, theme, onToggleTheme }: Props) {
+export function StatsBar({ agents, hooksHint, onLaunch, onHome, onToggleTasks, taskCount, tasksOpen, theme, onToggleTheme }: Props) {
   const [gatewayStatus, setGatewayStatus] = useState<{ available: boolean; message: string } | null>(null);
 
   useEffect(() => {
@@ -63,10 +64,13 @@ export function StatsBar({ agents, onLaunch, onHome, onToggleTasks, taskCount, t
       <div role="status" aria-label="Dashboard statistics" style={{ display: 'flex', gap: 6 }}>
         <StatChip value={sessions} label="sessions" color="var(--fg)" />
         <Sep />
-        <StatChip value={active} label="active" color="var(--green)" />
+        <StatChip value={active} label="working" color="var(--green)" />
         <StatChip value={idle} label="idle" color="var(--fg-3)" />
-        <StatChip value={waiting} label="waiting" color={waiting > 0 ? 'var(--orange)' : 'var(--fg-4)'} />
+        <StatChip value={waiting} label="needs you" color={waiting > 0 ? 'var(--orange)' : 'var(--fg-4)'} />
         <StatChip value={errors} label="errors" color={errors > 0 ? 'var(--accent)' : 'var(--fg-4)'} />
+        {hooksHint && (
+          <span style={{ fontSize: 11, color: 'var(--fg-4)', fontFamily: 'var(--mono)', alignSelf: 'center' }}>{hooksHint}</span>
+        )}
         <Sep />
         <StatChip value={repos} label="repos" color="var(--fg-2)" />
         <Sep />

@@ -24,6 +24,16 @@ description: Keyboard shortcuts for the terminal dashboard.
 | `?` | Show help overlay |
 | `q` | Quit |
 
+### What a session is doing
+
+The agent list, its preview, the header counts and the sessions view use the words the phone uses, from one answer aimux computes for every surface:
+
+- **needs you**: a permission prompt waits (with `aimux remote hooks install`, see [Permission alerts](/guides/remote-access/#permission-alerts-for-terminal-sessions)). The LAST column says "needs you" in amber.
+- **working**: Claude Code's registry says the session is busy. Harnesses without a registry (Codex) fall back to reading the transcript's last lines.
+- **idle**: open in a terminal and not working.
+
+An error (a crash or a full context) keeps its ✕ and the word "Error". The hooks' markers are read by the TUI itself; `remote serve` need not run. Without the hooks a permission prompt shows as working, and the header and help say, muted, "Permission prompts need `aimux remote hooks install`" (checked at start and every 5 minutes).
+
 ## Split View (Trace + Session)
 
 | Key | Action |
@@ -48,6 +58,8 @@ description: Keyboard shortcuts for the terminal dashboard.
 ## Sessions View
 
 A session's title is the one you wrote, else the name you gave it with Claude Code's `/rename`, else one aimux generated, else Claude Code's own name for it, else its first message. The dashboard, `aimux sessions`, search and the phone clients choose it the same way. `/` also matches that title.
+
+A session that is open leads its title with what it is doing: **needs you** (in amber), **working** or **idle**, as in the agent list.
 
 | Key | Action |
 |-----|--------|

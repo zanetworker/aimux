@@ -9,6 +9,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/catalog"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/terminput"
@@ -137,7 +138,14 @@ func (x *LocalIndex) RegistryStatus(sessionID string) string {
 // Sessions lists the most recently active sessions; automated ones only when
 // includeAutomated is set.
 func (x *LocalIndex) Sessions(ctx context.Context, limit int, includeAutomated bool) ([]Session, error) {
-	entries, err := x.Catalog().List(history.RemoteOpts(includeAutomated, false))
+	return x.SessionsAt(ctx, limit, includeAutomated, x.Catalog().Open())
+}
+
+// SessionsAt is Sessions with the open sessions given (catalog.ListWith):
+// the remote list passes the state service's read, so each session's state
+// and working match its activity.
+func (x *LocalIndex) SessionsAt(_ context.Context, limit int, includeAutomated bool, open map[string]harness.Holder) ([]Session, error) {
+	entries, err := x.Catalog().ListWith(history.RemoteOpts(includeAutomated, false), open)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}

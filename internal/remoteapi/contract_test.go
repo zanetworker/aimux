@@ -32,10 +32,12 @@ import (
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/folders"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/push"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
+	"github.com/zanetworker/aimux/internal/sessionstate"
 	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/waiting"
 )
@@ -284,7 +286,9 @@ func TestContract(t *testing.T) {
 				Pane: 1, Panes: 2, LastInFront: true}},
 	}
 	api := &API{Version: "test", Broker: b,
-		Sessions: func(context.Context, int, bool) ([]Session, error) { return sessions, nil },
+		// A copy: the list handler fills its sessions in place, as it may
+		// with LocalIndex's fresh slice; search hits must not see that.
+		Sessions: func(context.Context, int, bool) ([]Session, error) { return append([]Session(nil), sessions...), nil },
 		Session: func(_ context.Context, id string, _ int) (SessionDetail, error) {
 			if id == "s9" {
 				return SessionDetail{Session: sessions[1], Turns: []Turn{}, Terminal: &TerminalStatus{Status: "idle", CanType: false,
@@ -319,9 +323,16 @@ func TestContract(t *testing.T) {
 	defer stopQueue()
 	go api.QueueEvents(queueCtx)
 	api.Links = &Links{JiraBase: "https://jira.example.com", JiraProjects: []string{"WID"}}
-	// s9 waits at a permission prompt (its Claude Code hook's marker).
-	api.Waiting = func() map[string]waiting.Waiting {
-		return map[string]waiting.Waiting{"s9": {Kind: waiting.KindPermission, Message: "Claude needs your permission to use Bash", Since: now}}
+	// s9 and s2 are open in a terminal, s2 busy in its registry; s9 waits at
+	// a permission prompt (its Claude Code hook's marker).
+	api.States = &sessionstate.Service{
+		Holders: func() map[string]harness.Holder {
+			return map[string]harness.Holder{"s9": {PID: 9, SessionID: "s9", Status: "idle"}, "s2": {PID: 2, SessionID: "s2", Status: "busy"}}
+		},
+		Busy: b, Approvals: b,
+		Markers: func() map[string]waiting.Waiting {
+			return map[string]waiting.Waiting{"s9": {Kind: waiting.KindPermission, Message: "Claude needs your permission to use Bash", Since: now}}
+		},
 	}
 	devices := &push.DeviceStore{Path: filepath.Join(t.TempDir(), "devices.json")}
 	api.RegisterDevice, api.UnregisterDevice = devices.Add, devices.Remove

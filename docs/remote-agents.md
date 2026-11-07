@@ -228,7 +228,7 @@ Remote sandboxes appear in the agent list automatically. `DiscoverSandboxes()` r
 Sandboxes show with:
 - **LOC** column: `remote`
 - **NAME**: sandbox name (e.g., `ax-cl-d414`)
-- **STATUS**: Active (Ready phase), Error, or Idle
+- **STATUS**: working (Ready phase), error, or idle
 
 ## Known Gotchas
 

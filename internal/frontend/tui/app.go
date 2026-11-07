@@ -33,6 +33,7 @@ import (
 	"github.com/zanetworker/aimux/internal/team"
 	"github.com/zanetworker/aimux/internal/terminal"
 	"github.com/zanetworker/aimux/internal/trace"
+	"github.com/zanetworker/aimux/internal/waiting"
 )
 
 type viewType int
@@ -140,6 +141,8 @@ type App struct {
 
 	// Discovery
 	orchestrator *discovery.Orchestrator
+	// activity sets each agent's state service activity after discovery
+	activity *controller.LocalActivity
 
 	// Provider access for ResumeCommand — the orchestrator's AgentProvider
 	// interface only exposes Name() and Discover(), so we keep the full
@@ -314,6 +317,7 @@ func NewApp() App {
 		tasksView:        views.NewTasksView(),
 		layout:           NewLayout(0, 0),
 		orchestrator:     orch,
+		activity:         newLocalActivity(providers, home),
 		providers:        providers,
 		breadcrumbs:      []string{"Agents"},
 		hiddenAgents:     make(map[string]bool),
@@ -371,6 +375,17 @@ func (a App) Init() tea.Cmd {
 	)
 }
 
+// newLocalActivity is the TUI's session state service: every enabled
+// provider's live sessions, the hook markers under home, and the hooks'
+// settings file for the "Permission prompts need ..." hint.
+func newLocalActivity(providers []provider.Provider, home string) *controller.LocalActivity {
+	l := controller.NewLocalActivity(provider.LiveOf(providers, discovery.LiveTTL), waiting.Dir(home))
+	if home != "" {
+		l.HooksSettings = filepath.Join(home, ".claude", "settings.json")
+	}
+	return l
+}
+
 func (a App) tick() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -379,6 +394,8 @@ func (a App) tick() tea.Cmd {
 
 func (a App) discoverInstances() tea.Msg {
 	instances, _ := a.orchestrator.Discover()
+	a.activity.Apply(instances) // needs you / working / idle, as the phone shows them
+	a.activity.HooksInstalled() // re-reads the settings here, off the UI thread, when due
 	files := make([]string, 0, len(instances))
 	for _, in := range instances {
 		files = append(files, in.SessionFile)
@@ -555,6 +572,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.headerView.SetAttentionCount(attention)
 
 		a.agentsView.SetAgents(a.instances)
+		a.sessionsView.SetActivity(controller.ActivityBySession(a.instances))
+		hooksMissing := !a.activity.HooksInstalled() // cached; discoverInstances refreshed it
+		a.headerView.SetHooksMissing(hooksMissing)
+		a.helpView.SetHooksMissing(hooksMissing)
 		starredMap := make(map[string]bool)
 		for _, ag := range a.instances {
 			if ag.SessionFile != "" {

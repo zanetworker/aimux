@@ -22,7 +22,7 @@ export interface ContentSearchResult {
 type ViewTab = 'agents' | 'sessions' | string;
 
 export default function App() {
-  const { agents, loading: agentsLoading } = useAgentStream();
+  const { agents, loading: agentsLoading, hooksHint } = useAgentStream();
   const [activeTab, setActiveTab] = useState<ViewTab>('agents');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
@@ -198,6 +198,7 @@ export default function App() {
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <StatsBar
         agents={agents}
+        hooksHint={hooksHint}
         onLaunch={() => setShowLaunch(true)}
         onHome={() => { setActiveTab('agents'); setSelectedId(null); setSessionAgent(null); setPanelFullscreen(false); }}
         onToggleTasks={() => setShowTasks(t => !t)}

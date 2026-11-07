@@ -327,11 +327,26 @@ func (b *Broker) Hold(session string) (release func(), err error) {
 	}, nil
 }
 
-// Busy reports whether the session has a running turn or is held.
+// Busy reports whether the session has a running turn or is held. The
+// session state service reads a held session (an Open on Mac handoff) as
+// working in the background, on purpose.
 func (b *Broker) Busy(session string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.log(session).active != "" || b.held[session]
+}
+
+// AwaitingApproval reports whether one of the session's permission
+// requests waits for an answer (sessionstate.ApprovalReader).
+func (b *Broker) AwaitingApproval(session string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, p := range b.approvals {
+		if p.session == session {
+			return true
+		}
+	}
+	return false
 }
 
 // TurnEnded reports whether turn is over, and whether it ended with a

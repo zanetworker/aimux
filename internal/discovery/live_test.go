@@ -471,3 +471,31 @@ func TestLiveCache_StrictWaitersShareOneLaterScan(t *testing.T) {
 		t.Fatalf("50 concurrent Strict reads: %d command-line scans, want 2 (3 if a caller came late)", n)
 	}
 }
+
+// Registry is the raw entries of the cached read: discovery and the live
+// holders share one registry read and one ps per TTL.
+func TestLiveCache_RegistrySharesTheRead(t *testing.T) {
+	reg := map[int]ClaudeRegistryEntry{
+		9: {PID: 9, SessionID: "s", CWD: "/w", ProcStart: "Fri Oct 23 15:40:46 2026"},
+	}
+	c, clock, reads, pss := countingCache(reg, "")
+	got := c.Registry()
+	if len(got) != 1 || got[9].SessionID != "s" || got[9].CWD != "/w" {
+		t.Fatalf("Registry() = %+v", got)
+	}
+	got[9] = ClaudeRegistryEntry{} // the caller's own copy
+	if hs, _ := c.Holders(harness.List); len(hs) != 1 || hs[0].SessionID != "s" {
+		t.Fatalf("Holders after Registry = %+v", hs)
+	}
+	if c.Registry()[9].SessionID != "s" {
+		t.Fatal("a caller's change reached the cache")
+	}
+	if reads.Load() != 1 || pss.Load() != 1 {
+		t.Fatalf("Registry then Holders within the TTL: %d reads, %d ps; want 1 and 1", reads.Load(), pss.Load())
+	}
+	clock.add(time.Second)
+	_ = c.Registry()
+	if reads.Load() != 2 {
+		t.Fatalf("after the TTL: %d reads, want 2", reads.Load())
+	}
+}

@@ -117,7 +117,7 @@ After launching, the sandbox card shows:
 
 - **Name**: your project directory (e.g., `research`) — not the raw sandbox ID
 - **Working dir**: the directory you selected at launch
-- **Status**: Active (green dot) while the sandbox is ready
+- **Status**: working (green dot) while the sandbox is ready
 - **Session tab**: live PTY terminal connected to the sandbox shell
 
 ### Kill
@@ -135,7 +135,7 @@ The **Trace** tab shows turns from the session. Replies are read from the sandbo
 ## Sandbox Lifecycle
 
 ```
-Launch → Ready (Active) → user works → Kill → Deleting → gone
+Launch → Ready (working) → user works → Kill → Deleting → gone
                         ↑                                   ↓
                       Re-entry ──────────────────────────────
 ```

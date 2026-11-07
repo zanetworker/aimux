@@ -18,10 +18,12 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/folders"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/push"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
+	"github.com/zanetworker/aimux/internal/sessionstate"
 	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/waiting"
 )
@@ -59,6 +61,9 @@ type Session struct {
 	// Waiting is set while a session open in a terminal shows a permission
 	// prompt, from the marker its Claude Code hook wrote (internal/waiting).
 	Waiting *waiting.Waiting `json:"waiting,omitempty"`
+	// Activity is what the session is doing now (sessionstate): working,
+	// needs_you, idle or gone. Set on the list and the detail.
+	Activity sessionstate.Activity `json:"activity,omitempty"`
 }
 
 // SessionDetail is a session plus its most recent turns.
@@ -109,6 +114,10 @@ type API struct {
 	Broker   *Broker
 	Sessions func(ctx context.Context, limit int, includeAutomated bool) ([]Session, error)
 	Session  func(ctx context.Context, id string, turns int) (SessionDetail, error)
+	// SessionsAt, if set with States, serves the list instead of Sessions,
+	// given the state service's open-sessions read (LocalIndex.SessionsAt),
+	// so `state`, `working` and `activity` come from one read.
+	SessionsAt func(ctx context.Context, limit int, includeAutomated bool, open map[string]harness.Holder) ([]Session, error)
 	// SessionExists, if set, is the queue routes' check that a session is
 	// known, without reading its detail; nil falls back to Session.
 	SessionExists func(ctx context.Context, id string) error
@@ -170,9 +179,9 @@ type API struct {
 	// LastOnMac, if set, is the session last in front on the Mac
 	// (terminput.LastFocus.Last).
 	LastOnMac func() (id string, at time.Time, ok bool)
-	// Waiting, if set, gives the open sessions waiting for permission by id
-	// (waiting.Tracker.Current); it fills `waiting` on the list and detail.
-	Waiting func() map[string]waiting.Waiting
+	// States, if set, is the session state service: it fills `activity`
+	// and `waiting` on the list and detail, and `working` on the list.
+	States *sessionstate.Service
 	// Handoff, if set, serves POST /v1/sessions/{id}/open-on-mac (health
 	// openOnMac); nil answers 503 no_terminal.
 	Handoff *Handoff
@@ -397,7 +406,18 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err)
 		return
 	}
-	list, err := a.Sessions(r.Context(), limit, r.URL.Query().Get("include_automated") == "1")
+	automated := r.URL.Query().Get("include_automated") == "1"
+	var states *sessionstate.Snapshot
+	if a.States != nil {
+		snap := a.States.Read()
+		states = &snap
+	}
+	var list []Session
+	if states != nil && a.SessionsAt != nil {
+		list, err = a.SessionsAt(r.Context(), limit, automated, states.Holders())
+	} else {
+		list, err = a.Sessions(r.Context(), limit, automated)
+	}
 	if err != nil {
 		writeFailure(w, err)
 		return
@@ -405,7 +425,6 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []Session{}
 	}
-	waits := a.waiting()
 	var places map[string]terminput.MacPlace
 	if a.Places != nil {
 		places = a.Places(r.Context())
@@ -418,20 +437,15 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		if p, ok := places[list[i].ID]; ok {
 			list[i].Mac = &p
 		}
-		if wt, ok := waits[list[i].ID]; ok {
-			list[i].Waiting = &wt
+		if states != nil {
+			st := states.Of(list[i].ID)
+			list[i].Activity, list[i].Waiting = st.Activity, st.Waiting
+			list[i].Working = st.Held && st.RegistryStatus == "busy"
 		}
 	}
 	out := SessionList{Sessions: list, LastOnMac: a.lastOnMac(r.Context())}
 	writeJSON(w, http.StatusOK, out)
 	a.want(shownIDs(list, out.LastOnMac, time.Now()))
-}
-
-func (a *API) waiting() map[string]waiting.Waiting {
-	if a.Waiting == nil {
-		return nil
-	}
-	return a.Waiting()
 }
 
 func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
@@ -450,8 +464,8 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 			d.Queue = &q
 		}
 	}
-	if wt, ok := a.waiting()[d.ID]; ok {
-		d.Waiting = &wt
+	if a.States != nil {
+		d.Activity, d.Waiting = detailState(a.States.Read().Facts(d.ID), d.Terminal)
 	}
 	writeJSON(w, http.StatusOK, d)
 	a.want([]string{d.ID})
@@ -934,4 +948,16 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, v any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTerminalBody))
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
+}
+
+// detailState is a detail's activity and waiting: the service's facts plus
+// the terminal screen, which the detail reads and the list does not. Only a
+// screen that shows working counts: a status with terminal input off or a
+// failed read says false without reading.
+func detailState(f sessionstate.Facts, term *TerminalStatus) (sessionstate.Activity, *waiting.Waiting) {
+	if term != nil && term.Working {
+		f.Screen = sessionstate.ScreenWorking
+	}
+	st := sessionstate.Decide(f)
+	return st.Activity, st.Waiting
 }

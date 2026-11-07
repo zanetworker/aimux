@@ -908,6 +908,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			"project":      a.ShortProject(),
 			"workingDir":   a.WorkingDir,
 			"status":       a.Status.String(),
+			"activity":     a.Activity,
 			"source":       a.Source.String(),
 			"sessionFile":  a.SessionFile,
 			"tmuxSession":  a.TMuxSession,

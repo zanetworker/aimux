@@ -401,10 +401,12 @@ func (s *Server) build(w *wiring) error {
 	if layout := buildLayoutReader(index.TerminalPIDs, lastFocus, errOut, drivers...); layout != nil {
 		api.Places = layout.Places
 	}
-	// Terminal sessions at a permission prompt, from the markers
-	// aimux remote hooks notify writes.
+	// What each session is doing (activity, waiting, working): open
+	// sessions, aimux's runs and approvals, and the markers aimux remote
+	// hooks notify writes for terminal sessions at a permission prompt.
 	waits := &waiting.Tracker{Dir: waiting.Dir(home), Live: index.TerminalPIDs}
-	api.Waiting = waits.Current
+	api.States = buildStates(index, broker, waits)
+	api.SessionsAt = index.SessionsAt // the list's state and working from the service's read
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", o.Port))
 	if err != nil {
 		return fmt.Errorf("listen on 127.0.0.1:%d: %w (choose another port with --port)", o.Port, err)

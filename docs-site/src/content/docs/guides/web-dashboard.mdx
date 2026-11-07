@@ -15,7 +15,7 @@ aimux web --port 8080  # custom port
 The main view shows agent cards grouped by project. Each card displays:
 
 - **Provider badge** (Claude, Codex) with color coding
-- **Status** (Active, Idle, Waiting, Error)
+- **State**: needs you, working, idle (or error), the words the TUI and the phone use. A Claude Code session at a permission prompt reads "needs you" once `aimux remote hooks install` has run
 - **Launch mode badge** (tmux or direct)
 - **Title**: the title you wrote, else your `/rename` name, else one aimux generated, else Claude Code's own name for the session, else its first message (chosen as in the TUI, `aimux sessions` and the phone clients)
 - **Project name** and git branch
@@ -41,7 +41,7 @@ Toggle between card grid and compact list view using the view mode buttons in th
 
 The filter bar provides:
 
-- **Status filters**: All, Active, Idle, Waiting, Error
+- **Status filters**: All, Working, Idle, Needs you, Error
 - **Provider filters**: Claude, Codex
 - **Location filter**: Local, Remote — show only local agents or only remote sandboxes
 - **Recent filter**: Show only agents active in the last 5 minutes
@@ -139,7 +139,7 @@ Click **+ Launch**, set **Runtime: remote**, choose a directory, and click **Lau
 Remote sandbox cards show:
 - **LOC**: `remote` badge in the location column
 - **Name**: your project directory (e.g., `research`) — not the raw sandbox ID
-- **Status**: Active (green) while ready; **ERROR / Deleting** immediately after Kill
+- **Status**: working (green) while ready; **ERROR / Deleting** immediately after Kill
 
 ### Session terminal
 
@@ -157,7 +157,7 @@ The **Trace** tab shows turn-by-turn conversation with assistant replies read fr
 
 The header shows aggregate statistics:
 
-- Session count, active/idle/waiting/error counts
+- Session count, working/idle/needs you/error counts; without the hooks, a muted "Permission prompts need `aimux remote hooks install`" (a permission prompt then shows as working)
 - Repository count
 - Total tokens in/out
 - Total cost across all agents

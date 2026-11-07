@@ -17,6 +17,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/sessionstate"
 )
 
 // KindPermission: Claude Code shows a permission prompt.
@@ -25,12 +27,9 @@ const KindPermission = "permission"
 // MaxMessage is the longest message a marker keeps, in runes.
 const MaxMessage = 200
 
-// Waiting is what a session waits for. It is the session list's `waiting`.
-type Waiting struct {
-	Kind    string    `json:"kind"`
-	Message string    `json:"message"`
-	Since   time.Time `json:"since"`
-}
+// Waiting is what a session waits for. It is the session list's `waiting`
+// and the session state service's marker input (sessionstate.Wait).
+type Waiting = sessionstate.Wait
 
 // marker is the file's content. TranscriptPath (Claude Code's
 // transcript_path) lets the server see the session move on; AgentID is set
@@ -168,4 +167,17 @@ func listMarkers(dir string) map[string]marker {
 		}
 	}
 	return out
+}
+
+// removeIfSince deletes sessionID's marker only if it is still the one
+// reported at since: a marker rewritten meanwhile (a newer prompt, written
+// by a hook or another process's Tracker read) is kept. A missing marker is
+// not an error. The re-read and the delete are not atomic; the gap left is
+// the time between them, not the Tracker's whole pass.
+func removeIfSince(dir, sessionID string, since time.Time) error {
+	m, ok := readMarker(dir, sessionID)
+	if !ok || !m.Since.Equal(since) {
+		return nil
+	}
+	return Remove(dir, sessionID)
 }

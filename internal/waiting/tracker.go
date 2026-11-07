@@ -42,6 +42,11 @@ type Tracker struct {
 	Live  func() map[string]int // session id -> pid, e.g. LocalIndex.TerminalPIDs
 	Now   func() time.Time      // nil: time.Now
 	Alive func(pid int) bool    // nil: signal 0 to the pid
+	// ReadOnly: never delete a marker, only leave out the ones that do not
+	// count. For the TUI and the dashboard, whose Live may leave out a
+	// harness the owner disabled there, so "not open" is no proof the
+	// session closed; remote serve's Tracker (every harness) cleans up.
+	ReadOnly bool
 
 	mu       sync.Mutex
 	last     map[string]Waiting
@@ -84,14 +89,17 @@ func (t *Tracker) Current() map[string]Waiting {
 			t.pids[id] = pid
 			delete(t.firstMis, id)
 			if movedOn(m) {
-				_ = Remove(t.Dir, id) // best effort; the next read tries again
+				t.remove(id, m) // best effort; the next read tries again
 				continue
 			}
 			out[id] = m.Waiting
 			continue
 		}
 		if t.closed(id, m, now) {
-			_ = Remove(t.Dir, id)
+			// Only the marker read: a hook or another process may have
+			// written a newer one since (the TUI, the dashboard and remote
+			// serve each run a Tracker).
+			t.remove(id, m)
 			delete(t.pids, id)
 			delete(t.firstMis, id)
 		}
@@ -103,6 +111,13 @@ func (t *Tracker) Current() map[string]Waiting {
 		}
 	}
 	return out
+}
+
+// remove deletes the marker read, unless the Tracker is ReadOnly.
+func (t *Tracker) remove(id string, m marker) {
+	if !t.ReadOnly {
+		_ = removeIfSince(t.Dir, id, m.Since)
+	}
 }
 
 // closed: a marker of a session missing from the registry belongs to a

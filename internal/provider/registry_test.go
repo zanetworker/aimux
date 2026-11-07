@@ -235,3 +235,20 @@ func concreteProviders(t *testing.T) map[string]bool {
 	}
 	return out
 }
+
+// LiveOf keeps the providers that are a LiveSource, in order: Claude's
+// registry today; Codex has none.
+func TestLiveOf(t *testing.T) {
+	home := t.TempDir()
+	reg := NewRegistry(home, config.Config{})
+	got := LiveOf(reg.Local(), time.Second)
+	if len(got) != 1 {
+		t.Fatalf("LiveOf(Local) = %d sources, want 1 (Claude's)", len(got))
+	}
+	if lc, ok := got[0].(*discovery.LiveCache); !ok || lc.Dir != filepath.Join(home, ".claude", "sessions") || lc.TTL != time.Second {
+		t.Fatalf("LiveOf[0] = %#v", got[0])
+	}
+	if len(LiveOf(nil, time.Second)) != 0 {
+		t.Fatal("LiveOf(nil) is not empty")
+	}
+}

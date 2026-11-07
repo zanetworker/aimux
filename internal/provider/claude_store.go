@@ -48,15 +48,34 @@ var (
 func (c *Claude) TranscriptsDir() string { return c.projectsDir() }
 
 // LiveSessions reads Claude Code's session registry under RegistryDir, or
-// ~/.claude/sessions, caching a read for ttl (discovery.LiveCache).
-func (c *Claude) LiveSessions(ttl time.Duration) harness.LiveSessions {
-	dir := c.RegistryDir
-	if dir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			dir = filepath.Join(home, ".claude", "sessions")
-		}
+// ~/.claude/sessions, caching a read for ttl (discovery.LiveCache). One
+// reader per ttl, made on first use and kept: discovery reads the registry
+// through the LiveTTL one (liveCache), so a refresh reads it and runs ps
+// once.
+func (c *Claude) LiveSessions(ttl time.Duration) harness.LiveSessions { return c.liveCache(ttl) }
+
+func (c *Claude) liveCache(ttl time.Duration) *discovery.LiveCache {
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	if lc, ok := c.lives[ttl]; ok {
+		return lc
 	}
-	return discovery.NewLiveCache(dir, ttl)
+	if c.lives == nil {
+		c.lives = map[time.Duration]*discovery.LiveCache{}
+	}
+	lc := discovery.NewLiveCache(c.registryDir(), ttl)
+	c.lives[ttl] = lc
+	return lc
+}
+
+// registryDir is RegistryDir, or ~/.claude/sessions (the relative
+// .claude/sessions when the home directory is unknown).
+func (c *Claude) registryDir() string {
+	if c.RegistryDir != "" {
+		return c.RegistryDir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "sessions")
 }
 
 // SessionFile is session id's transcript under the projects dir, or "".
@@ -102,4 +121,17 @@ func (c *Claude) Reread(s history.Session) (history.Session, error) {
 // reading only the end of the file (ParseTraceTail).
 func (c *Claude) ParseTail(path string, n int) ([]trace.Turn, error) {
 	return c.ParseTraceTail(path, n)
+}
+
+// LiveOf is the harness.LiveSessions of every provider in ps that is a
+// LiveSource, in order, each read with ttl: the state service's holders
+// for the TUI and the dashboard.
+func LiveOf(ps []Provider, ttl time.Duration) []harness.LiveSessions {
+	var out []harness.LiveSessions
+	for _, p := range ps {
+		if ls, ok := p.(LiveSource); ok {
+			out = append(out, ls.LiveSessions(ttl))
+		}
+	}
+	return out
 }

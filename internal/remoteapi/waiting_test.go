@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/harness"
+	"github.com/zanetworker/aimux/internal/sessionstate"
 	"github.com/zanetworker/aimux/internal/waiting"
 )
 
@@ -19,8 +21,13 @@ func waitingAPI() *API {
 		Session: func(_ context.Context, id string, _ int) (SessionDetail, error) {
 			return SessionDetail{Session: Session{ID: id, State: StateOpenInTerminal}, Turns: []Turn{}}, nil
 		},
-		Waiting: func() map[string]waiting.Waiting {
-			return map[string]waiting.Waiting{"s1": {Kind: waiting.KindPermission, Message: "Claude needs your permission to use Bash", Since: waitSince}}
+		States: &sessionstate.Service{
+			Holders: func() map[string]harness.Holder {
+				return map[string]harness.Holder{"s1": {PID: 1, SessionID: "s1"}, "s2": {PID: 2, SessionID: "s2"}}
+			},
+			Markers: func() map[string]waiting.Waiting {
+				return map[string]waiting.Waiting{"s1": {Kind: waiting.KindPermission, Message: "Claude needs your permission to use Bash", Since: waitSince}}
+			},
 		},
 	}
 }
@@ -38,7 +45,7 @@ func TestListSessions_Waiting(t *testing.T) {
 
 func TestListSessions_NoWaitingSource(t *testing.T) {
 	api := waitingAPI()
-	api.Waiting = nil
+	api.States = nil
 	for _, s := range listJSON(t, api) {
 		if _, ok := s["waiting"]; ok {
 			t.Fatalf("waiting present with no source: %v", s)

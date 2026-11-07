@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import type { Agent } from '../types';
 
-export function useAgentStream(): { agents: Agent[]; loading: boolean } {
+// hooksHint is the server's muted line while the permission hooks are missing ("" once installed).
+export function useAgentStream(): { agents: Agent[]; loading: boolean; hooksHint: string } {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [hooksHint, setHooksHint] = useState('');
   const [loading, setLoading] = useState(true);
   const esRef = useRef<EventSource | null>(null);
 
@@ -14,6 +16,7 @@ export function useAgentStream(): { agents: Agent[]; loading: boolean } {
       try {
         const data = JSON.parse(e.data);
         setAgents(data.agents || []);
+        setHooksHint(typeof data.hooksHint === 'string' ? data.hooksHint : '');
         setLoading(false);
       } catch {
         // ignore parse errors
@@ -30,5 +33,5 @@ export function useAgentStream(): { agents: Agent[]; loading: boolean } {
     return () => es.close();
   }, []);
 
-  return { agents, loading };
+  return { agents, loading, hooksHint };
 }

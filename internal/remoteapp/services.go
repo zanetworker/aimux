@@ -25,6 +25,7 @@ import (
 	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
+	"github.com/zanetworker/aimux/internal/sessionstate"
 	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/terminput/iterm2"
 	"github.com/zanetworker/aimux/internal/waiting"
@@ -412,4 +413,20 @@ func cutRunes(s string, n int) string {
 		return string(r[:n])
 	}
 	return s
+}
+
+// buildStates is remote serve's session state service: the catalog's open
+// sessions (the list passes the snapshot's read to LocalIndex.SessionsAt,
+// so state and working come from it too), the broker's runs and approvals,
+// and the waiting tracker's markers. Broker.Busy includes sessions held for
+// an Open on Mac handoff, so such a session reads working, in the
+// background, until the handoff ends: intended, it is being moved, not
+// idle (handoffDeps.state keeps its own terminal-first rule).
+func buildStates(index *remoteapi.LocalIndex, broker *remoteapi.Broker, waits *waiting.Tracker) *sessionstate.Service {
+	return &sessionstate.Service{
+		Holders:   func() map[string]harness.Holder { return index.Catalog().Open() },
+		Busy:      broker,
+		Approvals: broker,
+		Markers:   waits.Current,
+	}
 }

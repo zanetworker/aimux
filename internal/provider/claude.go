@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
@@ -30,6 +31,9 @@ type Claude struct {
 	// RegistryDir is Claude Code's session registry that LiveSessions
 	// reads; "": ~/.claude/sessions.
 	RegistryDir string
+
+	liveMu sync.Mutex
+	lives  map[time.Duration]*discovery.LiveCache // one registry reader per ttl (liveCache)
 }
 
 func (c *Claude) Name() string { return "claude" }
@@ -63,7 +67,9 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	// Claude Code records each running session's ID by PID. It is more
 	// accurate than the command line (stale after /clear or a fork) and than
 	// start-time file matching.
-	registry := discovery.ReadClaudeRegistry(filepath.Join(home, ".claude", "sessions"))
+	// Read through the shared reader, so the state service's holders right
+	// after reuse this read (and its ps) instead of making their own.
+	registry := c.liveCache(discovery.LiveTTL).Registry()
 	fromRegistry := make(map[int]bool)
 	for i := range agents {
 		fromRegistry[i] = applyRegistryEntry(&agents[i], registry)
@@ -253,6 +259,9 @@ func (c *Claude) batchParseSessionFiles(agents []agent.Agent) {
 			r.info.CacheReadTokens,
 			r.info.CacheWriteTokens,
 		)
+		// The transcript guess: an input to the session state service
+		// (controller.LocalActivity's fallback), which decides what the
+		// TUI and the dashboard show; the registry and hook markers win.
 		inst.Status = r.status
 	}
 }

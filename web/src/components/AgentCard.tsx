@@ -1,5 +1,5 @@
 import type { Agent } from '../types';
-import { StatusLabel } from '../types';
+import { stateLabel } from './stateLabel';
 import { normalizeLocation } from '../utils';
 
 interface Props {
@@ -73,7 +73,7 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
       role="button"
       tabIndex={0}
-      aria-label={`${title || agent.Name}: ${StatusLabel[agent.Status]}, $${(agent.EstCostUSD || 0).toFixed(2)}`}
+      aria-label={`${title || agent.Name}: ${stateLabel(agent)}, $${(agent.EstCostUSD || 0).toFixed(2)}`}
       className="agent-card"
       data-selected={selected || undefined}
       style={{
@@ -111,7 +111,7 @@ export function AgentCard({ agent, selected, starred, onClick, onKill, onToggleS
           textTransform: 'uppercase', letterSpacing: '0.06em',
           background: statusStyle.bg, color: statusStyle.color,
         }}>
-          {StatusLabel[agent.Status]}
+          {stateLabel(agent)}
         </span>
         <span style={{
           padding: '2px 5px', borderRadius: 2, fontSize: 10, fontWeight: 600,

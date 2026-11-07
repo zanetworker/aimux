@@ -68,7 +68,13 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 		}
 	}
 
-	data, err := json.Marshal(map[string]any{"agents": enriched})
+	// hooksHint: why a permission prompt cannot read "needs you" (the
+	// hooks are missing); "" once they are installed.
+	hooksHint := ""
+	if !s.activity.HooksInstalled() {
+		hooksHint = controller.HooksHint
+	}
+	data, err := json.Marshal(map[string]any{"agents": enriched, "hooksHint": hooksHint})
 	if err != nil {
 		return
 	}

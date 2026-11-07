@@ -1,12 +1,16 @@
 package provider
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
 )
 
@@ -111,5 +115,41 @@ func TestTranscriptsDir_NoHomeFallsBackToRelative(t *testing.T) {
 	}
 	if got := (&Claude{ProjectsDir: "/w/projects"}).TranscriptsDir(); got != "/w/projects" {
 		t.Fatalf("explicit ProjectsDir = %q", got)
+	}
+}
+
+// One registry reader per Claude and ttl: LiveSessions returns the same
+// LiveCache each time, and discovery reads the registry through it, so a
+// TUI or dashboard refresh (discover, then the state service's holders)
+// reads the registry and runs ps once.
+func TestClaude_SharesOneLiveCache(t *testing.T) {
+	dir := t.TempDir()
+	me := os.Getpid()
+	entry := fmt.Sprintf(`{"pid":%d,"sessionId":"shared-1","cwd":"/w","status":"busy"}`, me)
+	if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%d.json", me)), []byte(entry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &Claude{RegistryDir: dir, ProjectsDir: t.TempDir()}
+	if c.LiveSessions(discovery.LiveTTL) != c.LiveSessions(discovery.LiveTTL) {
+		t.Fatal("LiveSessions built a second reader for the same ttl")
+	}
+	if c.LiveSessions(0) == c.LiveSessions(discovery.LiveTTL) {
+		t.Fatal("another ttl shares the reader")
+	}
+	agents, err := c.discoverFromAgents([]agent.Agent{{PID: me}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) == 0 || agents[0].SessionID != "shared-1" {
+		t.Fatalf("discovery did not read RegistryDir: %+v", agents)
+	}
+	// The registry is gone, but within the TTL the holders come from the
+	// read discovery made.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	hs, _ := c.LiveSessions(discovery.LiveTTL).Holders(harness.List)
+	if len(hs) != 1 || hs[0].SessionID != "shared-1" || hs[0].Status != "busy" {
+		t.Fatalf("holders after discovery = %+v, want the read discovery made", hs)
 	}
 }

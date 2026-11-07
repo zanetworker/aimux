@@ -48,7 +48,7 @@ Requires **tmux**. Auto-discovers running Claude and Codex agents.
 
 **Discovery & Monitoring**
 - Auto-discovers Claude and Codex agents
-- Live status: active, idle, waiting, error
+- Live status: working, idle, needs you, error (the same words on the phone)
 - Per-agent CPU%, memory, token usage, and cost tracking
 - Model-aware pricing (Opus, Sonnet, Haiku, GPT)
 - Cross-session search ("which agent edited auth.go?")
