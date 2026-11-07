@@ -217,25 +217,13 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 	if !s.requireSessionFile(w, req.FilePath) {
 		return
 	}
-	err := history.UpdateMeta(req.FilePath, func(meta *history.Meta) {
-		if req.Annotation != nil {
-			meta.Annotation = *req.Annotation
-		}
-		if req.Tags != nil {
-			meta.Tags = req.Tags
-		}
-		if req.Note != nil {
-			meta.Note = *req.Note
-		}
-		if req.Starred != nil {
-			meta.Starred = *req.Starred
-		}
-		if req.ROIMultiplier != nil {
-			meta.ROIMultiplier = *req.ROIMultiplier
-		}
-		if req.TaskType != nil {
-			meta.TaskType = *req.TaskType
-		}
+	err := controller.UpdateSessionMeta(req.FilePath, controller.MetaPatch{
+		Annotation:    req.Annotation,
+		Tags:          req.Tags,
+		Note:          req.Note,
+		Starred:       req.Starred,
+		ROIMultiplier: req.ROIMultiplier,
+		TaskType:      req.TaskType,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -739,15 +727,7 @@ func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
 		APIKey: s.cfg.Sessions.APIKey,
 	}
 
-	prompt := req.Prompt
-	if prompt == "" {
-		prompt = "You are analyzing a skill analytics dashboard for an AI coding agent system. " +
-			"The data below shows skill invocations, correction rates, learning funnel metrics, and failure patterns. " +
-			"For each section with data, provide 1-2 sentences of actionable insight. " +
-			"Focus on: which skills need attention, what patterns indicate, and specific next steps. " +
-			"Format as a JSON object where keys are section names and values are insight strings.\n\n" +
-			"Dashboard data:\n" + string(req.Data)
-	}
+	prompt := insight.DashboardPrompt(req.Prompt, req.Data)
 
 	result, err := insight.Generate(cfg, prompt)
 	if err != nil {
@@ -883,46 +863,7 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type costEntry struct {
-		Project    string  `json:"project"`
-		Provider   string  `json:"provider"`
-		Model      string  `json:"model"`
-		TokensIn   int64   `json:"tokens_in"`
-		TokensOut  int64   `json:"tokens_out"`
-		CostUSD    float64 `json:"cost"`
-		AgentCount int     `json:"agent_count"`
-	}
-
-	// Group by project
-	groups := make(map[string]*costEntry)
-	for _, a := range agents {
-		proj := a.ShortProject()
-		if proj == "" {
-			proj = "(unknown)"
-		}
-		e, ok := groups[proj]
-		if !ok {
-			e = &costEntry{
-				Project:  proj,
-				Provider: a.ProviderName,
-				Model:    a.ShortModel(),
-			}
-			groups[proj] = e
-		}
-		e.TokensIn += a.TokensIn
-		e.TokensOut += a.TokensOut
-		e.CostUSD += a.EstCostUSD
-		e.AgentCount++
-	}
-
-	result := make([]costEntry, 0, len(groups))
-	for _, e := range groups {
-		result = append(result, *e)
-	}
-	// Sort by cost descending
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].CostUSD > result[j].CostUSD
-	})
+	result := controller.CostsByProject(agents)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"costs": result}); err != nil {

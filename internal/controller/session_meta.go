@@ -43,3 +43,38 @@ func SetROI(sessionFile string, multiplier float64, taskType string) error {
 		m.TaskType = taskType
 	})
 }
+
+// MetaPatch is a partial .meta.json update: nil fields are left as they are,
+// a non-nil field (an empty string or empty tag list too) replaces the value.
+type MetaPatch struct {
+	Annotation    *string
+	Tags          []string
+	Note          *string
+	Starred       *bool
+	ROIMultiplier *float64
+	TaskType      *string
+}
+
+// UpdateSessionMeta applies a patch to a session's metadata in one write.
+func UpdateSessionMeta(sessionFile string, p MetaPatch) error {
+	return history.UpdateMeta(sessionFile, func(m *history.Meta) {
+		if p.Annotation != nil {
+			m.Annotation = *p.Annotation
+		}
+		if p.Tags != nil {
+			m.Tags = p.Tags
+		}
+		if p.Note != nil {
+			m.Note = *p.Note
+		}
+		if p.Starred != nil {
+			m.Starred = *p.Starred
+		}
+		if p.ROIMultiplier != nil {
+			m.ROIMultiplier = *p.ROIMultiplier
+		}
+		if p.TaskType != nil {
+			m.TaskType = *p.TaskType
+		}
+	})
+}

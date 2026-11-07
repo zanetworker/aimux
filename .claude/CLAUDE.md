@@ -213,7 +213,7 @@ Frontends (thin adapters, rendering + input only)
   CLI:  cmd/aimux/cmd/            — Cobra flags, JSON output
 
 Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
-  controller/  — operations: sort, filter, attend, archive, kill, notify, export, session_meta
+  controller/  — operations: sort, filter, attend, archive, kill, notify, export, session_meta, badges, live agent filter/dedup, costs by project
   agent/       — data types, status enum, fade colors
   badge/       — project file badge evaluation
   config/      — global + project-local config, runtime/sandbox profiles
@@ -268,6 +268,11 @@ If a feature exists in only one frontend, it is tech debt. Track it.
 | Export OTEL | `ExportOTEL()` | `:export-otel` | `POST /export/otel` | -- TODO |
 | Delete session | `DeleteSession()` | `d` key | -- TODO | -- TODO |
 | Filter hidden | `FilterHidden()` | auto | auto | -- |
+| Project badges | `ApplyBadges()` | agent refresh | SSE `/api/events` | -- |
+| Drop ephemeral agents | `DropEphemeral()` | -- (shows all) | SSE `/api/events` | -- |
+| One agent per session | `DedupBySession()` | -- (shows all) | SSE `/api/events` | -- |
+| Cost by project | `CostsByProject()` | cost view (empty provider shown "unknown") | `GET /api/costs` (provider sent empty) | -- TODO |
+| Update meta fields | `UpdateSessionMeta()` | -- (per-field setters) | `POST /sessions/meta` | -- |
 
 "-- TODO" means the controller function exists but the frontend hasn't wired it yet.
 
@@ -317,7 +322,6 @@ Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't
 ### Parity Gaps to Close (tech debt)
 
 **TUI has, Web API missing:**
-- Cost dashboard (`/api/costs`)
 - Teams view (`/api/teams`)
 - Health check (`/api/health/providers`)
 - Agent filter/sort query params on `/api/events`
@@ -334,7 +338,7 @@ Not yet wired into `app.go` startup (the `LoadProject` function exists but isn't
 - Remote API (`aimux remote serve`, `internal/remoteapi`); a daemon whose clients are other devices; device login (`remote_access.device_login`, default true; `internal/remoteapi/devicelogin`) admits only devices paired with `aimux remote pair --name <name>` (listed by `aimux remote devices`, cut off by `aimux remote revoke <name>`, which writes the revoke audit line), logged in with a Secure Enclave key (iPhone) or a passkey (web) through `/v1/auth/*`; push registrations stay in `~/.aimux/remote-devices.json`; with `terminal_input.enabled` it also types into Claude Code sessions open in iTerm2 (`POST /v1/sessions/{id}/terminal/messages` and `/terminal/keys`, `terminal` on the session detail, `internal/terminput`; `repo` on the session detail (`internal/gitremote`) and `links` on health (`remote_access.links.jira_base`, `jira_projects`) feed the clients' reference links, pinned by `api/testdata/clients/references/`; `aimux remote terminal-input check` asks macOS for iTerm2 Automation); `aimux remote hooks install|uninstall|status` (hidden `notify`, `internal/waiting`) puts terminal sessions at a permission prompt under Needs you (`waiting` on sessions, pinned by `api/testdata/clients/now/waiting-*.json`) and pushes them like approvals, with its clients under `clients/`: the phone web client at `/app/` (`clients/web`, Go package `webclient`) and the iPhone app (`clients/ios`, SwiftUI, XcodeGen; see its AGENTS.md), the iPhone chat queue is in `clients/ios/AimuxKit/Sources/ChatQueue.swift`, `ChatModelQueue.swift` and `clients/ios/App/Components/QueueList.swift`; both clients of the published contract `api/remote-v1.openapi.yaml`, ranking Now and All with the shared fixtures in `api/testdata/clients/`. Web client files in `clients/web/webapp/`: `index.html`, `app.css`, `app.js` (chat transport and state, new session, settings), `voice.js`, `tabs.mjs` (tab bar and the Now and All screens), `now.mjs` (Now ranking: Needs you, Pinned, the Mac's windows, tabs and panes, Elsewhere; the chat's Next bar target), `nowModel.mjs` (Now state and polling), `nowView.mjs` (Now rendering), `all.mjs` (All sections), `rows.mjs` (shared rows, dots and icons), `apiDate.mjs` (timestamp parser), `timeline.mjs` (the chat timeline from history and events, and a saved message without Claude Code's wrappers, as text, slash commands and command output, pinned by `api/testdata/clients/display/`), `chatView.mjs` (chat rendering), `login.mjs` (passkey pairing, unlock state machine and the `/v1` request wrapper), `chatLoad.mjs` (reading an opened chat consistently, and which read carries `Aimux-Interaction`), `queue.mjs` (the chat queue: composer action, queue section and rows, pinned by `api/testdata/clients/queue/`), `queueView.mjs` (the queue under the composer: edit in place, Move up and down, Delete, Resume), `markdown.mjs` (Markdown to the shared block tree), `highlight.mjs` (syntax colours for code blocks, pinned by `api/testdata/clients/highlight/`; iPhone `Highlight.swift` and `CodeColors.swift`), `references.mjs` (issue, commit, Jira and path links in that tree, and media cards for a reply paragraph that is only a video, image or audio link, pinned by `api/testdata/clients/media/`), `render.mjs` (the tree as DOM, user bubbles' inline-only form, the inline text of thoughts, plan entries, step targets and errors, and an opened step's command, error or edit lines), `sessionInfo.mjs` (the session info sheet and its number formats), `terminal.mjs` (typing into a terminal session: reason lines, pending line, header, polling pause, prompt card); `all`, `apiDate`, `now`, `nowModel`, `tabs` (its poller), `timeline`, `sessionInfo`, `terminal`, `login`, `chatLoad`, `queue`, `queueView`, `markdown` and `references` (which also covers `render`'s pure helpers and, with a small fake document, its code, table, copy and media DOM) have a `.test.mjs`, as does `chatView` for the user bubble's commands and output; the other view files do not; the local web dashboard has no chat view yet; finding sessions: `description` and `pinned` on sessions, `lastOnMac` on the list (focus probe every 15 s in `cmd/aimux/cmd/remote.go`, memory only, clients hide it after 12 h), `PATCH /v1/sessions/{id}/meta` and `POST /v1/sessions/{id}/describe` (capability `describe`, `naming` on health) in `internal/remoteapi/naming_api.go`, titles by `history.ShownTitle` (the owner's `.meta.json` title, Claude Code's `/rename`, `history.Namer`'s, Claude Code's ai-title, the first message); descriptions from the owner, else the newer of Claude Code's away summary and `history.Namer`'s (`history.ShownTitle`, `ShownDescription`) (`sessions.auto_title`, `naming_daily_limit` 20, `title_model`); web files `now.mjs` (`descriptionLine`), `folders.mjs` (All's Folders tree), `search.mjs` (the one search of Now and All), `nowModel.mjs` (pin, `editMeta`, `describe`), `nowView.mjs`, `sessionInfo.mjs` (edit, Update summary, naming line); iPhone files `SessionMeta.swift`, `NowRanking.swift`, `NowModel.swift`, `SearchModel.swift`, `SessionSearch.swift`, `FolderTree.swift`, `NowRows.swift`, `PinnableRow.swift`, `App/Components/SearchField.swift`, `DemoFinding.swift`, pinned by `api/testdata/clients/now/`; Mac layout and folders: `Session.folder`, `mac` and `working` from `internal/terminput/layout.go` and `internal/folders`
 
 **Web has, TUI missing:**
-- Plugin listing/execution, AI insights, task complete/reopen
+- Plugin listing/execution, AI insights (prompt in `insight.DashboardPrompt`), task complete/reopen
 
 ## Provider Architecture
 

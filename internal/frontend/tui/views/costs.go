@@ -2,11 +2,11 @@ package views
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/controller"
 )
 
 var (
@@ -39,50 +39,18 @@ func (v *CostsView) SetSize(w, h int) {
 	v.height = h
 }
 
-type projectCost struct {
-	project   string
-	provider  string
-	model     string
-	tokensIn  int64
-	tokensOut int64
-	cost      float64
-}
-
 // View renders the costs table.
 func (v *CostsView) View() string {
 	if len(v.instances) == 0 {
 		return costMutedStyle.Render("  No cost data available.")
 	}
 
-	// Aggregate by project
-	agg := make(map[string]*projectCost)
-	for _, inst := range v.instances {
-		proj := inst.ShortProject()
-		if proj == "" {
-			proj = "(unknown)"
+	rows := controller.CostsByProject(v.instances)
+	for i := range rows {
+		if rows[i].Provider == "" {
+			rows[i].Provider = "unknown" // the TUI labels an empty provider; the web sends it empty
 		}
-		pc, ok := agg[proj]
-		if !ok {
-			prov := inst.ProviderName
-			if prov == "" {
-				prov = "unknown"
-			}
-			pc = &projectCost{project: proj, provider: prov, model: inst.ShortModel()}
-			agg[proj] = pc
-		}
-		pc.tokensIn += inst.TokensIn
-		pc.tokensOut += inst.TokensOut
-		pc.cost += inst.EstCostUSD
 	}
-
-	// Sort by cost descending
-	rows := make([]*projectCost, 0, len(agg))
-	for _, pc := range agg {
-		rows = append(rows, pc)
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].cost > rows[j].cost
-	})
 
 	var b strings.Builder
 
@@ -97,17 +65,17 @@ func (v *CostsView) View() string {
 	var totalCost float64
 
 	for _, row := range rows {
-		totalIn += row.tokensIn
-		totalOut += row.tokensOut
-		totalCost += row.cost
+		totalIn += row.TokensIn
+		totalOut += row.TokensOut
+		totalCost += row.CostUSD
 
-		costStr := fmt.Sprintf("%10s", fmt.Sprintf("$%.2f", row.cost))
+		costStr := fmt.Sprintf("%10s", fmt.Sprintf("$%.2f", row.CostUSD))
 		line := fmt.Sprintf("%-20s %-10s %-14s %12s %12s ",
-			truncate(row.project, 20),
-			truncate(row.provider, 10),
-			truncate(row.model, 14),
-			formatTokens(row.tokensIn),
-			formatTokens(row.tokensOut),
+			truncate(row.Project, 20),
+			truncate(row.Provider, 10),
+			truncate(row.Model, 14),
+			formatTokens(row.TokensIn),
+			formatTokens(row.TokensOut),
 		)
 		b.WriteString(line)
 		b.WriteString(costValueStyle.Render(costStr))

@@ -1199,3 +1199,36 @@ func TestSessionMetaHandler_PartialUpdates(t *testing.T) {
 		t.Fatalf("empty note should clear only the note: %+v", m)
 	}
 }
+
+// Pins the web cost rows: an agent with no project is "(unknown)" and an
+// empty provider stays empty (the TUI shows "unknown" instead).
+func TestHandleCosts_UnknownProjectEmptyProvider(t *testing.T) {
+	s := newServerWithAgents([]agent.Agent{{PID: 1, EstCostUSD: 0.5, TokensIn: 10}})
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/costs")
+	if err != nil {
+		t.Fatalf("GET /api/costs failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var payload struct {
+		Costs []map[string]any `json:"costs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Costs) != 1 {
+		t.Fatalf("costs = %v", payload.Costs)
+	}
+	c := payload.Costs[0]
+	if c["project"] != "(unknown)" || c["provider"] != "" || c["agent_count"] != float64(1) {
+		t.Errorf("row = %v", c)
+	}
+	for _, k := range []string{"project", "provider", "model", "tokens_in", "tokens_out", "cost", "agent_count"} {
+		if _, ok := c[k]; !ok {
+			t.Errorf("missing key %q in %v", k, c)
+		}
+	}
+}
