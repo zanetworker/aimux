@@ -10,8 +10,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/llm"
 )
 
 // fakeMessagesAPI stands in for the Anthropic Messages API; it answers every
@@ -130,5 +132,77 @@ func TestCallAnthropic_ErrorCarriesStatusAndTypeOnly(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "flaky login") || !strings.Contains(err.Error(), "400") || !strings.Contains(err.Error(), "invalid_request_error") {
 		t.Errorf("err = %v, want status and error type only", err)
+	}
+}
+
+// TestGenerateTitle_RequestShape pins the titler's request: the model id,
+// max_tokens 30, one user message, no system prompt, and the API headers.
+func TestGenerateTitle_RequestShape(t *testing.T) {
+	var body map[string]any
+	var headers http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = r.Header.Clone()
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &body)
+		_, _ = io.WriteString(w, `{"content":[{"type":"text","text":"  Fix flaky login test \n"}],"usage":{"input_tokens":5,"output_tokens":3}}`)
+	}))
+	defer srv.Close()
+	old := anthropicMessagesURL
+	anthropicMessagesURL = srv.URL
+	t.Cleanup(func() { anthropicMessagesURL = old })
+	s := titlerSession(t, t.TempDir(), "shape123", nil)
+	title, err := GenerateTitle(s, TitleConfig{APIKey: "test-key", Model: "sonnet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "Fix flaky login test" {
+		t.Errorf("title = %q", title)
+	}
+	if len(body) != 3 || body["model"] != "claude-sonnet-5-5" || body["max_tokens"].(float64) != 30 {
+		t.Errorf("request = %v, want model, max_tokens 30 and messages only", body)
+	}
+	msgs, _ := body["messages"].([]any)
+	if len(msgs) != 1 || msgs[0].(map[string]any)["role"] != "user" ||
+		!strings.Contains(msgs[0].(map[string]any)["content"].(string), "User: Please fix the flaky login test") {
+		t.Errorf("messages = %v", msgs)
+	}
+	if headers.Get("x-api-key") != "test-key" || headers.Get("anthropic-version") != "2023-06-01" || headers.Get("content-type") != "application/json" {
+		t.Errorf("headers = %v", headers)
+	}
+}
+
+// TestGenerateTitles_StopsOnlyWithoutKey pins which errors stop the run: no
+// API key stops it with its message; a rejected key skips the session.
+func TestGenerateTitles_StopsOnlyWithoutKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	s := titlerSession(t, t.TempDir(), "nokey123", nil)
+	_, err := GenerateTitles([]Session{s}, TitleConfig{Output: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "no API key: set ANTHROPIC_API_KEY or configure sessions.api_key in config") {
+		t.Errorf("no key: err = %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`)
+	}))
+	defer srv.Close()
+	old := anthropicMessagesURL
+	anthropicMessagesURL = srv.URL
+	t.Cleanup(func() { anthropicMessagesURL = old })
+	n, err := GenerateTitles([]Session{s}, TitleConfig{APIKey: "bad", Output: io.Discard})
+	if n != 0 || err != nil {
+		t.Errorf("rejected key: n %d err %v, want the session skipped", n, err)
+	}
+}
+
+// TestTitleClient_Shape pins the titler's client: the Messages API only, 30 s,
+// no fallback, label naming.
+func TestTitleClient_Shape(t *testing.T) {
+	c := titleClient("k")
+	a, ok := c.Primary.(*llm.API)
+	if !ok || a.Client.Timeout != 30*time.Second || a.Key != "k" || a.URL != anthropicMessagesURL {
+		t.Errorf("primary = %#v", c.Primary)
+	}
+	if c.Fallback != nil || c.Label != "naming" {
+		t.Errorf("fallback %v label %q", c.Fallback, c.Label)
 	}
 }

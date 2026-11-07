@@ -18,6 +18,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/jsonl"
+	"github.com/zanetworker/aimux/internal/llm"
 )
 
 // The namer writes short titles and one-sentence descriptions for sessions
@@ -29,33 +30,12 @@ import (
 // "naming". No session text is ever logged or returned in an error.
 
 // DefaultModel is the model used for titles and descriptions.
-const DefaultModel = "claude-haiku-5-5"
+const DefaultModel = llm.DefaultModel
 
-// modelIDs maps the short names config accepts to full model ids.
-var modelIDs = map[string]string{
-	"haiku":  DefaultModel,
-	"sonnet": "claude-sonnet-5-5",
-	"opus":   "claude-opus-5-5",
-}
-
-// ResolveModel maps a configured model name ("haiku", "sonnet", "opus", or
-// one of their full ids; empty means haiku) to a full model id. Any other
-// name gives DefaultModel and known=false, so the caller can log it once.
-func ResolveModel(name string) (id string, known bool) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return DefaultModel, true
-	}
-	if id, ok := modelIDs[name]; ok {
-		return id, true
-	}
-	for _, id := range modelIDs {
-		if name == id {
-			return id, true
-		}
-	}
-	return DefaultModel, false
-}
+// ResolveModel maps a configured model name to a full model id
+// (llm.ResolveModel): "haiku", "sonnet", "opus", one of their full ids, or
+// empty for haiku; any other name gives DefaultModel and known=false.
+func ResolveModel(name string) (id string, known bool) { return llm.ResolveModel(name) }
 
 var (
 	idOnlyTitle    = regexp.MustCompile(`(?i)^(continue\s*:?\s+)?(session\s*:?\s*)?([0-9a-f]{6,}(-[0-9a-f]{4,})*)$`)
@@ -164,33 +144,9 @@ const (
 	descMaxRunes     = 200
 )
 
-// NamingRequest is one model call: a system prompt, a user prompt and an
-// output cap.
-type NamingRequest struct {
-	Model     string
-	System    string
-	Prompt    string
-	MaxTokens int
-}
-
-// NamingReply is a model's answer with the tokens it cost.
-type NamingReply struct {
-	Text         string
-	Model        string
-	InputTokens  int64
-	OutputTokens int64
-	CostUSD      *float64 // when the backend reports it; else from pricing, or unknown
-	Estimated    bool     // tokens guessed from text length
-}
-
-// NamingBackend makes one model call. Errors carry no prompt or reply text.
-type NamingBackend interface {
-	Complete(ctx context.Context, req NamingRequest) (NamingReply, error)
-}
-
 var (
 	// ErrModelNotFound is the API's answer for a model id it does not know.
-	ErrModelNotFound = errors.New("model not found")
+	ErrModelNotFound = llm.ErrModelNotFound
 	// ErrOwnerSet means both title and description are the owner's.
 	ErrOwnerSet = errors.New("title and description are set by the owner")
 	// ErrBusy means an update for the session is already running.
@@ -198,11 +154,11 @@ var (
 	// ErrNoContent means the transcript has nothing to summarise.
 	ErrNoContent = errors.New("the session has no messages to summarise")
 
-	ErrUnauthorized = errors.New("API key rejected")
-	ErrBadReply     = errors.New("unreadable model reply")
-	ErrNoBackend    = errors.New("no API key and no claude CLI")
-	ErrModelCall    = errors.New("model call failed")
-	ErrTimeout      = errors.New("timed out")
+	ErrUnauthorized = llm.ErrUnauthorized
+	ErrBadReply     = llm.ErrBadReply
+	ErrNoBackend    = llm.ErrNoBackend
+	ErrModelCall    = llm.ErrModelCall
+	ErrTimeout      = llm.ErrTimeout
 )
 
 // failureSentinel maps a model-call error to one of the sentinels above,
@@ -598,7 +554,6 @@ func (n *Namer) call(ctx context.Context, items []namingItem) ([]namingResult, e
 	req := buildNamingRequest(n.model, items)
 	reply, err := n.complete(ctx, req)
 	if err == nil {
-		n.record(reply, req.Model)
 		var results []namingResult
 		results, err = n.parseReply(reply.Text, items)
 		if err == nil {
@@ -626,33 +581,10 @@ func (n *Namer) call(ctx context.Context, items []namingItem) ([]namingResult, e
 	return nil, err
 }
 
-// complete calls Primary, and once more through Fallback with "haiku" when
-// the API does not know the model.
+// complete calls Primary, once more through Fallback with "haiku" when the
+// API does not know the model, and records the call's tokens under "naming".
 func (n *Namer) complete(ctx context.Context, req NamingRequest) (NamingReply, error) {
-	if n.cfg.Primary == nil {
-		return NamingReply{}, ErrNoBackend
-	}
-	reply, err := n.cfg.Primary.Complete(ctx, req)
-	if errors.Is(err, ErrModelNotFound) && n.cfg.Fallback != nil {
-		n.cfg.Logf("naming: model %s not found, retrying once with claude -p --model haiku", req.Model)
-		req.Model = "haiku"
-		return n.cfg.Fallback.Complete(ctx, req)
-	}
-	return reply, err
-}
-
-func (n *Namer) record(reply NamingReply, model string) {
-	if reply.Model != "" {
-		model = reply.Model
-	}
-	if id, known := ResolveModel(model); known {
-		model = id // "haiku" from the CLI fallback is recorded as the model it means
-	}
-	u := cost.Usage{At: n.cfg.Now().UTC(), Label: "naming", Model: model, InputTokens: reply.InputTokens,
-		OutputTokens: reply.OutputTokens, CostUSD: reply.CostUSD, Estimated: reply.Estimated}
-	if err := n.cfg.RecordUsage(u); err != nil {
-		n.cfg.Logf("naming: %v", err)
-	}
+	return namingClient(n.cfg.Primary, n.cfg.Fallback, n.cfg.RecordUsage, n.cfg.Now, n.cfg.Logf).Complete(ctx, req)
 }
 
 const namingSystem = `You name coding sessions so their owner can find them again. For each session, write only the fields asked for: "title" is 3 to 6 words naming the task; "description" is one sentence of at most 20 words saying what the session is about. Reply with JSON only, no other text: {"sessions":[{"id":"1","title":"...","description":"..."}]}`

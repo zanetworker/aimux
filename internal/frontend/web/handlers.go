@@ -720,18 +720,13 @@ func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	model := s.cfg.Sessions.TitleModel
-	if model == "" {
-		model = "haiku"
-	}
-
 	if s.cfg.Sessions.APIKey == "" {
 		http.Error(w, "insight requires an API key (set sessions.api_key in config)", http.StatusServiceUnavailable)
 		return
 	}
 
 	cfg := insight.Config{
-		Model:  model,
+		Model:  s.cfg.Sessions.TitleModel, // empty is insight's default, haiku
 		APIKey: s.cfg.Sessions.APIKey,
 	}
 

@@ -180,7 +180,7 @@ GET /api/plugins              # List all registered plugins and their panels
 GET /api/plugins/{name}/data  # Execute plugin command and return JSON
 ```
 
-The web UI renders plugins as tabs with auto-refresh. The "Generate Insights" button sends panel data to the LLM insight endpoint for AI-powered analysis.
+The web UI renders plugins as tabs with auto-refresh. The "Generate Insights" button sends panel data to the LLM insight endpoint for AI-powered analysis. It needs `sessions.api_key` and uses `sessions.title_model` (default `haiku`). Each insight's token use is recorded in `~/.aimux/data/usage.jsonl` under the label `insight`, next to session naming's `naming` lines.
 
 ## Execution Model
 

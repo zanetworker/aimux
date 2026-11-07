@@ -212,15 +212,16 @@ Frontends (thin adapters, rendering + input only)
   Web:  internal/frontend/web/    — HTTP handlers, SSE, WebSocket
   CLI:  cmd/aimux/cmd/            — Cobra flags, JSON output
 
-Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http)
+Core (UI-agnostic, MUST NOT import bubbletea/lipgloss/net/http; net/http exceptions: internal/llm and otel/k8s_reader.go)
   controller/  — operations: sort, filter, attend, archive, kill, notify, export, session_meta, badges, live agent filter/dedup, costs by project
   agent/       — data types, status enum, fade colors
   badge/       — project file badge evaluation
   config/      — global + project-local config, runtime/sandbox profiles
   cost/        — per-model pricing, token counting
   discovery/   — multi-provider orchestrator, process scanning
-  history/     — session scanning, metadata, titles, search; namer.go (economical naming, daily limit, pause on failures), namer_backend.go (API or `claude -p` safe mode), namer_proc_*.go (process group), metawrite.go (`UpdateMeta`: locked, atomic `.meta.json` writer; the only writer), cwd.go (`SessionCwd`: a session's first recorded cwd, decoding each line as scanSession does, stopping at that line), visible.go (`Visible`: which history sessions a list shows; `Kinds` classifies, each surface's options side by side: `TUIOpts`, `DashboardOpts` with `DashboardReveals` (subagents, automated, analyzers, search: the `hidden` list on `/api/history`); one `KindAnalyzer` (hook prompts or SESSION ANALYZER text) on every surface, `RemoteOpts`, `CLIOpts`; live agents are `controller.DropEphemeral`/`DedupBySession`, a different rule); history must never import provider (provider imports history)
+  history/     — session scanning, metadata, titles, search; namer.go (economical naming, daily limit, pause on failures), namer_backend.go (`NamingBackends` and `namingClient`: the one naming engine over internal/llm, label "naming", used by the Namer and by titler.go's `GenerateTitles` for the TUI and dashboard, which keep their own prompt, call size and session rules), metawrite.go (`UpdateMeta`: locked, atomic `.meta.json` writer; the only writer), cwd.go (`SessionCwd`: a session's first recorded cwd, decoding each line as scanSession does, stopping at that line), visible.go (`Visible`: which history sessions a list shows; `Kinds` classifies, each surface's options side by side: `TUIOpts`, `DashboardOpts` with `DashboardReveals` (subagents, automated, analyzers, search: the `hidden` list on `/api/history`); one `KindAnalyzer` (hook prompts or SESSION ANALYZER text) on every surface, `RemoteOpts`, `CLIOpts`; live agents are `controller.DropEphemeral`/`DedupBySession`, a different rule); history must never import provider (provider imports history)
   evaluation/  — annotation persistence, JSONL export
+  llm/         — the one model client: `Client` (Primary, once-only Fallback (claude -p) with `FallbackModel` (default haiku) on model not found, a usage line per successful call in ~/.aimux/data/usage.jsonl under the caller's `Label`: `naming` for history, `insight` for insight), `API` (Messages API; system field only when set; errors keep status and error type only), `CLI` (`claude -p --safe-mode` from an empty `aimux-llm-*` temp folder, own process group, proc_*.go), `Backends(key, url)`, `APIKey` (sessions.api_key, else ANTHROPIC_API_KEY; returns the key, never log it), `ResolveModel` (haiku/sonnet/opus); imports only cost (and net/http, a listed exception); the only model-name table (insight uses it too)
   otel/        — OTLP receiver, span store, exporter
   provider/    — Provider interface, Claude/Codex/Gemini/K8s implementations
   runtime/     — Runtime interface (local/container/k8s), PolicyEnforcer, OpenShell stub
