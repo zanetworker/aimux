@@ -1,0 +1,46 @@
+name: MCP Proxy Conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/mcpproxy/**'
+      - 'cmd/aimux/cmd/mcp_proxy*.go'
+      - 'scripts/mcp-proxy-conformance*'
+      - '.github/workflows/mcp-proxy-conformance.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/mcpproxy/**'
+      - 'cmd/aimux/cmd/mcp_proxy*.go'
+      - 'scripts/mcp-proxy-conformance*'
+      - '.github/workflows/mcp-proxy-conformance.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # internal/frontend/web embeds dist, which is not committed; build it
+      # as the CI workflow does, or `go build ./cmd/aimux` fails.
+      - name: Build web frontend
+        run: |
+          npm i -g pnpm && cd web && pnpm install --frozen-lockfile && pnpm build
+          mkdir -p ../internal/frontend/web/dist
+          cp -r dist/* ../internal/frontend/web/dist/
+      - name: Run conformance suite with baseline
+        run: bash scripts/mcp-proxy-conformance.sh

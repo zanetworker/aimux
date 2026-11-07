@@ -16,6 +16,7 @@ CORE_PKGS=(
   internal/remoteapp
   internal/catalog
   internal/sessionstate
+  internal/jsonedit
 )
 
 fail=0
@@ -36,5 +37,15 @@ for pkg in "${CORE_PKGS[@]}"; do
     fail=1
   fi
 done
+
+# internal/jsonedit (the config editor) is a leaf: standard library only.
+if [ -d internal/jsonedit ] && command -v go >/dev/null; then
+  extra=$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./internal/jsonedit | grep -v '/internal/jsonedit$' || true)
+  if [ -n "$extra" ]; then
+    echo "LAYER VIOLATION: internal/jsonedit may import only the standard library; imports:"
+    echo "$extra"
+    fail=1
+  fi
+fi
 
 exit $fail

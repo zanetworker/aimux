@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/jsonedit"
 )
 
 // commandSuffix ends every hook command aimux installs, optionally followed
@@ -225,17 +227,14 @@ func matcherFor(event string) string {
 
 // settings is a settings file read for changing.
 type settings struct {
-	path   string
 	exists bool
-	mode   fs.FileMode
 	raw    []byte
-	top    object
 	hooks  object
 	groups map[string][]json.RawMessage
 }
 
 func load(path string) (*settings, error) {
-	s := &settings{path: path, mode: 0o600, groups: map[string][]json.RawMessage{}}
+	s := &settings{groups: map[string][]json.RawMessage{}}
 	data, err := os.ReadFile(path) //nolint:gosec // the owner's own Claude Code settings path
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -243,78 +242,117 @@ func load(path string) (*settings, error) {
 	case err != nil:
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	s.exists, s.mode, s.raw = true, fi.Mode().Perm(), data
+	s.exists, s.raw = true, data
 	if len(bytes.TrimSpace(data)) == 0 {
 		return s, nil
 	}
-	if s.top, err = parseObject(data); err != nil {
+	top, err := parseObject(data)
+	if err != nil {
 		return nil, fmt.Errorf("%s is not a JSON object (%v); fix it first, nothing was changed", path, err)
 	}
-	if raw, ok := s.top.get("hooks"); ok {
-		if s.hooks, err = parseObject(raw); err != nil {
-			return nil, fmt.Errorf("%s: \"hooks\" is not an object (%v); nothing was changed", path, err)
-		}
-		for _, f := range s.hooks {
-			var list []json.RawMessage
-			if err := json.Unmarshal(f.Value, &list); err != nil {
-				return nil, fmt.Errorf("%s: hooks.%s is not a list (%v); nothing was changed", path, f.Key, err)
-			}
-			s.groups[f.Key] = list
-		}
+	raw, _ := top.get("hooks")
+	if err := s.readHooks(raw); err != nil {
+		return nil, fmt.Errorf("%s: %v; nothing was changed", path, err)
 	}
 	return s, nil
 }
 
-// save writes the settings back, after a backup of the old file.
-func (s *settings) save(now time.Time) (string, error) {
+// readHooks sets s.hooks and s.groups from the raw "hooks" value (nil: none).
+func (s *settings) readHooks(raw json.RawMessage) error {
+	s.hooks, s.groups = nil, map[string][]json.RawMessage{}
+	if raw == nil {
+		return nil
+	}
+	hooks, err := parseObject(raw)
+	if err != nil {
+		return fmt.Errorf("\"hooks\" is not an object (%v)", err)
+	}
+	for _, f := range hooks {
+		var list []json.RawMessage
+		if err := json.Unmarshal(f.Value, &list); err != nil {
+			return fmt.Errorf("hooks.%s is not a list (%v)", f.Key, err)
+		}
+		s.groups[f.Key] = list
+	}
+	s.hooks = hooks
+	return nil
+}
+
+// hooksValue is the "hooks" value for s, nil when no event is left.
+func (s *settings) hooksValue() (json.RawMessage, error) {
 	for _, f := range s.hooks {
 		list, err := marshal(s.groups[f.Key])
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		s.hooks.set(f.Key, list)
 	}
 	if len(s.hooks) == 0 {
-		s.top.del("hooks")
-	} else {
-		h, _ := s.hooks.MarshalJSON()
-		s.top.set("hooks", h)
+		return nil, nil
 	}
-	compact, _ := s.top.MarshalJSON()
-	var out bytes.Buffer
-	if err := json.Indent(&out, compact, "", "  "); err != nil {
-		return "", err
+	return s.hooks.MarshalJSON()
+}
+
+// edit applies change to the settings at path. A dry run on the file as it is
+// decides whether anything changes (and refuses broken settings); only then is
+// the file backed up (or created, 0600 in a 0700 dir, when missing) and the
+// "hooks" key rewritten through jsonedit.EditKey: atomic, verified, every other
+// top-level key byte-identical, retried from a fresh read if Claude Code writes
+// meanwhile. change runs again on each fresh read and must be pure; the Change
+// returned is the one that was written.
+func edit(path string, now time.Time, change func(*settings) Change) (Change, error) {
+	s, err := load(path)
+	if err != nil {
+		return Change{}, err
 	}
-	out.WriteByte('\n')
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return "", err
+	if ch := change(s); len(ch.Added)+len(ch.Updated)+len(ch.Removed) == 0 {
+		return ch, nil
 	}
 	backup := ""
-	if s.exists {
-		backup = s.path + ".aimux-bak-" + now.UTC().Format("20060102T150405.000000000Z")
+	if s.exists && len(bytes.TrimSpace(s.raw)) > 0 {
+		backup = path + ".aimux-bak-" + now.UTC().Format("20060102T150405.000000000Z")
 		if err := os.WriteFile(backup, s.raw, 0o600); err != nil {
-			return "", fmt.Errorf("back up %s: %w", s.path, err)
+			return Change{}, fmt.Errorf("back up %s: %w", path, err)
 		}
+	} else if err := startObject(path); err != nil {
+		return Change{}, err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".settings-*.json")
-	if err != nil {
-		return backup, err
+	var ch Change
+	err = jsonedit.EditKey(path, "hooks", func(old json.RawMessage) (json.RawMessage, error) {
+		cur := &settings{}
+		if err := cur.readHooks(old); err != nil {
+			return nil, err
+		}
+		ch = change(cur)
+		return cur.hooksValue()
+	})
+	ch.Backup = backup
+	return ch, err
+}
+
+// startObject makes a missing or blank settings file an empty JSON object for
+// EditKey to fill: created 0600 (dir 0700) when missing, appended to when it
+// holds only whitespace. A file someone else created meanwhile is left alone.
+func startObject(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
-	_, werr := tmp.Write(out.Bytes())
-	cerr := tmp.Close()
-	if err := errors.Join(werr, cerr, os.Chmod(tmp.Name(), s.mode)); err != nil {
-		_ = os.Remove(tmp.Name())
-		return backup, err
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // the owner's own Claude Code settings path
+	if errors.Is(err, fs.ErrExist) {
+		f, err = os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0) //nolint:gosec // same path
+		if err != nil {
+			return err
+		}
+		data, rerr := os.ReadFile(path) //nolint:gosec // same path
+		if rerr != nil || len(bytes.TrimSpace(data)) > 0 {
+			_ = f.Close()
+			return rerr // filled meanwhile: EditKey takes it from here
+		}
+	} else if err != nil {
+		return err
 	}
-	if err := os.Rename(tmp.Name(), s.path); err != nil {
-		_ = os.Remove(tmp.Name())
-		return backup, err
-	}
-	return backup, nil
+	_, werr := f.WriteString("{}\n")
+	return errors.Join(werr, f.Close())
 }
 
 // Install adds aimux's hooks (command) to the Claude Code settings at path,
@@ -322,10 +360,11 @@ func (s *settings) save(now time.Time) (string, error) {
 // aimux hook with another command (the binary moved) is updated in place.
 // Nothing is written when nothing changes.
 func Install(path, command string, now time.Time) (Change, error) {
-	s, err := load(path)
-	if err != nil {
-		return Change{}, err
-	}
+	return edit(path, now, func(s *settings) Change { return installChange(s, command) })
+}
+
+// installChange adds or updates aimux's hook in s for every event.
+func installChange(s *settings, command string) Change {
 	var ch Change
 	for _, ev := range Events() {
 		handler := hookHandler{Type: "command", Command: command, Timeout: hookTimeout}
@@ -361,20 +400,17 @@ func Install(path, command string, now time.Time) (Change, error) {
 			ch.Added = append(ch.Added, ev)
 		}
 	}
-	if len(ch.Added)+len(ch.Updated) == 0 {
-		return ch, nil
-	}
-	ch.Backup, err = s.save(now)
-	return ch, err
+	return ch
 }
 
 // Uninstall removes aimux's hooks from the settings at path, and an event
 // list or the hooks object it leaves empty; nothing else.
 func Uninstall(path string, now time.Time) (Change, error) {
-	s, err := load(path)
-	if err != nil {
-		return Change{}, err
-	}
+	return edit(path, now, uninstallChange)
+}
+
+// uninstallChange removes aimux's handlers from s, dropping emptied events.
+func uninstallChange(s *settings) Change {
 	var ch Change
 	for _, f := range append(object(nil), s.hooks...) {
 		var kept []json.RawMessage
@@ -408,11 +444,7 @@ func Uninstall(path string, now time.Time) (Change, error) {
 			s.groups[f.Key] = kept
 		}
 	}
-	if len(ch.Removed) == 0 {
-		return ch, nil
-	}
-	ch.Backup, err = s.save(now)
-	return ch, err
+	return ch
 }
 
 // Status reports which of aimux's hooks the settings at path hold.

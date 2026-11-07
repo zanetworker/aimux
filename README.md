@@ -97,7 +97,7 @@ Requires **tmux**. Auto-discovers running Claude and Codex agents.
 
 ## Agent-Ready CLI
 
-aimux is built for AI agents. Commands support `--json` for structured output (the `mcp proxy` commands, `remote serve` and `remote hooks install|uninstall|status` print text, and `chat --json` streams JSON lines), errors include valid values, and `agent-context` dumps the full CLI contract.
+aimux is built for AI agents. Commands support `--json` for structured output (the `mcp proxy` commands other than `mcp proxy status`, `remote serve` and `remote hooks install|uninstall|status` print text, and `chat --json` streams JSON lines), errors include valid values, and `agent-context` dumps the full CLI contract.
 
 ```bash
 aimux agents --json                              # discover running agents
@@ -108,6 +108,7 @@ aimux profile save work --provider claude        # save reusable config
 aimux feedback "the X flag doesn't work"         # report friction
 aimux chat <session-id> "next step?"             # continue an idle Claude session
 aimux mcp proxy serve                            # lazy, shared MCP servers for all sessions
+aimux mcp proxy status --json                    # proxied servers: state, tools, last call, last error
 aimux remote serve                               # your sessions from other devices (API, phone web client at /app/, approval notifications), via tailscale serve
 aimux remote pair --name iphone                  # one-time code that pairs a phone or browser (Face ID login); see also remote devices, remote revoke
 aimux remote hooks install                       # Claude Code hooks: terminal sessions at a permission prompt push and list under Needs you

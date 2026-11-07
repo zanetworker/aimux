@@ -1,25 +1,161 @@
 ---
 title: MCP Proxy
-description: Serve your stdio MCP servers lazily behind one shared endpoint
+description: Serve your stdio MCP servers lazily behind shared endpoints
 ---
 
 Claude Code starts every configured MCP server when a session opens, before any tool is used. With many stdio servers that costs hundreds of MB to a few GB per session, and each session runs its own copy.
 
-`aimux mcp proxy` puts your stdio MCP servers behind one local endpoint:
+`aimux mcp proxy` puts your stdio MCP servers behind shared HTTP endpoints:
 
 - **Lazy:** tools are listed from a cached catalog, and a server starts on its first tool call.
 - **Shared:** one process per server serves every session.
 - **Stopped when idle:** a server unused for 10 minutes (configurable) is stopped, including any child processes started by `npx` or `uv`.
-- **Same tools:** each tool keeps its name, prefixed by its server (`mcp__mux__slack__post_message`), so tool search works as before. Claude Code limits tool names to 64 characters; a longer one is cut short and ends in a 6-character hash of the full name, so it stays unique and stable.
-- **Permissions follow the new names:** an allow rule written for a direct server, such as `mcp__slack__post_message`, does not match the proxied tool. Add rules for the `mcp__mux__…` names (for example `mcp__mux__slack__post_message`) before switching.
+- **Same names:** each server keeps its own name, and every tool keeps its original name (`mcp__slack__post_message`, not renamed). Permission rules keep working unchanged.
+- **Per-server endpoints:** each moved server is served at `/mcp/<server>` under its original name, so `~/.claude.json` has one HTTP line per moved server instead of one `mux` entry.
 
 Remote (`http`, `sse`) servers are not proxied. They run no local process, so Claude Code keeps connecting to them directly.
 
 Only **tools** are proxied. Prompts, resources and log messages from the proxied servers are not available through the proxy; keep a server as a direct entry if you rely on those.
 
-## Set it up
+## Switch Claude Code to the proxy
 
-1. Cache the tool catalog. This starts each stdio server in `~/.claude.json` once and stops it:
+```bash
+aimux mcp proxy install --dry-run   # what would change, names only
+aimux mcp proxy install
+```
+
+`--dry-run` writes nothing outside a temporary directory. A server missing from the catalog is started once to list its tools into a temporary copy of the catalog; `~/.aimux/mcp-catalog.json` and `~/.aimux/mcp-servers.json` are not written.
+
+`install` checks everything before it touches a file, and refuses with a message naming the problem:
+
+1. It lists the tools of every server it will move into `~/.aimux/mcp-catalog.json`, so tools a server gained in an upgrade are exposed. A server that fails is refused by name; fix it or leave it direct with `--skip <name>`.
+2. It saves the definitions (command, arguments and `env`) of the servers it moves in `~/.aimux/mcp-servers.json`, an owner-only file the proxy runs them from, and adds them to that file's moved list, which is what the installed proxy serves. They are saved with `${VAR}` and `${VAR:-default}` already resolved in your shell (and the proxy does not expand them a second time, so a value that itself contains `${...}` stays as it is), because launchd starts the proxy without your shell's variables.
+3. It starts the proxy under launchd (`~/Library/LaunchAgents/com.aimux.mcp-proxy.plist`, started at login and restarted if it exits, logs in `~/.aimux/logs/mcp-proxy/`) and waits up to 10 seconds until the proxy answers and has an endpoint for every server it will move. The plist sets `PATH` and `HOME` from your shell, so `npx`, `uv` and other tools resolve as they do there; it holds no other values. A proxy already running has its daemon reload in place, so open sessions keep their connections; the daemon restarts only when it crashes (launchd brings it back) or when the aimux binary itself is upgraded (install and `status` say when an upgrade restart is pending).
+4. It has the proxy start each server it will move and list its tools (the probe below, for those servers only). A server that fails under launchd is refused by name; fix it or `--skip` it.
+
+If install stops before changing `~/.claude.json`, it says so, puts `~/.aimux/mcp-servers.json` and the launchd plist back as they were, and removes the launchd agent again when it was the one that started it; an agent that was loaded before is reloaded on its previous configuration.
+
+Then it changes `~/.claude.json`, after backing it up to `~/.aimux/backups/` (owner-only, the newest 10 kept):
+
+Each moved server's stdio entry becomes `{"type": "http", "url": "http://127.0.0.1:7381/mcp/<server>"}` under the same name. Remote servers stay. aimux's own `aimux` stdio entry moves like any other. Nothing else in the file changes, not even spacing. The edit is atomic: one edit of `mcpServers`, so there is no half-switched state.
+
+If a server's entry changes between these checks and the edit (another program saved `~/.claude.json`), the edit fails ("changed while installing; run install again") and the proxy's files are put back as above. An entry removed in that window is simply not moved, and the proxy stops serving it.
+
+Just before the edit, install records it in `~/.aimux/mcp-proxy-install.json` (owner-only): for each server it moves its original entry and the entry install writes, the servers kept direct with `--skip`, and the proxy's port. If the record cannot be written, nothing is edited. If the edit does not land, the record goes back to what it was (or is removed on a first install). Because the record comes first, an install killed at any point can be undone with `uninstall`: entries the edit wrote get their originals back, and entries it never reached are left as they are. A later `install` with a different `--port` is refused, since the entries point at the recorded one; uninstall and install again to change the port. A repeat `install` with nothing new to move changes nothing and says so.
+
+Install says how many Claude Code sessions are open. **Sessions already open keep their direct servers until they restart**, and one that saves its settings later can write the old entries back; `status` calls that drift.
+
+### Tool names after the switch
+
+| Before | After |
+|---|---|
+| `mcp__slack__post_message` | `mcp__slack__post_message` |
+| `mcp__aimux__list_sessions` | `mcp__aimux__list_sessions` |
+
+Tool names stay the same, so permission rules keep working unchanged.
+
+### Switch back
+
+```bash
+aimux mcp proxy uninstall
+```
+
+`uninstall` undoes what the manifest records, in one edit of `mcpServers`: each moved entry that is still the proxy entry install wrote gets its original bytes back; one you changed or removed since is kept as it is and reported. Servers you added after installing stay. When nothing else changed, the file comes back byte for byte. It also deletes the moved servers' saved definitions (they hold resolved `env` values) from `~/.aimux/mcp-servers.json`, then removes the manifest and the launchd agent. If `~/.claude.json` is gone, every entry is reported as removed and the rest still happens. Running it twice is harmless. If the agent cannot be removed, the config stays restored and running `uninstall` again removes it.
+
+Without a manifest, `uninstall` leaves the Claude config alone and removes a leftover launchd agent if there is one. To restore entries by hand, copy only their `mcpServers` entries from a backup in `~/.aimux/backups/`: copying the whole file would also undo everything Claude Code saved since.
+
+### New servers after installing
+
+A stdio server added to `~/.claude.json` after install runs directly until it is moved. To move it:
+
+```bash
+aimux mcp proxy install
+```
+
+Running `install` again moves only the stdio servers not yet moved and not kept direct with `--skip` (same refresh, daemon prepare and probe, then one atomic edit of just those entries) and adds them to the manifest. The daemon reloads in place, so open sessions keep their connections. Servers already moved are left alone.
+
+### Changing a moved server
+
+Once moved, a server's command, arguments and `env` live in `~/.aimux/mcp-servers.json`. Editing `~/.claude.json` no longer changes the server. To change a moved server:
+
+```bash
+aimux mcp proxy edit <server>
+```
+
+This opens the server's definition in `$EDITOR` (an owner-only temp copy that includes its `env`; `vi` when `$EDITOR` is unset). `$EDITOR` may carry arguments, such as `code --wait` or `vim -n`; it is split into words as a shell would split it (single and double quotes and backslashes work, variables and globs are not expanded), and the temp file is passed as the last argument, so quote a path with spaces: `EDITOR='"/Applications/My Editor/bin/ed" -w'`. When the editor exits, `edit` validates the definition (valid JSON holding only `command`, `args` and `env`, a command found on the proxy's `PATH`) and probes the server with it the way launchd runs it: `PATH` and `HOME` from the installed launchd plist plus the definition's `env`, nothing else from your shell, with a bare command resolved on that `PATH`. A definition that only works because of a variable or a `PATH` entry in your shell fails here. Without an installed plist, `edit` says so and uses the `PATH` and `HOME` install would write from your shell. A server that starts and initializes passes even if it lists no tools. Only then does it write the definition to `~/.aimux/mcp-servers.json`, record the tools it listed in the catalog, and reload that one server in place. On any failure before the write the old definition stays. An unchanged definition saves nothing. If the reload fails after the write, the new definition takes effect when the proxy next starts. Env values are never printed. `edit` waits for no other run: while `install` or `uninstall` runs it refuses.
+
+The temp copy is removed when `edit` ends, also on Ctrl-C or `SIGTERM` after the editor closed. Some editors write swap or backup files beside it (vim's `.swp`, a `~` backup); those hold the same `env` values, so configure your editor not to keep them for files in your temp directory, or delete them.
+
+The fallback: `uninstall`, edit `~/.claude.json`, `install`.
+
+### Drift
+
+```bash
+aimux mcp proxy status
+```
+
+`status` says which servers `install` moved, any whose entry drifted from its proxy URL (a running session saved a stale copy, or you edited it), stdio servers not behind the proxy yet (run `aimux mcp proxy install`), and whether an upgrade restart is pending. Then it reads the running proxy's `/status` on `127.0.0.1`. Not running is reported, not an error.
+
+Drift: a moved server's entry is no longer its proxy URL. To fix it:
+
+```bash
+aimux mcp proxy uninstall
+aimux mcp proxy install
+```
+
+### Skip servers
+
+Leave specific servers as direct entries:
+
+```bash
+aimux mcp proxy install --skip slack --skip github
+```
+
+The `--skip` choice is recorded in the manifest and kept on later runs until `--unskip`:
+
+```bash
+aimux mcp proxy install --unskip slack
+```
+
+### Reload and the restart trade-off
+
+The daemon reloads in place when you change a server (`edit`) or move a new one (re-run `install`). It does not restart. The daemon restarts only when it crashes (launchd brings it back) or when the aimux binary itself is upgraded.
+
+A crash or upgrade restart can leave open Claude Code sessions without these tools until they reconnect or restart. Claude Code may not reconnect to a restarted daemon on its own mid-session.
+
+`status` says when an upgrade restart is pending:
+
+```bash
+aimux mcp proxy status
+```
+
+To restart the daemon after an upgrade:
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.aimux.mcp-proxy
+```
+
+You can do this at a convenient time.
+
+### Tradeoffs
+
+| | Direct stdio servers | Through the proxy |
+|---|---|---|
+| Memory | one process per server per session | one process per server, stopped when idle |
+| Session start | every server starts | nothing starts until a tool is called |
+| First call to a server | immediate | waits for the server to start |
+| Tool names | `mcp__<server>__<tool>` | `mcp__<server>__<tool>` (unchanged) |
+| Prompts, resources, log messages | available | not available (tools only) |
+| Browser servers (`--per-session`) | one per session | one per session |
+| A server crash | that session loses it | every session loses it until the next call restarts it |
+| Needs | nothing | the launchd agent running |
+| Permission rules | direct rule | same rule (no translation) |
+
+## Set it up by hand
+
+Without `install`, nothing edits your files:
+
+1. Cache the tool catalog. This starts each stdio server in `~/.claude.json` once and stops it, and saves their definitions in `~/.aimux/mcp-servers.json`:
 
    ```bash
    aimux mcp proxy refresh
@@ -31,41 +167,91 @@ Only **tools** are proxied. Prompts, resources and log messages from the proxied
    aimux mcp proxy serve
    ```
 
-3. Print the Claude Code entry and the stdio entries it replaces:
+3. Print the Claude Code entries and add them to `mcpServers` in `~/.claude.json` yourself (after an `install`, `serve` without `--only` serves only the moved servers):
 
    ```bash
    aimux mcp proxy config
    ```
 
-   Add the `mux` entry to `mcpServers` in `~/.claude.json`. The command never edits the file.
-
-4. Remove the replaced stdio entries from `~/.claude.json` if you want. `refresh` saved their definitions (commands, arguments and `env`) in `~/.aimux/mcp-servers.json`, an owner-only file, and the proxy runs them from there. Later refreshes merge: a server still in `~/.claude.json` overrides the saved copy, and one you removed is kept. To drop a server from the proxy, remove it from `~/.claude.json` and pass `--exclude` to `refresh`; while it is still in `~/.claude.json`, every `refresh` and `serve` adds it back unless you pass `--exclude` to each.
+Later refreshes merge: a server still in `~/.claude.json` overrides the saved copy, and one you removed is kept. To drop a server from the proxy, remove it from `~/.claude.json` and pass `--exclude` to `refresh`; while it is still in `~/.claude.json`, every `refresh` and `serve` adds it back unless you pass `--exclude` to each.
 
 The catalog is also refreshed whenever a server starts, so new tools appear the next time the proxy starts.
+
+## Check its health
+
+```bash
+aimux mcp proxy status            # one row per configured server
+aimux mcp proxy status --probe    # start each server once and list its tools first
+aimux mcp proxy status --json
+```
+
+`--json` also says per server whether the proxy has an endpoint for it (`endpoint`). The table shows each server's state (`not_started`, `starting`, `running`, `idle_stopped`, `failed`), tool count, last call and last error, followed by the last stderr lines of any server that failed to start. Error text and stderr have configured `env` values and token-shaped strings replaced by `[redacted]`. When the proxy is not running the command says so and exits 0 (`--json` prints `{"running":false}`). `--probe` waits up to `--timeout` (default 1 minute); a probe counts no tool calls, and a per-session server it starts is stopped again.
+
+The same data is at `GET http://127.0.0.1:7381/status` (and `POST /status/probe?timeout=30s`, which needs the header `X-Aimux-Probe: 1` so a web page cannot start your servers; add `&server=<name>` once per server to probe only those), local requests only.
+
+`POST http://127.0.0.1:7381/reload` makes the running proxy re-read `~/.aimux/mcp-servers.json` and the catalog and apply the difference in place, without restarting: a new server gets its endpoint, a removed one loses it, and a changed one is served from its new definition (its running backend finishes in-flight calls first). It needs the same `X-Aimux-Probe: 1` header and answers `{"added": [...], "removed": [...], "changed": [...]}` with server names. `install` and `edit` call it for you; you only need it after editing those files by hand.
 
 ## Flags
 
 | Flag | Commands | Default | Meaning |
 |---|---|---|---|
-| `--claude-config` | all | `~/.claude.json` | Where the stdio servers are read from |
-| `--servers` | all | `~/.aimux/mcp-servers.json` | The proxy's saved backend definitions, written by `refresh` |
-| `--catalog` | all | `~/.aimux/mcp-catalog.json` | Tool catalog file |
-| `--exclude` | all | none | Servers to leave out of the proxy. On `serve` it applies to that run only: the saved catalog keeps their tools |
-| `--port` | `serve`, `config` | `7381` | Port on `127.0.0.1` |
+| `--claude-config` | `refresh`, `serve`, `config` | `~/.claude.json` | Where the stdio servers are read from |
+| `--servers` | `refresh`, `serve`, `config` | `~/.aimux/mcp-servers.json` | The proxy's saved backend definitions, written by `refresh` |
+| `--catalog` | `refresh`, `serve`, `config` | `~/.aimux/mcp-catalog.json` | Tool catalog file |
+| `--exclude` | `refresh`, `serve`, `config` | none | Servers to leave out of the proxy. On `serve` it applies to that run only: the saved catalog keeps their tools |
+| `--port` | `serve`, `config`, `status`, `install` | `7381` | Port on `127.0.0.1` |
 | `--per-session` | `serve` | `playwright,chrome-devtools,linkedin` | Servers that get one process per client session, for browser automation |
+| `--only` | `serve` | the moved list, else all | Serve only these servers. Without it, a servers file with a moved list (written by `install`) is served as exactly that list, even when it is empty; without a list every configured server is served |
 | `--idle` | `serve` | `10m` | Stop a server after it has been unused this long |
+| `--json` | `status` | off | Print the status as JSON |
+| `--probe` | `status` | off | Start each configured server once and list its tools first |
+| `--timeout` | `status` | `1m` | How long `--probe` may take |
+| `--dry-run` | `install` | off | Print what would change (names only) and exit; servers missing from the catalog are started once to list their tools into a temporary catalog |
+| `--skip` | `install` | none | Stdio servers to leave as direct entries (recorded: later runs keep them direct) |
+| `--unskip` | `install` | none | Servers an earlier `--skip` kept direct, to move this time |
 
 ## Security
 
-The proxy listens on `127.0.0.1` only. It rejects requests whose `Host` is not a loopback name (DNS rebinding) and requests a browser sends from another site.
+The proxy listens on `127.0.0.1` only, `/mcp/<server>` endpoints and `/status` alike. It rejects requests whose `Host` is not a loopback name (DNS rebinding) and requests a browser sends from another site.
 
 ## Failure handling
 
 - A server that fails to start, or does not answer within 2 minutes, returns an error result naming the server. Other servers keep working, and the next call tries again. Calls that arrive while a server is starting share that start; one caller giving up does not stop it for the others.
 - A call that times out (2 minutes) or loses its connection stops that server, and the next call starts a new one.
 - A tool that reports an error keeps its server running.
+- A server process that exits on its own is marked `failed` (`exited`) within about 10 seconds, also when it was a wrapper such as `npx` or `uv` whose child still holds its stderr open.
+- A probe (`status --probe`, install's check) whose tool listing gets no answer returns at its deadline; until that listing returns, further probes of the server fail at once instead of queueing behind it, and if it has not returned after 2 minutes the server is stopped like a timed-out call. A probe that got no answer does not count as use, so the idle reaper still stops the server.
+- `aimux mcp proxy refresh`, and `install` (with or without `--dry-run`) while it lists tools, interrupted with Ctrl-C or `SIGTERM` stop the servers they started (they run in sessions of their own, so the terminal's interrupt does not reach them), wait for them to close and say they were interrupted; an interrupted install changes nothing.
+- A manifest from the earlier single-entry design is refused; restore `~/.claude.json` from `~/.aimux/backups` and, after moving `~/.aimux/mcp-proxy-install.json` aside, remove the agent with `aimux mcp proxy uninstall`.
 - Claude Code does not end its MCP session when it exits. A session idle for longer than `--idle` expires, which also stops its per-session servers. A client that comes back later gets a new session automatically.
 
 ## Conformance check
 
-`scripts/mcp-proxy-conformance.sh` runs the official MCP conformance suite against the reference server directly and through the proxy, and lists the scenarios the proxy drops. Expect `logging-*`, `prompts-*` and `resources-*` (tools only, as above). `tools-call-error` and `tools-call-simple-text` also differ, because the suite calls tools the reference server lacks: the reference server wraps that error in a tool result, while the proxy returns the JSON-RPC error `-32602` the specification defines for unknown tools.
+`scripts/mcp-proxy-conformance.sh` runs the official MCP conformance suite (`@modelcontextprotocol/conformance@0.1.16`) against the reference server directly and through the proxy. The proxy run uses `scripts/mcp-proxy-conformance-baseline.yaml` to baseline known failures:
+
+- **Tools only:** `logging-*`, `prompts-*`, `resources-*` scenarios (the proxy serves tools only, as above)
+- **Unknown tool errors:** `tools-call-error`, `tools-call-simple-text` (the suite calls tools the reference server lacks; the reference server wraps that error in a tool result, while the proxy returns the JSON-RPC error `-32602` the specification defines for unknown tools)
+
+The script exits 0 when all failures match the baseline, and exits non-zero on:
+- **Unexpected failures** (new regressions)
+- **Stale baseline entries** (a listed scenario now passes, so the baseline needs updating)
+
+This runs on every relevant push: locally through pre-commit's `pre-push` stage (run `pre-commit install --hook-type pre-push` once per clone; other pre-commit hooks stay on commit), and in GitHub Actions when MCP proxy code changes.
+
+## Live check
+
+`scripts/mcp-proxy-live.sh` probes the owner's real MCP servers through the proxy. This runs only with explicit approval, and changes nothing:
+
+- Reads `~/.claude.json` strictly read-only (copies it to a temp directory)
+- Uses temporary `--servers` and `--catalog` paths, not the real `~/.aimux/` files
+- Port 17462 (a different port from the installed proxy)
+- Cleans up every process it starts on exit, including when it is cancelled during the refresh
+
+It starts a throwaway proxy on port 17462 and runs `aimux mcp proxy status --probe` against it, so the proxy starts each stdio server once and lists its tools. It calls no tools. Output is one line per server, with error text taken from the proxy's status (already scrubbed of env values and tokens):
+
+```
+ok <name> <tool count>
+failed <name> <first error line>
+```
+
+The script exits 0 even when servers fail (it is a report), and exits non-zero only if the proxy itself could not run.

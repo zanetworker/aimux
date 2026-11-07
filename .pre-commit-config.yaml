@@ -1,3 +1,6 @@
+# Hooks run on commit unless they name another stage; the MCP proxy conformance
+# check runs on push (install with: pre-commit install --hook-type pre-push).
+default_stages: [pre-commit]
 repos:
   # Secrets scanning — catches API keys, passwords, tokens before they're committed
   - repo: https://github.com/gitleaks/gitleaks
@@ -49,3 +52,12 @@ repos:
         entry: scripts/check-frontend-parity.sh
         pass_filenames: false
         types: [go]
+
+      # MCP proxy conformance: run official suite with baseline on pre-push
+      - id: mcp-proxy-conformance
+        name: mcp-proxy-conformance
+        language: system
+        entry: bash scripts/mcp-proxy-conformance.sh
+        pass_filenames: false
+        stages: [pre-push]
+        files: ^(internal/mcpproxy/|cmd/aimux/cmd/mcp_proxy|scripts/mcp-proxy-conformance)

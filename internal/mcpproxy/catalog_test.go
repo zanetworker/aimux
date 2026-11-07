@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -171,5 +172,138 @@ func TestCatalog_OnlyFiltersACopy(t *testing.T) {
 	}
 	if empty := c.Only(func(string) bool { return false }); empty.Servers == nil || len(empty.Servers) != 0 {
 		t.Fatalf("nothing kept: got %+v, want an empty, non-nil map", empty.Servers)
+	}
+}
+
+func TestCatalogUpdater_ToolCount(t *testing.T) {
+	cat := &Catalog{}
+	cat.Set("slack", []json.RawMessage{json.RawMessage(`{"name":"a"}`), json.RawMessage(`{"name":"b"}`)}, time.Now())
+	u := NewCatalogUpdater(cat, filepath.Join(t.TempDir(), "c.json"))
+	if got := u.ToolCount("slack"); got != 2 {
+		t.Fatalf("ToolCount(slack) = %d, want 2", got)
+	}
+	if got := u.ToolCount("unknown"); got != 0 {
+		t.Fatalf("ToolCount(unknown) = %d, want 0", got)
+	}
+	if err := u.Refresh(context.Background(), "slack", &stubLister{n: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if got := u.ToolCount("slack"); got != 3 {
+		t.Fatalf("ToolCount after refresh = %d, want 3", got)
+	}
+}
+
+type stubLister struct {
+	fakeBackend
+	n int
+}
+
+func (s *stubLister) ListToolsRaw(context.Context) ([]json.RawMessage, error) {
+	out := make([]json.RawMessage, s.n)
+	for i := range out {
+		out[i] = json.RawMessage(`{"name":"t"}`)
+	}
+	return out, nil
+}
+
+func TestToolsFingerprint(t *testing.T) {
+	a := []json.RawMessage{json.RawMessage(`{"name":"a","inputSchema":{"type":"object"}}`)}
+	spaced := []json.RawMessage{json.RawMessage("{ \"name\": \"a\",\n  \"inputSchema\": {\"type\": \"object\"} }")}
+	if ToolsFingerprint(a) != ToolsFingerprint(spaced) {
+		t.Fatal("formatting changed the fingerprint")
+	}
+	b := []json.RawMessage{json.RawMessage(`{"name":"a","inputSchema":{"type":"string"}}`)}
+	if ToolsFingerprint(a) == ToolsFingerprint(b) {
+		t.Fatal("a schema change kept the fingerprint")
+	}
+	if ToolsFingerprint(nil) == "" || ToolsFingerprint(nil) == ToolsFingerprint(a) {
+		t.Fatal("no tools needs a fingerprint of its own")
+	}
+	two := []json.RawMessage{a[0], b[0]}
+	swapped := []json.RawMessage{b[0], a[0]}
+	if ToolsFingerprint(two) == ToolsFingerprint(swapped) {
+		t.Fatal("order is part of what the daemon registers")
+	}
+}
+
+// install's CLI refresh writes the catalog file while the daemon runs; a
+// backend starting in the daemon before /reload must not erase that entry
+// by saving its older in-memory copy.
+func TestCatalogUpdater_RefreshKeepsEntriesWrittenSinceItsCopy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	cat := &Catalog{}
+	cat.Set("slack", toolJSON("post"), time.Now())
+	must(t, cat.Save(path))
+	update := NewCatalogUpdater(cat, path)
+
+	onDisk, err := LoadCatalog(path) // install's refresh adds a server
+	must(t, err)
+	onDisk.Set("pypi", toolJSON("search"), time.Now())
+	must(t, onDisk.Save(path))
+
+	must(t, update.Refresh(context.Background(), "slack", &listingBackend{tools: toolJSON("post", "read")}))
+	saved, err := LoadCatalog(path)
+	must(t, err)
+	if len(saved.Servers["pypi"].Tools) != 1 || len(saved.Servers["slack"].Tools) != 2 {
+		t.Fatalf("saved %v, want pypi kept and slack refreshed", saved.Servers)
+	}
+	if _, ok := update.Snapshot().Servers["pypi"]; ok {
+		t.Fatal("the served copy changed; only a reload replaces it")
+	}
+}
+
+// defBackend reports the definition it was started with.
+type defBackend struct {
+	listingBackend
+	def ServerConfig
+}
+
+func (d *defBackend) Definition() ServerConfig { return d.def }
+
+// A backend started with definition A finishes its startup refresh after
+// the server was changed to B (edit or reload): A's tools must not replace
+// B's, in memory or on disk.
+func TestCatalogUpdater_RefreshFromASupersededDefinitionIsDiscarded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.json")
+	defA, defB := ServerConfig{Command: "a-mcp"}, ServerConfig{Command: "b-mcp"}
+	current := defA
+	cat := &Catalog{}
+	cat.Set("s", toolJSON("a_tool"), time.Now())
+	must(t, cat.Save(path))
+	u := NewCatalogUpdater(cat, path)
+	u.Current = func(server string) (ServerConfig, bool) { return current, server == "s" }
+
+	// The server changes to B with its tools (edit wrote them, a reload read them).
+	current = defB
+	next := &Catalog{}
+	next.Set("s", toolJSON("b_tool"), time.Now())
+	must(t, next.Save(path))
+	u.Replace(next)
+
+	must(t, u.Refresh(context.Background(), "s", &defBackend{listingBackend{tools: toolJSON("a_tool")}, defA}))
+	saved, err := LoadCatalog(path)
+	must(t, err)
+	if got := string(saved.Servers["s"].Tools[0]); !strings.Contains(got, "b_tool") {
+		t.Fatalf("disk has %s, want B's tools", got)
+	}
+	if got := string(u.Snapshot().Servers["s"].Tools[0]); !strings.Contains(got, "b_tool") {
+		t.Fatalf("memory has %s, want B's tools", got)
+	}
+
+	// A backend started with B records its tools.
+	must(t, u.Refresh(context.Background(), "s", &defBackend{listingBackend{tools: toolJSON("b_tool", "b_new")}, defB}))
+	if saved, _ = LoadCatalog(path); len(saved.Servers["s"].Tools) != 2 {
+		t.Fatalf("a current refresh was dropped: %v", saved.Servers["s"])
+	}
+}
+
+func TestStdioBackend_ReportsItsDefinition(t *testing.T) {
+	cfg := testConfigs()["test"]
+	b, err := StdioStarter(map[string]ServerConfig{"test": cfg})(context.Background(), "test")
+	must(t, err)
+	defer func() { _ = b.Close() }()
+	d, ok := b.(interface{ Definition() ServerConfig })
+	if !ok || !reflect.DeepEqual(d.Definition(), cfg) {
+		t.Fatalf("definition %+v (ok %v), want the one it was started with", d, ok)
 	}
 }

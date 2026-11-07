@@ -3,6 +3,7 @@ package mcpproxy
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -111,5 +112,67 @@ func TestExpandConfig(t *testing.T) {
 	}
 	if in.Env["TOKEN"] != "${AIMUX_TEST_CRED}" {
 		t.Fatal("expandConfig modified its input (the saved definitions must keep ${VAR})")
+	}
+}
+
+func TestServerFile_ResolvedSetSurvivesSaveServers(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "servers.json")
+	a := ServerConfig{Command: "a"}
+	if err := SaveServerFile(p, map[string]ServerConfig{"a": a, "b": {Command: "b"}}, []string{"a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveServers(p, map[string]ServerConfig{"a": a, "b": {Command: "b"}, "c": {Command: "c"}}); err != nil {
+		t.Fatal(err)
+	}
+	servers, resolved, err := LoadServerFile(p)
+	if err != nil || len(servers) != 3 || !reflect.DeepEqual(resolved, []string{"a"}) {
+		t.Fatalf("servers %v resolved %v err %v", servers, resolved, err)
+	}
+	if _, resolved, err := LoadServerFile(filepath.Join(t.TempDir(), "missing.json")); err != nil || len(resolved) != 0 {
+		t.Fatalf("missing file: %v %v", resolved, err)
+	}
+}
+
+func TestMergeServers_ResolvedByInstallWins(t *testing.T) {
+	saved := map[string]ServerConfig{
+		"slack": {Command: "npx", Env: map[string]string{"TOKEN": "resolved"}},
+		"gh":    {Command: "old"},
+	}
+	fromClaude := map[string]ServerConfig{
+		"slack": {Command: "npx", Env: map[string]string{"TOKEN": "${TOKEN}"}},
+		"gh":    {Command: "new"},
+	}
+	got := MergeServers(saved, fromClaude, "slack")
+	if got["slack"].Env["TOKEN"] != "resolved" || got["gh"].Command != "new" {
+		t.Fatalf("got %+v", got)
+	}
+	if got := MergeServers(saved, fromClaude); got["slack"].Env["TOKEN"] != "${TOKEN}" {
+		t.Fatalf("without the resolved set the Claude config wins: %+v", got)
+	}
+}
+
+// An empty moved list (installed, nothing served now) is kept apart from
+// no list (a manual setup): the daemon serves nothing for the first and
+// every configured server for the second.
+func TestServerFile_EmptyMovedListIsNotAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "servers.json")
+	defs := map[string]ServerConfig{"a": {Command: "a-mcp"}}
+	if err := SaveServerFile(path, defs, []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, resolved, err := LoadServerFile(path); err != nil || resolved == nil || len(resolved) != 0 {
+		t.Fatalf("resolved %#v, err %v; want an empty, present list", resolved, err)
+	}
+	if err := SaveServers(path, defs); err != nil { // refresh keeps it
+		t.Fatal(err)
+	}
+	if _, resolved, _ := LoadServerFile(path); resolved == nil {
+		t.Fatal("SaveServers dropped the empty moved list")
+	}
+	if err := SaveServerFile(path, defs, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, resolved, _ := LoadServerFile(path); resolved != nil {
+		t.Fatalf("resolved %#v, want no list", resolved)
 	}
 }

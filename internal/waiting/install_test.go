@@ -310,3 +310,38 @@ func TestInstallKeepsShellCharactersReadable(t *testing.T) {
 		t.Fatalf("command was escaped:\n%s", data)
 	}
 }
+
+func TestInstallKeepsOtherKeysByteIdentical(t *testing.T) {
+	// Irregular spacing, HTML characters and an exponent: a re-encode would change all three.
+	const orig = "{\n  \"permissions\": {\"allow\":   [\"Bash(ls && pwd)\"]},\n  \"env\": {\"A\": \"<&>\", \"N\": 1e5},\n  \"model\": \"m\"\n}\n"
+	p := settingsIn(t, orig)
+	if _, err := Install(p, cmdA, t0); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p) //nolint:gosec // test temp dir
+	head := strings.TrimSuffix(orig, "\n}\n") + ",\n  \"hooks\": {"
+	if s := string(data); !strings.HasPrefix(s, head) || !strings.HasSuffix(s, "\n  }\n}\n") {
+		t.Fatalf("other keys changed:\n%s", s)
+	}
+	if _, err := Uninstall(p, t0.Add(1e9)); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(p); string(data) != orig { //nolint:gosec // test temp dir
+		t.Fatalf("install then uninstall did not restore the original bytes:\n%s", data)
+	}
+}
+
+func TestInstallKeepsKeysAroundExistingHooks(t *testing.T) {
+	const before, after = "{\"a\" : 1 ,\"hooks\":", ", \"z\":[1, 2]}"
+	p := settingsIn(t, before+`{"Stop":[{"hooks":[{"type":"command","command":"say hi"}]}]}`+after)
+	if _, err := Install(p, cmdA, t0); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p) //nolint:gosec // test temp dir
+	if s := string(data); !strings.HasPrefix(s, before) || !strings.HasSuffix(s, after) {
+		t.Fatalf("keys around hooks changed:\n%s", s)
+	}
+	if g := readHooks(t, p)["Stop"]; len(g) != 2 || g[0].Hooks[0].Command != "say hi" {
+		t.Fatalf("Stop = %+v", g)
+	}
+}

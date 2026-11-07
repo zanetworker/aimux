@@ -29,7 +29,7 @@ aimux profile list --json
 aimux feedback "message" --json
 ```
 
-Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as the reply streams. The MCP proxy commands (`mcp proxy refresh`, `serve`, `config`) and `remote serve` print text: a per-server report, a startup line, or setup instructions.
+Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as the reply streams. `aimux mcp proxy status --json` prints the proxy's status object. The other MCP proxy commands (`mcp proxy refresh`, `serve`, `config`) and `remote serve` print text: a per-server report, a startup line, or setup instructions.
 
 ## Exit Codes
 

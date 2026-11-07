@@ -640,3 +640,39 @@ func TestStdioStarter_FailedStartIsANilBackend(t *testing.T) {
 		t.Fatalf("got %v (%T), %v; want a nil Backend with the error", b, b, err)
 	}
 }
+
+// A reload that changes a server while its backend is starting tells the
+// waiting call to retry, not that its session ended, and counts no failure.
+func TestPool_CloseServerDuringStartSaysRetry(t *testing.T) {
+	gate := make(chan struct{})
+	start := func(ctx context.Context, server string) (Backend, error) {
+		<-gate
+		return &fakeBackend{}, nil
+	}
+	p := NewPool(start, PoolOptions{})
+	defer p.Close()
+	res := make(chan *mcp.CallToolResult, 1)
+	go func() { res <- p.Call(context.Background(), "slack", "", req("post")) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		p.mu.Lock()
+		n := len(p.slots)
+		p.mu.Unlock()
+		if n == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("call never began starting slack")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	p.CloseServer("slack")
+	close(gate)
+	r := <-res
+	if !r.IsError || !strings.Contains(resultText(t, r), "server reconfigured, retry") {
+		t.Fatalf("call across a reconfigure = %+v, want an error saying to retry", r)
+	}
+	if s := statusOf(t, p, "slack"); s.Failures != 0 {
+		t.Fatalf("reconfigure counted %d failures, want 0", s.Failures)
+	}
+}

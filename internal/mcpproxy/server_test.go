@@ -3,13 +3,19 @@ package mcpproxy
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
+
+// longTool is longer than any exposed-name limit the old combined endpoint
+// had, so a test can see it is served untruncated.
+var longTool = strings.Repeat("very_long_tool_name_", 3) + "x"
 
 func testCatalog() *Catalog {
 	c := &Catalog{}
@@ -18,18 +24,14 @@ func testCatalog() *Catalog {
 		json.RawMessage(`{"name":"post_message","description":"Post","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}}`),
 	}, at)
 	c.Set("notebooklm-mcp", []json.RawMessage{
-		json.RawMessage(`{"name":"` + strings.Repeat("very_long_tool_name_", 3) + `x","inputSchema":{"type":"object"}}`),
+		json.RawMessage(`{"name":"` + longTool + `","inputSchema":{"type":"object"}}`),
 	}, at)
 	c.Set("bad", []json.RawMessage{json.RawMessage(`{"inputSchema":{}}`)}, at)
 	return c
 }
 
-func connect(t *testing.T, cat *Catalog, pool *Pool) *client.Client {
+func connectTo(t *testing.T, srv *server.MCPServer) *client.Client {
 	t.Helper()
-	srv, skipped := NewServer(cat, pool, "mux")
-	if len(skipped) != 1 || !strings.Contains(skipped[0], "bad") {
-		t.Fatalf("skipped = %v, want the one malformed tool from server bad", skipped)
-	}
 	c, err := client.NewInProcessClient(srv)
 	if err != nil {
 		t.Fatal(err)
@@ -47,47 +49,63 @@ func connect(t *testing.T, cat *Catalog, pool *Pool) *client.Client {
 	return c
 }
 
-func TestServer_ListsCatalogToolsWithoutStartingBackends(t *testing.T) {
-	fs := newFakeStarter()
-	pool := NewPool(fs.start, PoolOptions{})
-	defer pool.Close()
-	c := connect(t, testCatalog(), pool)
-
+func toolNames(t *testing.T, c *client.Client) []string {
+	t.Helper()
 	res, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	names := map[string]mcp.Tool{}
+	var names []string
 	for _, tool := range res.Tools {
-		names[tool.Name] = tool
-		if full := "mcp__mux__" + tool.Name; len(full) > 64 {
-			t.Fatalf("exposed name %q is %d chars as registered by Claude Code", full, len(full))
-		}
+		names = append(names, tool.Name)
 	}
-	slack, ok := names["slack__post_message"]
-	if !ok || len(names) != 2 {
-		t.Fatalf("got tools %v, want slack__post_message and one shortened notebooklm tool", keys(names))
+	sort.Strings(names)
+	return names
+}
+
+func TestNewServers_OneServerPerCatalogServerWithOriginalToolNames(t *testing.T) {
+	fs := newFakeStarter()
+	pool := NewPool(fs.start, PoolOptions{})
+	defer pool.Close()
+	srvs := NewServers(testCatalog(), pool)
+
+	if len(srvs) != 3 || srvs["slack"] == nil || srvs["notebooklm-mcp"] == nil || srvs["bad"] == nil {
+		t.Fatalf("got servers %v, want slack, notebooklm-mcp and bad", srvs)
 	}
-	if !strings.HasPrefix(slack.Description, "[slack]") {
-		t.Fatalf("description %q should name the server", slack.Description)
+	slack := connectTo(t, srvs["slack"])
+	if got := toolNames(t, slack); len(got) != 1 || got[0] != "post_message" {
+		t.Fatalf("slack lists %v, want exactly [post_message]", got)
+	}
+	res, _ := slack.ListTools(context.Background(), mcp.ListToolsRequest{})
+	if d := res.Tools[0].Description; d != "Post" {
+		t.Fatalf("description %q, want the backend's own description", d)
+	}
+	if got := toolNames(t, connectTo(t, srvs["notebooklm-mcp"])); len(got) != 1 || got[0] != longTool {
+		t.Fatalf("notebooklm-mcp lists %v, want the long name untruncated", got)
+	}
+	if got := toolNames(t, connectTo(t, srvs["bad"])); len(got) != 0 {
+		t.Fatalf("bad lists %v, want its malformed tool skipped", got)
 	}
 	if fs.count("slack")+fs.count("notebooklm-mcp") != 0 {
 		t.Fatal("listing tools started a backend")
 	}
 }
 
-func TestServer_CallRoutesToBackendWithOriginalName(t *testing.T) {
+func TestNewServers_CallReachesThatServersBackendUnderTheOriginalName(t *testing.T) {
 	fs := newFakeStarter()
 	pool := NewPool(fs.start, PoolOptions{})
 	defer pool.Close()
-	c := connect(t, testCatalog(), pool)
+	srvs := NewServers(testCatalog(), pool)
+	c := connectTo(t, srvs["slack"])
 
-	req := mcp.CallToolRequest{}
-	req.Params.Name = "slack__post_message"
-	req.Params.Arguments = map[string]any{"text": "hello"}
-	res, err := c.CallTool(context.Background(), req)
+	r := req("post_message")
+	r.Params.Arguments = map[string]any{"text": "hello"}
+	res, err := c.CallTool(context.Background(), r)
 	if err != nil || res.IsError {
 		t.Fatalf("call failed: %v %+v", err, res)
+	}
+	if fs.count("slack") != 1 || fs.count("notebooklm-mcp") != 0 {
+		t.Fatalf("starts: slack %d, notebooklm-mcp %d; want only slack", fs.count("slack"), fs.count("notebooklm-mcp"))
 	}
 	got := fs.backends[0].lastReq
 	if got.Params.Name != "post_message" {
@@ -98,33 +116,10 @@ func TestServer_CallRoutesToBackendWithOriginalName(t *testing.T) {
 	}
 }
 
-func TestServer_ShortenedNameStillRoutes(t *testing.T) {
-	fs := newFakeStarter()
-	pool := NewPool(fs.start, PoolOptions{})
+func TestNewServers_EmptyCatalogGivesNoServers(t *testing.T) {
+	pool := NewPool(newFakeStarter().start, PoolOptions{})
 	defer pool.Close()
-	c := connect(t, testCatalog(), pool)
-
-	res, _ := c.ListTools(context.Background(), mcp.ListToolsRequest{})
-	var short string
-	for _, tool := range res.Tools {
-		if strings.HasPrefix(tool.Name, "notebooklm-mcp__") {
-			short = tool.Name
-		}
+	if srvs := NewServers(&Catalog{}, pool); len(srvs) != 0 {
+		t.Fatalf("got %d servers from an empty catalog", len(srvs))
 	}
-	req := mcp.CallToolRequest{}
-	req.Params.Name = short
-	if r, err := c.CallTool(context.Background(), req); err != nil || r.IsError {
-		t.Fatalf("calling shortened %q failed: %v %+v", short, err, r)
-	}
-	if want := strings.Repeat("very_long_tool_name_", 3) + "x"; fs.backends[0].lastReq.Params.Name != want {
-		t.Fatalf("backend got %q, want the original long name", fs.backends[0].lastReq.Params.Name)
-	}
-}
-
-func keys(m map[string]mcp.Tool) []string {
-	var out []string
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }

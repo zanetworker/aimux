@@ -1,0 +1,31 @@
+# MCP proxy conformance baseline - known failures
+# See docs-site/src/content/docs/guides/mcp-proxy.mdx for rationale
+server:
+  # Proxy serves tools only (no prompts, resources, logging)
+  - logging-set-level
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  - resources-list
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - resources-subscribe
+  - resources-unsubscribe
+  # Unknown tools: proxy returns JSON-RPC -32602, reference server wraps in tool result
+  - tools-call-error
+  - tools-call-simple-text
+  # Reference server limitations (fail in both direct and proxy)
+  - completion-complete
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  - tools-call-with-logging
+  - tools-call-with-progress
+  - tools-call-sampling
+  - tools-call-elicitation
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums

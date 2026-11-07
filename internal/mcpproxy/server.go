@@ -2,65 +2,78 @@ package mcpproxy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"sort"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// NewServer builds the proxy's MCP server from the catalog. Each backend tool
-// is exposed as ExposedName(server, tool) and forwarded through pool under
-// its original name. name is what clients register the proxy as (it counts
-// toward Claude Code's tool name limit). It also returns one message per
-// catalog tool it could not expose.
-func NewServer(cat *Catalog, pool *Pool, name string) (*server.MCPServer, []string) {
+// NewServers builds one MCP server per catalog server. Each lists that
+// server's catalog tools under their original names and forwards calls
+// through pool, so a backend starts on its first call. A tool the catalog
+// holds in a form that cannot be decoded is left out.
+func NewServers(cat *Catalog, pool *Pool) map[string]*server.MCPServer {
+	out := make(map[string]*server.MCPServer, len(cat.Servers))
+	for name, e := range cat.Servers {
+		srv := newServer(name, pool)
+		tools, _ := serverTools(name, e.Tools, pool)
+		srv.SetTools(tools...)
+		out[name] = srv
+	}
+	return out
+}
+
+// newServer is an MCP server for backend with no tools yet. Ending a client
+// session closes that session's per-session backends.
+func newServer(backend string, pool *Pool) *server.MCPServer {
 	hooks := &server.Hooks{}
 	hooks.AddOnUnregisterSession(func(ctx context.Context, s server.ClientSession) {
 		pool.CloseSession(s.SessionID())
 	})
-	srv := server.NewMCPServer(name, "1", server.WithToolCapabilities(false), server.WithHooks(hooks))
-
-	servers := make([]string, 0, len(cat.Servers))
-	for s := range cat.Servers {
-		servers = append(servers, s)
-	}
-	sort.Strings(servers) // deterministic order, so name collisions resolve the same way every run
-
-	maxLen := MaxToolNameLen(name)
-	used := map[string]bool{}
-	var skipped []string
-	for _, backend := range servers {
-		for _, raw := range cat.Servers[backend].Tools {
-			tool, err := DecodeTool(raw)
-			if err != nil {
-				skipped = append(skipped, fmt.Sprintf("%s: %v", backend, err))
-				continue
-			}
-			original := tool.Name
-			tool.Name = ExposedName(backend, original, maxLen)
-			if used[tool.Name] {
-				skipped = append(skipped, fmt.Sprintf("%s: tool %s collides with exposed name %s", backend, original, tool.Name))
-				continue
-			}
-			used[tool.Name] = true
-			tool.Description = "[" + backend + "] " + tool.Description
-			srv.AddTool(tool, forwarder(pool, backend, original))
-		}
-	}
-	return srv, skipped
+	// listChanged: a reload that changes the server's tools tells connected
+	// clients to list them again.
+	return server.NewMCPServer(backend, "1", server.WithToolCapabilities(true), server.WithHooks(hooks))
 }
 
-func forwarder(pool *Pool, backend, original string) server.ToolHandlerFunc {
+// serverTools decodes backend's catalog tools into forwarding tools, and
+// returns one message per tool it could not decode.
+func serverTools(backend string, raw []json.RawMessage, pool *Pool) ([]server.ServerTool, []string) {
+	var tools []server.ServerTool
+	var skipped []string
+	for _, r := range raw {
+		tool, err := DecodeTool(r)
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s: %v", backend, err))
+			continue
+		}
+		tools = append(tools, server.ServerTool{Tool: tool, Handler: forwarder(pool, backend, tool.Name)})
+	}
+	return tools, skipped
+}
+
+func forwarder(pool *Pool, backend, name string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		session := ""
 		if cs := server.ClientSessionFromContext(ctx); cs != nil {
 			session = cs.SessionID()
 		}
 		fwd := mcp.CallToolRequest{}
-		fwd.Params.Name = original
+		fwd.Params.Name = name
 		fwd.Params.Arguments = req.Params.Arguments
 		fwd.Params.Meta = req.Params.Meta // keeps the progress token
 		return pool.Call(ctx, backend, session, fwd), nil
 	}
+}
+
+// SkippedTools is one message per catalog tool NewServers leaves out,
+// "<server>: <why>", sorted by server. It never holds env values or tool
+// arguments.
+func SkippedTools(cat *Catalog) []string {
+	var out []string
+	for _, name := range sortedServerNames(cat.Servers) {
+		_, skipped := serverTools(name, cat.Servers[name].Tools, nil)
+		out = append(out, skipped...)
+	}
+	return out
 }

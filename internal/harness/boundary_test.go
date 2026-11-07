@@ -106,3 +106,26 @@ func TestSessionStateBoundary(t *testing.T) {
 		}
 	}
 }
+
+// TestJSONEditBoundary: the config editor is a leaf. It imports only the
+// standard library, so whoever edits a config file (the hooks installer, the
+// MCP proxy installer) pulls in nothing else (.claude/CLAUDE.md, package map).
+func TestJSONEditBoundary(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go tool")
+	}
+	out, err := exec.Command("go", "list", "-deps", "-f", "{{if not .Standard}}{{.ImportPath}}{{end}}", module+"internal/jsonedit").Output()
+	if err != nil {
+		t.Fatalf("go list internal/jsonedit: %v", err)
+	}
+	for _, p := range strings.Fields(string(out)) {
+		if p != module+"internal/jsonedit" {
+			t.Errorf("internal/jsonedit may import only the standard library; imports %s", p)
+		}
+	}
+	for _, d := range internalDeps(t, "internal/waiting") {
+		if d == "internal/mcpproxy" {
+			t.Error("internal/waiting must edit settings through internal/jsonedit, not internal/mcpproxy")
+		}
+	}
+}

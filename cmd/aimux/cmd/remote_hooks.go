@@ -33,7 +33,11 @@ var (
 // this same file (a stable name, such as a Homebrew link), else this one.
 // A binary in the temp dir or the Go build cache (go run, go test) is
 // refused: it disappears, and every tool call would then fail the hook.
-func hookBinary() (string, error) {
+func hookBinary() (string, error) { return stableBinary("aimux remote hooks install") }
+
+// stableBinary is hookBinary's rule for anything that runs aimux later (a
+// hook, a launchd agent); rerun is the command to name in the refusal.
+func stableBinary(rerun string) (string, error) {
 	bin, err := hooksExecutable()
 	if err != nil {
 		return "", fmt.Errorf("find the aimux binary: %w", err)
@@ -43,7 +47,7 @@ func hookBinary() (string, error) {
 	}
 	for _, dir := range hooksForbiddenDirs() {
 		if dir != "" && within(bin, dir) {
-			return "", fmt.Errorf("%s is a temporary build (under %s); install aimux (make install, or go install) and run `aimux remote hooks install` from there", bin, dir)
+			return "", fmt.Errorf("%s is a temporary build (under %s); install aimux (make install, or go install) and run `%s` from there", bin, dir, rerun)
 		}
 	}
 	if onPath, err := hooksLookPath("aimux"); err == nil {
