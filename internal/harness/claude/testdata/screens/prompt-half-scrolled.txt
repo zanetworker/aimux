@@ -1,0 +1,5 @@
+ ❯ 1. Yes
+   2. Yes, and don't ask again for ls commands in /home/demo/project
+   3. No, and tell Claude what to do differently (esc)
+
+ Esc to cancel

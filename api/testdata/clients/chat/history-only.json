@@ -1,0 +1,157 @@
+{
+  "name": "history turns only: user, one steps group, reply; empty parts add nothing",
+  "now": "2026-10-26T09:00:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T08:00:00Z",
+      "user": "Add a health check",
+      "reply": "Added a health endpoint.",
+      "tools": [
+        {
+          "name": "Read",
+          "snippet": "/src/app/server.go",
+          "ok": true
+        },
+        {
+          "name": "Edit",
+          "snippet": "/src/app/server.go",
+          "ok": true
+        },
+        {
+          "name": "Bash",
+          "snippet": "go test ./...",
+          "ok": false
+        },
+        {
+          "name": "Grep",
+          "snippet": "healthz",
+          "ok": true
+        },
+        {
+          "name": "Write",
+          "snippet": "/src/app/health.go",
+          "ok": true
+        },
+        {
+          "name": "Task",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "time": "2026-10-26T08:10:00Z",
+      "user": "Thanks",
+      "reply": "",
+      "tools": []
+    },
+    {
+      "number": 3,
+      "time": "2026-10-26T08:20:00Z",
+      "user": "",
+      "reply": "Ready when you are.",
+      "tools": []
+    }
+  ],
+  "events": [],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Add a health check"
+      },
+      {
+        "kind": "steps",
+        "count": 6,
+        "seconds": null,
+        "filesChanged": [
+          "/src/app/server.go",
+          "/src/app/health.go"
+        ],
+        "steps": [
+          {
+            "kind": "read",
+            "target": "/src/app/server.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "/src/app/server.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "run",
+            "target": "go test ./...",
+            "status": "failed",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "search",
+            "target": "healthz",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "/src/app/health.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "other",
+            "target": "",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "Added a health endpoint."
+      },
+      {
+        "kind": "user",
+        "text": "Thanks"
+      },
+      {
+        "kind": "reply",
+        "text": "Ready when you are."
+      }
+    ],
+    "working": false,
+    "pendingApproval": null
+  }
+}

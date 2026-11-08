@@ -1,0 +1,28 @@
+name: Web client
+
+on:
+  push:
+    branches: [main]
+    paths: ['clients/web/**', 'api/**', '.github/workflows/clients-web.yml']
+  pull_request:
+    branches: [main]
+    paths: ['clients/web/**', 'api/**', '.github/workflows/clients-web.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Ranking tests on the shared fixtures
+        run: node --test "clients/web/webapp/*.test.mjs"

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/zanetworker/aimux/internal/controller"
 )
 
 var (
@@ -15,8 +16,15 @@ var (
 
 // HelpView renders the help overlay.
 type HelpView struct {
-	width  int
-	height int
+	width        int
+	height       int
+	hooksMissing bool
+}
+
+// SetHooksMissing adds, muted under the status icons, that permission
+// alerts need the hooks (controller.HooksHint).
+func (v *HelpView) SetHooksMissing(missing bool) {
+	v.hooksMissing = missing
 }
 
 // NewHelpView creates a new HelpView.
@@ -41,12 +49,15 @@ func (v *HelpView) View() string {
 
 	b.WriteString(helpTitleStyle.Render("Status Icons"))
 	b.WriteString("\n")
-	writeHelp(&b, activeStyle.Render("▶")+" Active", "Processing (activity in last 30s)")
-	writeHelp(&b, idleStyle.Render("■")+" Idle", "Waiting for user input")
-	writeHelp(&b, waitingStyle.Render("⏸")+" Waiting", "Blocked on permission prompt")
+	writeHelp(&b, activeStyle.Render("▶")+" working", "Running a turn")
+	writeHelp(&b, idleStyle.Render("■")+" idle", "Open, waiting for your next message")
+	writeHelp(&b, waitingStyle.Render("⏸")+" needs you", "A permission prompt waits (alerts: aimux remote hooks install)")
 	errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
 	writeHelp(&b, errorStyle.Render("✕")+" Error", "Agent crashed or context overflow")
 	writeHelp(&b, unknownStyle.Render("?")+" Unknown", "Agent status could not be determined")
+	if v.hooksMissing {
+		b.WriteString(unknownStyle.Render("  "+controller.HooksHint) + "\n")
+	}
 	b.WriteString("\n")
 
 	b.WriteString(helpTitleStyle.Render("Agent List"))

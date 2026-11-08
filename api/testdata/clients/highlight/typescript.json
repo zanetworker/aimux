@@ -1,0 +1,95 @@
+{
+  "name": "typescript",
+  "lang": "typescript",
+  "code": "export async function load(id: string): Promise<User> {\n  const url = `/v1/${id}`; // fetch it\n  return await api.get(url, { retries: 3 });\n}\n",
+  "tokens": [
+    [
+      "keyword",
+      "export"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "keyword",
+      "async"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "keyword",
+      "function"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "function",
+      "load"
+    ],
+    [
+      "plain",
+      "(id: string): Promise<User> {\n  "
+    ],
+    [
+      "keyword",
+      "const"
+    ],
+    [
+      "plain",
+      " url = "
+    ],
+    [
+      "string",
+      "`/v1/${id}`"
+    ],
+    [
+      "plain",
+      "; "
+    ],
+    [
+      "comment",
+      "// fetch it"
+    ],
+    [
+      "plain",
+      "\n  "
+    ],
+    [
+      "keyword",
+      "return"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "keyword",
+      "await"
+    ],
+    [
+      "plain",
+      " api."
+    ],
+    [
+      "function",
+      "get"
+    ],
+    [
+      "plain",
+      "(url, { retries: "
+    ],
+    [
+      "number",
+      "3"
+    ],
+    [
+      "plain",
+      " });\n}\n"
+    ]
+  ]
+}

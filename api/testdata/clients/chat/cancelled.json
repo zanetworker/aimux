@@ -1,0 +1,144 @@
+{
+  "name": "a cancelled turn adds stopped: after its history turn, or after its own events when history lacks it",
+  "now": "2026-10-26T09:10:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T09:00:00Z",
+      "user": "Refactor the parser",
+      "reply": "",
+      "tools": [
+        {
+          "name": "Read",
+          "snippet": "/src/parser.go",
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "c1",
+      "kind": "turn_started",
+      "time": "2026-10-26T09:00:00Z",
+      "data": {
+        "text": "Refactor the parser"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "c1",
+      "kind": "update",
+      "time": "2026-10-26T09:00:02Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "r1",
+        "title": "Read parser.go",
+        "kind": "read",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "c1",
+      "kind": "turn_done",
+      "time": "2026-10-26T09:01:00Z",
+      "data": {
+        "stopReason": "cancelled"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "c2",
+      "kind": "turn_started",
+      "time": "2026-10-26T09:05:00Z",
+      "data": {
+        "text": "Try a smaller change"
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "c2",
+      "kind": "update",
+      "time": "2026-10-26T09:05:01Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "Smaller then."
+        }
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "c2",
+      "kind": "update",
+      "time": "2026-10-26T09:05:04Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "First I"
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "c2",
+      "kind": "turn_done",
+      "time": "2026-10-26T09:05:10Z",
+      "data": {
+        "stopReason": "cancelled"
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Refactor the parser"
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": null,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "read",
+            "target": "/src/parser.go",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "stopped"
+      },
+      {
+        "kind": "user",
+        "text": "Try a smaller change"
+      },
+      {
+        "kind": "thought",
+        "text": "Smaller then.",
+        "seconds": 3
+      },
+      {
+        "kind": "reply",
+        "text": "First I"
+      },
+      {
+        "kind": "stopped"
+      }
+    ],
+    "working": false,
+    "pendingApproval": null
+  }
+}

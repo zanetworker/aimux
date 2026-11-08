@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/sessionstate"
 )
 
 // SortField identifies which column to sort by.
@@ -17,11 +18,11 @@ type SortField int
 
 const (
 	SortByAge         SortField = iota // default: most recent first
-	SortByCost                        // highest cost first
-	SortByTurns                       // most turns first
-	SortByTitle                       // alphabetical by title/prompt
-	SortByFailureMode                 // tagged sessions first
-	SortByROI                         // highest ROI multiplier first
+	SortByCost                         // highest cost first
+	SortByTurns                        // most turns first
+	SortByTitle                        // alphabetical by title/prompt
+	SortByFailureMode                  // tagged sessions first
+	SortByROI                          // highest ROI multiplier first
 )
 
 // sortFieldOrder defines the cycle order when pressing 's'.
@@ -44,7 +45,9 @@ var (
 			Foreground(lipgloss.Color("#06B6D4"))
 	sessDimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6B7280"))
-	sessProjectStyle = lipgloss.NewStyle().
+	// sessNeedsYouStyle is the waiting colour of the agents view's icon.
+	sessNeedsYouStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+	sessProjectStyle  = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#A78BFA"))
 	sessBranchStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#A78BFA"))
@@ -172,10 +175,10 @@ type SessionsView struct {
 	filterText  string
 
 	// Tag input
-	tagMode     bool
-	tagInput    TextInput
-	tagVocab    []string // autocomplete vocabulary
-	tagCursor   int      // selected suggestion index (-1 = typing custom)
+	tagMode   bool
+	tagInput  TextInput
+	tagVocab  []string // autocomplete vocabulary
+	tagCursor int      // selected suggestion index (-1 = typing custom)
 
 	// Note input
 	noteMode  bool
@@ -213,6 +216,9 @@ type SessionsView struct {
 	// Pinned count (starred sessions at the top of visible list)
 	pinnedCount int
 
+	// activity is each live session's state service answer, by session id
+	activity map[string]string
+
 	// Title generation
 	generatingTitles bool
 
@@ -233,8 +239,8 @@ type SessionsView struct {
 	resumeMode string // "bypass", "default", "plan", etc.
 
 	// Trace preview (reused LogsView)
-	previewLogs  *LogsView
-	traceParser  TraceParser
+	previewLogs *LogsView
+	traceParser TraceParser
 }
 
 // NewSessionsView creates a new sessions browser.
@@ -251,6 +257,13 @@ func (v *SessionsView) SetSessions(sessions []history.Session) {
 	if v.cursor < 0 {
 		v.cursor = 0
 	}
+}
+
+// SetActivity sets each session's activity (sessionstate values, from the
+// agents refresh); a row shows "needs you", "working" or "idle" before its
+// title, nothing for gone or unknown sessions.
+func (v *SessionsView) SetActivity(activity map[string]string) {
+	v.activity = activity
 }
 
 // SetSize sets the available width and height.
@@ -853,45 +866,20 @@ func (v *SessionsView) cycleSortField() {
 	}
 }
 
-// sessionTitle returns the display title for sorting purposes.
+// sessionTitle returns the shown title (history.ShownTitle) for sorting.
 func sessionTitle(s history.Session) string {
-	if s.Title != "" {
-		return strings.ToLower(s.Title)
-	}
-	if s.LastPrompt != "" {
-		return strings.ToLower(s.LastPrompt)
-	}
-	return strings.ToLower(s.FirstPrompt)
+	return strings.ToLower(history.ShownTitle(s))
 }
 
 // visibleSessions returns sessions matching the current filter, sorted
-// by the active sort field.
-// Near-empty sessions (1 turn, $0 cost) are hidden unless a filter is active.
-// hiddenUntilH is the one rule for what H reveals (subagent and automated
-// sessions while not searching); the list and the header count both use it.
-func (v *SessionsView) hiddenUntilH(s history.Session, isSearching bool) bool {
-	return !v.showSubagents && !isSearching && (s.IsSubagent || s.Automated)
-}
-
+// by the active sort field. Which sessions are hidden is history.Visible's
+// rule with the TUI's options (H and search).
 func (v *SessionsView) visibleSessions() []history.Session {
 	isSearching := v.filterText != "" || v.contentSearchIDs != nil
+	opts := history.TUIOpts(v.showSubagents, isSearching)
 	var result []history.Session
 	for _, s := range v.sessions {
-		if v.hiddenUntilH(s, isSearching) {
-			continue
-		}
-		// H promises automated sessions: the noise filters below must not
-		// take them away again.
-		revealed := v.showSubagents && s.Automated
-		if !isSearching && !revealed && isHookSession(s) {
-			continue
-		}
-		// Hide near-empty sessions (auto-memory, system operations) unless searching
-		if !isSearching && !revealed && s.CostUSD == 0 && s.TurnCount <= 5 {
-			continue
-		}
-		// Hide sessions with no timestamps (broken/incomplete files)
-		if !isSearching && s.StartTime.IsZero() && s.LastActive.IsZero() {
+		if !history.Visible(s, opts) {
 			continue
 		}
 		// Directory filter
@@ -988,30 +976,18 @@ func (v *SessionsView) compareSessions(a, b history.Session) bool {
 		}
 		return aTag < bTag
 	case SortByROI:
-		aROI := a.DurationMin * (a.ROIMultiplier - 1) * (150.0 / 60.0) - a.CostUSD
-		bROI := b.DurationMin * (b.ROIMultiplier - 1) * (150.0 / 60.0) - b.CostUSD
+		aROI := a.DurationMin*(a.ROIMultiplier-1)*(150.0/60.0) - a.CostUSD
+		bROI := b.DurationMin*(b.ROIMultiplier-1)*(150.0/60.0) - b.CostUSD
 		return aROI < bROI
 	default: // SortByAge
 		return a.StartTime.Before(b.StartTime)
 	}
 }
 
-var hookSessionPrefixes = []string{
-	"YOU ARE A SESSION ANALYZER",
-	"YOU ARE A ",
-	"Analyze the session transcript",
-}
-
-func isHookSession(s history.Session) bool {
-	for _, prefix := range hookSessionPrefixes {
-		if strings.HasPrefix(s.FirstPrompt, prefix) || strings.HasPrefix(s.Title, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func sessionMatchesFilter(s history.Session, needle string) bool {
+	if strings.Contains(strings.ToLower(history.ShownTitle(s)), needle) {
+		return true
+	}
 	if strings.Contains(strings.ToLower(s.FirstPrompt), needle) {
 		return true
 	}
@@ -1082,8 +1058,10 @@ func (v *SessionsView) View() string {
 	if !v.showSubagents {
 		hiddenCount, automatedCount := 0, 0
 		isSearching := v.filterText != "" || v.contentSearchIDs != nil
+		// Count what H would show: hidden now, visible with H.
+		now, withH := history.TUIOpts(false, isSearching), history.TUIOpts(true, isSearching)
 		for _, s := range v.sessions {
-			if !v.hiddenUntilH(s, isSearching) {
+			if history.Visible(s, now) || !history.Visible(s, withH) {
 				continue
 			}
 			if s.IsSubagent {
@@ -1232,7 +1210,7 @@ func (v *SessionsView) View() string {
 		// Render divider between pinned and unpinned sections
 		if !pinnedDividerRendered && v.pinnedCount > 0 && i == v.pinnedCount {
 			divStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
-			b.WriteString(divStyle.Render("  " + strings.Repeat("─", w-4)) + "\n")
+			b.WriteString(divStyle.Render("  "+strings.Repeat("─", w-4)) + "\n")
 			pinnedDividerRendered = true
 		}
 
@@ -1260,7 +1238,7 @@ func (v *SessionsView) View() string {
 	if v.previewLogs != nil {
 		b.WriteString("\n")
 		sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#374151"))
-		b.WriteString(sepStyle.Render("  " + strings.Repeat("─", w-4)) + "\n")
+		b.WriteString(sepStyle.Render("  "+strings.Repeat("─", w-4)) + "\n")
 		b.WriteString(v.previewLogs.View())
 	}
 
@@ -1294,16 +1272,16 @@ func (v *SessionsView) View() string {
 			prefix := "    "
 			if i == v.tagCursor {
 				selectedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
-				b.WriteString("\n" + prefix + selectedStyle.Render("▸ " + tag))
+				b.WriteString("\n" + prefix + selectedStyle.Render("▸ "+tag))
 			} else {
-				b.WriteString("\n" + prefix + sessDimStyle.Render("  " + tag))
+				b.WriteString("\n" + prefix + sessDimStyle.Render("  "+tag))
 			}
 		}
 		if len(suggestions) > maxVisible {
 			b.WriteString("\n    " + sessDimStyle.Render(fmt.Sprintf("  ... and %d more (type to filter)", len(suggestions)-maxVisible)))
 		}
 		if len(suggestions) == 0 && v.tagInput.Value() != "" {
-			b.WriteString("\n    " + sessDimStyle.Render("(new tag: \"" + v.tagInput.Value() + "\")"))
+			b.WriteString("\n    " + sessDimStyle.Render("(new tag: \""+v.tagInput.Value()+"\")"))
 		}
 	}
 	if v.noteMode {
@@ -1318,12 +1296,9 @@ func (v *SessionsView) View() string {
 	if v.deleteMode {
 		s := v.SelectedSession()
 		if s != nil {
-			title := s.Title
-			if title == "" {
-				title = s.FirstPrompt
-			}
-			if len(title) > 50 {
-				title = title[:47] + "..."
+			title := history.ShownTitle(*s)
+			if r := []rune(title); len(r) > 50 {
+				title = string(r[:47]) + "..."
 			}
 			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
 			dimWarn := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
@@ -1424,14 +1399,8 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 	}
 	age := formatAge(ageTime)
 
-	// Use LLM-generated title if available, fall back to last prompt, then first prompt
-	prompt := s.Title
-	if prompt == "" {
-		prompt = s.LastPrompt
-	}
-	if prompt == "" {
-		prompt = s.FirstPrompt
-	}
+	// The one title rule: meta title, then Claude Code's ai-title, then the first message
+	prompt := history.ShownTitle(s)
 	if prompt == "" {
 		prompt = "(no prompt)"
 	}
@@ -1487,6 +1456,20 @@ func (v *SessionsView) renderSessionRow(s history.Session, selected bool, w int)
 		projStr := fmt.Sprintf("%-*s", cols.project, truncate(proj, cols.project))
 		b.WriteString(sessProjectStyle.Render(projStr))
 		b.WriteString("   ")
+	}
+
+	// A live session's activity leads the prompt column, in the same words
+	// and the one state colour (needs you) as the agents view.
+	if word := sessionstate.Activity(v.activity[s.ID]).Label(); word != "" {
+		style := sessDimStyle
+		if word == sessionstate.NeedsYou.Label() {
+			style = sessNeedsYouStyle
+		}
+		b.WriteString(style.Render(word) + " ")
+		cols.prompt -= len(word) + 1
+		if cols.prompt < 1 {
+			cols.prompt = 1
+		}
 	}
 
 	// Prompt column (fixed width, padded)
@@ -1759,15 +1742,12 @@ func (v *SessionsView) renderCleanupView(w int) string {
 		}
 
 		reason := sessDimStyle.Render(fmt.Sprintf("(%s)", item.reason))
-		prompt := item.session.Title
-		if prompt == "" {
-			prompt = item.session.FirstPrompt
-		}
+		prompt := history.ShownTitle(item.session)
 		if prompt == "" {
 			prompt = "(no prompt)"
 		}
-		if len(prompt) > 50 {
-			prompt = prompt[:47] + "..."
+		if r := []rune(prompt); len(r) > 50 {
+			prompt = string(r[:47]) + "..."
 		}
 
 		turnStr := sessTurnStyle.Render(fmt.Sprintf("%dt", item.session.TurnCount))

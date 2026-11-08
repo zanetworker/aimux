@@ -105,7 +105,7 @@ func TestDiscover_ScanCacheKeepsSidecarMetaFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	// a title set after caching must show without the session file changing
-	if err := SaveMeta(filepath.Join(projDir, "aaa.jsonl"), Meta{Title: "named later", Starred: true}); err != nil {
+	if err := UpdateMeta(filepath.Join(projDir, "aaa.jsonl"), func(m *Meta) { *m = Meta{Title: "named later", Starred: true} }); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := Discover(DiscoverOpts{}, root)

@@ -30,7 +30,7 @@ aimux profile list --json
 aimux feedback "message" --json
 ```
 
-Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as the reply streams. The MCP proxy commands (`mcp proxy refresh`, `serve`, `config`) and `remote serve` print text: a per-server report, a startup line, or setup instructions.
+Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as the reply streams. `aimux mcp proxy status --json` prints the proxy's status object. The other MCP proxy commands (`mcp proxy refresh`, `serve`, `config`) and `remote serve` print text: a per-server report, a startup line, or setup instructions.
 
 ## Exit Codes
 
@@ -57,7 +57,7 @@ aimux sessions --list --json --fields id,project,cost
 aimux agents --json --fields pid,provider,status
 ```
 
-Session fields worth knowing: `title` (a title aimux generated, if any), `ai_title` (the name Claude Code gave the session), `first_prompt` (the first prompt), `last_prompt` (the last message the person typed: not tool results, hook feedback, notifications, messages from other sessions or image placeholders), `project` (rebuilt from Claude's folder name) and `cwd` (the working directory recorded in the session, exact where `project` can be ambiguous).
+Session fields worth knowing: `title` (the `.meta.json` title, if any), `title_by` (`owner` when you wrote it, otherwise aimux generated it), `custom_title` (the name given with Claude Code's `/rename`), `ai_title` (the name Claude Code gave the session), `first_prompt` (the first prompt), `last_prompt` (the last message the person typed: not tool results, hook feedback, notifications, messages from other sessions or image placeholders), `project` (rebuilt from Claude's folder name) and `cwd` (the working directory recorded in the session, exact where `project` can be ambiguous).
 
 ## Bounded Output
 
@@ -138,7 +138,14 @@ With `--json`, errors go to stderr as structured JSON (except `aimux chat`, whos
 
 ## Session Search over MCP
 
-`aimux mcp serve` exposes session search, transcript reading and resume as MCP tools over stdio. It shares the ranked index with `aimux sessions` (`~/.aimux/search.db`). Each tool call picks up changed session files and embeds them in the background, so calls don't wait for them; only a new query's own embedding calls the API (cached after the first time). New content matches by keyword at once and usually joins semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next tool call retries it, even if no files changed. One-shot CLI searches (`aimux sessions "query" --list`) embed inline instead, since the process exits right after answering.
+`aimux mcp serve` exposes session search, transcript reading and resume as MCP tools over stdio. It shares the ranked index with `aimux sessions` (`~/.aimux/search.db`). Each tool call picks up changed session files and embeds them in the background, so calls don't wait for them; only a new query's own embedding calls the API (cached after the first time). New content matches by keyword at once and usually joins semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next tool call retries it, even if no files changed. One-shot CLI searches (`aimux sessions "query" --list`) embed inline instead, since the process exits right after answering. One exception: when the index was written by a newer aimux build (several builds can share the file, one per open session), an older build uses it as it is without refreshing and logs a note once, and `aimux sessions index` refuses to rebuild it; update `aimux` to bring that build's search up to date.
+
+`list_sessions` and `get_session` use the session catalog, the same one the phone clients see:
+
+- `list_sessions` prints one line per session, newest first: `` - `<id>` <last active> · **<title>** · <directory> · <provider> · <state> ``. The title follows the one title rule (your title, `/rename`, aimux's generated title, Claude Code's name, then the first message). The state is `idle` or `open_in_terminal`; `open_in_terminal` means a process holds the session, which is usually a terminal but can also be aimux's own remote adapter while the phone runs a turn. Sessions whose transcript only aimux's archive still has (`~/.aimux/archive`) come from the search index as `unknown · archived`, under the same visibility rule; if the index cannot be read, the list says so and shows the rest, and if finding them takes more than 20 pages of 100 index rows, it stops and says older ones may be missing. Subagents never show. Automated sessions and aimux's own analyzer sessions show only with `include_automated`, except sessions started from the phone. `days`, `project_filter` and `limit` apply after that; `limit` 0 or below means 200. A session with no recorded activity time uses its transcript's modified time.
+- `get_session` still reads the transcript through the search index. For a session the catalog knows, it shows the same title in full and adds `**Provider:**` and `**State:**` lines to its header; an archive-only session keeps the index's title and has neither line.
+
+`search_sessions`, `continue_session` and `create_virtual_session` read the search index as before.
 
 ## Configuration
 

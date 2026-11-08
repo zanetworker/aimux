@@ -3,22 +3,47 @@ package sessionmcp
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/zanetworker/aimux/internal/catalog"
+	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/search"
 )
 
 // Server exposes session search and resume as MCP tools.
 type Server struct {
 	svc *search.Service
+	cat *catalog.Catalog // nil: list_sessions and get_session read the index only
+	// archivePageSize and archiveMaxPages bound list_sessions' read of the
+	// index for archive-only sessions; 0: defaultArchivePageSize and
+	// defaultArchiveMaxPages.
+	archivePageSize, archiveMaxPages int
 }
+
+// The index is read for archive-only sessions in pages of this many rows,
+// at most this many pages per list_sessions call.
+const (
+	defaultArchivePageSize = 100
+	defaultArchiveMaxPages = 20
+)
 
 // New returns a Server over svc.
 func New(svc *search.Service) *Server {
 	return &Server{svc: svc}
+}
+
+// WithCatalog makes list_sessions list the session catalog (shown titles,
+// provider, state, history.MCPOpts visibility) and get_session add the
+// catalog's title, provider and state; it returns s.
+func (s *Server) WithCatalog(c *catalog.Catalog) *Server {
+	s.cat = c
+	return s
 }
 
 // Register adds the session tools to srv.
@@ -64,8 +89,10 @@ func getTool() mcp.Tool {
 
 func listTool() mcp.Tool {
 	return mcp.NewTool("list_sessions",
-		mcp.WithDescription("List recent sessions across all projects, newest first, with IDs, titles, dates and directories. "+
-			"Automated sessions are hidden unless include_automated is true.\n\n"+
+		mcp.WithDescription("List recent sessions across all projects, newest first, with IDs, titles, dates, directories, "+
+			"provider and state. State is idle, open_in_terminal (a process holds the session: a terminal, or aimux's own "+
+			"remote adapter while the phone runs a turn) or archived (only aimux's archive still has the transcript; provider unknown). "+
+			"Automated sessions and aimux's own analyzer sessions are hidden unless include_automated is true.\n\n"+
 			"Use when: user asks 'what did I work on recently', 'show my sessions', "+
 			"'what sessions do I have for project X', or needs to browse history without a specific query."),
 		mcp.WithNumber("limit", mcp.DefaultNumber(20)),
@@ -125,7 +152,14 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if res != nil {
 		return res, nil
 	}
-	return mcp.NewToolResultText(formatSession(t, req.GetInt("last_n", 0), req.GetInt("before_seq", 0))), nil
+	extra := ""
+	if s.cat != nil {
+		if title, provider, state, ok := s.catalogInfo(t.Detail.SessionID); ok {
+			t.Detail.Title = title
+			extra = fmt.Sprintf("- **Provider:** %s\n- **State:** %s\n", provider, state)
+		}
+	}
+	return mcp.NewToolResultText(formatSessionWith(t, req.GetInt("last_n", 0), req.GetInt("before_seq", 0), extra)), nil
 }
 
 func (s *Server) handleContinue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -137,6 +171,9 @@ func (s *Server) handleContinue(ctx context.Context, req mcp.CallToolRequest) (*
 }
 
 func (s *Server) handleList(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if s.cat != nil {
+		return s.listCatalog(ctx, req)
+	}
 	rs, err := s.svc.Recent(ctx, search.SearchOpts{
 		Limit:            req.GetInt("limit", 20),
 		IncludeAutomated: req.GetBool("include_automated", false),
@@ -156,6 +193,144 @@ func (s *Server) handleList(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		rs = kept
 	}
 	return mcp.NewToolResultText(formatList(rs)), nil
+}
+
+// catalogInfo is get_session's title (the whole history.ShownTitle),
+// provider and state from the catalog: Refresh rereads the one session (a
+// /rename or a .meta.json change since the last list shows) and scans
+// everything only when the catalog has not seen it. false: the catalog
+// does not know it.
+func (s *Server) catalogInfo(id string) (title, provider, state string, ok bool) {
+	e, ok := s.cat.Refresh(id)
+	if !ok {
+		return "", "", "", false
+	}
+	title = e.Title
+	if e.Record != nil {
+		title = history.ShownTitle(*e.Record)
+	}
+	return title, e.Provider, e.State, true
+}
+
+// defaultListLimit is list_sessions' cap when limit is 0 or below, the
+// index's own default.
+const defaultListLimit = 200
+
+// Provider and state of a session only aimux's archive still has.
+const (
+	archivedProvider = "unknown"
+	archivedState    = "archived"
+)
+
+// listCatalog is list_sessions over the catalog: its visibility rule
+// (history.MCPOpts), plus the sessions only the index has (aimux's archive
+// keeps transcripts Claude Code cleaned up), then the days and
+// project_filter filters, newest first, at most limit. An undated catalog
+// session takes its transcript's modified time, or is left out. If the
+// index cannot be read, the catalog rows still list, with a note.
+func (s *Server) listCatalog(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	includeAutomated := req.GetBool("include_automated", false)
+	es, err := s.cat.List(history.MCPOpts(includeAutomated))
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("list sessions: %v", err)), nil
+	}
+	var cutoff time.Time
+	if days := req.GetInt("days", 30); days > 0 {
+		cutoff = time.Now().AddDate(0, 0, -days)
+	}
+	dir := req.GetString("project_filter", "")
+	limit := req.GetInt("limit", 20)
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+	rows := make([]catalog.Entry, 0, len(es))
+	for _, e := range es {
+		if e.LastActive.IsZero() {
+			if e.LastActive = s.fileTime(e.ID); e.LastActive.IsZero() {
+				continue
+			}
+		}
+		if e.LastActive.After(cutoff) && underDir(entryDir(e), dir) {
+			rows = append(rows, e)
+		}
+	}
+	// Archive-only sessions: the index's rows the catalog does not know,
+	// under the same rule, read in pages until limit of them are found, so
+	// rows the catalog knows or hides never use up the read. Lookup reads
+	// the scan List made above, so "known" is as fresh as the rows listed.
+	keep := func(r search.Result) bool {
+		_, known := s.cat.Lookup(r.SessionID)
+		return !known && archivedVisible(r, includeAutomated)
+	}
+	pageSize, maxPages := s.archivePageSize, s.archiveMaxPages
+	if pageSize <= 0 {
+		pageSize = defaultArchivePageSize
+	}
+	if maxPages <= 0 {
+		maxPages = defaultArchiveMaxPages
+	}
+	var notes []string
+	rs, capped, err := s.svc.RecentWhere(ctx, search.SearchOpts{Limit: limit, IncludeAutomated: includeAutomated, Dir: dir, Since: cutoff},
+		pageSize, maxPages, keep)
+	if err != nil {
+		notes = append(notes, fmt.Sprintf("_archived sessions not listed: %v_", err))
+	}
+	if capped {
+		notes = append(notes, fmt.Sprintf("_archived sessions: stopped after %d pages of the search index; older ones may be missing_", maxPages))
+	}
+	for _, r := range rs {
+		rows = append(rows, catalog.Entry{ID: r.SessionID, Title: r.Title, Cwd: r.CWD, LastActive: r.ModTime,
+			Provider: archivedProvider, State: archivedState})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].LastActive.After(rows[j].LastActive) })
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	out := formatEntries(rows)
+	for _, n := range notes {
+		out += "\n\n" + n
+	}
+	return mcp.NewToolResultText(out), nil
+}
+
+// archivedVisible applies list_sessions' rule (history.MCPOpts) to an
+// archive-only index row, from what the index keeps: automated, title and
+// first prompt (the analyzer kind). The other kinds cannot hide one here:
+// the index does not read subagent transcripts (one folder deeper), and
+// MCPOpts hides neither near-empty nor undated sessions.
+func archivedVisible(r search.Result, includeAutomated bool) bool {
+	s := history.Session{ID: r.SessionID, Title: r.Title, FirstPrompt: r.FirstPrompt, Automated: r.Automated,
+		Cwd: r.CWD, LastActive: r.ModTime}
+	return history.Visible(s, history.MCPOpts(includeAutomated))
+}
+
+// fileTime is the modified time of a session's transcript; zero when the
+// catalog has no file for it.
+func (s *Server) fileTime(id string) time.Time {
+	f, _ := s.cat.File(id)
+	if f == "" {
+		return time.Time{}
+	}
+	info, err := os.Stat(f)
+	if err != nil {
+		return time.Time{}
+	}
+	return info.ModTime()
+}
+
+// entryDir is the session's recorded working directory, else its project.
+func entryDir(e catalog.Entry) string {
+	if e.Cwd != "" {
+		return e.Cwd
+	}
+	return e.Project
+}
+
+// underDir reports path is dir or below it, the index's project_filter
+// rule; an empty dir admits every path.
+func underDir(path, dir string) bool {
+	dir = strings.TrimRight(dir, "/")
+	return dir == "" || path == dir || strings.HasPrefix(path, dir+"/")
 }
 
 func (s *Server) handleVirtual(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -53,7 +53,7 @@ func TestToggleStar(t *testing.T) {
 }
 
 func TestToggleStar_InvalidPath(t *testing.T) {
-	// Non-existent directory should fail on SaveMeta
+	// Non-existent directory should fail on UpdateMeta
 	_, err := ToggleStar("/nonexistent/dir/session.jsonl")
 	if err == nil {
 		t.Error("expected error for non-existent path")
@@ -231,5 +231,70 @@ func TestSetROI_ZeroClears(t *testing.T) {
 	}
 	if meta.TaskType != "" {
 		t.Errorf("expected empty TaskType, got %q", meta.TaskType)
+	}
+}
+
+func TestSetStarred(t *testing.T) {
+	sf := tempSessionFile(t)
+	if err := SetNote(sf, "keep"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []bool{true, true, false} {
+		if err := SetStarred(sf, want); err != nil {
+			t.Fatalf("SetStarred(%v): %v", want, err)
+		}
+		if got := history.LoadMeta(sf); got.Starred != want || got.Note != "keep" {
+			t.Fatalf("after SetStarred(%v): starred=%v note=%q", want, got.Starred, got.Note)
+		}
+	}
+}
+
+func TestSetStarred_InvalidPath(t *testing.T) {
+	if err := SetStarred("/nonexistent/dir/session.jsonl", true); err == nil {
+		t.Error("expected error for non-existent path")
+	}
+}
+
+func TestUpdateSessionMeta_AppliesOnlySetFields(t *testing.T) {
+	sf := tempSessionFile(t)
+	if err := SetNote(sf, "keep"); err != nil {
+		t.Fatal(err)
+	}
+	ann, starred, roi, task := "a", true, 2.5, "bug"
+	err := UpdateSessionMeta(sf, MetaPatch{Annotation: &ann, Tags: []string{"x"}, Starred: &starred, ROIMultiplier: &roi, TaskType: &task})
+	if err != nil {
+		t.Fatalf("UpdateSessionMeta: %v", err)
+	}
+	m := history.LoadMeta(sf)
+	if m.Annotation != "a" || len(m.Tags) != 1 || m.Tags[0] != "x" || !m.Starred || m.ROIMultiplier != 2.5 || m.TaskType != "bug" {
+		t.Errorf("meta = %+v", m)
+	}
+	if m.Note != "keep" {
+		t.Errorf("unset note changed: %q", m.Note)
+	}
+}
+
+func TestUpdateSessionMeta_EmptyValuesClear(t *testing.T) {
+	sf := tempSessionFile(t)
+	if err := SetNote(sf, "n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetTags(sf, []string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	empty := ""
+	if err := UpdateSessionMeta(sf, MetaPatch{Note: &empty, Tags: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	m := history.LoadMeta(sf)
+	if m.Note != "" || len(m.Tags) != 0 {
+		t.Errorf("meta = %+v", m)
+	}
+}
+
+func TestUpdateSessionMeta_InvalidPath(t *testing.T) {
+	note := "x"
+	if err := UpdateSessionMeta(filepath.Join(t.TempDir(), "missing", "dir", "s.jsonl"), MetaPatch{Note: &note}); err == nil {
+		t.Error("expected error for unwritable path")
 	}
 }

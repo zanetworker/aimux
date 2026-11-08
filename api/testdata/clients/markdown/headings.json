@@ -1,0 +1,112 @@
+{
+  "name": "ATX headings 1 to 6 with inline content; seven hashes, a missing space and closing hashes",
+  "markdown": "# Title\n## Second level\n### Third *with emphasis*\n#### Four\n##### Five\n###### Six\n\n####### Seven hashes is a paragraph\n\n#No space is a paragraph\n\n## Closing hashes are dropped ##\nText right under a heading is its own paragraph.\n",
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Title"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Second level"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Third "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "with emphasis"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 4,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Four"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 5,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Five"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 6,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Six"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "####### Seven hashes is a paragraph"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "#No space is a paragraph"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Closing hashes are dropped"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Text right under a heading is its own paragraph."
+        }
+      ]
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
+	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
@@ -89,26 +90,7 @@ func findProcessRoots(pids []int) map[int]int {
 
 // getProcessStartTime returns the start time for a process, or zero time on error.
 // It is a variable so tests can override it.
-var getProcessStartTime = getProcessStartTimeImpl
-
-func getProcessStartTimeImpl(pid int) time.Time {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output() // #nosec G204
-	if err != nil {
-		return time.Time{}
-	}
-	// Format: "Mon Mar  2 09:32:31 2026" (local time).
-	raw := strings.TrimSpace(string(out))
-	t, err := time.ParseInLocation("Mon Jan  2 15:04:05 2006", raw, time.Local)
-	if err != nil {
-		t, err = time.ParseInLocation("Mon Jan 2 15:04:05 2006", raw, time.Local)
-		if err != nil {
-			return time.Time{}
-		}
-	}
-	return t.UTC()
-}
+var getProcessStartTime = discovery.ReadProcessStartTime
 
 // extractCodexCWD reads the first few lines of a Codex session JSONL file
 // looking for a session_meta entry with a "cwd" field.

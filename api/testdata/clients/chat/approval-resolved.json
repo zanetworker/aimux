@@ -1,0 +1,202 @@
+{
+  "name": "approvals resolved denied and expired keep their place and carry the outcome",
+  "now": "2026-10-26T08:05:00Z",
+  "turns": [],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "t1",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Update the notes"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:01Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c1",
+        "title": "Edit notes.md",
+        "kind": "edit",
+        "status": "pending"
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "t1",
+      "kind": "approval",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "approvalId": "a1",
+        "title": "Edit notes.md",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "toolCall": {
+          "toolCallId": "x-a1",
+          "rawInput": {
+            "file_path": "/src/notes.md"
+          }
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "t1",
+      "kind": "approval_resolved",
+      "time": "2026-10-26T08:00:10Z",
+      "data": {
+        "approvalId": "a1",
+        "outcome": "denied"
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:11Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c1",
+        "status": "failed"
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "t1",
+      "kind": "update",
+      "time": "2026-10-26T08:00:12Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "I left notes.md as it was."
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "t1",
+      "kind": "approval",
+      "time": "2026-10-26T08:00:13Z",
+      "data": {
+        "approvalId": "a2",
+        "title": "Run cleanup",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "toolCall": {
+          "toolCallId": "x-a2",
+          "rawInput": {
+            "command": "make clean"
+          }
+        }
+      }
+    },
+    {
+      "seq": 8,
+      "turn": "t1",
+      "kind": "approval_resolved",
+      "time": "2026-10-26T08:02:13Z",
+      "data": {
+        "approvalId": "a2",
+        "outcome": "expired"
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Update the notes"
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": 10,
+        "filesChanged": [
+          "Edit notes.md"
+        ],
+        "steps": [
+          {
+            "kind": "edit",
+            "target": "Edit notes.md",
+            "status": "failed",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "approval",
+        "approvalId": "a1",
+        "title": "Edit notes.md",
+        "command": null,
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "outcome": "denied"
+      },
+      {
+        "kind": "reply",
+        "text": "I left notes.md as it was."
+      },
+      {
+        "kind": "approval",
+        "approvalId": "a2",
+        "title": "Run cleanup",
+        "command": "make clean",
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ],
+        "outcome": "expired"
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

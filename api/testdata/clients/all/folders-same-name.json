@@ -1,0 +1,137 @@
+{
+  "name": "Repos with the same name (any case) are separate, ordered by repoPath; worktrees ignore case",
+  "now": "2026-10-31T12:00:00Z",
+  "timeZone": "UTC",
+  "project": null,
+  "sort": "folders",
+  "sessions": [
+    {
+      "id": "n1",
+      "provider": "claude",
+      "title": "Main notes",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "n2",
+      "provider": "claude",
+      "title": "Work notes",
+      "project": "/work/notes",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/work/notes",
+        "label": "work / notes"
+      }
+    },
+    {
+      "id": "n3",
+      "provider": "claude",
+      "title": "Archived",
+      "project": "/archive/Notes",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "Notes",
+        "repoPath": "/archive/Notes",
+        "label": "Notes"
+      }
+    },
+    {
+      "id": "n4",
+      "provider": "claude",
+      "title": "Beta work",
+      "project": "/src/notes-wt/beta",
+      "lastActive": "2026-10-31T08:00:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "worktree": "beta",
+        "label": "notes / beta"
+      }
+    },
+    {
+      "id": "n5",
+      "provider": "claude",
+      "title": "Alpha work",
+      "project": "/src/notes-wt/Alpha",
+      "lastActive": "2026-10-31T07:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "worktree": "Alpha",
+        "label": "notes / Alpha"
+      }
+    }
+  ],
+  "expect": {
+    "repos": [
+      {
+        "repoPath": "/archive/Notes",
+        "name": "Notes",
+        "count": 1,
+        "working": 0,
+        "open": false,
+        "sessions": [
+          "n3"
+        ],
+        "worktrees": []
+      },
+      {
+        "repoPath": "/src/notes",
+        "name": "notes",
+        "count": 3,
+        "working": 1,
+        "open": false,
+        "sessions": [
+          "n1"
+        ],
+        "worktrees": [
+          {
+            "name": "Alpha",
+            "count": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "n5"
+            ]
+          },
+          {
+            "name": "beta",
+            "count": 1,
+            "working": 1,
+            "open": false,
+            "sessions": [
+              "n4"
+            ]
+          }
+        ]
+      },
+      {
+        "repoPath": "/work/notes",
+        "name": "notes",
+        "count": 1,
+        "working": 0,
+        "open": true,
+        "sessions": [
+          "n2"
+        ],
+        "worktrees": []
+      }
+    ]
+  }
+}

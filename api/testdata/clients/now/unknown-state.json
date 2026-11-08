@@ -1,0 +1,50 @@
+{
+  "name": "an unknown state is closed, on no section, and does not crash",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "u1",
+      "provider": "claude",
+      "title": "Strange session",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "hibernating",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Old terminal",
+      "project": "/src/research",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "research",
+        "sessions": [
+          "m1"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 0,
+    "open": 1
+  }
+}

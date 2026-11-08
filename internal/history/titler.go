@@ -1,17 +1,34 @@
 package history
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"net/http"
+	"log"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/jsonl"
+	"github.com/zanetworker/aimux/internal/llm"
 )
+
+// anthropicMessagesURL is the Messages API endpoint (a test points it at a fake).
+var anthropicMessagesURL = llm.MessagesURL
+
+// recordNamingUsage records the titler's calls under "naming" (a test
+// replaces it).
+var recordNamingUsage = func(u cost.Usage) error { return cost.AppendUsage(cost.DefaultUsagePath(), u) }
+
+// titleTimeout bounds one title call.
+const titleTimeout = 30 * time.Second
+
+// errNoTitleKey is the one error that stops GenerateTitles: without an API
+// key every session would fail the same way.
+var errNoTitleKey = errors.New("no API key: set ANTHROPIC_API_KEY or configure sessions.api_key in config")
 
 // TitleConfig controls LLM-based session title generation.
 type TitleConfig struct {
@@ -28,28 +45,6 @@ func DefaultTitleConfig() TitleConfig {
 		Enabled: false,
 		Model:   "haiku",
 	}
-}
-
-// resolveModel maps short model names to full model IDs.
-func resolveModel(short string) string {
-	switch short {
-	case "haiku":
-		return "claude-haiku-4-5-20251001"
-	case "sonnet":
-		return "claude-sonnet-4-6-20250527"
-	case "opus":
-		return "claude-opus-4-6-20250527"
-	default:
-		return short
-	}
-}
-
-// resolveAPIKey returns the appropriate API key for the model.
-func resolveAPIKey(cfg TitleConfig) string {
-	if cfg.APIKey != "" {
-		return cfg.APIKey
-	}
-	return os.Getenv("ANTHROPIC_API_KEY")
 }
 
 // extractConversationSummary reads the first few turns of a session JSONL
@@ -165,9 +160,9 @@ func extractTextFromContent(content json.RawMessage) string {
 // from the first few turns of a session conversation. Returns the title
 // string or an error. The title is 3-8 words summarizing the session topic.
 func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
-	apiKey := resolveAPIKey(cfg)
+	apiKey := llm.APIKey(cfg.APIKey)
 	if apiKey == "" {
-		return "", fmt.Errorf("no API key: set ANTHROPIC_API_KEY or configure sessions.api_key in config")
+		return "", errNoTitleKey
 	}
 
 	// Build a conversation summary from the session file
@@ -180,7 +175,7 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 		}
 	}
 
-	model := resolveModel(cfg.Model)
+	model, _ := ResolveModel(cfg.Model)
 
 	prompt := fmt.Sprintf(
 		"Your task: write a single descriptive title (5-10 words) summarizing this coding session.\n\n"+
@@ -195,85 +190,52 @@ func GenerateTitle(session Session, cfg TitleConfig) (string, error) {
 	return callAnthropic(prompt, model, apiKey)
 }
 
+// titleClient is the naming engine as the titler uses it: the Messages API
+// only (no claude -p fallback), titleTimeout per call.
+func titleClient(apiKey string) *llm.Client {
+	return namingClient(llm.NewAPI(apiKey, anthropicMessagesURL, titleTimeout), nil, recordNamingUsage, nil, log.Printf)
+}
+
+// callAnthropic asks for one title through the naming engine (namingClient):
+// the Messages API only (the titler has no claude -p fallback), max_tokens
+// 30, no system prompt, usage recorded under "naming".
 func callAnthropic(prompt, model, apiKey string) (string, error) {
-	reqBody := map[string]interface{}{
-		"model":      model,
-		"max_tokens": 30,
-		"messages": []map[string]interface{}{
-			{"role": "user", "content": prompt},
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
+	reply, err := titleClient(apiKey).Complete(context.Background(), llm.Request{Model: model, Prompt: prompt, MaxTokens: 30})
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", err
 	}
-
-	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("API request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("anthropic API error %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("parse response: %w", err)
-	}
-
-	if len(result.Content) == 0 || result.Content[0].Text == "" {
+	if reply.Text == "" {
 		return "", fmt.Errorf("empty response from Anthropic")
 	}
-
-	return strings.TrimSpace(result.Content[0].Text), nil
+	return strings.TrimSpace(reply.Text), nil
 }
 
 // GenerateTitles generates titles for all sessions that don't have one yet.
 // Returns the number of titles generated and any error encountered.
 // Stops on first API error to avoid burning through quota on failures.
 func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
-	total := 0
-	for _, s := range sessions {
-		if (s.Title == "" || cfg.Regenerate) && s.FilePath != "" {
-			total++
-		}
-	}
-
 	out := cfg.Output
 	if out == nil {
 		out = os.Stderr
 	}
+	if _, known := ResolveModel(cfg.Model); !known {
+		_, _ = fmt.Fprintf(out, "  unknown title model %q, using %s\n", cfg.Model, DefaultModel)
+	}
+
+	var todo []Session
+	for _, s := range sessions {
+		if (s.Title != "" && !cfg.Regenerate) || s.FilePath == "" {
+			continue // already titled, or no session file to read
+		}
+		if LoadMeta(s.FilePath).TitleBy == "owner" {
+			continue // the owner's title is never replaced
+		}
+		todo = append(todo, s)
+	}
+	total := len(todo)
 
 	count := 0
-	for _, s := range sessions {
-		if s.Title != "" && !cfg.Regenerate {
-			continue // already has a title
-		}
-		if s.FilePath == "" {
-			continue // no session file to extract content from
-		}
-
+	for _, s := range todo {
 		prompt := s.FirstPrompt
 		if prompt == "" || prompt == "(no prompt)" {
 			prompt = "(from conversation)"
@@ -287,8 +249,7 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 		if err != nil {
 			// Skip sessions that fail (safety filter, empty content, etc.)
 			// but stop on auth/network errors
-			errStr := err.Error()
-			if strings.Contains(errStr, "API key") {
+			if errors.Is(err, errNoTitleKey) {
 				_, _ = fmt.Fprintln(out, "FAILED (auth)")
 				return count, fmt.Errorf("session %s: %w", s.ID, err)
 			}
@@ -297,9 +258,11 @@ func GenerateTitles(sessions []Session, cfg TitleConfig) (int, error) {
 		}
 
 		// Save to meta
-		meta := LoadMeta(s.FilePath)
-		meta.Title = title
-		if err := SaveMeta(s.FilePath, meta); err != nil {
+		if err := UpdateMeta(s.FilePath, func(m *Meta) {
+			if m.TitleBy != "owner" { // the owner may have named it during the call
+				m.Title, m.TitleBy = title, "model"
+			}
+		}); err != nil {
 			return count, fmt.Errorf("save meta for %s: %w", s.ID, err)
 		}
 		count++

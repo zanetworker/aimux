@@ -1,0 +1,120 @@
+{
+  "name": "On a GitLab host links use the /-/ forms, including self-hosted and sub-grouped projects",
+  "cases": [
+    {
+      "name": "issue, owner/repo issue, commit and path",
+      "context": {
+        "repo": {
+          "web": "https://gitlab.example.com/group/sub/widget",
+          "branch": "develop",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "#12, other/tool#3, a1b2c3d and internal/x.go:8 and WID-2"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#12",
+          "href": "https://gitlab.example.com/group/sub/widget/-/issues/12"
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "other/tool#3",
+          "href": "https://gitlab.example.com/other/tool/-/issues/3"
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "a1b2c3d",
+          "href": "https://gitlab.example.com/group/sub/widget/-/commit/a1b2c3d"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "internal/x.go:8",
+          "href": "https://gitlab.example.com/group/sub/widget/-/blob/develop/internal/x.go#L8"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-2",
+          "href": "https://jira.example.com/browse/WID-2"
+        }
+      ]
+    },
+    {
+      "name": "gitlab.com",
+      "context": {
+        "repo": {
+          "web": "https://gitlab.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "#1 a1b2c3d src/a.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#1",
+          "href": "https://gitlab.com/acme/widget/-/issues/1"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "a1b2c3d",
+          "href": "https://gitlab.com/acme/widget/-/commit/a1b2c3d"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "src/a.go",
+          "href": "https://gitlab.com/acme/widget/-/blob/main/src/a.go"
+        }
+      ]
+    }
+  ]
+}

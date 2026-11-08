@@ -1,0 +1,118 @@
+{
+  "name": "times keep their sub-millisecond digits: failures 0.4 ms apart order by time, and 900 s is measured to the microsecond",
+  "now": "2026-10-26T09:00:00.0004Z",
+  "sessions": [
+    {
+      "id": "a-first",
+      "provider": "claude",
+      "title": "T a-first",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "b-second",
+      "provider": "claude",
+      "title": "T b-second",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "f-late",
+      "provider": "claude",
+      "title": "T f-late",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "f-in",
+      "provider": "claude",
+      "title": "T f-in",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "events": {
+    "a-first": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:59:00.0010Z",
+        "data": {
+          "error": "the build failed"
+        }
+      }
+    ],
+    "b-second": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:59:00.0014Z",
+        "data": {
+          "error": "the build failed"
+        }
+      }
+    ],
+    "f-late": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:45:00.0001Z",
+        "data": {
+          "error": "x"
+        }
+      }
+    ],
+    "f-in": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:45:00.0005Z",
+        "data": {
+          "error": "x"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "b-second",
+      "a-first",
+      "f-in"
+    ],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 0,
+    "open": 0
+  }
+}

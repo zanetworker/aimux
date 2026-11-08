@@ -98,8 +98,8 @@ func TestSaveAndLoadMeta(t *testing.T) {
 		Tags:       []string{"loop-on-error", "wrong-file"},
 	}
 
-	if err := SaveMeta(sessionFile, meta); err != nil {
-		t.Fatalf("SaveMeta: %v", err)
+	if err := UpdateMeta(sessionFile, func(m *Meta) { *m = meta }); err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
 	}
 
 	loaded := LoadMeta(sessionFile)
@@ -130,13 +130,13 @@ func TestSaveMeta_AtomicWrite(t *testing.T) {
 	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
 
 	// Write initial metadata
-	if err := SaveMeta(sessionFile, Meta{Annotation: "achieved"}); err != nil {
-		t.Fatalf("first SaveMeta: %v", err)
+	if err := UpdateMeta(sessionFile, func(m *Meta) { *m = Meta{Annotation: "achieved"} }); err != nil {
+		t.Fatalf("first UpdateMeta: %v", err)
 	}
 
 	// Overwrite with new metadata
-	if err := SaveMeta(sessionFile, Meta{Annotation: "failed", Tags: []string{"bug"}}); err != nil {
-		t.Fatalf("second SaveMeta: %v", err)
+	if err := UpdateMeta(sessionFile, func(m *Meta) { *m = Meta{Annotation: "failed", Tags: []string{"bug"}} }); err != nil {
+		t.Fatalf("second UpdateMeta: %v", err)
 	}
 
 	loaded := LoadMeta(sessionFile)
@@ -156,11 +156,11 @@ func TestCollectTags(t *testing.T) {
 	// Create two meta files with overlapping tags
 	s1 := filepath.Join(projDir, "session1.jsonl")
 	_ = os.WriteFile(s1, []byte("{}"), 0o600)
-	_ = SaveMeta(s1, Meta{Tags: []string{"loop-on-error", "wrong-file"}})
+	_ = UpdateMeta(s1, func(m *Meta) { *m = Meta{Tags: []string{"loop-on-error", "wrong-file"}} })
 
 	s2 := filepath.Join(projDir, "session2.jsonl")
 	_ = os.WriteFile(s2, []byte("{}"), 0o600)
-	_ = SaveMeta(s2, Meta{Tags: []string{"wrong-file", "hallucinated-api"}})
+	_ = UpdateMeta(s2, func(m *Meta) { *m = Meta{Tags: []string{"wrong-file", "hallucinated-api"}} })
 
 	tags := CollectTags(dir)
 	if len(tags) != 3 {
@@ -458,11 +458,11 @@ func TestDiscover_WithMetadata(t *testing.T) {
 	sessionPath := minimalSession(t, projDir, "annotated", "some task", ts)
 
 	// Add metadata
-	_ = SaveMeta(sessionPath, Meta{
+	_ = UpdateMeta(sessionPath, func(m *Meta) { *m = Meta{
 		Annotation: "failed",
 		Note:       "kept looping",
 		Tags:       []string{"loop-on-error"},
-	})
+	} })
 
 	sessions, err := Discover(DiscoverOpts{}, dir)
 	if err != nil {
@@ -559,28 +559,6 @@ func TestDiscover_CostCalculation(t *testing.T) {
 	// Cost = 0.30 + 0.15 + 0.1875 + 0.06 = 0.6975
 	if s.CostUSD < 0.69 || s.CostUSD > 0.70 {
 		t.Errorf("CostUSD = %.4f, want ~0.6975", s.CostUSD)
-	}
-}
-
-func TestTitleForSessionFile(t *testing.T) {
-	dir := t.TempDir()
-	sessionFile := filepath.Join(dir, "test.jsonl")
-	_ = os.WriteFile(sessionFile, []byte("{}"), 0o600)
-
-	// No meta file — should return ""
-	if got := TitleForSessionFile(sessionFile); got != "" {
-		t.Errorf("expected empty title, got %q", got)
-	}
-
-	// With meta file
-	_ = SaveMeta(sessionFile, Meta{Title: "Fix markdown rendering"})
-	if got := TitleForSessionFile(sessionFile); got != "Fix markdown rendering" {
-		t.Errorf("expected title, got %q", got)
-	}
-
-	// Empty path
-	if got := TitleForSessionFile(""); got != "" {
-		t.Errorf("expected empty for empty path, got %q", got)
 	}
 }
 
@@ -1200,6 +1178,34 @@ func TestScanSession_AITitle(t *testing.T) {
 	}
 	if s.AITitle != "Remote session access plan" {
 		t.Fatalf("AITitle = %q", s.AITitle)
+	}
+}
+
+// Claude Code's /rename writes custom-title entries; the latest wins, and
+// Discover carries who wrote the meta title.
+func TestScanSession_CustomTitleAndTitleBy(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "-w")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "s.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","cwd":"/w","message":{"role":"user","content":"hello there"}}
+{"type":"custom-title","customTitle":"first-name"}
+{"type":"custom-title","customTitle":"agent-ops"}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateMeta(path, func(m *Meta) { m.Title, m.TitleBy = "Mine", "owner" }); err != nil {
+		t.Fatal(err)
+	}
+	all, err := Discover(DiscoverOpts{}, root)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("Discover: %v, %d sessions", err, len(all))
+	}
+	if all[0].CustomTitle != "agent-ops" || all[0].TitleBy != "owner" {
+		t.Fatalf("CustomTitle = %q, TitleBy = %q", all[0].CustomTitle, all[0].TitleBy)
 	}
 }
 

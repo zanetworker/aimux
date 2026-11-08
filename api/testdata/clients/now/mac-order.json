@@ -1,0 +1,284 @@
+{
+  "name": "Windows by index, tabs by index, panes by number (10 after 9); panes counts the tab's panes on the Mac, shells included",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "b1",
+      "provider": "claude",
+      "title": "Draft the release post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      },
+      "mac": {
+        "window": {
+          "id": "w7",
+          "index": 2,
+          "name": "Window 2"
+        },
+        "tab": {
+          "index": 2,
+          "name": "blog"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "a10",
+      "provider": "claude",
+      "title": "Wire the layout read",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w4",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 3,
+          "name": "aimux"
+        },
+        "pane": 10,
+        "panes": 10,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "n1",
+      "provider": "claude",
+      "title": "Sort the reading list",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      },
+      "mac": {
+        "window": {
+          "id": "w4",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 10,
+          "name": "notes"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Run the client tests",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "working": true,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w4",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 3,
+          "name": "aimux"
+        },
+        "pane": 2,
+        "panes": 10,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Proofread the guide",
+      "project": "/src/docs",
+      "lastActive": "2026-10-31T11:10:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "docs",
+        "repoPath": "/src/docs",
+        "label": "docs"
+      },
+      "mac": {
+        "window": {
+          "id": "w4",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "docs"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "a9",
+      "provider": "claude",
+      "title": "Check the fixtures",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w4",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 3,
+          "name": "aimux"
+        },
+        "pane": 9,
+        "panes": 10,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Plan the folder tree",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w4",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 3,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 10,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "c1",
+      "provider": "claude",
+      "title": "Old closed session",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:58:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w4",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "docs",
+            "panes": 2,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "d1"
+            ]
+          },
+          {
+            "index": 3,
+            "name": "aimux",
+            "panes": 10,
+            "working": 2,
+            "open": false,
+            "sessions": [
+              "a1",
+              "a2",
+              "a9",
+              "a10"
+            ]
+          },
+          {
+            "index": 10,
+            "name": "notes",
+            "panes": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "n1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "w7",
+        "name": "Window 2",
+        "tabs": [
+          {
+            "index": 2,
+            "name": "blog",
+            "panes": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "b1"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 2,
+    "open": 7
+  }
+}

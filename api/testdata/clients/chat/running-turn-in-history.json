@@ -1,0 +1,97 @@
+{
+  "name": "the running turn is already the latest history turn (2 s before its start, whitespace folded): shown once; a finished turn in history is not repeated",
+  "now": "2026-10-26T08:01:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T07:00:00Z",
+      "user": "Rename the flag",
+      "reply": "Done.",
+      "tools": []
+    },
+    {
+      "number": 2,
+      "time": "2026-10-26T07:59:58Z",
+      "user": "Write the release notes for the next version",
+      "reply": "Starting with",
+      "tools": []
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "h1",
+      "kind": "turn_started",
+      "time": "2026-10-26T07:00:00Z",
+      "data": {
+        "text": "Rename the flag"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "h1",
+      "kind": "update",
+      "time": "2026-10-26T07:00:03Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Done."
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "h1",
+      "kind": "turn_done",
+      "time": "2026-10-26T07:00:05Z",
+      "data": {
+        "stopReason": "end_turn"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "r2",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:00:00Z",
+      "data": {
+        "text": "Write the release\n  notes for the next version"
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "r2",
+      "kind": "update",
+      "time": "2026-10-26T08:00:02Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Starting with the summary."
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Rename the flag"
+      },
+      {
+        "kind": "reply",
+        "text": "Done."
+      },
+      {
+        "kind": "user",
+        "text": "Write the release\n  notes for the next version"
+      },
+      {
+        "kind": "reply",
+        "text": "Starting with the summary."
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

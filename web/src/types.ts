@@ -7,6 +7,7 @@ export interface Agent {
   Model: string;
   WorkingDir: string;
   Status: number; // 0=Active, 1=Idle, 2=WaitingPermission, 3=Error, 4=Unknown
+  Activity?: string; // the server's session state: working, needs_you, idle, gone (stateLabel prints it)
   GitBranch: string;
   CPUPercent: number;
   MemoryMB: number;
@@ -24,14 +25,6 @@ export interface Agent {
   PermissionMode?: string;
   Starred?: boolean;
 }
-
-export const StatusLabel: Record<number, string> = {
-  0: 'Active',
-  1: 'Idle',
-  2: 'Waiting',
-  3: 'Error',
-  4: 'Unknown',
-};
 
 export interface ToolSpan {
   name: string;

@@ -1,0 +1,100 @@
+{
+  "name": "a session with waiting absent or null is placed and shown as before",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "s1",
+      "provider": "claude",
+      "title": "Count the beans",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:50:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "working": true,
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "garden"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": true
+      },
+      "waiting": null
+    },
+    {
+      "id": "s2",
+      "provider": "claude",
+      "title": "Plan the raised beds",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:40:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      }
+    },
+    {
+      "id": "s3",
+      "provider": "claude",
+      "title": "Compost notes",
+      "project": "/src/garden",
+      "lastActive": "2026-10-25T10:00:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "garden",
+            "panes": 2,
+            "working": 1,
+            "open": true,
+            "sessions": [
+              "s1"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "garden",
+        "sessions": [
+          "s2"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 1,
+    "open": 2,
+    "rowStates": {
+      "s1": "Working",
+      "s3": null
+    }
+  }
+}

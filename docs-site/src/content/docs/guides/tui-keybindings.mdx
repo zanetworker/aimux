@@ -25,6 +25,16 @@ description: Keyboard shortcuts for the terminal dashboard.
 | `?` | Show help overlay |
 | `q` | Quit |
 
+### What a session is doing
+
+The agent list, its preview, the header counts and the sessions view use the words the phone uses, from one answer aimux computes for every surface:
+
+- **needs you**: a permission prompt waits (Claude Code's session registry reports it; `aimux remote hooks install` adds the alerts, see [Permission alerts](/guides/remote-access/#permission-alerts-for-terminal-sessions)). The LAST column says "needs you" in amber.
+- **working**: Claude Code's registry says the session is busy. Harnesses without a registry (Codex) fall back to reading the transcript's last lines.
+- **idle**: open in a terminal and not working.
+
+An error (a crash or a full context) keeps its ✕ and the word "Error". The hooks' markers are read by the TUI itself; `remote serve` need not run. Without the hooks a permission prompt still shows as needs you when Claude Code's registry reports the session waiting, and the header and help say, muted, "Permission alerts need `aimux remote hooks install`" (checked at start and every 5 minutes).
+
 ## Split View (Trace + Session)
 
 Opening a running agent starts with focus on the trace. Resuming a past session or opening an OpenShell sandbox session starts with focus on the session pane: press `Tab` before using the trace keys below.
@@ -57,6 +67,10 @@ Opening a running agent starts with focus on the trace. Resuming a past session 
 
 ## Sessions View
 
+A session's title is the one you wrote, else the name you gave it with Claude Code's `/rename`, else one aimux generated, else Claude Code's own name for it, else its first message. The dashboard, `aimux sessions`, search and the phone clients choose it the same way. `/` also matches that title.
+
+A session that is open leads its title with what it is doing: **needs you** (in amber), **working** or **idle**, as in the agent list.
+
 | Key | Action |
 |-----|--------|
 | `j` / `k` | Move selection down/up |
@@ -74,10 +88,10 @@ Opening a running agent starts with focus on the trace. Resuming a past session 
 | `p` | Toggle trace preview pane |
 | `d` | Delete session (with confirmation) |
 | `D` | Cleanup mode (find duplicates/empty sessions) |
-| `H` | Show/hide subagent sessions |
+| `H` | Show/hide subagent and automated sessions. Automated ones show in full; a subagent session stays hidden if it is near-empty (no cost, at most 5 turns) or an analyzer session (aimux's own analysis or hook prompts, or mentioning "session analyzer"). Near-empty, analyzer and undated sessions stay hidden otherwise; any search shows every session |
 | `Esc` | Clear filters (path first, then text), then exit view |
 
-`F` searches the same ranked index as `aimux sessions`: keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. The TUI refreshes the index when it starts and embeds changed sessions in the background, so a search doesn't wait for them; only a new query's own embedding calls the API (cached after the first time). New messages match by keyword right away and usually join semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed.
+`F` searches the same ranked index as `aimux sessions`: keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. The TUI refreshes the index when it starts and embeds changed sessions in the background, so a search doesn't wait for them; only a new query's own embedding calls the API (cached after the first time). New messages match by keyword right away and usually join semantic ranking within seconds. If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed. One exception: when the index was written by a newer aimux build (several builds can share the file, one per open session), an older build uses it as it is without refreshing and logs a note once, and `aimux sessions index` refuses to rebuild it; update `aimux` to bring that build's search up to date.
 
 ## Cross-Session Search
 

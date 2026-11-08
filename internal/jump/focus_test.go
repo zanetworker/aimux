@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/zanetworker/aimux/internal/terminput"
 )
 
 func stubOsascript(t *testing.T, out string, err error) *[]string {
@@ -62,8 +64,8 @@ func TestParsePSTTY(t *testing.T) {
 		"":          "",
 	}
 	for in, want := range cases {
-		if got := parsePSTTY(in); got != want {
-			t.Errorf("parsePSTTY(%q) = %q, want %q", in, got, want)
+		if got, _ := terminput.ParseTTY(in); got != want {
+			t.Errorf("ParseTTY(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

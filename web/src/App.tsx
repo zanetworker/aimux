@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { totalShowable, defaultSwitches } from './components/sessionFilter.ts';
 import { useAgentStream } from './hooks/useAgentStream';
 import type { Agent } from './types';
 import { StatsBar } from './components/StatsBar';
@@ -21,7 +22,7 @@ export interface ContentSearchResult {
 type ViewTab = 'agents' | 'sessions' | string;
 
 export default function App() {
-  const { agents, loading: agentsLoading } = useAgentStream();
+  const { agents, loading: agentsLoading, hooksHint } = useAgentStream();
   const [activeTab, setActiveTab] = useState<ViewTab>('agents');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
@@ -64,7 +65,7 @@ export default function App() {
         if (d?.sessions) {
           const s = (d.sessions as HistorySession[]).map(sess => ({ ...sess, note: sess.note || '' }));
           setCachedSessions(s);
-          setSessionCount(s.length);
+          setSessionCount(totalShowable(s, defaultSwitches));
           setStarredCount(s.filter(sess => sess.starred).length);
         }
       })
@@ -182,7 +183,7 @@ export default function App() {
       TMuxSession: '',
       TeamName: '',
       TaskSubject: '',
-      Title: session.title || session.firstPrompt || '',
+      Title: session.shownTitle || '',
       PermissionMode: session.permissionMode || '',
     });
   }, []);
@@ -197,6 +198,7 @@ export default function App() {
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <StatsBar
         agents={agents}
+        hooksHint={hooksHint}
         onLaunch={() => setShowLaunch(true)}
         onHome={() => { setActiveTab('agents'); setSelectedId(null); setSessionAgent(null); setPanelFullscreen(false); }}
         onToggleTasks={() => setShowTasks(t => !t)}

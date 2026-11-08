@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/sessionstate"
 )
 
 // Column widths for the agents table.
@@ -16,7 +17,7 @@ const (
 	colName   = 22
 	colAgent  = 8
 	colModel  = 12
-	colLoc    = 8  // location: "local" or "k8s"
+	colLoc    = 8 // location: "local" or "k8s"
 	colDir    = 8
 	colBranch = 12
 	colLast   = 14
@@ -93,15 +94,15 @@ type treeRow struct {
 
 // AgentsView renders the main agents table with columns.
 type AgentsView struct {
-	agents      []agent.Agent
-	rows        []treeRow // flattened tree rows for rendering
-	cursor      int
-	selectedPID int           // track selection by PID across refreshes
-	expanded    map[int]bool  // PID -> expanded state
-	width       int
-	height      int
-	filter      string
-	sortField   string        // "", "name", "cost", "age", "model"
+	agents       []agent.Agent
+	rows         []treeRow // flattened tree rows for rendering
+	cursor       int
+	selectedPID  int          // track selection by PID across refreshes
+	expanded     map[int]bool // PID -> expanded state
+	width        int
+	height       int
+	filter       string
+	sortField    string          // "", "name", "cost", "age", "model"
 	stalePIDs    map[int]bool    // PIDs that came from cache (stale)
 	starredFiles map[string]bool // session file paths that are starred
 	hourlyRate   float64
@@ -494,7 +495,7 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 		loc + " " +
 		padRight(truncate(a.ShortDir(), colDir), colDir) + " " +
 		branchDisplay + " " +
-		padRight(truncate(a.LastAction, colLast), colLast) + " " +
+		lastCol(a) + " " +
 		padRight(cpuRendered, colCPU) + " " +
 		padRight(memRendered, colMem) + " " +
 		padRight(a.FormatAge(), colAge) + " " +
@@ -508,6 +509,16 @@ func (v *AgentsView) renderParentRow(r treeRow) string {
 	}
 
 	return row
+}
+
+// lastCol is the LAST column: "needs you" in the waiting colour while the
+// session waits for the owner (the state service's activity), else the
+// last action.
+func lastCol(a agent.Agent) string {
+	if a.Activity == string(sessionstate.NeedsYou) {
+		return agentWaitingIcon.Render(padRight(sessionstate.NeedsYou.Label(), colLast))
+	}
+	return padRight(truncate(a.LastAction, colLast), colLast)
 }
 
 // renderAgentROI computes and renders the ROI value for an active agent.

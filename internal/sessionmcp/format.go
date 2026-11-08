@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/search"
 )
 
@@ -61,10 +62,29 @@ func formatList(rs []search.Result) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// formatEntries renders one line per catalog session, as formatList does,
+// with its provider and state appended.
+func formatEntries(es []catalog.Entry) string {
+	if len(es) == 0 {
+		return "No sessions found."
+	}
+	var b strings.Builder
+	for _, e := range es {
+		fmt.Fprintf(&b, "- `%s` %s · **%s** · %s · %s · %s\n", e.ID, e.LastActive.Local().Format("2006-01-02 15:04"), title(e.Title), entryDir(e), e.Provider, e.State)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // formatSession renders a session. beforeSeq > 0 keeps only exchanges
 // before that seq; lastN > 0 then keeps the last lastN of those. Output past
 // maxOutputChars keeps the newest, and the heading says how to page back.
 func formatSession(t search.Transcript, lastN, beforeSeq int) string {
+	return formatSessionWith(t, lastN, beforeSeq, "")
+}
+
+// formatSessionWith is formatSession with extra header lines (get_session's
+// provider and state from the catalog) after the standard ones.
+func formatSessionWith(t search.Transcript, lastN, beforeSeq int, extra string) string {
 	ex := t.Exchanges
 	if beforeSeq > 0 {
 		ex = ex[:sort.Search(len(ex), func(i int) bool { return ex[i].Seq >= beforeSeq })]
@@ -72,7 +92,7 @@ func formatSession(t search.Transcript, lastN, beforeSeq int) string {
 	if lastN > 0 && lastN < len(ex) {
 		ex = ex[len(ex)-lastN:]
 	}
-	head := header(t)
+	head := header(t) + extra
 	blocks, kept := fitNewest(ex, maxOutputChars-len(head)-200)
 	heading := fmt.Sprintf("## Transcript (%d of %d exchanges)", kept, len(t.Exchanges))
 	if kept > 0 {

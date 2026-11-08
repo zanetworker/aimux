@@ -1,0 +1,51 @@
+{
+  "name": "a failure 16 minutes old is not on Now",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Migrate the schema",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:44:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "events": {
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:40:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:44:00Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 0,
+    "open": 0
+  }
+}

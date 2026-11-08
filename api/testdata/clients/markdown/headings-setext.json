@@ -1,0 +1,46 @@
+{
+  "name": "Setext headings: === is h1, --- is h2, a multi-line paragraph heading, and the streaming prefix Steps: then -",
+  "markdown": "Title\n===\n\nSub\n---\n\nTwo lines\nmake one heading\n---\n\nSteps:\n-",
+  "blocks": [
+    {
+      "type": "heading",
+      "level": 1,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Title"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Sub"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Two lines make one heading"
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Steps:"
+        }
+      ]
+    }
+  ]
+}

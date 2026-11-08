@@ -1,0 +1,95 @@
+{
+  "name": "saved-prompt-match",
+  "cases": [
+    {
+      "name": "plain",
+      "saved": "run the tests again",
+      "pending": "run the tests again",
+      "match": true
+    },
+    {
+      "name": "two lines saved as typed",
+      "saved": "Reply with the single word LIVETWO.\nThis is the second line.",
+      "pending": "Reply with the single word LIVETWO.\nThis is the second line.",
+      "match": true
+    },
+    {
+      "name": "typed while busy",
+      "saved": "The user sent a new message while you were working:\nare you still blocked?",
+      "pending": "are you still blocked?",
+      "match": true
+    },
+    {
+      "name": "pasted content",
+      "saved": "\n\n<pasted_content id=\"6981\">\nline one\nline two\nline three\n</pasted_content>\n\n",
+      "pending": "line one\nline two\nline three",
+      "match": true
+    },
+    {
+      "name": "pasted content without attributes",
+      "saved": "<pasted_content>\nplan the release\n</pasted_content>",
+      "pending": "plan the release",
+      "match": true
+    },
+    {
+      "name": "paste typed while busy",
+      "saved": "The user sent a new message while you were working:\n\n<pasted_content id=\"7012\">\nfix the import\nthen run make\n</pasted_content>\n",
+      "pending": "fix the import\nthen run make",
+      "match": true
+    },
+    {
+      "name": "another message typed while busy",
+      "saved": "The user sent a new message while you were working:\nstop for now",
+      "pending": "go on",
+      "match": false
+    },
+    {
+      "name": "empty paste",
+      "saved": "<pasted_content id=\"1\">\n</pasted_content>",
+      "pending": "anything",
+      "match": false
+    },
+    {
+      "name": "a slash command with args",
+      "saved": "<command-name>/review-tools:tidy</command-name>\n<command-message>review-tools:tidy</command-message>\n<command-args>keep it short</command-args>",
+      "pending": "/review-tools:tidy keep it short",
+      "match": true
+    },
+    {
+      "name": "a slash command, message tag first",
+      "saved": "<command-message>compact</command-message>\n<command-name>/compact</command-name>",
+      "pending": "/compact",
+      "match": true
+    },
+    {
+      "name": "a slash command with other args",
+      "saved": "<command-name>/tidy</command-name>\n<command-message>tidy</command-message>\n<command-args>docs only</command-args>",
+      "pending": "/tidy all files",
+      "match": false
+    },
+    {
+      "name": "args on several lines",
+      "saved": "<command-name>/plan</command-name>\n<command-message>plan</command-message>\n<command-args>first step\nsecond step</command-args>",
+      "pending": "/plan first step\nsecond step",
+      "match": true
+    },
+    {
+      "name": "bash mode",
+      "saved": "<bash-input>git status</bash-input>",
+      "pending": "!git status",
+      "match": true
+    },
+    {
+      "name": "command output matches nothing",
+      "saved": "<local-command-stdout>Total cost: $0.12</local-command-stdout>",
+      "pending": "Total cost: $0.12",
+      "match": false
+    },
+    {
+      "name": "a caveat matches nothing",
+      "saved": "<local-command-caveat>Caveat: generated.</local-command-caveat>",
+      "pending": "Caveat: generated.",
+      "match": false
+    }
+  ]
+}

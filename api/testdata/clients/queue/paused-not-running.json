@@ -1,0 +1,56 @@
+{
+  "name": "paused-not-running",
+  "session": {
+    "state": "idle",
+    "queue": {
+      "state": "paused",
+      "reason": "Session not running",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Rename the helper to parseConfig",
+          "state": "waiting",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Then add a test for the empty file",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "send",
+      "label": "Send"
+    },
+    "queue": {
+      "visible": true,
+      "state": "paused",
+      "line": "Session not running",
+      "resume": true
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Rename the helper to parseConfig",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q2",
+        "text": "Then add a test for the empty file",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ]
+  }
+}

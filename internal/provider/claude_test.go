@@ -642,6 +642,43 @@ func TestClaudeParseTrace_MultipleTurns(t *testing.T) {
 	}
 }
 
+// A message typed while Claude was busy is saved as a queue-operation and a
+// queued_command attachment, not as a user entry; it starts its own turn.
+func TestClaudeParseTrace_QueuedCommandStartsTurn(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "session.jsonl")
+
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"run the slow command"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"running it"}],"usage":{"input_tokens":50,"output_tokens":25}}}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T10:00:07Z","content":"then say done"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-01-01T10:00:20Z","content":"then say done"}
+{"type":"attachment","timestamp":"2026-01-01T10:00:20Z","attachment":{"type":"queued_command","prompt":"then say done"}}
+{"type":"attachment","timestamp":"2026-01-01T10:00:21Z","attachment":{"type":"queued_command","prompt":""}}
+{"type":"attachment","timestamp":"2026-01-01T10:00:21Z","attachment":{"type":"other_kind","prompt":"not a message"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:25Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":80,"output_tokens":40}}}`
+
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatalf("ParseTrace error: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("expected 2 turns, got %d", len(turns))
+	}
+	if got := strings.Join(turns[1].UserLines, "\n"); got != "then say done" {
+		t.Errorf("turn 2 user = %q, want %q", got, "then say done")
+	}
+	if got := strings.Join(turns[1].OutputLines, "\n"); !strings.Contains(got, "done") {
+		t.Errorf("turn 2 reply = %q, want it to hold the answer", got)
+	}
+	if got := strings.Join(turns[0].OutputLines, "\n"); strings.Contains(got, "done") {
+		t.Errorf("turn 1 reply = %q took the queued message's answer", got)
+	}
+}
+
 func TestClaudeParseTrace_ToolResultError(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "session.jsonl")
@@ -944,5 +981,201 @@ func TestClaudeParseTraceTail_MatchesTheFullParse(t *testing.T) {
 				t.Fatalf("n=%d turn %d: tail %+v, full %+v", n, i, tail[i], want[i])
 			}
 		}
+	}
+}
+
+func TestClaudeParseTrace_ToolInputIsFull(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	cases := []struct {
+		name, tool, input, want string
+	}{
+		{"bash", "Bash", `{"command":"  ` + long + `  "}`, long},
+		{"grep", "Grep", `{"pattern":"foo.*bar"}`, "foo.*bar"},
+		{"glob", "Glob", `{"pattern":"**/*.go"}`, "**/*.go"},
+		{"webfetch", "WebFetch", `{"url":"https://example.com/` + long + `"}`, "https://example.com/" + long},
+		{"websearch", "WebSearch", `{"query":"go utf8"}`, "go utf8"},
+		{"task", "Task", `{"description":"explore"}`, "explore"},
+		{"read", "Read", `{"file_path":"/a/b.go"}`, "/a/b.go"},
+		{"edit", "Edit", `{"file_path":"/a/c.go","old_string":"a","new_string":"b"}`, "/a/c.go"},
+		{"write", "Write", `{"file_path":"/a/d.go","content":"x"}`, "/a/d.go"},
+		{"unknown", "Mystery", `{"foo":"bar"}`, ""},
+		{"bash without command", "Bash", `{}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.jsonl")
+			data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"go"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"tool_use","id":"t1","name":"` + tc.tool + `","input":` + tc.input + `}]}}`
+			if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			turns, err := (&Claude{}).ParseTrace(path)
+			if err != nil || len(turns) != 1 || len(turns[0].Actions) != 1 {
+				t.Fatalf("turns = %v, err = %v", turns, err)
+			}
+			a := turns[0].Actions[0]
+			if a.Input != tc.want {
+				t.Errorf("Input = %q, want %q", a.Input, tc.want)
+			}
+			if tc.name == "bash" {
+				if want := "$ " + strings.Repeat("x", 57) + "..."; a.Snippet != want {
+					t.Errorf("Snippet = %q, want %q (unchanged 60-char cut)", a.Snippet, want)
+				}
+			}
+		})
+	}
+}
+
+// OutputText keeps a reply's line structure: blank lines inside a text block,
+// and one blank line between text blocks and between assistant messages, so
+// Markdown on the phone does not run a table into the next paragraph.
+func TestClaudeParseTrace_OutputTextKeepsBlankLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"check the cluster"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"| Check | Result |\n|---|---|\n| a | yes |\n\nWhat's running:  \n"},{"type":"text","text":"\n\nSecond block."}]}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:06Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:07Z","message":{"role":"assistant","content":[{"type":"text","text":"   "},{"type":"text","text":"Code:\n\n    indented code\nDone."}]}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("got %d turns, want 1", len(turns))
+	}
+	want := "| Check | Result |\n|---|---|\n| a | yes |\n\nWhat's running:\n\nSecond block.\n\nCode:\n\n    indented code\nDone."
+	if turns[0].OutputText != want {
+		t.Errorf("OutputText = %q, want %q", turns[0].OutputText, want)
+	}
+	// The TUI's line list is unchanged: non-empty lines only.
+	if got := len(turns[0].OutputLines); got != 8 {
+		t.Errorf("OutputLines has %d lines, want 8: %q", got, turns[0].OutputLines)
+	}
+}
+
+func TestClaudeParseTrace_OutputTextEmptyWithoutText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"hi"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"\n  \n"}]}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 || turns[0].OutputText != "" {
+		t.Fatalf("turns %+v, want one turn with empty OutputText", turns)
+	}
+}
+
+// Claude Code saves a Stop hook's feedback as a user entry marked isMeta,
+// with string content. It is never the person's message: it becomes a
+// "Stop hook" step of the turn, and the reply that follows stays in that turn.
+func TestClaudeParseTrace_StopHookFeedbackIsAStepNotAMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Fix the login page"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Fixed."}]}}
+{"type":"user","isMeta":true,"timestamp":"2026-01-01T10:00:06Z","message":{"role":"user","content":"Stop hook feedback:\n[/home/me/.claude/hooks/check.py]: Run the tests before saying it works."}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:09Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests pass."}]}}
+{"type":"user","isMeta":true,"timestamp":"2026-01-01T10:00:10Z","message":{"role":"user","content":"Caveat: The messages below were generated by the user while running local commands."}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("got %d turns, want 1: %+v", len(turns), turns)
+	}
+	if got := strings.Join(turns[0].UserLines, "\n"); got != "Fix the login page" {
+		t.Errorf("user = %q", got)
+	}
+	if got := strings.Join(turns[0].OutputLines, "\n"); !strings.Contains(got, "Fixed.") || !strings.Contains(got, "Tests pass.") {
+		t.Errorf("reply = %q, want both replies in the turn", got)
+	}
+	if len(turns[0].Actions) != 1 {
+		t.Fatalf("actions = %+v, want the hook step", turns[0].Actions)
+	}
+	hook := turns[0].Actions[0]
+	if hook.Name != "Stop hook" || hook.Snippet != "Run the tests before saying it works." || !hook.Success {
+		t.Errorf("hook step = %+v", hook)
+	}
+}
+
+// A background task's notification is saved as a user entry (origin kind
+// task-notification) but is never the person's: it becomes a step with the
+// task's summary, and the turn's reply continues.
+func TestClaudeParseTrace_TaskNotificationIsAStepNotAMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	note := "<task-notification>\\n<task-id>abc123</task-id>\\n<status>completed</status>\\n<summary>Agent \\\"Review the parser\\\" finished</summary>\\n<result>All good.</result>\\n</task-notification>"
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Review the parser"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Started a reviewer."}]}}
+{"type":"user","origin":{"kind":"task-notification","producer":"session-task"},"timestamp":"2026-01-01T10:01:00Z","message":{"role":"user","content":"` + note + `"}}
+{"type":"assistant","timestamp":"2026-01-01T10:01:05Z","message":{"role":"assistant","content":[{"type":"text","text":"The review is clean."}]}}
+{"type":"user","timestamp":"2026-01-01T10:02:00Z","message":{"role":"user","content":"<task-notification>\n<summary>Without an origin field</summary>\n</task-notification>"}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("got %d turns, want 1: %+v", len(turns), turns)
+	}
+	if got := strings.Join(turns[0].UserLines, "\n"); got != "Review the parser" {
+		t.Errorf("user = %q", got)
+	}
+	if got := strings.Join(turns[0].OutputLines, "\n"); !strings.Contains(got, "Started a reviewer.") || !strings.Contains(got, "The review is clean.") {
+		t.Errorf("reply = %q, want both replies in the turn", got)
+	}
+	if len(turns[0].Actions) != 2 {
+		t.Fatalf("actions = %+v, want two task steps", turns[0].Actions)
+	}
+	first := turns[0].Actions[0]
+	if first.Name != "Background task" || first.Snippet != `Agent "Review the parser" finished` || !first.Success {
+		t.Errorf("task step = %+v", first)
+	}
+	if !strings.Contains(first.Input, "All good.") {
+		t.Errorf("task step input = %q, want the result", first.Input)
+	}
+	if second := turns[0].Actions[1]; second.Snippet != "Without an origin field" {
+		t.Errorf("second task step = %+v", second)
+	}
+}
+
+// A notification that arrives while Claude works is saved as a queued_command
+// attachment with commandMode task-notification: also a step, not a message.
+// A message the person typed meanwhile (commandMode prompt) stays theirs.
+func TestClaudeParseTrace_QueuedTaskNotificationIsAStep(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"Build the feature"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Working on it."}]}}
+{"type":"attachment","timestamp":"2026-01-01T10:00:30Z","attachment":{"type":"queued_command","commandMode":"task-notification","origin":{"kind":"task-notification"},"prompt":"<task-notification>\n<status>completed</status>\n<summary>Agent \"Run the tests\" finished</summary>\n<result>12 passed</result>\n</task-notification>"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:40Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests pass."}]}}
+{"type":"attachment","timestamp":"2026-01-01T10:00:50Z","attachment":{"type":"queued_command","commandMode":"prompt","origin":{"kind":"human"},"prompt":"also update the docs"}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&Claude{}).ParseTrace(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("got %d turns, want 2 (the typed message starts one): %+v", len(turns), turns)
+	}
+	if got := strings.Join(turns[0].OutputLines, "\n"); !strings.Contains(got, "Tests pass.") {
+		t.Errorf("first turn reply = %q, want it to continue past the notification", got)
+	}
+	if len(turns[0].Actions) != 1 || turns[0].Actions[0].Name != "Background task" ||
+		turns[0].Actions[0].Snippet != `Agent "Run the tests" finished` || turns[0].Actions[0].Input != "12 passed" {
+		t.Errorf("actions = %+v, want the task step", turns[0].Actions)
+	}
+	if got := strings.Join(turns[1].UserLines, "\n"); got != "also update the docs" {
+		t.Errorf("typed message = %q", got)
 	}
 }

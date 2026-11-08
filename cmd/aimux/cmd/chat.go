@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -17,6 +16,9 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/harness"
+	"github.com/zanetworker/aimux/internal/provider"
 	"golang.org/x/term"
 )
 
@@ -51,11 +53,16 @@ func newChatCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve home directory: %w", err)
 			}
+			// The ACP adapter is Claude Code's, so chat continues Claude's sessions.
+			claude, live, err := chatProvider(provider.NewRegistry(home, config.Config{}), "claude")
+			if err != nil {
+				return err
+			}
 			router := &acprun.Router{
-				Lookup: acprun.ClaudeLookup(filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".claude", "sessions")),
+				Lookup: acprun.SessionLookup{Provider: "claude", Store: claude, Live: live}.Lookup,
 				Manager: acprun.NewManager(acprun.ManagerOptions{Start: start, MaxRuns: 1,
-					Fingerprint: acprun.ClaudeFingerprint(filepath.Join(home, ".claude", "projects")),
-					Reserve:     sessionReservation(home)}),
+					Fingerprint: claude.Fingerprint,
+					Reserve:     acprun.Reservation(home)}),
 			}
 			defer router.Manager.Close()
 
@@ -234,8 +241,15 @@ func denyNoTerminal(out io.Writer) acprun.Approver {
 	}
 }
 
-// sessionReservation keeps two aimux processes from continuing one session.
-func sessionReservation(home string) func(string) (func(), error) {
-	dir := filepath.Join(home, ".aimux", "locks")
-	return func(sessionID string) (func(), error) { return acprun.SessionLock(dir, sessionID) }
+// chatProvider is the registry's provider called name as the session store
+// and live-session reader chat needs. The reader's TTL is 0: one command,
+// a read per send; remote serve shares one cached reader instead.
+func chatProvider(r *provider.Registry, name string) (harness.SessionStore, harness.LiveSessions, error) {
+	p := r.ByName(name)
+	store, isStore := p.(harness.SessionStore)
+	live, isLive := p.(provider.LiveSource)
+	if !isStore || !isLive {
+		return nil, nil, fmt.Errorf("provider %q cannot continue sessions", name)
+	}
+	return store, live.LiveSessions(0), nil
 }

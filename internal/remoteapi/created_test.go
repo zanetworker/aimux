@@ -13,32 +13,6 @@ import (
 	"github.com/zanetworker/aimux/internal/search"
 )
 
-func TestCreatedStore_PersistsPrivately(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "remote-created.json")
-	s := &CreatedStore{Path: path}
-	if err := s.Add("new-1", "/w/app", "start the cache work"); err != nil {
-		t.Fatal(err)
-	}
-	again := &CreatedStore{Path: path} // as after a restart
-	c, ok := again.Get("new-1")
-	if !ok || c.Cwd != "/w/app" || c.Prompt != "start the cache work" {
-		t.Fatalf("after reload: %+v %v", c, ok)
-	}
-	if _, ok := again.Get("other"); ok {
-		t.Fatal("unknown id reported as created")
-	}
-	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("store file mode %v (%v), want 0600: prompts are private", fi.Mode().Perm(), err)
-	}
-}
-
-func TestCreatedStore_MissingFileIsEmpty(t *testing.T) {
-	s := &CreatedStore{Path: filepath.Join(t.TempDir(), "none.json")}
-	if _, ok := s.Get("x"); ok {
-		t.Fatal("empty store has an entry")
-	}
-}
-
 // Sessions started from the phone run through the agent SDK, which marks
 // them automated; aimux knows it created them and lists them anyway.
 func TestLocalIndex_ListsSessionsItCreated(t *testing.T) {
@@ -83,7 +57,7 @@ func TestLocalIndex_Projects(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	x := &LocalIndex{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+	x := &LocalIndex{Providers: stubProviders(&stubStore{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
 		return []history.Session{
 			{ID: "1", Provider: "claude", Project: a, LastActive: now},
 			{ID: "2", Provider: "claude", Project: b, LastActive: now.Add(-time.Hour)},
@@ -92,7 +66,7 @@ func TestLocalIndex_Projects(t *testing.T) {
 			{ID: "5", Provider: "claude", Project: "/tmp/x", Automated: true, LastActive: now},
 			{ID: "6", Provider: "codex", Project: b, LastActive: now},
 		}, nil
-	}}
+	}}, nil)}
 	got, err := x.Projects(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -212,9 +186,9 @@ func TestLocalIndex_ProjectsUseTheRecordedCwd(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "my", "app"), 0o700); err != nil { // the look-alike
 		t.Fatal(err)
 	}
-	x := &LocalIndex{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+	x := &LocalIndex{Providers: stubProviders(&stubStore{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
 		return []history.Session{{ID: "1", Provider: "claude", Project: filepath.Join(root, "my", "app"), Cwd: real, LastActive: time.Now()}}, nil
-	}}
+	}}, nil)}
 	got, err := x.Projects(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -263,28 +237,14 @@ func TestLocalIndex_SearchSkipsUnavailableCreatedSessions(t *testing.T) {
 	}
 }
 
-func TestCreatedStore_NullFileIsEmpty(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "c.json")
-	if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s := &CreatedStore{Path: path}
-	if err := s.Add("x", "/w", "p"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := s.Get("x"); !ok {
-		t.Fatal("entry missing after Add")
-	}
-}
-
 // A folder used only by sessions started here stays a recent project,
 // although the agent SDK marks those sessions automated.
 func TestLocalIndex_ProjectsIncludeFoldersOfCreatedSessions(t *testing.T) {
 	dir := t.TempDir()
 	x := &LocalIndex{Created: &CreatedStore{Path: filepath.Join(t.TempDir(), "c.json")},
-		Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
+		Providers: stubProviders(&stubStore{Discover: func(history.DiscoverOpts, string) ([]history.Session, error) {
 			return []history.Session{{ID: "phone", Provider: "claude", Cwd: dir, Automated: true, LastActive: time.Now()}}, nil
-		}}
+		}}, nil)}
 	if err := x.Created.Add("phone", dir, "x"); err != nil {
 		t.Fatal(err)
 	}

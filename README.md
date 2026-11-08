@@ -62,14 +62,14 @@ aimux web      # browser UI at localhost:3000
 
 | Area | What you get | Docs |
 |---|---|---|
-| Discover | Auto-discovery of Claude Code and Codex, live status (active, idle, waiting, error), cross-session search, starred sessions, generated titles | [Web dashboard](https://aimux.ai/guides/web-dashboard/) |
+| Discover | Auto-discovery of Claude Code and Codex, live status (working, idle, needs you, error; the same words on the phone), cross-session search, starred sessions, generated titles | [Web dashboard](https://aimux.ai/guides/web-dashboard/) |
 | Trace and review | Turn-by-turn trace, inline diffs, PR-style review panel, live diff pane beside the session terminal | [Tracing](https://aimux.ai/guides/tracing/) |
 | Cost | Per-agent and per-turn cost with model-aware pricing | [Cost tracking](https://aimux.ai/guides/cost-tracking/) |
 | Evaluate | GOOD / BAD / WASTE labels with notes; export to MLflow, Jaeger or any OTLP backend, or JSONL | [MLflow](https://aimux.ai/guides/mlflow-integration/) |
 | Launch | Six-axis launcher, saved profiles, quick-launch directories, launches from Google Tasks, continue an idle session with `aimux chat` | [Launch modes](https://aimux.ai/guides/launch-modes/), [Tasks](https://aimux.ai/guides/tasks/), [Chat](https://aimux.ai/guides/chat/) |
 | Run remotely | OpenShell sandboxes with terminal, traces and kill; agents on Kubernetes pods | [Remote sandboxes](https://aimux.ai/guides/remote-sandboxes/), [Kubernetes](https://aimux.ai/advanced/k8s-quickstart/) |
-| Reach | `aimux remote serve`: follow Claude sessions from your phone over tailscale, continue idle ones and answer approvals; sessions open in a terminal on the Mac are read-only | [Remote access](https://aimux.ai/guides/remote-access/) |
-| Share MCP | `aimux mcp proxy serve`: one shared endpoint for your stdio MCP servers, each started on first call and stopped when idle; `aimux mcp serve`: session search and resume tools for agents | [MCP proxy](https://aimux.ai/guides/mcp-proxy/) |
+| Reach | `aimux remote serve`: follow and continue Claude sessions from the iPhone app or the phone web client over tailscale, answer approvals, type into sessions open in iTerm2, and open a phone session on the Mac | [Remote access](https://aimux.ai/guides/remote-access/) |
+| Share MCP | `aimux mcp proxy install`: your stdio MCP servers run once in a shared daemon, each at its own endpoint under its original name (permission rules unchanged), started on first call, shared ones stopped when idle and browser ones kept for as long as their Claude Code session runs; `aimux mcp serve`: session search and resume tools for agents | [MCP proxy](https://aimux.ai/guides/mcp-proxy/) |
 | Interfaces | Keyboard TUI with split panes; web dashboard with cards, filters and dark/light themes; desktop and terminal-bell notifications | [TUI keys](https://aimux.ai/guides/tui-keybindings/), [Notifications](https://aimux.ai/guides/notifications/) |
 | Extend | Plugin tabs, new providers, `--json` on every listing command, `aimux agent-context` for the full CLI contract | [Plugins](https://aimux.ai/guides/plugins/), [Agent usage](https://aimux.ai/guides/agent-usage/), [Add a provider](https://aimux.ai/advanced/adding-a-provider/) |
 
@@ -99,7 +99,7 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 | Continue a Claude session that is not open in a terminal | `aimux chat <session-id> "next step?"` |
 | Export a trace | `aimux export <session-id>` |
 | Follow Claude sessions from your phone | `aimux remote serve` (via tailscale serve) |
-| Share MCP servers across sessions | `aimux mcp proxy refresh`, then `aimux mcp proxy serve` |
+| Share MCP servers across sessions | `aimux mcp proxy install --dry-run`, then `aimux mcp proxy install` |
 
 <details>
 <summary>All commands</summary>

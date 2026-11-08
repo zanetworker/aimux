@@ -142,3 +142,20 @@ func TestBulkDeleteSessions_PartialFailure(t *testing.T) {
 		t.Errorf("deleted = %d, want 1", deleted)
 	}
 }
+
+func TestDeleteSession_RemovesMetaLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetNote(path, "n"); err != nil { // leaves the lock file
+		t.Fatal(err)
+	}
+	if err := DeleteSession(history.Session{FilePath: path}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(path))
+	if len(entries) != 0 {
+		t.Fatalf("left behind: %v", entries)
+	}
+}

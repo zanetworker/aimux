@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -20,6 +21,9 @@ const (
 	KindTurnError        = "turn_error"        // {"error"}
 	KindApproval         = "approval"          // {"approvalId","title","options"}
 	KindApprovalResolved = "approval_resolved" // {"approvalId","outcome": allowed|denied|expired}
+	// KindQueue: the session's chat queue changed; data is QueueStatus and
+	// turn is "". Only clients that ask (events?queue=1) see it.
+	KindQueue = "queue"
 )
 
 // Broker errors.
@@ -59,6 +63,9 @@ type BrokerOptions struct {
 	// OnApprovalResolved, if set, is told when one is answered, expires or
 	// its turn ends (Outcome set), so the notification can be taken back.
 	OnApprovalResolved func(ApprovalNotice)
+	// OnTurnEnd, if set, is told the session once a turn has ended (done or
+	// error) and the session can take the next one. It must not block.
+	OnTurnEnd func(session string)
 }
 
 // ApprovalNotice describes a new permission request for a notification.
@@ -100,6 +107,7 @@ type Broker struct {
 	mu        sync.Mutex
 	sessions  map[string]*sessionLog
 	approvals map[string]*pendingApproval
+	held      map[string]bool // sessions held during a handoff
 }
 
 // NewBroker returns a Broker.
@@ -107,7 +115,7 @@ func NewBroker(deps BrokerDeps, opt BrokerOptions) *Broker {
 	if opt.ApprovalTimeout <= 0 {
 		opt.ApprovalTimeout = 10 * time.Minute
 	}
-	return &Broker{deps: deps, opt: opt, logID: newID(), sessions: map[string]*sessionLog{}, approvals: map[string]*pendingApproval{}}
+	return &Broker{deps: deps, opt: opt, logID: newID(), sessions: map[string]*sessionLog{}, approvals: map[string]*pendingApproval{}, held: map[string]bool{}}
 }
 
 func (b *Broker) log(session string) *sessionLog {
@@ -119,7 +127,8 @@ func (b *Broker) log(session string) *sessionLog {
 	return l
 }
 
-// appendLocked adds an event and fans it out. Subscribers that fall behind
+// appendLocked adds an event and fans it out; a queue event replaces the
+// session's previous one. Subscribers that fall behind
 // are dropped; they reconnect with the last seq they saw.
 func (b *Broker) appendLocked(session, turn, kind string, data any) {
 	raw, ok := data.(json.RawMessage)
@@ -129,6 +138,11 @@ func (b *Broker) appendLocked(session, turn, kind string, data any) {
 	l := b.log(session)
 	l.seq++
 	e := Event{Seq: l.seq, Turn: turn, Kind: kind, Time: time.Now().UTC(), Data: raw}
+	if kind == KindQueue {
+		// A queue event is a whole snapshot: keep only the latest, so queue
+		// changes never push turn events out of the replay window.
+		l.events = slices.DeleteFunc(l.events, func(old Event) bool { return old.Kind == KindQueue })
+	}
 	l.events = append(l.events, e)
 	if len(l.events) > maxEventsPerSession {
 		l.events = l.events[len(l.events)-maxEventsPerSession:]
@@ -149,10 +163,13 @@ func (b *Broker) emit(session, turn, kind string, data any) {
 	b.appendLocked(session, turn, kind, data)
 }
 
+// Publish adds an event of no turn to the session's log.
+func (b *Broker) Publish(session, kind string, data any) { b.emit(session, "", kind, data) }
+
 // Start begins a turn and returns its id. The same non-empty key returns
 // the same turn, so a client may retry a send safely. It fails fast with
-// acprun.ErrBusy while the session has a running turn, or with Check's
-// error.
+// acprun.ErrBusy while the session has a running turn or is held, or with
+// Check's error.
 func (b *Broker) Start(session, text, key string) (string, error) {
 	b.mu.Lock()
 	l := b.log(session)
@@ -160,7 +177,7 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 		b.mu.Unlock()
 		return id, nil
 	}
-	if l.active != "" {
+	if l.active != "" || b.held[session] {
 		b.mu.Unlock()
 		return "", acprun.ErrBusy
 	}
@@ -181,7 +198,7 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 		b.mu.Unlock()
 		return id, nil
 	}
-	if l.active != "" {
+	if l.active != "" || b.held[session] {
 		b.mu.Unlock()
 		return "", acprun.ErrBusy
 	}
@@ -203,6 +220,11 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 // client follows the turn through the event log) and is cancelled by Cancel.
 func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, turn, text string) {
 	defer cancel()
+	defer func() { // after the unlock below: the session is free by then
+		if b.opt.OnTurnEnd != nil {
+			b.opt.OnTurnEnd(session)
+		}
+	}()
 	stop, err := b.deps.Send(ctx, session, text, func(e acprun.Event) {
 		if e.Kind == acprun.KindPermission {
 			return // the broker's own approval event replaces it
@@ -283,11 +305,66 @@ func (b *Broker) Subscribe(session string, after int64) (<-chan Event, func()) {
 	}
 }
 
-// Busy reports whether the session has a running turn.
+// Hold keeps the session from starting a turn, for handoff between
+// environments. It refuses with acprun.ErrBusy when a turn is running or
+// another hold exists. While held, Busy returns true and Start returns
+// ErrBusy. The release function is idempotent.
+func (b *Broker) Hold(session string) (release func(), err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l := b.log(session)
+	if l.active != "" || b.held[session] {
+		return nil, acprun.ErrBusy
+	}
+	b.held[session] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			delete(b.held, session)
+		})
+	}, nil
+}
+
+// Busy reports whether the session has a running turn or is held. The
+// session state service reads a held session (an Open on Mac handoff) as
+// working in the background, on purpose.
 func (b *Broker) Busy(session string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.log(session).active != ""
+	return b.log(session).active != "" || b.held[session]
+}
+
+// AwaitingApproval reports whether one of the session's permission
+// requests waits for an answer (sessionstate.ApprovalReader).
+func (b *Broker) AwaitingApproval(session string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, p := range b.approvals {
+		if p.session == session {
+			return true
+		}
+	}
+	return false
+}
+
+// TurnEnded reports whether turn is over, and whether it ended with a
+// turn_error event. A turn no longer in the event log counts as ended
+// without error.
+func (b *Broker) TurnEnded(session, turn string) (ended, failed bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	l := b.log(session)
+	if l.active == turn {
+		return false, false
+	}
+	for _, e := range l.events {
+		if e.Turn == turn && e.Kind == KindTurnError {
+			return true, true
+		}
+	}
+	return true, false
 }
 
 // Cancel stops the session's running turn wherever it is: before the agent

@@ -1,0 +1,5 @@
+{
+  "name": "A fence with no content lines yet is left out of the tree (streaming prefix)",
+  "markdown": "```go\n",
+  "blocks": []
+}

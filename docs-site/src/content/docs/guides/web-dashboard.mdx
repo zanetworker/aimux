@@ -15,9 +15,9 @@ aimux web --port 8080  # custom port
 The main view shows agent cards grouped by project. Each card displays:
 
 - **Provider badge** (Claude, Codex) with color coding
-- **Status** (Active, Idle, Waiting, Error)
+- **State**: needs you, working, idle (or error), the words the TUI and the phone use. A Claude Code session at a permission prompt reads "needs you" when Claude Code's session registry reports it waiting, and also from `aimux remote hooks install`'s markers
 - **Launch mode badge** (tmux or direct)
-- **Title** from the session's first prompt or auto-generated
+- **Title**: the title you wrote, else your `/rename` name, else one aimux generated, else Claude Code's own name for the session, else its first message (chosen as in the TUI, `aimux sessions` and the phone clients)
 - **Project name** and git branch
 - **Last activity snippet** showing the most recent tool call
 - **CPU%** and **memory** usage with color-coded thresholds
@@ -41,7 +41,7 @@ Toggle between card grid and compact list view using the view mode buttons in th
 
 The filter bar provides:
 
-- **Status filters**: All, Active, Idle, Waiting, Error
+- **Status filters**: All, Working, Idle, Needs you, Error
 - **Provider filters**: Claude, Codex
 - **Location filter**: Local, Remote — show only local agents or only remote sandboxes
 - **Recent filter**: Show only agents active in the last 5 minutes
@@ -68,11 +68,13 @@ Additional features:
 Click the **Sessions** tab to browse past agent sessions. The sessions table shows:
 
 - **Provider** and **project** name
-- **Title** (auto-generated or from first prompt)
+- **Title**, chosen as on the agent cards; the session filter also matches it
 - **Age** since last activity
 - **Turn count**, token usage, and cost
 - **Resumable** indicator for sessions that can be continued
 - **Star icon**: Click to pin/unpin sessions for quick access
+
+Some sessions are hidden until you ask for them. Sessions started by a program (`claude -p`, the agent SDK) show when you turn on **Automated**, in full, as `H` shows them in the TUI. Subagent sessions show when you turn on **Subagents**, analyzer sessions (started by aimux's own analysis or hook prompts, or mentioning "session analyzer") when you turn on **Analyzers**, and near-empty sessions (no cost and at most 5 turns) while a search is active. The Sessions tab count and the total under the table follow the switches: they count automated, subagent and analyzer sessions only while their switch is on, and near-empty sessions always (a search shows them). Content search also finds automated sessions; the switches decide whether they show. The server decides which sessions each switch reveals (the `hidden` list on each `/api/history` session), with the same rule the TUI and the phone clients use, each with its own switches.
 
 ### Starring Sessions
 
@@ -84,14 +86,14 @@ Click the star icon (☆/★) on any session row or agent card to pin it. Starre
 
 ### Title Generation
 
-Click **Generate Titles** in the sessions toolbar to auto-generate LLM titles for untitled sessions.
+Click **Generate Titles** in the sessions toolbar to auto-generate LLM titles for untitled sessions. Titles and descriptions you wrote are kept, and the token use is recorded under the label `naming`. Starring and editing from the dashboard change only the fields it sends, so they no longer reset a description or title you set elsewhere.
 
 Click any row to open its trace in the right panel. The toolbar provides two filter inputs:
 
 - **Filter sessions**: Search by title, prompt, project, annotation, or tags
 - **Filter by path**: Narrow to sessions in a specific directory (type a directory name like "research" or "aimux")
 
-Both filters stack: filter by path first, then search within those results. Use the content search for deep matches inside session files.
+Both filters stack: filter by path first, then search within those results. Use the content search for deep matches inside session files. Content search results follow the same rules: Starred, the path filter and the Subagents, Automated and Analyzers switches still apply, and a row matching either the text filter or the content search is shown.
 
 ### CLI Session Commands
 
@@ -115,7 +117,7 @@ Search across all agent traces to find specific files, functions, or topics:
 
 This is useful for questions like "which agent edited auth.go?" or "who ran the database migration?".
 
-Content search uses the same ranked index as `aimux sessions` (`~/.aimux/search.db`): keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. Each search first picks up session files that changed and embeds them in the background, so it doesn't wait for them; new messages match by keyword at once and usually join semantic ranking within seconds. Only the query itself is embedded inline (cached after the first time). If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed.
+Content search uses the same ranked index as `aimux sessions` (`~/.aimux/search.db`): keyword ranking, plus semantic ranking when `OPENAI_API_KEY` is set. Each search first picks up session files that changed and embeds them in the background, so it doesn't wait for them; new messages match by keyword at once and usually join semantic ranking within seconds. Only the query itself is embedded inline (cached after the first time). If more than 20 sessions changed at once, they are not embedded automatically; run `aimux sessions index` to catch up. If the embedding API is unreachable, the work stays queued and the next search retries it, even if no files changed. One exception: when the index was written by a newer aimux build (several builds can share the file, one per open session), an older build uses it as it is without refreshing and logs a note once, and `aimux sessions index` refuses to rebuild it; update `aimux` to bring that build's search up to date.
 
 ## Dark/Light Theme
 
@@ -137,7 +139,7 @@ Click **+ Launch**, set **Runtime: remote**, choose a directory, and click **Lau
 Remote sandbox cards show:
 - **LOC**: `remote` badge in the location column
 - **Name**: your project directory (e.g., `research`) — not the raw sandbox ID
-- **Status**: Active (green) while ready; **ERROR / Deleting** immediately after Kill
+- **Status**: working (green) while ready; **ERROR / Deleting** immediately after Kill
 
 ### Session terminal
 
@@ -155,7 +157,7 @@ The **Trace** tab shows turn-by-turn conversation with assistant replies read fr
 
 The header shows aggregate statistics:
 
-- Session count, active/idle/waiting/error counts
+- Session count, working/idle/needs you/error counts; without the hooks, a muted "Permission alerts need `aimux remote hooks install`" (a permission prompt still reads needs you when Claude Code's registry reports the session waiting)
 - Repository count
 - Total tokens in/out
 - Total cost across all agents

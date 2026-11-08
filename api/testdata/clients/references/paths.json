@@ -1,0 +1,1041 @@
+{
+  "name": "Repository paths with a slash and an extension become reference spans, with an optional line",
+  "cases": [
+    {
+      "name": "relative path and relative path with a line",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Edit internal/api/server.go and internal/api/server.go:42 now."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Edit "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "internal/api/server.go",
+          "href": "https://github.com/acme/widget/blob/main/internal/api/server.go"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "internal/api/server.go:42",
+          "href": "https://github.com/acme/widget/blob/main/internal/api/server.go#L42"
+        },
+        {
+          "t": "text",
+          "v": " now."
+        }
+      ]
+    },
+    {
+      "name": "leading ./ is dropped; dot directories work",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "See ./cmd/main.go and .github/workflows/ci.yml:7."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "See "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "./cmd/main.go",
+          "href": "https://github.com/acme/widget/blob/main/cmd/main.go"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": ".github/workflows/ci.yml:7",
+          "href": "https://github.com/acme/widget/blob/main/.github/workflows/ci.yml#L7"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "name": "a sentence period after the path is not part of it",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "The bug is in src/cache/ttl.go. Also src/a.go, src/b.go; and (src/c.go)."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "The bug is in "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "src/cache/ttl.go",
+          "href": "https://github.com/acme/widget/blob/main/src/cache/ttl.go"
+        },
+        {
+          "t": "text",
+          "v": ". Also "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "src/a.go",
+          "href": "https://github.com/acme/widget/blob/main/src/a.go"
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "src/b.go",
+          "href": "https://github.com/acme/widget/blob/main/src/b.go"
+        },
+        {
+          "t": "text",
+          "v": "; and ("
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "src/c.go",
+          "href": "https://github.com/acme/widget/blob/main/src/c.go"
+        },
+        {
+          "t": "text",
+          "v": ")."
+        }
+      ]
+    },
+    {
+      "name": "inline code that is exactly a path",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Open "
+        },
+        {
+          "t": "code",
+          "v": "internal/api/server.go"
+        },
+        {
+          "t": "text",
+          "v": " or "
+        },
+        {
+          "t": "code",
+          "v": "internal/api/server.go:42"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Open "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "internal/api/server.go",
+          "href": "https://github.com/acme/widget/blob/main/internal/api/server.go",
+          "code": true
+        },
+        {
+          "t": "text",
+          "v": " or "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "internal/api/server.go:42",
+          "href": "https://github.com/acme/widget/blob/main/internal/api/server.go#L42",
+          "code": true
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "name": "inline code that is more than a path stays code",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "code",
+          "v": "go test internal/api/server.go"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": "cat internal/api/server.go | head"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": " internal/api/server.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "code",
+          "v": "go test internal/api/server.go"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": "cat internal/api/server.go | head"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": " internal/api/server.go"
+        }
+      ]
+    },
+    {
+      "name": "absolute path under the project becomes relative",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Changed /Users/dev/code/widget/internal/api/server.go:9 and "
+        },
+        {
+          "t": "code",
+          "v": "/Users/dev/code/widget/web/app.js"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Changed "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/internal/api/server.go:9",
+          "href": "https://github.com/acme/widget/blob/main/internal/api/server.go#L9"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/web/app.js",
+          "href": "https://github.com/acme/widget/blob/main/web/app.js",
+          "code": true
+        }
+      ]
+    },
+    {
+      "name": "absolute path elsewhere stays text, also in code",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "See /etc/hosts.d/local.conf and /Users/dev/other/internal/x.go and "
+        },
+        {
+          "t": "code",
+          "v": "/var/log/app/out.log"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "See /etc/hosts.d/local.conf and /Users/dev/other/internal/x.go and "
+        },
+        {
+          "t": "code",
+          "v": "/var/log/app/out.log"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "name": "project that is only a prefix of a folder name",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "/Users/dev/code/widget2/internal/x.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "/Users/dev/code/widget2/internal/x.go"
+        }
+      ]
+    },
+    {
+      "name": "absolute path without a repository root or project folder",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "/Users/dev/code/widget/internal/x.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "/Users/dev/code/widget/internal/x.go"
+        }
+      ]
+    },
+    {
+      "name": "without a root the project folder is used",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "/Users/dev/code/widget/internal/x.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/internal/x.go",
+          "href": "https://github.com/acme/widget/blob/main/internal/x.go"
+        }
+      ]
+    },
+    {
+      "name": "session started in a subfolder: absolute paths are relative to the repository root",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": "/Users/dev/code/widget/internal"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Edit /Users/dev/code/widget/internal/api/x.go:3, /Users/dev/code/widget/main.go and "
+        },
+        {
+          "t": "code",
+          "v": "/Users/dev/code/widget/README.md"
+        },
+        {
+          "t": "text",
+          "v": "; relative "
+        },
+        {
+          "t": "code",
+          "v": "api/x.go"
+        },
+        {
+          "t": "text",
+          "v": " is repo-relative as written"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Edit "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/internal/api/x.go:3",
+          "href": "https://github.com/acme/widget/blob/main/internal/api/x.go#L3"
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/main.go",
+          "href": "https://github.com/acme/widget/blob/main/main.go"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/README.md",
+          "href": "https://github.com/acme/widget/blob/main/README.md",
+          "code": true
+        },
+        {
+          "t": "text",
+          "v": "; relative "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "api/x.go",
+          "href": "https://github.com/acme/widget/blob/main/api/x.go",
+          "code": true
+        },
+        {
+          "t": "text",
+          "v": " is repo-relative as written"
+        }
+      ]
+    },
+    {
+      "name": "a file directly in the root",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Open /Users/dev/code/widget/main.go:4 and /Users/dev/code/widget/go.mod but not main.go or go.mod"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Open "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/main.go:4",
+          "href": "https://github.com/acme/widget/blob/main/main.go#L4"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/go.mod",
+          "href": "https://github.com/acme/widget/blob/main/go.mod"
+        },
+        {
+          "t": "text",
+          "v": " but not main.go or go.mod"
+        }
+      ]
+    },
+    {
+      "name": "root with a trailing slash",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget/"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": "/Users/dev/code/widget/"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "/Users/dev/code/widget/a/b.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "/Users/dev/code/widget/a/b.go",
+          "href": "https://github.com/acme/widget/blob/main/a/b.go"
+        }
+      ]
+    },
+    {
+      "name": "a name glued after the extension is not a path",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "src/a.go_test pkg/x.go-old lib/y.rs+z src/a.go@v1 and src/ok.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "src/a.go_test pkg/x.go-old lib/y.rs+z src/a.go@v1 and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "src/ok.go",
+          "href": "https://github.com/acme/widget/blob/main/src/ok.go"
+        }
+      ]
+    },
+    {
+      "name": "a longer extension chain is one file name",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "backup/a.go.bak and a/b.tar.gz."
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "backup/a.go.bak",
+          "href": "https://github.com/acme/widget/blob/main/backup/a.go.bak"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "a/b.tar.gz",
+          "href": "https://github.com/acme/widget/blob/main/a/b.tar.gz"
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "name": "branch with a slash is kept as written",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "feature/ttl",
+          "root": "/p"
+        },
+        "jiraBase": null,
+        "jiraProjects": [],
+        "project": "/p"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "src/a.go:3"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "src/a.go:3",
+          "href": "https://github.com/acme/widget/blob/feature/ttl/src/a.go#L3"
+        }
+      ]
+    },
+    {
+      "name": "domain-like first segment, home paths, parent paths and doubled slashes are not linked",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "example.com/foo/bar.html ~/proj/a.go ../up/x.go a//b.go"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "example.com/foo/bar.html ~/proj/a.go ../up/x.go a//b.go"
+        }
+      ]
+    },
+    {
+      "name": "extension must start with a letter; no slash, no link",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "v1.2/3.4 and Makefile and main.go and 10/20.5"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "v1.2/3.4 and Makefile and main.go and 10/20.5"
+        }
+      ]
+    },
+    {
+      "name": "a path without an extension is not linked",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "see internal/api and internal/api/ and internal/api/Makefile"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "see internal/api and internal/api/ and internal/api/Makefile"
+        }
+      ]
+    },
+    {
+      "name": "line number rules",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "a/b.go:12 a/b.go:1234567 a/b.go:x a/b.go:12x a/b.go:12:5"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "a/b.go:12",
+          "href": "https://github.com/acme/widget/blob/main/a/b.go#L12"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "a/b.go",
+          "href": "https://github.com/acme/widget/blob/main/a/b.go"
+        },
+        {
+          "t": "text",
+          "v": ":1234567 "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "a/b.go",
+          "href": "https://github.com/acme/widget/blob/main/a/b.go"
+        },
+        {
+          "t": "text",
+          "v": ":x "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "a/b.go",
+          "href": "https://github.com/acme/widget/blob/main/a/b.go"
+        },
+        {
+          "t": "text",
+          "v": ":12x "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "a/b.go:12",
+          "href": "https://github.com/acme/widget/blob/main/a/b.go#L12"
+        },
+        {
+          "t": "text",
+          "v": ":5"
+        }
+      ]
+    },
+    {
+      "name": "inside emphasis",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "see lib/x.rs:5"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "see "
+            },
+            {
+              "t": "ref",
+              "kind": "path",
+              "v": "lib/x.rs:5",
+              "href": "https://github.com/acme/widget/blob/main/lib/x.rs#L5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "not inside a link",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "link",
+          "href": "https://example.com/l",
+          "c": [
+            {
+              "t": "text",
+              "v": "lib/x.rs"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "t": "link",
+          "href": "https://example.com/l",
+          "c": [
+            {
+              "t": "text",
+              "v": "lib/x.rs"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "two paths and a number in one text, left to right",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "lib/x.rs:5 then lib/y.rs and #3 and WID-4 and a1b2c3d"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "lib/x.rs:5",
+          "href": "https://github.com/acme/widget/blob/main/lib/x.rs#L5"
+        },
+        {
+          "t": "text",
+          "v": " then "
+        },
+        {
+          "t": "ref",
+          "kind": "path",
+          "v": "lib/y.rs",
+          "href": "https://github.com/acme/widget/blob/main/lib/y.rs"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "pr",
+          "v": "#3",
+          "href": "https://github.com/acme/widget/issues/3"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-4",
+          "href": "https://jira.example.com/browse/WID-4"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "commit",
+          "v": "a1b2c3d",
+          "href": "https://github.com/acme/widget/commit/a1b2c3d"
+        }
+      ]
+    }
+  ]
+}

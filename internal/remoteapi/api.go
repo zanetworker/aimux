@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,17 +16,26 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/catalog"
+	"github.com/zanetworker/aimux/internal/folders"
+	"github.com/zanetworker/aimux/internal/harness"
+	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/push"
+	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
+	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
+	"github.com/zanetworker/aimux/internal/sessionstate"
+	"github.com/zanetworker/aimux/internal/terminput"
+	"github.com/zanetworker/aimux/internal/waiting"
 )
 
-// Session states as clients see them.
+// Session states as clients see them: the catalog's.
 const (
-	StateIdle           = "idle"             // can be continued from here
-	StateOpenInTerminal = "open_in_terminal" // follow only
-	StateBusy           = "busy"             // aimux is running a turn
+	StateIdle           = catalog.StateIdle           // can be continued from here
+	StateOpenInTerminal = catalog.StateOpenInTerminal // follow only
+	StateBusy           = catalog.StateBusy           // aimux is running a turn
 	// StateUnavailable: created here, but its first prompt failed before the
 	// agent wrote the session, so there is nothing to continue.
-	StateUnavailable = "unavailable"
+	StateUnavailable = catalog.StateUnavailable
 )
 
 // Session is one entry in the session list. Automated sessions (started by
@@ -37,12 +48,64 @@ type Session struct {
 	LastActive time.Time `json:"lastActive"`
 	State      string    `json:"state"`
 	LastPrompt string    `json:"lastPrompt,omitempty"` // the latest message the user sent
+	// Description is the shown description (history.ShownDescription): the
+	// owner's, else Claude Code's away summary, else aimux's.
+	Description string `json:"description,omitempty"`
+	Pinned      bool   `json:"pinned"` // the session's star
+	// Folder, Mac and Working are filled for the session list only.
+	Folder *folders.Folder `json:"folder,omitempty"` // where the session ran, named once per path
+	// Mac is set when the running claude is in an iTerm2 pane.
+	Mac *terminput.MacPlace `json:"mac,omitempty"`
+	// Working: the session is open in a terminal and Claude's registry calls it busy.
+	Working bool `json:"working,omitempty"`
+	// Waiting is set while a session open in a terminal shows a permission
+	// prompt, from the marker its Claude Code hook wrote (internal/waiting).
+	Waiting *waiting.Waiting `json:"waiting,omitempty"`
+	// Activity is what the session is doing now (sessionstate): working,
+	// needs_you, idle or gone. Set on the list and the detail.
+	Activity sessionstate.Activity `json:"activity,omitempty"`
 }
 
 // SessionDetail is a session plus its most recent turns.
 type SessionDetail struct {
 	Session
 	Turns []Turn `json:"turns"`
+	// Stats is absent while the session is not in the index yet.
+	Stats *SessionStats `json:"stats,omitempty"`
+	// Terminal is set only for sessions open in a terminal on the Mac.
+	Terminal *TerminalStatus `json:"terminal,omitempty"`
+	// Repo is set only when the session's folder is a git repository on a
+	// known host (GitHub or GitLab).
+	Repo *Repo `json:"repo,omitempty"`
+	// Queue is set only when the session's chat queue holds items.
+	Queue *QueueStatus `json:"queue,omitempty"`
+}
+
+// TerminalInput types into sessions open in a terminal on the Mac, after its
+// own safety checks (terminput.Service).
+type TerminalInput interface {
+	Send(ctx context.Context, sessionID, text, idemKey string) error
+	// SendReplacing clears the input box first (the owner asked to replace
+	// its text); terminput.ErrNotCleared when it would not empty.
+	SendReplacing(ctx context.Context, sessionID, text, idemKey string) error
+	// SendNow is Send allowed while Claude works on a turn (Send now): the
+	// harness takes the message during the turn; every other check stays.
+	SendNow(ctx context.Context, sessionID, text, idemKey string) error
+	Press(ctx context.Context, sessionID, promptID string, option terminput.Key, idemKey string) error
+}
+
+// SessionStats is what a session has cost and used so far, from the index.
+type SessionStats struct {
+	CostUSD          float64    `json:"costUsd"`
+	TokensIn         int64      `json:"tokensIn"`
+	TokensOut        int64      `json:"tokensOut"`
+	CacheReadTokens  int64      `json:"cacheReadTokens"`
+	CacheWriteTokens int64      `json:"cacheWriteTokens"`
+	Turns            int        `json:"turns"`
+	StartTime        *time.Time `json:"startTime,omitempty"` // nil when the index has none
+	DurationMin      float64    `json:"durationMin"`
+	Model            string     `json:"model,omitempty"`
+	GitBranch        string     `json:"gitBranch,omitempty"`
 }
 
 // API serves /v1. Sessions and Session read aimux's session index.
@@ -51,11 +114,23 @@ type API struct {
 	Broker   *Broker
 	Sessions func(ctx context.Context, limit int, includeAutomated bool) ([]Session, error)
 	Session  func(ctx context.Context, id string, turns int) (SessionDetail, error)
-	Search   func(ctx context.Context, query string, limit int) ([]SearchHit, error)
+	// SessionsAt, if set with States, serves the list instead of Sessions,
+	// given the state service's open-sessions read (LocalIndex.SessionsAt),
+	// so `state`, `working` and `activity` come from one read.
+	SessionsAt func(ctx context.Context, limit int, includeAutomated bool, open map[string]harness.Holder) ([]Session, error)
+	// SessionExists, if set, is the queue routes' check that a session is
+	// known, without reading its detail; nil falls back to Session.
+	SessionExists func(ctx context.Context, id string) error
+	Search        func(ctx context.Context, query string, limit int) ([]SearchHit, error)
 	// Projects lists the folders a new session may start in; Create starts
 	// one there and returns its id.
 	Projects func(ctx context.Context) ([]Project, error)
 	Create   func(ctx context.Context, cwd, text string) (string, error)
+	// Places, if set, gives the iTerm2 pane of each open session by id, and
+	// Folder the named folder of a session's project path; both fill the
+	// session list only. Nil leaves the fields absent.
+	Places func(ctx context.Context) map[string]terminput.MacPlace
+	Folder func(path string) folders.Folder
 	// Client, if set, is a browser client served at /app/ behind the same
 	// identity check as /v1. It is any handler; the server knows nothing
 	// else about it.
@@ -64,9 +139,58 @@ type API struct {
 	// phone up for approval notifications (APNs) and off again.
 	RegisterDevice   func(push.Device) error
 	UnregisterDevice func(token string) error
+	// TerminalInput, with TerminalEnabled (remote_access.terminal_input.enabled),
+	// serves /terminal/messages and /terminal/keys; otherwise both answer
+	// 403 disabled.
+	TerminalInput   TerminalInput
+	TerminalEnabled bool
+	// Links, if it names a Jira base, is reported in /v1/health.
+	Links *Links
+	// TerminalTyped, if set, is told after a successful send or key press,
+	// so a cached terminal status of that session is dropped.
+	TerminalTyped func(sessionID string)
+	// Log, if set, receives details the server keeps from clients, such as
+	// a terminal driver's error text.
+	Log io.Writer
+	// DeviceLogin, if set (remote_access.device_login), serves /v1/auth,
+	// requires a paired device's session on every other route but the open
+	// ones, ends event streams with their session and audits each action.
+	// Nil keeps the tailnet check alone.
+	DeviceLogin *devicelogin.Server
+	// Queue, if set, serves /v1/sessions/{id}/queue. QueueKick (the
+	// dispatcher's Kick) is called after each change; QueueNote gives a
+	// session's waiting line. QueueSentNow (the dispatcher's NoteSentNow)
+	// is told the text of each Send now before it is typed, so its history
+	// turn is not taken for the owner's; the func it returns is called when
+	// the send fails. Any of them may be nil.
+	Queue        *chatqueue.Store
+	QueueKick    func()
+	QueueNote    func(session string) string
+	QueueSentNow func(session, text string) (forget func())
+	// Record, if set, gives a session's history record (its file and
+	// metadata) and serves PATCH /v1/sessions/{id}/meta; with Naming it also
+	// serves POST /v1/sessions/{id}/describe.
+	Record func(ctx context.Context, id string) (history.Session, error)
+	// Naming, if set, makes titles and descriptions ("Update summary") and
+	// reports its state in health. With AutoName (sessions.auto_title) it is
+	// also told which sessions clients show, to name them automatically.
+	Naming   Naming
+	AutoName bool
+	// LastOnMac, if set, is the session last in front on the Mac
+	// (terminput.LastFocus.Last).
+	LastOnMac func() (id string, at time.Time, ok bool)
+	// States, if set, is the session state service: it fills `activity`
+	// and `waiting` on the list and detail, and `working` on the list.
+	States *sessionstate.Service
+	// Handoff, if set, serves POST /v1/sessions/{id}/open-on-mac (health
+	// openOnMac); nil answers 503 no_terminal.
+	Handoff *Handoff
 
 	createMu sync.Mutex        // one creation at a time, so a retried key cannot create twice
 	created  map[string]string // client key -> new session id
+
+	nowMu   sync.Mutex           // guards nowDone
+	nowDone map[string]time.Time // session and key of a Send now that went through
 }
 
 // Handler returns the /v1 routes, admitting only allowed Tailscale logins
@@ -77,20 +201,82 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux.HandleFunc("GET /v1/openapi.yaml", serveContract)
 	mux.HandleFunc("GET /v1/sessions", a.listSessions)
 	mux.HandleFunc("GET /v1/sessions/{id}", a.getSession)
-	mux.HandleFunc("POST /v1/sessions", a.newSession)
+	mux.HandleFunc("POST /v1/sessions", a.audited(devicelogin.ActionNewSession, false, a.newSession))
 	mux.HandleFunc("GET /v1/search", a.search)
 	mux.HandleFunc("GET /v1/projects", a.projects)
-	mux.HandleFunc("POST /v1/sessions/{id}/messages", a.sendMessage)
+	mux.HandleFunc("PATCH /v1/sessions/{id}/meta", a.patchMeta)
+	mux.HandleFunc("POST /v1/sessions/{id}/describe", a.audited(devicelogin.ActionDescribe, true, a.describe))
+	mux.HandleFunc("POST /v1/sessions/{id}/open-on-mac", a.audited(devicelogin.ActionOpenOnMac, true, a.openOnMac))
+	mux.HandleFunc("POST /v1/sessions/{id}/messages", a.audited(devicelogin.ActionSend, true, a.sendMessage))
+	mux.HandleFunc("POST /v1/sessions/{id}/terminal/messages", a.audited(devicelogin.ActionTerminalMessage, true, a.terminalMessage))
+	mux.HandleFunc("POST /v1/sessions/{id}/terminal/keys", a.audited(devicelogin.ActionTerminalKey, true, a.terminalKey))
 	mux.HandleFunc("GET /v1/sessions/{id}/events", a.events)
-	mux.HandleFunc("POST /v1/sessions/{id}/cancel", a.cancel)
-	mux.HandleFunc("POST /v1/approvals/{id}", a.answer)
+	mux.HandleFunc("POST /v1/sessions/{id}/cancel", a.audited(devicelogin.ActionCancel, true, a.cancel))
+	mux.HandleFunc("GET /v1/sessions/{id}/queue", a.queueGet)
+	mux.HandleFunc("POST /v1/sessions/{id}/queue", a.audited(devicelogin.ActionQueueAdd, true, a.queueAdd))
+	mux.HandleFunc("PATCH /v1/sessions/{id}/queue/{item}", a.queuePatch)
+	mux.HandleFunc("DELETE /v1/sessions/{id}/queue/{item}", a.audited(devicelogin.ActionQueueDelete, true, a.queueDelete))
+	mux.HandleFunc("POST /v1/sessions/{id}/queue/resume", a.audited(devicelogin.ActionQueueResume, true, a.queueResume))
+	mux.HandleFunc("POST /v1/sessions/{id}/queue/{item}/send-now", a.audited(devicelogin.ActionQueueSendNow, true, a.queueSendNow))
+	mux.HandleFunc("POST /v1/approvals/{id}", a.audited(devicelogin.ActionApprove, false, a.answer))
 	mux.HandleFunc("POST /v1/devices", a.registerDevice)
 	mux.HandleFunc("DELETE /v1/devices/{token}", a.unregisterDevice)
 	if a.Client != nil {
 		mux.Handle("GET /app/", a.Client)
 		mux.Handle("GET /app", http.RedirectHandler("/app/", http.StatusFound))
 	}
-	return RequireTailnetUser(allowedLogins, trustedHosts, mux)
+	var h http.Handler = mux
+	if a.DeviceLogin != nil {
+		a.DeviceLogin.Register(mux)
+		h = a.DeviceLogin.Middleware(mux)
+	}
+	return RequireTailnetUser(allowedLogins, trustedHosts, h)
+}
+
+// audited writes an audit line for each request to h once it is answered:
+// the action, the session in the path when withSession (never the body),
+// and "ok" or http_<status>. Without device login it is h.
+func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.HandlerFunc {
+	if a.DeviceLogin == nil {
+		return h
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		h(rec, r)
+		result := "ok"
+		if rec.status >= 400 {
+			result = "http_" + strconv.Itoa(rec.status)
+		}
+		session := ""
+		if withSession {
+			session = r.PathValue("id")
+		}
+		act := action // per request: the route's action must not change for later requests
+		if rec.action != "" {
+			act = rec.action
+		}
+		a.DeviceLogin.Record(r, act, session, result)
+	}
+}
+
+// auditAs makes the audit line of this request carry action instead of
+// its route's (a variant of the route, such as a terminal Send now).
+func auditAs(w http.ResponseWriter, action string) {
+	if rec, ok := w.(*statusRecorder); ok {
+		rec.action = action
+	}
+}
+
+// statusRecorder remembers the status a handler answered with.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	action string // set by auditAs
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -128,6 +314,14 @@ func writeFailure(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "bad_request", err)
 	case errors.Is(err, errNotAProject):
 		writeError(w, http.StatusBadRequest, "bad_request", err)
+	case errors.Is(err, ErrNotStarted):
+		writeError(w, http.StatusConflict, "not_started", err)
+	case errors.Is(err, ErrNoTerminal):
+		writeError(w, http.StatusServiceUnavailable, "no_terminal", err)
+	case errors.Is(err, ErrNotAuthorized):
+		writeError(w, http.StatusForbidden, "not_authorized", err)
+	case errors.Is(err, ErrHandoffTimeout):
+		writeError(w, http.StatusGatewayTimeout, "timeout", err)
 	default:
 		writeError(w, http.StatusInternalServerError, "internal", err)
 	}
@@ -162,8 +356,48 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	if a.RegisterDevice != nil && a.UnregisterDevice != nil {
 		caps = append(caps, CapPush)
 	}
-	writeJSON(w, http.StatusOK, Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
-		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps})
+	if a.terminalOn() {
+		caps = append(caps, CapTerminalInput)
+	}
+	if a.DeviceLogin != nil {
+		caps = append(caps, CapDeviceLogin)
+	}
+	if a.Queue != nil {
+		caps = append(caps, CapQueue)
+	}
+	if a.describing() {
+		caps = append(caps, CapDescribe)
+	}
+	if a.terminalOn() {
+		caps = append(caps, CapSendNow)
+	}
+	h := Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
+		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps, OpenOnMac: a.Handoff != nil}
+	if a.DeviceLogin != nil {
+		h.Session = a.DeviceLogin.SessionState(r)
+	}
+	if a.Links != nil && a.Links.JiraBase != "" {
+		h.Links = &Links{JiraBase: a.Links.JiraBase, JiraProjects: append([]string{}, a.Links.JiraProjects...)}
+	}
+	if a.Naming != nil {
+		st := a.Naming.Status()
+		h.Naming = &NamingHealth{Today: st.Today, Limit: st.Limit, Failing: st.Failing, Reason: st.Reason, Paused: st.Paused}
+	}
+	writeJSON(w, http.StatusOK, h)
+}
+
+// openOnMac hands the session to a new iTerm2 tab on the Mac and answers
+// once the terminal holds it.
+func (a *API) openOnMac(w http.ResponseWriter, r *http.Request) {
+	if a.Handoff == nil {
+		writeError(w, http.StatusServiceUnavailable, "no_terminal", ErrNoTerminal)
+		return
+	}
+	if err := a.Handoff.Run(r.Context(), r.PathValue("id")); err != nil {
+		writeFailure(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, OpenOnMacResult{State: StateOpenInTerminal})
 }
 
 func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +406,18 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err)
 		return
 	}
-	list, err := a.Sessions(r.Context(), limit, r.URL.Query().Get("include_automated") == "1")
+	automated := r.URL.Query().Get("include_automated") == "1"
+	var states *sessionstate.Snapshot
+	if a.States != nil {
+		snap := a.States.Read()
+		states = &snap
+	}
+	var list []Session
+	if states != nil && a.SessionsAt != nil {
+		list, err = a.SessionsAt(r.Context(), limit, automated, states.Holders())
+	} else {
+		list, err = a.Sessions(r.Context(), limit, automated)
+	}
 	if err != nil {
 		writeFailure(w, err)
 		return
@@ -180,7 +425,27 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []Session{}
 	}
-	writeJSON(w, http.StatusOK, SessionList{Sessions: list})
+	var places map[string]terminput.MacPlace
+	if a.Places != nil {
+		places = a.Places(r.Context())
+	}
+	for i := range list {
+		if a.Folder != nil && list[i].Project != "" {
+			f := a.Folder(list[i].Project)
+			list[i].Folder = &f
+		}
+		if p, ok := places[list[i].ID]; ok {
+			list[i].Mac = &p
+		}
+		if states != nil {
+			st := states.Of(list[i].ID)
+			list[i].Activity, list[i].Waiting = st.Activity, st.Waiting
+			list[i].Working = st.Held && st.RegistryStatus == "busy"
+		}
+	}
+	out := SessionList{Sessions: list, LastOnMac: a.lastOnMac(r.Context())}
+	writeJSON(w, http.StatusOK, out)
+	a.want(shownIDs(list, out.LastOnMac, time.Now()))
 }
 
 func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +459,16 @@ func (a *API) getSession(w http.ResponseWriter, r *http.Request) {
 		writeFailure(w, err)
 		return
 	}
+	if a.Queue != nil {
+		if q := a.queueStatus(d.ID); len(q.Items) > 0 {
+			d.Queue = &q
+		}
+	}
+	if a.States != nil {
+		d.Activity, d.Waiting = detailState(a.States.Read().Facts(d.ID), d.Terminal)
+	}
 	writeJSON(w, http.StatusOK, d)
+	a.want([]string{d.ID})
 }
 
 func (a *API) search(w http.ResponseWriter, r *http.Request) {
@@ -332,6 +606,10 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := r.PathValue("id")
+	if a.queueActive(session, false) {
+		writeError(w, http.StatusConflict, "busy", errQueueActive)
+		return
+	}
 	turn, err := a.Broker.Start(session, req.Text, req.Key)
 	if err != nil {
 		writeFailure(w, err)
@@ -376,8 +654,15 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Queue events are for clients that ask: one before the queue would
+	// take an event of no turn for a turn still running.
+	withQueue := r.URL.Query().Get("queue") == "1"
 	if r.URL.Query().Get("wait") == "0" {
-		writeJSON(w, http.StatusOK, EventPage{Events: a.Broker.Events(session, after), Log: a.Broker.LogID()})
+		evs := a.Broker.Events(session, after)
+		if !withQueue {
+			evs = slices.DeleteFunc(evs, func(e Event) bool { return e.Kind == KindQueue })
+		}
+		writeJSON(w, http.StatusOK, EventPage{Events: evs, Log: a.Broker.LogID()})
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -390,6 +675,12 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// A stream ends with its login (logout, revoke, idle or 12 hours); it
+	// never counts as use. Without device login, ended is nil and never fires.
+	var ended <-chan struct{}
+	if s, ok := devicelogin.SessionFrom(r.Context()); ok {
+		ended = s.Done()
+	}
 	ch, stop := a.Broker.Subscribe(session, after)
 	defer stop()
 	keepalive := time.NewTicker(15 * time.Second)
@@ -398,12 +689,17 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ended:
+			return
 		case <-keepalive.C:
 			_, _ = fmt.Fprint(w, ": keepalive\n\n")
 			flusher.Flush()
 		case e, open := <-ch:
 			if !open {
 				return // fell behind; the client reconnects with Last-Event-ID
+			}
+			if e.Kind == KindQueue && !withQueue {
+				continue
 			}
 			data, _ := json.Marshal(e)
 			_, _ = fmt.Fprintf(w, "id: %s.%d\nevent: %s\ndata: %s\n\n", a.Broker.LogID(), e.Seq, e.Kind, data)
@@ -465,4 +761,203 @@ func (a *API) unregisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, Status{Status: "unregistered"})
+}
+
+func (a *API) typed(sessionID string) {
+	if a.TerminalTyped != nil {
+		a.TerminalTyped(sessionID)
+	}
+}
+
+func (a *API) terminalOn() bool { return a.TerminalEnabled && a.TerminalInput != nil }
+
+// errTerminalDriver is what a client sees of a driver failure: its text
+// (osascript stderr, JXA exceptions) goes to the server's log only.
+var errTerminalDriver = errors.New("the terminal driver failed")
+
+// maxTerminalBody caps a terminal message or key request.
+const maxTerminalBody = 64 << 10
+
+// terminalMessages are the client-facing messages per terminput code.
+// Clients never see err.Error(): terminput wraps driver text into some
+// coded errors.
+var terminalMessages = map[string]struct {
+	status int
+	msg    string
+}{
+	"disabled":           {http.StatusForbidden, "terminal input is off on the Mac"},
+	"bad_text":           {http.StatusBadRequest, "the text holds control characters, or starts with ! or / (bash mode, slash commands)"},
+	"not_in_terminal":    {http.StatusConflict, "the session is not open in a terminal"},
+	"not_claude":         {http.StatusConflict, "the terminal is not running this session's Claude Code"},
+	"mac_in_use":         {http.StatusConflict, "you're using this session on your Mac"},
+	"no_terminal_driver": {http.StatusConflict, "no terminal driver reaches this session (iTerm2 only)"},
+	"automation_denied":  {http.StatusConflict, "macOS denied aimux Automation access to the terminal"},
+	"not_at_input":       {http.StatusConflict, "Claude Code is not at an empty input box"},
+	"not_submitted":      {http.StatusConflict, "the message is in the input box but was not sent; the screen changed, a prompt may be showing"},
+	"box_not_cleared":    {http.StatusConflict, "the text in the input box on the Mac could not be cleared; nothing was sent"},
+	"draft_in_box":       {http.StatusConflict, "a draft you left in the input box on the Mac is kept (keep_drafts); nothing was sent"},
+	"box_has_unsent":     {http.StatusConflict, "Your earlier message is still in the box on your Mac; Retry it, or clear the box"},
+	"unsent_unconfirmed": {http.StatusConflict, "Your message may still be in the box on your Mac, but aimux can't confirm it's yours. Send or clear it at the Mac."},
+	"busy":               {http.StatusConflict, "Claude is working in this session; try again when it finishes"},
+	"no_prompt":          {http.StatusConflict, "no permission prompt is showing"},
+	"prompt_changed":     {http.StatusConflict, "a different permission prompt is showing"},
+}
+
+// writeTerminalFailure answers a terminput error with its code's fixed
+// message; anything else (a driver failure) is a 500 with a fixed message,
+// its detail written to log.
+func writeTerminalFailure(w http.ResponseWriter, err error, log io.Writer) {
+	code := terminput.Code(err)
+	if m, ok := terminalMessages[code]; ok {
+		writeJSON(w, m.status, ErrorBody{Error: m.msg, Code: code})
+		return
+	}
+	if log != nil {
+		_, _ = fmt.Fprintf(log, "terminal input: %q\n", err.Error())
+	}
+	writeError(w, http.StatusInternalServerError, "internal", errTerminalDriver)
+}
+
+// terminalError answers a failed terminal attempt: a session the server
+// does not know is a 404, not "not in a terminal". The attempt is never
+// retried here: a retry could type the text twice.
+func (a *API) terminalError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, terminput.ErrNotInTerminal) && a.Session != nil {
+		if _, derr := a.Session(r.Context(), r.PathValue("id"), 1); errors.Is(derr, acprun.ErrUnknownSession) {
+			writeFailure(w, derr)
+			return
+		}
+	}
+	writeTerminalFailure(w, err, a.Log)
+}
+
+// errQueueActive answers a direct message while the session's queue is
+// sending: it would join the queue's turn, or jump ahead of its items.
+var errQueueActive = errors.New("messages are queued for this session; add this one to the queue")
+
+// queueActive reports whether session's chat queue has an item in flight,
+// or is running with items waiting: the dispatcher may type at any moment.
+// For Send now (now) only an item being typed counts: a message mid-turn
+// may join the turn the queue's item started, and jumps ahead of the rest.
+func (a *API) queueActive(session string, now bool) bool {
+	if a.Queue == nil {
+		return false
+	}
+	if now {
+		return a.Queue.Typing(session) // as Send now from the queue refuses (chatqueue.ErrBusy)
+	}
+	q := a.Queue.Get(session)
+	for _, it := range q.Items {
+		if it.State != chatqueue.StateWaiting || q.State == chatqueue.QueueRunning {
+			return true
+		}
+	}
+	return false
+}
+
+// terminalMessage types text into the session's terminal pane.
+func (a *API) terminalMessage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text    string `json:"text"`
+		Key     string `json:"key"`
+		Replace bool   `json:"replace"` // clear the input box's text first
+		Now     bool   `json:"now"`     // Send now: also while Claude works
+	}
+	if err := decodeStrict(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with a text field, at most 64 KiB: %w", err))
+		return
+	}
+	if !a.terminalOn() {
+		writeTerminalFailure(w, terminput.ErrDisabled, a.Log)
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("text is empty"))
+		return
+	}
+	if req.Now && req.Replace {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("give at most one of now and replace"))
+		return
+	}
+	if req.Now {
+		auditAs(w, devicelogin.ActionTerminalSendNow)
+	}
+	if a.queueActive(r.PathValue("id"), req.Now) {
+		writeError(w, http.StatusConflict, "busy", errQueueActive)
+		return
+	}
+	send := a.TerminalInput.Send
+	switch {
+	case req.Replace:
+		send = a.TerminalInput.SendReplacing
+	case req.Now:
+		send = a.TerminalInput.SendNow
+	}
+	forget := func() {}
+	if req.Now {
+		forget = a.noteSentNow(r.PathValue("id"), req.Text) // before typing: a read right after Enter knows it
+	}
+	if err := send(r.Context(), r.PathValue("id"), req.Text, req.Key); err != nil {
+		forget()
+		a.terminalError(w, r, err)
+		return
+	}
+	a.typed(r.PathValue("id"))
+	writeJSON(w, http.StatusAccepted, Status{Status: "typed"})
+}
+
+// noteSentNow tells the dispatcher a Send now is about to be typed
+// (QueueSentNow); the answer forgets it again after a failed send.
+func (a *API) noteSentNow(session, text string) (forget func()) {
+	if a.QueueSentNow == nil {
+		return func() {}
+	}
+	return a.QueueSentNow(session, text)
+}
+
+// terminalKey presses one option of the permission prompt promptId.
+func (a *API) terminalKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PromptID string `json:"promptId"`
+		Option   string `json:"option"`
+		Key      string `json:"key"`
+	}
+	if err := decodeStrict(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with promptId and option: %w", err))
+		return
+	}
+	if !a.terminalOn() {
+		writeTerminalFailure(w, terminput.ErrDisabled, a.Log)
+		return
+	}
+	if req.PromptID == "" || req.Option == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("promptId and option are required"))
+		return
+	}
+	if err := a.TerminalInput.Press(r.Context(), r.PathValue("id"), req.PromptID, terminput.Key(req.Option), req.Key); err != nil {
+		a.terminalError(w, r, err)
+		return
+	}
+	a.typed(r.PathValue("id"))
+	writeJSON(w, http.StatusAccepted, Status{Status: "typed"})
+}
+
+// decodeStrict reads a terminal request body: at most maxTerminalBody, and
+// only the fields the contract lists.
+func decodeStrict(w http.ResponseWriter, r *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTerminalBody))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+// detailState is a detail's activity and waiting: the service's facts plus
+// the terminal screen, which the detail reads and the list does not. Only a
+// screen that shows working counts: a status with terminal input off or a
+// failed read says false without reading.
+func detailState(f sessionstate.Facts, term *TerminalStatus) (sessionstate.Activity, *waiting.Waiting) {
+	if term != nil && term.Working {
+		f.Screen = sessionstate.ScreenWorking
+	}
+	st := sessionstate.Decide(f)
+	return st.Activity, st.Waiting
 }

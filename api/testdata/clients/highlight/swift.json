@@ -1,0 +1,79 @@
+{
+  "name": "swift",
+  "lang": "swift",
+  "code": "struct Box {\n    let width: Int = 0x1F\n    /* area of the box */\n    func area() -> Int { width * 2 }\n}\nprint(\"w: \\(box.width)\")\n",
+  "tokens": [
+    [
+      "keyword",
+      "struct"
+    ],
+    [
+      "plain",
+      " Box {\n    "
+    ],
+    [
+      "keyword",
+      "let"
+    ],
+    [
+      "plain",
+      " width: Int = "
+    ],
+    [
+      "number",
+      "0x1F"
+    ],
+    [
+      "plain",
+      "\n    "
+    ],
+    [
+      "comment",
+      "/* area of the box */"
+    ],
+    [
+      "plain",
+      "\n    "
+    ],
+    [
+      "keyword",
+      "func"
+    ],
+    [
+      "plain",
+      " "
+    ],
+    [
+      "function",
+      "area"
+    ],
+    [
+      "plain",
+      "() -> Int { width * "
+    ],
+    [
+      "number",
+      "2"
+    ],
+    [
+      "plain",
+      " }\n}\n"
+    ],
+    [
+      "function",
+      "print"
+    ],
+    [
+      "plain",
+      "("
+    ],
+    [
+      "string",
+      "\"w: \\(box.width)\""
+    ],
+    [
+      "plain",
+      ")\n"
+    ]
+  ]
+}

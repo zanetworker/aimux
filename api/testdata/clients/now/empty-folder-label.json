@@ -1,0 +1,53 @@
+{
+  "name": "A folder with an empty label counts as no folder: the project's last part names its Elsewhere group",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "e1",
+      "provider": "claude",
+      "title": "Empty label",
+      "project": "/src/scratch",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "",
+        "repoPath": "",
+        "label": ""
+      }
+    },
+    {
+      "id": "e2",
+      "provider": "claude",
+      "title": "Named folder",
+      "project": "/src/scratch",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "scratch",
+        "repoPath": "/src/scratch",
+        "label": "scratch"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "scratch",
+        "sessions": [
+          "e1",
+          "e2"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 0,
+    "open": 2
+  }
+}

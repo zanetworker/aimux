@@ -28,7 +28,8 @@ resume:
 
 sessions:
   auto_title: false
-  title_model: "flash"
+  title_model: "haiku"
+  naming_daily_limit: 20
 
 notifications:
   enabled: true
@@ -156,9 +157,12 @@ aimux has six orthogonal configuration axes:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `auto_title` | bool | `false` | Generate titles via LLM on session discovery |
-| `title_model` | string | `"flash"` | LLM for title generation: `"flash"`, `"haiku"`, `"sonnet"`, `"opus"` |
-| `api_key` | string | env var | API key for title generation (overrides `GOOGLE_API_KEY` / `ANTHROPIC_API_KEY`) |
+| `auto_title` | bool | `false` | Name sessions a phone client shows that have no name or description, once, with a small model call. Never touches text you wrote |
+| `title_model` | string | `"haiku"` | Model for names: `"haiku"` (`claude-haiku-5-5`), `"sonnet"`, `"opus"`; an unknown name falls back to haiku |
+| `naming_daily_limit` | int | `20` | Sessions named automatically per local day; **Update summary** is not limited |
+| `api_key` | string | env var | API key for naming (overrides `ANTHROPIC_API_KEY`); without a key, `claude -p` in safe mode with your Claude Code login is used |
+
+At most 500 characters per session go to Anthropic for an automatic name (1,200 for Update summary). See [Finding sessions](/guides/remote-access/#finding-sessions) for the sources, privacy and cost details.
 
 ## Notifications
 
@@ -294,6 +298,11 @@ remote_access:
 | `adapter` | string | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command for Claude sessions |
 | `max_runs` | int | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | duration | `10m` | Unanswered permission requests are denied after this |
+| `device_login` | bool | `true` | Only devices paired with `aimux remote pair` may use the API, logged in with Face ID or Touch ID (see [Device login](/guides/remote-access/#device-login)); `false` admits any device of an allowed login and `remote serve` warns at start |
+| `terminal_input.enabled` | bool | `false` | Type phone messages into Claude Code sessions open in iTerm2 (see [Typing into terminal sessions](/guides/remote-access/#typing-into-terminal-sessions)) |
+| `terminal_input.allow_while_in_use` | bool | `false` | Type even into the session you are using on the Mac; for testing at the Mac only |
+| `terminal_input.allow_slash_commands` | bool | `false` | Let a phone message start with `/` (a slash command); a leading `!` is always refused |
+| `terminal_input.keep_drafts` | bool | `false` | Keep a draft you left in the input box: a phone message is then refused (`409 draft_in_box`) instead of replacing it. Claude Code's grey suggestion is always typed over |
 | `hostnames` | list | detected from `tailscale status` | `Host` names the API accepts (this machine's tailnet names); others are refused |
 | `push.ntfy.topic` | string | off | ntfy topic that gets an alert for each permission request; on when set |
 | `push.ntfy.server` | string | `https://ntfy.sh` | ntfy server (2.16 or later also takes the alert back once the request is settled) |
@@ -324,8 +333,8 @@ The web dashboard exposes a REST API on `http://127.0.0.1:<port>`. All endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/history` | List session history with metadata |
-| `GET` | `/api/search` | Search session content |
+| `GET` | `/api/history` | List session history with metadata. Every session the dashboard can reveal is returned, each with `shownTitle` and `hidden` (the switches that must all be on to show it: `subagents`, `automated`, `analyzers`, `search`); sessions no switch can reveal are left out |
+| `GET` | `/api/search` | Search session content (`q`); automated sessions are left out unless `automated=1` (the dashboard's Automated switch) |
 | `DELETE` | `/api/sessions/{id}` | Delete a session |
 | `POST` | `/api/sessions/{id}/annotate` | Add an annotation to a session turn |
 | `GET` | `/api/sessions/{id}/annotations` | Get annotations for a session |

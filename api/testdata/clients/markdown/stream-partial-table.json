@@ -1,0 +1,60 @@
+{
+  "name": "A table with its header, alignment row and one partial row (streaming prefix)",
+  "markdown": "Results so far:\n\n| File | Status | Lines |\n| --- | :---: | ---: |\n| api.go | rev",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Results so far:"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "align": [
+        "left",
+        "center",
+        "right"
+      ],
+      "header": [
+        [
+          {
+            "t": "text",
+            "v": "File"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "Status"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "Lines"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "t": "text",
+              "v": "api.go"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "rev"
+            }
+          ],
+          []
+        ]
+      ]
+    }
+  ]
+}

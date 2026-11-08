@@ -1,0 +1,42 @@
+{
+  "name": "Unclosed **, ~~, * and an unfinished link stay literal text (streaming prefix)",
+  "markdown": "This is **bold and `code` still going\n\nAlso ~~struck and *em and [link text](https://exa",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "This is **bold and "
+        },
+        {
+          "t": "code",
+          "v": "code"
+        },
+        {
+          "t": "text",
+          "v": " still going"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Also ~~struck and *em and [link text]("
+        },
+        {
+          "t": "link",
+          "href": "https://exa",
+          "c": [
+            {
+              "t": "text",
+              "v": "https://exa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

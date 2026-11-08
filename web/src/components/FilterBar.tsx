@@ -112,9 +112,9 @@ export function FilterBar({
     }}>
       {/* Status filters */}
       <FilterPill label="All" count={statusCounts.all} active={statusFilter === null} onClick={() => onStatusFilter(null)} />
-      <FilterPill label="Active" count={statusCounts.active} dotColor={statusDots.active} active={statusFilter === 0} onClick={() => onStatusFilter(0)} />
+      <FilterPill label="Working" count={statusCounts.active} dotColor={statusDots.active} active={statusFilter === 0} onClick={() => onStatusFilter(0)} />
       <FilterPill label="Idle" count={statusCounts.idle} dotColor={statusDots.idle} active={statusFilter === 1} onClick={() => onStatusFilter(1)} />
-      <FilterPill label="Waiting" count={statusCounts.waiting} dotColor={statusDots.waiting} active={statusFilter === 2} onClick={() => onStatusFilter(2)} />
+      <FilterPill label="Needs you" count={statusCounts.waiting} dotColor={statusDots.waiting} active={statusFilter === 2} onClick={() => onStatusFilter(2)} />
       <FilterPill label="Error" count={statusCounts.error} dotColor={statusDots.error} active={statusFilter === 3} onClick={() => onStatusFilter(3)} />
 
       <Divider />

@@ -1,0 +1,163 @@
+{
+  "name": "Emphasis is rebuilt canonically: the longest span is outermost, ties nest em outside strong outside del",
+  "markdown": "**_x_**, ***y*** and ~~**z**~~.\n\n**Bold *em* tail** and *em **strong** tail*.\n\n_**tie**_ and **~~struck strong~~**.\n",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "x"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": ", "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "y"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "del",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "z"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "Bold "
+            },
+            {
+              "t": "em",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "em"
+                }
+              ]
+            },
+            {
+              "t": "text",
+              "v": " tail"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "text",
+              "v": "em "
+            },
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "strong"
+                }
+              ]
+            },
+            {
+              "t": "text",
+              "v": " tail"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "em",
+          "c": [
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "tie"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "del",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "struck strong"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": "."
+        }
+      ]
+    }
+  ]
+}

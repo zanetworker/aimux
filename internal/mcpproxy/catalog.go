@@ -1,13 +1,18 @@
 package mcpproxy
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -57,6 +62,24 @@ func LoadCatalog(path string) (*Catalog, error) {
 	return c, nil
 }
 
+// ToolsFingerprint identifies a backend's tool list as the proxy registers
+// it: the tools in order, each as compact JSON, hashed. The daemon reports
+// it for what it loaded at start; install compares it with the catalog.
+func ToolsFingerprint(tools []json.RawMessage) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%d\n", len(tools))
+	for _, raw := range tools {
+		var buf bytes.Buffer
+		if json.Compact(&buf, raw) != nil {
+			buf.Reset()
+			buf.Write(raw)
+		}
+		_, _ = fmt.Fprintf(h, "%d\n", buf.Len())
+		h.Write(buf.Bytes())
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 // Set replaces a backend's tools.
 func (c *Catalog) Set(server string, tools []json.RawMessage, fetchedAt time.Time) {
 	if c.Servers == nil {
@@ -91,13 +114,24 @@ func writePrivateFile(path string, data []byte) error {
 		_ = tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil { // the data is on disk before the rename makes it current
+		_ = tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
 	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil { // and so is the rename
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 // DecodeTool turns a cached tool into an mcp.Tool whose input and output
@@ -134,15 +168,59 @@ type CatalogUpdater struct {
 	mu   sync.Mutex
 	cat  *Catalog
 	path string
+	// Current is a server's definition as a reload would load it now; a
+	// refresh from a backend started with another definition is dropped.
+	// Nil, or false (unknown), keeps every refresh.
+	Current func(server string) (ServerConfig, bool)
+	changes chan struct{}
 }
 
-// NewCatalogUpdater updates cat and saves it to path.
+// lockCatalog takes an exclusive flock beside the catalog file. The
+// daemon's refreshes and edit (another process) hold it around their
+// checks and writes.
+func lockCatalog(path string) (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 -- beside aimux's own catalog
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil { // #nosec G115 -- file descriptors are small
+		_ = f.Close()
+		return nil, fmt.Errorf("lock %s: %w", path+".lock", err)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) // #nosec G115 -- file descriptors are small
+		_ = f.Close()
+	}, nil
+}
+
+// NewCatalogUpdater keeps a copy of cat current and saves it to path. The
+// copy is its own: callers (the reloader's current set) may go on reading
+// cat while backend starts refresh the updater's catalog.
 func NewCatalogUpdater(cat *Catalog, path string) *CatalogUpdater {
-	return &CatalogUpdater{cat: cat, path: path}
+	return &CatalogUpdater{cat: copyCatalog(cat), path: path, changes: make(chan struct{}, 1)}
 }
 
-// Refresh re-lists a started backend's tools and saves the catalog. A failed
-// listing keeps the previous entry and writes nothing.
+// Changes receives a value after a Refresh saved a server's tools that
+// differ from the ones it had: the daemon reloads, so the endpoint serves
+// them. Changes not yet received collapse into one.
+func (u *CatalogUpdater) Changes() <-chan struct{} { return u.changes }
+
+func copyCatalog(cat *Catalog) *Catalog {
+	c := &Catalog{Servers: make(map[string]CatalogEntry, len(cat.Servers))}
+	for k, v := range cat.Servers {
+		c.Servers[k] = v
+	}
+	return c
+}
+
+// Refresh re-lists a started backend's tools and records them. The file is
+// read, changed for this server only and saved, so entries other programs
+// wrote since (install's refresh, edit) survive; the served copy changes
+// for this server only, a reload replaces the rest. A failed listing keeps
+// the previous entry and writes nothing.
 func (u *CatalogUpdater) Refresh(ctx context.Context, server string, b Backend) error {
 	tools, err := b.ListToolsRaw(ctx)
 	if err != nil {
@@ -150,17 +228,63 @@ func (u *CatalogUpdater) Refresh(ctx context.Context, server string, b Backend) 
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.cat.Set(server, tools, time.Now())
-	return u.cat.Save(u.path)
+	unlock, err := lockCatalog(u.path)
+	if err != nil {
+		return fmt.Errorf("refresh catalog for %s: %w", server, err)
+	}
+	defer unlock()
+	if u.superseded(server, b) {
+		return nil // an edit or reload replaced the definition it ran
+	}
+	now := time.Now()
+	changed := ToolsFingerprint(u.cat.Servers[server].Tools) != ToolsFingerprint(tools)
+	onDisk, err := LoadCatalog(u.path)
+	if err != nil {
+		return fmt.Errorf("refresh catalog for %s: %w", server, err)
+	}
+	onDisk.Set(server, tools, now)
+	if err := onDisk.Save(u.path); err != nil {
+		return err // the served copy keeps the old tools, so the next save still signals
+	}
+	u.cat.Set(server, tools, now)
+	if changed {
+		select {
+		case u.changes <- struct{}{}:
+		default: // a change is already pending; its reload reads this one too
+		}
+	}
+	return nil
+}
+
+// superseded reports whether b was started with a definition of server
+// other than the current one.
+func (u *CatalogUpdater) superseded(server string, b Backend) bool {
+	d, ok := b.(interface{ Definition() ServerConfig })
+	if !ok || u.Current == nil {
+		return false
+	}
+	cur, known := u.Current(server)
+	return known && !reflect.DeepEqual(cur, d.Definition())
+}
+
+// Replace swaps in a copy of cat, e.g. after a reload re-read the file.
+func (u *CatalogUpdater) Replace(cat *Catalog) {
+	c := copyCatalog(cat)
+	u.mu.Lock()
+	u.cat = c
+	u.mu.Unlock()
 }
 
 // Snapshot returns a copy of the current catalog.
 func (u *CatalogUpdater) Snapshot() *Catalog {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	c := &Catalog{Servers: make(map[string]CatalogEntry, len(u.cat.Servers))}
-	for k, v := range u.cat.Servers {
-		c.Servers[k] = v
-	}
-	return c
+	return copyCatalog(u.cat)
+}
+
+// ToolCount is how many tools the catalog lists for server.
+func (u *CatalogUpdater) ToolCount(server string) int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return len(u.cat.Servers[server].Tools)
 }

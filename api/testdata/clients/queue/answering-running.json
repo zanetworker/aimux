@@ -1,0 +1,54 @@
+{
+  "name": "answering-running",
+  "session": {
+    "state": "busy",
+    "queue": {
+      "state": "running",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Run the linter and fix what it finds",
+          "state": "answering",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Summarize the changes",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "running",
+      "resume": false
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Run the linter and fix what it finds",
+        "state": "answering",
+        "label": "Answer in progress",
+        "canEdit": false,
+        "canMove": false,
+        "canDelete": false
+      },
+      {
+        "id": "q2",
+        "text": "Summarize the changes",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ]
+  }
+}

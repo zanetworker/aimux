@@ -9,12 +9,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
-	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/correlator"
+	"github.com/zanetworker/aimux/internal/cost"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/jsonl"
 	"github.com/zanetworker/aimux/internal/statusdetect"
@@ -23,7 +24,17 @@ import (
 )
 
 // Claude is a Provider implementation for the Claude Code CLI.
-type Claude struct{}
+type Claude struct {
+	// ProjectsDir is where the session store reads transcripts
+	// (SessionFile, Fingerprint); "": ~/.claude/projects.
+	ProjectsDir string
+	// RegistryDir is Claude Code's session registry that LiveSessions
+	// reads; "": ~/.claude/sessions.
+	RegistryDir string
+
+	liveMu sync.Mutex
+	lives  map[time.Duration]*discovery.LiveCache // one registry reader per ttl (liveCache)
+}
 
 func (c *Claude) Name() string { return "claude" }
 
@@ -35,28 +46,32 @@ func (c *Claude) Discover() ([]agent.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.discoverFromAgents(agents, discovery.ListTmuxSessions())
+	return c.discoverFromAgents(agents, discovery.ListTmuxSessions(), nil)
 }
 
 // DiscoverWithSnapshot uses a shared ps/tmux snapshot instead of running
 // its own subprocess calls.
 func (c *Claude) DiscoverWithSnapshot(snap *discovery.Snapshot) ([]agent.Agent, error) {
 	agents := discovery.ScanProcessesFromOutput(snap.PsOutput)
-	return c.discoverFromAgents(agents, snap.TmuxSessions)
+	return c.discoverFromAgents(agents, snap.TmuxSessions, snap)
 }
 
-func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discovery.TmuxSession) ([]agent.Agent, error) {
+// discoverFromAgents enriches the scanned processes; snap, when not nil,
+// supplies parents and start times so no per-process ps runs.
+func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discovery.TmuxSession, snap *discovery.Snapshot) ([]agent.Agent, error) {
 	home, _ := os.UserHomeDir()
 	projectsDir := filepath.Join(home, ".claude", "projects")
 
 	// Batch CWD and start-time lookups in parallel — each is a subprocess
 	// call (~50-100ms) that blocks when done sequentially per agent.
-	c.batchResolveProcessInfo(agents)
+	c.batchResolveProcessInfo(agents, snap)
 
 	// Claude Code records each running session's ID by PID. It is more
 	// accurate than the command line (stale after /clear or a fork) and than
 	// start-time file matching.
-	registry := discovery.ReadClaudeRegistry(filepath.Join(home, ".claude", "sessions"))
+	// Read through the shared reader, so the state service's holders right
+	// after reuse this read (and its ps) instead of making their own.
+	registry := c.liveCache(discovery.LiveTTL).Registry()
 	fromRegistry := make(map[int]bool)
 	for i := range agents {
 		fromRegistry[i] = applyRegistryEntry(&agents[i], registry)
@@ -75,8 +90,16 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 
 	// Phase 1: match session files sequentially (cheap glob + stat calls,
 	// needs assignedFiles tracking to avoid double-claiming).
+	// The transcript is normally in the working directory's project folder:
+	// look there first (one stat) before searching every project folder.
+	cwdOf := make(map[string]string)
+	for i := range agents {
+		if fromRegistry[i] {
+			cwdOf[agents[i].SessionID] = agents[i].WorkingDir
+		}
+	}
 	assignSessionFiles(agents, fromRegistry,
-		func(id string) string { return discovery.FindSessionFile(id, projectsDir) },
+		func(id string) string { return discovery.FindSessionFileAt(id, cwdOf[id], projectsDir) },
 		func(a *agent.Agent, assigned map[string]bool) { c.matchSessionFile(a, projectsDir, assigned) })
 	for i := range agents {
 		agents[i].ProviderName = "claude"
@@ -89,7 +112,7 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	c.batchParseSessionFiles(agents)
 
 	// Tag subagent relationships from process tree before dedup.
-	correlator.TagFromProcessTree(agents, discovery.GetParentPID)
+	correlator.TagFromProcessTree(agents, snap.ParentPID)
 
 	// Deduplicate: group SDK agents by (WorkingDir, Model), CLI by PID.
 	// Subagents are excluded — they'll be nested under parents in the TUI.
@@ -98,33 +121,39 @@ func (c *Claude) discoverFromAgents(agents []agent.Agent, tmuxSessions []discove
 	return agents, nil
 }
 
-// batchResolveProcessInfo resolves CWD and start time for all agents
-// concurrently. These are independent per-process subprocess calls that
-// benefit significantly from parallelism (8 agents: ~500ms → ~70ms).
-func (c *Claude) batchResolveProcessInfo(agents []agent.Agent) {
+// batchResolveProcessInfo resolves CWD and start time for all agents: the
+// working directories with one lsof, the start times from snap, and with
+// one ps per process (in parallel) only for those snap lacks.
+func (c *Claude) batchResolveProcessInfo(agents []agent.Agent, snap *discovery.Snapshot) {
+	pids := make([]int, len(agents))
+	for i := range agents {
+		pids[i] = agents[i].PID
+	}
+	cwds := discovery.GetProcessCwds(pids)
+
 	type result struct {
 		idx       int
-		cwd       string
 		startTime time.Time
 	}
 	ch := make(chan result, len(agents))
-	for i, a := range agents {
-		go func(idx int, pid int) {
-			var r result
-			r.idx = idx
-			r.cwd, _ = discovery.GetProcessCwd(pid)
-			r.startTime = getProcessStartTime(pid)
-			ch <- r
-		}(i, a.PID)
+	asked := 0
+	for i := range agents {
+		if agents[i].WorkingDir == "" {
+			agents[i].WorkingDir = cwds[agents[i].PID]
+		}
+		if !agents[i].StartTime.IsZero() {
+			continue
+		}
+		if t, ok := snap.StartTime(agents[i].PID); ok {
+			agents[i].StartTime = t
+			continue
+		}
+		asked++
+		go func(idx, pid int) { ch <- result{idx, getProcessStartTime(pid)} }(i, agents[i].PID)
 	}
-	for range agents {
+	for range asked {
 		r := <-ch
-		if agents[r.idx].WorkingDir == "" {
-			agents[r.idx].WorkingDir = r.cwd
-		}
-		if agents[r.idx].StartTime.IsZero() {
-			agents[r.idx].StartTime = r.startTime
-		}
+		agents[r.idx].StartTime = r.startTime
 	}
 }
 
@@ -179,7 +208,7 @@ func applyRegistryEntry(inst *agent.Agent, registry map[int]discovery.ClaudeRegi
 func (c *Claude) matchSessionFile(inst *agent.Agent, projectsDir string, assignedFiles map[string]bool) {
 	sessionFile := ""
 	if inst.SessionID != "" {
-		sessionFile = discovery.FindSessionFile(inst.SessionID, projectsDir)
+		sessionFile = discovery.FindSessionFileAt(inst.SessionID, inst.WorkingDir, projectsDir)
 	}
 	if sessionFile == "" && inst.WorkingDir != "" {
 		sessionFile = c.matchSessionFileByStartTime(inst.PID, inst.WorkingDir, assignedFiles)
@@ -246,6 +275,9 @@ func (c *Claude) batchParseSessionFiles(agents []agent.Agent) {
 			r.info.CacheReadTokens,
 			r.info.CacheWriteTokens,
 		)
+		// The transcript guess: an input to the session state service
+		// (controller.LocalActivity's fallback), which decides what the
+		// TUI and the dashboard show; the registry and hook markers win.
 		inst.Status = r.status
 	}
 }
@@ -832,6 +864,7 @@ type claudeContentBlock struct {
 	text          string
 	toolName      string
 	toolSnippet   string
+	toolInput     string
 	toolUseID     string
 	toolFilePath  string
 	editOldString string
@@ -850,6 +883,8 @@ type claudeJSONLEntry struct {
 	timestamp      time.Time
 	isHumanMessage bool
 	textContent    string
+	hookFeedback   string // a Stop hook's feedback (isMeta string content): a step, not a message
+	taskNote       string // a background task's notification: a step, not a message
 	blocks         []claudeContentBlock
 	tokensIn       int64
 	tokensOut      int64
@@ -877,9 +912,36 @@ func parseClaudeRawEntry(line string) claudeJSONLEntry {
 		e.parseClaudeUser(raw)
 	case "assistant":
 		e.parseClaudeAssistant(raw)
+	case "attachment":
+		e.parseClaudeQueuedCommand(raw)
 	}
 
 	return e
+}
+
+// parseClaudeQueuedCommand reads a message typed while Claude was busy:
+// Claude Code saves it as an attachment of type queued_command rather than a
+// user entry, so it is turned into one. A background task's notification
+// delivered the same way (commandMode task-notification) becomes a step.
+// Other attachments are ignored.
+func (e *claudeJSONLEntry) parseClaudeQueuedCommand(raw map[string]json.RawMessage) {
+	var att struct {
+		Type        string          `json:"type"`
+		Prompt      string          `json:"prompt"`
+		CommandMode string          `json:"commandMode"`
+		Origin      json.RawMessage `json:"origin"`
+	}
+	if err := json.Unmarshal(raw["attachment"], &att); err != nil || att.Type != "queued_command" || strings.TrimSpace(att.Prompt) == "" {
+		e.entryType = ""
+		return
+	}
+	e.entryType = "user"
+	if att.CommandMode == "task-notification" || isTaskNotification(map[string]json.RawMessage{"origin": att.Origin}, att.Prompt) {
+		e.taskNote = strings.TrimSpace(att.Prompt)
+		return
+	}
+	e.isHumanMessage = true
+	e.textContent = att.Prompt
 }
 
 func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
@@ -898,9 +960,23 @@ func (e *claudeJSONLEntry) parseClaudeUser(raw map[string]json.RawMessage) {
 		return
 	}
 
-	// Try as simple string (human message)
+	// Try as simple string (human message). Text Claude Code injects is
+	// marked isMeta and is never the person's: a Stop hook's feedback
+	// becomes a step of the turn; the rest (such as a caveat) is skipped.
 	var contentStr string
 	if err := json.Unmarshal(contentRaw, &contentStr); err == nil {
+		var meta bool
+		_ = json.Unmarshal(raw["isMeta"], &meta)
+		if meta {
+			if strings.HasPrefix(strings.TrimSpace(contentStr), stopHookPrefix) {
+				e.hookFeedback = strings.TrimSpace(contentStr)
+			}
+			return
+		}
+		if isTaskNotification(raw, contentStr) {
+			e.taskNote = strings.TrimSpace(contentStr)
+			return
+		}
 		e.isHumanMessage = true
 		e.textContent = contentStr
 		return
@@ -1001,10 +1077,11 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 		case "tool_use":
 			name, _ := block["name"].(string)
 			id, _ := block["id"].(string)
-			snippet := ""
+			snippet, fullInput := "", ""
 			var editOld, editNew, filePath, writeContent string
 			if input, ok := block["input"].(map[string]interface{}); ok {
 				snippet = claudeToolInputSnippet(name, input)
+				fullInput = claudeToolInput(name, input)
 				if fp, ok := input["file_path"].(string); ok {
 					filePath = fp
 				}
@@ -1026,6 +1103,7 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 				blockType:     "tool_use",
 				toolName:      name,
 				toolSnippet:   snippet,
+				toolInput:     fullInput,
 				toolUseID:     id,
 				toolFilePath:  filePath,
 				editOldString: editOld,
@@ -1034,6 +1112,61 @@ func (e *claudeJSONLEntry) parseClaudeAssistant(raw map[string]json.RawMessage) 
 			})
 		}
 	}
+}
+
+// stopHookPrefix starts the text Claude Code saves for a Stop hook's feedback.
+const stopHookPrefix = "Stop hook feedback:"
+
+// stopHookMessage is a Stop hook's feedback without its prefix and the hook's
+// command ("[/path/hook.py]: "): the first line of what the hook said.
+func stopHookMessage(feedback string) string {
+	msg := strings.TrimSpace(strings.TrimPrefix(feedback, stopHookPrefix))
+	if strings.HasPrefix(msg, "[") {
+		if i := strings.Index(msg, "]: "); i > 0 {
+			msg = msg[i+3:]
+		}
+	}
+	msg, _, _ = strings.Cut(msg, "\n")
+	return strings.TrimSpace(msg)
+}
+
+// isTaskNotification reports a background task's notification, which Claude
+// Code saves as a user entry: marked by its origin, or by its opening tag.
+func isTaskNotification(raw map[string]json.RawMessage, content string) bool {
+	var origin struct {
+		Kind string `json:"kind"`
+	}
+	_ = json.Unmarshal(raw["origin"], &origin)
+	return origin.Kind == "task-notification" || strings.HasPrefix(strings.TrimSpace(content), "<task-notification>")
+}
+
+// taskNoteStep is a background task's notification as a step: its summary,
+// and its result (or the summary) as the step's detail.
+func taskNoteStep(note string) trace.ToolSpan {
+	summary := tagText(note, "summary")
+	if summary == "" {
+		summary = "Background task finished"
+	}
+	status := tagText(note, "status")
+	detail := tagText(note, "result")
+	if detail == "" {
+		detail = summary
+	}
+	return trace.ToolSpan{Name: "Background task", Snippet: summary, Input: detail,
+		Success: status == "" || status == "completed"}
+}
+
+// tagText is the trimmed text between <tag> and </tag>, or "".
+func tagText(s, tag string) string {
+	_, rest, ok := strings.Cut(s, "<"+tag+">")
+	if !ok {
+		return ""
+	}
+	inner, _, ok := strings.Cut(rest, "</"+tag+">")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(inner)
 }
 
 func parseClaudeJSONL(data string) []trace.Turn {
@@ -1074,6 +1207,12 @@ func parseClaudeJSONL(data string) []trace.Turn {
 						current.UserLines = append(current.UserLines, trimmed)
 					}
 				}
+			} else if e.hookFeedback != "" && current != nil {
+				current.Actions = append(current.Actions, trace.ToolSpan{
+					Name: "Stop hook", Snippet: stopHookMessage(e.hookFeedback), Input: e.hookFeedback, Success: true,
+				})
+			} else if e.taskNote != "" && current != nil {
+				current.Actions = append(current.Actions, taskNoteStep(e.taskNote))
 			} else if e.hasToolResults {
 				for _, tr := range e.toolResults {
 					if span, ok := pendingTools[tr.toolUseID]; ok {
@@ -1112,6 +1251,11 @@ func parseClaudeJSONL(data string) []trace.Turn {
 			for _, block := range e.blocks {
 				switch block.blockType {
 				case "text":
+					// block.text is trimmed and non-empty (parseClaudeRawEntry).
+					if current.OutputText != "" {
+						current.OutputText += "\n\n"
+					}
+					current.OutputText += block.text
 					for _, line := range strings.Split(block.text, "\n") {
 						trimmed := strings.TrimRight(line, " \t\r")
 						if strings.TrimSpace(trimmed) != "" {
@@ -1122,6 +1266,7 @@ func parseClaudeJSONL(data string) []trace.Turn {
 					span := trace.ToolSpan{
 						Name:      block.toolName,
 						Snippet:   block.toolSnippet,
+						Input:     block.toolInput,
 						Success:   true,
 						ToolUseID: block.toolUseID,
 						FilePath:  block.toolFilePath,
@@ -1199,4 +1344,28 @@ func claudeToolInputSnippet(toolName string, input map[string]interface{}) strin
 		}
 	}
 	return ""
+}
+
+// claudeToolInput returns the full, untruncated input of a tool call: the
+// command, pattern, query, url, description or path. Unknown tools give "".
+func claudeToolInput(toolName string, input map[string]interface{}) string {
+	key := ""
+	switch toolName {
+	case "Bash":
+		key = "command"
+	case "Read", "Write", "Edit":
+		key = "file_path"
+	case "Grep", "Glob":
+		key = "pattern"
+	case "Task":
+		key = "description"
+	case "WebSearch":
+		key = "query"
+	case "WebFetch":
+		key = "url"
+	default:
+		return ""
+	}
+	v, _ := input[key].(string)
+	return strings.TrimSpace(v)
 }

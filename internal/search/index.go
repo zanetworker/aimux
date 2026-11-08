@@ -16,12 +16,23 @@ import (
 	"unicode"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite with FTS5
+
+	"github.com/zanetworker/aimux/internal/history"
 )
 
 // Index is a persistent full-text index over session transcripts.
 type Index struct {
 	db *sql.DB
+	// newer: a newer aimux wrote this index (schema or extractor version
+	// above this build's). Several builds share ~/.aimux/search.db, and
+	// one rebuilding what the other wrote, back and forth, held the write
+	// lock for minutes; so an older build reads it and never writes it.
+	newer bool
 }
+
+// ErrNewerIndex is Update's answer for an index a newer aimux wrote: this
+// build serves it as it is and leaves the refresh to that aimux.
+var ErrNewerIndex = errors.New("search index was written by a newer aimux; not refreshing it")
 
 // Result is one matching session, best-scoring chunk first.
 type Result struct {
@@ -29,10 +40,12 @@ type Result struct {
 	Path      string
 	CWD       string
 	Title     string
-	Automated bool
-	ModTime   time.Time
-	Snippet   string
-	Score     float64 // lower is better (BM25)
+	// FirstPrompt is the session's first message; only Recent fills it.
+	FirstPrompt string
+	Automated   bool
+	ModTime     time.Time
+	Snippet     string
+	Score       float64 // lower is better (BM25)
 
 	matchText string // the matching chunk's text, so a snippet is built only if shown
 }
@@ -43,6 +56,8 @@ type SearchOpts struct {
 	IncludeAutomated bool
 	Dir              string   // only sessions whose cwd is Dir or below it
 	IDs              []string // only these sessions; nil = no restriction, empty = none
+	// Since: only sessions modified after it (Recent and RecentWhere only).
+	Since time.Time
 }
 
 // scopeClause restricts a query joined to sessions as "s" to opts.Dir and
@@ -86,7 +101,7 @@ const schema = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY, path TEXT, cwd TEXT, title TEXT, first_prompt TEXT,
-	automated INTEGER, mtime INTEGER, size INTEGER
+	automated INTEGER, mtime INTEGER, size INTEGER, meta_mtime INTEGER
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
 	session_id UNINDEXED, seq UNINDEXED, prompt UNINDEXED, prose UNINDEXED, title, text, more,
@@ -105,7 +120,8 @@ func Open(path string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(db); err != nil {
+	newerSchema, err := migrate(db)
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -113,57 +129,72 @@ func Open(path string) (*Index, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
-	if err := rereadIfExtractorChanged(db); err != nil {
+	if newerSchema {
+		return &Index{db: db, newer: true}, nil
+	}
+	newerExtractor, err := rereadIfExtractorChanged(db)
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Index{db: db}, nil
+	return &Index{db: db, newer: newerExtractor}, nil
 }
 
 // schemaVersion is bumped whenever the table layout or tokenizer changes; an index with an
-// older version is dropped and rebuilt from the session files on next Update.
-const schemaVersion = 6
+// older version is dropped and rebuilt from the session files on next Update, one with a
+// newer version is left alone (Index.newer).
+const schemaVersion = 7 // 7: sessions.meta_mtime, so a .meta.json title change is re-read
 
-func migrate(db *sql.DB) error {
+// migrate resets an index older than schemaVersion; newer reports one a
+// newer aimux wrote, which it leaves as it is. Several builds (one `aimux
+// mcp serve` per Claude Code session, started at different times) share
+// this file, and a reset is followed by a full rebuild whose write
+// transaction takes the lock at BEGIN (_txlock=immediate): resetting on
+// any mismatch made two builds rebuild each other's index back and forth,
+// and every other process's writes waited busy_timeout (5 s) and failed
+// with "database is locked". Hence only older versions are reset.
+func migrate(db *sql.DB) (newer bool, err error) {
 	var v int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
-		return err
+		return false, err
 	}
-	if v == schemaVersion {
-		return nil
+	if v >= schemaVersion {
+		return v > schemaVersion, nil
 	}
 	// embeddings and query vectors are matched by text hash, so they stay valid
 	// across layout changes: keeping them spares a full re-embed.
 	for _, t := range []string{"chunks", "sessions", "meta"} {
 		if _, err := db.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
-			return fmt.Errorf("reset index: %w", err)
+			return false, fmt.Errorf("reset index: %w", err)
 		}
 	}
-	_, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion))
-	return err
+	_, err = db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion))
+	return false, err
 }
 
 // extractVersion is bumped when ExtractFile's output changes without the
 // table layout changing. Sessions are then re-read on the next Update while
 // embeddings stay: they are matched by text hash, so unchanged prose is not
 // re-embedded.
-const extractVersion = 2
+const extractVersion = 3 // 3: titles by history.ShownTitle
 
-func rereadIfExtractorChanged(db *sql.DB) error {
+// rereadIfExtractorChanged marks every session for re-reading when an
+// older extractor (or none readable) wrote them; newer reports a newer
+// extractor's index, which it leaves as it is.
+func rereadIfExtractorChanged(db *sql.DB) (newer bool, err error) {
 	var v string
-	err := db.QueryRow(`SELECT value FROM meta WHERE key = 'extract_version'`).Scan(&v)
+	err = db.QueryRow(`SELECT value FROM meta WHERE key = 'extract_version'`).Scan(&v)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return false, err
 	}
-	want := strconv.Itoa(extractVersion)
-	if v == want {
-		return nil
+	if stored, perr := strconv.Atoi(v); perr == nil && stored >= extractVersion {
+		return stored > extractVersion, nil
 	}
 	if _, err := db.Exec(`UPDATE sessions SET mtime = 0, size = -1`); err != nil {
-		return fmt.Errorf("mark sessions for re-read: %w", err)
+		return false, fmt.Errorf("mark sessions for re-read: %w", err)
 	}
-	_, err = db.Exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('extract_version', ?)`, want)
-	return err
+	_, err = db.Exec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('extract_version', ?)`, strconv.Itoa(extractVersion))
+	return false, err
 }
 
 // Close releases the database.
@@ -183,8 +214,8 @@ func DefaultArchiveDir() string {
 }
 
 type fileState struct {
-	path        string
-	mtime, size int64
+	path                   string
+	mtime, size, metaMtime int64
 }
 
 // Update brings the index in line with the session files under projectsDir
@@ -195,6 +226,9 @@ type fileState struct {
 // drops that archive's sessions.
 func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...string) (UpdateStats, error) {
 	var st UpdateStats
+	if ix.newer {
+		return st, ErrNewerIndex
+	}
 	files := map[string]string{} // session id -> file, first dir wins
 	for _, dir := range append([]string{projectsDir}, archiveDirs...) {
 		m, err := filepath.Glob(filepath.Join(dir, "*", "*.jsonl"))
@@ -210,14 +244,14 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...str
 	}
 
 	known := map[string]fileState{}
-	rows, err := ix.db.Query(`SELECT id, path, mtime, size FROM sessions`)
+	rows, err := ix.db.Query(`SELECT id, path, mtime, size, meta_mtime FROM sessions`)
 	if err != nil {
 		return st, err
 	}
 	for rows.Next() {
 		var id string
 		var fs fileState
-		if err := rows.Scan(&id, &fs.path, &fs.mtime, &fs.size); err != nil {
+		if err := rows.Scan(&id, &fs.path, &fs.mtime, &fs.size, &fs.metaMtime); err != nil {
 			_ = rows.Close()
 			return st, err
 		}
@@ -231,7 +265,10 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...str
 		if err != nil {
 			continue
 		}
-		if fs, ok := known[id]; ok && fs.path == f && fs.mtime == info.ModTime().UnixNano() && fs.size == info.Size() {
+		// a session's title also lives in its .meta.json, which changes
+		// without the transcript changing
+		if fs, ok := known[id]; ok && fs.path == f && fs.mtime == info.ModTime().UnixNano() && fs.size == info.Size() &&
+			fs.metaMtime == history.MetaModTime(f) {
 			continue
 		}
 		changed = append(changed, f)
@@ -311,9 +348,9 @@ func writeDoc(tx *sql.Tx, d Doc) error {
 	if _, err := tx.Exec(`DELETE FROM embeddings WHERE session_id = ? AND seq >= ?`, d.SessionID, len(d.Chunks)); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT OR REPLACE INTO sessions (id, path, cwd, title, first_prompt, automated, mtime, size)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.SessionID, d.Path, d.CWD, d.Title, d.FirstPrompt, boolInt(d.Automated), info.ModTime().UnixNano(), info.Size()); err != nil {
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO sessions (id, path, cwd, title, first_prompt, automated, mtime, size, meta_mtime)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.SessionID, d.Path, d.CWD, d.Title, d.FirstPrompt, boolInt(d.Automated), info.ModTime().UnixNano(), info.Size(), d.MetaModTime); err != nil {
 		return err
 	}
 	for _, c := range d.Chunks {

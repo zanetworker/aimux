@@ -1,0 +1,324 @@
+{
+  "name": "A query keeps matching sessions in place, opens the tabs it shows, counts the tabs it hides and drops empty Elsewhere groups uncounted",
+  "now": "2026-10-31T12:00:00Z",
+  "query": "login",
+  "sessions": [
+    {
+      "id": "q1",
+      "provider": "claude",
+      "title": "Fix the login redirect",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 3,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "q2",
+      "provider": "claude",
+      "title": "Tidy imports",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:10:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 2,
+        "panes": 3,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "q3",
+      "provider": "claude",
+      "title": "Check a page",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:20:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "lastPrompt": "check the Login page",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 3,
+        "panes": 3,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "q4",
+      "provider": "claude",
+      "title": "Draft the post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "blog"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": true
+      }
+    },
+    {
+      "id": "q5",
+      "provider": "claude",
+      "title": "Run the tests",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 3,
+          "name": "web-login"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "q6",
+      "provider": "claude",
+      "title": "Bump deps",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:41:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 3,
+          "name": "web-login"
+        },
+        "pane": 2,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "q7",
+      "provider": "claude",
+      "title": "Write the guide",
+      "project": "/src/docs",
+      "lastActive": "2026-10-31T11:42:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "docs",
+        "repoPath": "/src/docs",
+        "label": "docs"
+      },
+      "mac": {
+        "window": {
+          "id": "w2",
+          "index": 2,
+          "name": "Window 2"
+        },
+        "tab": {
+          "index": 1,
+          "name": "docs"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "q8",
+      "provider": "claude",
+      "title": "Sort notes",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:43:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      },
+      "mac": {
+        "window": {
+          "id": "w5",
+          "index": 3,
+          "name": "Login work"
+        },
+        "tab": {
+          "index": 1,
+          "name": "notes"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "e1",
+      "provider": "claude",
+      "title": "Server check",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:44:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "description": "Moves the login check to the server.",
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      }
+    },
+    {
+      "id": "e2",
+      "provider": "claude",
+      "title": "Other thing",
+      "project": "/src/docs",
+      "lastActive": "2026-10-31T11:45:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "docs",
+        "repoPath": "/src/docs",
+        "label": "docs"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "aimux",
+            "panes": 3,
+            "working": 0,
+            "open": true,
+            "sessions": [
+              "q1",
+              "q3"
+            ]
+          },
+          {
+            "index": 3,
+            "name": "web-login",
+            "panes": 2,
+            "working": 0,
+            "open": true,
+            "sessions": [
+              "q5",
+              "q6"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "w5",
+        "name": "Login work",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "notes",
+            "panes": 1,
+            "working": 0,
+            "open": true,
+            "sessions": [
+              "q8"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 2,
+    "elsewhere": [
+      {
+        "label": "blog",
+        "sessions": [
+          "e1"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 1,
+    "open": 10
+  }
+}

@@ -278,3 +278,22 @@ func TestAgentFullStruct(t *testing.T) {
 		t.Errorf("SessionFile = %q, want %q", a.SessionFile, "/tmp/session.jsonl")
 	}
 }
+
+func TestStateWord(t *testing.T) {
+	cases := []struct {
+		a    Agent
+		want string
+	}{
+		{Agent{Status: StatusWaitingPermission, Activity: "needs_you"}, "needs you"},
+		{Agent{Status: StatusActive, Activity: "working"}, "working"},
+		{Agent{Status: StatusIdle, Activity: "idle"}, "idle"},
+		{Agent{Status: StatusError, Activity: "idle"}, "Error"}, // an error says more than idle
+		{Agent{Status: StatusIdle, Activity: "gone"}, "Idle"},   // gone has no word: the discovered status
+		{Agent{Status: StatusActive}, "Active"},                 // before the first refresh
+	}
+	for _, c := range cases {
+		if got := c.a.StateWord(); got != c.want {
+			t.Errorf("%+v StateWord = %q, want %q", c.a.Activity, got, c.want)
+		}
+	}
+}

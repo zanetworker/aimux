@@ -1,0 +1,320 @@
+{
+  "name": "A Jira key becomes a reference span only when its project is listed and a Jira base is configured",
+  "cases": [
+    {
+      "name": "listed projects link",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Tracked in WID-123 and OPS-7; also (WID-9)."
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "Tracked in "
+        },
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-123",
+          "href": "https://jira.example.com/browse/WID-123"
+        },
+        {
+          "t": "text",
+          "v": " and "
+        },
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "OPS-7",
+          "href": "https://jira.example.com/browse/OPS-7"
+        },
+        {
+          "t": "text",
+          "v": "; also ("
+        },
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-9",
+          "href": "https://jira.example.com/browse/WID-9"
+        },
+        {
+          "t": "text",
+          "v": ")."
+        }
+      ]
+    },
+    {
+      "name": "unlisted projects stay text",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "UTF-8, ISO-9001, ABC-12 and WID-1 are not all Jira keys"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "UTF-8, ISO-9001, ABC-12 and "
+        },
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-1",
+          "href": "https://jira.example.com/browse/WID-1"
+        },
+        {
+          "t": "text",
+          "v": " are not all Jira keys"
+        }
+      ]
+    },
+    {
+      "name": "whole words only",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "XWID-12 and WID-12x and WID-12_ and wid-12 and WID12 and WID- are text"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "XWID-12 and WID-12x and WID-12_ and wid-12 and WID12 and WID- are text"
+        }
+      ]
+    },
+    {
+      "name": "no Jira base: nothing links even for a listed project",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": null,
+        "jiraProjects": [
+          "WID"
+        ],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "WID-123"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "WID-123"
+        }
+      ]
+    },
+    {
+      "name": "a Jira base with an empty project list links nothing",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "WID-123 and UTF-8"
+        }
+      ],
+      "expect": [
+        {
+          "t": "text",
+          "v": "WID-123 and UTF-8"
+        }
+      ]
+    },
+    {
+      "name": "a trailing slash on the base is dropped",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main"
+        },
+        "jiraBase": "https://jira.example.com/",
+        "jiraProjects": [
+          "WID"
+        ],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "WID-5"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-5",
+          "href": "https://jira.example.com/browse/WID-5"
+        }
+      ]
+    },
+    {
+      "name": "works without a repo",
+      "context": {
+        "repo": null,
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID"
+        ],
+        "project": null
+      },
+      "inlines": [
+        {
+          "t": "text",
+          "v": "WID-5 and #6"
+        }
+      ],
+      "expect": [
+        {
+          "t": "ref",
+          "kind": "jira",
+          "v": "WID-5",
+          "href": "https://jira.example.com/browse/WID-5"
+        },
+        {
+          "t": "text",
+          "v": " and #6"
+        }
+      ]
+    },
+    {
+      "name": "inside strong; not inside code or a link",
+      "context": {
+        "repo": {
+          "web": "https://github.com/acme/widget",
+          "branch": "main",
+          "root": "/Users/dev/code/widget"
+        },
+        "jiraBase": "https://jira.example.com",
+        "jiraProjects": [
+          "WID",
+          "OPS"
+        ],
+        "project": "/Users/dev/code/widget"
+      },
+      "inlines": [
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "text",
+              "v": "WID-1"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": "WID-2"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/j",
+          "c": [
+            {
+              "t": "text",
+              "v": "WID-3"
+            }
+          ]
+        }
+      ],
+      "expect": [
+        {
+          "t": "strong",
+          "c": [
+            {
+              "t": "ref",
+              "kind": "jira",
+              "v": "WID-1",
+              "href": "https://jira.example.com/browse/WID-1"
+            }
+          ]
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "code",
+          "v": "WID-2"
+        },
+        {
+          "t": "text",
+          "v": " "
+        },
+        {
+          "t": "link",
+          "href": "https://example.com/j",
+          "c": [
+            {
+              "t": "text",
+              "v": "WID-3"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

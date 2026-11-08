@@ -1,91 +1,60 @@
 package insight
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
-	"net/http"
-	"os"
+	"log"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/cost"
+	"github.com/zanetworker/aimux/internal/llm"
 )
 
+// messagesURL is the Messages API endpoint (a test points it at a fake).
+var messagesURL = llm.MessagesURL
+
 type Config struct {
-	Model  string // "haiku" (default), "sonnet", "opus"
-	APIKey string // optional override; falls back to env vars
+	Model       string                 // "haiku" (default), "sonnet", "opus" (llm.ResolveModel; unknown names give haiku)
+	APIKey      string                 // optional override; falls back to env vars
+	RecordUsage func(cost.Usage) error // default: cost.AppendUsage to cost.DefaultUsagePath()
 }
 
-func resolveModel(short string) string {
-	switch short {
-	case "haiku":
-		return "claude-haiku-4-5-20251001"
-	case "sonnet":
-		return "claude-sonnet-4-6-20250527"
-	case "opus":
-		return "claude-opus-4-6-20250527"
-	default:
-		return short
-	}
+// logf logs (a test replaces it); warnedModels holds the configured model
+// names already logged as unknown, so each is logged once.
+var (
+	logf         = log.Printf
+	warnedModels sync.Map
+)
+
+// newClient is insight's model client: the Messages API only, 30 s per call,
+// usage under "insight".
+func newClient(cfg Config, apiKey string) *llm.Client {
+	return &llm.Client{Primary: llm.NewAPI(apiKey, messagesURL, 30*time.Second), Label: "insight", Record: cfg.RecordUsage, Logf: logf}
 }
 
-func resolveAPIKey(cfg Config) string {
-	if cfg.APIKey != "" {
-		return cfg.APIKey
-	}
-	return os.Getenv("ANTHROPIC_API_KEY")
-}
-
-// Generate sends a prompt to the configured LLM and returns the response text.
+// Generate sends a prompt to the configured model through the shared client
+// (Messages API only, 30 s, max_tokens 2048) and returns the response text.
+// Each successful call's usage is recorded under "insight".
 func Generate(cfg Config, prompt string) (string, error) {
-	apiKey := resolveAPIKey(cfg)
+	apiKey := llm.APIKey(cfg.APIKey)
 	if apiKey == "" {
 		return "", fmt.Errorf("no API key configured")
 	}
-	model := resolveModel(cfg.Model)
-	return callAnthropic(prompt, model, apiKey)
-}
-
-func callAnthropic(prompt, model, apiKey string) (string, error) {
-	reqBody := map[string]interface{}{
-		"model":      model,
-		"max_tokens": 2048,
-		"messages":   []map[string]interface{}{{"role": "user", "content": prompt}},
+	model, known := llm.ResolveModel(cfg.Model) // the one model table; empty is haiku
+	if !known {
+		if _, seen := warnedModels.LoadOrStore(cfg.Model, true); !seen {
+			logf("insight: unknown model %q, using %s", cfg.Model, model)
+		}
 	}
-	body, err := json.Marshal(reqBody)
+	reply, err := newClient(cfg, apiKey).Complete(context.Background(), llm.Request{Model: model, Prompt: prompt, MaxTokens: 2048})
 	if err != nil {
-		return "", fmt.Errorf("marshal: %w", err)
+		return "", err
 	}
-
-	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("anthropic API %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("parse: %w", err)
-	}
-	if len(result.Content) == 0 {
+	text := strings.TrimSpace(reply.Text)
+	if text == "" {
 		return "", fmt.Errorf("empty response")
 	}
-	return strings.TrimSpace(result.Content[0].Text), nil
+	return text, nil
 }

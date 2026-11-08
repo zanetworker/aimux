@@ -4,14 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/agent"
-	"github.com/zanetworker/aimux/internal/badge"
+	"github.com/zanetworker/aimux/internal/controller"
 	"github.com/zanetworker/aimux/internal/history"
-	"github.com/zanetworker/aimux/internal/jsonl"
 )
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -49,34 +46,9 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 		return
 	}
 
-	// Dedup by SessionID and filter ephemeral subagent processes
-	seen := make(map[string]int) // sessionID -> index in deduped
-	var deduped []agent.Agent
-	for _, a := range agents {
-		// Filter ephemeral automation subagents (session analyzers, hooks)
-		// but keep sessions launched by aimux (tmux session starts with "aimux-"),
-		// remote sandbox agents (no cost/token data by design), and any session
-		// that has been running for more than 5 minutes (never ephemeral).
-		if a.Location != "remote" &&
-			a.EstCostUSD == 0 && a.TokensIn < 1000 &&
-			!strings.Contains(a.Model, "opus") &&
-			!strings.HasPrefix(a.TMuxSession, "aimux-") &&
-			time.Since(a.StartTime) < 5*time.Minute {
-			continue
-		}
-		if a.SessionID == "" {
-			deduped = append(deduped, a)
-			continue
-		}
-		if idx, ok := seen[a.SessionID]; ok {
-			if a.StartTime.Before(deduped[idx].StartTime) {
-				deduped[idx] = a
-			}
-			continue
-		}
-		seen[a.SessionID] = len(deduped)
-		deduped = append(deduped, a)
-	}
+	// Drop ephemeral automation subagents, then one agent per session.
+	deduped := controller.DedupBySession(controller.DropEphemeral(agents, time.Now()))
+	controller.ApplyBadges(deduped, s.cfg.Badges)
 
 	// Enrich with titles
 	type enrichedAgent struct {
@@ -90,89 +62,22 @@ func (s *Server) sendAgentEvent(w http.ResponseWriter, flusher http.Flusher) {
 		enriched[i] = enrichedAgent{Agent: a}
 		if a.SessionFile != "" {
 			meta := history.LoadMeta(a.SessionFile)
-			enriched[i].Title = meta.Title
-			if enriched[i].Title == "" {
-				enriched[i].Title = firstPromptFromJSONL(a.SessionFile)
-			}
+			// cards clamp to two lines; no need to send a whole first message
+			enriched[i].Title = history.Shorten(history.ShownTitleForFileMeta(a.SessionFile, meta), 120)
 			enriched[i].Starred = meta.Starred
 		}
 	}
 
-	// Evaluate configurable badges for each agent.
-	if len(s.cfg.Badges) > 0 {
-		rules := make([]badge.Rule, len(s.cfg.Badges))
-		for i, b := range s.cfg.Badges {
-			rules[i] = badge.Rule{Path: b.Path, JSONPath: b.JSONPath, Label: b.Label, Color: b.Color}
-		}
-		for i := range enriched {
-			if enriched[i].WorkingDir != "" {
-				badges := badge.Evaluate(enriched[i].WorkingDir, rules)
-				enriched[i].Badges = make([]agent.BadgeValue, len(badges))
-				for j, b := range badges {
-					enriched[i].Badges[j] = agent.BadgeValue{
-						Label: b.Label, Value: b.Value, Color: b.Color,
-					}
-				}
-			}
-		}
+	// hooksHint: why a permission prompt cannot read "needs you" (the
+	// hooks are missing); "" once they are installed.
+	hooksHint := ""
+	if !s.activity.HooksInstalled() {
+		hooksHint = controller.HooksHint
 	}
-
-	data, err := json.Marshal(map[string]any{"agents": enriched})
+	data, err := json.Marshal(map[string]any{"agents": enriched, "hooksHint": hooksHint})
 	if err != nil {
 		return
 	}
 	_, _ = fmt.Fprintf(w, "event: agents\ndata: %s\n\n", data)
 	flusher.Flush()
-}
-
-func firstPromptFromJSONL(sessionFile string) string {
-	f, err := os.Open(sessionFile) // #nosec G304
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := jsonl.NewScanner(f)
-	for scanner.Scan() {
-		var entry struct {
-			Type    string `json:"type"`
-			Message *struct {
-				Role    string          `json:"role"`
-				Content json.RawMessage `json:"content"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue
-		}
-		if entry.Type == "user" && entry.Message != nil && entry.Message.Role == "user" {
-			// Handle both string content and array content
-			var text string
-
-			// Try parsing as string first
-			var contentStr string
-			if err := json.Unmarshal(entry.Message.Content, &contentStr); err == nil {
-				text = contentStr
-			} else {
-				// Try parsing as array of content blocks
-				var contentBlocks []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				}
-				if err := json.Unmarshal(entry.Message.Content, &contentBlocks); err == nil {
-					for _, block := range contentBlocks {
-						if block.Type == "text" && block.Text != "" {
-							text = block.Text
-							break
-						}
-					}
-				}
-			}
-
-			if len(text) > 120 {
-				text = text[:117] + "..."
-			}
-			return text
-		}
-	}
-	return ""
 }

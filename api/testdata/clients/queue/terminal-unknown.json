@@ -1,0 +1,21 @@
+{
+  "name": "terminal-unknown",
+  "session": {
+    "state": "open_in_terminal",
+    "terminal": {
+      "status": "unknown",
+      "canType": false,
+      "working": false
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": false
+    },
+    "items": []
+  }
+}

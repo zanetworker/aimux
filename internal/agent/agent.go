@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/sessionstate"
 	"github.com/zanetworker/aimux/internal/subagent"
 )
 
@@ -59,6 +60,19 @@ func (s Status) String() string {
 	}
 }
 
+// StateWord is the word the TUI prints for the agent's state: an error
+// status, else the state service's activity label ("needs you",
+// "working", "idle"), else the discovered status.
+func (a Agent) StateWord() string {
+	if a.Status == StatusError {
+		return a.Status.String()
+	}
+	if l := sessionstate.Activity(a.Activity).Label(); l != "" {
+		return l
+	}
+	return a.Status.String()
+}
+
 // Icon returns a single-character icon representing the status.
 func (s Status) Icon() string {
 	switch s {
@@ -88,34 +102,38 @@ type BadgeValue struct {
 type Agent struct {
 	PID            int
 	SessionID      string
-	Name           string     // project name, derived from WorkingDir
-	ProviderName   string     // "claude", "codex"
-	SessionFile    string     // path to conversation log
-	Model          string     // e.g. "claude-opus-4-6[1m]"
+	Name           string // project name, derived from WorkingDir
+	ProviderName   string // "claude", "codex"
+	SessionFile    string // path to conversation log
+	Model          string // e.g. "claude-opus-4-6[1m]"
 	PermissionMode string
 	WorkingDir     string
 	Source         SourceType
 	StartTime      time.Time
 	Status         Status
-	TMuxSession    string
-	CPUPercent     float64
-	MemoryMB       uint64
-	GitBranch      string
-	TokensIn       int64
-	TokensOut      int64
-	EstCostUSD     float64
-	TeamName       string
-	TaskID         string
-	TaskSubject    string
-	LastActivity   time.Time
-	GroupCount     int    // number of processes grouped into this entry (0 or 1 = single)
-	GroupPIDs      []int  // PIDs of grouped processes (for drill-down)
-	LastAction     string         // most recent tool call, e.g. "Ed main.go", "Sh go test"
-	ParentPID      int            // process tree parent (0 = top-level)
-	Subagent       subagent.Info  // from OTEL correlation
-	Badges         []BadgeValue   // evaluated badge results from project files
-	Location       string         // "local", "container", or "remote"
-	SandboxName    string         // OpenShell sandbox name (remote only)
+	// Activity is the session state service's answer (sessionstate:
+	// working, needs_you, idle, gone), set by controller.LocalActivity;
+	// "" until then. Status follows it where it says more.
+	Activity     string
+	TMuxSession  string
+	CPUPercent   float64
+	MemoryMB     uint64
+	GitBranch    string
+	TokensIn     int64
+	TokensOut    int64
+	EstCostUSD   float64
+	TeamName     string
+	TaskID       string
+	TaskSubject  string
+	LastActivity time.Time
+	GroupCount   int           // number of processes grouped into this entry (0 or 1 = single)
+	GroupPIDs    []int         // PIDs of grouped processes (for drill-down)
+	LastAction   string        // most recent tool call, e.g. "Ed main.go", "Sh go test"
+	ParentPID    int           // process tree parent (0 = top-level)
+	Subagent     subagent.Info // from OTEL correlation
+	Badges       []BadgeValue  // evaluated badge results from project files
+	Location     string        // "local", "container", or "remote"
+	SandboxName  string        // OpenShell sandbox name (remote only)
 }
 
 // IsSubagent returns true if this agent is nested under another agent.

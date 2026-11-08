@@ -1,0 +1,62 @@
+{
+  "name": "paused-automation-denied",
+  "session": {
+    "state": "open_in_terminal",
+    "terminal": {
+      "status": "idle",
+      "canType": false,
+      "working": false,
+      "reason": "automation_denied"
+    },
+    "queue": {
+      "state": "paused",
+      "reason": "macOS isn't letting aimux type into iTerm2",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Rename the helper to parseConfig",
+          "state": "waiting",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Then add a test for the empty file",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "paused",
+      "line": "macOS isn't letting aimux type into iTerm2",
+      "resume": true
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Rename the helper to parseConfig",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q2",
+        "text": "Then add a test for the empty file",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ]
+  }
+}

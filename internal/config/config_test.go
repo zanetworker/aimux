@@ -676,3 +676,139 @@ remote_access:
 		t.Fatalf("apns = %+v", a)
 	}
 }
+
+func TestRemoteAccessConfig_TerminalInput(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	yamlContent := "remote_access:\n  terminal_input:\n    enabled: true\n    allow_while_in_use: true\n"
+	if err := os.WriteFile(tmpFile, []byte(yamlContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if ti := cfg.RemoteAccess.TerminalInput; !ti.Enabled || !ti.AllowWhileInUse {
+		t.Fatalf("terminal_input = %+v, want both true", ti)
+	}
+
+	def, err := Load(filepath.Join(t.TempDir(), "absent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ti := def.RemoteAccess.TerminalInput; ti.Enabled || ti.AllowWhileInUse {
+		t.Fatalf("default terminal_input = %+v, want disabled", ti)
+	}
+}
+
+func TestTerminalInputAllowSlashCommands(t *testing.T) {
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(tmpFile, []byte("remote_access:\n  terminal_input:\n    enabled: true\n    allow_slash_commands: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(tmpFile)
+	if err != nil || !cfg.RemoteAccess.TerminalInput.AllowSlashCommands {
+		t.Fatalf("allow_slash_commands not read: %+v %v", cfg.RemoteAccess.TerminalInput, err)
+	}
+	def, err := Load(filepath.Join(t.TempDir(), "absent.yaml"))
+	if err != nil || def.RemoteAccess.TerminalInput.AllowSlashCommands {
+		t.Fatalf("allow_slash_commands must default to false: %+v %v", def.RemoteAccess.TerminalInput, err)
+	}
+}
+
+func TestRemoteAccessConfig_Links(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yml := "remote_access:\n  links:\n    jira_base: https://jira.example.com\n    jira_projects: [WID, OPS]\n"
+	if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := cfg.RemoteAccess.Links
+	if l.JiraBase != "https://jira.example.com" || len(l.JiraProjects) != 2 || l.JiraProjects[1] != "OPS" {
+		t.Fatalf("links = %+v", l)
+	}
+}
+
+func TestRemoteAccessConfig_JiraBaseMustBeHTTP(t *testing.T) {
+	for base, keep := range map[string]bool{"https://jira.example.com": true, "http://jira.local": true,
+		"javascript:alert(1)": false, "ftp://x.example.com": false, "jira.example.com": false, "": false} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		yml := "remote_access:\n  links:\n    jira_base: \"" + base + "\"\n    jira_projects: [WID]\n"
+		if err := os.WriteFile(path, []byte(yml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.RemoteAccess.Links.JiraBase; (got != "") != keep {
+			t.Errorf("jira_base %q kept as %q, keep=%v", base, got, keep)
+		}
+	}
+}
+
+func TestRemoteAccessConfig_DeviceLogin(t *testing.T) {
+	for _, tt := range []struct {
+		yaml string
+		want bool
+	}{
+		{"remote_access:\n  port: 7400\n", true}, // unset: on by default
+		{"remote_access:\n  device_login: false\n", false},
+		{"remote_access:\n  device_login: true\n", true},
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(tt.yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.RemoteAccess.DeviceLoginOn(); got != tt.want {
+			t.Errorf("%q: DeviceLoginOn() = %v, want %v", tt.yaml, got, tt.want)
+		}
+	}
+	if !(RemoteAccessConfig{}).DeviceLoginOn() {
+		t.Error("the zero RemoteAccessConfig must have device login on")
+	}
+}
+
+func TestRemoteAccessConfig_DeviceLoginNotABool(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("remote_access:\n  device_login: sometimes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("device_login: sometimes loaded without an error")
+	}
+}
+
+func TestNamingDailyLimit_DefaultAndOverride(t *testing.T) {
+	if got := Default().Sessions.NamingDailyLimit; got != 20 {
+		t.Errorf("default NamingDailyLimit = %d, want 20", got)
+	}
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		yaml string
+		want int
+	}{
+		{"sessions:\n  naming_daily_limit: 5\n", 5},
+		{"sessions:\n  title_model: sonnet\n", 20},
+		{"sessions:\n  naming_daily_limit: 0\n", 20}, // zero cannot be told from unset; auto_title switches naming off
+	} {
+		p := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(p, []byte(tc.yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Sessions.NamingDailyLimit != tc.want {
+			t.Errorf("%q: NamingDailyLimit = %d, want %d", tc.yaml, cfg.Sessions.NamingDailyLimit, tc.want)
+		}
+	}
+}

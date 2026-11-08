@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Agent } from '../types';
-import { StatusLabel } from '../types';
+import { stateLabel } from './stateLabel';
 import { useTraceStream } from '../hooks/useTraceStream';
 import { TraceView } from './TraceView';
 import { SessionView } from './SessionView';
@@ -146,7 +146,7 @@ export function RightPanel({ agent, onClose, isFullscreen, onToggleFullscreen, d
     return `$${cost.toFixed(2)}`;
   };
 
-  const statusLabel = StatusLabel[agent.Status] || 'Unknown';
+  const statusLabel = stateLabel(agent);
   const statusColor = agent.Status === 0 ? 'var(--teal)' :
                       agent.Status === 3 ? 'var(--accent)' :
                       'var(--fg-2)';

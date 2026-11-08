@@ -1,0 +1,665 @@
+{
+  "name": "live step detail: command, diff, text error, write content, failed then completed, non-string edit text",
+  "now": "2026-10-28T08:00:30Z",
+  "turns": [],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "r1",
+      "kind": "turn_started",
+      "time": "2026-10-28T08:00:00Z",
+      "data": {
+        "text": "Fix the rounding"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:01Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c1",
+        "title": "go test ./internal/ledger/",
+        "kind": "execute",
+        "status": "in_progress",
+        "rawInput": {
+          "command": "go test ./internal/ledger/ -run TestRounding -count=1",
+          "description": "Run the ledger rounding test"
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:02Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c1",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:03Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c2",
+        "title": "Edit round.go",
+        "kind": "edit",
+        "status": "pending",
+        "rawInput": {
+          "file_path": "/src/ledger/round.go"
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:04Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c2",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "path": "/src/ledger/round.go",
+            "oldText": "\tlet a = 1\n",
+            "newText": "\tlet a = 2\n"
+          }
+        ]
+      }
+    },
+    {
+      "seq": 6,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:05Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c3",
+        "title": "Grep carryOver",
+        "kind": "search",
+        "status": "pending",
+        "rawInput": {
+          "pattern": "carryOver",
+          "path": "/src"
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:06Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c3",
+        "status": "failed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "grep: /src/vendor: permission denied"
+            }
+          },
+          {
+            "type": "terminal",
+            "terminalId": "t1"
+          },
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "exit status 2"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "seq": 8,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:07Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c4",
+        "title": "Write notes.txt",
+        "kind": "edit",
+        "status": "pending",
+        "rawInput": {
+          "file_path": "/src/notes.txt",
+          "content": "rounding: half up\n"
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:08Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c4",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 10,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:09Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c5",
+        "title": "go build ./...",
+        "kind": "execute",
+        "status": "pending",
+        "rawInput": {
+          "command": "go build ./..."
+        }
+      }
+    },
+    {
+      "seq": 11,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:10Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c5",
+        "status": "failed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "build failed: flaky linker"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "seq": 12,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:11Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c5",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 13,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:12Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c6",
+        "title": "Run sync",
+        "kind": "execute",
+        "status": "pending",
+        "rawInput": {
+          "query": "sync"
+        }
+      }
+    },
+    {
+      "seq": 14,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:13Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c6",
+        "status": "failed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "disk full"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "seq": 15,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:14Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c6",
+        "status": "failed"
+      }
+    },
+    {
+      "seq": 16,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:15Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c7",
+        "title": "ls",
+        "kind": "execute",
+        "status": "pending",
+        "rawInput": {
+          "command": [
+            "ls",
+            "-la"
+          ],
+          "description": "List files"
+        }
+      }
+    },
+    {
+      "seq": 17,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:16Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c8",
+        "title": "Search TODO",
+        "kind": "search",
+        "status": "pending",
+        "rawInput": {
+          "command": "",
+          "pattern": "TODO"
+        }
+      }
+    },
+    {
+      "seq": 18,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:17Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c9",
+        "title": "Edit new.go",
+        "kind": "edit",
+        "status": "pending",
+        "rawInput": {
+          "file_path": "/src/new.go",
+          "old_string": "zzz",
+          "new_string": "yyy"
+        }
+      }
+    },
+    {
+      "seq": 19,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:18Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c9",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "path": "/src/new.go",
+            "newText": "b\n"
+          },
+          {
+            "type": "diff",
+            "path": "/src/new.go",
+            "oldText": "c\n",
+            "newText": "d\n"
+          }
+        ]
+      }
+    },
+    {
+      "seq": 20,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:19Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c10",
+        "title": "Edit b.go",
+        "kind": "edit",
+        "status": "pending",
+        "rawInput": {
+          "file_path": "/src/a.go",
+          "old_string": "x",
+          "new_string": "y"
+        }
+      }
+    },
+    {
+      "seq": 21,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:20Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c10",
+        "status": "in_progress",
+        "rawInput": {
+          "file_path": "/src/b.go"
+        },
+        "content": [
+          {
+            "type": "diff",
+            "path": "/src/b.go",
+            "oldText": "1\n",
+            "newText": "2\n"
+          }
+        ]
+      }
+    },
+    {
+      "seq": 22,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:21Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c10",
+        "status": "failed",
+        "content": [
+          {
+            "type": "content",
+            "content": {
+              "type": "text",
+              "text": "conflict"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "seq": 23,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:22Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c11",
+        "title": "make build",
+        "kind": "execute",
+        "status": "pending",
+        "rawInput": {
+          "command": "make",
+          "description": "build"
+        }
+      }
+    },
+    {
+      "seq": 24,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:23Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c11",
+        "status": "completed",
+        "rawInput": {
+          "description": "Run build"
+        }
+      }
+    },
+    {
+      "seq": 25,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:24Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c12",
+        "title": "Edit c.go",
+        "kind": "edit",
+        "status": "completed",
+        "rawInput": {
+          "file_path": "/src/c.go",
+          "old_string": 3,
+          "new_string": [
+            "x"
+          ],
+          "content": "w\n"
+        }
+      }
+    },
+    {
+      "seq": 26,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:25Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "c13",
+        "title": "Write d.txt",
+        "kind": "edit",
+        "status": "pending",
+        "rawInput": {
+          "file_path": "/src/d.txt",
+          "old_string": "before\n",
+          "new_string": "after\n",
+          "content": {
+            "text": "z"
+          }
+        }
+      }
+    },
+    {
+      "seq": 27,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:26Z",
+      "data": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c13",
+        "status": "completed",
+        "content": [
+          {
+            "type": "diff",
+            "path": "/src/d.txt",
+            "oldText": null,
+            "newText": 42
+          }
+        ]
+      }
+    },
+    {
+      "seq": 28,
+      "turn": "r1",
+      "kind": "update",
+      "time": "2026-10-28T08:00:27Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "Done."
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Fix the rounding"
+      },
+      {
+        "kind": "steps",
+        "count": 13,
+        "seconds": 25,
+        "filesChanged": [
+          "Edit round.go",
+          "Write notes.txt",
+          "Edit new.go",
+          "Edit b.go",
+          "Edit c.go",
+          "Write d.txt"
+        ],
+        "steps": [
+          {
+            "kind": "run",
+            "target": "go test ./internal/ledger/",
+            "status": "ok",
+            "detail": {
+              "input": "go test ./internal/ledger/ -run TestRounding -count=1",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Edit round.go",
+            "status": "ok",
+            "detail": {
+              "input": "/src/ledger/round.go",
+              "error": "",
+              "old": "\tlet a = 1\n",
+              "new": "\tlet a = 2\n"
+            }
+          },
+          {
+            "kind": "search",
+            "target": "Grep carryOver",
+            "status": "failed",
+            "detail": {
+              "input": "carryOver",
+              "error": "grep: /src/vendor: permission denied\nexit status 2",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Write notes.txt",
+            "status": "ok",
+            "detail": {
+              "input": "/src/notes.txt",
+              "error": "",
+              "old": "",
+              "new": "rounding: half up\n"
+            }
+          },
+          {
+            "kind": "run",
+            "target": "go build ./...",
+            "status": "ok",
+            "detail": {
+              "input": "go build ./...",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "run",
+            "target": "Run sync",
+            "status": "failed",
+            "detail": {
+              "input": "sync",
+              "error": "disk full",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "run",
+            "target": "ls",
+            "status": "running",
+            "detail": {
+              "input": "List files",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "search",
+            "target": "Search TODO",
+            "status": "running",
+            "detail": {
+              "input": "TODO",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Edit new.go",
+            "status": "ok",
+            "detail": {
+              "input": "/src/new.go",
+              "error": "",
+              "old": "",
+              "new": "b\n"
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Edit b.go",
+            "status": "failed",
+            "detail": {
+              "input": "/src/b.go",
+              "error": "conflict",
+              "old": "1\n",
+              "new": "2\n"
+            }
+          },
+          {
+            "kind": "run",
+            "target": "make build",
+            "status": "ok",
+            "detail": {
+              "input": "Run build",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Edit c.go",
+            "status": "ok",
+            "detail": {
+              "input": "/src/c.go",
+              "error": "",
+              "old": "",
+              "new": "w\n"
+            }
+          },
+          {
+            "kind": "edit",
+            "target": "Write d.txt",
+            "status": "ok",
+            "detail": {
+              "input": "/src/d.txt",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "Done."
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

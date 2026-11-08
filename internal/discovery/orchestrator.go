@@ -31,18 +31,24 @@ type SnapshotProvider interface {
 type Snapshot struct {
 	PsOutput     string         // raw `ps aux` output
 	TmuxSessions []TmuxSession  // parsed tmux sessions
+	Procs        map[int]ProcFacts // every process's parent and start; nil if ps failed
 }
 
-// TakeSnapshot captures a process snapshot (ps aux + tmux) in parallel.
+// TakeSnapshot captures a process snapshot (ps aux, parents and start
+// times, tmux) in parallel.
 func TakeSnapshot() *Snapshot {
 	snap := &Snapshot{}
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		if out, err := exec.Command("ps", "aux").Output(); err == nil {
 			snap.PsOutput = string(out)
 		}
+	}()
+	go func() {
+		defer wg.Done()
+		snap.Procs = readProcFacts()
 	}()
 	go func() {
 		defer wg.Done()

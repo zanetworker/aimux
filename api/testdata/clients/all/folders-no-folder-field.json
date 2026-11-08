@@ -1,0 +1,103 @@
+{
+  "name": "A session without folder is in the main checkout of the repo named by the project's last part, keyed by the project path",
+  "now": "2026-10-31T12:00:00Z",
+  "timeZone": "UTC",
+  "project": null,
+  "sort": "folders",
+  "sessions": [
+    {
+      "id": "s1",
+      "provider": "claude",
+      "title": "Scratch one",
+      "project": "/src/scratch",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "idle",
+      "pinned": false
+    },
+    {
+      "id": "s2",
+      "provider": "claude",
+      "title": "Scratch two",
+      "project": "/src/scratch",
+      "lastActive": "2026-10-31T09:00:00Z",
+      "state": "idle",
+      "pinned": false
+    },
+    {
+      "id": "s3",
+      "provider": "claude",
+      "title": "Probe",
+      "project": "/src/tools/probe",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "busy",
+      "pinned": false
+    },
+    {
+      "id": "s4",
+      "provider": "claude",
+      "title": "Plan",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T08:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "s5",
+      "provider": "claude",
+      "title": "Resolved scratch",
+      "project": "/src/scratch",
+      "lastActive": "2026-10-31T07:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "scratch",
+        "repoPath": "/src/scratch",
+        "label": "scratch"
+      }
+    }
+  ],
+  "expect": {
+    "repos": [
+      {
+        "repoPath": "/src/aimux",
+        "name": "aimux",
+        "count": 1,
+        "working": 0,
+        "open": false,
+        "sessions": [
+          "s4"
+        ],
+        "worktrees": []
+      },
+      {
+        "repoPath": "/src/tools/probe",
+        "name": "probe",
+        "count": 1,
+        "working": 1,
+        "open": false,
+        "sessions": [
+          "s3"
+        ],
+        "worktrees": []
+      },
+      {
+        "repoPath": "/src/scratch",
+        "name": "scratch",
+        "count": 3,
+        "working": 0,
+        "open": true,
+        "sessions": [
+          "s1",
+          "s2",
+          "s5"
+        ],
+        "worktrees": []
+      }
+    ]
+  }
+}

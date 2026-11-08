@@ -23,7 +23,10 @@ import (
 	"github.com/zanetworker/aimux/internal/task"
 )
 
-func (a *App) syncPreview() {
+// syncPreview points the preview pane at the selected agent and returns the
+// command loading its conversation (nil when the selection did not change).
+// The parse runs off the UI goroutine; Update applies its PreviewLoadedMsg.
+func (a *App) syncPreview() tea.Cmd {
 	selected := a.agentsView.Selected()
 	if selected != nil {
 		if selected.Location == "remote" {
@@ -40,12 +43,16 @@ func (a *App) syncPreview() {
 					debuglog.Log("syncPreview: no session in map for sandbox %q", sandboxName)
 				}
 			}
-			a.previewPane.SetParser(a.parserForRemote(sessionID, sandboxName))
+			a.previewPane.SetParser(a.previewParserForRemote(sessionID, sandboxName))
 		} else if p := a.providerFor(selected.ProviderName); p != nil {
-			a.previewPane.SetParser(a.parserForProvider(p))
+			if parser, tail := a.previewParserFor(p); tail {
+				a.previewPane.SetTailParser(parser)
+			} else {
+				a.previewPane.SetParser(parser)
+			}
 		}
 	}
-	a.previewPane.SetAgent(selected)
+	return a.previewPane.SetAgent(selected)
 }
 
 // refreshTasks updates the tasks view and header summary.
@@ -524,17 +531,70 @@ func (a App) openSessions() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	opts := history.DiscoverOpts{Dir: dir}
-	sessions, _ := history.Discover(opts, "")
-	a.cachedSessions = sessions
-	a.sessionsView.SetSessions(sessions)
-	a.sessionsView.SetTagVocab(history.CollectTags(""))
 	a.sessionsView.SetHourlyRate(a.cfg.ROI.HourlyRate)
 	if a.sessionsView.ResumeMode() == "" {
 		a.sessionsView.SetResumeMode(controller.ResolveMode("", a.cfg.DefaultMode))
 	}
 
-	return a.navigateTo(viewSessions, "Sessions")
+	load := a.loadSessions(dir)
+	m, cmd := a.navigateTo(viewSessions, "Sessions")
+	return m, tea.Batch(cmd, load)
+}
+
+// sessionsLoadedMsg carries a history scan made off the UI goroutine (it
+// reads thousands of transcripts' metadata: 0.3 to 1.8 s).
+type sessionsLoadedMsg struct {
+	seq      uint64
+	sessions []history.Session
+	tags     []string
+}
+
+// loadSessions starts a scan of the sessions in dir ("" for all) and
+// returns the command running it; a newer load makes this one's result
+// stale. The list keeps what it shows until the result arrives.
+func (a *App) loadSessions(dir string) tea.Cmd {
+	a.sessionsLoadSeq++
+	seq := a.sessionsLoadSeq
+	a.sessionsLoadPending, a.sessionsLoadDir = true, dir
+	a.statusHint = "Loading sessions..."
+	return func() tea.Msg {
+		sessions, _ := history.Discover(history.DiscoverOpts{Dir: dir}, "")
+		return sessionsLoadedMsg{seq: seq, sessions: sessions, tags: history.CollectTags("")}
+	}
+}
+
+// rescanSessionsAfter restarts a pending sessions scan after msg changed a
+// session on disk (delete, star, tags, annotation, note, ROI): the running
+// scan may have read the list before the change and would undo it on
+// screen. Nil when msg changes nothing or no scan is pending.
+func (a *App) rescanSessionsAfter(msg tea.Msg) tea.Cmd {
+	switch msg.(type) {
+	case views.SessionDeleteMsg, views.SessionBulkDeleteMsg, views.SessionStarMsg,
+		views.SessionTagMsg, views.SessionAnnotateMsg, views.SessionNoteMsg, views.SessionROIMsg:
+	default:
+		return nil
+	}
+	if !a.sessionsLoadPending {
+		return nil
+	}
+	hint := a.statusHint // keep the mutation's own message ("Session deleted")
+	cmd := a.loadSessions(a.sessionsLoadDir)
+	a.statusHint = hint
+	return cmd
+}
+
+// applySessions shows a scan's result unless a newer load started since.
+func (a *App) applySessions(msg sessionsLoadedMsg) {
+	if msg.seq != a.sessionsLoadSeq {
+		return
+	}
+	a.sessionsLoadPending = false
+	a.cachedSessions = msg.sessions
+	a.sessionsView.SetSessions(msg.sessions)
+	a.sessionsView.SetTagVocab(msg.tags)
+	if a.statusHint == "Loading sessions..." {
+		a.statusHint = ""
+	}
 }
 
 func (a App) openStarred() (tea.Model, tea.Cmd) {

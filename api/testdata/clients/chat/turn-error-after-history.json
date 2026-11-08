@@ -1,0 +1,128 @@
+{
+  "name": "errors go after their history turn: by prompt and time window, or, start aged out, the latest turn recorded before",
+  "now": "2026-10-26T08:00:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T07:00:00Z",
+      "user": "Bump the version",
+      "reply": "Bumped.",
+      "tools": []
+    },
+    {
+      "number": 2,
+      "time": "2026-10-26T07:30:01Z",
+      "user": "Run the migration",
+      "reply": "",
+      "tools": [
+        {
+          "name": "Bash",
+          "snippet": "make migrate",
+          "ok": false
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "time": "2026-10-26T07:40:00Z",
+      "user": "Thanks",
+      "reply": "Any time.",
+      "tools": []
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "e0",
+      "kind": "turn_error",
+      "time": "2026-10-26T07:05:00Z",
+      "data": {
+        "error": "Lost the connection to the agent."
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "e1",
+      "kind": "turn_started",
+      "time": "2026-10-26T07:30:00Z",
+      "data": {
+        "text": "Run the migration"
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "e1",
+      "kind": "update",
+      "time": "2026-10-26T07:30:02Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "m1",
+        "title": "make migrate",
+        "kind": "execute",
+        "status": "pending"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "e1",
+      "kind": "turn_error",
+      "time": "2026-10-26T07:31:00Z",
+      "data": {
+        "error": "The agent exited."
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "Bump the version"
+      },
+      {
+        "kind": "reply",
+        "text": "Bumped."
+      },
+      {
+        "kind": "error",
+        "text": "Lost the connection to the agent."
+      },
+      {
+        "kind": "user",
+        "text": "Run the migration"
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": null,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "run",
+            "target": "make migrate",
+            "status": "failed",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "error",
+        "text": "The agent exited."
+      },
+      {
+        "kind": "user",
+        "text": "Thanks"
+      },
+      {
+        "kind": "reply",
+        "text": "Any time."
+      }
+    ],
+    "working": false,
+    "pendingApproval": null
+  }
+}

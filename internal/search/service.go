@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,6 +42,9 @@ type Service struct {
 	EmbedInBackground bool
 
 	mu sync.Mutex // one call at a time: concurrent refreshes lock SQLite
+	// newerNoted: the newer-index note was given (under mu).
+	newerNoted bool
+
 	bg struct {
 		mu      sync.Mutex
 		pending map[string]bool // session IDs waiting for embedding
@@ -167,6 +171,22 @@ func (s *Service) Session(ctx context.Context, idOrPrefix string) (Transcript, e
 	return Transcript{Detail: d, Exchanges: ex}, nil
 }
 
+// RecentWhere refreshes the index once, then lists sessions by last
+// activity as Index.RecentWhere does: keep filters without costing rows.
+func (s *Service) RecentWhere(ctx context.Context, o SearchOpts, pageSize, maxPages int, keep func(Result) bool) ([]Result, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ix, err := Open(s.DBPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("open search index: %w", err)
+	}
+	defer func() { _ = ix.Close() }()
+	if err := s.refresh(ctx, ix); err != nil {
+		return nil, false, err
+	}
+	return ix.RecentWhere(o, pageSize, maxPages, keep)
+}
+
 // Recent refreshes the index and lists sessions by last activity.
 func (s *Service) Recent(ctx context.Context, o SearchOpts) ([]Result, error) {
 	s.mu.Lock()
@@ -187,6 +207,13 @@ func (s *Service) Recent(ctx context.Context, o SearchOpts) ([]Result, error) {
 // Big backlogs (a first run) are left to `aimux sessions index`.
 func (s *Service) refresh(ctx context.Context, ix *Index) error {
 	st, err := ix.Update(s.ProjectsDir, DefaultExtractOpts(), s.ArchiveDirs...)
+	if errors.Is(err, ErrNewerIndex) {
+		if !s.newerNoted {
+			s.newerNoted = true
+			s.note("note: " + err.Error() + "; results may miss recent changes until that aimux refreshes it")
+		}
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("update search index: %w", err)
 	}

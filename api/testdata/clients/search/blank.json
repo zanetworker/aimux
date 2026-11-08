@@ -1,0 +1,39 @@
+{
+  "name": "A query of only whitespace gives no results (the screen shows as usual)",
+  "now": "2026-10-31T12:00:00Z",
+  "query": " \t ",
+  "sessions": [
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Anything",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "a2",
+      "provider": "claude",
+      "title": "Else",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "expect": {
+    "open": [],
+    "other": []
+  }
+}

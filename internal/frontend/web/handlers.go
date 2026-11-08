@@ -200,9 +200,9 @@ func (s *Server) handleGetAnnotations(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		FilePath      string   `json:"filePath"`
-		Annotation    string   `json:"annotation"`
+		Annotation    *string  `json:"annotation"`
 		Tags          []string `json:"tags"`
-		Note          string   `json:"note"`
+		Note          *string  `json:"note"`
 		Starred       *bool    `json:"starred"`
 		ROIMultiplier *float64 `json:"roiMultiplier"`
 		TaskType      *string  `json:"taskType"`
@@ -218,22 +218,15 @@ func (s *Server) handleUpdateSessionMeta(w http.ResponseWriter, r *http.Request)
 	if !s.requireSessionFile(w, req.FilePath) {
 		return
 	}
-	meta := history.LoadMeta(req.FilePath)
-	meta.Annotation = req.Annotation
-	if req.Tags != nil {
-		meta.Tags = req.Tags
-	}
-	meta.Note = req.Note
-	if req.Starred != nil {
-		meta.Starred = *req.Starred
-	}
-	if req.ROIMultiplier != nil {
-		meta.ROIMultiplier = *req.ROIMultiplier
-	}
-	if req.TaskType != nil {
-		meta.TaskType = *req.TaskType
-	}
-	if err := history.SaveMeta(req.FilePath, meta); err != nil {
+	err := controller.UpdateSessionMeta(req.FilePath, controller.MetaPatch{
+		Annotation:    req.Annotation,
+		Tags:          req.Tags,
+		Note:          req.Note,
+		Starred:       req.Starred,
+		ROIMultiplier: req.ROIMultiplier,
+		TaskType:      req.TaskType,
+	})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -310,19 +303,71 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// visibleHistory drops automated (cron/SDK) sessions unless asked for them,
-// matching the TUI and search defaults.
-func visibleHistory(sessions []history.Session, includeAutomated bool) []history.Session {
-	if includeAutomated {
-		return sessions
+// dashboardHistory is /api/history's list: history.Visible with the
+// dashboard's options. Each row's hidden names the reveals
+// (history.DashboardReveals) that must all be on for the React app to show
+// it; the app reads it and applies no rule.
+func dashboardHistory(sessions []history.Session) []map[string]any {
+	return historyRows(sessions, history.DashboardOpts(), history.DashboardReveals)
+}
+
+// historyRows drops a session hidden by a kind no reveal covers, so the
+// client never shows it by default.
+func historyRows(sessions []history.Session, opts history.VisibleOpts, reveals []history.Reveal) []map[string]any {
+	var covered history.Kind
+	for _, r := range reveals {
+		covered |= r.Kinds
 	}
-	out := sessions[:0:0]
+	result := []map[string]any{}
 	for _, s := range sessions {
-		if !s.Automated {
-			out = append(out, s)
+		if history.HiddenBy(s, opts)&^covered != 0 {
+			continue
 		}
+		result = append(result, historyRow(s, history.HiddenUntil(s, opts, reveals)))
 	}
-	return out
+	return result
+}
+
+// historyRow is one session of /api/history.
+func historyRow(s history.Session, hidden []string) map[string]any {
+	return map[string]any{
+		"id":             s.ID,
+		"provider":       s.Provider,
+		"project":        s.Project,
+		"filePath":       s.FilePath,
+		"startTime":      s.StartTime.Format(time.RFC3339),
+		"lastActive":     s.LastActive.Format(time.RFC3339),
+		"turnCount":      s.TurnCount,
+		"tokensIn":       s.TokensIn,
+		"tokensOut":      s.TokensOut,
+		"costUSD":        s.CostUSD,
+		"firstPrompt":    s.FirstPrompt,
+		"title":          s.Title,
+		"shownTitle":     history.ShownTitle(s), // the title to show; the client never picks one
+		"hidden":         hidden,                // reveals needed to show it; the client never decides
+		"resumable":      s.Resumable,
+		"annotation":     s.Annotation,
+		"tags":           s.Tags,
+		"note":           s.Note,
+		"isSubagent":     s.IsSubagent,
+		"permissionMode": s.PermissionMode,
+		"starred":        s.Starred,
+		"gitBranch":      s.GitBranch,
+		"lastPrompt":     s.LastPrompt,
+		"lastAction":     s.LastAction,
+		"model":          s.Model,
+		"roiMultiplier":  s.ROIMultiplier,
+		"taskType":       s.TaskType,
+		"durationMin":    s.DurationMin,
+		// Infer location from file path: sandbox sessions run in /sandbox
+		// so their project hash is "-sandbox".
+		"location": func() string {
+			if strings.Contains(s.FilePath, "/-sandbox/") {
+				return "remote"
+			}
+			return "local"
+		}(),
+	}
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -333,50 +378,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	sessions = visibleHistory(sessions, r.URL.Query().Get("automated") == "1")
-	if sessions == nil {
-		sessions = []history.Session{}
-	}
-
-	result := make([]map[string]any, len(sessions))
-	for i, s := range sessions {
-		result[i] = map[string]any{
-			"id":          s.ID,
-			"provider":    s.Provider,
-			"project":     s.Project,
-			"filePath":    s.FilePath,
-			"startTime":   s.StartTime.Format(time.RFC3339),
-			"lastActive":  s.LastActive.Format(time.RFC3339),
-			"turnCount":   s.TurnCount,
-			"tokensIn":    s.TokensIn,
-			"tokensOut":   s.TokensOut,
-			"costUSD":     s.CostUSD,
-			"firstPrompt": s.FirstPrompt,
-			"title":       s.Title,
-			"resumable":   s.Resumable,
-			"annotation":  s.Annotation,
-			"tags":        s.Tags,
-			"note":        s.Note,
-			"isSubagent":     s.IsSubagent,
-			"permissionMode": s.PermissionMode,
-			"starred":        s.Starred,
-			"gitBranch":      s.GitBranch,
-			"lastPrompt":     s.LastPrompt,
-			"lastAction":     s.LastAction,
-			"model":          s.Model,
-			"roiMultiplier":  s.ROIMultiplier,
-			"taskType":       s.TaskType,
-			"durationMin":    s.DurationMin,
-			// Infer location from file path: sandbox sessions run in /sandbox
-			// so their project hash is "-sandbox".
-			"location": func() string {
-				if strings.Contains(s.FilePath, "/-sandbox/") {
-					return "remote"
-				}
-				return "local"
-			}(),
-		}
-	}
+	result := dashboardHistory(sessions)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"sessions": result}); err != nil {
@@ -549,7 +551,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	results := []map[string]string{}
 	if s.searchFn != nil {
-		matches, err := s.searchFn(q)
+		matches, err := s.searchFn(q, r.URL.Query().Get("automated") == "1")
 		if err != nil {
 			debuglog.Log("session search %q: %v", q, err) // details stay in the log
 			http.Error(w, "search failed", http.StatusInternalServerError)
@@ -719,30 +721,17 @@ func (s *Server) handleInsight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	model := s.cfg.Sessions.TitleModel
-	if model == "" {
-		model = "haiku"
-	}
-
 	if s.cfg.Sessions.APIKey == "" {
 		http.Error(w, "insight requires an API key (set sessions.api_key in config)", http.StatusServiceUnavailable)
 		return
 	}
 
 	cfg := insight.Config{
-		Model:  model,
+		Model:  s.cfg.Sessions.TitleModel, // empty is insight's default, haiku
 		APIKey: s.cfg.Sessions.APIKey,
 	}
 
-	prompt := req.Prompt
-	if prompt == "" {
-		prompt = "You are analyzing a skill analytics dashboard for an AI coding agent system. " +
-			"The data below shows skill invocations, correction rates, learning funnel metrics, and failure patterns. " +
-			"For each section with data, provide 1-2 sentences of actionable insight. " +
-			"Focus on: which skills need attention, what patterns indicate, and specific next steps. " +
-			"Format as a JSON object where keys are section names and values are insight strings.\n\n" +
-			"Dashboard data:\n" + string(req.Data)
-	}
+	prompt := insight.DashboardPrompt(req.Prompt, req.Data)
 
 	result, err := insight.Generate(cfg, prompt)
 	if err != nil {
@@ -878,46 +867,7 @@ func (s *Server) handleCosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type costEntry struct {
-		Project    string  `json:"project"`
-		Provider   string  `json:"provider"`
-		Model      string  `json:"model"`
-		TokensIn   int64   `json:"tokens_in"`
-		TokensOut  int64   `json:"tokens_out"`
-		CostUSD    float64 `json:"cost"`
-		AgentCount int     `json:"agent_count"`
-	}
-
-	// Group by project
-	groups := make(map[string]*costEntry)
-	for _, a := range agents {
-		proj := a.ShortProject()
-		if proj == "" {
-			proj = "(unknown)"
-		}
-		e, ok := groups[proj]
-		if !ok {
-			e = &costEntry{
-				Project:  proj,
-				Provider: a.ProviderName,
-				Model:    a.ShortModel(),
-			}
-			groups[proj] = e
-		}
-		e.TokensIn += a.TokensIn
-		e.TokensOut += a.TokensOut
-		e.CostUSD += a.EstCostUSD
-		e.AgentCount++
-	}
-
-	result := make([]costEntry, 0, len(groups))
-	for _, e := range groups {
-		result = append(result, *e)
-	}
-	// Sort by cost descending
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].CostUSD > result[j].CostUSD
-	})
+	result := controller.CostsByProject(agents)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"costs": result}); err != nil {
@@ -959,6 +909,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			"project":      a.ShortProject(),
 			"workingDir":   a.WorkingDir,
 			"status":       a.Status.String(),
+			"activity":     a.Activity,
 			"source":       a.Source.String(),
 			"sessionFile":  a.SessionFile,
 			"tmuxSession":  a.TMuxSession,

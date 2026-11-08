@@ -175,6 +175,8 @@ All frontends share the same backend packages. No business logic lives in fronte
 | Agent command (--session-id/--resume) | controller.RemoteAgentCommand | controller.RemoteAgentCommand | N/A | N/A |
 | Kill sandbox | controller.ExecuteKillSandbox | controller.ExecuteKillSandbox | controller.ExecuteKillSandbox | compose.Backend |
 
+The Mac layout (iTerm2 window, tab and pane of an open session, `internal/terminput/layout.go`) and the folder identity (`internal/folders`) are phone-only for now: the phone clients read them from `GET /v1/sessions`; the TUI and CLI do not show them.
+
 ### OTEL Trace Forwarding
 
 OTEL env vars are injected via `--env` flags at sandbox creation time. The endpoint is `http://host.openshell.internal:<port>` so traces cross the sandbox network boundary. The session ID (a UUID) is injected via:
@@ -226,7 +228,7 @@ Remote sandboxes appear in the agent list automatically. `DiscoverSandboxes()` r
 Sandboxes show with:
 - **LOC** column: `remote`
 - **NAME**: sandbox name (e.g., `ax-cl-d414`)
-- **STATUS**: Active (Ready phase), Error, or Idle
+- **STATUS**: working (Ready phase), error, or idle
 
 ## Known Gotchas
 

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestSessionLock(t *testing.T) {
@@ -76,9 +79,23 @@ func TestManager_ReservationReleasedOnReap(t *testing.T) {
 	dir := t.TempDir()
 	reserve := func(id string) (func(), error) { return SessionLock(dir, id) }
 	fs := &fakeRunStarter{}
-	m := NewManager(ManagerOptions{Start: fs.start, Reserve: reserve, IdleTimeout: 1})
+	// A clock the test moves: with time.Now, Send's last-use stamp and
+	// Reap's read can be the same instant (the monotonic clock ticks every
+	// ~42 ns on Apple silicon), and 0 is not past a 1 ns idle timeout.
+	var clock sync.Mutex
+	now := time.Unix(1_000_000, 0)
+	m := NewManager(ManagerOptions{Start: fs.start, Reserve: reserve, IdleTimeout: time.Minute,
+		Now: func() time.Time { clock.Lock(); defer clock.Unlock(); return now }})
 	defer m.Close()
-	_, _ = send(m, "a")
+	if _, err := send(m, "a"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if n := m.Reap(); n != 0 {
+		t.Fatalf("reaped %d before the idle timeout", n)
+	}
+	clock.Lock()
+	now = now.Add(time.Minute + time.Second)
+	clock.Unlock()
 	if n := m.Reap(); n != 1 {
 		t.Fatalf("reaped %d", n)
 	}
@@ -96,15 +113,41 @@ func TestRouter_ReportsInUseElsewhereBeforeOwnership(t *testing.T) {
 	projects, registry := claudeFixture(t)
 	dir := t.TempDir()
 	reserve := func(id string) (func(), error) { return SessionLock(dir, id) }
-	other := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start, Reserve: reserve})}
+	other := &Router{Lookup: claudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start, Reserve: reserve})}
 	if _, err := other.Send(context.Background(), "idle-1", "hi", func(Event) {}); err != nil {
 		t.Fatal(err)
 	}
 	defer other.Manager.Close()
 	writeHolder(t, registry, os.Getppid(), "idle-1") // the other process's adapter, unknown to us
-	me := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start, Reserve: reserve, ParentPID: func(int) int { return 1 }})}
+	me := &Router{Lookup: claudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start, Reserve: reserve, ParentPID: func(int) int { return 1 }})}
 	defer me.Manager.Close()
 	if err := me.Check("idle-1"); !errors.Is(err, ErrInUseElsewhere) {
 		t.Fatalf("got %v, want ErrInUseElsewhere", err)
+	}
+}
+
+// Reservation is the session lock every aimux process shares, under
+// ~/.aimux/locks: a second claim, from this or another reservation of the
+// same home, is refused until the first lets go.
+func TestReservation_SharedLockUnderHome(t *testing.T) {
+	home := t.TempDir()
+	release, err := Reservation(home)("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".aimux", "locks", "s1.lock")); err != nil {
+		t.Fatalf("lock file: %v", err)
+	}
+	if _, err := Reservation(home)("s1"); !errors.Is(err, ErrInUseElsewhere) {
+		t.Fatalf("second claim: %v, want ErrInUseElsewhere", err)
+	}
+	release()
+	again, err := Reservation(home)("s1")
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	again()
+	if _, err := Reservation(home)(""); err == nil {
+		t.Fatal("an empty session id was accepted")
 	}
 }

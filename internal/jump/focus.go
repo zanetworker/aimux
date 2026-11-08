@@ -4,8 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"strconv"
 	"strings"
+
+	"github.com/zanetworker/aimux/internal/terminput"
 )
 
 // focusScript selects the iTerm2 window, tab and pane whose tty equals the
@@ -70,17 +71,9 @@ func ITerm2FocusLocate(tty string) (string, bool, error) {
 // TTYForPID returns the controlling terminal of pid as /dev/ttysNNN, or ""
 // when the process has none (background or headless).
 func TTYForPID(pid int) string {
-	out, err := exec.Command("ps", "-o", "tty=", "-p", strconv.Itoa(pid)).Output() // #nosec G204
+	tty, err := terminput.SystemProbe{}.TTY(pid)
 	if err != nil {
 		return ""
 	}
-	return parsePSTTY(string(out))
-}
-
-func parsePSTTY(out string) string {
-	t := strings.TrimSpace(out)
-	if t == "" || t == "??" {
-		return ""
-	}
-	return "/dev/" + t
+	return tty
 }

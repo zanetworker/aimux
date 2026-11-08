@@ -1,0 +1,190 @@
+{
+  "name": "equal times order by session id, ascending",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "p2",
+      "provider": "claude",
+      "title": "Second approval",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "p1",
+      "provider": "claude",
+      "title": "First approval",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:55:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
+    },
+    {
+      "id": "w2",
+      "provider": "claude",
+      "title": "Second worker",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "First worker",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
+    },
+    {
+      "id": "m2",
+      "provider": "claude",
+      "title": "Second terminal",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "First terminal",
+      "project": "/src/research",
+      "lastActive": "2026-10-25T22:00:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
+    }
+  ],
+  "events": {
+    "p2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:54:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "approvalId": "x2",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ],
+    "p1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:54:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-26T08:55:00Z",
+        "data": {
+          "approvalId": "x1",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "p1",
+      "p2"
+    ],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "w2",
+          "m2"
+        ]
+      },
+      {
+        "label": "research",
+        "sessions": [
+          "w1",
+          "m1"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 2,
+    "open": 4
+  }
+}

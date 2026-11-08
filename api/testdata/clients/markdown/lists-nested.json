@@ -1,0 +1,225 @@
+{
+  "name": "Three nesting levels mixing ordered and bullet lists; an under-indented line does not nest",
+  "markdown": "- top one\n  1. second level a\n  2. second level b\n     - third level\n     - third again\n- top two\n\n1. ordered top\n   - bullet child\n     1. ordered grandchild\n\nParagraph between lists.\n\n1. first\n  - two spaces is not enough to nest under \"1. \"\n",
+  "blocks": [
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "top one"
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "ordered": true,
+              "start": 1,
+              "items": [
+                {
+                  "task": null,
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "inlines": [
+                        {
+                          "t": "text",
+                          "v": "second level a"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "task": null,
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "inlines": [
+                        {
+                          "t": "text",
+                          "v": "second level b"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "list",
+                      "ordered": false,
+                      "start": null,
+                      "items": [
+                        {
+                          "task": null,
+                          "blocks": [
+                            {
+                              "type": "paragraph",
+                              "inlines": [
+                                {
+                                  "t": "text",
+                                  "v": "third level"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "task": null,
+                          "blocks": [
+                            {
+                              "type": "paragraph",
+                              "inlines": [
+                                {
+                                  "t": "text",
+                                  "v": "third again"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "top two"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "ordered top"
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "ordered": false,
+              "start": null,
+              "items": [
+                {
+                  "task": null,
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "inlines": [
+                        {
+                          "t": "text",
+                          "v": "bullet child"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "list",
+                      "ordered": true,
+                      "start": 1,
+                      "items": [
+                        {
+                          "task": null,
+                          "blocks": [
+                            {
+                              "type": "paragraph",
+                              "inlines": [
+                                {
+                                  "t": "text",
+                                  "v": "ordered grandchild"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "t": "text",
+          "v": "Paragraph between lists."
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "first"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "two spaces is not enough to nest under \"1. \""
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

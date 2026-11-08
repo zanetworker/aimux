@@ -1,0 +1,135 @@
+{
+  "name": "A window the owner titled keeps its title; an untitled one is Window N, both as sent",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "x1",
+      "provider": "claude",
+      "title": "Fix the header",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:20:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      },
+      "mac": {
+        "window": {
+          "id": "w9",
+          "index": 2,
+          "name": "Window 2"
+        },
+        "tab": {
+          "index": 1,
+          "name": "blog"
+        },
+        "pane": 2,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "r1",
+      "provider": "claude",
+      "title": "Collect the sources",
+      "project": "/src/docs",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "docs",
+        "repoPath": "/src/docs",
+        "label": "docs"
+      },
+      "mac": {
+        "window": {
+          "id": "w2",
+          "index": 1,
+          "name": "Research"
+        },
+        "tab": {
+          "index": 1,
+          "name": "docs"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "x2",
+      "provider": "claude",
+      "title": "Write the post",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:45:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      },
+      "mac": {
+        "window": {
+          "id": "w9",
+          "index": 2,
+          "name": "Window 2"
+        },
+        "tab": {
+          "index": 1,
+          "name": "blog"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w2",
+        "name": "Research",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "docs",
+            "panes": 1,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "r1"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "w9",
+        "name": "Window 2",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "blog",
+            "panes": 2,
+            "working": 1,
+            "open": false,
+            "sessions": [
+              "x2",
+              "x1"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 1,
+    "open": 3
+  }
+}

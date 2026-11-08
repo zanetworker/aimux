@@ -1,0 +1,132 @@
+{
+  "name": "Open sessions not in an iTerm2 pane (unmatched, another terminal app, started from the phone) are Elsewhere; closed ones are not shown",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "m1",
+      "provider": "claude",
+      "title": "Tidy the imports",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "u1",
+      "provider": "claude",
+      "title": "Registry says running, no pane",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:40:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "In another terminal app",
+      "project": "/src/blog",
+      "lastActive": "2026-10-31T11:20:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "blog",
+        "repoPath": "/src/blog",
+        "label": "blog"
+      }
+    },
+    {
+      "id": "p1",
+      "provider": "claude",
+      "title": "Started from the phone",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "i1",
+      "provider": "claude",
+      "title": "Closed a minute ago",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:59:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "aimux",
+            "panes": 2,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "m1"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "p1",
+          "u1"
+        ]
+      },
+      {
+        "label": "blog",
+        "sessions": [
+          "t1"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 1,
+    "open": 4
+  }
+}

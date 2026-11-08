@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/controller"
+	"github.com/zanetworker/aimux/internal/history"
 	aimuxotel "github.com/zanetworker/aimux/internal/otel"
 	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/spawn"
@@ -185,7 +187,7 @@ func TestHistoryHandler_AllSessionFieldsMapped(t *testing.T) {
 	expectedFields := []string{
 		"id", "provider", "project", "filePath", "startTime", "lastActive",
 		"turnCount", "tokensIn", "tokensOut", "costUSD", "firstPrompt",
-		"title", "resumable", "annotation", "tags", "note",
+		"title", "shownTitle", "hidden", "resumable", "annotation", "tags", "note",
 		"isSubagent", "permissionMode", "starred",
 	}
 
@@ -1160,5 +1162,73 @@ func TestHandleGetTrace_LocalAgent(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for local agent trace, got %d", resp.StatusCode)
+	}
+}
+
+// A POST sets only the fields it carries: starring from the dashboard must
+// not clear an annotation or note written elsewhere; "" still clears.
+func TestSessionMetaHandler_PartialUpdates(t *testing.T) {
+	tmpDir := t.TempDir()
+	sessionFile := filepath.Join(tmpDir, "partial.jsonl")
+	_ = os.WriteFile(sessionFile, []byte("{\"type\":\"user\"}\n"), 0o600)
+	s := NewServer(0)
+	s.sessionRoots = []string{tmpDir}
+
+	post := func(fields map[string]any) {
+		t.Helper()
+		fields["filePath"] = sessionFile
+		body, _ := json.Marshal(fields)
+		rec := httptest.NewRecorder()
+		s.handleUpdateSessionMeta(rec, httptest.NewRequest(http.MethodPost, "/api/sessions/meta", bytes.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST %v: %d %s", fields, rec.Code, rec.Body.String())
+		}
+	}
+
+	post(map[string]any{"annotation": "achieved", "note": "kept note"})
+	post(map[string]any{"starred": true})
+	if m := history.LoadMeta(sessionFile); m.Annotation != "achieved" || m.Note != "kept note" || !m.Starred {
+		t.Fatalf("after starring: %+v", m)
+	}
+	post(map[string]any{"annotation": "failed"})
+	if m := history.LoadMeta(sessionFile); m.Annotation != "failed" || m.Note != "kept note" {
+		t.Fatalf("after annotation only: %+v", m)
+	}
+	post(map[string]any{"note": ""})
+	if m := history.LoadMeta(sessionFile); m.Note != "" || m.Annotation != "failed" {
+		t.Fatalf("empty note should clear only the note: %+v", m)
+	}
+}
+
+// Pins the web cost rows: an agent with no project is "(unknown)" and an
+// empty provider stays empty (the TUI shows "unknown" instead).
+func TestHandleCosts_UnknownProjectEmptyProvider(t *testing.T) {
+	s := newServerWithAgents([]agent.Agent{{PID: 1, EstCostUSD: 0.5, TokensIn: 10}})
+	go func() { _ = s.Start() }()
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	resp, err := http.Get(s.URL() + "/api/costs")
+	if err != nil {
+		t.Fatalf("GET /api/costs failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var payload struct {
+		Costs []map[string]any `json:"costs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Costs) != 1 {
+		t.Fatalf("costs = %v", payload.Costs)
+	}
+	c := payload.Costs[0]
+	if c["project"] != "(unknown)" || c["provider"] != "" || c["agent_count"] != float64(1) {
+		t.Errorf("row = %v", c)
+	}
+	for _, k := range []string{"project", "provider", "model", "tokens_in", "tokens_out", "cost", "agent_count"} {
+		if _, ok := c[k]; !ok {
+			t.Errorf("missing key %q in %v", k, c)
+		}
 	}
 }

@@ -1,0 +1,191 @@
+{
+  "name": "a failure exactly 900 seconds old still needs you; 901 does not; a finish places nothing",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Failed on the line",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "f2",
+      "provider": "claude",
+      "title": "Failed just late",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:44:59Z",
+      "state": "idle",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "d1",
+      "provider": "claude",
+      "title": "Finished on the line",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
+    },
+    {
+      "id": "d2",
+      "provider": "claude",
+      "title": "Finished just late",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:44:59Z",
+      "state": "idle",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
+    },
+    {
+      "id": "t1",
+      "provider": "claude",
+      "title": "Terminal on the line",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:45:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "t2",
+      "provider": "claude",
+      "title": "Terminal just late",
+      "project": "/src/research",
+      "lastActive": "2026-10-26T08:44:59Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "research",
+        "repoPath": "/src/research",
+        "label": "research"
+      }
+    }
+  ],
+  "events": {
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:45:00Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ],
+    "f2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-26T08:44:59Z",
+        "data": {
+          "error": "model overloaded"
+        }
+      }
+    ],
+    "d1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:45:00Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ],
+    "d2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:43:20Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_done",
+        "time": "2026-10-26T08:44:59Z",
+        "data": {
+          "stopReason": "end_turn"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "f1"
+    ],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "t1"
+        ]
+      },
+      {
+        "label": "research",
+        "sessions": [
+          "t2"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 0,
+    "open": 2
+  }
+}

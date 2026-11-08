@@ -112,11 +112,17 @@ func TestLaunchDirect_ProcessRuns(t *testing.T) {
 		t.Fatalf("Launch direct: %v", err)
 	}
 
-	// Wait briefly for the background process to run.
-	time.Sleep(200 * time.Millisecond)
-
-	if _, err := os.Stat(marker); err != nil {
-		t.Error("direct launch process did not run (marker file not created)")
+	// The process runs in the background; on a busy machine it can take a
+	// while, so wait for its marker rather than a fixed time.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("direct launch process did not run (marker file not created within 5 s)")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

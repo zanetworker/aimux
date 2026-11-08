@@ -1,0 +1,159 @@
+{
+  "name": "Pipe tables: alignment (--- is left), code and links in cells, escaped pipes, ragged rows padded or cut, no outer pipes",
+  "markdown": "| Left | Center | Right | None |\n| :--- | :---: | ---: | --- |\n| a | `code \\| pipe` | [link](https://example.com) | **bold** |\n| escaped \\| pipe | b |\n| 1 | 2 | 3 | 4 | extra |\n\nName | Value\n--- | ---\nno outer pipes | ok\n",
+  "blocks": [
+    {
+      "type": "table",
+      "align": [
+        "left",
+        "center",
+        "right",
+        "left"
+      ],
+      "header": [
+        [
+          {
+            "t": "text",
+            "v": "Left"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "Center"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "Right"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "None"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "t": "text",
+              "v": "a"
+            }
+          ],
+          [
+            {
+              "t": "code",
+              "v": "code | pipe"
+            }
+          ],
+          [
+            {
+              "t": "link",
+              "href": "https://example.com",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "link"
+                }
+              ]
+            }
+          ],
+          [
+            {
+              "t": "strong",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "bold"
+                }
+              ]
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "t": "text",
+              "v": "escaped | pipe"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "b"
+            }
+          ],
+          [],
+          []
+        ],
+        [
+          [
+            {
+              "t": "text",
+              "v": "1"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "2"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "3"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "4"
+            }
+          ]
+        ]
+      ]
+    },
+    {
+      "type": "table",
+      "align": [
+        "left",
+        "left"
+      ],
+      "header": [
+        [
+          {
+            "t": "text",
+            "v": "Name"
+          }
+        ],
+        [
+          {
+            "t": "text",
+            "v": "Value"
+          }
+        ]
+      ],
+      "rows": [
+        [
+          [
+            {
+              "t": "text",
+              "v": "no outer pipes"
+            }
+          ],
+          [
+            {
+              "t": "text",
+              "v": "ok"
+            }
+          ]
+        ]
+      ]
+    }
+  ]
+}

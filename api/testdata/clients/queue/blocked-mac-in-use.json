@@ -1,0 +1,62 @@
+{
+  "name": "blocked-mac-in-use",
+  "session": {
+    "state": "open_in_terminal",
+    "terminal": {
+      "status": "idle",
+      "canType": false,
+      "working": false,
+      "reason": "mac_in_use"
+    },
+    "queue": {
+      "state": "running",
+      "note": "Waiting: you're using this session on your Mac",
+      "items": [
+        {
+          "id": "q1",
+          "text": "Rename the helper to parseConfig",
+          "state": "waiting",
+          "created": "2026-03-02T09:01:00Z"
+        },
+        {
+          "id": "q2",
+          "text": "Then add a test for the empty file",
+          "state": "waiting",
+          "created": "2026-03-02T09:02:00Z"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "composer": {
+      "action": "queue",
+      "label": "Add to queue"
+    },
+    "queue": {
+      "visible": true,
+      "state": "running",
+      "line": "Waiting: you're using this session on your Mac",
+      "resume": false
+    },
+    "items": [
+      {
+        "id": "q1",
+        "text": "Rename the helper to parseConfig",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      },
+      {
+        "id": "q2",
+        "text": "Then add a test for the empty file",
+        "state": "waiting",
+        "label": "Waiting",
+        "canEdit": true,
+        "canMove": true,
+        "canDelete": true
+      }
+    ]
+  }
+}

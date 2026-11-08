@@ -1,0 +1,178 @@
+{
+  "name": "the working step: newest titled tool call, Thinking for a thought, untitled updates skipped, none without updates",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "w1",
+      "provider": "claude",
+      "title": "T w1",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:59:00Z",
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "w2",
+      "provider": "claude",
+      "title": "T w2",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:58:00Z",
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "w3",
+      "provider": "claude",
+      "title": "T w3",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:57:00Z",
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    },
+    {
+      "id": "w4",
+      "provider": "claude",
+      "title": "T w4",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-26T08:56:00Z",
+      "state": "busy",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      }
+    }
+  ],
+  "events": {
+    "w1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "go"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "update",
+        "time": "2026-10-26T08:51:00Z",
+        "data": {
+          "sessionUpdate": "tool_call",
+          "title": "Edit main.go"
+        }
+      },
+      {
+        "seq": 3,
+        "turn": "t1",
+        "kind": "update",
+        "time": "2026-10-26T08:52:00Z",
+        "data": {
+          "sessionUpdate": "tool_call_update"
+        }
+      }
+    ],
+    "w2": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "go"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "update",
+        "time": "2026-10-26T08:51:00Z",
+        "data": {
+          "sessionUpdate": "tool_call",
+          "title": "Run tests"
+        }
+      },
+      {
+        "seq": 3,
+        "turn": "t1",
+        "kind": "update",
+        "time": "2026-10-26T08:52:00Z",
+        "data": {
+          "sessionUpdate": "agent_thought_chunk"
+        }
+      }
+    ],
+    "w3": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "go"
+        }
+      }
+    ],
+    "w4": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-26T08:50:00Z",
+        "data": {
+          "text": "go"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "update",
+        "time": "2026-10-26T08:51:00Z",
+        "data": {
+          "sessionUpdate": "tool_call",
+          "title": ""
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "aimux",
+        "sessions": [
+          "w1",
+          "w2",
+          "w3",
+          "w4"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 4,
+    "open": 4,
+    "steps": {
+      "w1": "Edit main.go",
+      "w2": "Thinking",
+      "w3": null,
+      "w4": ""
+    }
+  }
+}

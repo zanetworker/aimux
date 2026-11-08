@@ -1,0 +1,102 @@
+{
+  "name": "Block quotes: multi-line, nested, holding a list, and a lazy continuation line",
+  "markdown": "> A quoted line\n> continues here.\n\n> Outer\n>\n> > Inner quote\n\n> - quoted list\n> - second\n\n> lazy start\nlazy continuation line\n",
+  "blocks": [
+    {
+      "type": "quote",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "A quoted line continues here."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "quote",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "Outer"
+            }
+          ]
+        },
+        {
+          "type": "quote",
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "t": "text",
+                  "v": "Inner quote"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "quote",
+      "blocks": [
+        {
+          "type": "list",
+          "ordered": false,
+          "start": null,
+          "items": [
+            {
+              "task": null,
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": [
+                    {
+                      "t": "text",
+                      "v": "quoted list"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "task": null,
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": [
+                    {
+                      "t": "text",
+                      "v": "second"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "quote",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "t": "text",
+              "v": "lazy start lazy continuation line"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

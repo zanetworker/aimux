@@ -300,6 +300,8 @@ func (c *Codex) enrichAgent(a *agent.Agent, tmuxSessions []discovery.TmuxSession
 		a.LastActivity = info.lastTimestamp
 	}
 	if a.SessionFile != "" {
+		// The transcript guess, the state service's fallback for a harness
+		// without a registry (controller.LocalActivity).
 		a.Status = statusdetect.DetectFromJSONL(a.SessionFile, 8192)
 	} else {
 		// No session file — running process is likely active

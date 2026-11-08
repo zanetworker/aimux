@@ -441,6 +441,25 @@ func (m *Manager) Active() []string {
 	return ids
 }
 
+// Drop closes the session's run if it is idle and releases its reservation.
+// Returns nil when there is no run, or ErrBusy when a turn is running.
+func (m *Manager) Drop(sessionID string) error {
+	m.mu.Lock()
+	e, ok := m.runs[sessionID]
+	if !ok {
+		m.mu.Unlock()
+		return nil
+	}
+	if e.busy {
+		m.mu.Unlock()
+		return ErrBusy
+	}
+	delete(m.runs, sessionID)
+	m.mu.Unlock()
+	e.retire()
+	return nil
+}
+
 // Reap closes runs idle longer than IdleTimeout and returns how many.
 func (m *Manager) Reap() int {
 	now := m.opt.Now()

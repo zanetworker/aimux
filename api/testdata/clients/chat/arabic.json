@@ -1,0 +1,116 @@
+{
+  "name": "Arabic text passes through unchanged; a history prompt cut with an ellipsis still matches the running turn",
+  "now": "2026-10-26T08:10:00Z",
+  "turns": [
+    {
+      "number": 1,
+      "time": "2026-10-26T08:00:00Z",
+      "user": "أضف اختبارًا للدالة",
+      "reply": "أضفت اختبارًا واحدًا.",
+      "tools": []
+    },
+    {
+      "number": 2,
+      "time": "2026-10-26T08:05:01Z",
+      "user": "اكتب ملخصًا قصيرًا…",
+      "reply": "سأبدأ",
+      "tools": []
+    }
+  ],
+  "events": [
+    {
+      "seq": 1,
+      "turn": "ar",
+      "kind": "turn_started",
+      "time": "2026-10-26T08:05:00Z",
+      "data": {
+        "text": "اكتب ملخصًا قصيرًا للتقرير"
+      }
+    },
+    {
+      "seq": 2,
+      "turn": "ar",
+      "kind": "update",
+      "time": "2026-10-26T08:05:01Z",
+      "data": {
+        "sessionUpdate": "agent_thought_chunk",
+        "content": {
+          "type": "text",
+          "text": "أقرأ التقرير أولًا."
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "turn": "ar",
+      "kind": "update",
+      "time": "2026-10-26T08:05:03Z",
+      "data": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "f1",
+        "title": "قراءة التقرير.md",
+        "kind": "read",
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 4,
+      "turn": "ar",
+      "kind": "update",
+      "time": "2026-10-26T08:05:05Z",
+      "data": {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {
+          "type": "text",
+          "text": "هذا ملخص قصير."
+        }
+      }
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "kind": "user",
+        "text": "أضف اختبارًا للدالة"
+      },
+      {
+        "kind": "reply",
+        "text": "أضفت اختبارًا واحدًا."
+      },
+      {
+        "kind": "user",
+        "text": "اكتب ملخصًا قصيرًا للتقرير"
+      },
+      {
+        "kind": "thought",
+        "text": "أقرأ التقرير أولًا.",
+        "seconds": 2
+      },
+      {
+        "kind": "steps",
+        "count": 1,
+        "seconds": 0,
+        "filesChanged": [],
+        "steps": [
+          {
+            "kind": "read",
+            "target": "قراءة التقرير.md",
+            "status": "ok",
+            "detail": {
+              "input": "",
+              "error": "",
+              "old": "",
+              "new": ""
+            }
+          }
+        ]
+      },
+      {
+        "kind": "reply",
+        "text": "هذا ملخص قصير."
+      }
+    ],
+    "working": true,
+    "pendingApproval": null
+  }
+}

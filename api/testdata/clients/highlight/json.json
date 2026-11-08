@@ -1,0 +1,83 @@
+{
+  "name": "json",
+  "lang": "json",
+  "code": "{\n  \"name\": \"aimux\",\n  \"port\": 8443,\n  \"tls\": true,\n  \"tags\": [\"a\", null]\n}\n",
+  "tokens": [
+    [
+      "plain",
+      "{\n  "
+    ],
+    [
+      "key",
+      "\"name\""
+    ],
+    [
+      "plain",
+      ": "
+    ],
+    [
+      "string",
+      "\"aimux\""
+    ],
+    [
+      "plain",
+      ",\n  "
+    ],
+    [
+      "key",
+      "\"port\""
+    ],
+    [
+      "plain",
+      ": "
+    ],
+    [
+      "number",
+      "8443"
+    ],
+    [
+      "plain",
+      ",\n  "
+    ],
+    [
+      "key",
+      "\"tls\""
+    ],
+    [
+      "plain",
+      ": "
+    ],
+    [
+      "keyword",
+      "true"
+    ],
+    [
+      "plain",
+      ",\n  "
+    ],
+    [
+      "key",
+      "\"tags\""
+    ],
+    [
+      "plain",
+      ": ["
+    ],
+    [
+      "string",
+      "\"a\""
+    ],
+    [
+      "plain",
+      ", "
+    ],
+    [
+      "keyword",
+      "null"
+    ],
+    [
+      "plain",
+      "]\n}\n"
+    ]
+  ]
+}

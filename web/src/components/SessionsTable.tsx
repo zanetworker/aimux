@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { filterSessions, totalShowable } from './sessionFilter.ts';
 import { formatAge } from '../utils';
 
 export interface HistorySession {
@@ -14,6 +15,8 @@ export interface HistorySession {
   costUSD: number;
   firstPrompt: string;
   title: string;
+  shownTitle: string; // the title to show, chosen by the server (history.ShownTitle)
+  hidden: string[]; // reveals (subagents, analyzers, search) that must all be on to show it, chosen by the server (history.Visible)
   resumable: boolean;
   annotation: string;
   tags: string[];
@@ -72,6 +75,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
   const [genResult, setGenResult] = useState<string | null>(null);
   const [showSubagents, setShowSubagents] = useState(false);
   const [showAnalyzers, setShowAnalyzers] = useState(false);
+  const [showAutomated, setShowAutomated] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [hourlyRate, setHourlyRate] = useState(150);
   const [roiDetailId, setRoiDetailId] = useState<string | null>(null);
@@ -80,7 +84,6 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     if (initialSessions) {
       setSessions(initialSessions);
       setLoading(false);
-      onSessionCount?.(initialSessions.length);
       return;
     }
     let cancelled = false;
@@ -93,7 +96,6 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
           const s = (data.sessions || []).map((sess: any) => ({ ...sess, note: sess.note || '' }));
           setSessions(s);
           setLoading(false);
-          onSessionCount?.(s.length);
           onSessionsLoaded?.(s);
         }
       } catch {
@@ -103,6 +105,12 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     load();
     return () => { cancelled = true; };
   }, [initialSessions]);
+
+  // The tab count follows the switches, as the table total does.
+  useEffect(() => {
+    if (loading) return; // keep the count the app already shows until the list arrives
+    onSessionCount?.(totalShowable(sessions, { showSubagents, showAutomated, showAnalyzers }));
+  }, [loading, sessions, showSubagents, showAutomated, showAnalyzers, onSessionCount]);
 
   useEffect(() => {
     fetch('/api/config/roi').then(r => r.json()).then(d => {
@@ -130,25 +138,36 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     }
   };
 
+  const searchSeq = useRef(0); // only the latest search's answer is shown
   const handleDeepSearch = useCallback(async () => {
     const q = deepQuery.trim();
     if (!q) { setDeepMatches(null); return; }
+    const seq = ++searchSeq.current;
     setSearching(true);
     try {
-      const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-      if (!resp.ok) return;
+      // automated sessions only while the Automated switch is on, so they never crowd the server's limit
+      const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}${showAutomated ? '&automated=1' : ''}`);
+      if (!resp.ok || seq !== searchSeq.current) return;
       const data = await resp.json();
+      if (seq !== searchSeq.current) return;
       const m = new Map<string, string>();
       for (const r of data.results || []) {
         m.set(r.sessionId, r.snippet);
       }
       setDeepMatches(m);
     } catch {
-      setDeepMatches(null);
+      if (seq === searchSeq.current) setDeepMatches(null);
     } finally {
-      setSearching(false);
+      if (seq === searchSeq.current) setSearching(false);
     }
-  }, [deepQuery]);
+  }, [deepQuery, showAutomated]);
+
+  // A content search shown or still running is run again when the Automated switch changes.
+  const deepActive = deepMatches !== null || searching;
+  useEffect(() => {
+    if (deepActive) handleDeepSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAutomated]);
 
   const clearDeepSearch = () => { setDeepQuery(''); setDeepMatches(null); };
 
@@ -202,51 +221,11 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     setSessions(prev => prev.map(s => s.id === session.id ? { ...s, annotation: next } : s));
   };
 
-  // Filter
-  let visible = sessions;
-  if (starredOnly) {
-    visible = visible.filter(s => s.starred);
-  }
-  if (!showSubagents) {
-    visible = visible.filter(s => !s.isSubagent);
-  }
-  const isAnalyzer = (s: HistorySession) =>
-    (s.firstPrompt || '').toUpperCase().includes('SESSION ANALYZER') ||
-    (s.title || '').toUpperCase().includes('SESSION ANALYZER');
-  if (!showAnalyzers) {
-    visible = visible.filter(s => !isAnalyzer(s));
-  }
-  // Hide near-empty sessions unless searching
+  // Filter: hidden comes from the server; filterSessions only applies it and
+  // the table's own filters (sessionFilter.ts, tested with node --test).
   const isSearching = filter !== '' || deepMatches !== null;
-  if (!isSearching) {
-    visible = visible.filter(s => s.costUSD > 0 || s.turnCount > 5);
-  }
-  if (dirFilter) {
-    const dq = dirFilter.toLowerCase();
-    visible = visible.filter(s => (s.project || '').toLowerCase().includes(dq));
-  }
-  if (filter) {
-    const q = filter.toLowerCase();
-    visible = visible.filter(s =>
-      (s.title || '').toLowerCase().includes(q) ||
-      (s.firstPrompt || '').toLowerCase().includes(q) ||
-      (s.lastPrompt || '').toLowerCase().includes(q) ||
-      (s.gitBranch || '').toLowerCase().includes(q) ||
-      (s.project || '').toLowerCase().includes(q) ||
-      (s.annotation || '').toLowerCase().includes(q) ||
-      (s.tags || []).some(t => t.toLowerCase().includes(q))
-    );
-  }
-  if (deepMatches) {
-    const metaIds = new Set(visible.map(s => s.id));
-    visible = visible.filter(s => metaIds.has(s.id) && deepMatches.has(s.id));
-    // Also add sessions matched by content but not metadata
-    for (const s of sessions) {
-      if (deepMatches.has(s.id) && !visible.some(v => v.id === s.id)) {
-        visible.push(s);
-      }
-    }
-  }
+  const filterState = { starredOnly: !!starredOnly, showSubagents, showAutomated, showAnalyzers, dirFilter, filter, deepMatches };
+  const visible = filterSessions(sessions, filterState);
 
   // Sort (starred first, then by selected field)
   const sorted = [...visible].sort((a, b) => {
@@ -261,7 +240,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
       }
       case 'cost': cmp = a.costUSD - b.costUSD; break;
       case 'turns': cmp = a.turnCount - b.turnCount; break;
-      case 'title': cmp = (a.title || a.lastPrompt || a.firstPrompt || '').localeCompare(b.title || b.lastPrompt || b.firstPrompt || ''); break;
+      case 'title': cmp = (a.shownTitle || '').localeCompare(b.shownTitle || ''); break;
       case 'project': cmp = shortProject(a.project).localeCompare(shortProject(b.project)); break;
       case 'roi': {
         const ar = computeROI(a)?.netROI || 0;
@@ -273,8 +252,9 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
     return sortDir === 'asc' ? cmp : -cmp;
   });
 
-  const subagentCount = sessions.filter(s => s.isSubagent).length;
-  const analyzerCount = sessions.filter(s => isAnalyzer(s)).length;
+  const subagentCount = sessions.filter(s => (s.hidden || []).includes('subagents')).length;
+  const analyzerCount = sessions.filter(s => (s.hidden || []).includes('analyzers')).length;
+  const automatedCount = sessions.filter(s => (s.hidden || []).includes('automated')).length;
 
   const annotationColor = (a: string) => {
     switch (a) {
@@ -392,6 +372,18 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
         >
           Subagents {subagentCount > 0 && `(${subagentCount})`}
         </button>
+        <button
+          onClick={() => setShowAutomated(v => !v)}
+          style={{
+            padding: '3px 10px', borderRadius: 12,
+            border: `1px solid ${showAutomated ? 'var(--fg-3)' : 'var(--border)'}`,
+            background: showAutomated ? 'var(--bg-3)' : 'transparent',
+            color: showAutomated ? 'var(--fg)' : 'var(--fg-3)',
+            fontSize: 10, cursor: 'pointer',
+          }}
+        >
+          Automated {automatedCount > 0 && `(${automatedCount})`}
+        </button>
         {analyzerCount > 0 && (
           <button
             onClick={() => setShowAnalyzers(v => !v)}
@@ -423,7 +415,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
           <span style={{ fontSize: 10, color: 'var(--green)' }}>{genResult}</span>
         )}
         <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--fg-4)' }}>
-          {sorted.length} of {sessions.length} sessions
+          {sorted.length} of {totalShowable(sessions, filterState)} sessions
         </span>
       </div>
 
@@ -470,7 +462,7 @@ export function SessionsTable({ onSelectSession, selectedId, onSessionCount, sta
             {sorted.map(s => {
               const isSelected = selectedId === s.id;
               const snippet = deepMatches?.get(s.id);
-              const title = s.title || s.lastPrompt || s.firstPrompt || '(no prompt)';
+              const title = s.shownTitle || '(no prompt)';
               return (
                 <React.Fragment key={s.id}>
                 <tr

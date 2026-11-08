@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/search"
 )
 
@@ -30,7 +29,7 @@ func searchResponse(t *testing.T, s *Server, q string) (int, []map[string]string
 func TestHandleSearch_UsesIndexRankingAndKeepsFields(t *testing.T) {
 	s := NewServer(0)
 	var gotQuery string
-	s.SetSearchFunc(func(q string) ([]search.Result, error) {
+	s.SetSearchFunc(func(q string, _ bool) ([]search.Result, error) {
 		gotQuery = q
 		return []search.Result{
 			{SessionID: "best", Path: "/p/best.jsonl", Title: "agent-ops", CWD: "/Users/me/OpenShell", Snippet: "[token] exchange"},
@@ -54,7 +53,7 @@ func TestHandleSearch_UsesIndexRankingAndKeepsFields(t *testing.T) {
 
 func TestHandleSearch_ErrorsAndUnconfigured(t *testing.T) {
 	s := NewServer(0)
-	s.SetSearchFunc(func(string) ([]search.Result, error) { return nil, errors.New("index locked") })
+	s.SetSearchFunc(func(string, bool) ([]search.Result, error) { return nil, errors.New("index locked") })
 	rec := httptest.NewRecorder()
 	s.handleSearch(rec, httptest.NewRequest(http.MethodGet, "/api/search?q=x", nil))
 	if rec.Code != http.StatusInternalServerError {
@@ -69,12 +68,19 @@ func TestHandleSearch_ErrorsAndUnconfigured(t *testing.T) {
 	}
 }
 
-func TestHistoryHidesAutomatedByDefault(t *testing.T) {
-	all := []history.Session{{ID: "human"}, {ID: "cron", Automated: true}}
-	if got := visibleHistory(all, false); len(got) != 1 || got[0].ID != "human" {
-		t.Errorf("default: %v, want only the interactive session", got)
+// The dashboard asks for automated sessions only while its Automated switch is
+// on (automated=1), so automated hits never crowd the result limit otherwise.
+func TestHandleSearch_AutomatedOnlyWhenAsked(t *testing.T) {
+	s := NewServer(0)
+	var got []bool
+	s.SetSearchFunc(func(_ string, automated bool) ([]search.Result, error) {
+		got = append(got, automated)
+		return nil, nil
+	})
+	for _, url := range []string{"/api/search?q=x", "/api/search?q=x&automated=1", "/api/search?q=x&automated=0"} {
+		s.handleSearch(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, url, nil))
 	}
-	if got := visibleHistory(all, true); len(got) != 2 {
-		t.Errorf("?automated=1: %v, want both", got)
+	if len(got) != 3 || got[0] || !got[1] || got[2] {
+		t.Fatalf("automated passed as %v, want [false true false]", got)
 	}
 }

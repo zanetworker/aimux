@@ -82,6 +82,97 @@ func TestManager_ReusesRunForSameSession(t *testing.T) {
 	}
 }
 
+func TestManager_DropClosesIdleRunAndReleasesLock(t *testing.T) {
+	fs := &fakeRunStarter{}
+	lockTaken := false
+	var lockRelease func()
+	m := NewManager(ManagerOptions{
+		Start: fs.start,
+		Reserve: func(session string) (func(), error) {
+			if lockTaken {
+				return nil, errors.New("session is locked")
+			}
+			lockTaken = true
+			lockRelease = func() { lockTaken = false }
+			return lockRelease, nil
+		},
+	})
+	defer m.Close()
+
+	// Start a run and send a message
+	if _, err := send(m, "a"); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if !m.Running("a") {
+		t.Fatal("session should be running after send")
+	}
+
+	// Drop the idle run
+	if err := m.Drop("a"); err != nil {
+		t.Fatalf("Drop: %v", err)
+	}
+
+	// Verify session is no longer running
+	if m.Running("a") {
+		t.Fatal("session should not be running after Drop")
+	}
+
+	// Verify lock is released by being able to acquire it again
+	if lockRelease2, err := m.opt.Reserve("a"); err != nil {
+		t.Fatalf("lock not released: %v", err)
+	} else {
+		lockRelease2()
+	}
+}
+
+func TestManager_DropWithoutRunIsNil(t *testing.T) {
+	fs := &fakeRunStarter{}
+	m := NewManager(ManagerOptions{Start: fs.start})
+	defer m.Close()
+
+	// Drop a session that has no run
+	if err := m.Drop("nonexistent"); err != nil {
+		t.Fatalf("Drop on nonexistent session: %v, want nil", err)
+	}
+}
+
+func TestManager_DropBusyRunRefuses(t *testing.T) {
+	release := make(chan struct{})
+	fs := &fakeRunStarter{promptF: func(ctx context.Context, text string) (string, error) {
+		<-release
+		return "end_turn", nil
+	}}
+	m := NewManager(ManagerOptions{Start: fs.start})
+	defer m.Close()
+
+	// Start a turn that blocks
+	done := make(chan error)
+	go func() { _, err := send(m, "a"); done <- err }()
+
+	// Wait for the run to start and be busy
+	for fs.count() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	// Try to drop while busy
+	err := m.Drop("a")
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("Drop while busy: %v, want ErrBusy", err)
+	}
+
+	// Verify session is still running
+	if !m.Running("a") {
+		t.Fatal("session should still be running after failed Drop")
+	}
+
+	// Release and finish
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("send: %v", err)
+	}
+}
+
 func TestManager_RefusesSecondMessageWhileBusy(t *testing.T) {
 	release := make(chan struct{})
 	fs := &fakeRunStarter{promptF: func(ctx context.Context, text string) (string, error) { <-release; return "end_turn", nil }}

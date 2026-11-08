@@ -1,0 +1,196 @@
+{
+  "name": "Needs you wins: a failed, pinned lastInFront pane and an approval leave their panes; a tab left empty is gone, not hidden",
+  "now": "2026-10-31T12:00:00Z",
+  "sessions": [
+    {
+      "id": "f1",
+      "provider": "claude",
+      "title": "Migrate the recipe index",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:55:00Z",
+      "state": "open_in_terminal",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "notes"
+        },
+        "pane": 1,
+        "panes": 2,
+        "lastInFront": true
+      }
+    },
+    {
+      "id": "p2",
+      "provider": "claude",
+      "title": "Tidy the bookmarks",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 1,
+          "name": "notes"
+        },
+        "pane": 2,
+        "panes": 2,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "a1",
+      "provider": "claude",
+      "title": "Run the migration",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "busy",
+      "pinned": false,
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    },
+    {
+      "id": "pz",
+      "provider": "claude",
+      "title": "Pinned and closed",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "idle",
+      "pinned": true,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    }
+  ],
+  "events": {
+    "f1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:50:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "turn_error",
+        "time": "2026-10-31T11:55:00Z",
+        "data": {
+          "error": "the build failed"
+        }
+      }
+    ],
+    "a1": [
+      {
+        "seq": 1,
+        "turn": "t1",
+        "kind": "turn_started",
+        "time": "2026-10-31T11:40:00Z",
+        "data": {
+          "text": "do the task"
+        }
+      },
+      {
+        "seq": 2,
+        "turn": "t1",
+        "kind": "approval",
+        "time": "2026-10-31T11:50:00Z",
+        "data": {
+          "approvalId": "p1",
+          "title": "Run command",
+          "options": [
+            {
+              "optionId": "allow",
+              "name": "Allow",
+              "kind": "allow_once"
+            },
+            {
+              "optionId": "reject",
+              "name": "Reject",
+              "kind": "reject_once"
+            }
+          ],
+          "toolCall": {
+            "rawInput": {
+              "command": "make test"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "needsYou": [
+      "a1",
+      "f1"
+    ],
+    "pinned": [
+      "pz"
+    ],
+    "windows": [
+      {
+        "id": "w1",
+        "name": "Window 1",
+        "tabs": [
+          {
+            "index": 1,
+            "name": "notes",
+            "panes": 2,
+            "working": 0,
+            "open": false,
+            "sessions": [
+              "p2"
+            ]
+          }
+        ]
+      }
+    ],
+    "hiddenTabs": 0,
+    "elsewhere": [],
+    "other": [],
+    "working": 1,
+    "open": 3
+  }
+}

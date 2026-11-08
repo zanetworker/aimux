@@ -36,11 +36,12 @@ type Server struct {
 	cfg              config.Config
 	taskProvider     tasks.Provider
 	recentDirsFn     func(int) []RecentDirInfo
-	searchFn         func(query string) ([]search.Result, error)
+	searchFn         func(query string, includeAutomated bool) ([]search.Result, error)
 	composeEngine    *aimuxcompose.Engine
 	sessionStore     *controller.SessionStore
 	otelStore        controller.OTELLookup
 	sessionRoots     []string // nil means defaultSessionRoots()
+	activity         *controller.LocalActivity
 
 	// Discovery cache to avoid redundant ps/tmux scans
 	cacheMu     sync.Mutex
@@ -59,6 +60,12 @@ func (s *Server) SetFocuser(f controller.Focuser) {
 
 func (s *Server) SetDiscoverFunc(fn func() ([]agent.Agent, error)) {
 	s.discoverFn = fn
+}
+
+// SetActivity makes every discovery carry the state service's activity
+// (controller.LocalActivity), the words the TUI and the phone show.
+func (s *Server) SetActivity(a *controller.LocalActivity) {
+	s.activity = a
 }
 
 func (s *Server) SetLaunchFunc(fn func(opts spawn.LaunchOpts) (spawn.LaunchResult, error)) {
@@ -86,6 +93,7 @@ func (s *Server) cachedDiscover() ([]agent.Agent, error) {
 		return nil, err
 	}
 	s.enrichRemoteAgents(agents)
+	s.activity.Apply(agents)
 	s.cacheAgents = agents
 	s.cacheTime = time.Now()
 	return agents, nil
@@ -138,8 +146,9 @@ type RecentDirInfo struct {
 	Age     string `json:"age"`
 }
 
-// SetSearchFunc wires session search (the shared internal/search index).
-func (s *Server) SetSearchFunc(fn func(query string) ([]search.Result, error)) {
+// SetSearchFunc wires session search (the shared internal/search index);
+// includeAutomated is the dashboard's Automated switch.
+func (s *Server) SetSearchFunc(fn func(query string, includeAutomated bool) ([]search.Result, error)) {
 	s.searchFn = fn
 }
 

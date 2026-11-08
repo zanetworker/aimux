@@ -15,11 +15,56 @@ import (
 )
 
 func (a App) parserForProvider(p provider.Provider) views.TraceParser {
+	return a.fileThenOTEL(p.ParseTrace, a.otelSessionIDs)
+}
+
+// previewTailTurns is how many turns the preview pane reads from the end of
+// a transcript: it shows the last turn and the last three actions.
+const previewTailTurns = 20
+
+// previewParserFor is parserForProvider for the preview pane, which parses
+// on another goroutine: it reads only the end of the transcript when the
+// provider can (tail reports that), and takes the OTEL session IDs now
+// rather than reading the views from that goroutine.
+func (a App) previewParserFor(p provider.Provider) (parser views.TraceParser, tail bool) {
+	ids := a.otelSessionIDs()
+	idsNow := func() []string { return ids }
+	if tp, ok := p.(provider.TailParser); ok {
+		parse := func(path string) ([]trace.Turn, error) { return tp.ParseTail(path, previewTailTurns) }
+		return a.fileThenOTEL(parse, idsNow), true
+	}
+	return a.fileThenOTEL(p.ParseTrace, idsNow), false
+}
+
+// otelSessionIDs are the conversation IDs the OTEL fallback looks up: the
+// selected agent's session and the open session view's.
+func (a App) otelSessionIDs() []string {
+	var sessionIDs []string
+	if a.agentsView != nil {
+		if selected := a.agentsView.Selected(); selected != nil && selected.SessionID != "" {
+			sessionIDs = append(sessionIDs, selected.SessionID)
+		}
+	}
+	if a.sessionView != nil && a.sessionView.Agent() != nil {
+		ag := a.sessionView.Agent()
+		if ag.SessionID != "" {
+			sessionIDs = append(sessionIDs, ag.SessionID)
+		}
+		if ag.TMuxSession != "" {
+			sessionIDs = append(sessionIDs, ag.TMuxSession)
+		}
+	}
+	return sessionIDs
+}
+
+// fileThenOTEL returns a TraceParser that parses the file with parse and
+// falls back to the OTEL store's conversations named by sessionIDs.
+func (a App) fileThenOTEL(parse views.TraceParser, sessionIDs func() []string) views.TraceParser {
 	return func(filePath string) ([]trace.Turn, error) {
 		// File-based parsing for display (has full response text).
 		// OTEL receiver still collects data for :export-otel to MLflow/Jaeger.
 		if filePath != "" {
-			turns, err := p.ParseTrace(filePath)
+			turns, err := parse(filePath)
 			if err == nil && len(turns) > 0 {
 				// For :new launches, filter out turns from before the launch
 				// to avoid showing traces from previous sessions in the same dir.
@@ -50,26 +95,11 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 		// Fall back to OTEL when file isn't available yet
 		// (newly launched sessions before session file is created)
 		if a.otelStore != nil && a.otelStore.HasData() {
-			var sessionIDs []string
-
-			if selected := a.agentsView.Selected(); selected != nil && selected.SessionID != "" {
-				sessionIDs = append(sessionIDs, selected.SessionID)
-			}
-			if a.sessionView != nil && a.sessionView.Agent() != nil {
-				ag := a.sessionView.Agent()
-				if ag.SessionID != "" {
-					sessionIDs = append(sessionIDs, ag.SessionID)
-				}
-				if ag.TMuxSession != "" {
-					sessionIDs = append(sessionIDs, ag.TMuxSession)
-				}
-			}
-
-			for _, id := range sessionIDs {
+			for _, id := range sessionIDs() {
 				if root := a.otelStore.GetByConversation(id); root != nil {
 					turns := aimuxotel.SpansToTurns(root)
 					if len(turns) > 0 {
-						return turns, nil
+						return turns, views.ErrLiveTrace
 					}
 				}
 			}
@@ -79,25 +109,42 @@ func (a App) parserForProvider(p provider.Provider) views.TraceParser {
 }
 
 func (a App) parserForRemote(otelSessionID, sandboxName string) views.TraceParser {
+	return a.remoteParser(otelSessionID, sandboxName, a.localSessionIDs)
+}
+
+// previewParserForRemote is parserForRemote for the preview pane, which
+// parses on another goroutine: the local session IDs are taken now.
+func (a App) previewParserForRemote(otelSessionID, sandboxName string) views.TraceParser {
+	ids := a.localSessionIDs()
+	return a.remoteParser(otelSessionID, sandboxName, func() map[string]bool { return ids })
+}
+
+// localSessionIDs are the session IDs of the local agents in the list.
+func (a App) localSessionIDs() map[string]bool {
+	localIDs := make(map[string]bool)
+	if a.agentsView != nil {
+		for _, ag := range a.agentsView.Agents() {
+			if ag.Location != "remote" && ag.SessionID != "" {
+				localIDs[ag.SessionID] = true
+			}
+		}
+	}
+	return localIDs
+}
+
+func (a App) remoteParser(otelSessionID, sandboxName string, localSessionIDs func() map[string]bool) views.TraceParser {
 	return func(_ string) ([]trace.Turn, error) {
 		// Shared path: direct OTEL lookup + session-file fallback.
 		turns := controller.RemoteTraceParser(a.otelStore, otelSessionID, sandboxName)
 		if len(turns) > 0 {
-			return turns, nil
+			return turns, views.ErrLiveTrace
 		}
 
 		// TUI-specific: when the session ID injection failed, scan all
 		// conversations and exclude known local sessions to find the
 		// remote one by elimination.
 		if a.otelStore != nil && a.otelStore.HasData() {
-			localIDs := make(map[string]bool)
-			if a.agentsView != nil {
-				for _, ag := range a.agentsView.Agents() {
-					if ag.Location != "remote" && ag.SessionID != "" {
-						localIDs[ag.SessionID] = true
-					}
-				}
-			}
+			localIDs := localSessionIDs()
 			for _, convID := range a.otelStore.ConversationIDs() {
 				if localIDs[convID] {
 					continue
@@ -112,12 +159,12 @@ func (a App) parserForRemote(otelSessionID, sandboxName string) views.TraceParse
 						replies := aimuxotel.FetchSessionReplies(sandboxName, otelSessionID)
 						aimuxotel.EnrichTurnsWithReplies(turns, replies)
 					}
-					return turns, nil
+					return turns, views.ErrLiveTrace
 				}
 			}
 		}
 
-		return turns, nil
+		return liveTurns(turns)
 	}
 }
 
@@ -378,4 +425,13 @@ func (a *App) agentForLogsView() *agent.Agent {
 		}
 	}
 	return nil
+}
+
+// liveTurns returns OTEL-backed turns with views.ErrLiveTrace, and no
+// turns with no error.
+func liveTurns(turns []trace.Turn) ([]trace.Turn, error) {
+	if len(turns) == 0 {
+		return turns, nil
+	}
+	return turns, views.ErrLiveTrace
 }

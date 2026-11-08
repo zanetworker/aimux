@@ -1,0 +1,88 @@
+{
+  "name": "A word matches the title, the description or the folder label; open sessions in Mac order first",
+  "now": "2026-10-31T12:00:00Z",
+  "query": "recipe",
+  "sessions": [
+    {
+      "id": "r1",
+      "provider": "claude",
+      "title": "Scale the recipe cards",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:00:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "r2",
+      "provider": "claude",
+      "title": "Fix the build",
+      "project": "/src/recipes-wt/app",
+      "lastActive": "2026-10-31T11:30:00Z",
+      "state": "open_in_terminal",
+      "pinned": false,
+      "folder": {
+        "repo": "recipes",
+        "repoPath": "/src/recipes",
+        "worktree": "app",
+        "label": "recipes / app"
+      }
+    },
+    {
+      "id": "r3",
+      "provider": "claude",
+      "title": "Something else",
+      "project": "/src/notes",
+      "lastActive": "2026-10-31T11:50:00Z",
+      "state": "idle",
+      "pinned": false,
+      "folder": {
+        "repo": "notes",
+        "repoPath": "/src/notes",
+        "label": "notes"
+      }
+    },
+    {
+      "id": "r4",
+      "provider": "claude",
+      "title": "Import feed",
+      "project": "/src/aimux",
+      "lastActive": "2026-10-31T10:00:00Z",
+      "state": "busy",
+      "pinned": false,
+      "description": "Imports the recipe feed.",
+      "folder": {
+        "repo": "aimux",
+        "repoPath": "/src/aimux",
+        "label": "aimux"
+      },
+      "mac": {
+        "window": {
+          "id": "w1",
+          "index": 1,
+          "name": "Window 1"
+        },
+        "tab": {
+          "index": 2,
+          "name": "aimux"
+        },
+        "pane": 1,
+        "panes": 1,
+        "lastInFront": false
+      }
+    }
+  ],
+  "expect": {
+    "open": [
+      "r4",
+      "r2"
+    ],
+    "other": [
+      "r1"
+    ]
+  }
+}

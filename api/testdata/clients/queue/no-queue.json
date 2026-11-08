@@ -1,0 +1,16 @@
+{
+  "name": "no-queue",
+  "session": {
+    "state": "idle"
+  },
+  "expect": {
+    "composer": {
+      "action": "send",
+      "label": "Send"
+    },
+    "queue": {
+      "visible": false
+    },
+    "items": []
+  }
+}

@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/harness"
+	"github.com/zanetworker/aimux/internal/provider"
 )
 
 // claudeFixture lays out ~/.claude/projects and ~/.claude/sessions for one
@@ -40,9 +45,18 @@ func claudeFixture(t *testing.T) (projects, registry string) {
 	return projects, registry
 }
 
+// claudeLookup is Claude Code's lookup over projects and registry, reading
+// the registry on every call and, instead of ps, the canned command lines
+// (`pid args`, none by default).
+func claudeLookup(projects, registry string, commandLines ...string) Lookup {
+	live := discovery.NewLiveCache(registry, 0)
+	live.CommandLines = func() ([]byte, error) { return []byte(strings.Join(commandLines, "\n")), nil }
+	return SessionLookup{Provider: "claude", Store: &provider.Claude{ProjectsDir: projects}, Live: live}.Lookup
+}
+
 func TestClaudeLookup(t *testing.T) {
 	projects, registry := claudeFixture(t)
-	lookup := ClaudeLookup(projects, registry)
+	lookup := claudeLookup(projects, registry)
 	tests := []struct {
 		id      string
 		open    bool
@@ -78,7 +92,7 @@ func TestRouter(t *testing.T) {
 		return fs.start(ctx, session, cwd)
 	}
 	r := &Router{
-		Lookup:  ClaudeLookup(projects, registry),
+		Lookup:  claudeLookup(projects, registry),
 		Manager: NewManager(ManagerOptions{Start: start}),
 	}
 	defer r.Manager.Close()
@@ -108,7 +122,7 @@ func TestRouter_SessionAimuxAlreadyRunsIsNotOpenInTerminal(t *testing.T) {
 	// The registry entry below is the adapter's own Claude process: a child of
 	// the adapter (pid 4242) that aimux started.
 	parents := map[int]int{os.Getppid(): 4242}
-	r := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: fs.start, ParentPID: func(p int) int { return parents[p] }})}
+	r := &Router{Lookup: claudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: fs.start, ParentPID: func(p int) int { return parents[p] }})}
 	defer r.Manager.Close()
 	ctx := context.Background()
 	if _, err := r.Send(ctx, "idle-1", "one", func(Event) {}); err != nil {
@@ -125,7 +139,7 @@ func TestRouter_SessionAimuxAlreadyRunsIsNotOpenInTerminal(t *testing.T) {
 func TestRouter_TerminalOpenedWhileAimuxHoldsAnIdleRun(t *testing.T) {
 	projects, registry := claudeFixture(t)
 	fs := &fakeRunStarter{}
-	r := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: fs.start, ParentPID: func(int) int { return 1 }})}
+	r := &Router{Lookup: claudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: fs.start, ParentPID: func(int) int { return 1 }})}
 	defer r.Manager.Close()
 	ctx := context.Background()
 	if _, err := r.Send(ctx, "idle-1", "one", func(Event) {}); err != nil {
@@ -147,7 +161,7 @@ func writeHolder(t *testing.T, registry string, pid int, session string) {
 
 func TestRouter_Check(t *testing.T) {
 	projects, registry := claudeFixture(t)
-	r := &Router{Lookup: ClaudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})}
+	r := &Router{Lookup: claudeLookup(projects, registry), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})}
 	defer r.Manager.Close()
 	if err := r.Check("idle-1"); err != nil {
 		t.Fatalf("idle session: %v", err)
@@ -168,7 +182,7 @@ func TestClaudeLookup_ReusedPIDIsNotAHolder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(registry, "stale.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	info, err := ClaudeLookup(projects, registry)("idle-1")
+	info, err := claudeLookup(projects, registry)("idle-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +194,7 @@ func TestClaudeLookup_ReusedPIDIsNotAHolder(t *testing.T) {
 func TestClaudeLookup_NoRegistryRefuses(t *testing.T) {
 	projects, _ := claudeFixture(t)
 	missing := filepath.Join(t.TempDir(), "no-sessions-dir")
-	r := &Router{Lookup: ClaudeLookup(projects, missing), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})}
+	r := &Router{Lookup: claudeLookup(projects, missing), Manager: NewManager(ManagerOptions{Start: (&fakeRunStarter{}).start})}
 	defer r.Manager.Close()
 	if err := r.Check("idle-1"); !errors.Is(err, ErrOwnershipUnknown) {
 		t.Fatalf("got %v, want ErrOwnershipUnknown when Claude's registry is unavailable", err)
@@ -191,15 +205,10 @@ func TestClaudeLookup_NoRegistryRefuses(t *testing.T) {
 // session even when the registry has no entry for it.
 func TestClaudeLookup_CommandLineHolder(t *testing.T) {
 	projects, registry := claudeFixture(t)
-	prev := listProcesses
-	defer func() { listProcesses = prev }()
-	listProcesses = func() ([]processArgs, error) {
-		return []processArgs{
-			{PID: os.Getppid(), Args: "/usr/local/bin/claude --dangerously-skip-permissions --resume idle-1"}, // no registry entry
-			{PID: 1, Args: "vim notes-about-idle-1.md"},                                                       // not claude
-		}, nil
-	}
-	info, err := ClaudeLookup(projects, registry)("idle-1")
+	info, err := claudeLookup(projects, registry,
+		fmt.Sprintf("%d /usr/local/bin/claude --dangerously-skip-permissions --resume idle-1", os.Getppid()), // no registry entry
+		"1 vim notes-about-idle-1.md", // not claude
+	)("idle-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,12 +222,7 @@ func TestClaudeLookup_CommandLineHolder(t *testing.T) {
 // command line must not keep the old session locked.
 func TestClaudeLookup_RegistryBeatsAStaleCommandLine(t *testing.T) {
 	projects, registry := claudeFixture(t) // this process's entry: open-1
-	prev := listProcesses
-	defer func() { listProcesses = prev }()
-	listProcesses = func() ([]processArgs, error) {
-		return []processArgs{{PID: os.Getpid(), Args: "claude --resume idle-1"}}, nil
-	}
-	info, err := ClaudeLookup(projects, registry)("idle-1")
+	info, err := claudeLookup(projects, registry, fmt.Sprintf("%d claude --resume idle-1", os.Getpid()))("idle-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +236,7 @@ func TestClaudeLookup_UndecodableRegistryEntryRefuses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(registry, "777.json"), []byte(`{"pid":777,"sessi`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ClaudeLookup(projects, registry)("idle-1"); !errors.Is(err, ErrOwnershipUnknown) {
+	if _, err := claudeLookup(projects, registry)("idle-1"); !errors.Is(err, ErrOwnershipUnknown) {
 		t.Fatalf("got %v, want ErrOwnershipUnknown: the broken entry may be the terminal holding this session", err)
 	}
 }
@@ -257,5 +261,80 @@ func TestRouter_NewSessionWithoutAFileIsAccepted(t *testing.T) {
 	}
 	if err := r.Check("other"); !errors.Is(err, ErrUnknownSession) {
 		t.Fatalf("unknown session: %v, want ErrUnknownSession", err)
+	}
+}
+
+// The `--flag=<id>` form names the session too.
+func TestClaudeLookup_CommandLineEqualsForm(t *testing.T) {
+	projects, registry := claudeFixture(t)
+	info, err := claudeLookup(projects, registry, fmt.Sprintf("%d claude --session-id=idle-1", os.Getppid()))("idle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.OpenInTerminal || len(info.Holders) != 1 || info.Holders[0] != os.Getppid() {
+		t.Fatalf("info %+v, want the --session-id=idle-1 process as the holder", info)
+	}
+}
+
+// A command line naming the session whose process has gone holds nothing.
+func TestClaudeLookup_DeadCommandLineProcessIsNotAHolder(t *testing.T) {
+	projects, registry := claudeFixture(t)
+	info, err := claudeLookup(projects, registry, "999999999 claude --resume idle-1")("idle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.OpenInTerminal {
+		t.Fatalf("info %+v: a process that has exited was treated as a holder", info)
+	}
+}
+
+type fakeStore struct {
+	file   string
+	cwd    string
+	cwdErr error
+}
+
+func (f fakeStore) SessionFile(string) string         { return f.file }
+func (f fakeStore) SessionCwd(string) (string, error) { return f.cwd, f.cwdErr }
+func (f fakeStore) Fingerprint(string) string         { return "" }
+
+type fakeLive struct {
+	hs   []harness.Holder
+	err  error
+	mode *harness.Mode
+}
+
+func (f fakeLive) Holders(m harness.Mode) ([]harness.Holder, error) {
+	*f.mode = m
+	return f.hs, f.err
+}
+
+// SessionLookup reads holders under the Strict rule, keeps the session's
+// own (one per pid) and maps a failed read to ErrOwnershipUnknown.
+func TestSessionLookup(t *testing.T) {
+	var mode harness.Mode = -1
+	store := fakeStore{file: "/p/s.jsonl", cwd: "/w"}
+	live := fakeLive{mode: &mode, hs: []harness.Holder{{PID: 3, SessionID: "s"}, {PID: 3, SessionID: "s"}, {PID: 4, SessionID: "t"}, {PID: 5, SessionID: "s"}}}
+	info, err := SessionLookup{Provider: "claude", Store: store, Live: live}.Lookup("s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != harness.Strict {
+		t.Errorf("read mode %v, want Strict", mode)
+	}
+	if !info.OpenInTerminal || len(info.Holders) != 2 || info.Holders[0] != 3 || info.Holders[1] != 5 || info.Cwd != "/w" || info.Provider != "claude" {
+		t.Errorf("info = %+v, want holders [3 5] in /w", info)
+	}
+
+	live.err = errors.New("decode 7.json")
+	if _, err := (SessionLookup{Store: store, Live: live}).Lookup("s"); !errors.Is(err, ErrOwnershipUnknown) {
+		t.Errorf("failed Strict read: %v, want ErrOwnershipUnknown", err)
+	}
+	cwdErr := errors.New("no working directory")
+	if _, err := (SessionLookup{Store: fakeStore{file: "/p/s.jsonl", cwdErr: cwdErr}, Live: live}).Lookup("s"); !errors.Is(err, cwdErr) {
+		t.Errorf("cwd error: %v", err)
+	}
+	if _, err := (SessionLookup{Store: fakeStore{}, Live: live}).Lookup("s"); !errors.Is(err, ErrUnknownSession) {
+		t.Errorf("no file: %v, want ErrUnknownSession", err)
 	}
 }

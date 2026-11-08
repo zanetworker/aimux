@@ -1,0 +1,83 @@
+{
+  "name": "a waiting of an unknown kind, or with no kind, places nothing and gives no waiting line",
+  "now": "2026-10-26T09:00:00Z",
+  "sessions": [
+    {
+      "id": "u1",
+      "provider": "claude",
+      "title": "Count the beans",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:50:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "working": true,
+      "waiting": {
+        "kind": "question",
+        "message": "Claude has a question",
+        "since": "2026-10-26T08:58:00Z"
+      }
+    },
+    {
+      "id": "u2",
+      "provider": "claude",
+      "title": "Compost notes",
+      "project": "/src/garden",
+      "lastActive": "2026-10-25T10:00:00Z",
+      "state": "idle",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "waiting": {
+        "kind": "elicitation",
+        "message": "Claude needs input",
+        "since": "2026-10-26T08:57:00Z"
+      }
+    },
+    {
+      "id": "u3",
+      "provider": "claude",
+      "title": "Plan the raised beds",
+      "project": "/src/garden",
+      "lastActive": "2026-10-26T08:40:00Z",
+      "state": "open_in_terminal",
+      "folder": {
+        "repo": "garden",
+        "repoPath": "/src/garden",
+        "label": "garden"
+      },
+      "waiting": {
+        "message": "Claude needs your permission to use Bash",
+        "since": "2026-10-26T08:59:00Z"
+      }
+    }
+  ],
+  "events": {},
+  "expect": {
+    "needsYou": [],
+    "pinned": [],
+    "windows": [],
+    "hiddenTabs": 0,
+    "elsewhere": [
+      {
+        "label": "garden",
+        "sessions": [
+          "u1",
+          "u3"
+        ]
+      }
+    ],
+    "other": [],
+    "working": 1,
+    "open": 2,
+    "rowStates": {
+      "u1": "Working",
+      "u2": null
+    }
+  }
+}
