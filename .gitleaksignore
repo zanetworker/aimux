@@ -1,0 +1,3 @@
+# Verified false positives only (commit:file:rule:line). Never add a real secret here: rotate it.
+# Demo transcript text "Add idempotency keys ..." in a since-deleted seed script.
+10bf9fd98e0493848135a718b9211c189095b2b4:docs/demo/seed.py:generic-api-key:45

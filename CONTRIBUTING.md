@@ -25,7 +25,7 @@ make lint               # golangci-lint
 
 `test/e2e/discovery/` runs the real binary against seeded sessions in a container; its README has the commands, and CI runs it on pull requests to `main` that touch `cmd/`, `internal/` or `test/e2e/`.
 
-Run `pre-commit run --all-files` before you push; it runs the secrets scan, whitespace and YAML checks and the linters. CI runs lint and the tests on every pull request to `main`.
+Run `pre-commit run --all-files` before you push; it runs the secrets scan, whitespace and YAML checks and the linters. CI runs lint and the tests on every pull request to `main`, and the gitleaks secrets scan on every push. A verified false positive goes in `.gitleaksignore` by its fingerprint; a real secret gets rotated, never ignored.
 
 ## Pull requests
 
