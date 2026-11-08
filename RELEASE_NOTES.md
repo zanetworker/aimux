@@ -1,4 +1,21 @@
-## Unreleased
+## aimux v0.14.0
+
+### Highlights
+
+**Your sessions on your phone.** An iPhone app and a phone web client follow every session live: chat, approve, queue messages, type into sessions open in iTerm2, and find sessions by your Mac's window and tab layout. Only devices you paired can connect, and they log in with Face ID, Touch ID or a passkey.
+
+**One MCP proxy instead of a copy of every server per session.** `aimux mcp proxy install` moves your stdio MCP servers behind one local daemon. Each server keeps its name and tools, so permission rules work unchanged, and each Claude Code session stops starting its own copy of every server.
+
+**One answer to "what is this session doing".** The TUI, the web dashboard and the phone show the same state: needs you, working or idle.
+
+### Upgrading
+
+- **Phone clients:** device login is on by default. Update the iPhone app (build 14 or later) and reload the web client, then pair each device once with `aimux remote pair --name <name>`. Until then the clients show the pairing screen. `remote_access.device_login: false` restores tailnet-only access.
+- **MCP proxy (optional):** run `aimux mcp proxy install`; open sessions keep their direct servers until they restart. After later upgrades, run `aimux mcp proxy restart`. `aimux mcp proxy uninstall` gives the direct servers back.
+- **Permission alerts (optional):** run `aimux remote hooks install` so a terminal session waiting at a permission prompt shows under Needs you on the phone and sends a push.
+- The MCP proxy is tested with Claude Code only. Codex keeps its own servers.
+
+### Sessions, TUI and MCP proxy
 
 - **A terminal session at a permission prompt reads "needs you" without the hooks.** Claude Code's session registry reports such a session as waiting, and the shared session state now uses that: the TUI and dashboard show it as needs you, and the remote API's `activity` is `needs_you`, even when `aimux remote hooks install` has not run. The phone clients' Needs you list and the push alerts still come from the hooks' markers. The muted hint now reads "Permission alerts need `aimux remote hooks install`".
 - **`aimux mcp proxy restart`** restarts the daemon after an upgrade, in place (the launchd job is never unloaded), waits for the new daemon and prints its pid and version; the "upgrade restart pending" hint now points at it instead of a `launchctl` command. `install` and `--dry-run` count the servers already behind the proxy instead of listing all of them. Fixed: a launchd restart (install's rollback) could bootstrap before launchd had unloaded the old job, fail with exit status 5 and leave the daemon down; it now waits for the unload and retries.
@@ -65,6 +82,10 @@
 - Opened steps: a command reads as shell with its colours and an edit's lines take the file's language colours (from its extension) on their red and green; a command and an error carry **Copy** (the whole text)
 - The live working line also shows while Claude Code's registry says busy (the header's Working), and sending on the iPhone scrolls to your message
 - The iPhone app is at version 0.3 (30)
+
+### Under the hood
+- CI runs the gitleaks secrets scan on every push and pull request
+- Dependency updates (OpenTelemetry protobuf, k8s.io apimachinery and client-go, golang.org/x/term)
 
 ## aimux v0.13.0
 
