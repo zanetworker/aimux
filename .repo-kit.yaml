@@ -1,0 +1,10 @@
+kit_version: 1
+languages:
+- go
+- swift
+- node
+items:
+  secrets-scan:
+    version: 1
+    status: present
+skips: []
