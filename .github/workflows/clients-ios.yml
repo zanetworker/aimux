@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   test:
-    runs-on: macos-26
+    # GitHub's xcode-27 image (public preview, macOS 27): the app targets iOS 27, the owner's phone,
+    # and the macos-26 image has Xcode 26 only.
+    runs-on: xcode-27
     timeout-minutes: 40
     defaults:
       run:
@@ -27,7 +29,8 @@ jobs:
       - name: Select Xcode 27
         run: |
           ls -d /Applications/Xcode*.app || true
-          XCODE=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -n 1)
+          # Newest released Xcode 27 (the image also carries release candidates and betas).
+          XCODE=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -v -i -E 'beta|release_candidate|_rc' | sort -V | tail -n 1)
           if [ -z "$XCODE" ]; then
             echo "::error::No Xcode 27 on this runner; project.yml needs the iOS 27 SDK"
             exit 1
