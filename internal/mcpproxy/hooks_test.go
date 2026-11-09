@@ -292,3 +292,27 @@ func TestHookAdded_SkipsTheOpenSessionsScan(t *testing.T) {
 		t.Fatalf("reply %+v", r)
 	}
 }
+
+func TestIsServerAdd_HeredocBodyIsNotACommand(t *testing.T) {
+	no := []string{
+		"cat > setup.md <<'EOF'\nRun this:\nclaude mcp add foo -- npx foo\nEOF",
+		"cat > s.sh <<EOF\nclaude mcp add foo x\nEOF\necho done",
+		"cat <<-END > x\n\tclaude mcp add foo x\n\tEND",
+		"python3 - <<\"PY\"\nprint('claude mcp add foo')\nclaude mcp add foo x\nPY",
+	}
+	for _, c := range no {
+		if IsServerAdd(c) {
+			t.Errorf("IsServerAdd(%q) = true; a heredoc body is data, not a command", c)
+		}
+	}
+	yes := []string{
+		"cat > x <<EOF\nhello\nEOF\nclaude mcp add foo -- npx foo", // a real add after the heredoc ends
+		"claude mcp add-json foo \"$(cat <<EOF\n{\\\"command\\\":\\\"x\\\"}\nEOF\n)\"",
+		"grep x <<< 'here string'; claude mcp add foo x",
+	}
+	for _, c := range yes {
+		if !IsServerAdd(c) {
+			t.Errorf("IsServerAdd(%q) = false, want true", c)
+		}
+	}
+}

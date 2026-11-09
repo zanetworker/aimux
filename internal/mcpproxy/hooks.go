@@ -102,6 +102,7 @@ func shellSegments(line string) ([][]string, bool) {
 		inWord    bool
 		quote     rune
 		inComment bool
+		heredocs  []heredoc // opened on this line; their bodies start after it
 		endWord   = func() {
 			if inWord {
 				words = append(words, word.String())
@@ -143,6 +144,20 @@ func shellSegments(line string) ([][]string, bool) {
 			inWord = true
 		case c == '#' && !inWord:
 			inComment = true
+		case c == '<' && i+2 < len(rs) && rs[i+1] == '<' && rs[i+2] == '<': // a here-string, not a heredoc
+			endWord()
+			i += 2
+		case c == '<' && i+1 < len(rs) && rs[i+1] == '<':
+			endWord()
+			h, next := readHeredoc(rs, i+2)
+			if h.delim != "" {
+				heredocs = append(heredocs, h)
+			}
+			i = next - 1
+		case c == '\n' && len(heredocs) > 0:
+			endSeg()
+			i = skipHeredocBodies(rs, i+1, heredocs) - 1
+			heredocs = nil
 		case c == ';' || c == '|' || c == '&' || c == '\n':
 			endSeg()
 		case c == ' ' || c == '\t':
@@ -157,6 +172,60 @@ func shellSegments(line string) ([][]string, bool) {
 	}
 	endSeg()
 	return segs, true
+}
+
+// heredoc is a `<<WORD` (strip: `<<-WORD`, leading tabs ignored) whose body
+// lines are data, not commands.
+type heredoc struct {
+	delim string
+	strip bool
+}
+
+// readHeredoc reads the delimiter after `<<` at rs[i:] (an optional -, then
+// a word, quotes removed) and returns it with the index just past it.
+func readHeredoc(rs []rune, i int) (heredoc, int) {
+	var h heredoc
+	if i < len(rs) && rs[i] == '-' {
+		h.strip, i = true, i+1
+	}
+	for i < len(rs) && (rs[i] == ' ' || rs[i] == '\t') {
+		i++
+	}
+	var d strings.Builder
+	for i < len(rs) && !strings.ContainsRune(" \t\n;|&<>()", rs[i]) {
+		if rs[i] != '\'' && rs[i] != '"' && rs[i] != '\\' {
+			d.WriteRune(rs[i])
+		}
+		i++
+	}
+	h.delim = d.String()
+	return h, i
+}
+
+// skipHeredocBodies skips, from the line starting at rs[i:], each heredoc's
+// body through its delimiter line, in order; it returns the index after the
+// last one (len(rs) when a body never ends).
+func skipHeredocBodies(rs []rune, i int, hs []heredoc) int {
+	for _, h := range hs {
+		for i < len(rs) {
+			end := i
+			for end < len(rs) && rs[end] != '\n' {
+				end++
+			}
+			line := string(rs[i:end])
+			if h.strip {
+				line = strings.TrimLeft(line, "\t")
+			}
+			i = end + 1
+			if line == h.delim {
+				break
+			}
+		}
+	}
+	if i > len(rs) {
+		return len(rs)
+	}
+	return i
 }
 
 // ProjectServers lists, sorted, the stdio MCP servers Claude Code uses only
