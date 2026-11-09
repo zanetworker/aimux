@@ -327,3 +327,26 @@ func TestIsServerAdd_LineContinuation(t *testing.T) {
 		}
 	}
 }
+
+func TestIsServerAdd_CommandPrefixes(t *testing.T) {
+	yes := []string{
+		"CLAUDECODE= claude mcp add --scope user foo -- npx foo",
+		"A=1 B=2 claude mcp add foo x",
+		"env CLAUDECODE= claude mcp add foo x",
+		"env -i PATH=/bin claude mcp add foo x",
+		"command claude mcp add foo x",
+		"exec claude mcp add-json foo '{}'",
+		"nohup claude mcp add foo x",
+		"time claude mcp add foo x",
+	}
+	for _, c := range yes {
+		if !IsServerAdd(c) {
+			t.Errorf("IsServerAdd(%q) = false, want true", c)
+		}
+	}
+	for _, c := range []string{"env claude mcp list", "FOO=claude mcp add", "echo claude mcp add"} {
+		if IsServerAdd(c) {
+			t.Errorf("IsServerAdd(%q) = true, want false", c)
+		}
+	}
+}

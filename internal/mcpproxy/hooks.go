@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/zanetworker/aimux/internal/claudehooks"
@@ -83,11 +84,39 @@ func IsServerAdd(command string) bool {
 		return false
 	}
 	for _, w := range segments {
+		w = commandWords(w)
 		if len(w) >= 3 && filepath.Base(w[0]) == "claude" && w[1] == "mcp" && addCommands[w[2]] {
 			return true
 		}
 	}
 	return false
+}
+
+// assignment is a shell variable assignment word (NAME=value).
+var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// wrappers run the command that follows them.
+var wrappers = map[string]bool{"command": true, "exec": true, "nohup": true, "time": true}
+
+// commandWords drops what precedes the command a simple command runs:
+// variable assignments (NAME=value), env with its flags and assignments, and
+// the wrappers command, exec, nohup and time. A `cd dir &&` before it is a
+// separate command and is not followed.
+func commandWords(w []string) []string {
+	for len(w) > 0 {
+		switch {
+		case assignment.MatchString(w[0]) || wrappers[w[0]]:
+			w = w[1:]
+		case w[0] == "env":
+			w = w[1:]
+			for len(w) > 0 && (strings.HasPrefix(w[0], "-") || assignment.MatchString(w[0])) {
+				w = w[1:]
+			}
+		default:
+			return w
+		}
+	}
+	return w
 }
 
 // shellSegments splits a command line into simple commands (split at &&,
