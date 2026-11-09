@@ -1,0 +1,10 @@
+flowchart LR
+  A["claude mcp add (in a session)"] --> B["PostToolUse hook<br/>aimux mcp proxy hooks added"]
+  B -->|"not an add, or it failed"| X["exit at once"]
+  B -->|"user-scope stdio server"| C["move it behind the proxy<br/>(install code: probe, backup, atomic edit)"]
+  B -->|"project-scoped"| P["say: proxy shares user-scope only"]
+  C -->|ok| M["tell you: foo moved behind the proxy"]
+  C -->|fails| F["leave it direct, tell you why"]
+  T["claude mcp add (terminal),<br/>hand edit, script"] --> S["SessionStart hook<br/>aimux mcp proxy hooks check"]
+  S -->|"all behind the proxy"| Q["silent"]
+  S -->|"some still direct"| R["one line: foo, bar not behind the proxy"]
