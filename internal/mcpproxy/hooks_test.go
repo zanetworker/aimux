@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/zanetworker/aimux/internal/claudehooks"
 )
 
 func TestIsServerAdd(t *testing.T) {
@@ -94,5 +97,93 @@ func BenchmarkIsServerAdd_NoMatch(b *testing.B) {
 		if IsServerAdd(cmd) {
 			b.Fatal("matched")
 		}
+	}
+}
+
+func proxyHooksState(t *testing.T, settings string) claudehooks.State {
+	t.Helper()
+	st, err := claudehooks.Status(settings, HookSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestInstall_AddsHooks(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	fx.in.Settings, fx.in.HookBinary = fx.settings, "/bin/aimux"
+	must(t, fx.in.Install(nil))
+	if st := proxyHooksState(t, fx.settings); len(st.Missing) != 0 ||
+		strings.Join(st.Commands, "|") != "/bin/aimux mcp proxy hooks added || true|/bin/aimux mcp proxy hooks check || true" {
+		t.Fatalf("hooks after install: %+v", st)
+	}
+	m, err := fx.in.loadManifest()
+	if err != nil || m.Hooks != hooksAdded {
+		t.Fatalf("manifest hooks = %q, %v", m.Hooks, err)
+	}
+	if !strings.Contains(fx.out.String(), "hooks") {
+		t.Fatalf("install did not mention the hooks:\n%s", fx.out.String())
+	}
+	before := fx.read(fx.settings)
+	must(t, fx.in.Install(nil)) // the "nothing to move" path
+	if fx.read(fx.settings) != before {
+		t.Fatal("a re-run changed settings.json")
+	}
+	must(t, fx.in.Uninstall())
+	if got := fx.read(fx.settings); got != fixtureSettings {
+		t.Fatalf("settings.json not byte-identical after uninstall:\n%s", got)
+	}
+}
+
+func TestInstall_HooksAddedByRerunWithNothingToMove(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	fx.in.Settings = fx.settings
+	must(t, fx.in.Install(nil)) // an install from before the hooks
+	if st := proxyHooksState(t, fx.settings); len(st.Installed) != 0 {
+		t.Fatal("hooks added without a hook binary")
+	}
+	fx.in.HookBinary = "/bin/aimux"
+	must(t, fx.in.Install(nil))
+	if st := proxyHooksState(t, fx.settings); len(st.Missing) != 0 {
+		t.Fatalf("re-run did not add the hooks: %+v", st)
+	}
+}
+
+func TestUninstall_RemovesOnlyProxyHooks(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	if _, err := claudehooks.Install(fx.settings, claudehooks.Spec{{Event: "PostToolUse", Suffix: " remote hooks notify", Timeout: 10}}, "/bin/aimux", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	withRemote := fx.read(fx.settings)
+	fx.in.Settings, fx.in.HookBinary = fx.settings, "/bin/aimux"
+	must(t, fx.in.Install(nil))
+	must(t, fx.in.Uninstall())
+	if got := fx.read(fx.settings); got != withRemote {
+		t.Fatalf("uninstall touched the remote hooks:\n%s\nwant:\n%s", got, withRemote)
+	}
+}
+
+func TestInstallStatus_Hooks(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	fx.in.Settings, fx.in.HookBinary = fx.settings, "/bin/aimux"
+	must(t, fx.in.Install(nil))
+	st, err := fx.in.InstallStatus()
+	if err != nil || !st.Hooks {
+		t.Fatalf("Hooks = %v, %v; want true", st.Hooks, err)
+	}
+	if _, err := claudehooks.Uninstall(fx.settings, HookSpec, time.Now()); err != nil { // the owner removes them by hand
+		t.Fatal(err)
+	}
+	if st, _ := fx.in.InstallStatus(); st.Hooks {
+		t.Fatal("Hooks still true after they were removed")
+	}
+}
+
+func TestInstall_NoHookBinaryLeavesSettings(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	fx.in.Settings = fx.settings
+	must(t, fx.in.Install(nil))
+	if strings.Contains(fx.read(fx.settings), "hooks") {
+		t.Fatalf("hooks written without a hook binary:\n%s", fx.read(fx.settings))
 	}
 }

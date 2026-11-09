@@ -8,11 +8,64 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zanetworker/aimux/internal/claudehooks"
 )
 
 // The hooks install adds to Claude Code: one moves a server added in a
 // session behind the proxy, one names servers still direct when a session
 // starts. See docs/superpowers/specs/2026-11-09-mcp-proxy-server-hooks-design.md.
+
+// hooksAdded is Manifest.Hooks once install added the hooks.
+const hooksAdded = "added"
+
+// HookSpec is the two hooks: after a Bash call (moves a server just added)
+// and at session start (names servers still direct).
+var HookSpec = claudehooks.Spec{
+	{Event: "PostToolUse", Matcher: "Bash", Suffix: " mcp proxy hooks added", Timeout: 120},
+	{Event: "SessionStart", Suffix: " mcp proxy hooks check", Timeout: 10},
+}
+
+// ensureHooks adds HookSpec to i.Settings for i.HookBinary and records it
+// in m. Like the idle timeout, a failure is a note, not an install failure.
+func (i Installer) ensureHooks(m *Manifest) {
+	if i.Settings == "" || i.HookBinary == "" || m == nil {
+		return
+	}
+	ch, err := claudehooks.Install(i.Settings, HookSpec, i.HookBinary, i.now())
+	if err != nil {
+		i.printf("Note: could not add the MCP server hooks to %s (%v); servers you add later stay direct until you run aimux mcp proxy install again.\n", i.Settings, err)
+		return
+	}
+	if len(ch.Added)+len(ch.Updated) > 0 {
+		i.printf("Added the MCP server hooks to %s: a server you add in a Claude Code session moves behind the proxy, and servers still direct are named when a session starts.\n", i.Settings)
+	}
+	if m.Hooks != hooksAdded {
+		m.Hooks = hooksAdded
+		if err := i.saveManifest(m); err != nil {
+			i.printf("Note: added the MCP server hooks but could not record them (%v); uninstall will leave them.\n", err)
+		}
+	}
+}
+
+// dropHooks removes the hooks ensureHooks added, if any.
+func (i Installer) dropHooks(m *Manifest) {
+	if i.Settings == "" || m == nil || m.Hooks == "" {
+		return
+	}
+	if _, err := claudehooks.Uninstall(i.Settings, HookSpec, i.now()); err != nil {
+		i.printf("Note: could not remove the MCP server hooks from %s (%v); remove them by hand.\n", i.Settings, err)
+	}
+}
+
+// hooksOn: every hook of HookSpec is in i.Settings.
+func (i Installer) hooksOn() bool {
+	if i.Settings == "" {
+		return false
+	}
+	st, err := claudehooks.Status(i.Settings, HookSpec)
+	return err == nil && len(st.Missing) == 0
+}
 
 // addCommands are the `claude mcp` subcommands that add servers.
 var addCommands = map[string]bool{"add": true, "add-json": true, "add-from-claude-desktop": true}

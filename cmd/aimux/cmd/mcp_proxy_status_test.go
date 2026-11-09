@@ -297,3 +297,19 @@ func TestPrintProxyStatus_RemovedServerIsMarkedAndLast(t *testing.T) {
 		t.Fatalf("removed server not marked or counted apart:\n%s", got)
 	}
 }
+
+func TestPrintInstallState_Hooks(t *testing.T) {
+	for _, tc := range []struct {
+		on   bool
+		want string
+	}{
+		{true, "hooks on: a server you add in a session moves behind the proxy"},
+		{false, "hooks off: servers you add later stay direct; `aimux mcp proxy install` adds the hooks"},
+	} {
+		var out bytes.Buffer
+		printInstallState(&out, mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Moved: []string{"a"}, Hooks: tc.on}, "/c", "", false)
+		if !strings.Contains(out.String(), tc.want) {
+			t.Fatalf("Hooks=%v: install section lacks %q:\n%s", tc.on, tc.want, out.String())
+		}
+	}
+}
