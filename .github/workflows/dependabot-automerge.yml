@@ -1,0 +1,82 @@
+# Merges Dependabot patch and minor updates once every other check on the PR passes,
+# with the first merge method the repo allows (squash, merge, rebase).
+# The merge uses the workflow token, so it does not start push-triggered workflows on the
+# default branch; the next push runs them.
+# Major updates, failed checks and PRs with no other checks are left for a human.
+# Needs no repo setting or branch protection: it waits for the checks itself, then merges.
+name: dependabot-automerge
+
+on: pull_request
+
+# Dependabot's pull_request runs get these write permissions when the workflow asks for them
+# (GitHub raises them for Dependabot since 2021), so no pull_request_target and no PR code is run.
+# Checked live: dev-pulse PRs #3, #5 and #6 were merged by this workflow.
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+  actions: read
+
+jobs:
+  dependabot-automerge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+      - name: Merge once every other check passes
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.html_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SELF: ${{ github.workflow }}
+        run: |
+          # Poll every 30s for up to 50 minutes. This job's own check is ignored (by name, and by
+          # workflow when the token can see workflow names). A failed or empty query never counts
+          # as passing, and the merge only goes through if the PR head is still the commit whose
+          # checks were read, so a rebase in between cannot merge an unchecked commit.
+          # GitHub Actions suites that are queued but have no check runs yet are waited for too.
+          # Suites of other apps that never report (a queued Cursor suite, for one) are ignored.
+          own_suite=$(gh api "repos/$REPO/actions/runs/$RUN_ID" --jq .check_suite_id)
+          for i in $(seq 1 100); do
+            sleep 30
+            set +e
+            buckets=$(gh pr checks "$PR" --json bucket,name,workflow --jq "[.[] | select(.name != \"dependabot-automerge\" and .workflow != \"$SELF\") | .bucket] | join(\" \")")
+            rc=$?
+            set -e
+            # gh exits 8 while any check (this job's included) is pending, and 1 when one failed.
+            case $rc in 0|1|8) ;; *) echo "Check query failed (exit $rc); trying again."; continue ;; esac
+            set +e
+            open_suites=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-suites" --paginate --jq ".check_suites[] | select(.app.slug == \"github-actions\" and .status != \"completed\" and .id != $own_suite) | .id" | wc -l | tr -d ' ')
+            src=$?
+            set -e
+            [ "$src" = 0 ] && [ -n "$open_suites" ] || { echo "Suite query failed; trying again."; continue; }
+            [ "$open_suites" = 0 ] || continue
+            if [ -z "$buckets" ]; then
+              [ "$i" -ge 20 ] && { echo "No other checks after 10 minutes; leaving the PR for a human."; exit 0; }
+              continue
+            fi
+            case " $buckets " in
+              *" fail "*|*" cancel "*) echo "A check failed; leaving the PR for a human."; exit 0 ;;
+              *" pending "*) continue ;;
+            esac
+            # Only pass and skipping may remain, and at least one check must have passed.
+            for b in $buckets; do
+              case $b in pass|skipping) ;; *) echo "Unexpected check state $b; leaving the PR for a human."; exit 0 ;; esac
+            done
+            case " $buckets " in
+              *" pass "*) ;;
+              *) echo "No check passed (all skipped); leaving the PR for a human."; exit 0 ;;
+            esac
+            head=$(gh pr view "$PR" --json headRefOid --jq .headRefOid) || continue
+            [ "$head" = "$HEAD_SHA" ] || { echo "The PR moved to $head; the run for that commit decides."; exit 0; }
+            method=$(gh api "repos/$REPO" --jq 'if .allow_squash_merge then "--squash" elif .allow_merge_commit then "--merge" else "--rebase" end')
+            gh pr merge "$PR" "$method" --delete-branch --match-head-commit "$HEAD_SHA"
+            exit 0
+          done
+          echo "Checks still pending after 50 minutes; leaving the PR for a human."
