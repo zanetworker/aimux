@@ -1,6 +1,7 @@
 package mcpproxy
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,5 +186,78 @@ func TestInstall_NoHookBinaryLeavesSettings(t *testing.T) {
 	must(t, fx.in.Install(nil))
 	if strings.Contains(fx.read(fx.settings), "hooks") {
 		t.Fatalf("hooks written without a hook binary:\n%s", fx.read(fx.settings))
+	}
+}
+
+const demoProject = "/Users/x/mcpServers-demo" // fixtureClaude's project with a project-only stdio "slack"
+
+func TestHookAdded_MovesNewServer(t *testing.T) {
+	fresh := newInstallFX(t, fixtureClaude, fixtureSettings)
+	if r := fresh.in.HookAdded("claude mcp add -s user pypi -- pypi-mcp", "/w"); r != (HookReply{}) {
+		t.Fatalf("proxy not installed: reply %+v, want none", r)
+	}
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	fx.setEntry("pypi", json.RawMessage(`{"command": "pypi-mcp", "args": ["--x"]}`))
+	fx.probed = nil
+	if r := fx.in.HookAdded("ls -la", "/w"); r != (HookReply{}) || fx.probed != nil {
+		t.Fatalf("not an add: reply %+v, probed %v", r, fx.probed)
+	}
+	r := fx.in.HookAdded("claude mcp add -s user pypi -- pypi-mcp --x", "/w")
+	want := MovedMessage([]string{"pypi"})
+	if r.User != want || r.Claude != want {
+		t.Fatalf("reply %+v, want %q", r, want)
+	}
+	if !jsonEqual(fx.entries()["pypi"], httpEntry("pypi")) {
+		t.Fatalf("pypi not moved: %s", fx.entries()["pypi"])
+	}
+}
+
+func TestHookAdded_FailedMoveNamesTheServer(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	fx.setEntry("pypi", json.RawMessage(`{"command": "pypi-mcp"}`))
+	fx.probeFailing["pypi"] = true
+	before := fx.read(fx.claude)
+	r := fx.in.HookAdded("claude mcp add pypi -- pypi-mcp", "/w")
+	if !strings.HasPrefix(r.User, "pypi stays a direct server: ") || !strings.Contains(r.User, "--skip") || r.Claude != r.User {
+		t.Fatalf("reply %+v", r)
+	}
+	if fx.read(fx.claude) != before {
+		t.Fatal("a failed move changed ~/.claude.json")
+	}
+}
+
+func TestHookAdded_ProjectScoped(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	fx.probed = nil
+	r := fx.in.HookAdded("claude mcp add slack -- nested", demoProject)
+	if want := ProjectMessage("slack"); r.User != want || r.Claude != want || fx.probed != nil {
+		t.Fatalf("reply %+v (probed %v), want %q and no install", r, fx.probed, want)
+	}
+	if r := fx.in.HookAdded("claude mcp add other -- x", demoProject); r != (HookReply{}) {
+		t.Fatalf("an older project server was named for another add: %+v", r)
+	}
+}
+
+func TestHookCheck(t *testing.T) {
+	fresh := newInstallFX(t, fixtureClaude, fixtureSettings)
+	if r := fresh.in.HookCheck("/w"); r != (HookReply{}) {
+		t.Fatalf("not installed: %+v", r)
+	}
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	if r := fx.in.HookCheck("/w"); r != (HookReply{}) {
+		t.Fatalf("all moved: %+v", r)
+	}
+	fx.setEntry("b", json.RawMessage(`{"command": "b-mcp"}`))
+	fx.setEntry("a", json.RawMessage(`{"command": "a-mcp"}`))
+	r := fx.in.HookCheck("/w")
+	if want := CheckMessage([]string{"a", "b"}); r.User != want || r.Claude != want {
+		t.Fatalf("reply %+v, want %q", r, want)
+	}
+	if r := fx.in.HookCheck(demoProject); !strings.Contains(r.Claude, "slack") || strings.Contains(r.User, "slack") {
+		t.Fatalf("project-only slack should reach Claude, not the owner's line: %+v", r)
 	}
 }

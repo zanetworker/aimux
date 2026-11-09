@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -239,4 +240,81 @@ func CheckMessage(direct []string) string {
 		return fmt.Sprintf("1 MCP server is not behind the aimux proxy: %s. Run aimux mcp proxy install.", direct[0])
 	}
 	return fmt.Sprintf("%d MCP servers are not behind the aimux proxy: %s. Run aimux mcp proxy install.", len(direct), strings.Join(direct, ", "))
+}
+
+// HookReply is what a hook says: User is shown to the owner, Claude goes
+// into the session's context. Both empty: the hook prints nothing.
+type HookReply struct {
+	User, Claude string
+}
+
+// quiet is the installer for a hook's reads: no daemon call, no output.
+func (i Installer) quiet() Installer {
+	i.Status, i.Out = nil, io.Discard
+	return i
+}
+
+// HookAdded answers the PostToolUse hook for a Bash command line run in a
+// session at cwd. Unless the command added an MCP server and the proxy is
+// installed, it says nothing. A new user-scope stdio server is moved behind
+// the proxy (install's own all-or-nothing move of every server still
+// direct); a project-scoped server the command named is explained instead.
+func (i Installer) HookAdded(command, cwd string) HookReply {
+	if !IsServerAdd(command) {
+		return HookReply{}
+	}
+	st, err := i.quiet().InstallStatus()
+	if err != nil || st.State == InstallNotInstalled {
+		return HookReply{}
+	}
+	if len(st.NotProxied) == 0 {
+		return i.projectReply(command, cwd)
+	}
+	if err := i.Install(nil); err != nil {
+		msg := FailedMessage(st.NotProxied, strings.TrimSuffix(err.Error(), "."))
+		return HookReply{User: msg, Claude: msg}
+	}
+	msg := MovedMessage(st.NotProxied)
+	return HookReply{User: msg, Claude: msg}
+}
+
+// projectReply explains the project-scoped servers at cwd that command
+// names; nothing for servers it does not name (they were there before).
+func (i Installer) projectReply(command, cwd string) HookReply {
+	project, err := ProjectServers(i.ClaudeConfig, cwd)
+	if err != nil || len(project) == 0 {
+		return HookReply{}
+	}
+	segments, _ := shellSegments(command)
+	named := map[string]bool{}
+	for _, seg := range segments {
+		for _, w := range seg {
+			named[w] = true
+		}
+	}
+	var msgs []string
+	for _, name := range project {
+		if named[name] {
+			msgs = append(msgs, ProjectMessage(name))
+		}
+	}
+	msg := strings.Join(msgs, " ")
+	return HookReply{User: msg, Claude: msg}
+}
+
+// HookCheck answers the SessionStart hook for a session at cwd: the stdio
+// servers still direct, read from files only. Project-only servers for cwd
+// go to Claude, not the owner's line (the proxy cannot share them).
+func (i Installer) HookCheck(cwd string) HookReply {
+	st, err := i.quiet().InstallStatus()
+	if err != nil || st.State == InstallNotInstalled {
+		return HookReply{}
+	}
+	user := CheckMessage(st.NotProxied)
+	claude := user
+	if project, err := ProjectServers(i.ClaudeConfig, cwd); err == nil && len(project) > 0 {
+		note := fmt.Sprintf("Project-only MCP servers here (not shared by the aimux proxy): %s.", strings.Join(project, ", "))
+		claude = strings.TrimSpace(claude + " " + note)
+	}
+	return HookReply{User: user, Claude: claude}
 }
