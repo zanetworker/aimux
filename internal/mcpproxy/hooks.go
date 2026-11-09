@@ -132,12 +132,16 @@ func shellSegments(line string) ([][]string, bool) {
 				quote = 0
 			} else if c == '\\' && quote == '"' && i+1 < len(rs) {
 				i++
-				word.WriteRune(rs[i])
+				if rs[i] != '\n' { // a backslash-newline inside "" is removed
+					word.WriteRune(rs[i])
+				}
 			} else {
 				word.WriteRune(c)
 			}
 		case c == '\'' || c == '"':
 			quote, inWord = c, true
+		case c == '\\' && i+1 < len(rs) && rs[i+1] == '\n': // line continuation: the lines join
+			i++
 		case c == '\\' && i+1 < len(rs):
 			i++
 			word.WriteRune(rs[i])

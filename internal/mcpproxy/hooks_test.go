@@ -316,3 +316,14 @@ func TestIsServerAdd_HeredocBodyIsNotACommand(t *testing.T) {
 		}
 	}
 }
+
+func TestIsServerAdd_LineContinuation(t *testing.T) {
+	for _, c := range []string{
+		"claude mcp \\\nadd --scope user foo -- npx foo",
+		"claude \\\n  mcp add foo \\\n  -- npx foo",
+	} {
+		if !IsServerAdd(c) {
+			t.Errorf("IsServerAdd(%q) = false; a backslash-newline joins the lines", c)
+		}
+	}
+}
