@@ -23,7 +23,7 @@ const hooksAdded = "added"
 // HookSpec is the two hooks: after a Bash call (moves a server just added)
 // and at session start (names servers still direct).
 var HookSpec = claudehooks.Spec{
-	{Event: "PostToolUse", Matcher: "Bash", Suffix: " mcp proxy hooks added", Timeout: 120},
+	{Event: "PostToolUse", Matcher: "Bash", Suffix: " mcp proxy hooks added", Timeout: 300}, // a move may cold-start servers twice (list tools, probe)
 	{Event: "SessionStart", Suffix: " mcp proxy hooks check", Timeout: 10},
 }
 
@@ -267,14 +267,17 @@ func (i Installer) HookAdded(command, cwd string) HookReply {
 	if err != nil || st.State == InstallNotInstalled {
 		return HookReply{}
 	}
+	project := i.projectReply(command, cwd).User
 	if len(st.NotProxied) == 0 {
-		return i.projectReply(command, cwd)
+		return HookReply{User: project, Claude: project}
 	}
-	if err := i.Install(nil); err != nil {
-		msg := FailedMessage(st.NotProxied, strings.TrimSuffix(err.Error(), "."))
-		return HookReply{User: msg, Claude: msg}
-	}
+	mover := i
+	mover.Sessions = nil // its note goes nowhere in a hook; skip the process scan
 	msg := MovedMessage(st.NotProxied)
+	if err := mover.Install(nil); err != nil {
+		msg = FailedMessage(st.NotProxied, strings.TrimSuffix(err.Error(), "."))
+	}
+	msg = strings.TrimSpace(msg + " " + project) // a project-scoped add is explained even when others moved
 	return HookReply{User: msg, Claude: msg}
 }
 
@@ -311,6 +314,10 @@ func (i Installer) HookCheck(cwd string) HookReply {
 		return HookReply{}
 	}
 	user := CheckMessage(st.NotProxied)
+	if len(st.Drifted) > 0 { // moved, but a stale session wrote the direct entry back
+		drift := fmt.Sprintf("Running direct again instead of through the aimux proxy: %s; to fix it, %s.", strings.Join(st.Drifted, ", "), DriftFix)
+		user = strings.TrimSpace(user + " " + drift)
+	}
 	claude := user
 	if project, err := ProjectServers(i.ClaudeConfig, cwd); err == nil && len(project) > 0 {
 		note := fmt.Sprintf("Project-only MCP servers here (not shared by the aimux proxy): %s.", strings.Join(project, ", "))

@@ -261,3 +261,34 @@ func TestHookCheck(t *testing.T) {
 		t.Fatalf("project-only slack should reach Claude, not the owner's line: %+v", r)
 	}
 }
+
+func TestHookCheck_NamesDriftedServers(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	// a stale session wrote slack's old stdio entry back: it runs direct again
+	fx.setEntry("slack", json.RawMessage(`{"command": "npx", "args": ["-y", "slack-mcp"]}`))
+	r := fx.in.HookCheck("/w")
+	if !strings.Contains(r.User, "slack") || !strings.Contains(r.User, DriftFix) || r.Claude != r.User {
+		t.Fatalf("drifted slack not named with the fix: %+v", r)
+	}
+}
+
+func TestHookAdded_ProjectAddExplainedWhenOthersMove(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	fx.setEntry("pypi", json.RawMessage(`{"command": "pypi-mcp"}`)) // added in a terminal earlier, still direct
+	r := fx.in.HookAdded("claude mcp add slack -- nested", demoProject)
+	if !strings.Contains(r.User, MovedMessage([]string{"pypi"})) || !strings.Contains(r.User, ProjectMessage("slack")) {
+		t.Fatalf("reply %+v, want the move and the project explanation", r)
+	}
+}
+
+func TestHookAdded_SkipsTheOpenSessionsScan(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	fx.in.Sessions = func() ([]string, error) { t.Fatal("the hook ran the open-sessions scan"); return nil, nil }
+	fx.setEntry("pypi", json.RawMessage(`{"command": "pypi-mcp"}`))
+	if r := fx.in.HookAdded("claude mcp add pypi -- pypi-mcp", "/w"); r.User != MovedMessage([]string{"pypi"}) {
+		t.Fatalf("reply %+v", r)
+	}
+}
