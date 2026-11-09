@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/zanetworker/aimux/internal/netguard"
 )
@@ -71,8 +72,12 @@ func (e *endpoints) add(name string, srv *server.MCPServer) {
 	// Clients such as Claude Code exit without ending their MCP session;
 	// expiring idle sessions runs the unregister hook, which stops their
 	// per-session backends. A client that comes back after expiry gets a new
-	// session, as the MCP spec requires.
-	ep := &endpoint{mcp: srv, http: server.NewStreamableHTTPServer(srv, server.WithSessionIdleTTL(e.ttl))}
+	// session, as the MCP spec requires. Per-session backends are keyed by
+	// that session, so only session-oriented protocol versions are offered:
+	// 2026-07-28 removed sessions, and its clients would all share one
+	// per-session backend that nothing ever stops.
+	ep := &endpoint{mcp: srv, http: server.NewStreamableHTTPServer(srv,
+		server.WithSessionIdleTTL(e.ttl), server.WithStreamableHTTPProtocolVersions(mcp.LegacyProtocolVersions()...))}
 	e.mu.Lock()
 	old := e.m[name]
 	e.m[name] = ep

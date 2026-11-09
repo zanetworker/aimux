@@ -204,7 +204,9 @@ func startStdioIn(ctx context.Context, server string, cfg ServerConfig, expand b
 		go b.awaitExit(drained)
 	}
 	init := mcp.InitializeRequest{}
-	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	// The initialize handshake: a newer version would first send
+	// server/discover, which older servers may ignore until a probe times out.
+	init.Params.ProtocolVersion = mcp.LATEST_LEGACY_PROTOCOL_VERSION
 	init.Params.ClientInfo = mcp.Implementation{Name: "aimux-mcp-proxy", Version: "1"}
 	res, err := c.Initialize(ctx, init)
 	if err == nil {
