@@ -66,6 +66,10 @@ type ReloadOptions struct {
 	// Changes, when set, triggers a reload on each value received
 	// (CatalogUpdater.Changes): tools a backend start found are published.
 	Changes <-chan struct{}
+	// ServerOptions are the options the servers given to Serve were built
+	// with (a call guard, a reject log). A reload builds its new and
+	// changed servers with them too, so a guarded server stays guarded.
+	ServerOptions []ServerOption
 }
 
 // reloadToolsPublished, when set (tests), runs right after a changed
@@ -141,7 +145,7 @@ func (r *reloader) reload() (ReloadResult, error) {
 		r.pool.CloseServer(name)
 	}
 	for _, name := range res.Added {
-		srv := newServer(name, r.pool)
+		srv := newServer(name, r.pool, r.opt.ServerOptions...)
 		srv.SetTools(r.tools(name, now[name])...)
 		r.eps.add(name, srv)
 	}
@@ -178,7 +182,7 @@ func (r *reloader) reload() (ReloadResult, error) {
 
 // tools decodes name's catalog tools and logs one line per tool it skips.
 func (r *reloader) tools(name string, raw []json.RawMessage) []server.ServerTool {
-	tools, skipped := serverTools(name, raw, r.pool)
+	tools, skipped := serverTools(name, raw, r.pool, buildConfig(r.opt.ServerOptions))
 	if r.log != nil {
 		for _, msg := range skipped {
 			_, _ = fmt.Fprintf(r.log, "skipped %s\n", msg)

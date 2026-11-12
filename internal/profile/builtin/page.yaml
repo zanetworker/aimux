@@ -1,0 +1,7 @@
+name: page
+extends: builtin:base
+runs: acp
+tools: []
+network:
+  default: deny
+  allow: [model]

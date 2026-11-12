@@ -102,7 +102,7 @@ aimux remote revoke iphone    # its next request fails
 - The server cannot prove that the iPhone's key sits in the Secure Enclave behind Face ID; that would take Apple's App Attest. It trusts the app it paired with.
 - A device's logins work only with the Tailscale login that paired it.
 - Failed logins are audited, never locked out: a signature cannot be guessed. A device on your tailnet that knows a device id can delay that device's next login by asking for many challenges (each device keeps 5 open, the oldest dropped), but cannot log in. Passkey logins (the web client) ask for challenges without a device id and share one such bucket, so any device on your tailnet can delay them without knowing a device id; it still cannot log in.
-- `remote_access.device_login: false` turns it off: any device signed in to your tailnet as an allowed login can use the API again, and `remote serve` prints a warning at start.
+- `remote_access.device_login: false` turns it off: any device signed in to your tailnet as an allowed login can use the API again. Since any local process can send the `Tailscale-User-Login` header itself, `remote serve` then refuses to start the tailnet listener (`device login is off: any local process could claim a tailnet login; pass --unsafe-no-device-login to run anyway`) unless you pass `--unsafe-no-device-login`; it still prints a warning at start. `--local-only` needs no device login.
 
 ## Approval notifications
 
@@ -368,6 +368,98 @@ How it is built:
 - Each row can show a one-line description under the title.
 
 
+## Local clients
+
+Programs on this Mac, such as Wingman, reach the API through a Unix socket of their own instead of the tailnet. The socket names the client: a local request needs no Tailscale login or device login, and nothing in the request can claim another client. The `Host` must be `aimux.local`, and a request from a web page (with an `Origin`) is refused.
+
+```bash
+aimux remote serve --local-only    # sockets only: no tailnet listener, no --allow, no device login
+```
+
+### Sockets
+
+Each client in `~/.config/aimux/clients.yaml` with a `socket` gets one; Wingman's default is `~/.aimux/clients/wingman.sock`.
+
+- A `socket` must be an absolute path or start with `~/` (expanded to your home folder). Any other relative path is refused when the file is read, because it would depend on where `remote serve` started. `socket: ""` gives the client none.
+- The socket's folder is created `0700`. An existing folder open to group or others stops `remote serve` (`socket directory ... must be private (0700) ...`). The socket is `0600`.
+- A socket left behind by a process that is gone is replaced. A path that is not a socket, or a socket another process answers on, stops `remote serve`.
+- The `device` client cannot have a socket: device requests are checked by device login, on the tailnet listener only.
+- `--local-only` needs at least one client with a socket.
+- A second `remote serve`, finding the Wingman socket answered by the same kind of serve, prints `already running (pid N)` and exits 0. A full serve that finds a `--local-only` one there (the one Wingman starts) exits 1 instead, naming its pid and `kill <pid>`: exiting 0 would leave the phone and web offline. The kind comes from the running serve's `GET /v1/health` (`localOnly`). Only the Wingman socket is checked, so this does not apply if you removed it from `clients.yaml`.
+- A `--local-only` serve exits on its own after 30 minutes with no local request (an open event stream counts as one) and no running profile session, and removes its sockets.
+- Profile sessions on the read-only tool gateway pick up re-pinned tools (`aimux browser setup`) within a minute: a work turn reloads the pins and retries backends that were down at most once a minute, and the sandbox policy follows the pins (its digest covers the compiled policy).
+
+### Client scopes
+
+`~/.config/aimux/clients.yaml` says which profiles each client may ask for and how much it may do. Without the file, these defaults apply:
+
+| Client | Who | Profiles | Socket | Limits |
+|---|---|---|---|---|
+| `wingman` | The Chrome side panel | `page`, `research`, `work-readonly`, `research-with-work` | `~/.aimux/clients/wingman.sock` | 2 sessions running, 20 turns a minute |
+| `device` | Requests over the tailnet (iPhone app, web client) | The same four and `coding` | none | none; step-up kinds `secure-enclave` |
+| `cli` | Your own terminal | `*` (every profile) | none | none |
+
+```yaml
+clients:
+  wingman:
+    profiles: [page, work-readonly]
+    max_sessions: 3
+```
+
+A client's entry overrides only the fields it sets. Fields left out keep that client's defaults, and clients not in the file keep theirs. Fields per client: `profiles`, `socket`, `max_sessions`, `turns_per_minute` and `step_up_kinds`. An unknown field, or any of these, stops `remote serve` with the file's path in the error:
+
+- the `*` wildcard for any client but `cli`,
+- `coding` in `wingman`'s profiles,
+- a negative limit, or a limit of `0` for `wingman` (limits may be raised, not turned off; `0` means unlimited for other clients),
+- an empty `step_up_kinds` for `device`.
+
+Wingman can never start a profile that runs on the Mac itself (`runs: host`, such as `coding`), whatever `clients.yaml` says. A new session without a profile counts as `coding`, so it is refused for Wingman too (`403 profile_not_allowed`).
+
+The limits count what a client has running, not what it keeps: `max_sessions` is how many of its sessions have a turn running at once, and `turns_per_minute` how many turns it started in the last minute (a follow-up message counts like a new question). Over either, the request answers `429 client_limit` with `Retry-After`, and nothing starts.
+
+### Step-up
+
+A request from a device that would run a session on the Mac itself (a `runs: host` profile such as `coding`) needs a recent login: a device login under 60 seconds old, from a device kind in the `device` client's `step_up_kinds` (by default a Secure Enclave iPhone, so not a passkey in the web client). Otherwise it answers `403 step_up_required` with `maxAge: 60`: log in again and retry. Without device login there is no login to check, so the request is refused.
+
+`remote_access.step_up_legacy: true` applies the same step-up to new sessions started without a profile, which run on the Mac like `coding`. It is off by default so existing clients keep working.
+
+### What a local client can reach
+
+A local client other than `cli` sees and drives only the profile sessions it started.
+
+| Allowed | Refused |
+|---|---|
+| `GET /v1/health`, `GET /v1/openapi.yaml`, `GET /v1/profiles`, `GET /v1/profiles/{name}`, `GET /v1/sessions` (its own sessions only), `POST /v1/sessions` | Everything else: search, projects, terminal routes, Open on Mac, approvals, devices, `describe`, the queue routes, the web client. These answer `403 forbidden_for_client` |
+| For a session it started: the detail, `events`, `messages`, `cancel` and `meta` | The same routes on any other session, a host session or one that does not exist. These answer `404 not_found` |
+
+Refusals happen before any handler runs, so nothing is read or done for them.
+
+### Profile sessions
+
+A session under a profile runs on the engine for the profile's `runs`: `acp` sessions on the Wingman ACP adapter in `~/.aimux/wingman/adapter` (the folder of `aimux browser install`), working in `~/.aimux/wingman/sessions`, and `sandbox` sessions with `claude` in the profile's OpenShell sandbox. Profiles with `runs: host` or `run` pass the checks but have no engine in this release; the request is refused and nothing starts.
+
+A session is recorded in `~/.aimux/sessions/profiles.json` with its profile, digest, client and page. Sandbox sessions recorded there resume after a restart. A new question on the same page from the same client and profile goes to the same session.
+
+The read-only tool gateway listens on `127.0.0.1:7390`. It starts on the first sandbox turn that needs it, not when `remote serve` starts, and stops when `remote serve` does. Each sandbox session gets its own token, which reaches only that profile's pinned tools. While the gateway holds the port, `aimux browser verify` cannot run: stop `remote serve`, run `verify`, and start `remote serve` again.
+
+### Audit log
+
+`~/.aimux/logs/remote-audit.log` (owner-only) also gets one line for every request of a local client, refused ones and reads included: the time, the `client`, the action (the route's, such as `new_session` or `send`), the session in the path, the `profile` and its `digest`, the page's host (`urlHost`, never its path or query) and the result (`ok` or `http_<status>`).
+
+It never holds a question, an answer, a page, a title, a token or a full URL. `remote serve` opens the log at start, for device login or for a local client's socket, and stops if it cannot.
+
+### Upgrading to a version with local clients
+
+Every `aimux remote serve` now:
+
+- creates `~/.aimux/wingman/sessions`,
+- listens on the Wingman socket (unless `clients.yaml` removes it),
+- refuses to start when the socket's folder, `~/.aimux/clients` by default, is open to group or others,
+- opens the audit log, and
+- refuses to start the tailnet listener when device login is off, unless you pass `--unsafe-no-device-login`.
+
+Wingman's old broker held `127.0.0.1:7390` while a panel was open and for about 30 seconds after the last one closed. The broker is gone in this version, but one still running from before the upgrade keeps the port until then: close the panels and wait before the first sandbox turn. A failed gateway start is retried by the next sandbox turn.
+
 ## Security model
 
 - With [device login](#device-login) on (the default), every request other than health, the contract, the web client's files and the three login endpoints also needs a live login from a paired device.
@@ -376,6 +468,7 @@ How it is built:
 - Every request must carry the `Tailscale-User-Login` header that `tailscale serve` sets for the caller (and overwrites if a client sends its own). The login must be in `allowed_logins`; an empty list admits nobody.
 - Browser requests are accepted only from the API's own origin (a client served by `remote serve` itself) (`https://<this host>:<port>`, as `tailscale serve` exposes it). A request from any other page is refused, including a plain cross-site GET such as an image tag (browsers mark those with `Sec-Fetch-Site`).
 - These checks keep out the tailnet and web pages, not programs on this machine: any local process (of any user account) can connect to `127.0.0.1` and send the same `Host` and `Tailscale-User-Login` headers. Run it only on a machine whose local users and programs you trust as much as yourself.
+- A [local client's](#local-clients) socket is `0600` in a `0700` folder, so only your account reaches it. The client it names is held to its [scope](#client-scopes), its own sessions and its limits, and each of its requests is audited. A program running as you can still open the socket; the scope limits what that client can do, not who may connect.
 - Sessions open in a terminal on the Mac are read-only through `POST /v1/sessions/{id}/messages`: sending to them is refused (`open_in_terminal`), because aimux does not drive a session another process owns. With terminal input on, `POST /v1/sessions/{id}/terminal/messages` types into the terminal itself under the checks in [Typing into terminal sessions](#typing-into-terminal-sessions). `GET /v1/sessions/{id}` shows their latest turns; the event stream carries only turns started through this API, so live progress of a terminal session is not streamed yet.
 - A permission request waits for an answer from a client. Without one it is denied after `approval_timeout`.
 - Step detail shows a command's full text and a failed step's error text on the phone, as replies already show Claude's text, so a command that carries or prints a secret shows that secret there.
@@ -390,17 +483,19 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 
 | Method and path | Purpose |
 |---|---|
-| `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`, `push`, `terminal_input`, `device_login`, `queue`, `describe`, `send_now`). With the `describe` capability it also has `"naming":{"today","limit","failing","reason","paused"}` (today's automatic naming; see [Finding sessions](#finding-sessions)). With device login on it also has `"session"`: `live` when the request carries a live login, else `none`. With `remote_access.links.jira_base` set it also has `"links":{"jiraBase","jiraProjects"}` (see [Links in replies](#links-in-replies)) |
+| `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`, `push`, `terminal_input`, `device_login`, `queue`, `describe`, `send_now`, `profiles`). With the `describe` capability it also has `"naming":{"today","limit","failing","reason","paused"}` (today's automatic naming; see [Finding sessions](#finding-sessions)). With device login on it also has `"session"`: `live` when the request carries a live login, else `none`. While the profile sessions file cannot be read it also has `"profileStore"`, naming the file and how to recover (no profile session can be routed until then). With `remote_access.links.jira_base` set it also has `"links":{"jiraBase","jiraProjects"}` (see [Links in replies](#links-in-replies)) |
 | `POST /v1/auth/pair` | Body `{"code","kind","publicKey",...}`: pair this device with a code from `aimux remote pair` and log it in (capability `device_login`). `kind` is `secure-enclave` (with `signature`, over `aimux-pair-v1\n<host>\n<code>`) or `webauthn` (with `credentialId`, `userHandle`, `clientDataJSON` and `authenticatorData` from the passkey's creation). The exact fields and signed strings are in the contract |
 | `POST /v1/auth/challenge` | Body `{"deviceId"}`, or `{}` for a passkey that finds its own device: `{"challenge"}`, valid 60 s, single use |
 | `POST /v1/auth/login` | Body `{"deviceId","challenge","signature",...}`: `{"deviceId","name"}`, plus `token` for the iPhone app (send it as `Authorization: Bearer <token>`); the web client gets the `__Host-aimux_session` cookie instead |
 | `POST /v1/auth/logout` | End this login: `{"status":"logged_out"}` |
-| `GET /v1/sessions?limit=50` | `{"sessions":[...],"lastOnMac":{"id","at"}}`: recent Claude sessions, newest first, with `state`, `lastPrompt`, `pinned` and an optional `description`; `lastPrompt` is the last message the person typed; `lastOnMac` is the session last in front on the Mac (absent when unknown; kept for older clients). Sessions also carry optional `folder`, `mac` and `working` (see [Finding sessions](#finding-sessions)). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`) |
+| `GET /v1/sessions?limit=50` | `{"sessions":[...],"lastOnMac":{"id","at"}}`: recent Claude sessions, newest first, with `state`, `lastPrompt`, `pinned` and an optional `description`; `lastPrompt` is the last message the person typed; `lastOnMac` is the session last in front on the Mac (absent when unknown; kept for older clients). Sessions also carry optional `folder`, `mac` and `working` (see [Finding sessions](#finding-sessions)). Sessions started by a program (`claude -p`) are left out unless `include_automated=1`. Sessions started through this API are listed too, except one whose first message failed before Claude saved it (then `unavailable`). `client=<name>` and `url=<page>` list the profile sessions of that client or on that page instead, each with `profile`, `client` and `page` (`url`, `title`); a local client always gets only its own |
 | `GET /v1/sessions/{id}?turns=20` | One session and its last turns: `{..session, "turns":[{"number","time","user","reply","tools":[{"name","snippet","ok","detail"}]}], "stats":{...}, "repo":{"web","branch","root"}}`. `repo` is the session folder's GitHub or GitLab repository (its `origin` remote as a web address without credentials: `https` for ssh remotes, while an `http` or `https` remote keeps its scheme and a non-default port; the checked-out branch; and `root`, the repository folder on the Mac; the session is looked up by the working directory it recorded); it is left out for any other folder and for a session that recorded no working directory. `stats` is what the session has cost and used so far: `costUsd`, `tokensIn`, `tokensOut`, `cacheReadTokens`, `cacheWriteTokens`, `turns`, `durationMin`, and `startTime`, `model` and `gitBranch` when known. It is left out for a session not in the index yet (just created, file not written). A tool's `detail` is optional and holds `input` (the full command or target; left out when `snippet` already shows it, as for a path or a search query), `error`, and for an edit `old` and `new` text (a Write's content arrives as `new`), cut at 4096, 2048, 4096 and 4096 bytes with a trailing `…`; it is left out when the tool has none. Long sessions are read from the end, so `number` counts turns in the part read: use it for order, not as a stable id. A session in state `open_in_terminal` also has `terminal`: `{"status","canType","working","reason","prompt"}` (see below). A session with messages queued also has `queue` (the same object as `GET …/queue`) |
-| `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`. Starts a turn |
+| `POST /v1/sessions/{id}/messages` | Body `{"text","key"}`, and for a profile session `"model"` (`sonnet` or `opus`, for this turn; any other value is `400 bad_request`). Starts a turn |
 | `POST /v1/sessions/{id}/terminal/messages` | Body `{"text","key","replace","now"}` (`replace` optional: replace a draft in the box even with `keep_drafts` on; `now` optional, capability `send_now`: Send now, typed also while Claude works on a turn with every other check kept, `409 busy` while another message is being typed, not together with `replace`, audited as `terminal_send_now`). Types the text into the session's terminal pane, then Enter: `202 {"status":"typed"}` (capability `terminal_input`). Bodies over 64 KiB or with unknown fields are `400 bad_request`; a driver failure is `500 internal` with a fixed message, its detail only in `remote serve`'s log |
 | `POST /v1/sessions/{id}/terminal/keys` | Body `{"promptId","option","key"}`. Presses `option` (an option's `key`) on the prompt `promptId` if it still shows: `202 {"status":"typed"}` (capability `terminal_input`) |
-| `POST /v1/sessions` | Body `{"cwd","text","key"}`. Starts a session in one of `/v1/projects` and sends its first message (capability `new_sessions`) |
+| `POST /v1/sessions` | Body `{"cwd","text","key"}`. Starts a session in one of `/v1/projects` and sends its first message (capability `new_sessions`). With `"profile"` (capability `profiles`) it needs no `cwd` and starts a session under that profile instead; see **Profile sessions** below |
+| `GET /v1/profiles` | `{"profiles":[{"name","runs","available","digest","allowed"}]}`, sorted by name; `allowed` is whether the caller's client may ask for the profile (capability `profiles`) |
+| `GET /v1/profiles/{name}` | The profile resolved through its `extends` chain, as `aimux profile show --json` prints it, plus `digest`, `available` and `allowed`; `404 unknown_profile` |
 | `GET /v1/sessions/{id}/events` | The session's events: a server-sent event stream, or one JSON page `{"events","log"}` with `?wait=0` |
 | `POST /v1/sessions/{id}/cancel` | Stop the running turn |
 | `GET /v1/sessions/{id}/queue` | The session's queue `{"state","reason","note","items":[{"id","text","state","created"}]}` (capability `queue`); `state` is `running` or `paused`, item states are `waiting`, `sending` and `answering`. A session without a queue has an empty one |
@@ -410,7 +505,7 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 | `POST /v1/sessions/{id}/queue/resume` | Resumes a paused queue; answers the queue |
 | `POST /v1/sessions/{id}/queue/{item}/send-now` | Body `{"key"}` (optional, may be empty; capability `send_now`). Send now: types a waiting message during Claude's turn and answers the queue without it; the others keep their order. A refusal keeps the message at its place and answers the terminal's code (`not_at_input`, `mac_in_use`, `draft_in_box`, `box_has_unsent` ...). `409 not_supported` for a session no terminal holds (started from the phone), `409 item_sending` for a message being sent or answered, `409 busy` while another message is being typed (a queued one or another Send now), `403 disabled` with terminal input off. A retry with the same `key` within 10 minutes answers the queue without typing again |
 | `POST /v1/sessions/{id}/open-on-mac` | No body. Open on Mac: closes the session's idle background process and opens it in a pane of aimux's iTerm2 window; answers `{"state":"open_in_terminal"}` once Claude holds it there (up to about 50 s). `409 busy`, `409 open_in_terminal`, `409 in_use`, `409 not_started`, `503 no_terminal`, `403 not_authorized`, `504 timeout`, `404 unknown_session`. Audit action `open_on_mac` |
-| `PATCH /v1/sessions/{id}/meta` | Body with `title`, `description` and/or `pinned` (at least one; title up to 80 characters, description up to 300, one line, an empty string clears your text). Answers the title, description and pin as clients show them (capability `describe`) |
+| `PATCH /v1/sessions/{id}/meta` | Body with `title`, `description`, `pinned` and/or `hidden` (at least one; `"hidden": true` removes the session from the lists, which is Wingman's history delete: the transcript stays and the page's next question starts a new session; a profile session can only be hidden, and a local client may hide only its own; title up to 80 characters, description up to 300, one line, an empty string clears your text). Answers the title, description and pin as clients show them (capability `describe`) |
 | `POST /v1/sessions/{id}/describe` | Update summary: asks the model now for a new title and description; `{title, description, changed, kept}`. `409 owner_set` when you wrote both, `409 describe_running`; `502 naming_auth`, `naming_model`, `naming_unreadable`, `naming_failed`, `503 naming_unavailable`, `504 naming_timeout` (capability `describe`) |
 | `POST /v1/approvals/{id}` | Body `{"option": "<optionId>"}` from the approval event, or `{"option": ""}` to deny |
 | `POST /v1/devices` | Body `{"token","environment"}`: an APNs device token (hex) and `sandbox` (a build run from Xcode) or `production` (TestFlight, App Store). The phone then gets an alert for each new approval (capability `push`). Register on every launch; tokens change |
@@ -419,6 +514,8 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 | `GET /v1/projects` | `{"projects":[{"path","name","lastActive"}]}`: up to 12 folders of recent sessions, where a new session may start |
 
 **Starting a turn.** Both `POST /v1/sessions/{id}/messages` and `POST /v1/sessions` answer `202 {"id","turn","after","events"}`: the session, the turn, and its events URL from just before the turn. A retry with the same non-empty `key` returns the same session and turn instead of running it twice; keys live until the server restarts. When every run slot (`max_runs`) is busy, a message is still accepted and the turn ends with `turn_error`; creating a session fails at once with `503 too_many_runs`.
+
+**Profile sessions.** `POST /v1/sessions` with `profile` starts a session under that profile, or continues the one the same client already has on the same `url` under the same profile. Fields: `text` (required), `url` and `title` (the page the question is about), `pageText` (the page's text for a new session, at most 512 KiB; ignored when the session continues), `model` (`sonnet` or `opus` for this turn; omitted keeps the profile's default) and `key` (a retry key scoped to the client, profile and page). Every check runs first, and a refusal starts nothing and counts no turn: `400 unknown_profile`, `403 profile_not_allowed` (outside the client's scope, or a host profile for Wingman), `403 step_up_required` (see [Step-up](#step-up)), `409 profile_not_available`, `413 page_too_large`, `429 client_limit` with `Retry-After`. A profile with no engine here yet (`runs: host`, such as `coding` and `base`, or `runs: run`) is listed with `available: false` and refused with `409 profile_not_available`: start a host session without a profile (`cwd`) instead. A failure inside the engine answers `500 internal` with a generic message; the detail goes to the `remote serve` log only. A body over 4 MiB is refused (1 MiB without a `profile`). A follow-up (`POST /v1/sessions/{id}/messages`) on a profile session is checked against the client's scope as it is now, so a profile removed from `clients.yaml` stops its existing sessions after `remote serve` restarts (`403 profile_not_allowed`); while the profile store cannot be read, follow-ups answer `500 internal`. In `GET /v1/sessions/{id}`, a profile session's `user` is the question asked, without the page text the engine was sent. Local clients are held to the routes in [What a local client can reach](#what-a-local-client-can-reach).
 
 **Session states.** `idle` (can be continued), `busy` (aimux is running a turn), `open_in_terminal` (read only here while a terminal on the Mac holds it), `unavailable` (created here, but its first message failed before Claude saved it).
 
@@ -439,7 +536,7 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 
 **Queue events.** The events request with `queue=1` also carries `queue` events, each the session's whole queue after a change; without `queue=1` they are left out, so older clients never see them. A detail read can be older than a `queue` event received just before it; the newest event wins on the next change.
 
-**Error codes.** `unauthorized` (401), `login_required` (401, device login is on and the request has no live login: log in, or pair if that fails), `forbidden` (403), `bad_request` (400), `invalid_option` (400), `unknown_session` (404), `queue_full` (409), `item_sending` (409), `unknown_item` (404), `no_such_approval` (404), `not_supported` (404, this server does not offer the endpoint; see `capabilities`; 409 for Send now on a session not open in a terminal), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process such as `aimux chat` drives the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is unreadable, so aimux will not risk a second writer), `too_many_runs` (503), `internal` (500). `busy` also answers a direct message while the session's queue is sending. Terminal input adds `disabled` (403, terminal input is off), `bad_text` (400 for `POST …/terminal/messages`; 409 for `POST …/queue`; control characters, or a leading `!` or `/`), and, all 409: `not_in_terminal`, `not_claude`, `mac_in_use`, `no_terminal_driver`, `automation_denied` (macOS refused aimux's Automation access to iTerm2), `not_at_input`, `not_submitted` (typed but Enter not pressed; the text waits in the input box), `draft_in_box` (409, a draft kept by `keep_drafts`), `box_has_unsent` (409, the box still holds aimux's own earlier message, typed but not sent: Retry it, or clear the box; another message never erases it unless sent with `"replace": true`), `unsent_unconfirmed` (409, the box shows a paste marker for the same message, but aimux can't confirm it is its own because the Mac had input since or `claude` restarted: send or clear it at the Mac), `box_not_cleared` (409, the draft would not clear), `no_prompt`, `prompt_changed`. Finding sessions adds `owner_set` (409), `describe_running` (409), `naming_timeout` (504), `naming_auth`, `naming_model`, `naming_unreadable`, `naming_failed` (502) and `naming_unavailable` (503). Device login adds `pairing_failed` (401, wrong, used, expired or burned code, or a bad proof), `pairing_conflict` (409, the name is taken), `unknown_device` (404) and `login_failed` (401).
+**Error codes.** `unauthorized` (401), `login_required` (401, device login is on and the request has no live login: log in, or pair if that fails), `forbidden` (403), `bad_request` (400), `invalid_option` (400), `unknown_session` (404), `queue_full` (409), `item_sending` (409), `unknown_item` (404), `no_such_approval` (404), `not_supported` (404, this server does not offer the endpoint; see `capabilities`; 409 for Send now on a session not open in a terminal), `open_in_terminal` (409), `busy` (409), `in_use` (409, another aimux process such as `aimux chat` drives the session), `not_running` (409, cancel with no turn), `ownership_unknown` (503, Claude's session registry is unreadable, so aimux will not risk a second writer), `too_many_runs` (503), `internal` (500). `busy` also answers a direct message while the session's queue is sending. Terminal input adds `disabled` (403, terminal input is off), `bad_text` (400 for `POST …/terminal/messages`; 409 for `POST …/queue`; control characters, or a leading `!` or `/`), and, all 409: `not_in_terminal`, `not_claude`, `mac_in_use`, `no_terminal_driver`, `automation_denied` (macOS refused aimux's Automation access to iTerm2), `not_at_input`, `not_submitted` (typed but Enter not pressed; the text waits in the input box), `draft_in_box` (409, a draft kept by `keep_drafts`), `box_has_unsent` (409, the box still holds aimux's own earlier message, typed but not sent: Retry it, or clear the box; another message never erases it unless sent with `"replace": true`), `unsent_unconfirmed` (409, the box shows a paste marker for the same message, but aimux can't confirm it is its own because the Mac had input since or `claude` restarted: send or clear it at the Mac), `box_not_cleared` (409, the draft would not clear), `no_prompt`, `prompt_changed`. Finding sessions adds `owner_set` (409), `describe_running` (409), `naming_timeout` (504), `naming_auth`, `naming_model`, `naming_unreadable`, `naming_failed` (502) and `naming_unavailable` (503). Profiles add `unknown_profile` (400 for a new session, 404 for `GET /v1/profiles/{name}`), `profile_not_allowed` (403), `step_up_required` (403, with `maxAge`), `profile_not_available` (409; for a profile that runs on the Mac, `<profile> sessions start without a profile today (POST /v1/sessions with cwd)`; otherwise `<profile> is not available yet`), `page_too_large` (413), `client_limit` (429, with `Retry-After`), and for local clients `forbidden_for_client` (403) and `not_found` (404). Device login adds `pairing_failed` (401, wrong, used, expired or burned code, or a bad proof), `pairing_conflict` (409, the name is taken), `unknown_device` (404) and `login_failed` (401).
 
 ## Settings
 
@@ -448,11 +545,13 @@ If `~/.aimux/config.yaml` cannot be read or parsed, `aimux remote serve` stops w
 | Key under `remote_access` | Flag | Default | Meaning |
 |---|---|---|---|
 | `port` | `--port` | `7382` | Port on `127.0.0.1` |
-| `allowed_logins` | `--allow` | none | Tailscale logins admitted |
+| `allowed_logins` | `--allow` | none | Tailscale logins admitted; not needed with `--local-only` |
+| | `--local-only` | off | Serve only the local clients' sockets (see [Local clients](#local-clients)) |
+| | `--unsafe-no-device-login` | off | Start the tailnet listener although `device_login` is `false` |
 | `adapter` | | `npx -y @agentclientprotocol/claude-agent-acp` | ACP adapter command |
 | `max_runs` | | `2` | Sessions running at once; each is a full agent process |
 | `approval_timeout` | | `10m` | Unanswered permission requests are denied after this |
-| `device_login` | | `true` | Only paired devices, logged in with Face ID or Touch ID, may use the API (see [Device login](#device-login)); `false` admits any device of an allowed login, with a warning at start |
+| `device_login` | | `true` | Only paired devices, logged in with Face ID or Touch ID, may use the API (see [Device login](#device-login)); `false` admits any device of an allowed login and needs `--unsafe-no-device-login` (or `--local-only`) to start |
 | `hostnames` | | detected from `tailscale status` | `Host` names to accept: this machine's tailnet names |
 | `push.ntfy.topic` | | off | ntfy topic for approval notifications (see [Approval notifications](#approval-notifications)) |
 | `push.ntfy.server` | | `https://ntfy.sh` | ntfy server |

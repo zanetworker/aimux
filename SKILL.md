@@ -81,10 +81,9 @@ Reuse on every invocation:
 aimux spawn --profile mysetup
 ```
 
-Explicit flags override profile values. Manage profiles:
+Explicit flags override profile values. Manage saved profiles (`aimux profile list` lists the v2 profiles; `aimux profile migrate` converts the saved ones):
 
 ```bash
-aimux profile list --json
 aimux profile get mysetup --json
 aimux profile delete mysetup
 ```

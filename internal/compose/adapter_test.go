@@ -75,3 +75,15 @@ func TestSandboxNameUniqueness(t *testing.T) {
 		t.Errorf("consecutive timestamps produced same name: %q", a)
 	}
 }
+
+func TestSandboxImage_DefaultsToWingmanImage(t *testing.T) {
+	for _, tc := range []struct{ opt, engine, want string }{
+		{"", "", "localhost/wingman-sandbox:2.1.319"},
+		{"", "engine/img:1", "engine/img:1"},
+		{"opt/img:2", "engine/img:1", "opt/img:2"},
+	} {
+		if got := sandboxImage(tc.opt, tc.engine); got != tc.want {
+			t.Errorf("sandboxImage(%q, %q) = %q, want %q", tc.opt, tc.engine, got, tc.want)
+		}
+	}
+}

@@ -154,6 +154,8 @@ var routes = []struct {
 	{"POST", "/v1/sessions", `{"cwd":"/w/app","text":"hi"}`, false},
 	{"GET", "/v1/search?q=x", "", false},
 	{"GET", "/v1/projects", "", false},
+	{"GET", "/v1/profiles", "", false},
+	{"GET", "/v1/profiles/page", "", false},
 	{"POST", "/v1/sessions/s1/messages", `{"text":"hi"}`, false},
 	{"POST", "/v1/sessions/s1/terminal/messages", `{"text":"hi"}`, false},
 	{"POST", "/v1/sessions/s1/terminal/keys", `{"promptId":"p","option":"1"}`, false},

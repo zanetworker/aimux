@@ -47,6 +47,9 @@ type Spec struct {
 	Args    []string
 	Cwd     string   // the session's working directory
 	Env     []string // extra KEY=VALUE pairs on top of aimux's environment
+	// Meta is sent as _meta on session/new and session/load, so options such
+	// as claude-agent-acp's tool lockdown also hold for a reloaded session.
+	Meta map[string]any
 }
 
 // Approver decides a permission request. It returns the chosen option ID,
@@ -67,12 +70,13 @@ type Run struct {
 	// the session, so a late one would stop the next turn.
 	cancelMu sync.Mutex
 
-	mu      sync.Mutex
-	events  []Event
-	seq     int64
-	loading bool
-	onEvent func(Event)
-	closed  bool
+	mu            sync.Mutex
+	configOptions []acp.SessionConfigOption // the session's settings, as the agent last reported them
+	events        []Event
+	seq           int64
+	loading       bool
+	onEvent       func(Event)
+	closed        bool
 	// prompting is true while a prompt is in flight; cancelPending records a
 	// Cancel that arrived before the prompt was sent, which then ends it.
 	prompting     bool
@@ -95,14 +99,15 @@ func Start(ctx context.Context, spec Spec, sessionID string, approve Approver) (
 	}
 	r.sessionID = acp.SessionId(sessionID)
 	r.setLoading(true)
-	_, err = r.conn.LoadSession(ctx, acp.LoadSessionRequest{
-		SessionId: r.sessionID, Cwd: spec.Cwd, McpServers: []acp.McpServer{},
+	resp, err := r.conn.LoadSession(ctx, acp.LoadSessionRequest{
+		SessionId: r.sessionID, Cwd: spec.Cwd, McpServers: []acp.McpServer{}, Meta: spec.Meta,
 	})
 	r.setLoading(false)
 	if err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("load session %s in %s: %w", sessionID, spec.Cwd, err)
 	}
+	r.setConfigOptions(resp.ConfigOptions)
 	return r, nil
 }
 
@@ -113,13 +118,97 @@ func StartNew(ctx context.Context, spec Spec, approve Approver) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := r.conn.NewSession(ctx, acp.NewSessionRequest{Cwd: spec.Cwd, McpServers: []acp.McpServer{}})
+	resp, err := r.conn.NewSession(ctx, acp.NewSessionRequest{Cwd: spec.Cwd, McpServers: []acp.McpServer{}, Meta: spec.Meta})
 	if err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("new session in %s: %w", spec.Cwd, err)
 	}
 	r.sessionID = resp.SessionId
+	r.setConfigOptions(resp.ConfigOptions)
 	return r, nil
+}
+
+func (r *Run) setConfigOptions(opts []acp.SessionConfigOption) {
+	r.mu.Lock()
+	r.configOptions = opts
+	r.mu.Unlock()
+}
+
+// modelOption is the session's model selector: the select option in the
+// model category, or one with id "model" when the agent sets no category.
+func modelOption(opts []acp.SessionConfigOption) *acp.SessionConfigOptionSelect {
+	var byID *acp.SessionConfigOptionSelect
+	for _, o := range opts {
+		if o.Select == nil {
+			continue
+		}
+		if o.Select.Category != nil && *o.Select.Category == acp.SessionConfigOptionCategoryModel {
+			return o.Select
+		}
+		if o.Select.Id == "model" && byID == nil {
+			byID = o.Select
+		}
+	}
+	return byID
+}
+
+func selectValues(o acp.SessionConfigSelectOptions) []string {
+	var vals []string
+	if o.Ungrouped != nil {
+		for _, v := range *o.Ungrouped {
+			vals = append(vals, string(v.Value))
+		}
+	}
+	if o.Grouped != nil {
+		for _, g := range *o.Grouped {
+			for _, v := range g.Options {
+				vals = append(vals, string(v.Value))
+			}
+		}
+	}
+	return vals
+}
+
+// Model is the session's current model as the agent reports it, or "" when
+// the agent offers no model selector.
+func (r *Run) Model() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if o := modelOption(r.configOptions); o != nil {
+		return string(o.CurrentValue)
+	}
+	return ""
+}
+
+// SetModel switches the session to model, which must be one of the values
+// the agent's model selector offers. Call it between prompts.
+func (r *Run) SetModel(ctx context.Context, model string) error {
+	r.mu.Lock()
+	o := modelOption(r.configOptions)
+	var id acp.SessionConfigId
+	var offered []string
+	if o != nil {
+		id, offered = o.Id, selectValues(o.Options)
+	}
+	r.mu.Unlock()
+	if o == nil {
+		return fmt.Errorf("session %s: the agent offers no model selector, cannot switch to %s", r.sessionID, model)
+	}
+	found := false
+	for _, v := range offered {
+		found = found || v == model
+	}
+	if !found {
+		return fmt.Errorf("session %s: %w: %q (offered: %s)", r.sessionID, ErrModelNotOffered, model, strings.Join(offered, ", "))
+	}
+	resp, err := r.conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{
+		SessionId: r.sessionID, ConfigId: id, Value: acp.SessionConfigValueId(model),
+	}})
+	if err != nil {
+		return fmt.Errorf("session %s: set model %s: %w", r.sessionID, model, err)
+	}
+	r.setConfigOptions(resp.ConfigOptions)
+	return nil
 }
 
 // SessionID is the session this run continues.
@@ -314,6 +403,9 @@ func (r *Run) emit(kind string, v any) {
 type client struct{ r *Run }
 
 func (c client) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	if u := n.Update.ConfigOptionUpdate; u != nil {
+		c.r.setConfigOptions(u.ConfigOptions) // the agent changed a setting itself, e.g. its model
+	}
 	c.r.emit(KindUpdate, n.Update)
 	return nil
 }
@@ -353,6 +445,10 @@ func (c client) ReadTextFile(context.Context, acp.ReadTextFileRequest) (acp.Read
 func (c client) WriteTextFile(context.Context, acp.WriteTextFileRequest) (acp.WriteTextFileResponse, error) {
 	return acp.WriteTextFileResponse{}, errNotOffered
 }
+
+// ErrModelNotOffered is returned by SetModel for a model the agent's model
+// selector does not list.
+var ErrModelNotOffered = errors.New("model is not offered by the agent")
 
 // errNotOffered answers requests for capabilities aimux does not advertise.
 var errNotOffered = errors.New("aimux does not offer this capability to agents")

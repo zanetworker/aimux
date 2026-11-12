@@ -94,13 +94,7 @@ func (e *Engine) LaunchInSandbox(provider, dir string, opts LaunchOpts) (*Launch
 		}
 	}
 	_ = dir // dir is used for workspace context in future extensions
-	image := opts.Image
-	if image == "" {
-		image = e.image
-	}
-	if image == "" {
-		image = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
-	}
+	image := sandboxImage(opts.Image, e.image)
 
 	// Use a UUID so it can double as the agent's pinned Claude session id
 	// (claude --session-id requires a valid UUID). Pinning the session id
@@ -409,4 +403,16 @@ func otelSandboxEnv(hostEndpoint, sessionID string) map[string]string {
 		env["OTEL_EXPORTER_OTLP_LOGS_HEADERS"] = "X-Aimux-Session-Id=" + sessionID
 	}
 	return env
+}
+
+// sandboxImage picks the launch image: the per-launch option, then the
+// engine's configured image, then the default.
+func sandboxImage(opt, engine string) string {
+	if opt != "" {
+		return opt
+	}
+	if engine != "" {
+		return engine
+	}
+	return "localhost/wingman-sandbox:2.1.319"
 }

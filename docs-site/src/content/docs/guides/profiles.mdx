@@ -1,0 +1,111 @@
+---
+title: Profiles
+description: Named contracts for what an agent session may reach, and where it runs
+---
+
+A profile says what a session may use (tools, network, files, credentials, user settings) and where it runs. Remote clients, such as the iPhone app and the [Wingman](/guides/wingman/) side panel, ask for a session by profile name; aimux holds each client to the profiles its [client scope](/guides/remote-access/#client-scopes) allows.
+
+Profiles are v2 manifests. They replace the v1 profiles (`aimux profile save`, a provider, directory, model and mode under a name), which keep working until you migrate them.
+
+## Where they live
+
+Builtin profiles ship with aimux and cannot be edited. Your own are YAML files, one per profile, named `<name>.yaml`, in `$AIMUX_PROFILE_DIR` or, when that is unset, `~/.config/aimux/profiles`. A missing folder means no user profiles. `remote serve` reads the folder each time it lists or resolves a profile, so a new file shows up without a restart.
+
+A bad file is skipped and reported (one line on stderr per file, or in the `remote serve` log); the good ones still load. A file is refused when it:
+
+- has a field aimux does not know,
+- has a `name` that differs from its file name,
+- has the name of a builtin (`builtin:<name>` always reaches the builtin),
+- has no `extends`. User profiles must extend another profile; defining a new root is not supported yet.
+
+## Format
+
+```yaml
+name: my-notes
+extends: builtin:work-readonly
+tools: [wiki:readonly]          # narrower than the parent's four sets
+network: { default: deny, allow: [model, gateway] }
+settings: { inherit_user: false }
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | Must equal the file name without `.yaml` |
+| `extends` | The profile this one narrows: `builtin:<name>` or the name of another user profile |
+| `harness` | The agent harness; `claude-code` (the default for a root, and the only one with an adapter). A child cannot change it |
+| `model` | `provider` and `name`; a child may set either. For `acp` sessions, `name` (`sonnet` or `opus`) is the default when a request names no model |
+| `runs` | Where it runs: `host` (the Mac itself, with your settings), `acp` (a no-tools agent session on the Wingman adapter), `sandbox` (an OpenShell sandbox), `run` (reserved for runs started by a later release). Default `host` for a root |
+| `dir` | A working directory carried over from a v1 profile; not a permission |
+| `tools` | Exact tool names or reviewed sets such as `jira:readonly`; `[]` is none. A set whose server has no pinned tools (its backend was down at `aimux browser setup`, or the name is misspelled) is left out and grants nothing; a profile whose sets all lack pins fails to compile |
+| `network` | `default` (`deny` or `allow`) and `allow`, a list of `model`, `gateway` or `web` |
+| `files` | `read` and `write`: paths the session may see or change |
+| `credentials` | Names of credentials the session may use |
+| `settings` | `inherit_user`: load your own harness settings (default `false`) |
+| `unsafe_patterns` | `true` allows `*` and `?` in `tools`; without it a pattern is rejected |
+| `roles` | Role to profile name, for profiles that run several roles; targets are not checked yet |
+
+### Narrow-only inheritance
+
+A child inherits every field of its parent and may only narrow it:
+
+- A list the child leaves out is inherited. A list it writes must be a subset of the parent's (an empty list is always a subset).
+- `network.default` may not go from `deny` to `allow`.
+- `settings.inherit_user` may not go from `false` to `true`.
+- `harness` cannot change.
+- `runs` may only move toward more isolation: `host`, then `acp`, then `sandbox`. `run` stays `run`.
+
+A child that widens is an error naming the profile and the field, for example `child widens parent: profile "widener" adds "jira:readonly" to tools`. Cycles and unknown parents are errors too.
+
+### Digests
+
+Every resolved profile has a digest: `sha256:` and the hash of its canonical JSON (fixed field order, lists sorted). It changes whenever any resolved field does. Sessions and audit lines record it, and `GET /v1/profiles` shows it, so a client can tell that a profile changed since it last looked.
+
+## Builtins
+
+| Profile | Runs | Tools | Network | Available |
+|---|---|---|---|---|
+| `base` | `host` | none | `deny`, allow `model` | yes |
+| `page` | `acp` | none | `deny`, allow `model` | yes |
+| `work-readonly` | `sandbox` | `wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly` | `deny`, allow `model` and `gateway` | yes |
+| `coding` | `host` | none declared | `allow` | yes |
+| `research` | `sandbox` | `wiki:readonly` | `deny`, allow `model` and `web` | not yet |
+| `research-with-work` | `run` | none | `deny`, allow `model` | not yet |
+
+`research` and `research-with-work` exist so clients can list them, but a session under either is refused with `409 profile_not_available` until a later release. Through the remote API, `coding` and `base` (`runs: host`) are listed with `available: false` too and refused the same way, since `remote serve` has no engine for them yet: start a host session without a profile instead. `aimux profile list` shows the manifest's own `available`.
+
+Builtins other than `page` are roots: they have no `extends`. `base` is the narrowest root, and `page` extends it. A user profile can extend any builtin and narrow it. Extending `base` or `page` gives a profile with no tools that can only stay as it is or move to a more isolated `runs`.
+
+`coding` is the profile a session without a profile counts as: it runs on the Mac with your settings. Wingman is never allowed it.
+
+## Commands
+
+```bash
+aimux profile list                # builtins first, then yours: name, runs, available, digest
+aimux profile show work-readonly  # the resolved manifest and its digest
+aimux profile check my-notes      # resolve and validate; exit 1 with the reason if it fails
+aimux profile migrate             # write each v1 profile as a v2 file
+```
+
+`show` prints the full digest; the `list` table shortens it to 12 characters. All four accept `--json`. `check` exits 1 when the profile does not resolve, and its message names the field that widens. `list` prints a profile that does not resolve with `-` as its digest and the reason on stderr.
+
+`check` validates the manifest; it does not say whether the profile is available. A profile like `research` checks ok while `available` is false in `list`.
+
+### Migrating v1 profiles
+
+The v1 commands `save`, `get` and `delete` still work on the old store, `~/.aimux/profiles.json`, and each prints `note: v1 profiles are replaced by ~/.config/aimux/profiles; run aimux profile migrate` on stderr. `list` shows the v2 profiles only.
+
+`aimux profile migrate` writes one file per v1 profile into the profile folder, extending `builtin:base` with `runs: host` and the old provider, directory and model. The v1 mode has no v2 equivalent (profiles v2 have no mode field yet) and is not carried; for each profile that had one, migrate prints `warning: <name>: v1 mode "<mode>" is not carried; profiles v2 have no mode field yet` on stderr. A file that already exists is skipped (`skip <name>: <path> already exists`), never overwritten, so the command is safe to repeat. A v1 profile named like a builtin is renamed `<name>-v1` (then `<name>-v1-2`, and so on) and the rename is printed. With nothing to migrate it prints `No v1 profiles to migrate.`
+
+## Enforced and cooperative
+
+A profile is compiled into several things, and they are not equally strong.
+
+| Part | What it does | Strength |
+|---|---|---|
+| OpenShell policy | Network egress, which MCP methods and tool names the sandbox may call at the gateway, files the sandbox can read and write, and which binaries may connect | Enforced by OpenShell outside the agent. The model cannot talk its way around it |
+| Tool gateway | Serves only the tools pinned for the profile, to a session token that reaches only that profile's tools | Enforced by aimux on the Mac |
+| Harness config | The agent's own launch options: the `--allowedTools` list, `--strict-mcp-config`, the tool list, no user settings | Cooperative. It mirrors the policy so the model is never offered a tool it cannot use, but the agent applies it to itself |
+
+A prompt injection that talks the agent into calling a tool the profile does not allow reaches OpenShell's policy or the gateway, and stops there. The harness config is what keeps the agent from trying.
+
+Only profiles with `runs: sandbox` compile to a policy. Their `network.allow` must include `model`, `web` is not supported yet, and `tools` need `gateway`. The tool sets resolve against the [pinned tools](/guides/wingman/#pinned-tools). A tool changed since it was pinned is hidden until you pin it again.

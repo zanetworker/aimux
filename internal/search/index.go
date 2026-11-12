@@ -236,6 +236,9 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...str
 			return st, err
 		}
 		for _, f := range m {
+			if wingmanFile(f) {
+				continue // untrusted web page text, never indexed
+			}
 			id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
 			if _, ok := files[id]; !ok {
 				files[id] = f
@@ -293,7 +296,7 @@ func (ix *Index) Update(projectsDir string, opts ExtractOpts, archiveDirs ...str
 		if _, ok := files[id]; ok {
 			continue
 		}
-		if _, err := os.Stat(fs.path); err == nil {
+		if _, err := os.Stat(fs.path); err == nil && !wingmanFile(fs.path) {
 			continue // in a dir this Update did not scan
 		}
 		if err := deleteSession(tx, id); err != nil {
@@ -646,4 +649,10 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// wingmanFile reports whether a session file lies in a Wingman page-lane
+// project dir (history.IsWingmanProjectDir), which the index skips.
+func wingmanFile(path string) bool {
+	return history.IsWingmanProjectDir(filepath.Base(filepath.Dir(path)))
 }

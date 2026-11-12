@@ -1,0 +1,136 @@
+---
+title: Wingman
+description: A Chrome side panel that reads the page you are on, with read-only lookups in your own work tools
+---
+
+Wingman is a Chrome side panel that summarizes the page you are reading and answers questions about it. With the "With my work" toggle on, an answer can also look things up, read only, in your research wiki, Jira, Slack, Gmail and Drive. The extension lives in the [wingman repo](https://github.com/zanetworker/wingman); `aimux browser` is its back end.
+
+Page text is untrusted input. A page must not be able to cause a write, a message, or data leaving to anywhere except your screen, the model provider and your own read-only lookups.
+
+Wingman is a client of aimux's [remote API](/guides/remote-access/#local-clients), like the iPhone app. The panel talks to a native messaging host (`aimux browser host`, started by Chrome while a panel is open), which only relays: it turns each panel request into a call on the API over Wingman's own Unix socket. A page question starts a session under the [`page` profile](/guides/profiles/#builtins), a "With my work" question one under `work-readonly`. The `page` profile is a Claude session with no tools, no MCP servers and no user settings. The `work-readonly` profile is a Claude Code process inside the `aimux-work-readonly` OpenShell sandbox, which can reach only the model provider and one read-only tool server on your Mac. `aimux remote serve` creates that sandbox from the compiled profile on the first work question and updates its policy when the profile or the pins change.
+
+## Install
+
+Build and load the extension from the wingman repo (`npm ci && npm run build`, then load `extension/dist` unpacked in `chrome://extensions`). Copy the extension id shown there, then:
+
+```bash
+aimux browser install --extension-id <id>
+```
+
+This does four things:
+
+- Installs the ACP adapter `@agentclientprotocol/claude-agent-acp@0.101.0` under `~/.aimux/wingman/adapter` if it is missing.
+- Writes a wrapper script, `~/.aimux/wingman/host.sh`, that runs `aimux browser host`.
+- Pins your extension id in `~/.aimux/wingman/extension-id`.
+- Writes the native messaging manifest `com.zanetworker.wingman.json` into the `NativeMessagingHosts` folder of both Chrome and Chrome Beta (under `~/Library/Application Support/Google/`).
+
+The manifest allows only your extension id, and the host checks it again: Chrome passes the caller's origin, and a host started by any other origin answers one error and exits. The host needs no running server. When nothing answers on the Wingman socket it starts `aimux remote serve --local-only` as a detached daemon (its own session, output in `host.log`) and waits for the socket. That local-only serve exits on its own after 30 minutes with no request from a panel and no running profile session, removing its socket. While it runs, a full `aimux remote serve` (for the phone and web) refuses to start and names its pid: stop it with `kill <pid>` and start the full serve, which Wingman then uses too. `--chrome-dirs` registers other Chrome user data dirs instead of the two defaults. Install refuses an `aimux` that runs from a temporary build (`go run`, `/tmp`); install aimux first, or pass `--allow-temp-binary` for tests. The wrapper points at the `aimux` on your `PATH` when it is the same binary, so it survives upgrades.
+
+## Set up the work lane
+
+Page questions work after `install`. For "With my work", run once:
+
+```bash
+claude setup-token
+security add-generic-password -U -a "$USER" -s wingman-claude-oauth -w
+aimux browser setup
+```
+
+`claude setup-token` makes a dedicated Claude subscription token. The second command stores it in the Keychain item `wingman-claude-oauth` (it prompts for the token). The sandbox never sees the token: an OpenShell provider injects it at the gateway.
+
+`aimux browser setup` then, skipping steps already done:
+
+1. Writes `~/.aimux/wingman/readonly.json` if it does not exist (mode 0600), and warns if the wiki root is missing.
+2. [Pins](#pinned-tools) the allowlisted tools.
+3. Writes `~/.config/aimux/clients.yaml` (mode 0600) with the Wingman client's profiles and limits if the file does not exist. An existing file is yours and is left alone.
+4. Checks the OpenShell gateway (`-g local`).
+5. Builds the sandbox image `localhost/wingman-sandbox:2.1.319` with Podman if it is missing.
+6. Imports the `claude-code-oauth` provider profile and creates the `wingman-claude` provider from the Keychain token. If the Keychain item is missing, setup prints the two commands above and stops.
+7. Prints that `aimux remote serve` creates the work sandbox `aimux-work-readonly` on first use. Setup creates no sandbox. The `wingman-work` sandbox earlier builds made is no longer used; delete it with `openshell -g local sandbox delete wingman-work`.
+
+Setup reads the sandbox files from `~/go/src/github.com/zanetworker/wingman/sandbox` by default; use `--sandbox-dir` if the repo lives elsewhere.
+
+### The read-only config
+
+`readonly.json` has three parts: the HTTP backends, the wiki root, and the allowlist. The default allowlist is:
+
+| Backend | Tools |
+|---|---|
+| wiki | `wiki_search`, `wiki_read` |
+| jira | `search_issues_jql`, `get_issue_details`, `get_comments`, `get_jira_issues` |
+| slack | `search_messages`, `get_thread`, `get_thread_messages`, `get_channel_history`, `get_user_profile` |
+| google | `search_gmail_messages`, `get_gmail_message_content`, `get_gmail_thread_content`, `search_drive_files`, `get_doc_as_markdown` |
+
+Default backends: Slack at `http://127.0.0.1:7381/mcp/slack` (the [MCP proxy](/guides/mcp-proxy/)), Jira at `http://127.0.0.1:8001/mcp`, Google Workspace at `http://127.0.0.1:8000/mcp`. The wiki root defaults to `~/go/src/github.com/zanetworker/research/wiki`. Edit the file to change any of them; a tool not listed is not exposed, even if the backend gains it later. `wiki_search` and `wiki_read` serve only Markdown files under the wiki root, resolve symlinks, and refuse anything outside the root or over the size cap.
+
+### Pinned tools
+
+Setup lists each read-only backend's tools once and pins the ones the allowlist names, in `~/.aimux/tools/pins.json`. A pin is a hash of the tool's name, input and output schemas and annotations, so a change to what a tool accepts, even in a parameter's description, changes the pin. The tool's own description and title are not part of it. The gateway checks the live tool against its pin when it lists tools and on every call: a tool that is new, renamed, missing or changed since it was pinned is hidden and refused until `aimux browser setup` runs again.
+
+Setup pins what a backend reports at that moment, and it prints `Pinned <backend>/<tool> <pin>` for each. Rerunning it after a change accepts the change, so look at what changed first. A backend that is down when setup runs gets no new pins (setup warns) but keeps the pins it already had: once it is back, the gateway serves its unchanged tools again without another setup. Only its tools that have no pin, or whose pin no longer matches, wait for the next setup.
+
+## Verify
+
+```bash
+aimux browser verify
+```
+
+Verify checks the sandbox work questions run in. It compiles `work-readonly` against your pins, starts a short-lived read-only server on `127.0.0.1:7390`, makes sure `aimux-work-readonly` exists with the compiled policy (creating it on the first run, which can take a few minutes), issues a test session token, and runs five checks inside the sandbox with `node` (the compiled policy allows only `node` and `claude`, not `curl`; each request times out after 10 seconds). It prints PASS or FAIL for each:
+
+- `https://example.com` is blocked.
+- The read-only server accepts the issued session token (on the first pinned server's endpoint, such as `/mcp/google`).
+- The read-only server rejects a request without a token.
+- The host's Slack proxy at `127.0.0.1:7381` is blocked.
+- The host's Slack proxy is blocked through the host gateway too (`host.containers.internal:7381`).
+
+It exits non-zero if any check fails. Verify needs the OpenShell gateway up (it stops with `OpenShell gateway: ...` when it is not) and pinned tools (run `aimux browser setup` first). It also needs port 7390 free. While `aimux remote serve` holds it (after its first work question), verify stops with `127.0.0.1:7390 is in use, most likely by aimux remote serve, which runs the read-only tool server there: stop aimux remote serve, run aimux browser verify, then start aimux remote serve again`. Do that: stop `remote serve`, run `verify`, and start it again (opening a panel starts `remote serve --local-only`).
+
+## Files and paths
+
+| Path | What |
+|---|---|
+| `~/.aimux/wingman/readonly.json` | Read-only backends, wiki root and allowlist |
+| `~/.aimux/tools/pins.json` | The pinned tools (see [Pinned tools](#pinned-tools)) |
+| `~/.config/aimux/clients.yaml` | The Wingman client's profiles, socket and limits (see [Client scopes](/guides/remote-access/#client-scopes)) |
+| `~/.aimux/clients/wingman.sock` | The socket the host talks to `remote serve` on (folder `0700`, socket `0600`) |
+| `~/.aimux/wingman/host.sh` | Wrapper Chrome starts |
+| `~/.aimux/wingman/extension-id` | The pinned extension id |
+| `~/.aimux/wingman/adapter/` | The pinned ACP adapter |
+| `~/.aimux/wingman/sessions/` | Working directory of the `page` sessions |
+| `~/.claude/projects/-Users-<you>--aimux-wingman-sessions/` | The `page` session files (Claude Code files them by working directory) |
+| `~/.aimux/sessions/profiles.json` | Which profile, client and page each profile session belongs to |
+| `~/.aimux/archive/` | Transcripts of `work-readonly` sessions, copied out of the sandbox |
+| `~/.aimux/sandboxes/` | The compiled policy and policy digest of each profile sandbox (`aimux-work-readonly.policy.yaml`, `.digest`) |
+| `~/.aimux/logs/remote-audit.log` | One line per Wingman request (see below) |
+| `~/Library/Logs/aimux/wingman/host.log` | The host's log and the output of the `remote serve` it started (owner-only) |
+
+The `page` session files hold the text of the pages you asked about. `aimux sessions`, the session search index and the `aimux` MCP tools (`search_sessions`, `list_sessions`, `get_session`) skip every project directory under `~/.aimux/wingman/`, so that untrusted text never reaches your session search or an agent reading it.
+
+The audit log records, per request, the time, `client: wingman`, the action, the session, the profile and its digest, the URL's host (not its path or query) and whether it succeeded, including refused requests. It does not record questions, answers, page text, titles or tokens. `host.log` records only that the host started, refused a caller or started `remote serve`, and what `remote serve` prints.
+
+## History
+
+The panel's history is the list of Wingman's sessions in the remote API: `GET /v1/sessions?client=wingman&url=<page>`. A page is its URL without a plain `#anchor`; a fragment holding a `/` is an app route and its own page, so each Gmail email (`#inbox/<id>`) and each route of a hash-routed app gets its own conversation. A page's conversation is the turns of its `page` and `work-readonly` sessions, oldest first, and survives restarts like any other session. The panel shows the last 50 turns of a page (fewer when they would not fit one message from Chrome) and the 100 most recently asked pages. Deleting a page from the history hides its sessions from the lists (`hidden` on the session); the transcripts stay, and the page's next question starts a new session. The old `history.db` is no longer used.
+
+## The :7390 listener
+
+The read-only tool gateway listens on `127.0.0.1:7390`. The sandbox reaches it as `host.containers.internal:7390` through the Podman gateway.
+
+- **Owner:** `aimux remote serve`. It starts the gateway on the first `work-readonly` question, not at startup, and stops it when `remote serve` stops. A failed start is tried again by the next work question.
+- **Refresh:** at most once a minute, a work question first retries backends that were down and reloads the pins. Re-pinning (`aimux browser setup`) takes effect within a minute, in the gateway and in the sandbox's policy, without restarting `remote serve`.
+- **Token:** every request needs a bearer token. Each session gets its own, and it reaches only the tools of that session's profile.
+- **No other surface:** the listener serves the allowlisted, pinned tools only. The always-on proxy on `:7381` is unchanged.
+
+Any container on the Podman machine can reach `127.0.0.1:7390` the same way the sandbox does, which is why the token is required.
+
+## Safety model
+
+- Only the toggle you set sends a question to the work lane; the page and the model cannot switch it on.
+- The page lane has no tools, no MCP servers and no user settings, so a page has nothing to call.
+- The work lane runs in a sandbox with default-deny egress: the model provider and `:7390`, nothing else.
+- The read-only server exposes an allowlist of lookup tools; every other call is rejected and logged.
+- Only the pinned version of a tool is served; a tool that changed is hidden until you pin it again.
+- The wiki tools cannot read outside the wiki root.
+- The sandbox policy and the gateway enforce this outside the agent; the agent's own tool list only mirrors it (see [Enforced and cooperative](/guides/profiles/#enforced-and-cooperative)).
+- Wingman is held to its [client scope](/guides/remote-access/#client-scopes): it sees only its own sessions, cannot start a profile that runs on your Mac, and is limited to 2 running sessions and 20 turns a minute.
+- Only the pinned extension can start the host.

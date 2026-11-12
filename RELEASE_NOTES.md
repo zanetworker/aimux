@@ -1,3 +1,73 @@
+## aimux v0.15.0
+
+### Highlights
+
+**Profiles.** A profile is a named contract for what an agent session may reach (tools, network, files, credentials, settings) and where it runs. Builtins ship with aimux, yours are YAML files in `~/.config/aimux/profiles`, a child may only narrow its parent, and every resolved profile has a digest. `aimux profile list|show|check|migrate` manage them, and the [Profiles guide](https://aimux.ai/guides/profiles/) has the format.
+
+**One API for local clients.** The remote API now serves programs on your Mac over Unix sockets, with a scope per client in `~/.config/aimux/clients.yaml`: which profiles it may ask for, how many sessions and turns it may run, and which routes it can reach. Every request of a local client is audited.
+
+**A reading side panel with safe lookups in your own tools.** Wingman is a Chrome extension (in the [wingman repo](https://github.com/zanetworker/wingman)) that summarizes the page you are on and answers questions about it. It is a client of that API: a page question runs under the `page` profile, and with its "With my work" toggle on, an answer can also search your research wiki, Jira, Slack, Gmail and Drive, read only, under `work-readonly`. `aimux browser` is its back end.
+
+### Upgrading
+
+Every `aimux remote serve` now does the following, whether or not you use Wingman:
+
+- creates `~/.aimux/wingman/sessions`,
+- listens on the Wingman socket, `~/.aimux/clients/wingman.sock`, unless `clients.yaml` removes it,
+- refuses to start when the socket's folder (`~/.aimux/clients`) is open to group or others,
+- opens the audit log, `~/.aimux/logs/remote-audit.log`, and stops if it cannot, and
+- refuses to start the tailnet listener when `remote_access.device_login` is `false`, unless you pass `--unsafe-no-device-login` (any local process could claim an allowed tailnet login). `--local-only` needs no device login.
+
+Also:
+
+- **The work sandbox is `aimux-work-readonly`.** `aimux remote serve` creates it from the compiled `work-readonly` profile on the first work question and keeps its policy (with its digest) in `~/.aimux/sandboxes/`. The `wingman-work` sandbox earlier builds made is no longer used and can be deleted with `openshell -g local sandbox delete wingman-work`. `aimux browser setup` no longer creates or recreates a sandbox.
+- **Re-pinning takes effect within a minute.** After `aimux browser setup` re-pins tools, the running gateway reloads the pins and retries down backends at most once a minute, on a work question, and the sandbox policy is updated on the next turn; no restart needed. A backend left with no pinned tool stops serving at once, even to sessions already open. A backend that was down at setup only leaves out its own tools; `work-readonly` still answers from the others.
+- **Local-only vs full serve.** Opening a Wingman panel starts `aimux remote serve --local-only` when nothing answers on its socket; it now exits after 30 minutes idle. While it runs, a full `aimux remote serve` exits 1 and names its pid: `kill <pid>`, then start the full serve (Wingman uses it too). Two serves of the same kind still print `already running (pid N)` and exit 0.
+- **Wingman's broker is gone.** An earlier build ran a broker daemon that held `127.0.0.1:7390` while a panel was open and for about 30 seconds after the last one closed. One still running after the upgrade keeps the port until then: close the panels and wait before the first work question or `aimux browser verify`.
+- **`aimux browser verify` cannot run while `remote serve` holds `127.0.0.1:7390`**, which it does after its first work question. Stop `remote serve`, run `verify`, start it again.
+- **Pins.** `aimux browser setup` pins the allowlisted tools in `~/.aimux/tools/pins.json`. A tool that changed since it was pinned is hidden until you run `setup` again. After upgrading, run `aimux browser setup` once so the tools are pinned; setup also writes `~/.config/aimux/clients.yaml` if it is missing.
+- **v1 profiles.** `aimux profile save|get|delete` still work on `~/.aimux/profiles.json` and print a note. Run `aimux profile migrate` to write them as v2 files; it never overwrites a file. A v1 `mode` is not carried (v2 has no mode field yet); migrate prints a warning for each profile that had one.
+- **`remote_access.step_up_legacy`** (default `false`) also asks for a fresh Secure Enclave login for new sessions started without a profile.
+- To try Wingman: load the extension, then run `aimux browser install --extension-id <id>`. For "With my work", store a token with `claude setup-token` and `security add-generic-password -U -a "$USER" -s wingman-claude-oauth -w`, then run `aimux browser setup` and `aimux browser verify`. The [Wingman guide](https://aimux.ai/guides/wingman/) has the steps.
+- `aimux browser setup` reads sandbox files from the wingman repo (`--sandbox-dir`).
+- **Default remote sandbox image.** A remote launch with no image (none in the launch, `remote.image` empty) now uses `localhost/wingman-sandbox:2.1.319` instead of the OpenShell community base. `aimux browser setup` builds it; to keep the community base, set `remote.image` in `~/.aimux/config.yaml`.
+- macOS with Chrome or Chrome Beta only.
+
+### Profiles
+
+- **Format.** `name`, `extends`, `harness`, `model`, `runs` (`host`, `acp`, `sandbox`, `run`), `tools`, `network`, `files`, `credentials`, `settings` and `roles`. Files are read from `$AIMUX_PROFILE_DIR` or `~/.config/aimux/profiles`; unknown fields, a name that differs from the file name and a name that shadows a builtin are errors.
+- **Builtins:** `page`, `work-readonly`, `coding` and `base`. `research` and `research-with-work` are listed but unavailable (`409 profile_not_available`) until a later release.
+- **Narrow-only inheritance.** A child may drop tools, network, files and credentials, never add them, and may not switch `network.default` from `deny` to `allow`, inherit your settings or change the harness. `runs` may only move toward more isolation. User profiles must declare `extends`.
+- **Commands.** `aimux profile list`, `show <name>`, `check <name>` (exit 1 and the field that widens) and `migrate`, all with `--json`.
+- **Enforced and cooperative.** The OpenShell policy (egress, MCP methods and tool names, files) and the tool gateway are enforced outside the agent; the harness config only mirrors them.
+
+### Wingman
+
+- **`aimux browser install --extension-id <id>`** installs the pinned ACP adapter under `~/.aimux/wingman/adapter`, writes `~/.aimux/wingman/host.sh`, pins your extension id in `~/.aimux/wingman/extension-id`, and registers the native messaging host `com.zanetworker.wingman` for Chrome and Chrome Beta, allowing only your extension id. It refuses a temporary `aimux` build unless `--allow-temp-binary` is set.
+- **`aimux browser host`** is the native messaging host Chrome starts for each open panel. It checks that Chrome's caller is the pinned extension, then only relays the panel's requests to the remote API on the Wingman socket, and starts `aimux remote serve --local-only` when nothing answers there. Closing a panel ends only its own host. Its log, `~/Library/Logs/aimux/wingman/host.log`, notes only that the host started, refused a caller or started `remote serve`; the per-request record is the audit log.
+- **`aimux browser setup`** writes `~/.aimux/wingman/readonly.json` (backends, wiki root, allowlist), pins the allowed tools, writes `clients.yaml` if missing, builds the sandbox image, and creates the `wingman-claude` provider from the Keychain item `wingman-claude-oauth`. It creates no sandbox: `aimux remote serve` creates `aimux-work-readonly` from the compiled `work-readonly` profile on the first work question.
+- **`aimux browser verify`** compiles `work-readonly`, makes sure `aimux-work-readonly` exists with that policy, and checks from inside it, with `node`, that the internet and the host's `:7381` proxy (on loopback and through the host gateway) are blocked, and that the read-only server accepts an issued session token and rejects a request without one. It stops clearly when the OpenShell gateway is down.
+- **Two lanes.** Page questions run in an aimux ACP session with no tools, no MCP servers and no user settings (Sonnet by default, Opus from the panel's picker). "With my work" questions run `claude -p` in the sandbox against the read-only server only. The toggle, not the model or the page, picks the lane.
+- **History.** The panel's history comes from Wingman's sessions in the remote API (`GET /v1/sessions?client=wingman`); deleting a page hides its sessions. A page is its URL without a plain `#anchor`; a fragment with a `/` (each Gmail email, each route of a hash-routed app) is its own page with its own conversation. The old `~/.aimux/wingman/history.db` is no longer used. Session search and the session MCP tools skip the page-lane session files.
+
+### Remote API
+
+- **Local client sockets.** `aimux remote serve` listens on a Unix socket for each client in `~/.config/aimux/clients.yaml` with a `socket` (Wingman: `~/.aimux/clients/wingman.sock`, folder `0700`, socket `0600`). The socket names the client: no tailnet or device login, and the client is held to its own profile sessions, scope and limits, each request audited (client, action, profile, digest, page host and result; never text, pages or tokens).
+- **Client scopes.** Defaults for `wingman` (four profiles, 2 sessions running, 20 turns a minute), `device` (those and `coding`, step-up for a Secure Enclave device) and `cli` (every profile). Wingman can never use a profile that runs on the Mac.
+- **`--local-only`** serves only those sockets, with no `--allow` and no device login, and exits on its own after 30 minutes with no local request and no running profile session. A second `remote serve` of the same kind prints `already running (pid N)` and exits 0; a full serve that finds a local-only one exits 1 and names its pid (`kill <pid>`). `GET /v1/health` has `localOnly`.
+- **Profile routes.** `GET /v1/profiles` and `GET /v1/profiles/{name}` (capability `profiles`); `POST /v1/sessions` takes `profile`, `url`, `title`, `pageText` (up to 512 KiB) and `model` (`sonnet` or `opus`), and `POST /v1/sessions/{id}/messages` takes `model`. `GET /v1/sessions` takes `client` and `url`. `PATCH /v1/sessions/{id}/meta` takes `hidden`. `GET /v1/health` has `profileStore` while the profile sessions file cannot be read.
+- **Host and run profiles** (`coding`, `base`, `research-with-work`) are listed `available: false` and refused with `409 profile_not_available` until they have an engine; start a host session without a profile. An engine failure answers `500 internal` with no internal detail.
+- **New error codes:** `unknown_profile`, `profile_not_allowed`, `step_up_required`, `profile_not_available`, `page_too_large`, `client_limit` (with `Retry-After`), `forbidden_for_client` and `not_found`.
+- **Local clients are confined.** They reach health, the contract, the profiles, their own session list, new sessions and, for the sessions they started, the detail, events, messages, cancel and meta; any other route (describe and the queue included) is `403 forbidden_for_client`, and another session is `404 not_found`.
+- **Profile sessions run for real.** Page sessions use the Wingman adapter; sandbox sessions run `claude` in the profile's OpenShell sandbox, with the read-only tool gateway on `127.0.0.1:7390` started on first use, and resume after a restart.
+
+### MCP proxy
+
+- **Allowlist profile:** `tools/list` shows only allowlisted `(backend, tool)` pairs; a call to anything else is rejected and logged. Tools a backend gains later stay hidden until allowlisted.
+- **HTTP backends:** the proxy can forward to Streamable HTTP MCP servers.
+- **Token-guarded listener:** a bearer token is required on every request; each session of the tool gateway gets its own.
+- **Wiki tools:** built-in `wiki_search` and `wiki_read` serve Markdown files under a configured root, resolve symlinks, and refuse paths outside the root, non-Markdown files and oversized files.
+
 ## aimux v0.14.0
 
 ### Highlights

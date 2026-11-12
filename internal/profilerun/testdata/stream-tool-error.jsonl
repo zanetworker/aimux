@@ -1,0 +1,6 @@
+{"type": "system", "subtype": "init", "session_id": "4bcd525c-3970-43f1-8420-b5e0d81d30b6", "tools": ["mcp__jira__search_issues_jql", "mcp__slack__search_messages"], "mcp_servers": [{"name": "jira", "status": "connected"}], "model": "claude-sonnet-5-5"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Searching. "}]}, "session_id": "4bcd525c-3970-43f1-8420-b5e0d81d30b6"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "mcp__jira__search_issues_jql", "input": {"jql": "bad"}}]}, "session_id": "4bcd525c-3970-43f1-8420-b5e0d81d30b6"}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "Error: 401 unauthorized", "is_error": true}]}, "session_id": "4bcd525c-3970-43f1-8420-b5e0d81d30b6"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Jira was unreachable, so I could not check it."}]}, "session_id": "4bcd525c-3970-43f1-8420-b5e0d81d30b6"}
+{"type": "result", "subtype": "success", "is_error": false, "result": "Jira was unreachable, so I could not check it.", "session_id": "4bcd525c-3970-43f1-8420-b5e0d81d30b6"}

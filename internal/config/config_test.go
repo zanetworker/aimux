@@ -776,6 +776,26 @@ func TestRemoteAccessConfig_DeviceLogin(t *testing.T) {
 	}
 }
 
+func TestRemoteAccessConfig_StepUpLegacy(t *testing.T) {
+	for yaml, want := range map[string]bool{
+		"remote_access:\n  port: 7400\n":            false, // unset: requests without a profile are as before
+		"remote_access:\n  step_up_legacy: true\n":  true,
+		"remote_access:\n  step_up_legacy: false\n": false,
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.RemoteAccess.StepUpLegacy != want {
+			t.Errorf("%q: StepUpLegacy = %v, want %v", yaml, cfg.RemoteAccess.StepUpLegacy, want)
+		}
+	}
+}
+
 func TestRemoteAccessConfig_DeviceLoginNotABool(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("remote_access:\n  device_login: sometimes\n"), 0o600); err != nil {

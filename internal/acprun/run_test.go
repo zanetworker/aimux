@@ -21,6 +21,9 @@ import (
 const (
 	fakeAgentEnv  = "AIMUX_ACPRUN_FAKE_AGENT"
 	fakeNoLoadEnv = "AIMUX_ACPRUN_FAKE_NOLOAD"
+	// fakeRecordEnv names a file the fake agent appends one JSON line to per
+	// session/new, session/load and session/set_config_option request.
+	fakeRecordEnv = "AIMUX_ACPRUN_FAKE_RECORD"
 )
 
 // TestMain lets the test binary act as an ACP agent, so the tests drive a
@@ -37,6 +40,55 @@ type fakeAgent struct {
 	conn      *acp.AgentSideConnection
 	mu        sync.Mutex
 	cancelled chan struct{}
+	models    map[acp.SessionId]string // each session's selected model
+}
+
+// fakeModels are the values the fake agent's model selector offers: those
+// claude-agent-acp 0.101.0 advertises (aliases first, then full ids).
+var fakeModels = []string{"default", "opus", "fable", "sonnet", "haiku",
+	"claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5", "claude-fable-5", "claude-opus-4-8"}
+
+// record appends one request to the record file, if the test asked for one.
+func (a *fakeAgent) record(method string, meta map[string]any, value string) {
+	path := os.Getenv(fakeRecordEnv)
+	if path == "" {
+		return
+	}
+	line, _ := json.Marshal(map[string]any{"method": method, "meta": meta, "value": value})
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G304: path is a test temp file
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(line, '\n'))
+	_ = f.Close()
+}
+
+// bindModel starts a session on "opus" and returns its config options. Like
+// claude-agent-acp 0.101.0 it ignores _meta.claudeCode.options.model:
+// only set_config_option changes the model.
+func (a *fakeAgent) bindModel(id acp.SessionId, _ map[string]any) []acp.SessionConfigOption {
+	model := "opus"
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.models == nil {
+		a.models = map[acp.SessionId]string{}
+	}
+	a.models[id] = model
+	return a.configOptionsLocked(id)
+}
+
+func (a *fakeAgent) configOptionsLocked(id acp.SessionId) []acp.SessionConfigOption {
+	opts := acp.SessionConfigSelectOptionsUngrouped{}
+	for _, m := range fakeModels {
+		opts = append(opts, acp.SessionConfigSelectOption{Name: m, Value: acp.SessionConfigValueId(m)})
+	}
+	cat := acp.SessionConfigOptionCategoryModel
+	return []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{Id: "mode", Name: "Mode", Type: "select",
+			CurrentValue: "default", Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{{Name: "Default", Value: "default"}}}}},
+		{Select: &acp.SessionConfigOptionSelect{Id: "model", Name: "Model", Type: "select", Category: &cat,
+			CurrentValue: acp.SessionConfigValueId(a.models[id]), Options: acp.SessionConfigSelectOptions{Ungrouped: &opts}}},
+	}
 }
 
 func runFakeAgent() {
@@ -56,9 +108,11 @@ func (a *fakeAgent) LoadSession(ctx context.Context, p acp.LoadSessionRequest) (
 	if p.SessionId != "sess-1" {
 		return acp.LoadSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "unknown session " + string(p.SessionId)})
 	}
+	a.record("session/load", p.Meta, "")
+	opts := a.bindModel(p.SessionId, p.Meta)
 	// Replayed history, which the runner must not report as new events.
 	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateUserMessageText("old turn")})
-	return acp.LoadSessionResponse{}, nil
+	return acp.LoadSessionResponse{ConfigOptions: opts}, nil
 }
 
 func (a *fakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
@@ -100,6 +154,19 @@ func (a *fakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Prompt
 			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 		case <-time.After(20 * time.Second):
 		}
+	case "model?":
+		a.mu.Lock()
+		m := a.models[p.SessionId]
+		a.mu.Unlock()
+		say("model: " + m)
+	case "switch-elsewhere":
+		// The agent changes its own model and says so, as after a /model.
+		a.mu.Lock()
+		a.models[p.SessionId] = "haiku"
+		opts := a.configOptionsLocked(p.SessionId)
+		a.mu.Unlock()
+		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId,
+			Update: acp.SessionUpdate{ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{ConfigOptions: opts}}})
 	case "crash":
 		os.Exit(5)
 	case "flood":
@@ -139,13 +206,29 @@ func (a *fakeAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (acp.
 	if p.Cwd == "" {
 		return acp.NewSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": "cwd is required"})
 	}
-	return acp.NewSessionResponse{SessionId: "new-1"}, nil
+	a.record("session/new", p.Meta, "")
+	return acp.NewSessionResponse{SessionId: "new-1", ConfigOptions: a.bindModel("new-1", p.Meta)}, nil
 }
 func (a *fakeAgent) ResumeSession(context.Context, acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	return acp.ResumeSessionResponse{}, errors.New("not supported by the fake agent")
 }
-func (a *fakeAgent) SetSessionConfigOption(context.Context, acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
+func (a *fakeAgent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if p.ValueId == nil || p.ValueId.ConfigId != "model" {
+		return acp.SetSessionConfigOptionResponse{}, acp.NewInvalidParams(map[string]any{"error": "only the model option is settable"})
+	}
+	v := string(p.ValueId.Value)
+	a.record("session/set_config_option", nil, v)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	offered := false
+	for _, m := range fakeModels {
+		offered = offered || m == v
+	}
+	if !offered {
+		return acp.SetSessionConfigOptionResponse{}, acp.NewInvalidParams(map[string]any{"error": "unknown model " + v})
+	}
+	a.models[p.ValueId.SessionId] = v
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: a.configOptionsLocked(p.ValueId.SessionId)}, nil
 }
 func (a *fakeAgent) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	return acp.SetSessionModeResponse{}, nil

@@ -1,0 +1,264 @@
+{
+ "theme": "paper",
+ "elements": [
+  {
+   "type": "text",
+   "x": 20,
+   "y": 14,
+   "w": 1100,
+   "text": "aimux tool gateway: every kind of tool is registered once, reviewed once, pinned, and granted to agents only through profiles",
+   "bold": true,
+   "size": 15
+  },
+  {
+   "type": "container",
+   "kind": "gray",
+   "x": 20,
+   "y": 56,
+   "w": 230,
+   "h": 340,
+   "label": "tool sources"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 90,
+   "w": 198,
+   "h": 56,
+   "title": "MCP servers",
+   "desc": "Slack, Jira, Gmail, notes",
+   "icon": "\ud83d\udd0c"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 160,
+   "w": 198,
+   "h": 56,
+   "title": "CLI tools",
+   "desc": "gh, kubectl, jira, oc",
+   "icon": "\u2328\ufe0f"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 230,
+   "w": 198,
+   "h": 56,
+   "title": "HTTP APIs",
+   "desc": "REST or OpenAPI",
+   "icon": "\ud83c\udf10"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 300,
+   "w": 198,
+   "h": 56,
+   "title": "Agent built-ins",
+   "desc": "web search, read files",
+   "icon": "\ud83e\uddf0"
+  },
+  {
+   "type": "container",
+   "kind": "open",
+   "x": 290,
+   "y": 56,
+   "w": 300,
+   "h": 340,
+   "label": "tool gateway (aimux)"
+  },
+  {
+   "type": "card",
+   "x": 306,
+   "y": 90,
+   "w": 268,
+   "h": 56,
+   "title": "Registry",
+   "desc": "each source pinned to its identity:\npath + version, endpoint, package",
+   "icon": "\ud83d\udcc7"
+  },
+  {
+   "type": "card",
+   "tone": "amber",
+   "x": 306,
+   "y": 166,
+   "w": 268,
+   "h": 70,
+   "title": "Review once per source",
+   "desc": "hints and curated packs suggest;\nyou approve the reviewed read set",
+   "icon": "\u2705"
+  },
+  {
+   "type": "card",
+   "tone": "red",
+   "x": 306,
+   "y": 256,
+   "w": 268,
+   "h": 70,
+   "title": "Pins, checked on every call",
+   "desc": "new, renamed or changed tools\nhidden until reviewed again",
+   "icon": "\ud83d\udccc"
+  },
+  {
+   "type": "text",
+   "x": 306,
+   "y": 340,
+   "w": 268,
+   "text": "listeners: default 127.0.0.1:7381 (as today); readonly on demand, token, sandboxes only",
+   "size": 11
+  },
+  {
+   "type": "container",
+   "kind": "open",
+   "x": 630,
+   "y": 56,
+   "w": 250,
+   "h": 340,
+   "label": "profiles"
+  },
+  {
+   "type": "card",
+   "x": 646,
+   "y": 90,
+   "w": 218,
+   "h": 48,
+   "title": "research",
+   "desc": "web, nothing private"
+  },
+  {
+   "type": "card",
+   "x": 646,
+   "y": 148,
+   "w": 218,
+   "h": 48,
+   "title": "work-readonly",
+   "desc": "reviewed sets, no web"
+  },
+  {
+   "type": "card",
+   "x": 646,
+   "y": 206,
+   "w": 218,
+   "h": 48,
+   "title": "research-with-work",
+   "desc": "planner, reader, writer"
+  },
+  {
+   "type": "card",
+   "x": 646,
+   "y": 264,
+   "w": 218,
+   "h": 48,
+   "title": "coding, page, yours\u2026",
+   "desc": "inherit only to narrow"
+  },
+  {
+   "type": "text",
+   "x": 646,
+   "y": 326,
+   "w": 220,
+   "text": "compiled into an OpenShell sandbox: policy, providers, L7 rules incl. MCP tool names per server, audit",
+   "size": 11
+  },
+  {
+   "type": "container",
+   "kind": "gray",
+   "x": 920,
+   "y": 56,
+   "w": 210,
+   "h": 340,
+   "label": "consumers"
+  },
+  {
+   "type": "card",
+   "x": 936,
+   "y": 90,
+   "w": 178,
+   "h": 48,
+   "title": "Wingman panel",
+   "desc": "toggle picks profile"
+  },
+  {
+   "type": "card",
+   "x": 936,
+   "y": 148,
+   "w": 178,
+   "h": 48,
+   "title": "aimux run / spawn",
+   "desc": "--profile name"
+  },
+  {
+   "type": "card",
+   "x": 936,
+   "y": 206,
+   "w": 178,
+   "h": 48,
+   "title": "phone app",
+   "desc": "profile picker"
+  },
+  {
+   "type": "card",
+   "x": 936,
+   "y": 264,
+   "w": 178,
+   "h": 48,
+   "title": "scheduled jobs",
+   "desc": "pinned profile digest"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     250,
+     226
+    ],
+    [
+     290,
+     226
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     590,
+     226
+    ],
+    [
+     630,
+     226
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     880,
+     226
+    ],
+    [
+     920,
+     226
+    ]
+   ]
+  },
+  {
+   "type": "legend",
+   "x": 20,
+   "y": 420,
+   "items": [
+    {
+     "kind": "open",
+     "text": "aimux owns it"
+    },
+    {
+     "kind": "text",
+     "text": "amber: the one human step; red: the enforcement"
+    }
+   ]
+  }
+ ]
+}

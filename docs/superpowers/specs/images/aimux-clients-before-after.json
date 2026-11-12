@@ -1,0 +1,468 @@
+{
+ "theme": "paper",
+ "elements": [
+  {
+   "type": "text",
+   "x": 20,
+   "y": 14,
+   "w": 1200,
+   "text": "aimux as one backend: today three servers with three contracts; proposed, one contract every client uses, and aimux decides where each session runs"
+  },
+  {
+   "type": "container",
+   "x": 20,
+   "y": 56,
+   "w": 580,
+   "h": 560,
+   "label": "Today: three servers, three contracts",
+   "kind": "gray"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 92,
+   "w": 170,
+   "h": 56,
+   "title": "iPhone app",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 166,
+   "w": 170,
+   "h": 56,
+   "title": "/app web client",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 240,
+   "w": 170,
+   "h": 56,
+   "title": "Dashboard",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 314,
+   "w": 170,
+   "h": 56,
+   "title": "Wingman panel",
+   "desc": "Chrome extension"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 420,
+   "w": 170,
+   "h": 56,
+   "title": "CLI and TUI",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 260,
+   "y": 92,
+   "w": 324,
+   "h": 130,
+   "title": "remote API v1",
+   "desc": "OpenAPI + shared client fixtures;\ntailnet login + pairing;\nACP broker #1; sessions, events,\napprovals, queue, search"
+  },
+  {
+   "type": "card",
+   "x": 260,
+   "y": 240,
+   "w": 324,
+   "h": 56,
+   "title": "web dashboard server",
+   "desc": "its own endpoints; calls\ncontroller, spawn, team directly"
+  },
+  {
+   "type": "card",
+   "x": 260,
+   "y": 314,
+   "w": 324,
+   "h": 80,
+   "title": "Wingman browser broker",
+   "desc": "its own socket protocol;\nACP broker #2; its own history.db",
+   "tone": "red"
+  },
+  {
+   "type": "card",
+   "x": 260,
+   "y": 420,
+   "w": 324,
+   "h": 56,
+   "title": "internal packages",
+   "desc": "in process, no contract"
+  },
+  {
+   "type": "card",
+   "x": 260,
+   "y": 510,
+   "w": 324,
+   "h": 70,
+   "title": "OpenShell sandbox wingman-work",
+   "desc": "only Wingman's Work lane;\nhand-written tool list",
+   "kind": "closed"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     206,
+     120
+    ],
+    [
+     260,
+     120
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     206,
+     194
+    ],
+    [
+     232,
+     194
+    ],
+    [
+     232,
+     157
+    ],
+    [
+     260,
+     157
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     206,
+     268
+    ],
+    [
+     260,
+     268
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     206,
+     342
+    ],
+    [
+     260,
+     342
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     206,
+     448
+    ],
+    [
+     260,
+     448
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     584,
+     354
+    ],
+    [
+     594,
+     354
+    ],
+    [
+     594,
+     545
+    ],
+    [
+     584,
+     545
+    ]
+   ]
+  },
+  {
+   "type": "container",
+   "x": 640,
+   "y": 56,
+   "w": 580,
+   "h": 560,
+   "label": "Proposed: one contract, one core, sandboxes by profile",
+   "kind": "open",
+   "tone": "amber"
+  },
+  {
+   "type": "card",
+   "x": 656,
+   "y": 92,
+   "w": 100,
+   "h": 56,
+   "title": "CLI, TUI",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 768,
+   "y": 92,
+   "w": 100,
+   "h": 56,
+   "title": "Dashboard",
+   "desc": "(later)"
+  },
+  {
+   "type": "card",
+   "x": 880,
+   "y": 92,
+   "w": 100,
+   "h": 56,
+   "title": "iPhone,",
+   "desc": "/app"
+  },
+  {
+   "type": "card",
+   "x": 992,
+   "y": 92,
+   "w": 100,
+   "h": 56,
+   "title": "Wingman",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 1104,
+   "y": 92,
+   "w": 100,
+   "h": 56,
+   "title": "cron,",
+   "desc": "Raycast"
+  },
+  {
+   "type": "card",
+   "x": 656,
+   "y": 176,
+   "w": 548,
+   "h": 84,
+   "title": "One contract: remote v1 + profiles + runs",
+   "desc": "transports: in-process Go \u00b7 Unix socket (local) \u00b7 tailnet HTTPS (remote)\nscopes per client: Wingman may use page, research, work-readonly only",
+   "tone": "red"
+  },
+  {
+   "type": "container",
+   "x": 656,
+   "y": 280,
+   "w": 548,
+   "h": 150,
+   "label": "aimux core",
+   "kind": "gray"
+  },
+  {
+   "type": "card",
+   "x": 672,
+   "y": 312,
+   "w": 124,
+   "h": 100,
+   "title": "Sessions\n+ runs",
+   "desc": "one broker;\nruns own their\nsessions"
+  },
+  {
+   "type": "card",
+   "x": 806,
+   "y": 312,
+   "w": 124,
+   "h": 100,
+   "title": "Profiles",
+   "desc": "contract,\ndigest per run"
+  },
+  {
+   "type": "card",
+   "x": 940,
+   "y": 312,
+   "w": 124,
+   "h": 100,
+   "title": "Tool gateway",
+   "desc": "reviewed sets,\npins, MCP\nrules compiled"
+  },
+  {
+   "type": "card",
+   "x": 1074,
+   "y": 312,
+   "w": 118,
+   "h": 100,
+   "title": "History +\nsearch",
+   "desc": "every session,\nwork lane too"
+  },
+  {
+   "type": "card",
+   "x": 656,
+   "y": 456,
+   "w": 250,
+   "h": 90,
+   "title": "On the host",
+   "desc": "coding sessions,\nas today"
+  },
+  {
+   "type": "card",
+   "x": 926,
+   "y": 456,
+   "w": 278,
+   "h": 90,
+   "title": "OpenShell sandboxes",
+   "desc": "page, research, work-readonly;\npolicy compiled from the profile"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     706,
+     148
+    ],
+    [
+     706,
+     176
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     818,
+     148
+    ],
+    [
+     818,
+     176
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     930,
+     148
+    ],
+    [
+     930,
+     176
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     1042,
+     148
+    ],
+    [
+     1042,
+     176
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     1154,
+     148
+    ],
+    [
+     1154,
+     176
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     930,
+     260
+    ],
+    [
+     930,
+     280
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     780,
+     430
+    ],
+    [
+     780,
+     456
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     1064,
+     430
+    ],
+    [
+     1064,
+     456
+    ]
+   ]
+  },
+  {
+   "type": "text",
+   "x": 656,
+   "y": 560,
+   "w": 548,
+   "text": "Every client sends the same request: start or continue a session or run with a profile. aimux picks host or sandbox, tools, credentials and policy.",
+   "italic": true,
+   "size": 11
+  },
+  {
+   "type": "legend",
+   "x": 20,
+   "y": 636,
+   "items": [
+    {
+     "kind": "open",
+     "tone": "amber",
+     "text": "proposed"
+    },
+    {
+     "kind": "closed",
+     "text": "sandbox used by one client only"
+    },
+    {
+     "kind": "text",
+     "text": "red: where the change lands"
+    }
+   ]
+  }
+ ]
+}

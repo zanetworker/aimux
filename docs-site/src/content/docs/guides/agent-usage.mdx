@@ -30,7 +30,7 @@ aimux profile list --json
 aimux feedback "message" --json
 ```
 
-Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as the reply streams. `aimux mcp proxy status --json` prints the proxy's status object. The other MCP proxy commands (`mcp proxy refresh`, `serve`, `config`) and `remote serve` print text: a per-server report, a startup line, or setup instructions.
+Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as the reply streams. `aimux mcp proxy status --json` prints the proxy's status object. The other MCP proxy commands (`mcp proxy refresh`, `serve`, `config`) and `remote serve` print text: a per-server report, a startup line, or setup instructions. `aimux browser install`, `setup`, `verify` and `host` print text even with `--json`: install and setup print what they wrote, verify prints one line per check.
 
 ## Exit Codes
 
@@ -42,7 +42,7 @@ Exceptions: `aimux chat --json` prints one JSON event per line (JSON Lines) as t
 | 3 | Not found (no sessions, no agents) |
 | 4 | Config error |
 
-`aimux chat`, `aimux jump`, `aimux remote serve` and `aimux mcp proxy` return 1 for every failure, including missing arguments, an unknown session and a bad setting.
+`aimux chat`, `aimux jump`, `aimux remote serve`, `aimux mcp proxy`, `aimux browser` and the v2 `aimux profile` commands (`list`, `show`, `check`, `migrate`) return 1 for every failure, including missing arguments, an unknown session or profile and a bad setting. `aimux profile check` also returns 1 when a profile widens its parent.
 
 ## Non-Interactive Mode
 
@@ -78,12 +78,11 @@ aimux resume <id> --dry-run --json
 
 ## Profiles
 
-Save named configuration bundles for reuse:
+Save named configuration bundles for reuse. These are v1 profiles; `aimux profile list --json` now lists the v2 [profiles](/guides/profiles/), and `aimux profile migrate` converts the saved ones:
 
 ```bash
 aimux profile save work --provider claude --model opus --dir ~/project
 aimux spawn --profile work
-aimux profile list --json
 aimux profile get work --json
 aimux profile delete work
 ```

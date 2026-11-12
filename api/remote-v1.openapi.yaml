@@ -94,6 +94,32 @@ info:
     and each new approval reaches the lock screen. Other events still
     arrive only over the open stream (replay from the cursor on reconnect).
 
+    Profiles (capability `profiles`): a profile names what a session may
+    reach (tools, network, files) and where it runs (`runs`: `host` on the
+    Mac itself, `acp`, `sandbox`). `GET /v1/profiles` lists them with
+    `allowed` for the caller's client; `POST /v1/sessions` with `profile`
+    starts a session under one, and with the same client, `url` and
+    `profile` continues that page's conversation. Clients are named by
+    clientscope (`~/.config/aimux/clients.yaml`): requests over the
+    tailnet are the `device` client; local clients (such as `wingman`)
+    reach the API on their own socket, see only their own sessions, and
+    each of their requests writes an audit line (client, action, profile,
+    digest, the page's host, result; never text, pages, tokens or full
+    URLs). Local clients other than `cli` reach only health, the contract,
+    the profiles, the session list, new sessions and, for the sessions
+    they started, the detail, events, messages, cancel and meta (any
+    other session is `404 not_found`); every other route, describe and
+    the queue routes included, is `403 forbidden_for_client`. A follow-up message counts
+    against the client's turn limit like a new question. Wingman never
+    gets a `host` profile. A `host` profile from a
+    device needs a step-up: a device login under 60 seconds old from a
+    device kind the `device` client allows (by default a Secure Enclave
+    iPhone, not a passkey); otherwise `403 step_up_required` with
+    `maxAge`. With `remote_access.step_up_legacy: true` the step-up applies
+    to new sessions without a profile too. Each client has limits on
+    running sessions and turns per minute: `429 client_limit` with
+    `Retry-After`. Nothing starts on any refusal.
+
     Known gaps for app clients (not offered yet):
     - Paging the session list: `limit` only, newest first.
     - Codex and other agents' sessions: Claude only (`provider` is `claude`).
@@ -147,6 +173,17 @@ paths:
           in: query
           description: "1 also lists sessions started by a program (for example `claude -p`)."
           schema: { type: string, enum: ["1"] }
+        - name: client
+          in: query
+          description: >
+            List the profile sessions this client started (a clientscope
+            name) instead of the host's sessions. A local client always gets
+            only its own, whatever it asks for.
+          schema: { type: string }
+        - name: url
+          in: query
+          description: List only the profile sessions started on this page URL.
+          schema: { type: string }
       responses:
         "200":
           description: OK
@@ -163,6 +200,14 @@ paths:
         Requires the `new_sessions` capability. `cwd` must be one of
         `GET /v1/projects`. A retry with the same non-empty `key` returns the
         same session and turn (keys are remembered until the server restarts).
+        With `profile` (capability `profiles`) `cwd` is not needed: the
+        session runs under that profile, and `url`, `title` and `pageText`
+        describe the page it is about. A later request with the same
+        client, `url` and `profile` sends its turn to that session. Refusals,
+        with nothing started: `400 unknown_profile`, `403
+        profile_not_allowed` (outside the client's scope), `403
+        step_up_required` (see Profiles), `409 profile_not_available`, `413
+        page_too_large` (`pageText` over 512 KiB), `429 client_limit`.
       operationId: newSession
       requestBody:
         required: true
@@ -180,6 +225,8 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Limit" }
         "500": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 
@@ -213,8 +260,12 @@ paths:
         string (or only spaces) clears the owner's value, and the session
         shows the model's or Claude Code's again; it leaves a value the owner
         did not write. One line each: control characters are refused.
-        `pinned` is aimux's star, shared with the TUI. Answers what clients
-        now show.
+        `pinned` is aimux's star, shared with the TUI. `hidden: true`
+        removes the session from the lists (Wingman's history delete; the
+        transcript stays, and the page's next question starts a new
+        session); a profile session can only be hidden, and a local client
+        may hide only its own (`403 profile_not_allowed`). Answers what
+        clients now show.
       operationId: editSessionMeta
       parameters:
         - $ref: "#/components/parameters/SessionID"
@@ -324,6 +375,7 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Limit" }
         "500": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 
@@ -633,6 +685,7 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
   /v1/sessions/{id}/cancel:
@@ -649,6 +702,7 @@ paths:
               schema: { $ref: "#/components/schemas/Status" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
 
   /v1/approvals/{id}:
@@ -761,6 +815,38 @@ paths:
               schema: { $ref: "#/components/schemas/ProjectList" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/profiles:
+    get:
+      summary: The profiles, and which the caller's client may use
+      operationId: listProfiles
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/profiles/{name}:
+    get:
+      summary: One profile, resolved
+      operationId: getProfile
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The resolved manifest (its extends chain applied) and its digest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
   /v1/auth/pair:
@@ -886,6 +972,15 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorBody" }
+    Limit:
+      description: The client is at its limit of running sessions or turns per minute (`client_limit`); nothing was started.
+      headers:
+        Retry-After:
+          description: Seconds to wait before trying again.
+          schema: { type: integer, minimum: 0 }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
     AuthSession:
       description: >
         Logged in. A `secure-enclave` device gets `token` (send it as
@@ -908,6 +1003,7 @@ components:
       required: [error, code]
       properties:
         error: { type: string, description: "A message for people." }
+        maxAge: { type: integer, minimum: 1, description: "On step_up_required: how many seconds old the device's login may be. Log in again, then retry." }
         code:
           type: string
           description: A stable code for programs.
@@ -962,6 +1058,14 @@ components:
             - no_terminal        # 503: Open on Mac, but this Mac cannot open an iTerm2 tab
             - not_authorized     # 403: macOS refused aimux control of iTerm2 (Open on Mac)
             - timeout            # 504: Open on Mac: the tab opened but Claude did not pick up the session in time
+            - unknown_profile       # 400 (new session), 404 (profile detail): no profile by that name
+            - profile_not_allowed   # 403: the client's scope does not allow the profile (Wingman never gets a host profile), or a local client acts on a session it did not start
+            - step_up_required      # 403: a host profile from a device needs a login under maxAge seconds old from an allowed device kind
+            - profile_not_available # 409: the profile exists but the Mac cannot run it yet
+            - page_too_large        # 413: pageText is over 512 KiB
+            - not_found             # 404: a local client (not cli) asked about a session it did not start; such sessions do not exist for it
+            - forbidden_for_client  # 403: a local client (not cli) may not use this route (search, projects, terminal, open on Mac, approvals, devices, describe, queue)
+            - client_limit          # 429: the client runs as many sessions, or started as many turns this minute, as it may; see Retry-After
 
     Health:
       type: object
@@ -974,7 +1078,7 @@ components:
         acpProtocolVersion: { type: integer, minimum: 1, description: "The Agent Client Protocol version `update` events follow." }
         capabilities:
           type: array
-          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe, send_now] }
+          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe, send_now, profiles] }
         session:
           type: string
           enum: [live, none]
@@ -1016,6 +1120,17 @@ components:
           description: >
             True when POST /v1/sessions/{id}/open-on-mac can open a terminal
             tab on the Mac. Absent from older servers: treat as false.
+        profileStore:
+          type: string
+          description: >
+            Present while the profile sessions file cannot be read: which
+            file and how to recover. No session can be routed until then.
+        localOnly:
+          type: boolean
+          description: >
+            True when this serve has local client sockets only (`aimux
+            remote serve --local-only`, as Wingman starts it) and no tailnet
+            listener. Absent from older servers: treat as false.
 
     SessionState:
       type: string
@@ -1059,6 +1174,16 @@ components:
         working: { type: boolean, description: "The session is open in a terminal and Claude's registry calls it busy. Absent when not working. Listed sessions only." }
         waiting: { $ref: "#/components/schemas/Waiting" }
         activity: { $ref: "#/components/schemas/Activity" }
+        profile: { type: string, description: "The profile the session runs under. Profile sessions only (the list with client or url)." }
+        client: { type: string, description: "The client that started it (a clientscope name). Profile sessions only." }
+        page:
+          type: object
+          additionalProperties: false
+          required: [url]
+          description: The page the session is about. Profile sessions started on a page only.
+          properties:
+            url: { type: string }
+            title: { type: string }
 
     Waiting:
       type: object
@@ -1366,6 +1491,7 @@ components:
       properties:
         text: { type: string, minLength: 1 }
         key: { type: string, description: "Idempotency key for retries." }
+        model: { type: string, enum: [sonnet, opus], description: "This turn's model in a profile session; omitted keeps the profile's default. Any other value is 400 bad_request." }
 
     TerminalMessageRequest:
       type: object
@@ -1452,6 +1578,7 @@ components:
         title: { type: string, maxLength: 80, description: "The owner's title; empty clears it." }
         description: { type: string, maxLength: 300, description: "The owner's description; empty clears it." }
         pinned: { type: boolean }
+        hidden: { type: boolean, enum: [true], description: "Remove the session from the lists; it cannot be shown again from here." }
 
     MetaResult:
       type: object
@@ -1461,6 +1588,7 @@ components:
         title: { type: string }
         description: { type: string, description: "Absent when the session has none." }
         pinned: { type: boolean }
+        hidden: { type: boolean, description: "True once the session is hidden; absent otherwise." }
 
     OpenOnMacResult:
       type: object
@@ -1519,11 +1647,77 @@ components:
     NewSessionRequest:
       type: object
       additionalProperties: false
-      required: [cwd, text]
+      required: [text]
       properties:
-        cwd: { type: string, description: "One of `GET /v1/projects`." }
+        cwd: { type: string, description: "One of `GET /v1/projects`. Required without `profile`." }
         text: { type: string, minLength: 1 }
         key: { type: string, description: "Idempotency key for retries." }
+        profile: { type: string, description: "Run the session under this profile (one of `GET /v1/profiles` with `allowed`)." }
+        url: { type: string, description: "With profile: the page the question is about; the same client, url and profile continue one session." }
+        title: { type: string, description: "With profile: the page's title." }
+        pageText: { type: string, description: "With profile: the page's text for a new session, at most 512 KiB (else 413 page_too_large). Ignored when the session continues." }
+        model: { type: string, enum: [sonnet, opus], description: "With profile: this turn's model; omitted keeps the profile's default. Any other value is 400 bad_request." }
+
+    ProfileInfo:
+      type: object
+      additionalProperties: false
+      required: [name, runs, available, digest, allowed]
+      properties:
+        name: { type: string }
+        runs: { type: string, enum: [host, acp, sandbox, run], description: "host: on the Mac itself, with the owner's settings. acp and sandbox: confined sessions." }
+        available: { type: boolean, description: "False for a profile the Mac cannot run yet, including host and run profiles, which have no engine yet (409 profile_not_available)." }
+        digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$", description: "Of the resolved manifest; changes whenever the profile does." }
+        allowed: { type: boolean, description: "The caller's client may ask for it." }
+
+    ProfileList:
+      type: object
+      additionalProperties: false
+      required: [profiles]
+      properties:
+        profiles:
+          type: array
+          description: Sorted by name.
+          items: { $ref: "#/components/schemas/ProfileInfo" }
+
+    ProfileDetail:
+      type: object
+      required: [name, runs, digest, available, allowed]
+      description: >
+        The resolved manifest as aimux profile show prints it, plus digest,
+        available and allowed (for the caller's client). Manifest fields
+        may grow; clients ignore those they do not know.
+      properties:
+        name: { type: string }
+        extends: { type: string }
+        harness: { type: string }
+        model:
+          type: object
+          properties:
+            provider: { type: string }
+            name: { type: string }
+        runs: { type: string, enum: [host, acp, sandbox, run] }
+        dir: { type: string }
+        tools: { type: array, nullable: true, items: { type: string } }
+        network:
+          type: object
+          properties:
+            default: { type: string, enum: [deny, allow] }
+            allow: { type: array, nullable: true, items: { type: string } }
+        files:
+          type: object
+          properties:
+            read: { type: array, nullable: true, items: { type: string } }
+            write: { type: array, nullable: true, items: { type: string } }
+        credentials: { type: array, nullable: true, items: { type: string } }
+        settings:
+          type: object
+          properties:
+            inherit_user: { type: boolean }
+        unsafe_patterns: { type: boolean }
+        roles: { type: object, nullable: true, additionalProperties: { type: string } }
+        digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        available: { type: boolean }
+        allowed: { type: boolean }
 
     DeviceRequest:
       type: object

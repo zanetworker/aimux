@@ -65,6 +65,8 @@ remote:
   warm_pool: 0  # set >0 to pre-create sandboxes
 ```
 
+When `remote.image` is empty and the launch names no image, aimux uses `localhost/wingman-sandbox:2.1.319`, a local Podman image with a pinned Claude Code. `aimux browser setup` builds it from the wingman repo's `sandbox/Containerfile` (`podman build -t localhost/wingman-sandbox:2.1.319 -f sandbox/Containerfile sandbox`); without it a launch with no image fails. Set `image:` as above to use another image, such as the OpenShell community base.
+
 ## Two Backends
 
 | | OpenShell | K8s |

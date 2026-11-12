@@ -29,6 +29,8 @@ export default defineConfig({
 						{ label: 'MLflow Integration', slug: 'guides/mlflow-integration' },
 						{ label: 'Agent Usage', slug: 'guides/agent-usage' },
 						{ label: 'MCP Proxy', slug: 'guides/mcp-proxy' },
+						{ label: 'Profiles', slug: 'guides/profiles' },
+						{ label: 'Wingman', slug: 'guides/wingman' },
 						{ label: 'Chat with Sessions', slug: 'guides/chat' },
 						{ label: 'Remote Access', slug: 'guides/remote-access' },
 					],

@@ -20,6 +20,12 @@ type Runner interface {
 	Close() error
 }
 
+// ModelSetter is a Runner that can switch its session's model; *Run is one.
+type ModelSetter interface {
+	Model() string
+	SetModel(ctx context.Context, model string) error
+}
+
 // StartFunc starts a run that continues sessionID in cwd.
 type StartFunc func(ctx context.Context, sessionID, cwd string) (Runner, error)
 
@@ -31,6 +37,9 @@ var (
 	ErrBusy        = errors.New("the session is already answering a message")
 	ErrTooManyRuns = errors.New("too many sessions are busy; try again when one finishes")
 	ErrNotRunning  = errors.New("the session is not running in aimux")
+	// ErrModelSwitch marks a SendModel that failed switching the model; the
+	// session itself is fine and nothing was sent.
+	ErrModelSwitch = errors.New("cannot switch the session's model")
 	errManagerDone = errors.New("aimux is shutting down")
 )
 
@@ -140,6 +149,13 @@ func NewManager(opt ManagerOptions) *Manager {
 // session is still answering, and with ErrTooManyRuns when every run slot
 // is busy. A failed turn closes the run so the next message starts fresh.
 func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent func(Event)) (string, error) {
+	return m.SendModel(ctx, sessionID, cwd, "", text, onEvent)
+}
+
+// SendModel is Send that first switches the session to model when it is not
+// already on it ("" keeps the current model). The run must be a ModelSetter.
+// A failed switch sends nothing and keeps the run.
+func (m *Manager) SendModel(ctx context.Context, sessionID, cwd, model, text string, onEvent func(Event)) (string, error) {
 	e, evicted, err := m.claim(sessionID)
 	if evicted != nil {
 		evicted.retire()
@@ -216,6 +232,17 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		}
 	}
 
+	if model != "" {
+		if err := switchModel(ctx, e.run, model); err != nil {
+			m.mu.Lock()
+			e.busy = false
+			e.cancelRequested = false
+			e.lastUsed = m.opt.Now()
+			m.mu.Unlock()
+			return "", err
+		}
+	}
+
 	m.mu.Lock()
 	if ctx.Err() != nil || e.cancelRequested {
 		// Cancelled after the turn was accepted but before its prompt: keep
@@ -252,6 +279,46 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 		e.retire()
 	}
 	return stop, err
+}
+
+// SetModel switches an idle running session to model (no-op when it is
+// already on it). It returns ErrNotRunning without a run, ErrBusy during a
+// turn, and an ErrModelSwitch error when the switch fails.
+func (m *Manager) SetModel(ctx context.Context, sessionID, model string) error {
+	m.mu.Lock()
+	e, ok := m.runs[sessionID]
+	switch {
+	case !ok || e.run == nil:
+		m.mu.Unlock()
+		return ErrNotRunning
+	case e.busy:
+		m.mu.Unlock()
+		return ErrBusy
+	}
+	e.busy = true
+	r := e.run
+	m.mu.Unlock()
+	err := switchModel(ctx, r, model)
+	m.mu.Lock()
+	e.busy = false
+	e.cancelRequested = false
+	e.lastUsed = m.opt.Now()
+	m.mu.Unlock()
+	return err
+}
+
+func switchModel(ctx context.Context, r Runner, model string) error {
+	ms, ok := r.(ModelSetter)
+	if !ok {
+		return fmt.Errorf("%w to %s: the agent adapter has no model selector", ErrModelSwitch, model)
+	}
+	if ms.Model() == model {
+		return nil
+	}
+	if err := ms.SetModel(ctx, model); err != nil {
+		return fmt.Errorf("%w: %w", ErrModelSwitch, err)
+	}
+	return nil
 }
 
 // New starts a new session in cwd and keeps its run for the session's

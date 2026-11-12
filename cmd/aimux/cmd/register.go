@@ -57,6 +57,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newMCPCmd())
 	rootCmd.AddCommand(newChatCmd())
 	rootCmd.AddCommand(newRemoteCmd())
+	rootCmd.AddCommand(newBrowserCmd())
 
 	// Build trace parser map for export command, converting function types.
 	parsers := make(map[string]traceParserFn)

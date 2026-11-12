@@ -321,8 +321,8 @@ func TestBuild_WiresEveryJob(t *testing.T) {
 	if got, want := names(w), "device login, queue events, chat queue*, folders*, waiting alerts*, reap idle runs, search refresh"; got != want {
 		t.Fatalf("jobs %s, want %s", got, want)
 	}
-	if len(w.closers) != 6 {
-		t.Fatalf("%d closers, want 6 (chat manager, drivers, terminal input log, audit log, queue file, listener)", len(w.closers))
+	if len(w.closers) != 7 {
+		t.Fatalf("%d closers, want 7 (chat manager, profile engines, drivers, terminal input log, audit log, queue file, listener)", len(w.closers))
 	}
 
 	off := false

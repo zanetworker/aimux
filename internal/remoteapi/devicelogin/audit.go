@@ -42,6 +42,8 @@ const (
 	ActionMetaEdit = "meta_edit"
 	ActionPin      = "pin"
 	ActionUnpin    = "unpin"
+	// ActionHide: a session removed from the lists (Wingman's history delete).
+	ActionHide = "hide"
 	// ActionOpenOnMac: a session handed from the phone to an iTerm2 tab.
 	ActionOpenOnMac = "open_on_mac"
 )
@@ -55,7 +57,14 @@ type AuditEntry struct {
 	Device  string    `json:"device"`
 	Action  string    `json:"action"`
 	Session string    `json:"session,omitempty"`
-	Result  string    `json:"result"`
+	// Client, Profile, Digest and URLHost are set on lines of local clients
+	// (clientscope names): the profile asked for, its digest, and the host
+	// of the page's URL, never its path or query.
+	Client  string `json:"client,omitempty"`
+	Profile string `json:"profile,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+	URLHost string `json:"urlHost,omitempty"`
+	Result  string `json:"result"`
 	// Count, on a failure line, is how many identical failures it stands
 	// for: those left out in the minute since the last such line, plus this.
 	Count int `json:"count,omitempty"`

@@ -17,6 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 	webclient "github.com/zanetworker/aimux/clients/web"
+	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/config"
 	"github.com/zanetworker/aimux/internal/discovery"
 	"github.com/zanetworker/aimux/internal/harness"
@@ -35,8 +36,9 @@ type remoteSettings struct {
 }
 
 // resolveRemoteSettings applies flags over remote_access config over
-// defaults. It refuses to run with nobody allowed.
-func resolveRemoteSettings(cfg config.RemoteAccessConfig, port int, allow []string) (remoteSettings, error) {
+// defaults. It refuses to run with nobody allowed, unless localOnly (no
+// tailnet listener, so nobody to allow).
+func resolveRemoteSettings(cfg config.RemoteAccessConfig, port int, allow []string, localOnly bool) (remoteSettings, error) {
 	s := remoteSettings{port: 7382, adapter: defaultClaudeAdapter, maxRuns: 2, approvalTimeout: 10 * time.Minute, allowed: cfg.AllowedLogins}
 	if cfg.Port > 0 {
 		s.port = cfg.Port
@@ -60,7 +62,7 @@ func resolveRemoteSettings(cfg config.RemoteAccessConfig, port int, allow []stri
 		}
 		s.approvalTimeout = d
 	}
-	if len(s.allowed) == 0 {
+	if len(s.allowed) == 0 && !localOnly {
 		return s, errors.New("nobody is allowed: set remote_access.allowed_logins in ~/.aimux/config.yaml or pass --allow <tailscale-login>")
 	}
 	return s, nil
@@ -206,8 +208,10 @@ func newRemoteRevokeCmd() *cobra.Command {
 
 func newRemoteServeCmd() *cobra.Command {
 	var (
-		port  int
-		allow []string
+		port         int
+		allow        []string
+		localOnly    bool
+		unsafeNoAuth bool
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -215,15 +219,24 @@ func newRemoteServeCmd() *cobra.Command {
 		Long: "Serve the remote API: list Claude sessions, follow them, continue idle ones and answer " +
 			"approvals from another device. It listens on 127.0.0.1 only and admits a request only when " +
 			"tailscale serve forwarded it for a login in remote_access.allowed_logins. It also serves a " +
-			"phone web client at /app/: after tailscale serve, open https://<this machine's tailnet name>:8443/app/.",
+			"phone web client at /app/: after tailscale serve, open https://<this machine's tailnet name>:8443/app/. " +
+			"Local clients (Wingman) get a unix socket each, as ~/.config/aimux/clients.yaml says (default " +
+			"~/.aimux/clients/wingman.sock, 0600): the socket names the client, so it needs no login, and the " +
+			"client is held to the profiles and limits of its scope. --local-only serves only those sockets. " +
+			"Without device login the tailnet listener is refused unless --unsafe-no-device-login is passed. " +
+			"A second remote serve exits at once when one is already running.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(config.DefaultPath())
 			if err != nil {
 				return fmt.Errorf("read %s: %w", config.DefaultPath(), err)
 			}
-			s, err := resolveRemoteSettings(cfg.RemoteAccess, port, allow)
+			s, err := resolveRemoteSettings(cfg.RemoteAccess, port, allow, localOnly)
 			if err != nil {
 				return err
+			}
+			scopes, err := clientscope.Load(clientscope.DefaultPath())
+			if err != nil {
+				return fmt.Errorf("read %s: %w", clientscope.DefaultPath(), err)
 			}
 			name, adapterArgs, err := parseAdapter(s.adapter)
 			if err != nil {
@@ -236,12 +249,15 @@ func newRemoteServeCmd() *cobra.Command {
 			return remoteapp.New(cfg, remoteapp.Options{
 				Home: home, Port: s.port, Allowed: s.allowed, AdapterCommand: name, AdapterArgs: adapterArgs,
 				MaxRuns: s.maxRuns, ApprovalTimeout: s.approvalTimeout,
+				LocalOnly: localOnly, UnsafeNoDeviceLogin: unsafeNoAuth, Scopes: scopes,
 				Version: cmd.Root().Version, Client: webclient.Handler(), Out: cmd.OutOrStdout(), ErrOut: cmd.ErrOrStderr(),
 			}).Run(cmd.Context())
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 0, "Port on 127.0.0.1 (default 7382, or remote_access.port)")
 	cmd.Flags().StringSliceVar(&allow, "allow", nil, "Tailscale logins to admit (overrides remote_access.allowed_logins)")
+	cmd.Flags().BoolVar(&localOnly, "local-only", false, "Serve only the local clients' sockets: no tailnet listener, no --allow, no device login")
+	cmd.Flags().BoolVar(&unsafeNoAuth, "unsafe-no-device-login", false, "Run the tailnet listener with remote_access.device_login false (any local process could claim an allowed login)")
 	return cmd
 }
 

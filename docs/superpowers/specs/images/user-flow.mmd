@@ -1,0 +1,32 @@
+%%{init: {'theme':'neutral'}}%%
+sequenceDiagram
+  autonumber
+  actor You
+  participant P as Wingman panel
+  participant C as aimux core (one contract)
+  participant O as OpenShell
+  participant PL as Planner (sandbox)
+  participant G as Tool gateway
+  participant R as Reader (sandbox)
+  participant W as Writer (no tools)
+  You->>P: ask, "Use my context" on
+  P->>C: start run, profile research-with-work, question + page
+  C->>C: Wingman may use this profile? resolve digest
+  C->>O: sandboxes with policy compiled from the profile
+  C->>PL: question only, never the page
+  PL->>G: reviewed read-only calls (Jira, Slack, notes)
+  Note over PL,G: names checked twice: gateway + OpenShell
+  PL-->>C: typed output: search queries, claims to check
+  C->>C: query check
+  alt a query names a person, ticket or secret
+    C-->>P: preview: send without it, my question only, or as is
+    You->>P: choose
+  end
+  C->>R: approved queries + page text, nothing private
+  R->>O: web search and GET fetch (audited)
+  R-->>C: findings with sources
+  C->>W: question + private evidence + findings
+  W-->>C: answer (no tools, no network)
+  C-->>P: progress events, then the answer with both kinds of source
+  C->>C: record run: profile digest, three sessions, archived for search
+  Note over You,C: later: the same run is listed on the phone and in the dashboard, and can be continued there

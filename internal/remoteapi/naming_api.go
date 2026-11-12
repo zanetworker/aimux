@@ -106,6 +106,9 @@ type metaRequest struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Pinned      *bool   `json:"pinned"`
+	// Hidden takes only true: the session leaves the lists (its transcript
+	// stays). Local clients may hide only their own profile sessions.
+	Hidden *bool `json:"hidden"`
 }
 
 // actions are the audit actions a request stands for.
@@ -120,6 +123,9 @@ func (q metaRequest) actions() []string {
 			action = devicelogin.ActionPin
 		}
 		out = append(out, action)
+	}
+	if q.Hidden != nil {
+		out = append(out, devicelogin.ActionHide)
 	}
 	if len(out) == 0 {
 		out = append(out, devicelogin.ActionMetaEdit)
@@ -150,6 +156,10 @@ func (a *API) patchMeta(w http.ResponseWriter, r *http.Request) {
 	decodeErr := decodeStrict(w, r, &req)
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	a.editMeta(rec, r, req, decodeErr)
+	if n := noteOf(r); n != nil { // a local client: localAudit writes its line
+		n.action = strings.Join(req.actions(), ",")
+		return
+	}
 	if a.DeviceLogin == nil {
 		return
 	}
@@ -167,8 +177,15 @@ func (a *API) editMeta(w http.ResponseWriter, r *http.Request, req metaRequest, 
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with title, description or pinned, at most 64 KiB: %w", decodeErr))
 		return
 	}
-	if req.Title == nil && req.Description == nil && req.Pinned == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", errors.New("give at least one of title, description and pinned"))
+	if req.Title == nil && req.Description == nil && req.Pinned == nil && req.Hidden == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("give at least one of title, description, pinned and hidden"))
+		return
+	}
+	if req.Hidden != nil && !*req.Hidden {
+		writeError(w, http.StatusBadRequest, "bad_request", errors.New("hidden takes only true"))
+		return
+	}
+	if done := a.hideProfileSession(w, r, req); done {
 		return
 	}
 	title, err := ownerText("title", req.Title, maxTitleChars)
@@ -201,6 +218,9 @@ func (a *API) editMeta(w http.ResponseWriter, r *http.Request, req metaRequest, 
 		if req.Pinned != nil {
 			m.Starred = *req.Pinned
 		}
+		if req.Hidden != nil {
+			m.Hidden = true
+		}
 		saved = *m
 	})
 	if err != nil {
@@ -210,7 +230,7 @@ func (a *API) editMeta(w http.ResponseWriter, r *http.Request, req metaRequest, 
 	}
 	s.Title, s.TitleBy, s.Description, s.DescriptionBy, s.DescribedAt, s.Starred = saved.Title, saved.TitleBy, saved.Description, saved.DescriptionBy, saved.DescribedAt, saved.Starred
 	shown, _ := history.ShownDescription(s)
-	writeJSON(w, http.StatusOK, MetaResult{Title: history.DisplayTitle(s), Description: shown, Pinned: s.Starred})
+	writeJSON(w, http.StatusOK, MetaResult{Title: history.DisplayTitle(s), Description: shown, Pinned: s.Starred, Hidden: saved.Hidden})
 }
 
 // setOwner stores an owner value; an empty one clears the field only when

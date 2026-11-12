@@ -17,9 +17,12 @@ import (
 	aimuxapi "github.com/zanetworker/aimux/api"
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/catalog"
+	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/profile"
+	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/push"
 	"github.com/zanetworker/aimux/internal/remoteapi/chatqueue"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
@@ -64,6 +67,17 @@ type Session struct {
 	// Activity is what the session is doing now (sessionstate): working,
 	// needs_you, idle or gone. Set on the list and the detail.
 	Activity sessionstate.Activity `json:"activity,omitempty"`
+	// Profile, Client and Page are set for sessions started under a profile
+	// (the session list with a client or url filter).
+	Profile string `json:"profile,omitempty"`
+	Client  string `json:"client,omitempty"`
+	Page    *Page  `json:"page,omitempty"`
+}
+
+// Page is the web page a profile session was started on.
+type Page struct {
+	URL   string `json:"url"`
+	Title string `json:"title,omitempty"`
 }
 
 // SessionDetail is a session plus its most recent turns.
@@ -186,8 +200,40 @@ type API struct {
 	// openOnMac); nil answers 503 no_terminal.
 	Handoff *Handoff
 
-	createMu sync.Mutex        // one creation at a time, so a retried key cannot create twice
-	created  map[string]string // client key -> new session id
+	// Profiles, if set with ProfileSessions and NewProfileSession, serves
+	// /v1/profiles and `profile` on POST /v1/sessions. It returns the
+	// resolved manifests (profile.Resolve) by name, Available set.
+	Profiles func() (map[string]profile.Manifest, error)
+	// Scopes says which profiles each client may ask for, and its limits.
+	Scopes clientscope.Scopes
+	// ProfileSessions records the sessions started under a profile;
+	// NewProfileSession starts one (the engine for its profile's Runs) and
+	// returns its id. The API records the Meta it gave.
+	ProfileSessions   *profilerun.Store
+	NewProfileSession func(ctx context.Context, m profilerun.Meta, page string) (string, error)
+	// CancelProfileSession, if set, stops a session NewProfileSession made
+	// that could not be recorded (the engine's Cancel), so it is never used.
+	CancelProfileSession func(session string) error
+	// ProfileHealth, if set, reports whether the profile sessions file can
+	// be read (profilerun.Router.Health); its error shows in /v1/health.
+	ProfileHealth func() error
+	// StepUpLegacy (remote_access.step_up_legacy) applies the host-profile
+	// step-up to new sessions without a profile, which run on the host.
+	StepUpLegacy bool
+	// Audit, if set, receives the local clients' audit lines; nil uses
+	// DeviceLogin's. With neither, nothing is written.
+	Audit *devicelogin.Audit
+	// Now, if set, is the clock of the client limits; nil is time.Now.
+	Now func() time.Time
+	// LocalOnly is reported on health: this serve has local sockets only
+	// (remote serve --local-only, as Wingman starts it).
+	LocalOnly bool
+
+	limits limiter // per-client sessions and turns (clientscope limits)
+
+	createMu sync.Mutex         // guards created and flights; never held across a creation
+	created  map[string]string  // client key -> new session id
+	flights  map[string]*flight // creations in progress by flight key
 
 	nowMu   sync.Mutex           // guards nowDone
 	nowDone map[string]time.Time // session and key of a Send now that went through
@@ -196,6 +242,43 @@ type API struct {
 // Handler returns the /v1 routes, admitting only allowed Tailscale logins
 // arriving through tailscale serve for one of trustedHosts.
 func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
+	mux := a.routes()
+	if a.DeviceLogin != nil {
+		a.DeviceLogin.Register(mux)
+	}
+	// Local clients are confined and audited whatever wraps the chain.
+	h := a.localAudit(a.localScope(mux))
+	if a.DeviceLogin != nil {
+		h = a.DeviceLogin.Middleware(h)
+	}
+	return RequireTailnetUser(allowedLogins, trustedHosts, h)
+}
+
+// LocalHost is the Host a local socket client sends (http://aimux.local).
+const LocalHost = "aimux.local"
+
+// LocalHandler serves the /v1 routes on a local client's socket. The socket
+// names the client, so there is no tailnet identity or device login check,
+// and nothing on the request (a header, a test seam) can change who it is.
+// Confinement (localScope) and the local audit apply as on Handler. Host
+// must be LocalHost and no web page may send it (no Origin), so a page that
+// reaches the socket through some relay is refused.
+func (a *API) LocalHandler(client string) http.Handler {
+	h := a.localAudit(a.localScope(a.routes()))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if normalizeHost(r.Host) != LocalHost || r.Header.Get("Origin") != "" || !fromOwnPage(r) {
+			writeError(w, http.StatusForbidden, "forbidden", errors.New("not a local client request (Host must be "+LocalHost+")"))
+			return
+		}
+		h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), localClientKey{}, client)))
+	})
+}
+
+// localClientKey holds the client a LocalHandler fixed for the request.
+type localClientKey struct{}
+
+// routes is the /v1 mux shared by Handler and LocalHandler.
+func (a *API) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", a.health)
 	mux.HandleFunc("GET /v1/openapi.yaml", serveContract)
@@ -204,6 +287,8 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 	mux.HandleFunc("POST /v1/sessions", a.audited(devicelogin.ActionNewSession, false, a.newSession))
 	mux.HandleFunc("GET /v1/search", a.search)
 	mux.HandleFunc("GET /v1/projects", a.projects)
+	mux.HandleFunc("GET /v1/profiles", a.listProfiles)
+	mux.HandleFunc("GET /v1/profiles/{name}", a.getProfile)
 	mux.HandleFunc("PATCH /v1/sessions/{id}/meta", a.patchMeta)
 	mux.HandleFunc("POST /v1/sessions/{id}/describe", a.audited(devicelogin.ActionDescribe, true, a.describe))
 	mux.HandleFunc("POST /v1/sessions/{id}/open-on-mac", a.audited(devicelogin.ActionOpenOnMac, true, a.openOnMac))
@@ -225,22 +310,23 @@ func (a *API) Handler(allowedLogins, trustedHosts []string) http.Handler {
 		mux.Handle("GET /app/", a.Client)
 		mux.Handle("GET /app", http.RedirectHandler("/app/", http.StatusFound))
 	}
-	var h http.Handler = mux
-	if a.DeviceLogin != nil {
-		a.DeviceLogin.Register(mux)
-		h = a.DeviceLogin.Middleware(mux)
-	}
-	return RequireTailnetUser(allowedLogins, trustedHosts, h)
+	return mux
 }
 
 // audited writes an audit line for each request to h once it is answered:
 // the action, the session in the path when withSession (never the body),
 // and "ok" or http_<status>. Without device login it is h.
 func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.HandlerFunc {
-	if a.DeviceLogin == nil {
-		return h
-	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		if n := noteOf(r); n != nil { // a local client: localAudit writes its line
+			n.action = action
+			h(w, r)
+			return
+		}
+		if a.DeviceLogin == nil {
+			h(w, r)
+			return
+		}
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		h(rec, r)
 		result := "ok"
@@ -279,6 +365,16 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// Flush passes a flush on, so event streams work through the recorder.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -291,39 +387,46 @@ func writeError(w http.ResponseWriter, status int, code string, err error) {
 
 // writeFailure maps aimux errors to statuses and stable codes for clients.
 func writeFailure(w http.ResponseWriter, err error) {
+	status, code := failureStatus(err)
+	writeError(w, status, code, err)
+}
+
+// failureStatus is the status and code writeFailure answers err with;
+// anything it does not know is 500 internal.
+func failureStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, acprun.ErrUnknownSession):
-		writeError(w, http.StatusNotFound, "unknown_session", err)
+		return http.StatusNotFound, "unknown_session"
 	case errors.Is(err, acprun.ErrOpenInTerminal):
-		writeError(w, http.StatusConflict, "open_in_terminal", err)
+		return http.StatusConflict, "open_in_terminal"
 	case errors.Is(err, acprun.ErrBusy):
-		writeError(w, http.StatusConflict, "busy", err)
+		return http.StatusConflict, "busy"
 	case errors.Is(err, acprun.ErrInUseElsewhere):
-		writeError(w, http.StatusConflict, "in_use", err)
+		return http.StatusConflict, "in_use"
 	case errors.Is(err, acprun.ErrOwnershipUnknown):
-		writeError(w, http.StatusServiceUnavailable, "ownership_unknown", err)
+		return http.StatusServiceUnavailable, "ownership_unknown"
 	case errors.Is(err, acprun.ErrNotRunning):
-		writeError(w, http.StatusConflict, "not_running", err)
+		return http.StatusConflict, "not_running"
 	case errors.Is(err, acprun.ErrTooManyRuns):
-		writeError(w, http.StatusServiceUnavailable, "too_many_runs", err)
+		return http.StatusServiceUnavailable, "too_many_runs"
 	case errors.Is(err, ErrNoSuchApproval):
-		writeError(w, http.StatusNotFound, "no_such_approval", err)
+		return http.StatusNotFound, "no_such_approval"
 	case errors.Is(err, ErrInvalidOption):
-		writeError(w, http.StatusBadRequest, "invalid_option", err)
+		return http.StatusBadRequest, "invalid_option"
 	case errors.Is(err, push.ErrBadDevice):
-		writeError(w, http.StatusBadRequest, "bad_request", err)
+		return http.StatusBadRequest, "bad_request"
 	case errors.Is(err, errNotAProject):
-		writeError(w, http.StatusBadRequest, "bad_request", err)
+		return http.StatusBadRequest, "bad_request"
 	case errors.Is(err, ErrNotStarted):
-		writeError(w, http.StatusConflict, "not_started", err)
+		return http.StatusConflict, "not_started"
 	case errors.Is(err, ErrNoTerminal):
-		writeError(w, http.StatusServiceUnavailable, "no_terminal", err)
+		return http.StatusServiceUnavailable, "no_terminal"
 	case errors.Is(err, ErrNotAuthorized):
-		writeError(w, http.StatusForbidden, "not_authorized", err)
+		return http.StatusForbidden, "not_authorized"
 	case errors.Is(err, ErrHandoffTimeout):
-		writeError(w, http.StatusGatewayTimeout, "timeout", err)
+		return http.StatusGatewayTimeout, "timeout"
 	default:
-		writeError(w, http.StatusInternalServerError, "internal", err)
+		return http.StatusInternalServerError, "internal"
 	}
 }
 
@@ -371,8 +474,11 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	if a.terminalOn() {
 		caps = append(caps, CapSendNow)
 	}
+	if a.profilesOn() {
+		caps = append(caps, CapProfiles)
+	}
 	h := Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
-		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps, OpenOnMac: a.Handoff != nil}
+		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps, OpenOnMac: a.Handoff != nil, LocalOnly: a.LocalOnly}
 	if a.DeviceLogin != nil {
 		h.Session = a.DeviceLogin.SessionState(r)
 	}
@@ -382,6 +488,11 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	if a.Naming != nil {
 		st := a.Naming.Status()
 		h.Naming = &NamingHealth{Today: st.Today, Limit: st.Limit, Failing: st.Failing, Reason: st.Reason, Paused: st.Paused}
+	}
+	if a.ProfileHealth != nil {
+		if err := a.ProfileHealth(); err != nil {
+			h.ProfileStore = err.Error()
+		}
 	}
 	writeJSON(w, http.StatusOK, h)
 }
@@ -404,6 +515,10 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	limit, err := intParam(r, "limit", 50, 500)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err)
+		return
+	}
+	if a.profileListing(r) {
+		writeJSON(w, http.StatusOK, SessionList{Sessions: a.profileSessions(r, limit)})
 		return
 	}
 	automated := r.URL.Query().Get("include_automated") == "1"
@@ -516,12 +631,13 @@ func (a *API) projects(w http.ResponseWriter, r *http.Request) {
 // newSession starts a session in one of the recent project folders (never
 // an arbitrary path) and sends its first message.
 func (a *API) newSession(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Cwd  string `json:"cwd"`
-		Text string `json:"text"`
-		Key  string `json:"key"`
+	var req newSessionRequest
+	body := &countingReader{r: http.MaxBytesReader(w, r.Body, maxProfileBody)}
+	err := json.NewDecoder(body).Decode(&req)
+	if err == nil && req.Profile == "" && body.n > maxSessionBody {
+		err = &http.MaxBytesError{Limit: maxSessionBody} // without a profile, today's limit
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with cwd and text: %w", err))
 		return
 	}
@@ -529,26 +645,39 @@ func (a *API) newSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", errors.New("text is empty"))
 		return
 	}
+	if !checkModel(w, req.Model) {
+		return
+	}
+	if req.Profile != "" {
+		a.newProfileSession(w, r, req)
+		return
+	}
+	if !a.legacyAllowed(w, r) {
+		return
+	}
 	if a.Create == nil || a.Projects == nil {
 		writeError(w, http.StatusNotFound, "not_supported", errors.New("starting sessions is not available"))
 		return
 	}
 
-	a.createMu.Lock()
-	id, known := a.created[req.Key]
-	var err error
-	if !known || req.Key == "" {
-		// Only a new creation is checked against the current projects; a
-		// retry of one already made is answered from its key.
-		id, err = a.createIn(r.Context(), req.Cwd, req.Text)
-		if err == nil && req.Key != "" {
-			if a.created == nil {
-				a.created = map[string]string{}
-			}
-			a.created[req.Key] = id
-		}
+	key := createdKey(a.clientOf(r), "", "", req.Key)
+	flightKey := ""
+	if req.Key != "" {
+		flightKey = key
 	}
-	a.createMu.Unlock()
+	// Only a new creation is checked against the current projects; a retry
+	// of one already made is answered from its key.
+	id, err := a.createOnce(r.Context(), flightKey,
+		func() (string, bool) {
+			id, ok := a.created[key]
+			return id, ok && req.Key != ""
+		},
+		func() (string, error) { return a.createIn(r.Context(), req.Cwd, req.Text) },
+		func(id string) {
+			if req.Key != "" {
+				a.remember(key, id)
+			}
+		})
 	if err != nil {
 		writeFailure(w, err)
 		return
@@ -594,8 +723,9 @@ func (a *API) createIn(ctx context.Context, cwd, text string) (string, error) {
 
 func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Text string `json:"text"`
-		Key  string `json:"key"`
+		Text  string `json:"text"`
+		Key   string `json:"key"`
+		Model string `json:"model"` // optional turn model: sonnet or opus
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with a text field: %w", err))
@@ -605,12 +735,29 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", errors.New("text is empty"))
 		return
 	}
+	if !checkModel(w, req.Model) {
+		return
+	}
 	session := r.PathValue("id")
 	if a.queueActive(session, false) {
 		writeError(w, http.StatusConflict, "busy", errQueueActive)
 		return
 	}
-	turn, err := a.Broker.Start(session, req.Text, req.Key)
+	client := a.clientOf(r)
+	profiled, ok := a.followUpAllowed(w, client, session)
+	if !ok {
+		return
+	}
+	done := func(bool) {}
+	// A follow-up on a profile session counts like a new question, for every
+	// client (a confined one reaches only its own profile sessions).
+	if confined(client) || profiled {
+		if done, ok = a.reserveTurn(w, client); !ok {
+			return
+		}
+	}
+	turn, err := a.Broker.StartWith(session, req.Text, req.Key, TurnOptions{Model: req.Model})
+	done(err == nil)
 	if err != nil {
 		writeFailure(w, err)
 		return

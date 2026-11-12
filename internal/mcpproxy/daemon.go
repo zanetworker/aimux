@@ -31,6 +31,23 @@ type DaemonOptions struct {
 	// Log receives one line per catalog tool a reload could not serve.
 	// nil discards them.
 	Log io.Writer
+	// Token, when set, replaces the loopback-only guard with a bearer-token
+	// guard on every route (for a client that reaches the daemon through a
+	// container gateway, with Host host.containers.internal). Empty keeps
+	// netguard.LocalOnly.
+	Token string
+	// Tokens, when set, makes the bearer token an issued session token
+	// (toolgateway.Tokens): it may reach only the /mcp/<server> endpoints in
+	// its allow map (others get 403), sees only its tools in tools/list and
+	// is refused any other tool call. Like Token, it replaces the
+	// loopback-only guard. Token, when also set, stays valid as an
+	// unrestricted admin credential.
+	Tokens TokenAuthorizer
+	// AddServers, when set, is called once Serve routes requests, with
+	// functions that add (or replace) and remove a served endpoint while it
+	// runs; remove ends the endpoint's client sessions and reports whether
+	// it was served.
+	AddServers func(add func(name string, srv *server.MCPServer), remove func(name string) bool)
 
 	// lookupPeers and processIdentity find and check the process that owns a
 	// client session (tests); default lsof and kill 0.
@@ -50,11 +67,15 @@ func EndpointPath(server string) string { return "/mcp/" + url.PathEscape(server
 // handler. The map is replaced under mu, so endpoints can be added and
 // removed while requests are served.
 type endpoints struct {
-	ttl    time.Duration
-	owners *sessionOwners // records each request's session and client
-	conns  *connTracker   // which connection each request came on
-	mu     sync.RWMutex
-	m      map[string]*endpoint
+	ttl time.Duration
+	// customGuard: the bearer token vets requests, so the transport's own
+	// loopback Host check (which rejects host.containers.internal) is off.
+	customGuard bool
+	owners      *sessionOwners // records each request's session and client
+	conns       *connTracker   // which connection each request came on
+	binds       *sessionBinds  // which token created each session; nil without Tokens
+	mu          sync.RWMutex
+	m           map[string]*endpoint
 }
 
 type endpoint struct {
@@ -72,7 +93,8 @@ func (e *endpoints) add(name string, srv *server.MCPServer) {
 	// expiring idle sessions runs the unregister hook, which stops their
 	// per-session backends. A client that comes back after expiry gets a new
 	// session, as the MCP spec requires.
-	ep := &endpoint{mcp: srv, http: server.NewStreamableHTTPServer(srv, server.WithSessionIdleTTL(e.ttl))}
+	ep := &endpoint{mcp: srv, http: server.NewStreamableHTTPServer(srv, server.WithSessionIdleTTL(e.ttl),
+		server.WithDisableLocalhostProtection(e.customGuard))}
 	e.mu.Lock()
 	old := e.m[name]
 	e.m[name] = ep
@@ -207,7 +229,11 @@ func Serve(ctx context.Context, ln net.Listener, servers map[string]*server.MCPS
 		port = a.Port
 	}
 	eps := newEndpoints(sessionTransportTTL)
+	eps.customGuard = opt.Token != "" || opt.Tokens != nil
 	eps.conns = newConnTracker()
+	if opt.Tokens != nil {
+		eps.binds = newSessionBinds()
+	}
 	eps.owners = &sessionOwners{
 		open:     eps.conns.open,
 		idle:     opt.IdleTimeout,
@@ -218,6 +244,9 @@ func Serve(ctx context.Context, ln net.Listener, servers map[string]*server.MCPS
 	}
 	for name, srv := range servers {
 		eps.add(name, srv)
+	}
+	if opt.AddServers != nil {
+		opt.AddServers(eps.add, eps.remove)
 	}
 	mux := http.NewServeMux()
 	if opt.Status != nil {
@@ -231,7 +260,13 @@ func Serve(ctx context.Context, ln net.Listener, servers map[string]*server.MCPS
 			go r.follow(ctx, opt.Reload.Changes)
 		}
 	}
-	httpSrv := &http.Server{Handler: netguard.LocalOnly(eps.handler(mux)), ReadHeaderTimeout: 10 * time.Second,
+	guard := netguard.LocalOnly
+	if opt.Tokens != nil {
+		guard = func(next http.Handler) http.Handler { return tokenGuard(opt.Token, opt.Tokens, eps.binds, next) }
+	} else if opt.Token != "" {
+		guard = func(next http.Handler) http.Handler { return netguard.BearerOnly(opt.Token, next) }
+	}
+	httpSrv := &http.Server{Handler: guard(eps.handler(mux)), ReadHeaderTimeout: 10 * time.Second,
 		ConnState: eps.conns.state, ConnContext: eps.conns.context}
 
 	go func() {
@@ -247,6 +282,9 @@ func Serve(ctx context.Context, ln net.Listener, servers map[string]*server.MCPS
 					// Its owner exited, or it idled with no owner found. Ending it in
 					// the transport drops the transport's state for it and, through
 					// the unregister hook (newServer), stops its per-session backends.
+					if eps.binds != nil {
+						eps.binds.forget(s.ID)
+					}
 					if ep := eps.get(s.Endpoint); ep != nil {
 						ep.terminate(s.ID)
 					} else {

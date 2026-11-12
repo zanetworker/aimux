@@ -34,6 +34,8 @@ const (
 	// /v1/sessions/{id}/queue/{item}/send-now (Send now, mid-turn); offered
 	// with terminal input.
 	CapSendNow = "send_now"
+	// CapProfiles: /v1/profiles and `profile` on POST /v1/sessions.
+	CapProfiles = "profiles"
 )
 
 // Health is GET /v1/health: who the caller is and what this server offers.
@@ -54,6 +56,12 @@ type Health struct {
 	Naming *NamingHealth `json:"naming,omitempty"`
 	// OpenOnMac: POST /v1/sessions/{id}/open-on-mac can open a terminal tab.
 	OpenOnMac bool `json:"openOnMac"`
+	// ProfileStore is present while the profile sessions file cannot be
+	// read: what is wrong and how to recover. No session can be routed then.
+	ProfileStore string `json:"profileStore,omitempty"`
+	// LocalOnly: this serve has local client sockets only (remote serve
+	// --local-only, as Wingman starts it), no tailnet listener.
+	LocalOnly bool `json:"localOnly"`
 }
 
 // OpenOnMacResult answers POST /v1/sessions/{id}/open-on-mac.
@@ -82,6 +90,7 @@ type MetaResult struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Pinned      bool   `json:"pinned"`
+	Hidden      bool   `json:"hidden,omitempty"` // removed from the lists (PATCH with hidden)
 }
 
 // DescribeResult answers POST /v1/sessions/{id}/describe: what clients now
@@ -183,6 +192,9 @@ type EventPage struct {
 type ErrorBody struct {
 	Error string `json:"error"`
 	Code  string `json:"code"`
+	// MaxAge, on step_up_required, is how many seconds old the device's
+	// login may be: log in again, then retry.
+	MaxAge int `json:"maxAge,omitempty"`
 }
 
 // Event data, by Event.Kind. `update` events carry an ACP SessionUpdate as

@@ -13,6 +13,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
 // serveCatalog runs a daemon for cat on a free loopback port and returns
@@ -245,4 +246,96 @@ func TestServe_AbandonedSessionStopsItsBackends(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	gone.Store(true)
 	waitFor(t, "abandoned session's per-session backend stopped", fs.backends[0].closed.Load)
+}
+
+func TestServeDefaultGuardIsLocalOnly(t *testing.T) {
+	base, _ := startDaemon(t, newFakeStarter(), DaemonOptions{})
+	req, _ := http.NewRequest("POST", endpointURL(base, "slack"), nil)
+	req.Host = "host.containers.internal:7390"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("got %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestServeToken(t *testing.T) {
+	const token = "wingman-token"
+	pool := NewPool(newFakeStarter().start, PoolOptions{})
+	mon := &Monitor{Pool: pool, Servers: []string{"slack"}, Registered: map[string]string{}}
+	base, _ := serveCatalog(t, testCatalog(), pool, DaemonOptions{Token: token, Status: mon})
+	do := func(method, path, auth string) int {
+		body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"` +
+			mcp.LATEST_PROTOCOL_VERSION + `","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
+		req, _ := http.NewRequest(method, base+path, strings.NewReader(body))
+		req.Host = "host.containers.internal:7390"
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := do("POST", EndpointPath("slack"), "Bearer "+token); got != http.StatusOK {
+		t.Fatalf("mcp with token: got %d, want 200", got)
+	}
+	if got := do("POST", EndpointPath("slack"), ""); got != http.StatusUnauthorized {
+		t.Fatalf("mcp without token: got %d, want 401", got)
+	}
+	if got := do("GET", "/status", ""); got != http.StatusUnauthorized {
+		t.Fatalf("/status without token: got %d, want 401", got)
+	}
+	if got := do("GET", "/status", "Bearer "+token); got != http.StatusOK {
+		t.Fatalf("/status with token: got %d, want 200", got)
+	}
+}
+
+// AddServers hands the caller a way to add and remove endpoints on a running daemon.
+func TestServeAddServersAddsEndpointLive(t *testing.T) {
+	pool := NewPool(newFakeStarter().start, PoolOptions{})
+	var add func(string, *server.MCPServer)
+	var remove func(string) bool
+	got := make(chan struct{})
+	base, _ := serveCatalog(t, testCatalog(), pool, DaemonOptions{AddServers: func(a func(string, *server.MCPServer), r func(string) bool) {
+		add, remove = a, r
+		close(got)
+	}})
+	<-got
+	status := func(name string) int {
+		body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"` +
+			mcp.LATEST_PROTOCOL_VERSION + `","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
+		req, _ := http.NewRequest("POST", endpointURL(base, name), strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if s := status("late"); s != http.StatusNotFound {
+		t.Fatalf("before add: %d, want 404", s)
+	}
+	add("late", server.NewMCPServer("late", "1"))
+	if s := status("late"); s != http.StatusOK {
+		t.Fatalf("added endpoint: %d, want 200", s)
+	}
+	if !remove("late") {
+		t.Fatal("remove(late) = false, want true")
+	}
+	if s := status("late"); s != http.StatusNotFound {
+		t.Fatalf("removed endpoint: %d, want 404", s)
+	}
+	if remove("late") {
+		t.Fatal("second remove(late) = true, want false")
+	}
 }

@@ -12,6 +12,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/profilerun"
 )
 
 // Event kinds beyond acprun.KindUpdate, which the broker passes through.
@@ -171,6 +172,19 @@ func (b *Broker) Publish(session, kind string, data any) { b.emit(session, "", k
 // acprun.ErrBusy while the session has a running turn or is held, or with
 // Check's error.
 func (b *Broker) Start(session, text, key string) (string, error) {
+	return b.StartWith(session, text, key, TurnOptions{})
+}
+
+// TurnOptions are a turn's harmless per-turn inputs.
+type TurnOptions struct {
+	// Model is the turn's model choice (sonnet or opus, checked by the
+	// API), handed to the engine as profilerun.WithModel; "" keeps the
+	// profile's default.
+	Model string
+}
+
+// StartWith is Start with the turn's options.
+func (b *Broker) StartWith(session, text, key string, opt TurnOptions) (string, error) {
 	b.mu.Lock()
 	l := b.log(session)
 	if id, ok := l.keys[key]; ok && key != "" {
@@ -204,6 +218,9 @@ func (b *Broker) Start(session, text, key string) (string, error) {
 	}
 	turn := newID()
 	ctx, cancel := context.WithCancel(context.Background())
+	if opt.Model != "" {
+		ctx = profilerun.WithModel(ctx, opt.Model)
+	}
 	l.active = turn
 	l.cancel = cancel
 	if key != "" {

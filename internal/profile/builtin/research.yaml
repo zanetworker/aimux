@@ -1,0 +1,9 @@
+name: research
+harness: claude-code
+runs: sandbox
+tools: [wiki:readonly]
+network:
+  default: deny
+  allow: [model, web]
+settings:
+  inherit_user: false

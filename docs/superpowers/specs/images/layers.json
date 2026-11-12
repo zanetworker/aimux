@@ -1,0 +1,253 @@
+{
+ "theme": "paper",
+ "elements": [
+  {
+   "type": "text",
+   "x": 20,
+   "y": 14,
+   "w": 1100,
+   "text": "OpenShell enforces at the sandbox and the network, down to MCP tool names; aimux adds arguments, pins, review and which data each model call sees",
+   "bold": true,
+   "size": 15
+  },
+  {
+   "type": "container",
+   "kind": "open",
+   "tone": "amber",
+   "x": 20,
+   "y": 56,
+   "w": 1100,
+   "h": 210,
+   "label": "aimux adds (tool, argument and data level)"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 92,
+   "w": 256,
+   "h": 70,
+   "title": "Tool registry + review",
+   "desc": "source identity, reviewed\nread-only sets, curated CLI packs",
+   "icon": "\ud83d\udcc7"
+  },
+  {
+   "type": "card",
+   "x": 306,
+   "y": 92,
+   "w": 256,
+   "h": 70,
+   "title": "Per-tool pins",
+   "desc": "schema, flags, method; checked\nlive; drift hides the tool",
+   "icon": "\ud83d\udccc"
+  },
+  {
+   "type": "card",
+   "x": 576,
+   "y": 92,
+   "w": 256,
+   "h": 70,
+   "title": "MCP catalog filter",
+   "desc": "stdio servers too; same list\nas the compiled MCP rules",
+   "icon": "\ud83d\udd00"
+  },
+  {
+   "type": "card",
+   "x": 846,
+   "y": 92,
+   "w": 258,
+   "h": 70,
+   "title": "CLI argument allowlist",
+   "desc": "gh issue view yes,\ngh pr merge no; no shell",
+   "icon": "\u2328\ufe0f"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 176,
+   "w": 256,
+   "h": 70,
+   "title": "Profiles",
+   "desc": "contract, narrow-only inheritance,\ndigest on every run",
+   "icon": "\ud83e\uddfe"
+  },
+  {
+   "type": "card",
+   "x": 306,
+   "y": 176,
+   "w": 256,
+   "h": 70,
+   "title": "Harness lockdown",
+   "desc": "--tools exact names, no user\nsettings, hooks or MCP",
+   "icon": "\ud83d\udd12"
+  },
+  {
+   "type": "card",
+   "x": 576,
+   "y": 176,
+   "w": 256,
+   "h": 70,
+   "title": "Three-call research",
+   "desc": "planner, reader, writer;\nwho sees what",
+   "icon": "\ud83e\udded"
+  },
+  {
+   "type": "card",
+   "x": 846,
+   "y": 176,
+   "w": 258,
+   "h": 70,
+   "title": "Query check",
+   "desc": "private terms in searches:\nask, strip or fall back",
+   "icon": "\ud83d\udd0d"
+  },
+  {
+   "type": "text",
+   "x": 470,
+   "y": 278,
+   "w": 300,
+   "text": "compiled into \u2193 by the profile compiler",
+   "italic": true,
+   "size": 12
+  },
+  {
+   "type": "container",
+   "kind": "boundary",
+   "tone": "red",
+   "x": 20,
+   "y": 306,
+   "w": 1100,
+   "h": 300,
+   "label": "OpenShell provides (sandbox and network level)"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 342,
+   "w": 256,
+   "h": 70,
+   "title": "Sandbox isolation",
+   "desc": "process, Landlock file rules,\nown image per sandbox",
+   "icon": "\ud83d\udce6"
+  },
+  {
+   "type": "card",
+   "x": 306,
+   "y": 342,
+   "w": 256,
+   "h": 70,
+   "title": "Default-deny egress",
+   "desc": "allowed hosts and ports only;\nprivate IPs only if listed",
+   "icon": "\ud83d\udea7"
+  },
+  {
+   "type": "card",
+   "x": 576,
+   "y": 342,
+   "w": 256,
+   "h": 70,
+   "title": "L7 rules (REST, GraphQL, MCP)",
+   "desc": "method+path; query vs mutation;\nMCP method + tool name per path",
+   "icon": "\ud83d\udec2"
+  },
+  {
+   "type": "card",
+   "x": 846,
+   "y": 342,
+   "w": 258,
+   "h": 70,
+   "title": "Binary scoping",
+   "desc": "only this binary may\nreach that host",
+   "icon": "\ud83c\udfaf"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 426,
+   "w": 256,
+   "h": 70,
+   "title": "Credential injection",
+   "desc": "providers; the sandbox\nonly sees a placeholder",
+   "icon": "\ud83d\udd11"
+  },
+  {
+   "type": "card",
+   "x": 306,
+   "y": 426,
+   "w": 256,
+   "h": 70,
+   "title": "Live policy reload",
+   "desc": "policy set --wait; open\ntunnels closed on change",
+   "icon": "\ud83d\udea6"
+  },
+  {
+   "type": "card",
+   "x": 576,
+   "y": 426,
+   "w": 256,
+   "h": 70,
+   "title": "Audit (OCSF)",
+   "desc": "every connection; MCP calls\nlogged with the tool name",
+   "icon": "\ud83e\uddfe"
+  },
+  {
+   "type": "card",
+   "kind": "closed",
+   "x": 846,
+   "y": 426,
+   "w": 258,
+   "h": 70,
+   "title": "Cannot see",
+   "desc": "tool arguments, server responses\n(tools/list drift), data meaning",
+   "icon": "\ud83d\ude48"
+  },
+  {
+   "type": "text",
+   "x": 36,
+   "y": 508,
+   "w": 400,
+   "text": "extension points (gRPC services aimux can register)",
+   "italic": true
+  },
+  {
+   "type": "card",
+   "kind": "closed",
+   "x": 36,
+   "y": 530,
+   "w": 256,
+   "h": 58,
+   "title": "Supervisor middleware",
+   "desc": "inspect or rewrite request and\nresponse bodies; later, not v1"
+  },
+  {
+   "type": "card",
+   "kind": "closed",
+   "x": 306,
+   "y": 530,
+   "w": 256,
+   "h": 58,
+   "title": "Gateway interceptor",
+   "desc": "reject policy changes that\nweaken the profile digest"
+  },
+  {
+   "type": "legend",
+   "x": 20,
+   "y": 626,
+   "items": [
+    {
+     "kind": "open",
+     "tone": "amber",
+     "text": "aimux layer"
+    },
+    {
+     "kind": "boundary",
+     "tone": "red",
+     "text": "OpenShell layer"
+    },
+    {
+     "kind": "closed",
+     "text": "gap aimux fills, or optional extension"
+    }
+   ]
+  }
+ ]
+}

@@ -51,6 +51,7 @@ type Session struct {
 	Automated        bool      `json:"automated"` // started by a program (cron, SDK, analyzers), see IsAutomated
 	PermissionMode   string    `json:"permission_mode"`
 	Starred          bool      `json:"starred"`
+	Hidden           bool      `json:"hidden,omitempty"` // the owner hid it (Wingman's history delete); from meta
 	GitBranch        string    `json:"git_branch"`
 	LastPrompt       string    `json:"last_prompt"`
 	LastAction       string    `json:"last_action"`
@@ -80,6 +81,9 @@ type Meta struct {
 	DescriptionBy  string `json:"description_by,omitempty"` // "model" or "owner"
 	DescribedAt    string `json:"described_at,omitempty"`   // RFC 3339
 	DescribedTurns int    `json:"described_turns,omitempty"`
+	// Hidden: the owner removed it from the remote lists (Wingman's history
+	// delete). The transcript stays.
+	Hidden bool `json:"hidden,omitempty"`
 }
 
 // DiscoverOpts controls the scope of session discovery.
@@ -138,7 +142,7 @@ func Discover(opts DiscoverOpts, projectsDir string) ([]Session, error) {
 	}
 
 	for _, pd := range projectDirs {
-		if !pd.IsDir() {
+		if !pd.IsDir() || IsWingmanProjectDir(pd.Name()) {
 			continue
 		}
 
@@ -235,6 +239,7 @@ func applyMeta(s *Session) {
 	s.DescriptionBy = meta.DescriptionBy
 	s.DescribedAt = meta.DescribedAt
 	s.Starred = meta.Starred
+	s.Hidden = meta.Hidden
 	s.ROIMultiplier = meta.ROIMultiplier
 	s.TaskType = meta.TaskType
 }

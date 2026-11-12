@@ -3,6 +3,7 @@
 package netguard
 
 import (
+	"crypto/subtle"
 	"net"
 	"net/http"
 	"net/url"
@@ -47,4 +48,27 @@ func LocalOnly(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// BearerOnly rejects requests that do not carry "Authorization: Bearer
+// <token>". The scheme is matched case-insensitively and the token in
+// constant time. An empty configured token rejects everything.
+func BearerOnly(token string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, ok := bearerToken(r.Header.Get("Authorization"))
+		if token == "" || !ok || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func bearerToken(h string) (string, bool) {
+	const scheme = "bearer "
+	if len(h) < len(scheme) || !strings.EqualFold(h[:len(scheme)], scheme) {
+		return "", false
+	}
+	return strings.TrimSpace(h[len(scheme):]), true
 }

@@ -773,3 +773,30 @@ func TestLocalIndex_EveryOpenReadGoesThroughLive(t *testing.T) {
 		t.Error("nil Live: want an empty map")
 	}
 }
+
+// A session whose transcript is only in aimux's archive (a finished
+// sandbox profile session) has a detail when Archived names its file; a
+// session Archived does not name stays unknown.
+func TestLocalIndex_SessionFromArchive(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	if _, err := x.Session(context.Background(), "sandboxed", 2); !errors.Is(err, acprun.ErrUnknownSession) {
+		t.Fatalf("before Archived: %v, want unknown session", err)
+	}
+	archived := filepath.Join(t.TempDir(), "openshell-work", "sandboxed.jsonl")
+	x.Archived = func(id string) string {
+		if id == "sandboxed" {
+			return archived
+		}
+		return ""
+	}
+	d, err := x.Session(context.Background(), "sandboxed", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.ID != "sandboxed" || d.Provider != "claude" || len(d.Turns) != 2 || d.Turns[1].User != "q5" {
+		t.Fatalf("archived detail %+v", d)
+	}
+	if _, err := x.Session(context.Background(), "missing", 2); !errors.Is(err, acprun.ErrUnknownSession) {
+		t.Fatalf("unknown session with Archived set: %v", err)
+	}
+}
