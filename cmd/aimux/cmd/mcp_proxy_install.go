@@ -224,7 +224,9 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			"each server's tools, saves its definition for the daemon, starts the proxy under launchd (or has the running " +
 			"proxy reload in place) and probes the servers, backs up ~/.claude.json to ~/.aimux/backups, then replaces each " +
 			"server's entry with an HTTP entry of the same name pointing at its own proxy endpoint, in one atomic edit. " +
-			"Tool names stay the same, so permission rules keep working unchanged; no settings file is read or written. " +
+			"Tool names stay the same, so permission rules keep working unchanged. In ~/.claude/settings.json it sets " +
+			"CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT and adds two hooks: one moves a server you add in a Claude Code session behind the proxy, " +
+			"one names servers still direct when a session starts (uninstall removes both). " +
 			"Run it again to move servers added later, and to take off the proxy any moved server you removed from ~/.claude.json (claude mcp remove); servers kept direct with --skip stay direct until --unskip. Moved servers are configured with `aimux mcp proxy edit`, not in " +
 			"~/.claude.json. What changed is recorded in ~/.aimux/mcp-proxy-install.json; `uninstall` undoes it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -252,6 +254,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			if in.Agent.Binary, err = stableBinary("aimux mcp proxy install"); err != nil {
 				return err
 			}
+			in.HookBinary = in.Agent.Binary
 			err = in.Install(skip)
 			if interrupted.Load() {
 				return fmt.Errorf("%w: %v", errInstallInterrupted, err)
