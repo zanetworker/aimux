@@ -3,6 +3,7 @@ package mcpproxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -63,7 +64,7 @@ func httpClient(t *testing.T, url string) *client.Client {
 		t.Fatal(err)
 	}
 	init := mcp.InitializeRequest{}
-	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	init.Params.ProtocolVersion = mcp.LATEST_LEGACY_PROTOCOL_VERSION
 	if _, err := c.Initialize(ctx, init); err != nil {
 		t.Fatal(err)
 	}
@@ -225,6 +226,44 @@ func TestServe_PerSessionBackendsOverHTTP(t *testing.T) {
 	}
 	_ = pb.Close()
 	_ = sb.Close()
+}
+
+// Per-session backends need protocol-level sessions, which protocol version
+// 2026-07-28 removed. A client asking for it is told to use a session-oriented
+// version instead of being served sessionless, where every such client would
+// share one browser that is never stopped.
+func TestServe_RefusesSessionlessProtocol(t *testing.T) {
+	fs := newFakeStarter()
+	pool := NewPool(fs.start, PoolOptions{PerSession: map[string]bool{"playwright": true}})
+	base, _ := serveCatalog(t, browserCatalog(), pool, DaemonOptions{})
+
+	c, err := client.NewStreamableHttpClient(endpointURL(base, "playwright"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	init := mcp.InitializeRequest{}
+	init.Params.ProtocolVersion = mcp.ProtocolVersion20260728
+	_, err = c.Initialize(ctx, init)
+	var unsupported mcp.UnsupportedProtocolVersionError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("initialize at %s: err %v, want an unsupported protocol version error", mcp.ProtocolVersion20260728, err)
+	}
+	if len(unsupported.Supported) == 0 {
+		t.Fatal("the refusal names no version the client can use instead")
+	}
+	for _, v := range unsupported.Supported {
+		if mcp.IsModernProtocol(v) {
+			t.Fatalf("advertised sessionless version %s among %v", v, unsupported.Supported)
+		}
+	}
+	if got := fs.count("playwright"); got != 0 {
+		t.Fatalf("playwright started %d times for a refused client", got)
+	}
 }
 
 // Claude Code exits without ending its MCP session; its per-session
