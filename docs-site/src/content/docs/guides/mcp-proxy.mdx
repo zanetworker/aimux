@@ -24,6 +24,8 @@ The proxy is tested with Claude Code only (2.1.319). `install` moves the servers
 
 What is specific to Claude Code: the limits the proxy matches (a call may run as long as Claude Code's default `MCP_TOOL_TIMEOUT` allows, and install sets `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`), and how sessions end (the proxy follows the process that holds each session's connection, which assumes a client keeping its connections open while it runs, as Claude Code does). Codex speaks the same protocol, so pointing it at `http://127.0.0.1:7381/mcp/<server>` by hand may work, but its timeouts, session handling and progress use have not been tested; until they are, keep Codex's servers direct.
 
+Protocol versions: the proxy's HTTP endpoints offer only the session-based MCP versions (2025-11-25 and earlier), because per-session servers such as playwright are started and stopped per client session. A client asking for the sessionless 2026-07-28 version is refused with the list of supported versions and must use one of them. Claude Code 2.1.319 asks for 2025-11-25.
+
 ## Switch Claude Code to the proxy
 
 ```bash
