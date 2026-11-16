@@ -1,0 +1,81 @@
+# The gh pack: read-only GitHub CLI commands, each a fixed argv plus
+# allowlisted flags. Every string value must match its whole pattern;
+# output is always --json with a fixed field list. Flags checked against
+# gh 2.103 help; write subcommands are refused when the pack loads.
+name: gh
+binary: /usr/bin/gh
+version: "2.103"
+credential:
+  provider: aimux-github
+  keychain: aimux-github
+  env: GH_TOKEN
+commands:
+  - name: issue_list
+    description: List issues in a GitHub repository (open by default).
+    argv: [issue, list]
+    fixed: [--json, "number,title,state,url"]
+    flags:
+      repo: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', required: true}
+      state: {type: enum, values: [open, closed, all]}
+      limit: {type: int, min: 1, max: 100}
+      author: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9-]{0,38}'}
+      label: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9 _.:/-]{0,49}'}
+  - name: issue_view
+    description: Show one issue in a GitHub repository, with its body and labels.
+    argv: [issue, view]
+    fixed: [--json, "number,title,state,author,body,labels,createdAt,updatedAt,url"]
+    flags:
+      repo: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', required: true}
+    args:
+      - {name: number, type: int, min: 1, max: 10000000, required: true}
+  - name: pr_list
+    description: List pull requests in a GitHub repository (open by default).
+    argv: [pr, list]
+    fixed: [--json, "number,title,state,url,author,headRefName,baseRefName,isDraft"]
+    flags:
+      repo: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', required: true}
+      state: {type: enum, values: [open, closed, merged, all]}
+      limit: {type: int, min: 1, max: 100}
+      author: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9-]{0,38}'}
+      label: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9 _.:/-]{0,49}'}
+      base: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9_./-]{0,99}'}
+  - name: pr_view
+    description: Show one pull request in a GitHub repository, with its body and change size.
+    argv: [pr, view]
+    fixed: [--json, "number,title,state,author,body,baseRefName,headRefName,isDraft,mergedAt,additions,deletions,changedFiles,url"]
+    flags:
+      repo: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', required: true}
+    args:
+      - {name: number, type: int, min: 1, max: 10000000, required: true}
+  - name: repo_view
+    description: Show a GitHub repository's description, default branch and counts.
+    argv: [repo, view]
+    fixed: [--json, "nameWithOwner,description,defaultBranchRef,stargazerCount,forkCount,isArchived,pushedAt,url"]
+    args:
+      - {name: repo, type: string, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', required: true}
+  - name: release_list
+    description: List releases in a GitHub repository, newest first by default.
+    argv: [release, list]
+    fixed: [--json, "tagName,name,isLatest,isPrerelease,isDraft,publishedAt"]
+    flags:
+      repo: {type: string, pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', required: true}
+      limit: {type: int, min: 1, max: 100}
+      order: {type: enum, values: [asc, desc]}
+      exclude-drafts: {type: bool}
+      exclude-pre-releases: {type: bool}
+# Shapes as the runner spike enforced them on OpenShell 0.1.7: REST read-only,
+# GraphQL query-only in the explicit rules form (access and rules on one
+# endpoint are rejected by OpenShell).
+policy:
+  - host: api.github.com
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    access: read-only
+  - host: api.github.com
+    port: 443
+    path: /graphql
+    protocol: graphql
+    enforcement: enforce
+    rules:
+      - allow: {operation_type: query}
