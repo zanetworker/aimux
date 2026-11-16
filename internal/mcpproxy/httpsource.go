@@ -29,10 +29,11 @@ const (
 )
 
 // curlArgv is the one command an http-openapi call runs: a GET (no -X, no
-// body) to u over https only, no URL globbing, JSON accepted. Only u comes
-// from the agent, built by httpsource.BuildURL.
+// body) to u over https only, no URL globbing, JSON accepted, and -q first
+// so no .curlrc is read. Only u comes from the agent, built by
+// httpsource.BuildURL.
 func curlArgv(u string) []string {
-	return []string{"curl", "-sS", "--fail-with-body", "--max-time", curlMaxTime, "--proto", "=https", "--globoff",
+	return []string{httpsource.CurlBinary, "-q", "-sS", "--fail-with-body", "--max-time", curlMaxTime, "--proto", "=https", "--globoff",
 		"-H", "Accept: application/json", "-w", "%{stderr}" + curlStatusPrefix + `%{http_code} %header{x-openshell-policy}\n`, u}
 }
 

@@ -559,6 +559,11 @@ func TestToolsAdd_HTTPRefusals(t *testing.T) {
 		{"no get operations", []string{"--name", "api", "--spec", empty, "--base-url", base}, "GET"},
 		{"not openapi", []string{"--name", "api", "--spec", bad, "--base-url", base}, "spec"},
 		{"unknown tool", []string{"--name", "api", "--spec", spec, "--base-url", base, "--tools", "api_getZ"}, "api_getZ"},
+		{"localhost base", []string{"--name", "api", "--spec", spec, "--base-url", "https://localhost:8443"}, "localhost"},
+		{"ip base", []string{"--name", "api", "--spec", spec, "--base-url", "https://10.0.0.5/api"}, "--base-url"},
+		{"internal base", []string{"--name", "api", "--spec", spec, "--base-url", "https://host.containers.internal:7390"}, ".internal"},
+		{"model host base", []string{"--name", "api", "--spec", spec, "--base-url", "https://api.anthropic.com"}, "model host"},
+		{"credentialed pack host", []string{"--name", "api", "--spec", spec, "--base-url", "https://API.github.com/v3"}, "aimux tools add cli gh"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

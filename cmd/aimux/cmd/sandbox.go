@@ -93,7 +93,7 @@ func newSandboxCmdWith(env browserEnv) *cobra.Command {
 	}
 	status := &cobra.Command{
 		Use:   "status",
-		Short: "Show the sandbox image, provider, OpenShell gateway, and each sandboxed profile's and the tool runner aimux-tools' policy state; read-only",
+		Short: "Show the sandbox image, providers (wingman-claude, aimux-github), OpenShell gateway, and each sandboxed profile's and the tool runner aimux-tools' policy state; read-only",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return sandboxStatus(c.Context(), env, profileDir(), c.OutOrStdout(), c.ErrOrStderr())
@@ -338,13 +338,16 @@ type profileSandbox struct {
 }
 
 type sandboxReport struct {
-	SchemaVersion string           `json:"schema_version"`
-	Image         component        `json:"image"`
-	Provider      component        `json:"provider"`
-	Gateway       component        `json:"gateway"`
-	Profiles      []profileSandbox `json:"profiles"`
-	Runner        profileSandbox   `json:"runner"` // aimux-tools; profile is empty
-	Next          []string         `json:"next"`
+	SchemaVersion string    `json:"schema_version"`
+	Image         component `json:"image"`
+	Provider      component `json:"provider"`
+	// RunnerProvider is aimux-github, the gh pack's provider in the tool
+	// runner; missing is only a Next step when an approved source needs it.
+	RunnerProvider component        `json:"runner_provider"`
+	Gateway        component        `json:"gateway"`
+	Profiles       []profileSandbox `json:"profiles"`
+	Runner         profileSandbox   `json:"runner"` // aimux-tools; profile is empty
+	Next           []string         `json:"next"`
 }
 
 // collectSandboxStatus checks everything status shows. It only reads:
@@ -353,7 +356,8 @@ type sandboxReport struct {
 // never migrates or writes). It never starts the gateway.
 func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string) sandboxReport {
 	r := sandboxReport{SchemaVersion: sandboxSchemaVersion, Next: []string{},
-		Image: component{Name: wingmanImage}, Provider: component{Name: wingmanProvider}, Gateway: component{Name: "local"}}
+		Image: component{Name: wingmanImage}, Provider: component{Name: wingmanProvider}, RunnerProvider: component{Name: runnerProvider},
+		Gateway: component{Name: "local"}}
 	next := func(s string) {
 		if !slices.Contains(r.Next, s) {
 			r.Next = append(r.Next, s)
@@ -378,22 +382,28 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 	gwErr := func() error { _, err := env.Run(ctx, nil, openshell("status")...); return err }()
 	if gwErr != nil {
 		r.Gateway.Status, r.Gateway.Error = "unreachable", clipText(gwErr.Error(), 300)
-		r.Provider.Status = "unknown"
+		r.Provider.Status, r.RunnerProvider.Status = "unknown", "unknown"
 		next("start the OpenShell gateway (openshell-gateway --config ~/.config/openshell/gateway-podman.toml; aimux sandbox setup and remote serve start it too), then aimux sandbox status")
 	} else {
 		r.Gateway.Status = "reachable"
 		out, err := env.Run(ctx, nil, openshell("provider", "list")...)
 		if err == nil {
-			providers = &out
+			list := out // its own copy: out is reused for sandbox list below
+			providers = &list
 		}
 		switch {
 		case err != nil:
 			r.Provider.Status, r.Provider.Error = "unknown", clipText(err.Error(), 300)
-		case hasTableName(out, wingmanProvider):
-			r.Provider.Status = "present"
+			r.RunnerProvider.Status, r.RunnerProvider.Error = "unknown", r.Provider.Error
 		default:
-			r.Provider.Status = "missing"
-			next("aimux sandbox setup")
+			r.Provider.Status, r.RunnerProvider.Status = "present", "present"
+			if !hasTableName(out, wingmanProvider) {
+				r.Provider.Status = "missing"
+				next("aimux sandbox setup")
+			}
+			if !hasTableName(out, runnerProvider) {
+				r.RunnerProvider.Status = "missing"
+			}
 		}
 		out, err = env.Run(ctx, nil, openshell("sandbox", "list")...)
 		if err != nil {
@@ -467,7 +477,15 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 	if providers != nil {
 		have = func(p string) bool { return hasTableName(*providers, p) }
 	}
-	rc, _, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, have)
+	rc, dropped, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, have)
+	if r.RunnerProvider.Status == "missing" {
+		for _, e := range dropped {
+			if strings.Contains(e.Error(), "provider "+runnerProvider+" ") {
+				next("aimux sandbox setup") // an approved source needs it
+				break
+			}
+		}
+	}
 	if err == nil && snapErr != nil {
 		err = snapErr
 	}
@@ -500,6 +518,7 @@ func sandboxStatus(ctx context.Context, env browserEnv, profileDir string, out, 
 		}
 		line("Image", r.Image)
 		line("Provider", r.Provider)
+		line("Provider", r.RunnerProvider)
 		line("Gateway", r.Gateway)
 		_, _ = fmt.Fprintln(out)
 		tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)

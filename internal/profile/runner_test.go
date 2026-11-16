@@ -321,21 +321,40 @@ func TestCompileRunner_Errors(t *testing.T) {
 	if _, err := CompileRunner(snap, noPack, noSpecs); err == nil || !strings.Contains(err.Error(), "github") {
 		t.Fatalf("pack error = %v", err)
 	}
-	// A path that is not an absolute template is refused, not passed through.
-	odd := httpsource.Operation{ID: "x", Path: "search"}
-	sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com"}}
-	pins := toolreg.PinTable{"jira": httpPins(t, "jira", "https://jira.example.com", odd)}
-	if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(odd)); err == nil {
-		t.Fatal("relative path accepted")
-	}
-	// Literal segments are checked here too, not only by the parser.
-	for _, path := range []string{"/a%2F..%2Fadmin", "/files/[a-z]", `/a\..\b`, "/a//b", "/sp ace"} {
+	// A path that is not an absolute template is refused, not passed
+	// through; literal segments are checked here too, not only by the
+	// parser. The source is left out, the others still compile.
+	for _, path := range []string{"search", "/a%2F..%2Fadmin", "/files/[a-z]", `/a\..\b`, "/a//b", "/sp ace"} {
 		op := httpsource.Operation{ID: "x", Path: path}
-		pins := toolreg.PinTable{"jira": httpPins(t, "jira", "https://jira.example.com", op)}
-		if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(op)); err == nil {
-			t.Errorf("%q accepted", path)
-		}
+		sources := ghSources()
+		sources["jira"] = toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com"}
+		pins := ghPins("gh_issue_list")
+		pins["jira"] = httpPins(t, "jira", "https://jira.example.com", op)
+		_ = requireDropped(t, runnerSnap(sources, pins), fixedOps(op), "jira")
 	}
+}
+
+// requireDropped compiles snap and checks that source is left out with an
+// error naming it while the github cli source (when approved) still
+// compiles: one bad source never takes the runner down.
+func requireDropped(t *testing.T, snap toolreg.Snapshot, specs func(toolreg.Source) ([]httpsource.Operation, error), source string) error {
+	t.Helper()
+	c, errs, err := CompileRunnerAvailable(snap, clipack.Builtin, specs, nil)
+	if err != nil {
+		t.Fatalf("compile failed for every source: %v", err)
+	}
+	e := errs[source]
+	if e == nil || !strings.Contains(e.Error(), "source "+source) {
+		t.Fatalf("errs = %v, want %s left out", errs, source)
+	}
+	np := decodePolicy(t, c.PolicyYAML).NetworkPolicies
+	if _, ok := np["tools_"+source]; ok {
+		t.Fatalf("%s has a policy:\n%s", source, c.PolicyYAML)
+	}
+	if _, ok := np["tools_github"]; !ok {
+		t.Fatalf("the github source was dropped too:\n%s", c.PolicyYAML)
+	}
+	return e
 }
 
 // An http-openapi base URL host must be a plain public hostname: no IP
@@ -349,18 +368,43 @@ func TestCompileRunner_HTTPHostRefused(t *testing.T) {
 		"https://printer.local", "https://api.anthropic.com", "https://API.Anthropic.com/v1", "https://anthropic.com",
 	} {
 		t.Run(base, func(t *testing.T) {
-			sources := map[string]toolreg.Source{"api": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}}
-			pins := toolreg.PinTable{"api": httpPins(t, "api", base, op)}
-			if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(op)); err == nil {
-				t.Fatalf("%s accepted", base)
-			}
+			sources := ghSources()
+			sources["api"] = toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}
+			pins := ghPins("gh_issue_list")
+			pins["api"] = httpPins(t, "api", base, op)
+			_ = requireDropped(t, runnerSnap(sources, pins), fixedOps(op), "api")
 		})
+	}
+	// A bad port is left out the same way.
+	for _, base := range []string{"https://api.example.com:0", "https://api.example.com:70000"} {
+		sources := ghSources()
+		sources["api"] = toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}
+		pins := ghPins("gh_issue_list")
+		pins["api"] = httpPins(t, "api", base, op)
+		_ = requireDropped(t, runnerSnap(sources, pins), fixedOps(op), "api")
 	}
 	// A plain public host still compiles.
 	const base = "https://api.example.com"
 	sources := map[string]toolreg.Source{"api": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}}
 	if _, err := CompileRunner(runnerSnap(sources, toolreg.PinTable{"api": httpPins(t, "api", base, op)}), clipack.Builtin, fixedOps(op)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A host a credentialed builtin pack reaches (api.github.com for gh) is
+// bound to that pack's provider: an http-openapi source on it is left out
+// with a reason, and the gh source keeps its policy and provider.
+func TestCompileRunnerAvailable_HTTPOnCredentialedPackHost(t *testing.T) {
+	op := httpsource.Operation{ID: "get", Path: "/x"}
+	for _, base := range []string{"https://api.github.com", "https://API.GitHub.com/v3"} {
+		sources := ghSources()
+		sources["api"] = toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}
+		pins := ghPins("gh_issue_list")
+		pins["api"] = httpPins(t, "api", base, op)
+		e := requireDropped(t, runnerSnap(sources, pins), fixedOps(op), "api")
+		if !strings.Contains(e.Error(), "gh") || strings.Contains(e.Error(), base) {
+			t.Fatalf("%s: reason = %v", base, e)
+		}
 	}
 }
 

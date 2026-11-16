@@ -282,6 +282,7 @@ func TestPool_RestartsCrashedStdioBackend(t *testing.T) {
 }
 
 func TestStdioBackend_CloseKillsProcessesBehindAWrapper(t *testing.T) {
+	t.Parallel() // its wait is mcp-go's 2 s graceful shutdown, which tests cannot shorten
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	cfgs := map[string]ServerConfig{"wrapped": {
 		// Like npx or uv: a parent process that runs the real server as a child.
@@ -386,6 +387,7 @@ func TestPool_UnknownToolOnRealBackendKeepsIt(t *testing.T) {
 }
 
 func TestPool_TimeoutUnblocksAWriteToAServerThatStoppedReading(t *testing.T) {
+	t.Parallel() // its wait is mcp-go's 2 s graceful shutdown, which tests cannot shorten
 	cfgs := map[string]ServerConfig{"deaf": {Command: os.Args[0], Env: map[string]string{testDeafEnv: "1"}}}
 	p := NewPool(StdioStarter(cfgs), PoolOptions{CallTimeout: 300 * time.Millisecond})
 	defer p.Close()

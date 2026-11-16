@@ -167,16 +167,20 @@ func stallingServer(t *testing.T) (*httptest.Server, *atomic.Bool) {
 }
 
 func TestHTTPBackendStalledServerTimesOut(t *testing.T) {
+	old := httpListTimeout
+	httpListTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { httpListTimeout = old })
 	ts, stall := stallingServer(t)
 	b := startHTTPBackend(t, ts.URL, nil)
 	stall.Store(true)
+	t.Cleanup(func() { stall.Store(false) }) // before Close: mcp-go's session DELETE waits up to 5 s
 	begin := time.Now()
 	_, err := b.ListToolsRaw(context.Background())
 	if err == nil {
 		t.Fatal("want an error from a silent server")
 	}
-	if d := time.Since(begin); d > 6*time.Second {
-		t.Fatalf("ListToolsRaw took %v, want under 6s", d)
+	if d := time.Since(begin); d > 3*time.Second {
+		t.Fatalf("ListToolsRaw took %v, want about 300ms", d)
 	}
 }
 
@@ -187,6 +191,7 @@ func TestHTTPBackendStalledCallTimesOut(t *testing.T) {
 	ts, stall := stallingServer(t)
 	b := startHTTPBackend(t, ts.URL, nil)
 	stall.Store(true)
+	t.Cleanup(func() { stall.Store(false) }) // before Close: mcp-go's session DELETE waits up to 5 s
 	req := mcp.CallToolRequest{}
 	req.Params.Name = "echo"
 	begin := time.Now()
@@ -409,6 +414,9 @@ func TestListenGuard_ResumptionGETsBypassTheBreaker(t *testing.T) {
 // stream: logged once, and after listenMaxFailures in a row no further GET
 // reaches the server.
 func TestHTTPBackend_ListenNonSSESuccessCountsAsFailure(t *testing.T) {
+	// Parallel with the other slow tests whose waits are mcp-go's fixed
+	// intervals; no other parallel test touches listenLog or listenMaxFailures.
+	t.Parallel()
 	logged := captureListenLog(t)
 	old := listenMaxFailures
 	listenMaxFailures = 2

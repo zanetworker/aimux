@@ -448,9 +448,55 @@ func toolsApprove(ctx context.Context, env toolsEnv, targets []string, all bool,
 		}
 		_, _ = fmt.Fprintln(out, toolgateway.Disclaimer)
 	}
+	if wrote {
+		if err := ensureRunnerAfterApprove(ctx, env, rv, res); err != nil {
+			return err
+		}
+	}
 	if len(skipped) > 0 {
 		_, _ = fmt.Fprintln(errOut, "Next: start the backends that are down, check aimux tools status, then approve again")
 		return fmt.Errorf("could not approve %s", strings.Join(skipped, ", "))
+	}
+	return nil
+}
+
+// ensureRunnerAfterApprove ensures aimux-tools again from the pins approve
+// just wrote: the listing ensured it from the pins as they were, so a
+// first approve would leave it with none of the new endpoints or
+// providers. Only when the approved tools include a cli or http-openapi
+// source; once per such source, so each one's error is reported.
+func ensureRunnerAfterApprove(ctx context.Context, env toolsEnv, rv toolsReview, res []toolgateway.Approval) error {
+	if env.Runner == nil {
+		return nil
+	}
+	var sources []string
+	for _, a := range res {
+		if a.Action == toolgateway.ActionSkipped || slices.Contains(sources, a.Source) {
+			continue
+		}
+		if t := rv.reg.Sources[a.Source].Type; t == toolreg.TypeCLI || t == toolreg.TypeHTTPOpenAPI {
+			sources = append(sources, a.Source)
+		}
+	}
+	if len(sources) == 0 {
+		return nil
+	}
+	pins, err := rv.store.LoadFile()
+	if err != nil {
+		return err
+	}
+	slices.Sort(sources)
+	bind := env.Runner(toolreg.NewSnapshot(rv.reg, pins.Table(), nil), true)
+	ctx, cancel := context.WithTimeout(ctx, toolsListTimeout)
+	defer cancel()
+	var errs []error
+	for _, src := range sources {
+		if err := bind(src).Ensure(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", src, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("pins written, but the tool runner was not updated to them: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -617,7 +663,8 @@ func pickTools(tools string, all []string) ([]string, error) {
 }
 
 // checkBaseURL names the wrong part of --base-url, never the URL itself:
-// it may carry userinfo or a query secret.
+// it may carry userinfo or a query secret. The host must pass
+// clipack.CheckHost and must not be a credentialed builtin pack's host.
 func checkBaseURL(raw string) error {
 	u, err := neturl.Parse(raw)
 	switch {
@@ -631,6 +678,13 @@ func checkBaseURL(raw string) error {
 		return errors.New("--base-url must not contain a query")
 	case u.Fragment != "":
 		return errors.New("--base-url must not contain a fragment")
+	}
+	// The host is safe to name: userinfo, query and fragment are refused above.
+	if err := clipack.CheckHost(u.Hostname()); err != nil {
+		return fmt.Errorf("--base-url: %w", err)
+	}
+	if pack, ok := clipack.CredentialedHost(u.Hostname()); ok {
+		return fmt.Errorf("--base-url: host %s belongs to the %s CLI pack, whose provider is bound to it; use aimux tools add cli %s", u.Hostname(), pack, pack)
 	}
 	return nil
 }

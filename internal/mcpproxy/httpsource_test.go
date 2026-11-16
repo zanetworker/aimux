@@ -72,7 +72,7 @@ func TestHTTPSourceBackend_CurlArgv(t *testing.T) {
 	if err != nil || res.IsError || resultText(t, res) != `[{"number":1}]` {
 		t.Fatalf("call: %v %+v", err, res)
 	}
-	want := []string{"curl", "-sS", "--fail-with-body", "--max-time", "25", "--proto", "=https", "--globoff",
+	want := []string{"/usr/bin/curl", "-q", "-sS", "--fail-with-body", "--max-time", "25", "--proto", "=https", "--globoff",
 		"-H", "Accept: application/json", "-w", "%{stderr}aimux-http %{http_code} %header{x-openshell-policy}\\n",
 		"https://api.github.com/repos/cli/cli/issues?state=open"}
 	calls := f.toolCalls()

@@ -21,8 +21,6 @@ const (
 	RunnerSandbox = "aimux-tools"
 	// RunnerImage is SandboxImage plus gh 2.103.3 (sandbox/aimux-tools/Containerfile).
 	RunnerImage = "localhost/aimux-tools:2.103.3"
-	// curlBinary makes an http-openapi source's requests.
-	curlBinary = "/usr/bin/curl"
 )
 
 // CompileRunner compiles the aimux-tools sandbox policy from snap: one
@@ -34,8 +32,10 @@ const (
 // providers, sorted, once each, for sources that compiled to at least one
 // endpoint. Nothing is writable beyond /tmp. packs loads a pack by name and
 // specs lists a source's operations; a pack error fails the compile, while
-// an http-openapi source whose spec fails or that names a credential is
-// left out (CompileRunnerAvailable says why).
+// an http-openapi source whose spec fails, that names a credential, or
+// whose base URL or paths are refused (a host CheckHost refuses or a
+// credentialed pack's host, a bad port or base path) is left out
+// (CompileRunnerAvailable says why).
 // PolicyDigest covers the policy and the sorted providers, since providers
 // attach outside the policy.
 func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, error), specs func(toolreg.Source) ([]httpsource.Operation, error)) (Compiled, error) {
@@ -47,8 +47,8 @@ func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, erro
 // has: a source whose provider have reports missing is left out (no policy,
 // no provider) and its error, which says how to create the provider, is
 // returned under its name, so the other sources still run. An http-openapi
-// source whose spec fails, or that names a credential, is left out the
-// same way. A nil have leaves no source out for a missing provider.
+// source whose spec fails, that names a credential, or whose base URL or
+// paths are refused is left out the same way. A nil have leaves no source out for a missing provider.
 func CompileRunnerAvailable(snap toolreg.Snapshot, packs func(string) (clipack.Pack, error), specs func(toolreg.Source) ([]httpsource.Operation, error), have func(provider string) bool) (Compiled, map[string]error, error) {
 	reg := snap.Registry()
 	dropped := map[string]error{}
@@ -92,16 +92,18 @@ func CompileRunnerAvailable(snap toolreg.Snapshot, packs func(string) (clipack.P
 			}
 			ops, err = pinnedOperations(name, src.BaseURL, ops, served[name])
 			if err != nil {
-				return Compiled{}, nil, fmt.Errorf("source %s: %w", name, err)
+				dropped[name] = fmt.Errorf("source %s: %w", name, err)
+				continue
 			}
 			e, err := httpEndpoint(src.BaseURL, ops)
 			if err != nil {
-				return Compiled{}, nil, fmt.Errorf("source %s: %w", name, err)
+				dropped[name] = fmt.Errorf("source %s: %w", name, err)
+				continue
 			}
 			if e != nil {
 				eps = append(eps, *e)
 			}
-			bin = curlBinary
+			bin = httpsource.CurlBinary
 		default:
 			continue // mcp-http and local-notes run in the gateway, not here
 		}
@@ -200,6 +202,9 @@ func httpEndpoint(baseURL string, ops []httpsource.Operation) (*endpoint, error)
 	}
 	if err := clipack.CheckHost(u.Hostname()); err != nil {
 		return nil, fmt.Errorf("base_url: %w", err)
+	}
+	if pack, ok := clipack.CredentialedHost(u.Hostname()); ok {
+		return nil, fmt.Errorf("base_url: host %s belongs to the %s CLI pack, whose provider is bound to it; use aimux tools add cli %s", u.Hostname(), pack, pack)
 	}
 	port := 443
 	if s := u.Port(); s != "" {

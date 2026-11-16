@@ -128,6 +128,9 @@ type statusDoc struct {
 	Provider struct {
 		Name, Status, Error string
 	} `json:"provider"`
+	RunnerProvider struct {
+		Name, Status, Error string
+	} `json:"runner_provider"`
 	Gateway struct {
 		Name, Status, Error string
 	} `json:"gateway"`
@@ -173,6 +176,7 @@ func TestSandboxStatus_AllPresent(t *testing.T) {
 	for _, want := range []string{
 		"Image:     " + wingmanImage + "  present",
 		"Provider:  wingman-claude  present",
+		"Provider:  aimux-github  missing",
 		"Gateway:   local  reachable",
 		"research",
 		"aimux-research",
@@ -196,6 +200,10 @@ func TestSandboxStatus_AllPresent(t *testing.T) {
 	if d.SchemaVersion != "1" || d.Image.Status != "present" || d.Image.Name != wingmanImage ||
 		d.Provider.Status != "present" || d.Provider.Name != "wingman-claude" || d.Gateway.Status != "reachable" || d.Gateway.Name != "local" {
 		t.Fatalf("components = %+v", d)
+	}
+	// aimux-github is missing, but no source needs it: no Next for it.
+	if d.RunnerProvider.Name != "aimux-github" || d.RunnerProvider.Status != "missing" {
+		t.Fatalf("runner provider = %+v", d.RunnerProvider)
 	}
 	if len(d.Profiles) != 2 || d.Profiles[0].Profile != "research" || d.Profiles[1].Profile != "work-readonly" {
 		t.Fatalf("profiles = %+v, want research and work-readonly", d.Profiles)
@@ -283,7 +291,7 @@ func TestSandboxStatus_GatewayDown(t *testing.T) {
 		}
 	}
 	d := decodeStatus(t, mustJSON(t, env))
-	if d.Gateway.Status != "unreachable" || d.Gateway.Error == "" || d.Provider.Status != "unknown" {
+	if d.Gateway.Status != "unreachable" || d.Gateway.Error == "" || d.Provider.Status != "unknown" || d.RunnerProvider.Status != "unknown" {
 		t.Fatalf("doc = %+v", d)
 	}
 	for _, p := range d.Profiles {
@@ -455,21 +463,19 @@ func statusWithAPI(t *testing.T, base string, specs func(toolreg.Source) ([]http
 	return env
 }
 
-// A runner that does not compile names the runner and its sources, not a
-// profile.
-func TestSandboxStatus_RunnerCompileError(t *testing.T) {
+// A source whose base host is refused (here localhost) is left out of the
+// runner like a spec error: the runner still compiles for the others, and
+// status blames neither a profile nor the runner.
+func TestSandboxStatus_RunnerRefusedHostStaysOnSource(t *testing.T) {
 	env := statusWithAPI(t, "https://localhost", func(toolreg.Source) ([]httpsource.Operation, error) {
 		return []httpsource.Operation{{ID: "get", Path: "/x"}}, nil
 	})
 	_, errOut := runSandboxStatus(t, env, false)
-	if strings.Contains(errOut, "a profile does not compile") {
-		t.Errorf("runner error blamed on a profile: %s", errOut)
-	}
-	if !strings.Contains(errOut, "Next: aimux tools status (the tool runner aimux-tools does not compile; see its error)") {
-		t.Errorf("errOut = %q", errOut)
+	if strings.Contains(errOut, "does not compile") {
+		t.Errorf("a refused host failed the compile: %s", errOut)
 	}
 	d := decodeStatus(t, mustJSON(t, env))
-	if d.Runner.State != "error" || !strings.Contains(d.Runner.Error, "api") || !strings.Contains(d.Runner.Error, "localhost") {
+	if d.Runner.State == "error" || d.Runner.Error != "" {
 		t.Fatalf("runner = %+v", d.Runner)
 	}
 }
@@ -1021,5 +1027,91 @@ func TestSandboxStatus_UsesCompiledSandboxName(t *testing.T) {
 		if p.Sandbox != c.Sandbox {
 			t.Errorf("%s sandbox = %q, compiled %q", p.Profile, p.Sandbox, c.Sandbox)
 		}
+	}
+}
+
+// ghRunnerHome adds the github cli source with gh_repo_view pinned to the
+// status rig's home.
+func ghRunnerHome(t *testing.T, env browserEnv) {
+	t.Helper()
+	path := toolreg.DefaultPath(env.Home)
+	reg, err := toolreg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Sources["github"] = toolreg.Source{Type: toolreg.TypeCLI, Pack: "gh"}
+	reg.Sets["github:readonly"] = toolreg.Set{Source: "github", Tools: []string{"gh_repo_view"}}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := toolreg.WriteNew(path, reg); err != nil {
+		t.Fatal(err)
+	}
+	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(hashOnly(toolgateway.Pins{
+		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}, "github": {"gh_repo_view": "p5"}})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The live L2 case: the runner was ensured from the pins before the gh
+// ones were written (an empty policy, no providers) and the gh pins are
+// now approved with aimux-github on the gateway: status says stale, not
+// current, and its compiled digest is the one with the gh endpoints.
+func TestSandboxStatus_RunnerStaleAfterPinsAdded(t *testing.T) {
+	env, f := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman + "aimux-github    github             1  0\n",
+		sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	before, _, err := toolgateway.NewStore(env.Home).Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, _, err := profile.CompileRunnerAvailable(before, clipack.Builtin, runnerSpecs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDigest(t, env.Home, "aimux-tools", empty.PolicyDigest)
+	ghRunnerHome(t, env)
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.Runner.State != "stale" || d.Runner.CompiledDigest == empty.PolicyDigest {
+		t.Fatalf("runner = %+v, want stale (recorded is the empty policy)", d.Runner)
+	}
+	assertReadOnly(t, f)
+}
+
+// A runner that does not compile (here: an unreadable pins file) names the
+// runner, not a profile.
+func TestSandboxStatus_RunnerCompileError(t *testing.T) {
+	env, _ := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman})
+	if err := os.WriteFile(toolgateway.DefaultPinsPath(env.Home), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut := runSandboxStatus(t, env, false)
+	if !strings.Contains(errOut, "Next: aimux tools status (the tool runner aimux-tools does not compile; see its error)") {
+		t.Errorf("errOut = %q", errOut)
+	}
+	if d := decodeStatus(t, mustJSON(t, env)); d.Runner.State != "error" || d.Runner.Error == "" {
+		t.Fatalf("runner = %+v", d.Runner)
+	}
+}
+
+// The Provider lines name aimux-github too: present when the gateway has
+// it; missing with a Next line when an approved gh source is left out for
+// lack of it.
+func TestSandboxStatus_RunnerProvider(t *testing.T) {
+	env, _ := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman + "aimux-github    github             1  0\n",
+		sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	ghRunnerHome(t, env)
+	out, _ := runSandboxStatus(t, env, false)
+	if !strings.Contains(out, "Provider:  aimux-github  present") {
+		t.Fatalf("out:\n%s", out)
+	}
+	if d := decodeStatus(t, mustJSON(t, env)); d.RunnerProvider.Status != "present" {
+		t.Fatalf("runner provider = %+v", d.RunnerProvider)
+	}
+
+	env, _ = statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman, sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	ghRunnerHome(t, env)
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.RunnerProvider.Status != "missing" || !slices.Contains(d.Next, "aimux sandbox setup") {
+		t.Fatalf("runner provider = %+v, next = %q", d.RunnerProvider, d.Next)
 	}
 }

@@ -6,6 +6,11 @@ package httpsource
 
 import "errors"
 
+// CurlBinary is the one binary an http-openapi request runs as in the
+// runner: the runner policy allows it and the backend execs it (RunTool
+// takes only an absolute path).
+const CurlBinary = "/usr/bin/curl"
+
 // ErrCredential is why an http-openapi source that names a credential
 // serves nothing: OpenShell 0.1.7 offers no checked way for curl in the
 // runner to send a provider's credential without its value in argv.

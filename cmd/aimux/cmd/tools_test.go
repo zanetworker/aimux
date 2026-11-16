@@ -598,3 +598,28 @@ func TestTools_RunnerReadOnlyExceptApprove(t *testing.T) {
 		t.Errorf("approve did not ensure the runner: %v", v)
 	}
 }
+
+// The first approve lists the gh tools with the runner compiled from the
+// pins as they were (none: an empty policy), then writes the pins: it
+// ensures the runner again from the new snapshot, so the policy the
+// sandbox ends with has the gh endpoints and the aimux-github provider.
+func TestToolsApprove_FirstApproveEnsuresRunnerFromNewPins(t *testing.T) {
+	home := ghToolsHome(t)
+	rec := &openshellRec{}
+	dir := filepath.Join(home, ".aimux", "sandboxes")
+	env := toolsEnv{Home: home, Now: time.Now, Catalog: mcpproxy.ReadonlyCatalog, Runner: runnerBinding(rec.run, dir)}
+	if _, errOut, err := runTools(t, env, "approve", "github:readonly"); err != nil {
+		t.Fatalf("approve: %v\n%s", err, errOut)
+	}
+	policy, err := os.ReadFile(filepath.Join(dir, "aimux-tools.policy.yaml")) //nolint:gosec // G304: test temp dir
+	if err != nil || !strings.Contains(string(policy), "tools_github") || !strings.Contains(string(policy), "api.github.com") {
+		t.Fatalf("final policy lacks the gh endpoints (%v):\n%s", err, policy)
+	}
+	if p, _ := os.ReadFile(filepath.Join(dir, "aimux-tools.providers")); !strings.Contains(string(p), "aimux-github") { //nolint:gosec // G304: test temp dir
+		t.Fatalf("providers = %q, want aimux-github", p)
+	}
+	calls := rec.calls()
+	if !slices.Contains(calls, "policy set") || !slices.Contains(calls, "sandbox provider attach") {
+		t.Fatalf("the runner was not updated after the pins were written: %v", calls)
+	}
+}

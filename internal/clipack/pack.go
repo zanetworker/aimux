@@ -269,6 +269,24 @@ func Builtin(name string) (Pack, error) {
 	return Load(data)
 }
 
+// CredentialedHost names the builtin pack with a credential whose policy
+// reaches host (case-insensitive): that pack's provider is bound to the
+// host, so no other source may use it.
+func CredentialedHost(host string) (pack string, ok bool) {
+	for _, name := range Names() {
+		p, err := Builtin(name)
+		if err != nil || p.Credential == nil {
+			continue
+		}
+		for _, e := range p.Policy {
+			if host != "" && strings.EqualFold(e.Host, host) {
+				return p.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 // Load decodes a pack strictly (unknown keys are errors) and checks it.
 func Load(data []byte) (Pack, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
