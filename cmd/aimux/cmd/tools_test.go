@@ -476,3 +476,26 @@ func TestToolsStatus_ClassColumn(t *testing.T) {
 		}
 	}
 }
+
+// A cli source is not started yet: status says why for its set's tools.
+func TestToolsStatus_RunnerSourceSaysNotStarted(t *testing.T) {
+	r := newToolsRig(t)
+	r.env.Catalog = mcpproxy.ReadonlyCatalog
+	reg := toolreg.Registry{Version: 1,
+		Sources: map[string]toolreg.Source{"gh": {Type: toolreg.TypeCLI, Pack: "gh"}},
+		Sets:    map[string]toolreg.Set{"gh:readonly": {Source: "gh", Tools: []string{"issue_list"}}}}
+	data, err := toolreg.Marshal(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(toolreg.DefaultPath(r.env.Home), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := runTools(t, r.env, "status")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.Contains(out, "gh:readonly") || !strings.Contains(out, "runner sources are not started yet") {
+		t.Errorf("status lacks the reason:\n%s", out)
+	}
+}

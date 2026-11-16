@@ -713,3 +713,41 @@ func TestBuildReadonly_HearsListChangedBeforeAnyCallAndAfterReap(t *testing.T) {
 	}
 	awaitChanged(t, s, pins)
 }
+
+func TestReadonlyConfigFrom_Runner(t *testing.T) {
+	gh := toolreg.Source{Type: toolreg.TypeCLI, Pack: "gh"}
+	api := toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://a.example"}
+	reg := toolreg.Registry{Version: 1, Sources: map[string]toolreg.Source{
+		"gh": gh, "api": api,
+		"jira":  {Type: toolreg.TypeMCPHTTP, URL: "http://127.0.0.1:8001/mcp"},
+		"notes": {Type: toolreg.TypeLocalNotes, Root: "/n"},
+	}}
+	cfg := ReadonlyConfigFrom(reg)
+	if !reflect.DeepEqual(cfg.Runner, map[string]toolreg.Source{"gh": gh, "api": api}) {
+		t.Errorf("runner = %+v", cfg.Runner)
+	}
+	if _, ok := cfg.HTTP["gh"]; ok || len(cfg.HTTP) != 1 || len(cfg.Notes) != 1 {
+		t.Errorf("new types leaked: http %+v notes %+v", cfg.HTTP, cfg.Notes)
+	}
+}
+
+func TestBuildReadonlyBackends_RunnerNotStarted(t *testing.T) {
+	cfg := testReadonlyConfig(t, slackFake(t).URL+"/")
+	cfg.Runner = map[string]toolreg.Source{"gh": {Type: toolreg.TypeCLI, Pack: "gh"}}
+	_, errs := BuildReadonlyBackends(context.Background(), cfg, readonlyNames(cfg), passPins{}, nil, nil)
+	if err := errs["gh"]; err == nil || err.Error() != "runner sources are not started yet" {
+		t.Fatalf("errs[gh] = %v", err)
+	}
+}
+
+func TestReadonlyCatalog_RunnerReportsNotStarted(t *testing.T) {
+	cfg := ReadonlyConfig{HTTP: map[string]HTTPServerConfig{}, Notes: map[string]string{},
+		Runner: map[string]toolreg.Source{"gh": {Type: toolreg.TypeCLI, Pack: "gh"}}}
+	cat, errs := ReadonlyCatalog(context.Background(), cfg)
+	if err := errs["gh"]; err == nil || err.Error() != "runner sources are not started yet" {
+		t.Fatalf("errs[gh] = %v", err)
+	}
+	if _, ok := cat.Servers["gh"]; ok {
+		t.Error("runner source has catalog tools")
+	}
+}

@@ -3,6 +3,7 @@ package mcpproxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -21,21 +22,29 @@ import (
 type ReadonlyConfig struct {
 	HTTP  map[string]HTTPServerConfig // backends reached over HTTP, by name
 	Notes map[string]string           // local notes backends: name -> root directory
-	Allow Allowlist                   // tools each backend may expose
+	// Runner holds the cli and http-openapi sources by name; they are
+	// neither HTTP nor notes backends.
+	Runner map[string]toolreg.Source
+	Allow  Allowlist // tools each backend may expose
 }
+
+// errRunnerNotStarted is why a cli or http-openapi source serves no tools.
+var errRunnerNotStarted = errors.New("runner sources are not started yet")
 
 // ReadonlyConfigFrom is reg's sources and sets as a ReadonlyConfig: each
 // mcp-http source an HTTP backend, each local-notes source a notes backend,
 // and each backend allowed the sorted union of the tools its sets list.
 // Entries Load dropped are not in reg, so they are not served.
 func ReadonlyConfigFrom(reg toolreg.Registry) ReadonlyConfig {
-	cfg := ReadonlyConfig{HTTP: map[string]HTTPServerConfig{}, Notes: map[string]string{}, Allow: Allowlist{}}
+	cfg := ReadonlyConfig{HTTP: map[string]HTTPServerConfig{}, Notes: map[string]string{}, Runner: map[string]toolreg.Source{}, Allow: Allowlist{}}
 	for n, s := range reg.Sources {
 		switch s.Type {
 		case toolreg.TypeMCPHTTP:
 			cfg.HTTP[n] = HTTPServerConfig{URL: s.URL}
 		case toolreg.TypeLocalNotes:
 			cfg.Notes[n] = s.Root
+		case toolreg.TypeCLI, toolreg.TypeHTTPOpenAPI:
+			cfg.Runner[n] = s
 		}
 	}
 	tools := map[string]map[string]bool{}
@@ -150,6 +159,9 @@ func readonlyNames(cfg ReadonlyConfig) []string {
 func ReadonlyCatalog(ctx context.Context, cfg ReadonlyConfig) (*Catalog, map[string]error) {
 	cat := &Catalog{Servers: map[string]CatalogEntry{}}
 	errs := RefreshCatalog(ctx, cat, ReadonlyStarter(cfg), readonlyNames(cfg))
+	for n := range cfg.Runner {
+		errs[n] = errRunnerNotStarted
+	}
 	return cat, errs
 }
 
@@ -161,6 +173,9 @@ func ReadonlyCatalog(ctx context.Context, cfg ReadonlyConfig) (*Catalog, map[str
 func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []string, pins ToolPins, pool *Pool, rejectLog func(server, tool string, err error)) (map[string]*server.MCPServer, map[string]error) {
 	errs := map[string]error{}
 	var live []string
+	for n := range cfg.Runner { // started by a later change; say why they are down
+		errs[n] = errRunnerNotStarted
+	}
 	for _, n := range names {
 		root, notes := cfg.Notes[n]
 		switch _, ok := cfg.HTTP[n]; {

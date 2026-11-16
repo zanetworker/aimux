@@ -37,11 +37,19 @@ func (p PinTable) clone() PinTable {
 	return out
 }
 
-// Endpoint is where a source's tools are listed from: its URL, or its root
-// for a notes source. A pin records it at approval.
+// Endpoint is where a source's tools are listed from: its URL, its root
+// for a notes source, pack:<name> for a cli source or its base URL. A pin records it at approval.
+// A changed http-openapi spec path does not drop approvals: pins hash each
+// tool definition (method and path template included), so changed operations
+// show as changed.
 func (s Source) Endpoint() string {
-	if s.Type == TypeLocalNotes {
+	switch s.Type {
+	case TypeLocalNotes:
 		return s.Root
+	case TypeCLI:
+		return "pack:" + s.Pack
+	case TypeHTTPOpenAPI:
+		return s.BaseURL
 	}
 	return s.URL
 }

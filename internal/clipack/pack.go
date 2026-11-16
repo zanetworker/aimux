@@ -245,6 +245,18 @@ var (
 	hostRE     = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 )
 
+// Names lists the embedded packs, sorted.
+func Names() []string {
+	entries, _ := builtin.ReadDir("packs") // the embedded dir always exists
+	var out []string
+	for _, e := range entries {
+		if n, ok := strings.CutSuffix(e.Name(), ".yaml"); ok {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // Builtin returns the embedded pack packs/<name>.yaml.
 func Builtin(name string) (Pack, error) {
 	if !packNameRE.MatchString(name) {

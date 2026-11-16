@@ -718,3 +718,25 @@ func TestCheckSandboxName(t *testing.T) {
 		}
 	}
 }
+
+// A cli source's set is granted like any other: the server is the source
+// name, its pinned tools are the grant, and the policy has its /mcp rule.
+func TestCompile_CLISetInGrant(t *testing.T) {
+	reg := toolreg.Registry{Version: 1,
+		Sources: map[string]toolreg.Source{"gh": {Type: toolreg.TypeCLI, Pack: "gh"}},
+		Sets:    map[string]toolreg.Set{"gh:readonly": {Source: "gh", Tools: []string{"issue_list", "pr_view", "unpinned"}}},
+	}
+	sets := RegistrySets(reg, toolgateway.Pins{"gh": {"issue_list": "a", "pr_view": "b"}})
+	m := workReadonly(t)
+	m.Tools = []string{"gh:readonly"}
+	c, err := Compile(m, sets, testGW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := viewScope(c.Capabilities().Grant); !reflect.DeepEqual(got, map[string][]string{"gh": {"issue_list", "pr_view"}}) {
+		t.Errorf("grant = %v", got)
+	}
+	if !strings.Contains(string(c.PolicyYAML), "/mcp/gh") {
+		t.Errorf("policy has no /mcp/gh rule:\n%s", c.PolicyYAML)
+	}
+}

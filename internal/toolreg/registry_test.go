@@ -637,3 +637,105 @@ func TestMigrate_NotesAreSelf(t *testing.T) {
 		t.Errorf("jira authorship = %q, want none", got)
 	}
 }
+
+func loadReg(t *testing.T, sources string) Registry {
+	t.Helper()
+	r, err := Load(regFile(t, "version: 1\nsources:\n"+sources+"sets: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestLoad_CLISource(t *testing.T) {
+	r := loadReg(t, "  gh: {type: cli, pack: gh}\n  bad: {type: cli, pack: nope}\n  none: {type: cli}\n")
+	if s, ok := r.Sources["gh"]; !ok || s.Pack != "gh" {
+		t.Fatalf("gh not loaded: %+v errs %v", r.Sources, r.SourceErrors)
+	}
+	if err := r.SourceErrors["bad"]; err == nil || !strings.Contains(err.Error(), "unknown pack nope") {
+		t.Errorf("bad pack error = %v", err)
+	}
+	if _, ok := r.Sources["bad"]; ok {
+		t.Error("source with unknown pack was kept")
+	}
+	if r.SourceErrors["none"] == nil {
+		t.Error("cli source without pack was kept")
+	}
+}
+
+func TestLoad_HTTPOpenAPISource(t *testing.T) {
+	r := loadReg(t, `  ok: {type: http-openapi, spec: /srv/api.yaml, base_url: "https://api.example.com/v1", credential: my-api}
+  plain: {type: http-openapi, spec: /srv/api.yaml, base_url: "http://api.example.com"}
+  rel: {type: http-openapi, spec: api.yaml, base_url: "https://api.example.com"}
+  user: {type: http-openapi, spec: /srv/api.yaml, base_url: "https://u:p@api.example.com"}
+  cred: {type: http-openapi, spec: /srv/api.yaml, base_url: "https://api.example.com", credential: "Bad Name"}
+  nospec: {type: http-openapi, base_url: "https://api.example.com"}
+  query: {type: http-openapi, spec: /srv/api.yaml, base_url: "https://api.example.com/v1?key=SECRET"}
+  frag: {type: http-openapi, spec: /srv/api.yaml, base_url: "https://api.example.com/v1#x"}
+  dash: {type: http-openapi, spec: /srv/api.yaml, base_url: "https://api.example.com", credential: "-x"}
+  dashes: {type: http-openapi, spec: /srv/api.yaml, base_url: "https://api.example.com", credential: "--"}
+`)
+	if s, ok := r.Sources["ok"]; !ok || s.Credential != "my-api" || s.BaseURL != "https://api.example.com/v1" {
+		t.Fatalf("ok not loaded: %+v errs %v", r.Sources, r.SourceErrors)
+	}
+	for _, n := range []string{"plain", "rel", "user", "cred", "nospec", "query", "frag", "dash", "dashes"} {
+		if r.SourceErrors[n] == nil {
+			t.Errorf("%s: no error", n)
+		}
+		if _, ok := r.Sources[n]; ok {
+			t.Errorf("%s was kept", n)
+		}
+	}
+}
+
+func TestLoad_FieldsOfOtherTypesRefused(t *testing.T) {
+	r := loadReg(t, `  a: {type: cli, pack: gh, url: "http://x/mcp"}
+  b: {type: mcp-http, url: "http://x/mcp", pack: gh}
+  c: {type: mcp-http, url: "http://x/mcp", spec: /a}
+  d: {type: local-notes, root: /n, base_url: "https://x"}
+  e: {type: http-openapi, spec: /a, base_url: "https://x", root: /n}
+  f: {type: cli, pack: gh, credential: x}
+`)
+	for _, n := range []string{"a", "b", "c", "d", "e", "f"} {
+		if r.SourceErrors[n] == nil {
+			t.Errorf("%s: foreign field accepted", n)
+		}
+	}
+}
+
+func TestEndpoint_NewTypes(t *testing.T) {
+	if got := (Source{Type: TypeCLI, Pack: "gh"}).Endpoint(); got != "pack:gh" {
+		t.Errorf("cli endpoint = %q", got)
+	}
+	if got := (Source{Type: TypeHTTPOpenAPI, BaseURL: "https://a.example/v1"}).Endpoint(); got != "https://a.example/v1" {
+		t.Errorf("http-openapi endpoint = %q", got)
+	}
+	r := Registry{Sources: map[string]Source{"gh": {Type: TypeCLI, Pack: "gh"}}}
+	if r.SourceChanged("gh", "pack:gh") || !r.SourceChanged("gh", "pack:other") {
+		t.Error("SourceChanged does not track the pack")
+	}
+}
+
+// A rejected URL is never echoed: errors reach gateway logs.
+func TestLoad_RejectedURLsAreNotEchoed(t *testing.T) {
+	r := loadReg(t, `  a: {type: http-openapi, spec: /s.yaml, base_url: "https://user:password@api.example.com"}
+  b: {type: http-openapi, spec: /s.yaml, base_url: "https://api.example.com/v1?key=SECRET"}
+  c: {type: http-openapi, spec: /s.yaml, base_url: "http://api.example.com/?key=SECRET"}
+  d: {type: mcp-http, url: "ftp://user:password@x.example/?key=SECRET"}
+`)
+	for _, n := range []string{"a", "b", "c", "d"} {
+		err := r.SourceErrors[n]
+		if err == nil {
+			t.Fatalf("%s: no error", n)
+		}
+		if strings.Contains(err.Error(), "password") || strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("%s: error echoes the URL: %v", n, err)
+		}
+	}
+	if err := r.SourceErrors["a"]; !strings.Contains(err.Error(), "user info") {
+		t.Errorf("a: error does not say what is wrong: %v", err)
+	}
+	if err := r.SourceErrors["b"]; !strings.Contains(err.Error(), "query") {
+		t.Errorf("b: error does not say what is wrong: %v", err)
+	}
+}
