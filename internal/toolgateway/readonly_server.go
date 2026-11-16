@@ -53,6 +53,9 @@ type ReadonlyServer struct {
 	// Starter is how a changed registry's backends start on the running
 	// pool (nil: mcpproxy.ReadonlyStarter, what BuildReadonly uses).
 	Starter func(cfg mcpproxy.ReadonlyConfig) mcpproxy.Starter
+	// Runner binds the runner sandbox compiled from a snapshot to each
+	// source (mcpproxy.ReadonlyConfig.Tools); nil starts no cli sources.
+	Runner func(snap toolreg.Snapshot) func(source string) mcpproxy.ToolRunner
 
 	applied atomic.Pointer[toolreg.Snapshot] // the snapshot the servers were built from
 
@@ -370,7 +373,11 @@ func (r *ReadonlyServer) configOf(snap toolreg.Snapshot) mcpproxy.ReadonlyConfig
 			r.Log.Printf("read-only: skipped: %v", m[n])
 		}
 	}
-	return mcpproxy.ReadonlyConfigFrom(reg)
+	cfg := mcpproxy.ReadonlyConfigFrom(reg)
+	if r.Runner != nil {
+		cfg.Tools = r.Runner(snap)
+	}
+	return cfg
 }
 
 func (r *ReadonlyServer) reject(server, tool string, _ error) {
@@ -485,7 +492,9 @@ func (r *ReadonlyServer) Refresh(ctx context.Context) {
 	r.applied.Store(&snap)
 	cfg := r.configOf(snap)
 	r.pins = GatewayPins(snap)
-	if reflect.DeepEqual(cfg, r.cfg) {
+	// Bound runner sources restart on every snapshot (moved), so only a
+	// config without them can take the pins-only path.
+	if sameConfig(cfg, r.cfg) && cfg.Tools == nil {
 		r.Log.Printf("read-only: snapshot %s (pins changed); rebuilding %d backends", snap.Short(), len(r.all))
 		r.apply(ctx, r.all)
 		return
@@ -526,13 +535,32 @@ func backendNames(cfg mcpproxy.ReadonlyConfig) []string {
 	for n := range cfg.Notes {
 		all = append(all, n)
 	}
+	if cfg.Tools != nil {
+		for n, src := range cfg.Runner {
+			if src.Type == toolreg.TypeCLI {
+				all = append(all, n)
+			}
+		}
+	}
 	sort.Strings(all)
 	return slices.Compact(all)
 }
 
+// sameConfig compares a and b without their runner binding: a func is
+// never DeepEqual, and the binding follows the snapshot, which callers
+// compare by version.
+func sameConfig(a, b mcpproxy.ReadonlyConfig) bool {
+	a.Tools, b.Tools = nil, nil
+	return reflect.DeepEqual(a, b)
+}
+
 // moved reports whether backend n is reached differently (or not at all)
-// under next than under prev.
+// under next than under prev. A runner source always moves: next binds the
+// runner sandbox compiled from a new snapshot, whose policy may differ.
 func moved(prev, next mcpproxy.ReadonlyConfig, n string) bool {
+	if _, ok := next.Runner[n]; ok && next.Tools != nil {
+		return true
+	}
 	ph, pok := prev.HTTP[n]
 	nh, nok := next.HTTP[n]
 	pr, prok := prev.Notes[n]
@@ -638,7 +666,7 @@ func (r *ReadonlyServer) relistNow(only []string) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.add == nil || r.Applied().Version() != snap.Version() || !reflect.DeepEqual(cfg, r.cfg) {
+	if r.add == nil || r.Applied().Version() != snap.Version() || !sameConfig(cfg, r.cfg) {
 		return // superseded by a newer snapshot, which rebuilt what it needed
 	}
 	var listed, failed []string

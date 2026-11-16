@@ -3,10 +3,7 @@ package clipack
 import (
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
-
-	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
 type toolShape struct {
@@ -45,7 +42,7 @@ func TestTools_ShapeAndVersionInAnnotations(t *testing.T) {
 	if len(a) != len(p.Commands) {
 		t.Fatalf("%d tools for %d commands", len(a), len(p.Commands))
 	}
-	s, rawA := toolByName(t, a, "gh_issue_list")
+	s, _ := toolByName(t, a, "gh_issue_list")
 	if s.Description == "" || s.InputSchema.Type != "object" {
 		t.Errorf("shape %+v", s)
 	}
@@ -80,29 +77,6 @@ func TestTools_ShapeAndVersionInAnnotations(t *testing.T) {
 	if r.InputSchema.Properties["exclude-drafts"]["type"] != "boolean" {
 		t.Errorf("release_list %v", r.InputSchema.Properties)
 	}
-
-	again, err := p.Tools("2.103.3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, rawAgain := toolByName(t, again, "gh_issue_list")
-	b, err := p.Tools("2.104.0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, rawB := toolByName(t, b, "gh_issue_list")
-	pinA, err := toolgateway.PinTool(rawA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pinAgain, _ := toolgateway.PinTool(rawAgain)
-	pinB, _ := toolgateway.PinTool(rawB)
-	if pinA != pinAgain {
-		t.Errorf("same input, different pins %s %s", pinA, pinAgain)
-	}
-	if pinA == pinB {
-		t.Error("pin did not change with the binary version")
-	}
 }
 
 func TestTools_BinaryPathInAnnotations(t *testing.T) {
@@ -111,54 +85,13 @@ func TestTools_BinaryPathInAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, rawA := toolByName(t, a, "gh_issue_list")
+	s, _ := toolByName(t, a, "gh_issue_list")
 	if s.Annotations["x-aimux-binary-path"] != "/usr/bin/gh" {
 		t.Errorf("annotations %v", s.Annotations)
 	}
-	p.Binary = "/opt/gh"
-	b, err := p.Tools("2.103.3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, rawB := toolByName(t, b, "gh_issue_list")
-	pinA, _ := toolgateway.PinTool(rawA)
-	pinB, _ := toolgateway.PinTool(rawB)
-	if pinA == pinB {
-		t.Error("pin did not change with the binary path")
-	}
 }
 
-func pinOf(t *testing.T, doc string) string {
-	t.Helper()
-	p, err := Load([]byte(doc))
-	if err != nil {
-		t.Fatal(err)
-	}
-	tools, err := p.Tools("1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	pin, err := toolgateway.PinTool(tools[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pin
-}
-
-func TestTools_BindingsInPin(t *testing.T) {
-	ab := cmdPack("  - {name: c, argv: [issue, view], flags: {repo: {type: string, pattern: '[a-z]+'}}, args: [{name: a, type: int, max: 5}, {name: b, type: int, max: 5}]}\n")
-	ba := cmdPack("  - {name: c, argv: [issue, view], flags: {repo: {type: string, pattern: '[a-z]+'}}, args: [{name: b, type: int, max: 5}, {name: a, type: int, max: 5}]}\n")
-	first, second := pinOf(t, ab), pinOf(t, ab)
-	if first != second {
-		t.Error("same pack, different pins")
-	}
-	if pinOf(t, ab) == pinOf(t, ba) {
-		t.Error("swapping positional args did not change the pin")
-	}
-	renamed := strings.Replace(ab, "flags: {repo:", "flags: {owner:", 1)
-	if pinOf(t, ab) == pinOf(t, renamed) {
-		t.Error("renaming a flag did not change the pin")
-	}
+func TestTools_BindingsInAnnotations(t *testing.T) {
 	p := gh(t)
 	tools, err := p.Tools("1")
 	if err != nil {

@@ -270,3 +270,87 @@ func TestCompile_ProvidersHasSandboxProvider(t *testing.T) {
 		t.Fatalf("provider %q providers %v", c.Provider, c.Providers)
 	}
 }
+
+// Providers attach outside the policy, so a provider change alone must
+// still change the recorded digest (Ensure updates the sandbox on it).
+func TestCompileRunner_DigestCoversProviders(t *testing.T) {
+	specs := func(toolreg.Source) ([]httpsource.Operation, error) {
+		return []httpsource.Operation{{ID: "get_issue", Path: "/issue/{key}"}}, nil
+	}
+	compile := func(cred string) Compiled {
+		sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com", Credential: cred}}
+		pins := toolreg.PinTable{"jira": {"get_issue": {Hash: "h", Source: "https://jira.example.com"}}}
+		c, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, specs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	a, b := compile("aimux-jira"), compile("aimux-jira2")
+	if string(a.PolicyYAML) != string(b.PolicyYAML) {
+		t.Fatalf("policies differ; the test needs equal policies:\n%s\n%s", a.PolicyYAML, b.PolicyYAML)
+	}
+	if a.PolicyDigest == b.PolicyDigest {
+		t.Fatal("a provider change kept the digest")
+	}
+	if c := compile("aimux-jira"); c.PolicyDigest != a.PolicyDigest {
+		t.Fatal("same providers, different digest")
+	}
+}
+
+func TestCompileRunnerAvailable_DropsSourceWithoutProvider(t *testing.T) {
+	specs := func(toolreg.Source) ([]httpsource.Operation, error) {
+		return []httpsource.Operation{{ID: "get_issue", Path: "/issue/{key}"}}, nil
+	}
+	sources := map[string]toolreg.Source{
+		"github": {Type: toolreg.TypeCLI, Pack: "gh"},
+		"jira":   {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com", Credential: "aimux-jira"}, // #nosec G101 -- a provider name, not a credential
+	}
+	pins := ghPins("gh_issue_list")
+	pins["jira"] = map[string]toolreg.Pin{"get_issue": {Hash: "h", Source: "https://jira.example.com"}}
+	snap := runnerSnap(sources, pins)
+
+	have := func(p string) bool { return p == "aimux-jira" }
+	c, errs, err := CompileRunnerAvailable(snap, clipack.Builtin, specs, have)
+	if err != nil {
+		t.Fatal(err)
+	}
+	np := decodePolicy(t, c.PolicyYAML).NetworkPolicies
+	if _, ok := np["tools_github"]; ok {
+		t.Fatal("source without its provider still has a policy")
+	}
+	if _, ok := np["tools_jira"]; !ok {
+		t.Fatal("the other source was dropped too")
+	}
+	if strings.Join(c.Providers, ",") != "aimux-jira" {
+		t.Fatalf("providers = %v", c.Providers)
+	}
+	gh := errs["github"]
+	if gh == nil || len(errs) != 1 {
+		t.Fatalf("errs = %v", errs)
+	}
+	for _, want := range []string{"aimux-github", "aimux sandbox setup", "Keychain item aimux-github"} {
+		if !strings.Contains(gh.Error(), want) {
+			t.Errorf("error %q lacks %q", gh, want)
+		}
+	}
+
+	// Every provider present: the same compile as CompileRunner.
+	all, errs, err := CompileRunnerAvailable(snap, clipack.Builtin, specs, func(string) bool { return true })
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("%v %v", err, errs)
+	}
+	plain, err := CompileRunner(snap, clipack.Builtin, specs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.PolicyDigest != plain.PolicyDigest || c.PolicyDigest == plain.PolicyDigest {
+		t.Fatalf("digests: all %s plain %s dropped %s", all.PolicyDigest, plain.PolicyDigest, c.PolicyDigest)
+	}
+
+	// An unapproved source needs no provider: nothing to report.
+	_, errs, err = CompileRunnerAvailable(runnerSnap(ghSources(), nil), clipack.Builtin, noSpecs, func(string) bool { return false })
+	if err != nil || len(errs) != 0 {
+		t.Fatalf("unapproved: %v %v", err, errs)
+	}
+}

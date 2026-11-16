@@ -457,6 +457,44 @@ func TestSandboxStatus_RunnerCompileError(t *testing.T) {
 	}
 }
 
+// A source whose provider the gateway lacks is left out of the runner by
+// Ensure; status compiles the same way, so the runner is current, not
+// stale for good.
+func TestSandboxStatus_RunnerMatchesAvailableProviders(t *testing.T) {
+	env, f := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman,
+		sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	path := toolreg.DefaultPath(env.Home)
+	reg, err := toolreg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Sources["github"] = toolreg.Source{Type: toolreg.TypeCLI, Pack: "gh"}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := toolreg.WriteNew(path, reg); err != nil {
+		t.Fatal(err)
+	}
+	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(hashOnly(toolgateway.Pins{
+		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}, "github": {"gh_repo_view": "p5"}})); err != nil {
+		t.Fatal(err)
+	}
+	snap, _, err := toolgateway.NewStore(env.Home).Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, dropped, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, noSpecs, func(p string) bool { return p == "wingman-claude" })
+	if err != nil || dropped["github"] == nil {
+		t.Fatalf("%v %v", err, dropped)
+	}
+	writeDigest(t, env.Home, "aimux-tools", applied.PolicyDigest)
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.Runner.State != "current" || d.Runner.CompiledDigest != applied.PolicyDigest {
+		t.Fatalf("runner = %+v, want current at %s", d.Runner, applied.PolicyDigest)
+	}
+	assertReadOnly(t, f)
+}
+
 // setupMachine answers sandbox setup: image and provider present or not.
 func setupMachine(imagePresent, providerPresent bool, token string) func(argv []string) (string, error) {
 	return func(argv []string) (string, error) {

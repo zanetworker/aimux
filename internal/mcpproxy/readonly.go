@@ -13,6 +13,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/zanetworker/aimux/internal/clipack"
 	"github.com/zanetworker/aimux/internal/toolreg"
 	"github.com/zanetworker/aimux/internal/wikitools"
 )
@@ -26,10 +27,20 @@ type ReadonlyConfig struct {
 	// neither HTTP nor notes backends.
 	Runner map[string]toolreg.Source
 	Allow  Allowlist // tools each backend may expose
+	// Tools binds the runner sandbox to a source. With it, cli sources
+	// start (NewCLIBackend); without it, or for http-openapi sources until
+	// they are supported, runner sources serve no tools.
+	Tools func(source string) ToolRunner
 }
 
-// errRunnerNotStarted is why a cli or http-openapi source serves no tools.
+// errRunnerNotStarted is why a runner source serves no tools.
 var errRunnerNotStarted = errors.New("runner sources are not started yet")
+
+// startsRunner reports whether cfg starts runner source n.
+func (cfg ReadonlyConfig) startsRunner(n string) bool {
+	src, ok := cfg.Runner[n]
+	return ok && cfg.Tools != nil && src.Type == toolreg.TypeCLI
+}
 
 // ReadonlyConfigFrom is reg's sources and sets as a ReadonlyConfig: each
 // mcp-http source an HTTP backend, each local-notes source a notes backend,
@@ -143,14 +154,29 @@ func (p *Pool) ToolPins() ToolPins {
 	return nil
 }
 
-// readonlyNames is every backend cfg configures, sorted.
+// readonlyNames is every backend cfg starts, sorted.
 func readonlyNames(cfg ReadonlyConfig) []string {
 	names := slices.Collect(maps.Keys(cfg.HTTP))
 	for n := range cfg.Notes {
 		names = append(names, n)
 	}
+	for n := range cfg.Runner {
+		if cfg.startsRunner(n) {
+			names = append(names, n)
+		}
+	}
 	sort.Strings(names)
 	return names
+}
+
+// runnerNotStarted is the runner sources cfg does not start, each with
+// errRunnerNotStarted.
+func runnerNotStarted(cfg ReadonlyConfig, errs map[string]error) {
+	for n := range cfg.Runner {
+		if !cfg.startsRunner(n) {
+			errs[n] = errRunnerNotStarted
+		}
+	}
 }
 
 // ReadonlyCatalog lists every configured backend's live tools, unfiltered,
@@ -159,9 +185,7 @@ func readonlyNames(cfg ReadonlyConfig) []string {
 func ReadonlyCatalog(ctx context.Context, cfg ReadonlyConfig) (*Catalog, map[string]error) {
 	cat := &Catalog{Servers: map[string]CatalogEntry{}}
 	errs := RefreshCatalog(ctx, cat, ReadonlyStarter(cfg), readonlyNames(cfg))
-	for n := range cfg.Runner {
-		errs[n] = errRunnerNotStarted
-	}
+	runnerNotStarted(cfg, errs)
 	return cat, errs
 }
 
@@ -173,12 +197,12 @@ func ReadonlyCatalog(ctx context.Context, cfg ReadonlyConfig) (*Catalog, map[str
 func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []string, pins ToolPins, pool *Pool, rejectLog func(server, tool string, err error)) (map[string]*server.MCPServer, map[string]error) {
 	errs := map[string]error{}
 	var live []string
-	for n := range cfg.Runner { // started by a later change; say why they are down
-		errs[n] = errRunnerNotStarted
-	}
+	runnerNotStarted(cfg, errs) // say why they are down
 	for _, n := range names {
 		root, notes := cfg.Notes[n]
 		switch _, ok := cfg.HTTP[n]; {
+		case cfg.startsRunner(n):
+			live = append(live, n)
 		case notes:
 			if st, err := os.Stat(root); err != nil {
 				errs[n] = fmt.Errorf("notes root: %w", err)
@@ -190,6 +214,9 @@ func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []stri
 		case ok:
 			live = append(live, n)
 		default:
+			if _, ok := cfg.Runner[n]; ok {
+				continue // runnerNotStarted said why
+			}
 			errs[n] = fmt.Errorf("no read-only backend %q is configured", n)
 		}
 	}
@@ -231,13 +258,24 @@ func poolLister(pool *Pool) func(ctx context.Context, server string) ([]json.Raw
 	}
 }
 
-// ReadonlyStarter starts cfg's notes backends in process and the rest over
-// HTTP: the starter BuildReadonly gives its pool.
+// ReadonlyStarter starts cfg's notes backends in process, its cli sources
+// in the runner sandbox (cfg.Tools) and the rest over HTTP: the starter
+// BuildReadonly gives its pool.
 func ReadonlyStarter(cfg ReadonlyConfig) Starter {
 	httpStart := HTTPStarter(cfg.HTTP)
 	return func(ctx context.Context, name string) (Backend, error) {
 		if root, ok := cfg.Notes[name]; ok {
 			return wikitools.NewBackend(root, 0), nil
+		}
+		if src, ok := cfg.Runner[name]; ok {
+			if !cfg.startsRunner(name) {
+				return nil, errRunnerNotStarted
+			}
+			pack, err := clipack.Builtin(src.Pack)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			return NewCLIBackend(name, pack, cfg.Tools(name)), nil
 		}
 		return httpStart(ctx, name)
 	}

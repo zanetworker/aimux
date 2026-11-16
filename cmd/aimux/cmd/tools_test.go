@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -497,5 +499,102 @@ func TestToolsStatus_RunnerSourceSaysNotStarted(t *testing.T) {
 	}
 	if !strings.Contains(out, "gh:readonly") || !strings.Contains(out, "runner sources are not started yet") {
 		t.Errorf("status lacks the reason:\n%s", out)
+	}
+}
+
+// openshellRec is a sandboxlaunch.Runner standing in for openshell: it
+// records each call and answers sandbox list from ready.
+type openshellRec struct {
+	mu    sync.Mutex
+	verbs []string
+	ready bool
+}
+
+func (o *openshellRec) run(_ context.Context, _ io.Reader, argv ...string) (io.ReadCloser, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	verb := argv[3] + " " + argv[4]
+	if verb == "sandbox provider" {
+		verb += " " + argv[5]
+	}
+	o.verbs = append(o.verbs, verb)
+	out := ""
+	switch verb {
+	case "sandbox list":
+		out = "NAME  CREATED  PHASE\n"
+		if o.ready {
+			out += "aimux-tools  2026-11-16 10:00:00  Ready\n"
+		}
+	case "sandbox create":
+		o.ready = true
+	case "provider list":
+		out = "wingman-claude\naimux-github\n"
+	case "sandbox exec":
+		out = "gh version 2.103.3 (2026-10-26)\n"
+	}
+	return io.NopCloser(strings.NewReader(out)), nil
+}
+
+func (o *openshellRec) calls() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.verbs)
+}
+
+func ghToolsHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	reg := toolreg.DefaultPath(home)
+	if err := os.MkdirAll(filepath.Dir(reg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reg, []byte("version: 1\nsources:\n  github: {type: cli, pack: gh}\nsets:\n  github:readonly: {source: github, tools: [gh_repo_view]}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// status and diff are read-only: they list a cli source only when
+// aimux-tools is already Ready, and never create or update it. approve
+// ensures it, so the tools it pins are the ones the runner serves.
+func TestTools_RunnerReadOnlyExceptApprove(t *testing.T) {
+	home := ghToolsHome(t)
+	rec := &openshellRec{ready: true}
+	env := toolsEnv{Home: home, Now: time.Now, Catalog: mcpproxy.ReadonlyCatalog,
+		Runner: runnerBinding(rec.run, filepath.Join(home, ".aimux", "sandboxes"))}
+	for _, args := range [][]string{{"status"}, {"diff"}} {
+		out, _, err := runTools(t, env, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if args[0] == "status" && !strings.Contains(out, "gh_repo_view") {
+			t.Errorf("status lists no gh tool:\n%s", out)
+		}
+	}
+	for _, v := range rec.calls() {
+		if v != "sandbox list" && v != "sandbox exec" {
+			t.Errorf("status or diff ran %s", v)
+		}
+	}
+
+	// Not started: down with the hint, still nothing created.
+	rec = &openshellRec{}
+	env.Runner = runnerBinding(rec.run, filepath.Join(home, ".aimux", "sandboxes"))
+	out, errOut, err := runTools(t, env, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out+errOut, "tool runner not started") {
+		t.Errorf("status does not say the runner is not started:\n%s\n%s", out, errOut)
+	}
+	if v := rec.calls(); !slices.Equal(v, []string{"sandbox list"}) {
+		t.Errorf("status ran %v", v)
+	}
+
+	if _, _, err := runTools(t, env, "approve", "github:readonly"); err != nil {
+		t.Fatal(err)
+	}
+	if v := rec.calls(); !slices.Contains(v, "provider list") || !slices.Contains(v, "sandbox create") {
+		t.Errorf("approve did not ensure the runner: %v", v)
 	}
 }

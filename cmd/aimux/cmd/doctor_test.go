@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -375,5 +377,38 @@ func TestDoctor_PinsOfARemovedSource(t *testing.T) {
 	}
 	if _, errOut, _ := r.doctor(t); strings.Contains(errOut, "Next: nothing to do") || !strings.Contains(errOut, "Next: to serve it again, add source google back with aimux tools add") {
 		t.Fatalf("stderr:\n%s", errOut)
+	}
+}
+
+// Doctor (and setup's review) list cli sources the way tools status does:
+// through a read-only probe of aimux-tools, never creating it.
+func TestDoctor_ProbesRunnerReadOnly(t *testing.T) {
+	home := ghToolsHome(t)
+	f := &fakeRun{answer: func(argv []string) (string, error) {
+		switch strings.Join(argv[:min(len(argv), 5)], " ") {
+		case "openshell -g local sandbox list":
+			return "NAME  CREATED  PHASE\naimux-tools  2026-11-16 10:00:00  Ready\n", nil
+		case "openshell -g local sandbox exec":
+			return "gh version 2.103.3 (2026-10-26)\n", nil
+		}
+		return "", nil
+	}}
+	env := frontEnv{browserEnv: browserEnv{Home: home, Run: f.run, Catalog: mcpproxy.ReadonlyCatalog}, Now: time.Now}
+	reg, err := toolreg.Load(toolreg.DefaultPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rv, err := reviewFrom(context.Background(), env.toolsEnv(), reg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live := rv.live["github"]; live.Err != nil || len(live.Tools) == 0 {
+		t.Fatalf("github live = %+v", live)
+	}
+	for _, c := range f.calls {
+		s := strings.Join(c.argv, " ")
+		if !strings.HasPrefix(s, "openshell -g local sandbox list") && !strings.HasPrefix(s, "openshell -g local sandbox exec") {
+			t.Errorf("doctor ran %q", s)
+		}
 	}
 }

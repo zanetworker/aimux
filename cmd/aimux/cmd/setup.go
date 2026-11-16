@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/zanetworker/aimux/internal/autoroute"
+	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -66,7 +67,31 @@ func defaultFrontEnv() frontEnv {
 	}
 }
 
-func (e frontEnv) toolsEnv() toolsEnv { return toolsEnv{Home: e.Home, Catalog: e.Catalog, Now: e.Now} }
+// toolsEnv lists cli sources through a read-only probe of aimux-tools
+// (doctor and setup's review never create or update it).
+func (e frontEnv) toolsEnv() toolsEnv {
+	env := toolsEnv{Home: e.Home, Catalog: e.Catalog, Now: e.Now}
+	if e.Run != nil {
+		env.Runner = runnerBinding(runnerOver(e.Run), filepath.Join(e.Home, ".aimux", "sandboxes"))
+	}
+	return env
+}
+
+// runnerOver adapts browserEnv.Run to sandboxlaunch.Runner: stdout whole,
+// the error from Close.
+func runnerOver(run func(ctx context.Context, env []string, argv ...string) (string, error)) sandboxlaunch.Runner {
+	return func(ctx context.Context, _ io.Reader, argv ...string) (io.ReadCloser, error) {
+		out, err := run(ctx, nil, argv...)
+		return closeErr{Reader: strings.NewReader(out), err: err}, nil
+	}
+}
+
+type closeErr struct {
+	io.Reader
+	err error
+}
+
+func (c closeErr) Close() error { return c.err }
 
 func newSetupCmd() *cobra.Command { return newSetupCmdWith(defaultFrontEnv()) }
 

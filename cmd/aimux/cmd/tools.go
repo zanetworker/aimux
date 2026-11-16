@@ -24,6 +24,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
+	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -39,7 +40,14 @@ type toolsEnv struct {
 	Home string
 	// Catalog lists the sources' live tools (mcpproxy.ReadonlyCatalog).
 	Catalog func(ctx context.Context, cfg mcpproxy.ReadonlyConfig) (*mcpproxy.Catalog, map[string]error)
-	Now     func() time.Time
+	// Runner binds the runner sandbox to cli sources so Catalog lists them
+	// (runnerBinding): ensure creates or updates aimux-tools (approve);
+	// otherwise it is only probed. Nil lists none.
+	Runner func(snap toolreg.Snapshot, ensure bool) func(source string) mcpproxy.ToolRunner
+	Now    func() time.Time
+	// ensureRunner is set by approve, the one tools command that may
+	// create or update aimux-tools.
+	ensureRunner bool
 	// IsTTY is whether remove may ask (stdin and stdout are terminals); In
 	// is where the answer is read. Nil: no terminal.
 	IsTTY func() bool
@@ -49,6 +57,7 @@ type toolsEnv struct {
 func newToolsCmd() *cobra.Command {
 	home, _ := os.UserHomeDir()
 	return newToolsCmdWith(toolsEnv{Home: home, Catalog: mcpproxy.ReadonlyCatalog, Now: time.Now,
+		Runner: runnerBinding(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes")),
 		IsTTY: func() bool {
 			return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) // #nosec G115 -- small fds
 		},
@@ -121,6 +130,19 @@ func readRegistry(home string) (reg toolreg.Registry, note string, err error) {
 	return reg, note, nil
 }
 
+// runnerBinding is toolsEnv.Runner over run: with ensure,
+// sandboxlaunch.RunnerTools (creates or updates aimux-tools); without,
+// sandboxlaunch.RunnerProbe (read-only).
+func runnerBinding(run sandboxlaunch.Runner, dir string) func(toolreg.Snapshot, bool) func(string) mcpproxy.ToolRunner {
+	tools, probe := sandboxlaunch.RunnerTools(run, dir), sandboxlaunch.RunnerProbe(run, dir)
+	return func(snap toolreg.Snapshot, ensure bool) func(string) mcpproxy.ToolRunner {
+		if ensure {
+			return tools(snap)
+		}
+		return probe(snap)
+	}
+}
+
 // toolsReview is everything the tools commands judge from.
 type toolsReview struct {
 	reg      toolreg.Registry
@@ -148,7 +170,12 @@ func reviewFrom(ctx context.Context, env toolsEnv, reg toolreg.Registry, note st
 	}
 	ctx, cancel := context.WithTimeout(ctx, toolsListTimeout)
 	defer cancel()
-	cat, down := env.Catalog(ctx, mcpproxy.ReadonlyConfigFrom(reg))
+	cfg := mcpproxy.ReadonlyConfigFrom(reg)
+	if env.Runner != nil {
+		// The runner's policy follows the pins: bind it to the files as read.
+		cfg.Tools = env.Runner(toolreg.NewSnapshot(reg, pins.Table(), nil), env.ensureRunner)
+	}
+	cat, down := env.Catalog(ctx, cfg)
 	problems := []string{}
 	for _, m := range []map[string]error{reg.SourceErrors, reg.SetErrors} {
 		for _, n := range slices.Sorted(maps.Keys(m)) {
@@ -368,6 +395,7 @@ func checkExpect(rv toolsReview, target, expect string) error {
 }
 
 func toolsApprove(ctx context.Context, env toolsEnv, targets []string, all bool, expect string, out, errOut io.Writer) error {
+	env.ensureRunner = true // pin what the runner will serve
 	rv, err := loadToolsReview(ctx, env)
 	if err != nil {
 		return err

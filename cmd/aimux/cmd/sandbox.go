@@ -92,8 +92,9 @@ func newSandboxCmdWith(env browserEnv) *cobra.Command {
 			"aimux remote serve creates on first use and updates when the compiled policy changes. These commands\n" +
 			"check and prepare what those sandboxes need; none of them creates a sandbox, except verify, which\n" +
 			"ensures aimux-work-readonly as serve does.\n\n" +
-			"The tool runner, aimux-tools, is the sandbox cli and http-openapi tools will run in. Its policy is\n" +
-			"compiled from the approved sources and shown by status; tool calls do not run in it yet.",
+			"The tool runner, aimux-tools, is the sandbox cli tools run in (http-openapi sources once supported).\n" +
+			"The tool gateway creates or updates it on first use with the policy compiled from the approved\n" +
+			"sources; status shows that policy's state.",
 	}
 	status := &cobra.Command{
 		Use:   "status",
@@ -378,6 +379,7 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 
 	var sandboxes string
 	var listErr error
+	var providers *string // the gateway's provider list, when it listed
 	gwErr := func() error { _, err := env.Run(ctx, nil, openshell("status")...); return err }()
 	if gwErr != nil {
 		r.Gateway.Status, r.Gateway.Error = "unreachable", clipText(gwErr.Error(), 300)
@@ -385,7 +387,11 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 		next("start the OpenShell gateway (openshell-gateway --config ~/.config/openshell/gateway-podman.toml; aimux sandbox setup and remote serve start it too), then aimux sandbox status")
 	} else {
 		r.Gateway.Status = "reachable"
-		switch out, err := env.Run(ctx, nil, openshell("provider", "list")...); {
+		out, err := env.Run(ctx, nil, openshell("provider", "list")...)
+		if err == nil {
+			providers = &out
+		}
+		switch {
 		case err != nil:
 			r.Provider.Status, r.Provider.Error = "unknown", clipText(err.Error(), 300)
 		case hasTableName(out, wingmanProvider):
@@ -394,7 +400,7 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 			r.Provider.Status = "missing"
 			next("aimux sandbox setup")
 		}
-		out, err := env.Run(ctx, nil, openshell("sandbox", "list")...)
+		out, err = env.Run(ctx, nil, openshell("sandbox", "list")...)
 		if err != nil {
 			listErr = err
 			r.Gateway.Error = "sandbox list failed: " + clipText(err.Error(), 300)
@@ -460,7 +466,13 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 	if r.Profiles == nil {
 		r.Profiles = []profileSandbox{}
 	}
-	rc, err := profile.CompileRunner(snap, clipack.Builtin, runnerSpecs)
+	// Compile as Ensure applies it: sources whose provider the gateway lacks
+	// are left out (unknown providers: compile everything).
+	var have func(string) bool
+	if providers != nil {
+		have = func(p string) bool { return hasTableName(*providers, p) }
+	}
+	rc, _, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, have)
 	if err == nil && snapErr != nil {
 		err = snapErr
 	}

@@ -34,8 +34,21 @@ const (
 // for sources that compiled to at least one endpoint.
 // Nothing is writable beyond /tmp. packs loads a pack by name and specs
 // lists a source's operations; an error from either fails the compile.
+// PolicyDigest covers the policy and the sorted providers, since providers
+// attach outside the policy.
 func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, error), specs func(toolreg.Source) ([]httpsource.Operation, error)) (Compiled, error) {
+	c, _, err := CompileRunnerAvailable(snap, packs, specs, nil)
+	return c, err
+}
+
+// CompileRunnerAvailable is CompileRunner for the providers the gateway
+// has: a source whose provider have reports missing is left out (no policy,
+// no provider) and its error, which says how to create the provider, is
+// returned under its name, so the other sources still run. A nil have
+// leaves nothing out.
+func CompileRunnerAvailable(snap toolreg.Snapshot, packs func(string) (clipack.Pack, error), specs func(toolreg.Source) ([]httpsource.Operation, error), have func(provider string) bool) (Compiled, map[string]error, error) {
 	reg := snap.Registry()
+	dropped := map[string]error{}
 	served := toolgateway.ServedPins(snap)
 	var providers []string
 	addProvider := func(p string) {
@@ -50,28 +63,28 @@ func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, erro
 			continue // not approved: no endpoint, no provider
 		}
 		var eps []endpoint
-		var bin, provider string
+		var bin, provider, item string
 		switch src.Type {
 		case toolreg.TypeCLI:
 			pack, err := packs(src.Pack)
 			if err != nil {
-				return Compiled{}, fmt.Errorf("source %s: %w", name, err)
+				return Compiled{}, nil, fmt.Errorf("source %s: %w", name, err)
 			}
 			for _, e := range pack.Policy {
 				eps = append(eps, packEndpoint(e))
 			}
 			bin = pack.Binary
 			if pack.Credential != nil {
-				provider = pack.Credential.Provider
+				provider, item = pack.Credential.Provider, pack.Credential.Keychain
 			}
 		case toolreg.TypeHTTPOpenAPI:
 			ops, err := specs(src)
 			if err != nil {
-				return Compiled{}, fmt.Errorf("source %s: %w", name, err)
+				return Compiled{}, nil, fmt.Errorf("source %s: %w", name, err)
 			}
 			e, err := httpEndpoint(src.BaseURL, ops)
 			if err != nil {
-				return Compiled{}, fmt.Errorf("source %s: %w", name, err)
+				return Compiled{}, nil, fmt.Errorf("source %s: %w", name, err)
 			}
 			if e != nil {
 				eps = append(eps, *e)
@@ -82,6 +95,10 @@ func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, erro
 		}
 		if len(eps) == 0 {
 			continue // nothing to reach: no policy, and no credential to attach
+		}
+		if provider != "" && have != nil && !have(provider) {
+			dropped[name] = missingProvider(name, provider, item)
+			continue
 		}
 		addProvider(provider)
 		key := "tools_" + name
@@ -100,10 +117,10 @@ func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, erro
 	}
 	policy, err := marshalPolicy(p)
 	if err != nil {
-		return Compiled{}, err
+		return Compiled{}, nil, err
 	}
 	slices.Sort(providers)
-	sum := sha256.Sum256(policy)
+	sum := sha256.Sum256(append(append(slices.Clone(policy), "\n# providers: "...), strings.Join(providers, ",")...))
 	return Compiled{
 		PolicyYAML:   policy,
 		PolicyDigest: "sha256:" + hex.EncodeToString(sum[:]),
@@ -111,7 +128,16 @@ func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, erro
 		Image:        RunnerImage,
 		Providers:    providers,
 		Snapshot:     snap,
-	}, nil
+	}, dropped, nil
+}
+
+// missingProvider is why a source whose provider the gateway lacks is left
+// out of the runner; item is the secret store item setup creates it from.
+func missingProvider(source, provider, item string) error {
+	if item != "" {
+		return fmt.Errorf("source %s: provider %s is not on the OpenShell gateway: add its token as the Keychain item %s (the Secret Service item on Linux), then run aimux sandbox setup", source, provider, item)
+	}
+	return fmt.Errorf("source %s: provider %s is not on the OpenShell gateway: create it with openshell provider create, then run aimux sandbox setup", source, provider)
 }
 
 // packEndpoint is a pack's endpoint (clipack checked it) in policy form,

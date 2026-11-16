@@ -63,9 +63,22 @@ Three walls then apply: the adapter's flags (cooperative), the OpenShell policy 
 
 ## The tool runner sandbox
 
-`cli` and `http-openapi` tool sources do not run in a profile's sandbox. They are meant to run in one shared sandbox, `aimux-tools`, from the image `localhost/aimux-tools:2.103.3`: the profile sandbox image plus `gh` 2.103.3, installed from the release tarball and checked against its SHA-256 for arm64 or amd64 (`sandbox/aimux-tools/Containerfile`). `aimux sandbox setup` builds it.
+`cli` and `http-openapi` tool sources do not run in a profile's sandbox. They run in one shared sandbox, `aimux-tools`, from the image `localhost/aimux-tools:2.103.3`: the profile sandbox image plus `gh` 2.103.3, installed from the release tarball and checked against its SHA-256 for arm64 or amd64 (`sandbox/aimux-tools/Containerfile`). `aimux sandbox setup` builds it.
 
-What exists today is the setup and the policy: `aimux sandbox setup` builds the image and the GitHub provider, `profile.CompileRunner` compiles the policy below, and `aimux sandbox status` reports it. Nothing creates the sandbox or executes a CLI or HTTP tool call in it yet; that lands with the runner backend.
+`cli` sources run there now; `http-openapi` sources follow once HTTP source support lands, and until then they serve no tools. The tool gateway (`aimux remote serve`) and `aimux tools approve` start each `cli` source on first use:
+
+1. Ensure: `openshell provider list --names`, then the policy below compiled for the providers the gateway has, then the sandbox is created or updated as for profiles. A source whose provider is missing (for `gh`, `aimux-github`) is left out of the policy and shows as down with an error naming the Keychain item and `aimux sandbox setup`; the other sources keep running.
+   `aimux tools status`, `aimux tools diff`, `aimux doctor` and setup's tool review are read-only: they list a `cli` source only when `aimux-tools` already exists and is Ready (running `<binary> --version` in it), and otherwise show it as down with `tool runner not started: run aimux tools approve <set> ... or start aimux remote serve`. They never create or update the sandbox.
+2. `<binary> --version` at start and again on every listing (the gateway relists at most once a minute, and to verify a call). The version goes into each tool's `x-aimux-binary` annotation, so a `gh` upgrade changes every `gh` tool's pin: the tools stop being served until you approve them again. A binary replaced under a running backend (a rebuilt `aimux-tools`) is seen at the next listing, and calls are refused as changed from then until the tools are approved again.
+3. Each call: the pack checks the arguments first (a refused argument runs nothing), then `openshell sandbox exec --no-login-shell --no-tty --timeout <s> --env GH_CONFIG_DIR=/tmp/gh --env XDG_CACHE_HOME=/tmp/cache aimux-tools -- <argv>`, argv only, never a shell, with a 30 second limit. Stdout is the result, cut at 256 KiB with a final line `[output cut at 256 KiB]`. A non-zero exit is an error result with the first 2 KiB of the stderr aimux kept (the last 4 KiB the command wrote, so a long stderr is a truncated tail). A request the network policy refused (OpenShell's `policy_denied` body with an HTTP 403) is an error result naming the method and path it refused. Output past 1 MiB is read and dropped so the command's own exit status is kept. openshell also exits 1 when the sandbox is gone or not Ready, so after any failure the runner's phase is checked: if it is not Ready, the call ensures the sandbox once (for at most 60 seconds) and retries once. If it comes back with another binary, the call is refused as changed. If the Ensure fails, the result names the step for that situation:
+
+   - Missing: Ensure creates it again; if that fails (no image, no gateway), `aimux sandbox setup`.
+   - Stopped: Ensure never starts a stopped sandbox. Run `openshell -g local sandbox start aimux-tools`, or delete it as for Failed.
+   - Failed (or Error, Completed): `openshell -g local sandbox delete aimux-tools`, then run `aimux tools approve <set>` or restart `aimux remote serve` to create it again.
+
+   Any other runner failure reaches the agent as `the tool runner failed; see the aimux log`, with the detail in the gateway's log.
+
+The sandbox never holds the token: it sees OpenShell's placeholder (`openshell:resolve:env:...`) and the proxy swaps in the real value on the wire, so nothing on this path reads the Keychain or redacts output.
 
 `profile.CompileRunner` (`internal/profile/runner.go`) compiles its policy from the same snapshot as the profiles:
 
@@ -76,7 +89,7 @@ What exists today is the setup and the policy: `aimux sandbox setup` builds the 
 - No model host and no tool gateway: the runner has neither `api.anthropic.com` nor `host.containers.internal`.
 - Files: `/tmp` and `/dev/null` are the only writable paths; the workdir is read-only.
 
-`Compiled.Providers` lists the providers the sandbox is created with: the packs' credential providers (`aimux-github` for `gh`) and the sources' `credential`, once each. A profile sandbox's list is just `wingman-claude`. `sandboxlaunch` passes one `--provider` per entry. The runner's `PolicyDigest` and `.digest` file work as for profiles, and `aimux sandbox status` shows it as `(tool runner)` with its recorded and compiled digests (`runner` in `--json`).
+`Compiled.Providers` lists the providers the sandbox is created with: the packs' credential providers (`aimux-github` for `gh`) and the sources' `credential`, once each. A profile sandbox's list is just `wingman-claude`. `sandboxlaunch` passes one `--provider` per entry at create and records the list in `<sandbox>.providers`; when the list changes on a running sandbox, Ensure attaches and detaches the difference (`openshell sandbox provider attach|detach --wait`). The runner's `PolicyDigest` covers its policy and its sorted providers, so a provider change alone updates the sandbox; its `.digest` file works as for profiles, and `aimux sandbox status` shows it as `(tool runner)` with its recorded and compiled digests (`runner` in `--json`).
 
 ### The GitHub provider
 
