@@ -18,9 +18,12 @@ type Backend interface {
 	// reaches the harness as a 0600 file that replaces
 	// harnessconfig.MCPConfigPlaceholder in args; it is on no command line.
 	// prompt reaches the harness on stdin, so page text and questions are on
-	// no command line either and have no argument-size limit.
+	// no command line either and have no argument-size limit. env is
+	// exported into the harness's environment; it is on the command line,
+	// so it holds no secrets, and a name or value outside the safe sets
+	// (envNameRE, envValueRE) fails the call before anything runs.
 	// The ReadCloser streams stdout; Close returns the exit error.
-	Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, args []string) (io.ReadCloser, error)
+	Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, env map[string]string, args []string) (io.ReadCloser, error)
 	// Download copies one file out of the sandbox to localPath (0600).
 	Download(ctx context.Context, sandbox, remotePath, localPath string) error
 }
@@ -34,6 +37,6 @@ func (l *Launcher) Ensure(ctx context.Context, c profile.Compiled) error {
 }
 
 // Exec delegates to the backend.
-func (l *Launcher) Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, args []string) (io.ReadCloser, error) {
-	return l.Backend.Exec(ctx, c, mcpConfig, prompt, args)
+func (l *Launcher) Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, env map[string]string, args []string) (io.ReadCloser, error) {
+	return l.Backend.Exec(ctx, c, mcpConfig, prompt, env, args)
 }

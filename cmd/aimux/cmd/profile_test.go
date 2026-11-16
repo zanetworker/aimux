@@ -118,11 +118,11 @@ func TestProfileList_ShowsBuiltinsWithDigest(t *testing.T) {
 	}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) > 0 && f[0] == "research" && !strings.Contains(line, "false") {
-			t.Errorf("research should be unavailable: %q", line)
+		if len(f) > 0 && f[0] == "research-with-work" && !strings.Contains(line, "false") {
+			t.Errorf("research-with-work should be unavailable: %q", line)
 		}
-		if len(f) > 0 && f[0] == "page" && !strings.Contains(line, "true") {
-			t.Errorf("page should be available: %q", line)
+		if len(f) > 0 && (f[0] == "page" || f[0] == "research") && !strings.Contains(line, "true") {
+			t.Errorf("%s should be available: %q", f[0], line)
 		}
 	}
 }
@@ -502,5 +502,32 @@ func TestProfileMigrate_WarnsWhenModeIsDropped(t *testing.T) {
 	}
 	if strings.Contains(errOut, "plain") || strings.Contains(out, "mode") {
 		t.Fatalf("warning for a profile without a mode, or in stdout: stderr %q stdout %q", errOut, out)
+	}
+}
+
+func TestProfileCheck_SandboxNameTooLongFails(t *testing.T) {
+	dir := profileDirEnv(t)
+	writeProfileFile(t, dir, "research-narrow.yaml", "name: research-narrow\nextends: builtin:research\n")
+	jsonOutput = false
+
+	_, _, err := runProfileCmdErr(t, testStore(t), []string{"profile", "check", "research-narrow"})
+	if !errors.Is(err, profile.ErrNameTooLong) {
+		t.Fatalf("err = %v, want ErrNameTooLong", err)
+	}
+	if !strings.Contains(err.Error(), `"aimux-research-narrow" is 21 characters, OpenShell allows 19`) {
+		t.Errorf("error should match Compile's message: %v", err)
+	}
+}
+
+func TestProfileCheck_SandboxNameAtLimitAndHostProfilesPass(t *testing.T) {
+	dir := profileDirEnv(t)
+	writeProfileFile(t, dir, "research-1234.yaml", "name: research-1234\nextends: builtin:research\n") // 13: aimux- + 13 = 19
+	writeProfileFile(t, dir, "page-with-a-long-name.yaml", "name: page-with-a-long-name\nextends: builtin:page\n")
+	jsonOutput = false
+
+	for _, name := range []string{"research-1234", "page-with-a-long-name"} {
+		if _, _, err := runProfileCmdErr(t, testStore(t), []string{"profile", "check", name}); err != nil {
+			t.Errorf("check %s: %v", name, err)
+		}
 	}
 }

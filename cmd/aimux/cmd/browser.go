@@ -9,21 +9,26 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
+	"github.com/zanetworker/aimux/internal/autoroute"
 	"github.com/zanetworker/aimux/internal/browserhost"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
@@ -31,6 +36,7 @@ import (
 	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 const (
@@ -67,6 +73,8 @@ type browserEnv struct {
 	// Ensure makes sure a compiled profile's sandbox exists with its policy
 	// (verify; the launcher serve uses).
 	Ensure func(ctx context.Context, c profile.Compiled) error
+	// AutoKey checks, by existence only, whether Auto mode has an OpenRouter key.
+	AutoKey keyProbe
 }
 
 func defaultBrowserEnv() browserEnv {
@@ -92,6 +100,7 @@ func defaultBrowserEnv() browserEnv {
 		Build:     mcpproxy.BuildReadonly,
 		Serve:     mcpproxy.Serve,
 		Catalog:   mcpproxy.ReadonlyCatalog,
+		AutoKey:   defaultKeyProbe(home),
 		Health:    func(ctx context.Context) error { return profilerun.GatewayHealth(ctx, &once) },
 		Ensure: func(ctx context.Context, c profile.Compiled) error {
 			l := &sandboxlaunch.Launcher{Backend: sandboxlaunch.NewCLIBackend(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
@@ -203,7 +212,7 @@ func newBrowserCmd() *cobra.Command { return newBrowserCmdWith(defaultBrowserEnv
 func newBrowserCmdWith(env browserEnv) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "browser",
-		Short: "Wingman browser side panel: native messaging host and sandbox setup",
+		Short: "Wingman browser side panel: Chrome native messaging host and setup (the sandbox is aimux sandbox)",
 	}
 
 	var extID string
@@ -221,13 +230,15 @@ func newBrowserCmdWith(env browserEnv) *cobra.Command {
 	install.Flags().StringSliceVar(&chromeDirs, "chrome-dirs", nil, "Chrome user data dirs to register in (default: Chrome and Chrome Beta)")
 
 	var sandboxDir string
+	var acceptPins bool
 	setup := &cobra.Command{
 		Use:   "setup",
-		Short: "Prepare the work lane: the read-only tool config and pins, the sandbox image and the provider",
+		Short: "Prepare the work lane: the read-only tool config, the sandbox image and the provider; reports tools to review",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return browserSetup(c.Context(), env, sandboxDir, c.OutOrStdout())
+			return browserSetup(c.Context(), env, sandboxDir, acceptPins, c.OutOrStdout())
 		},
 	}
+	setup.Flags().BoolVar(&acceptPins, "accept-pins", false, "Approve every listed tool without review (for automation; prints a warning)")
 	setup.Flags().StringVar(&sandboxDir, "sandbox-dir", filepath.Join(env.Home, "go/src/github.com/zanetworker/wingman/sandbox"),
 		"The wingman repo's sandbox directory (Containerfile, claude-code-oauth.yaml)")
 
@@ -245,13 +256,34 @@ func newBrowserCmdWith(env browserEnv) *cobra.Command {
 
 	verify := &cobra.Command{
 		Use:   "verify",
-		Short: "Check the work sandbox's egress: internet blocked, read-only server reachable only with a session token",
+		Short: "Deprecated: use aimux sandbox verify",
 		RunE: func(c *cobra.Command, _ []string) error {
-			return browserVerify(c.Context(), env, c.OutOrStdout())
+			_, _ = fmt.Fprintln(c.ErrOrStderr(), "Note: aimux browser verify is now aimux sandbox verify; this alias will be removed")
+			return sandboxVerify(c.Context(), env, c.OutOrStdout())
 		},
 	}
 
-	cmd.AddCommand(install, setup, host, verify)
+	status := &cobra.Command{
+		Use:   "status",
+		Short: "Show the Chrome native host registration, the pinned extension id and the host wrapper; read-only",
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			return browserStatus(env, c.OutOrStdout(), c.ErrOrStderr())
+		},
+	}
+
+	var all bool
+	uninstall := &cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the Wingman native host from Chrome and Chrome Beta and its wrapper (--all: the pinned extension id too)",
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			return browserUninstall(env.Home, all, c.OutOrStdout())
+		},
+	}
+	uninstall.Flags().BoolVar(&all, "all", false, "Also remove the pinned extension id")
+
+	cmd.AddCommand(install, setup, host, verify, status, uninstall)
 	return cmd
 }
 
@@ -412,136 +444,143 @@ func openshell(args ...string) []string {
 // browserSetup prepares what the work lane needs; each step is skipped when
 // already done. The work sandbox itself (aimux-work-readonly) is created by
 // aimux remote serve on first use, from the compiled work-readonly profile.
-func browserSetup(ctx context.Context, env browserEnv, sandboxDir string, out io.Writer) error {
+func browserSetup(ctx context.Context, env browserEnv, sandboxDir string, acceptPins bool, out io.Writer) error {
 	say := func(format string, a ...any) { _, _ = fmt.Fprintf(out, format+"\n", a...) }
 
-	cfgPath := filepath.Join(wingmanDir(env.Home), "readonly.json")
-	if _, err := os.Stat(cfgPath); errors.Is(err, os.ErrNotExist) {
-		data, err := json.MarshalIndent(mcpproxy.DefaultReadonlyConfig(env.Home), "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := ensurePrivateDir(filepath.Dir(cfgPath)); err != nil {
-			return err
-		}
-		if err := os.WriteFile(cfgPath, append(data, '\n'), 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", cfgPath, err)
-		}
-		say("Wrote %s", cfgPath)
-	} else if err != nil {
-		return fmt.Errorf("check %s: %w", cfgPath, err)
-	}
-	cfg, err := mcpproxy.LoadReadonlyConfig(cfgPath)
+	reg, err := setupToolSources(env.Home, say)
 	if err != nil {
 		return err
 	}
-	if st, err := os.Stat(cfg.WikiRoot); err != nil || !st.IsDir() {
-		say("Warning: wiki root %s not found; the wiki tools will be off", cfg.WikiRoot)
-	}
-	if err := pinAllowedTools(ctx, env, cfg, say); err != nil {
+	if err := reviewToolsInSetup(ctx, toolsEnv{Home: env.Home, Catalog: env.Catalog, Now: time.Now}, reg, acceptPins, say); err != nil {
 		return err
 	}
 	if err := writeDefaultClients(env.Home, say); err != nil {
 		return err
 	}
 
-	if err := env.Health(ctx); err != nil {
-		return fmt.Errorf("OpenShell gateway: %w", err)
+	if _, err := sandboxSetup(ctx, env, sandboxDir, "aimux browser setup", say); err != nil {
+		return err
 	}
-
-	if _, err := env.Run(ctx, nil, "podman", "image", "exists", wingmanImage); err != nil {
-		say("Building %s from %s", wingmanImage, sandboxDir)
-		if _, err := env.Run(ctx, nil, "podman", "build", "-t", wingmanImage, "-f", filepath.Join(sandboxDir, "Containerfile"), sandboxDir); err != nil {
-			return fmt.Errorf("build the sandbox image: %w", err)
-		}
-	}
-
-	profiles, err := env.Run(ctx, nil, openshell("provider", "list-profiles")...)
-	if err != nil {
-		return fmt.Errorf("list provider profiles: %w", err)
-	}
-	if !hasTableName(profiles, wingmanProfile) {
-		say("Importing provider profile %s", wingmanProfile)
-		if _, err := env.Run(ctx, nil, openshell("provider", "profile", "import", "-f", filepath.Join(sandboxDir, "claude-code-oauth.yaml"), "--global")...); err != nil {
-			return fmt.Errorf("import provider profile: %w", err)
-		}
-	}
-
-	providers, err := env.Run(ctx, nil, openshell("provider", "list")...)
-	if err != nil {
-		return fmt.Errorf("list providers: %w", err)
-	}
-	if !hasTableName(providers, wingmanProvider) {
-		tok, err := env.Run(ctx, nil, "security", "find-generic-password", "-s", wingmanKeychainItem, "-w")
-		tok = strings.TrimSpace(tok)
-		var ec interface{ ExitCode() int }
-		if err != nil && (!errors.As(err, &ec) || ec.ExitCode() != securityItemNotFound) {
-			return fmt.Errorf("read Keychain item %s: %s", wingmanKeychainItem, redact(err.Error(), tok))
-		}
-		if err != nil || tok == "" {
-			say("The Claude token for Wingman is not in the Keychain (item %s). Run:", wingmanKeychainItem)
-			say("  claude setup-token")
-			say("  security add-generic-password -U -a \"$USER\" -s %s -w", wingmanKeychainItem)
-			say("then run `aimux browser setup` again.")
-			return errors.New("missing Keychain item " + wingmanKeychainItem)
-		}
-		say("Creating provider %s", wingmanProvider)
-		if _, err := env.Run(ctx, []string{tokenEnv + "=" + tok}, openshell("provider", "create", "--name", wingmanProvider, "--type", wingmanProfile, "--credential", tokenEnv)...); err != nil {
-			// The child's stderr may echo the credential: redact it.
-			return fmt.Errorf("create provider %s: %s", wingmanProvider, redact(err.Error(), tok))
-		}
-	}
-
+	say("Sandbox image, provider and policies: aimux sandbox status (setup and verify are there too)")
+	say("%s", autoKeySetupLine(env))
 	say("Done. aimux remote serve creates the work sandbox %s on first use; the old %s sandbox is no longer used (delete it with `openshell -g local sandbox delete %s`).", workSandbox, wingmanOldSandbox, wingmanOldSandbox)
 	return nil
 }
 
-// pinAllowedTools lists the read-only backends' live tools once and pins
-// the ones cfg.Allow names: the hand-reviewed allowlist is trusted on first
-// use. A backend that is down keeps whatever pins it had and gets no new
-// ones, so its tools stay hidden until setup runs again.
-func pinAllowedTools(ctx context.Context, env browserEnv, cfg mcpproxy.ReadonlyConfig, say func(string, ...any)) error {
-	store := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}
-	pins, err := store.Load()
+// setupToolSources makes sure ~/.config/aimux/tool-sources.yaml exists:
+// migrated from readonly.json once (one line per allowlist entry the
+// migration dropped), else the defaults (no notes source). An existing
+// registry is never rewritten; one that does not load fails setup. It warns
+// on each entry the registry skipped and each notes root that is missing,
+// and returns the registry.
+func setupToolSources(home string, say func(string, ...any)) (toolreg.Registry, error) {
+	path, old := toolreg.DefaultPath(home), toolreg.LegacyPath(home)
+	m, err := toolreg.MigrateReport(old, path)
+	if err != nil {
+		return toolreg.Registry{}, err
+	}
+	if m.Migrated {
+		say("Migrated %s to %s (the old file is kept as %s.migrated)", old, path, old)
+		for _, d := range m.Dropped {
+			say("Migrated tool config to %s; %s", path, d)
+		}
+	} else if err := toolreg.WriteNew(path, toolreg.Default()); err == nil {
+		say("Wrote %s", path)
+	} else if !errors.Is(err, fs.ErrExist) {
+		return toolreg.Registry{}, err
+	}
+	reg, err := toolreg.Load(path)
+	if err != nil {
+		return toolreg.Registry{}, err
+	}
+	for _, m := range []map[string]error{reg.SourceErrors, reg.SetErrors} {
+		for _, n := range slices.Sorted(maps.Keys(m)) {
+			say("Warning: %v; it is skipped", m[n])
+		}
+	}
+	cfg := mcpproxy.ReadonlyConfigFrom(reg)
+	for _, n := range slices.Sorted(maps.Keys(cfg.Notes)) {
+		if st, err := os.Stat(cfg.Notes[n]); err != nil || !st.IsDir() {
+			say("Warning: notes root %s (source %s) not found; its tools will be off", cfg.Notes[n], n)
+		}
+	}
+	return reg, nil
+}
+
+// reviewToolsInSetup lists the sources' live tools once and reports the
+// ones that need review with the commands to review them; it writes no
+// pins. With acceptPins it approves every set instead and says so loudly.
+// A backend that is down is named; its pins are kept.
+func reviewToolsInSetup(ctx context.Context, env toolsEnv, reg toolreg.Registry, acceptPins bool, say func(string, ...any)) error {
+	rv, err := reviewFrom(ctx, env, reg, "")
 	if err != nil {
 		return err
 	}
-	cat, down := env.Catalog(ctx, cfg)
-	downNames := make([]string, 0, len(down))
-	for n := range down {
-		downNames = append(downNames, n)
-	}
-	sort.Strings(downNames)
-	for _, n := range downNames {
-		say("Warning: backend %s unavailable (%s); its tools are not pinned and stay hidden until you rerun `aimux browser setup`", n, clipText(down[n].Error(), 200))
-	}
-	allowed := cat.Allowed(cfg.Allow)
-	servers := make([]string, 0, len(cat.Servers))
-	for n := range cat.Servers {
-		servers = append(servers, n)
-	}
-	sort.Strings(servers)
-	for _, srv := range servers {
-		fresh := map[string]string{}
-		for _, raw := range allowed.Servers[srv].Tools {
-			tool, err := mcpproxy.DecodeTool(raw)
-			if err != nil {
-				continue
-			}
-			pin, err := toolgateway.PinTool(raw)
-			if err != nil {
-				continue
-			}
-			fresh[tool.Name] = pin
-			say("Pinned %s/%s %s", srv, tool.Name, pin)
+	for _, n := range slices.Sorted(maps.Keys(rv.live)) {
+		if e := rv.live[n].Err; e != nil {
+			say("Warning: backend %s unavailable (%s); its tools stay hidden until it is up and approved (aimux tools status)", n, clipText(e.Error(), 200))
 		}
-		if len(fresh) == 0 {
-			delete(pins, srv)
-			continue
-		}
-		pins[srv] = fresh
 	}
-	return store.Save(pins)
+	if acceptPins {
+		res, _, err := approveAndSave(rv, slices.Sorted(maps.Keys(reg.Sets)), env.Now())
+		if err != nil {
+			return err
+		}
+		count := map[string]int{}
+		for _, a := range res {
+			count[a.Action]++
+		}
+		msg := fmt.Sprintf("Warning: --accept-pins approved %s without review, dropped %s of a tool no longer listed, skipped %d (backend down or tool not listed)",
+			plural(count[toolgateway.ActionApproved]+count[toolgateway.ActionUpgraded], "tool", "tools"), plural(count[toolgateway.ActionRemoved], "pin", "pins"), count[toolgateway.ActionSkipped])
+		if n := unsetTools(reg, rv.live); n > 0 {
+			msg += fmt.Sprintf("; %s in no set (not approved)", plural(n, "listed tool is", "listed tools are"))
+		}
+		say("%s. %s", msg, toolgateway.Disclaimer)
+		return nil
+	}
+	st := toolgateway.Review(rv.reg, rv.pins, rv.live)
+	var need []string
+	for _, s := range st {
+		if s.NeedsReview() {
+			need = append(need, s.Set+"/"+s.Tool)
+		}
+	}
+	if len(need) == 0 {
+		return nil
+	}
+	say("Tools need review (%d): %s", len(need), strings.Join(need, ", "))
+	say("  Review:  aimux tools diff")
+	say("  Approve: aimux tools approve %s", strings.Join(reviewSets(st), " "))
+	say("They stay hidden until approved. %s", toolgateway.Disclaimer)
+	return nil
+}
+
+// plural is n with one when n is 1, else with many ("1 tool", "2 tools").
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// unsetTools counts the tools live backends list that no set of their
+// source names: --accept-pins never approves them.
+func unsetTools(reg toolreg.Registry, live map[string]toolgateway.LiveSource) int {
+	named := map[string]bool{}
+	for _, s := range reg.Sets {
+		for _, t := range s.Tools {
+			named[s.Source+"/"+t] = true
+		}
+	}
+	n := 0
+	for src, l := range live {
+		for t := range l.Tools {
+			if !named[src+"/"+t] {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // writeDefaultClients writes ~/.config/aimux/clients.yaml with the wingman
@@ -800,149 +839,143 @@ type readonlyServer struct {
 }
 
 func (r *readonlyServer) start(ctx context.Context) (func(), error) {
-	srv := &toolgateway.ReadonlyServer{Home: r.env.Home, Token: r.token, Log: r.env.Log,
+	srv := &toolgateway.ReadonlyServer{Store: toolgateway.NewStore(r.env.Home), Token: r.token, Log: r.env.Log,
 		Listen: r.env.Listen, Build: r.env.Build, Serve: r.env.Serve, Rebuild: r.env.Rebuild}
 	return srv.Start(ctx)
 }
 
-// workProfile is the profile work turns run under; workSandbox is its
-// compiled sandbox (profile.Compile names it aimux-<profile>).
-const (
-	workProfile = "work-readonly"
-	workSandbox = "aimux-" + workProfile
-)
-
-// verifyScript is the node program run inside the work sandbox, whose
-// compiled policy allows /usr/bin/node and claude only (no curl). Stdin
-// line 1 is the session token, so it is on no command line; each check
-// prints "<name> <HTTP status>" (000: no connection or timeout). mcpURL is
-// the read-only gateway endpoint of a pinned server.
-func verifyScript(mcpURL string) string {
-	u, _ := json.Marshal(mcpURL)
-	return `const t = require("fs").readFileSync(0, "utf8").split("\n")[0];
-const u = ` + string(u) + `;
-const init = JSON.stringify({jsonrpc: "2.0", id: 1, method: "initialize", params: {protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {name: "aimux-verify", version: "1"}}});
-const h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"};
-async function code(url, opts) {
-  try { const r = await fetch(url, {...opts, signal: AbortSignal.timeout(10000)}); return String(r.status); }
-  catch (e) { return "000"; }
-}
-(async () => {
-  console.log("internet " + await code("https://example.com"));
-  console.log("auth " + await code(u, {method: "POST", headers: {...h, Authorization: "Bearer " + t}, body: init}));
-  console.log("noauth " + await code(u, {method: "POST", headers: h, body: init}));
-  console.log("hostport " + await code("http://127.0.0.1:7381/"));
-  console.log("hostgw " + await code("http://host.containers.internal:7381/"));
-})();
-`
+// autoKeySetupLine reports the mode-router's key, using the owner's
+// deciders.yaml when there is one.
+func autoKeySetupLine(env browserEnv) string {
+	cfg, err := autoroute.LoadDecider(filepath.Join(env.Home, ".config", "aimux", "deciders.yaml"))
+	if err != nil {
+		return "Auto mode: cannot check the OpenRouter key: " + err.Error()
+	}
+	return autoKeyLine(cfg.Key, env.AutoKey, runtime.GOOS)
 }
 
-// browserVerify checks the sandbox work turns run in: it compiles
-// work-readonly against the pins, starts a short-lived read-only server on
-// :7390 with an issued session token, ensures aimux-work-readonly through
-// the launcher (as serve does), runs the egress checks there with node, and
-// prints PASS/FAIL for each. It needs the OpenShell gateway up and :7390
-// free; aimux remote serve holds :7390 while running.
-func browserVerify(ctx context.Context, env browserEnv, out io.Writer) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := env.Health(ctx); err != nil {
-		return fmt.Errorf("OpenShell gateway: %w; start it, then run aimux browser verify again", err)
-	}
-	pins, err := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}.Load()
-	if err != nil {
-		return err
-	}
-	m, err := profile.Resolve(workProfile, nil) // a builtin: no user file can shadow it
-	if err != nil {
-		return err
-	}
-	c, err := profile.Compile(m, profile.PinnedSets(pins), profile.GatewayAddr{})
-	if err != nil {
-		return fmt.Errorf("compile %s: %w; run aimux browser setup to pin its tools", workProfile, err)
-	}
-	servers := make([]string, 0, len(c.Servers))
-	for n := range c.Servers {
-		servers = append(servers, n)
-	}
-	sort.Strings(servers)
-	if len(servers) == 0 {
-		return fmt.Errorf("%s has no pinned tools to check; run aimux browser setup", workProfile)
-	}
-	ln, err := env.Listen("tcp", wingmanReadonlyAddr)
-	if err != nil {
-		if errors.Is(err, syscall.EADDRINUSE) {
-			return fmt.Errorf("%s is in use, most likely by aimux remote serve, which runs the read-only tool server there: stop aimux remote serve, run aimux browser verify, then start aimux remote serve again", wingmanReadonlyAddr)
-		}
-		return fmt.Errorf("listen on %s: %w", wingmanReadonlyAddr, err)
-	}
-	defer func() { _ = ln.Close() }()
-	admin, err := env.NewToken() // required by the server; never sent
-	if err != nil {
-		return fmt.Errorf("make the read-only server token: %w", err)
-	}
-	tokens := &toolgateway.Tokens{}
-	srv := &toolgateway.ReadonlyServer{Home: env.Home, Token: admin, Tokens: tokens, Log: log.New(out, "  ", 0),
-		Listen: func(string, string) (net.Listener, error) { return ln, nil }, Build: env.Build, Serve: env.Serve}
-	stop, err := srv.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start the read-only server: %w", err)
-	}
-	defer stop()
+// browserHost is one Chrome's native host manifest in browser status.
+type browserHost struct {
+	Browser    string `json:"browser"`
+	Manifest   string `json:"manifest"`
+	Registered bool   `json:"registered"`
+}
 
-	_, _ = fmt.Fprintf(out, "Ensuring sandbox %s (created on first use; can take a few minutes)\n", c.Sandbox)
-	if err := env.Ensure(ctx, c); err != nil {
-		return fmt.Errorf("sandbox %s: %w", c.Sandbox, err)
-	}
-	const verifySession = "aimux-browser-verify"
-	token, err := tokens.Issue(verifySession, c.Servers)
-	if err != nil {
-		return fmt.Errorf("issue the test token: %w", err)
-	}
-	defer tokens.Revoke(verifySession)
+// chromeBrowsers are the Chromes install registers in by default.
+var chromeBrowsers = []string{"Chrome", "Chrome Beta"}
 
-	mcpURL := wingmanMCPURL + "/mcp/" + servers[0]
-	argv := openshell("sandbox", "exec", "--no-login-shell", "--no-tty", c.Sandbox, "--",
-		"/usr/bin/env", "NODE_USE_ENV_PROXY=1", "/usr/bin/node", "-e", verifyScript(mcpURL))
-	res, err := env.Exec(ctx, token+"\n", argv...)
-	if err != nil {
-		return fmt.Errorf("run the checks in sandbox %s: %s", c.Sandbox, redact(err.Error(), token, admin))
+func hostManifestPath(home, browser string) string {
+	return filepath.Join(home, "Library", "Application Support", "Google", browser, "NativeMessagingHosts", wingmanHostName+".json")
+}
+
+// browserHostFiles are what install writes for Chrome to start the host:
+// the manifest in Chrome and Chrome Beta, then the wrapper. The adapter
+// and the pinned extension id are not among them.
+func browserHostFiles(home string) []string {
+	var out []string
+	for _, b := range chromeBrowsers {
+		out = append(out, hostManifestPath(home, b))
 	}
-	path := "/mcp/" + servers[0]
-	got := map[string]string{}
-	for _, f := range tableRows(res) {
-		if len(f) == 2 {
-			got[f[0]] = f[1]
+	return append(out, filepath.Join(wingmanDir(home), "host.sh"))
+}
+
+// browserState is what browser status reports. Usable is whether Chrome
+// can start the host: a manifest registered, an id pinned, the wrapper there.
+type browserState struct {
+	Hosts          []browserHost
+	ExtensionID    string
+	IDErr          error
+	Wrapper        string
+	WrapperPresent bool
+}
+
+func (b browserState) registered() bool {
+	for _, h := range b.Hosts {
+		if h.Registered {
+			return true
 		}
 	}
-	blocked := func(c string) bool { return c == "000" || c == "403" }
-	checks := []struct {
-		key, label string
-		ok         func(string) bool
-		want       string
-	}{
-		{"internet", "internet blocked (https://example.com)", blocked, "000 or 403"},
-		{"auth", "read-only server accepts a session token (:7390" + path + ")", func(c string) bool { return c == "200" }, "200"},
-		{"noauth", "read-only server rejects a missing token (:7390" + path + ")", func(c string) bool { return c == "401" }, "401"},
-		{"hostport", "host Slack proxy blocked (127.0.0.1:7381)", blocked, "000 or 403"},
-		{"hostgw", "host Slack proxy blocked through the host gateway (host.containers.internal:7381)", blocked, "000 or 403"},
+	return false
+}
+
+func (b browserState) usable() bool { return b.registered() && b.IDErr == nil && b.WrapperPresent }
+
+// collectBrowser reads, without writing, what install sets up.
+func collectBrowser(home string) browserState {
+	var b browserState
+	for _, name := range chromeBrowsers {
+		p := hostManifestPath(home, name)
+		_, err := os.Stat(p)
+		b.Hosts = append(b.Hosts, browserHost{Browser: name, Manifest: p, Registered: err == nil})
 	}
-	failed := 0
-	for _, c := range checks {
-		code, found := got[c.key]
-		if found && c.ok(code) {
-			_, _ = fmt.Fprintf(out, "PASS: %s, HTTP %s\n", c.label, code)
+	b.ExtensionID, b.IDErr = pinnedExtensionID(home)
+	b.Wrapper = filepath.Join(wingmanDir(home), "host.sh")
+	st, err := os.Stat(b.Wrapper)
+	b.WrapperPresent = err == nil && st.Mode().IsRegular() && st.Mode().Perm()&0o100 != 0
+	return b
+}
+
+// browserStatus reports, without writing, what install sets up: the host
+// manifest in Chrome and Chrome Beta, the pinned extension id and the
+// wrapper script. Next names install when the host is not usable.
+func browserStatus(env browserEnv, out, errOut io.Writer) error {
+	b := collectBrowser(env.Home)
+	if jsonOutput {
+		if err := writeJSON(out, map[string]any{
+			"schema_version": "1",
+			"hosts":          b.Hosts,
+			"extension_id":   b.ExtensionID,
+			"wrapper":        map[string]any{"path": b.Wrapper, "present": b.WrapperPresent},
+		}); err != nil {
+			return err
+		}
+	} else {
+		for _, h := range b.Hosts {
+			s := "registered"
+			if !h.Registered {
+				s = "not registered"
+			}
+			_, _ = fmt.Fprintf(out, "%-14s %s  %s\n", h.Browser+":", h.Manifest, s)
+		}
+		if b.IDErr != nil {
+			_, _ = fmt.Fprintf(out, "%-14s not pinned\n", "Extension id:")
+		} else {
+			_, _ = fmt.Fprintf(out, "%-14s %s\n", "Extension id:", b.ExtensionID)
+		}
+		s := "present"
+		if !b.WrapperPresent {
+			s = "missing"
+		}
+		_, _ = fmt.Fprintf(out, "%-14s %s  %s\n", "Host wrapper:", b.Wrapper, s)
+	}
+	if !b.usable() {
+		_, _ = fmt.Fprintln(errOut, "Next: aimux browser install --extension-id <id> (the id is in chrome://extensions)")
+	}
+	return nil
+}
+
+// browserUninstall removes the host manifests and the wrapper, and with
+// all the pinned extension id too. The adapter is left (npm installed it
+// and reinstalling it is slow); a file already gone is skipped.
+func browserUninstall(home string, all bool, out io.Writer) error {
+	paths := browserHostFiles(home)
+	if all {
+		paths = append(paths, extensionIDFile(home))
+	}
+	removed := 0
+	for _, p := range paths {
+		err := os.Remove(p)
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		failed++
-		if !found {
-			code = "no result"
+		if err != nil {
+			return fmt.Errorf("remove %s: %w", p, err)
 		}
-		_, _ = fmt.Fprintf(out, "FAIL: %s, got %s, want %s\n", c.label, code, c.want)
+		removed++
+		_, _ = fmt.Fprintf(out, "Removed %s\n", p)
 	}
-	if failed > 0 {
-		return fmt.Errorf("%d of %d egress checks failed", failed, len(checks))
+	if removed == 0 {
+		_, _ = fmt.Fprintln(out, "Nothing to remove: the Wingman native host is not installed.")
 	}
 	return nil
 }

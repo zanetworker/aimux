@@ -1,0 +1,22 @@
+# Reviewed apex list v1: two-label hosts the "**.*.<tld>" wildcards cannot
+# match. Each entry compiles to one exact read-only endpoint on port 443 whose
+# allowed_ips is the public IPv4 complement plus 2000::/3, so it cannot reach
+# private addresses either. Stopgap until OpenShell has a public-only any-host
+# endpoint; then this list goes away.
+#
+# A host of three or more labels under a listed TLD (pkg.go.dev) must not be
+# listed: the wildcard already covers it, and OpenShell rejects an exact entry
+# whose allowed_ips differ from an overlapping wildcard on the same port.
+github.com
+gitlab.com
+stripe.com
+python.org
+kubernetes.io
+redhat.com
+anthropic.com
+openai.com
+arxiv.org
+npmjs.com
+pypi.org
+go.dev
+endoflife.date

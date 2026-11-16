@@ -85,3 +85,8 @@ func secretEnv(environ []string) map[string]string {
 	}
 	return out
 }
+
+// ScrubTokens hides token-shaped strings (bearer values, API keys, long
+// mixed runs) in text from outside the proxy, which knows no configured
+// values to hide.
+func ScrubTokens(s string) string { return (&scrubber{}).scrub(s) }

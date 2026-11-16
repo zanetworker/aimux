@@ -1,0 +1,243 @@
+{
+  "page_acp_meta": {
+    "opus": {
+      "claudeCode": {
+        "options": {
+          "mcpServers": {},
+          "model": "opus",
+          "settingSources": [],
+          "strictMcpConfig": true,
+          "tools": []
+        }
+      }
+    },
+    "sonnet": {
+      "claudeCode": {
+        "options": {
+          "mcpServers": {},
+          "model": "sonnet",
+          "settingSources": [],
+          "strictMcpConfig": true,
+          "tools": []
+        }
+      }
+    }
+  },
+  "profiles": {
+    "research": {
+      "policy_digest": "sha256:706e835e7af72db1f225663ab5b4dcfbfdf38387c0c8b312bcbee34a9f915853",
+      "turns": [
+        {
+          "argv": [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--tools",
+            "WebSearch,WebFetch",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "wingman-mcp-config-file",
+            "--allowedTools",
+            "WebFetch,WebSearch",
+            "--setting-sources",
+            "",
+            "--session-id",
+            "\u003cSESSION\u003e"
+          ],
+          "mcp_config": "{\"mcpServers\":{}}",
+          "token_scope": null,
+          "env": {
+            "DISABLE_ERROR_REPORTING": "1",
+            "DISABLE_TELEMETRY": "1"
+          }
+        },
+        {
+          "argv": [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--tools",
+            "WebSearch,WebFetch",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "wingman-mcp-config-file",
+            "--allowedTools",
+            "WebFetch,WebSearch",
+            "--setting-sources",
+            "",
+            "--resume",
+            "\u003cSESSION\u003e"
+          ],
+          "mcp_config": "{\"mcpServers\":{}}",
+          "token_scope": null,
+          "env": {
+            "DISABLE_ERROR_REPORTING": "1",
+            "DISABLE_TELEMETRY": "1"
+          }
+        },
+        {
+          "argv": [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--tools",
+            "WebSearch,WebFetch",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "wingman-mcp-config-file",
+            "--allowedTools",
+            "WebFetch,WebSearch",
+            "--setting-sources",
+            "",
+            "--model",
+            "opus",
+            "--resume",
+            "\u003cSESSION\u003e"
+          ],
+          "mcp_config": "{\"mcpServers\":{}}",
+          "token_scope": null,
+          "env": {
+            "DISABLE_ERROR_REPORTING": "1",
+            "DISABLE_TELEMETRY": "1"
+          }
+        }
+      ]
+    },
+    "work-readonly": {
+      "policy_digest": "sha256:6d7c24f26fbb571564584d9c881ae0a58c2c78364b8b0cf7434b13168da7cd20",
+      "turns": [
+        {
+          "argv": [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "wingman-mcp-config-file",
+            "--allowedTools",
+            "mcp__google__get_doc_as_markdown,mcp__jira__get_issue_details,mcp__jira__search_issues_jql,mcp__slack__search_messages,mcp__wiki__wiki_read,mcp__wiki__wiki_search",
+            "--setting-sources",
+            "",
+            "--session-id",
+            "\u003cSESSION\u003e"
+          ],
+          "mcp_config": "{\"mcpServers\":{\"google\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/google\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"jira\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/jira\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"slack\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/slack\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"wiki\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/wiki\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}}}}",
+          "token_scope": {
+            "google": [
+              "get_doc_as_markdown"
+            ],
+            "jira": [
+              "get_issue_details",
+              "search_issues_jql"
+            ],
+            "slack": [
+              "search_messages"
+            ],
+            "wiki": [
+              "wiki_read",
+              "wiki_search"
+            ]
+          },
+          "env": {
+            "DISABLE_ERROR_REPORTING": "1",
+            "DISABLE_TELEMETRY": "1"
+          }
+        },
+        {
+          "argv": [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "wingman-mcp-config-file",
+            "--allowedTools",
+            "mcp__google__get_doc_as_markdown,mcp__jira__get_issue_details,mcp__jira__search_issues_jql,mcp__slack__search_messages,mcp__wiki__wiki_read,mcp__wiki__wiki_search",
+            "--setting-sources",
+            "",
+            "--resume",
+            "\u003cSESSION\u003e"
+          ],
+          "mcp_config": "{\"mcpServers\":{\"google\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/google\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"jira\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/jira\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"slack\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/slack\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"wiki\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/wiki\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}}}}",
+          "token_scope": {
+            "google": [
+              "get_doc_as_markdown"
+            ],
+            "jira": [
+              "get_issue_details",
+              "search_issues_jql"
+            ],
+            "slack": [
+              "search_messages"
+            ],
+            "wiki": [
+              "wiki_read",
+              "wiki_search"
+            ]
+          },
+          "env": {
+            "DISABLE_ERROR_REPORTING": "1",
+            "DISABLE_TELEMETRY": "1"
+          }
+        },
+        {
+          "argv": [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--tools",
+            "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "wingman-mcp-config-file",
+            "--allowedTools",
+            "mcp__google__get_doc_as_markdown,mcp__jira__get_issue_details,mcp__jira__search_issues_jql,mcp__slack__search_messages,mcp__wiki__wiki_read,mcp__wiki__wiki_search",
+            "--setting-sources",
+            "",
+            "--model",
+            "opus",
+            "--resume",
+            "\u003cSESSION\u003e"
+          ],
+          "mcp_config": "{\"mcpServers\":{\"google\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/google\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"jira\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/jira\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"slack\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/slack\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}},\"wiki\":{\"type\":\"http\",\"url\":\"http://host.containers.internal:7390/mcp/wiki\",\"headers\":{\"Authorization\":\"Bearer \u003cTOKEN\u003e\"}}}}",
+          "token_scope": {
+            "google": [
+              "get_doc_as_markdown"
+            ],
+            "jira": [
+              "get_issue_details",
+              "search_issues_jql"
+            ],
+            "slack": [
+              "search_messages"
+            ],
+            "wiki": [
+              "wiki_read",
+              "wiki_search"
+            ]
+          },
+          "env": {
+            "DISABLE_ERROR_REPORTING": "1",
+            "DISABLE_TELEMETRY": "1"
+          }
+        }
+      ]
+    }
+  }
+}

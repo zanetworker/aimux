@@ -3,7 +3,7 @@ package browserhost
 import "time"
 
 // Request is one message from the Wingman side panel.
-// Type is ask | history.list | history.get | history.delete | cancel.
+// Type is ask | route | history.list | history.get | history.delete | cancel.
 type Request struct {
 	ID       string `json:"id"`
 	Type     string `json:"type"`
@@ -15,10 +15,41 @@ type Request struct {
 	Question string `json:"question,omitempty"`
 	Query    string `json:"query,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// Instance is the panel's browser profile id, so each browser keeps its
+	// own conversations; a malformed one is ignored (legacy behaviour).
+	Instance string `json:"instance,omitempty"`
+	// OriginOnly: Research on a private page without its text; the prompt
+	// names only the URL's origin.
+	OriginOnly bool `json:"originOnly,omitempty"`
+	// Text and Facts are a route request: the question and the three facts
+	// about the page, all that POST /v1/route is sent.
+	Text  string      `json:"text,omitempty"`
+	Facts *RouteFacts `json:"facts,omitempty"`
+	// Routed is an ask's route answer it followed (POST /v1/sessions routed).
+	Routed *Routed `json:"routed,omitempty"`
+}
+
+// RouteFacts are what the panel knows about the page for Auto mode.
+type RouteFacts struct {
+	SitePrivate  bool `json:"sitePrivate"`
+	PageReadable bool `json:"pageReadable"`
+	UsePage      bool `json:"usePage"`
+}
+
+// Routed is the route answer an ask followed, with the mode it finally
+// asked in (page, web or workspace).
+type Routed struct {
+	DecisionID string `json:"decisionId"`
+	Mode       string `json:"mode"`
+	Source     string `json:"source"`
 }
 
 // Event is one message streamed back to the side panel.
-// Type is delta | tool_call | done | error | history.
+// Type is delta | tool_call | done | error | history | route | status. A
+// status (route requests only) has Text starting or routing. A tool_call's
+// Text is its snippet (a WebFetch's url), when it has one; a route's is the
+// question with any @mode prefix removed, and its other fields are the
+// POST /v1/route answer (Source unsupported: the serve has no Auto).
 type Event struct {
 	ID    string `json:"id"`
 	Type  string `json:"type"`
@@ -27,6 +58,15 @@ type Event struct {
 	Error string `json:"error,omitempty"`
 	Pages []Page `json:"pages,omitempty"`
 	Page  *Page  `json:"page"`
+
+	Mode          string             `json:"mode,omitempty"`
+	Profile       string             `json:"profile,omitempty"`
+	Confidence    float64            `json:"confidence,omitempty"`
+	Probabilities map[string]float64 `json:"probabilities,omitempty"`
+	Decided       bool               `json:"decided,omitempty"`
+	Source        string             `json:"source,omitempty"`
+	Reason        string             `json:"reason,omitempty"`
+	DecisionID    string             `json:"decisionId,omitempty"`
 }
 
 // Turn is one question and answer on a page, as the panel shows it.

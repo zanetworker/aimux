@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,7 +34,7 @@ const (
 )
 
 // profileOfLane is the profile each panel lane asks under.
-var profileOfLane = map[string]string{"page": "page", "work": "work-readonly"}
+var profileOfLane = map[string]string{"page": "page", "research": "research", "work": "work-readonly"}
 
 // Relay serves one Wingman side panel over native messaging (the frames and
 // Request/Event JSON the extension speaks) by turning its requests into
@@ -167,22 +168,42 @@ func (s *relaySession) dispatch(ctx context.Context, msg []byte) {
 	}()
 }
 
+// instancePattern is a well-formed panel instance (the server's rule too).
+var instancePattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
+// validInstance is the panel's instance when well formed, else "": an old
+// or broken panel then gets the legacy behaviour instead of an error.
+func validInstance(instance string) string {
+	if instancePattern.MatchString(instance) {
+		return instance
+	}
+	return ""
+}
+
 func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emit func(Event)) {
 	fail := func(err error) { emit(Event{Type: "error", Error: panelMessage(err)}) }
+	req.Instance = validInstance(req.Instance)
 	switch req.Type {
 	case "ask":
 		if err := s.ask(ctx, req, f, emit); err != nil {
 			fail(err)
 		}
+	case "route":
+		e, err := s.route(ctx, req, emit)
+		if err != nil {
+			fail(err)
+			return
+		}
+		emit(e)
 	case "history.list":
-		pages, err := s.listPages(ctx, req.Query)
+		pages, err := s.listPages(ctx, req.Instance, req.Query)
 		if err != nil {
 			fail(err)
 			return
 		}
 		emit(Event{Type: "history", Pages: pages})
 	case "history.get":
-		page, err := s.getPage(ctx, pageKey(req.URL))
+		page, err := s.getPage(ctx, req.Instance, pageKey(req.URL))
 		if err != nil {
 			fail(err)
 			return
@@ -192,7 +213,7 @@ func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emi
 			emit(Event{Type: "done"}) // page: null means not found
 		}
 	case "history.delete":
-		if err := s.deletePage(ctx, pageKey(req.URL)); err != nil {
+		if err := s.deletePage(ctx, req.Instance, pageKey(req.URL)); err != nil {
 			fail(err)
 			return
 		}
@@ -204,11 +225,11 @@ func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emi
 
 // ask starts (or continues) the page's session under the lane's profile
 // and streams the turn. It always posts to /v1/sessions: the server reuses
-// the page's session for the same client, url and profile (FindPage), so
-// the relay keeps no page-to-session state of its own.
+// the page's session for the same client, instance, url and profile
+// (FindPage), so the relay keeps no page-to-session state of its own.
 func (s *relaySession) ask(ctx context.Context, req Request, f *inflight, emit func(Event)) error {
 	if req.Lane == "" {
-		return errors.New("lane is required (page or work)")
+		return errors.New("lane is required (page, research or work)")
 	}
 	profile, ok := profileOfLane[req.Lane]
 	if !ok {
@@ -219,9 +240,18 @@ func (s *relaySession) ask(ctx context.Context, req Request, f *inflight, emit f
 		return errors.New("url is required")
 	}
 	var acc turnAccepted
-	body := map[string]string{"profile": profile, "url": pageURL, "title": req.Title, "pageText": req.Page, "text": req.Question}
+	body := map[string]any{"profile": profile, "url": pageURL, "title": req.Title, "pageText": req.Page, "text": req.Question}
+	if req.OriginOnly {
+		body["originOnly"] = true // the prompt names only the origin; the session keeps the full URL
+	}
 	if req.Model != "" {
 		body["model"] = req.Model // the panel's Sonnet/Opus choice; the server checks it
+	}
+	if req.Instance != "" {
+		body["instance"] = req.Instance
+	}
+	if req.Routed != nil {
+		body["routed"] = req.Routed // the route answer this ask followed, for the decision log
 	}
 	if err := s.call(ctx, http.MethodPost, "/v1/sessions", body, &acc); err != nil {
 		return err
@@ -235,6 +265,50 @@ func (s *relaySession) ask(ctx context.Context, req Request, f *inflight, emit f
 		return nil
 	}
 	return s.follow(ctx, acc, emit)
+}
+
+// route asks POST /v1/route which mode the question needs, sending only
+// the question and the facts. Before the answer it emits status events:
+// "starting" while it has to start aimux remote serve first, then
+// "routing" once the serve answers, so the panel can give a start more time
+// than a decision. A serve without Auto (404) or one that refuses it (403)
+// answers undecided with source unsupported, so the panel can still offer
+// its picker.
+func (s *relaySession) route(ctx context.Context, req Request, emit func(Event)) (Event, error) {
+	if !s.relay.serving(ctx) && s.relay.Start != nil {
+		emit(Event{Type: "status", Text: "starting"})
+	}
+	c, err := s.relay.connect(ctx) // starts the serve when needed
+	if err != nil {
+		return Event{}, err
+	}
+	_ = c.Close() // only proves the serve is up; the call dials its own
+	emit(Event{Type: "status", Text: "routing"})
+	facts := RouteFacts{}
+	if req.Facts != nil {
+		facts = *req.Facts
+	}
+	var res struct {
+		Mode          string             `json:"mode"`
+		Profile       string             `json:"profile"`
+		Confidence    float64            `json:"confidence"`
+		Probabilities map[string]float64 `json:"probabilities"`
+		Decided       bool               `json:"decided"`
+		Source        string             `json:"source"`
+		Reason        string             `json:"reason"`
+		Text          string             `json:"text"`
+		DecisionID    string             `json:"decisionId"`
+	}
+	err = s.call(ctx, http.MethodPost, "/v1/route", map[string]any{"text": req.Text, "facts": facts}, &res)
+	var ae *apiError
+	if errors.As(err, &ae) && (ae.Status == http.StatusNotFound || ae.Status == http.StatusForbidden) {
+		return Event{Type: "route", Source: "unsupported", Text: req.Text}, nil
+	}
+	if err != nil {
+		return Event{}, err
+	}
+	return Event{Type: "route", Mode: res.Mode, Profile: res.Profile, Confidence: res.Confidence, Probabilities: res.Probabilities,
+		Decided: res.Decided, Source: res.Source, Reason: res.Reason, Text: res.Text, DecisionID: res.DecisionID}, nil
 }
 
 // cancel answers the panel's cancel of request id: done at once (and only
@@ -304,11 +378,15 @@ func laneOfProfile(profile string) string {
 }
 
 // sessions lists Wingman's sessions, newest first; pageURL narrows them to
-// one page when set.
-func (s *relaySession) sessions(ctx context.Context, pageURL string) ([]v1Session, error) {
+// one page when set, and instance to that browser profile's sessions plus
+// legacy ones (the server's rule) when set.
+func (s *relaySession) sessions(ctx context.Context, instance, pageURL string) ([]v1Session, error) {
 	q := url.Values{"client": {"wingman"}, "limit": {strconv.Itoa(maxListed)}}
 	if pageURL != "" {
 		q.Set("url", pageURL)
+	}
+	if instance != "" {
+		q.Set("instance", instance)
 	}
 	var list struct {
 		Sessions []v1Session `json:"sessions"`
@@ -323,8 +401,8 @@ func (s *relaySession) sessions(ctx context.Context, pageURL string) ([]v1Sessio
 // most maxPages; query keeps the pages whose title or URL contains it
 // (case-insensitively). A session's time is when it started (the v1 list
 // gives profile sessions no later activity time).
-func (s *relaySession) listPages(ctx context.Context, query string) ([]Page, error) {
-	list, err := s.sessions(ctx, "")
+func (s *relaySession) listPages(ctx context.Context, instance, query string) ([]Page, error) {
+	list, err := s.sessions(ctx, instance, "")
 	if err != nil {
 		return nil, err
 	}
@@ -381,8 +459,8 @@ const (
 // getPage is pageURL's conversation: the turns of every Wingman session on
 // it, oldest first, capped for the panel; nil when it has none. A session
 // whose detail is gone (404) is left out.
-func (s *relaySession) getPage(ctx context.Context, pageURL string) (*Page, error) {
-	list, err := s.sessions(ctx, pageURL)
+func (s *relaySession) getPage(ctx context.Context, instance, pageURL string) (*Page, error) {
+	list, err := s.sessions(ctx, instance, pageURL)
 	if err != nil {
 		return nil, err
 	}
@@ -435,10 +513,11 @@ func (s *relaySession) getPage(ctx context.Context, pageURL string) (*Page, erro
 	return &capped, nil
 }
 
-// deletePage hides every Wingman session on pageURL; v1 never deletes a
-// session, and a hidden one leaves the lists.
-func (s *relaySession) deletePage(ctx context.Context, pageURL string) error {
-	list, err := s.sessions(ctx, pageURL)
+// deletePage hides the Wingman sessions on pageURL that instance lists
+// (its own and legacy ones); v1 never deletes a session, and a hidden one
+// leaves the lists.
+func (s *relaySession) deletePage(ctx context.Context, instance, pageURL string) error {
+	list, err := s.sessions(ctx, instance, pageURL)
 	if err != nil {
 		return err
 	}
@@ -621,6 +700,22 @@ func readSSE(br *bufio.Reader, frame func()) (v1Event, error) {
 	}
 }
 
+// toolCallSnippet is the text of a tool call's first content block (the
+// snippet the sandbox engine attaches, such as a WebFetch's url); "" when it
+// has none.
+func toolCallSnippet(raw json.RawMessage) string {
+	var c []struct {
+		Content struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(raw, &c) != nil || len(c) == 0 || c[0].Content.Type != "text" {
+		return ""
+	}
+	return c[0].Content.Text
+}
+
 // mapEvent emits ev's panel events; end is true once the turn is over, with
 // the turn's error, if any.
 func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
@@ -629,6 +724,7 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 		var u struct {
 			Kind    string `json:"sessionUpdate"`
 			Title   string `json:"title"`
+			Status  string `json:"status"`
 			Content json.RawMessage
 		}
 		if json.Unmarshal(ev.Data, &u) != nil {
@@ -644,7 +740,11 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 				emit(Event{Type: "delta", Text: c.Text})
 			}
 		case "tool_call":
-			emit(Event{Type: "tool_call", Tool: u.Title})
+			ev := Event{Type: "tool_call", Tool: u.Title}
+			if u.Status != "failed" { // a failure's text stays off the panel, as before
+				ev.Text = toolCallSnippet(u.Content)
+			}
+			emit(ev)
 		}
 		return false, nil
 	case "turn_done":
@@ -793,6 +893,17 @@ func (r *Relay) connect(ctx context.Context) (net.Conn, error) {
 			return nil, ctx.Err()
 		}
 	}
+}
+
+// serving reports whether something answers on the socket now, without
+// starting a server.
+func (r *Relay) serving(ctx context.Context) bool {
+	c, err := r.dial(ctx)
+	if err != nil {
+		return false
+	}
+	_ = c.Close() // a probe only
+	return true
 }
 
 func (r *Relay) dial(ctx context.Context) (net.Conn, error) {

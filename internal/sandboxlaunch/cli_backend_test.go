@@ -226,7 +226,7 @@ func TestCLIExec_UploadsConfigAndRemovesIt(t *testing.T) {
 	cfg := `{"mcpServers":{"jira":{"type":"http","url":"http://h:7390/mcp/jira","headers":{"Authorization":"Bearer SECRET-TOKEN"}}}}`
 	args := []string{"claude", "-p", "--mcp-config", harnessconfig.MCPConfigPlaceholder}
 	prompt := "say ok\nsecond line"
-	rc, err := b.Exec(context.Background(), compiled("sha256:one"), cfg, prompt, args)
+	rc, err := b.Exec(context.Background(), compiled("sha256:one"), cfg, prompt, nil, args)
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestCLIExec_LargePromptOnStdinUntruncated(t *testing.T) {
 	f := &fakeRunner{respond: func([]string) (string, error) { return "", nil }}
 	b := newTestCLI(f, t.TempDir())
 	prompt := "Question about this page:\n" + strings.Repeat("page text ", 30<<10) // 300 KiB
-	rc, err := b.Exec(context.Background(), compiled("d"), "{}", prompt, []string{"claude", "-p", "--mcp-config", harnessconfig.MCPConfigPlaceholder})
+	rc, err := b.Exec(context.Background(), compiled("d"), "{}", prompt, nil, []string{"claude", "-p", "--mcp-config", harnessconfig.MCPConfigPlaceholder})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestCLIExec_RefusesUnsafeInput(t *testing.T) {
 		"flag-like sandbox": {profile.Compiled{Sandbox: "-g"}, "{}", ph},
 		"empty args":        {compiled("d"), "{}", nil},
 	} {
-		if _, err := b.Exec(context.Background(), tc.c, tc.cfg, "q", tc.args); err == nil {
+		if _, err := b.Exec(context.Background(), tc.c, tc.cfg, "q", nil, tc.args); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}

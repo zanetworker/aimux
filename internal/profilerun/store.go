@@ -21,6 +21,18 @@ type Meta struct {
 	// claude has created the session id and later turns resume it (sandbox
 	// sessions).
 	Started bool `json:",omitempty"`
+	// Instance is the browser profile that started it (Wingman's per-profile
+	// id); empty for sessions from before instances, and for other clients.
+	Instance string `json:",omitempty"`
+	// WithPage: the session was started with page text (bound on its first
+	// turn). FindPage continues it only for a request that also has page
+	// text, so a question asked without the page never reaches that text.
+	// False for sessions from before the field.
+	WithPage bool `json:",omitempty"`
+	// OriginOnly: the first prompt named only the URL's origin (Wingman,
+	// a private page with "Use this page" off). Keyed like WithPage, so a
+	// question asked one way never continues a session started the other.
+	OriginOnly bool `json:",omitempty"`
 }
 
 // Store keeps session Meta in one JSON file (0600, written atomically), by
@@ -117,13 +129,16 @@ func (s *Store) save(all map[string]Meta) error {
 	return os.Rename(tmp, s.Path)
 }
 
-// FindPage returns the latest session client started on url under profile
-// that is not hidden. Ties on Created go to the larger session id, so the
-// answer is stable.
-func (s *Store) FindPage(client, url, profile string) (session string, ok bool) {
+// FindPage returns the latest session client's instance started on url
+// under profile, with page text exactly when withPage and an origin-only
+// URL exactly when originOnly, that is not hidden. instance "" matches only
+// sessions recorded without one (legacy), so an instance never continues
+// another's session or a legacy one. Ties on Created go to the larger
+// session id, so the answer is stable.
+func (s *Store) FindPage(client, instance, url, profile string, withPage, originOnly bool) (session string, ok bool) {
 	var best Meta
 	for id, m := range s.List(client) {
-		if m.URL != url || m.Profile != profile || m.Hidden {
+		if m.Instance != instance || m.URL != url || m.Profile != profile || m.WithPage != withPage || m.OriginOnly != originOnly || m.Hidden {
 			continue
 		}
 		if !ok || m.Created.After(best.Created) || (m.Created.Equal(best.Created) && id > session) {

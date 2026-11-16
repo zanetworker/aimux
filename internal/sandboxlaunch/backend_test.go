@@ -15,6 +15,7 @@ type recBackend struct {
 	ensured []string
 	execs   [][]string
 	cfgs    []string
+	envs    []map[string]string
 	err     error
 }
 
@@ -23,8 +24,9 @@ func (r *recBackend) Ensure(_ context.Context, c profile.Compiled) error {
 	return r.err
 }
 
-func (r *recBackend) Exec(_ context.Context, c profile.Compiled, cfg, _ string, args []string) (io.ReadCloser, error) {
+func (r *recBackend) Exec(_ context.Context, c profile.Compiled, cfg, _ string, env map[string]string, args []string) (io.ReadCloser, error) {
 	r.execs = append(r.execs, append([]string{c.Sandbox}, args...))
+	r.envs = append(r.envs, env)
 	r.cfgs = append(r.cfgs, cfg)
 	return io.NopCloser(strings.NewReader("out")), r.err
 }
@@ -38,12 +40,12 @@ func TestLauncher_Delegates(t *testing.T) {
 	if err := l.Ensure(context.Background(), c); err != nil || !slices.Equal(rb.ensured, []string{"aimux-work-readonly"}) {
 		t.Fatalf("Ensure: %v, ensured %v", err, rb.ensured)
 	}
-	rc, err := l.Exec(context.Background(), c, "{}", "", []string{"claude", "-p"})
+	rc, err := l.Exec(context.Background(), c, "{}", "", map[string]string{"A": "1"}, []string{"claude", "-p"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := io.ReadAll(rc); string(b) != "out" || !slices.Equal(rb.execs[0], []string{"aimux-work-readonly", "claude", "-p"}) || rb.cfgs[0] != "{}" {
-		t.Fatalf("Exec out=%q execs=%v cfgs=%v", b, rb.execs, rb.cfgs)
+	if b, _ := io.ReadAll(rc); string(b) != "out" || !slices.Equal(rb.execs[0], []string{"aimux-work-readonly", "claude", "-p"}) || rb.cfgs[0] != "{}" || rb.envs[0]["A"] != "1" {
+		t.Fatalf("Exec out=%q execs=%v cfgs=%v envs=%v", b, rb.execs, rb.cfgs, rb.envs)
 	}
 	rb.err = errors.New("down")
 	if err := l.Ensure(context.Background(), c); err == nil || err.Error() != "down" {

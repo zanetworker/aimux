@@ -332,8 +332,15 @@ func (s *Server) LoginAge(r *http.Request) (age time.Duration, kind string, ok b
 // Record writes an audit line for an action on a request the middleware
 // admitted; session is the aimux session acted on, if any.
 func (s *Server) Record(r *http.Request, action, session, result string) {
+	s.RecordEntry(r, AuditEntry{Action: action, Session: session, Result: result})
+}
+
+// RecordEntry is Record for a line with more fields than an action's:
+// e's login and device are the request's.
+func (s *Server) RecordEntry(r *http.Request, e AuditEntry) {
 	a, _ := r.Context().Value(sessionKey{}).(authed)
-	s.audit.Write(AuditEntry{Login: s.login(r), Device: a.device, Action: action, Session: session, Result: result})
+	e.Login, e.Device = s.login(r), a.device
+	s.audit.Write(e)
 }
 
 // canonicalHost returns the request's host name (lowercase, no port, no

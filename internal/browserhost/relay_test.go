@@ -241,6 +241,32 @@ func TestRelay_AskPageMapsToProfileSession(t *testing.T) {
 	}
 }
 
+// The panel's instance (its browser profile) is forwarded on every ask; a
+// missing or malformed one is left out (legacy behaviour), never refused.
+func TestRelay_AskForwardsInstance(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	acceptOnce(f)
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	for i, inst := range []string{"0b9c-Ab12", "", "bad id", strings.Repeat("a", 65)} {
+		id := fmt.Sprintf("i%d", i)
+		p.send(t, Request{ID: id, Type: "ask", Lane: "page", URL: "https://a.example/", Question: "q", Instance: inst})
+		if evs := p.until(t, id); evs[len(evs)-1].Type != "done" {
+			t.Fatalf("instance %q: events %+v, want done", inst, evs)
+		}
+	}
+	posts := f.find("POST", "/v1/sessions")
+	if len(posts) != 4 || posts[0].Body["instance"] != "0b9c-Ab12" {
+		t.Fatalf("posts = %+v", posts)
+	}
+	for _, c := range posts[1:] {
+		if _, has := c.Body["instance"]; has {
+			t.Fatalf("instance sent for a missing or malformed one: %v", c.Body)
+		}
+	}
+}
+
 // acceptOnce answers POST /v1/sessions with session S1 turn T1 and streams
 // a short answer.
 func acceptOnce(f *fakeV1) {
@@ -275,6 +301,27 @@ func TestRelay_AskWorkUsesWorkReadonly(t *testing.T) {
 	}
 	if n := len(f.find("POST", "/v1/sessions")); n != 1 {
 		t.Fatalf("posts after bad lanes = %d", n)
+	}
+}
+
+// A research ask runs under the research profile and forwards the page
+// text only as the panel sent it (empty when "Use this page" is off).
+func TestRelay_AskResearchUsesResearchProfile(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	acceptOnce(f)
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "r1", Type: "ask", Lane: "research", URL: "https://a.example/", Title: "A", Question: "q"})
+	if evs := p.until(t, "r1"); evs[len(evs)-1].Type != "done" {
+		t.Fatalf("events = %+v", evs)
+	}
+	posts := f.find("POST", "/v1/sessions")
+	if len(posts) != 1 || posts[0].Body["profile"] != "research" {
+		t.Fatalf("posts = %+v", posts)
+	}
+	if posts[0].Body["pageText"] != "" || posts[0].Body["url"] != "https://a.example/" || posts[0].Body["title"] != "A" {
+		t.Fatalf("body = %+v", posts[0].Body)
 	}
 }
 
@@ -416,6 +463,38 @@ func TestRelay_HistoryListGroupsByURL(t *testing.T) {
 	p.send(t, Request{ID: "h2", Type: "history.list", Query: "BEE"})
 	if e := p.first(t, "h2"); len(e.Pages) != 1 || e.Pages[0].URL != "https://b.example/" {
 		t.Fatalf("filtered = %+v", e)
+	}
+}
+
+// History listings, gets and deletes carry the panel's instance, so the
+// server lists that browser profile's sessions (and legacy ones) only.
+func TestRelay_HistoryForwardsInstance(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("GET /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"sessions": []any{}})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "l", Type: "history.list", Instance: "inst-1"})
+	p.first(t, "l")
+	p.send(t, Request{ID: "g", Type: "history.get", URL: "https://a.example/", Instance: "inst-1"})
+	p.until(t, "g")
+	p.send(t, Request{ID: "d", Type: "history.delete", URL: "https://a.example/", Instance: "inst-1"})
+	p.until(t, "d")
+	p.send(t, Request{ID: "x", Type: "history.list", Instance: "no/good"})
+	p.first(t, "x")
+	gets := f.find("GET", "/v1/sessions")
+	if len(gets) != 4 {
+		t.Fatalf("list calls = %+v", gets)
+	}
+	for _, c := range gets[:3] {
+		if !strings.Contains(c.Query, "instance=inst-1") {
+			t.Fatalf("query %q has no instance", c.Query)
+		}
+	}
+	if strings.Contains(gets[3].Query, "instance") {
+		t.Fatalf("malformed instance forwarded: %q", gets[3].Query)
 	}
 }
 
@@ -756,5 +835,184 @@ func TestPageKey_AnchorDropped(t *testing.T) {
 		if got := pageKey(in); got != want {
 			t.Errorf("pageKey(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A tool call's content text is its snippet (a WebFetch's url); a failed
+// tool call keeps showing only its name, as before.
+func TestMapEvent_ToolSnippet(t *testing.T) {
+	content := func(text string) []any {
+		return []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": text}}}
+	}
+	for name, tc := range map[string]struct {
+		u    map[string]any
+		want Event
+	}{
+		"webfetch url": {map[string]any{"sessionUpdate": "tool_call", "title": "WebFetch", "status": "pending", "content": content("https://a.example/x")},
+			Event{Type: "tool_call", Tool: "WebFetch", Text: "https://a.example/x"}},
+		"no content": {map[string]any{"sessionUpdate": "tool_call", "title": "wiki_search", "status": "pending"},
+			Event{Type: "tool_call", Tool: "wiki_search"}},
+		"failed": {map[string]any{"sessionUpdate": "tool_call", "title": "mcp__jira__search", "status": "failed", "content": content("failed: no access")},
+			Event{Type: "tool_call", Tool: "mcp__jira__search"}},
+	} {
+		data, _ := json.Marshal(tc.u)
+		var got []Event
+		if end, err := mapEvent(v1Event{Kind: "update", Data: data}, func(e Event) { got = append(got, e) }); end || err != nil {
+			t.Fatalf("%s: end %v err %v", name, end, err)
+		}
+		if len(got) != 1 || fmt.Sprint(got[0]) != fmt.Sprint(tc.want) {
+			t.Errorf("%s: events %+v, want %+v", name, got, tc.want)
+		}
+	}
+}
+
+// A route request posts the question and the three facts to /v1/route and
+// answers with one route event carrying the server's pick.
+func TestRelay_RouteForwards(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("POST /v1/route", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"mode": "web", "profile": "research", "confidence": 0.73,
+			"probabilities": map[string]float64{"web": 0.73, "page": 0.27}, "decided": true, "source": "model", "text": "latest release?", "decisionId": "D1"})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "r1", Type: "route", Text: "latest release?", URL: "https://a.example/", Page: "PAGE TEXT",
+		Facts: &RouteFacts{SitePrivate: true, PageReadable: true, UsePage: false}})
+	evs := p.routeEvents(t, "r1")
+	if len(evs) != 2 || fmt.Sprint(evs[0]) != fmt.Sprint(Event{ID: "r1", Type: "status", Text: "routing"}) {
+		t.Fatalf("events = %+v, want status routing then the route (serve already up: no starting)", evs)
+	}
+	e := evs[1]
+	want := Event{ID: "r1", Type: "route", Mode: "web", Profile: "research", Confidence: 0.73, Probabilities: map[string]float64{"web": 0.73, "page": 0.27},
+		Decided: true, Source: "model", Text: "latest release?", DecisionID: "D1"}
+	if fmt.Sprint(e) != fmt.Sprint(want) {
+		t.Fatalf("event = %+v, want %+v", e, want)
+	}
+	posts := f.find("POST", "/v1/route")
+	if len(posts) != 1 {
+		t.Fatalf("POST /v1/route calls = %d", len(posts))
+	}
+	b, _ := json.Marshal(posts[0].Body)
+	if string(b) != `{"facts":{"pageReadable":true,"sitePrivate":true,"usePage":false},"text":"latest release?"}` {
+		t.Fatalf("body = %s (only the question and the facts may be sent)", b)
+	}
+}
+
+// An older serve without /v1/route (404) or one refusing it (403) answers
+// an undecided route with source unsupported, for the panel's picker;
+// another refusal is an error event.
+func TestRelay_RouteUnsupported(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   string
+	}{{http.StatusNotFound, "route"}, {http.StatusForbidden, "route"}, {http.StatusBadRequest, "error"}} {
+		sock := sockPath(t)
+		f := newFakeV1()
+		f.mux.HandleFunc("POST /v1/route", func(w http.ResponseWriter, r *http.Request) {
+			writeJSONStatus(w, tc.status, map[string]any{"error": "nope", "code": "x"})
+		})
+		listenV1(t, sock, f)
+		p := startPanel(t, &Relay{Socket: sock})
+		p.send(t, Request{ID: "u", Type: "route", Text: "q", Facts: &RouteFacts{}})
+		evs := p.routeEvents(t, "u")
+		e := evs[len(evs)-1]
+		if e.Type != tc.want {
+			t.Fatalf("status %d: event %+v, want %s", tc.status, e, tc.want)
+		}
+		if tc.want == "route" && (e.Decided || e.Source != "unsupported") {
+			t.Fatalf("status %d: event %+v, want undecided unsupported", tc.status, e)
+		}
+	}
+}
+
+// An ask carrying routed sends it on the session create, and only the
+// three fields the server accepts.
+func TestRelay_AskForwardsRouted(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	acceptOnce(f)
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "a", Type: "ask", Lane: "research", URL: "https://a.example/", Question: "q", Routed: &Routed{DecisionID: "D1", Mode: "workspace", Source: "model"}})
+	p.until(t, "a")
+	p.send(t, Request{ID: "b", Type: "ask", Lane: "page", URL: "https://a.example/", Question: "q"})
+	p.until(t, "b")
+	posts := f.find("POST", "/v1/sessions")
+	if len(posts) != 2 {
+		t.Fatalf("posts = %d", len(posts))
+	}
+	b, _ := json.Marshal(posts[0].Body["routed"])
+	if string(b) != `{"decisionId":"D1","mode":"workspace","source":"model"}` {
+		t.Fatalf("routed = %s", b)
+	}
+	if _, has := posts[1].Body["routed"]; has {
+		t.Fatalf("routed sent without one: %v", posts[1].Body)
+	}
+}
+
+// routeEvents returns id's events up to and including its route or error.
+func (p *panel) routeEvents(t *testing.T, id string) []Event {
+	t.Helper()
+	var out []Event
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case e, ok := <-p.events:
+			if !ok {
+				t.Fatalf("panel closed; got %+v", out)
+			}
+			if e.ID != id {
+				continue
+			}
+			out = append(out, e)
+			if e.Type == "route" || e.Type == "error" || e.Type == "done" {
+				return out
+			}
+		case <-timeout:
+			t.Fatalf("no route event for %s; got %+v", id, out)
+		}
+	}
+}
+
+// A route while the relay has to start aimux remote serve first says so
+// (status starting), then status routing once the serve answers, so the
+// panel can wait for the start instead of timing out.
+func TestRelay_RouteReportsStarting(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("POST /v1/route", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"mode": "page", "confidence": 0.9, "decided": true, "source": "model", "text": "q"})
+	})
+	srv := &http.Server{Handler: f, ReadHeaderTimeout: 5 * time.Second}
+	t.Cleanup(func() { _ = srv.Close() })
+	start := func(context.Context) error {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			ln, err := net.Listen("unix", sock)
+			if err != nil {
+				t.Errorf("listen: %v", err)
+				return
+			}
+			_ = srv.Serve(ln)
+		}()
+		return nil
+	}
+	p := startPanel(t, &Relay{Socket: sock, Start: start})
+	p.send(t, Request{ID: "s", Type: "route", Text: "q", Facts: &RouteFacts{}})
+	evs := p.routeEvents(t, "s")
+	got := []string{}
+	for _, e := range evs {
+		got = append(got, e.Type+":"+e.Text)
+	}
+	if fmt.Sprint(got) != "[status:starting status:routing route:q]" {
+		t.Fatalf("events = %v", got)
+	}
+
+	failing := startPanel(t, &Relay{Socket: sockPath(t), Start: func(context.Context) error { return errors.New("exec: no such file") }})
+	failing.send(t, Request{ID: "f", Type: "route", Text: "q", Facts: &RouteFacts{}})
+	evs = failing.routeEvents(t, "f")
+	if last := evs[len(evs)-1]; evs[0].Text != "starting" || last.Type != "error" || !strings.Contains(last.Error, "aimux remote serve") {
+		t.Fatalf("failing start: %+v", evs)
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/toolgateway"
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 // The gateway starts on first use only, once; a failed start is retried by
@@ -155,7 +156,7 @@ func TestProfileWiring_RestartDropsUnstartedSandboxSession(t *testing.T) {
 	if err := p.router.Check(id); err == nil || !strings.Contains(err.Error(), "never started before aimux restarted") {
 		t.Fatalf("Check = %v, want the restart error", err)
 	}
-	if got, ok := store.FindPage("wingman", "https://a.example/x", "work-readonly"); ok {
+	if got, ok := store.FindPage("wingman", "", "https://a.example/x", "work-readonly", false, false); ok {
 		t.Fatalf("FindPage still continues the dropped session %s", got)
 	}
 	if p.sandbox.OnStarted == nil {
@@ -325,5 +326,147 @@ func TestProfileWiring_PageEngineDefaultsToTheProfileModel(t *testing.T) {
 	}
 	if got := page.SessionModel("unknown"); got != "" {
 		t.Fatalf("SessionModel(unknown) = %q, want none", got)
+	}
+}
+
+// A gateway whose snapshot is behind the store's is refreshed on the next
+// get, without waiting out the minute, so the turn's token and the served
+// pins agree.
+func TestLazyGateway_RefreshesAtOnceWhenStale(t *testing.T) {
+	var refreshes atomic.Int32
+	var stale atomic.Bool
+	g := &lazyGateway{tokens: &toolgateway.Tokens{},
+		start:   func(context.Context) (func(), error) { return func() {}, nil },
+		refresh: func(context.Context) { refreshes.Add(1); stale.Store(false) },
+		stale:   stale.Load}
+	defer g.close()
+	_, _, _ = g.get()
+	_, _, _ = g.get()
+	if refreshes.Load() != 0 {
+		t.Fatal("refreshed while current")
+	}
+	stale.Store(true)
+	_, _, _ = g.get()
+	if refreshes.Load() != 1 {
+		t.Fatalf("%d refreshes, want 1 for the stale snapshot", refreshes.Load())
+	}
+	_, _, _ = g.get()
+	if refreshes.Load() != 1 {
+		t.Fatal("refreshed again once current")
+	}
+}
+
+// The real wiring serves GET /v1/tools from the turns' snapshot store
+// (reloaded when a file changed, as a turn would) and the gateway's own
+// view, which is empty before the gateway starts: no backend is contacted.
+// Injected engines have no tool gateway, so no Tools.
+func TestProfileWiring_InstallServesToolsFromTheStore(t *testing.T) {
+	home := t.TempDir()
+	reg := toolreg.DefaultPath(home)
+	if err := os.MkdirAll(filepath.Dir(reg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reg, []byte("version: 1\nsources:\n  jira: {type: mcp-http, url: \"http://127.0.0.1:1/mcp\"}\nsets:\n  jira:readonly: {source: jira, tools: [search]}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	api := &remoteapi.API{}
+	p.Install(api, clientscope.Defaults(), false)
+	if api.Tools == nil {
+		t.Fatal("real wiring: no Tools")
+	}
+	v := api.Tools()
+	if _, ok := v.Snapshot.Registry().Sets["jira:readonly"]; !ok || len(v.Live) != 0 {
+		t.Fatalf("view: sets %v live %v, want the registry and nothing listed yet", v.Snapshot.Registry().Sets, v.Live)
+	}
+	first := v.Snapshot.Version()
+	ps := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(home)}
+	if err := ps.Save(toolgateway.PinFile{"jira": {"search": {Hash: "sha256:1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if v := api.Tools(); v.Snapshot.Version() == first {
+		t.Fatal("a new pin did not reach the view: it reports a stale snapshot")
+	}
+
+	injected, closeInjected, err := buildProfileWiring(t.TempDir(), noEnv, &bytes.Buffer{}, map[string]profilerun.Engine{"acp": &fakeEngine{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeInjected()
+	api2 := &remoteapi.API{}
+	injected.Install(api2, clientscope.Defaults(), false)
+	if api2.Tools != nil {
+		t.Fatal("injected engines: Tools set")
+	}
+}
+
+const legacyReadonly = `{"HTTP": {"jira": {"URL": "http://127.0.0.1:1/mcp"}}, "Allow": {"jira": ["search_issues_jql"]}}`
+
+// remote serve migrates readonly.json once, when it starts; it is never
+// migrated by a reload afterwards.
+func TestProfileWiring_MigratesOnceAtStart(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, toolreg.LegacyPath(home), legacyReadonly)
+	var logw bytes.Buffer
+	_, closeAll, err := buildProfileWiring(home, noEnv, &logw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	if _, err := os.Stat(toolreg.DefaultPath(home)); err != nil {
+		t.Fatalf("serve start did not migrate: %v", err)
+	}
+	if _, err := os.Stat(toolreg.LegacyPath(home) + ".migrated"); err != nil || !strings.Contains(logw.String(), "igrated") {
+		t.Fatalf("legacy file kept: %v; log %q", err, logw.String())
+	}
+}
+
+// GET /v1/tools and a turn's compile only read: on an install whose
+// readonly.json was never migrated (it appeared after serve started), the
+// registry is read from it in memory and both files are left exactly as
+// they were.
+func TestProfileWiring_ToolsAndTurnsWriteNothing(t *testing.T) {
+	home := t.TempDir()
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	writeFile(t, toolreg.LegacyPath(home), legacyReadonly)
+	before, err := os.Stat(toolreg.LegacyPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &remoteapi.API{}
+	p.Install(api, clientscope.Defaults(), false)
+	v := api.Tools()
+	if _, ok := v.Snapshot.Registry().Sets["jira:readonly"]; !ok || v.Snapshot.Err() != nil {
+		t.Fatalf("view %v (%v): want readonly.json's set", v.Snapshot.Registry().Sets, v.Snapshot.Err())
+	}
+	_, _ = p.sandbox.Compile("work-readonly") // a turn's compile; no pins, so it may fail: only its side effects matter
+	api.Tools()
+	if _, err := os.Lstat(toolreg.DefaultPath(home)); err == nil {
+		t.Fatal("a reload wrote tool-sources.yaml")
+	}
+	after, err := os.Stat(toolreg.LegacyPath(home))
+	if err != nil || !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size() {
+		t.Fatalf("readonly.json changed: %v", err)
+	}
+	if _, err := os.Stat(toolreg.LegacyPath(home) + ".migrated"); err == nil {
+		t.Fatal("readonly.json was renamed")
+	}
+}
+
+func writeFile(t *testing.T, p, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

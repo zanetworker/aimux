@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +54,32 @@ exec 3<&0
 p=$!
 wait $p
 exit $?`
+
+var (
+	envNameRE  = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	envValueRE = regexp.MustCompile(`^[A-Za-z0-9._-]*$`)
+)
+
+// envArgs is the `env NAME=VALUE...` prefix (sorted by name) that sets env
+// for the command alone: the wrapper shell never has it, so a value such as
+// IFS cannot change how the wrapper runs. Names and values must match
+// envNameRE and envValueRE. No env is no prefix.
+func envArgs(env map[string]string) ([]string, error) {
+	if len(env) == 0 {
+		return nil, nil
+	}
+	pre := []string{"env"}
+	for _, k := range slices.Sorted(maps.Keys(env)) {
+		if !envNameRE.MatchString(k) {
+			return nil, fmt.Errorf("invalid environment variable name %q", k)
+		}
+		if !envValueRE.MatchString(env[k]) {
+			return nil, fmt.Errorf("invalid value for environment variable %s: only letters, digits, '.', '_' and '-' are allowed", k)
+		}
+		pre = append(pre, k+"="+env[k])
+	}
+	return pre, nil
+}
 
 // ExecRunner runs commands on the host with os/exec.
 func ExecRunner() Runner {
@@ -305,8 +332,9 @@ func writeFile0600(path string, data []byte) error {
 // Exec passes mcpConfig on stdin line 1 to WorkWrapper, which writes it to a
 // 0600 file in the sandbox, swaps it in for the placeholder and removes it
 // when the command exits. The rest of stdin is the prompt, which the wrapper
-// hands to the command as its stdin.
-func (b *cliBackend) Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, args []string) (io.ReadCloser, error) {
+// hands to the command as its stdin. env goes to the command alone, through
+// an `env` prefix (envArgs).
+func (b *cliBackend) Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, env map[string]string, args []string) (io.ReadCloser, error) {
 	if !sandboxNameRE.MatchString(c.Sandbox) {
 		return nil, fmt.Errorf("invalid sandbox name %q", c.Sandbox)
 	}
@@ -316,8 +344,13 @@ func (b *cliBackend) Exec(ctx context.Context, c profile.Compiled, mcpConfig, pr
 	if !slices.Contains(args, harnessconfig.MCPConfigPlaceholder) {
 		return nil, fmt.Errorf("args have no %s placeholder for the MCP config", harnessconfig.MCPConfigPlaceholder)
 	}
+	pre, err := envArgs(env)
+	if err != nil {
+		return nil, err
+	}
 	argv := b.openshell("sandbox", "exec", "--no-login-shell", "--no-tty", c.Sandbox, "--", "sh", "-c", WorkWrapper, "sh")
-	return b.run(ctx, strings.NewReader(mcpConfig+"\n"+prompt), append(argv, args...)...)
+	argv = append(append(argv, pre...), args...)
+	return b.run(ctx, strings.NewReader(mcpConfig+"\n"+prompt), argv...)
 }
 
 // Download reads remotePath with `cat` in the sandbox; localPath is written

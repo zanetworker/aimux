@@ -618,10 +618,11 @@ func TestContract(t *testing.T) {
 
 	// Every operation and event kind in the contract was exercised; the
 	// /v1/auth operations by TestContract_DeviceLogin, /v1/profiles by
-	// TestContract_Profiles.
+	// TestContract_Profiles, /v1/route by TestContract_Route, /v1/tools by
+	// TestContract_Tools.
 	var missing []string
 	for path, item := range c.doc.Paths.Map() {
-		if strings.HasPrefix(path, "/v1/auth/") || strings.HasPrefix(path, "/v1/profiles") {
+		if strings.HasPrefix(path, "/v1/auth/") || strings.HasPrefix(path, "/v1/profiles") || path == "/v1/route" || path == "/v1/tools" {
 			continue
 		}
 		for method, op := range item.Operations() {

@@ -535,3 +535,83 @@ func TestModel_OnlySonnetOrOpusReachesTheTurn(t *testing.T) {
 		t.Fatalf("turn models = %q, want opus, sonnet, then none", got)
 	}
 }
+
+// Each browser profile (instance) has its own conversation on a page: an
+// instance continues only its own session, never another instance's and
+// never a legacy one (recorded without an instance); a request without an
+// instance continues only the legacy one.
+func TestNewSession_InstanceKeepsConversationsApart(t *testing.T) {
+	r := newProfileRig(t).serve()
+	r.put("legacy", profilerun.Meta{Profile: "page", Client: "wingman", URL: "https://example.com/a", Created: time.Now().Add(-time.Hour)})
+	ask := func(instance, want string) {
+		t.Helper()
+		body := `{"profile":"page","url":"https://example.com/a","text":"q"`
+		if instance != "" {
+			body += `,"instance":"` + instance + `"`
+		}
+		resp, out := r.do("POST", "/v1/sessions", body+`}`)
+		if resp.StatusCode != 202 || out["id"] != want {
+			t.Fatalf("instance %q: %d %v, want %s", instance, resp.StatusCode, out, want)
+		}
+		r.idle(want)
+	}
+	ask("chrome-1", "p-1") // a fresh session, not the legacy one
+	ask("beta-2", "p-2")   // another browser: its own session
+	ask("chrome-1", "p-1") // continues its own
+	ask("", "legacy")      // an old extension still continues the legacy one
+	if m, _ := r.store.Get("p-2"); m.Instance != "beta-2" {
+		t.Fatalf("recorded instance %q, want beta-2", m.Instance)
+	}
+	if r.started() != 2 {
+		t.Fatalf("started %d sessions, want 2", r.started())
+	}
+}
+
+func TestNewSession_BadInstance400(t *testing.T) {
+	r := newProfileRig(t).serve()
+	r.expectRefused(`{"profile":"page","url":"https://example.com/a","text":"q","instance":"a b"}`, 400, "bad_request")
+	r.expectRefused(`{"profile":"page","url":"https://example.com/a","text":"q","instance":"`+strings.Repeat("a", 65)+`"}`, 400, "bad_request")
+	resp, out := r.do("POST", "/v1/sessions", `{"profile":"page","url":"https://example.com/a","text":"q","instance":"`+strings.Repeat("a", 64)+`"}`)
+	if resp.StatusCode != 202 {
+		t.Fatalf("64-character instance: %d %v", resp.StatusCode, out)
+	}
+	if resp, out := r.do("GET", "/v1/sessions?client=wingman&instance=a%2Fb", ""); resp.StatusCode != 400 || out["code"] != "bad_request" {
+		t.Fatalf("bad instance query: %d %v", resp.StatusCode, out)
+	}
+}
+
+// With an instance the list is that instance's sessions plus legacy ones,
+// so history from before instances stays visible; without one it is
+// unchanged.
+func TestListSessions_FilterByInstance(t *testing.T) {
+	r := newProfileRig(t).serve()
+	t0 := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
+	r.put("old", profilerun.Meta{Profile: "page", Client: "wingman", URL: "https://a.example/x", Created: t0})
+	r.put("mine", profilerun.Meta{Profile: "page", Client: "wingman", Instance: "i-1", URL: "https://a.example/x", Created: t0.Add(time.Minute)})
+	r.put("theirs", profilerun.Meta{Profile: "page", Client: "wingman", Instance: "i-2", URL: "https://a.example/x", Created: t0.Add(2 * time.Minute)})
+	_, body := r.do("GET", "/v1/sessions?client=wingman&instance=i-1", "")
+	if got := fmt.Sprint(listIDs(t, body)); got != "[mine old]" {
+		t.Fatalf("instance=i-1: %s, want [mine old]", got)
+	}
+	_, body = r.do("GET", "/v1/sessions?client=wingman&url=https://a.example/x&instance=i-2", "")
+	if got := fmt.Sprint(listIDs(t, body)); got != "[theirs old]" {
+		t.Fatalf("instance=i-2 with url: %s, want [theirs old]", got)
+	}
+	_, body = r.do("GET", "/v1/sessions?client=wingman", "")
+	if got := fmt.Sprint(listIDs(t, body)); got != "[theirs mine old]" {
+		t.Fatalf("no instance: %s, want every session", got)
+	}
+}
+
+// A retry key is scoped to the instance too: another browser reusing the
+// same key on the same page gets its own session.
+func TestNewSession_RetryKeyScopedToInstance(t *testing.T) {
+	r := newProfileRig(t).serve()
+	for _, c := range []struct{ instance, want string }{{"i-1", "p-1"}, {"i-2", "p-2"}, {"i-1", "p-1"}} {
+		resp, out := r.do("POST", "/v1/sessions", `{"profile":"page","url":"https://example.com/a","text":"q","key":"k","instance":"`+c.instance+`"}`)
+		if resp.StatusCode != 202 || out["id"] != c.want {
+			t.Fatalf("instance %s: %d %v, want %s", c.instance, resp.StatusCode, out, c.want)
+		}
+		r.idle(c.want)
+	}
+}

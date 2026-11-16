@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -146,6 +147,32 @@ type newSessionRequest struct {
 	Title    string `json:"title"`
 	PageText string `json:"pageText"`
 	Model    string `json:"model"` // optional turn model: sonnet or opus
+	// Instance is the caller's browser profile (Wingman), so two browsers
+	// on one page keep separate conversations; "" is the legacy behaviour.
+	Instance string `json:"instance"`
+
+	// OriginOnly: the prompt names only the URL's origin; the session is
+	// still kept under the full URL (Wingman, a private page without its text).
+	OriginOnly bool `json:"originOnly"`
+
+	// Routed, with Profile, is the POST /v1/route answer this question
+	// followed; the decision log records which mode the session ran in.
+	Routed *routedRequest `json:"routed"`
+}
+
+// instancePattern is what an instance may look like (Wingman sends a UUID).
+var instancePattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
+var errBadInstance = errors.New("instance must be 1 to 64 letters, digits or dashes")
+
+// checkInstance answers an instance that is present but malformed with 400
+// bad_request (and false).
+func checkInstance(w http.ResponseWriter, present bool, instance string) bool {
+	if !present || instancePattern.MatchString(instance) {
+		return true
+	}
+	writeError(w, http.StatusBadRequest, "bad_request", errBadInstance)
+	return false
 }
 
 // checkModel answers a model choice other than "", sonnet or opus with 400
@@ -190,6 +217,9 @@ var errProfileNotAllowed = errors.New("this client may not use that profile")
 func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newSessionRequest) {
 	if len(req.PageText) > maxPageText {
 		writeError(w, http.StatusRequestEntityTooLarge, "page_too_large", fmt.Errorf("pageText is longer than %d KiB", maxPageText>>10))
+		return
+	}
+	if !checkInstance(w, req.Instance != "", req.Instance) {
 		return
 	}
 	all, ok := a.loadProfiles(w)
@@ -240,18 +270,21 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 		a.writeProfileFailure(w, req.Profile, err)
 		return
 	}
+	a.routeFeedback(client, m.Name, req.Routed)
 	writeJSON(w, http.StatusAccepted, a.accepted(id, turn))
 }
 
 // createdKey is where a retry key is remembered: a device's request
 // without a profile under the key itself (as before profiles), any other
-// under its client, profile and page too, so one client's key never
-// reaches another's session.
-func createdKey(client, profile, url, key string) string {
+// under its client, instance, profile, page and whether it has page text
+// too, and whether its prompt names only the URL's origin, so one client's
+// (or browser profile's) key never reaches another's session, and a request
+// without page text never reaches one that has it.
+func createdKey(client, instance, profile, url, key string, withPage, originOnly bool) string {
 	if client == clientDevice && profile == "" {
 		return key
 	}
-	return client + "\x00" + profile + "\x00" + url + "\x00" + key
+	return client + "\x00" + instance + "\x00" + profile + "\x00" + url + "\x00" + strconv.FormatBool(withPage) + "\x00" + strconv.FormatBool(originOnly) + "\x00" + key
 }
 
 // profileSession is the session the turn goes to: the one a retried key
@@ -263,11 +296,12 @@ func createdKey(client, profile, url, key string) string {
 // createMu: requests for the same page (or, without a page, the same key)
 // wait for the one in flight and get its result; others never wait.
 func (a *API) profileSession(ctx context.Context, client string, m profile.Manifest, req newSessionRequest) (string, error) {
-	key := createdKey(client, m.Name, req.URL, req.Key)
+	withPage := req.PageText != ""
+	key := createdKey(client, req.Instance, m.Name, req.URL, req.Key, withPage, req.OriginOnly)
 	flightKey := ""
 	switch {
 	case req.URL != "":
-		flightKey = createdKey(client, m.Name, req.URL, "")
+		flightKey = createdKey(client, req.Instance, m.Name, req.URL, "", withPage, req.OriginOnly)
 	case req.Key != "":
 		flightKey = key
 	}
@@ -277,7 +311,7 @@ func (a *API) profileSession(ctx context.Context, client string, m profile.Manif
 				return id, true
 			}
 			if req.URL != "" {
-				return a.ProfileSessions.FindPage(client, req.URL, m.Name)
+				return a.ProfileSessions.FindPage(client, req.Instance, req.URL, m.Name, withPage, req.OriginOnly)
 			}
 			return "", false
 		},
@@ -292,7 +326,7 @@ func (a *API) profileSession(ctx context.Context, client string, m profile.Manif
 // startProfileSession makes a new engine session and records it; one the
 // store cannot record is cancelled.
 func (a *API) startProfileSession(ctx context.Context, client string, m profile.Manifest, req newSessionRequest) (string, error) {
-	meta := profilerun.Meta{Profile: m.Name, Digest: m.Digest(), Client: client, URL: req.URL, Title: req.Title, Created: a.now()}
+	meta := profilerun.Meta{Profile: m.Name, Digest: m.Digest(), Client: client, Instance: req.Instance, URL: req.URL, Title: req.Title, Created: a.now(), WithPage: req.PageText != "", OriginOnly: req.OriginOnly}
 	id, err := a.NewProfileSession(ctx, meta, req.PageText)
 	if err != nil {
 		return "", err
@@ -457,7 +491,9 @@ func (a *API) profileListing(r *http.Request) bool {
 }
 
 // profileSessions are the recorded profile sessions matching the request's
-// filters, newest first, at most limit. A confined client's own only.
+// filters, newest first, at most limit. A confined client's own only. An
+// instance filter keeps that instance's sessions and legacy ones (recorded
+// without an instance), so history from before instances stays visible.
 func (a *API) profileSessions(r *http.Request, limit int) []Session {
 	out := []Session{}
 	if a.ProfileSessions == nil {
@@ -478,7 +514,8 @@ func (a *API) profileSessions(r *http.Request, limit int) []Session {
 	created := map[string]time.Time{}
 	for _, c := range clients {
 		for id, m := range a.ProfileSessions.List(c) {
-			if q.Has("url") && m.URL != q.Get("url") || !history.Visible(history.Session{Hidden: m.Hidden}, history.RemoteOpts(false, false)) {
+			if q.Has("url") && m.URL != q.Get("url") || q.Has("instance") && m.Instance != "" && m.Instance != q.Get("instance") ||
+				!history.Visible(history.Session{Hidden: m.Hidden}, history.RemoteOpts(false, false)) {
 				continue
 			}
 			created[id] = m.Created
@@ -587,7 +624,9 @@ func confined(client string) bool {
 var openToConfined = map[string]bool{
 	"GET /v1/health": true, "GET /v1/openapi.yaml": true,
 	"GET /v1/profiles": true, "GET /v1/profiles/{name}": true,
+	"GET /v1/tools":    true, // read-only, scoped to the client's profiles
 	"GET /v1/sessions": true, "POST /v1/sessions": true,
+	"POST /v1/route": true,
 }
 
 // ownSessionRoutes are the session routes a confined client may use on
@@ -701,6 +740,7 @@ func sessionIDOf(r *http.Request) string {
 type auditNote struct {
 	action, profile, digest, urlHost string
 	route, session                   string // set by localScope before the mux matches
+	routeAudit                              // set by POST /v1/route
 }
 
 type auditNoteKey struct{}
@@ -750,7 +790,8 @@ func (a *API) localAudit(next http.Handler) http.Handler {
 			session = n.session
 		}
 		a.auditLog().Write(devicelogin.AuditEntry{Client: client, Action: action, Session: session,
-			Profile: n.profile, Digest: n.digest, URLHost: n.urlHost, Result: result})
+			Profile: n.profile, Digest: n.digest, URLHost: n.urlHost, Result: result,
+			QuestionSHA256: n.questionSHA, DecisionID: n.decisionID, Source: n.source})
 	})
 }
 

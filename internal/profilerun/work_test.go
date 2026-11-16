@@ -213,3 +213,24 @@ func answerText(evs []LaneEvent) string {
 	}
 	return b.String()
 }
+
+// A WebFetch tool_use carries its url as the event's snippet; other tools
+// carry none.
+func TestParseStream_WebFetchSnippetIsURL(t *testing.T) {
+	out := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"w1","name":"WebFetch","input":{"url":"https://en.wikipedia.org/wiki/OpenShell","prompt":"summarise"}},{"type":"tool_use","id":"s1","name":"WebSearch","input":{"query":"openshell"}},{"type":"tool_use","id":"w2","name":"WebFetch","input":{}},{"type":"tool_use","id":"m1","name":"mcp__wiki__open","input":{"url":"https://wiki.internal/secret"}}]}}
+{"type":"result","subtype":"success","session_id":"s"}
+`
+	_, evs, err := streamCollect(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []LaneEvent{
+		{Type: "tool_call", Tool: "WebFetch", Text: "https://en.wikipedia.org/wiki/OpenShell"},
+		{Type: "tool_call", Tool: "WebSearch"},
+		{Type: "tool_call", Tool: "WebFetch"},
+		{Type: "tool_call", Tool: "mcp__wiki__open"},
+	}
+	if !reflect.DeepEqual(evs, want) {
+		t.Fatalf("events %+v, want %+v", evs, want)
+	}
+}

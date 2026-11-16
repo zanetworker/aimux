@@ -30,6 +30,7 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/decide"
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/gitremote"
 	"github.com/zanetworker/aimux/internal/history"
@@ -85,6 +86,8 @@ type Server struct {
 	// wrapJob, when set, wraps each job as build lists it (tests watch a
 	// job end through it).
 	wrapJob func(job) job
+	// warmRouter readies the mode router at start (nil: warmModeRouter).
+	warmRouter func(ctx context.Context, d *decide.Decider)
 	// idleAfter and idleEvery: a local-only serve exits once idle for
 	// idleAfter, checked every idleEvery (defaults localIdleAfter and
 	// time.Minute).
@@ -474,6 +477,8 @@ func (s *Server) build(w *wiring) error {
 	// store and the engines; the store's health and the step-up of
 	// sessions without a profile.
 	profiles.Install(api, o.Scopes, cfg.RemoteAccess.StepUpLegacy)
+	// Auto: POST /v1/route asks the mode-router decider (nil: always undecided).
+	api.ModeRouter = buildModeRouter(home, cfg.Sessions.APIKey, errOut)
 
 	// Open on Mac: only with an iTerm2 driver and terminal input on.
 	api.Handoff = buildHandoff(cfg.RemoteAccess.TerminalInput, drivers, handoffDeps{
@@ -599,6 +604,14 @@ func (s *Server) build(w *wiring) error {
 		job{name: "reap idle runs", run: every(time.Minute, func() { manager.Reap(); profiles.reap() })},
 		job{name: "search refresh", run: refreshing(searcher.Refresh, time.Minute, errOut)},
 	)
+	if api.ModeRouter != nil {
+		warm := s.warmRouter
+		if warm == nil {
+			warm = func(ctx context.Context, d *decide.Decider) { warmModeRouter(ctx, d, errOut) }
+		}
+		router := api.ModeRouter
+		w.jobs = append(w.jobs, job{name: "mode router warm", run: func(ctx context.Context) { warm(ctx, router) }})
+	}
 	if idle != nil {
 		w.exit = make(chan struct{})
 		var once sync.Once

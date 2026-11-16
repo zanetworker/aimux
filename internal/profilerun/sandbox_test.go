@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
-	"github.com/zanetworker/aimux/internal/harnessconfig"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
@@ -49,6 +48,8 @@ type sbExec struct {
 	prompt  string
 	token   string
 	allow   map[string][]string // what the token allowed while the turn ran
+	cfg     string
+	env     map[string]string
 }
 
 func (b *sbBackend) Ensure(_ context.Context, c profile.Compiled) error {
@@ -70,7 +71,7 @@ func (b *sbBackend) Ensure(_ context.Context, c profile.Compiled) error {
 	return nil
 }
 
-func (b *sbBackend) Exec(ctx context.Context, c profile.Compiled, cfg, prompt string, args []string) (io.ReadCloser, error) {
+func (b *sbBackend) Exec(ctx context.Context, c profile.Compiled, cfg, prompt string, env map[string]string, args []string) (io.ReadCloser, error) {
 	var parsed struct {
 		MCPServers map[string]struct {
 			Headers map[string]string `json:"headers"`
@@ -82,8 +83,11 @@ func (b *sbBackend) Exec(ctx context.Context, c profile.Compiled, cfg, prompt st
 		tok = strings.TrimPrefix(s.Headers["Authorization"], "Bearer ")
 	}
 	session, allow, _ := b.tokens.Lookup(tok)
+	if tok == "" { // no servers, no token: the session is the one on argv
+		session = argAfter(args, "--session-id") + argAfter(args, "--resume")
+	}
 	b.mu.Lock()
-	b.execs = append(b.execs, sbExec{sandbox: c.Sandbox, args: args, prompt: prompt, token: tok, allow: allow})
+	b.execs = append(b.execs, sbExec{sandbox: c.Sandbox, args: args, prompt: prompt, token: tok, allow: allow, cfg: cfg, env: env})
 	b.mu.Unlock()
 	out, closeErr, execErr := b.script(session)
 	if execErr != nil {
@@ -159,13 +163,16 @@ func okStream(session string) string {
 `, session, session)
 }
 
-var workServers2 = map[string][]string{"jira": {"search"}, "wiki": {"read_page"}}
+var (
+	workServers2 = map[string][]string{"jira": {"search"}, "wiki": {"read_page"}}
+	workGrant2   = profile.NewToolGrant(workServers2)
+)
 
 var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func compiledFor(name string) profile.Compiled {
 	return profile.Compiled{Profile: name, Digest: "dg-" + name, PolicyDigest: "pdg-" + name, Sandbox: "aimux-" + name, Harness: "claude-code",
-		Servers: workServers2, Intent: harnessconfig.Intent{Mode: "print", Tools: workServers2}}
+		Grant: workGrant2}
 }
 
 func newSandbox(t *testing.T) (*SandboxEngine, *sbBackend) {
@@ -622,5 +629,123 @@ func TestSandboxEngine_RefusesOtherModel(t *testing.T) {
 	}
 	if len(b.execs) != 0 {
 		t.Fatalf("%d execs launched", len(b.execs))
+	}
+}
+
+// research compiles with no servers: the harness intent has web and no tools.
+func researchCompiled() profile.Compiled {
+	return profile.Compiled{Profile: "research", Digest: "dg-research", PolicyDigest: "pdg-research", Sandbox: "aimux-research", Harness: "claude-code",
+		Web: true}
+}
+
+// newResearchSandbox is newSandbox compiling every profile as research; the
+// gateway func counts its calls and fails, as it would with no gateway.
+func newResearchSandbox(t *testing.T) (*SandboxEngine, *sbBackend, *atomic.Int32) {
+	t.Helper()
+	tokens := &toolgateway.Tokens{}
+	b := &sbBackend{tokens: tokens, script: func(s string) (string, error, error) { return okStream(s), nil, nil }}
+	var gwCalls atomic.Int32
+	e := NewSandboxEngine(&sandboxlaunch.Launcher{Backend: b},
+		func(string) (profile.Compiled, error) { return researchCompiled(), nil },
+		func() (string, *toolgateway.Tokens, error) {
+			gwCalls.Add(1)
+			return "", nil, errors.New("tool gateway not running")
+		})
+	e.ArchiveDir = filepath.Join(t.TempDir(), "archive")
+	return e, b, &gwCalls
+}
+
+// A turn with no servers asks the tool gateway for nothing (no token is
+// issued) and hands claude an MCP config with no servers; the harness env
+// reaches the launch.
+func TestSandboxEngine_NoServersNoToken(t *testing.T) {
+	e, b, gwCalls := newResearchSandbox(t)
+	sid, err := e.New(context.Background(), Meta{Profile: "research"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop, _, err := sendCollect(t, e, sid, "q"); err != nil || stop != "end_turn" {
+		t.Fatalf("Send = %q %v", stop, err)
+	}
+	if n := gwCalls.Load(); n != 0 {
+		t.Fatalf("tool gateway asked %d times for a turn with no servers", n)
+	}
+	x := b.execs[0]
+	if x.token != "" {
+		t.Fatalf("a token was issued: %q", x.token)
+	}
+	var cfg struct {
+		MCPServers map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(x.cfg), &cfg); err != nil || cfg.MCPServers == nil || len(cfg.MCPServers) != 0 {
+		t.Fatalf("MCP config %q, want an empty mcpServers", x.cfg)
+	}
+	if x.env["DISABLE_TELEMETRY"] != "1" || x.env["DISABLE_ERROR_REPORTING"] != "1" {
+		t.Fatalf("env %v", x.env)
+	}
+	if argAfter(x.args, "--allowedTools") != "WebFetch,WebSearch" {
+		t.Fatalf("args %q", x.args)
+	}
+}
+
+// A turn with servers still issues its token (the gateway is asked once).
+func TestSandboxEngine_ServersStillIssueToken(t *testing.T) {
+	e, b := newSandbox(t)
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if b.execs[0].token == "" || !reflect.DeepEqual(b.execs[0].allow, workServers2) {
+		t.Fatalf("exec %+v: want a token allowing the servers", b.execs[0])
+	}
+}
+
+// Research turns archive their transcript as work-readonly turns do.
+func TestSandboxEngine_ResearchTurnArchives(t *testing.T) {
+	e, b, _ := newResearchSandbox(t)
+	sid, err := e.New(context.Background(), Meta{Profile: "research"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	want := "/sandbox/.claude/projects/-sandbox/" + sid + ".jsonl"
+	if len(b.downloads) != 1 || b.downloads[0] != want {
+		t.Fatalf("downloads %q, want %s", b.downloads, want)
+	}
+	local := filepath.Join(e.ArchiveDir, "openshell-aimux-research", sid+".jsonl")
+	if fi, err := os.Stat(local); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("archive %s: %v %v", local, fi, err)
+	}
+}
+
+// acpEmitter puts a tool event's snippet in the tool call's content, as a
+// failure's text is; a tool without one has no content.
+func TestAcpEmitter_ToolSnippetInContent(t *testing.T) {
+	var got []map[string]any
+	emit := acpEmitter(func(ev acprun.Event) {
+		var m map[string]any
+		_ = json.Unmarshal(ev.Data, &m)
+		got = append(got, m)
+	})
+	emit(LaneEvent{Type: "tool_call", Tool: "WebFetch", Text: "https://a.example/x"})
+	emit(LaneEvent{Type: "tool_call", Tool: "WebSearch"})
+	emit(LaneEvent{Type: "tool_call", Tool: "mcp__jira__search", Text: "failed: no access"})
+	text := func(m map[string]any) string {
+		c, _ := m["content"].([]any)
+		if len(c) != 1 {
+			return fmt.Sprintf("<%d content>", len(c))
+		}
+		return c[0].(map[string]any)["content"].(map[string]any)["text"].(string)
+	}
+	if got[0]["status"] != "pending" || got[0]["title"] != "WebFetch" || text(got[0]) != "https://a.example/x" {
+		t.Fatalf("WebFetch update %v", got[0])
+	}
+	if _, ok := got[1]["content"]; ok || got[1]["status"] != "pending" {
+		t.Fatalf("WebSearch update %v, want no content", got[1])
+	}
+	if got[2]["status"] != "failed" || text(got[2]) != "failed: no access" {
+		t.Fatalf("failed update %v", got[2])
 	}
 }

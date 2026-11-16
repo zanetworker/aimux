@@ -51,11 +51,11 @@ func TestLiveCLIBackend(t *testing.T) {
 	}
 	t.Log("PASS Ensure updated policy on digest change")
 	a, _ := harnessconfig.For("claude-code")
-	spec, err := a.Config(harnessconfig.Intent{Mode: "print"})
+	spec, err := a.Config(harnessconfig.Capabilities{}, harnessconfig.Launch{Mode: harnessconfig.ModeHeadless})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rc, err := b.Exec(ctx, c, `{"mcpServers":{}}`, "say ok", spec.Argv)
+	rc, err := b.Exec(ctx, c, `{"mcpServers":{}}`, "say ok", spec.Env, spec.Argv)
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}

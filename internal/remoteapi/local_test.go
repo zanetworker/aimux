@@ -800,3 +800,22 @@ func TestLocalIndex_SessionFromArchive(t *testing.T) {
 		t.Fatalf("unknown session with Archived set: %v", err)
 	}
 }
+
+// Through the real Claude parser: an archived research turn's WebFetch shows
+// its url as the tool's snippet in GET /v1/sessions/{id} turns.
+func TestTurnOf_WebFetchSnippetIsURL(t *testing.T) {
+	data := `{"type":"user","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"read it"}}
+{"type":"assistant","timestamp":"2026-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"w1","name":"WebFetch","input":{"url":"https://en.wikipedia.org/wiki/X","prompt":"summarise"}}]}}`
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := (&provider.Claude{}).ParseTrace(path)
+	if err != nil || len(turns) != 1 {
+		t.Fatalf("parse: %v, %d turns", err, len(turns))
+	}
+	tools := turnOf(turns[0]).Tools
+	if len(tools) != 1 || tools[0].Name != "WebFetch" || tools[0].Snippet != "https://en.wikipedia.org/wiki/X" {
+		t.Fatalf("tools = %+v", tools)
+	}
+}

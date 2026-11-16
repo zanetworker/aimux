@@ -53,7 +53,7 @@ func PageSpec(adapter, cwd, model string) (acprun.Spec, error) {
 	if err != nil {
 		return acprun.Spec{}, fmt.Errorf("page lockdown unavailable: %w", err)
 	}
-	hs, err := h.Config(harnessconfig.Intent{Mode: "acp", Model: model})
+	hs, err := h.Config(harnessconfig.Capabilities{Model: model}, harnessconfig.Launch{Mode: harnessconfig.ModeInteractive})
 	if err != nil {
 		return acprun.Spec{}, fmt.Errorf("page lockdown unavailable: %w", err)
 	}
@@ -309,6 +309,7 @@ func Prompt(r AskRequest) string {
 		b.WriteString(r.Recap)
 		b.WriteString("\n\n")
 	}
+	b.WriteString(diagramHint)
 	b.WriteString(questionMarker)
 	b.WriteString(r.Question)
 	return b.String()
@@ -401,6 +402,9 @@ const (
 	workPromptPreamble    = "You answer questions for the owner using read-only lookups in their wiki, Jira, Slack, Gmail and Drive through the MCP tools. You cannot change anything. Be concise and cite what you found.\n\n"
 	sandboxPromptPreamble = "Answer the question below.\n\n"
 	questionMarker        = "Question: "
+	// diagramHint precedes the question in every engine's prompt: the Wingman
+	// panel renders a closed ```mermaid fence as a diagram (it enforces its own limits).
+	diagramHint = "When a diagram helps, you may include one Mermaid block (```mermaid, flowchart, sequence, state, class, er, gantt, pie, xychart, mindmap); keep it under 40 nodes.\n\n"
 )
 
 // openTagRE is a page block's opening tag (pageDelimiter's form).

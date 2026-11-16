@@ -70,7 +70,7 @@ aimux web      # browser UI at localhost:3000
 | Run remotely | OpenShell sandboxes with terminal, traces and kill; agents on Kubernetes pods | [Remote sandboxes](https://aimux.ai/guides/remote-sandboxes/), [Kubernetes](https://aimux.ai/advanced/k8s-quickstart/) |
 | Reach | `aimux remote serve`: follow and continue Claude sessions from the iPhone app or the phone web client over tailscale, answer approvals, type into sessions open in iTerm2, and open a phone session on the Mac | [Remote access](https://aimux.ai/guides/remote-access/) |
 | Share MCP | `aimux mcp proxy install`: your stdio MCP servers run once in a shared daemon, each at its own endpoint under its original name (permission rules unchanged), started on first call, shared ones stopped when idle and browser ones kept for as long as their Claude Code session runs; `aimux mcp serve`: session search and resume tools for agents | [MCP proxy](https://aimux.ai/guides/mcp-proxy/) |
-| Read the web | Wingman, a Chrome side panel that summarizes the page and answers questions about it. It is a client of the remote API on its own socket: `aimux browser install` registers the native messaging host with Chrome and Chrome Beta, `aimux browser setup` pins the read-only tools and prepares the sandbox image and provider, `aimux remote serve` creates the `aimux-work-readonly` OpenShell sandbox on the first work question, `aimux browser verify` checks that sandbox's egress, and `aimux browser host` is the relay Chrome starts. Page questions run under the `page` profile, work questions under `work-readonly`, which exposes only pinned lookups (wiki, Jira, Slack, Gmail, Drive) | [Wingman](https://aimux.ai/guides/wingman/) |
+| Read the web | Wingman, a Chrome side panel that summarizes the page and answers questions about it. It is a client of the remote API on its own socket: `aimux browser install` registers the native messaging host with Chrome and Chrome Beta, `aimux browser setup` prepares the sandbox image and provider and reports tools to review, `aimux tools status|diff|approve` reviews and pins the read-only tools (`aimux tools add|remove` edits their sources), `aimux remote serve` creates the `aimux-work-readonly` OpenShell sandbox on the first work question, `aimux sandbox status|setup|verify` shows each profile's sandbox and policy state, prepares the image and provider, and checks that sandbox's egress, and `aimux browser host` is the relay Chrome starts. Page questions run under the `page` profile, work questions under `work-readonly`, which exposes only pinned lookups (wiki, Jira, Slack, Gmail, Drive) | [Wingman](https://aimux.ai/guides/wingman/) |
 | Constrain | Profiles: named contracts for what a session may reach (tools, network, files, credentials) and where it runs, narrow-only inheritance, a digest per profile. `aimux profile list\|show\|check\|migrate`; per-client scopes and limits in `~/.config/aimux/clients.yaml` | [Profiles](https://aimux.ai/guides/profiles/), [Local clients](https://aimux.ai/guides/remote-access/#local-clients) |
 | Interfaces | Keyboard TUI with split panes; web dashboard with cards, filters and dark/light themes; desktop and terminal-bell notifications | [TUI keys](https://aimux.ai/guides/tui-keybindings/), [Notifications](https://aimux.ai/guides/notifications/) |
 | Extend | Plugin tabs, new providers, `--json` on every listing command, `aimux agent-context` for the full CLI contract | [Plugins](https://aimux.ai/guides/plugins/), [Agent usage](https://aimux.ai/guides/agent-usage/), [Add a provider](https://aimux.ai/advanced/adding-a-provider/) |
@@ -102,7 +102,9 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 | Export a trace | `aimux export <session-id>` |
 | Follow Claude sessions from your phone | `aimux remote serve` (via tailscale serve) |
 | Share MCP servers across sessions | `aimux mcp proxy install --dry-run`, then `aimux mcp proxy install` |
-| Set up the Wingman side panel | `aimux browser install --extension-id <id>`, `aimux browser setup`, `aimux browser verify` |
+| Set up the Wingman side panel | `aimux browser install --extension-id <id>`, `aimux browser setup`, `aimux tools approve <set>...`, `aimux sandbox verify`, `aimux sandbox status` |
+| Review the tools a profile may call | `aimux tools status`, `aimux tools diff`, `aimux tools approve`; add or remove a source with `aimux tools add notes --folder <dir>`, `aimux tools add mcp ...`, `aimux tools remove <source>` |
+| Set up everything missing, then check it | `aimux setup` (runs only missing steps), `aimux doctor` (read-only, one fix per problem) |
 | See what a profile allows | `aimux profile list`, `aimux profile show work-readonly`, `aimux profile check <name>` |
 
 <details>
@@ -111,10 +113,11 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 ```text
 agent-context  Machine-readable CLI surface for agents
 agents         List running AI agents
-browser        Wingman browser side panel: native messaging host and sandbox setup
+browser        Wingman browser side panel: Chrome native messaging host and setup (the sandbox is aimux sandbox)
 chat           Send a message to an existing Claude session and stream the reply
 collect        Run headless OTEL collector
 configs        List named agent configurations
+doctor         Read-only checks of tools, router, port 7390, Wingman serve, sandbox and gateway, each problem with its fix; exit 1 on any failure
 environments   List configured environments
 export         Export a session trace
 feedback       Send feedback about the CLI
@@ -124,8 +127,12 @@ mcp            MCP server for session search and remote agents
 profile        Manage profiles (list, show, check, migrate; save|get|delete act on the v1 store)
 remote         API for your sessions from other devices, through tailscale serve
 resume         Resume a past session
+router         Inspect and try Auto mode's mode router: status and test
+sandbox        The OpenShell sandboxes profiles run in: status, setup (image and provider) and verify
 sessions       Browse and search past sessions
+setup          Check every concern and run only the missing setup steps; on a terminal, offer to review changed tools
 spawn          Start a new AI agent session
+tools          Review the tools aimux exposes: status, diff and approve pins; add or remove sources
 version        Show aimux version
 web            Launch web dashboard
 ```

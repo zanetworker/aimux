@@ -14,6 +14,8 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 func tempWiki(t *testing.T) string {
@@ -81,7 +83,7 @@ func testReadonlyConfig(t *testing.T, slackURL string) ReadonlyConfig {
 			"slack": {URL: slackURL},
 			"jira":  {URL: downURL(t)},
 		},
-		WikiRoot: tempWiki(t),
+		Notes: map[string]string{"wiki": tempWiki(t)},
 		Allow: Allowlist{
 			"wiki":  {"wiki_search", "wiki_read"},
 			"slack": {"search_messages"},
@@ -136,7 +138,7 @@ func TestBuildReadonlyBackendDown(t *testing.T) {
 
 func TestBuildReadonlyMissingWikiRoot(t *testing.T) {
 	cfg := testReadonlyConfig(t, slackFake(t).URL+"/")
-	cfg.WikiRoot = filepath.Join(t.TempDir(), "nope")
+	cfg.Notes["wiki"] = filepath.Join(t.TempDir(), "nope")
 	servers, pool, errs, err := BuildReadonly(context.Background(), cfg, passPins{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -194,56 +196,53 @@ func TestBuildReadonlyRejectsWrite(t *testing.T) {
 	}
 }
 
-func TestDefaultReadonlyConfigAllowlist(t *testing.T) {
-	cfg := DefaultReadonlyConfig("/h")
-	want := Allowlist{
-		"wiki":   {"wiki_search", "wiki_read"},
-		"jira":   {"search_issues_jql", "get_issue_details", "get_comments", "get_jira_issues"},
-		"slack":  {"search_messages", "get_thread", "get_thread_messages", "get_channel_history", "get_user_profile"},
-		"google": {"search_gmail_messages", "get_gmail_message_content", "get_gmail_thread_content", "search_drive_files", "get_doc_as_markdown"},
+func TestReadonlyConfigFrom(t *testing.T) {
+	reg := toolreg.Registry{
+		Version: 1,
+		Sources: map[string]toolreg.Source{
+			"jira":  {Type: toolreg.TypeMCPHTTP, URL: "http://127.0.0.1:8001/mcp"},
+			"idle":  {Type: toolreg.TypeMCPHTTP, URL: "http://127.0.0.1:9/mcp"},
+			"notes": {Type: toolreg.TypeLocalNotes, Root: "/n"},
+		},
+		Sets: map[string]toolreg.Set{
+			"jira:readonly":  {Source: "jira", Tools: []string{"search", "get_issue"}},
+			"jira:triage":    {Source: "jira", Tools: []string{"get_issue", "get_comments"}},
+			"notes:readonly": {Source: "notes", Tools: []string{"wiki_read"}},
+		},
 	}
+	cfg := ReadonlyConfigFrom(reg)
+	wantHTTP := map[string]HTTPServerConfig{"jira": {URL: "http://127.0.0.1:8001/mcp"}, "idle": {URL: "http://127.0.0.1:9/mcp"}}
+	if !reflect.DeepEqual(cfg.HTTP, wantHTTP) {
+		t.Errorf("http = %+v", cfg.HTTP)
+	}
+	if !reflect.DeepEqual(cfg.Notes, map[string]string{"notes": "/n"}) {
+		t.Errorf("notes = %+v", cfg.Notes)
+	}
+	// Two sets on one source allow their union, each tool once.
+	want := Allowlist{"jira": {"get_comments", "get_issue", "search"}, "notes": {"wiki_read"}}
 	if !reflect.DeepEqual(cfg.Allow, want) {
-		t.Errorf("allow = %v", cfg.Allow)
-	}
-	wantHTTP := map[string]string{"slack": "http://127.0.0.1:7381/mcp/slack", "jira": "http://127.0.0.1:8001/mcp", "google": "http://127.0.0.1:8000/mcp"}
-	for k, u := range wantHTTP {
-		if cfg.HTTP[k].URL != u {
-			t.Errorf("%s url = %q, want %q", k, cfg.HTTP[k].URL, u)
-		}
-	}
-	if len(cfg.HTTP) != 3 {
-		t.Errorf("http backends = %d", len(cfg.HTTP))
-	}
-	if cfg.WikiRoot != "/h/go/src/github.com/zanetworker/research/wiki" {
-		t.Errorf("wiki root = %q", cfg.WikiRoot)
+		t.Errorf("allow = %v, want %v", cfg.Allow, want)
 	}
 }
 
-func TestLoadReadonlyConfigRoundTrip(t *testing.T) {
-	cfg := DefaultReadonlyConfig("/h")
-	cfg.HTTP["slack"] = HTTPServerConfig{URL: "http://x/", Headers: map[string]string{"A": "b"}}
-	data, err := marshalReadonlyConfig(cfg)
+// With no notes source configured there is no wiki backend at all: nothing
+// is served from a default folder.
+func TestBuildReadonly_NoNotesSourceNoWiki(t *testing.T) {
+	cfg := ReadonlyConfigFrom(toolreg.Default())
+	cfg.HTTP = map[string]HTTPServerConfig{"slack": {URL: slackFake(t).URL + "/"}}
+	servers, pool, errs, err := BuildReadonly(context.Background(), cfg, passPins{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(t.TempDir(), "ro.json")
-	if err := os.WriteFile(p, data, 0o600); err != nil {
-		t.Fatal(err)
+	defer pool.Close()
+	if _, ok := servers["wiki"]; ok {
+		t.Error("a wiki server is served with no notes source")
 	}
-	got, err := LoadReadonlyConfig(p)
-	if err != nil {
-		t.Fatal(err)
+	if _, ok := errs["wiki"]; ok {
+		t.Errorf("wiki reported without a notes source: %v", errs)
 	}
-	if !reflect.DeepEqual(got, cfg) {
-		t.Errorf("round trip:\n got %+v\nwant %+v", got, cfg)
-	}
-	if _, err := LoadReadonlyConfig(filepath.Join(t.TempDir(), "missing.json")); err == nil {
-		t.Error("missing file must error")
-	}
-	bad := filepath.Join(t.TempDir(), "bad.json")
-	_ = os.WriteFile(bad, []byte("{"), 0o600)
-	if _, err := LoadReadonlyConfig(bad); err == nil {
-		t.Error("bad JSON must error")
+	if servers["slack"] == nil {
+		t.Errorf("slack not served: %v", errs)
 	}
 }
 

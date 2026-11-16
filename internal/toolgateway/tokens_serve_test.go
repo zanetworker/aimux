@@ -14,12 +14,13 @@ import (
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/toolgateway"
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 // The real Tokens plugs into the daemon: a revoked token stops working at once.
 func TestTokens_ServeHonoursRevocation(t *testing.T) {
 	var tokens toolgateway.Tokens
-	tok, err := tokens.Issue("sess-1", map[string][]string{"wiki": {"wiki_search"}})
+	tok, err := tokens.Issue("sess-1", map[string][]string{"wiki": {"wiki_search"}}, toolreg.Snapshot{})
 	if err != nil {
 		t.Fatal(err)
 	}

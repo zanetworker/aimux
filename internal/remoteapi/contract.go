@@ -36,6 +36,8 @@ const (
 	CapSendNow = "send_now"
 	// CapProfiles: /v1/profiles and `profile` on POST /v1/sessions.
 	CapProfiles = "profiles"
+	// CapTools: GET /v1/tools (the tool sets the caller's profiles request).
+	CapTools = "tools"
 )
 
 // Health is GET /v1/health: who the caller is and what this server offers.

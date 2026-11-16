@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 // lazyGateway is the read-only tool gateway of remote serve: started on the
@@ -34,16 +36,20 @@ type lazyGateway struct {
 	tokens *toolgateway.Tokens
 	start  func(ctx context.Context) (stop func(), err error)
 	// refresh, if set, updates the running gateway (backends that were
-	// down, changed pins); now is the clock (nil: time.Now).
+	// down, a newer snapshot); stale, if set, says the gateway serves an
+	// older snapshot than the turns compile with; now is the clock (nil:
+	// time.Now).
 	refresh func(ctx context.Context)
+	stale   func() bool
 	now     func() time.Time
 
-	mu        sync.Mutex
-	ctx       context.Context // ends at close; nil: background
-	cancel    context.CancelFunc
-	stop      func()
-	stopped   bool
-	refreshed time.Time // last refresh, or the start
+	mu         sync.Mutex
+	ctx        context.Context // ends at close; nil: background
+	cancel     context.CancelFunc
+	stop       func()
+	stopped    bool
+	refreshed  time.Time // last refresh, or the start
+	refreshing bool      // a get is refreshing
 }
 
 // The running gateway is refreshed at most once per gatewayRefreshEvery,
@@ -62,9 +68,10 @@ func (g *lazyGateway) clock() time.Time {
 
 // get is the sandbox engine's Gateway: the base URL a sandbox reaches the
 // gateway at and the token table it checks, starting it if needed. A
-// gateway already running is refreshed (backends that were down, changed
-// pins) at most once per gatewayRefreshEvery, outside the lock, so only the
-// turn that refreshes waits, and for at most gatewayRefreshTimeout.
+// gateway already running is refreshed at once when it is stale (the turns
+// reloaded a newer snapshot), else at most once per gatewayRefreshEvery to
+// retry backends that were down; outside the lock, one get at a time, so
+// only the turn that refreshes waits, and for at most gatewayRefreshTimeout.
 func (g *lazyGateway) get() (string, *toolgateway.Tokens, error) {
 	g.mu.Lock()
 	if g.stopped {
@@ -82,8 +89,8 @@ func (g *lazyGateway) get() (string, *toolgateway.Tokens, error) {
 			return "", nil, err
 		}
 		g.stop, g.refreshed = stop, now // a fresh start read every backend and the pins
-	} else if g.refresh != nil && now.Sub(g.refreshed) >= gatewayRefreshEvery {
-		g.refreshed, refresh = now, true
+	} else if g.refresh != nil && !g.refreshing && (now.Sub(g.refreshed) >= gatewayRefreshEvery || (g.stale != nil && g.stale())) {
+		g.refreshed, g.refreshing, refresh = now, true, true
 	}
 	ctx := g.ctx
 	g.mu.Unlock()
@@ -91,6 +98,9 @@ func (g *lazyGateway) get() (string, *toolgateway.Tokens, error) {
 		rctx, cancel := context.WithTimeout(ctx, gatewayRefreshTimeout)
 		g.refresh(rctx) // logs its own failures
 		cancel()
+		g.mu.Lock()
+		g.refreshing = false
+		g.mu.Unlock()
 	}
 	return toolgateway.ReadonlyURL, g.tokens, nil
 }
@@ -120,8 +130,9 @@ type profileWiring struct {
 	catalog func() (map[string]profile.Manifest, error)
 	runs    func(name string) (string, error)
 	engines map[string]profilerun.Engine
-	pageMgr *acprun.Manager           // nil with injected engines
-	sandbox *profilerun.SandboxEngine // nil with injected engines
+	pageMgr *acprun.Manager            // nil with injected engines
+	sandbox *profilerun.SandboxEngine  // nil with injected engines
+	tools   func() remoteapi.ToolsView // GET /v1/tools; nil with injected engines
 
 	mu    sync.Mutex
 	owner map[string]profilerun.Engine // session -> the engine that made it
@@ -143,10 +154,10 @@ func NewProfileWiring(home string, getenv func(string) string, errOut io.Writer,
 func (p *profileWiring) Router() *profilerun.Router { return p.router }
 
 // Install sets the API's profile fields: the catalog, the clients' scopes,
-// the store, the engines' session start and cancel, the store's health and
-// the step-up of sessions without a profile.
+// the store, the engines' session start and cancel, the store's health,
+// the step-up of sessions without a profile and the tool sets' view.
 func (p *profileWiring) Install(api *remoteapi.API, scopes clientscope.Scopes, stepUpLegacy bool) {
-	api.Profiles, api.Scopes, api.ProfileSessions = p.servedCatalog, scopes, p.store
+	api.Profiles, api.Scopes, api.ProfileSessions, api.Tools = p.servedCatalog, scopes, p.store, p.tools
 	api.NewProfileSession, api.CancelProfileSession = p.newSession, p.cancelSession
 	api.ProfileHealth, api.StepUpLegacy = p.router.Health, stepUpLegacy
 }
@@ -214,24 +225,19 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 		p.pageMgr.Close()
 		return nil, fmt.Errorf("make the tool gateway's admin token: %w", err)
 	}
-	tokens := &toolgateway.Tokens{}
-	ro := &toolgateway.ReadonlyServer{Home: home, Token: admin, Tokens: tokens,
-		Log:    log.New(errOut, "tool gateway: ", log.LstdFlags),
-		Listen: net.Listen, Build: mcpproxy.BuildReadonly, Serve: mcpproxy.Serve, Rebuild: mcpproxy.BuildReadonlyBackends}
-	gw := &lazyGateway{tokens: tokens, start: ro.Start, refresh: ro.Refresh}
+	gwLog := log.New(errOut, "tool gateway: ", log.LstdFlags)
+	migrateToolSources(home, gwLog.Printf)
+	tg := newToolGateway(home, admin, gwLog, net.Listen)
+	gw, snaps := tg.gw, tg.snaps
+	p.tools = tg.tools
 
 	launcher := &sandboxlaunch.Launcher{Backend: sandboxlaunch.NewCLIBackend(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
 	compile := func(name string) (profile.Compiled, error) {
-		user, _ := profile.LoadDir(dir) // a bad file is skipped; the catalog logs it
-		m, err := profile.Resolve(name, user)
-		if err != nil {
-			return profile.Compiled{}, err
+		c, err := compileProfile(snaps.turn(), dir, name)
+		if err == nil {
+			gwLog.Printf("profile %s compiled at tool snapshot %s", name, c.Snapshot.Short())
 		}
-		pins, err := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(home)}.Load()
-		if err != nil {
-			return profile.Compiled{}, err
-		}
-		return profile.Compile(m, profile.PinnedSets(pins), profile.GatewayAddr{})
+		return c, err
 	}
 	p.sandbox = profilerun.NewSandboxEngine(launcher, compile, gw.get)
 	p.sandbox.ArchiveDir = filepath.Join(home, ".aimux", "archive")
@@ -242,6 +248,141 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 		gw.close()
 		p.pageMgr.Close()
 	}, nil
+}
+
+// toolGatewayParts is remote serve's read-only tool gateway as the profile
+// wiring uses it: the lazily started gateway, the turns' snapshot reloads,
+// and GET /v1/tools' view.
+type toolGatewayParts struct {
+	gw    *lazyGateway
+	snaps *toolSnapshots
+	tools func() remoteapi.ToolsView
+}
+
+// newToolGateway builds the gateway over home's registry and pins, served
+// with the real MCP builders; listen is how it listens (net.Listen).
+func newToolGateway(home, admin string, gwLog *log.Logger, listen func(network, addr string) (net.Listener, error)) toolGatewayParts {
+	// One store, reloaded only by the turns (toolSnapshots), feeds both the
+	// compiler and the gateway, so a turn's grant and the pins served
+	// under its token come from one snapshot.
+	store := toolgateway.NewStore(home)
+	snaps := &toolSnapshots{store: store, files: snapshotFiles(home), log: gwLog.Printf}
+	tokens := &toolgateway.Tokens{}
+	ro := &toolgateway.ReadonlyServer{Store: store, Token: admin, Tokens: tokens, Log: gwLog,
+		Listen: listen, Build: mcpproxy.BuildReadonly, Serve: mcpproxy.Serve, Rebuild: mcpproxy.BuildReadonlyBackends}
+	tokens.Current = ro.Applied
+	gw := &lazyGateway{tokens: tokens, start: ro.Start, refresh: ro.Refresh, stale: ro.Stale}
+	// GET /v1/tools sees the snapshot the next turn compiles against and
+	// what the gateway already listed; it never starts the gateway.
+	tools := func() remoteapi.ToolsView {
+		snap := snaps.turn()
+		reg, obs := snap.Registry(), ro.Observed()
+		return remoteapi.ToolsView{Snapshot: snap, Live: toolgateway.LiveFor(reg, obs), RelistFailed: toolgateway.RelistFailedFor(reg, obs)}
+	}
+	return toolGatewayParts{gw: gw, snaps: snaps, tools: tools}
+}
+
+// migrateToolSources carries readonly.json into tool-sources.yaml once, as
+// remote serve starts: snapshot reloads (turns, GET /v1/tools) only read.
+// A failure is logged; the reloads then read readonly.json in memory and
+// report its problem.
+func migrateToolSources(home string, logf func(format string, args ...any)) {
+	old, reg := toolreg.LegacyPath(home), toolreg.DefaultPath(home)
+	m, err := toolreg.MigrateReport(old, reg)
+	switch {
+	case err != nil:
+		logf("migrate %s: %v", old, err)
+	case m.Migrated:
+		logf("migrated %s to %s (the old file is kept as %s.migrated)", old, reg, old)
+		for _, d := range m.Dropped {
+			logf("migrated tool config to %s; %s", reg, d)
+		}
+	}
+}
+
+// toolSnapshots is the one place remote serve reloads the tool-source
+// registry and pins: the turns ask it for their snapshot, and it reloads
+// the store when one of files changed since the last reload (time, size or
+// inode; a missing file is a state too), and at most once per
+// snapshotReloadEvery otherwise, as a backstop. The gateway then applies
+// what changed on the turn's get. A reload that changed them, or failed, is
+// logged.
+type toolSnapshots struct {
+	store *toolreg.Store
+	files []string // snapshotFiles: what a reload reads
+	log   func(format string, args ...any)
+	now   func() time.Time // nil: time.Now
+
+	mu       sync.Mutex
+	reloaded time.Time // zero: never
+	stamp    string    // files' stamp at the last reload
+}
+
+// snapshotReloadEvery is the backstop reload interval when no file looks
+// changed: the gateway's refresh rate.
+const snapshotReloadEvery = gatewayRefreshEvery
+
+// snapshotFiles is what the store reads under home: the registry, the
+// readonly.json it migrates from, and the pins.
+func snapshotFiles(home string) []string {
+	return []string{toolreg.DefaultPath(home), toolreg.LegacyPath(home), toolgateway.DefaultPinsPath(home)}
+}
+
+// stampOf is each file's modification time, size and inode, or "missing".
+func stampOf(files []string) string {
+	var b strings.Builder
+	for _, f := range files {
+		fi, err := os.Stat(f)
+		if err != nil {
+			fmt.Fprintf(&b, "%s:missing;", f)
+			continue
+		}
+		fmt.Fprintf(&b, "%s:%d:%d:%d;", f, fi.ModTime().UnixNano(), fi.Size(), inode(fi))
+	}
+	return b.String()
+}
+
+// turn is the snapshot a turn compiles against, reloading it first when a
+// file changed or snapshotReloadEvery has passed since the last reload.
+func (s *toolSnapshots) turn() toolreg.Snapshot {
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	stamp := stampOf(s.files)
+	s.mu.Lock()
+	t := now()
+	due := s.reloaded.IsZero() || stamp != s.stamp || t.Sub(s.reloaded) >= snapshotReloadEvery
+	if due {
+		s.reloaded, s.stamp = t, stamp
+	}
+	s.mu.Unlock()
+	if due {
+		snap, changed, err := s.store.Reload()
+		switch {
+		case err != nil:
+			s.log("tool snapshot %s: %v; no tool is granted or served until it is fixed", snap.Short(), err)
+		case changed:
+			s.log("tool snapshot %s (registry and pins reloaded)", snap.Short())
+		}
+	}
+	return s.store.Current()
+}
+
+// compileProfile compiles the profile name (user profiles in dir, then the
+// built-ins) against snap. A registry that did not load leaves every set
+// unavailable and its error is added to the compile error.
+func compileProfile(snap toolreg.Snapshot, dir, name string) (profile.Compiled, error) {
+	user, _ := profile.LoadDir(dir) // a bad file is skipped; the catalog logs it
+	m, err := profile.Resolve(name, user)
+	if err != nil {
+		return profile.Compiled{}, err
+	}
+	c, err := profile.CompileAt(m, snap, profile.GatewayAddr{})
+	if err != nil && snap.Err() != nil {
+		return profile.Compiled{}, fmt.Errorf("%w (%v)", err, snap.Err())
+	}
+	return c, err
 }
 
 // adopt makes the sandbox sessions in the store known to the sandbox

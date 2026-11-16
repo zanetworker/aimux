@@ -576,7 +576,7 @@ func TestPageSessionsDirIsSkippedBySessionSearch(t *testing.T) {
 type failingAdapter struct{}
 
 func (failingAdapter) Name() string { return "claude-code" }
-func (failingAdapter) Config(harnessconfig.Intent) (harnessconfig.Spec, error) {
+func (failingAdapter) Config(harnessconfig.Capabilities, harnessconfig.Launch) (harnessconfig.Spec, error) {
 	return harnessconfig.Spec{}, errors.New("adapter broken")
 }
 

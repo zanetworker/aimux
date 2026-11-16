@@ -4,58 +4,53 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
-	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/zanetworker/aimux/internal/toolreg"
 	"github.com/zanetworker/aimux/internal/wikitools"
 )
 
-const wikiServer = "wiki"
-
-// ReadonlyConfig describes the read-only servers Wingman's sandbox may reach.
+// ReadonlyConfig is the view of the tool-source registry the read-only
+// servers are built from (ReadonlyConfigFrom).
 type ReadonlyConfig struct {
-	HTTP     map[string]HTTPServerConfig // backends reached over HTTP, by name
-	WikiRoot string                      // directory the wiki backend serves
-	Allow    Allowlist                   // tools each backend may expose
+	HTTP  map[string]HTTPServerConfig // backends reached over HTTP, by name
+	Notes map[string]string           // local notes backends: name -> root directory
+	Allow Allowlist                   // tools each backend may expose
 }
 
-// DefaultReadonlyConfig is the standard layout under home.
-func DefaultReadonlyConfig(home string) ReadonlyConfig {
-	return ReadonlyConfig{
-		HTTP: map[string]HTTPServerConfig{
-			"slack":  {URL: "http://127.0.0.1:7381/mcp/slack"},
-			"jira":   {URL: "http://127.0.0.1:8001/mcp"},
-			"google": {URL: "http://127.0.0.1:8000/mcp"},
-		},
-		WikiRoot: filepath.Join(home, "go/src/github.com/zanetworker/research/wiki"),
-		Allow: Allowlist{
-			"wiki":   {"wiki_search", "wiki_read"},
-			"jira":   {"search_issues_jql", "get_issue_details", "get_comments", "get_jira_issues"},
-			"slack":  {"search_messages", "get_thread", "get_thread_messages", "get_channel_history", "get_user_profile"},
-			"google": {"search_gmail_messages", "get_gmail_message_content", "get_gmail_thread_content", "search_drive_files", "get_doc_as_markdown"},
-		},
+// ReadonlyConfigFrom is reg's sources and sets as a ReadonlyConfig: each
+// mcp-http source an HTTP backend, each local-notes source a notes backend,
+// and each backend allowed the sorted union of the tools its sets list.
+// Entries Load dropped are not in reg, so they are not served.
+func ReadonlyConfigFrom(reg toolreg.Registry) ReadonlyConfig {
+	cfg := ReadonlyConfig{HTTP: map[string]HTTPServerConfig{}, Notes: map[string]string{}, Allow: Allowlist{}}
+	for n, s := range reg.Sources {
+		switch s.Type {
+		case toolreg.TypeMCPHTTP:
+			cfg.HTTP[n] = HTTPServerConfig{URL: s.URL}
+		case toolreg.TypeLocalNotes:
+			cfg.Notes[n] = s.Root
+		}
 	}
-}
-
-func marshalReadonlyConfig(cfg ReadonlyConfig) ([]byte, error) {
-	return json.MarshalIndent(cfg, "", "  ")
-}
-
-// LoadReadonlyConfig reads a ReadonlyConfig from a JSON file.
-func LoadReadonlyConfig(path string) (ReadonlyConfig, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own readonly config file
-	if err != nil {
-		return ReadonlyConfig{}, err
+	tools := map[string]map[string]bool{}
+	for _, set := range reg.Sets {
+		if tools[set.Source] == nil {
+			tools[set.Source] = map[string]bool{}
+		}
+		for _, t := range set.Tools {
+			tools[set.Source][t] = true
+		}
 	}
-	var cfg ReadonlyConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return ReadonlyConfig{}, fmt.Errorf("parse %s: %w", path, err)
+	for src, ts := range tools {
+		cfg.Allow[src] = slices.Sorted(maps.Keys(ts))
 	}
-	return cfg, nil
+	return cfg
 }
 
 // ToolPins pins the tools a read-only server exposes. toolgateway.Pins is
@@ -74,24 +69,22 @@ type ToolPins interface {
 // the tools cfg.Allow lists that are also pinned and still match their pin,
 // and re-checking the pin before each call. A nil pins exposes nothing. The
 // catalog comes from the live backends; a
-// backend that fails (or a missing wiki root) is returned in the error map
+// backend that fails (or a missing notes root) is returned in the error map
 // and left out of the servers, and is not fatal. rejectLog, when set, hears
 // every failed tools/call: a call to a tool outside the allowlist, or a
 // backend error. The caller closes the returned Pool.
 func BuildReadonly(ctx context.Context, cfg ReadonlyConfig, pins ToolPins, rejectLog func(server, tool string, err error)) (map[string]*server.MCPServer, *Pool, map[string]error, error) {
 	names := readonlyNames(cfg)
-	pool := NewPool(readonlyStarter(cfg), PoolOptions{})
+	pool := NewPool(ReadonlyStarter(cfg), PoolOptions{})
 	servers, errs := BuildReadonlyBackends(ctx, cfg, names, pins, pool, rejectLog)
 	return servers, pool, errs, nil
 }
 
 // readonlyNames is every backend cfg configures, sorted.
 func readonlyNames(cfg ReadonlyConfig) []string {
-	names := []string{wikiServer}
-	for n := range cfg.HTTP {
-		if n != wikiServer {
-			names = append(names, n)
-		}
+	names := slices.Collect(maps.Keys(cfg.HTTP))
+	for n := range cfg.Notes {
+		names = append(names, n)
 	}
 	sort.Strings(names)
 	return names
@@ -102,7 +95,7 @@ func readonlyNames(cfg ReadonlyConfig) []string {
 // caller's to apply. A backend that is down is returned in the error map.
 func ReadonlyCatalog(ctx context.Context, cfg ReadonlyConfig) (*Catalog, map[string]error) {
 	cat := &Catalog{Servers: map[string]CatalogEntry{}}
-	errs := RefreshCatalog(ctx, cat, readonlyStarter(cfg), readonlyNames(cfg))
+	errs := RefreshCatalog(ctx, cat, ReadonlyStarter(cfg), readonlyNames(cfg))
 	return cat, errs
 }
 
@@ -113,12 +106,13 @@ func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []stri
 	errs := map[string]error{}
 	var live []string
 	for _, n := range names {
+		root, notes := cfg.Notes[n]
 		switch _, ok := cfg.HTTP[n]; {
-		case n == wikiServer:
-			if st, err := os.Stat(cfg.WikiRoot); err != nil {
-				errs[n] = fmt.Errorf("wiki root: %w", err)
+		case notes:
+			if st, err := os.Stat(root); err != nil {
+				errs[n] = fmt.Errorf("notes root: %w", err)
 			} else if !st.IsDir() {
-				errs[n] = fmt.Errorf("wiki root %s is not a directory", cfg.WikiRoot)
+				errs[n] = fmt.Errorf("notes root %s is not a directory", root)
 			} else {
 				live = append(live, n)
 			}
@@ -129,7 +123,7 @@ func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []stri
 		}
 	}
 	cat := &Catalog{Servers: map[string]CatalogEntry{}}
-	for n, err := range RefreshCatalog(ctx, cat, readonlyStarter(cfg), live) {
+	for n, err := range RefreshCatalog(ctx, cat, ReadonlyStarter(cfg), live) {
 		errs[n] = err
 	}
 	var opts []ServerOption
@@ -159,12 +153,13 @@ func poolLister(pool *Pool) func(ctx context.Context, server string) ([]json.Raw
 	}
 }
 
-// readonlyStarter starts the wiki backend in process and the rest over HTTP.
-func readonlyStarter(cfg ReadonlyConfig) func(ctx context.Context, name string) (Backend, error) {
+// ReadonlyStarter starts cfg's notes backends in process and the rest over
+// HTTP: the starter BuildReadonly gives its pool.
+func ReadonlyStarter(cfg ReadonlyConfig) Starter {
 	httpStart := HTTPStarter(cfg.HTTP)
 	return func(ctx context.Context, name string) (Backend, error) {
-		if name == wikiServer {
-			return wikitools.NewBackend(cfg.WikiRoot, 0), nil
+		if root, ok := cfg.Notes[name]; ok {
+			return wikitools.NewBackend(root, 0), nil
 		}
 		return httpStart(ctx, name)
 	}

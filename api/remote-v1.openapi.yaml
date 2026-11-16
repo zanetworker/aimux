@@ -106,7 +106,7 @@ info:
     each of their requests writes an audit line (client, action, profile,
     digest, the page's host, result; never text, pages, tokens or full
     URLs). Local clients other than `cli` reach only health, the contract,
-    the profiles, the session list, new sessions and, for the sessions
+    the profiles, the session list, new sessions, `POST /v1/route` and, for the sessions
     they started, the detail, events, messages, cancel and meta (any
     other session is `404 not_found`); every other route, describe and
     the queue routes included, is `403 forbidden_for_client`. A follow-up message counts
@@ -119,6 +119,19 @@ info:
     to new sessions without a profile too. Each client has limits on
     running sessions and turns per minute: `429 client_limit` with
     `Retry-After`. Nothing starts on any refusal.
+
+    Auto mode: `POST /v1/route` picks the mode a question needs (`page`,
+    `web` or `workspace`, run under the profiles `page`, `research` and
+    `work-readonly`) among the modes whose profile the caller's client may
+    use and the Mac can run. Only the question and three facts go to the
+    decision model (OpenRouter, zero data retention providers only); never
+    page text, titles or URLs. A question starting with `@page`, `@web` or
+    `@workspace` skips the model. The answer is always `200`: without a
+    key, a working model or a confident pick it is `decided: false` with a
+    suggested mode for the client to confirm. `routed` on the
+    `POST /v1/sessions` that follows records in the Mac's decision log
+    whether the pick was kept. Each call writes an audit line with the
+    question's SHA-256, never its text.
 
     Known gaps for app clients (not offered yet):
     - Paging the session list: `limit` only, newest first.
@@ -184,6 +197,15 @@ paths:
           in: query
           description: List only the profile sessions started on this page URL.
           schema: { type: string }
+        - name: instance
+          in: query
+          description: >
+            List only the profile sessions this instance (a browser profile)
+            started, plus legacy sessions recorded without an instance, so
+            history from before instances stays visible. Without it the
+            list is unchanged. Not matching `^[A-Za-z0-9-]{1,64}$` is 400
+            bad_request.
+          schema: { type: string, pattern: "^[A-Za-z0-9-]{1,64}$" }
       responses:
         "200":
           description: OK
@@ -203,7 +225,9 @@ paths:
         With `profile` (capability `profiles`) `cwd` is not needed: the
         session runs under that profile, and `url`, `title` and `pageText`
         describe the page it is about. A later request with the same
-        client, `url` and `profile` sends its turn to that session. Refusals,
+        client, `instance`, `url` and `profile` sends its turn to that
+        session; a request with an `instance` never continues another
+        instance's session or one started without an instance. Refusals,
         with nothing started: `400 unknown_profile`, `403
         profile_not_allowed` (outside the client's scope), `403
         step_up_required` (see Profiles), `409 profile_not_available`, `413
@@ -832,6 +856,60 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
+  /v1/tools:
+    get:
+      summary: The tool sets the caller's profiles request, and what is granted now
+      description: >
+        Read-only. Lists each tool set a profile in the caller's client
+        scope requests (other sets are not shown), with its status and
+        each tool's: from the tool snapshot the next turn compiles against
+        and what the tool gateway itself last listed. No backend is
+        contacted: a source the gateway has not listed yet (it starts with
+        the first sandbox turn) shows its tools as `unknown`. Sets the
+        compiler would omit (not in tool-sources.yaml, rejected there, or
+        not a `<name>:<kind>` name) are listed `unavailable` with the
+        reason. When the registry or the pins do not load, `errors` holds
+        one entry and every set is `unavailable`. No definition, schema,
+        hash, token or credential is returned; a source URL only when it
+        is a loopback one. Confined clients (Wingman) may call it.
+      operationId: listTools
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToolsList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+
+  /v1/route:
+    post:
+      summary: Pick the mode a question needs (Auto)
+      description: >
+        Rate limited to 60 calls a minute per client (`429 client_limit`
+        with `Retry-After`); overrides (`@page`, `@web`, `@workspace`) are
+        not counted, and all paired devices of a client share its budget. It
+        counts toward no session or turn limit.
+        `400 bad_request` for an empty `text` or any field not listed.
+      operationId: route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RouteRequest" }
+      responses:
+        "200":
+          description: The pick, decided or a suggestion
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RouteResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Limit" }
+
   /v1/profiles/{name}:
     get:
       summary: One profile, resolved
@@ -1078,7 +1156,7 @@ components:
         acpProtocolVersion: { type: integer, minimum: 1, description: "The Agent Client Protocol version `update` events follow." }
         capabilities:
           type: array
-          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe, send_now, profiles] }
+          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe, send_now, profiles, tools] }
         session:
           type: string
           enum: [live, none]
@@ -1657,6 +1735,46 @@ components:
         title: { type: string, description: "With profile: the page's title." }
         pageText: { type: string, description: "With profile: the page's text for a new session, at most 512 KiB (else 413 page_too_large). Ignored when the session continues." }
         model: { type: string, enum: [sonnet, opus], description: "With profile: this turn's model; omitted keeps the profile's default. Any other value is 400 bad_request." }
+        instance: { type: string, pattern: "^[A-Za-z0-9-]{1,64}$", description: "With profile: the caller's instance (Wingman's per-browser-profile id), recorded on the session, so two browsers on one page keep separate conversations. Omitted continues only sessions started without one. Not matching the pattern is 400 bad_request." }
+        originOnly: { type: boolean, description: "With profile: a sandbox session's first prompt names only the URL's scheme://host[:port], while the session is still kept and continued under the full url. Requests with and without it never continue each other's session. Wingman sets it for Research on a private page without its text." }
+        routed:
+          type: object
+          additionalProperties: false
+          required: [decisionId]
+          description: "With profile: the `POST /v1/route` answer this question followed. Once the session starts, the decision log records the mode its profile runs in and whether that kept the pick. An unknown `decisionId` is ignored."
+          properties:
+            decisionId: { type: string }
+            mode: { type: string, enum: [page, web, workspace] }
+            source: { type: string, enum: [override, model, unavailable, override_blocked] }
+
+    RouteRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, description: "The question as typed, with any @page, @web or @workspace prefix. At most 2,000 characters reach the model." }
+        facts:
+          type: object
+          additionalProperties: false
+          properties:
+            sitePrivate: { type: boolean, description: "The page is on a private or internal origin." }
+            pageReadable: { type: boolean, description: "The page's text can be read. False never gets page." }
+            usePage: { type: boolean, description: "The person attached the page to the question." }
+
+    RouteResult:
+      type: object
+      additionalProperties: false
+      required: [mode, profile, confidence, probabilities, decided, source, text]
+      properties:
+        mode: { type: string, enum: [page, web, workspace, ""], description: "The pick, or the suggestion when not decided. Empty when no mode is in scope, for override_blocked, and for reason steering." }
+        profile: { type: string, description: "The profile mode runs under (page, research, work-readonly); empty with mode." }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        probabilities: { type: object, additionalProperties: { type: number }, description: "Over the allowed modes only; empty when the model was not asked or did not answer." }
+        decided: { type: boolean, description: "True for an override and for a confident model pick; otherwise the client asks the person, with mode preselected." }
+        source: { type: string, enum: [override, model, unavailable, override_blocked], description: "unavailable: no key, the model failed or its decision request timed out (2 s by default; the key read is not counted), or no mode is in scope. override_blocked: the question named a mode that is not allowed here; nothing was routed." }
+        reason: { type: string, description: "Why the answer is undecided: for override_blocked a sentence for the person; steering (the question tells the router which mode to pick, so the model was not asked); or the decider's reason: low_confidence, timeout, error, no_key (no OpenRouter key), key_error (the key could not be read)." }
+        text: { type: string, description: "The question with any override prefix removed: send this one on." }
+        decisionId: { type: string, description: "Set when the model was asked; send it as routed.decisionId on POST /v1/sessions." }
 
     ProfileInfo:
       type: object
@@ -1678,6 +1796,69 @@ components:
           type: array
           description: Sorted by name.
           items: { $ref: "#/components/schemas/ProfileInfo" }
+
+    ToolsList:
+      type: object
+      additionalProperties: false
+      required: [snapshot, sets, errors]
+      properties:
+        snapshot: { type: string, pattern: "^sha256:[0-9a-f]{64}$", description: "The tool snapshot version (registry and pins) the statuses come from; the next turn compiles against it." }
+        sets:
+          type: array
+          description: Sorted by name.
+          items: { $ref: "#/components/schemas/ToolSetInfo" }
+        errors:
+          type: array
+          description: tool-sources.yaml problems with a set or source in scope, or one entry without set or source when the registry or pins did not load.
+          items: { $ref: "#/components/schemas/ToolsError" }
+
+    ToolSetInfo:
+      type: object
+      additionalProperties: false
+      required: [name, source, status, tools]
+      properties:
+        name: { type: string, description: "As the profile names it (wiki:readonly may resolve to the notes source)." }
+        source: { type: string, description: "The source (server) name; empty for a set that is omitted." }
+        url: { type: string, description: "The source's URL, only when it is a loopback one, without userinfo or query." }
+        status:
+          type: string
+          enum: [available, partial, unavailable]
+          description: "available: every tool is granted; partial: some are; unavailable: none is, or the set is omitted."
+        reason: { type: string, description: "A short human reason; absent when available and checked live." }
+        tools:
+          type: array
+          description: Sorted by name; empty for an omitted set.
+          items: { $ref: "#/components/schemas/ToolInfo" }
+
+    ToolInfo:
+      type: object
+      additionalProperties: false
+      required: [name, status]
+      properties:
+        name: { type: string }
+        status:
+          type: string
+          enum: [active, unpinned, changed, unavailable, source_changed, unknown]
+          description: >
+            active: approved and matches the live tool. unpinned: never
+            approved. changed: differs from the approved definition or is
+            no longer listed. unavailable: its backend is down or does not
+            list it. source_changed: approved from another endpoint than
+            tool-sources.yaml names. unknown: the gateway has not listed
+            its source yet, or its last relist failed while the source is
+            still served (reason "unknown (relist failed): ..."). `aimux tools diff` and `aimux tools approve`
+            on the Mac review them.
+        reason: { type: string }
+        approvedAt: { type: string, format: date-time }
+
+    ToolsError:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        set: { type: string }
+        source: { type: string }
+        message: { type: string }
 
     ProfileDetail:
       type: object

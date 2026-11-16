@@ -33,6 +33,7 @@ export default defineConfig({
 						{ label: 'Wingman', slug: 'guides/wingman' },
 						{ label: 'Chat with Sessions', slug: 'guides/chat' },
 						{ label: 'Remote Access', slug: 'guides/remote-access' },
+						{ label: 'Troubleshooting', slug: 'guides/troubleshooting' },
 					],
 				},
 				{
@@ -40,6 +41,7 @@ export default defineConfig({
 					items: [
 						{ label: 'Adding a Provider', slug: 'advanced/adding-a-provider' },
 						{ label: 'Kubernetes Quickstart', slug: 'advanced/k8s-quickstart' },
+						{ label: 'Profile to Sandbox', slug: 'advanced/profile-to-sandbox' },
 					],
 				},
 			],

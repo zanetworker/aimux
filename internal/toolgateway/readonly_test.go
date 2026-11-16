@@ -29,9 +29,8 @@ func TestBuildReadonly_RefusesCallAfterBackendChangesSchema(t *testing.T) {
 	defer ts.Close()
 
 	cfg := mcpproxy.ReadonlyConfig{
-		HTTP:     map[string]mcpproxy.HTTPServerConfig{"slack": {URL: ts.URL + "/"}},
-		WikiRoot: t.TempDir(),
-		Allow:    mcpproxy.Allowlist{"slack": {"search_messages"}},
+		HTTP:  map[string]mcpproxy.HTTPServerConfig{"slack": {URL: ts.URL + "/"}},
+		Allow: mcpproxy.Allowlist{"slack": {"search_messages"}},
 	}
 	ctx := context.Background()
 

@@ -18,6 +18,7 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/clientscope"
+	"github.com/zanetworker/aimux/internal/decide"
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
@@ -228,8 +229,17 @@ type API struct {
 	// LocalOnly is reported on health: this serve has local sockets only
 	// (remote serve --local-only, as Wingman starts it).
 	LocalOnly bool
+	// Tools, if set with Profiles, serves GET /v1/tools: the current tool
+	// snapshot and the gateway's live listings. It must not contact a
+	// backend; nil answers 404 not_supported.
+	Tools func() ToolsView
+	// ModeRouter, if set, answers POST /v1/route (internal/autoroute); nil
+	// answers every question undecided (source unavailable), so the client
+	// asks the person instead.
+	ModeRouter *decide.Decider
 
-	limits limiter // per-client sessions and turns (clientscope limits)
+	limits     limiter      // per-client sessions and turns (clientscope limits)
+	routeCalls routeLimiter // per-client /v1/route calls
 
 	createMu sync.Mutex         // guards created and flights; never held across a creation
 	created  map[string]string  // client key -> new session id
@@ -289,6 +299,8 @@ func (a *API) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/projects", a.projects)
 	mux.HandleFunc("GET /v1/profiles", a.listProfiles)
 	mux.HandleFunc("GET /v1/profiles/{name}", a.getProfile)
+	mux.HandleFunc("GET /v1/tools", a.listTools)
+	mux.HandleFunc("POST /v1/route", a.audited(devicelogin.ActionRoute, false, a.route))
 	mux.HandleFunc("PATCH /v1/sessions/{id}/meta", a.patchMeta)
 	mux.HandleFunc("POST /v1/sessions/{id}/describe", a.audited(devicelogin.ActionDescribe, true, a.describe))
 	mux.HandleFunc("POST /v1/sessions/{id}/open-on-mac", a.audited(devicelogin.ActionOpenOnMac, true, a.openOnMac))
@@ -341,7 +353,8 @@ func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.
 		if rec.action != "" {
 			act = rec.action
 		}
-		a.DeviceLogin.Record(r, act, session, result)
+		a.DeviceLogin.RecordEntry(r, devicelogin.AuditEntry{Action: act, Session: session, Result: result,
+			QuestionSHA256: rec.route.questionSHA, DecisionID: rec.route.decisionID, Source: rec.route.source})
 	}
 }
 
@@ -357,7 +370,8 @@ func auditAs(w http.ResponseWriter, action string) {
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
-	action string // set by auditAs
+	action string     // set by auditAs
+	route  routeAudit // set by noteRoute
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
@@ -477,6 +491,9 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	if a.profilesOn() {
 		caps = append(caps, CapProfiles)
 	}
+	if a.Profiles != nil && a.Tools != nil {
+		caps = append(caps, CapTools)
+	}
 	h := Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
 		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps, OpenOnMac: a.Handoff != nil, LocalOnly: a.LocalOnly}
 	if a.DeviceLogin != nil {
@@ -515,6 +532,9 @@ func (a *API) listSessions(w http.ResponseWriter, r *http.Request) {
 	limit, err := intParam(r, "limit", 50, 500)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err)
+		return
+	}
+	if !checkInstance(w, r.URL.Query().Has("instance"), r.URL.Query().Get("instance")) {
 		return
 	}
 	if a.profileListing(r) {
@@ -660,7 +680,7 @@ func (a *API) newSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := createdKey(a.clientOf(r), "", "", req.Key)
+	key := createdKey(a.clientOf(r), "", "", "", req.Key, false, false)
 	flightKey := ""
 	if req.Key != "" {
 		flightKey = key

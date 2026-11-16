@@ -198,8 +198,11 @@ func (p *Pool) startSlot(k slotKey, s *slot) {
 		err error
 	}
 	result := make(chan started, 1)
+	p.mu.Lock()
+	start := p.start
+	p.mu.Unlock()
 	go func() {
-		b, err := p.start(ctx, k.server)
+		b, err := start(ctx, k.server)
 		result <- started{b, err}
 	}()
 	var b Backend
@@ -416,6 +419,15 @@ func (p *Pool) RetireServer(server string) (closeRetired func()) {
 			_ = b.Close()
 		}
 	}
+}
+
+// SetStarter makes start the starter of backends started from now on;
+// running backends are kept (RetireServer replaces one). The pool stays
+// the one the daemon reaps, closes sessions on and closes at shutdown.
+func (p *Pool) SetStarter(start Starter) {
+	p.mu.Lock()
+	p.start = start
+	p.mu.Unlock()
 }
 
 // Close closes every backend and rejects further calls.

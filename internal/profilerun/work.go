@@ -19,6 +19,7 @@ import (
 const (
 	gatewayDownText = "OpenShell gateway down"
 	maxToolErrText  = 200
+	maxToolSnippet  = 200 // runes of a tool's snippet (a WebFetch's url)
 )
 
 // workPrompt frames the page's title, URL and text and the other lane's
@@ -39,7 +40,7 @@ func workPrompt(r AskRequest) string {
 		}
 		fmt.Fprintf(&b, "</%s>\n\n", tag)
 	}
-	b.WriteString(questionMarker + r.Question + "\n")
+	b.WriteString(diagramHint + questionMarker + r.Question + "\n")
 	return b.String()
 }
 
@@ -96,6 +97,7 @@ func parseStream(r io.Reader, emit func(LaneEvent), onSession func(id string)) (
 				ToolUseID string          `json:"tool_use_id"`
 				IsError   bool            `json:"is_error"`
 				Content   json.RawMessage `json:"content"`
+				Input     json.RawMessage `json:"input"`
 			}
 			if json.Unmarshal(line.Message.Content, &blocks) != nil {
 				continue
@@ -113,7 +115,7 @@ func parseStream(r io.Reader, emit func(LaneEvent), onSession func(id string)) (
 					}
 				case "tool_use":
 					toolNames[b.ID] = b.Name
-					emit(LaneEvent{Type: "tool_call", Tool: b.Name})
+					emit(LaneEvent{Type: "tool_call", Tool: b.Name, Text: toolSnippet(b.Name, b.Input)})
 				case "tool_result":
 					if b.IsError {
 						emit(LaneEvent{Type: "tool_call", Tool: toolNames[b.ToolUseID], Text: "failed: " + clip(toolText(b.Content), maxToolErrText)})
@@ -160,6 +162,19 @@ func readLine(br *bufio.Reader) (line []byte, ok bool, err error) {
 		}
 		return buf, !over, nil
 	}
+}
+
+// toolSnippet is what a tool_use shows besides its name: a WebFetch's url,
+// clipped; nothing for other tools.
+func toolSnippet(name string, input json.RawMessage) string {
+	if name != "WebFetch" {
+		return ""
+	}
+	var in struct {
+		URL string `json:"url"`
+	}
+	_ = json.Unmarshal(input, &in) // an unreadable input just has no snippet
+	return clip(in.URL, maxToolSnippet)
 }
 
 func toolText(raw json.RawMessage) string {

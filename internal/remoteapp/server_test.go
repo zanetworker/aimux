@@ -21,6 +21,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/config"
+	"github.com/zanetworker/aimux/internal/decide"
 	"github.com/zanetworker/aimux/internal/remoteapi"
 	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/terminput/iterm2"
@@ -288,13 +289,15 @@ func testServer(t *testing.T, cfg config.Config, out, errOut *syncBuffer) (*Serv
 	home := t.TempDir()
 	t.Setenv("HOME", home) // the search service finds its corpus through HOME
 	cfg.RemoteAccess.Hostnames = []string{"mac.tail1.ts.net"}
-	return New(cfg, Options{
+	s := New(cfg, Options{
 		Home: home, Allowed: []string{"me@example.com"}, AdapterCommand: "true", MaxRuns: 1, ApprovalTimeout: time.Minute,
 		Version: "test", Out: out, ErrOut: errOut,
 		DetectHost: func() (string, error) { return "", errors.New("tailscale must not be asked") },
 		Drivers:    func() ([]terminput.Driver, func()) { return nil, func() {} },
 		Reserve:    acprun.Reservation(home),
-	}), home
+	})
+	s.warmRouter = func(context.Context, *decide.Decider) {} // never the Keychain or OpenRouter from a test
+	return s, home
 }
 
 // The real build wires every job, in start order, with the awaited ones
@@ -318,7 +321,7 @@ func TestBuild_WiresEveryJob(t *testing.T) {
 	if err := s.build(w); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := names(w), "device login, queue events, chat queue*, folders*, waiting alerts*, reap idle runs, search refresh"; got != want {
+	if got, want := names(w), "device login, queue events, chat queue*, folders*, waiting alerts*, reap idle runs, search refresh, mode router warm"; got != want {
 		t.Fatalf("jobs %s, want %s", got, want)
 	}
 	if len(w.closers) != 7 {
@@ -335,7 +338,7 @@ func TestBuild_WiresEveryJob(t *testing.T) {
 	if err := s2.build(w2); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := names(w2), "queue events, chat queue*, namer*, folders*, waiting alerts*, reap idle runs, search refresh"; got != want {
+	if got, want := names(w2), "queue events, chat queue*, namer*, folders*, waiting alerts*, reap idle runs, search refresh, mode router warm"; got != want {
 		t.Fatalf("jobs %s, want %s", got, want)
 	}
 }

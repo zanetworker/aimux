@@ -208,6 +208,9 @@ func newProfileCheckCmd() *cobra.Command {
 				return err
 			}
 			m, err := profile.Resolve(args[0], user)
+			if err == nil {
+				err = profile.CheckSandboxName(m)
+			}
 			if err != nil {
 				return fmt.Errorf("profile %s: %w", args[0], err)
 			}

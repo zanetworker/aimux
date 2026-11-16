@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,6 +27,7 @@ import (
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/toolgateway"
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 const testExtID = "abcdefghijklmnopabcdefghijklmnop"
@@ -265,7 +268,7 @@ func TestBrowserSetupArgv(t *testing.T) {
 	env := testEnv(t, f)
 	sandboxDir := filepath.Join(t.TempDir(), "sandbox")
 	var out bytes.Buffer
-	if err := browserSetup(context.Background(), env, sandboxDir, &out); err != nil {
+	if err := browserSetup(context.Background(), env, sandboxDir, false, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	img := "localhost/wingman-sandbox:2.1.319"
@@ -313,20 +316,25 @@ func TestBrowserSetupArgv(t *testing.T) {
 	if strings.Contains(out.String(), token) {
 		t.Fatal("token printed")
 	}
-	cfg := filepath.Join(env.Home, ".aimux", "wingman", "readonly.json")
-	fi, err := os.Stat(cfg)
+	// A new install gets the default registry: no notes source, so no
+	// wiki root to warn about, and no readonly.json.
+	reg := toolreg.DefaultPath(env.Home)
+	fi, err := os.Stat(reg)
 	if err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("readonly.json: %v %v", fi, err)
+		t.Fatalf("tool-sources.yaml: %v %v", fi, err)
 	}
-	loaded, err := mcpproxy.LoadReadonlyConfig(cfg)
+	loaded, err := toolreg.Load(reg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.WikiRoot != mcpproxy.DefaultReadonlyConfig(env.Home).WikiRoot {
-		t.Fatalf("wiki root = %s", loaded.WikiRoot)
+	if !reflect.DeepEqual(loaded.Sources, toolreg.Default().Sources) || !reflect.DeepEqual(loaded.Sets, toolreg.Default().Sets) {
+		t.Fatalf("registry = %+v", loaded)
 	}
-	if !strings.Contains(out.String(), "wiki root") {
-		t.Fatalf("no wiki root warning for a missing wiki: %s", out.String())
+	if _, err := os.Stat(toolreg.LegacyPath(env.Home)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("readonly.json written: %v", err)
+	}
+	if !strings.Contains(out.String(), "Wrote "+reg) || strings.Contains(out.String(), "root") {
+		t.Fatalf("output should report the registry and no root warning:\n%s", out.String())
 	}
 }
 
@@ -344,7 +352,7 @@ func TestBrowserSetupSkipsExistingAndLeavesSandboxesAlone(t *testing.T) {
 		return "", nil
 	}}
 	env := testEnv(t, f)
-	if err := browserSetup(context.Background(), env, t.TempDir(), &bytes.Buffer{}); err != nil {
+	if err := browserSetup(context.Background(), env, t.TempDir(), false, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.find("podman", "build")) != 0 || len(f.find("openshell", "-g", "local", "provider", "profile")) != 0 ||
@@ -356,28 +364,76 @@ func TestBrowserSetupSkipsExistingAndLeavesSandboxesAlone(t *testing.T) {
 	}
 }
 
-func TestBrowserSetupKeepsExistingReadonlyConfig(t *testing.T) {
+// An upgraded install: setup migrates readonly.json once (the wiki stays a
+// notes source named wiki) and keeps the old file as .migrated.
+func TestBrowserSetupMigratesReadonlyConfig(t *testing.T) {
 	created := false
 	f := &fakeRun{answer: setupScript("tok", &created)}
 	env := testEnv(t, f)
-	cfg := filepath.Join(env.Home, ".aimux", "wingman", "readonly.json")
-	if err := os.MkdirAll(filepath.Dir(cfg), 0o700); err != nil {
+	old := toolreg.LegacyPath(env.Home)
+	if err := os.MkdirAll(filepath.Dir(old), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	custom := `{"HTTP":{},"WikiRoot":"` + env.Home + `","Allow":{"wiki":["wiki_read"]}}`
-	if err := os.WriteFile(cfg, []byte(custom), 0o600); err != nil {
+	if err := os.WriteFile(old, []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := browserSetup(context.Background(), env, t.TempDir(), &out); err != nil {
+	if err := browserSetup(context.Background(), env, t.TempDir(), false, &out); err != nil {
 		t.Fatal(err)
 	}
-	got, _ := os.ReadFile(cfg) //nolint:gosec // G304: path is a test temp or fixed testdata path
-	if string(got) != custom {
-		t.Fatalf("readonly.json overwritten: %s", got)
+	reg, err := toolreg.Load(toolreg.DefaultPath(env.Home))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "wiki root") {
-		t.Fatalf("warned about an existing wiki root: %s", out.String())
+	if reg.Sources["wiki"] != (toolreg.Source{Type: toolreg.TypeLocalNotes, Root: env.Home}) || len(reg.Sets) != 1 {
+		t.Fatalf("registry = %+v", reg)
+	}
+	if got, _ := os.ReadFile(old + ".migrated"); string(got) != custom { //nolint:gosec // G304: test temp path
+		t.Fatalf("old file not kept: %q", got)
+	}
+	if !strings.Contains(out.String(), "Migrated "+old) || strings.Contains(out.String(), "root") {
+		t.Fatalf("output:\n%s", out.String())
+	}
+}
+
+// An existing registry is the user's: setup never rewrites it, warns on a
+// notes root that is missing and on a set it skipped, and fails on a file
+// that does not load.
+func TestBrowserSetupKeepsExistingRegistry(t *testing.T) {
+	created := false
+	f := &fakeRun{answer: setupScript("tok", &created)}
+	env := testEnv(t, f)
+	reg := toolreg.DefaultPath(env.Home)
+	body := "version: 1\nsources:\n  notes: {type: local-notes, root: " + filepath.Join(env.Home, "gone") + "}\nsets:\n  notes:readonly: {source: notes, tools: [wiki_read]}\n  x:readonly: {source: nope, tools: [a]}\n"
+	if err := os.MkdirAll(filepath.Dir(reg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := browserSetup(context.Background(), env, t.TempDir(), false, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(reg); string(got) != body { //nolint:gosec // G304: test temp path
+		t.Fatalf("registry rewritten:\n%s", got)
+	}
+	for _, w := range []string{"notes root " + filepath.Join(env.Home, "gone"), `"x:readonly"`} {
+		if !strings.Contains(out.String(), w) {
+			t.Errorf("output lacks %q:\n%s", w, out.String())
+		}
+	}
+
+	if err := os.WriteFile(reg, []byte("version: 1\nsorces: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := browserSetup(context.Background(), env, t.TempDir(), false, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "sorces") {
+		t.Fatalf("setup over a broken registry = %v, want an error naming the key", err)
+	}
+	if got, _ := os.ReadFile(reg); string(got) != "version: 1\nsorces: {}\n" { //nolint:gosec // G304: test temp path
+		t.Fatalf("broken registry rewritten:\n%s", got)
 	}
 }
 
@@ -392,7 +448,7 @@ func TestBrowserSetupMissingKeychainToken(t *testing.T) {
 	}}
 	env := testEnv(t, f)
 	var out bytes.Buffer
-	err := browserSetup(context.Background(), env, t.TempDir(), &out)
+	err := browserSetup(context.Background(), env, t.TempDir(), false, &out)
 	if err == nil {
 		t.Fatal("setup succeeded without the Keychain token")
 	}
@@ -410,7 +466,7 @@ func TestBrowserSetupStopsWhenGatewayDown(t *testing.T) {
 	f := &fakeRun{}
 	env := testEnv(t, f)
 	env.Health = func(context.Context) error { return errors.New("OpenShell gateway down") }
-	err := browserSetup(context.Background(), env, t.TempDir(), &bytes.Buffer{})
+	err := browserSetup(context.Background(), env, t.TempDir(), false, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "gateway") {
 		t.Fatalf("err = %v", err)
 	}
@@ -647,7 +703,7 @@ func TestBrowserSetupRedactsTokenFromErrors(t *testing.T) {
 	}}
 	env := testEnv(t, f)
 	var out bytes.Buffer
-	err := browserSetup(context.Background(), env, t.TempDir(), &out)
+	err := browserSetup(context.Background(), env, t.TempDir(), false, &out)
 	if err == nil || !strings.Contains(err.Error(), "wingman-claude") {
 		t.Fatalf("err = %v", err)
 	}
@@ -685,7 +741,7 @@ func TestBrowserSetupKeychainOtherFailure(t *testing.T) {
 	}}
 	env := testEnv(t, f)
 	var out bytes.Buffer
-	err := browserSetup(context.Background(), env, t.TempDir(), &out)
+	err := browserSetup(context.Background(), env, t.TempDir(), false, &out)
 	if err == nil || !strings.Contains(err.Error(), "user interaction is not allowed") {
 		t.Fatalf("err = %v", err)
 	}
@@ -713,8 +769,17 @@ type verifyRig struct {
 func verifyEnv(t *testing.T, execOut string, listenErr error) *verifyRig {
 	t.Helper()
 	r := &verifyRig{env: testEnv(t, &fakeRun{}), served: make(chan mcpproxy.DaemonOptions, 1)}
-	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(r.env.Home)}).Save(toolgateway.Pins{
-		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}}); err != nil {
+	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(r.env.Home)}).Save(hashOnly(toolgateway.Pins{
+		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}})); err != nil {
+		t.Fatal(err)
+	}
+	reg := toolreg.Registry{Version: 1, Sources: map[string]toolreg.Source{"wiki": {Type: toolreg.TypeLocalNotes, Root: r.env.Home}}, Sets: map[string]toolreg.Set{
+		"wiki:readonly": {Source: "wiki", Tools: []string{"wiki_search"}}}}
+	for n, tool := range map[string]string{"jira": "search", "slack": "history", "google": "get_doc"} {
+		reg.Sources[n] = toolreg.Source{Type: toolreg.TypeMCPHTTP, URL: "http://127.0.0.1:9/mcp"}
+		reg.Sets[n+":readonly"] = toolreg.Set{Source: n, Tools: []string{tool}}
+	}
+	if err := toolreg.WriteNew(toolreg.DefaultPath(r.env.Home), reg); err != nil {
 		t.Fatal(err)
 	}
 	built := false
@@ -777,7 +842,7 @@ func verifyEnv(t *testing.T, execOut string, listenErr error) *verifyRig {
 func TestBrowserVerifyPasses(t *testing.T) {
 	r := verifyEnv(t, "internet 000\nauth 200\nnoauth 401\nhostport 403\nhostgw 000\n", nil)
 	var out bytes.Buffer
-	if err := browserVerify(context.Background(), r.env, &out); err != nil {
+	if err := sandboxVerify(context.Background(), r.env, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	opt := <-r.served
@@ -835,7 +900,7 @@ func TestBrowserVerifyFailures(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r := verifyEnv(t, execOut, nil)
 			var out bytes.Buffer
-			if err := browserVerify(context.Background(), r.env, &out); err == nil {
+			if err := sandboxVerify(context.Background(), r.env, &out); err == nil {
 				t.Fatalf("passed: %s", out.String())
 			}
 			if !strings.Contains(out.String(), "FAIL") {
@@ -852,7 +917,7 @@ func TestBrowserVerifyFailures(t *testing.T) {
 func TestBrowserVerifyGatewayDown(t *testing.T) {
 	r := verifyEnv(t, "", nil)
 	r.env.Health = func(context.Context) error { return errors.New("connection refused") }
-	err := browserVerify(context.Background(), r.env, &bytes.Buffer{})
+	err := sandboxVerify(context.Background(), r.env, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "OpenShell gateway") {
 		t.Fatalf("err = %v, want the gateway named", err)
 	}
@@ -867,9 +932,9 @@ func TestBrowserVerifyNeedsPins(t *testing.T) {
 	if err := os.Remove(toolgateway.DefaultPinsPath(r.env.Home)); err != nil {
 		t.Fatal(err)
 	}
-	err := browserVerify(context.Background(), r.env, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "aimux browser setup") {
-		t.Fatalf("err = %v, want setup named", err)
+	err := sandboxVerify(context.Background(), r.env, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "aimux tools approve") {
+		t.Fatalf("err = %v, want tools approve named", err)
 	}
 	if r.argv != nil {
 		t.Fatal("ran checks without pins")
@@ -879,9 +944,9 @@ func TestBrowserVerifyNeedsPins(t *testing.T) {
 func TestBrowserVerifyRefusesBoundPort(t *testing.T) {
 	inUse := &net.OpError{Op: "listen", Net: "tcp", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)}
 	r := verifyEnv(t, "", inUse)
-	err := browserVerify(context.Background(), r.env, &bytes.Buffer{})
+	err := sandboxVerify(context.Background(), r.env, &bytes.Buffer{})
 	// remote serve owns :7390 now: name it and how to run verify around it.
-	for _, want := range []string{"aimux remote serve", "stop", "aimux browser verify", "start"} {
+	for _, want := range []string{"aimux remote serve", "stop", "aimux sandbox verify", "start"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("err = %v, want it to mention %q", err, want)
 		}
@@ -985,96 +1050,124 @@ func catalogFake(tools map[string][]json.RawMessage, down map[string]error) func
 	}
 }
 
-func runSetupForPins(t *testing.T, env browserEnv, out *bytes.Buffer) {
+// runSetupForPins runs setup over a registry with the default sources plus
+// a notes source named wiki, as a migrated install has.
+func runSetupForPins(t *testing.T, env browserEnv, out *bytes.Buffer, acceptPins bool) {
 	t.Helper()
+	reg := toolreg.Default()
+	reg.Sources["wiki"] = toolreg.Source{Type: toolreg.TypeLocalNotes, Root: env.Home}
+	reg.Sets["wiki:readonly"] = toolreg.Set{Source: "wiki", Tools: []string{"wiki_search", "wiki_read"}}
+	if err := toolreg.WriteNew(toolreg.DefaultPath(env.Home), reg); err != nil && !errors.Is(err, os.ErrExist) {
+		t.Fatal(err)
+	}
 	token := "sk-ant-oat01-SECRETSECRET" //nolint:gosec // G101: fake token for the redaction test
 	created := false
 	f := &fakeRun{answer: setupScript(token, &created)}
 	env.Run = f.run
-	if err := browserSetup(context.Background(), env, filepath.Join(t.TempDir(), "sandbox"), out); err != nil {
+	if err := browserSetup(context.Background(), env, filepath.Join(t.TempDir(), "sandbox"), acceptPins, out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 }
 
-// Setup pins exactly the tools the allowlist names, and a backend that is
-// down is skipped with a warning that names it.
-func TestBrowserSetupPinsAllowedToolsAndWarnsOnDownBackend(t *testing.T) {
+// Setup approves nothing: it names the tools that need review and the
+// commands to review them, warns on a backend that is down, and writes no
+// pins, also on a first run with no pins at all.
+func TestBrowserSetupReportsReviewAndWritesNoPins(t *testing.T) {
 	env := testEnv(t, &fakeRun{})
 	env.Catalog = catalogFake(map[string][]json.RawMessage{
 		"wiki":  {rawTool("wiki_search", "string"), rawTool("wiki_read", "string"), rawTool("wiki_write", "string")},
 		"slack": {rawTool("search_messages", "string"), rawTool("post_message", "string")},
 	}, map[string]error{"jira": errors.New("connection refused")})
 	var out bytes.Buffer
-	runSetupForPins(t, env, &out)
+	runSetupForPins(t, env, &out, false)
 
+	if _, err := os.Stat(toolgateway.DefaultPinsPath(env.Home)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("setup wrote pins: %v", err)
+	}
+	for _, w := range []string{"Tools need review (3): slack:readonly/search_messages, wiki:readonly/wiki_read, wiki:readonly/wiki_search",
+		"aimux tools diff", "aimux tools approve slack:readonly wiki:readonly", "jira", "connection refused"} {
+		if !strings.Contains(out.String(), w) {
+			t.Errorf("output lacks %q:\n%s", w, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "wiki_write") || strings.Contains(out.String(), "post_message") {
+		t.Errorf("setup mentions a tool no set lists:\n%s", out.String())
+	}
+}
+
+// A changed tool is reported, not re-pinned: pins.json is left byte for byte.
+func TestBrowserSetupLeavesChangedPinsAlone(t *testing.T) {
+	env := testEnv(t, &fakeRun{})
 	store := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}
-	pins, err := store.Load()
-	if err != nil {
+	if err := store.Save(hashOnly(toolgateway.Pins{"wiki": {"wiki_search": "sha256:old", "wiki_read": "sha256:gone"}})); err != nil {
 		t.Fatal(err)
 	}
-	want, err := toolgateway.PinTool(rawTool("wiki_search", "string"))
-	if err != nil {
+	before, _ := os.ReadFile(store.Path)
+	env.Catalog = catalogFake(map[string][]json.RawMessage{"wiki": {rawTool("wiki_search", "number")}}, nil)
+	var out bytes.Buffer
+	runSetupForPins(t, env, &out, false)
+	after, _ := os.ReadFile(store.Path)
+	if !bytes.Equal(before, after) {
+		t.Errorf("setup rewrote pins.json:\n%s", after)
+	}
+	if !strings.Contains(out.String(), "wiki:readonly/wiki_read, wiki:readonly/wiki_search") {
+		t.Errorf("output:\n%s", out.String())
+	}
+}
+
+// --accept-pins approves every set's live tools, says so loudly, drops the
+// pin of a tool the backend no longer lists and keeps a down backend's pins.
+func TestBrowserSetupAcceptPinsApprovesWithWarning(t *testing.T) {
+	env := testEnv(t, &fakeRun{})
+	store := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}
+	if err := store.Save(hashOnly(toolgateway.Pins{"wiki": {"wiki_search": "sha256:old", "wiki_read": "sha256:gone"}, "jira": {"search_issues_jql": "sha256:j"}})); err != nil {
 		t.Fatal(err)
 	}
-	if pins["wiki"]["wiki_search"] != want || pins["wiki"]["wiki_read"] == "" {
-		t.Fatalf("wiki pins = %v", pins["wiki"])
+	env.Catalog = catalogFake(map[string][]json.RawMessage{"wiki": {rawTool("wiki_search", "number"), rawTool("wiki_extra", "string")}}, map[string]error{"jira": errors.New("down")})
+	var out bytes.Buffer
+	runSetupForPins(t, env, &out, true)
+	pins, _ := store.Load()
+	if want, _ := toolgateway.PinTool(rawTool("wiki_search", "number")); pins["wiki"]["wiki_search"] != want {
+		t.Errorf("wiki_search = %q, want the new pin", pins["wiki"]["wiki_search"])
 	}
-	if _, ok := pins["wiki"]["wiki_write"]; ok {
-		t.Error("pinned a tool the allowlist does not name")
+	if _, ok := pins["wiki"]["wiki_read"]; ok {
+		t.Error("a tool the backend no longer lists kept its pin")
 	}
-	if _, ok := pins["slack"]["post_message"]; ok || pins["slack"]["search_messages"] == "" {
-		t.Errorf("slack pins = %v", pins["slack"])
+	if pins["jira"]["search_issues_jql"] != "sha256:j" {
+		t.Errorf("down backend lost its pin: %v", pins["jira"])
 	}
-	if len(pins["jira"]) != 0 {
-		t.Errorf("down backend pinned: %v", pins["jira"])
-	}
-	fi, err := os.Stat(store.Path)
-	if err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("pins file: %v %v", fi, err)
-	}
-	for _, w := range []string{"wiki/wiki_search", "slack/search_messages", "jira", "connection refused"} {
+	// wiki_search approved; wiki_read's pin dropped; the 20 jira, slack and
+	// google set tools skipped (jira down, the others not listed); wiki_extra
+	// is listed but in no set.
+	for _, w := range []string{"Warning: --accept-pins approved 1 tool without review, dropped 1 pin of a tool no longer listed, skipped 20 (backend down or tool not listed); 1 listed tool is in no set (not approved)", toolgateway.Disclaimer} {
 		if !strings.Contains(out.String(), w) {
 			t.Errorf("output lacks %q:\n%s", w, out.String())
 		}
 	}
 }
 
-// Rerunning setup while a backend is down must not drop its earlier pins.
-func TestBrowserSetupKeepsEarlierPinsOfDownBackend(t *testing.T) {
+// A migration that drops an allowlist entry says so, one line per entry.
+func TestBrowserSetupPrintsDroppedMigrationEntries(t *testing.T) {
 	env := testEnv(t, &fakeRun{})
-	store := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}
-	if err := store.Save(toolgateway.Pins{"jira": {"search_issues_jql": "sha256:old"}}); err != nil {
+	legacy := toolreg.LegacyPath(env.Home)
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	env.Catalog = catalogFake(map[string][]json.RawMessage{"wiki": {rawTool("wiki_search", "string")}},
-		map[string]error{"jira": errors.New("down")})
-	runSetupForPins(t, env, &bytes.Buffer{})
-	pins, err := store.Load()
-	if err != nil {
+	if err := os.WriteFile(legacy, []byte(`{"HTTP":{"jira":{"URL":"http://127.0.0.1:8001/mcp"}},"WikiRoot":"","Allow":{"jira":["search"],"wiki":["wiki_read"]}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if pins["jira"]["search_issues_jql"] != "sha256:old" {
-		t.Fatalf("jira pins = %v", pins["jira"])
-	}
-}
-
-// Rerunning setup re-pins a live backend: a changed tool takes its new
-// pin and a tool that left the backend is dropped.
-func TestBrowserSetupRepinsLiveBackend(t *testing.T) {
-	env := testEnv(t, &fakeRun{})
-	store := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}
-	if err := store.Save(toolgateway.Pins{"wiki": {"wiki_search": "sha256:old", "wiki_read": "sha256:gone"}}); err != nil {
+	var lines []string
+	if _, err := setupToolSources(env.Home, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }); err != nil {
 		t.Fatal(err)
 	}
-	env.Catalog = catalogFake(map[string][]json.RawMessage{"wiki": {rawTool("wiki_search", "number")}}, nil)
-	runSetupForPins(t, env, &bytes.Buffer{})
-	pins, _ := store.Load()
-	want, _ := toolgateway.PinTool(rawTool("wiki_search", "number"))
-	if pins["wiki"]["wiki_search"] != want {
-		t.Errorf("wiki_search = %q, want the new pin", pins["wiki"]["wiki_search"])
+	var dropped []string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "Migrated tool config to "+toolreg.DefaultPath(env.Home)+"; ") && strings.Contains(l, `"wiki:readonly"`) {
+			dropped = append(dropped, l)
+		}
 	}
-	if _, ok := pins["wiki"]["wiki_read"]; ok {
-		t.Error("a tool the backend no longer lists kept its pin")
+	if len(dropped) != 1 {
+		t.Fatalf("dropped lines = %q (all: %q)", dropped, lines)
 	}
 }
 
@@ -1093,7 +1186,7 @@ func TestBrowserHostReadonlyLoadsPins(t *testing.T) {
 	}
 	<-fk.served
 	stop()
-	if !strings.Contains(logBuf.String(), "no pinned tools: run aimux browser setup") {
+	if !strings.Contains(logBuf.String(), "no pinned tools: run aimux tools status, then aimux tools approve") {
 		t.Fatalf("log lacks the no-pins hint:\n%s", logBuf.String())
 	}
 	if fk.pins == nil {
@@ -1101,7 +1194,7 @@ func TestBrowserHostReadonlyLoadsPins(t *testing.T) {
 	}
 
 	pin := toolgateway.Pins{"wiki": {"wiki_search": "sha256:x"}}
-	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(pin); err != nil {
+	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(hashOnly(pin)); err != nil {
 		t.Fatal(err)
 	}
 	var logBuf2 syncBuffer
@@ -1116,8 +1209,8 @@ func TestBrowserHostReadonlyLoadsPins(t *testing.T) {
 	if strings.Contains(logBuf2.String(), "no pinned tools") {
 		t.Errorf("hint logged although pins exist:\n%s", logBuf2.String())
 	}
-	got, ok := fk.pins.(toolgateway.Pins)
-	if !ok || got["wiki"]["wiki_search"] != "sha256:x" {
+	got, ok := fk.pins.(toolgateway.SnapshotPins)
+	if !ok || got.Pins["wiki"]["wiki_search"] != "sha256:x" {
 		t.Fatalf("Build got pins %#v", fk.pins)
 	}
 }
@@ -1325,7 +1418,7 @@ func TestBrowserHostSIGTERMExitsCleanly(t *testing.T) {
 // loads back as the defaults) and never touches an existing one.
 func TestBrowserSetupWritesDefaultClientsFile(t *testing.T) {
 	env := testEnv(t, &fakeRun{})
-	runSetupForPins(t, env, &bytes.Buffer{})
+	runSetupForPins(t, env, &bytes.Buffer{}, false)
 	p := filepath.Join(env.Home, ".config", "aimux", "clients.yaml")
 	fi, err := os.Stat(p)
 	if err != nil || fi.Mode().Perm() != 0o600 {
@@ -1344,7 +1437,7 @@ func TestBrowserSetupWritesDefaultClientsFile(t *testing.T) {
 	if err := os.WriteFile(p, []byte("clients:\n  wingman:\n    max_sessions: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runSetupForPins(t, env, &bytes.Buffer{})
+	runSetupForPins(t, env, &bytes.Buffer{}, false)
 	if b, _ := os.ReadFile(p); string(b) != "clients:\n  wingman:\n    max_sessions: 1\n" { //nolint:gosec // G304: path is a test temp or fixed testdata path
 		t.Fatalf("existing file changed: %q", b)
 	}
@@ -1396,4 +1489,16 @@ func TestHost_BadClientsFileAnswersWithFrame(t *testing.T) {
 	if e := frame([]string{"chrome-extension://" + strings.Repeat("b", 32) + "/"}); !strings.Contains(e.Error, "extension") || built != 0 {
 		t.Fatalf("other origin: error %q, relay built %d times (want the origin refusal first)", e.Error, built)
 	}
+}
+
+// hashOnly is p as v1-style records (hash only), for seeding a pin store.
+func hashOnly(p toolgateway.Pins) toolgateway.PinFile {
+	f := toolgateway.PinFile{}
+	for s, tools := range p {
+		f[s] = map[string]toolgateway.PinRecord{}
+		for t, h := range tools {
+			f[s][t] = toolgateway.PinRecord{Hash: h}
+		}
+	}
+	return f
 }

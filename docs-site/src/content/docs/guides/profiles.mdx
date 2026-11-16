@@ -30,13 +30,13 @@ settings: { inherit_user: false }
 
 | Field | Meaning |
 |---|---|
-| `name` | Must equal the file name without `.yaml` |
+| `name` | Must equal the file name without `.yaml`. A profile that runs in a sandbox (`runs: sandbox` or `run`) gets the sandbox `aimux-<name>`, and OpenShell allows 19 characters, so its name is at most 13 characters; `check` and every session fail a longer one |
 | `extends` | The profile this one narrows: `builtin:<name>` or the name of another user profile |
 | `harness` | The agent harness; `claude-code` (the default for a root, and the only one with an adapter). A child cannot change it |
 | `model` | `provider` and `name`; a child may set either. For `acp` sessions, `name` (`sonnet` or `opus`) is the default when a request names no model |
 | `runs` | Where it runs: `host` (the Mac itself, with your settings), `acp` (a no-tools agent session on the Wingman adapter), `sandbox` (an OpenShell sandbox), `run` (reserved for runs started by a later release). Default `host` for a root |
 | `dir` | A working directory carried over from a v1 profile; not a permission |
-| `tools` | Exact tool names or reviewed sets such as `jira:readonly`; `[]` is none. A set whose server has no pinned tools (its backend was down at `aimux browser setup`, or the name is misspelled) is left out and grants nothing; a profile whose sets all lack pins fails to compile |
+| `tools` | Exact tool names or reviewed sets such as `jira:readonly`; `[]` is none. A set whose server has no approved tools (none approved yet with `aimux tools approve`, its backend was down, or the name is misspelled) is left out and grants nothing; a profile whose sets all lack pins fails to compile |
 | `network` | `default` (`deny` or `allow`) and `allow`, a list of `model`, `gateway` or `web` |
 | `files` | `read` and `write`: paths the session may see or change |
 | `credentials` | Names of credentials the session may use |
@@ -68,14 +68,74 @@ Every resolved profile has a digest: `sha256:` and the hash of its canonical JSO
 | `page` | `acp` | none | `deny`, allow `model` | yes |
 | `work-readonly` | `sandbox` | `wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly` | `deny`, allow `model` and `gateway` | yes |
 | `coding` | `host` | none declared | `allow` | yes |
-| `research` | `sandbox` | `wiki:readonly` | `deny`, allow `model` and `web` | not yet |
+| `research` | `sandbox` | none | `deny`, allow `model` and `web` | yes |
 | `research-with-work` | `run` | none | `deny`, allow `model` | not yet |
 
-`research` and `research-with-work` exist so clients can list them, but a session under either is refused with `409 profile_not_available` until a later release. Through the remote API, `coding` and `base` (`runs: host`) are listed with `available: false` too and refused the same way, since `remote serve` has no engine for them yet: start a host session without a profile instead. `aimux profile list` shows the manifest's own `available`.
+`research` reaches the public web read only: WebSearch, and WebFetch with GET only on a reviewed list of top-level domains and apex hosts, with private addresses blocked. It has no tools and no `gateway`, so it holds no private data. `research-with-work` exists so clients can list it, but a session under it is refused with `409 profile_not_available` until a later release. Through the remote API, `coding` and `base` (`runs: host`) are listed with `available: false` too and refused the same way, since `remote serve` has no engine for them yet: start a host session without a profile instead. `aimux profile list` shows the manifest's own `available`.
 
 Builtins other than `page` are roots: they have no `extends`. `base` is the narrowest root, and `page` extends it. A user profile can extend any builtin and narrow it. Extending `base` or `page` gives a profile with no tools that can only stay as it is or move to a more isolated `runs`.
 
 `coding` is the profile a session without a profile counts as: it runs on the Mac with your settings. Wingman is never allowed it.
+
+## Reviewed tool sets and pins
+
+A profile names tool sets such as `google:readonly`, never tool names. What a set contains is decided by review, in two files:
+
+- `~/.config/aimux/tool-sources.yaml` holds the sources and the sets: for each set, its source and the tools you reviewed and allowed (package `internal/toolreg`; format in [Tool sources](/guides/wingman/#tool-sources)). `aimux setup` (and `aimux browser setup`) writes the defaults, or migrates `~/.aimux/wingman/readonly.json` once; so does the first start of `aimux remote serve`, which logs one line and renames the old file `readonly.json.migrated`. Pins made before (version 1) stay valid: nothing needs approving again. Add and remove sources with `aimux tools add` and `aimux tools remove` (below) rather than by hand.
+- `~/.aimux/tools/pins.json` holds a pin for each approved tool (`internal/toolgateway/pin.go`). A pin is a sha256 over the tool's name, input schema, output schema and annotations. The tool's top-level description and title are left out, because backends reword them without changing what the tool does. The file is version 2: per source and tool it keeps `hash`, `definition` (the canonical JSON that was hashed, so a later change can be shown field by field), `approved_at` and `source` (the URL or notes folder the tool was listed from). A version 1 file (hashes only) is still read and is rewritten as version 2 on the next approve.
+
+### How a set resolves
+
+`google:readonly` resolves through the registry to its source, `google`, which is the server name, and to the tools the set lists that are also pinned for that server. `wiki:readonly`, which the built-in `work-readonly` asks for, falls back to `notes:readonly` when the registry defines no `wiki:readonly`. The gateway serves a tool only while its live definition still matches its pin. Three cases change the result:
+
+- A set the registry does not define, or dropped as malformed, is left out of the profile, as is a set none of whose tools is pinned: no endpoint, no tools, no token entry.
+- A set name that is not `<name>:<kind>` fails the compile.
+- A profile whose sets are all left out fails to compile, and the error says to run `aimux tools status`, then `aimux tools approve`; when the registry itself does not load, the error carries its reason (`RegistrySets` and `Compile` in `internal/profile/compile.go`).
+
+### Reviewing and approving tools
+
+Only `aimux tools approve` writes pins. Three commands, each with `--json`:
+
+| Command | What it does |
+|---|---|
+| `aimux tools status` | Lists the live tools of every source (read-only) and gives each set tool a status: `active` (pinned and unchanged), `unpinned` (never approved), `changed` (its definition differs from the approved one, or the backend no longer lists it), `unavailable` (the backend is down, or lists no such tool), `source_changed` (approved from another URL or notes folder than `tool-sources.yaml` now names; pins made before version 2 record no source and are never flagged) or `not_in_registry` (pinned, but no set lists it), with its approval time. URLs compare as written: `localhost` and `127.0.0.1`, or a trailing slash, count as a different source. It exits 0, and when something needs review it prints a `Next:` line on stderr; a pins file that does not parse is an error naming the file. |
+| `aimux tools diff [set\|set/tool]` | Shows what approving would change: `added`, `removed` and `changed` tools (a `source_changed` tool is listed as changed, with a note naming the old and the new endpoint), and for a changed tool each field that differs (`inputSchema.properties.q.type: "string" -> "number"`). A tool pinned before version 2 has no stored definition, so the diff says so and shows the live definition only. |
+| `aimux tools approve <set\|set/tool>...` or `--all` | Pins the live definitions of the named tools only, and drops the pin of a tool the backend no longer lists. A `source_changed` tool is re-pinned with the current endpoint as its source. A tool already approved as it is live keeps its record (no new `approved_at`), so running it twice changes nothing; with nothing to change the file is not rewritten. A tool whose backend is down is skipped and the command exits non-zero naming it. Each tool it pins is printed with the short hash of the definition it pinned (`approved jira:readonly/search 3f2a9c01b7e4`; `hash` in `--json`). It pins what the source lists when you run it, which can differ from what `aimux tools diff` showed a moment before: diff prints each tool's live hash (`(live 3f2a9c01b7e4)`), and `--expect <hash>` with one `set/tool` refuses, writing nothing, when the live definition is another one. The file is written atomically, mode 0600; the first write over a version 1 file keeps that file as `pins.json.v1-backup` for a downgrade. |
+
+`aimux browser setup` approves nothing: it prints `Tools need review (N): ...` with the `aimux tools diff` and `aimux tools approve` commands to run, also on a first run with no pins at all. `aimux browser setup --accept-pins` approves every set's live tools without review, for automation, and prints a warning line saying so.
+
+### Adding and removing sources
+
+`aimux tools add` and `aimux tools remove` edit `tool-sources.yaml` in place: every other entry and comment is kept (a broken entry too), the file is replaced atomically (mode 0600), and an edit that would not load cleanly is refused with nothing written. When the registry does not exist yet they first migrate `readonly.json`, or start from the defaults. Neither approves or changes a pin.
+
+```bash
+aimux tools add notes --folder ~/notes                  # source notes, set notes:readonly (wiki_search, wiki_read)
+aimux tools add notes --folder ~/work/wiki --name work  # source work, set work:readonly
+aimux tools add mcp --name github --url http://127.0.0.1:8004/mcp --tools get_issue,list_pull_requests
+aimux tools remove work                                 # asks first on a terminal; --yes to skip
+```
+
+- `add notes` needs an existing folder (a relative path is made absolute). `add mcp` takes only an `http` or `https` URL on this Mac's loopback (`127.0.0.1`, `::1` or `localhost`, no userinfo) and the exact tool names. Each adds the source and its set `<name>:readonly`, refuses a name the file already has as a source or set, and prints the next step on stderr: `Next: aimux tools diff <name>:readonly, then aimux tools approve <name>:readonly`. Until then the new tools are `unpinned` and hidden.
+- `remove <source>` removes the source and every set that names it. Without a terminal it needs `--yes`; `--json` gives `schema_version`, `source`, `sets`, `path` and `kept_pins`. Its pins stay in `pins.json`, unused: `aimux tools status` lists them as `not_in_registry` ("source ... is not in tool-sources.yaml; the pin is kept but unused"), and adding the source back under the same name and endpoint reuses them.
+- The built-in `work-readonly` profile asks for `wiki:readonly`; with no set of that name it gets `notes:readonly`, so `aimux tools add notes` with the default name is all a new install needs for notes.
+
+### What the pins do and do not prove
+
+- A pin detects schema changes; it does not prove a tool is read-only. Read-only comes from your review of what each tool in a set does. `aimux tools approve` prints this line every time.
+- A tool that changed since it was approved, or whose source now points elsewhere (`source_changed`), is hidden and refused until you approve it again.
+- `remote serve` rereads `tool-sources.yaml` and the pins on the next turn after either file changes (and once a minute regardless), so an approval or a registry edit takes effect on the next turn without a restart. Each turn compiles against one snapshot of both (logged as `tool snapshot <version>`). The gateway applies that snapshot before the turn's token is used; if another turn's refresh is still running, the gateway refuses what it has not applied yet, so a call gets at most what both the turn's snapshot and the served one allow.
+- A session keeps working across edits: when its turn was granted under another snapshot than the gateway serves (older, or newer while the gateway's refresh is still pending), the gateway refuses only the tools whose pin differs between the two or is missing from one; tools whose pins did not change stay usable. A registry edit restarts only the backends whose URL or folder changed or that were removed, each after its calls in flight finish.
+- A pins file that does not parse fails closed: no tool is granted or served, the gateway log names the file and the error, and `aimux tools status` reports it; fixing the file restores service on the next turn.
+
+### Where each wall is enforced
+
+| Wall | What it does | Strength |
+|---|---|---|
+| Harness | The agent is only told about the allowed tools (`--allowedTools`, `--strict-mcp-config`) | Cooperative |
+| OpenShell policy | MCP rules allow `tools/call` only for the pinned tool names | Enforced outside the agent |
+| Read-only tool gateway on `127.0.0.1:7390` | Checks the session token and the pin on every call | Enforced by aimux on the Mac |
+
+See [Pinned tools](/guides/wingman/#pinned-tools) for the setup output and what happens when a backend is down.
 
 ## Commands
 
@@ -86,9 +146,32 @@ aimux profile check my-notes      # resolve and validate; exit 1 with the reason
 aimux profile migrate             # write each v1 profile as a v2 file
 ```
 
-`show` prints the full digest; the `list` table shortens it to 12 characters. All four accept `--json`. `check` exits 1 when the profile does not resolve, and its message names the field that widens. `list` prints a profile that does not resolve with `-` as its digest and the reason on stderr.
+`show` prints the full digest; the `list` table shortens it to 12 characters. All four accept `--json`. `check` exits 1 when the profile does not resolve or its sandbox name is too long, and its message names the field that widens. `list` prints a profile that does not resolve with `-` as its digest and the reason on stderr.
 
-`check` validates the manifest; it does not say whether the profile is available. A profile like `research` checks ok while `available` is false in `list`.
+`check` validates the manifest; it does not say whether the profile is available. A profile like `research-with-work` checks ok while `available` is false in `list`.
+
+### Sandboxes
+
+A profile that runs in a sandbox (`runs: sandbox`, such as `research` and `work-readonly`) gets one OpenShell sandbox, `aimux-<profile>`. `aimux remote serve` creates it on the profile's first turn and, when the compiled policy changes (a new approval, an edited profile), updates its policy on the next turn. The digest of the policy it last applied is in `~/.aimux/sandboxes/<sandbox>.digest`.
+
+```bash
+aimux sandbox status          # image, provider, gateway, and each sandboxed profile's policy state; read-only
+aimux sandbox status --json
+aimux sandbox setup           # build the image and create the provider when missing; creates no sandbox
+aimux sandbox verify          # egress checks inside aimux-work-readonly (was aimux browser verify)
+```
+
+For each sandboxed profile, `status` compiles the profile now (reading the registry and pins without writing) and compares that digest with the recorded one:
+
+| Policy | Meaning |
+|---|---|
+| `current` | The sandbox runs the policy compiled now |
+| `stale (applies on next turn)` | The sandbox exists with another policy, or none recorded; the next turn applies the new one |
+| `missing (created on first use)` | No sandbox yet; the first turn creates it |
+| `unknown (gateway unreachable)` | The OpenShell gateway did not answer, so existence is unknown |
+| `error: ...` | The profile does not compile (for example no approved tools); the reason follows |
+
+Profiles that do not run in a sandbox (`page` runs over `acp`) and profiles that are not available are not listed. `status` never starts the gateway, builds, creates or changes anything, and always exits 0; each action it suggests is a `Next:` line on stderr (and in `next` with `--json`). The JSON has `schema_version`, `image`, `provider` and `gateway` (each `name`, `status`, `error`) and `profiles` (`profile`, `sandbox`, `exists`, which is null when the gateway is unreachable, `state`, `recorded_digest`, `compiled_digest`, `error`).
 
 ### Migrating v1 profiles
 
@@ -108,4 +191,4 @@ A profile is compiled into several things, and they are not equally strong.
 
 A prompt injection that talks the agent into calling a tool the profile does not allow reaches OpenShell's policy or the gateway, and stops there. The harness config is what keeps the agent from trying.
 
-Only profiles with `runs: sandbox` compile to a policy. Their `network.allow` must include `model`, `web` is not supported yet, and `tools` need `gateway`. The tool sets resolve against the [pinned tools](/guides/wingman/#pinned-tools). A tool changed since it was pinned is hidden until you pin it again.
+Only profiles with `runs: sandbox` compile to a policy. Their `network.allow` must include `model`, and `tools` need `gateway`. `web` compiles to one read-only policy, `public_web_readonly`: a `**.*.<tld>` endpoint for each reviewed top-level domain (`com, org, net, io, dev, ai, app, edu, gov, co, me, info, uk, de, eu`) and an exact endpoint, limited to public addresses, for each reviewed apex host such as `github.com`, all on port 443 with GET only. The tool sets resolve against the [pinned tools](/guides/wingman/#pinned-tools). A tool changed since it was pinned is hidden until you pin it again.

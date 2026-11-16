@@ -20,7 +20,7 @@ func TestCompile_PolicyDigestFollowsPins(t *testing.T) {
 	if want := "sha256:" + hex.EncodeToString(sum[:]); a.PolicyDigest != want {
 		t.Fatalf("policy digest = %q, want %q", a.PolicyDigest, want)
 	}
-	repinned := PinnedSets(toolgateway.Pins{
+	repinned := pinnedSets(toolgateway.Pins{
 		"wiki":   {"read_page": "a"},
 		"jira":   {"search": "c", "get_issue": "d"},
 		"slack":  {"history": "e"},
