@@ -1,0 +1,338 @@
+{
+ "theme": "paper",
+ "elements": [
+  {
+   "type": "text",
+   "x": 20,
+   "y": 14,
+   "w": 1180,
+   "text": "What changes for you: the same profiles, runs and history on every surface; Wingman stays a small panel"
+  },
+  {
+   "type": "text",
+   "x": 36,
+   "y": 50,
+   "w": 170,
+   "text": "Surface",
+   "bold": true
+  },
+  {
+   "type": "text",
+   "x": 220,
+   "y": 50,
+   "w": 460,
+   "text": "Today",
+   "bold": true
+  },
+  {
+   "type": "text",
+   "x": 720,
+   "y": 50,
+   "w": 460,
+   "text": "After",
+   "bold": true
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 76,
+   "w": 170,
+   "h": 50,
+   "title": "Wingman panel",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 220,
+   "y": 76,
+   "w": 470,
+   "h": 50,
+   "title": "Page, or Work with my tools",
+   "desc": "research and context are separate asks",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 720,
+   "y": 76,
+   "w": 470,
+   "h": 50,
+   "title": "Research by default, one \"Use my context\" toggle",
+   "desc": "one ask, a progress line, sources from both"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     690,
+     101
+    ],
+    [
+     720,
+     101
+    ]
+   ]
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 136,
+   "w": 170,
+   "h": 50,
+   "title": "Privacy check",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 220,
+   "y": 136,
+   "w": 470,
+   "h": 50,
+   "title": "None needed: Work never reaches the web",
+   "desc": "and Research never sees your tools",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 720,
+   "y": 136,
+   "w": 470,
+   "h": 50,
+   "title": "Query check, rarely",
+   "desc": "asks only when a search would name a person, ticket or secret"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     690,
+     161
+    ],
+    [
+     720,
+     161
+    ]
+   ]
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 196,
+   "w": 170,
+   "h": 50,
+   "title": "Adding a tool",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 220,
+   "y": 196,
+   "w": 470,
+   "h": 50,
+   "title": "Edit readonly.json by hand",
+   "desc": "tool names only, no change detection",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 720,
+   "y": 196,
+   "w": 470,
+   "h": 50,
+   "title": "aimux tools add, then review once",
+   "desc": "a tool that changes hides until reviewed again"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     690,
+     221
+    ],
+    [
+     720,
+     221
+    ]
+   ]
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 256,
+   "w": 170,
+   "h": 50,
+   "title": "Phone and dashboard",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 220,
+   "y": 256,
+   "w": 470,
+   "h": 50,
+   "title": "Wingman questions are invisible there",
+   "desc": "",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 720,
+   "y": 256,
+   "w": 470,
+   "h": 50,
+   "title": "Each Wingman run shows up as one run",
+   "desc": "with its profile; continue it on the phone"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     690,
+     281
+    ],
+    [
+     720,
+     281
+    ]
+   ]
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 316,
+   "w": 170,
+   "h": 50,
+   "title": "Past sessions",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 220,
+   "y": 316,
+   "w": 470,
+   "h": 50,
+   "title": "Work-lane transcripts die with the sandbox",
+   "desc": "Wingman cannot look back",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 720,
+   "y": 316,
+   "w": 470,
+   "h": 50,
+   "title": "All runs archived and searchable",
+   "desc": "optional \"sessions\" source, with the query preview"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     690,
+     341
+    ],
+    [
+     720,
+     341
+    ]
+   ]
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 376,
+   "w": 170,
+   "h": 50,
+   "title": "Terminal and cron",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 220,
+   "y": 376,
+   "w": 470,
+   "h": 50,
+   "title": "Profiles are saved flags",
+   "desc": "no sandboxed read-only agent outside Wingman",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 720,
+   "y": 376,
+   "w": 470,
+   "h": 50,
+   "title": "aimux run, spawn, schedule --profile",
+   "desc": "the same research or work-readonly agent"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     690,
+     401
+    ],
+    [
+     720,
+     401
+    ]
+   ]
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 436,
+   "w": 170,
+   "h": 50,
+   "title": "Safety",
+   "desc": ""
+  },
+  {
+   "type": "card",
+   "x": 220,
+   "y": 436,
+   "w": 470,
+   "h": 50,
+   "title": "Wingman cannot post",
+   "desc": "tool names checked once, by aimux",
+   "kind": "closed"
+  },
+  {
+   "type": "card",
+   "x": 720,
+   "y": 436,
+   "w": 470,
+   "h": 50,
+   "title": "Still cannot post",
+   "desc": "names checked by aimux and the network; no coding sessions from Wingman"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     690,
+     461
+    ],
+    [
+     720,
+     461
+    ]
+   ]
+  },
+  {
+   "type": "legend",
+   "x": 20,
+   "y": 500,
+   "items": [
+    {
+     "kind": "closed",
+     "text": "today"
+    },
+    {
+     "kind": "open",
+     "text": "after the change"
+    }
+   ]
+  }
+ ]
+}

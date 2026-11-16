@@ -3,6 +3,7 @@ package mcpproxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -121,5 +122,55 @@ func TestNewServers_EmptyCatalogGivesNoServers(t *testing.T) {
 	defer pool.Close()
 	if srvs := NewServers(&Catalog{}, pool); len(srvs) != 0 {
 		t.Fatalf("got %d servers from an empty catalog", len(srvs))
+	}
+}
+
+func TestCallGuard_RefusesBeforeBackend(t *testing.T) {
+	fs := newFakeStarter()
+	pool := NewPool(fs.start, PoolOptions{})
+	defer pool.Close()
+	var guarded [][2]string
+	var rejected []string
+	guard := func(_ context.Context, server, tool string) error {
+		guarded = append(guarded, [2]string{server, tool})
+		return errors.New("schema drifted")
+	}
+	srvs := NewServers(testCatalog(), pool, WithCallGuard(guard),
+		WithRejectLog(func(server, tool string, err error) { rejected = append(rejected, server+"/"+tool) }))
+	c := connectTo(t, srvs["slack"])
+
+	res, err := c.CallTool(context.Background(), req("post_message"))
+	if err != nil {
+		t.Fatalf("a guard refusal must be a tool result, got transport error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("IsError = false: %+v", res)
+	}
+	text := resultText(t, res)
+	if !strings.Contains(text, "post_message") || !strings.Contains(text, "schema drifted") {
+		t.Fatalf("refusal text %q must name the tool and the reason", text)
+	}
+	if fs.count("slack") != 0 {
+		t.Fatalf("backend started %d times; the guard must refuse before the pool", fs.count("slack"))
+	}
+	if len(guarded) != 1 || guarded[0] != [2]string{"slack", "post_message"} {
+		t.Fatalf("guard saw %v", guarded)
+	}
+	if len(rejected) != 1 || rejected[0] != "slack/post_message" {
+		t.Fatalf("reject log saw %v", rejected)
+	}
+}
+
+func TestCallGuard_PassesWhenGuardAllows(t *testing.T) {
+	fs := newFakeStarter()
+	pool := NewPool(fs.start, PoolOptions{})
+	defer pool.Close()
+	srvs := NewServers(testCatalog(), pool, WithCallGuard(func(context.Context, string, string) error { return nil }))
+	res, err := connectTo(t, srvs["slack"]).CallTool(context.Background(), req("post_message"))
+	if err != nil || res.IsError {
+		t.Fatalf("call refused: %v %+v", err, res)
+	}
+	if fs.count("slack") != 1 {
+		t.Fatalf("backend starts = %d, want 1", fs.count("slack"))
 	}
 }

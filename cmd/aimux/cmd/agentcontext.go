@@ -35,11 +35,12 @@ func newAgentContextCmd(providers []string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commands := make(map[string]commandInfo)
 
-			for _, sub := range rootCmd.Commands() {
+			var describe func(prefix string, sub *cobra.Command)
+			describe = func(prefix string, sub *cobra.Command) {
 				if sub.Name() == "help" || sub.Name() == "completion" || sub.Name() == "agent-context" {
-					continue
+					return
 				}
-
+				key := prefix + sub.Name()
 				info := commandInfo{
 					Description: sub.Short,
 					Flags:       make(map[string]flagInfo),
@@ -49,14 +50,16 @@ func newAgentContextCmd(providers []string) *cobra.Command {
 				use := sub.Use
 				if idx := strings.IndexByte(use, ' '); idx != -1 {
 					argPart := use[idx+1:]
-					argPart = strings.TrimSpace(argPart)
+					argPart = strings.TrimSuffix(strings.TrimSpace(argPart), "...")
 					if argPart != "" {
 						required := strings.HasPrefix(argPart, "<")
 						argName := strings.Trim(argPart, "<>[]")
 
 						ai := argInfo{Name: argName, Required: required}
-						if sub.Name() == "spawn" {
+						if key == "spawn" {
 							ai.Values = providers
+						} else if len(sub.ValidArgs) > 0 {
+							ai.Values = sub.ValidArgs
 						}
 						info.Args = append(info.Args, ai)
 					}
@@ -77,7 +80,14 @@ func newAgentContextCmd(providers []string) *cobra.Command {
 				// Add inherited --json flag
 				info.Flags["--json"] = flagInfo{Type: "bool", Default: "false"}
 
-				commands[sub.Name()] = info
+				commands[key] = info
+				// Subcommands are listed by their full path ("tools status").
+				for _, child := range sub.Commands() {
+					describe(key+" ", child)
+				}
+			}
+			for _, sub := range rootCmd.Commands() {
+				describe("", sub)
 			}
 
 			result := map[string]any{

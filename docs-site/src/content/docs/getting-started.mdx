@@ -52,12 +52,23 @@ Open `http://localhost:9090` in your browser.
 | `aimux spawn claude --dir ./proj` | Start a new agent session |
 | `aimux resume <id>` | Resume a previous session |
 | `aimux jump <id>` | Bring a running session's iTerm2 pane to the front (session ID, unique prefix or PID) |
+| `aimux setup` | Check every concern and run only the missing setup steps (tool registry, clients, sandbox, Chrome host); on a terminal, offer to review changed tools |
+| `aimux doctor` | Read-only checks with one fix per problem; exit 1 on any failure, warnings exit 0 ([Troubleshooting](/guides/troubleshooting/)) |
 | `aimux agent-context` | Machine-readable CLI schema for agents |
-| `aimux profile save <name>` | Save a named configuration bundle |
+| `aimux profile save <name>` | Save a named configuration bundle (v1; `aimux profile migrate` converts it to a [profile](/guides/profiles/)) |
 | `aimux feedback "text"` | Report CLI friction |
 | `aimux version --json` | Print version info |
 
 All data commands support `--json` for structured output. See [Agent Usage](/guides/agent-usage/) for the full reference.
+
+## Set up Wingman and the sandboxed profiles
+
+```bash
+aimux setup --extension-id <id>   # the id is in chrome://extensions once the Wingman extension is loaded
+aimux doctor                      # read-only: what is still wrong, and the fix for each
+```
+
+`aimux setup` checks the sandbox, tools, router, browser and OpenShell gateway and runs only what is missing: it asks before each step on a terminal, and `--yes` runs them without asking. It ends with one line per concern (`✓`, `!` or `✗`) and a `Next:` line for each problem. Run it again any time; with nothing missing it changes nothing. It never approves a tool unless you answer yes to that tool's diff on a terminal. The [Wingman guide](/guides/wingman/) has the details and [Troubleshooting](/guides/troubleshooting/) lists every `aimux doctor` check.
 
 ## Quick Tour
 

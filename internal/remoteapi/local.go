@@ -11,6 +11,7 @@ import (
 	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/search"
 	"github.com/zanetworker/aimux/internal/terminput"
 	"github.com/zanetworker/aimux/internal/trace"
@@ -67,6 +68,12 @@ type LocalIndex struct {
 	// Repo gives the web address and branch of the git repository in a
 	// folder (gitremote.Lookup). Nil: details carry no repo.
 	Repo func(dir string) (web, branch, root string, ok bool)
+	// Archived, if set, is the transcript in aimux's archive of a session
+	// whose detail may be read from there (a finished sandbox profile
+	// session: its transcript never reaches ~/.claude/projects), or "".
+	// It is read in NewProvider's format and only when no provider has the
+	// session's file.
+	Archived func(id string) string
 
 	cache catalog.Cache // the latest scan, for Lookup
 }
@@ -87,6 +94,25 @@ func (x *LocalIndex) Catalog() *catalog.Catalog {
 		c.Busy = x.Broker
 	}
 	return c
+}
+
+// archived is the archive transcript Archived names for id and the store
+// of NewProvider that reads it; "" and nil when there is none.
+func (x *LocalIndex) archived(id string) (string, Store) {
+	if x.Archived == nil {
+		return "", nil
+	}
+	f := x.Archived(id)
+	if f == "" {
+		return "", nil
+	}
+	name := x.newProvider()
+	for _, p := range x.Providers {
+		if p.Store.Name() == name {
+			return f, p.Store
+		}
+	}
+	return "", nil
 }
 
 func (x *LocalIndex) running(id string) bool { return x.Running != nil && x.Running(id) }
@@ -201,6 +227,9 @@ func (x *LocalIndex) session(ctx context.Context, id string, turns int, withTerm
 	cat := x.Catalog()
 	file, store := cat.File(id)
 	if file == "" {
+		file, store = x.archived(id)
+	}
+	if file == "" {
 		if c, ok := x.Created.Get(id); ok {
 			// Created here, and the agent has not written its file yet. Without
 			// a run either, its first prompt failed: nothing to continue.
@@ -262,6 +291,10 @@ func timeOrNil(t time.Time) *time.Time {
 	return &t
 }
 
+// turnOf is a parsed turn as clients get it. The user text of a profile
+// engine's prompt is its question (profilerun.QuestionOf), found in the
+// whole prompt before maxTextLen cuts it: a long page would otherwise cut
+// the question off.
 func turnOf(t trace.Turn) Turn {
 	tools := make([]TurnTool, 0, len(t.Actions))
 	for _, a := range t.Actions {
@@ -270,7 +303,7 @@ func turnOf(t trace.Turn) Turn {
 	return Turn{
 		Number: t.Number,
 		Time:   t.Timestamp,
-		User:   history.Shorten(strings.Join(t.UserLines, "\n"), maxTextLen),
+		User:   history.Shorten(profilerun.QuestionOf(strings.Join(t.UserLines, "\n")), maxTextLen),
 		Reply:  shortenLines(replyOf(t), maxTextLen),
 		Tools:  tools,
 	}

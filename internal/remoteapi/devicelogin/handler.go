@@ -120,6 +120,7 @@ type sessionKey struct{}
 type authed struct {
 	Session
 	device string // its name, for the audit log
+	kind   string // its Device.Kind, for step-up
 }
 
 // SessionFrom returns the session the middleware admitted the request with.
@@ -204,7 +205,7 @@ func (s *Server) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		s.markSeen(d.ID)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey{}, authed{sess, d.Name})))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey{}, authed{sess, d.Name, d.Kind})))
 	})
 }
 
@@ -317,11 +318,29 @@ func (s *Server) Audit() *Audit {
 	return s.audit
 }
 
+// LoginAge is how long ago the request's device logged in (its session's
+// Created, on the server's clock) and the device's kind; ok is false for a
+// request the middleware did not admit with a session.
+func (s *Server) LoginAge(r *http.Request) (age time.Duration, kind string, ok bool) {
+	a, ok := r.Context().Value(sessionKey{}).(authed)
+	if !ok {
+		return 0, "", false
+	}
+	return s.now().Sub(a.Created), a.kind, true
+}
+
 // Record writes an audit line for an action on a request the middleware
 // admitted; session is the aimux session acted on, if any.
 func (s *Server) Record(r *http.Request, action, session, result string) {
+	s.RecordEntry(r, AuditEntry{Action: action, Session: session, Result: result})
+}
+
+// RecordEntry is Record for a line with more fields than an action's:
+// e's login and device are the request's.
+func (s *Server) RecordEntry(r *http.Request, e AuditEntry) {
 	a, _ := r.Context().Value(sessionKey{}).(authed)
-	s.audit.Write(AuditEntry{Login: s.login(r), Device: a.device, Action: action, Session: session, Result: result})
+	e.Login, e.Device = s.login(r), a.device
+	s.audit.Write(e)
 }
 
 // canonicalHost returns the request's host name (lowercase, no port, no

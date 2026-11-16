@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/zanetworker/aimux/internal/agent"
 	"github.com/zanetworker/aimux/internal/history"
@@ -27,6 +28,17 @@ var bannedVerbs = map[string]string{
 	"rm":       "use 'delete'",
 	"remove":   "use 'delete'",
 	"destroy":  "use 'delete'",
+}
+
+// verbExemptions are subcommands (path under aimux) allowed a banned verb.
+// tools add and tools remove are the owner-approved shape of the tools
+// noun (plan 2a): a source is added to and removed from tool-sources.yaml,
+// not created or deleted. mcp proxy edit predates the check of nested
+// commands.
+var verbExemptions = map[string]bool{
+	"tools add":      true,
+	"tools remove":   true,
+	"mcp proxy edit": true,
 }
 
 var bannedFlags = map[string]string{
@@ -68,14 +80,31 @@ func TestVocabularyCompliance_Commands(t *testing.T) {
 	cleanup := registerTestCommands(t)
 	defer cleanup()
 
-	for _, sub := range rootCmd.Commands() {
-		name := sub.Name()
-		verb := name
-		if idx := strings.IndexByte(name, '-'); idx != -1 {
-			verb = name[:idx]
+	var walk func(parent *cobra.Command, path string)
+	walk = func(parent *cobra.Command, path string) {
+		for _, sub := range parent.Commands() {
+			name := sub.Name()
+			full := strings.TrimPrefix(path+" "+name, " ")
+			verb := name
+			if idx := strings.IndexByte(name, '-'); idx != -1 {
+				verb = name[:idx]
+			}
+			if suggestion, banned := bannedVerbs[verb]; banned && !verbExemptions[full] {
+				t.Errorf("command %q uses banned verb %q (%s)", full, verb, suggestion)
+			}
+			walk(sub, full)
 		}
-		if suggestion, banned := bannedVerbs[verb]; banned {
-			t.Errorf("command %q uses banned verb %q (%s)", name, verb, suggestion)
+	}
+	walk(rootCmd, "")
+}
+
+// The exemptions are real commands, so a rename cannot leave one behind.
+func TestVocabularyCompliance_ExemptionsExist(t *testing.T) {
+	cleanup := registerTestCommands(t)
+	defer cleanup()
+	for path := range verbExemptions {
+		if c, rest, err := rootCmd.Find(strings.Fields(path)); err != nil || len(rest) != 0 || c == rootCmd {
+			t.Errorf("exempted command %q does not exist", path)
 		}
 	}
 }

@@ -684,3 +684,47 @@ func TestReload_ToolsRefreshedByABackendStartReachTheEndpointWithoutAReload(t *t
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A reload builds its servers with the options Serve's were built with: a
+// server the reload adds, or whose tools it changes, keeps the call guard.
+func TestReload_KeepsServerOptionsOnAddedAndRetooledServers(t *testing.T) {
+	fs := newFakeStarter()
+	set := newSet("slack")
+	src := &setSource{set: copySet(set)}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	pool := NewPool(fs.start, PoolOptions{})
+	mon := &Monitor{Pool: pool, Servers: []string{"slack"}, Port: port}
+	guard := WithCallGuard(func(context.Context, string, string) error { return errors.New("guarded") })
+	opt := DaemonOptions{Status: mon, Reload: &ReloadOptions{
+		Current: copySet(set), Load: src.load, Apply: src.apply, ServerOptions: []ServerOption{guard},
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, ln, NewServers(set.Catalog, pool, guard), pool, opt) }()
+	t.Cleanup(func() { cancel(); <-done }) //nolint:errcheck // Serve's exit error is irrelevant to teardown
+	base := "http://" + ln.Addr().String()
+
+	src.change(func(s *ServerSet) {
+		s.Configs["jira"] = ServerConfig{Command: "jira-mcp"}
+		s.Catalog.Set("jira", toolJSON("jira_tool"), time.Unix(0, 0))
+		s.Catalog.Set("slack", toolJSON("slack_tool", "slack_tool2"), time.Unix(0, 0))
+	})
+	if res, err := ReloadDaemon(port); err != nil || !sameNames(res.Added, []string{"jira"}) {
+		t.Fatalf("reload: %+v %v", res, err)
+	}
+	for _, c := range []struct{ server, tool string }{{"jira", "jira_tool"}, {"slack", "slack_tool2"}} {
+		cl := httpClient(t, endpointURL(base, c.server))
+		res, err := cl.CallTool(context.Background(), req(c.tool))
+		_ = cl.Close()
+		if err != nil || !res.IsError || !strings.Contains(resultText(t, res), "guarded") {
+			t.Errorf("%s/%s after reload was not guarded: %v %+v", c.server, c.tool, err, res)
+		}
+	}
+	if fs.count("jira") != 0 || fs.count("slack") != 0 {
+		t.Fatalf("a guarded call reached a backend: jira %d slack %d", fs.count("jira"), fs.count("slack"))
+	}
+}

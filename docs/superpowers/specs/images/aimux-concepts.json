@@ -1,0 +1,206 @@
+{
+ "theme": "paper",
+ "elements": [
+  {
+   "type": "text",
+   "x": 20,
+   "y": 14,
+   "w": 1180,
+   "text": "Where aimux goes: from \"watch and spawn my agents\" to \"run agents safely from any client\". Most concepts exist; four are new"
+  },
+  {
+   "type": "container",
+   "x": 20,
+   "y": 56,
+   "w": 380,
+   "h": 520,
+   "label": "Reused as is",
+   "kind": "gray"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 92,
+   "w": 348,
+   "h": 64,
+   "title": "Sessions",
+   "desc": "history, catalog, sessionstate, search:\nevery surface already reads these"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 170,
+   "w": 348,
+   "h": 64,
+   "title": "acprun",
+   "desc": "continue a session over ACP; the remote\nAPI broker and Wingman's Page lane both use it"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 248,
+   "w": 348,
+   "h": 64,
+   "title": "Environments + runtimes",
+   "desc": "local, container, k8s, OpenShell;\nCreateSandbox, PolicyEnforcer interfaces"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 326,
+   "w": 348,
+   "h": 64,
+   "title": "remote API v1",
+   "desc": "contract, fixtures, tailnet auth, pairing,\nevents, approvals, queue"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 404,
+   "w": 348,
+   "h": 64,
+   "title": "controller",
+   "desc": "UI-agnostic logic for TUI and web"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 482,
+   "w": 348,
+   "h": 64,
+   "title": "trace, cost, otel, deliver",
+   "desc": "observability and output targets"
+  },
+  {
+   "type": "container",
+   "x": 420,
+   "y": 56,
+   "w": 380,
+   "h": 520,
+   "label": "Extended (same name, more meaning)",
+   "kind": "open"
+  },
+  {
+   "type": "card",
+   "x": 436,
+   "y": 92,
+   "w": 348,
+   "h": 76,
+   "title": "Profile",
+   "desc": "today: saved flags (provider, dir, model, mode)\nafter: security contract, narrow-only, digest"
+  },
+  {
+   "type": "card",
+   "x": 436,
+   "y": 184,
+   "w": 348,
+   "h": 76,
+   "title": "Spawn",
+   "desc": "today: --environment openshell exists\nafter: --profile picks sandbox, tools, policy"
+  },
+  {
+   "type": "card",
+   "x": 436,
+   "y": 276,
+   "w": 348,
+   "h": 76,
+   "title": "MCP proxy \u2192 tool gateway",
+   "desc": "today: allowlist by name, readonly listener\nafter: any tool kind, review, pins, MCP rules"
+  },
+  {
+   "type": "card",
+   "x": 436,
+   "y": 368,
+   "w": 348,
+   "h": 76,
+   "title": "remote API v1",
+   "desc": "after: + profiles, + runs, + per-client scopes;\nalso served on a local Unix socket"
+  },
+  {
+   "type": "card",
+   "x": 436,
+   "y": 460,
+   "w": 348,
+   "h": 76,
+   "title": "OpenShell launch",
+   "desc": "today: three code paths (compose, environment,\nWingman); after: one compiler + launcher"
+  },
+  {
+   "type": "container",
+   "x": 820,
+   "y": 56,
+   "w": 380,
+   "h": 520,
+   "label": "New concepts",
+   "kind": "open",
+   "tone": "amber"
+  },
+  {
+   "type": "card",
+   "x": 836,
+   "y": 92,
+   "w": 348,
+   "h": 78,
+   "title": "Run",
+   "desc": "one request that owns several sessions with\nroles and data rules (planner, reader, writer)",
+   "tone": "red"
+  },
+  {
+   "type": "card",
+   "x": 836,
+   "y": 188,
+   "w": 348,
+   "h": 78,
+   "title": "Reviewed tool set + pin",
+   "desc": "a human-approved read-only set per source;\nchange hides the tool"
+  },
+  {
+   "type": "card",
+   "x": 836,
+   "y": 284,
+   "w": 348,
+   "h": 78,
+   "title": "Client scope",
+   "desc": "which profiles a client may use:\nWingman never gets coding"
+  },
+  {
+   "type": "card",
+   "x": 836,
+   "y": 380,
+   "w": 348,
+   "h": 78,
+   "title": "Query check",
+   "desc": "the one place private text may leave,\nchecked before any search"
+  },
+  {
+   "type": "card",
+   "x": 836,
+   "y": 486,
+   "w": 348,
+   "h": 70,
+   "title": "Retired",
+   "desc": "Wingman's own broker, history.db,\nreadonly.json, hand-rolled sandbox exec",
+   "kind": "closed"
+  },
+  {
+   "type": "legend",
+   "x": 20,
+   "y": 596,
+   "items": [
+    {
+     "kind": "open",
+     "text": "grows"
+    },
+    {
+     "kind": "open",
+     "tone": "amber",
+     "text": "new"
+    },
+    {
+     "kind": "closed",
+     "text": "goes away"
+    }
+   ]
+  }
+ ]
+}

@@ -45,3 +45,21 @@ func envKeys(m map[string]string) []string {
 	}
 	return out
 }
+
+// ScrubTokens hides token-shaped strings in text from outside the proxy
+// (no configured values to know of), and leaves ordinary text alone.
+func TestScrubTokens(t *testing.T) {
+	in := "auth failed: Bearer abc.def-123 key sk-ant-0123456789abcdef run a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7"
+	out := ScrubTokens(in)
+	for _, secret := range []string{"abc.def-123", "sk-ant-0123456789abcdef", "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("%q survived: %q", secret, out)
+		}
+	}
+	if plain := "backend down: connection refused"; ScrubTokens(plain) != plain {
+		t.Errorf("plain text changed: %q", ScrubTokens(plain))
+	}
+	if ScrubTokens("") != "" {
+		t.Error("empty text changed")
+	}
+}

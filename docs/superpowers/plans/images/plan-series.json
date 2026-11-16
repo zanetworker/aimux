@@ -1,0 +1,201 @@
+{
+ "theme": "paper",
+ "elements": [
+  {
+   "type": "text",
+   "x": 20,
+   "y": 14,
+   "w": 1160,
+   "text": "Three plans, each shippable on its own: profiles and one contract first, then the tool gateway, then research with context"
+  },
+  {
+   "type": "container",
+   "x": 20,
+   "y": 56,
+   "w": 375,
+   "h": 470,
+   "label": "Plan 1: profiles and one contract (this plan)",
+   "kind": "open",
+   "tone": "amber"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 92,
+   "w": 343,
+   "h": 68,
+   "title": "Per-tool pins, live check",
+   "desc": "closes the readonly.go:101 gap"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 176,
+   "w": 343,
+   "h": 68,
+   "title": "Profiles v2 + CLI",
+   "desc": "manifest, narrow-only, digest"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 260,
+   "w": 343,
+   "h": 68,
+   "title": "Compiler + launcher",
+   "desc": "policy with MCP tool rules;\none OpenShell launch path"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 344,
+   "w": 343,
+   "h": 68,
+   "title": "Client scopes + v1 additions",
+   "desc": "profiles, profile on sessions,\nlocal sockets"
+  },
+  {
+   "type": "card",
+   "x": 36,
+   "y": 428,
+   "w": 343,
+   "h": 68,
+   "title": "Wingman as a v1 client",
+   "desc": "relay only; its broker retired"
+  },
+  {
+   "type": "container",
+   "x": 415,
+   "y": 56,
+   "w": 375,
+   "h": 470,
+   "label": "Plan 2: tool gateway",
+   "kind": "open"
+  },
+  {
+   "type": "card",
+   "x": 431,
+   "y": 92,
+   "w": 343,
+   "h": 68,
+   "title": "Registry + identity",
+   "desc": "aimux tools add, list, status"
+  },
+  {
+   "type": "card",
+   "x": 431,
+   "y": 176,
+   "w": 343,
+   "h": 68,
+   "title": "Review",
+   "desc": "hints suggest, you approve;\nauthorship class"
+  },
+  {
+   "type": "card",
+   "x": 431,
+   "y": 260,
+   "w": 343,
+   "h": 68,
+   "title": "CLI packs + runner sandbox",
+   "desc": "kubectl spike, gh REST + GraphQL"
+  },
+  {
+   "type": "card",
+   "x": 431,
+   "y": 344,
+   "w": 343,
+   "h": 68,
+   "title": "HTTP sources",
+   "desc": "OpenAPI GET operations"
+  },
+  {
+   "type": "card",
+   "x": 431,
+   "y": 428,
+   "w": 343,
+   "h": 68,
+   "title": "/v1/tools, list_changed",
+   "desc": "drift visible to every client"
+  },
+  {
+   "type": "container",
+   "x": 810,
+   "y": 56,
+   "w": 375,
+   "h": 470,
+   "label": "Plan 3: research with context",
+   "kind": "open"
+  },
+  {
+   "type": "card",
+   "x": 826,
+   "y": 92,
+   "w": 343,
+   "h": 68,
+   "title": "Spikes",
+   "desc": "web search in a sandbox;\nplanner typed output"
+  },
+  {
+   "type": "card",
+   "x": 826,
+   "y": 176,
+   "w": 343,
+   "h": 68,
+   "title": "Runs in v1",
+   "desc": "/v1/runs, events, preview"
+  },
+  {
+   "type": "card",
+   "x": 826,
+   "y": 260,
+   "w": 343,
+   "h": 68,
+   "title": "Planner, reader, writer",
+   "desc": "three sessions, one run"
+  },
+  {
+   "type": "card",
+   "x": 826,
+   "y": 344,
+   "w": 343,
+   "h": 68,
+   "title": "Query check",
+   "desc": "preview only on a hit"
+  },
+  {
+   "type": "card",
+   "x": 826,
+   "y": 428,
+   "w": 343,
+   "h": 68,
+   "title": "Surfaces",
+   "desc": "Wingman toggle, aimux run,\nschedule, phone runs view"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     395,
+     290
+    ],
+    [
+     415,
+     290
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     790,
+     290
+    ],
+    [
+     810,
+     290
+    ]
+   ]
+  }
+ ]
+}

@@ -3,6 +3,7 @@ package netguard
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,51 @@ func TestLocalOnly(t *testing.T) {
 			h.ServeHTTP(w, r)
 			if w.Code != tt.want {
 				t.Fatalf("got %d, want %d", w.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestBearerOnly(t *testing.T) {
+	tests := []struct {
+		name, token, header string
+		want                int
+	}{
+		{"no header", "s3cret", "", http.StatusUnauthorized},
+		{"wrong token", "s3cret", "Bearer nope", http.StatusUnauthorized},
+		{"right token", "s3cret", "Bearer s3cret", http.StatusOK},
+		{"lowercase scheme", "s3cret", "bearer s3cret", http.StatusOK},
+		{"wrong scheme", "s3cret", "Basic s3cret", http.StatusUnauthorized},
+		{"token prefix only", "s3cret", "Bearer s3cre", http.StatusUnauthorized},
+		{"empty token, empty bearer", "", "Bearer ", http.StatusUnauthorized},
+		{"empty token, no header", "", "", http.StatusUnauthorized},
+		{"empty token, any header", "", "Bearer anything", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			h := BearerOnly(tt.token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+			r := httptest.NewRequest("POST", "/mcp", nil)
+			r.Host = "host.containers.internal:7390"
+			if tt.header != "" {
+				r.Header.Set("Authorization", tt.header)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			got := w.Code
+			if got != tt.want {
+				t.Fatalf("got %d, want %d", got, tt.want)
+			}
+			if called != (tt.want == http.StatusOK) {
+				t.Fatalf("next called = %v for status %d", called, tt.want)
+			}
+			if tt.want == http.StatusUnauthorized {
+				if w.Header().Get("WWW-Authenticate") != "Bearer" {
+					t.Errorf("WWW-Authenticate = %q, want Bearer", w.Header().Get("WWW-Authenticate"))
+				}
+				if body := strings.TrimSpace(w.Body.String()); body != "unauthorized" {
+					t.Errorf("body = %q, want unauthorized", body)
+				}
 			}
 		})
 	}

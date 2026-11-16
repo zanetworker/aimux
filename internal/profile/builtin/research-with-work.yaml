@@ -1,0 +1,12 @@
+name: research-with-work
+harness: claude-code
+runs: run
+tools: []
+network:
+  default: deny
+  allow: [model]
+settings:
+  inherit_user: false
+roles:
+  planner: research-planner
+  writer: research-writer

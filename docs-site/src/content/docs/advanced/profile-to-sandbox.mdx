@@ -1,0 +1,62 @@
+---
+title: How a profile becomes a sandbox
+description: The compile chain from a profile manifest to an OpenShell policy, a gateway token and claude flags
+---
+
+For contributors. This page follows one profile with `runs: sandbox` from its manifest to the `claude -p` process in the sandbox. For what the profile fields mean, see [Profiles](/guides/profiles/).
+
+## The compile chain
+
+```text
+profile manifest (builtin or ~/.config/aimux/profiles)
+        |  profile.Resolve        internal/profile/manifest.go
+        |  extends parent; a child may only narrow
+        v
+resolved Manifest
+        |  toolreg.Snapshot          internal/toolreg/snapshot.go
+        |  registry + pins, one version; "google:readonly" ->
+        |  server + listed tools pinned (not source_changed)
+        v
+profile.CompileAt(m, snap, gw)    internal/profile/compile.go
+        |
+        +--> (a) PolicyYAML + PolicyDigest   buildPolicy / marshalPolicy
+        |        OpenShell network, MCP tool, file and binary rules
+        |
+        +--> (b) Grant: profile.ToolGrant    internal/profile/grant.go
+        |        server -> exact tools, immutable; (a), the token
+        |        and (c) all render from this one value
+        |
+        +--> (c) Compiled.Capabilities()     internal/harnessconfig/harnessconfig.go
+                 grant, web, file grants (read and write paths),
+                 inherit user, model (harness-neutral)
+                      |
+                      |  + harnessconfig.Launch from the engine:
+                      |    mode (headless or interactive),
+                      |    resume id, session id
+                      v  harnessconfig.For("claude-code")
+                 harness adapter             internal/harnessconfig/claude.go
+                 claudePrint (claudeACP for acp mode)
+                      |
+                      v
+                 Spec: argv for `claude -p ...` + MCP config renderer
+```
+
+Compile fails before any of this runs when the profile does not run in a sandbox, is not available, lacks `model` in `network.allow`, has a sandbox name over 19 characters, or requests tools whose sets all lack pins.
+
+## What each output feeds
+
+- **(a) Policy.** `buildPolicy` turns the manifest, the grant and the gateway address into the OpenShell policy. `PolicyDigest` is a sha256 over the YAML. It keys the sandbox's policy, so a new pin changes it. The manifest `Digest` is separate and is what sessions and audit record.
+- **(b) Grant.** The server to exact tool names map, held as an immutable `ToolGrant`: its fields are unexported and every accessor returns a copy. `Grant.Scope()` is the scope of the session token that `toolgateway.Tokens.Issue` creates (`internal/toolgateway/tokens.go`); the same grant is what the policy allows, what the MCP config lists and what `--allowedTools` names, and a test checks the four match.
+- **(c) Capabilities and Launch.** An adapter reads only these two, never the manifest; a future Codex or Gemini adapter reads the same two. Capabilities is what the run may do (`Compiled.Capabilities()`, which derives its tool grant from `Compiled.Grant`); Launch is how this run starts (from the engine, per turn). Launch modes are harness-neutral: the claude adapter maps `headless` to `claude -p` and `interactive` to ACP. For headless, `claudePrint` turns them into flags: `--tools`, `--strict-mcp-config`, `--mcp-config`, `--allowedTools`, `--setting-sources ""` unless the profile inherits user settings, `--model`, and `--resume` or `--session-id`.
+
+## At run time
+
+`profilerun.SandboxEngine` (`internal/profilerun/sandbox.go`) does this for each turn:
+
+1. Calls its `Compile` function: `profile.CompileAt` over the turn's snapshot of the registry and pins, recorded in `Compiled.Snapshot`. In `remote serve` the snapshot comes from one `toolreg.Store` that only the turns reload, when the registry or pins file changed (time, size, inode) and once a minute as a backstop (`toolSnapshots` in `internal/remoteapp/profileserve.go`); the read-only gateway serves the same store and never rereads the files itself. It publishes a new snapshot to the token table before rebuilding any server, and keeps the one backend pool `mcpproxy.Serve` owns, retiring only moved or dropped backends.
+2. Ensures the sandbox `aimux-<profile>` exists with that policy (`ensure`, through `internal/sandboxlaunch`).
+3. Asks the harness adapter for a Spec from the compiled Capabilities (with the turn's model, if chosen) and a Launch: headless mode, `--session-id` on the first turn, `--resume` after.
+4. If the grant is not empty, gets the gateway (which first applies a newer snapshot if the turns reloaded one), issues a session token scoped to the grant under `Compiled.Snapshot`, and revokes it when the process ends. When the gateway serves another snapshot than the token's, older or newer (a refresh still pending), the token loses the tools whose pin hash or source differs between the two, or that only one of them pins; the rest stay usable.
+5. Runs `claude` through `Launcher.Exec` with the MCP config (it holds the token) on the first stdin line and the prompt after it. Neither goes on a command line.
+
+Three walls then apply: the adapter's flags (cooperative), the OpenShell policy (enforced), and the read-only tool gateway checking token and pin on every call (enforced). [Reviewed tool sets and pins](/guides/profiles/#reviewed-tool-sets-and-pins) explains the pins.

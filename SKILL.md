@@ -81,10 +81,9 @@ Reuse on every invocation:
 aimux spawn --profile mysetup
 ```
 
-Explicit flags override profile values. Manage profiles:
+Explicit flags override profile values. Manage saved profiles (`aimux profile list` lists the v2 profiles; `aimux profile migrate` converts the saved ones):
 
 ```bash
-aimux profile list --json
 aimux profile get mysetup --json
 aimux profile delete mysetup
 ```
@@ -139,7 +138,7 @@ aimux spawn gpt
 # Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
-Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config. `aimux chat`, `aimux jump`, `aimux remote serve` and `aimux mcp proxy` return 1 for every failure, including missing arguments, an unknown session and a bad setting.
+Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config. `aimux chat`, `aimux jump`, `aimux remote serve`, `aimux mcp proxy`, `aimux browser`, `aimux profile`, `aimux tools`, `aimux sandbox`, `aimux router`, `aimux setup` and `aimux doctor` return 1 for every failure, including missing arguments, an unknown session and a bad setting. Status commands exit 0 and report problems on stderr; `aimux doctor` exits 1 only when a check fails.
 
 With `--json`, errors go to stderr as structured JSON (except `aimux chat`, whose `--json` covers the event stream; its errors stay plain text):
 

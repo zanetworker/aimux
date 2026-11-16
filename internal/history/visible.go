@@ -22,6 +22,7 @@ const (
 	KindAnalyzer                   // started by aimux's own analysis or hook prompts
 	KindNearEmpty                  // no cost and at most 5 turns
 	KindUndated                    // neither a start nor a last-active time
+	KindHidden                     // the owner hid it (Meta.Hidden); no reveal lifts it
 )
 
 // noise are the kinds that only guess a session is uninteresting.
@@ -46,6 +47,9 @@ func Kinds(s Session) Kind {
 	}
 	if s.StartTime.IsZero() && s.LastActive.IsZero() {
 		k |= KindUndated
+	}
+	if s.Hidden {
+		k |= KindHidden
 	}
 	return k
 }
@@ -138,10 +142,11 @@ var DashboardReveals = []Reveal{
 }
 
 // RemoteOpts: the remote API's list, projects and search scope. Subagents
-// are never listed; automated sessions are when asked for, or when aimux
-// created them (a session started from the phone stays listed).
+// and sessions the owner hid are never listed; automated sessions are when
+// asked for, or when aimux created them (a session started from the phone
+// stays listed).
 func RemoteOpts(includeAutomated, created bool) VisibleOpts {
-	o := VisibleOpts{Hide: KindSubagent | KindAutomated}
+	o := VisibleOpts{Hide: KindSubagent | KindAutomated | KindHidden}
 	if includeAutomated || created {
 		o.Reveal = KindAutomated
 	}

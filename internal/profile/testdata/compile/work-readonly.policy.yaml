@@ -1,0 +1,112 @@
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /bin
+    - /dev/urandom
+    - /etc
+    - /lib
+    - /proc
+    - /usr
+    - /var/log
+  read_write:
+    - /dev/null
+    - /sandbox
+    - /tmp
+landlock:
+  compatibility: best_effort
+network_policies:
+  aimux_tool_gateway:
+    name: aimux_tool_gateway
+    endpoints:
+      - host: host.containers.internal
+        port: 7390
+        path: /mcp/google
+        protocol: mcp
+        enforcement: enforce
+        mcp:
+          versions: ["2025-06-18", "2025-11-25"]
+        allowed_ips:
+          - 192.168.127.254/32
+        rules:
+          - allow:
+              method: initialize
+          - allow:
+              method: notifications/initialized
+          - allow:
+              method: tools/list
+          - allow:
+              method: ping
+          - allow:
+              method: tools/call
+              tool:
+                any: [get_doc]
+      - host: host.containers.internal
+        port: 7390
+        path: /mcp/jira
+        protocol: mcp
+        enforcement: enforce
+        mcp:
+          versions: ["2025-06-18", "2025-11-25"]
+        allowed_ips:
+          - 192.168.127.254/32
+        rules:
+          - allow:
+              method: initialize
+          - allow:
+              method: notifications/initialized
+          - allow:
+              method: tools/list
+          - allow:
+              method: ping
+          - allow:
+              method: tools/call
+              tool:
+                any: [get_issue, search]
+      - host: host.containers.internal
+        port: 7390
+        path: /mcp/slack
+        protocol: mcp
+        enforcement: enforce
+        mcp:
+          versions: ["2025-06-18", "2025-11-25"]
+        allowed_ips:
+          - 192.168.127.254/32
+        rules:
+          - allow:
+              method: initialize
+          - allow:
+              method: notifications/initialized
+          - allow:
+              method: tools/list
+          - allow:
+              method: ping
+          - allow:
+              method: tools/call
+              tool:
+                any: [history]
+      - host: host.containers.internal
+        port: 7390
+        path: /mcp/wiki
+        protocol: mcp
+        enforcement: enforce
+        mcp:
+          versions: ["2025-06-18", "2025-11-25"]
+        allowed_ips:
+          - 192.168.127.254/32
+        rules:
+          - allow:
+              method: initialize
+          - allow:
+              method: notifications/initialized
+          - allow:
+              method: tools/list
+          - allow:
+              method: ping
+          - allow:
+              method: tools/call
+              tool:
+                any: [read_page, search]
+    binaries:
+      - path: /usr/bin/node
+      - path: /usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe

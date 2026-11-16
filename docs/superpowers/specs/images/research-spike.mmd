@@ -1,0 +1,17 @@
+%%{init: {"theme": "neutral"}}%%
+flowchart LR
+  subgraph SB["OpenShell sandbox aimux-research (claude -p, tools WebSearch + WebFetch only)"]
+    C["Claude Code 2.1.319<br/>claude.exe / node"]
+  end
+  subgraph SUP["OpenShell supervisor: policy DNS, TLS termination, L7 rules, OCSF log"]
+    P1["_provider_wingman_claude<br/>api.anthropic.com:443<br/>rest read-write, token injected"]
+    P2["public_web_readonly<br/>**.*.com, **.*.org, ... :443<br/>rest read-only: GET HEAD OPTIONS"]
+    D["deny: no matching policy,<br/>private or link-local answer,<br/>POST to web hosts, port 80"]
+  end
+  A["api.anthropic.com<br/>POST /v1/messages (model + WebSearch, server side)<br/>GET /api/web/domain_info (WebFetch preflight)<br/>POST /v1/messages (WebFetch extraction)"]
+  S["Anthropic search backend<br/>(runs inside the API)"]
+  W["Public web page<br/>GET https://host/path?query"]
+  X["169.254.169.254, host.containers.internal,<br/>192-168-x.nip.io, github.com (apex), datadog POST"]
+  C -->|"model call, WebSearch"| P1 --> A --> S
+  C -->|"WebFetch GET"| P2 --> W
+  C -.->|"blocked"| D -.-> X

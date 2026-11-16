@@ -8,7 +8,8 @@ import (
 	"sort"
 )
 
-// Profile stores a named bundle of flags (provider, dir, model, mode).
+// Profile is the v1 saved-flags record (provider, dir, model, mode). The v1
+// store keeps working and is read only to migrate into Manifest (MigrateV1).
 type Profile struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider,omitempty"`

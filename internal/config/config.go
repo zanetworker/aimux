@@ -91,6 +91,10 @@ type RemoteAccessConfig struct {
 	// DeviceLogin requires a paired device and Face ID on top of the tailnet
 	// check; nil (unset) means on. Read it with DeviceLoginOn.
 	DeviceLogin *bool `yaml:"device_login"`
+	// StepUpLegacy applies the step-up of host profiles (a device login in
+	// the last 60 seconds, from a Secure Enclave device) to new sessions
+	// started without a profile too. Off: those are as before profiles.
+	StepUpLegacy bool `yaml:"step_up_legacy"`
 }
 
 // DeviceLoginOn reports whether the remote API requires device login: true

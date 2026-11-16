@@ -1,0 +1,23 @@
+flowchart TB
+  subgraph C["Clients (thin)"]
+    W["Wingman panel"] ~~~ I["iPhone app"] ~~~ CLI["aimux CLI"]
+  end
+  subgraph U["Use cases (aimux)"]
+    AR["internal/autoroute<br/>which mode? (NEW)"]
+    MR["internal/modelroute<br/>which model? (future)"]
+  end
+  subgraph K["Core: internal/decide (NEW)"]
+    Q["Question + Options + Allowed"] --> P["policy: allowed filter, threshold,<br/>timeout, fallback chain"]
+    P --> B1["backend: openrouter<br/>Decisions API, zdr"]
+    P --> B2["backend: chat via internal/llm"]
+    P --> L["usage line + decision log<br/>+ Feedback(id, final)"]
+  end
+  subgraph S["Shared plumbing"]
+    SEC["internal/secrets<br/>Keychain (NEW)"] ~~~ LLM["internal/llm"] ~~~ COST["internal/cost"]
+  end
+  W -->|"POST /v1/route"| AR
+  AR --> Q
+  MR -.-> Q
+  B1 --> SEC
+  B2 --> LLM
+  L --> COST

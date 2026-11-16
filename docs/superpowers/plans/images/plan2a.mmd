@@ -1,0 +1,19 @@
+flowchart LR
+  subgraph CFG["~/.config/aimux (you edit)"]
+    TS["tool-sources.yaml (T1)<br/>sources: where servers are<br/>sets: what is reviewed"]
+  end
+  subgraph ST["~/.aimux (generated state)"]
+    PN["tools/pins.json v2 (T2)<br/>hash + reviewed definition<br/>+ approved_at + source"]
+  end
+  TS --> SN["Snapshot (T4)<br/>config + pins, one version"]
+  PN --> SN
+  RV["aimux tools status / diff / approve (T2)"] --> PN
+  SN --> C["profile.Compile"]
+  C --> G["ToolGrant (T3)<br/>immutable, shared"]
+  G --> P["OpenShell policy"]
+  G --> K["gateway token scope"]
+  G --> H["HarnessCapabilities (T3)"]
+  L["LaunchRequest (T3)<br/>mode, session ids"] --> A["harness adapter"]
+  H --> A
+  SN --> GW["read-only gateway<br/>serves the same snapshot"]
+  SN --> API["GET /v1/tools (T5)<br/>why active / hidden / changed"]

@@ -1,0 +1,9 @@
+name: base
+harness: claude-code
+runs: host
+tools: []
+network:
+  default: deny
+  allow: [model]
+settings:
+  inherit_user: false

@@ -1,0 +1,21 @@
+{
+  "description": "GET /v1/profiles as Wingman sees it: every profile is listed, allowed says which this client may ask for, available says which the Mac can run yet. A host profile (runs: host) is never allowed for Wingman, even when its scope names it (coding-v1). Clients grey out profiles that are not allowed or not available and never send them. digest is sha256:<hex> of the resolved manifest; compare it, do not parse it.",
+  "client": "wingman",
+  "profiles": [
+    { "name": "coding", "runs": "host", "available": true },
+    { "name": "coding-v1", "runs": "host", "available": true },
+    { "name": "page", "runs": "acp", "available": true },
+    { "name": "research", "runs": "acp", "available": false },
+    { "name": "work-readonly", "runs": "sandbox", "available": true }
+  ],
+  "scopes": { "wingman": ["page", "research", "work-readonly", "coding-v1"] },
+  "want": {
+    "profiles": [
+      { "name": "coding", "runs": "host", "available": true, "allowed": false },
+      { "name": "coding-v1", "runs": "host", "available": true, "allowed": false },
+      { "name": "page", "runs": "acp", "available": true, "allowed": true },
+      { "name": "research", "runs": "acp", "available": false, "allowed": true },
+      { "name": "work-readonly", "runs": "sandbox", "available": true, "allowed": true }
+    ]
+  }
+}

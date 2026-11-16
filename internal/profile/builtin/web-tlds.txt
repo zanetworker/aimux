@@ -1,0 +1,20 @@
+# Reviewed TLD list v1 for the research profile's public_web_readonly policy.
+# Each entry compiles to one read-only endpoint "**.*.<tld>" on port 443, which
+# matches hosts of three or more labels (www.example.com) and never reaches
+# private addresses. Changing this list changes the policy digest, so running
+# sandboxes pick up the new policy.
+com
+org
+net
+io
+dev
+ai
+app
+edu
+gov
+co
+me
+info
+uk
+de
+eu

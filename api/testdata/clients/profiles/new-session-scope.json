@@ -1,0 +1,62 @@
+{
+  "description": "POST /v1/sessions with a profile: every refusal a client must handle, by status and code, and the one that starts. Nothing starts on a refusal. pageTextBytes, where set, stands for a pageText of that many bytes (too long to write here). A device without a login under 60 seconds old (or with device login off) gets step_up_required with maxAge for any host profile: log in again, then retry.",
+  "profiles": [
+    { "name": "coding", "runs": "host", "available": true },
+    { "name": "coding-v1", "runs": "host", "available": true },
+    { "name": "page", "runs": "acp", "available": true },
+    { "name": "research", "runs": "acp", "available": false },
+    { "name": "work-readonly", "runs": "sandbox", "available": true }
+  ],
+  "scopes": { "wingman": ["page", "research", "work-readonly", "coding-v1"] },
+  "cases": [
+    {
+      "description": "unknown profile",
+      "client": "wingman",
+      "request": { "profile": "nope", "text": "hi" },
+      "status": 400, "code": "unknown_profile"
+    },
+    {
+      "description": "outside the client's scope",
+      "client": "wingman",
+      "request": { "profile": "coding", "text": "hi" },
+      "status": 403, "code": "profile_not_allowed"
+    },
+    {
+      "description": "a host profile in Wingman's scope is still refused",
+      "client": "wingman",
+      "request": { "profile": "coding-v1", "text": "hi" },
+      "status": 403, "code": "profile_not_allowed"
+    },
+    {
+      "description": "no profile from a local client: a host session, refused",
+      "client": "wingman",
+      "request": { "cwd": "/w/app", "text": "hi" },
+      "status": 403, "code": "profile_not_allowed"
+    },
+    {
+      "description": "a host profile from a device without a fresh login",
+      "client": "device",
+      "request": { "profile": "coding", "text": "hi" },
+      "status": 403, "code": "step_up_required", "maxAge": 60
+    },
+    {
+      "description": "allowed, but the Mac cannot run it yet",
+      "client": "wingman",
+      "request": { "profile": "research", "text": "hi" },
+      "status": 409, "code": "profile_not_available"
+    },
+    {
+      "description": "a page over 512 KiB",
+      "client": "wingman",
+      "request": { "profile": "page", "text": "sum up", "url": "https://example.com/a" },
+      "pageTextBytes": 524289,
+      "status": 413, "code": "page_too_large"
+    },
+    {
+      "description": "a question about a page: started",
+      "client": "wingman",
+      "request": { "profile": "page", "text": "what is this?", "url": "https://example.com/a", "title": "A page", "pageText": "The page's text." },
+      "status": 202
+    }
+  ]
+}

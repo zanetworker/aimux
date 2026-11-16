@@ -22,7 +22,7 @@ import (
 )
 
 func TestResolveRemoteSettings_Defaults(t *testing.T) {
-	s, err := resolveRemoteSettings(config.RemoteAccessConfig{AllowedLogins: []string{"me@example.com"}}, 0, nil)
+	s, err := resolveRemoteSettings(config.RemoteAccessConfig{AllowedLogins: []string{"me@example.com"}}, 0, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestResolveRemoteSettings_Defaults(t *testing.T) {
 
 func TestResolveRemoteSettings_FlagsOverrideConfig(t *testing.T) {
 	cfg := config.RemoteAccessConfig{Port: 7400, AllowedLogins: []string{"a@x"}, MaxRuns: 3, ApprovalTimeout: "2m", Adapter: "my-acp --x"}
-	s, err := resolveRemoteSettings(cfg, 7500, []string{"b@x"})
+	s, err := resolveRemoteSettings(cfg, 7500, []string{"b@x"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,11 +43,11 @@ func TestResolveRemoteSettings_FlagsOverrideConfig(t *testing.T) {
 }
 
 func TestResolveRemoteSettings_Errors(t *testing.T) {
-	if _, err := resolveRemoteSettings(config.RemoteAccessConfig{}, 0, nil); err == nil || !strings.Contains(err.Error(), "allowed_logins") {
+	if _, err := resolveRemoteSettings(config.RemoteAccessConfig{}, 0, nil, false); err == nil || !strings.Contains(err.Error(), "allowed_logins") {
 		t.Fatalf("empty allowlist: %v, want an error naming remote_access.allowed_logins", err)
 	}
 	bad := config.RemoteAccessConfig{AllowedLogins: []string{"a@x"}, ApprovalTimeout: "soon"}
-	if _, err := resolveRemoteSettings(bad, 0, nil); err == nil || !strings.Contains(err.Error(), "approval_timeout") {
+	if _, err := resolveRemoteSettings(bad, 0, nil, false); err == nil || !strings.Contains(err.Error(), "approval_timeout") {
 		t.Fatalf("bad duration: %v", err)
 	}
 }
@@ -532,5 +532,44 @@ func TestRemoteRevoke_WritesTheAuditLine(t *testing.T) {
 	}
 	if strings.Contains(string(raw), d.PublicKey) || strings.Contains(string(raw), d.ID) {
 		t.Fatalf("audit line holds the key or id: %s", raw)
+	}
+}
+
+// --local-only serves only local sockets, so nobody need be allowed on the
+// tailnet; other settings still apply.
+func TestServe_LocalOnlySettingsNeedNoAllow(t *testing.T) {
+	s, err := resolveRemoteSettings(config.RemoteAccessConfig{ApprovalTimeout: "2m"}, 0, nil, true)
+	if err != nil {
+		t.Fatalf("local-only without allowed logins: %v", err)
+	}
+	if s.approvalTimeout != 2*time.Minute || len(s.allowed) != 0 {
+		t.Fatalf("got %+v", s)
+	}
+	if _, err := resolveRemoteSettings(config.RemoteAccessConfig{ApprovalTimeout: "soon"}, 0, nil, true); err == nil {
+		t.Fatal("a bad duration passed under --local-only")
+	}
+}
+
+// remote serve reads the clients file (clientscope) from the HOME it runs
+// under: a malformed one stops it, naming the file.
+func TestServe_MalformedClientsFileIsAnError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".config", "aimux")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "clients.yaml"), []byte("clients: [unclosed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := newRemoteServeCmd()
+	c.SetArgs([]string{"--local-only"})
+	if err := c.Execute(); err == nil || !strings.Contains(err.Error(), "clients.yaml") {
+		t.Fatalf("got %v, want an error naming clients.yaml", err)
+	}
+	for _, f := range []string{"local-only", "unsafe-no-device-login"} {
+		if c.Flags().Lookup(f) == nil {
+			t.Errorf("no --%s flag", f)
+		}
 	}
 }
