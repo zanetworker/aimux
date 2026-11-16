@@ -1,0 +1,14 @@
+flowchart LR
+  Q["You type a question<br/>(mode: Auto)"] --> P["Panel<br/>facts: site private?, page readable?, chip on?"]
+  P -->|"POST /v1/route (T2)<br/>question + facts only"| R["aimux autoroute (T1)"]
+  R --> O{"@page / @web / @workspace?"}
+  O -->|yes| D1["use it"]
+  O -->|no| G["guards: unreadable page never Page;<br/>only modes in your client scope"]
+  G --> C["Clef-flash via OpenRouter<br/>Decisions API, zdr:true, 2 s timeout"]
+  C --> T{"confidence >= 0.25?"}
+  T -->|yes| D2["Auto: Web (73%) [change]"]
+  T -->|"no / error / no key"| PK["one-tap picker,<br/>suggestion preselected"]
+  D1 --> S["session with that profile<br/>page | research | work-readonly"]
+  D2 --> S
+  PK --> S
+  S --> L["decision log: hash, facts, pick,<br/>confidence, your final mode (T2)"]

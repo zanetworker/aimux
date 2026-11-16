@@ -1,0 +1,11 @@
+flowchart LR
+  P["Panel mode: Research (T5)"] --> R["Relay lane research (T5)"]
+  R --> API["remote API v1 profile research (available, T1)"]
+  API --> C["Compile: web policy from reviewed TLD list (T1)"]
+  C --> H["Harness: --allowedTools WebSearch,WebFetch, env (T2)"]
+  H --> S["Sandbox aimux-research: claude -p (T3)"]
+  S -- "model + WebSearch" --> A["api.anthropic.com (provider)"]
+  S -- "WebFetch GET only" --> W["public hosts on reviewed TLDs"]
+  S -. "denied" .-> X["private, metadata, host gateway, POST"]
+  S --> L["Live probes (T4)"]
+  L --> U["Upstream OpenShell issue draft (T6)"]

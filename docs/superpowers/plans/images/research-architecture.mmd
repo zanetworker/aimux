@@ -1,0 +1,29 @@
+flowchart LR
+  subgraph Mac["Your Mac"]
+    subgraph Chrome["Chrome / Chrome Beta (one instance id each)"]
+      Panel["Wingman panel<br/>mode: Page | Research | My work<br/>+ page-context chip"]
+    end
+    Host["native host (relay)<br/>lane to profile"]
+    API["aimux remote API v1<br/>client scope, limits, audit,<br/>instance"]
+    Router["profilerun router"]
+    PageEng["page engine (ACP)<br/>Claude, no tools"]
+    GW["read-only tool gateway :7390<br/>pinned tools only"]
+    Backends["wiki, Jira, Slack,<br/>Gmail, Drive (read-only)"]
+    subgraph OS["OpenShell gateway (enforces policy)"]
+      Work["sandbox aimux-work-readonly<br/>claude -p + MCP tools"]
+      Res["sandbox aimux-research<br/>claude -p + WebSearch, WebFetch<br/>NEW"]
+    end
+  end
+  Anth["api.anthropic.com<br/>model + WebSearch"]
+  Web["public web<br/>GET only, reviewed TLDs<br/>NEW"]
+  Deny["private IPs, metadata,<br/>host gateway, POST<br/>DENIED"]
+
+  Panel --> Host --> API --> Router
+  Router -->|page| PageEng --> Anth
+  Router -->|work| Work
+  Router -->|research| Res
+  Work -->|MCP, token| GW --> Backends
+  Work --> Anth
+  Res --> Anth
+  Res -->|WebFetch| Web
+  Res -.-> Deny
