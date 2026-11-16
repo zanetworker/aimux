@@ -155,6 +155,10 @@ func shellSegments(line string) ([][]string, bool) {
 			if c == '\n' {
 				inComment = false
 				endSeg()
+				if len(heredocs) > 0 { // a comment after <<EOF: the body still starts on the next line
+					i = skipHeredocBodies(rs, i+1, heredocs) - 1
+					heredocs = nil
+				}
 			}
 		case quote != 0:
 			if c == quote {
