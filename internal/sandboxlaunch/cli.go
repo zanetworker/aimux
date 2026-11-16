@@ -251,9 +251,12 @@ func (b *cliBackend) Ensure(ctx context.Context, c profile.Compiled) error {
 		return err
 	}
 	if !exists {
-		if _, err := b.output(ctx, nil, "sandbox", "create", "--name", c.Sandbox, "--from", c.Image,
-			"--policy", policy, "--provider", c.Provider, "--no-auto-providers", "--no-tty", "--detach",
-			"--", "sleep", "infinity"); err != nil {
+		args := []string{"sandbox", "create", "--name", c.Sandbox, "--from", c.Image, "--policy", policy}
+		for _, p := range c.Providers {
+			args = append(args, "--provider", p)
+		}
+		args = append(args, "--no-auto-providers", "--no-tty", "--detach", "--", "sleep", "infinity")
+		if _, err := b.output(ctx, nil, args...); err != nil {
 			return fmt.Errorf("create sandbox %s: %w", c.Sandbox, err)
 		}
 	}

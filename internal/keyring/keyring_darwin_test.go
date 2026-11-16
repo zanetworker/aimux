@@ -29,3 +29,19 @@ func TestSystem_IsKeychain(t *testing.T) {
 		t.Fatalf("%v %+v", err, *calls)
 	}
 }
+
+// On macOS Probe is the Keychain probe, and Exists is Probe without the
+// error.
+func TestProbe_Darwin(t *testing.T) {
+	fakeRun(t, out("", exitErr(t, 51)))
+	if ok, err := Probe("svc"); ok || err == nil {
+		t.Fatalf("Probe = %v %v", ok, err)
+	}
+	if Exists("svc") {
+		t.Fatal("Exists true on a failed probe")
+	}
+	calls := fakeRun(t, out("attributes", nil))
+	if ok, err := Probe("svc"); !ok || err != nil || (*calls)[0].bin != "/usr/bin/security" {
+		t.Fatalf("Probe = %v %v %+v", ok, err, *calls)
+	}
+}

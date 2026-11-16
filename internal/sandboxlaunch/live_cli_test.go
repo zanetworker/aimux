@@ -39,7 +39,7 @@ func TestLiveCLIBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := profile.Compiled{Profile: "work-readonly", Digest: "sha256:live-1", PolicyDigest: "sha256:live-1", Sandbox: spikeSandbox,
-		Image: profile.SandboxImage, Provider: profile.SandboxProvider, PolicyYAML: golden}
+		Image: profile.SandboxImage, Provider: profile.SandboxProvider, Providers: []string{profile.SandboxProvider}, PolicyYAML: golden}
 	if err := b.Ensure(ctx, c); err != nil {
 		t.Fatalf("Ensure create: %v", err)
 	}

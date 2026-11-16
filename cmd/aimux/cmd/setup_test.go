@@ -367,7 +367,7 @@ func TestSetup_YesRunsMissingStepsThenSecondRunChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s\n%s", err, out, errOut)
 	}
-	if len(r.f.find("podman", "build")) != 1 || len(r.f.find("openshell", "-g", "local", "provider", "create")) != 1 {
+	if len(r.f.find("podman", "build", "-t", wingmanImage)) != 1 || len(r.f.find("openshell", "-g", "local", "provider", "create", "--name", wingmanProvider)) != 1 {
 		t.Fatalf("calls = %v", r.f.calls)
 	}
 	if _, err := toolreg.Load(toolreg.DefaultPath(r.env.Home)); err != nil {

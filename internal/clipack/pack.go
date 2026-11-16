@@ -476,19 +476,33 @@ func (f *Flag) prepare() error {
 // anchored is Pattern as the whole-value regexp Load compiles.
 func (f Flag) anchored() string { return "^(?:" + f.Pattern + ")$" }
 
-func (e Endpoint) check() error {
-	if !hostRE.MatchString(e.Host) {
-		return fmt.Errorf("host %q must be a plain hostname (no wildcard, scheme, port or path)", e.Host)
+// CheckHost refuses a host a sandbox endpoint may not name: anything but a
+// plain hostname, numeric forms and IP literals, localhost, .internal
+// (host.containers.internal is the tool gateway) and .local names, and the
+// model host (anthropic.com), which only the model provider reaches.
+func CheckHost(host string) error {
+	if !hostRE.MatchString(host) {
+		return fmt.Errorf("host %q must be a plain hostname (no wildcard, scheme, port or path)", host)
 	}
-	h := strings.ToLower(e.Host)
+	h := strings.ToLower(host)
 	// An alphabetic last label refuses numeric host forms (2130706433,
 	// 0x7f000001, 127.1) that resolvers read as IP addresses.
 	if !alphaRE.MatchString(h[strings.LastIndex(h, ".")+1:]) {
-		return fmt.Errorf("host %q: the last label must be letters", e.Host)
+		return fmt.Errorf("host %q: the last label must be letters", host)
 	}
 	if net.ParseIP(h) != nil || h == "localhost" || strings.HasSuffix(h, ".localhost") ||
 		strings.HasSuffix(h, ".internal") || strings.HasSuffix(h, ".local") {
-		return fmt.Errorf("host %q: no IP literals, localhost, .internal or .local names", e.Host)
+		return fmt.Errorf("host %q: no IP literals, localhost, .internal or .local names", host)
+	}
+	if h == "anthropic.com" || strings.HasSuffix(h, ".anthropic.com") {
+		return fmt.Errorf("host %q: the model host is not a tool endpoint", host)
+	}
+	return nil
+}
+
+func (e Endpoint) check() error {
+	if err := CheckHost(e.Host); err != nil {
+		return err
 	}
 	if e.Protocol == "graphql" && e.Path == "" {
 		return errors.New("a graphql endpoint needs a path")

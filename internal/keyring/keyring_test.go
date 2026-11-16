@@ -258,3 +258,62 @@ func TestChain_ReadsSourcesEveryCall(t *testing.T) {
 		t.Fatalf("looked up %d times, want 2", s.calls)
 	}
 }
+
+// probeKeychain asks security for the item's attributes only (no -w):
+// exit 44 is absent, success present, anything else an error naming the
+// service and never the tool's output.
+func TestProbeKeychain(t *testing.T) {
+	calls := fakeRun(t, out("attributes "+fakeSecret, nil))
+	ok, err := probeKeychain("svc")
+	if !ok || err != nil {
+		t.Fatalf("present: %v %v", ok, err)
+	}
+	if c := (*calls)[0]; c.bin != "/usr/bin/security" || strings.Join(c.args, " ") != "find-generic-password -s svc" {
+		t.Fatalf("call = %+v", c)
+	}
+
+	fakeRun(t, out("", exitErr(t, 44)))
+	if ok, err := probeKeychain("svc"); ok || err != nil {
+		t.Fatalf("absent: %v %v", ok, err)
+	}
+
+	fakeRun(t, out(fakeSecret, exitErr(t, 51)))
+	ok, err = probeKeychain("svc")
+	if ok || err == nil || !strings.Contains(err.Error(), "svc") || !strings.Contains(err.Error(), "51") {
+		t.Fatalf("failure: %v %v", ok, err)
+	}
+	noSecret(t, err)
+
+	fakeRun(t, func(ctx context.Context) ([]byte, error) { return nil, errors.New("exec: not found") })
+	if ok, err := probeKeychain("svc"); ok || err == nil {
+		t.Fatalf("tool missing: %v %v", ok, err)
+	}
+}
+
+// probeSecretService reads through Lookup (secret-tool has no metadata-only
+// lookup): not found or no secret-tool is absent, a key present, any other
+// failure an error without the key.
+func TestProbeSecretService(t *testing.T) {
+	oldLook := lookPath
+	t.Cleanup(func() { lookPath = oldLook })
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	if ok, err := probeSecretService("svc"); ok || err != nil {
+		t.Fatalf("no secret-tool: %v %v", ok, err)
+	}
+	lookPath = func(string) (string, error) { return "/usr/bin/secret-tool", nil }
+
+	fakeRun(t, out(fakeSecret, nil))
+	if ok, err := probeSecretService("svc"); !ok || err != nil {
+		t.Fatalf("present: %v %v", ok, err)
+	}
+	fakeRun(t, out("", exitErr(t, 1)))
+	if ok, err := probeSecretService("svc"); ok || err != nil {
+		t.Fatalf("absent: %v %v", ok, err)
+	}
+	fakeRun(t, out("", exitErr(t, 2)))
+	ok, err := probeSecretService("svc")
+	if ok || err == nil || !strings.Contains(err.Error(), "svc") {
+		t.Fatalf("failure: %v %v", ok, err)
+	}
+	noSecret(t, err)
+}

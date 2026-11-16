@@ -75,6 +75,9 @@ type browserEnv struct {
 	Ensure func(ctx context.Context, c profile.Compiled) error
 	// AutoKey checks, by existence only, whether Auto mode has an OpenRouter key.
 	AutoKey keyProbe
+	// RunnerKey is the platform secret store the tool runner's GitHub token
+	// comes from (sandbox setup).
+	RunnerKey secretStore
 }
 
 func defaultBrowserEnv() browserEnv {
@@ -101,6 +104,7 @@ func defaultBrowserEnv() browserEnv {
 		Serve:     mcpproxy.Serve,
 		Catalog:   mcpproxy.ReadonlyCatalog,
 		AutoKey:   defaultKeyProbe(home),
+		RunnerKey: defaultSecretStore(),
 		Health:    func(ctx context.Context) error { return profilerun.GatewayHealth(ctx, &once) },
 		Ensure: func(ctx context.Context, c profile.Compiled) error {
 			l := &sandboxlaunch.Launcher{Backend: sandboxlaunch.NewCLIBackend(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
@@ -233,7 +237,7 @@ func newBrowserCmdWith(env browserEnv) *cobra.Command {
 	var acceptPins bool
 	setup := &cobra.Command{
 		Use:   "setup",
-		Short: "Prepare the work lane: the read-only tool config, the sandbox image and the provider; reports tools to review",
+		Short: "Prepare the work lane: the read-only tool config, the sandbox and tool runner images, wingman-claude and (when its token is in the secret store) aimux-github; reports tools to review",
 		RunE: func(c *cobra.Command, _ []string) error {
 			return browserSetup(c.Context(), env, sandboxDir, acceptPins, c.OutOrStdout())
 		},

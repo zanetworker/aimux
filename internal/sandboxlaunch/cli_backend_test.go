@@ -68,7 +68,7 @@ func (f *fakeRunner) call(verb string) []string {
 
 func compiled(digest string) profile.Compiled {
 	return profile.Compiled{Profile: "work-readonly", Digest: digest, PolicyDigest: digest, Sandbox: "aimux-work-readonly",
-		Image: profile.SandboxImage, Provider: profile.SandboxProvider, PolicyYAML: []byte("version: 1\n")}
+		Image: profile.SandboxImage, Provider: profile.SandboxProvider, Providers: []string{profile.SandboxProvider}, PolicyYAML: []byte("version: 1\n")}
 }
 
 // newTestCLI does not sleep between polls.
@@ -120,6 +120,45 @@ func TestCLIEnsure_CreatesWithPolicyAndProvider(t *testing.T) {
 	}
 	if d, _ := os.ReadFile(filepath.Join(dir, "aimux-work-readonly.digest")); string(d) != "sha256:one" { //nolint:gosec // G304: path is in the test temp dir
 		t.Fatalf("digest = %q", d)
+	}
+}
+
+// The runner gets one --provider per compiled provider (and none of the
+// model provider); no providers is no --provider flag.
+func TestEnsure_PassesEveryProvider(t *testing.T) {
+	for _, tc := range []struct {
+		providers []string
+		want      []string
+	}{
+		{[]string{"aimux-github", "aimux-jira"}, []string{"--provider", "aimux-github", "--provider", "aimux-jira"}},
+		{nil, nil},
+	} {
+		lists := 0
+		f := &fakeRunner{respond: func(argv []string) (string, error) {
+			if argv[4] == "list" {
+				if lists++; lists > 1 {
+					return listHeader + "aimux-tools  2026-11-11 10:00:00  Ready\n", nil
+				}
+				return listHeader, nil
+			}
+			return "", nil
+		}}
+		dir := t.TempDir()
+		c := profile.Compiled{Sandbox: profile.RunnerSandbox, Image: profile.RunnerImage, Providers: tc.providers,
+			PolicyDigest: "sha256:r", PolicyYAML: []byte("version: 1\n")}
+		if err := newTestCLI(f, dir).Ensure(context.Background(), c); err != nil {
+			t.Fatal(err)
+		}
+		want := append([]string{"openshell", "-g", "local", "sandbox", "create", "--name", "aimux-tools",
+			"--from", profile.RunnerImage, "--policy", filepath.Join(dir, "aimux-tools.policy.yaml")}, tc.want...)
+		want = append(want, "--no-auto-providers", "--no-tty", "--detach", "--", "sleep", "infinity")
+		got := f.call("sandbox create")
+		if !slices.Equal(got, want) {
+			t.Fatalf("create = %q\nwant     %q", got, want)
+		}
+		if slices.Contains(got, profile.SandboxProvider) {
+			t.Fatal("runner got the model provider")
+		}
 	}
 }
 

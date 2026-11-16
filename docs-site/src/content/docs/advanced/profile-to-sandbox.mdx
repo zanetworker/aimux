@@ -60,3 +60,24 @@ Compile fails before any of this runs when the profile does not run in a sandbox
 5. Runs `claude` through `Launcher.Exec` with the MCP config (it holds the token) on the first stdin line and the prompt after it. Neither goes on a command line.
 
 Three walls then apply: the adapter's flags (cooperative), the OpenShell policy (enforced), and the read-only tool gateway checking token and pin on every call (enforced). [Reviewed tool sets and pins](/guides/profiles/#reviewed-tool-sets-and-pins) explains the pins.
+
+## The tool runner sandbox
+
+`cli` and `http-openapi` tool sources do not run in a profile's sandbox. They are meant to run in one shared sandbox, `aimux-tools`, from the image `localhost/aimux-tools:2.103.3`: the profile sandbox image plus `gh` 2.103.3, installed from the release tarball and checked against its SHA-256 for arm64 or amd64 (`sandbox/aimux-tools/Containerfile`). `aimux sandbox setup` builds it.
+
+What exists today is the setup and the policy: `aimux sandbox setup` builds the image and the GitHub provider, `profile.CompileRunner` compiles the policy below, and `aimux sandbox status` reports it. Nothing creates the sandbox or executes a CLI or HTTP tool call in it yet; that lands with the runner backend.
+
+`profile.CompileRunner` (`internal/profile/runner.go`) compiles its policy from the same snapshot as the profiles:
+
+- One network policy, `tools_<source>`, per `cli` or `http-openapi` source with at least one active pin (a pin the gateway serves, so not `source_changed`). Unapproved sources open nothing.
+- A `cli` source gets its pack's endpoints and binary. For `gh` that is `api.github.com` REST with `access: read-only` and `/graphql` with a rule allowing `operation_type: query`, for `/usr/bin/gh` only.
+- An `http-openapi` source gets one REST endpoint on its base URL's host (a plain public hostname: no IP literals, `localhost`, `.internal` or `.local` names, and not the model host), with a `GET` rule per operation path under the base path, each `{param}` segment as `*` (one segment), for `/usr/bin/curl`. Until the OpenAPI parser lands, these sources compile to no endpoints.
+- Every endpoint is `enforcement: enforce`. A REST endpoint has either `access` or `rules`, never both (OpenShell rejects that).
+- No model host and no tool gateway: the runner has neither `api.anthropic.com` nor `host.containers.internal`.
+- Files: `/tmp` and `/dev/null` are the only writable paths; the workdir is read-only.
+
+`Compiled.Providers` lists the providers the sandbox is created with: the packs' credential providers (`aimux-github` for `gh`) and the sources' `credential`, once each. A profile sandbox's list is just `wingman-claude`. `sandboxlaunch` passes one `--provider` per entry. The runner's `PolicyDigest` and `.digest` file work as for profiles, and `aimux sandbox status` shows it as `(tool runner)` with its recorded and compiled digests (`runner` in `--json`).
+
+### The GitHub provider
+
+`aimux sandbox setup` creates the provider `aimux-github` only when the platform's secret store (`keyring.System`: the Keychain on macOS, the Secret Service on Linux) has the item `aimux-github`; it asks with `keyring.Probe`, which tells a missing item from a store that could not be asked (on macOS it reads only the item's attributes; on Linux, where `secret-tool` has no metadata lookup, it reads and discards the item). When the item is absent, or the platform has no supported store, setup prints how to add it (a fine-grained token, public repositories, read-only) and carries on. A probe or read that fails for any other reason (a timeout, an access error, a locked store) fails setup with the store and item named. Before creating it, setup lints and imports aimux's own provider profile `aimux-github` (`sandbox/aimux-tools/github-profile.yaml`) into the workspace when the gateway lacks it, and creates the provider with `--type aimux-github`. Its id is not `github`, so OpenShell's built-in `github` profile is never the one attached. aimux's profile is the stock OpenShell one trimmed to the `api.github.com` endpoints and `/usr/bin/gh`: the stock profile also opens `github.com` git transport to the `git` binaries, and an attached provider adds its profile's endpoints to the sandbox's effective policy. The token goes to `openshell provider create` in `GITHUB_TOKEN` in its environment, never on a command line.

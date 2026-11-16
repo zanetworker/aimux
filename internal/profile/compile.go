@@ -63,6 +63,10 @@ type Compiled struct {
 	// manifest digest sessions and audit record.
 	PolicyDigest    string
 	Image, Provider string
+	// Providers are the OpenShell providers attached at sandbox create:
+	// [Provider] for a profile sandbox, the sources' credentials for the
+	// tool runner.
+	Providers []string
 	Harness         string // Manifest.Harness: the adapter the engines launch
 	PolicyYAML      []byte
 	// Grant is the MCP tools the policy allows, the gateway token scopes
@@ -200,6 +204,7 @@ func Compile(m Manifest, sets ToolSets, gw GatewayAddr) (Compiled, error) {
 		Sandbox:      sandbox,
 		Image:        SandboxImage,
 		Provider:     SandboxProvider,
+		Providers:    []string{SandboxProvider},
 		Harness:      m.Harness,
 		Grant:        grant,
 		Web:          web,
@@ -273,20 +278,25 @@ type endpoint struct {
 	Access      string    `yaml:"access,omitempty"`
 	MCP         *mcpOpts  `yaml:"mcp,omitempty"`
 	AllowedIPs  []string  `yaml:"allowed_ips,omitempty"`
-	Rules       []mcpRule `yaml:"rules,omitempty"`
+	Rules       []rule    `yaml:"rules,omitempty"`
 }
 
 type mcpOpts struct {
 	Versions []string `yaml:"versions,flow"`
 }
 
-type mcpRule struct {
-	Allow mcpAllow `yaml:"allow"`
+// rule is one allow rule: an MCP method (and tools), a REST method and
+// path, or a GraphQL operation type. OpenShell rejects rules together with
+// access on one endpoint.
+type rule struct {
+	Allow ruleAllow `yaml:"allow"`
 }
 
-type mcpAllow struct {
-	Method string   `yaml:"method"`
-	Tool   *toolAny `yaml:"tool,omitempty"`
+type ruleAllow struct {
+	Method        string   `yaml:"method,omitempty"`
+	Tool          *toolAny `yaml:"tool,omitempty"`
+	Path          string   `yaml:"path,omitempty"`
+	OperationType string   `yaml:"operation_type,omitempty"`
 }
 
 type toolAny struct {
@@ -314,11 +324,11 @@ func buildPolicy(m Manifest, grant ToolGrant, gw GatewayAddr, web bool) policyFi
 	}
 	var eps []endpoint
 	for _, s := range grant.Servers() {
-		rules := make([]mcpRule, 0, len(mcpHandshakeMethods)+1)
+		rules := make([]rule, 0, len(mcpHandshakeMethods)+1)
 		for _, method := range mcpHandshakeMethods {
-			rules = append(rules, mcpRule{Allow: mcpAllow{Method: method}})
+			rules = append(rules, rule{Allow: ruleAllow{Method: method}})
 		}
-		rules = append(rules, mcpRule{Allow: mcpAllow{Method: "tools/call", Tool: &toolAny{Any: grant.Tools(s)}}})
+		rules = append(rules, rule{Allow: ruleAllow{Method: "tools/call", Tool: &toolAny{Any: grant.Tools(s)}}})
 		eps = append(eps, endpoint{
 			Host: gw.Host, Port: gw.Port, Path: "/mcp/" + s,
 			Protocol: "mcp", Enforcement: "enforce",

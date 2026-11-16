@@ -2,8 +2,6 @@
 
 package keyring
 
-import "context"
-
 // SecretService is the Secret Service item with attribute service=<service>,
 // read with secret-tool (absent tool means no key).
 func SecretService(service string) Source { return secretServiceSource{service: service} }
@@ -12,10 +10,14 @@ func SecretService(service string) Source { return secretServiceSource{service: 
 // Linux.
 func System(service string) Source { return SecretService(service) }
 
-// Exists reports whether the Secret Service has an item for service.
+// Probe reports whether the Secret Service has an item for service.
 // secret-tool has no metadata-only lookup, so the secret is read and
-// discarded at once.
+// discarded at once. A missing item or no secret-tool is (false, nil); any
+// other failure (a locked store, D-Bus) is an error.
+func Probe(service string) (bool, error) { return probeSecretService(service) }
+
+// Exists is Probe with any failure read as absent.
 func Exists(service string) bool {
-	key, err := SecretService(service).Lookup(context.Background())
-	return err == nil && key != ""
+	ok, _ := Probe(service)
+	return ok
 }

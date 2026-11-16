@@ -62,13 +62,15 @@ A pin detects schema changes; it does not prove a tool is read-only.
 | `sandbox.policy.<profile>` | warn | The profile's sandbox runs another policy than the profile compiles to now (stale). Serve applies the new one before the next turn. | `work-readonly`: `applies on the next Workspace question`, plus `; or run aimux sandbox verify` only while port 7390 is free (with `remote serve` holding it, verify cannot run). `research`: `applies on the next Web question`. Others: `applies on the next turn in <profile>` |
 | `sandbox.policy.<profile>` | fail | The profile does not compile. | `aimux tools status, then fix what the error names` |
 
+`aimux sandbox status` also lists the tool runner, `aimux-tools`, as `(tool runner)` after the profiles (`runner` in `--json`), with the same states and its recorded and compiled digests. `error` means a `cli` or `http-openapi` source does not compile; run `aimux tools status`. Its GitHub provider `aimux-github` is created by `aimux sandbox setup` only when the platform's secret store (Keychain on macOS, Secret Service on Linux) has the item `aimux-github` with a fine-grained, read-only GitHub token; without it setup prints the line to store it (`security add-generic-password` or `secret-tool store`), carries on, and the `gh` tools have no credential.
+
 ## aimux setup
 
 `aimux setup` checks the same concerns and runs only the steps that are missing:
 
 1. The tool registry: migrates `readonly.json` once, or writes the defaults.
 2. `~/.config/aimux/clients.yaml`, when it is absent.
-3. The sandbox: starts the OpenShell gateway, builds the image and creates the provider, each only when missing (as `aimux sandbox setup`).
+3. The sandbox: starts the OpenShell gateway, builds the image and creates the provider, each only when missing (as `aimux sandbox setup`). It runs only when one of those is missing; to build the tool runner image `localhost/aimux-tools:2.103.3` and create `aimux-github`, run `aimux sandbox setup`.
 4. The Chrome native host (as `aimux browser install`), with `--extension-id <id>`, or when an id is already pinned but no host manifest or wrapper is there.
 
 On a terminal it asks before each step (Enter is yes); `--yes` runs them without asking. With no terminal, or with `--json`, and no `--yes`, it runs none and lists them as `pending` with `Next: aimux setup --yes`.

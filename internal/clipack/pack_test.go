@@ -447,3 +447,21 @@ func TestLoad_PatternDialect(t *testing.T) {
 		t.Errorf("gh pack: %v", err)
 	}
 }
+
+// CheckHost is the host rule packs and http-openapi base URLs share: a
+// plain public hostname, never an IP literal, a local or internal name, or
+// the model host.
+func TestCheckHost(t *testing.T) {
+	for _, h := range []string{"api.github.com", "jira.example.com", "Example.COM"} {
+		if err := CheckHost(h); err != nil {
+			t.Errorf("%s: %v", h, err)
+		}
+	}
+	for _, h := range []string{"", "127.0.0.1", "::1", "2130706433", "127.1", "localhost", "a.localhost",
+		"host.containers.internal", "x.internal", "printer.local", "api.anthropic.com", "Anthropic.com",
+		"*.example.com", "example.com:443", "https://example.com"} {
+		if err := CheckHost(h); err == nil {
+			t.Errorf("%q accepted", h)
+		}
+	}
+}
