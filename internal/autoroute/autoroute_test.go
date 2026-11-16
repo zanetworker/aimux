@@ -358,7 +358,7 @@ func TestLoadDecider_Defaults(t *testing.T) {
 		t.Fatalf("backends %+v (no chat fallback by default)", c.Backends)
 	}
 	b := c.Backends[0]
-	if b.Kind != "openrouter" || b.Model != "cloudflare/clef-flash" || b.ZDR != nil || c.Threshold != 0.25 || c.Timeout != 2*time.Second {
+	if b.Kind != "openrouter" || b.Model != "cloudflare/clef-flash" || b.ZDR != nil || c.Threshold != 0.25 || c.Timeout != 5*time.Second {
 		t.Fatalf("default %+v", c)
 	}
 	if c.Key.Service != "aimux-openrouter" || c.Key.Env != "OPENROUTER_API_KEY" || c.Key.File != "~/.config/aimux/keys/openrouter" {
@@ -410,5 +410,43 @@ func TestRoute_ResultCarriesAnswerDetails(t *testing.T) {
 	}
 	if b.calls() != 0 {
 		t.Errorf("backend called %d times", b.calls())
+	}
+}
+
+// slowBackend answers after delay, as OpenRouter's first response byte did
+// (0.3 s to 7 s, measured 2026-11-16).
+type slowBackend struct {
+	delay time.Duration
+	a     decide.Answer
+}
+
+func (s slowBackend) Decide(ctx context.Context, _ decide.Request) (decide.Answer, error) {
+	select {
+	case <-time.After(s.delay):
+		return s.a, nil
+	case <-ctx.Done():
+		return decide.Answer{}, ctx.Err()
+	}
+}
+
+func TestDefaultDecider_WaitsForASlowAnswer(t *testing.T) {
+	d := newDecider(slowBackend{delay: 2500 * time.Millisecond, a: decide.Answer{Choice: "web", Confidence: 0.7, Probabilities: map[string]float64{"page": 0.1, "web": 0.8, "workspace": 0.1}}})
+	d.Timeout = DefaultDecider().Timeout
+	r := Route(context.Background(), d, "latest OpenShell release notes", Facts{PageReadable: true}, []string{"page", "research", "work"})
+	if !r.Decided || r.Mode != "web" || r.Source != "model" {
+		t.Fatalf("a 2.5 s answer within the default limit: got %+v", r)
+	}
+}
+
+func TestDefaultDecider_GivesUpPastTheLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits 5 s")
+	}
+	d := newDecider(slowBackend{delay: 10 * time.Second, a: decide.Answer{Probabilities: map[string]float64{"web": 1}}})
+	d.Timeout = DefaultDecider().Timeout
+	start := time.Now()
+	r := Route(context.Background(), d, "q", Facts{PageReadable: true}, []string{"page", "research", "work"})
+	if took := time.Since(start); r.Decided || r.Reason != "timeout" || took > 5500*time.Millisecond {
+		t.Fatalf("a 10 s answer: got %+v after %v, want undecided timeout within 5.5 s", r, took)
 	}
 }

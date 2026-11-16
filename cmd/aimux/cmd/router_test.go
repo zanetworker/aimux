@@ -87,7 +87,7 @@ func TestRouterStatus_DefaultsAndKeyFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"mode-router", "openrouter", "cloudflare/clef-flash", "0.25", "2s", "deciders.yaml", "valid", "key found"} {
+	for _, want := range []string{"mode-router", "openrouter", "cloudflare/clef-flash", "0.25", "5s", "deciders.yaml", "valid", "key found"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status lacks %q:\n%s", want, out)
 		}
@@ -124,7 +124,7 @@ func TestRouterStatus_JSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, out)
 	}
-	if s.SchemaVersion != "1" || s.Decider != "mode-router" || !s.ConfigValid || s.ConfigError != "" || s.TimeoutMs != 2000 {
+	if s.SchemaVersion != "1" || s.Decider != "mode-router" || !s.ConfigValid || s.ConfigError != "" || s.TimeoutMs != 5000 {
 		t.Errorf("status = %+v", s)
 	}
 	if len(s.Backends) != 1 || s.Backends[0].Model != "cloudflare/clef-flash" || s.Backends[0].Threshold != 0.25 {
