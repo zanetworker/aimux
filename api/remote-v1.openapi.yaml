@@ -1820,6 +1820,10 @@ components:
         name: { type: string, description: "As the profile names it (wiki:readonly may resolve to the notes source)." }
         source: { type: string, description: "The source (server) name; empty for a set that is omitted." }
         url: { type: string, description: "The source's URL, only when it is a loopback one, without userinfo or query." }
+        authorship:
+          type: string
+          enum: [self, internal, outside]
+          description: "Who writes what the source returns, from tool-sources.yaml (unset means outside); absent for a set that is omitted."
         status:
           type: string
           enum: [available, partial, unavailable]

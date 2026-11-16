@@ -98,6 +98,8 @@ type Answer struct {
 	// KeyMs is the time spent reading API keys before the decision call
 	// (outside Timeout), CallMs the time the backends took within it.
 	KeyMs, CallMs int64
+	// Hedged is true when a second identical request was sent to a backend.
+	Hedged bool
 
 	// tokens the call used, for the usage line, when the backend reports them
 	inputTokens, outputTokens int64
@@ -125,6 +127,11 @@ type Decider struct {
 	Backends  []Backend
 	Threshold float64
 	Timeout   time.Duration
+	// Hedge, when positive, sends a backend a second identical request if
+	// the first has not answered after Hedge, and takes whichever answers
+	// first (within Timeout). Backends that are slow by nature (chat, which
+	// runs claude -p) are never hedged. Zero is off.
+	Hedge time.Duration
 	// KeyTimeout bounds reading the backends' API keys before Timeout
 	// starts (zero means DefaultKeyTimeout).
 	KeyTimeout time.Duration
@@ -259,7 +266,9 @@ func prepareOne(ctx context.Context, p Preparer) error {
 
 // chain asks the backends in order within Timeout; a backend whose Prepare
 // failed is not called and fails with that error.
-func (d *Decider) chain(ctx context.Context, r Request, prepErr []error) Answer {
+func (d *Decider) chain(ctx context.Context, r Request, prepErr []error) (out Answer) {
+	hedged := false
+	defer func() { out.Hedged = hedged }()
 	timeout := d.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -277,9 +286,17 @@ func (d *Decider) chain(ctx context.Context, r Request, prepErr []error) Answer 
 		var a Answer
 		err := prepErr[i]
 		if err == nil {
-			a, err = call(ctx, b, r)
+			hedge := d.Hedge
+			if _, no := inner(b).(unhedgeable); no {
+				hedge = 0
+			}
+			var h bool
+			a, h, err = callHedged(ctx, b, r, hedge, d.recordUsage)
+			hedged = hedged || h
 		}
-		if ctx.Err() != nil {
+		// A success received before the deadline stands even when the
+		// deadline passed since (a hedged win waits up to billGrace).
+		if err != nil && ctx.Err() != nil {
 			why := UndecidedTimeout
 			if errors.Is(parent.Err(), context.Canceled) {
 				why = UndecidedCanceled
@@ -333,6 +350,84 @@ func call(ctx context.Context, b Backend, r Request) (Answer, error) {
 		return res.a, res.err
 	case <-ctx.Done():
 		return Answer{}, ctx.Err()
+	}
+}
+
+// unhedgeable marks a Backend that is never sent a second request: one
+// that is slow by nature (chat runs claude -p, about 3 s), so a hedge would
+// only double its cost.
+type unhedgeable interface{ noHedge() }
+
+// billGrace is how long a hedged win waits for the other request, when it is
+// about to finish, so that its cost is recorded too.
+const billGrace = 25 * time.Millisecond
+
+// callHedged is call, plus a second identical request when the first has
+// not answered after hedge (zero: never). The first success wins and the
+// other request is cancelled; an error waits for the other request if one
+// is running. hedged reports whether the second request went out. The
+// caller records the winner; record is called for the other request when it
+// also completed with an answer (it waits up to billGrace for that, never
+// past ctx's deadline), since each completed request is billed. A returned
+// success stands even if ctx expired during that wait.
+func callHedged(ctx context.Context, b Backend, r Request, hedge time.Duration, record func(Answer)) (a Answer, hedged bool, err error) {
+	if hedge <= 0 {
+		a, err = call(ctx, b, r)
+		return a, false, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		a   Answer
+		err error
+	}
+	ch := make(chan result, 2)
+	start := func() {
+		go func() {
+			a, err := b.Decide(ctx, r)
+			ch <- result{a, err}
+		}()
+	}
+	start()
+	timer := time.NewTimer(hedge)
+	defer timer.Stop()
+	running, lastErr := 1, error(nil)
+	for {
+		select {
+		case <-timer.C:
+			if !hedged {
+				hedged = true
+				running++
+				start()
+			}
+		case res := <-ch:
+			running--
+			if res.err == nil {
+				if running > 0 {
+					wait := billGrace
+					if dl, ok := ctx.Deadline(); ok {
+						wait = min(wait, time.Until(dl))
+					}
+					grace := time.NewTimer(wait)
+					select {
+					case other := <-ch:
+						if other.err == nil {
+							record(other.a)
+						}
+					case <-grace.C:
+					case <-ctx.Done():
+					}
+					grace.Stop()
+				}
+				return res.a, hedged, nil
+			}
+			lastErr = res.err
+			if running == 0 {
+				return Answer{}, hedged, lastErr
+			}
+		case <-ctx.Done():
+			return Answer{}, hedged, ctx.Err()
+		}
 	}
 }
 

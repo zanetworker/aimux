@@ -43,7 +43,7 @@ func TestToolsAddNotes_AddsSourceAndSetAndApprovesNothing(t *testing.T) {
 		t.Fatalf("add: %v\n%s%s", err, out, errOut)
 	}
 	reg := loadReg(t, r.env.Home)
-	if want := (toolreg.Source{Type: toolreg.TypeLocalNotes, Root: folder}); reg.Sources["notes"] != want {
+	if want := (toolreg.Source{Type: toolreg.TypeLocalNotes, Root: folder, Authorship: toolreg.AuthorshipSelf}); reg.Sources["notes"] != want {
 		t.Fatalf("source %+v", reg.Sources["notes"])
 	}
 	if want := (toolreg.Set{Source: "notes", Tools: []string{"wiki_search", "wiki_read"}}); !reflect.DeepEqual(reg.Sets["notes:readonly"], want) {
@@ -379,5 +379,46 @@ func TestToolsRemove_JSONCountsKeptPins(t *testing.T) {
 	}
 	if !strings.Contains(out, `"kept_pins": 0`) {
 		t.Fatalf("no pins: %s", out)
+	}
+}
+
+func TestToolsAdd_NotesDefaultsSelf(t *testing.T) {
+	r := newToolsRig(t)
+	if _, errOut, err := runTools(t, r.env, "add", "notes", "--folder", t.TempDir()); err != nil {
+		t.Fatalf("add: %v %s", err, errOut)
+	}
+	if !strings.Contains(regBytes(t, r.env.Home), "authorship: self") {
+		t.Fatalf("no authorship: self in\n%s", regBytes(t, r.env.Home))
+	}
+}
+
+func TestToolsAdd_MCPDefaultsOutsideOmitted(t *testing.T) {
+	r := newToolsRig(t)
+	if _, errOut, err := runTools(t, r.env, "add", "mcp", "--name", "x", "--url", "http://127.0.0.1:9/mcp", "--tools", "a"); err != nil {
+		t.Fatalf("add: %v %s", err, errOut)
+	}
+	if strings.Contains(regBytes(t, r.env.Home), "authorship") {
+		t.Fatalf("authorship key written for the default:\n%s", regBytes(t, r.env.Home))
+	}
+}
+
+func TestToolsAdd_AuthorshipFlag(t *testing.T) {
+	r := newToolsRig(t)
+	if _, errOut, err := runTools(t, r.env, "add", "mcp", "--name", "x", "--url", "http://127.0.0.1:9/mcp", "--tools", "a", "--authorship", "internal"); err != nil {
+		t.Fatalf("add: %v %s", err, errOut)
+	}
+	if got := loadReg(t, r.env.Home).Sources["x"].Authorship; got != "internal" {
+		t.Fatalf("authorship = %q", got)
+	}
+	before := regBytes(t, r.env.Home)
+	_, _, err := runTools(t, r.env, "add", "mcp", "--name", "y", "--url", "http://127.0.0.1:9/mcp", "--tools", "a", "--authorship", "bogus")
+	if err == nil {
+		t.Fatal("bogus authorship accepted")
+	}
+	if !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("err = %v, want it to name the bad value", err)
+	}
+	if regBytes(t, r.env.Home) != before {
+		t.Fatal("file changed")
 	}
 }

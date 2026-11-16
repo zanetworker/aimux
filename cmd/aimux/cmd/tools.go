@@ -203,7 +203,7 @@ func toolsStatus(ctx context.Context, env toolsEnv, out, errOut io.Writer) error
 		}
 	} else {
 		tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "SET\tTOOL\tSTATUS\tAPPROVED\tREASON")
+		_, _ = fmt.Fprintln(tw, "SET\tTOOL\tSTATUS\tCLASS\tAPPROVED\tREASON")
 		for _, s := range st {
 			set, at := s.Set, "-"
 			if set == "" {
@@ -212,7 +212,11 @@ func toolsStatus(ctx context.Context, env toolsEnv, out, errOut io.Writer) error
 			if s.ApprovedAt != nil {
 				at = s.ApprovedAt.UTC().Format("2006-01-02 15:04")
 			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", set, s.Tool, s.Status, at, s.Reason)
+			class := s.Authorship
+			if class == "" {
+				class = "-"
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", set, s.Tool, s.Status, class, at, s.Reason)
 		}
 		if err := tw.Flush(); err != nil {
 			return err
@@ -425,7 +429,7 @@ func toolsApprove(ctx context.Context, env toolsEnv, targets []string, all bool,
 var notesTools = []string{"wiki_search", "wiki_read"}
 
 func newToolsAddCmd(env toolsEnv) *cobra.Command {
-	var folder, name, url, tools string
+	var folder, name, url, tools, authorship string
 	cmd := &cobra.Command{
 		Use:       "add <notes|mcp>",
 		ValidArgs: []string{"notes", "mcp"},
@@ -437,6 +441,11 @@ func newToolsAddCmd(env toolsEnv) *cobra.Command {
 			"aimux tools diff, then approve them with aimux tools approve <name>:readonly.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			switch authorship {
+			case "", toolreg.AuthorshipSelf, toolreg.AuthorshipInternal, toolreg.AuthorshipOutside:
+			default:
+				return fmt.Errorf("--authorship %q must be self, internal or outside", authorship)
+			}
 			var src toolreg.Source
 			var list []string
 			switch args[0] {
@@ -457,6 +466,13 @@ func newToolsAddCmd(env toolsEnv) *cobra.Command {
 			default:
 				return fmt.Errorf("unknown source kind %q: want notes or mcp", args[0])
 			}
+			class := authorship
+			if class == "" && src.Type == toolreg.TypeLocalNotes {
+				class = toolreg.AuthorshipSelf
+			}
+			if class != toolreg.AuthorshipOutside { // outside is the default: no key
+				src.Authorship = class
+			}
 			return toolsAdd(env, name, src, list, c.OutOrStdout(), c.ErrOrStderr())
 		},
 	}
@@ -464,6 +480,7 @@ func newToolsAddCmd(env toolsEnv) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "The source's name, which its set, pins and tool names key on (notes: default notes)")
 	cmd.Flags().StringVar(&url, "url", "", "mcp: the server's http URL on this Mac (127.0.0.1, ::1 or localhost)")
 	cmd.Flags().StringVar(&tools, "tools", "", "mcp: the exact tool names the set may expose, comma separated")
+	cmd.Flags().StringVar(&authorship, "authorship", "", "Who writes what the source returns: self, internal or outside (notes: default self; mcp: default outside)")
 	return cmd
 }
 

@@ -44,7 +44,9 @@ const DeciderName = "mode-router"
 // 0.25 within 5 s, and no chat fallback (when OpenRouter cannot answer, the
 // person picks instead of waiting on a slower model). 5 s, not 2: OpenRouter's
 // first response byte ranged from 0.3 s to 7 s on 2026-11-16, and the panel
-// offers Pick now while it waits. The key is looked up
+// offers Pick now while it waits. Slow and fast answers came interleaved,
+// so a request not answered after 1.2 s gets an identical second one
+// (about $0.000003 each) and the first answer wins. The key is looked up
 // in the Keychain or Secret Service item aimux-openrouter, then the 0600
 // file, then OPENROUTER_API_KEY.
 func DefaultDecider() decide.DeciderConfig {
@@ -52,6 +54,7 @@ func DefaultDecider() decide.DeciderConfig {
 		Backends:  []decide.BackendConfig{{Kind: "openrouter", Model: "cloudflare/clef-flash"}},
 		Threshold: 0.25,
 		Timeout:   5 * time.Second,
+		Hedge:     1200 * time.Millisecond,
 		Key:       decide.KeyConfig{Service: "aimux-openrouter", Env: "OPENROUTER_API_KEY", File: "~/.config/aimux/keys/openrouter"},
 	}
 }

@@ -446,3 +446,33 @@ func TestToolsAdd_JSONWithLegacyConfigStaysJSON(t *testing.T) {
 		t.Errorf("migration message missing from stderr:\n%s", errOut)
 	}
 }
+
+func TestToolsStatus_ClassColumn(t *testing.T) {
+	r := newToolsRig(t)
+	out, _, err := runTools(t, r.env, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(out, "\n")
+	if f := strings.Fields(lines[0]); !reflect.DeepEqual(f, []string{"SET", "TOOL", "STATUS", "CLASS", "APPROVED", "REASON"}) {
+		t.Fatalf("header = %q", lines[0])
+	}
+	if !strings.Contains(out, "outside") {
+		t.Fatalf("no outside row:\n%s", out)
+	}
+	js, _, err := runTools(t, r.env, "status", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Tools []map[string]interface{} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(js), &doc); err != nil || len(doc.Tools) == 0 {
+		t.Fatalf("json: %v %s", err, js)
+	}
+	for _, tl := range doc.Tools {
+		if tl["authorship"] != "outside" {
+			t.Errorf("tool %v authorship = %v", tl["tool"], tl["authorship"])
+		}
+	}
+}

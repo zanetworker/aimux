@@ -349,6 +349,10 @@ func (b *stdioBackend) failure(err error) error {
 	return &scrubbedError{msg: b.scrub.scrub(err.Error()), err: err, tail: b.stderr.Lines()}
 }
 
+// OnToolsChanged runs fn on each tools/list_changed the server sends,
+// beside the progress handler startStdio registered.
+func (b *stdioBackend) OnToolsChanged(fn func()) { onToolsChanged(b.c, fn) }
+
 // Close shuts the client down, then kills anything left in the server's
 // process group. Only the first call does anything: a later one could kill
 // a new process group that reused the id.

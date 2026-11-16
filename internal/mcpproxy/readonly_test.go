@@ -3,11 +3,15 @@ package mcpproxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -284,6 +288,7 @@ func (passPins) Filter(c *Catalog) *Catalog { return c }
 func (passPins) Guard(func(context.Context, string) ([]json.RawMessage, error)) func(context.Context, string, string) error {
 	return func(context.Context, string, string) error { return nil }
 }
+func (passPins) Changed(string) {}
 
 // schemaPins pins a tool to its inputSchema text as the backend sent it.
 type schemaPins map[string]string // "server/tool" -> inputSchema JSON
@@ -311,6 +316,7 @@ func (p schemaPins) Filter(c *Catalog) *Catalog {
 func (p schemaPins) Guard(func(context.Context, string) ([]json.RawMessage, error)) func(context.Context, string, string) error {
 	return func(context.Context, string, string) error { return nil }
 }
+func (schemaPins) Changed(string) {}
 
 func TestBuildReadonly_HidesChangedTool(t *testing.T) {
 	cfg := testReadonlyConfig(t, slackFake(t).URL+"/")
@@ -391,4 +397,319 @@ func TestReadonlyCatalog_ListsLiveBackendsAndReportsDownOnes(t *testing.T) {
 	if len(cat.Servers["wiki"].Tools) == 0 {
 		t.Error("wiki tools missing")
 	}
+}
+
+// cachedPins pins a tool to its inputSchema like schemaPins, and its guard
+// keeps each server's listing until Changed drops it, as the real verifier
+// does within its 60 s MaxAge. Changed reports each server on changed.
+type cachedPins struct {
+	schemaPins
+	mu      sync.Mutex
+	cache   map[string][]json.RawMessage
+	changed chan string
+}
+
+func newCachedPins(p schemaPins) *cachedPins {
+	return &cachedPins{schemaPins: p, cache: map[string][]json.RawMessage{}, changed: make(chan string, 64)}
+}
+
+func (p *cachedPins) Guard(list func(context.Context, string) ([]json.RawMessage, error)) func(context.Context, string, string) error {
+	return func(ctx context.Context, server, tool string) error {
+		p.mu.Lock()
+		raws, ok := p.cache[server]
+		p.mu.Unlock()
+		if !ok {
+			var err error
+			if raws, err = list(ctx, server); err != nil {
+				return err
+			}
+			p.mu.Lock()
+			p.cache[server] = raws
+			p.mu.Unlock()
+		}
+		for _, raw := range raws {
+			var t struct {
+				Name   string          `json:"name"`
+				Schema json.RawMessage `json:"inputSchema"`
+			}
+			if json.Unmarshal(raw, &t) == nil && t.Name == tool {
+				if p.schemaPins[server+"/"+tool] != string(t.Schema) {
+					return fmt.Errorf("%s/%s changed since it was pinned", server, tool)
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("%s/%s changed since it was pinned (no longer listed)", server, tool)
+	}
+}
+
+func (p *cachedPins) Changed(server string) {
+	p.mu.Lock()
+	delete(p.cache, server)
+	p.mu.Unlock()
+	select {
+	case p.changed <- server:
+	default:
+	}
+}
+
+// swappableSlack is a Slack fixture whose search_messages schema the test
+// swaps (setSchema), returning the MCP server so it can notify.
+func swappableSlack(t *testing.T) (*server.MCPServer, string, func(prop string)) {
+	t.Helper()
+	s := server.NewMCPServer("slack", "1", server.WithToolCapabilities(true))
+	h := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return mcp.NewToolResultText("ok"), nil
+	}
+	set := func(prop string) { s.AddTool(mcp.NewTool("search_messages", mcp.WithString(prop)), h) }
+	set("query")
+	ts := httptest.NewServer(server.NewStreamableHTTPServer(s))
+	t.Cleanup(ts.Close)
+	return s, ts.URL + "/", set
+}
+
+// liveSchema is search_messages' inputSchema as slack serves it now.
+func liveSchema(t *testing.T, url string) string {
+	t.Helper()
+	cat, errs := ReadonlyCatalog(context.Background(), ReadonlyConfig{HTTP: map[string]HTTPServerConfig{"slack": {URL: url}}})
+	if errs["slack"] != nil {
+		t.Fatal(errs["slack"])
+	}
+	for _, raw := range cat.Servers["slack"].Tools {
+		var tl struct {
+			Name   string          `json:"name"`
+			Schema json.RawMessage `json:"inputSchema"`
+		}
+		if json.Unmarshal(raw, &tl) == nil && tl.Name == "search_messages" {
+			return string(tl.Schema)
+		}
+	}
+	t.Fatal("search_messages not listed")
+	return ""
+}
+
+func roCall(t *testing.T, srv *server.MCPServer, tool string) *mcp.CallToolResult {
+	t.Helper()
+	c, err := client.NewInProcessClient(srv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := c.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	init := mcp.InitializeRequest{}
+	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	if _, err := c.Initialize(ctx, init); err != nil {
+		t.Fatal(err)
+	}
+	call := mcp.CallToolRequest{}
+	call.Params.Name = tool
+	res, err := c.CallTool(ctx, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// awaitChanged sends list_changed from s until pins hears it for slack,
+// for up to 2 s: the backend's listening stream may still be opening.
+func awaitChanged(t *testing.T, s *server.MCPServer, pins *cachedPins) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
+	for {
+		select {
+		case got := <-pins.changed:
+			if got != "slack" {
+				t.Fatalf("Changed(%q), want slack", got)
+			}
+			return
+		case <-tick.C:
+			s.SendNotificationToAllClients(mcp.MethodNotificationToolsListChanged, nil)
+		case <-deadline:
+			t.Fatal("pins never heard tools/list_changed")
+		}
+	}
+}
+
+func listChangedRig(t *testing.T) (*server.MCPServer, func(string), map[string]*server.MCPServer, *Pool, *cachedPins) {
+	t.Helper()
+	s, url, set := swappableSlack(t)
+	cfg := ReadonlyConfig{HTTP: map[string]HTTPServerConfig{"slack": {URL: url}}, Allow: Allowlist{"slack": {"search_messages"}}}
+	pins := newCachedPins(schemaPins{"slack/search_messages": liveSchema(t, url)})
+	servers, pool, errs, err := BuildReadonly(context.Background(), cfg, pins, nil)
+	if err != nil || errs["slack"] != nil || servers["slack"] == nil {
+		t.Fatalf("build: %v %v %v", err, errs, servers)
+	}
+	t.Cleanup(pool.Close)
+	if res := roCall(t, servers["slack"], "search_messages"); res.IsError {
+		t.Fatalf("pinned call refused: %+v", res.Content)
+	}
+	return s, set, servers, pool, pins
+}
+
+func assertRefusedChanged(t *testing.T, srv *server.MCPServer, since time.Time) {
+	t.Helper()
+	res := roCall(t, srv, "search_messages")
+	if !res.IsError {
+		t.Fatal("call to the changed tool succeeded")
+	}
+	if tc, ok := res.Content[0].(mcp.TextContent); !ok || !strings.Contains(tc.Text, "changed") {
+		t.Fatalf("refusal %+v does not say the tool changed", res.Content)
+	}
+	if d := time.Since(since); d >= 5*time.Second {
+		t.Fatalf("refused after %v, want under 5 s", d)
+	}
+}
+
+func TestBuildReadonly_ListChangedHidesChangedToolImmediately(t *testing.T) {
+	s, set, servers, _, pins := listChangedRig(t)
+	start := time.Now()
+	set("other") // same name, new input schema
+	awaitChanged(t, s, pins)
+	assertRefusedChanged(t, servers["slack"], start)
+}
+
+func TestBuildReadonly_RestartedBackendStillNotifies(t *testing.T) {
+	s, set, servers, pool, pins := listChangedRig(t)
+	pool.CloseServer("slack")
+	// The listing is still cached, so this call only starts a new backend.
+	if res := roCall(t, servers["slack"], "search_messages"); res.IsError {
+		t.Fatalf("call on the restarted backend refused: %+v", res.Content)
+	}
+	for len(pins.changed) > 0 { // anything the first backend heard
+		<-pins.changed
+	}
+	start := time.Now()
+	set("other")
+	awaitChanged(t, s, pins)
+	assertRefusedChanged(t, servers["slack"], start)
+}
+
+// notifyingBackend is a fakeBackend that reports tools/list_changed when
+// the test calls notify. Registering a callback takes register, as a real
+// client's handler setup may.
+type notifyingBackend struct {
+	*fakeBackend
+	register time.Duration
+	fnMu     sync.Mutex
+	fns      []func()
+}
+
+func (b *notifyingBackend) OnToolsChanged(fn func()) {
+	time.Sleep(b.register)
+	b.fnMu.Lock()
+	b.fns = append(b.fns, fn)
+	b.fnMu.Unlock()
+}
+
+func (b *notifyingBackend) notify() {
+	b.fnMu.Lock()
+	fns := slices.Clone(b.fns)
+	b.fnMu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+// namedPins trusts every tool and reports each Changed with its name.
+type namedPins struct {
+	passPins
+	name string
+	got  chan string
+}
+
+func (p namedPins) Changed(string) { p.got <- p.name }
+
+func notifyingStarter(register time.Duration, started chan *notifyingBackend) Starter {
+	return func(context.Context, string) (Backend, error) {
+		b := &notifyingBackend{fakeBackend: &fakeBackend{}, register: register}
+		started <- b
+		return b, nil
+	}
+}
+
+func heard(t *testing.T, got chan string) string {
+	t.Helper()
+	select {
+	case n := <-got:
+		return n
+	case <-time.After(time.Second):
+		return ""
+	}
+}
+
+// A rebuild that finishes after a newer one was accepted (a relist
+// superseded by a newer snapshot) must not take over notifications from
+// the newer pins: only the caller that accepts a rebuild publishes pins.
+func TestReadonly_SupersededRebuildKeepsNewerPins(t *testing.T) {
+	got := make(chan string, 4)
+	started := make(chan *notifyingBackend, 4)
+	pool := readonlyPool(notifyingStarter(0, started))
+	t.Cleanup(pool.Close)
+	pool.PublishToolPins(namedPins{name: "newer", got: got})
+	BuildReadonlyBackends(context.Background(), ReadonlyConfig{}, nil, namedPins{name: "stale", got: got}, pool, nil)
+	lease, err := pool.Lease(context.Background(), "slack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Close() }()
+	b := <-started
+	time.Sleep(50 * time.Millisecond) // let any after-start hook finish
+	b.notify()
+	if n := heard(t, got); n != "newer" {
+		t.Fatalf("tools/list_changed reached %q pins, want the newer ones", n)
+	}
+}
+
+// A backend's subscription is in place before anyone can use it, so a
+// tools/list_changed sent right after start, before any call, is heard;
+// a backend from a starter set later (SetStarter) is subscribed too.
+func TestReadonly_SubscribedBeforeBackendIsUsable(t *testing.T) {
+	got := make(chan string, 4)
+	started := make(chan *notifyingBackend, 4)
+	pool := readonlyPool(notifyingStarter(100*time.Millisecond, started))
+	t.Cleanup(pool.Close)
+	pool.PublishToolPins(namedPins{name: "pins", got: got})
+	for i, server := range []string{"slack", "jira"} {
+		if i == 1 {
+			pool.SetStarter(notifyingStarter(100*time.Millisecond, started))
+		}
+		lease, err := pool.Lease(context.Background(), server)
+		if err != nil {
+			t.Fatal(err)
+		}
+		(<-started).notify() // at once: no call has been made
+		if n := heard(t, got); n != "pins" {
+			t.Fatalf("%s: tools/list_changed right after start was not heard", server)
+		}
+		_ = lease.Close()
+	}
+}
+
+// A read-only build keeps each built backend running in its pool, so a
+// change the server announces before any tool call is heard, and the
+// idle reaper does not stop it (its notification stream would go with it).
+func TestBuildReadonly_HearsListChangedBeforeAnyCallAndAfterReap(t *testing.T) {
+	s, url, _ := swappableSlack(t)
+	cfg := ReadonlyConfig{HTTP: map[string]HTTPServerConfig{"slack": {URL: url}}, Allow: Allowlist{"slack": {"search_messages"}}}
+	pins := newCachedPins(schemaPins{"slack/search_messages": liveSchema(t, url)})
+	servers, pool, errs, err := BuildReadonly(context.Background(), cfg, pins, nil)
+	if err != nil || errs["slack"] != nil || servers["slack"] == nil {
+		t.Fatalf("build: %v %v %v", err, errs, servers)
+	}
+	t.Cleanup(pool.Close)
+	awaitChanged(t, s, pins) // no call has been made
+	if n := pool.Reap(0); n != 0 {
+		t.Fatalf("reaper stopped %d read-only backends, want 0", n)
+	}
+	for len(pins.changed) > 0 {
+		<-pins.changed
+	}
+	awaitChanged(t, s, pins)
 }

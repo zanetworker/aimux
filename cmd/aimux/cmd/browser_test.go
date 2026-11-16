@@ -386,7 +386,7 @@ func TestBrowserSetupMigratesReadonlyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reg.Sources["wiki"] != (toolreg.Source{Type: toolreg.TypeLocalNotes, Root: env.Home}) || len(reg.Sets) != 1 {
+	if reg.Sources["wiki"] != (toolreg.Source{Type: toolreg.TypeLocalNotes, Root: env.Home, Authorship: toolreg.AuthorshipSelf}) || len(reg.Sets) != 1 {
 		t.Fatalf("registry = %+v", reg)
 	}
 	if got, _ := os.ReadFile(old + ".migrated"); string(got) != custom { //nolint:gosec // G304: test temp path

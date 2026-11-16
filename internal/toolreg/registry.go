@@ -30,6 +30,13 @@ const (
 	TypeLocalNotes = "local-notes" // Markdown files under Root, served in process
 )
 
+// Authorship classes: who writes the content a source returns.
+const (
+	AuthorshipSelf     = "self"     // content only the owner writes
+	AuthorshipInternal = "internal" // content written by people the owner trusts
+	AuthorshipOutside  = "outside"  // content anyone outside can write; the default
+)
+
 // Source is one place tools come from. Its name in Registry.Sources is the
 // server name the gateway serves it under, so pins, session tokens, sandbox
 // endpoints (/mcp/<name>) and harness tool names (mcp__<name>__*) all key on
@@ -38,6 +45,17 @@ type Source struct {
 	Type string `yaml:"type"`
 	URL  string `yaml:"url,omitempty"`  // mcp-http only
 	Root string `yaml:"root,omitempty"` // local-notes only: an absolute directory
+	// Authorship is who writes what the source returns: self, internal or
+	// outside. Empty means outside.
+	Authorship string `yaml:"authorship,omitempty"`
+}
+
+// Class is the source's authorship class: Authorship, or outside when unset.
+func (s Source) Class() string {
+	if s.Authorship == "" {
+		return AuthorshipOutside
+	}
+	return s.Authorship
 }
 
 // Set is a reviewed tool set: exact tool names a source may expose.
@@ -151,6 +169,11 @@ func parse(path string, data []byte) (Registry, error) {
 func checkSource(name string, s Source) error {
 	if !safeName.MatchString(name) {
 		return errors.New("name must match [A-Za-z0-9_-]+")
+	}
+	switch s.Authorship {
+	case "", AuthorshipSelf, AuthorshipInternal, AuthorshipOutside:
+	default:
+		return fmt.Errorf("authorship %q must be self, internal or outside", s.Authorship)
 	}
 	switch s.Type {
 	case TypeMCPHTTP:
@@ -399,7 +422,7 @@ func fromLegacy(data []byte) (Registry, []string, error) {
 		r.Sources[n] = Source{Type: TypeMCPHTTP, URL: h.URL}
 	}
 	if old.WikiRoot != "" {
-		r.Sources["wiki"] = Source{Type: TypeLocalNotes, Root: old.WikiRoot}
+		r.Sources["wiki"] = Source{Type: TypeLocalNotes, Root: old.WikiRoot, Authorship: AuthorshipSelf}
 	}
 	var dropped []string
 	for _, n := range slices.Sorted(maps.Keys(old.Allow)) {

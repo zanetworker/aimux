@@ -84,6 +84,7 @@ type ToolStatus struct {
 	Tool       string     `json:"tool"`
 	Status     string     `json:"status"`
 	Reason     string     `json:"reason,omitempty"`
+	Authorship string     `json:"authorship,omitempty"`
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 }
 
@@ -188,7 +189,7 @@ func Review(reg toolreg.Registry, pins PinFile, live map[string]LiveSource) []To
 	listed := map[string]bool{}
 	for _, v := range setViews(reg, pins, live) {
 		listed[v.source+"/"+v.tool] = true
-		out = append(out, ToolStatus{Set: v.set, Source: v.source, Tool: v.tool, Status: v.status, Reason: v.reason, ApprovedAt: approvedAt(v)})
+		out = append(out, ToolStatus{Set: v.set, Source: v.source, Tool: v.tool, Status: v.status, Reason: v.reason, Authorship: reg.Sources[v.source].Class(), ApprovedAt: approvedAt(v)})
 	}
 	for _, src := range slices.Sorted(maps.Keys(pins)) {
 		for _, t := range slices.Sorted(maps.Keys(pins[src])) {
@@ -196,11 +197,13 @@ func Review(reg toolreg.Registry, pins PinFile, live map[string]LiveSource) []To
 				continue
 			}
 			v := view{pin: pins[src][t], pinned: true}
-			reason := "no set in tool-sources.yaml lists it"
-			if _, ok := reg.Sources[src]; !ok {
+			reason, class := "no set in tool-sources.yaml lists it", ""
+			if s, ok := reg.Sources[src]; !ok {
 				reason = "source " + src + " is not in tool-sources.yaml; the pin is kept but unused"
+			} else {
+				class = s.Class()
 			}
-			out = append(out, ToolStatus{Source: src, Tool: t, Status: StatusNotInRegistry, Reason: reason, ApprovedAt: approvedAt(v)})
+			out = append(out, ToolStatus{Source: src, Tool: t, Status: StatusNotInRegistry, Reason: reason, Authorship: class, ApprovedAt: approvedAt(v)})
 		}
 	}
 	return out

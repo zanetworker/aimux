@@ -307,7 +307,7 @@ func TestMigrate_FromReadonlyJSON(t *testing.T) {
 		"google": {Type: TypeMCPHTTP, URL: "http://127.0.0.1:8000/mcp"},
 		"jira":   {Type: TypeMCPHTTP, URL: "http://127.0.0.1:8001/mcp"},
 		// The server keeps its name: pins, tokens and tool names key on it.
-		"wiki": {Type: TypeLocalNotes, Root: "/Users/me/wiki"},
+		"wiki": {Type: TypeLocalNotes, Root: "/Users/me/wiki", Authorship: AuthorshipSelf},
 	}
 	if !reflect.DeepEqual(r.Sources, wantSources) {
 		t.Errorf("sources = %+v", r.Sources)
@@ -572,5 +572,68 @@ func TestReadHome_NoWrites(t *testing.T) {
 	writeFile(t, LegacyPath(bad), `{"Nope": 1}`)
 	if _, err := ReadHome(bad); err == nil || !strings.Contains(err.Error(), LegacyPath(bad)) {
 		t.Fatalf("bad legacy err = %v, want one naming the file", err)
+	}
+}
+
+func TestLoad_AuthorshipValues(t *testing.T) {
+	p := regFile(t, `version: 1
+sources:
+  a: {type: mcp-http, url: "http://127.0.0.1:1/mcp", authorship: self}
+  b: {type: mcp-http, url: "http://127.0.0.1:2/mcp", authorship: internal}
+  c: {type: mcp-http, url: "http://127.0.0.1:3/mcp", authorship: outside}
+  d: {type: mcp-http, url: "http://127.0.0.1:4/mcp"}
+sets: {}
+`)
+	r, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for n, s := range r.Sources {
+		got[n] = s.Class()
+	}
+	want := map[string]string{"a": "self", "b": "internal", "c": "outside", "d": "outside"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("classes = %v, want %v", got, want)
+	}
+}
+
+func TestLoad_AuthorshipInvalid(t *testing.T) {
+	p := regFile(t, `version: 1
+sources:
+  x: {type: mcp-http, url: "http://127.0.0.1:1/mcp", authorship: Outside}
+  ok: {type: mcp-http, url: "http://127.0.0.1:2/mcp", authorship: self}
+sets: {}
+`)
+	r, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := r.SourceErrors["x"]; e == nil || !strings.Contains(e.Error(), `authorship "Outside" must be self, internal or outside`) {
+		t.Fatalf("SourceErrors[x] = %v", e)
+	}
+	if _, ok := r.Sources["ok"]; !ok {
+		t.Fatal("the valid source was dropped too")
+	}
+}
+
+func TestDefault_Authorship(t *testing.T) {
+	for _, n := range []string{"slack", "jira", "google"} {
+		if c := Default().Sources[n].Class(); c != AuthorshipOutside {
+			t.Errorf("%s class = %q, want outside", n, c)
+		}
+	}
+}
+
+func TestMigrate_NotesAreSelf(t *testing.T) {
+	r, _, err := fromLegacy([]byte(`{"wikiRoot":"/tmp/wiki","http":{"jira":{"url":"http://127.0.0.1:8001/mcp"}},"allow":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Sources["wiki"].Authorship; got != AuthorshipSelf {
+		t.Errorf("wiki authorship = %q, want self", got)
+	}
+	if got := r.Sources["jira"].Authorship; got != "" {
+		t.Errorf("jira authorship = %q, want none", got)
 	}
 }

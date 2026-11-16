@@ -69,7 +69,7 @@ func newRouterCmdWith(env routerEnv) *cobra.Command {
 	}
 	status := &cobra.Command{
 		Use:   "status",
-		Short: "Show the mode router: backends, thresholds, config file and whether a key is found; read-only",
+		Short: "Show the mode router: backends, thresholds, timeout, hedge, config file and whether a key is found; read-only",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return routerStatus(env, c.OutOrStdout(), c.ErrOrStderr())
@@ -78,7 +78,7 @@ func newRouterCmdWith(env routerEnv) *cobra.Command {
 	var facts string
 	test := &cobra.Command{
 		Use:   "test <question>",
-		Short: "Route one question with the real router and decider (calls the model once; the question is not run)",
+		Short: "Route one question with the real router and decider (asks the model, plus one identical hedged request if an OpenRouter answer is slow; the question is not run)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			f, err := parseRouterFacts(facts)
@@ -138,6 +138,7 @@ type routerStatusDoc struct {
 	ConfigError   string          `json:"config_error,omitempty"`
 	Threshold     float64         `json:"threshold,omitempty"`
 	TimeoutMs     int64           `json:"timeout_ms,omitempty"`
+	HedgeMs       int64           `json:"hedge_ms,omitempty"`
 	Backends      []routerBackend `json:"backends"`
 	Key           routerKeyDoc    `json:"key"`
 }
@@ -153,7 +154,7 @@ func routerStatus(env routerEnv, out, errOut io.Writer) error {
 		doc.ConfigError = err.Error()
 	} else {
 		doc.ConfigValid, keyCfg = true, cfg.Key
-		doc.Threshold, doc.TimeoutMs = cfg.Threshold, cfg.Timeout.Milliseconds()
+		doc.Threshold, doc.TimeoutMs, doc.HedgeMs = cfg.Threshold, cfg.Timeout.Milliseconds(), cfg.Hedge.Milliseconds()
 		for _, b := range cfg.Backends {
 			t := cfg.Threshold
 			if b.Threshold != nil {
@@ -180,6 +181,11 @@ func routerStatus(env routerEnv, out, errOut io.Writer) error {
 	}
 	if doc.ConfigValid {
 		p("timeout", (time.Duration(doc.TimeoutMs) * time.Millisecond).String())
+		if doc.HedgeMs > 0 {
+			p("hedge", fmt.Sprintf("%s (a second request if the first has not answered)", time.Duration(doc.HedgeMs)*time.Millisecond))
+		} else {
+			p("hedge", "off")
+		}
 		for i, b := range doc.Backends {
 			p(fmt.Sprintf("backend %d", i+1), fmt.Sprintf("%s %s, decided at confidence >= %g", b.Kind, b.Model, b.Threshold))
 		}

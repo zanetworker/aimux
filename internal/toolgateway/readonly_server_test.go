@@ -723,3 +723,161 @@ sets:
 		t.Fatalf("newer token against the old servers allowed %v, want %v", allow, want)
 	}
 }
+
+// A burst of tools/list_changed notifications from one backend relists it
+// once, never once per notification; a burst that arrives while that relist
+// runs (it may have listed before the change) relists it exactly once more.
+// A burst logs at most two lines (the first notification, then how many were
+// coalesced when the recheck finishes), never one per notification.
+func TestReadonlyServer_NotificationBurst_OneRelist(t *testing.T) {
+	var logw bytes.Buffer
+	r, served, _, home := readonlyRig(t, &logw)
+	store := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(home)}
+	if err := store.Save(hashOnly(toolgateway.Pins{"wiki": {"search": "p1"}, "slack": {"search_messages": "p1"}})); err != nil {
+		t.Fatal(err)
+	}
+	reload(t, r)
+	var built mcpproxy.ToolPins
+	r.Build = func(_ context.Context, _ mcpproxy.ReadonlyConfig, pins mcpproxy.ToolPins, _ func(string, string, error)) (map[string]*server.MCPServer, *mcpproxy.Pool, map[string]error, error) {
+		built = pins
+		return map[string]*server.MCPServer{"wiki": server.NewMCPServer("wiki", "1"), "slack": server.NewMCPServer("slack", "1")}, nil, nil, nil
+	}
+	var relists atomic.Int32
+	entered, release := make(chan struct{}), make(chan struct{})
+	var first sync.Once
+	r.Rebuild = func(_ context.Context, _ mcpproxy.ReadonlyConfig, names []string, _ mcpproxy.ToolPins, _ *mcpproxy.Pool, _ func(string, string, error)) (map[string]*server.MCPServer, map[string]error) {
+		if slices.Contains(names, "slack") {
+			relists.Add(1)
+			first.Do(func() { close(entered); <-release })
+		}
+		return map[string]*server.MCPServer{}, nil
+	}
+	stop, err := r.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	opt := <-served
+	opt.AddServers(func(string, *server.MCPServer) {}, func(string) bool { return true })
+	n, ok := built.(interface{ Changed(string) })
+	if !ok {
+		t.Fatalf("Build got %T, which has no Changed", built)
+	}
+	for range 20 {
+		n.Changed("slack")
+	}
+	<-entered // the first notification's relist is running
+	for range 20 {
+		n.Changed("slack")
+	}
+	close(release)
+	r.WaitBackground()
+	if got := relists.Load(); got != 2 {
+		t.Fatalf("relisted slack %d times for 40 notifications (20 during the first relist), want 2", got)
+	}
+	lines := 0
+	for _, l := range strings.Split(logw.String(), "\n") {
+		if strings.Contains(l, "tools changed: slack") {
+			lines++
+		}
+	}
+	if lines > 2 || !strings.Contains(logw.String(), "tools changed: slack (notification)") || !strings.Contains(logw.String(), "39 more notifications coalesced") {
+		t.Fatalf("burst of 40 logged %d lines, want the first and a coalesced count of 39 (at most 2):\n%s", lines, logw.String())
+	}
+}
+
+// Notifications racing the gateway's stop never add to its background work
+// after stop began waiting for it (a WaitGroup misuse that can panic), and
+// one after stop starts nothing.
+func TestReadonlyServer_ChangedDuringStop(t *testing.T) {
+	for range 20 {
+		var logw bytes.Buffer
+		r, served, _, _ := readonlyRig(t, &logw)
+		var built mcpproxy.ToolPins
+		r.Build = func(_ context.Context, _ mcpproxy.ReadonlyConfig, pins mcpproxy.ToolPins, _ func(string, string, error)) (map[string]*server.MCPServer, *mcpproxy.Pool, map[string]error, error) {
+			built = pins
+			return map[string]*server.MCPServer{"slack": server.NewMCPServer("slack", "1")}, nil, nil, nil
+		}
+		var relists atomic.Int32
+		r.Rebuild = func(context.Context, mcpproxy.ReadonlyConfig, []string, mcpproxy.ToolPins, *mcpproxy.Pool, func(string, string, error)) (map[string]*server.MCPServer, map[string]error) {
+			relists.Add(1)
+			return map[string]*server.MCPServer{}, nil
+		}
+		stop, err := r.Start(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		opt := <-served
+		opt.AddServers(func(string, *server.MCPServer) {}, func(string) bool { return true })
+		n := built.(interface{ Changed(string) })
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range 200 {
+					n.Changed("slack")
+				}
+			}()
+		}
+		stop()
+		wg.Wait()
+		before := relists.Load()
+		n.Changed("slack")
+		r.WaitBackground()
+		if got := relists.Load(); got != before {
+			t.Fatalf("a notification after stop relisted (%d -> %d)", before, got)
+		}
+	}
+}
+
+// A background relist superseded by a newer snapshot must not leave the
+// pool reporting tools/list_changed to its older pins: the pins the pool
+// notifies are the applied snapshot's once both rebuilds finished.
+func TestReadonlyServer_SupersededRelistKeepsNewerNotificationPins(t *testing.T) {
+	var logw bytes.Buffer
+	r, served, _, home := readonlyRig(t, &logw)
+	store := toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(home)}
+	if err := store.Save(hashOnly(toolgateway.Pins{"wiki": {"search": "p1"}})); err != nil {
+		t.Fatal(err)
+	}
+	reload(t, r)
+	var pool *mcpproxy.Pool
+	r.Build = func(ctx context.Context, _ mcpproxy.ReadonlyConfig, pins mcpproxy.ToolPins, _ func(string, string, error)) (map[string]*server.MCPServer, *mcpproxy.Pool, map[string]error, error) {
+		_, p, _, err := mcpproxy.BuildReadonly(ctx, mcpproxy.ReadonlyConfig{}, pins, nil)
+		pool = p
+		return map[string]*server.MCPServer{"wiki": server.NewMCPServer("wiki", "1")}, p, nil, err
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	r.Rebuild = func(_ context.Context, _ mcpproxy.ReadonlyConfig, _ []string, _ mcpproxy.ToolPins, _ *mcpproxy.Pool, _ func(string, string, error)) (map[string]*server.MCPServer, map[string]error) {
+		if calls.Add(1) == 1 { // the relist, still listing
+			close(entered)
+			<-release
+		}
+		return map[string]*server.MCPServer{}, nil
+	}
+	stop, err := r.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	t.Cleanup(pool.Close)
+	opt := <-served
+	opt.AddServers(func(string, *server.MCPServer) {}, func(string) bool { return true })
+
+	r.Refresh(context.Background()) // unchanged snapshot: a background relist
+	<-entered
+	if err := store.Save(hashOnly(toolgateway.Pins{"wiki": {"search": "p2"}})); err != nil {
+		t.Fatal(err)
+	}
+	reload(t, r)
+	r.Refresh(context.Background()) // the newer snapshot, applied at once
+	close(release)
+	r.WaitBackground()
+
+	got, ok := pool.ToolPins().(toolgateway.SnapshotPins)
+	if !ok || got.Snap.Version() != r.Applied().Version() {
+		t.Fatalf("pool notifies pins of snapshot %q, want the applied %q", got.Snap.Short(), r.Applied().Short())
+	}
+}

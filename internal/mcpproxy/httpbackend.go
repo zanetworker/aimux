@@ -6,8 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
+	"mime"
+	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,6 +50,109 @@ func HTTPStarter(cfgs map[string]HTTPServerConfig) Starter {
 	}
 }
 
+// listenMaxFailures is how many failed listening streams in a row a
+// backend tries before it stops listening (its tool changes are then seen
+// at the next relist or expired pin check); listenLog is where the first
+// failure is reported. Variables so tests can change them.
+var (
+	listenMaxFailures = 5
+	listenLog         = log.Printf
+)
+
+// listenGuard is an HTTP backend's transport. It passes every request
+// through and watches the listening stream's GETs: the first failure is
+// logged (server and status or network error, never the headers), a stream
+// that opens resets the count, and once listenMaxFailures failed in a row
+// the next GET is answered 405 without reaching the server, which makes
+// mcp-go stop listening. A 2xx that is not an event stream counts as a
+// failure; only a 2xx event stream resets the count. A GET that resumes a response stream carries
+// Last-Event-ID (mcp-go's resumeSSE; the listening GET never does) and is
+// passed through untouched: it is part of a call, not the listening stream.
+type listenGuard struct {
+	server string
+	next   http.RoundTripper
+	// max and logf are listenMaxFailures and listenLog as the backend
+	// started (zero: read them on use), so mcp-go's listening goroutine,
+	// which outlives Close, never reads the variables a test restores.
+	max  int
+	logf func(format string, args ...any)
+
+	mu       sync.Mutex
+	failures int
+	logged   bool
+}
+
+func (g *listenGuard) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodGet || req.Header.Get("Last-Event-ID") != "" {
+		return g.next.RoundTrip(req)
+	}
+	g.mu.Lock()
+	stop := g.failures >= g.limit()
+	g.mu.Unlock()
+	if stop {
+		return &http.Response{
+			Status: "405 Method Not Allowed", StatusCode: http.StatusMethodNotAllowed,
+			Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header: http.Header{}, Body: http.NoBody, Request: req,
+		}, nil
+	}
+	resp, err := g.next.RoundTrip(req)
+	if req.Context().Err() != nil {
+		return resp, err // the client is closing
+	}
+	switch {
+	case err != nil:
+		g.failed(err.Error())
+	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusAccepted:
+		// mcp-go reads only an event stream; any other body is a failed
+		// stream it retries every second, so it counts like an error status.
+		ct := resp.Header.Get("Content-Type")
+		if mt, _, _ := mime.ParseMediaType(ct); mt != "text/event-stream" {
+			g.failed(fmt.Sprintf("status %d with content type %q", resp.StatusCode, clipHeader(ct)))
+			break
+		}
+		g.mu.Lock()
+		g.failures = 0
+		g.mu.Unlock()
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed:
+		// mcp-go handles these: a new session, or no stream offered.
+	default:
+		g.failed(fmt.Sprintf("status %d", resp.StatusCode))
+	}
+	return resp, err
+}
+
+func (g *listenGuard) limit() int {
+	if g.max > 0 {
+		return g.max
+	}
+	return listenMaxFailures
+}
+
+// clipHeader bounds a server-sent header value for a log line.
+func clipHeader(v string) string {
+	if len(v) > 64 {
+		return v[:64] + "..."
+	}
+	return v
+}
+
+func (g *listenGuard) failed(why string) {
+	g.mu.Lock()
+	g.failures++
+	first := !g.logged
+	g.logged = true
+	g.mu.Unlock()
+	if first {
+		logf := g.logf
+		if logf == nil {
+			logf = listenLog
+		}
+		logf("mcp proxy: %s: listening for tool changes failed (%s); retrying up to %d times in a row, then its changes are seen at the next relist",
+			g.server, why, g.limit())
+	}
+}
+
 type httpBackend struct {
 	server string
 	c      *client.Client
@@ -56,7 +163,18 @@ func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpB
 	// The transport logs through slog.Default; the proxy reports errors itself.
 	ctx, cancel := context.WithTimeout(ctx, httpStartTimeout)
 	defer cancel()
-	opts := []transport.StreamableHTTPCOption{transport.WithHTTPLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	// Continuous listening opens the GET stream a server's notifications
+	// (tools/list_changed) arrive on while no request is in flight. It is
+	// deprecated for 2026-07-28, which has no such stream; the client stays
+	// on the legacy handshake below, where it is the only way to hear them.
+	// mcp-go retries a failed stream every second for the client's life and
+	// stops only on a 405, so listenGuard logs the first failure and, after
+	// listenMaxFailures in a row, answers the stream's GET with 405 itself.
+	opts := []transport.StreamableHTTPCOption{
+		transport.WithHTTPLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		transport.WithContinuousListening(), //nolint:staticcheck // SA1019: needed on the legacy protocol, see above
+		transport.WithHTTPBasicClient(&http.Client{Transport: &listenGuard{server: server, next: http.DefaultTransport, max: listenMaxFailures, logf: listenLog}}),
+	}
 	if len(cfg.Headers) > 0 {
 		opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
 	}
@@ -67,7 +185,9 @@ func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpB
 	// Pinned to the initialize handshake, as for stdio backends: 2026-07-28 has
 	// no sessions, and our raw tools/list carries no _meta protocol version.
 	c := client.NewClient(trans, client.WithProtocolVersion(mcp.LATEST_LEGACY_PROTOCOL_VERSION))
-	if err := c.Start(ctx); err != nil {
+	// The listening stream lives as long as the client (Close ends it), not
+	// as long as the start timeout; Start itself sends nothing.
+	if err := c.Start(context.WithoutCancel(ctx)); err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("start MCP server %s: %w", server, err)
 	}
@@ -132,6 +252,19 @@ func (b *httpBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*m
 		return nil, err
 	}
 	return res, nil
+}
+
+// OnToolsChanged runs fn on each tools/list_changed the server sends.
+func (b *httpBackend) OnToolsChanged(fn func()) { onToolsChanged(b.c, fn) }
+
+// onToolsChanged registers fn on c for tools/list_changed only; c keeps
+// its other notification handlers.
+func onToolsChanged(c *client.Client, fn func()) {
+	c.OnNotification(func(n mcp.JSONRPCNotification) {
+		if n.Method == mcp.MethodNotificationToolsListChanged {
+			fn()
+		}
+	})
 }
 
 func (b *httpBackend) Close() error { return b.c.Close() }

@@ -63,6 +63,31 @@ type ToolPins interface {
 	// Guard returns the check run before each call, which lists a server's
 	// live tools with list to compare them with their pins.
 	Guard(list func(ctx context.Context, server string) ([]json.RawMessage, error)) func(ctx context.Context, server, tool string) error
+	// Changed hears that server sent tools/list_changed, so its next
+	// call's check lists it again. It runs on the backend's notification
+	// goroutine and must not block.
+	Changed(server string)
+}
+
+// toolPinsRef holds a ToolPins for Pool.pins (an atomic.Pointer needs one
+// concrete type).
+type toolPinsRef struct{ pins ToolPins }
+
+// notifyChanged is the pool's BeforeReady for read-only builds: a backend
+// that reports tools/list_changed has it passed to the pins published when
+// it arrives (PublishToolPins), since an accepted rebuild swaps them. It is
+// subscribed before any caller can use the backend, so a change sent right
+// after start is not missed.
+func (p *Pool) notifyChanged(server string, b Backend) {
+	n, ok := b.(ToolsChangedNotifier)
+	if !ok {
+		return
+	}
+	n.OnToolsChanged(func() {
+		if ref := p.pins.Load(); ref != nil && ref.pins != nil {
+			ref.pins.Changed(server)
+		}
+	})
 }
 
 // BuildReadonly builds one MCP server per live backend, each exposing only
@@ -75,9 +100,38 @@ type ToolPins interface {
 // backend error. The caller closes the returned Pool.
 func BuildReadonly(ctx context.Context, cfg ReadonlyConfig, pins ToolPins, rejectLog func(server, tool string, err error)) (map[string]*server.MCPServer, *Pool, map[string]error, error) {
 	names := readonlyNames(cfg)
-	pool := NewPool(ReadonlyStarter(cfg), PoolOptions{})
+	pool := readonlyPool(ReadonlyStarter(cfg))
+	pool.PublishToolPins(pins)
 	servers, errs := BuildReadonlyBackends(ctx, cfg, names, pins, pool, rejectLog)
 	return servers, pool, errs, nil
+}
+
+// readonlyPool is the pool BuildReadonly serves from: its backends report
+// tools/list_changed to the pins last published on it, also those from a
+// starter set later (SetStarter). Idle backends are kept (KeepIdle): a
+// stopped backend hears no notification, so a change announced while no
+// call ran would only be seen at the next relist.
+func readonlyPool(start Starter) *Pool {
+	var pool *Pool
+	pool = NewPool(start, PoolOptions{KeepIdle: true, BeforeReady: func(server string, b Backend) { pool.notifyChanged(server, b) }})
+	return pool
+}
+
+// PublishToolPins makes pins the ones the pool's backends report
+// tools/list_changed to. BuildReadonly publishes its pins; a caller of
+// BuildReadonlyBackends publishes the rebuild's pins only once it accepts
+// that rebuild, so one superseded meanwhile never takes over from newer
+// pins.
+func (p *Pool) PublishToolPins(pins ToolPins) {
+	p.pins.Store(&toolPinsRef{pins: pins})
+}
+
+// ToolPins is the pins last published on the pool (nil: none).
+func (p *Pool) ToolPins() ToolPins {
+	if ref := p.pins.Load(); ref != nil {
+		return ref.pins
+	}
+	return nil
 }
 
 // readonlyNames is every backend cfg configures, sorted.
@@ -101,7 +155,9 @@ func ReadonlyCatalog(ctx context.Context, cfg ReadonlyConfig) (*Catalog, map[str
 
 // BuildReadonlyBackends builds servers for the named backends only, on pool
 // (from BuildReadonly), for a caller that retries backends that were down. A
-// name cfg does not configure is an error in the map.
+// name cfg does not configure is an error in the map. It does not change
+// the pins pool's backends report tools/list_changed to: the caller
+// publishes pins (PublishToolPins) when it accepts the rebuild.
 func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []string, pins ToolPins, pool *Pool, rejectLog func(server, tool string, err error)) (map[string]*server.MCPServer, map[string]error) {
 	errs := map[string]error{}
 	var live []string
@@ -122,8 +178,15 @@ func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []stri
 			errs[n] = fmt.Errorf("no read-only backend %q is configured", n)
 		}
 	}
+	// Listing through pool leaves each backend running there, subscribed
+	// to its notifications before any tool call (a lease's Close only
+	// releases it); without a pool the backends are started and stopped.
+	start := ReadonlyStarter(cfg)
+	if pool != nil {
+		start = func(ctx context.Context, name string) (Backend, error) { return pool.Lease(ctx, name) }
+	}
 	cat := &Catalog{Servers: map[string]CatalogEntry{}}
-	for n, err := range RefreshCatalog(ctx, cat, ReadonlyStarter(cfg), live) {
+	for n, err := range RefreshCatalog(ctx, cat, start, live) {
 		errs[n] = err
 	}
 	var opts []ServerOption

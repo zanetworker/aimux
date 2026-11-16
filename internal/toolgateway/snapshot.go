@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
+	"weak"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/toolreg"
@@ -87,13 +89,18 @@ type SnapshotPins struct {
 	// listed, if set, hears each live listing a call's check made of a
 	// backend, so the gateway notices a change between its builds.
 	listed func(server string, tools []json.RawMessage)
+	// verifiers are the ones Guard made, which Changed invalidates; nil
+	// (a SnapshotPins not from GatewayPins) keeps none.
+	verifiers *verifierSet
+	// onChanged, if set, hears each server Changed is told about.
+	onChanged func(server string)
 }
 
 var _ mcpproxy.ToolPins = SnapshotPins{}
 
 // GatewayPins is snap as the gateway's ToolPins.
 func GatewayPins(snap toolreg.Snapshot) SnapshotPins {
-	return SnapshotPins{Pins: ServedPins(snap), Snap: snap}
+	return SnapshotPins{Pins: ServedPins(snap), Snap: snap, verifiers: &verifierSet{}}
 }
 
 // Filter keeps the catalog tools whose live pin matches a served pin.
@@ -116,11 +123,67 @@ func (p SnapshotPins) Guard(list func(ctx context.Context, server string) ([]jso
 			return tools, err
 		}
 	}
-	check := p.Pins.Guard(list)
+	v := p.Pins.Verifier(list)
+	p.verifiers.add(v)
+	check := v.Check
 	return func(ctx context.Context, server, tool string) error {
 		if p.Snap.SourceChanged(server, tool) {
 			return fmt.Errorf("%s/%s: %w; run aimux tools status", server, tool, ErrSourceChanged)
 		}
 		return check(ctx, server, tool)
 	}
+}
+
+// Changed hears that server sent tools/list_changed: each guard's verifier
+// lists it again on its next call, and onChanged, if set, hears it. It
+// does not block (a backend's notification goroutine calls it).
+func (p SnapshotPins) Changed(server string) {
+	p.verifiers.invalidate(server)
+	if p.onChanged != nil {
+		p.onChanged(server)
+	}
+}
+
+// verifierSet is the verifiers a SnapshotPins' guards check with, held
+// weakly: the gateway rebuilds a backend (and so makes a guard) on every
+// relist, and a guard whose servers were dropped lets its verifier go.
+type verifierSet struct {
+	mu sync.Mutex
+	vs []weak.Pointer[Verifier]
+}
+
+func (s *verifierSet) add(v *Verifier) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune(nil)
+	s.vs = append(s.vs, weak.Make(v))
+}
+
+// invalidate invalidates server on every verifier still in use.
+func (s *verifierSet) invalidate(server string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune(func(v *Verifier) { v.Invalidate(server) })
+}
+
+// prune drops the verifiers collected since and runs fn, if set, on each
+// one left. s.mu is held.
+func (s *verifierSet) prune(fn func(*Verifier)) {
+	kept := s.vs[:0]
+	for _, w := range s.vs {
+		if v := w.Value(); v != nil {
+			if fn != nil {
+				fn(v)
+			}
+			kept = append(kept, w)
+		}
+	}
+	clear(s.vs[len(kept):])
+	s.vs = kept
 }

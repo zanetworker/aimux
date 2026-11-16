@@ -61,7 +61,7 @@ func toolsFixture(t *testing.T) (toolreg.Registry, toolreg.PinTable, map[string]
 	srcErr := errors.New(`url "https://user:` + fakePW + `@brk.example.com/mcp" must be an http or https URL with a host`)
 	reg := toolreg.Registry{Version: 1,
 		Sources: map[string]toolreg.Source{
-			"notes":  {Type: toolreg.TypeLocalNotes, Root: "/notes"},
+			"notes":  {Type: toolreg.TypeLocalNotes, Root: "/notes", Authorship: toolreg.AuthorshipSelf},
 			"jira":   {Type: toolreg.TypeMCPHTTP, URL: "http://user:" + fakePW + "@127.0.0.1:8001/mcp?token=" + fakeTok},
 			"slack":  {Type: toolreg.TypeMCPHTTP, URL: "https://slack.example.com/mcp?key=" + fakeKey},
 			"google": {Type: toolreg.TypeMCPHTTP, URL: "http://127.0.0.1:8003/mcp"},
@@ -454,5 +454,19 @@ func TestTools_RelistFailedIsUnknownNotUnavailable(t *testing.T) {
 	gh := setOf(t, l, "github:readonly")
 	if gh.Status != "available" || gh.Tools[0].Status != "unknown" || gh.Tools[0].Reason != reasonRelistFailed {
 		t.Fatalf("github = %+v", gh)
+	}
+}
+
+func TestListTools_Authorship(t *testing.T) {
+	r, _ := toolsRig(t, nil)
+	l, _ := getTools(t, r, "cli")
+	if got := setOf(t, l, "wiki:readonly").Authorship; got != "self" {
+		t.Errorf("notes (wiki alias) authorship = %q, want self", got)
+	}
+	if got := setOf(t, l, "jira:readonly").Authorship; got != "outside" {
+		t.Errorf("jira authorship = %q, want outside", got)
+	}
+	if got := setOf(t, l, "missing:readonly").Authorship; got != "" {
+		t.Errorf("omitted set authorship = %q, want none", got)
 	}
 }

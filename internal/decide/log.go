@@ -82,12 +82,13 @@ type decisionLine struct {
 	Model         string             `json:"model"`
 	Ms            int64              `json:"ms"`
 	Test          bool               `json:"test,omitempty"`
+	Hedged        bool               `json:"hedged,omitempty"`
 }
 
 func (l *Log) record(decider, stateSHA string, a Answer, test bool) error {
 	err := l.append(decisionLine{Time: time.Now().UTC(), ID: a.ID, Decider: decider, StateSHA256: stateSHA,
 		Choice: a.Choice, Confidence: a.Confidence, Probabilities: a.Probabilities, Decided: a.Decided,
-		Undecided: a.Undecided, Threshold: a.Threshold, Backend: a.Backend, Model: a.Model, Ms: a.Ms, Test: test})
+		Undecided: a.Undecided, Threshold: a.Threshold, Backend: a.Backend, Model: a.Model, Ms: a.Ms, Test: test, Hedged: a.Hedged})
 	if err != nil {
 		return err
 	}

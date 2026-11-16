@@ -358,7 +358,7 @@ func TestLoadDecider_Defaults(t *testing.T) {
 		t.Fatalf("backends %+v (no chat fallback by default)", c.Backends)
 	}
 	b := c.Backends[0]
-	if b.Kind != "openrouter" || b.Model != "cloudflare/clef-flash" || b.ZDR != nil || c.Threshold != 0.25 || c.Timeout != 5*time.Second {
+	if b.Kind != "openrouter" || b.Model != "cloudflare/clef-flash" || b.ZDR != nil || c.Threshold != 0.25 || c.Timeout != 5*time.Second || c.Hedge != 1200*time.Millisecond {
 		t.Fatalf("default %+v", c)
 	}
 	if c.Key.Service != "aimux-openrouter" || c.Key.Env != "OPENROUTER_API_KEY" || c.Key.File != "~/.config/aimux/keys/openrouter" {
