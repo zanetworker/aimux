@@ -535,11 +535,9 @@ func backendNames(cfg mcpproxy.ReadonlyConfig) []string {
 	for n := range cfg.Notes {
 		all = append(all, n)
 	}
-	if cfg.Tools != nil {
-		for n, src := range cfg.Runner {
-			if src.Type == toolreg.TypeCLI {
-				all = append(all, n)
-			}
+	for n := range cfg.Runner {
+		if cfg.StartsRunner(n) {
+			all = append(all, n)
 		}
 	}
 	sort.Strings(all)

@@ -110,12 +110,8 @@ func (b *cliBackend) start(ctx context.Context) (string, error) {
 	if b.version != "" {
 		return b.version, nil
 	}
-	if err := b.run.Ensure(ctx); err != nil {
-		var re *RunnerError
-		if errors.As(err, &re) || strings.Contains(err.Error(), "aimux sandbox setup") {
-			return "", fmt.Errorf("%s: tool runner: %w", b.server, err)
-		}
-		return "", fmt.Errorf("%s: tool runner: %w (%s)", b.server, err, runnerSetupHint)
+	if err := ensureRunner(ctx, b.server, b.run); err != nil {
+		return "", err
 	}
 	v, err := b.readVersion(ctx)
 	if err != nil {
@@ -237,10 +233,7 @@ func (b *cliBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return nil, &RequestError{Err: fmt.Errorf("%s: %w", tool, err)}
 	}
-	notReady := func(err error) *mcp.CallToolResult {
-		runnerLog("%s: %s: %v", b.server, tool, err)
-		return mcp.NewToolResultError(tool + ": the tool runner is not ready (" + nextStep(err) + ")")
-	}
+	notReady := func(err error) *mcp.CallToolResult { return runnerNotReady(b.server, tool, err) }
 	if _, err := b.start(ctx); err != nil {
 		return notReady(err), nil
 	}
@@ -258,14 +251,7 @@ func (b *cliBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mc
 		out, stderr, exit, err = b.runOnce(ctx, argv)
 	}
 	if err != nil {
-		switch {
-		case errors.Is(err, context.DeadlineExceeded):
-			return mcp.NewToolResultError(fmt.Sprintf("%s: timed out after %s", tool, runnerCallTimeout)), nil
-		case errors.Is(err, ErrRunnerNotReady):
-			return notReady(err), nil
-		}
-		runnerLog("%s: %s: run in the tool runner: %v", b.server, tool, err)
-		return mcp.NewToolResultError(tool + ": the tool runner failed; see the aimux log"), nil
+		return runFailure(b.server, tool, err), nil
 	}
 	if exit != 0 {
 		if method, path, ok := policyDenial(out, stderr); ok {
@@ -277,22 +263,68 @@ func (b *cliBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mc
 		}
 		return mcp.NewToolResultError(msg), nil
 	}
-	if len(out) > maxRunnerOutput {
-		return mcp.NewToolResultText(cutUTF8(out, maxRunnerOutput) + runnerCutMarker), nil
-	}
-	return mcp.NewToolResultText(string(out)), nil
+	return cappedText(out), nil
 }
 
-// runOnce runs argv with runnerCallTimeout; a timeout is
-// context.DeadlineExceeded.
+// runOnce runs argv with runnerCallTimeout (runBounded).
 func (b *cliBackend) runOnce(ctx context.Context, argv []string) (stdout, stderr []byte, exit int, err error) {
+	return runBounded(ctx, b.run, argv)
+}
+
+// The steps the cli and http-openapi backends share.
+
+// ensureRunner ensures run for server; the error carries one next step.
+func ensureRunner(ctx context.Context, server string, run ToolRunner) error {
+	err := run.Ensure(ctx)
+	if err == nil {
+		return nil
+	}
+	var re *RunnerError
+	if errors.As(err, &re) || strings.Contains(err.Error(), "aimux sandbox setup") {
+		return fmt.Errorf("%s: tool runner: %w", server, err)
+	}
+	return fmt.Errorf("%s: tool runner: %w (%s)", server, err, runnerSetupHint)
+}
+
+// runBounded runs argv in run with runnerCallTimeout; a timeout is
+// context.DeadlineExceeded.
+func runBounded(ctx context.Context, run ToolRunner, argv []string) (stdout, stderr []byte, exit int, err error) {
 	cctx, cancel := context.WithTimeout(ctx, runnerCallTimeout)
 	defer cancel()
-	stdout, stderr, exit, err = b.run.RunTool(cctx, argv)
+	stdout, stderr, exit, err = run.RunTool(cctx, argv)
 	if err != nil && ctx.Err() == nil && cctx.Err() != nil {
 		err = context.DeadlineExceeded
 	}
 	return stdout, stderr, exit, err
+}
+
+// runnerNotReady is the agent's result for a runner that cannot run tool:
+// the next step only; the detail goes to the log.
+func runnerNotReady(server, tool string, err error) *mcp.CallToolResult {
+	runnerLog("%s: %s: %v", server, tool, err)
+	return mcp.NewToolResultError(tool + ": the tool runner is not ready (" + nextStep(err) + ")")
+}
+
+// runFailure is the agent's result for a RunTool error (not an exit
+// status): a timeout, a runner not ready, or a generic failure whose detail
+// goes to the log.
+func runFailure(server, tool string, err error) *mcp.CallToolResult {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return mcp.NewToolResultError(fmt.Sprintf("%s: timed out after %s", tool, runnerCallTimeout))
+	case errors.Is(err, ErrRunnerNotReady):
+		return runnerNotReady(server, tool, err)
+	}
+	runnerLog("%s: %s: run in the tool runner: %v", server, tool, err)
+	return mcp.NewToolResultError(tool + ": the tool runner failed; see the aimux log")
+}
+
+// cappedText is out as a text result, cut at maxRunnerOutput with a marker.
+func cappedText(out []byte) *mcp.CallToolResult {
+	if len(out) > maxRunnerOutput {
+		return mcp.NewToolResultText(cutUTF8(out, maxRunnerOutput) + runnerCutMarker)
+	}
+	return mcp.NewToolResultText(string(out))
 }
 
 // reset forgets the start, so the next use ensures the runner again, and

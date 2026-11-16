@@ -78,11 +78,12 @@ func (s SourceTools) RunTool(ctx context.Context, argv []string) (stdout, stderr
 
 // RunnerTools is what toolgateway.ReadonlyServer.Runner and
 // mcpproxy.ReadonlyConfig.Tools take: for each snapshot, one ToolSandbox
-// compiled from it with the builtin packs, bound per source.
+// compiled from it with the builtin packs and the http-openapi sources'
+// specs, bound per source.
 func RunnerTools(run Runner, policyDir string) func(snap toolreg.Snapshot) func(source string) mcpproxy.ToolRunner {
 	return func(snap toolreg.Snapshot) func(string) mcpproxy.ToolRunner {
 		ts := NewToolSandbox(run, policyDir, func(have func(string) bool) (profile.Compiled, map[string]error, error) {
-			return profile.CompileRunnerAvailable(snap, clipack.Builtin, noOperations, have)
+			return profile.CompileRunnerAvailable(snap, clipack.Builtin, httpsource.SourceOperations, have)
 		})
 		return func(source string) mcpproxy.ToolRunner { return ts.For(source) }
 	}
@@ -131,7 +132,3 @@ func stoppedRunner(phase string) error {
 func (p probeTools) RunTool(ctx context.Context, argv []string) (stdout, stderr []byte, exit int, err error) {
 	return p.b.RunTool(ctx, profile.RunnerSandbox, argv)
 }
-
-// noOperations lists no http-openapi operations: those sources do not run
-// in the runner yet, so they reach nothing.
-func noOperations(toolreg.Source) ([]httpsource.Operation, error) { return nil, nil }

@@ -1,0 +1,51 @@
+openapi: 3.0.3
+info: {title: fixture, version: "1"}
+paths:
+  /repos/{owner}/{repo}/issues:
+    parameters:
+      - $ref: '#/components/parameters/owner'
+      - $ref: '#/components/parameters/repo'
+    get:
+      operationId: issues/list-for-repo
+      summary: List repository issues
+      parameters:
+        - name: state
+          in: query
+          schema: {type: string, enum: [open, closed, all]}
+        - name: per_page
+          in: query
+          schema: {type: integer}
+        - name: X-Trace
+          in: header
+          schema: {type: string}
+    post:
+      operationId: issues/create
+  /repos/{owner}/{repo}:
+    parameters:
+      - $ref: '#/components/parameters/owner'
+      - $ref: '#/components/parameters/repo'
+    get:
+      summary: no operationId
+    put:
+      operationId: repos/replace
+  /zen:
+    get:
+      operationId: meta/get-zen
+      parameters:
+        - name: pretty
+          in: query
+          schema: {type: boolean}
+    delete:
+      operationId: meta/delete-zen
+components:
+  parameters:
+    owner:
+      name: owner
+      in: path
+      required: true
+      schema: {type: string}
+    repo:
+      name: repo
+      in: path
+      required: true
+      schema: {type: string}

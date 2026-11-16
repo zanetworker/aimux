@@ -320,7 +320,8 @@ func TestRunnerBackend_NoCredentialInOutput(t *testing.T) {
 	}
 }
 
-func TestReadonly_StartsCLISources(t *testing.T) {
+// cli and http-openapi sources both start in the runner when it is bound.
+func TestReadonly_StartsRunnerSources(t *testing.T) {
 	f := &fakeTools{version: "gh version 2.83.1", run: func(context.Context, []string) ([]byte, []byte, int, error) {
 		return []byte("ok"), nil, 0, nil
 	}}
@@ -329,9 +330,9 @@ func TestReadonly_StartsCLISources(t *testing.T) {
 	cfg := ReadonlyConfig{HTTP: map[string]HTTPServerConfig{}, Notes: map[string]string{},
 		Runner: map[string]toolreg.Source{
 			"github": {Type: toolreg.TypeCLI, Pack: "gh"},
-			"api":    {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://a.example"},
+			"api":    githubSpec(t),
 		},
-		Allow: Allowlist{"github": {"gh_repo_view"}},
+		Allow: Allowlist{"github": {"gh_repo_view"}, "api": {"api_meta_get_zen"}},
 		Tools: func(source string) ToolRunner {
 			mu.Lock()
 			bound = append(bound, source)
@@ -343,8 +344,8 @@ func TestReadonly_StartsCLISources(t *testing.T) {
 	if errs["github"] != nil || len(cat.Servers["github"].Tools) == 0 {
 		t.Fatalf("catalog: %v %d tools", errs, len(cat.Servers["github"].Tools))
 	}
-	if errs["api"] == nil || !strings.Contains(errs["api"].Error(), "not started") {
-		t.Fatalf("api: %v", errs["api"])
+	if errs["api"] != nil || len(cat.Servers["api"].Tools) != 2 {
+		t.Fatalf("api: %v %d tools", errs["api"], len(cat.Servers["api"].Tools))
 	}
 
 	servers, pool, errs, err := BuildReadonly(context.Background(), cfg, passPins{}, nil)
@@ -352,10 +353,10 @@ func TestReadonly_StartsCLISources(t *testing.T) {
 		t.Fatalf("build: %v %v", err, errs)
 	}
 	t.Cleanup(pool.Close)
-	if _, ok := servers["api"]; ok || errs["api"] == nil {
-		t.Fatalf("http-openapi served: %v", errs["api"])
+	if servers["api"] == nil || errs["api"] != nil {
+		t.Fatalf("http-openapi not served: %v", errs["api"])
 	}
-	if !slices.Contains(bound, "github") || slices.Contains(bound, "api") {
+	if !slices.Contains(bound, "github") || !slices.Contains(bound, "api") {
 		t.Fatalf("bound = %v", bound)
 	}
 }

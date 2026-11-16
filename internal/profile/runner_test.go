@@ -7,6 +7,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/clipack"
 	"github.com/zanetworker/aimux/internal/httpsource"
+	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 	"gopkg.in/yaml.v3"
 )
@@ -156,16 +157,43 @@ func TestCompileRunner_NoModelOrGateway(t *testing.T) {
 	}
 }
 
-// An http-openapi source compiles each GET operation to a rest rule on
-// its base URL's host ({param} segments as *), curl as the binary and its
-// credential as a provider.
-func TestCompileRunner_HTTPOpenAPI(t *testing.T) {
-	sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com/rest/api/2", Credential: "aimux-jira"}} // #nosec G101 -- a provider name, not a credential
-	pins := toolreg.PinTable{"jira": {"get_issue": {Hash: "h", Source: "https://jira.example.com/rest/api/2"}}}
-	specs := func(toolreg.Source) ([]httpsource.Operation, error) {
-		return []httpsource.Operation{{ID: "get_issue", Path: "/issue/{key}"}, {ID: "search", Path: "/search"}, {ID: "dup", Path: "/search"}}, nil
+// httpPins pins ops of source at base as the gateway would on approval.
+func httpPins(t *testing.T, source, base string, ops ...httpsource.Operation) map[string]toolreg.Pin {
+	t.Helper()
+	out := map[string]toolreg.Pin{}
+	for _, op := range ops {
+		raws, err := httpsource.Tools(source, base, []httpsource.Operation{op})
+		if err != nil || len(raws) != 1 {
+			t.Fatalf("tools: %v", err)
+		}
+		h, err := toolgateway.PinTool(raws[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[httpsource.ToolName(source, op)] = toolreg.Pin{Hash: h, Source: base}
 	}
-	c, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, specs)
+	return out
+}
+
+func fixedOps(ops ...httpsource.Operation) func(toolreg.Source) ([]httpsource.Operation, error) {
+	return func(toolreg.Source) ([]httpsource.Operation, error) { return ops, nil }
+}
+
+var (
+	opIssue  = httpsource.Operation{ID: "get_issue", Path: "/issue/{key}", Params: []httpsource.Param{{Name: "key", In: "path", Type: "string", Required: true}}}
+	opSearch = httpsource.Operation{ID: "search", Path: "/search"}
+	opDup    = httpsource.Operation{ID: "dup", Path: "/search"}
+	opAdmin  = httpsource.Operation{ID: "admin", Path: "/admin/{x}", Params: []httpsource.Param{{Name: "x", In: "path", Type: "string", Required: true}}}
+)
+
+// An http-openapi source compiles each approved GET operation to a rest
+// rule on its base URL's host ({param} segments as *), with curl as the
+// binary.
+func TestCompileRunner_HTTPOpenAPI(t *testing.T) {
+	const base = "https://jira.example.com/rest/api/2"
+	sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}}
+	pins := toolreg.PinTable{"jira": httpPins(t, "jira", base, opIssue, opSearch, opDup)}
+	c, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(opIssue, opSearch, opDup))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,11 +212,11 @@ func TestCompileRunner_HTTPOpenAPI(t *testing.T) {
 	if strings.Join(got, ",") != "GET /rest/api/2/issue/*,GET /rest/api/2/search" {
 		t.Fatalf("rules = %v", got)
 	}
-	if strings.Join(c.Providers, ",") != "aimux-jira" {
+	if len(c.Providers) != 0 {
 		t.Fatalf("providers = %v", c.Providers)
 	}
 
-	// No operations (today's specs): no endpoints, so no network policy.
+	// No operations: no endpoints, so no network policy.
 	c, err = CompileRunner(runnerSnap(sources, pins), clipack.Builtin, noSpecs)
 	if err != nil {
 		t.Fatal(err)
@@ -196,19 +224,94 @@ func TestCompileRunner_HTTPOpenAPI(t *testing.T) {
 	if n := len(decodePolicy(t, c.PolicyYAML).NetworkPolicies); n != 0 {
 		t.Fatalf("%d policies from no operations", n)
 	}
-	// Its credential has nothing to reach, so it is not attached.
-	if len(c.Providers) != 0 {
-		t.Fatalf("providers = %v from a source with no endpoints", c.Providers)
-	}
-	// Next to an approved gh source, only gh's provider is attached.
-	both := map[string]toolreg.Source{"jira": sources["jira"], "github": {Type: toolreg.TypeCLI, Pack: "gh"}}
-	bothPins := toolreg.PinTable{"jira": pins["jira"], "github": ghPins("gh_issue_list")["github"]}
-	c, err = CompileRunner(runnerSnap(both, bothPins), clipack.Builtin, noSpecs)
+}
+
+// Only operations with an active pin whose definition still matches it
+// reach the policy: an unpinned operation, and a pinned one whose path
+// template changed since approval, get no rule. Path params are one *
+// segment each, never **.
+func TestCompileRunner_HTTPPathRules(t *testing.T) {
+	const base = "https://api.example.com"
+	sources := map[string]toolreg.Source{"api": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}}
+	moved := opSearch
+	moved.Path = "/search/{all}"
+	moved.Params = []httpsource.Param{{Name: "all", In: "path", Type: "string", Required: true}}
+	pins := toolreg.PinTable{"api": httpPins(t, "api", base, opIssue, opSearch)}
+	// The spec now has search at another path, and admin nobody approved.
+	c, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(opIssue, moved, opAdmin))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(c.Providers, ",") != "aimux-github" {
-		t.Fatalf("providers = %v", c.Providers)
+	eps := decodePolicy(t, c.PolicyYAML).NetworkPolicies["tools_api"].Endpoints
+	if len(eps) != 1 || len(eps[0].Rules) != 1 {
+		t.Fatalf("endpoints = %+v", eps)
+	}
+	if r := eps[0].Rules[0].Allow; r.Method != "GET" || r.Path != "/issue/*" {
+		t.Fatalf("rule = %+v", r)
+	}
+	if strings.Contains(string(c.PolicyYAML), "**") || strings.Contains(string(c.PolicyYAML), "/admin") {
+		t.Fatalf("policy widened:\n%s", c.PolicyYAML)
+	}
+	// Nothing pinned matches: no policy at all.
+	stale := toolreg.PinTable{"api": {"api_get_issue": {Hash: "sha256:old", Source: base}}}
+	c, err = CompileRunner(runnerSnap(sources, stale), clipack.Builtin, fixedOps(opIssue))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(decodePolicy(t, c.PolicyYAML).NetworkPolicies); n != 0 {
+		t.Fatalf("%d policies from a stale pin", n)
+	}
+}
+
+// A source whose spec cannot be read is left out with its error (naming
+// the source), and the other sources still compile.
+func TestCompileRunnerAvailable_SpecErrorStaysOnSource(t *testing.T) {
+	const base = "https://api.example.com"
+	sources := map[string]toolreg.Source{
+		"api":    {Type: toolreg.TypeHTTPOpenAPI, Spec: "/missing.yaml", BaseURL: base},
+		"github": {Type: toolreg.TypeCLI, Pack: "gh"},
+	}
+	pins := ghPins("gh_issue_list")
+	pins["api"] = httpPins(t, "api", base, opSearch)
+	bad := func(toolreg.Source) ([]httpsource.Operation, error) {
+		return nil, errors.New("spec /missing.yaml: open: no such file or directory")
+	}
+	c, errs, err := CompileRunnerAvailable(runnerSnap(sources, pins), clipack.Builtin, bad, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := errs["api"]; e == nil || !strings.Contains(e.Error(), "source api") || !strings.Contains(e.Error(), "/missing.yaml") || len(errs) != 1 {
+		t.Fatalf("errs = %v", errs)
+	}
+	np := decodePolicy(t, c.PolicyYAML).NetworkPolicies
+	if _, ok := np["tools_api"]; ok {
+		t.Fatal("unreadable source has a policy")
+	}
+	if _, ok := np["tools_github"]; !ok {
+		t.Fatal("the other source was dropped too")
+	}
+}
+
+// http-openapi sources do not send credentials yet: one that names a
+// provider is left out (no policy, no provider) with an error saying so.
+func TestCompileRunnerAvailable_HTTPCredentialRefused(t *testing.T) {
+	const base = "https://jira.example.com"
+	sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base, Credential: "aimux-jira"}} // #nosec G101 -- a provider name, not a credential
+	pins := toolreg.PinTable{"jira": httpPins(t, "jira", base, opIssue)}
+	read := false
+	specs := func(toolreg.Source) ([]httpsource.Operation, error) {
+		read = true
+		return []httpsource.Operation{opIssue}, nil
+	}
+	c, errs, err := CompileRunnerAvailable(runnerSnap(sources, pins), clipack.Builtin, specs, func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := errs["jira"]; e == nil || !strings.Contains(e.Error(), "credential") || !strings.Contains(e.Error(), "source jira") {
+		t.Fatalf("errs = %v", errs)
+	}
+	if len(decodePolicy(t, c.PolicyYAML).NetworkPolicies) != 0 || len(c.Providers) != 0 || read {
+		t.Fatalf("credentialed source compiled: providers %v, spec read %v\n%s", c.Providers, read, c.PolicyYAML)
 	}
 }
 
@@ -218,18 +321,20 @@ func TestCompileRunner_Errors(t *testing.T) {
 	if _, err := CompileRunner(snap, noPack, noSpecs); err == nil || !strings.Contains(err.Error(), "github") {
 		t.Fatalf("pack error = %v", err)
 	}
-	sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com"}}
-	pins := toolreg.PinTable{"jira": {"x": {Hash: "h"}}}
-	bad := func(toolreg.Source) ([]httpsource.Operation, error) { return nil, errors.New("bad spec") }
-	if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, bad); err == nil || !strings.Contains(err.Error(), "jira") {
-		t.Fatalf("spec error = %v", err)
-	}
 	// A path that is not an absolute template is refused, not passed through.
-	odd := func(toolreg.Source) ([]httpsource.Operation, error) {
-		return []httpsource.Operation{{ID: "x", Path: "search"}}, nil
-	}
-	if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, odd); err == nil {
+	odd := httpsource.Operation{ID: "x", Path: "search"}
+	sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com"}}
+	pins := toolreg.PinTable{"jira": httpPins(t, "jira", "https://jira.example.com", odd)}
+	if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(odd)); err == nil {
 		t.Fatal("relative path accepted")
+	}
+	// Literal segments are checked here too, not only by the parser.
+	for _, path := range []string{"/a%2F..%2Fadmin", "/files/[a-z]", `/a\..\b`, "/a//b", "/sp ace"} {
+		op := httpsource.Operation{ID: "x", Path: path}
+		pins := toolreg.PinTable{"jira": httpPins(t, "jira", "https://jira.example.com", op)}
+		if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(op)); err == nil {
+			t.Errorf("%q accepted", path)
+		}
 	}
 }
 
@@ -237,9 +342,7 @@ func TestCompileRunner_Errors(t *testing.T) {
 // literals, localhost, .internal or .local names (host.containers.internal
 // is the tool gateway) and no model host.
 func TestCompileRunner_HTTPHostRefused(t *testing.T) {
-	ops := func(toolreg.Source) ([]httpsource.Operation, error) {
-		return []httpsource.Operation{{ID: "get", Path: "/x"}}, nil
-	}
+	op := httpsource.Operation{ID: "get", Path: "/x"}
 	for _, base := range []string{
 		"https://127.0.0.1/api", "https://[::1]/", "https://10.0.0.5", "https://2130706433/", "https://localhost:8443",
 		"https://a.localhost", "https://host.containers.internal:7390", "https://metadata.google.internal",
@@ -247,15 +350,16 @@ func TestCompileRunner_HTTPHostRefused(t *testing.T) {
 	} {
 		t.Run(base, func(t *testing.T) {
 			sources := map[string]toolreg.Source{"api": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}}
-			pins := toolreg.PinTable{"api": {"get": {Hash: "h"}}}
-			if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, ops); err == nil {
+			pins := toolreg.PinTable{"api": httpPins(t, "api", base, op)}
+			if _, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, fixedOps(op)); err == nil {
 				t.Fatalf("%s accepted", base)
 			}
 		})
 	}
 	// A plain public host still compiles.
-	sources := map[string]toolreg.Source{"api": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://api.example.com"}}
-	if _, err := CompileRunner(runnerSnap(sources, toolreg.PinTable{"api": {"get": {Hash: "h"}}}), clipack.Builtin, ops); err != nil {
+	const base = "https://api.example.com"
+	sources := map[string]toolreg.Source{"api": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}}
+	if _, err := CompileRunner(runnerSnap(sources, toolreg.PinTable{"api": httpPins(t, "api", base, op)}), clipack.Builtin, fixedOps(op)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -274,43 +378,42 @@ func TestCompile_ProvidersHasSandboxProvider(t *testing.T) {
 // Providers attach outside the policy, so a provider change alone must
 // still change the recorded digest (Ensure updates the sandbox on it).
 func TestCompileRunner_DigestCoversProviders(t *testing.T) {
-	specs := func(toolreg.Source) ([]httpsource.Operation, error) {
-		return []httpsource.Operation{{ID: "get_issue", Path: "/issue/{key}"}}, nil
-	}
-	compile := func(cred string) Compiled {
-		sources := map[string]toolreg.Source{"jira": {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com", Credential: cred}}
-		pins := toolreg.PinTable{"jira": {"get_issue": {Hash: "h", Source: "https://jira.example.com"}}}
-		c, err := CompileRunner(runnerSnap(sources, pins), clipack.Builtin, specs)
+	compile := func(provider string) Compiled {
+		packs := func(name string) (clipack.Pack, error) {
+			p, err := clipack.Builtin(name)
+			p.Credential = &clipack.Cred{Provider: provider, Keychain: "item"}
+			return p, err
+		}
+		c, err := CompileRunner(runnerSnap(ghSources(), ghPins("gh_issue_list")), packs, noSpecs)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return c
 	}
-	a, b := compile("aimux-jira"), compile("aimux-jira2")
+	a, b := compile("aimux-github"), compile("aimux-github2")
 	if string(a.PolicyYAML) != string(b.PolicyYAML) {
 		t.Fatalf("policies differ; the test needs equal policies:\n%s\n%s", a.PolicyYAML, b.PolicyYAML)
 	}
 	if a.PolicyDigest == b.PolicyDigest {
 		t.Fatal("a provider change kept the digest")
 	}
-	if c := compile("aimux-jira"); c.PolicyDigest != a.PolicyDigest {
+	if c := compile("aimux-github"); c.PolicyDigest != a.PolicyDigest {
 		t.Fatal("same providers, different digest")
 	}
 }
 
 func TestCompileRunnerAvailable_DropsSourceWithoutProvider(t *testing.T) {
-	specs := func(toolreg.Source) ([]httpsource.Operation, error) {
-		return []httpsource.Operation{{ID: "get_issue", Path: "/issue/{key}"}}, nil
-	}
+	const base = "https://jira.example.com"
 	sources := map[string]toolreg.Source{
 		"github": {Type: toolreg.TypeCLI, Pack: "gh"},
-		"jira":   {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://jira.example.com", Credential: "aimux-jira"}, // #nosec G101 -- a provider name, not a credential
+		"jira":   {Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base},
 	}
 	pins := ghPins("gh_issue_list")
-	pins["jira"] = map[string]toolreg.Pin{"get_issue": {Hash: "h", Source: "https://jira.example.com"}}
+	pins["jira"] = httpPins(t, "jira", base, opIssue)
 	snap := runnerSnap(sources, pins)
+	specs := fixedOps(opIssue)
 
-	have := func(p string) bool { return p == "aimux-jira" }
+	have := func(string) bool { return false }
 	c, errs, err := CompileRunnerAvailable(snap, clipack.Builtin, specs, have)
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +425,7 @@ func TestCompileRunnerAvailable_DropsSourceWithoutProvider(t *testing.T) {
 	if _, ok := np["tools_jira"]; !ok {
 		t.Fatal("the other source was dropped too")
 	}
-	if strings.Join(c.Providers, ",") != "aimux-jira" {
+	if len(c.Providers) != 0 {
 		t.Fatalf("providers = %v", c.Providers)
 	}
 	gh := errs["github"]

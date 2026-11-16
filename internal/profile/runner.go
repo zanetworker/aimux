@@ -28,12 +28,14 @@ const (
 // CompileRunner compiles the aimux-tools sandbox policy from snap: one
 // network policy per approved cli or http-openapi source (one with at least
 // one active pin, as the gateway serves them), with the pack's endpoints and
-// binary for a cli source, and a GET rule per operation on the base URL's
-// host with curl for an http-openapi source. Providers are the packs'
-// credential providers and the sources' credentials, sorted, once each,
-// for sources that compiled to at least one endpoint.
-// Nothing is writable beyond /tmp. packs loads a pack by name and specs
-// lists a source's operations; an error from either fails the compile.
+// binary for a cli source, and for an http-openapi source a GET rule on the
+// base URL's host per operation whose tool has an active pin matching its
+// current definition, with curl. Providers are the packs' credential
+// providers, sorted, once each, for sources that compiled to at least one
+// endpoint. Nothing is writable beyond /tmp. packs loads a pack by name and
+// specs lists a source's operations; a pack error fails the compile, while
+// an http-openapi source whose spec fails or that names a credential is
+// left out (CompileRunnerAvailable says why).
 // PolicyDigest covers the policy and the sorted providers, since providers
 // attach outside the policy.
 func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, error), specs func(toolreg.Source) ([]httpsource.Operation, error)) (Compiled, error) {
@@ -44,8 +46,9 @@ func CompileRunner(snap toolreg.Snapshot, packs func(string) (clipack.Pack, erro
 // CompileRunnerAvailable is CompileRunner for the providers the gateway
 // has: a source whose provider have reports missing is left out (no policy,
 // no provider) and its error, which says how to create the provider, is
-// returned under its name, so the other sources still run. A nil have
-// leaves nothing out.
+// returned under its name, so the other sources still run. An http-openapi
+// source whose spec fails, or that names a credential, is left out the
+// same way. A nil have leaves no source out for a missing provider.
 func CompileRunnerAvailable(snap toolreg.Snapshot, packs func(string) (clipack.Pack, error), specs func(toolreg.Source) ([]httpsource.Operation, error), have func(provider string) bool) (Compiled, map[string]error, error) {
 	reg := snap.Registry()
 	dropped := map[string]error{}
@@ -78,7 +81,16 @@ func CompileRunnerAvailable(snap toolreg.Snapshot, packs func(string) (clipack.P
 				provider, item = pack.Credential.Provider, pack.Credential.Keychain
 			}
 		case toolreg.TypeHTTPOpenAPI:
+			if src.Credential != "" {
+				dropped[name] = fmt.Errorf("source %s: %w", name, httpsource.ErrCredential)
+				continue
+			}
 			ops, err := specs(src)
+			if err != nil {
+				dropped[name] = fmt.Errorf("source %s: %w", name, err)
+				continue
+			}
+			ops, err = pinnedOperations(name, src.BaseURL, ops, served[name])
 			if err != nil {
 				return Compiled{}, nil, fmt.Errorf("source %s: %w", name, err)
 			}
@@ -89,7 +101,7 @@ func CompileRunnerAvailable(snap toolreg.Snapshot, packs func(string) (clipack.P
 			if e != nil {
 				eps = append(eps, *e)
 			}
-			bin, provider = curlBinary, src.Credential
+			bin = curlBinary
 		default:
 			continue // mcp-http and local-notes run in the gateway, not here
 		}
@@ -129,6 +141,31 @@ func CompileRunnerAvailable(snap toolreg.Snapshot, packs func(string) (clipack.P
 		Providers:    providers,
 		Snapshot:     snap,
 	}, dropped, nil
+}
+
+// pinnedOperations is the ops whose tool has a pin in served that matches
+// its current definition: an operation nobody approved, or whose method,
+// path or parameters changed since, gets no rule.
+func pinnedOperations(source, baseURL string, ops []httpsource.Operation, served map[string]string) ([]httpsource.Operation, error) {
+	var out []httpsource.Operation
+	for _, op := range ops {
+		pin, ok := served[httpsource.ToolName(source, op)]
+		if !ok {
+			continue
+		}
+		raws, err := httpsource.Tools(source, baseURL, []httpsource.Operation{op})
+		if err != nil {
+			return nil, err
+		}
+		h, err := toolgateway.PinTool(raws[0])
+		if err != nil {
+			return nil, err
+		}
+		if h == pin {
+			out = append(out, op)
+		}
+	}
+	return out, nil
 }
 
 // missingProvider is why a source whose provider the gateway lacks is left
@@ -193,10 +230,12 @@ func httpEndpoint(baseURL string, ops []httpsource.Operation) (*endpoint, error)
 }
 
 // rulePath turns a path template into a policy path: each whole {param}
-// segment becomes *; any other *, {, }, ? or # is refused.
+// segment becomes *. A template httpsource.CheckPath refuses (a literal
+// segment that is not plain RFC 3986 pchar, an empty or dot segment) is
+// refused here too.
 func rulePath(tmpl string) (string, error) {
-	if !strings.HasPrefix(tmpl, "/") || strings.ContainsAny(tmpl, "?#") {
-		return "", fmt.Errorf("path %q must be an absolute template without query or fragment", tmpl)
+	if err := httpsource.CheckPath(tmpl); err != nil {
+		return "", err
 	}
 	segs := strings.Split(tmpl, "/")
 	for i, s := range segs {

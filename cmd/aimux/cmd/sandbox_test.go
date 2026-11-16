@@ -383,7 +383,7 @@ func runnerDigest(t *testing.T, home string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := profile.CompileRunner(snap, clipack.Builtin, noSpecs)
+	c, err := profile.CompileRunner(snap, clipack.Builtin, runnerSpecs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,30 +420,47 @@ func TestSandboxStatus_ListsRunner(t *testing.T) {
 	}
 }
 
-// A runner that does not compile names the runner and its sources, not a
-// profile.
-func TestSandboxStatus_RunnerCompileError(t *testing.T) {
+// statusWithAPI is a status rig with an http-openapi source "api" at base
+// whose tool api_get (GET /x) is pinned, and runnerSpecs set to specs.
+func statusWithAPI(t *testing.T, base string, specs func(toolreg.Source) ([]httpsource.Operation, error)) browserEnv {
+	t.Helper()
 	env, _ := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman})
 	path := toolreg.DefaultPath(env.Home)
 	reg, err := toolreg.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg.Sources["api"] = toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: "https://api.example.com"}
+	reg.Sources["api"] = toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 	if err := toolreg.WriteNew(path, reg); err != nil {
 		t.Fatal(err)
 	}
+	raws, err := httpsource.Tools("api", base, []httpsource.Operation{{ID: "get", Path: "/x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := toolgateway.PinTool(raws[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(hashOnly(toolgateway.Pins{
-		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}, "api": {"get": "p5"}})); err != nil {
+		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}, "api": {"api_get": hash}})); err != nil {
 		t.Fatal(err)
 	}
 	old := runnerSpecs
-	runnerSpecs = func(toolreg.Source) ([]httpsource.Operation, error) { return nil, errors.New("bad spec") }
+	runnerSpecs = specs
 	t.Cleanup(func() { runnerSpecs = old })
+	return env
+}
 
+// A runner that does not compile names the runner and its sources, not a
+// profile.
+func TestSandboxStatus_RunnerCompileError(t *testing.T) {
+	env := statusWithAPI(t, "https://localhost", func(toolreg.Source) ([]httpsource.Operation, error) {
+		return []httpsource.Operation{{ID: "get", Path: "/x"}}, nil
+	})
 	_, errOut := runSandboxStatus(t, env, false)
 	if strings.Contains(errOut, "a profile does not compile") {
 		t.Errorf("runner error blamed on a profile: %s", errOut)
@@ -452,7 +469,23 @@ func TestSandboxStatus_RunnerCompileError(t *testing.T) {
 		t.Errorf("errOut = %q", errOut)
 	}
 	d := decodeStatus(t, mustJSON(t, env))
-	if d.Runner.State != "error" || !strings.Contains(d.Runner.Error, "api") || !strings.Contains(d.Runner.Error, "bad spec") {
+	if d.Runner.State != "error" || !strings.Contains(d.Runner.Error, "api") || !strings.Contains(d.Runner.Error, "localhost") {
+		t.Fatalf("runner = %+v", d.Runner)
+	}
+}
+
+// A source whose spec fails is left out of the runner (its listing says
+// why); the runner still compiles for the others.
+func TestSandboxStatus_RunnerSpecErrorStaysOnSource(t *testing.T) {
+	env := statusWithAPI(t, "https://api.example.com", func(toolreg.Source) ([]httpsource.Operation, error) {
+		return nil, errors.New("bad spec")
+	})
+	_, errOut := runSandboxStatus(t, env, false)
+	if strings.Contains(errOut, "does not compile") {
+		t.Errorf("a spec error failed the compile: %s", errOut)
+	}
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.Runner.State == "error" || d.Runner.Error != "" {
 		t.Fatalf("runner = %+v", d.Runner)
 	}
 }
@@ -483,7 +516,7 @@ func TestSandboxStatus_RunnerMatchesAvailableProviders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied, dropped, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, noSpecs, func(p string) bool { return p == "wingman-claude" })
+	applied, dropped, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, func(p string) bool { return p == "wingman-claude" })
 	if err != nil || dropped["github"] == nil {
 		t.Fatalf("%v %v", err, dropped)
 	}

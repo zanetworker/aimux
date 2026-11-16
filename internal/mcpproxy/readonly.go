@@ -28,18 +28,19 @@ type ReadonlyConfig struct {
 	Runner map[string]toolreg.Source
 	Allow  Allowlist // tools each backend may expose
 	// Tools binds the runner sandbox to a source. With it, cli sources
-	// start (NewCLIBackend); without it, or for http-openapi sources until
-	// they are supported, runner sources serve no tools.
+	// (NewCLIBackend) and http-openapi sources (NewHTTPSourceBackend)
+	// start; without it, runner sources serve no tools.
 	Tools func(source string) ToolRunner
 }
 
 // errRunnerNotStarted is why a runner source serves no tools.
 var errRunnerNotStarted = errors.New("runner sources are not started yet")
 
-// startsRunner reports whether cfg starts runner source n.
-func (cfg ReadonlyConfig) startsRunner(n string) bool {
+// StartsRunner reports whether cfg starts runner source n: a cli or
+// http-openapi source, with the runner bound (Tools).
+func (cfg ReadonlyConfig) StartsRunner(n string) bool {
 	src, ok := cfg.Runner[n]
-	return ok && cfg.Tools != nil && src.Type == toolreg.TypeCLI
+	return ok && cfg.Tools != nil && (src.Type == toolreg.TypeCLI || src.Type == toolreg.TypeHTTPOpenAPI)
 }
 
 // ReadonlyConfigFrom is reg's sources and sets as a ReadonlyConfig: each
@@ -161,7 +162,7 @@ func readonlyNames(cfg ReadonlyConfig) []string {
 		names = append(names, n)
 	}
 	for n := range cfg.Runner {
-		if cfg.startsRunner(n) {
+		if cfg.StartsRunner(n) {
 			names = append(names, n)
 		}
 	}
@@ -173,7 +174,7 @@ func readonlyNames(cfg ReadonlyConfig) []string {
 // errRunnerNotStarted.
 func runnerNotStarted(cfg ReadonlyConfig, errs map[string]error) {
 	for n := range cfg.Runner {
-		if !cfg.startsRunner(n) {
+		if !cfg.StartsRunner(n) {
 			errs[n] = errRunnerNotStarted
 		}
 	}
@@ -201,7 +202,7 @@ func BuildReadonlyBackends(ctx context.Context, cfg ReadonlyConfig, names []stri
 	for _, n := range names {
 		root, notes := cfg.Notes[n]
 		switch _, ok := cfg.HTTP[n]; {
-		case cfg.startsRunner(n):
+		case cfg.StartsRunner(n):
 			live = append(live, n)
 		case notes:
 			if st, err := os.Stat(root); err != nil {
@@ -258,8 +259,9 @@ func poolLister(pool *Pool) func(ctx context.Context, server string) ([]json.Raw
 	}
 }
 
-// ReadonlyStarter starts cfg's notes backends in process, its cli sources
-// in the runner sandbox (cfg.Tools) and the rest over HTTP: the starter
+// ReadonlyStarter starts cfg's notes backends in process, its cli and
+// http-openapi sources in the runner sandbox (cfg.Tools) and the rest over
+// HTTP: the starter
 // BuildReadonly gives its pool.
 func ReadonlyStarter(cfg ReadonlyConfig) Starter {
 	httpStart := HTTPStarter(cfg.HTTP)
@@ -268,8 +270,11 @@ func ReadonlyStarter(cfg ReadonlyConfig) Starter {
 			return wikitools.NewBackend(root, 0), nil
 		}
 		if src, ok := cfg.Runner[name]; ok {
-			if !cfg.startsRunner(name) {
+			if !cfg.StartsRunner(name) {
 				return nil, errRunnerNotStarted
+			}
+			if src.Type == toolreg.TypeHTTPOpenAPI {
+				return NewHTTPSourceBackend(name, src, cfg.Tools(name)), nil
 			}
 			pack, err := clipack.Builtin(src.Pack)
 			if err != nil {

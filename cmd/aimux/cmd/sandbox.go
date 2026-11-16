@@ -23,7 +23,6 @@ import (
 	"github.com/zanetworker/aimux/internal/keyring"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/toolgateway"
-	"github.com/zanetworker/aimux/internal/toolreg"
 	aimuxtools "github.com/zanetworker/aimux/sandbox/aimux-tools"
 )
 
@@ -56,13 +55,9 @@ func defaultSecretStore() secretStore {
 	}
 }
 
-// noSpecs lists no operations for an http-openapi source: until its OpenAPI
-// parser lands, such sources compile to no runner endpoints.
-func noSpecs(toolreg.Source) ([]httpsource.Operation, error) { return nil, nil }
-
 // runnerSpecs lists an http-openapi source's operations for status's
 // runner compile; a var so tests can make it fail.
-var runnerSpecs = noSpecs
+var runnerSpecs = httpsource.SourceOperations
 
 // sandboxSchemaVersion is the schema of `aimux sandbox status --json`.
 const sandboxSchemaVersion = "1"
@@ -92,7 +87,7 @@ func newSandboxCmdWith(env browserEnv) *cobra.Command {
 			"aimux remote serve creates on first use and updates when the compiled policy changes. These commands\n" +
 			"check and prepare what those sandboxes need; none of them creates a sandbox, except verify, which\n" +
 			"ensures aimux-work-readonly as serve does.\n\n" +
-			"The tool runner, aimux-tools, is the sandbox cli tools run in (http-openapi sources once supported).\n" +
+			"The tool runner, aimux-tools, is the sandbox cli and http-openapi tools run in.\n" +
 			"The tool gateway creates or updates it on first use with the policy compiled from the approved\n" +
 			"sources; status shows that policy's state.",
 	}

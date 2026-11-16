@@ -1,0 +1,26 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "fixture", "version": "1"},
+  "paths": {
+    "/items/{id}": {
+      "parameters": [
+        {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "fields", "in": "query", "schema": {"type": "string"}}
+      ],
+      "get": {
+        "operationId": "getItem",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}},
+          {"name": "tags", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}},
+          {"name": "note", "in": "query", "schema": {"type": ["string", "null"]}}
+        ]
+      }
+    },
+    "/needs-header": {
+      "get": {
+        "operationId": "needsHeader",
+        "parameters": [{"name": "X-Key", "in": "header", "required": true, "schema": {"type": "string"}}]
+      }
+    }
+  }
+}

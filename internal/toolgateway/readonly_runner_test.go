@@ -36,14 +36,14 @@ func TestReadonlyServer_ConfigBindsRunnerToSnapshot(t *testing.T) {
 	if cfg.Tools == nil || !slices.Equal(boundTo, []string{snap.Version()}) {
 		t.Fatalf("tools %v, bound to %v", cfg.Tools != nil, boundTo)
 	}
-	if got := backendNames(cfg); !slices.Equal(got, []string{"github", "wiki"}) {
+	if got := backendNames(cfg); !slices.Equal(got, []string{"api", "github", "wiki"}) {
 		t.Fatalf("backends = %v", got)
 	}
 	// A runner source restarts on every new snapshot: a new pin can change
 	// the runner policy under it. The others move only when their config does.
 	next := r.configOf(toolreg.NewSnapshot(reg, toolreg.PinTable{"github": {"gh_repo_view": {Hash: "h"}}}, nil))
-	if !moved(cfg, next, "github") || moved(cfg, next, "wiki") {
-		t.Fatalf("moved github %v wiki %v", moved(cfg, next, "github"), moved(cfg, next, "wiki"))
+	if !moved(cfg, next, "github") || !moved(cfg, next, "api") || moved(cfg, next, "wiki") {
+		t.Fatalf("moved github %v api %v wiki %v", moved(cfg, next, "github"), moved(cfg, next, "api"), moved(cfg, next, "wiki"))
 	}
 
 	// No runner binding: no runner backends, as before.
