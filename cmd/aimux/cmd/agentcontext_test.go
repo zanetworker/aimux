@@ -230,8 +230,8 @@ func TestAgentContextCmd_ListsToolsSubcommands(t *testing.T) {
 			t.Errorf("tools add lacks %s: %+v", f, add)
 		}
 	}
-	if len(add.Args) != 1 || !add.Args[0].Required || strings.Join(add.Args[0].Values, ",") != "notes,mcp" {
-		t.Errorf("tools add args = %+v, want one required arg with values notes, mcp", add.Args)
+	if len(add.Args) != 1 || !add.Args[0].Required || strings.Join(add.Args[0].Values, ",") != "notes,mcp,cli,http" {
+		t.Errorf("tools add args = %+v, want one required arg with values notes, mcp, cli, http", add.Args)
 	}
 	rm := result.Commands["tools remove"]
 	if _, ok := rm.Flags["--yes"]; !ok || len(rm.Args) != 1 || rm.Args[0].Name != "source" || !rm.Args[0].Required {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zanetworker/aimux/internal/clipack"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -104,7 +105,7 @@ func TestToolsAdd_Refusals(t *testing.T) {
 		{"mcp no name", []string{"add", "mcp", "--url", "http://127.0.0.1:9000/mcp", "--tools", "a"}, "--name"},
 		{"mcp userinfo", []string{"add", "mcp", "--name", "gh", "--url", "http://u:p@127.0.0.1:9000/mcp", "--tools", "a"}, "loopback"},
 		{"mcp bad tool", []string{"add", "mcp", "--name", "gh", "--url", "http://127.0.0.1:9000/mcp", "--tools", "a,b*"}, "exact name"},
-		{"unknown kind", []string{"add", "cli", "--name", "gh"}, "notes or mcp"},
+		{"unknown kind", []string{"add", "ftp", "--name", "gh"}, "notes, mcp, cli or http"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -420,5 +421,179 @@ func TestToolsAdd_AuthorshipFlag(t *testing.T) {
 	}
 	if regBytes(t, r.env.Home) != before {
 		t.Fatal("file changed")
+	}
+}
+
+func TestToolsAdd_CLI(t *testing.T) {
+	r := newToolsRig(t)
+	out, errOut, err := runTools(t, r.env, "add", "cli", "gh")
+	if err != nil {
+		t.Fatalf("add cli: %v\n%s%s", err, out, errOut)
+	}
+	reg := loadReg(t, r.env.Home)
+	if want := (toolreg.Source{Type: toolreg.TypeCLI, Pack: "gh"}); reg.Sources["gh"] != want {
+		t.Fatalf("source %+v", reg.Sources["gh"])
+	}
+	pack, _ := clipack.Builtin("gh")
+	var want []string
+	for _, c := range pack.Commands {
+		want = append(want, "gh_"+c.Name)
+	}
+	if got := reg.Sets["gh:readonly"].Tools; !reflect.DeepEqual(got, want) || len(want) == 0 {
+		t.Fatalf("tools %v, want %v", got, want)
+	}
+	if strings.Contains(regBytes(t, r.env.Home), "authorship") {
+		t.Fatalf("authorship key written for the default:\n%s", regBytes(t, r.env.Home))
+	}
+	if !strings.Contains(errOut, "aimux tools approve gh:readonly") || !strings.Contains(errOut, "aimux sandbox setup") {
+		t.Errorf("stderr:\n%s", errOut)
+	}
+
+	// --tools narrows the set, --name renames the source.
+	r = newToolsRig(t)
+	if _, _, err := runTools(t, r.env, "add", "cli", "gh", "--name", "ghub", "--tools", "gh_"+pack.Commands[0].Name); err != nil {
+		t.Fatal(err)
+	}
+	reg = loadReg(t, r.env.Home)
+	if reg.Sources["ghub"].Pack != "gh" || !reflect.DeepEqual(reg.Sets["ghub:readonly"].Tools, []string{"gh_" + pack.Commands[0].Name}) {
+		t.Fatalf("registry %+v %+v", reg.Sources["ghub"], reg.Sets["ghub:readonly"])
+	}
+}
+
+func TestToolsAdd_CLIRefusals(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown pack", []string{"add", "cli", "nope"}, "gh"},
+		{"no pack", []string{"add", "cli"}, "pack"},
+		{"unknown tool", []string{"add", "cli", "gh", "--tools", "gh_issue_create"}, "gh_issue_create"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newToolsRig(t)
+			before := regBytes(t, r.env.Home)
+			_, _, err := runTools(t, r.env, c.args...)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err %v, want one containing %q", err, c.want)
+			}
+			if regBytes(t, r.env.Home) != before {
+				t.Fatal("the registry changed")
+			}
+		})
+	}
+}
+
+const addSpec = `openapi: 3.0.0
+info: {title: t, version: "1"}
+paths:
+  /a:
+    get: {operationId: getA, responses: {"200": {description: ok}}}
+    post: {operationId: postA, responses: {"200": {description: ok}}}
+  /b:
+    get: {operationId: getB, responses: {"200": {description: ok}}}
+  /c:
+    get: {operationId: getC, responses: {"200": {description: ok}}}
+    delete: {operationId: delC, responses: {"200": {description: ok}}}
+`
+
+func writeSpec(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "spec.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestToolsAdd_HTTP(t *testing.T) {
+	spec := writeSpec(t, addSpec)
+	r := newToolsRig(t)
+	out, errOut, err := runTools(t, r.env, "add", "http", "--name", "api", "--spec", spec, "--base-url", "https://api.example.com/v1")
+	if err != nil {
+		t.Fatalf("add http: %v\n%s%s", err, out, errOut)
+	}
+	reg := loadReg(t, r.env.Home)
+	if want := (toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: spec, BaseURL: "https://api.example.com/v1"}); reg.Sources["api"] != want {
+		t.Fatalf("source %+v", reg.Sources["api"])
+	}
+	if want := []string{"api_get_a", "api_get_b", "api_get_c"}; !reflect.DeepEqual(reg.Sets["api:readonly"].Tools, want) {
+		t.Fatalf("tools %v, want %v", reg.Sets["api:readonly"].Tools, want)
+	}
+	if !strings.Contains(errOut, "aimux tools approve api:readonly") || !strings.Contains(errOut, "aimux sandbox setup") {
+		t.Errorf("stderr:\n%s", errOut)
+	}
+}
+
+func TestToolsAdd_HTTPListsOperations(t *testing.T) {
+	spec := writeSpec(t, addSpec)
+	r := newToolsRig(t)
+	out, _, err := runTools(t, r.env, "add", "http", "--name", "api", "--spec", spec, "--base-url", "https://api.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "3 GET operations, 2 others ignored") {
+		t.Errorf("stdout:\n%s", out)
+	}
+}
+
+func TestToolsAdd_HTTPRefusals(t *testing.T) {
+	spec := writeSpec(t, addSpec)
+	empty := writeSpec(t, "openapi: 3.0.0\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    post: {operationId: p, responses: {\"200\": {description: ok}}}\n")
+	bad := writeSpec(t, "not: openapi")
+	const base = "https://api.example.com"
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"relative spec", []string{"--name", "api", "--spec", "spec.yaml", "--base-url", base}, "absolute"},
+		{"no spec", []string{"--name", "api", "--base-url", base}, "--spec"},
+		{"missing spec", []string{"--name", "api", "--spec", filepath.Join(t.TempDir(), "x.yaml"), "--base-url", base}, "spec"},
+		{"http base", []string{"--name", "api", "--spec", spec, "--base-url", "http://api.example.com"}, "https"},
+		{"base with userinfo", []string{"--name", "api", "--spec", spec, "--base-url", "https://u:p@api.example.com"}, "userinfo"},
+		{"no base", []string{"--name", "api", "--spec", spec}, "--base-url"},
+		{"no name", []string{"--spec", spec, "--base-url", base}, "--name"},
+		{"credential", []string{"--name", "api", "--spec", spec, "--base-url", base, "--credential", "tok"}, "not supported yet"},
+		{"no get operations", []string{"--name", "api", "--spec", empty, "--base-url", base}, "GET"},
+		{"not openapi", []string{"--name", "api", "--spec", bad, "--base-url", base}, "spec"},
+		{"unknown tool", []string{"--name", "api", "--spec", spec, "--base-url", base, "--tools", "api_getZ"}, "api_getZ"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newToolsRig(t)
+			before := regBytes(t, r.env.Home)
+			_, _, err := runTools(t, r.env, append([]string{"add", "http"}, c.args...)...)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err %v, want one containing %q", err, c.want)
+			}
+			if regBytes(t, r.env.Home) != before {
+				t.Fatal("the registry changed")
+			}
+		})
+	}
+}
+
+func TestToolsAdd_HTTPBaseURLErrorsNeverEchoSecrets(t *testing.T) {
+	spec := writeSpec(t, addSpec)
+	for _, base := range []string{
+		"https://user:secret@x.example.com",
+		"https://x.example.com/?key=SECRET",
+		"https://x.example.com/#SECRET",
+		"https://x.example.com/%zzSECRET",
+		"ht!tp://secret",
+		"http://x.example.com/?key=SECRET",
+	} {
+		t.Run(base, func(t *testing.T) {
+			r := newToolsRig(t)
+			_, _, err := runTools(t, r.env, "add", "http", "--name", "api", "--spec", spec, "--base-url", base)
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if s := strings.ToLower(err.Error()); strings.Contains(s, "secret") {
+				t.Fatalf("error echoes the URL: %v", err)
+			}
+		})
 	}
 }

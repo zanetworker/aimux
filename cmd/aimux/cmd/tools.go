@@ -23,6 +23,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/zanetworker/aimux/internal/clipack"
+	"github.com/zanetworker/aimux/internal/httpsource"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
@@ -457,18 +459,24 @@ func toolsApprove(ctx context.Context, env toolsEnv, targets []string, all bool,
 var notesTools = []string{"wiki_search", "wiki_read"}
 
 func newToolsAddCmd(env toolsEnv) *cobra.Command {
-	var folder, name, url, tools, authorship string
+	var folder, name, url, tools, authorship, spec, baseURL, credential string
 	cmd := &cobra.Command{
-		Use:       "add <notes|mcp>",
-		ValidArgs: []string{"notes", "mcp"},
+		Use:       "add <notes|mcp|cli|http>",
+		ValidArgs: []string{"notes", "mcp", "cli", "http"},
 		Short:     "Add a source and its <name>:readonly set to tool-sources.yaml; approves nothing",
 		Long: "aimux tools add notes --folder <dir> [--name notes] adds a local-notes source over the folder and its set\n" +
 			"<name>:readonly (wiki_search, wiki_read). aimux tools add mcp --name <name> --url <loopback url> --tools a,b\n" +
 			"adds an MCP server on this Mac and its set <name>:readonly with those exact tools. Every other entry of\n" +
 			"tool-sources.yaml is kept; a name it already has is refused. Nothing is approved: review the new tools with\n" +
-			"aimux tools diff, then approve them with aimux tools approve <name>:readonly.",
-		Args: cobra.ExactArgs(1),
+			"aimux tools diff, then approve them with aimux tools approve <name>:readonly.\n" +
+			"aimux tools add cli <pack> [--name N] [--tools a,b] adds a built-in CLI pack (gh), run read-only in the aimux-tools\n" +
+			"sandbox. aimux tools add http --name N --spec <openapi file> --base-url https://... adds an HTTPS API: each\n" +
+			"GET operation with an operationId becomes a tool. Credentialed HTTP sources are not supported yet.",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
+			if len(args) == 2 && args[0] != "cli" {
+				return fmt.Errorf("add %s takes no argument %q", args[0], args[1])
+			}
 			switch authorship {
 			case "", toolreg.AuthorshipSelf, toolreg.AuthorshipInternal, toolreg.AuthorshipOutside:
 			default:
@@ -476,6 +484,7 @@ func newToolsAddCmd(env toolsEnv) *cobra.Command {
 			}
 			var src toolreg.Source
 			var list []string
+			var summary string
 			switch args[0] {
 			case "notes":
 				if name == "" {
@@ -491,8 +500,18 @@ func newToolsAddCmd(env toolsEnv) *cobra.Command {
 				if src, list, err = mcpSource(name, url, tools); err != nil {
 					return err
 				}
+			case "cli":
+				var err error
+				if src, list, name, err = cliSource(args[1:], name, tools); err != nil {
+					return err
+				}
+			case "http":
+				var err error
+				if src, list, summary, err = httpSource(name, spec, baseURL, credential, tools); err != nil {
+					return err
+				}
 			default:
-				return fmt.Errorf("unknown source kind %q: want notes or mcp", args[0])
+				return fmt.Errorf("unknown source kind %q: want notes, mcp, cli or http", args[0])
 			}
 			class := authorship
 			if class == "" && src.Type == toolreg.TypeLocalNotes {
@@ -501,14 +520,17 @@ func newToolsAddCmd(env toolsEnv) *cobra.Command {
 			if class != toolreg.AuthorshipOutside { // outside is the default: no key
 				src.Authorship = class
 			}
-			return toolsAdd(env, name, src, list, c.OutOrStdout(), c.ErrOrStderr())
+			return toolsAdd(env, name, src, list, summary, c.OutOrStdout(), c.ErrOrStderr())
 		},
 	}
 	cmd.Flags().StringVar(&folder, "folder", "", "notes: the folder of Markdown notes to search")
-	cmd.Flags().StringVar(&name, "name", "", "The source's name, which its set, pins and tool names key on (notes: default notes)")
+	cmd.Flags().StringVar(&name, "name", "", "The source's name, which its set, pins and tool names key on (notes: default notes; cli: default the pack name; mcp and http: required)")
 	cmd.Flags().StringVar(&url, "url", "", "mcp: the server's http URL on this Mac (127.0.0.1, ::1 or localhost)")
-	cmd.Flags().StringVar(&tools, "tools", "", "mcp: the exact tool names the set may expose, comma separated")
-	cmd.Flags().StringVar(&authorship, "authorship", "", "Who writes what the source returns: self, internal or outside (notes: default self; mcp: default outside)")
+	cmd.Flags().StringVar(&tools, "tools", "", "mcp: the exact tool names the set may expose (required); cli: pack tools (<pack>_<command>); http: operation tools (<name>_<operation>); comma separated, default all for cli and http")
+	cmd.Flags().StringVar(&authorship, "authorship", "", "Who writes what the source returns: self, internal or outside (notes: default self; mcp, cli, http: default outside)")
+	cmd.Flags().StringVar(&spec, "spec", "", "http: the OpenAPI 3 file (stored by absolute path, not copied)")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "http: the API's https base URL, without userinfo, query or fragment")
+	cmd.Flags().StringVar(&credential, "credential", "", "http: not supported yet")
 	return cmd
 }
 
@@ -552,6 +574,125 @@ func mcpSource(name, rawURL, tools string) (toolreg.Source, []string, error) {
 	return toolreg.Source{Type: toolreg.TypeMCPHTTP, URL: rawURL}, list, nil
 }
 
+// cliSource is a cli source over a built-in pack; name defaults to the
+// pack. tools, when given, must each be one of the pack's <pack>_<command>.
+func cliSource(args []string, name, tools string) (toolreg.Source, []string, string, error) {
+	if len(args) != 1 {
+		return toolreg.Source{}, nil, "", fmt.Errorf("name the CLI pack: aimux tools add cli <pack> (built in: %s)", strings.Join(clipack.Names(), ", "))
+	}
+	pack, err := clipack.Builtin(args[0])
+	if err != nil {
+		return toolreg.Source{}, nil, "", fmt.Errorf("%w (built in: %s)", err, strings.Join(clipack.Names(), ", "))
+	}
+	if name == "" {
+		name = pack.Name
+	}
+	var all []string
+	for _, c := range pack.Commands {
+		all = append(all, pack.Name+"_"+c.Name)
+	}
+	list, err := pickTools(tools, all)
+	if err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	return toolreg.Source{Type: toolreg.TypeCLI, Pack: pack.Name}, list, name, nil
+}
+
+// pickTools is the comma separated tools, each one of all; all when empty.
+func pickTools(tools string, all []string) ([]string, error) {
+	var list []string
+	for _, t := range strings.Split(tools, ",") {
+		if t = strings.TrimSpace(t); t == "" {
+			continue
+		}
+		if !slices.Contains(all, t) {
+			return nil, fmt.Errorf("--tools: %q is not one of %s", t, strings.Join(all, ", "))
+		}
+		list = append(list, t)
+	}
+	if len(list) == 0 {
+		return all, nil
+	}
+	return list, nil
+}
+
+// checkBaseURL names the wrong part of --base-url, never the URL itself:
+// it may carry userinfo or a query secret.
+func checkBaseURL(raw string) error {
+	u, err := neturl.Parse(raw)
+	switch {
+	case err != nil:
+		return errors.New("--base-url is not a valid URL")
+	case u.Scheme != "https" || u.Host == "":
+		return errors.New("--base-url must be an https URL with a host")
+	case u.User != nil:
+		return errors.New("--base-url must not contain userinfo")
+	case u.RawQuery != "" || u.ForceQuery:
+		return errors.New("--base-url must not contain a query")
+	case u.Fragment != "":
+		return errors.New("--base-url must not contain a fragment")
+	}
+	return nil
+}
+
+// httpSource is an http-openapi source over a local spec; its set holds
+// every GET operation the spec offers unless tools narrows it; summary is
+// the count line toolsAdd prints.
+func httpSource(name, spec, baseURL, credential, tools string) (toolreg.Source, []string, string, error) {
+	if credential != "" {
+		return toolreg.Source{}, nil, "", errors.New("--credential: credentialed HTTP sources are not supported yet")
+	}
+	if name == "" {
+		return toolreg.Source{}, nil, "", errors.New("pass --name <name> for the HTTP source")
+	}
+	if spec == "" {
+		return toolreg.Source{}, nil, "", errors.New("pass --spec <file>: the OpenAPI file")
+	}
+	if baseURL == "" {
+		return toolreg.Source{}, nil, "", errors.New("pass --base-url https://...: the API's base URL")
+	}
+	if !filepath.IsAbs(spec) {
+		return toolreg.Source{}, nil, "", fmt.Errorf("--spec %q must be an absolute path", spec)
+	}
+	src := toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: spec, BaseURL: baseURL}
+	if err := checkBaseURL(baseURL); err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	ops, ignored, err := httpOperations(spec)
+	if err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	if len(ops) == 0 {
+		return toolreg.Source{}, nil, "", fmt.Errorf("spec %s has no GET operations with an operationId (%d ignored)", spec, len(ignored))
+	}
+	var all []string
+	for _, op := range ops {
+		all = append(all, httpsource.ToolName(name, op))
+	}
+	list, err := pickTools(tools, all)
+	if err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	return src, list, fmt.Sprintf("%d GET operations, %d others ignored", len(ops), len(ignored)), nil
+}
+
+func httpOperations(spec string) ([]httpsource.Operation, []httpsource.Ignored, error) {
+	f, err := os.Open(spec) // #nosec G304 -- the path the owner named
+	if err != nil {
+		return nil, nil, fmt.Errorf("spec %s: %w", spec, errors.Unwrap(err))
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, httpsource.MaxSpecBytes+1))
+	if err != nil {
+		return nil, nil, fmt.Errorf("spec %s: %w", spec, err)
+	}
+	ops, ignored, err := httpsource.Operations(b)
+	if err != nil {
+		return nil, nil, fmt.Errorf("spec %s: %w", spec, err)
+	}
+	return ops, ignored, nil
+}
+
 func isLoopbackHost(h string) bool {
 	if h == "localhost" {
 		return true
@@ -577,7 +718,7 @@ func migrateForEdit(home string, out io.Writer) error {
 	return nil
 }
 
-func toolsAdd(env toolsEnv, name string, src toolreg.Source, tools []string, out, errOut io.Writer) error {
+func toolsAdd(env toolsEnv, name string, src toolreg.Source, tools []string, summary string, out, errOut io.Writer) error {
 	path := toolreg.DefaultPath(env.Home)
 	if err := migrateForEdit(env.Home, errOut); err != nil {
 		return err
@@ -591,8 +732,14 @@ func toolsAdd(env toolsEnv, name string, src toolreg.Source, tools []string, out
 		return writeJSON(out, map[string]any{"schema_version": toolsSchemaVersion, "source": name, "set": set, "tools": tools, "path": path, "next": next})
 	}
 	_, _ = fmt.Fprintf(out, "Added source %s (%s) and set %s (%s) to %s\n", name, src.Type, set, strings.Join(tools, ", "), path)
+	if summary != "" {
+		_, _ = fmt.Fprintln(out, summary)
+	}
 	_, _ = fmt.Fprintln(out, "Nothing is approved yet: its tools stay hidden until you approve them.")
 	_, _ = fmt.Fprintf(errOut, "Next: aimux tools diff %s, then %s\n", set, next)
+	if src.Type == toolreg.TypeCLI || src.Type == toolreg.TypeHTTPOpenAPI {
+		_, _ = fmt.Fprintln(errOut, "Then run aimux sandbox setup if the aimux-tools runner image or a provider is missing.")
+	}
 	return nil
 }
 
