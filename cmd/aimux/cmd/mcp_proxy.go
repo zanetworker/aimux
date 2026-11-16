@@ -59,7 +59,7 @@ func newMCPProxyCmd() *cobra.Command {
 			"Run `install` to switch Claude Code to it (and `uninstall` to switch back), or run `refresh` and `serve` " +
 			"yourself and add the entries printed by `config`.",
 	}
-	cmd.AddCommand(newMCPProxyRefreshCmd(), newMCPProxyServeCmd(), newMCPProxyConfigCmd(), newMCPProxyStatusCmd(), newMCPProxyRestartCmd(),
+	cmd.AddCommand(newMCPProxyRefreshCmd(), newMCPProxyServeCmd(), newMCPProxyConfigCmd(), newMCPProxyStatusCmd(), newMCPProxyRestartCmd(), newMCPProxyHooksCmd(),
 		newMCPProxyInstallCmd(), newMCPProxyUninstallCmd(), newMCPProxyEditCmd())
 	return cmd
 }

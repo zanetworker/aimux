@@ -187,6 +187,11 @@ func printInstallState(out io.Writer, st mcpproxy.InstallState, claudeConfig, up
 	if st.UpgradePending {
 		warn("%s", upgradeText)
 	}
+	if st.Hooks {
+		note("hooks on: a server you add in a session moves behind the proxy; servers still direct are named when a session starts")
+	} else {
+		warn("hooks off: servers you add later stay direct; `aimux mcp proxy install` adds the hooks")
+	}
 	if len(st.Removed) > 0 {
 		note("removed from %s: %s (still served by the proxy, unused; `aimux mcp proxy install` takes them off)", claudeConfig, strings.Join(st.Removed, ", "))
 	}

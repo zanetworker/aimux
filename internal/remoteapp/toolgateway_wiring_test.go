@@ -139,7 +139,7 @@ func (r *wiringRig) client(t *testing.T) *client.Client {
 		t.Fatal(err)
 	}
 	init := mcp.InitializeRequest{}
-	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	init.Params.ProtocolVersion = mcp.LATEST_LEGACY_PROTOCOL_VERSION
 	if _, err := c.Initialize(ctx, init); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func (r *wiringRig) served(t *testing.T) []string {
 		return nil
 	}
 	init := mcp.InitializeRequest{}
-	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	init.Params.ProtocolVersion = mcp.LATEST_LEGACY_PROTOCOL_VERSION
 	if _, err := c.Initialize(ctx, init); err != nil {
 		return nil
 	}

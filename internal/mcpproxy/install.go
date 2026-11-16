@@ -72,6 +72,8 @@ type Manifest struct {
 	// IdleTimeout is what install did to Claude Code's http idle limit in
 	// settings.json (idleAdded, idleAddedEnv, or empty: nothing).
 	IdleTimeout string `json:"idleTimeout,omitempty"`
+	// Hooks is "added" once install added the server hooks to settings.json.
+	Hooks string `json:"hooks,omitempty"`
 }
 
 // MovedEntry is one moved server's mcpServers entry: Original is its raw
@@ -108,6 +110,8 @@ type InstallState struct {
 	// UpgradePending: the running daemon's version differs from this aimux.
 	UpgradePending bool   `json:"upgradePending,omitempty"`
 	DaemonVersion  string `json:"daemonVersion,omitempty"`
+	// Hooks: settings.json holds both server hooks.
+	Hooks bool `json:"hooks,omitempty"`
 }
 
 // Installer moves Claude Code's stdio MCP servers behind the proxy and
@@ -118,7 +122,8 @@ type Installer struct {
 	BackupDir    string // ~/.aimux/backups
 	ServersPath  string // the proxy's saved backend definitions
 	CatalogPath  string // the tool catalog
-	Settings     string // ~/.claude/settings.json, for the http idle limit; empty leaves it alone
+	Settings     string // ~/.claude/settings.json, for the http idle limit and the hooks; empty leaves it alone
+	HookBinary   string // the aimux the hooks run; empty adds no hooks
 	Port         int    // the daemon's port on 127.0.0.1
 	Version      string // this aimux's version, compared with the daemon's
 	// Unskip are recorded --skip servers this run moves after all.
@@ -339,6 +344,7 @@ func (i Installer) Install(skip []string) (err error) {
 			i.printf("The MCP proxy is installed (%d servers behind it); no new stdio servers to move.\n", len(m.Servers))
 			i.printSkipped(p.Skip)
 			i.ensureIdleTimeout(m)
+			i.ensureHooks(m)
 			return nil
 		}
 		return fmt.Errorf("no stdio MCP servers to move in %s", i.ClaudeConfig)
@@ -444,6 +450,7 @@ func (i Installer) Install(skip []string) (err error) {
 	i.printf("Undo with: aimux mcp proxy uninstall\n")
 	if final, err := i.loadManifest(); err == nil {
 		i.ensureIdleTimeout(final)
+		i.ensureHooks(final)
 	}
 	return nil
 }
@@ -991,6 +998,7 @@ func (i Installer) Uninstall() error {
 		return fmt.Errorf("%w; the Claude config is restored; run `aimux mcp proxy uninstall` again to finish", err)
 	}
 	i.dropIdleTimeout(m)
+	i.dropHooks(m)
 	// Without the manifest, uninstall again only removes the agent: the way
 	// to finish if removing it fails below.
 	if err := removeManifest(i.ManifestPath); err != nil {
@@ -1058,7 +1066,7 @@ func (i Installer) InstallStatus() (InstallState, error) {
 	if m == nil {
 		return st, nil
 	}
-	st.State, st.Moved = InstallInPlace, sortedKeys(m.Servers)
+	st.State, st.Moved, st.Hooks = InstallInPlace, sortedKeys(m.Servers), i.hooksOn()
 	_, members, err := readMCPServers(i.ClaudeConfig)
 	if err != nil {
 		return InstallState{}, err

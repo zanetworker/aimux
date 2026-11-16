@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -59,16 +60,19 @@ func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpB
 	if len(cfg.Headers) > 0 {
 		opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
 	}
-	c, err := client.NewStreamableHttpClient(cfg.URL, opts...)
+	trans, err := transport.NewStreamableHTTP(cfg.URL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect MCP server %s: %w", server, err)
 	}
+	// Pinned to the initialize handshake, as for stdio backends: 2026-07-28 has
+	// no sessions, and our raw tools/list carries no _meta protocol version.
+	c := client.NewClient(trans, client.WithProtocolVersion(mcp.LATEST_LEGACY_PROTOCOL_VERSION))
 	if err := c.Start(ctx); err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("start MCP server %s: %w", server, err)
 	}
 	init := mcp.InitializeRequest{}
-	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	init.Params.ProtocolVersion = mcp.LATEST_LEGACY_PROTOCOL_VERSION
 	init.Params.ClientInfo = mcp.Implementation{Name: "aimux-mcp-proxy", Version: "1"}
 	if _, err := c.Initialize(ctx, init); err != nil {
 		_ = c.Close()
@@ -117,6 +121,7 @@ func (b *httpBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, erro
 func (b *httpBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, httpCallTimeout)
 	defer cancel()
+	req.Params.Meta = withoutProtocolMeta(req.Params.Meta)
 	res, err := b.c.CallTool(ctx, req)
 	var terr *transport.Error
 	if err != nil && !errors.As(err, &terr) {
@@ -130,3 +135,28 @@ func (b *httpBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*m
 }
 
 func (b *httpBackend) Close() error { return b.c.Close() }
+
+// protocolMetaPrefix marks _meta keys that describe one connection (protocol
+// version, client info and capabilities, log level), not the call.
+const protocolMetaPrefix = "io.modelcontextprotocol/"
+
+// withoutProtocolMeta drops the caller's protocol keys from a call's _meta:
+// they describe the caller's connection to the proxy, and forwarded to a
+// backend on another protocol version they contradict that connection's
+// Mcp-Protocol-Version header. m is not modified.
+func withoutProtocolMeta(m *mcp.Meta) *mcp.Meta {
+	if m == nil || len(m.AdditionalFields) == 0 {
+		return m
+	}
+	out := &mcp.Meta{ProgressToken: m.ProgressToken}
+	for k, v := range m.AdditionalFields {
+		if strings.HasPrefix(k, protocolMetaPrefix) {
+			continue
+		}
+		if out.AdditionalFields == nil {
+			out.AdditionalFields = map[string]any{}
+		}
+		out.AdditionalFields[k] = v
+	}
+	return out
+}

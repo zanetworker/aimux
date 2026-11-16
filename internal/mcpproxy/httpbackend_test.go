@@ -210,3 +210,25 @@ func TestHTTPStarterStalledServerTimesOut(t *testing.T) {
 		t.Fatalf("start took %v, want about 300ms", d)
 	}
 }
+
+func TestWithoutProtocolMeta(t *testing.T) {
+	in := &mcp.Meta{ProgressToken: "p1", AdditionalFields: map[string]any{
+		mcp.MetaKeyProtocolVersion:    "2026-07-28",
+		mcp.MetaKeyClientCapabilities: map[string]any{},
+		"trace":                       "keep",
+	}}
+	out := withoutProtocolMeta(in)
+	if out.ProgressToken != "p1" || len(out.AdditionalFields) != 1 || out.AdditionalFields["trace"] != "keep" {
+		t.Fatalf("out = %+v", out)
+	}
+	if len(in.AdditionalFields) != 3 {
+		t.Fatalf("input modified: %+v", in.AdditionalFields)
+	}
+	if withoutProtocolMeta(nil) != nil {
+		t.Fatal("nil meta must stay nil")
+	}
+	only := withoutProtocolMeta(&mcp.Meta{AdditionalFields: map[string]any{mcp.MetaKeyLogLevel: "info"}})
+	if only.AdditionalFields != nil {
+		t.Fatalf("only protocol keys: %+v", only.AdditionalFields)
+	}
+}

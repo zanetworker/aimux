@@ -402,6 +402,24 @@ func TestPool_TimeoutUnblocksAWriteToAServerThatStoppedReading(t *testing.T) {
 	}
 }
 
+// Many stdio servers predate server/discover and ignore methods they do not
+// know. The proxy opens with the initialize handshake, so such a server
+// starts at once instead of after a discover probe times out.
+func TestStdioStarter_ServerIgnoringUnknownMethodsStartsPromptly(t *testing.T) {
+	cfgs := map[string]ServerConfig{"old": {Command: os.Args[0], Env: map[string]string{testListErrEnv: "1"}}}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	start := time.Now()
+	b, err := StdioStarter(cfgs)(ctx, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("start took %v, want under 2s", took)
+	}
+}
+
 func TestStdioStarter_FailedStartKeepsStderrTail(t *testing.T) {
 	cfgs := map[string]ServerConfig{"dies": {Command: os.Args[0], Env: map[string]string{testDieEnv: "1"}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

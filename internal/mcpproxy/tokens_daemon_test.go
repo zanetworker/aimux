@@ -54,7 +54,7 @@ func bearerClient(t *testing.T, url, token string) *client.Client {
 		t.Fatal(err)
 	}
 	init := mcp.InitializeRequest{}
-	init.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	init.Params.ProtocolVersion = mcp.LATEST_LEGACY_PROTOCOL_VERSION
 	if _, err := c.Initialize(ctx, init); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func bearerClient(t *testing.T, url, token string) *client.Client {
 func postInit(t *testing.T, base, path, auth string) int {
 	t.Helper()
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"` +
-		mcp.LATEST_PROTOCOL_VERSION + `","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
+		mcp.LATEST_LEGACY_PROTOCOL_VERSION + `","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
 	r, _ := http.NewRequest("POST", base+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json, text/event-stream")
@@ -290,7 +290,7 @@ func TestDaemon_SameTokenKeepsItsSession(t *testing.T) {
 	if got := rawMCP(t, "POST", url, "tok-b", sid, listBody); got != http.StatusOK {
 		t.Fatalf("owner on its own session: got %d, want 200", got)
 	}
-	if got := rawMCP(t, "POST", url, "tok-b", "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+mcp.LATEST_PROTOCOL_VERSION+`","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`); got != http.StatusOK {
+	if got := rawMCP(t, "POST", url, "tok-b", "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+mcp.LATEST_LEGACY_PROTOCOL_VERSION+`","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`); got != http.StatusOK {
 		t.Fatalf("initialize without a session id: got %d, want 200", got)
 	}
 	if got := rawMCP(t, "DELETE", url, "tok-b", sid, ""); got >= 400 {
