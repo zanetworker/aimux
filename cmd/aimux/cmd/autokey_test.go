@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -110,7 +111,11 @@ func TestBrowserSetup_PrintsAutoKeyLine(t *testing.T) {
 	if err := browserSetup(context.Background(), env, filepath.Join(t.TempDir(), "sandbox"), false, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if n := strings.Count(out.String(), "Auto mode:"); n != 1 || !strings.Contains(out.String(), "Auto mode: OpenRouter key found (Keychain aimux-openrouter)") {
+	store := "Keychain" // the line names the OS secret store: Keychain on macOS, Secret Service elsewhere
+	if runtime.GOOS != "darwin" {
+		store = "Secret Service"
+	}
+	if n := strings.Count(out.String(), "Auto mode:"); n != 1 || !strings.Contains(out.String(), "Auto mode: OpenRouter key found ("+store+" aimux-openrouter)") {
 		t.Fatalf("want exactly one found line:\n%s", out.String())
 	}
 }

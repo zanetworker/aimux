@@ -110,6 +110,7 @@ type PageEngine struct {
 	warming chan struct{}         // closed when the spare being started is ready or failed
 	warmErr error                 // the outcome of the start that warming waited for
 	pending map[string]AskRequest // profile sessions whose page is not sent yet
+	bg      sync.WaitGroup        // the background re-warms bind starts
 }
 
 // NewPageEngine returns an engine whose sessions run in cwd and default to model.
@@ -171,13 +172,19 @@ func (e *PageEngine) newSession(ctx context.Context) (string, error) {
 	return e.Mgr.New(ctx, e.Cwd)
 }
 
+// WaitBackground waits for the spare-session warms bind started (tests: a
+// warm creates the sessions directory, which must not outlive its temp dir).
+func (e *PageEngine) WaitBackground() { e.bg.Wait() }
+
 // bind returns a new session for a page: the spare if there is one (a spare
 // still starting is awaited), else a freshly started one. Either way it
 // starts a new spare in the background.
 func (e *PageEngine) bind(ctx context.Context) (string, error) {
 	defer func() {
 		// If this fails, the next new page starts its session inline.
+		e.bg.Add(1)
 		go func() {
+			defer e.bg.Done()
 			if err := e.Warm(context.Background()); err != nil && e.Log != nil {
 				e.Log.Warn("wingman: no spare page session", "err", err)
 			}

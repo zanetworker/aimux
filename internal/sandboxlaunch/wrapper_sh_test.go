@@ -33,7 +33,7 @@ func eachShell(t *testing.T, fn func(t *testing.T, shell string)) {
 
 func testWorkWrapperRuns(t *testing.T, shell string) {
 	cmd := exec.Command(shell, "-c", WorkWrapper, "sh", "sh", "-c", //nolint:gosec // G204: shell is a fixed sh/bash from the test table
-		`m=$(stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"); echo "mode=$m"; echo "cfg=$(cat "$1")"; echo "prompt=$(cat)"; echo "$1"`,
+		`m=$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"); echo "mode=$m"; echo "cfg=$(cat "$1")"; echo "prompt=$(cat)"; echo "$1"`,
 		"x", harnessconfig.MCPConfigPlaceholder)
 	cmd.Stdin = strings.NewReader("{\"tok\":1}\nthe prompt\n")
 	out, err := cmd.CombinedOutput()

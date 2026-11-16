@@ -171,7 +171,8 @@ func newPageEngine(t *testing.T, a *pgAdapter) *PageEngine {
 	mgr := acprun.NewManager(acprun.ManagerOptions{Start: a.start, StartNew: a.startNew, MaxRuns: 6, IdleTimeout: 30 * time.Minute})
 	t.Cleanup(mgr.Close)
 	e := NewPageEngine(mgr, filepath.Join(t.TempDir(), "sessions"), "sonnet")
-	e.Log = slog.New(slog.DiscardHandler) // re-warms can outlive the test's temp dir
+	e.Log = slog.New(slog.DiscardHandler)
+	t.Cleanup(e.WaitBackground) // runs before the temp dir is removed: a re-warm writes into it
 	return e
 }
 

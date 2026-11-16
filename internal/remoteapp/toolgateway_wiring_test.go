@@ -110,6 +110,11 @@ func newWiringRig(t *testing.T) *wiringRig {
 	if _, _, err := rig.gw.gw.get(); err != nil { // the first sandbox turn starts it
 		t.Fatal(err)
 	}
+	// Start returns before Serve hands the gateway its add/remove hooks (the
+	// serve goroutine does, just before it listens). A Refresh before that
+	// has nothing to apply a relist with and, rate limited, is not retried,
+	// so wait until the endpoint answers: the hooks are set by then.
+	eventually(t, "the gateway to serve", func() bool { return len(rig.served(t)) > 0 })
 	return rig
 }
 

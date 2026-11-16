@@ -83,6 +83,6 @@ func socketOwner(path string) (pid int, ok bool) {
 	if err != nil {
 		return 0, true
 	}
-	_ = raw.Control(func(fd uintptr) { pid = peerPID(int(fd)) })
+	_ = raw.Control(func(fd uintptr) { pid = peerPID(int(fd)) }) //nolint:gosec // G115: fd is an open file descriptor, a small non-negative int
 	return pid, true
 }

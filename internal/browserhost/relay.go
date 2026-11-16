@@ -927,12 +927,13 @@ func lockFile(path string) (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("open wingman lock %s: %w", path, err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	fd := int(f.Fd()) //nolint:gosec // G115: an open file descriptor is a small non-negative int
+	if err := syscall.Flock(fd, syscall.LOCK_EX); err != nil {
 		_ = f.Close() // the lock error is the one to report
 		return nil, fmt.Errorf("lock %s: %w", path, err)
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) // Close releases it anyway
+		_ = syscall.Flock(fd, syscall.LOCK_UN) // Close releases it anyway
 		_ = f.Close()
 	}, nil
 }
