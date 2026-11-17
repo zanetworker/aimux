@@ -86,6 +86,7 @@ func TestReview_EveryStatus(t *testing.T) {
 		"jira:readonly/never":   StatusUnavailable,
 		"slack:readonly/search": StatusUnavailable,
 		"/old":                  StatusNotInRegistry,
+		"/extra":                StatusNewOnServer,
 	}
 	for k, st := range want {
 		if got[k].Status != st {
@@ -110,7 +111,10 @@ func TestReview_EveryStatus(t *testing.T) {
 	if got["/old"].Source != "jira" {
 		t.Errorf("not_in_registry source = %q", got["/old"].Source)
 	}
-	wantOrder := []string{"jira:readonly/drifted", "jira:readonly/fresh", "jira:readonly/gone", "jira:readonly/never", "jira:readonly/same", "slack:readonly/search", "/old"}
+	if r := got["/extra"]; r.Source != "jira" || r.Reason != "offered by jira, not in any set" || r.ApprovedAt != nil {
+		t.Errorf("new_on_server row = %+v", r)
+	}
+	wantOrder := []string{"jira:readonly/drifted", "jira:readonly/fresh", "jira:readonly/gone", "jira:readonly/never", "jira:readonly/same", "slack:readonly/search", "/old", "/extra"}
 	if !reflect.DeepEqual(order, wantOrder) {
 		t.Errorf("order = %v, want %v", order, wantOrder)
 	}
@@ -389,5 +393,19 @@ func TestDiff_SourceChangedNamesBothEndpoints(t *testing.T) {
 	if len(d) != 1 || d[0].Tool != "moved" || d[0].Kind != KindChanged ||
 		!strings.Contains(d[0].Note, "http://127.0.0.1:7000/mcp") || !strings.Contains(d[0].Note, "http://127.0.0.1:8001/mcp") {
 		t.Fatalf("diff = %+v", d)
+	}
+}
+
+// A tool the server offers that no set lists is new_on_server only while
+// no pin covers it (a pinned one is not_in_registry), and never for a
+// source the registry does not name.
+func TestReview_NewOnServerSkipsPinnedAndUnknownSources(t *testing.T) {
+	reg, pins, live := reviewFixture(t)
+	pins["jira"]["extra"] = record(t, tool("extra", "string"), t0)
+	live["ghost"] = LiveSource{Tools: map[string]json.RawMessage{"x": tool("x", "string")}}
+	for _, s := range Review(reg, pins, live) {
+		if s.Status == StatusNewOnServer {
+			t.Fatalf("unexpected new_on_server row %+v", s)
+		}
 	}
 }

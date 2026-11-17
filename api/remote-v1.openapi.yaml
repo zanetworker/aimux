@@ -1847,6 +1847,10 @@ components:
           type: array
           description: Sorted by name; empty for an omitted set.
           items: { $ref: "#/components/schemas/ToolInfo" }
+        newOnServer:
+          type: array
+          description: "Tools the set's source offers that no set lists and no pin covers (status new_on_server), sorted; never granted. Absent when none. Add one with aimux tools approve <source>/<tool> --add-to-set <set>."
+          items: { type: string }
 
     ToolInfo:
       type: object

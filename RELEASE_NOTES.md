@@ -2,6 +2,8 @@
 
 ### Highlights
 
+**New tools on a server show up, and join a set in one step.** `aimux tools status` lists a tool a source offers that no set lists and no pin covers as `new_on_server` (`GET /v1/tools` reports them on the set as `newOnServer`); nothing grants it. `aimux tools approve <source>/<tool> --add-to-set <set>` prints its definition, adds it to the set in `tool-sources.yaml` (comments kept) and pins it, warning when the tool does not declare `readOnlyHint`.
+
 **The sandbox tool gateway runs on its own.** The read-only tool gateway that OpenShell sandboxes reach on `host.containers.internal:7390` is now a worker of the `aimux mcp proxy` service (`aimux mcp proxy gateway serve`), with its own pool of backends, instead of living inside `aimux remote serve`. Each sandbox turn's token is a lease (15 minutes, renewed while the turn runs, deleted when it ends) that `remote serve` puts on the worker over `~/.aimux/gateway.sock` (mode 0600, only your user). A new lease first lists its servers afresh, so a tool a backend changed since the last listing is not served to that turn; when a backend is slow the listing stops waiting after 5 seconds and the lease is accepted anyway (each call is still checked against its pin). Run `aimux mcp proxy gateway install` once: it runs the worker under launchd (`com.aimux.tool-gateway`); without it, a Workspace turn fails at once with that command in the error. `aimux mcp proxy gateway status`, the `tool gateway:` line of `aimux mcp proxy status` and doctor's `gateway.worker` check show whether it runs. `aimux sandbox verify` uses the running worker, so `remote serve` no longer has to be stopped first.
 
 ## aimux v0.15.0

@@ -24,6 +24,7 @@ const (
 	StatusUnavailable   = "unavailable"     // the backend is down, or lists no such tool
 	StatusNotInRegistry = "not_in_registry" // pinned, but no set lists it
 	StatusSourceChanged = "source_changed"  // pinned from another endpoint than the registry now names
+	StatusNewOnServer   = "new_on_server"   // listed live by a registry source, in no set and not pinned
 )
 
 // Change kinds, as `aimux tools diff` reports them.
@@ -206,7 +207,32 @@ func Review(reg toolreg.Registry, pins PinFile, live map[string]LiveSource) []To
 			out = append(out, ToolStatus{Source: src, Tool: t, Status: StatusNotInRegistry, Reason: reason, Authorship: class, ApprovedAt: approvedAt(v)})
 		}
 	}
+	// Tools a registry source offers that no set lists and no pin covers:
+	// shown so a tool added on the server is not invisible; nothing grants
+	// them.
+	for _, src := range slices.Sorted(maps.Keys(live)) {
+		s, ok := reg.Sources[src]
+		if !ok || live[src].Err != nil {
+			continue
+		}
+		for _, t := range slices.Sorted(maps.Keys(live[src].Tools)) {
+			if _, pinned := pins[src][t]; pinned || inAnySet(reg, src, t) {
+				continue
+			}
+			out = append(out, ToolStatus{Source: src, Tool: t, Status: StatusNewOnServer, Reason: "offered by " + src + ", not in any set", Authorship: s.Class()})
+		}
+	}
 	return out
+}
+
+// inAnySet reports whether a set of source src lists tool.
+func inAnySet(reg toolreg.Registry, src, tool string) bool {
+	for _, set := range reg.Sets {
+		if set.Source == src && slices.Contains(set.Tools, tool) {
+			return true
+		}
+	}
+	return false
 }
 
 // FieldChange is one difference between two definitions. Path is dotted

@@ -18,6 +18,11 @@ var (
 	ErrExists = errors.New("already in tool-sources.yaml")
 	// ErrNoSource is a source the registry does not have.
 	ErrNoSource = errors.New("no such source in tool-sources.yaml")
+	// errSharedYAML is a set or tools list shared through a YAML anchor:
+	// editing it would change other sets too.
+	errSharedYAML = errors.New("its tools list is shared with another set through a YAML anchor; edit tool-sources.yaml by hand")
+	// ErrNoSet is a set the file does not have.
+	ErrNoSet = errors.New("no such set in tool-sources.yaml")
 )
 
 // AddSource adds source name and the set <name>:readonly listing tools to
@@ -57,6 +62,58 @@ func AddSource(path, name string, src Source, tools []string) (string, error) {
 	return set, nil
 }
 
+// AddToSet appends tool to set's tools in the registry at path, keeping
+// every other line, and returns undo, which puts the file back while it
+// still holds this edit. A tool already in the set changes nothing (the
+// file is not rewritten; undo does nothing); a missing file or set is an
+// error (ErrNoSet).
+func AddToSet(path, set, tool string) (undo func() error, err error) {
+	if r, err := Load(path); err == nil {
+		if s, ok := r.Sets[set]; ok && slices.Contains(s.Tools, tool) {
+			return func() error { return nil }, nil
+		}
+	}
+	return editFileUndo(path, false, func(root *yaml.Node) error {
+		sets := section(root, "sets")
+		var entry *yaml.Node
+		for i := 0; sets.Kind == yaml.MappingNode && i+1 < len(sets.Content); i += 2 {
+			if sets.Content[i].Value == set {
+				entry = sets.Content[i+1]
+			}
+		}
+		if entry != nil && (entry.Kind == yaml.AliasNode || entry.Anchor != "") {
+			return fmt.Errorf("set %q: %w", set, errSharedYAML)
+		}
+		if entry == nil || entry.Kind != yaml.MappingNode {
+			return fmt.Errorf("set %q: %w", set, ErrNoSet)
+		}
+		for i := 0; i+1 < len(entry.Content); i += 2 {
+			if entry.Content[i].Value == "<<" { // a YAML merge: its tools come from elsewhere
+				return fmt.Errorf("set %q: %w", set, errSharedYAML)
+			}
+		}
+		item := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: tool}
+		for i := 0; i+1 < len(entry.Content); i += 2 {
+			if entry.Content[i].Value != "tools" {
+				continue
+			}
+			tools := entry.Content[i+1]
+			// Appending to a list another set also uses (a YAML anchor)
+			// would grant the tool there too.
+			if tools.Kind == yaml.AliasNode || tools.Anchor != "" {
+				return fmt.Errorf("set %q: %w", set, errSharedYAML)
+			}
+			if tools.Kind == yaml.SequenceNode {
+				tools.Content = append(tools.Content, item)
+				return nil
+			}
+		}
+		entry.Content = append(entry.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "tools"},
+			&yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle, Content: []*yaml.Node{item}})
+		return nil
+	}, func(_, after Registry) error { return after.SetErrors[set] })
+}
+
 // RemoveSource removes source name, broken or not, and every set naming it
 // from the registry at path, keeping every other line, and returns the
 // removed sets, sorted. A missing file or source is an error (ErrNoSource
@@ -94,53 +151,68 @@ func RemoveSource(path, name string) ([]string, error) {
 // check (if set) accepts it. A missing path starts from Default() when
 // create is set and is an error otherwise.
 func editFile(path string, create bool, edit func(root *yaml.Node) error, check func(before, after Registry) error) error {
+	_, err := editFileUndo(path, create, edit, check)
+	return err
+}
+
+// editFileUndo is editFile, also returning undo: it puts the file back as
+// it was before this edit, atomically, only while it still holds what this
+// edit wrote (another edit since is kept, and undo says so).
+func editFileUndo(path string, create bool, edit func(root *yaml.Node) error, check func(before, after Registry) error) (undo func() error, err error) {
 	target, data, err := readForEdit(path, create)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	before, err := parse(path, data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("tool sources %s: %w", path, err)
+		return nil, fmt.Errorf("tool sources %s: %w", path, err)
 	}
 	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return fmt.Errorf("tool sources %s: not a mapping", path)
+		return nil, fmt.Errorf("tool sources %s: not a mapping", path)
 	}
 	if err := edit(doc.Content[0]); err != nil {
-		return err
+		return nil, err
 	}
 	var b bytes.Buffer
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
 	if err := enc.Encode(&doc); err != nil {
-		return fmt.Errorf("encode tool sources: %w", err)
+		return nil, fmt.Errorf("encode tool sources: %w", err)
 	}
 	if err := enc.Close(); err != nil {
-		return fmt.Errorf("encode tool sources: %w", err)
+		return nil, fmt.Errorf("encode tool sources: %w", err)
 	}
 	after, err := parse(path, b.Bytes())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if check != nil {
 		if err := check(before, after); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, m := range [][2]map[string]error{{before.SourceErrors, after.SourceErrors}, {before.SetErrors, after.SetErrors}} {
 		for _, n := range slices.Sorted(maps.Keys(m[1])) {
 			if m[0][n] == nil {
-				return m[1][n]
+				return nil, m[1][n]
 			}
 		}
 	}
+	written := b.Bytes()
 	if target == "" {
-		return writeNew(path, b.Bytes())
+		if err := writeNew(path, written); err != nil {
+			return nil, err
+		}
+		return func() error { return errors.New("the file did not exist before; remove it by hand") }, nil
 	}
-	return replace(target, data, b.Bytes())
+	if err := replace(target, data, written); err != nil {
+		return nil, err
+	}
+	return func() error { return replace(target, written, data) }, nil
 }
 
 // readForEdit is the file to replace (path, or a link's target) and its
