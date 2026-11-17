@@ -243,18 +243,20 @@ func ReloadDaemon(port int) (ReloadResult, error) {
 
 // LiveStarter starts stdio servers from definitions a reload can replace.
 type LiveStarter struct {
-	mu    sync.RWMutex
-	start Starter
+	mu     sync.RWMutex
+	start  Starter
+	reader SecretReader
 }
 
-// NewLiveStarter starts servers from cfgs, as StdioStarter does.
-func NewLiveStarter(cfgs map[string]ServerConfig, resolved []string) *LiveStarter {
-	return &LiveStarter{start: StdioStarter(cfgs, resolved...)}
+// NewLiveStarter starts servers from cfgs, as DefinitionStarter does: HTTP
+// definitions read their headers through reader.
+func NewLiveStarter(cfgs map[string]ServerConfig, resolved []string, reader SecretReader) *LiveStarter {
+	return &LiveStarter{start: DefinitionStarter(cfgs, resolved, reader), reader: reader}
 }
 
 // Set replaces the definitions; starts already under way keep the old ones.
 func (l *LiveStarter) Set(cfgs map[string]ServerConfig, resolved []string) {
-	s := StdioStarter(cfgs, resolved...)
+	s := DefinitionStarter(cfgs, resolved, l.reader)
 	l.mu.Lock()
 	l.start = s
 	l.mu.Unlock()

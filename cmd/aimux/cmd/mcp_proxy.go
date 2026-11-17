@@ -54,7 +54,8 @@ func newMCPProxyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "proxy",
 		Short: "Serve your stdio MCP servers lazily from one shared process",
-		Long: "One shared process for all stdio MCP servers in ~/.claude.json, each at its own endpoint under its own name. Tools are listed from a cached " +
+		Long: "One shared process for all stdio MCP servers in ~/.claude.json, each at its own endpoint under its own name, and for HTTP servers saved in " +
+			"~/.aimux/mcp-servers.json (type http, url, headerNames; header values come from the Keychain item aimux-mcp-proxy/<server>). Tools are listed from a cached " +
 			"catalog, each server starts on its first tool call, is shared by every session, and stops when idle (a per-session server lives as long as the Claude Code process using it). " +
 			"Run `install` to switch Claude Code to it (and `uninstall` to switch back), or run `refresh` and `serve` " +
 			"yourself and add the entries printed by `config`.",
@@ -68,7 +69,7 @@ func newMCPProxyRefreshCmd() *cobra.Command {
 	var f proxyFlags
 	cmd := &cobra.Command{
 		Use:   "refresh",
-		Short: "Start each stdio MCP server once and cache its tools",
+		Short: "Start each stdio or saved HTTP MCP server once and cache its tools",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgs, resolved, err := proxyBackends(f.claudeConfig, f.servers, f.exclude, true)
 			if err != nil {
@@ -80,7 +81,7 @@ func newMCPProxyRefreshCmd() *cobra.Command {
 			defer stop()
 			ctx, cancel := context.WithTimeout(sigCtx, 3*time.Minute)
 			defer cancel()
-			err = proxyRefresh(ctx, sortedKeys(cfgs), mcpproxy.StdioStarter(cfgs, resolved...), f.catalog, cmd.OutOrStdout())
+			err = proxyRefresh(ctx, sortedKeys(cfgs), mcpproxy.DefinitionStarter(cfgs, resolved, mcpproxy.SystemSecrets()), f.catalog, cmd.OutOrStdout())
 			if sigCtx.Err() != nil {
 				return errors.New("refresh interrupted; the servers it started were stopped")
 			}
@@ -160,7 +161,7 @@ func newMCPProxyServeCmd() *cobra.Command {
 			// A backend's startup refresh is dropped once an edit or reload
 			// replaced the definition it was started with.
 			updater.Current = proxyCurrentDefinition(f)
-			starter := mcpproxy.NewLiveStarter(set.Configs, set.Resolved)
+			starter := mcpproxy.NewLiveStarter(set.Configs, set.Resolved, mcpproxy.SystemSecrets())
 			pool := mcpproxy.NewPool(starter.Start, mcpproxy.PoolOptions{
 				PerSession: perSession,
 				// Keep the catalog current: re-list tools whenever a backend starts.

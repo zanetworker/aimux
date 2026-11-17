@@ -33,7 +33,8 @@ else from your shell; a bare command is resolved on that PATH),
 saves the definition and the tools it listed, and reloads that one server in
 place. Any failure before the save leaves the old definition unchanged.
 
-For a server not behind the proxy, run 'aimux mcp proxy install' first.`,
+For a server not behind the proxy, run 'aimux mcp proxy install' first.
+Only stdio servers can be edited; an HTTP server is refused.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()

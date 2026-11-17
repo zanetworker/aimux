@@ -69,6 +69,9 @@ func EditServer(ctx context.Context, opts EditOptions) error {
 	if !ok {
 		return fmt.Errorf("server %q not found in %s; run `aimux mcp proxy install`", opts.Server, opts.ServersPath)
 	}
+	if cfg.Type == "http" {
+		return fmt.Errorf("%s is an HTTP server; aimux mcp proxy edit changes stdio servers only", opts.Server)
+	}
 
 	// From here until the temp copy (it holds env values) is removed,
 	// SIGINT and SIGTERM never kill aimux: while the editor runs they belong
@@ -215,11 +218,18 @@ func readTempDefinition(path string) (cfg ServerConfig, hash string, err error) 
 		return ServerConfig{}, "", err
 	}
 
+	// Only the stdio fields: ServerConfig's HTTP fields are not editable.
+	var stdio struct {
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
+	if err := dec.Decode(&stdio); err != nil {
 		return ServerConfig{}, "", fmt.Errorf("the edited definition is not valid (%v); it may hold only command, args and env; nothing was saved", err)
 	}
+	cfg = ServerConfig{Command: stdio.Command, Args: stdio.Args, Env: stdio.Env}
 	if dec.More() {
 		return ServerConfig{}, "", errors.New("the edited definition has more than one JSON value; nothing was saved")
 	}

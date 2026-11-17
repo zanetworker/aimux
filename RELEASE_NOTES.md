@@ -83,6 +83,7 @@ Also:
 
 - **Allowlist profile:** `tools/list` shows only allowlisted `(backend, tool)` pairs; a call to anything else is rejected and logged. Tools a backend gains later stay hidden until allowlisted.
 - **HTTP backends:** the proxy can forward to Streamable HTTP MCP servers.
+- **Saved HTTP definitions:** a definition in `~/.aimux/mcp-servers.json` may be an HTTP server (`type`, `url`, `headerNames`); the proxy reads its header values from the Keychain item `aimux-mcp-proxy/<server>` each time it starts it, and its errors never carry a header value. `aimux mcp proxy edit` edits stdio servers only and refuses an HTTP one.
 - **Token-guarded listener:** a bearer token is required on every request; each session of the tool gateway gets its own.
 - **Wiki tools:** built-in `wiki_search` and `wiki_read` serve Markdown files under a configured root, resolve symlinks, and refuse paths outside the root, non-Markdown files and oversized files.
 - **New MCP servers move behind the proxy by themselves.** `aimux mcp proxy install` now adds two Claude Code hooks: after a session runs `claude mcp add` (or `add-json`, `add-from-claude-desktop`), the new stdio server is moved behind the proxy and the session says so (or names the server that failed); when a session starts, one line names any stdio servers still direct, such as ones added in a terminal. A project-only server is explained, not moved. `status` shows whether the hooks are on; `uninstall` removes them. Re-run `aimux mcp proxy install` once to add them to an existing install.

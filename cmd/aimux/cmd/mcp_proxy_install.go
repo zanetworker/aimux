@@ -105,7 +105,7 @@ func proxyRefreshFor(claudeConfig, serversFile, catalogPath string, names []stri
 	defer stop()
 	ctx, cancel := context.WithTimeout(sigCtx, 3*time.Minute)
 	defer cancel()
-	errs := mcpproxy.RefreshCatalog(ctx, cat, mcpproxy.StdioStarter(cfgs, resolved...), names)
+	errs := mcpproxy.RefreshCatalog(ctx, cat, mcpproxy.DefinitionStarter(cfgs, resolved, mcpproxy.SystemSecrets()), names)
 	if sigCtx.Err() != nil {
 		if interrupted != nil {
 			interrupted.Store(true)

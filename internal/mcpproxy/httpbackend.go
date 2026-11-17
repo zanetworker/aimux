@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -157,9 +158,69 @@ type httpBackend struct {
 	server string
 	c      *client.Client
 	listID atomic.Int64
+	sc     *scrubber // hides the header values in every error it returns
+}
+
+// headerScrubbedError is err with its header values scrubbed; errors.As and errors.Is
+// still see err.
+type headerScrubbedError struct {
+	msg string
+	err error
+}
+
+func (e *headerScrubbedError) Error() string { return e.msg }
+func (e *headerScrubbedError) Unwrap() error { return e.err }
+
+// scrubErr hides header values in err's text, keeping a RequestError a
+// RequestError (callers tell a live server's refusal from a dead one).
+func scrubErr(sc *scrubber, err error) error {
+	if err == nil || sc == nil {
+		return err
+	}
+	var re *RequestError
+	if errors.As(err, &re) {
+		return &RequestError{Code: re.Code, Err: &headerScrubbedError{msg: sc.scrub(re.Err.Error()), err: re.Err}}
+	}
+	return &headerScrubbedError{msg: sc.scrub(err.Error()), err: err}
+}
+
+// headerScrubber hides each header value and, for "Scheme token" values,
+// the token alone too.
+func headerScrubber(headers map[string]string) *scrubber {
+	if len(headers) == 0 {
+		return nil
+	}
+	// Every header value is a secret here, however short: no minSecretLen
+	// cutoff as for env values.
+	seen := map[string]bool{}
+	sc := &scrubber{}
+	add := func(v string) {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			sc.values = append(sc.values, v)
+		}
+	}
+	for _, v := range headers {
+		add(v)
+		if i := strings.LastIndexByte(v, ' '); i >= 0 {
+			add(v[i+1:])
+		}
+	}
+	sort.Slice(sc.values, func(i, j int) bool { return len(sc.values[i]) > len(sc.values[j]) })
+	return sc
 }
 
 func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpBackend, error) {
+	sc := headerScrubber(cfg.Headers)
+	b, err := startHTTPRaw(ctx, server, cfg)
+	if err != nil {
+		return nil, scrubErr(sc, err)
+	}
+	b.sc = sc
+	return b, nil
+}
+
+func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig) (*httpBackend, error) {
 	// The transport logs through slog.Default; the proxy reports errors itself.
 	ctx, cancel := context.WithTimeout(ctx, httpStartTimeout)
 	defer cancel()
@@ -203,6 +264,11 @@ func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpB
 
 // ListToolsRaw pages through tools/list and returns each tool's JSON as sent.
 func (b *httpBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, error) {
+	tools, err := b.listToolsRaw(ctx)
+	return tools, scrubErr(b.sc, err)
+}
+
+func (b *httpBackend) listToolsRaw(ctx context.Context) ([]json.RawMessage, error) {
 	var tools []json.RawMessage
 	cursor := ""
 	for {
@@ -239,6 +305,11 @@ func (b *httpBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, erro
 }
 
 func (b *httpBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	res, err := b.callTool(ctx, req)
+	return res, scrubErr(b.sc, err)
+}
+
+func (b *httpBackend) callTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, httpCallTimeout)
 	defer cancel()
 	req.Params.Meta = withoutProtocolMeta(req.Params.Meta)

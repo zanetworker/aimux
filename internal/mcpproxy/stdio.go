@@ -27,6 +27,11 @@ type ServerConfig struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
+	// Type "http" is a moved HTTP server: URL is where it is, and the
+	// values of HeaderNames are in Keychain item HeaderService(name).
+	Type        string   `json:"type,omitempty"`
+	URL         string   `json:"url,omitempty"`
+	HeaderNames []string `json:"headerNames,omitempty"`
 }
 
 // StdioStarter returns a Starter that launches servers from cfgs, expanding

@@ -689,7 +689,8 @@ func entryDefinition(raw json.RawMessage) ServerConfig {
 // sameDefinition compares two definitions, an empty list or map equal to
 // none.
 func sameDefinition(a, b ServerConfig) bool {
-	if a.Command != b.Command || len(a.Args) != len(b.Args) || len(a.Env) != len(b.Env) {
+	if a.Command != b.Command || len(a.Args) != len(b.Args) || len(a.Env) != len(b.Env) ||
+		a.Type != b.Type || a.URL != b.URL || !slices.Equal(a.HeaderNames, b.HeaderNames) {
 		return false
 	}
 	for k := range a.Args {

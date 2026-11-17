@@ -16,6 +16,8 @@ Claude Code starts every configured MCP server when a session opens, before any 
 
 Remote (`http`, `sse`) servers are not proxied. They run no local process, so Claude Code keeps connecting to them directly.
 
+The proxy can also serve a saved HTTP server: a definition in `~/.aimux/mcp-servers.json` with `"type": "http"`, its `url` and the names of its headers (`headerNames`). The header values are not in that file; the proxy reads them from the Keychain item `aimux-mcp-proxy/<server>` (account `aimux`) each time it starts the server, and its errors and status never carry a header value. If that item is missing or locked, the server fails to start with `keychain item aimux-mcp-proxy/<server> is missing or locked`; the other servers keep working.
+
 Only **tools** are proxied. Prompts, resources and log messages from the proxied servers are not available through the proxy; keep a server as a direct entry if you rely on those.
 
 ## Supported clients
@@ -104,7 +106,7 @@ This opens the server's definition in `$EDITOR` (an owner-only temp copy that in
 
 The temp copy is removed when `edit` ends, also on Ctrl-C or `SIGTERM` after the editor closed. Some editors write swap or backup files beside it (vim's `.swp`, a `~` backup); those hold the same `env` values, so configure your editor not to keep them for files in your temp directory, or delete them.
 
-The fallback: `uninstall`, edit `~/.claude.json`, `install`.
+The fallback: `uninstall`, edit `~/.claude.json`, `install`. `edit` changes stdio servers only and refuses an HTTP one (`<server> is an HTTP server; aimux mcp proxy edit changes stdio servers only`).
 
 ### Drift
 
