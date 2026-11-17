@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 740" font-family="RedHatDisplay, 'Red Hat Display', -apple-system, 'Segoe UI', Roboto, Arial, sans-serif">
+  <style>
+    :root {
+      --bg: #1a1a1a; --bg-card: #2d2d2d; --bg-item: #3a3a3a;
+      --accent: #ee0000; --text-primary: #e0e0e0; --text-secondary: #a3a3a3; --text-muted: #8a8a8a;
+      --border-card: #404040; --conn-opacity: 0.6; --worker: rgba(255,255,255,0.03);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f5f5; --bg-card: #ffffff; --bg-item: #f0f0f0;
+        --accent: #cc0000; --text-primary: #151515; --text-secondary: #4d4d4d; --text-muted: #6b6b6b;
+        --border-card: #d2d2d2; --conn-opacity: 0.7; --worker: rgba(0,0,0,0.025);
+      }
+    }
+    .t { fill: var(--text-primary); font-size: 13px; font-weight: 600; }
+    .i { fill: var(--text-secondary); font-size: 10.5px; }
+    .m { fill: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 1.5px; }
+    .lbl { font-size: 10px; font-weight: 600; }
+    .card { fill: var(--bg-card); stroke: var(--border-card); stroke-width: 1.5; }
+    .key { fill: var(--bg-card); stroke: var(--accent); stroke-width: 2; }
+    .conn { fill: none; stroke-width: 2.5; stroke-dasharray: 4 3; opacity: var(--conn-opacity); }
+    .worker { fill: var(--worker); stroke: var(--text-muted); stroke-width: 1.2; }
+  </style>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/><feOffset dy="2" result="o"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="a-teal" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#37a3a3"/></marker>
+    <marker id="a-red" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#ee0000"/></marker>
+    <marker id="a-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#7b61d6"/></marker>
+    <marker id="a-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#f5921b"/></marker>
+  </defs>
+
+  <rect width="1400" height="740" fill="var(--bg)"/>
+  <text x="30" y="34" class="t" font-size="17">Proposed: aimux mcp proxy as one service with two workers</text>
+  <text x="30" y="54" class="i">Same binary and lifecycle; each worker has its own pool, processes and environment, and restarts on its own. remote serve hands out tokens over a private socket.</text>
+
+  <text x="125" y="80" text-anchor="middle" class="m">CLIENTS</text>
+  <text x="355" y="80" text-anchor="middle" class="m">AIMUX CORE</text>
+  <text x="585" y="80" text-anchor="middle" class="m">LISTENER</text>
+  <text x="815" y="80" text-anchor="middle" class="m">POLICY · toolgateway</text>
+  <text x="1045" y="80" text-anchor="middle" class="m">POOL · mcpproxy</text>
+  <text x="1275" y="80" text-anchor="middle" class="m">BACKENDS</text>
+
+  <!-- Service boundary -->
+  <rect x="472" y="90" width="680" height="530" rx="12" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 5" opacity="0.75"/>
+  <rect x="484" y="83" width="252" height="15" fill="var(--bg)"/>
+  <text x="490" y="94" class="lbl" fill="var(--accent)">aimux mcp proxy · one service</text>
+
+  <!-- Workers -->
+  <rect x="482" y="104" width="660" height="128" rx="8" class="worker"/>
+  <text x="1134" y="120" text-anchor="end" class="lbl" fill="#37a3a3">LOCAL WORKER · process 1</text>
+  <rect x="482" y="408" width="660" height="200" rx="8" class="worker"/>
+  <text x="1134" y="424" text-anchor="end" class="lbl" fill="#ee0000">SANDBOX WORKER · process 2</text>
+
+  <!-- Clients -->
+  <g filter="url(#shadow)"><rect x="30" y="122" width="190" height="96" rx="6" class="card"/></g>
+  <text x="125" y="146" text-anchor="middle" class="t">Claude Code sessions</text>
+  <text x="44" y="170" class="i">your terminals, on your Mac</text>
+  <text x="44" y="186" class="i">MCP over loopback</text>
+  <text x="44" y="202" class="i">no sandbox, no token</text>
+
+  <g filter="url(#shadow)"><rect x="30" y="290" width="190" height="56" rx="6" class="card"/></g>
+  <text x="125" y="313" text-anchor="middle" class="t">Wingman panel</text>
+  <text x="125" y="331" text-anchor="middle" class="i">Workspace, Auto questions</text>
+  <g filter="url(#shadow)"><rect x="30" y="362" width="190" height="56" rx="6" class="card" stroke-dasharray="5 4"/></g>
+  <text x="125" y="385" text-anchor="middle" class="t">Phone app, CLI</text>
+  <text x="125" y="403" text-anchor="middle" class="i">planned, same API</text>
+
+  <!-- Core -->
+  <g filter="url(#shadow)"><rect x="260" y="280" width="190" height="140" rx="6" class="card"/></g>
+  <text x="355" y="304" text-anchor="middle" class="t">remote serve · API v1</text>
+  <text x="274" y="328" class="i">client scope from clients.yaml</text>
+  <text x="274" y="345" class="i">profile → session</text>
+  <text x="274" y="362" class="i">compiles the sandbox policy</text>
+  <text x="274" y="379" class="i">makes and keeps the token</text>
+  <text x="274" y="396" class="i">routes Auto, runs plans</text>
+
+  <g filter="url(#shadow)"><rect x="260" y="455" width="190" height="110" rx="6" class="card"/></g>
+  <text x="355" y="479" text-anchor="middle" class="t">OpenShell sandboxes</text>
+  <text x="274" y="503" class="i">Workspace (work-readonly)</text>
+  <text x="274" y="520" class="i">research-with-work (planned)</text>
+  <text x="274" y="537" class="i">network: only :7390 + model</text>
+  <text x="274" y="554" class="i">carries its session token</text>
+
+  <!-- Local worker cards -->
+  <g filter="url(#shadow)"><rect x="492" y="128" width="186" height="92" rx="6" class="card"/></g>
+  <text x="585" y="150" text-anchor="middle" class="t">Local listener</text>
+  <text x="504" y="172" class="i">127.0.0.1, loopback only</text>
+  <text x="504" y="188" class="i">same as today</text>
+  <g filter="url(#shadow)"><rect x="722" y="128" width="186" height="92" rx="6" class="card"/></g>
+  <text x="815" y="150" text-anchor="middle" class="t">Local policy</text>
+  <text x="734" y="172" class="i">approvals opt-in per client</text>
+  <text x="734" y="188" class="i">off by default</text>
+  <g filter="url(#shadow)"><rect x="952" y="128" width="186" height="92" rx="6" class="card"/></g>
+  <text x="1045" y="150" text-anchor="middle" class="t">Local pool</text>
+  <text x="964" y="172" class="i">your ~/.claude.json servers</text>
+  <text x="964" y="188" class="i">lazy stdio, your environment</text>
+  <text x="964" y="204" class="i">its own cache and processes</text>
+
+  <!-- Control socket -->
+  <g filter="url(#shadow)"><rect x="492" y="290" width="416" height="86" rx="6" class="key"/></g>
+  <text x="700" y="312" text-anchor="middle" class="t">Control socket · ~/.aimux/gateway.sock</text>
+  <text x="506" y="334" class="i">PutLease(token, tools, snapshot, expiry) · Renew · DeleteLease</text>
+  <text x="506" y="351" class="i">Unix socket, mode 0600, caller checked; no HTTP, no sandbox access</text>
+  <text x="506" y="368" class="i">worker restarts → forgets tokens → refuses until leases are re-sent</text>
+
+  <!-- Sandbox worker cards -->
+  <g filter="url(#shadow)"><rect x="492" y="445" width="186" height="120" rx="6" class="key"/></g>
+  <text x="585" y="467" text-anchor="middle" class="t">Sandbox listener</text>
+  <text x="504" y="489" class="i">host.containers.internal</text>
+  <text x="504" y="504" class="i">:7390</text>
+  <text x="504" y="526" class="i">mounts only backends a</text>
+  <text x="504" y="541" class="i">sandbox profile allows</text>
+  <g filter="url(#shadow)"><rect x="722" y="435" width="186" height="140" rx="6" class="key"/></g>
+  <text x="815" y="457" text-anchor="middle" class="t">Sandbox policy</text>
+  <text x="734" y="480" class="i">1  token lease → tools</text>
+  <text x="734" y="498" class="i">2  list only approved pins</text>
+  <text x="734" y="516" class="i">3  re-check pin every call</text>
+  <text x="734" y="534" class="i">4  snapshot = compiler's</text>
+  <text x="734" y="552" class="i">5  fail closed on change</text>
+  <g filter="url(#shadow)"><rect x="952" y="435" width="186" height="140" rx="6" class="key"/></g>
+  <text x="1045" y="457" text-anchor="middle" class="t">Sandbox pool</text>
+  <text x="964" y="480" class="i">HTTP MCP, OpenAPI GET</text>
+  <text x="964" y="498" class="i">gh → aimux-tools sandbox</text>
+  <text x="964" y="516" class="i">env allowlist, no secrets</text>
+  <text x="964" y="534" class="i">own cache, own pins for</text>
+  <text x="964" y="549" class="i">list_changed</text>
+
+  <!-- Backends -->
+  <g filter="url(#shadow)"><rect x="1180" y="122" width="190" height="96" rx="6" class="card"/></g>
+  <text x="1275" y="146" text-anchor="middle" class="t">Your MCP servers</text>
+  <text x="1194" y="170" class="i">everything in ~/.claude.json</text>
+  <text x="1194" y="186" class="i">includes write-capable ones</text>
+  <text x="1194" y="202" class="i">local worker only</text>
+  <g filter="url(#shadow)"><rect x="1180" y="430" width="190" height="150" rx="6" class="card"/></g>
+  <text x="1275" y="454" text-anchor="middle" class="t">Read-only sources</text>
+  <text x="1194" y="478" class="i">wiki, Jira, Slack, Google</text>
+  <text x="1194" y="494" class="i">(MCP, read tools only)</text>
+  <text x="1194" y="516" class="i">OpenAPI GET operations</text>
+  <text x="1194" y="538" class="i">gh (GitHub token injected</text>
+  <text x="1194" y="554" class="i">by OpenShell, read-only)</text>
+
+  <!-- Connections: local -->
+  <path id="l1" d="M220,170 L490,170" class="conn" stroke="#37a3a3" marker-end="url(#a-teal)"/>
+  <path id="l2" d="M678,170 L720,170" class="conn" stroke="#37a3a3" marker-end="url(#a-teal)"/>
+  <path id="l3" d="M908,170 L950,170" class="conn" stroke="#37a3a3" marker-end="url(#a-teal)"/>
+  <path id="l4" d="M1138,170 L1178,170" class="conn" stroke="#37a3a3" marker-end="url(#a-teal)"/>
+  <!-- Client asks -->
+  <path id="c1" d="M220,318 L258,318" class="conn" stroke="#7b61d6" marker-end="url(#a-purple)"/>
+  <path id="c2" d="M220,390 L258,390" class="conn" stroke="#7b61d6" marker-end="url(#a-purple)"/>
+  <path id="c3" d="M355,420 L355,453" class="conn" stroke="#7b61d6" marker-end="url(#a-purple)"/>
+  <rect x="300" y="429" width="44" height="14" fill="var(--bg)" opacity="0.85"/>
+  <text x="322" y="440" text-anchor="middle" class="lbl" fill="#7b61d6">starts</text>
+  <!-- Leases -->
+  <path id="k1" d="M450,333 L490,333" class="conn" stroke="#f5921b" marker-end="url(#a-orange)"/>
+  <path id="k2" d="M815,376 L815,433" class="conn" stroke="#f5921b" marker-end="url(#a-orange)"/>
+  <rect x="822" y="390" width="78" height="14" fill="var(--bg)" opacity="0.85"/>
+  <text x="826" y="401" class="lbl" fill="#f5921b">token table</text>
+  <!-- Sandbox lane -->
+  <path id="s1" d="M450,505 L490,505" class="conn" stroke="#ee0000" marker-end="url(#a-red)"/>
+  <path id="s2" d="M678,505 L720,505" class="conn" stroke="#ee0000" marker-end="url(#a-red)"/>
+  <path id="s3" d="M908,505 L950,505" class="conn" stroke="#ee0000" marker-end="url(#a-red)"/>
+  <path id="s4" d="M1138,505 L1178,505" class="conn" stroke="#ee0000" marker-end="url(#a-red)"/>
+  <!-- Not mounted -->
+  <path d="M1160,430 L1160,245" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="2 4"/>
+  <line x1="1150" y1="255" x2="1170" y2="235" stroke="#ee0000" stroke-width="2.5"/>
+  <line x1="1150" y1="235" x2="1170" y2="255" stroke="#ee0000" stroke-width="2.5"/>
+
+  <!-- Dots -->
+  <circle r="4" fill="#37a3a3" opacity="0.9"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#l1"/></animateMotion></circle>
+  <circle r="4" fill="#37a3a3" opacity="0.9"><animateMotion dur="0.6s" repeatCount="indefinite" begin="0.2s"><mpath href="#l2"/></animateMotion></circle>
+  <circle r="4" fill="#37a3a3" opacity="0.9"><animateMotion dur="0.6s" repeatCount="indefinite" begin="0.4s"><mpath href="#l3"/></animateMotion></circle>
+  <circle r="4" fill="#37a3a3" opacity="0.9"><animateMotion dur="0.6s" repeatCount="indefinite" begin="0.6s"><mpath href="#l4"/></animateMotion></circle>
+  <circle r="4" fill="#7b61d6" opacity="0.9"><animateMotion dur="0.8s" repeatCount="indefinite" begin="0.1s"><mpath href="#c1"/></animateMotion></circle>
+  <circle r="4" fill="#7b61d6" opacity="0.6"><animateMotion dur="2.5s" repeatCount="indefinite" begin="0.5s"><mpath href="#c2"/></animateMotion></circle>
+  <circle r="4" fill="#7b61d6" opacity="0.9"><animateMotion dur="0.8s" repeatCount="indefinite" begin="0.9s"><mpath href="#c3"/></animateMotion></circle>
+  <circle r="4" fill="#f5921b" opacity="0.8"><animateMotion dur="1.2s" repeatCount="indefinite" begin="0.3s"><mpath href="#k1"/></animateMotion></circle>
+  <circle r="4" fill="#f5921b" opacity="0.8"><animateMotion dur="1.2s" repeatCount="indefinite" begin="0.9s"><mpath href="#k2"/></animateMotion></circle>
+  <circle r="4" fill="#ee0000" opacity="0.9"><animateMotion dur="0.6s" repeatCount="indefinite"><mpath href="#s1"/></animateMotion></circle>
+  <circle r="4" fill="#ee0000" opacity="0.9"><animateMotion dur="0.6s" repeatCount="indefinite" begin="0.3s"><mpath href="#s2"/></animateMotion></circle>
+  <circle r="4" fill="#ee0000" opacity="0.9"><animateMotion dur="0.6s" repeatCount="indefinite" begin="0.6s"><mpath href="#s3"/></animateMotion></circle>
+  <circle r="4" fill="#ee0000" opacity="0.9"><animateMotion dur="0.6s" repeatCount="indefinite" begin="0.9s"><mpath href="#s4"/></animateMotion></circle>
+
+  <!-- Legend -->
+  <g transform="translate(170, 646)">
+    <rect x="0" y="0" width="1060" height="30" rx="6" fill="var(--bg-card)" stroke="var(--border-card)"/>
+    <circle cx="20" cy="15" r="5" fill="#37a3a3"/><text x="32" y="19" class="i">Local tool call (trusted)</text>
+    <circle cx="230" cy="15" r="5" fill="#7b61d6"/><text x="242" y="19" class="i">Client question (remote API v1)</text>
+    <circle cx="470" cy="15" r="5" fill="#f5921b"/><text x="482" y="19" class="i">Token lease (control socket)</text>
+    <circle cx="680" cy="15" r="5" fill="#ee0000"/><text x="692" y="19" class="i">Sandbox tool call (untrusted)</text>
+    <line x1="878" y1="9" x2="890" y2="21" stroke="#ee0000" stroke-width="2.5"/><line x1="878" y1="21" x2="890" y2="9" stroke="#ee0000" stroke-width="2.5"/>
+    <text x="898" y="19" class="i">Not mounted in that worker</text>
+  </g>
+  <text x="700" y="708" text-anchor="middle" class="i" font-style="italic">A sandbox call can reach only what its worker mounted, only with a live lease, and only tools whose pins still match.</text>
+</svg>
