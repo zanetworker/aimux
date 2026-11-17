@@ -8,6 +8,7 @@
 package keyring
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +26,9 @@ var (
 	// ErrInsecure means a key file exists but is readable by others or not
 	// owned by the user, so it is refused.
 	ErrInsecure = errors.New("key file is not private (want mode 0600, owned by you)")
+	// ErrUnsupported means this platform has no secret store aimux can
+	// write (Store and Delete).
+	ErrUnsupported = errors.New("no writable secret store on this platform")
 )
 
 // readTimeout bounds one secret-store call (a locked store can prompt).
@@ -44,6 +48,13 @@ type Source interface {
 var (
 	run = func(ctx context.Context, bin string, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, bin, args...).Output() // #nosec G204 -- fixed binaries, args built here
+	}
+	// runStdin runs bin with stdin; Store sends the value this way so it
+	// never appears on a command line.
+	runStdin = func(ctx context.Context, bin string, stdin []byte, args ...string) ([]byte, error) {
+		c := exec.CommandContext(ctx, bin, args...) // #nosec G204 -- fixed binary, args built here
+		c.Stdin = bytes.NewReader(stdin)
+		return c.Output()
 	}
 	lookPath  = exec.LookPath
 	getenv    = os.Getenv
@@ -90,7 +101,8 @@ func names(sources []Source) string {
 
 // keychainSource reads a macOS Keychain generic password with
 // `/usr/bin/security find-generic-password -s <service> -w`.
-type keychainSource struct{ service string }
+// account, when set, limits it to that account's item (Store's items).
+type keychainSource struct{ service, account string }
 
 // exitKeychainNotFound is security's exit status for a missing item.
 const exitKeychainNotFound = 44
@@ -100,7 +112,11 @@ func (s keychainSource) String() string { return "keychain " + s.service }
 func (s keychainSource) Lookup(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
-	b, err := run(ctx, "/usr/bin/security", "find-generic-password", "-s", s.service, "-w")
+	args := []string{"find-generic-password", "-s", s.service, "-w"}
+	if s.account != "" {
+		args = []string{"find-generic-password", "-a", s.account, "-s", s.service, "-w"}
+	}
+	b, err := run(ctx, "/usr/bin/security", args...)
 	return toolResult(ctx, s, b, err, exitKeychainNotFound)
 }
 
@@ -250,4 +266,32 @@ func expandHome(path string) string {
 		}
 	}
 	return path
+}
+
+// validService reports whether service is safe to put on a `security -i`
+// line: letters, digits and . _ - / only.
+func validService(service string) bool {
+	if service == "" {
+		return false
+	}
+	for _, r := range service {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-/", r)
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// toolFailure is a secret tool's failure with only its exit status kept
+// (its output could hold the value).
+func toolFailure(ctx context.Context, what string, err error) error {
+	var ee *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		return fmt.Errorf("%s: %w", what, ctx.Err())
+	case errors.As(err, &ee):
+		return fmt.Errorf("%s: exit status %d", what, ee.ExitCode())
+	}
+	return fmt.Errorf("%s: could not run security", what)
 }
