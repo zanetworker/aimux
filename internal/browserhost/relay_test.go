@@ -1100,3 +1100,32 @@ func TestRelay_HistoryGetMarksImage(t *testing.T) {
 		t.Fatalf("turns JSON = %s", b)
 	}
 }
+
+// An aimux_notice update reaches the panel as a notice event.
+func TestRelay_ForwardsNotice(t *testing.T) {
+	var got []Event
+	data, _ := json.Marshal(map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "2 tools held for review (jira: a changed, b new): run aimux tools status"}})
+	if end, err := mapEvent(v1Event{Kind: "update", Data: data}, func(e Event) { got = append(got, e) }); end || err != nil {
+		t.Fatalf("end %v err %v", end, err)
+	}
+	if len(got) != 1 || got[0].Type != "notice" || !strings.Contains(got[0].Text, "held for review") {
+		t.Fatalf("events %+v, want one notice", got)
+	}
+}
+
+// An API error's code travels with the panel's error event, so the panel
+// can match on it (image_invalid) instead of the wording.
+func TestRelay_ForwardsErrorCode(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("POST /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusBadRequest, map[string]any{"error": "the image is not a PNG, JPEG, WebP or GIF", "code": "image_invalid"})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "img", Type: "ask", Lane: "page", URL: "https://a.example/", Question: "what is this"})
+	evs := p.until(t, "img")
+	if last := evs[len(evs)-1]; last.Type != "error" || last.Code != "image_invalid" || !strings.Contains(last.Error, "PNG") {
+		t.Fatalf("events %+v, want an error with code image_invalid", evs)
+	}
+}

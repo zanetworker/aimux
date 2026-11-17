@@ -404,6 +404,7 @@ func (r *ReadonlyServer) Start(ctx context.Context) (stop func(), err error) {
 	observe(backendNames(cfg), errs)
 	r.markBuilt(backendNames(cfg), servers, pins.Pins)
 	down := logDown(r.Log, errs)
+	logEmpty(r.Log, backendNames(cfg), servers, errs)
 	ln, err := r.Listen("tcp", ReadonlyAddr)
 	if err != nil {
 		if pool != nil {
@@ -624,6 +625,38 @@ func (r *ReadonlyServer) relistInBackground() {
 // far (tests; stop waits for them too).
 func (r *ReadonlyServer) WaitBackground() { r.bg.Wait() }
 
+// RelistNow lists servers afresh now (relistNow on those that are up),
+// waiting at most until ctx ends; a relist that outlives ctx finishes in the
+// background. It returns ctx's error when it did not finish in time.
+func (r *ReadonlyServer) RelistNow(ctx context.Context, servers []string) error {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.relistMu.Lock()
+		defer r.relistMu.Unlock()
+		// A request whose caller stopped waiting while it queued is dropped,
+		// so slow backends cannot pile up relists behind the lock.
+		if ctx.Err() != nil {
+			return
+		}
+		r.relistNow(servers)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Backends is every backend the gateway built or found down, and the down
+// ones, both sorted.
+func (r *ReadonlyServer) Backends() (all, down []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.all), slices.Clone(r.down)
+}
+
 // relistNow lists again the served backends among only (nil: all of them,
 // and the ones that were down too), without holding r.mu while it lists,
 // so turns and a newer snapshot never wait for it. Its results are dropped
@@ -645,7 +678,9 @@ func (r *ReadonlyServer) relistNow(only []string) {
 	for _, n := range r.all {
 		switch {
 		case slices.Contains(r.down, n):
-			if only == nil {
+			// A lease's backend that was down is retried too, so a backend
+			// that came up after the worker started serves the turn at once.
+			if only == nil || slices.Contains(only, n) {
 				down = append(down, n)
 			}
 		case only == nil || slices.Contains(only, n):
@@ -692,11 +727,14 @@ func (r *ReadonlyServer) relistNow(only []string) {
 			r.Log.Printf("read-only: backend %s removed: no tool still matches its pin", n)
 		}
 	}
-	if only != nil {
-		return
-	}
 	r.markBuilt(down, servers, r.pins.Pins)
+	// Down backends outside this relist (a lease's names) stay down.
 	var still []string
+	for _, n := range r.down {
+		if !slices.Contains(down, n) {
+			still = append(still, n)
+		}
+	}
 	for _, n := range down {
 		if srv, ok := servers[n]; ok {
 			r.add(n, srv)
@@ -705,6 +743,7 @@ func (r *ReadonlyServer) relistNow(only []string) {
 			still = append(still, n)
 		}
 	}
+	slices.Sort(still)
 	r.down = still
 }
 
@@ -725,6 +764,18 @@ func (r *ReadonlyServer) markRelistFailed(names []string, errs map[string]error)
 }
 
 // logDown logs each unavailable backend and returns their names, sorted.
+// logEmpty names each backend of names that is neither served nor down: it
+// listed, but none of its tools matches an approved pin (or none is in a
+// set), so the build left it out.
+func logEmpty(l *log.Logger, names []string, servers map[string]*server.MCPServer, errs map[string]error) {
+	for _, n := range names {
+		if _, served := servers[n]; served || errs[n] != nil {
+			continue
+		}
+		l.Printf("read-only: backend %s serves no tools: none of its listed tools matches an approved pin (see aimux tools status)", n)
+	}
+}
+
 func logDown(l *log.Logger, errs map[string]error) []string {
 	names := make([]string, 0, len(errs))
 	for n := range errs {

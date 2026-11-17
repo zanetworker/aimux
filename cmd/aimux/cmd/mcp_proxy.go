@@ -20,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
+	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
 type proxyFlags struct {
@@ -60,7 +61,7 @@ func newMCPProxyCmd() *cobra.Command {
 			"yourself and add the entries printed by `config`.",
 	}
 	cmd.AddCommand(newMCPProxyRefreshCmd(), newMCPProxyServeCmd(), newMCPProxyConfigCmd(), newMCPProxyStatusCmd(), newMCPProxyRestartCmd(), newMCPProxyHooksCmd(),
-		newMCPProxyInstallCmd(), newMCPProxyUninstallCmd(), newMCPProxyEditCmd())
+		newMCPProxyInstallCmd(), newMCPProxyUninstallCmd(), newMCPProxyEditCmd(), newMCPProxyGatewayCmd())
 	return cmd
 }
 
@@ -244,7 +245,13 @@ func newMCPProxyStatusCmd() *cobra.Command {
 					o.removed = printInstallSection(in, cmd.OutOrStdout(), o.color).Removed
 				}
 			}
-			return proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now())
+			if err := proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now()); err != nil {
+				return err
+			}
+			if home, err := os.UserHomeDir(); err == nil && !o.json {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), gatewayStatusLine(cmd.Context(), toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}))
+			}
+			return nil
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 7381, "Port the proxy listens on at 127.0.0.1")

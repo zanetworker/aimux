@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/zanetworker/aimux/internal/httpsource"
 	"github.com/zanetworker/aimux/internal/keyring"
 	"github.com/zanetworker/aimux/internal/profile"
+	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	aimuxtools "github.com/zanetworker/aimux/sandbox/aimux-tools"
 )
@@ -616,37 +618,53 @@ func sandboxVerify(ctx context.Context, env browserEnv, out io.Writer) error {
 	if len(servers) == 0 {
 		return fmt.Errorf("%s has no pinned tools to check; run aimux tools status, then aimux tools approve", workProfile)
 	}
-	ln, err := env.Listen("tcp", wingmanReadonlyAddr)
-	if err != nil {
-		if errors.Is(err, syscall.EADDRINUSE) {
-			return fmt.Errorf("%s is in use, most likely by aimux remote serve, which runs the read-only tool server there: stop aimux remote serve, run aimux sandbox verify, then start aimux remote serve again", wingmanReadonlyAddr)
+	// The running gateway worker serves the check when there is one; else
+	// the check serves the gateway itself for its duration.
+	var leases profilerun.Leases
+	admin := ""
+	worker := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(env.Home)}
+	if _, err := worker.Status(ctx); err == nil {
+		_, _ = fmt.Fprintln(out, "Using the running tool gateway worker")
+		leases = worker
+	} else {
+		ln, err := env.Listen("tcp", wingmanReadonlyAddr)
+		if err != nil {
+			if errors.Is(err, syscall.EADDRINUSE) {
+				return fmt.Errorf("%s is in use by a program that is not the tool gateway worker (aimux mcp proxy gateway status says whether it runs); stop that program, then run aimux sandbox verify again", wingmanReadonlyAddr)
+			}
+			return fmt.Errorf("listen on %s: %w", wingmanReadonlyAddr, err)
 		}
-		return fmt.Errorf("listen on %s: %w", wingmanReadonlyAddr, err)
+		defer func() { _ = ln.Close() }()
+		if admin, err = env.NewToken(); err != nil { // required by the server; never sent
+			return fmt.Errorf("make the read-only server token: %w", err)
+		}
+		tokens := &toolgateway.Tokens{}
+		srv := &toolgateway.ReadonlyServer{Store: store, Token: admin, Tokens: tokens, Log: log.New(out, "  ", 0),
+			Listen: func(string, string) (net.Listener, error) { return ln, nil }, Build: env.Build, Serve: env.Serve}
+		stop, err := srv.Start(ctx)
+		if err != nil {
+			return fmt.Errorf("start the read-only server: %w", err)
+		}
+		defer stop()
+		leases = toolgateway.LocalLeases{T: tokens}
 	}
-	defer func() { _ = ln.Close() }()
-	admin, err := env.NewToken() // required by the server; never sent
-	if err != nil {
-		return fmt.Errorf("make the read-only server token: %w", err)
-	}
-	tokens := &toolgateway.Tokens{}
-	srv := &toolgateway.ReadonlyServer{Store: store, Token: admin, Tokens: tokens, Log: log.New(out, "  ", 0),
-		Listen: func(string, string) (net.Listener, error) { return ln, nil }, Build: env.Build, Serve: env.Serve}
-	stop, err := srv.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start the read-only server: %w", err)
-	}
-	defer stop()
 
 	_, _ = fmt.Fprintf(out, "Ensuring sandbox %s (created on first use; can take a few minutes)\n", c.Sandbox)
 	if err := env.Ensure(ctx, c); err != nil {
 		return fmt.Errorf("sandbox %s: %w", c.Sandbox, err)
 	}
 	const verifySession = "aimux-browser-verify"
-	token, err := tokens.Issue(verifySession, c.Grant.Scope(), c.Snapshot)
+	token, err := toolgateway.NewToken()
 	if err != nil {
-		return fmt.Errorf("issue the test token: %w", err)
+		return fmt.Errorf("make the test token: %w", err)
 	}
-	defer tokens.Revoke(verifySession)
+	scope := c.Grant.Scope()
+	lease := toolgateway.Lease{Session: verifySession, Token: token, Allow: scope, Version: c.Snapshot.Version(),
+		Pins: toolgateway.PinsFor(c.Snapshot, scope), Expires: time.Now().Add(toolgateway.LeaseTTL)}
+	if err := leases.PutLease(ctx, lease); err != nil {
+		return fmt.Errorf("lease the test token: %w", err)
+	}
+	defer func() { _ = leases.DeleteLease(context.Background(), verifySession) }()
 
 	mcpURL := wingmanMCPURL + "/mcp/" + servers[0]
 	argv := openshell("sandbox", "exec", "--no-login-shell", "--no-tty", c.Sandbox, "--",

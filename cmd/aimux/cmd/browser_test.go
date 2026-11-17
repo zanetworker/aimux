@@ -945,8 +945,9 @@ func TestBrowserVerifyRefusesBoundPort(t *testing.T) {
 	inUse := &net.OpError{Op: "listen", Net: "tcp", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)}
 	r := verifyEnv(t, "", inUse)
 	err := sandboxVerify(context.Background(), r.env, &bytes.Buffer{})
-	// remote serve owns :7390 now: name it and how to run verify around it.
-	for _, want := range []string{"aimux remote serve", "stop", "aimux sandbox verify", "start"} {
+	// The tool gateway worker owns :7390 when it runs (verify then uses it);
+	// anything else holding it is named as not the worker, with how to check.
+	for _, want := range []string{"not the tool gateway worker", "aimux mcp proxy gateway status", "aimux sandbox verify"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("err = %v, want it to mention %q", err, want)
 		}

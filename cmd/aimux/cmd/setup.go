@@ -56,6 +56,9 @@ type frontEnv struct {
 	IsTTY func() bool
 	// In is where answers are read from.
 	In func() io.Reader
+	// Gateway reports the tool gateway worker (nil: its control socket
+	// under Home).
+	Gateway gatewayStatuser
 }
 
 func defaultFrontEnv() frontEnv {
@@ -107,7 +110,7 @@ func newSetupCmdWith(env frontEnv) *cobra.Command {
 			"terminal (or --json) and no --yes it runs none and lists them as pending.\n" +
 			"Tools that need review are offered one by one, only on a terminal and never with --json: a tool is\n" +
 			"approved only after you answer yes to its diff and yes to approving it. --yes never approves tools.\n" +
-			"Ends with one line per concern (sandbox, tools, router, browser, gateway) and a Next: line per problem.\n" +
+			"Ends with one line per concern (sandbox, tools, router, browser, gateway, worker: the tool gateway worker) and a Next: line per problem.\n" +
 			"Exit 0 unless a step failed.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -227,6 +230,7 @@ func runSetup(ctx context.Context, env frontEnv, o setupOpts, out, errOut io.Wri
 		routerSummary(probeRouterKey(env.Home, env.AutoKey, env.GOOS)),
 		browserSummary(collectBrowser(env.Home)),
 		gatewaySummary(sb),
+		workerSummary(ctx, env.gateway()),
 	}
 	var next []string
 	if len(pending) > 0 {
@@ -570,6 +574,17 @@ func gatewaySummary(r sandboxReport) summaryLine {
 	case r.Gateway.Error != "":
 		l.Status, l.Detail = checkWarn, "OpenShell gateway "+r.Gateway.Name+" reachable, "+r.Gateway.Error
 		l.Next = append(l.Next, gatewayListFix)
+	}
+	return l
+}
+
+// workerSummary is the tool gateway worker in setup's summary: Workspace
+// turns need it.
+func workerSummary(ctx context.Context, g gatewayStatuser) summaryLine {
+	c := gatewayWorkerCheck(ctx, g)
+	l := summaryLine{Concern: "worker", Status: c.Status, Detail: c.Detail, Next: []string{}}
+	if c.Fix != "" {
+		l.Next = append(l.Next, c.Fix)
 	}
 	return l
 }

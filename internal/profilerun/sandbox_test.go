@@ -186,8 +186,8 @@ func newSandbox(t *testing.T) (*SandboxEngine, *sbBackend) {
 			}
 			return compiledFor(p), nil
 		},
-		func() (string, *toolgateway.Tokens, error) {
-			return "http://host.containers.internal:7390", tokens, nil
+		func() (string, Leases, error) {
+			return "http://host.containers.internal:7390", toolgateway.LocalLeases{T: tokens}, nil
 		})
 	e.ArchiveDir = filepath.Join(t.TempDir(), "archive")
 	return e, b
@@ -647,7 +647,7 @@ func newResearchSandbox(t *testing.T) (*SandboxEngine, *sbBackend, *atomic.Int32
 	var gwCalls atomic.Int32
 	e := NewSandboxEngine(&sandboxlaunch.Launcher{Backend: b},
 		func(string) (profile.Compiled, error) { return researchCompiled(), nil },
-		func() (string, *toolgateway.Tokens, error) {
+		func() (string, Leases, error) {
 			gwCalls.Add(1)
 			return "", nil, errors.New("tool gateway not running")
 		})

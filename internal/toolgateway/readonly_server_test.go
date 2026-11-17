@@ -881,3 +881,39 @@ func TestReadonlyServer_SupersededRelistKeepsNewerNotificationPins(t *testing.T)
 		t.Fatalf("pool notifies pins of snapshot %q, want the applied %q", got.Snap.Short(), r.Applied().Short())
 	}
 }
+
+// A backend that lists fine but has no tool matching an approved pin is
+// left out of the served set; the log says so by name, not only the count.
+func TestReadonlyServer_LogsBackendServingNoTools(t *testing.T) {
+	var logw bytes.Buffer
+	r, served, _, home := readonlyRig(t, &logw)
+	writeHomeFile(t, toolreg.DefaultPath(home), `version: 1
+sources:
+  wiki: {type: mcp-http, url: "http://127.0.0.1:1/wiki"}
+  slack: {type: mcp-http, url: "http://127.0.0.1:1/slack"}
+  jira: {type: mcp-http, url: "http://127.0.0.1:1/jira"}
+sets:
+  wiki:readonly: {source: wiki, tools: [search]}
+  slack:readonly: {source: slack, tools: [history]}
+  jira:readonly: {source: jira, tools: [get]}
+`)
+	r.Build = func(context.Context, mcpproxy.ReadonlyConfig, mcpproxy.ToolPins, func(string, string, error)) (map[string]*server.MCPServer, *mcpproxy.Pool, map[string]error, error) {
+		return map[string]*server.MCPServer{"wiki": server.NewMCPServer("wiki", "1")}, nil, map[string]error{"jira": errors.New("connection refused")}, nil
+	}
+	stop, err := r.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	<-served
+	got := logw.String()
+	if !strings.Contains(got, "backend jira unavailable: connection refused") {
+		t.Fatalf("down backend not logged:\n%s", got)
+	}
+	if !strings.Contains(got, "backend slack serves no tools") || !strings.Contains(got, "aimux tools status") {
+		t.Fatalf("empty backend not logged by name:\n%s", got)
+	}
+	if strings.Contains(got, "backend wiki serves no tools") {
+		t.Fatalf("a served backend was reported empty:\n%s", got)
+	}
+}

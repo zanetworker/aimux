@@ -144,7 +144,8 @@ func newFrontRig(t *testing.T) *frontRig {
 	be.AutoKey = keyProbe{Exists: func(string) bool { return r.keyFound }}
 	be.Health = func(context.Context) error { m.gatewayUp = true; return nil }
 	r.env = frontEnv{browserEnv: be, GOOS: "darwin", Now: func() time.Time { return frontNow }, ProfileDir: t.TempDir(),
-		IsTTY: func() bool { return r.tty }, In: func() io.Reader { return strings.NewReader(r.input) }}
+		IsTTY: func() bool { return r.tty }, In: func() io.Reader { return strings.NewReader(r.input) },
+		Gateway: fakeGatewayStatus{st: toolgateway.ControlStatus{Leases: 0}}}
 	home := be.Home
 
 	if err := toolreg.WriteNew(toolreg.DefaultPath(home), frontRegistry(home)); err != nil {
@@ -247,7 +248,7 @@ func decodeSetup(t *testing.T, s string) setupDoc {
 	return d
 }
 
-// summaryLines are the five summary lines of setup's text output.
+// summaryLines are the six summary lines of setup's text output.
 func summaryLines(t *testing.T, out string) []string {
 	t.Helper()
 	var got []string
@@ -258,8 +259,8 @@ func summaryLines(t *testing.T, out string) []string {
 			}
 		}
 	}
-	if len(got) != 5 {
-		t.Fatalf("want 5 summary lines, got %d:\n%s", len(got), out)
+	if len(got) != 6 {
+		t.Fatalf("want 6 summary lines, got %d:\n%s", len(got), out)
 	}
 	for i, c := range []string{"sandbox", "tools", "router", "browser", "gateway"} {
 		if f := strings.Fields(got[i]); len(f) < 2 || f[1] != c {
@@ -290,7 +291,7 @@ func TestSetup_HealthyChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := decodeSetup(t, jout); len(d.Steps) != 0 || len(d.Approved) != 0 || len(d.Summary) != 5 || d.SchemaVersion != "1" {
+	if d := decodeSetup(t, jout); len(d.Steps) != 0 || len(d.Approved) != 0 || len(d.Summary) != 6 || d.SchemaVersion != "1" {
 		t.Fatalf("doc = %+v", d)
 	}
 	r.tty = true

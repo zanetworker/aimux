@@ -218,3 +218,91 @@ func TestRemoveSource_Refusals(t *testing.T) {
 		t.Fatalf("bad file: %v", err)
 	}
 }
+
+func TestAddToSet_AppendsKeepsComments(t *testing.T) {
+	p := regFile(t, editBase)
+	if _, err := AddToSet(p, "jira:readonly", "new_tool"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := readFile(p)
+	if !strings.Contains(string(data), "# my own note about jira") || !strings.Contains(string(data), "relative/dir") {
+		t.Fatalf("lost other content:\n%s", data)
+	}
+	r, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"search_issues_jql", "get_comments", "new_tool"}; !reflect.DeepEqual(r.Sets["jira:readonly"].Tools, want) {
+		t.Fatalf("tools %v, want %v", r.Sets["jira:readonly"].Tools, want)
+	}
+}
+
+func TestAddToSet_NoOpWhenPresent(t *testing.T) {
+	p := regFile(t, editBase)
+	before, _ := readFile(p)
+	if _, err := AddToSet(p, "jira:readonly", "get_comments"); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := readFile(p)
+	if string(before) != string(after) {
+		t.Fatalf("file changed for a tool already in the set:\n%s", after)
+	}
+}
+
+func TestAddToSet_UnknownSet(t *testing.T) {
+	p := regFile(t, editBase)
+	if _, err := AddToSet(p, "nope:readonly", "x"); err == nil || !errors.Is(err, ErrNoSet) {
+		t.Fatalf("AddToSet on an unknown set = %v, want ErrNoSet", err)
+	}
+}
+
+func TestAddToSet_RefusesSharedAnchor(t *testing.T) {
+	p := regFile(t, `version: 1
+sources:
+  jira: {type: mcp-http, url: "http://127.0.0.1:8001/mcp"}
+sets:
+  jira:readonly: {source: jira, tools: &shared [search]}
+  jira:triage: {source: jira, tools: *shared}
+  base: &base {source: jira, tools: [get]}
+  jira:merged: {<<: *base}
+`)
+	before, _ := readFile(p)
+	for _, set := range []string{"jira:readonly", "jira:triage", "jira:merged"} {
+		if _, err := AddToSet(p, set, "delete_issue"); err == nil || !strings.Contains(err.Error(), "YAML anchor") {
+			t.Fatalf("%s: err %v, want the anchor refusal", set, err)
+		}
+	}
+	after, _ := readFile(p)
+	if string(before) != string(after) {
+		t.Fatal("file changed")
+	}
+}
+
+func TestAddToSet_UndoRestoresOnlyItsOwnEdit(t *testing.T) {
+	p := regFile(t, editBase)
+	orig, _ := readFile(p)
+	undo, err := AddToSet(p, "jira:readonly", "new_tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(); err != nil {
+		t.Fatal(err)
+	}
+	if now, _ := readFile(p); string(now) != string(orig) {
+		t.Fatalf("undo did not restore the file:\n%s", now)
+	}
+	undo, err = AddToSet(p, "jira:readonly", "new_tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := []byte(string(orig) + "# someone else's edit\n")
+	if err := os.WriteFile(p, other, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(); err == nil {
+		t.Fatal("undo overwrote an edit made after it")
+	}
+	if now, _ := readFile(p); string(now) != string(other) {
+		t.Fatal("the later edit was lost")
+	}
+}

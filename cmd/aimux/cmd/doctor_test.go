@@ -199,8 +199,8 @@ func TestDoctor_Problems(t *testing.T) {
 	}
 }
 
-// A serve on the installed binary started after it was installed, or
-// holding :7390, is healthy.
+// A serve on the installed binary started after it was installed is
+// healthy, and so is :7390 held by the tool gateway worker.
 func TestDoctor_CurrentServeIsHealthy(t *testing.T) {
 	r := newFrontRig(t)
 	bin := rigBinary(r.env.Home)
@@ -209,14 +209,14 @@ func TestDoctor_CurrentServeIsHealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A grep and a shell wrapper that mention the serve are not serves.
-	r.m.ps = fmt.Sprintf("  77 %s %s remote serve --local-only\n  90 %s grep remote serve --local-only\n  91 %s sh -c '%s remote serve --local-only'\n",
-		lstart(frontNow), bin, lstart(frontNow), lstart(frontNow), bin)
-	r.m.lsof = "77\n"
+	r.m.ps = fmt.Sprintf("  77 %s %s remote serve --local-only\n  88 %s %s mcp proxy gateway serve\n  90 %s grep remote serve --local-only\n  91 %s sh -c '%s remote serve --local-only'\n",
+		lstart(frontNow), bin, lstart(frontNow), bin, lstart(frontNow), lstart(frontNow), bin)
+	r.m.lsof = "88\n"
 	d, err := r.doctorDoc(t)
 	if err != nil {
 		t.Fatalf("%v %+v", err, d)
 	}
-	if c, _ := checkByID(d, "port.7390"); c.Status != "ok" || !strings.Contains(c.Detail, "pid 77") {
+	if c, _ := checkByID(d, "port.7390"); c.Status != "ok" || !strings.Contains(c.Detail, "tool gateway worker, pid 88") {
 		t.Fatalf("port = %+v", c)
 	}
 	if c, _ := checkByID(d, "wingman.serve"); c.Status != "ok" || !strings.Contains(c.Detail, "pid 77") {

@@ -14,7 +14,6 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
-	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
 // liveResearchSandbox is the only sandbox this test creates; it is always
@@ -74,7 +73,7 @@ func TestLive_ResearchProbes(t *testing.T) {
 	// Research has no tool servers, so the engine must never ask for the
 	// tool gateway; a call is recorded and checked after each turn.
 	var gatewayCalls atomic.Int32
-	noGateway := func() (string, *toolgateway.Tokens, error) {
+	noGateway := func() (string, Leases, error) {
 		gatewayCalls.Add(1)
 		return "", nil, errors.New("research must not use the tool gateway")
 	}

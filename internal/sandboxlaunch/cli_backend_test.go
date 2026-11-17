@@ -774,7 +774,7 @@ func TestRunnerProbe_ReadOnly(t *testing.T) {
 
 	none := &fakeRunner{respond: func([]string) (string, error) { return listHeader, nil }}
 	err := RunnerProbe(none.run, t.TempDir())(snap)("github").Ensure(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "tool runner not started") || !strings.Contains(err.Error(), "aimux tools approve") || !strings.Contains(err.Error(), "aimux remote serve") {
+	if err == nil || !strings.Contains(err.Error(), "tool runner not started") || !strings.Contains(err.Error(), "aimux tools approve") || !strings.Contains(err.Error(), "aimux mcp proxy gateway install") {
 		t.Fatalf("not started: %v", err)
 	}
 	if v := none.verbs(); !slices.Equal(v, []string{"sandbox list"}) {

@@ -468,6 +468,7 @@ func browserSetup(ctx context.Context, env browserEnv, sandboxDir string, accept
 	say("Sandbox image, provider and policies: aimux sandbox status (setup and verify are there too)")
 	say("%s", autoKeySetupLine(env))
 	say("Done. aimux remote serve creates the work sandbox %s on first use; the old %s sandbox is no longer used (delete it with `openshell -g local sandbox delete %s`).", workSandbox, wingmanOldSandbox, wingmanOldSandbox)
+	say("Workspace needs the tool gateway worker: run `aimux mcp proxy gateway install` once (aimux mcp proxy gateway status shows it).")
 	return nil
 }
 

@@ -57,6 +57,9 @@ type ToolSetInfo struct {
 	Status     string     `json:"status"`
 	Reason     string     `json:"reason,omitempty"`
 	Tools      []ToolInfo `json:"tools"`
+	// NewOnServer is the tools the set's source offers that no set lists
+	// (status new_on_server): shown, never granted. Absent when none.
+	NewOnServer []string `json:"newOnServer,omitempty"`
 }
 
 // ToolInfo is one tool of a set.
@@ -118,7 +121,12 @@ func (a *API) listTools(w http.ResponseWriter, r *http.Request) {
 		out.Errors = append(out.Errors, ToolsError{Message: msgLoadFailed})
 	}
 	byTool := map[string]toolgateway.ToolStatus{}
+	newOn := map[string][]string{} // by source
 	for _, st := range toolgateway.Review(reg, toolgateway.PinsOf(snap), v.Live) {
+		if st.Status == toolgateway.StatusNewOnServer {
+			newOn[st.Source] = append(newOn[st.Source], st.Tool)
+			continue
+		}
 		byTool[st.Source+"/"+st.Tool] = st
 	}
 	sourceErrs := map[string]bool{}
@@ -145,6 +153,7 @@ func (a *API) listTools(w http.ResponseWriter, r *http.Request) {
 			info.Source, info.URL = set.Source, loopbackURL(reg.Sources[set.Source].URL)
 			info.Authorship = reg.Sources[set.Source].Class()
 			info.Tools, info.Status, info.Reason = setTools(snap, set, reg.Sources[set.Source], byTool, v.Live, v.RelistFailed[set.Source], loadErr != nil)
+			info.NewOnServer = newOn[set.Source]
 		}
 		out.Sets = append(out.Sets, info)
 	}
