@@ -379,9 +379,11 @@ func (i Installer) HookAdded(command, cwd string) HookReply {
 	}
 	mover := i
 	mover.Sessions = nil // its note goes nowhere in a hook; skip the process scan
-	msg := MovedMessage(st.NotProxied)
+	var msg string
 	if err := mover.Install(nil); err != nil {
 		msg = FailedMessage(st.NotProxied, strings.TrimSuffix(err.Error(), "."))
+	} else {
+		msg = movedReply(st.NotProxied, i.quiet())
 	}
 	msg = strings.TrimSpace(msg + " " + project) // a project-scoped add is explained even when others moved
 	return HookReply{User: msg, Claude: msg}
@@ -430,4 +432,42 @@ func (i Installer) HookCheck(cwd string) HookReply {
 		claude = strings.TrimSpace(claude + " " + note)
 	}
 	return HookReply{User: user, Claude: claude}
+}
+
+// movedReply says what an install the add hook ran did with the servers
+// that were direct: which moved, and which HTTP servers stayed direct (by
+// reason when the install recorded one). It reads the install's result,
+// so a server install left direct is never announced as moved.
+func movedReply(wasDirect []string, in Installer) string {
+	after, err := in.InstallStatus()
+	if err != nil {
+		return MovedMessage(wasDirect)
+	}
+	var moved, stayed []string
+	reasoned := map[string]bool{}
+	var kept []KeptDirect
+	for _, k := range after.KeptDirect {
+		if contains(wasDirect, k.Server) {
+			kept, reasoned[k.Server] = append(kept, k), true
+		}
+	}
+	for _, n := range wasDirect {
+		switch {
+		case contains(after.Moved, n):
+			moved = append(moved, n)
+		case !reasoned[n]:
+			stayed = append(stayed, n)
+		}
+	}
+	var parts []string
+	if len(moved) > 0 {
+		parts = append(parts, MovedMessage(moved))
+	}
+	for _, line := range KeptDirectLines(kept) {
+		parts = append(parts, line+".")
+	}
+	if len(stayed) > 0 {
+		parts = append(parts, fmt.Sprintf("%s stayed direct for now (not reachable, or kept with --skip); aimux mcp proxy install says why.", strings.Join(stayed, ", ")))
+	}
+	return strings.Join(parts, " ")
 }

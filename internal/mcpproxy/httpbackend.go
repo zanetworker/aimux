@@ -1,7 +1,9 @@
 package mcpproxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,8 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,6 +80,9 @@ type listenGuard struct {
 	// which outlives Close, never reads the variables a test restores.
 	max  int
 	logf func(format string, args ...any)
+	// sc hides the backend's header values in what it logs (a server can
+	// echo them, in a Content-Type for example).
+	sc *scrubber
 
 	mu       sync.Mutex
 	failures int
@@ -143,6 +150,9 @@ func (g *listenGuard) failed(why string) {
 	first := !g.logged
 	g.logged = true
 	g.mu.Unlock()
+	if g.sc != nil {
+		why = g.sc.scrub(why)
+	}
 	if first {
 		logf := g.logf
 		if logf == nil {
@@ -157,9 +167,98 @@ type httpBackend struct {
 	server string
 	c      *client.Client
 	listID atomic.Int64
+	sc     *scrubber // hides the header values in every error it returns
+}
+
+// headerScrubbedError is err with its header values scrubbed; errors.As and errors.Is
+// still see err.
+type headerScrubbedError struct {
+	msg string
+	err error
+}
+
+func (e *headerScrubbedError) Error() string { return e.msg }
+func (e *headerScrubbedError) Unwrap() error { return e.err }
+
+// scrubErr hides header values in err's text, keeping a RequestError a
+// RequestError (callers tell a live server's refusal from a dead one).
+func scrubErr(sc *scrubber, err error) error {
+	if err == nil || sc == nil {
+		return err
+	}
+	var re *RequestError
+	if errors.As(err, &re) {
+		return &RequestError{Code: re.Code, Err: &headerScrubbedError{msg: sc.scrub(re.Err.Error()), err: re.Err}}
+	}
+	return &headerScrubbedError{msg: sc.scrub(err.Error()), err: err}
+}
+
+// headerScrubber is secretScrubber for headers alone.
+func headerScrubber(headers map[string]string) *scrubber { return secretScrubber("", headers) }
+
+// secretScrubber hides an HTTP server's secrets in text: every header value
+// (however short: no minSecretLen cutoff as for env values), the token of
+// a "Scheme token" value, a Basic value's decoded user:pass and password,
+// and the URL's query values and userinfo password (a literal secret in a
+// URL cannot be told from a harmless value). Each also in its URL-query,
+// URL-path and JSON-escaped forms. Nil when there is nothing to hide.
+func secretScrubber(rawURL string, headers map[string]string) *scrubber {
+	seen := map[string]bool{}
+	sc := &scrubber{}
+	add := func(v string) {
+		if v == "" {
+			return
+		}
+		esc, _ := json.Marshal(v)
+		for _, f := range []string{v, url.QueryEscape(v), url.PathEscape(v), strings.Trim(string(esc), `"`)} {
+			if f != "" && !seen[f] {
+				seen[f] = true
+				sc.values = append(sc.values, f)
+			}
+		}
+	}
+	for _, v := range headers {
+		add(v)
+		if i := strings.LastIndexByte(v, ' '); i >= 0 {
+			add(v[i+1:])
+		}
+		if enc, ok := strings.CutPrefix(v, "Basic "); ok {
+			if dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(enc)); err == nil {
+				add(string(dec))
+				if _, pass, ok := strings.Cut(string(dec), ":"); ok {
+					add(pass)
+				}
+			}
+		}
+	}
+	if u, err := url.Parse(rawURL); err == nil && rawURL != "" {
+		if pass, ok := u.User.Password(); ok {
+			add(pass)
+		}
+		for _, vals := range u.Query() {
+			for _, v := range vals {
+				add(v)
+			}
+		}
+	}
+	if len(sc.values) == 0 {
+		return nil
+	}
+	sort.Slice(sc.values, func(i, j int) bool { return len(sc.values[i]) > len(sc.values[j]) })
+	return sc
 }
 
 func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpBackend, error) {
+	sc := secretScrubber(cfg.URL, cfg.Headers)
+	b, err := startHTTPRaw(ctx, server, cfg, sc)
+	if err != nil {
+		return nil, scrubErr(sc, err)
+	}
+	b.sc = sc
+	return b, nil
+}
+
+func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig, sc *scrubber) (*httpBackend, error) {
 	// The transport logs through slog.Default; the proxy reports errors itself.
 	ctx, cancel := context.WithTimeout(ctx, httpStartTimeout)
 	defer cancel()
@@ -173,7 +272,7 @@ func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpB
 	opts := []transport.StreamableHTTPCOption{
 		transport.WithHTTPLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
 		transport.WithContinuousListening(), //nolint:staticcheck // SA1019: needed on the legacy protocol, see above
-		transport.WithHTTPBasicClient(&http.Client{Transport: &listenGuard{server: server, next: http.DefaultTransport, max: listenMaxFailures, logf: listenLog}}),
+		transport.WithHTTPBasicClient(&http.Client{Transport: &listenGuard{server: server, next: http.DefaultTransport, max: listenMaxFailures, logf: listenLog, sc: sc}}),
 	}
 	if len(cfg.Headers) > 0 {
 		opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
@@ -203,6 +302,57 @@ func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpB
 
 // ListToolsRaw pages through tools/list and returns each tool's JSON as sent.
 func (b *httpBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, error) {
+	tools, err := b.listToolsRaw(ctx)
+	if err != nil {
+		return nil, scrubErr(b.sc, err)
+	}
+	// Tool lists are saved (catalog, pins): one that echoes a header value
+	// is refused rather than stored.
+	if b.sc != nil {
+		for _, t := range tools {
+			if echoesValue(b.sc, t) {
+				return nil, &RequestError{Err: fmt.Errorf("list tools of %s: its tool list contains one of its header values; not stored", b.server)}
+			}
+		}
+	}
+	return tools, nil
+}
+
+// echoMin is the shortest secret echoesValue looks for: a 1 to 7 byte
+// value (a short API key part, a "Basic" token half) also occurs in
+// ordinary tool names and descriptions, and refusing a tool list on such a
+// match would stop a working server from moving. Shorter values are still
+// scrubbed from errors and logs.
+const echoMin = 8
+
+// echoesValue reports whether any string token in raw (keys and values,
+// at any depth, decoded, duplicates included, so every escape form and
+// every member counts) holds one of sc's configured values of 8 bytes or
+// more (shorter values would match ordinary words). A tool that does not
+// decode counts as an echo: it cannot be checked.
+func echoesValue(sc *scrubber, raw json.RawMessage) bool {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return false
+		}
+		if err != nil {
+			return true
+		}
+		s, ok := tok.(string)
+		if !ok {
+			continue
+		}
+		for _, val := range sc.values {
+			if len(val) >= echoMin && strings.Contains(s, val) {
+				return true
+			}
+		}
+	}
+}
+
+func (b *httpBackend) listToolsRaw(ctx context.Context) ([]json.RawMessage, error) {
 	var tools []json.RawMessage
 	cursor := ""
 	for {
@@ -239,6 +389,11 @@ func (b *httpBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, erro
 }
 
 func (b *httpBackend) CallTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	res, err := b.callTool(ctx, req)
+	return res, scrubErr(b.sc, err)
+}
+
+func (b *httpBackend) callTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, httpCallTimeout)
 	defer cancel()
 	req.Params.Meta = withoutProtocolMeta(req.Params.Meta)

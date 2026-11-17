@@ -21,3 +21,15 @@ func Exists(service string) bool {
 	ok, _ := Probe(service)
 	return ok
 }
+
+// Store has no writable secret store here.
+func Store(string, string) error { return ErrUnsupported }
+
+// Delete has no writable secret store here.
+func Delete(string) error { return ErrUnsupported }
+
+// Stored is the secret store item Store would write; there is none here.
+func Stored(service string) Source { return System(service) }
+
+// MaxStoreValue is 0: Store writes nothing here.
+func MaxStoreValue(string) int { return 0 }

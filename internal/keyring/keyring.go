@@ -25,6 +25,9 @@ var (
 	// ErrInsecure means a key file exists but is readable by others or not
 	// owned by the user, so it is refused.
 	ErrInsecure = errors.New("key file is not private (want mode 0600, owned by you)")
+	// ErrUnsupported means this platform has no secret store aimux can
+	// write (Store and Delete).
+	ErrUnsupported = errors.New("no writable secret store on this platform")
 )
 
 // readTimeout bounds one secret-store call (a locked store can prompt).
@@ -90,7 +93,8 @@ func names(sources []Source) string {
 
 // keychainSource reads a macOS Keychain generic password with
 // `/usr/bin/security find-generic-password -s <service> -w`.
-type keychainSource struct{ service string }
+// account, when set, limits it to that account's item (Store's items).
+type keychainSource struct{ service, account string }
 
 // exitKeychainNotFound is security's exit status for a missing item.
 const exitKeychainNotFound = 44
@@ -100,7 +104,11 @@ func (s keychainSource) String() string { return "keychain " + s.service }
 func (s keychainSource) Lookup(ctx context.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
-	b, err := run(ctx, "/usr/bin/security", "find-generic-password", "-s", s.service, "-w")
+	args := []string{"find-generic-password", "-s", s.service, "-w"}
+	if s.account != "" {
+		args = []string{"find-generic-password", "-a", s.account, "-s", s.service, "-w"}
+	}
+	b, err := run(ctx, "/usr/bin/security", args...)
 	return toolResult(ctx, s, b, err, exitKeychainNotFound)
 }
 

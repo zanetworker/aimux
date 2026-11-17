@@ -66,7 +66,8 @@ func proxyInstaller(home string, port int, out io.Writer) mcpproxy.Installer {
 		Sessions: func() ([]string, error) {
 			return openSessionIDs(provider.LiveOf(provider.NewRegistry(home, config.Config{}).Local(), 0))
 		},
-		Out: out,
+		Vault: mcpproxy.SystemVault(),
+		Out:   out,
 	}
 }
 
@@ -105,7 +106,7 @@ func proxyRefreshFor(claudeConfig, serversFile, catalogPath string, names []stri
 	defer stop()
 	ctx, cancel := context.WithTimeout(sigCtx, 3*time.Minute)
 	defer cancel()
-	errs := mcpproxy.RefreshCatalog(ctx, cat, mcpproxy.StdioStarter(cfgs, resolved...), names)
+	errs := mcpproxy.RefreshCatalog(ctx, cat, mcpproxy.DefinitionStarter(cfgs, resolved, mcpproxy.SystemSecrets()), names)
 	if sigCtx.Err() != nil {
 		if interrupted != nil {
 			interrupted.Store(true)
@@ -219,15 +220,19 @@ func newMCPProxyInstallCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Move Claude Code's stdio MCP servers behind the proxy (edits mcpServers in ~/.claude.json)",
-		Long: "Moves every stdio server in ~/.claude.json that is not behind the proxy yet (except --skip ones). It lists " +
+		Short: "Move Claude Code's stdio and HTTP MCP servers behind the proxy (edits mcpServers in ~/.claude.json)",
+		Long: "Moves every stdio server in ~/.claude.json that is not behind the proxy yet (except --skip ones), and every HTTP server " +
+			"that needs no OAuth: one with no auth or a static headers map. An HTTP server's header values move into the macOS Keychain " +
+			"(item aimux-mcp-proxy/<server>), out of ~/.claude.json and out of the backup install writes. HTTP servers that need OAuth " +
+			"stay direct (kept direct: needs OAuth (later)), as do ones that are down (tried again next run), SSE servers and ones whose " +
+			"headers come from a headersHelper. It lists " +
 			"each server's tools, saves its definition for the daemon, starts the proxy under launchd (or has the running " +
 			"proxy reload in place) and probes the servers, backs up ~/.claude.json to ~/.aimux/backups, then replaces each " +
 			"server's entry with an HTTP entry of the same name pointing at its own proxy endpoint, in one atomic edit. " +
 			"Tool names stay the same, so permission rules keep working unchanged. In ~/.claude/settings.json it sets " +
 			"CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT and adds two hooks: one moves a server you add in a Claude Code session behind the proxy, " +
 			"one names servers still direct when a session starts (uninstall removes both). " +
-			"Run it again to move servers added later, and to take off the proxy any moved server you removed from ~/.claude.json (claude mcp remove); servers kept direct with --skip stay direct until --unskip. Moved servers are configured with `aimux mcp proxy edit`, not in " +
+			"Run it again to move servers added later, and to take off the proxy any moved server you removed from ~/.claude.json (claude mcp remove); servers kept direct with --skip stay direct until --unskip. Moved stdio servers are configured with `aimux mcp proxy edit` (moved HTTP servers by uninstall, edit, install), not in " +
 			"~/.claude.json. What changed is recorded in ~/.aimux/mcp-proxy-install.json; `uninstall` undoes it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
@@ -263,27 +268,36 @@ func newMCPProxyInstallCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would change (names only) and exit; servers missing from the catalog are started once to list their tools into a temporary catalog")
-	cmd.Flags().StringSliceVar(&skip, "skip", nil, "Stdio servers to leave as direct entries (recorded: later runs keep them direct)")
+	cmd.Flags().StringSliceVar(&skip, "skip", nil, "Servers (stdio or HTTP) to leave as direct entries (recorded: later runs keep them direct)")
 	cmd.Flags().StringSliceVar(&unskip, "unskip", nil, "Servers an earlier --skip kept direct, to move this time")
 	cmd.Flags().IntVar(&port, "port", 7381, "Port the proxy listens on at 127.0.0.1")
 	return cmd
 }
 
 func newMCPProxyUninstallCmd() *cobra.Command {
-	return &cobra.Command{
+	var without []string
+	cmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Give Claude Code its direct stdio MCP servers back and stop the proxy's launchd agent",
+		Short: "Give Claude Code its direct stdio and HTTP MCP servers back and stop the proxy's launchd agent",
 		Long: "Undoes what `install` recorded, in one edit of mcpServers: each moved entry that is still the proxy entry " +
-			"install wrote gets its original bytes back; one you changed or removed since is kept and reported. Then it " +
-			"removes the launchd agent. Without a record it leaves the Claude config alone and only removes a leftover launchd agent.",
+			"install wrote gets its original bytes back, an HTTP server's header values read from its Keychain item first (an item that " +
+			"cannot be read stops uninstall with nothing changed); one you changed or removed since is kept and reported. It deletes the " +
+			"Keychain items of the servers it restored. Then it " +
+			"removes the launchd agent. Without a record it leaves the Claude config alone and only removes a leftover launchd agent. " +
+			"If a server's Keychain item is gone, --without <server> gives up that server's original: its proxy entry is removed " +
+			"from ~/.claude.json (add it again with `claude mcp add`) and the others are restored.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return err
 			}
-			return proxyInstaller(home, 7381, cmd.OutOrStdout()).Uninstall()
+			in := proxyInstaller(home, 7381, cmd.OutOrStdout())
+			in.Without = without
+			return in.Uninstall()
 		},
 	}
+	cmd.Flags().StringSliceVar(&without, "without", nil, "Moved servers whose Keychain item is gone: remove their proxy entry instead of restoring it")
+	return cmd
 }
 
 func newMCPProxyRestartCmd() *cobra.Command {

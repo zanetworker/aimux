@@ -374,3 +374,27 @@ func ReadPlistEnv(path string) (env map[string]string, found bool, err error) {
 	}
 	return env, true, nil
 }
+
+// ReadPlistBinary is the program the launchd plist at path runs (the first
+// ProgramArguments string), or "" when there is no readable plist.
+func ReadPlistBinary(path string) string {
+	b, err := os.ReadFile(path) // #nosec G304 -- the agent's own plist
+	if err != nil {
+		return ""
+	}
+	var root plistNode
+	if xml.Unmarshal(b, &root) != nil || len(root.Nodes) == 0 {
+		return ""
+	}
+	top := root.Nodes[0].Nodes
+	for i := 0; i+1 < len(top); i++ {
+		if top[i].XMLName.Local == "key" && top[i].Text == "ProgramArguments" && top[i+1].XMLName.Local == "array" {
+			for _, n := range top[i+1].Nodes {
+				if n.XMLName.Local == "string" {
+					return n.Text
+				}
+			}
+		}
+	}
+	return ""
+}

@@ -166,7 +166,7 @@ func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now
 // the servers): removed entries and drift apart, things to act on in yellow.
 func printInstallState(out io.Writer, st mcpproxy.InstallState, claudeConfig, upgradeText string, color bool) {
 	if st.State == mcpproxy.InstallNotInstalled {
-		_, _ = fmt.Fprintf(out, "Install: not installed (`aimux mcp proxy install` moves Claude Code's stdio servers behind the proxy)\n")
+		_, _ = fmt.Fprintf(out, "Install: not installed (`aimux mcp proxy install` moves Claude Code's stdio and HTTP servers behind the proxy)\n")
 		return
 	}
 	_, _ = fmt.Fprintf(out, "%d servers behind the proxy %s\n", len(st.Moved),
@@ -197,5 +197,8 @@ func printInstallState(out io.Writer, st mcpproxy.InstallState, claudeConfig, up
 	}
 	if len(st.Skipped) > 0 {
 		note("kept direct: %s (`aimux mcp proxy install --unskip <name>` moves one)", strings.Join(st.Skipped, ", "))
+	}
+	for _, line := range mcpproxy.KeptDirectLines(st.KeptDirect) {
+		note("%s", line)
 	}
 }

@@ -45,7 +45,7 @@ func startInstallDaemon(t *testing.T, fx *installFX) *installDaemon {
 	set, err := loadMoved(fx.servers, fx.catalog)
 	must(t, err)
 	updater := NewCatalogUpdater(set.Catalog, fx.catalog)
-	starter := NewLiveStarter(set.Configs, set.Resolved)
+	starter := NewLiveStarter(set.Configs, set.Resolved, nil)
 	pool := NewPool(starter.Start, PoolOptions{})
 	served := set.Catalog.Only(func(s string) bool { _, ok := set.Configs[s]; return ok })
 	mon := &Monitor{Pool: pool, Servers: sortedServerNames(set.Configs), Registered: map[string]string{}}

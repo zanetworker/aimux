@@ -2,6 +2,16 @@
 
 package keyring
 
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
+)
+
 // Keychain is the macOS Keychain generic password stored under service.
 func Keychain(service string) Source { return keychainSource{service: service} }
 
@@ -17,4 +27,101 @@ func Probe(service string) (bool, error) { return probeKeychain(service) }
 func Exists(service string) bool {
 	ok, _ := Probe(service)
 	return ok
+}
+
+// storeAccount is the account of every item Store writes.
+const storeAccount = "aimux"
+
+// maxSecurityLine is the longest command line `security -i` reads whole:
+// longer lines are split and the command fails (seen at 5000 bytes, fine
+// at 4000), so Store refuses a value whose hex would not fit.
+const maxSecurityLine = 4000
+
+// Stored is the item Store wrote for service: the generic password of
+// account "aimux" only, so an item another account owns under the same
+// service (an older setup) is never read in its place.
+func Stored(service string) Source { return keychainSource{service: service, account: storeAccount} }
+
+// Store sets the generic password for service (account "aimux"), replacing
+// an existing one. The value goes to `security -i` on stdin as hex, never on
+// a command line, and is read back and compared, because `security -i` can
+// report a failed command and still exit 0. Errors name the service and an
+// exit status, never the value or the tool's output.
+func Store(service, value string) error {
+	if !validService(service) {
+		return fmt.Errorf("keychain item name %q is not allowed (use letters, digits, '.', '_', '-', '/')", service)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+	line := "add-generic-password -U -a " + storeAccount + " -s " + service + " -X " + hex.EncodeToString([]byte(value)) + "\n"
+	if len(line) > maxSecurityLine {
+		return fmt.Errorf("keychain item %s: value too long (%d bytes; at most %d)", service, len(value), (maxSecurityLine-len(line)+2*len(value))/2)
+	}
+	if _, err := runStdin(ctx, "/usr/bin/security", []byte(line), "-i"); err != nil {
+		return toolFailure(ctx, "keychain item "+service, err)
+	}
+	got, err := Stored(service).Lookup(context.Background())
+	if err != nil || got != strings.TrimSpace(value) {
+		return fmt.Errorf("keychain item %s did not take the new value", service)
+	}
+	return nil
+}
+
+// Delete removes the generic password Store wrote for service; a missing
+// item is not an error.
+func Delete(service string) error {
+	if !validService(service) {
+		return fmt.Errorf("keychain item name %q is not allowed", service)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+	_, err := run(ctx, "/usr/bin/security", "delete-generic-password", "-a", storeAccount, "-s", service)
+	var ee *exec.ExitError
+	if err == nil || (errors.As(err, &ee) && ee.ExitCode() == exitKeychainNotFound) {
+		return nil
+	}
+	return toolFailure(ctx, "keychain item "+service, err)
+}
+
+// MaxStoreValue is the longest value Store accepts for service (one
+// `security -i` line).
+func MaxStoreValue(service string) int {
+	overhead := len("add-generic-password -U -a " + storeAccount + " -s  -X \n")
+	return (maxSecurityLine - overhead - len(service)) / 2
+}
+
+// runStdin runs bin with stdin; Store sends the value this way so it
+// never appears on a command line.
+var runStdin = func(ctx context.Context, bin string, stdin []byte, args ...string) ([]byte, error) {
+	c := exec.CommandContext(ctx, bin, args...) // #nosec G204 -- fixed binary, args built here
+	c.Stdin = bytes.NewReader(stdin)
+	return c.Output()
+}
+
+// validService reports whether service is safe to put on a `security -i`
+// line: letters, digits and . _ - / only.
+func validService(service string) bool {
+	if service == "" {
+		return false
+	}
+	for _, r := range service {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-/", r)
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// toolFailure is a secret tool's failure with only its exit status kept
+// (its output could hold the value).
+func toolFailure(ctx context.Context, what string, err error) error {
+	var ee *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		return fmt.Errorf("%s: %w", what, ctx.Err())
+	case errors.As(err, &ee):
+		return fmt.Errorf("%s: exit status %d", what, ee.ExitCode())
+	}
+	return fmt.Errorf("%s: could not run security", what)
 }

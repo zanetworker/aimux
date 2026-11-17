@@ -389,7 +389,7 @@ func TestReloadDaemon_ErrorStatusIsAnError(t *testing.T) {
 }
 
 func TestLiveStarter_UsesTheLatestDefinitions(t *testing.T) {
-	l := NewLiveStarter(map[string]ServerConfig{}, nil)
+	l := NewLiveStarter(map[string]ServerConfig{}, nil, nil)
 	if _, err := l.Start(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "no MCP server named") {
 		t.Fatalf("start of an unconfigured server = %v", err)
 	}

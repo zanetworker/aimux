@@ -32,7 +32,12 @@ type EditOptions struct {
 	Editor       func(path string) error // opens $EDITOR on path (injectable for tests)
 	Probe        func(ctx context.Context, cfg ServerConfig) ([]json.RawMessage, error)
 	Reload       func() (ReloadResult, error) // reloads the daemon (injectable for tests)
-	Timeout      time.Duration                // probe timeout
+	// Status and Version: when the servers file holds HTTP definitions, a
+	// running proxy of another version refuses the edit (daemonReadsHTTP).
+	Status    func() (StatusReport, error)
+	Version   string
+	PlistPath string        // the proxy's launchd plist, named in that refusal
+	Timeout   time.Duration // probe timeout
 }
 
 // EditServer opens the server's definition in $EDITOR, validates the changes,
@@ -68,6 +73,12 @@ func EditServer(ctx context.Context, opts EditOptions) error {
 	cfg, ok := servers[opts.Server]
 	if !ok {
 		return fmt.Errorf("server %q not found in %s; run `aimux mcp proxy install`", opts.Server, opts.ServersPath)
+	}
+	if cfg.Type == "http" {
+		return fmt.Errorf("%s is an HTTP server; aimux mcp proxy edit changes stdio servers only", opts.Server)
+	}
+	if err := daemonReadsHTTP(opts.Status, opts.Version, holdsHTTP(servers), opts.PlistPath); err != nil {
+		return err
 	}
 
 	// From here until the temp copy (it holds env values) is removed,
@@ -215,11 +226,18 @@ func readTempDefinition(path string) (cfg ServerConfig, hash string, err error) 
 		return ServerConfig{}, "", err
 	}
 
+	// Only the stdio fields: ServerConfig's HTTP fields are not editable.
+	var stdio struct {
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
+	if err := dec.Decode(&stdio); err != nil {
 		return ServerConfig{}, "", fmt.Errorf("the edited definition is not valid (%v); it may hold only command, args and env; nothing was saved", err)
 	}
+	cfg = ServerConfig{Command: stdio.Command, Args: stdio.Args, Env: stdio.Env}
 	if dec.More() {
 		return ServerConfig{}, "", errors.New("the edited definition has more than one JSON value; nothing was saved")
 	}

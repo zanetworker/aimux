@@ -19,6 +19,7 @@ package mcpproxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,7 +52,12 @@ const (
 )
 
 // manifestVersion is the manifest format this aimux writes and reads.
-const manifestVersion = 2
+// manifestVersion is the format install writes; LoadManifest also reads
+// minManifestVersion (2: before HTTP servers moved).
+const (
+	manifestVersion    = 3
+	minManifestVersion = 2
+)
 
 // DriftFix is the advice for a moved server whose entry is no longer its
 // proxy URL.
@@ -74,6 +80,9 @@ type Manifest struct {
 	IdleTimeout string `json:"idleTimeout,omitempty"`
 	// Hooks is "added" once install added the server hooks to settings.json.
 	Hooks string `json:"hooks,omitempty"`
+	// Direct are the HTTP servers the last install found need OAuth, so
+	// status can name them without a network call.
+	Direct []KeptDirect `json:"direct,omitempty"`
 }
 
 // MovedEntry is one moved server's mcpServers entry: Original is its raw
@@ -82,16 +91,29 @@ type Manifest struct {
 type MovedEntry struct {
 	Original string `json:"original"`
 	Written  string `json:"written"`
+	// Keychain is the item holding the entry's header values (HTTP servers
+	// with headers); Original then has each value replaced by
+	// headerPlaceholder.
+	Keychain string `json:"keychain,omitempty"`
+	// redacted is Original as recorded, set by unredacted when it rebuilt
+	// Original from the item (never saved).
+	redacted string
+	// without: uninstall --without named it (never saved).
+	without bool
 }
 
 // InstallPlan is what install would do, by name only.
 type InstallPlan struct {
-	Move    []string // stdio servers that would move behind the proxy
+	Move    []string // stdio and HTTP servers that would move behind the proxy
 	Skip    []string // left direct with --skip
 	Moved   []string // already behind the proxy (the manifest)
 	Remove  []string // moved, but their entry is gone from the Claude config: install takes them off
 	Refresh []string // missing from the catalog (after DryRun: the ones it could not list)
 	Listed  []string // DryRun started these once to list their tools into a temporary catalog
+	// HTTP are the names in Move that are HTTP servers.
+	HTTP []string
+	// KeptDirect are HTTP servers this run leaves direct, with the reason.
+	KeptDirect []KeptDirect
 }
 
 // InstallState is how the install looks now.
@@ -105,8 +127,11 @@ type InstallState struct {
 	Removed []string `json:"removed,omitempty"`
 	// NotProxied are stdio servers in mcpServers not behind the proxy.
 	NotProxied []string `json:"notProxied,omitempty"`
-	// Skipped are stdio servers kept direct with --skip.
+	// Skipped are servers kept direct with --skip.
 	Skipped []string `json:"skipped,omitempty"`
+	// KeptDirect are HTTP servers install leaves direct, with the reason
+	// (from the config, and the OAuth ones the last install recorded).
+	KeptDirect []KeptDirect `json:"keptDirect,omitempty"`
 	// UpgradePending: the running daemon's version differs from this aimux.
 	UpgradePending bool   `json:"upgradePending,omitempty"`
 	DaemonVersion  string `json:"daemonVersion,omitempty"`
@@ -128,13 +153,26 @@ type Installer struct {
 	Version      string // this aimux's version, compared with the daemon's
 	// Unskip are recorded --skip servers this run moves after all.
 	Unskip []string
+	// Without are moved servers uninstall gives up the original of (their
+	// Keychain item is gone): the proxy entry is removed instead of
+	// restored, and a note says to add the server again.
+	Without []string
 
-	Agent    Agent
-	Status   func() (StatusReport, error)
-	Probe    func(servers []string) (StatusReport, error)                // the daemon's POST /status/probe for these servers
-	Reload   func() (ReloadResult, error)                                // the daemon's POST /reload
-	Refresh  func(catalogPath string, servers []string) map[string]error // lists tools and saves them in the catalog at catalogPath
-	Sessions func() ([]string, error)                                    // ids of open Claude Code sessions; nil skips the note
+	Agent   Agent
+	Status  func() (StatusReport, error)
+	Probe   func(servers []string) (StatusReport, error)                // the daemon's POST /status/probe for these servers
+	Reload  func() (ReloadResult, error)                                // the daemon's POST /reload
+	Refresh func(catalogPath string, servers []string) map[string]error // lists tools and saves them in the catalog at catalogPath
+	// RefreshHTTP lists the tools of HTTP servers with their headers held
+	// in memory and saves them in the catalog at catalogPath (nil:
+	// refreshHTTPCatalog).
+	RefreshHTTP func(catalogPath string, entries map[string]HTTPEntry, names []string) map[string]error
+	// CheckHTTP checks an HTTP server before it moves (nil: CheckHTTPServer).
+	CheckHTTP func(ctx context.Context, url string, headers map[string]string) HTTPReach
+	// Vault holds header values (the Keychain); nil moves no HTTP server
+	// with headers.
+	Vault    VaultStore
+	Sessions func() ([]string, error) // ids of open Claude Code sessions; nil skips the note
 	Out      io.Writer
 	Wait     time.Duration // for the daemon to answer; 0 means 10 s
 	Sleep    func(time.Duration)
@@ -198,7 +236,7 @@ func (i Installer) entryFor(server string) json.RawMessage {
 
 // Plan reports what Install(skip) would change, touching nothing.
 func (i Installer) Plan(skip []string) (InstallPlan, error) {
-	p, _, _, err := i.plan(skip)
+	p, _, err := i.plan(skip)
 	return p, err
 }
 
@@ -208,7 +246,7 @@ func (i Installer) Plan(skip []string) (InstallPlan, error) {
 // a temporary directory is written; the copy is removed before it returns.
 // Servers that fail to list stay in Refresh.
 func (i Installer) DryRun(skip []string) (InstallPlan, error) {
-	p, err := i.Plan(skip)
+	p, in, err := i.plan(skip)
 	if err != nil || len(p.Refresh) == 0 {
 		return p, err
 	}
@@ -225,7 +263,7 @@ func (i Installer) DryRun(skip []string) (InstallPlan, error) {
 	if err := cat.Save(tmp); err != nil {
 		return InstallPlan{}, err
 	}
-	failed := i.Refresh(tmp, p.Refresh)
+	failed := i.refreshAll(tmp, p.Refresh, in.http)
 	list := p.Refresh
 	p.Refresh = nil
 	for _, s := range list {
@@ -238,18 +276,48 @@ func (i Installer) DryRun(skip []string) (InstallPlan, error) {
 	return p, nil
 }
 
-// plan reads the Claude config, the manifest and the catalog: the stdio
-// servers to move are those not skipped and not moved already (a moved
-// server whose entry is stdio again is drift, reported by status, not moved
-// twice).
-func (i Installer) plan(skip []string) (InstallPlan, map[string]ServerConfig, *Manifest, error) {
+// planInput is what plan read for Install: the stdio definitions, the
+// movable HTTP entries, the manifest and the HTTP servers that need OAuth.
+type planInput struct {
+	stdio    map[string]ServerConfig
+	http     map[string]HTTPEntry
+	manifest *Manifest
+	oauth    []KeptDirect
+}
+
+// plan reads the Claude config, the manifest and the catalog: the stdio and
+// HTTP servers to move are those not skipped and not moved already (a moved
+// server whose entry is direct again is drift, reported by status, not
+// moved twice). HTTP servers not moved or skipped are checked first: one
+// that needs OAuth or is down stays direct with its reason.
+func (i Installer) plan(skip []string) (InstallPlan, planInput, error) {
 	m, err := i.loadManifest()
 	if err != nil {
-		return InstallPlan{}, nil, nil, err
+		return InstallPlan{}, planInput{}, err
 	}
 	stdio, err := LoadClaudeServers(i.ClaudeConfig, nil)
 	if err != nil {
-		return InstallPlan{}, nil, nil, err
+		return InstallPlan{}, planInput{}, err
+	}
+	httpAll, staticKept, err := LoadClaudeHTTPServers(i.ClaudeConfig, i.Port, i.Vault != nil)
+	if err != nil {
+		return InstallPlan{}, planInput{}, err
+	}
+	for _, name := range sortedKeys(httpAll) {
+		if reason := headersTooLong(i.Vault, name, httpAll[name]); reason != "" {
+			staticKept = append(staticKept, KeptDirect{Server: name, Reason: reason})
+			delete(httpAll, name)
+		}
+	}
+	known := map[string]bool{}
+	for n := range stdio {
+		known[n] = true
+	}
+	for n := range httpAll {
+		known[n] = true
+	}
+	for _, k := range staticKept {
+		known[k.Server] = true
 	}
 	var p InstallPlan
 	skipped := map[string]bool{}
@@ -258,7 +326,7 @@ func (i Installer) plan(skip []string) (InstallPlan, map[string]ServerConfig, *M
 		recorded = m.Skipped
 		_, members, err := readMCPServers(i.ClaudeConfig)
 		if err != nil {
-			return InstallPlan{}, nil, nil, err
+			return InstallPlan{}, planInput{}, err
 		}
 		for _, name := range sortedKeys(m.Servers) {
 			if _, ok := members[name]; ok {
@@ -270,36 +338,67 @@ func (i Installer) plan(skip []string) (InstallPlan, map[string]ServerConfig, *M
 	}
 	for _, s := range i.Unskip {
 		if !contains(recorded, s) {
-			return InstallPlan{}, nil, nil, fmt.Errorf("--unskip %s: not a server install kept direct (kept direct: %s)", s, listOrNone(recorded))
+			return InstallPlan{}, planInput{}, fmt.Errorf("--unskip %s: not a server install kept direct (kept direct: %s)", s, listOrNone(recorded))
 		}
 	}
 	for _, s := range recorded {
-		if _, ok := stdio[s]; ok && !contains(i.Unskip, s) {
+		if known[s] && !contains(i.Unskip, s) {
 			skipped[s] = true // a recorded skip stays until --unskip
 		}
 	}
 	for _, s := range skip {
-		if _, ok := stdio[s]; !ok {
-			return InstallPlan{}, nil, nil, fmt.Errorf("--skip %s: no stdio MCP server by that name in %s", s, i.ClaudeConfig)
+		if !known[s] {
+			return InstallPlan{}, planInput{}, fmt.Errorf("--skip %s: no MCP server by that name in %s", s, i.ClaudeConfig)
 		}
 		skipped[s] = true
 	}
 	p.Skip = sortedKeys(skipped)
+	pending := func(s string) bool { _, moved := m.server(s); return !skipped[s] && !moved }
 	for _, s := range sortedKeys(stdio) {
-		if _, moved := m.server(s); !skipped[s] && !moved {
+		if pending(s) {
 			p.Move = append(p.Move, s)
 		}
 	}
+	candidates := map[string]HTTPEntry{}
+	for n, e := range httpAll {
+		if pending(n) {
+			candidates[n] = e
+		}
+	}
+	check := i.CheckHTTP
+	if check == nil {
+		check = CheckHTTPServer
+	}
+	httpMove, checkKept, oauth := checkAll(context.Background(), candidates, check)
+	p.HTTP = httpMove
+	p.Move = append(p.Move, httpMove...)
+	sort.Strings(p.Move)
+	for _, k := range append(append([]KeptDirect(nil), staticKept...), checkKept...) {
+		if pending(k.Server) {
+			p.KeptDirect = append(p.KeptDirect, k)
+		}
+	}
+	sort.Slice(p.KeptDirect, func(a, b int) bool { return p.KeptDirect[a].Server < p.KeptDirect[b].Server })
+	for _, k := range staticKept {
+		if k.Reason == ReasonNeedsOAuth && pending(k.Server) {
+			oauth = append(oauth, k)
+		}
+	}
+	sort.Slice(oauth, func(a, b int) bool { return oauth[a].Server < oauth[b].Server })
 	cat, err := LoadCatalog(i.CatalogPath)
 	if err != nil {
-		return InstallPlan{}, nil, nil, err
+		return InstallPlan{}, planInput{}, err
 	}
 	for _, s := range p.Move {
 		if _, ok := cat.Servers[s]; !ok {
 			p.Refresh = append(p.Refresh, s)
 		}
 	}
-	return p, stdio, m, nil
+	moveHTTP := map[string]HTTPEntry{}
+	for _, n := range httpMove {
+		moveHTTP[n] = httpAll[n]
+	}
+	return p, planInput{stdio: stdio, http: moveHTTP, manifest: m, oauth: oauth}, nil
 }
 
 // server is the manifest's record of name; a nil manifest has none.
@@ -320,13 +419,18 @@ func (i Installer) Install(skip []string) (err error) {
 		return err
 	}
 	defer unlock()
-	p, stdio, m, err := i.plan(skip)
+	p, in, err := i.plan(skip)
 	if err != nil {
 		return err
 	}
+	m := in.manifest
 	if m != nil && m.Port != i.Port {
 		return fmt.Errorf("the proxy is installed on port %d but this run would use %d; pass --port %d, "+
 			"or run `aimux mcp proxy uninstall` and install again to change the port; nothing changed", m.Port, i.Port, m.Port)
+	}
+	// Before anything rewrites the servers file (forgetRemoved does too).
+	if err := i.needCurrentDaemon(in.http); err != nil {
+		return err
 	}
 	gone, err := i.forgetRemoved(m)
 	if err != nil {
@@ -335,19 +439,21 @@ func (i Installer) Install(skip []string) (err error) {
 	p.Moved = slices.DeleteFunc(p.Moved, func(n string) bool { return slices.Contains(gone, n) })
 	if len(p.Move) == 0 {
 		if m != nil {
-			if !slices.Equal(m.Skipped, p.Skip) {
-				m.Skipped = p.Skip
+			if !slices.Equal(m.Skipped, p.Skip) || !reflect.DeepEqual(m.Direct, in.oauth) {
+				m.Skipped, m.Direct = p.Skip, in.oauth
 				if err := i.saveManifest(m); err != nil {
 					return err
 				}
 			}
-			i.printf("The MCP proxy is installed (%d servers behind it); no new stdio servers to move.\n", len(m.Servers))
+			i.printf("The MCP proxy is installed (%d servers behind it); no new servers to move.\n", len(m.Servers))
 			i.printSkipped(p.Skip)
+			i.printKeptDirect(p.KeptDirect)
 			i.ensureIdleTimeout(m)
 			i.ensureHooks(m)
 			return nil
 		}
-		return fmt.Errorf("no stdio MCP servers to move in %s", i.ClaudeConfig)
+		i.printKeptDirect(p.KeptDirect)
+		return fmt.Errorf("no MCP servers to move in %s", i.ClaudeConfig)
 	}
 	i.reportSessions()
 
@@ -364,11 +470,20 @@ func (i Installer) Install(skip []string) (err error) {
 	}()
 
 	i.printf("Listing the tools of %d servers: %s\n", len(p.Move), strings.Join(p.Move, ", "))
-	if failed := sortedKeys(i.Refresh(i.CatalogPath, p.Move)); len(failed) > 0 {
+	if failed := sortedKeys(i.refreshAll(i.CatalogPath, p.Move, in.http)); len(failed) > 0 {
 		return fmt.Errorf("these servers failed to list their tools: %s (`aimux mcp proxy refresh` shows why); fix them or leave them direct with --skip <name>",
 			strings.Join(failed, ", "))
 	}
-	defs, err := i.saveDefinitions(p.Move, stdio)
+	written, err := i.storeHeaders(in.http)
+	defer func() {
+		if err != nil && !keepDaemon {
+			i.deleteItems(written)
+		}
+	}()
+	if err != nil {
+		return err
+	}
+	defs, err := i.saveDefinitions(p.Move, in.stdio, in.http)
 	if err != nil {
 		return err
 	}
@@ -378,7 +493,7 @@ func (i Installer) Install(skip []string) (err error) {
 	if err := i.probeMoved(p.Move); err != nil {
 		return err
 	}
-	backup, err := jsonedit.Backup(i.ClaudeConfig, i.BackupDir, backupsKept)
+	backup, err := i.backupRedacted(in.http)
 	if err != nil {
 		return err
 	}
@@ -406,20 +521,29 @@ func (i Installer) Install(skip []string) (err error) {
 	}
 	planned := map[string]MovedEntry{}
 	for name, raw := range originals {
-		planned[name] = MovedEntry{Original: string(raw), Written: string(i.entryFor(name))}
+		if planned[name], err = i.movedEntry(name, raw, in.http); err != nil {
+			return err
+		}
 	}
-	if err := i.saveManifest(i.extended(m, planned, p.Skip)); err != nil {
+	if err := i.saveManifest(i.extendedWith(m, planned, p.Skip, in.oauth)); err != nil {
 		return err
 	}
+	unchanged := func(name string, raw json.RawMessage) bool {
+		if e, isHTTP := in.http[name]; isHTTP {
+			return jsonEqual(raw, e.Raw) // what the daemon definition and the item came from
+		}
+		return sameDefinition(entryDefinition(raw), defs[name])
+	}
+	record := func(name string, raw json.RawMessage) (MovedEntry, error) { return i.movedEntry(name, raw, in.http) }
 	var moved map[string]MovedEntry
 	err = i.editKey(i.ClaudeConfig, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
-		v, mv, err := switchServers(old, p.Move, defs, originals, i.entryFor)
+		v, mv, err := switchServers(old, p.Move, unchanged, originals, i.entryFor, record)
 		moved = mv
 		return v, err
 	})
 	if err != nil {
 		// The edit may have landed before it reported the error.
-		moved = i.landed(originals)
+		moved = i.landed(originals, in.http)
 		if len(moved) == 0 {
 			return i.revertManifest(prevManifest, fmt.Errorf("edit mcpServers in %s: %w", i.ClaudeConfig, err))
 		}
@@ -432,9 +556,16 @@ func (i Installer) Install(skip []string) (err error) {
 	if gone := missingFrom(p.Move, moved); len(gone) > 0 {
 		i.printf("Note: removed from %s while installing, so not moved: %s.\n", i.ClaudeConfig, strings.Join(gone, ", "))
 		i.stopServing(gone)
+		var items []string
+		for _, n := range gone {
+			if e, ok := in.http[n]; ok && len(e.Headers) > 0 {
+				items = append(items, HeaderService(n))
+			}
+		}
+		i.deleteItems(items) // their entries are gone: nothing will read them
 	}
 	if !reflect.DeepEqual(moved, planned) {
-		if err := i.saveManifest(i.extended(m, moved, p.Skip)); err != nil {
+		if err := i.saveManifest(i.extendedWith(m, moved, p.Skip, in.oauth)); err != nil {
 			i.printf("Note: could not update the record in %s (%v); it lists servers that were not moved, which uninstall reports as removed.\n", i.ManifestPath, err)
 		}
 	}
@@ -444,7 +575,9 @@ func (i Installer) Install(skip []string) (err error) {
 		i.printf("  Already behind it: %d servers (`aimux mcp proxy status` lists them)\n", len(p.Moved))
 	}
 	i.printSkipped(p.Skip)
+	i.printKeptDirect(p.KeptDirect)
 	i.printf("  Backup: %s\n", backup)
+	i.noteOlderBackups(backup, in.http)
 	i.printf("New Claude Code sessions use the proxy; running sessions keep their direct servers until they restart.\n")
 	i.printf("From now on, %s.\n", editHint)
 	i.printf("Undo with: aimux mcp proxy uninstall\n")
@@ -481,6 +614,11 @@ func (i Installer) forgetRemoved(m *Manifest) ([]string, error) {
 		return nil, fmt.Errorf("take %s off the proxy: %w", strings.Join(gone, ", "), err)
 	}
 	for _, name := range gone {
+		if svc := m.Servers[name].Keychain; svc != "" && i.Vault != nil {
+			if err := i.Vault.Delete(svc); err != nil {
+				i.printf("Note: could not delete Keychain item %s (%v); remove it with: security delete-generic-password -a aimux -s %s\n", svc, err, svc)
+			}
+		}
 		delete(m.Servers, name)
 	}
 	if err := i.saveManifest(m); err != nil {
@@ -499,14 +637,18 @@ func (i Installer) forgetRemoved(m *Manifest) ([]string, error) {
 // here (the daemon runs under launchd without this shell's variables), into
 // the servers file and adds them to its moved list, which the daemon
 // serves. It returns those definitions.
-func (i Installer) saveDefinitions(move []string, stdio map[string]ServerConfig) (map[string]ServerConfig, error) {
+func (i Installer) saveDefinitions(move []string, stdio map[string]ServerConfig, http map[string]HTTPEntry) (map[string]ServerConfig, error) {
 	saved, resolved, err := LoadServerFile(i.ServersPath)
 	if err != nil {
 		return nil, err
 	}
 	defs := map[string]ServerConfig{}
 	for _, s := range move {
-		defs[s] = expandConfig(stdio[s])
+		if e, ok := http[s]; ok {
+			defs[s] = ServerConfig{Type: "http", URL: e.URL, Secrets: keychainHeaderRefs(s, sortedKeys(e.Headers))}
+		} else {
+			defs[s] = expandConfig(stdio[s])
+		}
 		saved[s] = defs[s]
 	}
 	return defs, SaveServerFile(i.ServersPath, saved, union(resolved, move))
@@ -518,7 +660,7 @@ func (i Installer) saveDefinitions(move []string, stdio map[string]ServerConfig)
 // as moved, with its original from originals (read before the edit). An
 // entry removed meanwhile is left out; one that no longer matches the
 // definition given to the daemon fails the edit.
-func switchServers(old json.RawMessage, move []string, defs map[string]ServerConfig, originals map[string]json.RawMessage, entry func(string) json.RawMessage) (json.RawMessage, map[string]MovedEntry, error) {
+func switchServers(old json.RawMessage, move []string, unchanged func(name string, raw json.RawMessage) bool, originals map[string]json.RawMessage, entry func(string) json.RawMessage, record func(string, json.RawMessage) (MovedEntry, error)) (json.RawMessage, map[string]MovedEntry, error) {
 	if old == nil {
 		return nil, nil, errors.New("there is no mcpServers object")
 	}
@@ -535,17 +677,21 @@ func switchServers(old json.RawMessage, move []string, defs map[string]ServerCon
 		w := entry(name)
 		if jsonEqual(raw, w) {
 			if orig, ok := originals[name]; ok {
-				moved[name] = MovedEntry{Original: string(orig), Written: string(w)}
+				if moved[name], err = record(name, orig); err != nil {
+					return nil, nil, err
+				}
 			}
 			continue
 		}
-		if !sameDefinition(entryDefinition(raw), defs[name]) {
+		if !unchanged(name, raw) {
 			return nil, nil, fmt.Errorf("%s changed while installing; nothing was changed, run install again", name)
 		}
 		if cur, err = jsonedit.SetMember(cur, name, w); err != nil {
 			return nil, nil, err
 		}
-		moved[name] = MovedEntry{Original: string(raw), Written: string(w)}
+		if moved[name], err = record(name, raw); err != nil {
+			return nil, nil, err
+		}
 	}
 	return cur, moved, nil
 }
@@ -553,36 +699,56 @@ func switchServers(old json.RawMessage, move []string, defs map[string]ServerCon
 // restoreServers is the uninstall edit of mcpServers old: each entry still
 // equal (as JSON) to what install wrote gets its original bytes back; one
 // the owner changed or removed is kept and noted.
-func restoreServers(old json.RawMessage, servers map[string]MovedEntry) (json.RawMessage, []string, error) {
-	var notes []string
+func restoreServers(old json.RawMessage, servers map[string]MovedEntry) (json.RawMessage, []string, []string, error) {
+	var notes, restored []string
 	if old == nil {
 		for _, name := range sortedKeys(servers) {
 			notes = append(notes, fmt.Sprintf("%s: entry removed since install; not restored", name))
 		}
-		return nil, notes, nil
+		return nil, notes, nil, nil
 	}
 	members, err := objectMembers(old)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	cur := old
 	for _, name := range sortedKeys(servers) {
 		e := servers[name]
 		have, ok := members[name]
 		switch {
+		case e.without && ok && jsonEqual(have, json.RawMessage(e.Written)):
+			if cur, err = removeMember(cur, name); err != nil {
+				return nil, nil, nil, err
+			}
+			notes = append(notes, fmt.Sprintf("%s: its proxy entry was removed; its original could not be restored (its Keychain item is gone); add it again with `claude mcp add`", name))
+		case e.without:
+			notes = append(notes, fmt.Sprintf("%s: given up (--without); its entry is not the proxy entry, so it was left as it is", name))
 		case !ok:
 			notes = append(notes, fmt.Sprintf("%s: entry removed since install; not restored", name))
-		case jsonEqual(have, json.RawMessage(e.Original)):
+		case jsonEqual(have, json.RawMessage(e.Original)) || (e.Keychain != "" && !anyPlaceholder(have) && sameRedacted(have, e.Original)):
 			notes = append(notes, fmt.Sprintf("%s: already restored", name))
+			restored = append(restored, name)
+		case e.redacted != "" && jsonEqual(have, json.RawMessage(e.redacted)):
+			// A backup install wrote was put back: its header values are the
+			// placeholder; the item fills them in.
+			if cur, err = jsonedit.ReplaceMemberVerbatim(cur, name, json.RawMessage(e.Original)); err != nil {
+				return nil, nil, nil, err
+			}
+			restored = append(restored, name)
 		case !jsonEqual(have, json.RawMessage(e.Written)):
 			notes = append(notes, fmt.Sprintf("%s: entry changed since install; kept yours", name))
+		case e.Keychain != "" && e.redacted == "":
+			// The entry became the proxy entry after its item was found
+			// missing: restoring now would write placeholders.
+			return nil, nil, nil, fmt.Errorf("%s changed while uninstalling and its Keychain item %s is gone; nothing was changed", name, e.Keychain)
 		default:
 			if cur, err = jsonedit.ReplaceMemberVerbatim(cur, name, json.RawMessage(e.Original)); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
+			restored = append(restored, name)
 		}
 	}
-	return cur, notes, nil
+	return cur, notes, restored, nil
 }
 
 // extended is m (a new manifest when nil) with servers added and skipped
@@ -613,7 +779,7 @@ func (i Installer) revertManifest(prev fileSnapshot, cause error) error {
 // landed reads mcpServers again and returns the servers in originals whose
 // entry is the one install writes: after an edit error, the entries that
 // are in place.
-func (i Installer) landed(originals map[string]json.RawMessage) map[string]MovedEntry {
+func (i Installer) landed(originals map[string]json.RawMessage, http map[string]HTTPEntry) map[string]MovedEntry {
 	_, members, err := readMCPServers(i.ClaudeConfig)
 	if err != nil {
 		return nil
@@ -621,7 +787,9 @@ func (i Installer) landed(originals map[string]json.RawMessage) map[string]Moved
 	out := map[string]MovedEntry{}
 	for name, orig := range originals {
 		if w := i.entryFor(name); jsonEqual(members[name], w) {
-			out[name] = MovedEntry{Original: string(orig), Written: string(w)}
+			if e, err := i.movedEntry(name, orig, http); err == nil {
+				out[name] = e
+			}
 		}
 	}
 	return out
@@ -689,7 +857,8 @@ func entryDefinition(raw json.RawMessage) ServerConfig {
 // sameDefinition compares two definitions, an empty list or map equal to
 // none.
 func sameDefinition(a, b ServerConfig) bool {
-	if a.Command != b.Command || len(a.Args) != len(b.Args) || len(a.Env) != len(b.Env) {
+	if a.Command != b.Command || len(a.Args) != len(b.Args) || len(a.Env) != len(b.Env) ||
+		a.Type != b.Type || a.URL != b.URL || !reflect.DeepEqual(a.Secrets, b.Secrets) {
 		return false
 	}
 	for k := range a.Args {
@@ -980,12 +1149,29 @@ func (i Installer) Uninstall() error {
 		i.printf("The MCP proxy is not installed (no manifest at %s); the Claude config was not changed.\n", i.ManifestPath)
 		return nil
 	}
-	var notes []string
+	// Header values come back from the Keychain before anything changes:
+	// an item that cannot be read stops uninstall here.
+	var current map[string]json.RawMessage
+	if fileExists(i.ClaudeConfig) {
+		if _, current, err = readMCPServers(i.ClaudeConfig); err != nil {
+			return err
+		}
+	}
+	for _, w := range i.Without {
+		if _, ok := m.Servers[w]; !ok {
+			return fmt.Errorf("--without %s: not a server install moved (moved: %s); nothing was changed", w, listOrNone(sortedKeys(m.Servers)))
+		}
+	}
+	servers, err := i.unredacted(context.Background(), m, current)
+	if err != nil {
+		return err
+	}
+	var notes, restored []string
 	if !fileExists(i.ClaudeConfig) {
-		_, notes, _ = restoreServers(nil, m.Servers) // every entry is gone
+		_, notes, _, _ = restoreServers(nil, servers) // every entry is gone
 	} else if err := i.editKey(i.ClaudeConfig, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
-		v, n, err := restoreServers(old, m.Servers)
-		notes = n
+		v, n, r, err := restoreServers(old, servers)
+		notes, restored = n, r
 		return v, err
 	}); err != nil {
 		return fmt.Errorf("restore mcpServers in %s: %w; nothing was changed, run uninstall again in a moment", i.ClaudeConfig, err)
@@ -997,6 +1183,7 @@ func (i Installer) Uninstall() error {
 	if err := i.dropMoved(names, true, true); err != nil {
 		return fmt.Errorf("%w; the Claude config is restored; run `aimux mcp proxy uninstall` again to finish", err)
 	}
+	i.dropItems(m, restored, current)
 	i.dropIdleTimeout(m)
 	i.dropHooks(m)
 	// Without the manifest, uninstall again only removes the agent: the way
@@ -1087,15 +1274,54 @@ func (i Installer) InstallStatus() (InstallState, error) {
 	if err != nil {
 		return InstallState{}, err
 	}
-	for _, name := range sortedKeys(stdio) {
+	// HTTP servers are classified from the config and the manifest only;
+	// status never probes the network.
+	httpAll, staticKept, err := LoadClaudeHTTPServers(i.ClaudeConfig, m.Port, i.Vault != nil)
+	if err != nil {
+		return InstallState{}, err
+	}
+	// A recorded OAuth server counts only while its entry is still an HTTP
+	// entry (a stdio server added under the same name is not it).
+	direct := map[string]bool{}
+	var recordedDirect []KeptDirect
+	for _, k := range m.Direct {
+		if _, isStdio := stdio[k.Server]; !isStdio && entryURL(members[k.Server]) != "" {
+			direct[k.Server] = true
+			recordedDirect = append(recordedDirect, k)
+		}
+	}
+	for _, name := range sortedKeys(httpAll) {
+		if reason := headersTooLong(i.Vault, name, httpAll[name]); reason != "" {
+			staticKept = append(staticKept, KeptDirect{Server: name, Reason: reason})
+			delete(httpAll, name)
+		}
+	}
+	names := map[string]bool{}
+	for n := range stdio {
+		names[n] = true
+	}
+	for n := range httpAll {
+		names[n] = true
+	}
+	for _, name := range sortedKeys(names) {
 		switch _, moved := m.Servers[name]; {
 		case moved:
 		case contains(m.Skipped, name):
 			st.Skipped = append(st.Skipped, name)
+		case direct[name]:
 		default:
 			st.NotProxied = append(st.NotProxied, name)
 		}
 	}
+	for _, k := range append(staticKept, recordedDirect...) {
+		if _, moved := m.Servers[k.Server]; moved || contains(m.Skipped, k.Server) {
+			continue
+		}
+		if _, ok := members[k.Server]; ok {
+			st.KeptDirect = append(st.KeptDirect, k)
+		}
+	}
+	sort.Slice(st.KeptDirect, func(a, b int) bool { return st.KeptDirect[a].Server < st.KeptDirect[b].Server })
 	return st, nil
 }
 
@@ -1114,7 +1340,7 @@ func entryURL(raw json.RawMessage) string {
 // PrintInstallStatus prints st in a few plain lines.
 func (i Installer) PrintInstallStatus(st InstallState) {
 	if st.State == InstallNotInstalled {
-		i.printf("Install: not installed (`aimux mcp proxy install` moves Claude Code's stdio servers behind the proxy)\n")
+		i.printf("Install: not installed (`aimux mcp proxy install` moves Claude Code's stdio and HTTP servers behind the proxy)\n")
 	} else {
 		i.printf("Install: %d servers behind the proxy (%s); %s\n", len(st.Moved), strings.Join(st.Moved, ", "), editHint)
 	}
@@ -1129,6 +1355,9 @@ func (i Installer) PrintInstallStatus(st InstallState) {
 		i.printf("  Not behind the proxy: %s (run `aimux mcp proxy install` to move them)\n", strings.Join(st.NotProxied, ", "))
 	}
 	i.printSkipped(st.Skipped)
+	for _, line := range KeptDirectLines(st.KeptDirect) {
+		i.printf("  %s\n", line)
+	}
 	if st.UpgradePending {
 		i.printf("  Note: %s.\n", i.UpgradeText(st.DaemonVersion))
 	}
@@ -1142,17 +1371,24 @@ func (i Installer) PrintPlan(p InstallPlan) {
 	if len(p.Remove) > 0 {
 		i.printf("Would take off the proxy (removed from %s): %s\n", i.ClaudeConfig, strings.Join(p.Remove, ", "))
 	}
+	for _, k := range p.KeptDirect {
+		i.printf("Would keep direct: %s: %s\n", k.Server, k.Reason)
+	}
 	if len(p.Move) == 0 {
 		if len(p.Remove) == 0 {
-			i.printf("No stdio servers to move; nothing would change.\n")
+			i.printf("No servers to move; nothing would change.\n")
 		} else {
-			i.printf("No stdio servers to move.\n")
+			i.printf("No servers to move.\n")
 		}
 		return
 	}
-	i.printf("Would move %d stdio servers behind the proxy, each keeping its name:\n", len(p.Move))
+	i.printf("Would move %d servers behind the proxy, each keeping its name:\n", len(p.Move))
 	for _, s := range p.Move {
-		i.printf("  %s -> %s\n", s, EntryURL(i.Port, s))
+		kind := ""
+		if contains(p.HTTP, s) {
+			kind = " (http)"
+		}
+		i.printf("  %s%s -> %s\n", s, kind, EntryURL(i.Port, s))
 	}
 	if len(p.Skip) > 0 {
 		i.printf("Would leave direct (--skip): %s\n", strings.Join(p.Skip, ", "))
@@ -1231,7 +1467,7 @@ func LoadManifest(path string) (*Manifest, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, fmt.Errorf("%w: %s (%v); nothing changed", errManifestCorrupt, path, err)
 	}
-	if m.Version < manifestVersion {
+	if m.Version < minManifestVersion {
 		return nil, fmt.Errorf("this manifest (%s) is from an older aimux design; move %s aside and run `aimux mcp proxy uninstall`; nothing changed", path, path)
 	}
 	if m.Version > manifestVersion {

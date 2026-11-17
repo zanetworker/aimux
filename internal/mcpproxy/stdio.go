@@ -27,6 +27,14 @@ type ServerConfig struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
+	// Type "http" is a moved HTTP server: URL is where it is, and the
+	// Secrets say where its header values are (resolveSecret).
+	Type    string      `json:"type,omitempty"`
+	URL     string      `json:"url,omitempty"`
+	Secrets *SecretRefs `json:"secrets,omitempty"`
+	// LegacyHeaderNames is the header list of a definition written before
+	// refs; LoadServerFile turns it into Secrets and clears it.
+	LegacyHeaderNames []string `json:"headerNames,omitempty"`
 }
 
 // StdioStarter returns a Starter that launches servers from cfgs, expanding
