@@ -32,8 +32,9 @@ const (
 const checkInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"aimux-install-check","version":"1"}}}`
 
 // CheckHTTPServer POSTs one MCP initialize request with headers and reads
-// only the status line and WWW-Authenticate; the body is discarded. Any
-// status other than a challenged 401 is Reachable: listing decides.
+// only the status line and WWW-Authenticate; the body is discarded. 502,
+// 503 and 504 mean down (Unreachable); any status other than those and a
+// challenged 401 is Reachable: listing decides.
 func CheckHTTPServer(ctx context.Context, url string, headers map[string]string) HTTPReach {
 	ctx, cancel := context.WithTimeout(ctx, httpCheckTimeout)
 	defer cancel()
@@ -52,8 +53,11 @@ func CheckHTTPServer(ctx context.Context, url string, headers map[string]string)
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	_ = resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized && resp.Header.Get("WWW-Authenticate") != "" {
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized && resp.Header.Get("WWW-Authenticate") != "":
 		return NeedsOAuth
+	case resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout:
+		return Unreachable // down behind a proxy or load balancer: tried again next run
 	}
 	return Reachable
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 
 	"github.com/zanetworker/aimux/internal/keyring"
 )
@@ -83,3 +84,23 @@ type definedHTTPBackend struct {
 
 // Definition is the definition the backend was started with.
 func (b *definedHTTPBackend) Definition() ServerConfig { return b.def }
+
+// SystemVault is the Keychain on macOS, where install can keep header
+// values; nil elsewhere, so HTTP servers with headers stay direct.
+func SystemVault() VaultStore {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return keychainVault{}
+}
+
+// keychainVault keeps items with keyring.Store, reads them with
+// keyring.Stored and removes them with keyring.Delete.
+type keychainVault struct{}
+
+func (keychainVault) Put(service, value string) error { return keyring.Store(service, value) }
+func (keychainVault) Get(ctx context.Context, service string) (string, error) {
+	return keyring.Stored(service).Lookup(ctx)
+}
+func (keychainVault) Delete(service string) error { return keyring.Delete(service) }
+func (keychainVault) MaxValue(service string) int { return keyring.MaxStoreValue(service) }

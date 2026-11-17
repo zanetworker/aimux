@@ -81,3 +81,10 @@ func Delete(service string) error {
 	}
 	return toolFailure(ctx, "keychain item "+service, err)
 }
+
+// MaxStoreValue is the longest value Store accepts for service (one
+// `security -i` line).
+func MaxStoreValue(service string) int {
+	overhead := len("add-generic-password -U -a " + storeAccount + " -s  -X \n")
+	return (maxSecurityLine - overhead - len(service)) / 2
+}

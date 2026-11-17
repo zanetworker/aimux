@@ -116,3 +116,19 @@ func TestCheckAll_ReasonsAndSplit(t *testing.T) {
 		t.Fatalf("oauth %v", oauth)
 	}
 }
+
+func TestCheckHTTP_GatewayErrorsAreUnreachable(t *testing.T) {
+	for _, code := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(code) }))
+		got := CheckHTTPServer(context.Background(), srv.URL, nil)
+		srv.Close()
+		if got != Unreachable {
+			t.Fatalf("%d: got %v", code, got)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) }))
+	defer srv.Close()
+	if got := CheckHTTPServer(context.Background(), srv.URL, nil); got != Reachable {
+		t.Fatalf("500: got %v", got)
+	}
+}

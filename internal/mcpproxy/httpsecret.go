@@ -154,8 +154,42 @@ type headerSecret struct {
 }
 
 type headerItem struct {
-	Value   string `json:"value"`   // resolved; what the daemon sends
-	Literal string `json:"literal"` // the token as in the file; what uninstall writes back
+	Value string `json:"value"` // resolved; what the daemon sends
+	// Literal is the token as in the file, what uninstall writes back;
+	// empty when it is plainTokenOf(Value), so a long token is not kept
+	// twice in an item of limited size.
+	Literal string `json:"literal,omitempty"`
+}
+
+// literal is the token uninstall writes back.
+func (h headerItem) literal() string {
+	if h.Literal != "" {
+		return h.Literal
+	}
+	return plainTokenOf(h.Value)
+}
+
+// plainTokenOf is v as a JSON string token written the plain way: no HTML
+// escaping, no optional escapes.
+func plainTokenOf(v string) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v) // a string always encodes
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// headerSecretOf is the Keychain item of one HTTP entry.
+func headerSecretOf(e HTTPEntry) headerSecret {
+	s := headerSecret{Headers: map[string]headerItem{}}
+	for h, v := range e.Headers {
+		it := headerItem{Value: v}
+		if lit := e.Literals[h]; lit != plainTokenOf(v) {
+			it.Literal = lit
+		}
+		s.Headers[h] = it
+	}
+	return s
 }
 
 // encodeHeaderSecret is s as ASCII-only JSON (non-ASCII as \u escapes), so

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,12 @@ func TestReadTempDefinition_RejectsHTTPFields(t *testing.T) {
 	}
 	if _, _, err := readTempDefinition(p); err == nil || !strings.Contains(err.Error(), "only command, args and env") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSystemVault_DarwinOnly(t *testing.T) {
+	v := SystemVault()
+	if (runtime.GOOS == "darwin") != (v != nil) {
+		t.Fatalf("GOOS %s: vault %v", runtime.GOOS, v)
 	}
 }

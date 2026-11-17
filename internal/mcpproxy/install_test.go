@@ -2,6 +2,7 @@ package mcpproxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -197,13 +198,16 @@ func newInstallFX(t *testing.T, claude, settings string) *installFX {
 			Args: []string{"mcp", "proxy", "serve", "--port", "7381"}, Run: fx.lc.run, UID: 501,
 			Env: map[string]string{"PATH": "/opt/homebrew/bin:/usr/bin", "HOME": dir},
 		},
-		Status:   fx.status,
-		Probe:    fx.probe,
-		Reload:   fx.reload,
-		Refresh:  fx.refresh,
-		Sessions: func() ([]string, error) { return []string{"sess-1", "sess-2"}, nil },
-		Out:      &fx.out,
-		Wait:     time.Second,
+		Status:  fx.status,
+		Probe:   fx.probe,
+		Reload:  fx.reload,
+		Refresh: fx.refresh,
+		// No network in tests: a remote HTTP server counts as down, so it
+		// stays direct as it did before HTTP servers could move.
+		CheckHTTP: func(context.Context, string, map[string]string) HTTPReach { return Unreachable },
+		Sessions:  func() ([]string, error) { return []string{"sess-1", "sess-2"}, nil },
+		Out:       &fx.out,
+		Wait:      time.Second,
 	}
 	fx.clock = time.Unix(1_000_000_000, 0)
 	fx.in.Now = func() time.Time { return fx.clock }
@@ -505,7 +509,7 @@ func TestInstall_RerunMovesOnlyANewServer(t *testing.T) {
 	if !reflect.DeepEqual(fx.snapshot(), snap) || fx.reloads != reloads {
 		t.Fatal("a run with nothing to move changed something")
 	}
-	if !strings.Contains(fx.out.String(), "no new stdio servers") {
+	if !strings.Contains(fx.out.String(), "no new servers") {
 		t.Fatalf("output: %s", fx.out.String())
 	}
 
@@ -879,13 +883,14 @@ func TestInstall_RefusalsChangeNothing(t *testing.T) {
 	if err := fx.in.Install([]string{"nosuch"}); err == nil || !strings.Contains(err.Error(), "nosuch") {
 		t.Fatalf("unknown --skip: err = %v", err)
 	}
-	if err := fx.in.Install([]string{"remote"}); err == nil || !strings.Contains(err.Error(), "remote") {
+	// A remote (HTTP) server may be kept direct with --skip too.
+	if _, err := fx.in.Plan([]string{"remote"}); err != nil {
 		t.Fatalf("--skip of a remote server: err = %v", err)
 	}
 	const cfg = `{"a": 1,
  "b": [1, 2]}`
 	empty := newInstallFX(t, cfg, "")
-	if err := empty.in.Install(nil); err == nil || !strings.Contains(err.Error(), "no stdio MCP servers") {
+	if err := empty.in.Install(nil); err == nil || !strings.Contains(err.Error(), "no MCP servers to move") {
 		t.Fatalf("nothing to move: err = %v", err)
 	}
 	if fx.read(fx.claude) != fixtureClaude || empty.read(empty.claude) != cfg || fx.lc.count() != 0 {
@@ -1441,7 +1446,6 @@ func TestPlan_ShowsServersInstallWouldTakeOff(t *testing.T) {
 		t.Fatalf("dry-run output:\n%s", out)
 	}
 }
-
 
 // After an upgrade, restart kickstarts the daemon in place (the job is never
 // unloaded) and waits for the new daemon (a new pid) to answer.

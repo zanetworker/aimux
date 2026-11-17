@@ -157,3 +157,16 @@ func TestStore_LiveKeychain(t *testing.T) {
 		t.Fatalf("after delete: %v %v", ok, err)
 	}
 }
+
+func TestMaxStoreValue_MatchesStore(t *testing.T) {
+	fakeRunStdin(t, func() ([]byte, error) { return nil, nil })
+	svc := "aimux-mcp-proxy/x"
+	n := MaxStoreValue(svc)
+	fakeRun(t, out(strings.Repeat("v", n), nil))
+	if err := Store(svc, strings.Repeat("v", n)); err != nil {
+		t.Fatalf("max %d refused: %v", n, err)
+	}
+	if err := Store(svc, strings.Repeat("v", n+1)); err == nil {
+		t.Fatalf("max+1 accepted")
+	}
+}

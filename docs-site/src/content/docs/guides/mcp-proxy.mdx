@@ -14,7 +14,7 @@ Claude Code starts every configured MCP server when a session opens, before any 
 - **Same names:** each server keeps its own name, and every tool keeps its original name (`mcp__slack__post_message`, not renamed). Permission rules keep working unchanged.
 - **Per-server endpoints:** each moved server is served at `/mcp/<server>` under its original name, so `~/.claude.json` has one HTTP line per moved server instead of one `mux` entry.
 
-Remote (`http`, `sse`) servers are not proxied. They run no local process, so Claude Code keeps connecting to them directly.
+`install` also moves HTTP servers that need no OAuth (see [HTTP servers and the Keychain](#http-servers-and-the-keychain)); SSE servers and HTTP servers that sign in with OAuth stay direct.
 
 The proxy can also serve a saved HTTP server: a definition in `~/.aimux/mcp-servers.json` with `"type": "http"`, its `url` and the names of its headers (`headerNames`). The header values are not in that file; the proxy reads them from the Keychain item `aimux-mcp-proxy/<server>` (account `aimux`) each time it starts the server, and its errors and status never carry a header value. If that item is missing or locked, the server fails to start with `keychain item aimux-mcp-proxy/<server> is missing or locked`; the other servers keep working.
 
@@ -50,7 +50,7 @@ If install stops before changing `~/.claude.json`, it says so, puts `~/.aimux/mc
 
 Then it changes `~/.claude.json`, after backing it up to `~/.aimux/backups/` (owner-only, the newest 10 kept):
 
-Each moved server's stdio entry becomes `{"type": "http", "url": "http://127.0.0.1:7381/mcp/<server>"}` under the same name. Remote servers stay. aimux's own `aimux` stdio entry moves like any other. Nothing else in the file changes, not even spacing. The edit is atomic: one edit of `mcpServers`, so there is no half-switched state.
+Each moved server's entry (stdio or HTTP) becomes `{"type": "http", "url": "http://127.0.0.1:7381/mcp/<server>"}` under the same name. HTTP servers kept direct stay as they are. aimux's own `aimux` stdio entry moves like any other. Nothing else in the file changes, not even spacing. The edit is atomic: one edit of `mcpServers`, so there is no half-switched state.
 
 If a server's entry changes between these checks and the edit (another program saved `~/.claude.json`), the edit fails ("changed while installing; run install again") and the proxy's files are put back as above. An entry removed in that window is simply not moved, and the proxy stops serving it.
 
@@ -75,24 +75,24 @@ aimux mcp proxy uninstall
 
 `uninstall` undoes what the manifest records, in one edit of `mcpServers`: each moved entry that is still the proxy entry install wrote gets its original bytes back; one you changed or removed since is kept as it is and reported. Servers you added after installing stay. When nothing else changed, the file comes back byte for byte. It also deletes the moved servers' saved definitions (they hold resolved `env` values) from `~/.aimux/mcp-servers.json`, then removes the manifest and the launchd agent. If `~/.claude.json` is gone, every entry is reported as removed and the rest still happens. Running it twice is harmless. If the agent cannot be removed, the config stays restored and running `uninstall` again removes it.
 
-Without a manifest, `uninstall` leaves the Claude config alone and removes a leftover launchd agent if there is one. To restore entries by hand, copy only their `mcpServers` entries from a backup in `~/.aimux/backups/`: copying the whole file would also undo everything Claude Code saved since.
+Without a manifest, `uninstall` leaves the Claude config alone and removes a leftover launchd agent if there is one. To restore entries by hand, copy only their `mcpServers` entries from a backup in `~/.aimux/backups/`: copying the whole file would also undo everything Claude Code saved since. In the backup install wrote, a moved HTTP server's header values are `"[in Keychain]"`; read them from the item with `security find-generic-password -a aimux -s aimux-mcp-proxy/<server> -w` (it prints the item's JSON, whose `value` fields are the header values), or run `uninstall` with the manifest in place, which puts them back itself.
 
 ### New servers after installing
 
 Install also adds two Claude Code hooks to `~/.claude/settings.json` (backed up first; your own hooks and other aimux hooks are kept), so new servers do not quietly stay direct:
 
-- **When a session adds a server.** After a Bash call that runs `claude mcp add`, `claude mcp add-json` or `claude mcp add-from-claude-desktop` and succeeds, aimux moves the stdio servers still direct behind the proxy, as `install` does, and the session shows: `foo moved behind the aimux proxy (tools unchanged; it starts on first use). Open sessions keep their direct copy until they restart.` If the move fails, nothing changes and the message names the server that failed and why (`--skip <name>` keeps one direct). A server added for one project only (`claude mcp add` without `--scope user`, or a repo's `.mcp.json`) is not moved, because the proxy shares user-scope servers; the message says how to re-add it at user scope. The add is recognised as a command of its own, also after `NAME=value`, `env`, `command`, `exec`, `nohup` or `time` and across a line continuation, but not inside quotes, a comment or a heredoc body. A project-scope explanation looks at the session's folder, not a `cd` earlier in the same command line; anything the hook misses is named at the next session start.
-- **When a session starts.** aimux reads `~/.claude.json` and its install record (no server is started) and, only when some stdio servers are still direct, shows one line: `2 MCP servers are not behind the aimux proxy: foo, bar. Run aimux mcp proxy install.` This catches servers added in a terminal, by hand or by a script, where no session hook runs. When a moved server's entry has drifted back to its direct command, the same line says so: `Running direct again instead of through the aimux proxy: foo; to fix it, ...` with the fix from [Drift](#drift). Servers defined only for the current project (which the proxy cannot share) are named to Claude, not in your line: `Project-only MCP servers here (not shared by the aimux proxy): baz.`
+- **When a session adds a server.** After a Bash call that runs `claude mcp add`, `claude mcp add-json` or `claude mcp add-from-claude-desktop` and succeeds, aimux moves the servers still direct behind the proxy (stdio, and HTTP servers that need no OAuth), as `install` does (and names any HTTP server it left direct, with the reason), and the session shows: `foo moved behind the aimux proxy (tools unchanged; it starts on first use). Open sessions keep their direct copy until they restart.` If the move fails, nothing changes and the message names the server that failed and why (`--skip <name>` keeps one direct). A server added for one project only (`claude mcp add` without `--scope user`, or a repo's `.mcp.json`) is not moved, because the proxy shares user-scope servers; the message says how to re-add it at user scope. The add is recognised as a command of its own, also after `NAME=value`, `env`, `command`, `exec`, `nohup` or `time` and across a line continuation, but not inside quotes, a comment or a heredoc body. A project-scope explanation looks at the session's folder, not a `cd` earlier in the same command line; anything the hook misses is named at the next session start.
+- **When a session starts.** aimux reads `~/.claude.json` and its install record (no server is started) and, only when some stdio or movable HTTP servers are still direct, shows one line (servers that need OAuth are not named): `2 MCP servers are not behind the aimux proxy: foo, bar. Run aimux mcp proxy install.` This catches servers added in a terminal, by hand or by a script, where no session hook runs. When a moved server's entry has drifted back to its direct command, the same line says so: `Running direct again instead of through the aimux proxy: foo; to fix it, ...` with the fix from [Drift](#drift). Servers defined only for the current project (which the proxy cannot share) are named to Claude, not in your line: `Project-only MCP servers here (not shared by the aimux proxy): baz.`
 
 A hook never fails a tool call or a session start. `aimux mcp proxy status` shows whether the hooks are on, and `uninstall` removes them (and nothing else in your hooks). They run alongside hookify or any other hooks you have: hookify rules can warn about or block a command, these move servers and report.
 
-A stdio server added to `~/.claude.json` after install runs directly until it is moved. To move it by hand:
+A stdio or HTTP server added to `~/.claude.json` after install runs directly until it is moved. To move it by hand:
 
 ```bash
 aimux mcp proxy install
 ```
 
-Running `install` again moves only the stdio servers not yet moved and not kept direct with `--skip` (same refresh, daemon prepare and probe, then one atomic edit of just those entries) and adds them to the manifest. The daemon reloads in place, so open sessions keep their connections. Servers already moved are left alone. It also tidies up: a moved server whose entry you removed from `~/.claude.json` (for example with `claude mcp remove <name>`) is taken off the proxy (its saved definition and manifest entry go, and the daemon reloads in place). With no new servers to move, install still does that, sets `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` in `~/.claude/settings.json` if it is not there yet (step 5 above), adds the two server hooks if they are missing (step 6), and changes nothing else.
+Running `install` again moves only the stdio and HTTP servers not yet moved and not kept direct (by `--skip`, or because they need OAuth or are down) (same refresh, daemon prepare and probe, then one atomic edit of just those entries) and adds them to the manifest. The daemon reloads in place, so open sessions keep their connections. Servers already moved are left alone. It also tidies up: a moved server whose entry you removed from `~/.claude.json` (for example with `claude mcp remove <name>`) is taken off the proxy (its saved definition and manifest entry go, and the daemon reloads in place). With no new servers to move, install still does that, sets `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` in `~/.claude/settings.json` if it is not there yet (step 5 above), adds the two server hooks if they are missing (step 6), and changes nothing else.
 
 ### Changing a moved server
 
@@ -114,7 +114,7 @@ The fallback: `uninstall`, edit `~/.claude.json`, `install`. `edit` changes stdi
 aimux mcp proxy status
 ```
 
-`status` says which servers `install` moved, any whose entry drifted from its proxy URL (a running session saved a stale copy, or you edited it), stdio servers not behind the proxy yet (run `aimux mcp proxy install`), and whether an upgrade restart is pending. Then it reads the running proxy's `/status` on `127.0.0.1`. Not running is reported, not an error.
+`status` says which servers `install` moved, any whose entry drifted from its proxy URL (a running session saved a stale copy, or you edited it), stdio and HTTP servers not behind the proxy yet (run `aimux mcp proxy install`), the HTTP servers kept direct with their reason, and whether an upgrade restart is pending. Then it reads the running proxy's `/status` on `127.0.0.1`. Not running is reported, not an error.
 
 Drift: a moved server's entry is no longer its proxy URL. To fix it:
 
@@ -123,9 +123,30 @@ aimux mcp proxy uninstall
 aimux mcp proxy install
 ```
 
+### HTTP servers and the Keychain
+
+`install` moves an HTTP (Streamable HTTP) server when it needs no OAuth: no auth at all, or a static `headers` map. Before moving, it sends each such server one MCP `initialize` request (5 seconds each, in parallel):
+
+| What it finds | What install does |
+|---|---|
+| The server answers | Lists its tools and moves it; one that answers but cannot list its tools fails install by name, as a stdio server does (fix it or `--skip` it) |
+| `401` with a `WWW-Authenticate` challenge, no headers | Keeps it direct: `kept direct: <name>: needs OAuth (later)` |
+| `401` with a challenge although it has headers | Keeps it direct: `the server refused its headers (401)` |
+| Refused, DNS failure, `502`, `503` or `504`, or no answer in 5 seconds | Keeps it direct for this run (`not reachable now; run install again when it is up`) and tries again next time |
+
+An entry with an `oauth` field, a `headersHelper`, `type: "sse"`, a header value that is not a string, or a `${VAR}` that is unset in your shell stays direct with that reason. A server with headers moves only on macOS, and only when its header values fit one Keychain item (about 1.9 KB in all; a longer one stays direct with `header values too long for the Keychain`).
+
+`aimux mcp proxy status` lists the servers kept direct by reason (`kept direct: needs OAuth (later): granola, ...`) from your config and what the last install recorded; it never contacts the servers. A movable HTTP server not moved yet is listed with the stdio ones under not behind the proxy, and the session-start hook names it; OAuth servers are not named there.
+
+A moved HTTP server's entry becomes the same proxy entry a stdio server gets, so tool names and permission rules do not change. Its header values go into the Keychain item `aimux-mcp-proxy/<server>` (account `aimux`; the value goes to `security` on stdin, never on a command line). `${VAR}` and `${VAR:-default}` in the URL and header values are resolved in your shell when you install; the item also keeps the text as written (`Bearer ${TOKEN}`), so `uninstall` puts the entry back byte for byte. To change a header value, uninstall, change `~/.claude.json` and install again.
+
+The values are never written anywhere else aimux keeps: `~/.aimux/mcp-servers.json` holds the URL and the header names, the manifest holds each original entry with `"[in Keychain]"` in place of each value, and the backup install writes of `~/.claude.json` has the same placeholder. Older backups in `~/.aimux/backups` from before the move still hold the values; install names them once (`note: ... still hold header values for <names>; delete them with: rm ...`).
+
+`uninstall` reads each item before it changes anything. If an item cannot be read (a locked Keychain), it stops with nothing changed and names the item. It deletes the item of each server it restores; a server whose entry you changed since install keeps its item, and uninstall prints the `security delete-generic-password` command to remove it.
+
 ### Skip servers
 
-Leave specific servers as direct entries:
+Leave specific servers as direct entries (stdio or HTTP, OAuth servers included, so they stay direct once the proxy can sign in):
 
 ```bash
 aimux mcp proxy install --skip slack --skip github
@@ -231,7 +252,7 @@ The same data is at `GET http://127.0.0.1:7381/status` (and `POST /status/probe?
 | `--probe` | `status` | off | Start each configured server once and list its tools first |
 | `--timeout` | `status` | `1m` | How long `--probe` may take |
 | `--dry-run` | `install` | off | Print what would change (names only) and exit; servers missing from the catalog are started once to list their tools into a temporary catalog |
-| `--skip` | `install` | none | Stdio servers to leave as direct entries (recorded: later runs keep them direct) |
+| `--skip` | `install` | none | Servers (stdio or HTTP) to leave as direct entries (recorded: later runs keep them direct) |
 | `--unskip` | `install` | none | Servers an earlier `--skip` kept direct, to move this time |
 
 ## Security
