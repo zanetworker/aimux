@@ -337,12 +337,12 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 		writeError(w, http.StatusNotFound, "not_supported", errors.New("starting profile sessions is not available"))
 		return
 	}
-	if req.Prior == nil { // absent: aimux picks it; an explicit [] stays empty
-		req.Prior = a.pagePrior(r.Context(), client, m.Name, req)
-	}
 	done, ok := a.reserveTurn(w, client)
 	if !ok {
 		return
+	}
+	if req.Prior == nil { // absent: aimux picks it; an explicit [] stays empty
+		req.Prior = a.pagePrior(r.Context(), client, m.Name, req)
 	}
 	id, err := a.profileSession(r.Context(), client, m, req)
 	if err != nil {

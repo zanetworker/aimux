@@ -214,7 +214,7 @@ func (e *PageEngine) bind(ctx context.Context) (string, error) {
 
 // Ask answers r in the page's session, binding a new one when r has none.
 // The page text goes only to a newly bound session; follow-ups send the
-// recap and question. A follow-up whose session can no longer be resumed
+// question. A follow-up whose session can no longer be resumed
 // (and produced no output) is answered in a new session with the page.
 func (e *PageEngine) Ask(ctx context.Context, r AskRequest, emit func(LaneEvent)) (string, error) {
 	model := r.Model
@@ -298,7 +298,7 @@ const maxHeaderRunes = 300
 // Prompt is the text sent for r: the untrusted-content framing, then (when r
 // has page text) the title, URL and page inside a block whose delimiter is
 // random per prompt, so no page text can close it, then (when r.Image) the
-// attached image's framing, then the recap, then the question.
+// attached image's framing, then the earlier questions, then the question.
 func Prompt(r AskRequest) string {
 	var b strings.Builder
 	if r.Page == "" {
@@ -313,11 +313,6 @@ func Prompt(r AskRequest) string {
 	if r.Image {
 		b.WriteString(imageFraming)
 	}
-	if r.Recap != "" {
-		b.WriteString(recapHeading)
-		b.WriteString(r.Recap)
-		b.WriteString("\n\n")
-	}
 	b.WriteString(priorBlock(r.Prior, r.Question))
 	b.WriteString(diagramHint)
 	b.WriteString(questionMarker)
@@ -326,7 +321,7 @@ func Prompt(r AskRequest) string {
 }
 
 // priorHeading opens the earlier-questions block of a prompt.
-const priorHeading = "Earlier questions in this conversation (asked in another mode; their answers are not shown):"
+const priorHeading = "Earlier questions on this page (their answers are not shown here):"
 
 // priorBlock lists the user's earlier questions, one per line, inside a
 // block with its own random tag (earlier-xxxxxxxx) under the same untrusted
@@ -488,8 +483,6 @@ const (
 	workPromptPreamble    = "You answer questions for the owner using read-only lookups in their wiki, Jira, Slack, Gmail and Drive through the MCP tools. You cannot change anything. Be concise and cite what you found.\n\n"
 	sandboxPromptPreamble = "Answer the question below.\n\n"
 	questionMarker        = "Question: "
-	// recapHeading opens the page prompt's recap of the other lane.
-	recapHeading = "Earlier, in the other lane:\n"
 	// imageFraming precedes the question (and any earlier-questions block)
 	// when the user attached an image: it is screen content, as untrusted
 	// as page text.
@@ -598,8 +591,8 @@ func enginePrompt(user string) bool {
 // history stores it (the Claude parser keeps only non-blank trimmed lines).
 // The framing counts only where the builder puts it: after the page block
 // (skipped by its random tag, which page text cannot close) and before any
-// recap, earlier questions, diagram hint and the question, so page text, a
-// recap or a question quoting it does not mark the turn. The image itself
+// earlier questions, diagram hint and the question, so page text or a
+// question quoting it does not mark the turn. The image itself
 // is never in the prompt.
 func ImageOf(user string) bool {
 	var lines []string
@@ -615,7 +608,7 @@ func ImageOf(user string) bool {
 	if !strings.HasPrefix(head, strings.TrimSpace(pagePromptPreamble)) && !strings.HasPrefix(head, strings.TrimSpace(workPromptPreamble)) && !strings.HasPrefix(head, strings.TrimSpace(sandboxPromptPreamble)) {
 		return false
 	}
-	framing, recap, hint := strings.TrimSpace(imageFraming), strings.TrimSpace(recapHeading), strings.TrimSpace(diagramHint)
+	framing, hint := strings.TrimSpace(imageFraming), strings.TrimSpace(diagramHint)
 	for i := 0; i < len(lines); i++ {
 		l := lines[i]
 		if m := openTagRE.FindStringSubmatch(l); m != nil && m[0] == l && i > 0 && strings.Contains(lines[i-1], "block tagged "+m[1]) {
@@ -629,7 +622,7 @@ func ImageOf(user string) bool {
 		switch {
 		case l == framing:
 			return true
-		case l == recap, l == hint, strings.HasPrefix(l, questionMarker), openEarlierRE.MatchString(l):
+		case l == hint, strings.HasPrefix(l, questionMarker), openEarlierRE.MatchString(l):
 			return false
 		}
 	}

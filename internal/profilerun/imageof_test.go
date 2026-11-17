@@ -19,7 +19,6 @@ func TestImageOf(t *testing.T) {
 		{"sandbox prompt without image", sandboxTurnPrompt(first, nil, false, "q"), false},
 		{"framing in the question", Prompt(AskRequest{Question: imageFraming + "q"}), false},
 		{"framing in the page text", Prompt(AskRequest{Page: imageFraming, Question: "q"}), false},
-		{"framing in the recap", Prompt(AskRequest{Recap: imageFraming, Question: "q"}), false},
 		{"framing in a sandbox page", sandboxTurnPrompt(&AskRequest{Page: imageFraming}, nil, false, "q"), false},
 		{"plain text with framing", imageFraming + "q", false},
 		{"empty", "", false},

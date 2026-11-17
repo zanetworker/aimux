@@ -6,7 +6,6 @@ type AskRequest struct {
 	Title    string
 	Page     string
 	Question string
-	Recap    string
 	// Prior is the user's earlier questions on this page from another
 	// mode, oldest first (no answers); see priorBlock.
 	Prior []string

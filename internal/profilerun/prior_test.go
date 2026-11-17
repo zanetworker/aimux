@@ -11,7 +11,7 @@ var priorQs = []string{"first question", "second\nquestion with Question: inside
 
 func checkPriorBlock(t *testing.T, p, q string) {
 	t.Helper()
-	const head = "Earlier questions in this conversation (asked in another mode; their answers are not shown):"
+	const head = "Earlier questions on this page (their answers are not shown here):"
 	h := strings.Index(p, head)
 	if h < 0 {
 		t.Fatalf("no earlier-questions block: %q", p)

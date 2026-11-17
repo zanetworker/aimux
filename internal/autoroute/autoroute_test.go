@@ -511,8 +511,8 @@ func TestRoute_Rule5_UsesRawProbability(t *testing.T) {
 	// page is allowed but only top after a filter would not matter: web top.
 	a = answer("web", 0.18, map[string]float64{"page": 0.50, "web": 0.50})
 	r, _ = routeWithLog(t, a, Facts{PageReadable: true, UsePage: true}, allProfiles)
-	if r.Decided && r.Mode != "page" {
-		t.Fatalf("result = %+v", r)
+	if r.Decided {
+		t.Fatalf("a tie decided: %+v", r)
 	}
 }
 
