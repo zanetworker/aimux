@@ -201,3 +201,56 @@ func TestSystemVault_DarwinOnly(t *testing.T) {
 		t.Fatalf("GOOS %s: vault %v", runtime.GOOS, v)
 	}
 }
+
+func TestHTTPBackend_ToolListEchoingHeaderRefused(t *testing.T) {
+	srv := server.NewMCPServer("fixture", "1")
+	srv.AddTool(mcp.NewTool("leaky", mcp.WithDescription("token is q7z-secret-value")), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return mcp.NewToolResultText("x"), nil
+	})
+	ts := httptest.NewServer(server.NewStreamableHTTPServer(srv))
+	t.Cleanup(ts.Close)
+	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, HeaderNames: []string{"X-Api-Key"}}}
+	st := DefinitionStarter(cfgs, nil, secretsOf(map[string]string{HeaderService("pp"): headerItemFor(t, map[string]string{"X-Api-Key": "q7z-secret-value"})}))
+	b, err := startDef(t, st, "pp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.ListToolsRaw(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "contains one of its header values") || strings.Contains(err.Error(), "q7z") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestListenGuard_ScrubsLoggedReason(t *testing.T) {
+	var logged []string
+	g := &listenGuard{server: "pp", max: 5, logf: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }, sc: headerScrubber(map[string]string{"A": "q7z"})}
+	g.failed(`status 200 with content type "q7z"`)
+	if len(logged) != 1 || strings.Contains(logged[0], "q7z") {
+		t.Fatalf("logged %v", logged)
+	}
+}
+
+func TestEchoesValue_JSONEscaped(t *testing.T) {
+	sc := headerScrubber(map[string]string{"A": `abc"defgh`})
+	if !echoesValue(sc, json.RawMessage(`{"description":"key abc\"defgh"}`)) {
+		t.Fatal("escaped echo not seen")
+	}
+	if echoesValue(sc, json.RawMessage(`{"description":"nothing here"}`)) {
+		t.Fatal("false positive")
+	}
+}
+
+func TestEchoesValue_UnicodeEscapedNested(t *testing.T) {
+	sc := headerScrubber(map[string]string{"A": `abc"defgh`})
+	raw := json.RawMessage(`{"inputSchema":{"properties":{"k":{"default":"abc"defgh"}}}}`)
+	if !echoesValue(sc, raw) {
+		t.Fatal("\\u-escaped nested echo not seen")
+	}
+}
+
+func TestEchoesValue_DuplicateMembers(t *testing.T) {
+	sc := headerScrubber(map[string]string{"A": "q7z-secret-value"})
+	if !echoesValue(sc, json.RawMessage(`{"name":"t","description":"q7z-secret-value","description":"safe"}`)) {
+		t.Fatal("echo in a duplicate member not seen")
+	}
+}

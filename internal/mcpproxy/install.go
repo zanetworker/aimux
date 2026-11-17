@@ -483,12 +483,8 @@ func (i Installer) Install(skip []string) (err error) {
 	if err := i.probeMoved(p.Move); err != nil {
 		return err
 	}
-	backup, err := jsonedit.Backup(i.ClaudeConfig, i.BackupDir, backupsKept)
+	backup, err := i.backupRedacted(in.http)
 	if err != nil {
-		return err
-	}
-	if err := i.redactBackup(backup, in.http); err != nil {
-		_ = os.Remove(backup) // it holds header values the run moves to the Keychain
 		return err
 	}
 

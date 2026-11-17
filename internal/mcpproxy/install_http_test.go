@@ -674,3 +674,25 @@ func TestInstall_RemovedDuringInstallDeletesItsItem(t *testing.T) {
 		t.Fatal("item of a server removed during install kept")
 	}
 }
+
+func TestInstall_IdenticalHTTPEntriesBothRedactedInBackup(t *testing.T) {
+	entry := `{"type": "http", "url": "https://twin.example/mcp", "headers": {"Authorization": "Bearer ` + sentinelValue + `"}}`
+	fx := newHTTPFX(t, `{"mcpServers": {"a": `+entry+`, "b": `+entry+`}}`)
+	must(t, fx.in.Install(nil))
+	b, _ := os.ReadFile(filesUnder(t, fx.backups)[0]) // #nosec G304 -- the test's temp backup
+	if strings.Contains(string(b), sentinelValue) || strings.Count(string(b), headerPlaceholder) != 2 {
+		t.Fatalf("backup %s", b)
+	}
+}
+
+func TestRedactConfig_DuplicatesRefused(t *testing.T) {
+	e := map[string]HTTPEntry{"pp": {Literals: map[string]string{"A": `"x"`}}}
+	for _, cfg := range []string{
+		`{"mcpServers":{"pp":{"headers":{"A":"x"}}},"mcpServers":{"pp":{"headers":{"A":"y"}}}}`,
+		`{"mcpServers":{"pp":{"headers":{"A":"x"}},"pp":{"headers":{"A":"y"}}}}`,
+	} {
+		if _, err := redactConfig([]byte(cfg), e); err == nil {
+			t.Fatalf("accepted %s", cfg)
+		}
+	}
+}

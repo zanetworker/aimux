@@ -1,6 +1,7 @@
 package mcpproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -77,6 +78,9 @@ type listenGuard struct {
 	// which outlives Close, never reads the variables a test restores.
 	max  int
 	logf func(format string, args ...any)
+	// sc hides the backend's header values in what it logs (a server can
+	// echo them, in a Content-Type for example).
+	sc *scrubber
 
 	mu       sync.Mutex
 	failures int
@@ -144,6 +148,9 @@ func (g *listenGuard) failed(why string) {
 	first := !g.logged
 	g.logged = true
 	g.mu.Unlock()
+	if g.sc != nil {
+		why = g.sc.scrub(why)
+	}
 	if first {
 		logf := g.logf
 		if logf == nil {
@@ -212,7 +219,7 @@ func headerScrubber(headers map[string]string) *scrubber {
 
 func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpBackend, error) {
 	sc := headerScrubber(cfg.Headers)
-	b, err := startHTTPRaw(ctx, server, cfg)
+	b, err := startHTTPRaw(ctx, server, cfg, sc)
 	if err != nil {
 		return nil, scrubErr(sc, err)
 	}
@@ -220,7 +227,7 @@ func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpB
 	return b, nil
 }
 
-func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig) (*httpBackend, error) {
+func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig, sc *scrubber) (*httpBackend, error) {
 	// The transport logs through slog.Default; the proxy reports errors itself.
 	ctx, cancel := context.WithTimeout(ctx, httpStartTimeout)
 	defer cancel()
@@ -234,7 +241,7 @@ func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig) (*ht
 	opts := []transport.StreamableHTTPCOption{
 		transport.WithHTTPLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
 		transport.WithContinuousListening(), //nolint:staticcheck // SA1019: needed on the legacy protocol, see above
-		transport.WithHTTPBasicClient(&http.Client{Transport: &listenGuard{server: server, next: http.DefaultTransport, max: listenMaxFailures, logf: listenLog}}),
+		transport.WithHTTPBasicClient(&http.Client{Transport: &listenGuard{server: server, next: http.DefaultTransport, max: listenMaxFailures, logf: listenLog, sc: sc}}),
 	}
 	if len(cfg.Headers) > 0 {
 		opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
@@ -265,7 +272,46 @@ func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig) (*ht
 // ListToolsRaw pages through tools/list and returns each tool's JSON as sent.
 func (b *httpBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, error) {
 	tools, err := b.listToolsRaw(ctx)
-	return tools, scrubErr(b.sc, err)
+	if err != nil {
+		return nil, scrubErr(b.sc, err)
+	}
+	// Tool lists are saved (catalog, pins): one that echoes a header value
+	// is refused rather than stored.
+	if b.sc != nil {
+		for _, t := range tools {
+			if echoesValue(b.sc, t) {
+				return nil, &RequestError{Err: fmt.Errorf("list tools of %s: its tool list contains one of its header values; not stored", b.server)}
+			}
+		}
+	}
+	return tools, nil
+}
+
+// echoesValue reports whether any string token in raw (keys and values,
+// at any depth, decoded, duplicates included, so every escape form and
+// every member counts) holds one of sc's configured values of 8 bytes or
+// more (shorter values would match ordinary words). A tool that does not
+// decode counts as an echo: it cannot be checked.
+func echoesValue(sc *scrubber, raw json.RawMessage) bool {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return false
+		}
+		if err != nil {
+			return true
+		}
+		s, ok := tok.(string)
+		if !ok {
+			continue
+		}
+		for _, val := range sc.values {
+			if len(val) >= 8 && strings.Contains(s, val) {
+				return true
+			}
+		}
+	}
 }
 
 func (b *httpBackend) listToolsRaw(ctx context.Context) ([]json.RawMessage, error) {

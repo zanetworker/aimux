@@ -142,6 +142,8 @@ A moved HTTP server's entry becomes the same proxy entry a stdio server gets, so
 
 The values are never written anywhere else aimux keeps: `~/.aimux/mcp-servers.json` holds the URL and the header names, the manifest holds each original entry with `"[in Keychain]"` in place of each value, and the backup install writes of `~/.claude.json` has the same placeholder. Older backups in `~/.aimux/backups` from before the move still hold the values; install names them once (`note: ... still hold header values for <names>; delete them with: rm ...`).
 
+A server whose tool list echoes one of its header values (8 bytes or more, as written or JSON-escaped) is not stored: listing it fails with `its tool list contains one of its header values; not stored`, so install refuses that server by name (fix it or `--skip` it), because the tool list is saved in the catalog. Logs and errors never carry a header value either.
+
 `uninstall` reads each item before it changes anything. If an item cannot be read (a locked Keychain), it stops with nothing changed and names the item. It deletes the item of each server it restores; a server whose entry you changed since install keeps its item, and uninstall prints the `security delete-generic-password` command to remove it.
 
 ### Skip servers

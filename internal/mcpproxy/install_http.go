@@ -1,6 +1,7 @@
 package mcpproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -138,42 +139,119 @@ func (i Installer) extendedWith(m *Manifest, servers map[string]MovedEntry, skip
 	return out
 }
 
-// redactBackup replaces the header values of the HTTP servers this run
-// moves in the backup install just wrote; the rest of it stays byte for
-// byte. Uninstall never reads backups.
-func (i Installer) redactBackup(path string, http map[string]HTTPEntry) error {
-	var names []string
+// backupRedacted backs up the Claude config with the header values of the
+// HTTP servers this run moves already replaced. The bytes are redacted in
+// memory before anything is written, so no copy with the values is ever
+// left behind, even if install is killed. The rest stays byte for byte.
+// Uninstall never reads backups.
+func (i Installer) backupRedacted(http map[string]HTTPEntry) (string, error) {
+	data, err := os.ReadFile(i.ClaudeConfig) // #nosec G304 -- the owner's Claude config
+	if err != nil {
+		return "", fmt.Errorf("back up %s: %w", i.ClaudeConfig, err)
+	}
+	if data, err = redactConfig(data, http); err != nil {
+		return "", fmt.Errorf("remove header values from the backup of %s: %w", i.ClaudeConfig, err)
+	}
+	dir, err := os.MkdirTemp("", "aimux-backup-*")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	tmp := filepath.Join(dir, filepath.Base(i.ClaudeConfig))
+	if err := os.WriteFile(tmp, data, 0o600); err != nil { // #nosec G703 -- inside our own temp dir
+		return "", err
+	}
+	return jsonedit.Backup(tmp, i.BackupDir, backupsKept)
+}
+
+// redactConfig is the Claude config data with each moved HTTP server's
+// member of the top-level mcpServers object (when it has headers) replaced
+// by its redacted form; every other byte is kept.
+func redactConfig(data []byte, http map[string]HTTPEntry) ([]byte, error) {
+	start, end, err := topMemberSpan(data, "mcpServers")
+	if err != nil {
+		return nil, err
+	}
+	servers := json.RawMessage(data[start:end])
+	if err := memberNamesUnique(servers); err != nil {
+		return nil, err
+	}
+	members, err := objectMembers(servers)
+	if err != nil {
+		return nil, err
+	}
 	for _, n := range sortedKeys(http) {
-		if len(http[n].Literals) > 0 {
-			names = append(names, n)
+		raw, ok := members[n]
+		if len(http[n].Literals) == 0 || !ok {
+			continue
 		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	err := jsonedit.EditKeyVerbatim(path, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
-		members, err := objectMembers(old)
+		red, _, err := redactHeaders(raw)
 		if err != nil {
 			return nil, err
 		}
-		cur := old
-		for _, n := range names {
-			raw, ok := members[n]
-			if !ok {
-				continue
-			}
-			red, _, err := redactHeaders(raw)
-			if err != nil {
-				return nil, err
-			}
-			if cur, err = jsonedit.ReplaceMemberVerbatim(cur, n, red); err != nil {
-				return nil, err
-			}
+		if servers, err = jsonedit.ReplaceMemberVerbatim(servers, n, red); err != nil {
+			return nil, err
 		}
-		return cur, nil
-	})
-	if err != nil {
-		return fmt.Errorf("remove header values from the backup %s: %w", path, err)
+	}
+	out := append(append(append([]byte{}, data[:start]...), servers...), data[end:]...)
+	return out, nil
+}
+
+// topMemberSpan is the byte span of key's value in the top-level object of
+// data.
+func topMemberSpan(data []byte, key string) (int, int, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return 0, 0, fmt.Errorf("not a JSON object")
+	}
+	start, end, found := 0, 0, false
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			return 0, 0, fmt.Errorf("not valid JSON")
+		}
+		after := int(dec.InputOffset())
+		if err := skipValue(dec); err != nil {
+			return 0, 0, err
+		}
+		if k != key {
+			continue
+		}
+		if found {
+			return 0, 0, fmt.Errorf("%s appears twice", key)
+		}
+		found, start, end = true, after, int(dec.InputOffset())
+		for start < end && (data[start] == ' ' || data[start] == '\t' || data[start] == '\n' || data[start] == '\r' || data[start] == ':') {
+			start++
+		}
+	}
+	if !found {
+		return 0, 0, fmt.Errorf("no %s object", key)
+	}
+	return start, end, nil
+}
+
+// memberNamesUnique reports an error when obj names a member twice (the
+// last one would win for a reader, while an edit could touch the first).
+func memberNamesUnique(obj []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(obj))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return fmt.Errorf("mcpServers is not a JSON object")
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("mcpServers is not valid JSON")
+		}
+		name, _ := k.(string)
+		if seen[name] {
+			return fmt.Errorf("mcpServers names %s twice", name)
+		}
+		seen[name] = true
+		if err := skipValue(dec); err != nil {
+			return err
+		}
 	}
 	return nil
 }
