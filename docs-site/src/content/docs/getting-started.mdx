@@ -68,7 +68,7 @@ aimux setup --extension-id <id>   # the id is in chrome://extensions once the Wi
 aimux doctor                      # read-only: what is still wrong, and the fix for each
 ```
 
-`aimux setup` checks the sandbox, tools, router, browser and OpenShell gateway and runs only what is missing: it asks before each step on a terminal, and `--yes` runs them without asking. It ends with one line per concern (`✓`, `!` or `✗`) and a `Next:` line for each problem. Run it again any time; with nothing missing it changes nothing. It never approves a tool unless you answer yes to that tool's diff on a terminal. The [Wingman guide](/guides/wingman/) has the details and [Troubleshooting](/guides/troubleshooting/) lists every `aimux doctor` check.
+`aimux setup` checks the sandbox, tools, router, browser, OpenShell gateway and tool gateway worker and runs only what is missing (it reports a missing worker with `aimux mcp proxy gateway install` but does not install it): it asks before each step on a terminal, and `--yes` runs them without asking. It ends with one line per concern (`✓`, `!` or `✗`) and a `Next:` line for each problem. Run it again any time; with nothing missing it changes nothing. It never approves a tool unless you answer yes to that tool's diff on a terminal. The [Wingman guide](/guides/wingman/) has the details and [Troubleshooting](/guides/troubleshooting/) lists every `aimux doctor` check.
 
 ## Quick Tour
 

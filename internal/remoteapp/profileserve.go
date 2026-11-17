@@ -2,13 +2,10 @@ package remoteapp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +15,6 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/discovery"
-	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/remoteapi"
@@ -26,100 +22,6 @@ import (
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
-
-// lazyGateway is the read-only tool gateway of remote serve: started on the
-// first sandbox turn that needs it (never at startup, so serve does not hold
-// 127.0.0.1:7390 unless profile sessions use it), checking the session
-// tokens the sandbox engine issues. A failed start is retried by the next
-// use; close stops what started.
-type lazyGateway struct {
-	tokens *toolgateway.Tokens
-	start  func(ctx context.Context) (stop func(), err error)
-	// refresh, if set, updates the running gateway (backends that were
-	// down, a newer snapshot); stale, if set, says the gateway serves an
-	// older snapshot than the turns compile with; now is the clock (nil:
-	// time.Now).
-	refresh func(ctx context.Context)
-	stale   func() bool
-	now     func() time.Time
-
-	mu         sync.Mutex
-	ctx        context.Context // ends at close; nil: background
-	cancel     context.CancelFunc
-	stop       func()
-	stopped    bool
-	refreshed  time.Time // last refresh, or the start
-	refreshing bool      // a get is refreshing
-}
-
-// The running gateway is refreshed at most once per gatewayRefreshEvery,
-// each refresh bounded by gatewayRefreshTimeout.
-const (
-	gatewayRefreshEvery   = 60 * time.Second
-	gatewayRefreshTimeout = 15 * time.Second
-)
-
-func (g *lazyGateway) clock() time.Time {
-	if g.now != nil {
-		return g.now()
-	}
-	return time.Now()
-}
-
-// get is the sandbox engine's Gateway: the base URL a sandbox reaches the
-// gateway at and the token table it checks, starting it if needed. A
-// gateway already running is refreshed at once when it is stale (the turns
-// reloaded a newer snapshot), else at most once per gatewayRefreshEvery to
-// retry backends that were down; outside the lock, one get at a time, so
-// only the turn that refreshes waits, and for at most gatewayRefreshTimeout.
-func (g *lazyGateway) get() (string, *toolgateway.Tokens, error) {
-	g.mu.Lock()
-	if g.stopped {
-		g.mu.Unlock()
-		return "", nil, fmt.Errorf("the tool gateway is shut down")
-	}
-	now, refresh := g.clock(), false
-	if g.stop == nil {
-		if g.ctx == nil {
-			g.ctx, g.cancel = context.WithCancel(context.Background())
-		}
-		stop, err := g.start(g.ctx)
-		if err != nil {
-			g.mu.Unlock()
-			return "", nil, err
-		}
-		g.stop, g.refreshed = stop, now // a fresh start read every backend and the pins
-	} else if g.refresh != nil && !g.refreshing && (now.Sub(g.refreshed) >= gatewayRefreshEvery || (g.stale != nil && g.stale())) {
-		g.refreshed, g.refreshing, refresh = now, true, true
-	}
-	ctx := g.ctx
-	g.mu.Unlock()
-	if refresh {
-		rctx, cancel := context.WithTimeout(ctx, gatewayRefreshTimeout)
-		g.refresh(rctx) // logs its own failures
-		cancel()
-		g.mu.Lock()
-		g.refreshing = false
-		g.mu.Unlock()
-	}
-	return toolgateway.ReadonlyURL, g.tokens, nil
-}
-
-// close stops the gateway if it started; later gets fail.
-func (g *lazyGateway) close() {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.stopped {
-		return
-	}
-	g.stopped = true
-	if g.stop != nil {
-		g.stop()
-	}
-	if g.cancel != nil {
-		g.cancel()
-	}
-}
 
 // profileWiring is remote serve's profile sessions: the catalog the API
 // serves, the store, the engines by Manifest.Runs and the router the
@@ -220,15 +122,10 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	page.Log = logger
 	page.SessionModel = func(session string) string { return sessionModel(p.store, dir, session) }
 
-	admin, err := randomToken()
-	if err != nil {
-		p.pageMgr.Close()
-		return nil, fmt.Errorf("make the tool gateway's admin token: %w", err)
-	}
 	gwLog := log.New(errOut, "tool gateway: ", log.LstdFlags)
 	migrateToolSources(home, gwLog.Printf)
-	tg := newToolGateway(home, admin, gwLog, net.Listen)
-	gw, snaps := tg.gw, tg.snaps
+	tg := newToolGateway(home, gwLog)
+	snaps := tg.snaps
 	p.tools = tg.tools
 
 	launcher := &sandboxlaunch.Launcher{Backend: sandboxlaunch.NewCLIBackend(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
@@ -239,49 +136,74 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 		}
 		return c, err
 	}
-	p.sandbox = profilerun.NewSandboxEngine(launcher, compile, gw.get)
+	p.sandbox = profilerun.NewSandboxEngine(launcher, compile, tg.gateway)
 	p.sandbox.ArchiveDir = filepath.Join(home, ".aimux", "archive")
 	p.sandbox.OnStarted = p.store.MarkStarted
+	p.sandbox.Notice = tg.notice(dir)
 	p.sandbox.Log = logger
 	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox}
 	return func() {
-		gw.close()
 		p.pageMgr.Close()
 	}, nil
 }
 
-// toolGatewayParts is remote serve's read-only tool gateway as the profile
-// wiring uses it: the lazily started gateway, the turns' snapshot reloads,
-// and GET /v1/tools' view.
+// toolGatewayParts is the tool gateway as remote serve's profile wiring
+// uses it: the turns' snapshot reloads, the gateway worker's lease table
+// (over its control socket) and GET /v1/tools' view.
 type toolGatewayParts struct {
-	gw    *lazyGateway
-	snaps *toolSnapshots
-	tools func() remoteapi.ToolsView
-	ro    *toolgateway.ReadonlyServer // the server itself (tests read its wiring)
+	snaps   *toolSnapshots
+	tools   func() remoteapi.ToolsView
+	gateway func() (string, profilerun.Leases, error)
+	worker  toolgateway.ControlClient
 }
 
-// newToolGateway builds the gateway over home's registry and pins, served
-// with the real MCP builders; listen is how it listens (net.Listen).
-func newToolGateway(home, admin string, gwLog *log.Logger, listen func(network, addr string) (net.Listener, error)) toolGatewayParts {
-	// One store, reloaded only by the turns (toolSnapshots), feeds both the
-	// compiler and the gateway, so a turn's grant and the pins served
-	// under its token come from one snapshot.
+// observedTimeout bounds GET /v1/tools' read of the worker's listings.
+const observedTimeout = 2 * time.Second
+
+// newToolGateway is remote serve's side of the gateway: it compiles turns
+// against its own reload of home's registry and pins, puts each turn's
+// lease on the gateway worker (aimux mcp proxy gateway serve) and never
+// serves tools itself, so it never opens the gateway's port.
+func newToolGateway(home string, gwLog *log.Logger) toolGatewayParts {
 	store := toolgateway.NewStore(home)
 	snaps := &toolSnapshots{store: store, files: snapshotFiles(home), log: gwLog.Printf}
-	tokens := &toolgateway.Tokens{}
-	ro := &toolgateway.ReadonlyServer{Store: store, Token: admin, Tokens: tokens, Log: gwLog,
-		Listen: listen, Build: mcpproxy.BuildReadonly, Serve: mcpproxy.Serve, Rebuild: mcpproxy.BuildReadonlyBackends,
-		Runner: sandboxlaunch.RunnerTools(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
-	tokens.Current = ro.Applied
-	gw := &lazyGateway{tokens: tokens, start: ro.Start, refresh: ro.Refresh, stale: ro.Stale}
+	worker := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}
 	// GET /v1/tools sees the snapshot the next turn compiles against and
-	// what the gateway already listed; it never starts the gateway.
+	// what the worker last listed; with no worker every source is unknown.
 	tools := func() remoteapi.ToolsView {
 		snap := snaps.turn()
-		reg, obs := snap.Registry(), ro.Observed()
+		ctx, cancel := context.WithTimeout(context.Background(), observedTimeout)
+		defer cancel()
+		obs, err := worker.Observed(ctx)
+		if err != nil {
+			obs = nil
+		}
+		reg := snap.Registry()
 		return remoteapi.ToolsView{Snapshot: snap, Live: toolgateway.LiveFor(reg, obs), RelistFailed: toolgateway.RelistFailedFor(reg, obs)}
 	}
-	return toolGatewayParts{gw: gw, snaps: snaps, tools: tools, ro: ro}
+	gateway := func() (string, profilerun.Leases, error) { return toolgateway.ReadonlyURL, worker, nil }
+	return toolGatewayParts{snaps: snaps, tools: tools, gateway: gateway, worker: worker}
+}
+
+// notice is the sandbox engine's Notice over the profiles in dir: the tools
+// of the turn's profile's sets the worker lists but that need review, in
+// one line, or "" (also when the worker cannot be asked).
+func (tg toolGatewayParts) notice(dir string) func(c profile.Compiled) string {
+	return func(c profile.Compiled) string {
+		user, _ := profile.LoadDir(dir) // a bad file is skipped, as everywhere profiles resolve
+		m, err := profile.Resolve(c.Profile, user)
+		if err != nil || len(m.Tools) == 0 {
+			return ""
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), observedTimeout)
+		defer cancel()
+		obs, err := tg.worker.Observed(ctx)
+		if err != nil {
+			return ""
+		}
+		reg := c.Snapshot.Registry()
+		return toolgateway.HeldBackNotice(toolgateway.HeldBack(reg, toolgateway.PinsOf(c.Snapshot), toolgateway.LiveFor(reg, obs), m.Tools))
+	}
 }
 
 // migrateToolSources carries readonly.json into tool-sources.yaml once, as
@@ -321,8 +243,8 @@ type toolSnapshots struct {
 }
 
 // snapshotReloadEvery is the backstop reload interval when no file looks
-// changed: the gateway's refresh rate.
-const snapshotReloadEvery = gatewayRefreshEvery
+// changed (the gateway worker reloads at the same rate).
+const snapshotReloadEvery = 60 * time.Second
 
 // snapshotFiles is what the store reads under home: the registry, the
 // readonly.json it migrates from, and the pins.
@@ -510,13 +432,4 @@ func (p *profileWiring) reap() {
 	if p.pageMgr != nil {
 		p.pageMgr.Reap()
 	}
-}
-
-// randomToken is 32 random bytes in hex.
-func randomToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }

@@ -470,3 +470,22 @@ func TestListTools_Authorship(t *testing.T) {
 		t.Errorf("omitted set authorship = %q, want none", got)
 	}
 }
+
+// A tool the set's source offers that no set lists is reported on the set
+// as newOnServer (never granted); a set without one has no field.
+func TestToolsAPI_NewOnServer(t *testing.T) {
+	r, _ := toolsRig(t, nil)
+	live := r.api.Tools().Live
+	live["jira"].Tools["fresh"] = toolDef("fresh", "string")
+	l, raw := getTools(t, r, "cli")
+	jira := setOf(t, l, "jira:readonly")
+	if !reflect.DeepEqual(jira.NewOnServer, []string{"fresh"}) {
+		t.Fatalf("jira newOnServer %v, want [fresh]", jira.NewOnServer)
+	}
+	if _, granted := toolStates(jira)["fresh"]; granted {
+		t.Fatal("a new tool appears among the set's tools")
+	}
+	if strings.Count(raw, `"newOnServer"`) != 1 {
+		t.Fatalf("newOnServer on sets without new tools:\n%s", raw)
+	}
+}

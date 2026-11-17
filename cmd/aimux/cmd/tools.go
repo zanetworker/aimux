@@ -77,7 +77,7 @@ func newToolsCmdWith(env toolsEnv) *cobra.Command {
 	}
 	status := &cobra.Command{
 		Use:   "status",
-		Short: "Show each tool's review state (active, unpinned, changed, unavailable, source_changed, not_in_registry); read-only",
+		Short: "Show each tool's review state (active, unpinned, changed, unavailable, source_changed, not_in_registry, new_on_server); read-only",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return toolsStatus(c.Context(), env, c.OutOrStdout(), c.ErrOrStderr())
@@ -92,14 +92,21 @@ func newToolsCmdWith(env toolsEnv) *cobra.Command {
 		},
 	}
 	var all bool
-	var expect string
+	var expect, addToSet string
 	approve := &cobra.Command{
 		Use:   "approve <set|set/tool>...",
 		Short: "Pin the live definitions of the named tools (or --all) as reviewed",
 		Long: "Pins the definitions the sources list now, and prints each one pinned with its short hash. A definition\n" +
 			"can change between aimux tools diff and approve: pass --expect <hash> (the live hash diff printed) with one\n" +
-			"set/tool to refuse when the live definition is another one.",
+			"set/tool to refuse when the live definition is another one. A tool a source offers that no set lists\n" +
+			"(status new_on_server) is added and pinned in one step with: approve <source>/<tool> --add-to-set <set>.",
 		RunE: func(c *cobra.Command, args []string) error {
+			if addToSet != "" {
+				if all || len(args) != 1 || !strings.Contains(args[0], "/") || expect != "" {
+					return errors.New("--add-to-set takes one <source>/<tool>, without --all or --expect")
+				}
+				return toolsApproveIntoSet(c.Context(), env, args[0], addToSet, c.OutOrStdout(), c.ErrOrStderr())
+			}
 			if all == (len(args) > 0) {
 				return errors.New("name the sets or set/tool pairs to approve, or pass --all (not both)")
 			}
@@ -110,6 +117,7 @@ func newToolsCmdWith(env toolsEnv) *cobra.Command {
 		},
 	}
 	approve.Flags().BoolVar(&all, "all", false, "Approve every tool of every set")
+	approve.Flags().StringVar(&addToSet, "add-to-set", "", "Add <source>/<tool>, a tool the source offers that no set lists, to this set, then pin it (shows its definition first)")
 	approve.Flags().StringVar(&expect, "expect", "", "Refuse unless the live definition's hash starts with this one (12 or more hex digits, as diff prints it)")
 	cmd.AddCommand(status, diff, approve, newToolsAddCmd(env), newToolsRemoveCmd(env))
 	return cmd
@@ -856,4 +864,74 @@ func toolsRemove(env toolsEnv, name string, yes bool, out, errOut io.Writer) err
 			kept, toolgateway.StatusNotInRegistry, name)
 	}
 	return nil
+}
+
+// toolsApproveIntoSet adds target (<source>/<tool>), a tool the source
+// offers live, to set in tool-sources.yaml and pins it, after printing its
+// definition. It warns when the tool does not declare readOnlyHint: the
+// set's name is a promise the server does not make.
+func toolsApproveIntoSet(ctx context.Context, env toolsEnv, target, set string, out, errOut io.Writer) error {
+	src, tool, _ := strings.Cut(target, "/")
+	env.ensureRunner = true
+	rv, err := loadToolsReview(ctx, env)
+	if err != nil {
+		return err
+	}
+	if rv.note != "" {
+		return errors.New(rv.note + "; run aimux setup first")
+	}
+	s, ok := rv.reg.Sets[set]
+	switch {
+	case !ok:
+		return fmt.Errorf("no set %s in %s", set, toolreg.DefaultPath(env.Home))
+	case s.Source != src:
+		return fmt.Errorf("set %s lists tools of %s, not %s", set, s.Source, src)
+	}
+	raw, ok := rv.live[src].Tools[tool]
+	if !ok {
+		why := ""
+		if err := rv.live[src].Err; err != nil {
+			why = " (" + err.Error() + ")"
+		}
+		return fmt.Errorf("%s does not offer %s now%s; see aimux tools status", src, tool, why)
+	}
+	def, err := toolgateway.Canonical(raw)
+	if err != nil {
+		return err
+	}
+	// The definition shown is the one pinned: approve below refuses another.
+	hash, err := toolgateway.PinTool(raw)
+	if err != nil {
+		return err
+	}
+	preview := out
+	if jsonOutput {
+		preview = errOut // stdout carries only the JSON document
+	}
+	_, _ = fmt.Fprintf(preview, "%s/%s as %s offers it (%s):\n%s\n", src, tool, src, toolgateway.ShortHash(hash), def)
+	var ann struct {
+		Annotations struct {
+			ReadOnlyHint *bool `json:"readOnlyHint"`
+		} `json:"annotations"`
+	}
+	if json.Unmarshal(raw, &ann) != nil || ann.Annotations.ReadOnlyHint == nil || !*ann.Annotations.ReadOnlyHint {
+		_, _ = fmt.Fprintf(errOut, "Warning: %s does not mark this tool read-only (no readOnlyHint); the set is named %s\n", src, set)
+	}
+	// The set change stands only if the pin does: when approve fails before
+	// pinning, undo puts tool-sources.yaml back, unless it changed since.
+	undo, err := toolreg.AddToSet(toolreg.DefaultPath(env.Home), set, tool)
+	if err != nil {
+		return err
+	}
+	aerr := toolsApprove(ctx, env, []string{set + "/" + tool}, false, hash, out, errOut)
+	if aerr == nil {
+		return nil
+	}
+	if pins, perr := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).LoadFile(); perr == nil && pins[src][tool].Hash == hash {
+		return aerr // pinned: the set keeps the tool
+	}
+	if err := undo(); err != nil {
+		return fmt.Errorf("%w; tool-sources.yaml was not put back (%v): remove %s from %s by hand", aerr, err, tool, set)
+	}
+	return aerr
 }

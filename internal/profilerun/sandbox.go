@@ -37,7 +37,21 @@ const archiveTimeout = time.Minute
 type SandboxEngine struct {
 	L          *sandboxlaunch.Launcher
 	Compile    func(profile string) (profile.Compiled, error)
-	Gateway    func() (baseURL string, tokens *toolgateway.Tokens, err error)
+	Gateway    func() (baseURL string, leases Leases, err error)
+	// RenewEvery is how often a running turn renews its lease (0:
+	// toolgateway.LeaseRenewEvery).
+	RenewEvery time.Duration
+	// ProbeEvery is how often a running turn checks the gateway worker's
+	// status, to put its lease again soon after the worker restarted (0:
+	// leaseProbeEvery).
+	ProbeEvery time.Duration
+	// ProbeRetryEvery is how soon the status is checked again after a
+	// failed renewal or status check, while the worker is coming back (0:
+	// leaseProbeRetry).
+	ProbeRetryEvery time.Duration
+	// Notice, if set, is one line a turn shows before claude answers (the
+	// profile's tools held for review); "" shows nothing.
+	Notice func(c profile.Compiled) string
 	ArchiveDir string // default ~/.aimux/archive (the search index scans it)
 	// OnStarted, if set, hears once per session that its first turn's
 	// claude process started, as its stream showed (the id is claude's from
@@ -63,7 +77,7 @@ type sbSession struct {
 // NewSandboxEngine returns a sandbox engine. compile turns a profile name
 // into its compiled form; gw returns the tool gateway's base URL (as seen
 // from inside the sandbox) and the token table its listener checks.
-func NewSandboxEngine(l *sandboxlaunch.Launcher, compile func(profile string) (profile.Compiled, error), gw func() (baseURL string, tokens *toolgateway.Tokens, err error)) *SandboxEngine {
+func NewSandboxEngine(l *sandboxlaunch.Launcher, compile func(profile string) (profile.Compiled, error), gw func() (baseURL string, leases Leases, err error)) *SandboxEngine {
 	home, _ := os.UserHomeDir()
 	return &SandboxEngine{L: l, Compile: compile, Gateway: gw,
 		ArchiveDir: filepath.Join(home, ".aimux", "archive"), Log: slog.Default()}
@@ -251,25 +265,34 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	// is issued and the MCP config lists no servers.
 	var base, token string
 	if !c.Grant.Empty() {
-		var tokens *toolgateway.Tokens
-		base, tokens, err = e.Gateway()
+		var leases Leases
+		base, leases, err = e.Gateway()
 		if err != nil {
 			return "", fmt.Errorf("tool gateway: %w", err)
 		}
-		if tokens == nil {
-			return "", errors.New("tool gateway: no token table")
+		if leases == nil {
+			return "", errors.New("tool gateway: no lease table")
 		}
-		token, err = tokens.Issue(session, c.Grant.Scope(), c.Snapshot)
-		if err != nil {
+		if token, err = toolgateway.NewToken(); err != nil {
 			return "", fmt.Errorf("tool gateway token: %w", err)
 		}
-		// Deferred before rc.Close, so it runs after it: the token goes once
-		// the process that held it is closed. Revoke does not close MCP
-		// streams the listener still has open; closing the exec reader ends
-		// the process group that opened them.
-		defer tokens.Revoke(session)
+		end, err := e.lease(ctx, leases, session, token, c)
+		if err != nil {
+			return "", fmt.Errorf("tool gateway: %w", err)
+		}
+		// Deferred before rc.Close, so it runs after it: the lease ends once
+		// the process that held its token is closed. Ending it does not
+		// close MCP streams the listener still has open; closing the exec
+		// reader ends the process group that opened them.
+		defer end()
 	}
 	redact := func(err error) error { return redactToken(err, token) }
+	emit := acpEmitter(onEvent)
+	if e.Notice != nil {
+		if text := e.Notice(c); text != "" {
+			emit(LaneEvent{Type: "notice", Text: text})
+		}
+	}
 
 	// The prompt goes on stdin after the config line, never on a command line.
 	rc, err := e.L.Exec(ctx, c, spec.MCPConfig(base, token), prompt, spec.Env, spec.Argv)
@@ -299,7 +322,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 			}
 		}
 	}
-	res, readErr := parseStream(rc, acpEmitter(onEvent), started)
+	res, readErr := parseStream(rc, emit, started)
 	closeErr := rc.Close()
 
 	if res.sawResult {
@@ -489,6 +512,10 @@ func acpEmitter(onEvent func(acprun.Event)) func(LaneEvent) {
 			if ev.Text != "" { // a failure's text, or the call's snippet (a WebFetch's url)
 				u["content"] = []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": ev.Text}}}
 			}
+		case "notice":
+			// aimux's own line for the client (held-back tools), not the
+			// agent's; ACP clients that do not know it skip it.
+			u = map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": ev.Text}}
 		default:
 			return
 		}
@@ -516,4 +543,138 @@ func originOf(raw string) string {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+// Leases is the gateway's lease table as a turn uses it: a
+// toolgateway.ControlClient for the gateway worker, or
+// toolgateway.LocalLeases in the same process.
+type Leases interface {
+	PutLease(ctx context.Context, l toolgateway.Lease) error
+	Renew(ctx context.Context, session string, until time.Time) error
+	DeleteLease(ctx context.Context, session string) error
+}
+
+// leaseCallTimeout bounds a renew or delete the turn makes in the
+// background; leasePutTimeout a re-put, which the worker may hold while it
+// loads the lease's snapshot (15 s) and lists its servers (5 s).
+const (
+	leaseCallTimeout = 5 * time.Second
+	leasePutTimeout  = 25 * time.Second
+	// leaseProbeEvery is how often a turn asks the worker's status, so a
+	// lease lost to a worker restart is put again within seconds.
+	leaseProbeEvery = 10 * time.Second
+	// leaseProbeRetry is the quicker check while the worker is not
+	// answering, so its lease is back about a second after it does.
+	leaseProbeRetry = time.Second
+)
+
+// leaseStatuser is the worker status a turn probes (toolgateway.ControlClient
+// has it; in-process leases do not need it).
+type leaseStatuser interface {
+	Status(ctx context.Context) (toolgateway.ControlStatus, error)
+}
+
+// lease puts the turn's lease (token, the grant, its snapshot and pins)
+// and renews it until end is called, putting it again when the gateway
+// lost it (a restarted worker). end stops renewing and deletes it.
+func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token string, c profile.Compiled) (end func(), err error) {
+	scope := c.Grant.Scope()
+	l := toolgateway.Lease{Session: session, Token: token, Allow: scope, Version: c.Snapshot.Version(),
+		Pins: toolgateway.PinsFor(c.Snapshot, scope), Expires: time.Now().Add(toolgateway.LeaseTTL)}
+	// Which worker gets the lease is read before the put: a restart in
+	// between then shows as a new start time at the first probe. Unknown
+	// (the status failed) means the first good probe puts the lease again.
+	st, _ := leases.(leaseStatuser)
+	var started time.Time
+	if st != nil {
+		if s, err := st.Status(ctx); err == nil {
+			started = s.StartedAt
+		}
+	}
+	if err := leases.PutLease(ctx, l); err != nil {
+		return nil, err
+	}
+	every := e.RenewEvery
+	if every == 0 {
+		every = toolgateway.LeaseRenewEvery
+	}
+	// Each renew or re-put runs to its own deadline, never cut short by the
+	// turn's end: a put the client abandoned could still land on the worker
+	// after the delete. end waits for one in flight, then deletes.
+	probeEvery := e.ProbeEvery
+	if probeEvery == 0 {
+		probeEvery = leaseProbeEvery
+	}
+	put := func(until time.Time) error {
+		l.Expires = until
+		pctx, cancel := context.WithTimeout(context.Background(), leasePutTimeout)
+		defer cancel()
+		return leases.PutLease(pctx, l)
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() { //nolint:gosec // G118: on purpose detached from the turn's context, see above
+		defer close(done)
+		renew := time.NewTicker(every)
+		defer renew.Stop()
+		retry := e.ProbeRetryEvery
+		if retry == 0 {
+			retry = leaseProbeRetry
+		}
+		probe := time.NewTimer(probeEvery)
+		defer probe.Stop()
+		for {
+			var err error
+			select {
+			case <-stop:
+				return
+			case <-renew.C:
+				until := time.Now().Add(toolgateway.LeaseTTL)
+				cctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
+				err = leases.Renew(cctx, session, until)
+				cancel()
+				if errors.Is(err, toolgateway.ErrUnknownLease) {
+					err = put(until)
+				}
+				if err != nil { // the worker may be restarting: look again soon
+					probe.Reset(retry)
+				}
+			case <-probe.C:
+				if st == nil {
+					continue
+				}
+				cctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
+				s, serr := st.Status(cctx)
+				cancel()
+				if serr != nil {
+					probe.Reset(retry) // not answering yet: look again soon
+					continue
+				}
+				probe.Reset(probeEvery)
+				// A restarted worker (new start time) or one holding no lease
+				// lost this turn's: put it again now, not at the renewal.
+				if started.IsZero() || !s.StartedAt.Equal(started) || s.Leases == 0 {
+					if err = put(time.Now().Add(toolgateway.LeaseTTL)); err != nil {
+						probe.Reset(retry) // try the put again soon
+					}
+				}
+				// The new start time counts only once this turn's lease is
+				// back, so a failed put is retried at the next probe.
+				if err == nil {
+					started = s.StartedAt
+				}
+			}
+			if err != nil && e.Log != nil {
+				e.Log.Warn("tool gateway: lease renewal failed; the turn's tools stop when the lease expires", "session", session, "err", err)
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		<-done
+		dctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
+		defer cancel()
+		if err := leases.DeleteLease(dctx, session); err != nil && e.Log != nil {
+			e.Log.Warn("tool gateway: lease not deleted; it expires on its own", "session", session, "err", err)
+		}
+	}, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,6 +17,18 @@ import (
 type TokenAuthorizer interface {
 	Lookup(token string) (session string, allow map[string][]string, ok bool)
 }
+
+// TokenWaiter is a TokenAuthorizer that may hold a request whose token it
+// does not know yet (a gateway that just restarted, before remote serve
+// puts its leases again): WaitLookup returns once the token is known, the
+// wait ends (ok false) or the caller leaves. ErrTokenWaitBusy means too
+// many requests are waiting already.
+type TokenWaiter interface {
+	WaitLookup(ctx context.Context, token string) (session string, allow map[string][]string, ok bool, err error)
+}
+
+// ErrTokenWaitBusy is a TokenWaiter refusing to hold one more request.
+var ErrTokenWaitBusy = errors.New("too many requests waiting for their token")
 
 // tokenAccess is what a request's session token allows; the guard puts it in
 // the request context for the tool list and the call guard.
@@ -63,7 +76,16 @@ func tokenGuard(admin string, tokens TokenAuthorizer, binds *sessionBinds, next 
 			allow   map[string][]string
 		)
 		if ok {
-			session, allow, ok = tokens.Lookup(got)
+			if waiter, can := tokens.(TokenWaiter); can {
+				var err error
+				session, allow, ok, err = waiter.WaitLookup(r.Context(), got)
+				if errors.Is(err, ErrTokenWaitBusy) {
+					http.Error(w, "the tool gateway is starting; try again", http.StatusServiceUnavailable)
+					return
+				}
+			} else {
+				session, allow, ok = tokens.Lookup(got)
+			}
 		}
 		if !ok {
 			w.Header().Set("WWW-Authenticate", "Bearer")

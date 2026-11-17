@@ -230,6 +230,21 @@ Later refreshes merge: a server still in `~/.claude.json` overrides the saved co
 
 The catalog is also refreshed whenever a server starts, and tools it did not list before reach open sessions right away (the proxy reloads that server's tool list in place).
 
+## The sandbox tool gateway
+
+The proxy service has a second worker for OpenShell sandboxes: the read-only tool gateway on `127.0.0.1:7390`, which sandboxes reach as `host.containers.internal:7390`. It serves only the tools approved in `~/.config/aimux/tool-sources.yaml` (see `aimux tools`), from its own pool of backends: it never shares a server process, a cache or an environment with the proxy on `:7381`, and each restarts on its own.
+
+```sh
+aimux mcp proxy gateway install    # run it under launchd (com.aimux.tool-gateway), at login and after a crash
+aimux mcp proxy gateway status     # running or not, live leases, backends, which are down
+aimux mcp proxy gateway uninstall  # stop it; Workspace turns then fail until it is installed again
+aimux mcp proxy gateway serve      # run it in the foreground (what launchd runs)
+```
+
+Every sandbox turn's token is a lease: `aimux remote serve` puts it on the worker over `~/.aimux/gateway.sock` before the turn's claude starts, with the tools the turn may use and the tool snapshot it was compiled at, renews it every 2 minutes, and deletes it when the turn ends. A lease nobody renews expires after 15 minutes. The socket is mode 0600, the worker checks that every connection comes from your user, and it is never offered on a TCP port. A restarted worker knows no leases: `remote serve` asks the worker's status every 10 seconds during a turn and puts the turn's lease again once the restarted worker answers, and checks again every second while the worker does not answer or a renewal failed. For its first 15 seconds a started worker holds a call whose token it does not know yet (instead of answering 401, which makes Claude Code stop using that server for the turn) until the lease is put again; at most 64 calls wait, more get 503, and after the 15 seconds an unknown token gets 401 at once. The worker logs each lease put and delete by session (never the token) in `~/.aimux/logs/tool-gateway`, and, when it builds its servers, each backend that is down (with its error) and each one that serves no tools because none of its listed tools matches an approved pin (`aimux tools status` says why: `changed`, `unpinned`, `source_changed`, or not in any set). `aimux mcp proxy status` ends with a `tool gateway:` line.
+
+The `openshell` commands the worker runs for `cli` and `http-openapi` sources get only `PATH`, `HOME`, `LANG`, `TMPDIR`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `OPENSHELL_GATEWAY`, `OPENSHELL_GATEWAY_INSECURE` and `OPENSHELL_LOCAL_TLS_DIR` from the worker's environment; every other variable stays out, `OPENSHELL_OIDC_CLIENT_SECRET` and cloud credentials included.
+
 ## Check its health
 
 ```bash

@@ -1,4 +1,4 @@
-package remoteapp
+package gatewayworker
 
 import (
 	"bytes"
@@ -42,16 +42,15 @@ func (s *syncBuf) String() string {
 	return s.b.String()
 }
 
-// wiringRig is remote serve's real tool gateway (newToolGateway: real
+// wiringRig is the worker's real tool gateway (NewServer: real
 // BuildReadonly, Serve and Rebuild) over a temp HOME whose registry names
 // one fake MCP backend, fake:readonly = [search, other], approved as it is
 // now.
 // The gateway listens on an ephemeral port, never :7390.
 type wiringRig struct {
 	backend *server.MCPServer
-	gw      toolGatewayParts
+	ro      *toolgateway.ReadonlyServer
 	addr    func() string
-	clock   *time.Time
 	logs    *syncBuf
 }
 
@@ -100,18 +99,17 @@ func newWiringRig(t *testing.T) *wiringRig {
 		return ln, err
 	}
 	logs := &syncBuf{}
-	clock := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
-	rig := &wiringRig{backend: backend, clock: &clock, logs: logs, addr: func() string {
+	rig := &wiringRig{backend: backend, logs: logs, addr: func() string {
 		mu.Lock()
 		defer mu.Unlock()
 		return addr
 	}}
-	rig.gw = newToolGateway(home, "admin-token", log.New(logs, "", 0), listen)
-	rig.gw.gw.now = func() time.Time { return *rig.clock }
-	t.Cleanup(rig.gw.gw.close)
-	if _, _, err := rig.gw.gw.get(); err != nil { // the first sandbox turn starts it
+	rig.ro, _, _ = NewServer(home, "admin-token", log.New(logs, "", 0), listen)
+	stop, err := rig.ro.Start(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(stop)
 	// Start returns before Serve hands the gateway its add/remove hooks (the
 	// serve goroutine does, just before it listens). A Refresh before that
 	// has nothing to apply a relist with and, rate limited, is not retried,
@@ -121,10 +119,12 @@ func newWiringRig(t *testing.T) *wiringRig {
 }
 
 // status is what GET /v1/tools reports for fake/search: Review over the
-// served snapshot and the gateway's own listings, as listTools computes it.
+// served snapshot and the gateway's own listings (what the worker sends
+// remote serve as Observed).
 func (r *wiringRig) status() string {
-	v := r.gw.tools()
-	for _, st := range toolgateway.Review(v.Snapshot.Registry(), toolgateway.PinsOf(v.Snapshot), v.Live) {
+	snap := r.ro.Applied()
+	live := toolgateway.LiveFor(snap.Registry(), r.ro.Observed())
+	for _, st := range toolgateway.Review(snap.Registry(), toolgateway.PinsOf(snap), live) {
 		if st.Source == "fake" && st.Tool == "search" {
 			return st.Status
 		}
@@ -227,7 +227,7 @@ func TestToolGateway_SchemaChangeSeenByACallShowsChangedAndHides(t *testing.T) {
 	eventually(t, "the gateway to serve only other", func() bool { return slices.Equal(r.served(t), []string{"other"}) })
 }
 
-// With no call at all, the once-a-minute refresh of a turn relists the
+// With no call at all, the worker's once-a-minute refresh relists the
 // backends that are up and applies a schema change the same way.
 func TestToolGateway_SchemaChangeSeenByTheMinuteRefresh(t *testing.T) {
 	r := newWiringRig(t)
@@ -235,29 +235,40 @@ func TestToolGateway_SchemaChangeSeenByTheMinuteRefresh(t *testing.T) {
 		t.Fatalf("before: status %q, want active", got)
 	}
 	r.changeSchema()
-	if _, _, err := r.gw.gw.get(); err != nil { // a turn within the minute: no refresh
-		t.Fatal(err)
-	}
 	if got := r.status(); got != toolgateway.StatusActive {
-		t.Fatalf("within the minute: status %q, want active (not relisted yet)", got)
+		t.Fatalf("before the refresh: status %q, want active (not relisted yet)", got)
 	}
-	*r.clock = r.clock.Add(61 * time.Second)
-	if _, _, err := r.gw.gw.get(); err != nil { // the next turn starts the relist in the background
-		t.Fatal(err)
-	}
+	r.ro.Refresh(context.Background()) // the worker's minute tick: starts the relist in the background
 	eventually(t, "GET /v1/tools to say changed", func() bool { return r.status() == toolgateway.StatusChanged })
 	eventually(t, "the gateway to serve only other", func() bool { return slices.Equal(r.served(t), []string{"other"}) })
 }
 
-// Remote serve's gateway starts cli sources in the runner sandbox.
-func TestNewToolGateway_BindsRunner(t *testing.T) {
-	tg := newToolGateway(t.TempDir(), "admin-token", log.New(io.Discard, "", 0), net.Listen)
-	if tg.ro == nil || tg.ro.Runner == nil {
+// A fresh listing for a new lease (RelistNow) sees the change at once.
+func TestToolGateway_SchemaChangeSeenByALeaseListing(t *testing.T) {
+	r := newWiringRig(t)
+	r.changeSchema()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := r.ro.RelistNow(ctx, []string{"fake"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.status(); got != toolgateway.StatusChanged {
+		t.Fatalf("after the lease listing: status %q, want changed", got)
+	}
+	if got := r.served(t); slices.Contains(got, "search") {
+		t.Fatalf("served %v: the changed tool is still served after the lease listing", got)
+	}
+}
+
+// The worker's gateway starts cli sources in the runner sandbox.
+func TestNewServer_BindsRunner(t *testing.T) {
+	ro, _, _ := NewServer(t.TempDir(), "admin-token", log.New(io.Discard, "", 0), net.Listen)
+	if ro.Runner == nil {
 		t.Fatal("the tool gateway has no runner binding: cli sources would never start")
 	}
 	// The gateway's runner ensures aimux-tools (RunnerTools), not the
 	// read-only probe status uses, which would never create it.
-	tr := tg.ro.Runner(toolreg.Snapshot{})("github")
+	tr := ro.Runner(toolreg.Snapshot{})("github")
 	if _, ok := tr.(sandboxlaunch.SourceTools); !ok {
 		t.Fatalf("the gateway's runner is %T, want sandboxlaunch.SourceTools", tr)
 	}

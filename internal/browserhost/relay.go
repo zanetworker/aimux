@@ -181,7 +181,14 @@ func validInstance(instance string) string {
 }
 
 func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emit func(Event)) {
-	fail := func(err error) { emit(Event{Type: "error", Error: panelMessage(err)}) }
+	fail := func(err error) {
+		ev := Event{Type: "error", Error: panelMessage(err)}
+		var ae *apiError
+		if errors.As(err, &ae) {
+			ev.Code = ae.Code
+		}
+		emit(ev)
+	}
 	req.Instance = validInstance(req.Instance)
 	switch req.Type {
 	case "ask":
@@ -745,6 +752,14 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 			}
 			if json.Unmarshal(u.Content, &c) == nil && c.Type == "text" && c.Text != "" {
 				emit(Event{Type: "delta", Text: c.Text})
+			}
+		case "aimux_notice": // aimux's own line, such as tools held for review
+			var c struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(u.Content, &c) == nil && c.Type == "text" && c.Text != "" {
+				emit(Event{Type: "notice", Text: c.Text})
 			}
 		case "tool_call":
 			ev := Event{Type: "tool_call", Tool: u.Title}
