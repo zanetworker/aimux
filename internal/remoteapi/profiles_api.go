@@ -152,7 +152,8 @@ type newSessionRequest struct {
 	Model    string `json:"model"` // optional turn model: sonnet or opus
 	// Prior is the page's earlier questions asked in another mode, oldest
 	// first (questions only, never answers); at most maxPrior of at most
-	// maxPriorRunes characters each.
+	// maxPriorRunes characters each. Absent (nil), aimux computes it
+	// (pagePrior); an explicit one, even [], is used as sent.
 	Prior []string `json:"prior"`
 	// Instance is the caller's browser profile (Wingman), so two browsers
 	// on one page keep separate conversations; "" is the legacy behaviour.
@@ -335,6 +336,9 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 	if a.ProfileSessions == nil || a.NewProfileSession == nil {
 		writeError(w, http.StatusNotFound, "not_supported", errors.New("starting profile sessions is not available"))
 		return
+	}
+	if req.Prior == nil { // absent: aimux picks it; an explicit [] stays empty
+		req.Prior = a.pagePrior(r.Context(), client, m.Name, req)
 	}
 	done, ok := a.reserveTurn(w, client)
 	if !ok {

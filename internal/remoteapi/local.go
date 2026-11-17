@@ -300,12 +300,16 @@ func turnOf(t trace.Turn) Turn {
 	for _, a := range t.Actions {
 		tools = append(tools, TurnTool{Name: a.Name, Snippet: history.Shorten(a.Snippet, 200), OK: a.Success, Detail: detailOf(a)})
 	}
+	user := strings.Join(t.UserLines, "\n")
+	question := profilerun.QuestionOf(user)
 	return Turn{
-		Number: t.Number,
-		Time:   t.Timestamp,
-		User:   history.Shorten(profilerun.QuestionOf(strings.Join(t.UserLines, "\n")), maxTextLen),
-		Reply:  shortenLines(replyOf(t), maxTextLen),
-		Tools:  tools,
+		Number:   t.Number,
+		Time:     t.Timestamp,
+		User:     history.Shorten(question, maxTextLen),
+		Reply:    shortenLines(replyOf(t), maxTextLen),
+		Tools:    tools,
+		Image:    profilerun.ImageOf(user),
+		question: question,
 	}
 }
 

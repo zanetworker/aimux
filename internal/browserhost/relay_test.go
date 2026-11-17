@@ -1065,3 +1065,38 @@ func TestRelay_ForwardsImage(t *testing.T) {
 		t.Fatalf("image sent when absent: %v", posts[1].Body)
 	}
 }
+
+// history.get marks a question asked with an image (the v1 turn's image
+// flag) and leaves the flag out of every other turn's JSON.
+func TestRelay_HistoryGetMarksImage(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	t0 := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	const pageURL = "https://a.example/img"
+	f.mux.HandleFunc("GET /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"sessions": []any{session("p1", "page", pageURL, "A", t0)}})
+	})
+	f.mux.HandleFunc("GET /v1/sessions/p1", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"id": "p1", "turns": []any{
+			map[string]any{"number": 1, "time": t0, "user": "what is this?", "reply": "A chart.", "tools": []any{}, "image": true},
+			map[string]any{"number": 2, "time": t0.Add(time.Minute), "user": "and now?", "reply": "Done.", "tools": []any{}},
+		}})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "g", Type: "history.get", URL: pageURL})
+	e := p.first(t, "g")
+	if e.Page == nil || len(e.Page.Turns) != 2 {
+		t.Fatalf("event = %+v", e)
+	}
+	if !e.Page.Turns[0].Image || e.Page.Turns[1].Image {
+		t.Fatalf("image flags = %v, %v", e.Page.Turns[0].Image, e.Page.Turns[1].Image)
+	}
+	b, err := json.Marshal(e.Page.Turns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(b), `"image":true`) != 1 || strings.Count(string(b), `"image"`) != 1 {
+		t.Fatalf("turns JSON = %s", b)
+	}
+}

@@ -136,6 +136,13 @@ type Turn struct {
 	User   string     `json:"user"`
 	Reply  string     `json:"reply"`
 	Tools  []TurnTool `json:"tools"`
+	// Image: the question was asked with an attached image (the prompt
+	// framed one, profilerun.ImageOf); the image itself is never in history.
+	Image bool `json:"image,omitempty"`
+
+	// question is the whole question as asked, before User's cut and trim,
+	// for comparing questions in process (pagePrior); never sent.
+	question string
 }
 
 // TurnTool is a tool call in a turn: its name, a short target (a path, a

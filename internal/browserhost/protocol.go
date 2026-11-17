@@ -89,6 +89,8 @@ type Turn struct {
 	Question  string    `json:"question"`
 	Answer    string    `json:"answer"`
 	ToolCalls []string  `json:"toolCalls"`
+	// Image: the question was asked with an image (never the image itself).
+	Image bool `json:"image,omitempty"`
 }
 
 // Page is a page's conversation in the JSON shape the panel reads (the
