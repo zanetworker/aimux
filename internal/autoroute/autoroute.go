@@ -214,6 +214,7 @@ func Route(ctx context.Context, d *decide.Decider, text string, f Facts, allowed
 		State:    state{Facts: f, Question: truncate(text, maxQuestionRunes)},
 		Question: ModeQuestion,
 		Allowed:  allowedModes,
+		HasURL:   hasURL(text),
 		Promote:  func(a decide.Answer) (string, string) { return promotePage(a, allowedModes, f) },
 	})
 	r := Result{
@@ -322,3 +323,9 @@ func truncate(s string, n int) string {
 	}
 	return string(r[:n])
 }
+
+var urlRe = regexp.MustCompile(`(?i)https?://\S`)
+
+// hasURL reports whether text holds an http:// or https:// link. Only the
+// yes/no goes to the decision log, never the link.
+func hasURL(text string) bool { return urlRe.MatchString(text) }

@@ -311,3 +311,26 @@ func TestDecider_TestUsageLabel(t *testing.T) {
 		t.Errorf("labels = %+v", got)
 	}
 }
+
+func TestLog_HasURLNoText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "decisions.jsonl")
+	const url = "https://example.com/UNIQUE-PATH-91b2"
+	b := &fakeBackend{a: ans("web", 0.9, map[string]float64{"web": 1})}
+	d := &Decider{Name: "t", Backends: []Backend{b}, Threshold: 0.25, Timeout: time.Second, Usage: noUsage, Log: &Log{Path: path}}
+	d.Ask(context.Background(), Request{State: map[string]string{"question": url}, Question: testQuestion, HasURL: true})
+	d.Ask(context.Background(), Request{State: "plain", Question: testQuestion})
+	data, err := os.ReadFile(path) // #nosec G304 -- test temp file
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "UNIQUE-PATH-91b2") || strings.Contains(string(data), "example.com") {
+		t.Fatalf("decision log contains the URL: %s", data)
+	}
+	lines := readLines(t, path)
+	if len(lines) != 2 || lines[0]["has_url"] != true {
+		t.Fatalf("first line %v", lines)
+	}
+	if _, ok := lines[1]["has_url"]; ok {
+		t.Errorf("has_url set without a URL: %v", lines[1])
+	}
+}

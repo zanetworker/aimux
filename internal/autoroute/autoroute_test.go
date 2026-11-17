@@ -531,3 +531,35 @@ func TestRoute_Rule5_SteeringNeverAutoDecides(t *testing.T) {
 		t.Fatalf("calls=%d result=%+v", b.calls(), r)
 	}
 }
+
+func TestHasURL(t *testing.T) {
+	for in, want := range map[string]bool{
+		"summarize https://example.com/a":  true,
+		"see HTTP://X.org":                 true,
+		"http://a":                         true,
+		"what is https:// alone":           false,
+		"https:":                           false,
+		"the http protocol":                false,
+		"":                                 false,
+		"look at Https://Example.com now ": true,
+	} {
+		if got := hasURL(in); got != want {
+			t.Errorf("hasURL(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestRoute_LogsHasURL(t *testing.T) {
+	a := answer("web", 0.9, map[string]float64{"web": 1})
+	path := filepath.Join(t.TempDir(), "decisions.jsonl")
+	d := newDecider(&fakeBackend{a: a})
+	d.Log = &decide.Log{Path: path}
+	Route(context.Background(), d, "read https://example.com/SECRET-PATH", Facts{PageReadable: true}, allProfiles)
+	data, err := os.ReadFile(path) // #nosec G304 -- test temp file
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "SECRET-PATH") || !strings.Contains(string(data), `"has_url":true`) {
+		t.Fatalf("log = %s", data)
+	}
+}

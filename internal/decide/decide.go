@@ -81,6 +81,9 @@ type Request struct {
 	// RawProbabilities and must not log or keep the state. The decision
 	// log line records the rule.
 	Promote func(a Answer) (choice, rule string)
+	// HasURL is a flag for the decision log line only (the question held a
+	// link); the URL itself is never logged.
+	HasURL bool
 }
 
 // Answer is a decision. Choice is the picked option ("" when none could be
@@ -212,7 +215,7 @@ func (d *Decider) Ask(ctx context.Context, r Request) Answer {
 	a.Ms = time.Since(start).Milliseconds()
 	if d.Log != nil {
 		sum := sha256.Sum256(stateJSON)
-		if err := d.Log.record(d.Name, hex.EncodeToString(sum[:]), a, d.Test); err != nil {
+		if err := d.Log.record(d.Name, hex.EncodeToString(sum[:]), a, d.Test, r.HasURL); err != nil {
 			log.Printf("decide:%s: %v", d.Name, err)
 		}
 	}
