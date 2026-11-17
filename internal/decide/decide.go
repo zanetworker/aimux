@@ -74,6 +74,13 @@ type Request struct {
 	State    any
 	Question Question
 	Allowed  []string
+	// Promote, when set, is asked about an answer that came back undecided
+	// for low confidence (a backend answered, with a choice). It returns an
+	// allowed option and the name of the caller's rule that decides it, or
+	// an empty rule to leave the answer undecided. It sees the answer's
+	// RawProbabilities and must not log or keep the state. The decision
+	// log line records the rule.
+	Promote func(a Answer) (choice, rule string)
 }
 
 // Answer is a decision. Choice is the picked option ("" when none could be
@@ -87,19 +94,27 @@ type Answer struct {
 	ID            string
 	Choice        string
 	Probabilities map[string]float64
-	Confidence    float64
-	Decided       bool
-	Undecided     string
-	Threshold     float64
-	Backend       string
-	Model         string
-	Ms            int64
-	CostUSD       *float64
+	// RawProbabilities are the backend's probabilities over all of the
+	// Question's options, before the allowed filter renormalized them (nil
+	// when the backend gave none). Rules about how likely an option is
+	// must read these: Probabilities over two options are always >= 0.5.
+	RawProbabilities map[string]float64
+	Confidence       float64
+	Decided          bool
+	Undecided        string
+	Threshold        float64
+	Backend          string
+	Model            string
+	Ms               int64
+	CostUSD          *float64
 	// KeyMs is the time spent reading API keys before the decision call
 	// (outside Timeout), CallMs the time the backends took within it.
 	KeyMs, CallMs int64
 	// Hedged is true when a second identical request was sent to a backend.
 	Hedged bool
+	// Rule names the caller's Promote rule that made this answer Decided
+	// ("" when the backend's own confidence did).
+	Rule string
 
 	// tokens the call used, for the usage line, when the backend reports them
 	inputTokens, outputTokens int64
@@ -191,6 +206,7 @@ func (d *Decider) Ask(ctx context.Context, r Request) Answer {
 		a = Answer{Undecided: UndecidedError}
 	} else {
 		a = d.ask(ctx, r)
+		a = promote(a, r)
 	}
 	a.ID = newID()
 	a.Ms = time.Since(start).Milliseconds()
@@ -200,6 +216,20 @@ func (d *Decider) Ask(ctx context.Context, r Request) Answer {
 			log.Printf("decide:%s: %v", d.Name, err)
 		}
 	}
+	return a
+}
+
+// promote lets the caller's rule decide a low-confidence answer. The chosen
+// option must be allowed.
+func promote(a Answer, r Request) Answer {
+	if r.Promote == nil || a.Decided || a.Undecided != UndecidedLowConfidence || a.Choice == "" {
+		return a
+	}
+	choice, rule := r.Promote(a)
+	if rule == "" || !allowed(r)[choice] {
+		return a
+	}
+	a.Choice, a.Rule, a.Decided, a.Undecided = choice, rule, true, ""
 	return a
 }
 
@@ -463,6 +493,7 @@ func apply(a Answer, ok map[string]bool, threshold float64) Answer {
 		}
 	}
 	out := a
+	out.RawProbabilities = a.Probabilities
 	out.Probabilities = nil
 	if total > 0 {
 		for k := range probs {

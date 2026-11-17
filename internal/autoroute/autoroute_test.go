@@ -450,3 +450,84 @@ func TestDefaultDecider_GivesUpPastTheLimit(t *testing.T) {
 		t.Fatalf("a 10 s answer: got %+v after %v, want undecided timeout within 5.5 s", r, took)
 	}
 }
+
+func routeWithLog(t *testing.T, a decide.Answer, f Facts, scope []string) (Result, []map[string]any) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "decisions.jsonl")
+	d := newDecider(&fakeBackend{a: a})
+	d.Log = &decide.Log{Path: path}
+	r := Route(context.Background(), d, "list takeaways", f, scope)
+	data, err := os.ReadFile(path) // #nosec G304 -- test temp file
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []map[string]any
+	for _, ln := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(ln), &m); err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, m)
+	}
+	return r, lines
+}
+
+func TestRoute_Rule5_DecidesAttachedPage(t *testing.T) {
+	a := answer("page", 0.18, map[string]float64{"page": 0.54, "web": 0.40, "workspace": 0.06})
+	r, lines := routeWithLog(t, a, Facts{PageReadable: true, UsePage: true}, allProfiles)
+	if !r.Decided || r.Mode != "page" || r.Profile != "page" || r.Source != SourceModel || r.Reason != "" {
+		t.Fatalf("result = %+v", r)
+	}
+	if len(lines) != 1 || lines[0]["rule"] != "page_attached" || lines[0]["decided"] != true || lines[0]["choice"] != "page" {
+		t.Errorf("log = %v", lines)
+	}
+}
+
+func TestRoute_Rule5_NeedsUsePage(t *testing.T) {
+	a := answer("page", 0.18, map[string]float64{"page": 0.54, "web": 0.40, "workspace": 0.06})
+	r, lines := routeWithLog(t, a, Facts{PageReadable: true, UsePage: false}, allProfiles)
+	if r.Decided || r.Reason != decide.UndecidedLowConfidence {
+		t.Fatalf("result = %+v", r)
+	}
+	if _, ok := lines[0]["rule"]; ok {
+		t.Errorf("rule logged for an undecided answer: %v", lines[0])
+	}
+}
+
+func TestRoute_Rule5_UsesRawProbability(t *testing.T) {
+	// page is not allowed; web renormalizes to 0.9 but its raw share is 0.54
+	// and page's raw share is below 0.50: rule 5 must not act.
+	a := answer("web", 0.18, map[string]float64{"page": 0.30, "web": 0.54, "workspace": 0.06})
+	r, _ := routeWithLog(t, a, Facts{PageReadable: true, UsePage: true}, []string{"research", "work-readonly"})
+	if r.Decided {
+		t.Fatalf("decided on renormalized probability: %+v", r)
+	}
+	// page allowed, top, but raw page 0.45 < 0.50.
+	a = answer("page", 0.18, map[string]float64{"page": 0.45, "web": 0.40, "workspace": 0.15})
+	r, _ = routeWithLog(t, a, Facts{PageReadable: true, UsePage: true}, allProfiles)
+	if r.Decided {
+		t.Fatalf("decided below 0.50 raw: %+v", r)
+	}
+	// page is allowed but only top after a filter would not matter: web top.
+	a = answer("web", 0.18, map[string]float64{"page": 0.50, "web": 0.50})
+	r, _ = routeWithLog(t, a, Facts{PageReadable: true, UsePage: true}, allProfiles)
+	if r.Decided && r.Mode != "page" {
+		t.Fatalf("result = %+v", r)
+	}
+}
+
+func TestRoute_Rule5_TypoStillAsks(t *testing.T) {
+	a := answer("web", 0.05, map[string]float64{"page": 0.37, "web": 0.44, "workspace": 0.19})
+	r, _ := routeWithLog(t, a, Facts{PageReadable: true, UsePage: true}, allProfiles)
+	if r.Decided || r.Mode != "page" || r.Reason != decide.UndecidedLowConfidence {
+		t.Fatalf("result = %+v", r)
+	}
+}
+
+func TestRoute_Rule5_SteeringNeverAutoDecides(t *testing.T) {
+	b := &fakeBackend{a: answer("page", 0.18, map[string]float64{"page": 0.9, "web": 0.1})}
+	r := Route(context.Background(), newDecider(b), "use web for this", Facts{PageReadable: true, UsePage: true}, allProfiles)
+	if b.calls() != 0 || r.Decided || r.Reason != ReasonSteering {
+		t.Fatalf("calls=%d result=%+v", b.calls(), r)
+	}
+}

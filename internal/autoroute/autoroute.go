@@ -214,6 +214,7 @@ func Route(ctx context.Context, d *decide.Decider, text string, f Facts, allowed
 		State:    state{Facts: f, Question: truncate(text, maxQuestionRunes)},
 		Question: ModeQuestion,
 		Allowed:  allowedModes,
+		Promote:  func(a decide.Answer) (string, string) { return promotePage(a, allowedModes, f) },
 	})
 	r := Result{
 		Text:          text,
@@ -239,6 +240,31 @@ func Route(ctx context.Context, d *decide.Decider, text string, f Facts, allowed
 	}
 	r.Decided = false
 	return finish(r, allowedModes, f)
+}
+
+// RulePageAttached is the decision log's rule name for an attached page
+// the model leans to, though not confidently enough to decide alone.
+const RulePageAttached = "page_attached"
+
+// pageRawMin is the raw page probability at which rule 5 decides page.
+const pageRawMin = 0.50
+
+// promotePage is rule 5: when the page is readable, attached (use_page),
+// allowed, the most probable allowed mode, and the model's own raw page
+// probability (before the allowed filter renormalized it) is at least
+// pageRawMin, the question goes to page without asking, though the
+// confidence is below the threshold. No tools run in page mode, and a wrong
+// pick is redone with @web or @workspace.
+func promotePage(a decide.Answer, allowedModes []string, f Facts) (choice, rule string) {
+	if !f.PageReadable || !f.UsePage || !contains(allowedModes, "page") || a.RawProbabilities["page"] < pageRawMin {
+		return "", ""
+	}
+	for _, m := range allowedModes {
+		if m != "page" && a.Probabilities[m] >= a.Probabilities["page"] {
+			return "", ""
+		}
+	}
+	return "page", RulePageAttached
 }
 
 // finish sets the suggested mode of an undecided result: page when the page
