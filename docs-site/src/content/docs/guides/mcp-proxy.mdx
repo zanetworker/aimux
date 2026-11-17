@@ -134,7 +134,7 @@ aimux mcp proxy install
 | `401` with a challenge although it has headers | Keeps it direct: `the server refused its headers (401)` |
 | Refused, DNS failure, `502`, `503` or `504`, or no answer in 5 seconds | Keeps it direct for this run (`not reachable now; run install again when it is up`) and tries again next time |
 
-An entry with an `oauth` field, a `headersHelper`, `type: "sse"`, a header value that is not a string, or a `${VAR}` that is unset in your shell stays direct with that reason. A server with headers moves only on macOS, and only when its header values fit one Keychain item (about 1.9 KB in all; a longer one stays direct with `header values too long for the Keychain`).
+An entry with an `oauth` field, a `headersHelper`, `type: "sse"`, a header value that is not a string, a `${VAR}` that is unset in your shell, or a `${VAR}` in its URL's query or userinfo (`uses ${NAME} in its URL (query or userinfo); keep it direct until URL secrets are supported`: the resolved URL would be saved in plain text) stays direct with that reason. A secret written literally in a URL's query or userinfo cannot be told apart, so the proxy hides every query value and userinfo password of a moved server's URL in its errors and logs, as it does header values (also in their URL-escaped and JSON-escaped forms, and a `Basic` header's decoded `user:pass`). A server with headers moves only on macOS, and only when its header values fit one Keychain item (about 1.9 KB in all; a longer one stays direct with `header values too long for the Keychain`).
 
 `aimux mcp proxy status` lists the servers kept direct by reason (`kept direct: needs OAuth (later): granola, ...`) from your config and what the last install recorded; it never contacts the servers. A movable HTTP server not moved yet is listed with the stdio ones under not behind the proxy, and the session-start hook names it; OAuth servers are not named there.
 
@@ -142,9 +142,13 @@ A moved HTTP server's entry becomes the same proxy entry a stdio server gets, so
 
 The values are never written anywhere else aimux keeps: `~/.aimux/mcp-servers.json` holds the URL and the header names, the manifest holds each original entry with `"[in Keychain]"` in place of each value, and the backup install writes of `~/.claude.json` has the same placeholder. Older backups in `~/.aimux/backups` from before the move still hold the values; install names them once (`note: ... still hold header values for <names>; delete them with: rm ...`).
 
-A server whose tool list echoes one of its header values (8 bytes or more, as written or JSON-escaped) is not stored: listing it fails with `its tool list contains one of its header values; not stored`, so install refuses that server by name (fix it or `--skip` it), because the tool list is saved in the catalog. Logs and errors never carry a header value either.
+A server whose tool list echoes one of its secrets (8 bytes or more: a header value, a `Basic` header's decoded `user:pass` or password, a URL query value or userinfo password, each also in its URL-escaped or JSON-escaped form) is not stored: listing it fails with `its tool list contains one of its header values; not stored`, so install refuses that server by name (fix it or `--skip` it), because the tool list is saved in the catalog. Logs and errors never carry a header value either.
 
-`uninstall` reads each item before it changes anything. If an item cannot be read (a locked Keychain), it stops with nothing changed and names the item. It deletes the item of each server it restores; a server whose entry you changed since install keeps its item, and uninstall prints the `security delete-generic-password` command to remove it.
+`uninstall` reads each item before it changes anything. If an item cannot be read (a locked Keychain), it stops with nothing changed and names the item. It deletes the item of each server it restores; a server whose entry you changed or removed since install keeps its item, and uninstall says which and prints `security delete-generic-password -a aimux -s aimux-mcp-proxy/<server>` to remove it.
+
+If an item is gone (deleted, or a Keychain reset), uninstall cannot give that server its original back and stops, naming the way out: `aimux mcp proxy uninstall --without <server>` removes that server's proxy entry from `~/.claude.json` instead of restoring it, restores the others, and tells you to add the server again with `claude mcp add`. The backups do not help here: their header values are placeholders too.
+
+Install records the manifest just before it edits `~/.claude.json`, after it has written the Keychain items. If it is killed between the two, the manifest lists servers whose entries were never switched: `uninstall` then finds each such entry still equal to its original, reports it as already restored, and deletes its item, so nothing is left behind.
 
 ### Skip servers
 

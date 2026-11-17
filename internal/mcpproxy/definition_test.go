@@ -106,7 +106,7 @@ func TestDefinitionStarter_MissingItemErrorNamesItemOnly(t *testing.T) {
 	}
 	st := DefinitionStarter(cfgs, nil, secretsOf(nil))
 	_, err := startDef(t, st, "pp")
-	if err == nil || !strings.Contains(err.Error(), "keychain item aimux-mcp-proxy/pp is missing or locked") || !strings.Contains(err.Error(), "uninstall and install again") {
+	if err == nil || !strings.Contains(err.Error(), "keychain item aimux-mcp-proxy/pp is missing or locked") || !strings.Contains(err.Error(), "uninstall --without pp") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := startDef(t, st, "dw"); err != nil {

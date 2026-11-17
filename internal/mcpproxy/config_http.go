@@ -73,6 +73,10 @@ func LoadClaudeHTTPServers(path string, port int, canStoreSecrets bool) (map[str
 			keep(name, reasonHelper)
 			continue
 		}
+		if v := urlSecretVar(e.URL); v != "" {
+			keep(name, "uses ${"+v+"} in its URL (query or userinfo); keep it direct until URL secrets are supported")
+			continue
+		}
 		_, literals, err := redactHeaders(raw)
 		if err != nil {
 			keep(name, reasonBadHeaders)
@@ -129,4 +133,29 @@ func keychainName(name string) bool {
 		}
 	}
 	return name != ""
+}
+
+// urlSecretVar is the first ${VAR} in the userinfo or the query of a URL
+// as written, or "": a resolved value there would be saved in plain text
+// and shown in every connection error.
+func urlSecretVar(raw string) string {
+	rest := raw
+	if _, after, ok := strings.Cut(rest, "://"); ok {
+		rest = after
+	}
+	authority, _, _ := strings.Cut(rest, "/")
+	authority, _, _ = strings.Cut(authority, "?")
+	var parts []string
+	if userinfo, _, ok := strings.Cut(authority, "@"); ok {
+		parts = append(parts, userinfo)
+	}
+	if _, query, ok := strings.Cut(raw, "?"); ok {
+		parts = append(parts, query)
+	}
+	for _, p := range parts {
+		if m := claudeVar.FindStringSubmatch(p); m != nil {
+			return m[1]
+		}
+	}
+	return ""
 }

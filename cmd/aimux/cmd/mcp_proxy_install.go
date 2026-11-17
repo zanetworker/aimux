@@ -275,22 +275,29 @@ func newMCPProxyInstallCmd() *cobra.Command {
 }
 
 func newMCPProxyUninstallCmd() *cobra.Command {
-	return &cobra.Command{
+	var without []string
+	cmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Give Claude Code its direct stdio and HTTP MCP servers back and stop the proxy's launchd agent",
 		Long: "Undoes what `install` recorded, in one edit of mcpServers: each moved entry that is still the proxy entry " +
 			"install wrote gets its original bytes back, an HTTP server's header values read from its Keychain item first (an item that " +
 			"cannot be read stops uninstall with nothing changed); one you changed or removed since is kept and reported. It deletes the " +
 			"Keychain items of the servers it restored. Then it " +
-			"removes the launchd agent. Without a record it leaves the Claude config alone and only removes a leftover launchd agent.",
+			"removes the launchd agent. Without a record it leaves the Claude config alone and only removes a leftover launchd agent. " +
+			"If a server's Keychain item is gone, --without <server> gives up that server's original: its proxy entry is removed " +
+			"from ~/.claude.json (add it again with `claude mcp add`) and the others are restored.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return err
 			}
-			return proxyInstaller(home, 7381, cmd.OutOrStdout()).Uninstall()
+			in := proxyInstaller(home, 7381, cmd.OutOrStdout())
+			in.Without = without
+			return in.Uninstall()
 		},
 	}
+	cmd.Flags().StringSliceVar(&without, "without", nil, "Moved servers whose Keychain item is gone: remove their proxy entry instead of restoring it")
+	return cmd
 }
 
 func newMCPProxyRestartCmd() *cobra.Command {

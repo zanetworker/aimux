@@ -98,6 +98,8 @@ type MovedEntry struct {
 	// redacted is Original as recorded, set by unredacted when it rebuilt
 	// Original from the item (never saved).
 	redacted string
+	// without: uninstall --without named it (never saved).
+	without bool
 }
 
 // InstallPlan is what install would do, by name only.
@@ -151,6 +153,10 @@ type Installer struct {
 	Version      string // this aimux's version, compared with the daemon's
 	// Unskip are recorded --skip servers this run moves after all.
 	Unskip []string
+	// Without are moved servers uninstall gives up the original of (their
+	// Keychain item is gone): the proxy entry is removed instead of
+	// restored, and a note says to add the server again.
+	Without []string
 
 	Agent   Agent
 	Status  func() (StatusReport, error)
@@ -606,7 +612,7 @@ func (i Installer) forgetRemoved(m *Manifest) ([]string, error) {
 	for _, name := range gone {
 		if svc := m.Servers[name].Keychain; svc != "" && i.Vault != nil {
 			if err := i.Vault.Delete(svc); err != nil {
-				i.printf("Note: could not delete Keychain item %s (%v); remove it with: security delete-generic-password -s %s\n", svc, err, svc)
+				i.printf("Note: could not delete Keychain item %s (%v); remove it with: security delete-generic-password -a aimux -s %s\n", svc, err, svc)
 			}
 		}
 		delete(m.Servers, name)
@@ -706,6 +712,13 @@ func restoreServers(old json.RawMessage, servers map[string]MovedEntry) (json.Ra
 		e := servers[name]
 		have, ok := members[name]
 		switch {
+		case e.without && ok && jsonEqual(have, json.RawMessage(e.Written)):
+			if cur, err = removeMember(cur, name); err != nil {
+				return nil, nil, nil, err
+			}
+			notes = append(notes, fmt.Sprintf("%s: its proxy entry was removed; its original could not be restored (its Keychain item is gone); add it again with `claude mcp add`", name))
+		case e.without:
+			notes = append(notes, fmt.Sprintf("%s: given up (--without); its entry is not the proxy entry, so it was left as it is", name))
 		case !ok:
 			notes = append(notes, fmt.Sprintf("%s: entry removed since install; not restored", name))
 		case jsonEqual(have, json.RawMessage(e.Original)) || (e.Keychain != "" && !anyPlaceholder(have) && sameRedacted(have, e.Original)):
@@ -1140,6 +1153,11 @@ func (i Installer) Uninstall() error {
 			return err
 		}
 	}
+	for _, w := range i.Without {
+		if _, ok := m.Servers[w]; !ok {
+			return fmt.Errorf("--without %s: not a server install moved (moved: %s); nothing was changed", w, listOrNone(sortedKeys(m.Servers)))
+		}
+	}
 	servers, err := i.unredacted(context.Background(), m, current)
 	if err != nil {
 		return err
@@ -1161,7 +1179,7 @@ func (i Installer) Uninstall() error {
 	if err := i.dropMoved(names, true, true); err != nil {
 		return fmt.Errorf("%w; the Claude config is restored; run `aimux mcp proxy uninstall` again to finish", err)
 	}
-	i.dropItems(m, restored)
+	i.dropItems(m, restored, current)
 	i.dropIdleTimeout(m)
 	i.dropHooks(m)
 	// Without the manifest, uninstall again only removes the agent: the way

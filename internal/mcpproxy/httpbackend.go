@@ -3,6 +3,7 @@ package mcpproxy
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -191,20 +193,28 @@ func scrubErr(sc *scrubber, err error) error {
 	return &headerScrubbedError{msg: sc.scrub(err.Error()), err: err}
 }
 
-// headerScrubber hides each header value and, for "Scheme token" values,
-// the token alone too.
-func headerScrubber(headers map[string]string) *scrubber {
-	if len(headers) == 0 {
-		return nil
-	}
-	// Every header value is a secret here, however short: no minSecretLen
-	// cutoff as for env values.
+// headerScrubber is secretScrubber for headers alone.
+func headerScrubber(headers map[string]string) *scrubber { return secretScrubber("", headers) }
+
+// secretScrubber hides an HTTP server's secrets in text: every header value
+// (however short: no minSecretLen cutoff as for env values), the token of
+// a "Scheme token" value, a Basic value's decoded user:pass and password,
+// and the URL's query values and userinfo password (a literal secret in a
+// URL cannot be told from a harmless value). Each also in its URL-query,
+// URL-path and JSON-escaped forms. Nil when there is nothing to hide.
+func secretScrubber(rawURL string, headers map[string]string) *scrubber {
 	seen := map[string]bool{}
 	sc := &scrubber{}
 	add := func(v string) {
-		if v != "" && !seen[v] {
-			seen[v] = true
-			sc.values = append(sc.values, v)
+		if v == "" {
+			return
+		}
+		esc, _ := json.Marshal(v)
+		for _, f := range []string{v, url.QueryEscape(v), url.PathEscape(v), strings.Trim(string(esc), `"`)} {
+			if f != "" && !seen[f] {
+				seen[f] = true
+				sc.values = append(sc.values, f)
+			}
 		}
 	}
 	for _, v := range headers {
@@ -212,13 +222,34 @@ func headerScrubber(headers map[string]string) *scrubber {
 		if i := strings.LastIndexByte(v, ' '); i >= 0 {
 			add(v[i+1:])
 		}
+		if enc, ok := strings.CutPrefix(v, "Basic "); ok {
+			if dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(enc)); err == nil {
+				add(string(dec))
+				if _, pass, ok := strings.Cut(string(dec), ":"); ok {
+					add(pass)
+				}
+			}
+		}
+	}
+	if u, err := url.Parse(rawURL); err == nil && rawURL != "" {
+		if pass, ok := u.User.Password(); ok {
+			add(pass)
+		}
+		for _, vals := range u.Query() {
+			for _, v := range vals {
+				add(v)
+			}
+		}
+	}
+	if len(sc.values) == 0 {
+		return nil
 	}
 	sort.Slice(sc.values, func(i, j int) bool { return len(sc.values[i]) > len(sc.values[j]) })
 	return sc
 }
 
 func startHTTP(ctx context.Context, server string, cfg HTTPServerConfig) (*httpBackend, error) {
-	sc := headerScrubber(cfg.Headers)
+	sc := secretScrubber(cfg.URL, cfg.Headers)
 	b, err := startHTTPRaw(ctx, server, cfg, sc)
 	if err != nil {
 		return nil, scrubErr(sc, err)
@@ -287,6 +318,13 @@ func (b *httpBackend) ListToolsRaw(ctx context.Context) ([]json.RawMessage, erro
 	return tools, nil
 }
 
+// echoMin is the shortest secret echoesValue looks for: a 1 to 7 byte
+// value (a short API key part, a "Basic" token half) also occurs in
+// ordinary tool names and descriptions, and refusing a tool list on such a
+// match would stop a working server from moving. Shorter values are still
+// scrubbed from errors and logs.
+const echoMin = 8
+
 // echoesValue reports whether any string token in raw (keys and values,
 // at any depth, decoded, duplicates included, so every escape form and
 // every member counts) holds one of sc's configured values of 8 bytes or
@@ -307,7 +345,7 @@ func echoesValue(sc *scrubber, raw json.RawMessage) bool {
 			continue
 		}
 		for _, val := range sc.values {
-			if len(val) >= 8 && strings.Contains(s, val) {
+			if len(val) >= echoMin && strings.Contains(s, val) {
 				return true
 			}
 		}

@@ -47,7 +47,7 @@ func httpHeaders(ctx context.Context, server string, cfg ServerConfig, secrets S
 		return nil, nil
 	}
 	service := HeaderService(server)
-	fix := "run aimux mcp proxy uninstall and install again"
+	fix := fmt.Sprintf("unlock the Keychain and restart the proxy; if the item is gone, run aimux mcp proxy uninstall --without %s (then add %s again with claude mcp add)", server, server)
 	if secrets == nil {
 		return nil, fmt.Errorf("keychain item %s is missing or locked (no secret store here); %s", service, fix)
 	}

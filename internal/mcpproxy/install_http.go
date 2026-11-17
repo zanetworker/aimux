@@ -113,7 +113,7 @@ func (i Installer) storeHeaders(http map[string]HTTPEntry) ([]string, error) {
 func (i Installer) deleteItems(services []string) {
 	for _, s := range services {
 		if err := i.Vault.Delete(s); err != nil {
-			i.printf("Note: could not delete Keychain item %s (%v); remove it with: security delete-generic-password -s %s\n", s, err, s)
+			i.printf("Note: could not delete Keychain item %s (%v); remove it with: security delete-generic-password -a aimux -s %s\n", s, err, s)
 		}
 	}
 }
@@ -329,6 +329,11 @@ func (i Installer) unredacted(ctx context.Context, m *Manifest, current map[stri
 		// Only an entry that is still the proxy entry gets its original back;
 		// for any other (restored already, changed, removed) the item is not
 		// needed, so an uninstall interrupted after deleting items can finish.
+		if contains(i.Without, name) {
+			e.without = true
+			out[name] = e
+			continue
+		}
 		if e.Keychain == "" {
 			out[name] = e
 			continue
@@ -338,7 +343,7 @@ func (i Installer) unredacted(ctx context.Context, m *Manifest, current map[stri
 		// when the entry needs none of its values: not the proxy entry and
 		// no placeholder left (an uninstall that stopped after deleting it).
 		needed := jsonEqual(current[name], json.RawMessage(e.Written)) || anyPlaceholder(current[name])
-		fix := fmt.Sprintf("nothing was changed; unlock the Keychain (or restore %s from %s) and run uninstall again", name, i.BackupDir)
+		fix := fmt.Sprintf("nothing was changed; unlock the Keychain and run uninstall again, or, if the item is gone, give up this server's original with: aimux mcp proxy uninstall --without %s", name)
 		if i.Vault == nil {
 			if !needed {
 				out[name] = e
@@ -375,20 +380,64 @@ func (i Installer) unredacted(ctx context.Context, m *Manifest, current map[stri
 // dropItems deletes the Keychain items of the servers uninstall restored;
 // a server whose entry the owner changed or removed keeps its item, with a
 // note. A failed delete is a note, not an error.
-func (i Installer) dropItems(m *Manifest, restored []string) {
+func (i Installer) dropItems(m *Manifest, restored []string, current map[string]json.RawMessage) {
 	for _, name := range sortedKeys(m.Servers) {
 		svc := m.Servers[name].Keychain
 		if svc == "" || i.Vault == nil {
 			continue
 		}
-		if !contains(restored, name) {
-			i.printf("Kept Keychain item %s (its entry changed since install); remove it with: security delete-generic-password -s %s\n", svc, svc)
+		if !contains(restored, name) && !contains(i.Without, name) {
+			why := "its entry changed since install"
+			if _, ok := current[name]; !ok {
+				why = "its entry was removed since install"
+			}
+			i.printf("Kept Keychain item %s (%s); remove it with: security delete-generic-password -a aimux -s %s\n", svc, why, svc)
 			continue
 		}
 		if err := i.Vault.Delete(svc); err != nil {
-			i.printf("Note: could not delete Keychain item %s (%v); remove it with: security delete-generic-password -s %s\n", svc, err, svc)
+			i.printf("Note: could not delete Keychain item %s (%v); remove it with: security delete-generic-password -a aimux -s %s\n", svc, err, svc)
 		}
 	}
+}
+
+// removeMember is obj without its member key; every other byte is kept.
+func removeMember(obj json.RawMessage, key string) (json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(obj))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, fmt.Errorf("not a JSON object")
+	}
+	type span struct{ keyStart, valueEnd int }
+	var spans []span
+	target := -1
+	for dec.More() {
+		before := int(dec.InputOffset())
+		k, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("not valid JSON")
+		}
+		ks := before + bytes.IndexByte(obj[before:], '"')
+		if err := skipValue(dec); err != nil {
+			return nil, err
+		}
+		if k == key {
+			target = len(spans)
+		}
+		spans = append(spans, span{ks, int(dec.InputOffset())})
+	}
+	if target < 0 {
+		return obj, nil
+	}
+	s := spans[target]
+	var out []byte
+	switch {
+	case target+1 < len(spans): // up to the next member's key
+		out = append(append(out, obj[:s.keyStart]...), obj[spans[target+1].keyStart:]...)
+	case target > 0: // last: from the previous value's end (drops the comma)
+		out = append(append(out, obj[:spans[target-1].valueEnd]...), obj[s.valueEnd:]...)
+	default: // the only member: an empty object
+		return json.RawMessage(`{}`), nil
+	}
+	return json.RawMessage(out), nil
 }
 
 // sameRedacted reports whether entry, with its header values replaced by

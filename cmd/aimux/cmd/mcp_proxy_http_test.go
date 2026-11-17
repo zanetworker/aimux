@@ -28,3 +28,10 @@ func TestProxyInstaller_VaultWired(t *testing.T) {
 		t.Fatalf("GOOS %s: vault %v", runtime.GOOS, in.Vault)
 	}
 }
+
+func TestUninstallWithoutFlag(t *testing.T) {
+	c := newMCPProxyUninstallCmd()
+	if f := c.Flags().Lookup("without"); f == nil || !strings.Contains(c.Long, "--without <server>") {
+		t.Fatal("uninstall has no --without flag or help")
+	}
+}
