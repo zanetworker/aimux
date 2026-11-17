@@ -1,6 +1,9 @@
 package toolgateway
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -60,5 +63,39 @@ func (t *Tokens) Renew(session string, until time.Time) error {
 	if !is.expires.IsZero() {
 		is.expires = until
 	}
+	return nil
+}
+
+// LeaseTTL is how long a turn's lease lives unless renewed; LeaseRenewEvery
+// is how often remote serve renews it while the turn runs.
+const (
+	LeaseTTL        = 15 * time.Minute
+	LeaseRenewEvery = 5 * time.Minute
+)
+
+// NewToken is 32 random bytes in hex: a turn's token.
+func NewToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+// LocalLeases is a token table used as leases in the same process (aimux
+// sandbox verify, tests); remote serve uses a ControlClient.
+type LocalLeases struct{ T *Tokens }
+
+// PutLease stores l.
+func (l LocalLeases) PutLease(_ context.Context, x Lease) error { return l.T.Put(x) }
+
+// Renew moves the lease's expiry.
+func (l LocalLeases) Renew(_ context.Context, session string, until time.Time) error {
+	return l.T.Renew(session, until)
+}
+
+// DeleteLease ends the lease.
+func (l LocalLeases) DeleteLease(_ context.Context, session string) error {
+	l.T.Revoke(session)
 	return nil
 }

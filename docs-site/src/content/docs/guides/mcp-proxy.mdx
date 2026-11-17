@@ -199,6 +199,19 @@ Later refreshes merge: a server still in `~/.claude.json` overrides the saved co
 
 The catalog is also refreshed whenever a server starts, and tools it did not list before reach open sessions right away (the proxy reloads that server's tool list in place).
 
+## The sandbox tool gateway
+
+The proxy service has a second worker for OpenShell sandboxes: the read-only tool gateway on `127.0.0.1:7390`, which sandboxes reach as `host.containers.internal:7390`. It serves only the tools approved in `~/.config/aimux/tool-sources.yaml` (see `aimux tools`), from its own pool of backends: it never shares a server process, a cache or an environment with the proxy on `:7381`, and each restarts on its own.
+
+```sh
+aimux mcp proxy gateway install    # run it under launchd (com.aimux.tool-gateway), at login and after a crash
+aimux mcp proxy gateway status     # running or not, live leases, backends, which are down
+aimux mcp proxy gateway uninstall  # stop it; Workspace turns then fail until it is installed again
+aimux mcp proxy gateway serve      # run it in the foreground (what launchd runs)
+```
+
+Every sandbox turn's token is a lease: `aimux remote serve` puts it on the worker over `~/.aimux/gateway.sock` before the turn's claude starts, with the tools the turn may use and the tool snapshot it was compiled at, renews it every 5 minutes, and deletes it when the turn ends. A lease nobody renews expires after 15 minutes. The socket is mode 0600, the worker checks that every connection comes from your user, and it is never offered on a TCP port. A restarted worker knows no leases, so calls fail until `remote serve` puts them again at its next renewal. `aimux mcp proxy status` ends with a `tool gateway:` line.
+
 ## Check its health
 
 ```bash

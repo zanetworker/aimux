@@ -114,7 +114,7 @@ func (p probeTools) Ensure(ctx context.Context) error {
 		return stoppedRunner(phase)
 	case !ok || phase != "Ready":
 		return &mcpproxy.RunnerError{Err: errors.New("tool runner not started"),
-			Next: fmt.Sprintf("run aimux tools approve <set> (a set of %s) or start aimux remote serve", p.source)}
+			Next: fmt.Sprintf("run aimux tools approve <set> (a set of %s), or start the tool gateway worker: aimux mcp proxy gateway install", p.source)}
 	}
 	return nil
 }
@@ -122,7 +122,7 @@ func (p probeTools) Ensure(ctx context.Context) error {
 // stoppedRunner is a runner in a terminal phase, with how to bring it back.
 func stoppedRunner(phase string) error {
 	s := profile.RunnerSandbox
-	next := fmt.Sprintf("delete it with openshell -g local sandbox delete %s, then run aimux tools approve <set> or restart aimux remote serve to create it again", s)
+	next := fmt.Sprintf("delete it with openshell -g local sandbox delete %s, then run aimux tools approve <set> or restart the tool gateway worker (launchctl kickstart -k gui/$(id -u)/com.aimux.tool-gateway) to create it again", s)
 	if phase == "Stopped" {
 		next = fmt.Sprintf("start it with openshell -g local sandbox start %s, or %s", s, next)
 	}

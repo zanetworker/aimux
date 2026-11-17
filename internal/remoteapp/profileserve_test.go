@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,41 +17,6 @@ import (
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
-
-// The gateway starts on first use only, once; a failed start is retried by
-// the next use; closing stops what started.
-func TestLazyGateway_StartsOnceOnFirstUseAndStopsOnClose(t *testing.T) {
-	starts, stops := 0, 0
-	fail := true
-	g := &lazyGateway{tokens: &toolgateway.Tokens{}, start: func(ctx context.Context) (func(), error) {
-		starts++
-		if fail {
-			return nil, errors.New("listen on 127.0.0.1:7390: address in use")
-		}
-		return func() { stops++ }, nil
-	}}
-	if starts != 0 {
-		t.Fatal("started before use")
-	}
-	if _, _, err := g.get(); err == nil || !strings.Contains(err.Error(), "7390") {
-		t.Fatalf("first get = %v, want the start error", err)
-	}
-	fail = false
-	for i := 0; i < 3; i++ {
-		base, tokens, err := g.get()
-		if err != nil || base != toolgateway.ReadonlyURL || tokens != g.tokens {
-			t.Fatalf("get = %q %p %v", base, tokens, err)
-		}
-	}
-	if starts != 2 {
-		t.Fatalf("%d starts, want 2 (one failed, one served three uses)", starts)
-	}
-	g.close()
-	g.close()
-	if stops != 1 {
-		t.Fatalf("%d stops, want 1", stops)
-	}
-}
 
 // fakeEngine records what the serve wiring asks of it.
 type fakeEngine struct {
@@ -202,57 +165,6 @@ func TestProfileWiring_InstallMarksEngineLessProfilesUnavailable(t *testing.T) {
 	}
 }
 
-// get refreshes the running gateway (down backends, re-pins) at most once
-// per refreshEvery, never on the get that started it, and outside the start
-// lock: a slow refresh does not hold up another turn's get.
-func TestLazyGateway_RefreshesAtMostOncePerMinuteOutsideTheLock(t *testing.T) {
-	now := time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)
-	var clockMu sync.Mutex
-	clock := func() time.Time { clockMu.Lock(); defer clockMu.Unlock(); return now }
-	advance := func(d time.Duration) { clockMu.Lock(); now = now.Add(d); clockMu.Unlock() }
-	var refreshes atomic.Int32
-	entered, release := make(chan struct{}, 4), make(chan struct{})
-	g := &lazyGateway{tokens: &toolgateway.Tokens{},
-		start: func(context.Context) (func(), error) { return func() {}, nil },
-		refresh: func(ctx context.Context) {
-			refreshes.Add(1)
-			entered <- struct{}{}
-			select {
-			case <-release:
-			case <-ctx.Done():
-			}
-		},
-		now: clock}
-	defer g.close()
-	if _, _, err := g.get(); err != nil || refreshes.Load() != 0 {
-		t.Fatalf("starting get: %v, %d refreshes (a fresh start read everything)", err, refreshes.Load())
-	}
-	advance(30 * time.Second)
-	_, _, _ = g.get()
-	if refreshes.Load() != 0 {
-		t.Fatal("refreshed within a minute of the start")
-	}
-	advance(31 * time.Second)
-	go func() { _, _, _ = g.get() }()
-	select {
-	case <-entered: // a slow refresh is running
-	case <-time.After(2 * time.Second):
-		close(release)
-		t.Fatal("no refresh a minute after the start")
-	}
-	done := make(chan struct{})
-	go func() { _, _, _ = g.get(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("a get waited on another get's refresh")
-	}
-	close(release)
-	if n := refreshes.Load(); n != 1 {
-		t.Fatalf("%d refreshes in one minute, want 1", n)
-	}
-}
-
 // A finished sandbox session's transcript is archived under
 // ~/.aimux/archive (sandboxlaunch.Archive's layout); archived names it so
 // the session detail reads it. Archived transcripts of other sessions, and
@@ -326,33 +238,6 @@ func TestProfileWiring_PageEngineDefaultsToTheProfileModel(t *testing.T) {
 	}
 	if got := page.SessionModel("unknown"); got != "" {
 		t.Fatalf("SessionModel(unknown) = %q, want none", got)
-	}
-}
-
-// A gateway whose snapshot is behind the store's is refreshed on the next
-// get, without waiting out the minute, so the turn's token and the served
-// pins agree.
-func TestLazyGateway_RefreshesAtOnceWhenStale(t *testing.T) {
-	var refreshes atomic.Int32
-	var stale atomic.Bool
-	g := &lazyGateway{tokens: &toolgateway.Tokens{},
-		start:   func(context.Context) (func(), error) { return func() {}, nil },
-		refresh: func(context.Context) { refreshes.Add(1); stale.Store(false) },
-		stale:   stale.Load}
-	defer g.close()
-	_, _, _ = g.get()
-	_, _, _ = g.get()
-	if refreshes.Load() != 0 {
-		t.Fatal("refreshed while current")
-	}
-	stale.Store(true)
-	_, _, _ = g.get()
-	if refreshes.Load() != 1 {
-		t.Fatalf("%d refreshes, want 1 for the stale snapshot", refreshes.Load())
-	}
-	_, _, _ = g.get()
-	if refreshes.Load() != 1 {
-		t.Fatal("refreshed again once current")
 	}
 }
 

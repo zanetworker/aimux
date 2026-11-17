@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -197,5 +199,59 @@ func TestReadonlyServer_RelistIsNotQueuedBehindARunningOne(t *testing.T) {
 	r.WaitBackground()
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("%d relists ran for 5 turns during one, want 1", n)
+	}
+}
+
+// A lease's fresh listing retries its backend when it was down at start (a
+// backend that came up after the worker started), not only the minute tick.
+func TestReadonlyServer_RelistNowRetriesALeasesDownBackend(t *testing.T) {
+	var logw bytes.Buffer
+	r, served, _, home := readonlyRig(t, &logw)
+	writeHomeFile(t, toolreg.DefaultPath(home), `version: 1
+sources:
+  wiki: {type: mcp-http, url: "http://127.0.0.1:1/wiki"}
+  jira: {type: mcp-http, url: "http://127.0.0.1:1/jira"}
+sets:
+  wiki:readonly: {source: wiki, tools: [search]}
+  jira:readonly: {source: jira, tools: [get]}
+`)
+	r.Build = func(_ context.Context, _ mcpproxy.ReadonlyConfig, _ mcpproxy.ToolPins, _ func(string, string, error)) (map[string]*server.MCPServer, *mcpproxy.Pool, map[string]error, error) {
+		return map[string]*server.MCPServer{"wiki": server.NewMCPServer("wiki", "1")}, nil, map[string]error{"jira": errors.New("connection refused")}, nil
+	}
+	var mu sync.Mutex
+	var rebuilt [][]string
+	r.Rebuild = func(_ context.Context, _ mcpproxy.ReadonlyConfig, names []string, _ mcpproxy.ToolPins, _ *mcpproxy.Pool, _ func(string, string, error)) (map[string]*server.MCPServer, map[string]error) {
+		mu.Lock()
+		rebuilt = append(rebuilt, append([]string(nil), names...))
+		mu.Unlock()
+		return servers(names), nil
+	}
+	stop, err := r.Start(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	opt := <-served
+	var added []string
+	opt.AddServers(func(n string, _ *server.MCPServer) { mu.Lock(); added = append(added, n); mu.Unlock() }, func(string) bool { return true })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := r.RelistNow(ctx, []string{"jira"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, names := range rebuilt {
+		found = found || slices.Contains(names, "jira")
+	}
+	if !found {
+		t.Fatalf("rebuilt %v: the lease's down backend jira was not retried", rebuilt)
+	}
+	if !slices.Contains(added, "jira") {
+		t.Fatalf("added %v: the recovered backend's endpoint was not published", added)
+	}
+	if _, down := r.Backends(); slices.Contains(down, "jira") {
+		t.Fatalf("down %v: jira still marked down after it recovered", down)
 	}
 }

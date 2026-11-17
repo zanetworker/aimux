@@ -1,9 +1,7 @@
 package toolgateway
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"slices"
 	"sync"
@@ -60,11 +58,10 @@ func (t *Tokens) Issue(session string, allow map[string][]string, at toolreg.Sna
 	if session == "" {
 		return "", errors.New("a token needs a session")
 	}
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
+	tok, err := NewToken()
+	if err != nil {
 		return "", err
 	}
-	tok := hex.EncodeToString(raw)
 	t.store(session, &issued{token: []byte(tok), allow: copyAllow(allow), version: at.Version(), pins: PinsFor(at, allow)})
 	return tok, nil
 }
@@ -167,4 +164,18 @@ func copyAllow(in map[string][]string) map[string][]string {
 		out[k] = slices.Clone(v)
 	}
 	return out
+}
+
+// Len is the number of live tokens and leases.
+func (t *Tokens) Len() int {
+	now := t.now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for _, is := range t.sessions {
+		if is.expires.IsZero() || now.Before(is.expires) {
+			n++
+		}
+	}
+	return n
 }

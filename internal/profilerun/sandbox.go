@@ -37,7 +37,10 @@ const archiveTimeout = time.Minute
 type SandboxEngine struct {
 	L          *sandboxlaunch.Launcher
 	Compile    func(profile string) (profile.Compiled, error)
-	Gateway    func() (baseURL string, tokens *toolgateway.Tokens, err error)
+	Gateway    func() (baseURL string, leases Leases, err error)
+	// RenewEvery is how often a running turn renews its lease (0:
+	// toolgateway.LeaseRenewEvery).
+	RenewEvery time.Duration
 	ArchiveDir string // default ~/.aimux/archive (the search index scans it)
 	// OnStarted, if set, hears once per session that its first turn's
 	// claude process started, as its stream showed (the id is claude's from
@@ -63,7 +66,7 @@ type sbSession struct {
 // NewSandboxEngine returns a sandbox engine. compile turns a profile name
 // into its compiled form; gw returns the tool gateway's base URL (as seen
 // from inside the sandbox) and the token table its listener checks.
-func NewSandboxEngine(l *sandboxlaunch.Launcher, compile func(profile string) (profile.Compiled, error), gw func() (baseURL string, tokens *toolgateway.Tokens, err error)) *SandboxEngine {
+func NewSandboxEngine(l *sandboxlaunch.Launcher, compile func(profile string) (profile.Compiled, error), gw func() (baseURL string, leases Leases, err error)) *SandboxEngine {
 	home, _ := os.UserHomeDir()
 	return &SandboxEngine{L: l, Compile: compile, Gateway: gw,
 		ArchiveDir: filepath.Join(home, ".aimux", "archive"), Log: slog.Default()}
@@ -251,23 +254,26 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	// is issued and the MCP config lists no servers.
 	var base, token string
 	if !c.Grant.Empty() {
-		var tokens *toolgateway.Tokens
-		base, tokens, err = e.Gateway()
+		var leases Leases
+		base, leases, err = e.Gateway()
 		if err != nil {
 			return "", fmt.Errorf("tool gateway: %w", err)
 		}
-		if tokens == nil {
-			return "", errors.New("tool gateway: no token table")
+		if leases == nil {
+			return "", errors.New("tool gateway: no lease table")
 		}
-		token, err = tokens.Issue(session, c.Grant.Scope(), c.Snapshot)
-		if err != nil {
+		if token, err = toolgateway.NewToken(); err != nil {
 			return "", fmt.Errorf("tool gateway token: %w", err)
 		}
-		// Deferred before rc.Close, so it runs after it: the token goes once
-		// the process that held it is closed. Revoke does not close MCP
-		// streams the listener still has open; closing the exec reader ends
-		// the process group that opened them.
-		defer tokens.Revoke(session)
+		end, err := e.lease(ctx, leases, session, token, c)
+		if err != nil {
+			return "", fmt.Errorf("tool gateway: %w", err)
+		}
+		// Deferred before rc.Close, so it runs after it: the lease ends once
+		// the process that held its token is closed. Ending it does not
+		// close MCP streams the listener still has open; closing the exec
+		// reader ends the process group that opened them.
+		defer end()
 	}
 	redact := func(err error) error { return redactToken(err, token) }
 
@@ -516,4 +522,67 @@ func originOf(raw string) string {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+// Leases is the gateway's lease table as a turn uses it: a
+// toolgateway.ControlClient for the gateway worker, or
+// toolgateway.LocalLeases in the same process.
+type Leases interface {
+	PutLease(ctx context.Context, l toolgateway.Lease) error
+	Renew(ctx context.Context, session string, until time.Time) error
+	DeleteLease(ctx context.Context, session string) error
+}
+
+// leaseCallTimeout bounds a renew or delete the turn makes in the
+// background.
+const leaseCallTimeout = 5 * time.Second
+
+// lease puts the turn's lease (token, the grant, its snapshot and pins)
+// and renews it until end is called, putting it again when the gateway
+// lost it (a restarted worker). end stops renewing and deletes it.
+func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token string, c profile.Compiled) (end func(), err error) {
+	scope := c.Grant.Scope()
+	l := toolgateway.Lease{Session: session, Token: token, Allow: scope, Version: c.Snapshot.Version(),
+		Pins: toolgateway.PinsFor(c.Snapshot, scope), Expires: time.Now().Add(toolgateway.LeaseTTL)}
+	if err := leases.PutLease(ctx, l); err != nil {
+		return nil, err
+	}
+	every := e.RenewEvery
+	if every == 0 {
+		every = toolgateway.LeaseRenewEvery
+	}
+	rctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-rctx.Done():
+				return
+			case <-t.C:
+			}
+			cctx, cancel := context.WithTimeout(rctx, leaseCallTimeout)
+			until := time.Now().Add(toolgateway.LeaseTTL)
+			err := leases.Renew(cctx, session, until)
+			if errors.Is(err, toolgateway.ErrUnknownLease) {
+				l.Expires = until
+				err = leases.PutLease(cctx, l)
+			}
+			cancel()
+			if err != nil && rctx.Err() == nil && e.Log != nil {
+				e.Log.Warn("tool gateway: lease renewal failed; the turn's tools stop when the lease expires", "session", session, "err", err)
+			}
+		}
+	}()
+	return func() {
+		stop()
+		<-done
+		dctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
+		defer cancel()
+		if err := leases.DeleteLease(dctx, session); err != nil && e.Log != nil {
+			e.Log.Warn("tool gateway: lease not deleted; it expires on its own", "session", session, "err", err)
+		}
+	}, nil
 }

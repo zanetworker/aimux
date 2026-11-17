@@ -82,8 +82,15 @@ const maxControlResponse = 64 << 20
 
 func leasePath(session string) string { return "/v1/leases/" + url.PathEscape(session) }
 
+// putLeaseTimeout covers what a put may wait for on the worker: a refresh to
+// the lease's snapshot (leaseRefreshTimeout) and the fresh listing (5 s).
+const putLeaseTimeout = leaseRefreshTimeout + 10*time.Second
+
 // PutLease puts l on the worker.
 func (c ControlClient) PutLease(ctx context.Context, l Lease) error {
+	if c.Timeout < putLeaseTimeout {
+		c.Timeout = putLeaseTimeout
+	}
 	return c.do(ctx, http.MethodPut, leasePath(l.Session), l, nil)
 }
 

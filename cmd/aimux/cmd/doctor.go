@@ -102,7 +102,7 @@ func collectDoctor(ctx context.Context, env frontEnv) []doctorCheck {
 	port, portFree := portCheck(ctx, env, procs, psErr)
 	cs = append(cs, port, serveCheck(env, procs, psErr))
 	sb := collectSandboxStatus(ctx, env.browserEnv, env.ProfileDir)
-	cs = append(cs, gatewayCheck(sb))
+	cs = append(cs, gatewayCheck(sb), gatewayWorkerCheck(ctx, env.gateway()))
 	return append(cs, sandboxChecks(sb, portFree)...)
 }
 
@@ -375,7 +375,7 @@ func portCheck(ctx context.Context, env frontEnv, procs []procInfo, psErr error)
 	out, err := env.Run(ctx, nil, "lsof", "-nP", "-iTCP:7390", "-sTCP:LISTEN", "-t")
 	var ec interface{ ExitCode() int }
 	if err != nil && errors.As(err, &ec) && ec.ExitCode() == 1 && strings.TrimSpace(out) == "" {
-		return ok(id, "free (no aimux remote serve holds it)"), true
+		return ok(id, "free (the tool gateway worker is not running; aimux sandbox verify can use the port)"), true
 	}
 	if err != nil {
 		return doctorCheck{ID: id, Status: checkWarn, Detail: "could not check: " + clipText(err.Error(), 200), Fix: "lsof -nP -iTCP:7390 -sTCP:LISTEN (install lsof if it is missing)"}, false
@@ -397,6 +397,9 @@ func portCheck(ctx context.Context, env frontEnv, procs []procInfo, psErr error)
 				desc, serve = p.Cmd, p.aimuxServe(ref)
 			}
 		}
+		if strings.Contains(desc, "mcp proxy gateway serve") {
+			return ok(id, fmt.Sprintf("held by the tool gateway worker, pid %d (aimux sandbox verify uses it)", pid)), true
+		}
 		if serve {
 			serves = append(serves, fmt.Sprintf("pid %d (%s)", pid, desc))
 		} else {
@@ -406,10 +409,10 @@ func portCheck(ctx context.Context, env frontEnv, procs []procInfo, psErr error)
 	}
 	if len(others) > 0 {
 		return doctorCheck{ID: id, Status: checkFail,
-			Detail: "held by " + strings.Join(others, ", ") + ", so aimux remote serve cannot start its read-only tool server there",
-			Fix:    "kill " + strings.Join(otherPIDs, " ") + " (or stop that program), then start aimux remote serve again"}, false
+			Detail: "held by " + strings.Join(others, ", ") + ", so the tool gateway worker cannot serve sandboxes there",
+			Fix:    "kill " + strings.Join(otherPIDs, " ") + " (or stop that program), then: launchctl kickstart -k gui/$(id -u)/com.aimux.tool-gateway"}, false
 	}
-	return ok(id, "held by aimux remote serve, "+strings.Join(serves, ", ")+" (stop it before aimux sandbox verify)"), false
+	return doctorCheck{ID: id, Status: checkWarn, Detail: "held by an older aimux remote serve, " + strings.Join(serves, ", ") + ", which still runs its own gateway", Fix: "restart aimux remote serve from the current aimux, then: aimux mcp proxy gateway install"}, false
 }
 
 func serveCheck(env frontEnv, procs []procInfo, psErr error) doctorCheck {
@@ -520,4 +523,12 @@ func staleFix(profile string, portFree bool) string {
 		return "applies on the next Web question"
 	}
 	return "applies on the next turn in " + profile
+}
+
+// gateway is env's tool gateway worker reporter.
+func (env frontEnv) gateway() gatewayStatuser {
+	if env.Gateway != nil {
+		return env.Gateway
+	}
+	return toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(env.Home)}
 }

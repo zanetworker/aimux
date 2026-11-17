@@ -71,8 +71,8 @@ func runGoldenTurns(t *testing.T, c profile.Compiled) []goldenTurn {
 	b := &sbBackend{tokens: tokens, script: func(s string) (string, error, error) { return okStream(s), nil, nil }}
 	e := NewSandboxEngine(&sandboxlaunch.Launcher{Backend: b},
 		func(string) (profile.Compiled, error) { return c, nil },
-		func() (string, *toolgateway.Tokens, error) {
-			return "http://host.containers.internal:7390", tokens, nil
+		func() (string, Leases, error) {
+			return "http://host.containers.internal:7390", toolgateway.LocalLeases{T: tokens}, nil
 		})
 	e.ArchiveDir = filepath.Join(t.TempDir(), "archive")
 	sid, err := e.New(context.Background(), Meta{Profile: c.Profile, URL: "https://a", Title: "T"}, "PAGE")
