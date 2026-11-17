@@ -231,7 +231,10 @@ paths:
         with nothing started: `400 unknown_profile`, `403
         profile_not_allowed` (outside the client's scope), `403
         step_up_required` (see Profiles), `409 profile_not_available`, `413
-        page_too_large` (`pageText` over 512 KiB), `429 client_limit`.
+        page_too_large` (`pageText` over 512 KiB), `400 image_invalid`
+        (see `image`), `429 client_limit`. With a profile the body may be
+        up to 6 MiB (a 512 KiB `pageText` escaped plus a 1.5 MiB image);
+        without one, 1 MiB.
       operationId: newSession
       requestBody:
         required: true
@@ -1141,6 +1144,7 @@ components:
             - step_up_required      # 403: a host profile from a device needs a login under maxAge seconds old from an allowed device kind
             - profile_not_available # 409: the profile exists but the Mac cannot run it yet
             - page_too_large        # 413: pageText is over 512 KiB
+            - image_invalid         # 400: the question's image is not png, jpeg, webp or gif, not plain base64, not of its stated type, or over 1.5 MiB of base64
             - not_found             # 404: a local client (not cli) asked about a session it did not start; such sessions do not exist for it
             - forbidden_for_client  # 403: a local client (not cli) may not use this route (search, projects, terminal, open on Mac, approvals, devices, describe, queue)
             - client_limit          # 429: the client runs as many sessions, or started as many turns this minute, as it may; see Retry-After
@@ -1747,6 +1751,14 @@ components:
             decisionId: { type: string }
             mode: { type: string, enum: [page, web, workspace] }
             source: { type: string, enum: [override, model, unavailable, override_blocked] }
+        image:
+          type: object
+          additionalProperties: false
+          required: [mimeType, data]
+          description: "With profile: one image pasted into the question (a screenshot). The model sees it after the prompt text, framed as untrusted data from the user's screen like page text: instructions in it are never followed. A mimeType other than these, data that is not plain base64 (no `data:` prefix, no line breaks), bytes that are not of the stated type, or more than 1,572,864 bytes (1.5 MiB) of base64 is 400 image_invalid. Events and history show only the question text; the agent's own transcript keeps the image."
+          properties:
+            mimeType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
+            data: { type: string, maxLength: 1572864, description: "The image bytes in standard base64." }
 
     RouteRequest:
       type: object

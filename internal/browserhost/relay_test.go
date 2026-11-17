@@ -1039,3 +1039,29 @@ func TestRelay_ForwardsPrior(t *testing.T) {
 		t.Fatalf("prior sent when empty: %v", posts[1].Body)
 	}
 }
+
+// An ask's image goes to POST /v1/sessions as is; an ask without one sends
+// no image field.
+func TestRelay_ForwardsImage(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	acceptOnce(f)
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "i1", Type: "ask", Lane: "page", URL: "https://a.example/", Question: "q",
+		Image: &Image{MimeType: "image/png", Data: "iVBORw0KGgo="}})
+	p.until(t, "i1")
+	p.send(t, Request{ID: "i2", Type: "ask", Lane: "page", URL: "https://a.example/", Question: "q"})
+	p.until(t, "i2")
+	posts := f.find("POST", "/v1/sessions")
+	if len(posts) != 2 {
+		t.Fatalf("posts = %+v", posts)
+	}
+	img, _ := posts[0].Body["image"].(map[string]any)
+	if img["mimeType"] != "image/png" || img["data"] != "iVBORw0KGgo=" || len(img) != 2 {
+		t.Fatalf("image = %v", posts[0].Body["image"])
+	}
+	if _, has := posts[1].Body["image"]; has {
+		t.Fatalf("image sent when absent: %v", posts[1].Body)
+	}
+}

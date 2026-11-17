@@ -170,3 +170,18 @@ func ModelFrom(ctx context.Context) string {
 	m, _ := ctx.Value(modelKey{}).(string)
 	return m
 }
+
+// imageKey carries a turn's attached image in its context.
+type imageKey struct{}
+
+// WithImage returns ctx carrying the image the user attached to the turn's
+// question (checked by the remote API), sent after the prompt text.
+func WithImage(ctx context.Context, img *acprun.Image) context.Context {
+	return context.WithValue(ctx, imageKey{}, img)
+}
+
+// ImageFrom is the turn's attached image in ctx, nil when none.
+func ImageFrom(ctx context.Context) *acprun.Image {
+	img, _ := ctx.Value(imageKey{}).(*acprun.Image)
+	return img
+}

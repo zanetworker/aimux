@@ -409,8 +409,9 @@ func writeFile0600(path string, data []byte) error {
 
 // Exec passes mcpConfig on stdin line 1 to WorkWrapper, which writes it to a
 // 0600 file in the sandbox, swaps it in for the placeholder and removes it
-// when the command exits. The rest of stdin is the prompt, which the wrapper
-// hands to the command as its stdin. env goes to the command alone, through
+// when the command exits. The rest of stdin is the prompt (plain text, or for
+// a turn with an image one stream-json user message line), which the
+// wrapper hands to the command as its stdin unchanged. env goes to the command alone, through
 // an `env` prefix (envArgs).
 func (b *cliBackend) Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, env map[string]string, args []string) (io.ReadCloser, error) {
 	if !sandboxNameRE.MatchString(c.Sandbox) {

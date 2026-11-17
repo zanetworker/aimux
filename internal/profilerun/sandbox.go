@@ -228,7 +228,9 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	if model != "" {
 		caps.Model = model // the turn's choice (--model), checked above
 	}
-	launch := harnessconfig.Launch{Mode: harnessconfig.ModeHeadless}
+	img := ImageFrom(ctx)
+	// With an image claude reads one stream-json user message instead of text.
+	launch := harnessconfig.Launch{Mode: harnessconfig.ModeHeadless, StreamJSONInput: img != nil}
 	if created {
 		launch.ResumeID = session
 	} else {
@@ -238,7 +240,12 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	if err != nil {
 		return "", fmt.Errorf("harness %s: %w", harness, err)
 	}
-	prompt := sandboxPromptPrior(first, PriorFrom(ctx), text)
+	prompt := sandboxTurnPrompt(first, PriorFrom(ctx), img != nil, text)
+	if img != nil {
+		if prompt, err = streamUserMessage(prompt, img); err != nil {
+			return "", err
+		}
+	}
 
 	// A profile with no servers (research) needs no tool gateway: no token
 	// is issued and the MCP config lists no servers.
@@ -407,6 +414,12 @@ func sandboxPrompt(first *AskRequest, text string) string {
 // sandboxPromptPrior is sandboxPrompt with the user's earlier questions
 // from another mode (any turn, not only the first), before the question.
 func sandboxPromptPrior(first *AskRequest, prior []string, text string) string {
+	return sandboxTurnPrompt(first, prior, false, text)
+}
+
+// sandboxTurnPrompt is sandboxPromptPrior with, when image, the attached
+// image's untrusted-data framing after the page block.
+func sandboxTurnPrompt(first *AskRequest, prior []string, image bool, text string) string {
 	var b strings.Builder
 	b.WriteString(sandboxPromptPreamble)
 	if first != nil && (first.URL != "" || first.Title != "" || first.Page != "") {
@@ -422,9 +435,39 @@ func sandboxPromptPrior(first *AskRequest, prior []string, text string) string {
 		}
 		fmt.Fprintf(&b, "</%s>\n\n", tag)
 	}
+	if image {
+		b.WriteString(imageFraming)
+	}
 	b.WriteString(priorBlock(prior, text))
 	b.WriteString(diagramHint + questionMarker + text)
 	return b.String()
+}
+
+// streamUserMessage is the stream-json line claude -p --input-format
+// stream-json reads for a turn with an image: one user message holding the
+// prompt as a text block, then the image as a base64 image block.
+func streamUserMessage(prompt string, img *acprun.Image) (string, error) {
+	type source struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+	}
+	type block struct {
+		Type   string  `json:"type"`
+		Text   string  `json:"text,omitempty"`
+		Source *source `json:"source,omitempty"`
+	}
+	msg := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []block{
+		{Type: "text", Text: prompt},
+		{Type: "image", Source: &source{Type: "base64", MediaType: img.MimeType, Data: img.Data}},
+	}}}
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(msg); err != nil { // one line, newline-terminated
+		return "", fmt.Errorf("encode the prompt: %w", err)
+	}
+	return b.String(), nil
 }
 
 // acpEmitter turns stream events into ACP-shaped session updates, as the

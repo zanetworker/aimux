@@ -49,8 +49,12 @@ func claudePrint(c Capabilities, l Launch) (Spec, error) {
 		tools = "WebSearch,WebFetch"
 		allowed = joinSorted("WebFetch", "WebSearch", allowed)
 	}
-	a := []string{"claude", "-p", "--output-format", "stream-json", "--verbose",
-		"--tools", tools, "--strict-mcp-config", "--mcp-config", MCPConfigPlaceholder}
+	a := []string{"claude", "-p"}
+	if l.StreamJSONInput {
+		a = append(a, "--input-format", "stream-json")
+	}
+	a = append(a, "--output-format", "stream-json", "--verbose",
+		"--tools", tools, "--strict-mcp-config", "--mcp-config", MCPConfigPlaceholder)
 	if allowed != "" {
 		a = append(a, "--allowedTools", allowed)
 	}

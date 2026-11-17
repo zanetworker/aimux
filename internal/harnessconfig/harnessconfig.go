@@ -49,6 +49,9 @@ type Launch struct {
 	Mode      string // ModeHeadless or ModeInteractive
 	ResumeID  string
 	SessionID string // print mode: the id a new session gets (a UUID); not with ResumeID
+	// StreamJSONInput: print mode reads its prompt as stream-json user
+	// messages on stdin (a turn with an image), not as plain text.
+	StreamJSONInput bool
 }
 
 // Spec is the launch config for one harness.

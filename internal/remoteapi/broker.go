@@ -184,6 +184,9 @@ type TurnOptions struct {
 	// Prior is the user's earlier questions on the page from another mode
 	// (checked by the API), handed to the engine as profilerun.WithPrior.
 	Prior []string
+	// Image is the image pasted into the question (checked by the API),
+	// handed to the engine as profilerun.WithImage; nil for none.
+	Image *acprun.Image
 }
 
 // StartWith is Start with the turn's options.
@@ -226,6 +229,9 @@ func (b *Broker) StartWith(session, text, key string, opt TurnOptions) (string, 
 	}
 	if len(opt.Prior) > 0 {
 		ctx = profilerun.WithPrior(ctx, opt.Prior)
+	}
+	if opt.Image != nil {
+		ctx = profilerun.WithImage(ctx, opt.Image)
 	}
 	l.active = turn
 	l.cancel = cancel

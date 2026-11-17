@@ -30,6 +30,16 @@ type Request struct {
 	Facts *RouteFacts `json:"facts,omitempty"`
 	// Routed is an ask's route answer it followed (POST /v1/sessions routed).
 	Routed *Routed `json:"routed,omitempty"`
+	// Image is one image pasted into an ask's question, forwarded to POST
+	// /v1/sessions as is (the server checks it).
+	Image *Image `json:"image,omitempty"`
+}
+
+// Image is an image attached to a question: its mime type and base64 bytes
+// (no data: prefix).
+type Image struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 // RouteFacts are what the panel knows about the page for Auto mode.

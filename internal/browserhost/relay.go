@@ -256,6 +256,9 @@ func (s *relaySession) ask(ctx context.Context, req Request, f *inflight, emit f
 	if req.Routed != nil {
 		body["routed"] = req.Routed // the route answer this ask followed, for the decision log
 	}
+	if req.Image != nil {
+		body["image"] = req.Image // the pasted image; the server checks its type and size
+	}
 	if err := s.call(ctx, http.MethodPost, "/v1/sessions", body, &acc); err != nil {
 		return err
 	}

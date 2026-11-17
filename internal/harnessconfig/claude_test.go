@@ -306,3 +306,22 @@ func TestClaude_ModesAreHarnessNeutral(t *testing.T) {
 		t.Errorf("interactive = %+v %v, want ACP metadata", i, err)
 	}
 }
+
+// A turn with an image reads its prompt as one stream-json user message;
+// a text-only turn keeps the plain text stdin (no --input-format).
+func TestClaudePrint_StreamJSONInput(t *testing.T) {
+	s, err := claude(t).Config(Capabilities{}, Launch{Mode: ModeHeadless, StreamJSONInput: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := flagVal(s.Argv, "--input-format"); v != "stream-json" {
+		t.Fatalf("--input-format = %q in %q", v, s.Argv)
+	}
+	if v, _ := flagVal(s.Argv, "--output-format"); v != "stream-json" {
+		t.Fatalf("--output-format = %q", v)
+	}
+	s, _ = claude(t).Config(Capabilities{}, Launch{Mode: ModeHeadless})
+	if _, ok := flagVal(s.Argv, "--input-format"); ok {
+		t.Fatalf("--input-format without an image: %q", s.Argv)
+	}
+}

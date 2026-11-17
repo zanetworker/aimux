@@ -9,7 +9,10 @@ type AskRequest struct {
 	Recap    string
 	// Prior is the user's earlier questions on this page from another
 	// mode, oldest first (no answers); see priorBlock.
-	Prior     []string
+	Prior []string
+	// Image: an image is attached to the question; the prompt frames it as
+	// untrusted data (imageFraming). The image itself is sent separately.
+	Image     bool
 	SessionID string
 	Model     string
 

@@ -12,6 +12,8 @@
 
 **Earlier questions follow a mode change.** `POST /v1/sessions` takes `prior`, up to 5 earlier questions of the page's conversation (2,000 characters each, questions only, no answers or page text), so the new mode knows what you asked before; the prompt frames them as untrusted data before the question.
 
+**Ask about a screenshot.** `POST /v1/sessions` takes `image` (PNG, JPEG, WebP or GIF, at most 1.5 MiB of base64, one per question; anything else is `400 image_invalid`), and Wingman sends the image you paste or drop into the question box. Page sends it to its Claude session as an image block; Web and Workspace start Claude Code with `--input-format stream-json` and one user message holding the prompt and the image (a question without an image runs exactly as before). The prompt frames the image as untrusted data from your screen, like page text, and it never goes to the mode router. With a profile the request body may now be up to 6 MiB (was 4 MiB).
+
 ### Upgrading
 
 Every `aimux remote serve` now does the following, whether or not you use Wingman:

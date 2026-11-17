@@ -20,6 +20,24 @@ type Runner interface {
 	Close() error
 }
 
+// Image is one image a turn sends after its text: MimeType is image/png,
+// image/jpeg, image/webp or image/gif and Data its base64 (no data: prefix).
+// The remote API checks both before a turn starts.
+type Image struct {
+	MimeType string
+	Data     string
+}
+
+// ErrNoImages is returned for a turn with an image when the agent does not
+// take images; nothing is sent.
+var ErrNoImages = errors.New("this agent does not accept images")
+
+// ImagePrompter is a Runner that can send an image with a prompt; *Run is one.
+type ImagePrompter interface {
+	AcceptsImages() bool
+	PromptImage(ctx context.Context, text string, img *Image, onEvent func(Event)) (string, error)
+}
+
 // ModelSetter is a Runner that can switch its session's model; *Run is one.
 type ModelSetter interface {
 	Model() string
@@ -156,6 +174,13 @@ func (m *Manager) Send(ctx context.Context, sessionID, cwd, text string, onEvent
 // already on it ("" keeps the current model). The run must be a ModelSetter.
 // A failed switch sends nothing and keeps the run.
 func (m *Manager) SendModel(ctx context.Context, sessionID, cwd, model, text string, onEvent func(Event)) (string, error) {
+	return m.SendImage(ctx, sessionID, cwd, model, text, nil, onEvent)
+}
+
+// SendImage is SendModel with img sent after the text; a nil img is
+// SendModel. A run that does not take images refuses the turn with
+// ErrNoImages before anything is sent and is kept.
+func (m *Manager) SendImage(ctx context.Context, sessionID, cwd, model, text string, img *Image, onEvent func(Event)) (string, error) {
 	e, evicted, err := m.claim(sessionID)
 	if evicted != nil {
 		evicted.retire()
@@ -232,6 +257,19 @@ func (m *Manager) SendModel(ctx context.Context, sessionID, cwd, model, text str
 		}
 	}
 
+	var ip ImagePrompter
+	if img != nil {
+		var ok bool
+		if ip, ok = e.run.(ImagePrompter); !ok || !ip.AcceptsImages() {
+			m.mu.Lock()
+			e.busy = false
+			e.cancelRequested = false
+			e.lastUsed = m.opt.Now()
+			m.mu.Unlock()
+			return "", ErrNoImages
+		}
+	}
+
 	if model != "" {
 		if err := switchModel(ctx, e.run, model); err != nil {
 			m.mu.Lock()
@@ -261,7 +299,12 @@ func (m *Manager) SendModel(ctx context.Context, sessionID, cwd, model, text str
 	m.mu.Unlock()
 	// The prompt itself is not cut off by ctx: stopping a turn mid-prompt is
 	// the agent's job (Cancel), so its session state stays consistent.
-	stop, err := e.run.Prompt(context.WithoutCancel(ctx), text, onEvent)
+	var stop string
+	if ip != nil {
+		stop, err = ip.PromptImage(context.WithoutCancel(ctx), text, img, onEvent)
+	} else {
+		stop, err = e.run.Prompt(context.WithoutCancel(ctx), text, onEvent)
+	}
 	fp := ""
 	if err == nil && m.opt.Fingerprint != nil {
 		fp = m.opt.Fingerprint(sessionID)

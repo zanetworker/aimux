@@ -59,7 +59,9 @@ func (a *fakeAgent) options(id acp.SessionId) []acp.SessionConfigOption {
 }
 
 func (a *fakeAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber, AgentCapabilities: acp.AgentCapabilities{LoadSession: true}}, nil
+	// Like claude-agent-acp 0.101.0, it takes image prompts.
+	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber,
+		AgentCapabilities: acp.AgentCapabilities{LoadSession: true, PromptCapabilities: acp.PromptCapabilities{Image: true}}}, nil
 }
 func (a *fakeAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	a.record("session/new", p.Meta, "")
@@ -90,7 +92,20 @@ func (a *fakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Prompt
 	if len(p.Prompt) > 0 && p.Prompt[0].Text != nil {
 		text = p.Prompt[0].Text.Text
 	}
-	a.record("session/prompt", nil, text)
+	// meta.blocks is every block's type, in order, and an image's mime
+	// type and data.
+	var blocks []any
+	for _, b := range p.Prompt {
+		switch {
+		case b.Text != nil:
+			blocks = append(blocks, map[string]any{"type": "text"})
+		case b.Image != nil:
+			blocks = append(blocks, map[string]any{"type": "image", "mimeType": b.Image.MimeType, "data": b.Image.Data})
+		default:
+			blocks = append(blocks, map[string]any{"type": "other"})
+		}
+	}
+	a.record("session/prompt", map[string]any{"blocks": blocks}, text)
 	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText("answer")})
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }

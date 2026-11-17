@@ -55,6 +55,10 @@ The chip is on by default, except on private pages, where it starts off. Private
 
 Turning the chip on on a private page shows "This page's text can reach the web in Web mode.", since private text plus web access is the one way a page's text could leave. The chip resets with each new page. Web with the chip on and with it off are separate conversations on the same page, so turning it on or off starts a new one: text sent with the chip on never reaches a question asked with it off. On a page Wingman cannot read, the chip is disabled and Web still answers, without the page's text.
 
+### Images
+
+Paste or drop an image, such as a screenshot, into the question box and ask about it. One image per question, PNG, JPEG, WebP or GIF; the panel scales it down to at most 1,568 pixels on the long edge, and aimux refuses one over 1.5 MiB of base64 or whose bytes are not the type it claims (`400 image_invalid`). Every mode takes it: Page sends it to its Claude session with the question, and Web and Workspace pass it to Claude Code in their sandbox. The image never goes to the mode router, so Auto picks from the question text alone. Like page text, an image is untrusted data from your screen: the prompt says so, and text inside a screenshot cannot change what the mode may reach. The panel's history shows the question, not the image; the image stays in the session's transcript on your Mac.
+
 ## Install
 
 Build and load the extension from the wingman repo (`npm ci && npm run build`, then load `extension/dist` unpacked in `chrome://extensions`). Copy the extension id shown there, then:
@@ -210,6 +214,7 @@ Any container on the Podman machine can reach `127.0.0.1:7390` the same way the 
 
 - Only the mode you pick, or Auto's pick, sends a question to Web or Workspace; the page and the answering model cannot switch it. To pick, Auto sends only the question and three yes or no facts to the mode router on OpenRouter (never the page's text, title or URL), and the chosen mode then runs as if you had picked it, with the same limits.
 - Web reaches only the reviewed public hosts above, GET only, and sends a private page's text only after you turn "Use this page" on. WebSearch queries are run by the model provider (Anthropic's API), outside the sandbox's network policy.
+- A pasted image is framed as untrusted data like page text, and the mode's sandbox and tool limits are the same with or without it.
 - The page lane has no tools, no MCP servers and no user settings, so a page has nothing to call.
 - The work lane runs in a sandbox with default-deny egress: the model provider and `:7390`, nothing else.
 - The read-only server exposes an allowlist of lookup tools; every other call is rejected and logged.
