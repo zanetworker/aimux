@@ -41,6 +41,9 @@ type SandboxEngine struct {
 	// RenewEvery is how often a running turn renews its lease (0:
 	// toolgateway.LeaseRenewEvery).
 	RenewEvery time.Duration
+	// Notice, if set, is one line a turn shows before claude answers (the
+	// profile's tools held for review); "" shows nothing.
+	Notice func(c profile.Compiled) string
 	ArchiveDir string // default ~/.aimux/archive (the search index scans it)
 	// OnStarted, if set, hears once per session that its first turn's
 	// claude process started, as its stream showed (the id is claude's from
@@ -276,6 +279,12 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 		defer end()
 	}
 	redact := func(err error) error { return redactToken(err, token) }
+	emit := acpEmitter(onEvent)
+	if e.Notice != nil {
+		if text := e.Notice(c); text != "" {
+			emit(LaneEvent{Type: "notice", Text: text})
+		}
+	}
 
 	// The prompt goes on stdin after the config line, never on a command line.
 	rc, err := e.L.Exec(ctx, c, spec.MCPConfig(base, token), prompt, spec.Env, spec.Argv)
@@ -305,7 +314,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 			}
 		}
 	}
-	res, readErr := parseStream(rc, acpEmitter(onEvent), started)
+	res, readErr := parseStream(rc, emit, started)
 	closeErr := rc.Close()
 
 	if res.sawResult {
@@ -495,6 +504,10 @@ func acpEmitter(onEvent func(acprun.Event)) func(LaneEvent) {
 			if ev.Text != "" { // a failure's text, or the call's snippet (a WebFetch's url)
 				u["content"] = []any{map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": ev.Text}}}
 			}
+		case "notice":
+			// aimux's own line for the client (held-back tools), not the
+			// agent's; ACP clients that do not know it skip it.
+			u = map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": ev.Text}}
 		default:
 			return
 		}

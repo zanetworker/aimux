@@ -409,3 +409,63 @@ func TestReview_NewOnServerSkipsPinnedAndUnknownSources(t *testing.T) {
 		}
 	}
 }
+
+// HeldBack is what a profile's sets cannot use now and the owner can act
+// on: changed, unpinned, source_changed and new_on_server tools of those
+// sets' sources, never other sources' and never unavailable ones.
+func TestHeldBack_OnlyGrantedSets(t *testing.T) {
+	reg, pins, live := reviewFixture(t)
+	got := HeldBack(reg, pins, live, []string{"jira:readonly"})
+	var names []string
+	for _, s := range got {
+		names = append(names, s.Source+"/"+s.Tool+":"+s.Status)
+	}
+	want := []string{"jira/drifted:changed", "jira/fresh:unpinned", "jira/gone:changed", "jira/extra:new_on_server"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("held back %v, want %v", names, want)
+	}
+	if got := HeldBack(reg, pins, live, []string{"slack:readonly"}); len(got) != 0 {
+		t.Fatalf("a down source's tools are not held for review: %v", got)
+	}
+	if got := HeldBack(reg, pins, live, nil); len(got) != 0 {
+		t.Fatalf("no sets: %v", got)
+	}
+}
+
+func TestHeldBackNotice(t *testing.T) {
+	reg, pins, live := reviewFixture(t)
+	n := HeldBackNotice(HeldBack(reg, pins, live, []string{"jira:readonly"}))
+	want := "4 tools held for review (jira: drifted changed, fresh unpinned, gone changed, extra new): run aimux tools status"
+	if n != want {
+		t.Fatalf("notice\n got %q\nwant %q", n, want)
+	}
+	if HeldBackNotice(nil) != "" {
+		t.Fatal("a notice with nothing held")
+	}
+}
+
+func TestHeldBack_ToolInTwoSetsCountsOnce(t *testing.T) {
+	reg, pins, live := reviewFixture(t)
+	reg.Sets["jira:triage"] = toolreg.Set{Source: "jira", Tools: []string{"drifted"}}
+	got := HeldBack(reg, pins, live, []string{"jira:readonly"})
+	n := 0
+	for _, s := range got {
+		if s.Tool == "drifted" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("drifted held %d times, want once: %v", n, got)
+	}
+}
+
+func TestHeldBack_OtherSetOfTheSameSourceIgnored(t *testing.T) {
+	reg, pins, live := reviewFixture(t)
+	live["jira"].Tools["writey"] = tool("writey", "string")
+	reg.Sets["jira:write"] = toolreg.Set{Source: "jira", Tools: []string{"writey"}}
+	for _, s := range HeldBack(reg, pins, live, []string{"jira:readonly"}) {
+		if s.Tool == "writey" {
+			t.Fatalf("jira:write's unpinned tool reported for a profile asking only jira:readonly: %+v", s)
+		}
+	}
+}

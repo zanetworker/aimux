@@ -152,3 +152,46 @@ func TestSandboxTurn_GatewayNotRunningFailsFast(t *testing.T) {
 		t.Fatal("claude started without a lease")
 	}
 }
+
+// A turn whose profile has held-back tools says so once, before claude's
+// first words; a turn with none says nothing.
+func TestSandboxTurn_NoticeBeforeFirstDelta(t *testing.T) {
+	e, _ := newLeaseSandbox(t, &fakeLeases{})
+	e.Notice = func(c profile.Compiled) string {
+		if c.Profile != "work-readonly" {
+			t.Errorf("notice asked for %s", c.Profile)
+		}
+		return "1 tool held for review (jira: search changed): run aimux tools status"
+	}
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	_, evs, err := sendCollect(t, e, sid, "q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, ev := range evs {
+		kinds = append(kinds, ev["sessionUpdate"].(string))
+	}
+	if len(kinds) == 0 || kinds[0] != "aimux_notice" || strings.Count(strings.Join(kinds, " "), "aimux_notice") != 1 {
+		t.Fatalf("updates %v: want one aimux_notice, first", kinds)
+	}
+	text := evs[0]["content"].(map[string]any)["text"]
+	if text != "1 tool held for review (jira: search changed): run aimux tools status" {
+		t.Fatalf("notice text %q", text)
+	}
+}
+
+func TestSandboxTurn_NoNoticeWhenNothingHeld(t *testing.T) {
+	e, _ := newLeaseSandbox(t, &fakeLeases{})
+	e.Notice = func(profile.Compiled) string { return "" }
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	_, evs, err := sendCollect(t, e, sid, "q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range evs {
+		if ev["sessionUpdate"] == "aimux_notice" {
+			t.Fatalf("notice with nothing held: %v", ev)
+		}
+	}
+}

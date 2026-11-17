@@ -139,6 +139,7 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	p.sandbox = profilerun.NewSandboxEngine(launcher, compile, tg.gateway)
 	p.sandbox.ArchiveDir = filepath.Join(home, ".aimux", "archive")
 	p.sandbox.OnStarted = p.store.MarkStarted
+	p.sandbox.Notice = tg.notice(dir)
 	p.sandbox.Log = logger
 	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox}
 	return func() {
@@ -153,6 +154,7 @@ type toolGatewayParts struct {
 	snaps   *toolSnapshots
 	tools   func() remoteapi.ToolsView
 	gateway func() (string, profilerun.Leases, error)
+	worker  toolgateway.ControlClient
 }
 
 // observedTimeout bounds GET /v1/tools' read of the worker's listings.
@@ -180,7 +182,28 @@ func newToolGateway(home string, gwLog *log.Logger) toolGatewayParts {
 		return remoteapi.ToolsView{Snapshot: snap, Live: toolgateway.LiveFor(reg, obs), RelistFailed: toolgateway.RelistFailedFor(reg, obs)}
 	}
 	gateway := func() (string, profilerun.Leases, error) { return toolgateway.ReadonlyURL, worker, nil }
-	return toolGatewayParts{snaps: snaps, tools: tools, gateway: gateway}
+	return toolGatewayParts{snaps: snaps, tools: tools, gateway: gateway, worker: worker}
+}
+
+// notice is the sandbox engine's Notice over the profiles in dir: the tools
+// of the turn's profile's sets the worker lists but that need review, in
+// one line, or "" (also when the worker cannot be asked).
+func (tg toolGatewayParts) notice(dir string) func(c profile.Compiled) string {
+	return func(c profile.Compiled) string {
+		user, _ := profile.LoadDir(dir) // a bad file is skipped, as everywhere profiles resolve
+		m, err := profile.Resolve(c.Profile, user)
+		if err != nil || len(m.Tools) == 0 {
+			return ""
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), observedTimeout)
+		defer cancel()
+		obs, err := tg.worker.Observed(ctx)
+		if err != nil {
+			return ""
+		}
+		reg := c.Snapshot.Registry()
+		return toolgateway.HeldBackNotice(toolgateway.HeldBack(reg, toolgateway.PinsOf(c.Snapshot), toolgateway.LiveFor(reg, obs), m.Tools))
+	}
 }
 
 // migrateToolSources carries readonly.json into tool-sources.yaml once, as

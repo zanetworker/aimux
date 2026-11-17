@@ -486,3 +486,64 @@ func Approve(reg toolreg.Registry, pins PinFile, live map[string]LiveSource, tar
 	}
 	return out, res, nil
 }
+
+// heldStatuses are the statuses a turn's notice reports: tools the owner
+// can make usable by reviewing them.
+var heldStatuses = map[string]string{StatusChanged: "changed", StatusUnpinned: "unpinned", StatusSourceChanged: "source changed", StatusNewOnServer: "new"}
+
+// HeldBack is the tools of sets' sources that a turn cannot use until the
+// owner reviews them (changed, unpinned, source_changed, new_on_server),
+// in Review's order. Unavailable tools are left out: nothing to review.
+func HeldBack(reg toolreg.Registry, pins PinFile, live map[string]LiveSource, sets []string) []ToolStatus {
+	sources := map[string]bool{}
+	tools := map[string]bool{} // source/tool of the requested sets
+	for _, name := range sets {
+		if s, err := reg.Resolve(name); err == nil {
+			sources[s.Source] = true
+			for _, t := range s.Tools {
+				tools[s.Source+"/"+t] = true
+			}
+		}
+	}
+	var out []ToolStatus
+	seen := map[string]bool{} // a tool in two sets is one tool
+	for _, st := range Review(reg, pins, live) {
+		key := st.Source + "/" + st.Tool
+		if _, held := heldStatuses[st.Status]; !held || seen[key] {
+			continue
+		}
+		// A set tool counts only for the requested sets; a tool no set lists
+		// counts for any requested set of its source (adding it is how it
+		// becomes usable there).
+		if (st.Status == StatusNewOnServer && sources[st.Source]) || tools[key] {
+			seen[key] = true
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
+// HeldBackNotice is the one line a turn shows for held: "" when nothing is
+// held.
+func HeldBackNotice(held []ToolStatus) string {
+	if len(held) == 0 {
+		return ""
+	}
+	var order []string
+	bySource := map[string][]string{}
+	for _, st := range held {
+		if _, seen := bySource[st.Source]; !seen {
+			order = append(order, st.Source)
+		}
+		bySource[st.Source] = append(bySource[st.Source], st.Tool+" "+heldStatuses[st.Status])
+	}
+	parts := make([]string, 0, len(order))
+	for _, src := range order {
+		parts = append(parts, src+": "+strings.Join(bySource[src], ", "))
+	}
+	noun := "tools"
+	if len(held) == 1 {
+		noun = "tool"
+	}
+	return fmt.Sprintf("%d %s held for review (%s): run aimux tools status", len(held), noun, strings.Join(parts, "; "))
+}

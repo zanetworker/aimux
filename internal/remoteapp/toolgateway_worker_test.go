@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -75,5 +76,37 @@ func TestToolGateway_LeasesGoToTheWorker(t *testing.T) {
 	c, ok := leases.(toolgateway.ControlClient)
 	if !ok || c.Path != toolgateway.ControlSocketPath(home) {
 		t.Fatalf("leases %#v, want the worker's control client", leases)
+	}
+}
+
+// A turn's notice names the tools of the profile's sets that the worker
+// lists but that need review; with nothing listed it is empty.
+func TestToolGateway_NoticeNamesHeldBackTools(t *testing.T) {
+	home := shortHome(t)
+	reg := toolreg.Registry{Version: 1,
+		Sources: map[string]toolreg.Source{"fake": {Type: toolreg.TypeMCPHTTP, URL: "http://fake/"}},
+		Sets:    map[string]toolreg.Set{"jira:readonly": {Source: "fake", Tools: []string{"search"}}}}
+	if err := toolreg.WriteNew(toolreg.DefaultPath(home), reg); err != nil {
+		t.Fatal(err)
+	}
+	tg := newToolGateway(home, log.New(io.Discard, "", 0))
+	notice := tg.notice(t.TempDir()) // no user profiles: the builtin work-readonly asks for jira:readonly
+	c := profile.Compiled{Profile: "work-readonly", Snapshot: tg.snaps.turn()}
+	if got := notice(c); got != "" {
+		t.Fatalf("no worker: notice %q, want none (nothing listed)", got)
+	}
+	ln, err := toolgateway.ListenControl(toolgateway.ControlSocketPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = toolgateway.ServeControl(ctx, ln, observedWorker{}) }()
+	// search is listed live but never approved: held for review.
+	if got := notice(c); got != "1 tool held for review (fake: search unpinned): run aimux tools status" {
+		t.Fatalf("notice %q", got)
+	}
+	if got := notice(profile.Compiled{Profile: "research", Snapshot: c.Snapshot}); got != "" {
+		t.Fatalf("a profile without tool sets got a notice: %q", got)
 	}
 }

@@ -2048,7 +2048,12 @@ components:
         An Agent Client Protocol SessionUpdate, passed through unchanged
         (agent_message_chunk, agent_thought_chunk, tool_call,
         tool_call_update, plan, ...). The agent's slash-command list
-        (available_commands_update) is left out.
+        (available_commands_update) is left out. aimux adds one kind of its
+        own, aimux_notice ({"sessionUpdate": "aimux_notice", "content":
+        {"type": "text", "text": ...}}): a line for the user, not the
+        agent's, sent at most once per sandbox turn before the answer when
+        tools of the profile's sets are held for review. Clients that do not
+        know it can skip it.
       required: [sessionUpdate]
       properties:
         sessionUpdate: { type: string }
