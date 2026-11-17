@@ -404,6 +404,7 @@ func (r *ReadonlyServer) Start(ctx context.Context) (stop func(), err error) {
 	observe(backendNames(cfg), errs)
 	r.markBuilt(backendNames(cfg), servers, pins.Pins)
 	down := logDown(r.Log, errs)
+	logEmpty(r.Log, backendNames(cfg), servers, errs)
 	ln, err := r.Listen("tcp", ReadonlyAddr)
 	if err != nil {
 		if pool != nil {
@@ -763,6 +764,18 @@ func (r *ReadonlyServer) markRelistFailed(names []string, errs map[string]error)
 }
 
 // logDown logs each unavailable backend and returns their names, sorted.
+// logEmpty names each backend of names that is neither served nor down: it
+// listed, but none of its tools matches an approved pin (or none is in a
+// set), so the build left it out.
+func logEmpty(l *log.Logger, names []string, servers map[string]*server.MCPServer, errs map[string]error) {
+	for _, n := range names {
+		if _, served := servers[n]; served || errs[n] != nil {
+			continue
+		}
+		l.Printf("read-only: backend %s serves no tools: none of its listed tools matches an approved pin (see aimux tools status)", n)
+	}
+}
+
 func logDown(l *log.Logger, errs map[string]error) []string {
 	names := make([]string, 0, len(errs))
 	for n := range errs {

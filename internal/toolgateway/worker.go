@@ -117,6 +117,9 @@ func RunWorker(ctx context.Context, w *Worker, start func(context.Context) (func
 	if err != nil {
 		return err
 	}
+	// Building the backends can take a while: the grace window for calls
+	// whose lease is not back yet counts from when leases can be put.
+	w.Tokens.StartGrace(time.Now())
 	go func() {
 		t := time.NewTicker(workerRefreshEvery)
 		defer t.Stop()

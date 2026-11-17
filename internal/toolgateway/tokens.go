@@ -1,10 +1,12 @@
 package toolgateway
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
@@ -30,9 +32,26 @@ type Tokens struct {
 	Current func() toolreg.Snapshot
 	// Now is the clock leases expire by (nil: time.Now).
 	Now func() time.Time
+	// Grace: for Grace after StartGrace (a worker that just started knows
+	// no leases yet), WaitLookup holds a request with an unknown token until
+	// its lease is put; MaxWaiting bounds how many it holds (0: 64). Grace 0
+	// never holds.
+	Grace      time.Duration
+	MaxWaiting int
 
 	mu       sync.Mutex
 	sessions map[string]*issued // by session
+	changed  chan struct{}      // closed and replaced on every store
+	waiting  atomic.Int32
+	graceAt  time.Time // under mu: when the grace window (re)started
+}
+
+// StartGrace (re)starts the grace window at at: call it when the worker
+// starts, and again once it can take leases.
+func (t *Tokens) StartGrace(at time.Time) {
+	t.mu.Lock()
+	t.graceAt = at
+	t.mu.Unlock()
 }
 
 type issued struct {
@@ -73,6 +92,64 @@ func (t *Tokens) store(session string, is *issued) {
 		t.sessions = map[string]*issued{}
 	}
 	t.sessions[session] = is
+	if t.changed != nil {
+		close(t.changed) // wake requests waiting for a token
+		t.changed = nil
+	}
+}
+
+// changes is a channel closed at the next store.
+func (t *Tokens) changes() <-chan struct{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.changed == nil {
+		t.changed = make(chan struct{})
+	}
+	return t.changed
+}
+
+// WaitLookup is Lookup that, inside the startup grace window, holds a
+// request whose token is unknown until its lease is put, the window ends
+// or ctx ends. Outside the window it answers at once, as Lookup does.
+func (t *Tokens) WaitLookup(ctx context.Context, token string) (string, map[string][]string, bool, error) {
+	if s, a, ok := t.Lookup(token); ok || token == "" {
+		return s, a, ok, nil
+	}
+	t.mu.Lock()
+	end := t.graceAt.Add(t.Grace)
+	opened := !t.graceAt.IsZero()
+	t.mu.Unlock()
+	if !opened {
+		return "", nil, false, nil
+	}
+	if t.Grace <= 0 || !t.now().Before(end) {
+		return "", nil, false, nil
+	}
+	limit := t.MaxWaiting
+	if limit <= 0 {
+		limit = 64
+	}
+	if int(t.waiting.Add(1)) > limit {
+		t.waiting.Add(-1)
+		return "", nil, false, mcpproxy.ErrTokenWaitBusy
+	}
+	defer t.waiting.Add(-1)
+	timer := time.NewTimer(time.Until(end))
+	defer timer.Stop()
+	for {
+		changed := t.changes()
+		if s, a, ok := t.Lookup(token); ok {
+			return s, a, true, nil
+		}
+		select {
+		case <-changed:
+		case <-timer.C:
+			s, a, ok := t.Lookup(token)
+			return s, a, ok, nil
+		case <-ctx.Done():
+			return "", nil, false, nil
+		}
+	}
 }
 
 // Revoke retires session's token. An unknown session is ignored.

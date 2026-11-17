@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
@@ -32,6 +33,10 @@ func NewServer(home, admin string, l *log.Logger, listen func(network, addr stri
 	return srv, store, tokens
 }
 
+// StartupGrace is how long after a start the worker holds a call whose
+// token it does not know yet, waiting for remote serve to put the lease.
+const StartupGrace = 15 * time.Second
+
 // Run serves the gateway and its control socket under home until ctx ends.
 func Run(ctx context.Context, home string, l *log.Logger, listen func(network, addr string) (net.Listener, error)) error {
 	admin, err := toolgateway.NewToken() // required by the server; never sent
@@ -39,6 +44,10 @@ func Run(ctx context.Context, home string, l *log.Logger, listen func(network, a
 		return fmt.Errorf("make the gateway's admin token: %w", err)
 	}
 	srv, store, tokens := NewServer(home, admin, l, listen)
+	// Just after a (re)start no lease is known yet: hold calls with an
+	// unknown token until remote serve puts their lease again.
+	tokens.Grace = StartupGrace
+	tokens.StartGrace(time.Now()) // RunWorker starts it again once leases can be put
 	w := &toolgateway.Worker{Server: srv, Store: store, Tokens: tokens, Log: l}
 	return toolgateway.RunWorker(ctx, w, srv.Start, toolgateway.ControlSocketPath(home))
 }

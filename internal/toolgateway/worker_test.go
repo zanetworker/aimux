@@ -234,3 +234,21 @@ func TestWorker_LogsLeasePutAndDelete(t *testing.T) {
 		t.Fatal("the token reached the log")
 	}
 }
+
+// The grace window restarts when the control socket opens, so a slow
+// backend build does not use it up before leases can be put.
+func TestRunWorker_GraceCountsFromTheControlSocket(t *testing.T) {
+	w, _, _, _ := newTestWorker(t)
+	w.Tokens.Grace = 300 * time.Millisecond
+	w.Tokens.StartGrace(time.Now())
+	path := shortSock(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	slowStart := func(context.Context) (func(), error) { time.Sleep(400 * time.Millisecond); return func() {}, nil }
+	go func() { _ = RunWorker(ctx, w, slowStart, path) }()
+	time.Sleep(450 * time.Millisecond) // past the first window, just after the socket opened
+	go func() { time.Sleep(50 * time.Millisecond); _ = w.Tokens.Put(testLease(time.Now())) }()
+	if _, _, ok, _ := w.Tokens.WaitLookup(context.Background(), leaseTok); !ok {
+		t.Fatal("the window ended during the slow build: the call was refused")
+	}
+}

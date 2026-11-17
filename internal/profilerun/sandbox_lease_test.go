@@ -346,6 +346,7 @@ func TestSandboxTurn_RePutRetriedAfterAFailedOne(t *testing.T) {
 	e, b := newLeaseSandbox(t, f)
 	e.Gateway = func() (string, Leases, error) { return "http://host.containers.internal:7390", r, nil }
 	e.ProbeEvery = 20 * time.Millisecond
+	e.ProbeRetryEvery = 10 * time.Millisecond
 	b.block, b.closed = make(chan struct{}), make(chan struct{})
 	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
 	var puts int
@@ -388,6 +389,7 @@ func TestSandboxTurn_RePutWhenTheFirstStatusFailed(t *testing.T) {
 	e, b := newLeaseSandbox(t, f)
 	e.Gateway = func() (string, Leases, error) { return "http://host.containers.internal:7390", r, nil }
 	e.ProbeEvery = 20 * time.Millisecond
+	e.ProbeRetryEvery = 10 * time.Millisecond
 	b.block, b.closed = make(chan struct{}), make(chan struct{})
 	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
 	go func() { time.Sleep(100 * time.Millisecond); close(b.block) }()
@@ -396,5 +398,67 @@ func TestSandboxTurn_RePutWhenTheFirstStatusFailed(t *testing.T) {
 	}
 	if _, puts := f.snapshot(); len(puts) < 2 {
 		t.Fatalf("%d puts: with the worker unknown at the first put, the first good probe must put the lease again", len(puts))
+	}
+}
+
+// downThenUp is a worker that is down for a moment (renew and status fail)
+// and comes back restarted.
+type downThenUp struct {
+	*restartingLeases
+	mu2  sync.Mutex
+	down bool
+}
+
+func (d *downThenUp) isDown() bool { d.mu2.Lock(); defer d.mu2.Unlock(); return d.down }
+
+func (d *downThenUp) Renew(ctx context.Context, s string, u time.Time) error {
+	if d.isDown() {
+		return toolgateway.ErrGatewayNotRunning
+	}
+	return d.fakeLeases.Renew(ctx, s, u)
+}
+
+func (d *downThenUp) Status(ctx context.Context) (toolgateway.ControlStatus, error) {
+	if d.isDown() {
+		return toolgateway.ControlStatus{}, toolgateway.ErrGatewayNotRunning
+	}
+	return d.restartingLeases.Status(ctx)
+}
+
+// A failed renewal makes the next status check come quickly, so the lease
+// is back soon after the worker answers again, not a full probe interval
+// later.
+func TestSandboxTurn_FailedRenewProbesSoon(t *testing.T) {
+	f := &fakeLeases{}
+	d := &downThenUp{restartingLeases: &restartingLeases{fakeLeases: f, started: time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)}}
+	e, b := newLeaseSandbox(t, f)
+	e.Gateway = func() (string, Leases, error) { return "http://host.containers.internal:7390", d, nil }
+	e.ProbeEvery = time.Hour // only the quick re-check can catch the restart
+	e.RenewEvery = 30 * time.Millisecond
+	e.ProbeRetryEvery = 10 * time.Millisecond
+	b.block, b.closed = make(chan struct{}), make(chan struct{})
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	var puts int
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		d.mu2.Lock()
+		d.down = true
+		d.mu2.Unlock()
+		d.restart()
+		time.Sleep(50 * time.Millisecond) // a renewal fails meanwhile
+		d.mu2.Lock()
+		d.down = false
+		d.mu2.Unlock()
+		time.Sleep(60 * time.Millisecond)
+		f.mu.Lock()
+		puts = len(f.puts)
+		f.mu.Unlock()
+		close(b.block)
+	}()
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if puts < 2 {
+		t.Fatalf("%d puts: the lease was not put again soon after the worker came back", puts)
 	}
 }

@@ -45,6 +45,10 @@ type SandboxEngine struct {
 	// status, to put its lease again soon after the worker restarted (0:
 	// leaseProbeEvery).
 	ProbeEvery time.Duration
+	// ProbeRetryEvery is how soon the status is checked again after a
+	// failed renewal or status check, while the worker is coming back (0:
+	// leaseProbeRetry).
+	ProbeRetryEvery time.Duration
 	// Notice, if set, is one line a turn shows before claude answers (the
 	// profile's tools held for review); "" shows nothing.
 	Notice func(c profile.Compiled) string
@@ -559,6 +563,9 @@ const (
 	// leaseProbeEvery is how often a turn asks the worker's status, so a
 	// lease lost to a worker restart is put again within seconds.
 	leaseProbeEvery = 10 * time.Second
+	// leaseProbeRetry is the quicker check while the worker is not
+	// answering, so its lease is back about a second after it does.
+	leaseProbeRetry = time.Second
 )
 
 // leaseStatuser is the worker status a turn probes (toolgateway.ControlClient
@@ -609,7 +616,11 @@ func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token
 		defer close(done)
 		renew := time.NewTicker(every)
 		defer renew.Stop()
-		probe := time.NewTicker(probeEvery)
+		retry := e.ProbeRetryEvery
+		if retry == 0 {
+			retry = leaseProbeRetry
+		}
+		probe := time.NewTimer(probeEvery)
 		defer probe.Stop()
 		for {
 			var err error
@@ -624,6 +635,9 @@ func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token
 				if errors.Is(err, toolgateway.ErrUnknownLease) {
 					err = put(until)
 				}
+				if err != nil { // the worker may be restarting: look again soon
+					probe.Reset(retry)
+				}
 			case <-probe.C:
 				if st == nil {
 					continue
@@ -632,12 +646,16 @@ func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token
 				s, serr := st.Status(cctx)
 				cancel()
 				if serr != nil {
-					continue // not running: the next probe or renewal tries again
+					probe.Reset(retry) // not answering yet: look again soon
+					continue
 				}
+				probe.Reset(probeEvery)
 				// A restarted worker (new start time) or one holding no lease
 				// lost this turn's: put it again now, not at the renewal.
 				if started.IsZero() || !s.StartedAt.Equal(started) || s.Leases == 0 {
-					err = put(time.Now().Add(toolgateway.LeaseTTL))
+					if err = put(time.Now().Add(toolgateway.LeaseTTL)); err != nil {
+						probe.Reset(retry) // try the put again soon
+					}
 				}
 				// The new start time counts only once this turn's lease is
 				// back, so a failed put is retried at the next probe.
