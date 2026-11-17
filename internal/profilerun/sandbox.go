@@ -41,6 +41,10 @@ type SandboxEngine struct {
 	// RenewEvery is how often a running turn renews its lease (0:
 	// toolgateway.LeaseRenewEvery).
 	RenewEvery time.Duration
+	// ProbeEvery is how often a running turn checks the gateway worker's
+	// status, to put its lease again soon after the worker restarted (0:
+	// leaseProbeEvery).
+	ProbeEvery time.Duration
 	// Notice, if set, is one line a turn shows before claude answers (the
 	// profile's tools held for review); "" shows nothing.
 	Notice func(c profile.Compiled) string
@@ -552,7 +556,16 @@ type Leases interface {
 const (
 	leaseCallTimeout = 5 * time.Second
 	leasePutTimeout  = 25 * time.Second
+	// leaseProbeEvery is how often a turn asks the worker's status, so a
+	// lease lost to a worker restart is put again within seconds.
+	leaseProbeEvery = 10 * time.Second
 )
+
+// leaseStatuser is the worker status a turn probes (toolgateway.ControlClient
+// has it; in-process leases do not need it).
+type leaseStatuser interface {
+	Status(ctx context.Context) (toolgateway.ControlStatus, error)
+}
 
 // lease puts the turn's lease (token, the grant, its snapshot and pins)
 // and renews it until end is called, putting it again when the gateway
@@ -561,6 +574,16 @@ func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token
 	scope := c.Grant.Scope()
 	l := toolgateway.Lease{Session: session, Token: token, Allow: scope, Version: c.Snapshot.Version(),
 		Pins: toolgateway.PinsFor(c.Snapshot, scope), Expires: time.Now().Add(toolgateway.LeaseTTL)}
+	// Which worker gets the lease is read before the put: a restart in
+	// between then shows as a new start time at the first probe. Unknown
+	// (the status failed) means the first good probe puts the lease again.
+	st, _ := leases.(leaseStatuser)
+	var started time.Time
+	if st != nil {
+		if s, err := st.Status(ctx); err == nil {
+			started = s.StartedAt
+		}
+	}
 	if err := leases.PutLease(ctx, l); err != nil {
 		return nil, err
 	}
@@ -571,26 +594,56 @@ func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token
 	// Each renew or re-put runs to its own deadline, never cut short by the
 	// turn's end: a put the client abandoned could still land on the worker
 	// after the delete. end waits for one in flight, then deletes.
+	probeEvery := e.ProbeEvery
+	if probeEvery == 0 {
+		probeEvery = leaseProbeEvery
+	}
+	put := func(until time.Time) error {
+		l.Expires = until
+		pctx, cancel := context.WithTimeout(context.Background(), leasePutTimeout)
+		defer cancel()
+		return leases.PutLease(pctx, l)
+	}
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() { //nolint:gosec // G118: on purpose detached from the turn's context, see above
 		defer close(done)
-		t := time.NewTicker(every)
-		defer t.Stop()
+		renew := time.NewTicker(every)
+		defer renew.Stop()
+		probe := time.NewTicker(probeEvery)
+		defer probe.Stop()
 		for {
+			var err error
 			select {
 			case <-stop:
 				return
-			case <-t.C:
-			}
-			until := time.Now().Add(toolgateway.LeaseTTL)
-			cctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
-			err := leases.Renew(cctx, session, until)
-			cancel()
-			if errors.Is(err, toolgateway.ErrUnknownLease) {
-				l.Expires = until
-				pctx, cancel := context.WithTimeout(context.Background(), leasePutTimeout)
-				err = leases.PutLease(pctx, l)
+			case <-renew.C:
+				until := time.Now().Add(toolgateway.LeaseTTL)
+				cctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
+				err = leases.Renew(cctx, session, until)
 				cancel()
+				if errors.Is(err, toolgateway.ErrUnknownLease) {
+					err = put(until)
+				}
+			case <-probe.C:
+				if st == nil {
+					continue
+				}
+				cctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
+				s, serr := st.Status(cctx)
+				cancel()
+				if serr != nil {
+					continue // not running: the next probe or renewal tries again
+				}
+				// A restarted worker (new start time) or one holding no lease
+				// lost this turn's: put it again now, not at the renewal.
+				if started.IsZero() || !s.StartedAt.Equal(started) || s.Leases == 0 {
+					err = put(time.Now().Add(toolgateway.LeaseTTL))
+				}
+				// The new start time counts only once this turn's lease is
+				// back, so a failed put is retried at the next probe.
+				if err == nil {
+					started = s.StartedAt
+				}
 			}
 			if err != nil && e.Log != nil {
 				e.Log.Warn("tool gateway: lease renewal failed; the turn's tools stop when the lease expires", "session", session, "err", err)

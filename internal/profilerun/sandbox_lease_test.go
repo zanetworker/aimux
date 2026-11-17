@@ -249,3 +249,152 @@ func TestSandboxTurn_SlowReputRacingTurnEndLeavesNoLease(t *testing.T) {
 		t.Fatalf("%d lease(s) left after the turn ended", n)
 	}
 }
+
+// restartingLeases is a worker that restarts during the turn: its status
+// shows a new start time and no leases until the lease is put again.
+type restartingLeases struct {
+	*fakeLeases
+	mu        sync.Mutex
+	started   time.Time
+	restarted bool
+}
+
+func (r *restartingLeases) Status(context.Context) (toolgateway.ControlStatus, error) {
+	r.mu.Lock()
+	started := r.started
+	r.mu.Unlock()
+	r.fakeLeases.mu.Lock()
+	n := r.table.Len()
+	r.fakeLeases.mu.Unlock()
+	return toolgateway.ControlStatus{StartedAt: started, Leases: n}, nil
+}
+
+func (r *restartingLeases) restart() {
+	r.mu.Lock()
+	r.started = r.started.Add(time.Hour)
+	r.restarted = true
+	r.mu.Unlock()
+	r.fakeLeases.mu.Lock()
+	r.table.Revoke("") // no-op; the table below replaces it
+	for _, l := range r.puts {
+		r.table.Revoke(l.Session) // a restarted worker knows no leases
+	}
+	r.fakeLeases.mu.Unlock()
+}
+
+// After the worker restarts mid-turn, the turn's lease is put again at the
+// next status probe, long before the 2-minute renewal.
+func TestSandboxTurn_RePutsAfterWorkerRestart(t *testing.T) {
+	f := &fakeLeases{}
+	r := &restartingLeases{fakeLeases: f, started: time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)}
+	e, b := newLeaseSandbox(t, f)
+	e.Gateway = func() (string, Leases, error) { return "http://host.containers.internal:7390", r, nil }
+	e.ProbeEvery = 20 * time.Millisecond // stands in for the 10 s probe
+	b.block, b.closed = make(chan struct{}), make(chan struct{})
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	var putsAfter int
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		r.restart()
+		time.Sleep(100 * time.Millisecond) // several probes, no renewal (2 min)
+		f.mu.Lock()
+		putsAfter = len(f.puts)
+		f.mu.Unlock()
+		close(b.block)
+	}()
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if putsAfter < 2 {
+		t.Fatalf("%d puts before the turn ended: the lease was not put again after the worker restarted", putsAfter)
+	}
+	if ops, _ := f.snapshot(); strings.Contains(strings.Join(ops, " "), "renew") {
+		t.Fatalf("ops %v: the 2-minute renewal should not have run", ops)
+	}
+}
+
+// failingOncePut fails the first re-put after a restart; another turn's
+// lease keeps the worker's count above zero, so only the start time says
+// this turn's lease is still missing.
+type failingOncePut struct {
+	*restartingLeases
+	failed bool
+}
+
+func (f *failingOncePut) PutLease(ctx context.Context, l toolgateway.Lease) error {
+	f.mu.Lock()
+	restarted, failed := f.restarted, f.failed
+	if restarted && !failed {
+		f.failed = true
+	}
+	f.mu.Unlock()
+	if restarted && !failed {
+		return errors.New("worker still starting")
+	}
+	return f.fakeLeases.PutLease(ctx, l)
+}
+
+func (f *failingOncePut) Status(ctx context.Context) (toolgateway.ControlStatus, error) {
+	s, err := f.restartingLeases.Status(ctx)
+	s.Leases++ // another turn's lease
+	return s, err
+}
+
+func TestSandboxTurn_RePutRetriedAfterAFailedOne(t *testing.T) {
+	f := &fakeLeases{}
+	r := &failingOncePut{restartingLeases: &restartingLeases{fakeLeases: f, started: time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)}}
+	e, b := newLeaseSandbox(t, f)
+	e.Gateway = func() (string, Leases, error) { return "http://host.containers.internal:7390", r, nil }
+	e.ProbeEvery = 20 * time.Millisecond
+	b.block, b.closed = make(chan struct{}), make(chan struct{})
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	var puts int
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		r.restart()
+		time.Sleep(150 * time.Millisecond)
+		f.mu.Lock()
+		puts = len(f.puts)
+		f.mu.Unlock()
+		close(b.block)
+	}()
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if puts < 2 {
+		t.Fatalf("%d puts: a failed re-put after the restart was not retried", puts)
+	}
+}
+
+// statusFailsFirst cannot report the worker before the first put, then the
+// worker restarts at once: the first good probe puts the lease again.
+type statusFailsFirst struct {
+	*failingOncePut
+	calls int
+}
+
+func (s *statusFailsFirst) Status(ctx context.Context) (toolgateway.ControlStatus, error) {
+	s.calls++
+	if s.calls == 1 {
+		return toolgateway.ControlStatus{}, errors.New("not answering yet")
+	}
+	return s.failingOncePut.Status(ctx)
+}
+
+func TestSandboxTurn_RePutWhenTheFirstStatusFailed(t *testing.T) {
+	f := &fakeLeases{}
+	inner := &failingOncePut{restartingLeases: &restartingLeases{fakeLeases: f, started: time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)}, failed: true}
+	r := &statusFailsFirst{failingOncePut: inner}
+	e, b := newLeaseSandbox(t, f)
+	e.Gateway = func() (string, Leases, error) { return "http://host.containers.internal:7390", r, nil }
+	e.ProbeEvery = 20 * time.Millisecond
+	b.block, b.closed = make(chan struct{}), make(chan struct{})
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	go func() { time.Sleep(100 * time.Millisecond); close(b.block) }()
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if _, puts := f.snapshot(); len(puts) < 2 {
+		t.Fatalf("%d puts: with the worker unknown at the first put, the first good probe must put the lease again", len(puts))
+	}
+}

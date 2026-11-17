@@ -218,3 +218,19 @@ func TestWorker_PutLeaseCancelledDoesNotStore(t *testing.T) {
 		t.Fatal("a cancelled put stored its lease")
 	}
 }
+
+// The worker logs each lease put and delete by session, never the token.
+func TestWorker_LogsLeasePutAndDelete(t *testing.T) {
+	w, gw, _, logs := newTestWorker(t)
+	if err := w.PutLease(context.Background(), leaseUnder(gw.Applied())); err != nil {
+		t.Fatal(err)
+	}
+	w.DeleteLease("sess-1")
+	got := logs.String()
+	if !strings.Contains(got, "lease put for session sess-1") || !strings.Contains(got, "lease deleted for session sess-1") {
+		t.Fatalf("log lacks the put or delete:\n%s", got)
+	}
+	if strings.Contains(got, leaseTok) {
+		t.Fatal("the token reached the log")
+	}
+}

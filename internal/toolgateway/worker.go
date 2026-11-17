@@ -72,6 +72,7 @@ func (w *Worker) PutLease(ctx context.Context, l Lease) error {
 	if err := w.Tokens.Put(l); err != nil {
 		return err
 	}
+	w.Log.Printf("tool gateway: lease put for session %s (%d servers, until %s)", l.Session, len(l.Allow), l.Expires.Format(time.RFC3339))
 	servers := slices.Sorted(maps.Keys(l.Allow))
 	timeout := w.FreshListTimeout
 	if timeout == 0 {
@@ -89,7 +90,10 @@ func (w *Worker) PutLease(ctx context.Context, l Lease) error {
 func (w *Worker) Renew(session string, until time.Time) error { return w.Tokens.Renew(session, until) }
 
 // DeleteLease ends a lease.
-func (w *Worker) DeleteLease(session string) { w.Tokens.Revoke(session) }
+func (w *Worker) DeleteLease(session string) {
+	w.Tokens.Revoke(session)
+	w.Log.Printf("tool gateway: lease deleted for session %s", session)
+}
 
 // Observed is the gateway's listings.
 func (w *Worker) Observed() map[string]Observed { return w.Server.Observed() }
