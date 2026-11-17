@@ -501,7 +501,7 @@ func (i Installer) needCurrentDaemon(http map[string]HTTPEntry) error {
 	if err != nil {
 		return err
 	}
-	return daemonReadsHTTP(i.Status, i.Version, len(http) > 0 || holdsHTTP(saved))
+	return daemonReadsHTTP(i.Status, i.Version, len(http) > 0 || holdsHTTP(saved), i.Agent.PlistPath)
 }
 
 // holdsHTTP reports whether defs has an HTTP definition.
@@ -516,7 +516,7 @@ func holdsHTTP(defs map[string]ServerConfig) bool {
 
 // daemonReadsHTTP is nil unless needed and the running proxy (status) is
 // another version than this aimux (version).
-func daemonReadsHTTP(status func() (StatusReport, error), version string, needed bool) error {
+func daemonReadsHTTP(status func() (StatusReport, error), version string, needed bool, plistPath string) error {
 	if !needed || status == nil || version == "" {
 		return nil
 	}
@@ -527,11 +527,15 @@ func daemonReadsHTTP(status func() (StatusReport, error), version string, needed
 	if !rep.Running || rep.Version == version {
 		return nil
 	}
-	return fmt.Errorf("the running proxy is aimux %s, not this %s, and may not read the HTTP servers' header references; run `aimux mcp proxy restart`, then try again; nothing was changed", rep.Version, version)
+	binary := ReadPlistBinary(plistPath)
+	if binary == "" {
+		binary = "the binary its launchd job runs"
+	}
+	return fmt.Errorf("the running proxy is aimux %s (launchd runs %s), not this %s, and may not read the HTTP servers' definitions; update that binary to this version and run `aimux mcp proxy restart`, or reinstall from this binary (`aimux mcp proxy install` run from it); nothing was changed", rep.Version, binary, version)
 }
 
 // CheckDaemonReadsHTTP is daemonReadsHTTP for commands outside install and
 // edit that write the servers file (refresh): defs are its definitions.
-func CheckDaemonReadsHTTP(status func() (StatusReport, error), version string, defs map[string]ServerConfig) error {
-	return daemonReadsHTTP(status, version, holdsHTTP(defs))
+func CheckDaemonReadsHTTP(status func() (StatusReport, error), version string, defs map[string]ServerConfig, plistPath string) error {
+	return daemonReadsHTTP(status, version, holdsHTTP(defs), plistPath)
 }

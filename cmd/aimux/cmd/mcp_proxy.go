@@ -73,12 +73,12 @@ func newMCPProxyRefreshCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// refresh rewrites the servers file: not under a proxy of another
 			// version while it holds HTTP definitions.
+			home, _ := os.UserHomeDir()
 			if saved, _, err := mcpproxy.LoadServerFile(f.servers); err != nil {
 				return err
 			} else if err := mcpproxy.CheckDaemonReadsHTTP(func() (mcpproxy.StatusReport, error) {
-				home, _ := os.UserHomeDir()
 				return getProxyStatus(fmt.Sprintf("127.0.0.1:%d", restartPort(home, 7381, false))) // the installed daemon's port
-			}, rootCmd.Version, saved); err != nil {
+			}, rootCmd.Version, saved, filepath.Join(home, "Library", "LaunchAgents", proxyAgentLabel+".plist")); err != nil {
 				return err
 			}
 			cfgs, resolved, err := proxyBackends(f.claudeConfig, f.servers, f.exclude, true)

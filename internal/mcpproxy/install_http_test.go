@@ -758,17 +758,17 @@ func TestInstall_RemovedServerWithOldDaemonChangesNothing(t *testing.T) {
 
 func TestCheckDaemonReadsHTTP(t *testing.T) {
 	old := func() (StatusReport, error) { return StatusReport{Running: true, Version: "1.1.0"}, nil }
-	if err := CheckDaemonReadsHTTP(old, "1.2.0", map[string]ServerConfig{"dw": {Type: "http"}}); err == nil {
+	if err := CheckDaemonReadsHTTP(old, "1.2.0", map[string]ServerConfig{"dw": {Type: "http"}}, ""); err == nil {
 		t.Fatal("older daemon with HTTP definitions accepted")
 	}
-	if err := CheckDaemonReadsHTTP(old, "1.2.0", map[string]ServerConfig{"st": {Command: "x"}}); err != nil {
+	if err := CheckDaemonReadsHTTP(old, "1.2.0", map[string]ServerConfig{"st": {Command: "x"}}, ""); err != nil {
 		t.Fatalf("stdio only refused: %v", err)
 	}
 }
 
 func TestCheckDaemonReadsHTTP_StatusErrorRefuses(t *testing.T) {
 	broken := func() (StatusReport, error) { return StatusReport{}, errors.New("timeout") }
-	if err := CheckDaemonReadsHTTP(broken, "1.2.0", map[string]ServerConfig{"dw": {Type: "http"}}); err == nil {
+	if err := CheckDaemonReadsHTTP(broken, "1.2.0", map[string]ServerConfig{"dw": {Type: "http"}}, ""); err == nil {
 		t.Fatal("unverified daemon accepted")
 	}
 }

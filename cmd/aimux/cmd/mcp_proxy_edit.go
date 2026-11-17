@@ -75,10 +75,11 @@ func runEdit(home, server string, out io.Writer, editor func(string) error) erro
 		Probe: func(ctx context.Context, cfg mcpproxy.ServerConfig) ([]json.RawMessage, error) {
 			return mcpproxy.ProbeServerDirect(ctx, cfg, 2*time.Minute, base)
 		},
-		Reload:  func() (mcpproxy.ReloadResult, error) { return mcpproxy.ReloadDaemon(m.Port) },
-		Status:  func() (mcpproxy.StatusReport, error) { return getProxyStatus(fmt.Sprintf("127.0.0.1:%d", m.Port)) },
-		Version: rootCmd.Version,
-		Timeout: 2 * time.Minute,
+		Reload:    func() (mcpproxy.ReloadResult, error) { return mcpproxy.ReloadDaemon(m.Port) },
+		Status:    func() (mcpproxy.StatusReport, error) { return getProxyStatus(fmt.Sprintf("127.0.0.1:%d", m.Port)) },
+		Version:   rootCmd.Version,
+		PlistPath: filepath.Join(home, "Library", "LaunchAgents", proxyAgentLabel+".plist"),
+		Timeout:   2 * time.Minute,
 	})
 }
 

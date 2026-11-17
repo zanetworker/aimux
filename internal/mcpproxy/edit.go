@@ -34,9 +34,10 @@ type EditOptions struct {
 	Reload       func() (ReloadResult, error) // reloads the daemon (injectable for tests)
 	// Status and Version: when the servers file holds HTTP definitions, a
 	// running proxy of another version refuses the edit (daemonReadsHTTP).
-	Status  func() (StatusReport, error)
-	Version string
-	Timeout time.Duration // probe timeout
+	Status    func() (StatusReport, error)
+	Version   string
+	PlistPath string        // the proxy's launchd plist, named in that refusal
+	Timeout   time.Duration // probe timeout
 }
 
 // EditServer opens the server's definition in $EDITOR, validates the changes,
@@ -76,7 +77,7 @@ func EditServer(ctx context.Context, opts EditOptions) error {
 	if cfg.Type == "http" {
 		return fmt.Errorf("%s is an HTTP server; aimux mcp proxy edit changes stdio servers only", opts.Server)
 	}
-	if err := daemonReadsHTTP(opts.Status, opts.Version, holdsHTTP(servers)); err != nil {
+	if err := daemonReadsHTTP(opts.Status, opts.Version, holdsHTTP(servers), opts.PlistPath); err != nil {
 		return err
 	}
 
