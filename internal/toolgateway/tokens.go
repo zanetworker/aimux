@@ -166,16 +166,15 @@ func copyAllow(in map[string][]string) map[string][]string {
 	return out
 }
 
-// Len is the number of live tokens and leases.
+// Len is the number of live tokens and leases; expired leases are dropped.
 func (t *Tokens) Len() int {
 	now := t.now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	n := 0
-	for _, is := range t.sessions {
-		if is.expires.IsZero() || now.Before(is.expires) {
-			n++
+	for s, is := range t.sessions {
+		if !is.expires.IsZero() && !now.Before(is.expires) {
+			delete(t.sessions, s)
 		}
 	}
-	return n
+	return len(t.sessions)
 }

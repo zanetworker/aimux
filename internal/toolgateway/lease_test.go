@@ -183,3 +183,25 @@ func TestLookup_SweepsOtherExpiredLeases(t *testing.T) {
 		t.Fatalf("%d expired lease(s) kept after a lookup", n)
 	}
 }
+
+func TestLen_DropsExpiredLeases(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	clock := now
+	tk := Tokens{Now: func() time.Time { return clock }}
+	if err := tk.Put(testLease(now)); err != nil {
+		t.Fatal(err)
+	}
+	if tk.Len() != 1 {
+		t.Fatal("live lease not counted")
+	}
+	clock = now.Add(time.Hour)
+	if n := tk.Len(); n != 0 {
+		t.Fatalf("Len = %d after expiry", n)
+	}
+	tk.mu.Lock()
+	kept := len(tk.sessions)
+	tk.mu.Unlock()
+	if kept != 0 {
+		t.Fatal("Len kept the expired lease")
+	}
+}
