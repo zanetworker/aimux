@@ -87,7 +87,7 @@ func TestRouterStatus_DefaultsAndKeyFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"mode-router", "openrouter", "cloudflare/clef-flash", "0.25", "5s", "deciders.yaml", "valid", "key found"} {
+	for _, want := range []string{"mode-router", "openrouter", "cloudflare/clef-flash", "0.25", "5s", "hedge:", "1.2s", "deciders.yaml", "valid", "key found"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status lacks %q:\n%s", want, out)
 		}
@@ -111,6 +111,7 @@ func TestRouterStatus_JSON(t *testing.T) {
 		ConfigError   string `json:"config_error"`
 		Threshold     float64
 		TimeoutMs     int64 `json:"timeout_ms"`
+		HedgeMs       int64 `json:"hedge_ms"`
 		Backends      []struct {
 			Kind      string  `json:"kind"`
 			Model     string  `json:"model"`
@@ -124,7 +125,7 @@ func TestRouterStatus_JSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, out)
 	}
-	if s.SchemaVersion != "1" || s.Decider != "mode-router" || !s.ConfigValid || s.ConfigError != "" || s.TimeoutMs != 5000 {
+	if s.SchemaVersion != "1" || s.Decider != "mode-router" || !s.ConfigValid || s.ConfigError != "" || s.TimeoutMs != 5000 || s.HedgeMs != 1200 {
 		t.Errorf("status = %+v", s)
 	}
 	if len(s.Backends) != 1 || s.Backends[0].Model != "cloudflare/clef-flash" || s.Backends[0].Threshold != 0.25 {
@@ -173,6 +174,20 @@ func TestRouterStatus_InvalidConfigStillExitsZero(t *testing.T) {
 	js, _, _ := r.run(t, "status", "--json")
 	if !strings.Contains(js, `"config_valid": false`) || !strings.Contains(js, "treshold") {
 		t.Errorf("JSON lacks the config error:\n%s", js)
+	}
+}
+
+func TestRouterStatus_HedgeNotShorterThanTimeout(t *testing.T) {
+	r := newRouterRig(t)
+	r.writeConfig(t, "mode-router:\n  timeout: 1s\n  hedge: 2s\n")
+	js, _, err := r.run(t, "status", "--json")
+	if err != nil || !strings.Contains(js, `"config_valid": false`) || !strings.Contains(js, "hedge") {
+		t.Fatalf("explicit hedge past the timeout must show as invalid: %v\n%s", err, js)
+	}
+	r.writeConfig(t, "mode-router:\n  timeout: 1s\n")
+	js, _, _ = r.run(t, "status", "--json")
+	if !strings.Contains(js, `"config_valid": true`) || strings.Contains(js, "hedge_ms") {
+		t.Errorf("an inherited hedge must be turned off, not invalid:\n%s", js)
 	}
 }
 

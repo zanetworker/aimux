@@ -231,7 +231,10 @@ paths:
         with nothing started: `400 unknown_profile`, `403
         profile_not_allowed` (outside the client's scope), `403
         step_up_required` (see Profiles), `409 profile_not_available`, `413
-        page_too_large` (`pageText` over 512 KiB), `429 client_limit`.
+        page_too_large` (`pageText` over 512 KiB), `400 image_invalid`
+        (see `image`), `429 client_limit`. With a profile the body may be
+        up to 6 MiB (a 512 KiB `pageText` escaped plus a 1.5 MiB image);
+        without one, 1 MiB.
       operationId: newSession
       requestBody:
         required: true
@@ -1141,6 +1144,7 @@ components:
             - step_up_required      # 403: a host profile from a device needs a login under maxAge seconds old from an allowed device kind
             - profile_not_available # 409: the profile exists but the Mac cannot run it yet
             - page_too_large        # 413: pageText is over 512 KiB
+            - image_invalid         # 400: the question's image is not png, jpeg, webp or gif, not plain base64, not of its stated type, or over 1.5 MiB of base64
             - not_found             # 404: a local client (not cli) asked about a session it did not start; such sessions do not exist for it
             - forbidden_for_client  # 403: a local client (not cli) may not use this route (search, projects, terminal, open on Mac, approvals, devices, describe, queue)
             - client_limit          # 429: the client runs as many sessions, or started as many turns this minute, as it may; see Retry-After
@@ -1369,6 +1373,7 @@ components:
         tools:
           type: array
           items: { $ref: "#/components/schemas/TurnTool" }
+        image: { type: boolean, description: "Present and true when the question was asked with an attached image (POST /v1/sessions image); absent otherwise. The image itself is never in history." }
 
     TurnTool:
       type: object
@@ -1736,6 +1741,7 @@ components:
         pageText: { type: string, description: "With profile: the page's text for a new session, at most 512 KiB (else 413 page_too_large). Ignored when the session continues." }
         model: { type: string, enum: [sonnet, opus], description: "With profile: this turn's model; omitted keeps the profile's default. Any other value is 400 bad_request." }
         instance: { type: string, pattern: "^[A-Za-z0-9-]{1,64}$", description: "With profile: the caller's instance (Wingman's per-browser-profile id), recorded on the session, so two browsers on one page keep separate conversations. Omitted continues only sessions started without one. Not matching the pattern is 400 bad_request." }
+        prior: { type: array, maxItems: 5, items: { type: string, maxLength: 2000 }, description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): the page's earlier questions asked in another mode (Auto or a mode change), oldest first, questions only and never answers. The turn's prompt lists them before the question as untrusted context. At most 5 of at most 2000 characters each (else 400 bad_request). Default when absent (or null): aimux computes it. The page conversation is every session of the same client and instance on the same url (any profile, with or without page text, not hidden); when its most recent answered turn (one that ended with assistant text, complete or partial) ran in another profile than this request, prior is that conversation's questions as stored in session history (each line trimmed, blank lines dropped), oldest first, distinct in that form (first kept), without this question (compared in the same form), the last 5, each cut to 2000 characters; otherwise it is empty. An explicit prior, including [], overrides the default." }
         originOnly: { type: boolean, description: "With profile: a sandbox session's first prompt names only the URL's scheme://host[:port], while the session is still kept and continued under the full url. Requests with and without it never continue each other's session. Wingman sets it for Research on a private page without its text." }
         routed:
           type: object
@@ -1746,6 +1752,14 @@ components:
             decisionId: { type: string }
             mode: { type: string, enum: [page, web, workspace] }
             source: { type: string, enum: [override, model, unavailable, override_blocked] }
+        image:
+          type: object
+          additionalProperties: false
+          required: [mimeType, data]
+          description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): one image pasted into the question (a screenshot). The model sees it after the prompt text, framed as untrusted data from the user's screen like page text: instructions in it are never followed. A mimeType other than these, data that is not plain base64 (no `data:` prefix, no line breaks), bytes that are not of the stated type, or more than 1,572,864 bytes (1.5 MiB) of base64 is 400 image_invalid. Events and history show only the question text; the agent's own transcript keeps the image."
+          properties:
+            mimeType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
+            data: { type: string, maxLength: 1572864, description: "The image bytes in standard base64." }
 
     RouteRequest:
       type: object
@@ -1820,6 +1834,10 @@ components:
         name: { type: string, description: "As the profile names it (wiki:readonly may resolve to the notes source)." }
         source: { type: string, description: "The source (server) name; empty for a set that is omitted." }
         url: { type: string, description: "The source's URL, only when it is a loopback one, without userinfo or query." }
+        authorship:
+          type: string
+          enum: [self, internal, outside]
+          description: "Who writes what the source returns, from tool-sources.yaml (unset means outside); absent for a set that is omitted."
         status:
           type: string
           enum: [available, partial, unavailable]

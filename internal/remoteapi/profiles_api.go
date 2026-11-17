@@ -2,6 +2,7 @@ package remoteapi
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
@@ -147,6 +150,11 @@ type newSessionRequest struct {
 	Title    string `json:"title"`
 	PageText string `json:"pageText"`
 	Model    string `json:"model"` // optional turn model: sonnet or opus
+	// Prior is the page's earlier questions asked in another mode, oldest
+	// first (questions only, never answers); at most maxPrior of at most
+	// maxPriorRunes characters each. Absent (nil), aimux computes it
+	// (pagePrior); an explicit one, even [], is used as sent.
+	Prior []string `json:"prior"`
 	// Instance is the caller's browser profile (Wingman), so two browsers
 	// on one page keep separate conversations; "" is the legacy behaviour.
 	Instance string `json:"instance"`
@@ -158,6 +166,55 @@ type newSessionRequest struct {
 	// Routed, with Profile, is the POST /v1/route answer this question
 	// followed; the decision log records which mode the session ran in.
 	Routed *routedRequest `json:"routed"`
+
+	// Image, with Profile, is one image pasted into the question (checkImage).
+	Image *imageInput `json:"image"`
+}
+
+// imageInput is an image attached to a question: its mime type and its
+// bytes in base64, without a data: prefix.
+type imageInput struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
+// image is img for the engine; nil for no image.
+func (img *imageInput) image() *acprun.Image {
+	if img == nil {
+		return nil
+	}
+	return &acprun.Image{MimeType: img.MimeType, Data: img.Data}
+}
+
+// imageTypes are the image types a question may carry.
+var imageTypes = map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true, "image/gif": true}
+
+// checkImage answers an image whose type is not png, jpeg, webp or gif,
+// whose data is not plain base64 of at most maxImageBase64 bytes, or whose
+// bytes are not of its type (sniffed, so an SVG or HTML labelled image/png
+// is refused) with 400 image_invalid (and false). No image passes.
+func checkImage(w http.ResponseWriter, img *imageInput) bool {
+	if img == nil {
+		return true
+	}
+	bad := func(msg string) bool {
+		writeError(w, http.StatusBadRequest, "image_invalid", errors.New(msg))
+		return false
+	}
+	if !imageTypes[img.MimeType] {
+		return bad("image mimeType must be image/png, image/jpeg, image/webp or image/gif")
+	}
+	if len(img.Data) > maxImageBase64 {
+		return bad(fmt.Sprintf("image data is longer than %d bytes of base64 (1.5 MiB)", maxImageBase64))
+	}
+	raw, err := base64.StdEncoding.DecodeString(img.Data)
+	if err != nil || len(raw) == 0 || strings.ContainsAny(img.Data, "\r\n") {
+		return bad("image data must be base64 without a data: prefix")
+	}
+	if http.DetectContentType(raw) != img.MimeType {
+		return bad("image data is not a " + img.MimeType + " image")
+	}
+	return true
 }
 
 // instancePattern is what an instance may look like (Wingman sends a UUID).
@@ -187,14 +244,34 @@ func checkModel(w http.ResponseWriter, model string) bool {
 	return false
 }
 
+// checkPrior answers more than maxPrior earlier questions, or one longer
+// than maxPriorRunes characters, with 400 bad_request (and false).
+func checkPrior(w http.ResponseWriter, prior []string) bool {
+	if len(prior) > maxPrior {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("prior has at most %d questions", maxPrior))
+		return false
+	}
+	for _, q := range prior {
+		if utf8.RuneCountInString(q) > maxPriorRunes {
+			writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("a prior question is at most %d characters", maxPriorRunes))
+			return false
+		}
+	}
+	return true
+}
+
 // Body limits of POST /v1/sessions: maxSessionBody without a profile (as
-// before profiles), maxProfileBody with one, room for a pageText of
+// before profiles), maxProfileBody with one: room for a pageText of
 // maxPageText (decoded, as Wingman caps it) even when JSON escaping makes
-// each byte six.
+// each byte six (3 MiB), an image of maxImageBase64 (1.5 MiB) and the rest
+// of the request.
 const (
 	maxPageText    = 512 << 10
+	maxImageBase64 = 1536 << 10 // 1.5 MiB of base64, about 1.1 MiB of image
 	maxSessionBody = 1 << 20
-	maxProfileBody = 4 << 20
+	maxProfileBody = 6 << 20
+	maxPrior       = 5
+	maxPriorRunes  = 2000
 )
 
 // countingReader counts the bytes read through it.
@@ -220,6 +297,12 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 		return
 	}
 	if !checkInstance(w, req.Instance != "", req.Instance) {
+		return
+	}
+	if !checkPrior(w, req.Prior) {
+		return
+	}
+	if !checkImage(w, req.Image) {
 		return
 	}
 	all, ok := a.loadProfiles(w)
@@ -258,13 +341,16 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 	if !ok {
 		return
 	}
+	if req.Prior == nil { // absent: aimux picks it; an explicit [] stays empty
+		req.Prior = a.pagePrior(r.Context(), client, m.Name, req)
+	}
 	id, err := a.profileSession(r.Context(), client, m, req)
 	if err != nil {
 		done(false)
 		a.writeProfileFailure(w, req.Profile, err)
 		return
 	}
-	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model})
+	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model, Prior: req.Prior, Image: req.Image.image()})
 	done(err == nil)
 	if err != nil {
 		a.writeProfileFailure(w, req.Profile, err)

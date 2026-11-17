@@ -10,7 +10,7 @@ aimux doctor          # one line per check, a fix line under each problem
 aimux doctor --json   # {"schema_version", "healthy", "problems", "checks": [{"id", "status", "detail", "fix"}]}
 ```
 
-Each fix is also printed as a `Next: <fix>` line on stderr, as the other commands hint, in text and JSON mode; a healthy run prints none, and a fix that is only "nothing to do" gets no `Next:` line. Exit status: 1 when any check is `fail`; warnings alone exit 0 (text output ends with `N warnings, no failure (exit 0)`). In JSON, `healthy` is false only when a check fails, and `problems` counts every `warn` and `fail`. Doctor writes no file, not even a temporary one: an unmigrated `readonly.json` is converted in memory. Its probes are read-only: it lists each tool source's live tools (as `aimux tools status` does) and runs `podman image exists`, `openshell -g local status`, `provider list` and `sandbox list`, `ps` and `lsof`. It never starts the gateway, migrates `readonly.json` or approves a tool.
+Each fix is also printed as a `Next: <fix>` line on stderr, as the other commands hint, in text and JSON mode; a healthy run prints none, and a fix that is only "nothing to do" gets no `Next:` line. Exit status: 1 when any check is `fail`; warnings alone exit 0 (text output ends with `N warnings, no failure (exit 0)`). In JSON, `healthy` is false only when a check fails, and `problems` counts every `warn` and `fail`. Doctor writes no file, not even a temporary one: an unmigrated `readonly.json` is converted in memory. Its probes are read-only: it lists each tool source's live tools (as `aimux tools status` does; a `cli` source only when the tool runner `aimux-tools` is already Ready, through `sandbox exec <binary> --version`) and runs `podman image exists`, `openshell -g local status`, `provider list` and `sandbox list`, `ps` and `lsof`. It never starts the gateway, migrates `readonly.json` or approves a tool.
 
 To fix what is missing in one go, run `aimux setup` (see [below](#aimux-setup)).
 
@@ -27,7 +27,7 @@ To fix what is missing in one go, run `aimux setup` (see [below](#aimux-setup)).
 | `tools.review.<set>/<tool>` | warn | The tool is `unpinned` (listed live, never approved), `changed` (its live definition differs from the approved one, or it is gone) or `source_changed` (approved from another URL or folder than the registry names now). It is not served until approved. | `aimux tools diff <set>/<tool>, then aimux tools approve <set>/<tool>` |
 | `tools.no_set.<source>/<tool>` | warn | The tool is pinned, but no set lists it, so it is never served. When the source itself is gone (`aimux tools remove`), the pin is kept but unused. | `add <tool> to a set of source <source> in <registry> if it should be served (else nothing to do)`. Source gone: `nothing to do; to serve it again, add source <source> back with aimux tools add (same folder or URL)` |
 | `tools.backend.<source>` | warn | The source could not be listed; its tools are hidden. | MCP source: `start the <source> MCP server at <url>, then aimux tools status`. Notes source: `create the notes folder <root> or fix source <source> in <registry>, then run aimux tools status` |
-| `tools.omitted.<profile>.<set>` | warn | A profile requests a set its compile leaves out (not in the registry, or none of its tools pinned). The profile runs without it. | No pinned tools: `aimux tools diff <set>, then aimux tools approve <set>`. Not in the registry: `add set <set> to <registry>, or remove it from the profile` |
+| `tools.omitted.<profile>.<set>` | warn | A profile requests a set its compile leaves out (not in the registry, or none of its tools pinned). The profile runs without it. A builtin's opt-in set (`gh:readonly` in `work-readonly`) that is not in the registry at all is not reported. | No pinned tools: `aimux tools diff <set>, then aimux tools approve <set>`. Not in the registry: `add set <set> to <registry>, or remove it from the profile` |
 
 A pin detects schema changes; it does not prove a tool is read-only.
 
@@ -62,13 +62,17 @@ A pin detects schema changes; it does not prove a tool is read-only.
 | `sandbox.policy.<profile>` | warn | The profile's sandbox runs another policy than the profile compiles to now (stale). Serve applies the new one before the next turn. | `work-readonly`: `applies on the next Workspace question`, plus `; or run aimux sandbox verify` only while port 7390 is free (with `remote serve` holding it, verify cannot run). `research`: `applies on the next Web question`. Others: `applies on the next turn in <profile>` |
 | `sandbox.policy.<profile>` | fail | The profile does not compile. | `aimux tools status, then fix what the error names` |
 
+`aimux sandbox status` also lists the tool runner, `aimux-tools`, as `(tool runner)` after the profiles (`runner` in `--json`), with the same states and its recorded and compiled digests. `error` means the runner does not compile at all (for example a pins file that does not parse). An `http-openapi` source whose spec cannot be read, that names a `credential`, or whose base URL the compiler refuses (an IP literal, `localhost`, an `.internal` or `.local` name, the model host, or `api.github.com`, which the `gh` pack's provider is bound to) is left out of the runner instead: the runner still compiles without it, and the reason shows under `aimux tools status`. A second `Provider:` line shows `aimux-github`; `missing` there needs action only when an approved `gh` source is left out for it (then `Next: aimux sandbox setup`). Its GitHub provider `aimux-github` is created by `aimux sandbox setup` only when the platform's secret store (Keychain on macOS, Secret Service on Linux) has the item `aimux-github` with a fine-grained, read-only GitHub token; without it setup prints the line to store it (`security add-generic-password` or `secret-tool store`), carries on, and the `gh` tools have no credential.
+
+On Linux, `aimux sandbox setup` still fails at the `wingman-claude` step when that provider is missing: it reads the Claude token with macOS `security`, not the Secret Service. Create `wingman-claude` with `openshell provider create` yourself, then run setup again for the images and `aimux-github`.
+
 ## aimux setup
 
 `aimux setup` checks the same concerns and runs only the steps that are missing:
 
 1. The tool registry: migrates `readonly.json` once, or writes the defaults.
 2. `~/.config/aimux/clients.yaml`, when it is absent.
-3. The sandbox: starts the OpenShell gateway, builds the image and creates the provider, each only when missing (as `aimux sandbox setup`).
+3. The sandbox: starts the OpenShell gateway, builds the image and creates the provider, each only when missing (as `aimux sandbox setup`). It runs only when one of those is missing; to build the tool runner image `localhost/aimux-tools:2.103.3` and create `aimux-github`, run `aimux sandbox setup`.
 4. The Chrome native host (as `aimux browser install`), with `--extension-id <id>`, or when an id is already pinned but no host manifest or wrapper is there.
 
 On a terminal it asks before each step (Enter is yes); `--yes` runs them without asking. With no terminal, or with `--json`, and no `--yes`, it runs none and lists them as `pending` with `Next: aimux setup --yes`.

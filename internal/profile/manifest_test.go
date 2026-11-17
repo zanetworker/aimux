@@ -263,7 +263,7 @@ func TestBuiltins_AllResolveAndPageHasNoTools(t *testing.T) {
 		t.Fatalf("page = %+v", page)
 	}
 	wr, _ := Resolve("work-readonly", nil)
-	if wr.Runs != "sandbox" || len(wr.Tools) != 4 || !reflect.DeepEqual(wr.Network.Allow, []string{"model", "gateway"}) {
+	if wr.Runs != "sandbox" || len(wr.Tools) != 5 || !reflect.DeepEqual(wr.Network.Allow, []string{"model", "gateway"}) {
 		t.Fatalf("work-readonly = %+v", wr)
 	}
 	coding, _ := Resolve("builtin:coding", nil)

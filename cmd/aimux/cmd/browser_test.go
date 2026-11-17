@@ -272,13 +272,13 @@ func TestBrowserSetupArgv(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	img := "localhost/wingman-sandbox:2.1.319"
-	if b := f.find("podman", "build"); len(b) != 1 || strings.Join(b[0].argv, " ") != "podman build -t "+img+" -f "+filepath.Join(sandboxDir, "Containerfile")+" "+sandboxDir {
+	if b := f.find("podman", "build", "-t", img); len(b) != 1 || strings.Join(b[0].argv, " ") != "podman build -t "+img+" -f "+filepath.Join(sandboxDir, "Containerfile")+" "+sandboxDir {
 		t.Fatalf("podman build = %v", b)
 	}
 	if p := f.find("openshell", "-g", "local", "provider", "profile", "import"); len(p) != 1 || strings.Join(p[0].argv, " ") != "openshell -g local provider profile import -f "+filepath.Join(sandboxDir, "claude-code-oauth.yaml")+" --global" {
 		t.Fatalf("profile import = %v", p)
 	}
-	pc := f.find("openshell", "-g", "local", "provider", "create")
+	pc := f.find("openshell", "-g", "local", "provider", "create", "--name", "wingman-claude")
 	if len(pc) != 1 {
 		t.Fatalf("provider create calls = %d", len(pc))
 	}
@@ -345,7 +345,7 @@ func TestBrowserSetupSkipsExistingAndLeavesSandboxesAlone(t *testing.T) {
 		case strings.HasPrefix(s, "openshell -g local provider list-profiles"):
 			return "NAME               TYPE      CATEGORY\nclaude-code-oauth  provider  AGENT\n", nil
 		case strings.HasPrefix(s, "openshell -g local provider list"):
-			return "NAME            TYPE               CREDENTIAL_KEYS\nwingman-claude  claude-code-oauth  1\n", nil
+			return "NAME            TYPE               CREDENTIAL_KEYS\nwingman-claude  claude-code-oauth  1\naimux-github    github             1\n", nil
 		case strings.HasPrefix(s, "openshell -g local sandbox list"):
 			return "NAME  CREATED  PHASE\nwingman-work  2026-11-09 10:00:00  Ready\n", nil
 		}
@@ -386,7 +386,7 @@ func TestBrowserSetupMigratesReadonlyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reg.Sources["wiki"] != (toolreg.Source{Type: toolreg.TypeLocalNotes, Root: env.Home}) || len(reg.Sets) != 1 {
+	if reg.Sources["wiki"] != (toolreg.Source{Type: toolreg.TypeLocalNotes, Root: env.Home, Authorship: toolreg.AuthorshipSelf}) || len(reg.Sets) != 1 {
 		t.Fatalf("registry = %+v", reg)
 	}
 	if got, _ := os.ReadFile(old + ".migrated"); string(got) != custom { //nolint:gosec // G304: test temp path

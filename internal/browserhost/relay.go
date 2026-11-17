@@ -247,11 +247,17 @@ func (s *relaySession) ask(ctx context.Context, req Request, f *inflight, emit f
 	if req.Model != "" {
 		body["model"] = req.Model // the panel's Sonnet/Opus choice; the server checks it
 	}
+	if len(req.Prior) > 0 {
+		body["prior"] = req.Prior // earlier questions only; the server caps them
+	}
 	if req.Instance != "" {
 		body["instance"] = req.Instance
 	}
 	if req.Routed != nil {
 		body["routed"] = req.Routed // the route answer this ask followed, for the decision log
+	}
+	if req.Image != nil {
+		body["image"] = req.Image // the pasted image; the server checks its type and size
 	}
 	if err := s.call(ctx, http.MethodPost, "/v1/sessions", body, &acc); err != nil {
 		return err
@@ -481,6 +487,7 @@ func (s *relaySession) getPage(ctx context.Context, instance, pageURL string) (*
 				Time  time.Time `json:"time"`
 				User  string    `json:"user"`
 				Reply string    `json:"reply"`
+				Image bool      `json:"image"`
 				Tools []struct {
 					Name string `json:"name"`
 				} `json:"tools"`
@@ -499,7 +506,7 @@ func (s *relaySession) getPage(ctx context.Context, instance, pageURL string) (*
 			for _, tl := range t.Tools {
 				tools = append(tools, tl.Name)
 			}
-			p.Turns = append(p.Turns, Turn{At: t.Time, Lane: laneOfProfile(ss.Profile), Question: profilerun.QuestionOf(t.User), Answer: t.Reply, ToolCalls: tools})
+			p.Turns = append(p.Turns, Turn{At: t.Time, Lane: laneOfProfile(ss.Profile), Question: profilerun.QuestionOf(t.User), Answer: t.Reply, ToolCalls: tools, Image: t.Image})
 			if t.Time.After(p.LastAsked) {
 				p.LastAsked = t.Time
 			}

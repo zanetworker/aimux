@@ -74,6 +74,16 @@ type Request struct {
 	State    any
 	Question Question
 	Allowed  []string
+	// Promote, when set, is asked about an answer that came back undecided
+	// for low confidence (a backend answered, with a choice). It returns an
+	// allowed option and the name of the caller's rule that decides it, or
+	// an empty rule to leave the answer undecided. It sees the answer's
+	// RawProbabilities and must not log or keep the state. The decision
+	// log line records the rule.
+	Promote func(a Answer) (choice, rule string)
+	// HasURL is a flag for the decision log line only (the question held a
+	// link); the URL itself is never logged.
+	HasURL bool
 }
 
 // Answer is a decision. Choice is the picked option ("" when none could be
@@ -87,17 +97,27 @@ type Answer struct {
 	ID            string
 	Choice        string
 	Probabilities map[string]float64
-	Confidence    float64
-	Decided       bool
-	Undecided     string
-	Threshold     float64
-	Backend       string
-	Model         string
-	Ms            int64
-	CostUSD       *float64
+	// RawProbabilities are the backend's probabilities over all of the
+	// Question's options, before the allowed filter renormalized them (nil
+	// when the backend gave none). Rules about how likely an option is
+	// must read these: Probabilities over two options are always >= 0.5.
+	RawProbabilities map[string]float64
+	Confidence       float64
+	Decided          bool
+	Undecided        string
+	Threshold        float64
+	Backend          string
+	Model            string
+	Ms               int64
+	CostUSD          *float64
 	// KeyMs is the time spent reading API keys before the decision call
 	// (outside Timeout), CallMs the time the backends took within it.
 	KeyMs, CallMs int64
+	// Hedged is true when a second identical request was sent to a backend.
+	Hedged bool
+	// Rule names the caller's Promote rule that made this answer Decided
+	// ("" when the backend's own confidence did).
+	Rule string
 
 	// tokens the call used, for the usage line, when the backend reports them
 	inputTokens, outputTokens int64
@@ -125,6 +145,11 @@ type Decider struct {
 	Backends  []Backend
 	Threshold float64
 	Timeout   time.Duration
+	// Hedge, when positive, sends a backend a second identical request if
+	// the first has not answered after Hedge, and takes whichever answers
+	// first (within Timeout). Backends that are slow by nature (chat, which
+	// runs claude -p) are never hedged. Zero is off.
+	Hedge time.Duration
 	// KeyTimeout bounds reading the backends' API keys before Timeout
 	// starts (zero means DefaultKeyTimeout).
 	KeyTimeout time.Duration
@@ -184,15 +209,30 @@ func (d *Decider) Ask(ctx context.Context, r Request) Answer {
 		a = Answer{Undecided: UndecidedError}
 	} else {
 		a = d.ask(ctx, r)
+		a = promote(a, r)
 	}
 	a.ID = newID()
 	a.Ms = time.Since(start).Milliseconds()
 	if d.Log != nil {
 		sum := sha256.Sum256(stateJSON)
-		if err := d.Log.record(d.Name, hex.EncodeToString(sum[:]), a, d.Test); err != nil {
+		if err := d.Log.record(d.Name, hex.EncodeToString(sum[:]), a, d.Test, r.HasURL); err != nil {
 			log.Printf("decide:%s: %v", d.Name, err)
 		}
 	}
+	return a
+}
+
+// promote lets the caller's rule decide a low-confidence answer. The chosen
+// option must be allowed.
+func promote(a Answer, r Request) Answer {
+	if r.Promote == nil || a.Decided || a.Undecided != UndecidedLowConfidence || a.Choice == "" {
+		return a
+	}
+	choice, rule := r.Promote(a)
+	if rule == "" || !allowed(r)[choice] {
+		return a
+	}
+	a.Choice, a.Rule, a.Decided, a.Undecided = choice, rule, true, ""
 	return a
 }
 
@@ -259,7 +299,9 @@ func prepareOne(ctx context.Context, p Preparer) error {
 
 // chain asks the backends in order within Timeout; a backend whose Prepare
 // failed is not called and fails with that error.
-func (d *Decider) chain(ctx context.Context, r Request, prepErr []error) Answer {
+func (d *Decider) chain(ctx context.Context, r Request, prepErr []error) (out Answer) {
+	hedged := false
+	defer func() { out.Hedged = hedged }()
 	timeout := d.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -277,9 +319,17 @@ func (d *Decider) chain(ctx context.Context, r Request, prepErr []error) Answer 
 		var a Answer
 		err := prepErr[i]
 		if err == nil {
-			a, err = call(ctx, b, r)
+			hedge := d.Hedge
+			if _, no := inner(b).(unhedgeable); no {
+				hedge = 0
+			}
+			var h bool
+			a, h, err = callHedged(ctx, b, r, hedge, d.recordUsage)
+			hedged = hedged || h
 		}
-		if ctx.Err() != nil {
+		// A success received before the deadline stands even when the
+		// deadline passed since (a hedged win waits up to billGrace).
+		if err != nil && ctx.Err() != nil {
 			why := UndecidedTimeout
 			if errors.Is(parent.Err(), context.Canceled) {
 				why = UndecidedCanceled
@@ -336,6 +386,84 @@ func call(ctx context.Context, b Backend, r Request) (Answer, error) {
 	}
 }
 
+// unhedgeable marks a Backend that is never sent a second request: one
+// that is slow by nature (chat runs claude -p, about 3 s), so a hedge would
+// only double its cost.
+type unhedgeable interface{ noHedge() }
+
+// billGrace is how long a hedged win waits for the other request, when it is
+// about to finish, so that its cost is recorded too.
+const billGrace = 25 * time.Millisecond
+
+// callHedged is call, plus a second identical request when the first has
+// not answered after hedge (zero: never). The first success wins and the
+// other request is cancelled; an error waits for the other request if one
+// is running. hedged reports whether the second request went out. The
+// caller records the winner; record is called for the other request when it
+// also completed with an answer (it waits up to billGrace for that, never
+// past ctx's deadline), since each completed request is billed. A returned
+// success stands even if ctx expired during that wait.
+func callHedged(ctx context.Context, b Backend, r Request, hedge time.Duration, record func(Answer)) (a Answer, hedged bool, err error) {
+	if hedge <= 0 {
+		a, err = call(ctx, b, r)
+		return a, false, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		a   Answer
+		err error
+	}
+	ch := make(chan result, 2)
+	start := func() {
+		go func() {
+			a, err := b.Decide(ctx, r)
+			ch <- result{a, err}
+		}()
+	}
+	start()
+	timer := time.NewTimer(hedge)
+	defer timer.Stop()
+	running, lastErr := 1, error(nil)
+	for {
+		select {
+		case <-timer.C:
+			if !hedged {
+				hedged = true
+				running++
+				start()
+			}
+		case res := <-ch:
+			running--
+			if res.err == nil {
+				if running > 0 {
+					wait := billGrace
+					if dl, ok := ctx.Deadline(); ok {
+						wait = min(wait, time.Until(dl))
+					}
+					grace := time.NewTimer(wait)
+					select {
+					case other := <-ch:
+						if other.err == nil {
+							record(other.a)
+						}
+					case <-grace.C:
+					case <-ctx.Done():
+					}
+					grace.Stop()
+				}
+				return res.a, hedged, nil
+			}
+			lastErr = res.err
+			if running == 0 {
+				return Answer{}, hedged, lastErr
+			}
+		case <-ctx.Done():
+			return Answer{}, hedged, ctx.Err()
+		}
+	}
+}
+
 // allowed is the set of option keys the answer may pick.
 func allowed(r Request) map[string]bool {
 	set := map[string]bool{}
@@ -368,6 +496,7 @@ func apply(a Answer, ok map[string]bool, threshold float64) Answer {
 		}
 	}
 	out := a
+	out.RawProbabilities = a.Probabilities
 	out.Probabilities = nil
 	if total > 0 {
 		for k := range probs {

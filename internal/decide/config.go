@@ -49,7 +49,10 @@ type DeciderConfig struct {
 	Backends  []BackendConfig `yaml:"backends"`
 	Threshold float64         `yaml:"threshold"`
 	Timeout   time.Duration   `yaml:"timeout"`
-	Key       KeyConfig       `yaml:"key"`
+	// Hedge, when positive, sends a second identical request to a backend
+	// that has not answered after this long and takes the first answer.
+	Hedge time.Duration `yaml:"hedge"`
+	Key   KeyConfig     `yaml:"key"`
 }
 
 // Deps is what Build wires in: Key overrides the config's key sources when
@@ -108,12 +111,42 @@ func LoadConfig(path string, builtins map[string]DeciderConfig) (map[string]Deci
 		if err := node.Decode(&c); err != nil {
 			return nil, fmt.Errorf("parse deciders config %s, decider %q: %w", path, name, err)
 		}
+		if err := checkHedge(&c, hasKey(&node, "hedge")); err != nil {
+			return nil, fmt.Errorf("deciders config %s, decider %q: %w", path, name, err)
+		}
 		if c.Threshold <= 0 {
 			return nil, fmt.Errorf("deciders config %s, decider %q: set a threshold (0 < threshold <= 1); zero or less would decide every answer", path, name)
 		}
 		cfgs[name] = c
 	}
 	return cfgs, nil
+}
+
+// hasKey reports whether the mapping node sets key.
+func hasKey(node *yaml.Node, key string) bool {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
+}
+
+// checkHedge validates c's hedge after the file's fields went on top of a
+// built-in. A hedge the file set that is negative or not shorter than the
+// timeout is an error. A hedge the file did not set (inherited from the
+// built-in) that is not shorter than the file's timeout is turned off: the
+// user never wrote it, so it must not make their config invalid.
+func checkHedge(c *DeciderConfig, explicit bool) error {
+	switch {
+	case c.Hedge < 0:
+		return fmt.Errorf("hedge %v must be 0 (off) or shorter than the timeout", c.Hedge)
+	case c.Hedge > 0 && c.Timeout > 0 && c.Hedge >= c.Timeout && !explicit:
+		c.Hedge = 0
+	case c.Hedge > 0 && c.Timeout > 0 && c.Hedge >= c.Timeout:
+		return fmt.Errorf("hedge %v must be 0 (off) or shorter than the timeout %v", c.Hedge, c.Timeout)
+	}
+	return nil
 }
 
 // strictCheck decodes one decider's node with unknown fields rejected
@@ -147,6 +180,9 @@ func Build(name string, cfg DeciderConfig, deps Deps) (*Decider, error) {
 	if cfg.Timeout <= 0 {
 		return nil, fmt.Errorf("decider %q: timeout must be positive", name)
 	}
+	if cfg.Hedge < 0 || (cfg.Hedge > 0 && cfg.Hedge >= cfg.Timeout) {
+		return nil, fmt.Errorf("decider %q: hedge %v must be 0 (off) or shorter than the timeout %v", name, cfg.Hedge, cfg.Timeout)
+	}
 	if len(cfg.Backends) == 0 {
 		return nil, fmt.Errorf("decider %q: no backends", name)
 	}
@@ -154,7 +190,7 @@ func Build(name string, cfg DeciderConfig, deps Deps) (*Decider, error) {
 	if key == nil {
 		key = keyChain(cfg.Key)
 	}
-	d := &Decider{Name: name, Threshold: cfg.Threshold, Timeout: cfg.Timeout, Log: deps.Log, Usage: deps.Usage}
+	d := &Decider{Name: name, Threshold: cfg.Threshold, Timeout: cfg.Timeout, Hedge: cfg.Hedge, Log: deps.Log, Usage: deps.Usage}
 	for _, bc := range cfg.Backends {
 		b, err := buildBackend(bc, key, deps.LLM)
 		if err != nil {

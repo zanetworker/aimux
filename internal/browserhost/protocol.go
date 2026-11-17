@@ -15,6 +15,9 @@ type Request struct {
 	Question string `json:"question,omitempty"`
 	Query    string `json:"query,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// Prior is the page's earlier questions from another mode (questions
+	// only), sent on the first ask after a mode change.
+	Prior []string `json:"prior,omitempty"`
 	// Instance is the panel's browser profile id, so each browser keeps its
 	// own conversations; a malformed one is ignored (legacy behaviour).
 	Instance string `json:"instance,omitempty"`
@@ -27,6 +30,16 @@ type Request struct {
 	Facts *RouteFacts `json:"facts,omitempty"`
 	// Routed is an ask's route answer it followed (POST /v1/sessions routed).
 	Routed *Routed `json:"routed,omitempty"`
+	// Image is one image pasted into an ask's question, forwarded to POST
+	// /v1/sessions as is (the server checks it).
+	Image *Image `json:"image,omitempty"`
+}
+
+// Image is an image attached to a question: its mime type and base64 bytes
+// (no data: prefix).
+type Image struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 // RouteFacts are what the panel knows about the page for Auto mode.
@@ -76,6 +89,8 @@ type Turn struct {
 	Question  string    `json:"question"`
 	Answer    string    `json:"answer"`
 	ToolCalls []string  `json:"toolCalls"`
+	// Image: the question was asked with an image (never the image itself).
+	Image bool `json:"image,omitempty"`
 }
 
 // Page is a page's conversation in the JSON shape the panel reads (the

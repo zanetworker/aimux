@@ -150,8 +150,38 @@ func WithModel(ctx context.Context, model string) context.Context {
 	return context.WithValue(ctx, modelKey{}, model)
 }
 
+// priorKey carries a turn's earlier questions in its context.
+type priorKey struct{}
+
+// WithPrior returns ctx carrying the user's earlier questions on the page
+// (asked in another mode, oldest first) for the turn's prompt.
+func WithPrior(ctx context.Context, prior []string) context.Context {
+	return context.WithValue(ctx, priorKey{}, prior)
+}
+
+// PriorFrom is the turn's earlier questions in ctx, nil when none.
+func PriorFrom(ctx context.Context) []string {
+	p, _ := ctx.Value(priorKey{}).([]string)
+	return p
+}
+
 // ModelFrom is the turn's model choice in ctx, "" when none.
 func ModelFrom(ctx context.Context) string {
 	m, _ := ctx.Value(modelKey{}).(string)
 	return m
+}
+
+// imageKey carries a turn's attached image in its context.
+type imageKey struct{}
+
+// WithImage returns ctx carrying the image the user attached to the turn's
+// question (checked by the remote API), sent after the prompt text.
+func WithImage(ctx context.Context, img *acprun.Image) context.Context {
+	return context.WithValue(ctx, imageKey{}, img)
+}
+
+// ImageFrom is the turn's attached image in ctx, nil when none.
+func ImageFrom(ctx context.Context) *acprun.Image {
+	img, _ := ctx.Value(imageKey{}).(*acprun.Image)
+	return img
 }

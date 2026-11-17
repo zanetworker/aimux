@@ -18,6 +18,8 @@ type Chat struct {
 	Model  string // full model id (from llm.ResolveModel)
 }
 
+func (*Chat) noHedge() {}
+
 // ChatClient is the model client for chat backends (Deps.LLM): the
 // Messages API when an API key is set (apiKey, from sessions.api_key, else
 // ANTHROPIC_API_KEY) with claude -p as the fallback for an unknown model,

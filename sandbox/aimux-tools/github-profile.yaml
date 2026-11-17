@@ -1,0 +1,33 @@
+# OpenShell provider profile for the aimux-tools runner: the stock github
+# profile (OpenShell v0.1.7 providers/github.yaml) trimmed to api.github.com
+# REST and GraphQL read-only and the gh binary. The stock one also opens
+# github.com git transport to the git binaries, which the runner never needs.
+# Its id is aimux-github, not github: OpenShell ships a built-in "github"
+# profile (with the git transport), and profiles are looked up by exact id.
+# aimux sandbox setup lints and imports it before creating provider aimux-github.
+id: aimux-github
+display_name: GitHub (aimux, API read-only)
+description: GitHub API read-only for gh in the aimux-tools sandbox
+category: source_control
+credentials:
+  - name: api_token
+    description: Fine-grained GitHub token, public repositories read-only
+    env_vars: [GITHUB_TOKEN, GH_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+discovery:
+  credentials: [api_token]
+endpoints:
+  - host: api.github.com
+    port: 443
+    protocol: rest
+    access: read-only
+    enforcement: enforce
+  - host: api.github.com
+    port: 443
+    path: /graphql
+    protocol: graphql
+    access: read-only
+    enforcement: enforce
+binaries: [/usr/bin/gh]

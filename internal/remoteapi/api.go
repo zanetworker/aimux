@@ -672,6 +672,10 @@ func (a *API) newSession(w http.ResponseWriter, r *http.Request) {
 		a.newProfileSession(w, r, req)
 		return
 	}
+	if req.Image != nil || req.Prior != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", errNeedProfile)
+		return
+	}
 	if !a.legacyAllowed(w, r) {
 		return
 	}
@@ -724,6 +728,9 @@ func (a *API) accepted(session, turn string) TurnAccepted {
 		Events: fmt.Sprintf("/v1/sessions/%s/events?after=%d", session, after)}
 }
 
+// errNeedProfile refuses an image or prior outside a profile session.
+var errNeedProfile = errors.New("image and prior need a profile session (POST /v1/sessions with profile)")
+
 // errNotAProject refuses a new session outside the recent project folders.
 var errNotAProject = errors.New("cwd must be one of the recent projects from /v1/projects")
 
@@ -746,6 +753,9 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 		Text  string `json:"text"`
 		Key   string `json:"key"`
 		Model string `json:"model"` // optional turn model: sonnet or opus
+		// Image and Prior are only read to be refused (errNeedProfile).
+		Image *imageInput `json:"image"`
+		Prior []string    `json:"prior"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("body must be JSON with a text field: %w", err))
@@ -756,6 +766,10 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !checkModel(w, req.Model) {
+		return
+	}
+	if req.Image != nil || req.Prior != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", errNeedProfile)
 		return
 	}
 	session := r.PathValue("id")

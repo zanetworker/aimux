@@ -44,7 +44,9 @@ const DeciderName = "mode-router"
 // 0.25 within 5 s, and no chat fallback (when OpenRouter cannot answer, the
 // person picks instead of waiting on a slower model). 5 s, not 2: OpenRouter's
 // first response byte ranged from 0.3 s to 7 s on 2026-11-16, and the panel
-// offers Pick now while it waits. The key is looked up
+// offers Pick now while it waits. Slow and fast answers came interleaved,
+// so a request not answered after 1.2 s gets an identical second one
+// (about $0.000003 each) and the first answer wins. The key is looked up
 // in the Keychain or Secret Service item aimux-openrouter, then the 0600
 // file, then OPENROUTER_API_KEY.
 func DefaultDecider() decide.DeciderConfig {
@@ -52,6 +54,7 @@ func DefaultDecider() decide.DeciderConfig {
 		Backends:  []decide.BackendConfig{{Kind: "openrouter", Model: "cloudflare/clef-flash"}},
 		Threshold: 0.25,
 		Timeout:   5 * time.Second,
+		Hedge:     1200 * time.Millisecond,
 		Key:       decide.KeyConfig{Service: "aimux-openrouter", Env: "OPENROUTER_API_KEY", File: "~/.config/aimux/keys/openrouter"},
 	}
 }
@@ -211,6 +214,8 @@ func Route(ctx context.Context, d *decide.Decider, text string, f Facts, allowed
 		State:    state{Facts: f, Question: truncate(text, maxQuestionRunes)},
 		Question: ModeQuestion,
 		Allowed:  allowedModes,
+		HasURL:   hasURL(text),
+		Promote:  func(a decide.Answer) (string, string) { return promotePage(a, allowedModes, f) },
 	})
 	r := Result{
 		Text:          text,
@@ -236,6 +241,31 @@ func Route(ctx context.Context, d *decide.Decider, text string, f Facts, allowed
 	}
 	r.Decided = false
 	return finish(r, allowedModes, f)
+}
+
+// RulePageAttached is the decision log's rule name for an attached page
+// the model leans to, though not confidently enough to decide alone.
+const RulePageAttached = "page_attached"
+
+// pageRawMin is the raw page probability at which rule 5 decides page.
+const pageRawMin = 0.50
+
+// promotePage is rule 5: when the page is readable, attached (use_page),
+// allowed, the most probable allowed mode, and the model's own raw page
+// probability (before the allowed filter renormalized it) is at least
+// pageRawMin, the question goes to page without asking, though the
+// confidence is below the threshold. No tools run in page mode, and a wrong
+// pick is redone with @web or @workspace.
+func promotePage(a decide.Answer, allowedModes []string, f Facts) (choice, rule string) {
+	if !f.PageReadable || !f.UsePage || !contains(allowedModes, "page") || a.RawProbabilities["page"] < pageRawMin {
+		return "", ""
+	}
+	for _, m := range allowedModes {
+		if m != "page" && a.Probabilities[m] >= a.Probabilities["page"] {
+			return "", ""
+		}
+	}
+	return "page", RulePageAttached
 }
 
 // finish sets the suggested mode of an undecided result: page when the page
@@ -293,3 +323,9 @@ func truncate(s string, n int) string {
 	}
 	return string(r[:n])
 }
+
+var urlRe = regexp.MustCompile(`(?i)https?://\S`)
+
+// hasURL reports whether text holds an http:// or https:// link. Only the
+// yes/no goes to the decision log, never the link.
+func hasURL(text string) bool { return urlRe.MatchString(text) }

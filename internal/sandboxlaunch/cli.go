@@ -12,11 +12,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/harnessconfig"
+	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/profile"
 )
 
@@ -153,11 +155,28 @@ func (p *proc) Close() error {
 		}
 		err := p.cmd.Wait()
 		if err != nil && !killed { // a kill is the caller's choice, not a failure
-			p.err = fmt.Errorf("%s: %w: %s", p.name, err, strings.TrimSpace(p.stderr.String()))
+			code := -1
+			var x *exec.ExitError
+			if errors.As(err, &x) {
+				code = x.ExitCode() // -1 when a signal ended it
+			}
+			p.err = &CommandError{Name: p.name, Err: err, Code: code, Stderr: strings.TrimSpace(p.stderr.String())}
 		}
 	})
 	return p.err
 }
+
+// CommandError is a command that failed, as a Runner's Close reports it.
+type CommandError struct {
+	Name   string // the first words of the command line
+	Err    error  // what Wait returned
+	Code   int    // the exit status; -1 when the command did not exit on its own
+	Stderr string // the tail of stderr, trimmed
+}
+
+func (e *CommandError) Error() string { return fmt.Sprintf("%s: %v: %s", e.Name, e.Err, e.Stderr) }
+
+func (e *CommandError) Unwrap() error { return e.Err }
 
 // tailBuffer keeps the last maxStderr bytes written to it.
 type tailBuffer struct {
@@ -250,11 +269,18 @@ func (b *cliBackend) Ensure(ctx context.Context, c profile.Compiled) error {
 	if err != nil {
 		return err
 	}
+	providersFile := filepath.Join(b.dir, c.Sandbox+".providers")
 	if !exists {
-		if _, err := b.output(ctx, nil, "sandbox", "create", "--name", c.Sandbox, "--from", c.Image,
-			"--policy", policy, "--provider", c.Provider, "--no-auto-providers", "--no-tty", "--detach",
-			"--", "sleep", "infinity"); err != nil {
+		args := []string{"sandbox", "create", "--name", c.Sandbox, "--from", c.Image, "--policy", policy}
+		for _, p := range c.Providers {
+			args = append(args, "--provider", p)
+		}
+		args = append(args, "--no-auto-providers", "--no-tty", "--detach", "--", "sleep", "infinity")
+		if _, err := b.output(ctx, nil, args...); err != nil {
 			return fmt.Errorf("create sandbox %s: %w", c.Sandbox, err)
+		}
+		if err := writeProviders(providersFile, c.Providers); err != nil {
+			return err
 		}
 	}
 	if err := b.waitReady(ctx, c.Sandbox); err != nil {
@@ -275,8 +301,60 @@ func (b *cliBackend) Ensure(ctx context.Context, c profile.Compiled) error {
 		if err != nil {
 			return fmt.Errorf("update policy of %s: %w", c.Sandbox, err)
 		}
+		if err := b.syncProviders(ctx, c.Sandbox, providersFile, c.Providers); err != nil {
+			return err
+		}
 	}
 	return writeFile0600(digestFile, []byte(c.PolicyDigest))
+}
+
+// syncProviders attaches the providers want adds to the ones recorded in
+// file and detaches the ones it drops, recording the list after each
+// change. With no recorded list the sandbox is taken to have want (what
+// Ensure created it with before lists were recorded).
+func (b *cliBackend) syncProviders(ctx context.Context, sandbox, file string, want []string) error {
+	data, err := os.ReadFile(file) //nolint:gosec // G304: file is under the backend's policyDir, named from a validated sandbox name
+	if errors.Is(err, os.ErrNotExist) {
+		return writeProviders(file, want)
+	}
+	if err != nil {
+		return err
+	}
+	have := strings.Fields(string(data))
+	for _, p := range want {
+		if slices.Contains(have, p) {
+			continue
+		}
+		if _, err := b.output(ctx, nil, "sandbox", "provider", "attach", "--wait", sandbox, p); err != nil {
+			return fmt.Errorf("attach provider %s to %s: %w", p, sandbox, err)
+		}
+		have = append(have, p)
+		if err := writeProviders(file, have); err != nil {
+			return err
+		}
+	}
+	for _, p := range slices.Clone(have) {
+		if slices.Contains(want, p) {
+			continue
+		}
+		if _, err := b.output(ctx, nil, "sandbox", "provider", "detach", "--wait", sandbox, p); err != nil {
+			return fmt.Errorf("detach provider %s from %s: %w", p, sandbox, err)
+		}
+		have = slices.DeleteFunc(have, func(h string) bool { return h == p })
+		if err := writeProviders(file, have); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeProviders records a sandbox's providers, sorted, one per line.
+func writeProviders(file string, providers []string) error {
+	var sb strings.Builder
+	for _, p := range slices.Sorted(slices.Values(providers)) {
+		sb.WriteString(p + "\n")
+	}
+	return writeFile0600(file, []byte(sb.String()))
 }
 
 // isConflict reports the gateway's optimistic-concurrency refusal as the CLI
@@ -331,8 +409,9 @@ func writeFile0600(path string, data []byte) error {
 
 // Exec passes mcpConfig on stdin line 1 to WorkWrapper, which writes it to a
 // 0600 file in the sandbox, swaps it in for the placeholder and removes it
-// when the command exits. The rest of stdin is the prompt, which the wrapper
-// hands to the command as its stdin. env goes to the command alone, through
+// when the command exits. The rest of stdin is the prompt (plain text, or for
+// a turn with an image one stream-json user message line), which the
+// wrapper hands to the command as its stdin unchanged. env goes to the command alone, through
 // an `env` prefix (envArgs).
 func (b *cliBackend) Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, env map[string]string, args []string) (io.ReadCloser, error) {
 	if !sandboxNameRE.MatchString(c.Sandbox) {
@@ -351,6 +430,74 @@ func (b *cliBackend) Exec(ctx context.Context, c profile.Compiled, mcpConfig, pr
 	argv := b.openshell("sandbox", "exec", "--no-login-shell", "--no-tty", c.Sandbox, "--", "sh", "-c", WorkWrapper, "sh")
 	argv = append(append(argv, pre...), args...)
 	return b.run(ctx, strings.NewReader(mcpConfig+"\n"+prompt), argv...)
+}
+
+const (
+	// runToolTimeout bounds a tool command whose context has no deadline.
+	runToolTimeout = 30 * time.Second
+	// maxToolOutput is how much of a tool's stdout RunTool keeps; the
+	// caller cuts it shorter.
+	maxToolOutput = 1 << 20
+)
+
+// toolEnv is set for every tool command: the runner's filesystem is
+// read-only except /tmp, and gh writes its config and cache. It holds no
+// secrets: credentials reach the sandbox only through its providers.
+var toolEnv = []string{"GH_CONFIG_DIR=/tmp/gh", "XDG_CACHE_HOME=/tmp/cache"}
+
+// RunTool runs argv (an absolute binary and its arguments, never a shell)
+// in sandbox with `sandbox exec --no-login-shell --timeout`, the timeout
+// taken from ctx's deadline (runToolTimeout without one). A command that
+// exits returns its stdout (at most maxToolOutput), the tail of its stderr
+// and its exit status with a nil error; err is for a command that could
+// not run or did not exit on its own.
+func (b *cliBackend) RunTool(ctx context.Context, sandbox string, argv []string) (stdout, stderr []byte, exit int, err error) {
+	if !sandboxNameRE.MatchString(sandbox) {
+		return nil, nil, 0, fmt.Errorf("invalid sandbox name %q", sandbox)
+	}
+	if len(argv) == 0 || !filepath.IsAbs(argv[0]) {
+		return nil, nil, 0, errors.New("a tool command starts with an absolute binary path")
+	}
+	timeout := runToolTimeout
+	if d, ok := ctx.Deadline(); ok {
+		timeout = max(time.Until(d), time.Second)
+	}
+	secs := int64((timeout + time.Second - 1) / time.Second)
+	args := []string{"sandbox", "exec", "--no-login-shell", "--no-tty", "--timeout", strconv.FormatInt(secs, 10)}
+	for _, e := range toolEnv {
+		args = append(args, "--env", e)
+	}
+	args = append(append(args, sandbox, "--"), argv...)
+	rc, err := b.run(ctx, nil, b.openshell(args...)...)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	out, rerr := io.ReadAll(io.LimitReader(rc, maxToolOutput))
+	if rerr == nil {
+		// Drain the rest so the command exits on its own and keeps its exit
+		// status; --timeout bounds one that never stops writing.
+		_, rerr = io.Copy(io.Discard, rc)
+	}
+	cerr := rc.Close()
+	if ctx.Err() != nil {
+		return nil, nil, 0, ctx.Err()
+	}
+	if cerr == nil && rerr == nil {
+		return out, nil, 0, nil
+	}
+	// openshell exits 1 for a sandbox that is gone or not Ready, as a tool
+	// may: a failure on a runner that is not Ready is the runner's.
+	if phase, ok, perr := b.phase(ctx, sandbox); perr == nil && (!ok || phase != "Ready") {
+		return nil, nil, 0, fmt.Errorf("%s (phase %q): %w", sandbox, phase, mcpproxy.ErrRunnerNotReady)
+	}
+	var ce *CommandError
+	if errors.As(cerr, &ce) && ce.Code >= 0 {
+		return out, []byte(ce.Stderr), ce.Code, nil
+	}
+	if cerr != nil {
+		return nil, nil, 0, cerr
+	}
+	return nil, nil, 0, rerr
 }
 
 // Download reads remotePath with `cat` in the sandbox; localPath is written

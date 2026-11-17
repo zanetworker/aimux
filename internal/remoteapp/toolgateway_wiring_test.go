@@ -3,6 +3,7 @@ package remoteapp
 import (
 	"bytes"
 	"context"
+	"io"
 	"log"
 	"net"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
+	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -245,4 +247,18 @@ func TestToolGateway_SchemaChangeSeenByTheMinuteRefresh(t *testing.T) {
 	}
 	eventually(t, "GET /v1/tools to say changed", func() bool { return r.status() == toolgateway.StatusChanged })
 	eventually(t, "the gateway to serve only other", func() bool { return slices.Equal(r.served(t), []string{"other"}) })
+}
+
+// Remote serve's gateway starts cli sources in the runner sandbox.
+func TestNewToolGateway_BindsRunner(t *testing.T) {
+	tg := newToolGateway(t.TempDir(), "admin-token", log.New(io.Discard, "", 0), net.Listen)
+	if tg.ro == nil || tg.ro.Runner == nil {
+		t.Fatal("the tool gateway has no runner binding: cli sources would never start")
+	}
+	// The gateway's runner ensures aimux-tools (RunnerTools), not the
+	// read-only probe status uses, which would never create it.
+	tr := tg.ro.Runner(toolreg.Snapshot{})("github")
+	if _, ok := tr.(sandboxlaunch.SourceTools); !ok {
+		t.Fatalf("the gateway's runner is %T, want sandboxlaunch.SourceTools", tr)
+	}
 }

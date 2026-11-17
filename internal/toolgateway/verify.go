@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,8 +25,8 @@ var (
 const DefaultMaxAge = 60 * time.Second
 
 // Verifier checks a tool against its pin using the backend's live listing.
-// A listing is reused for MaxAge; a failed listing is not kept, so the next
-// Check lists again.
+// A listing is reused for MaxAge or until Invalidate; a failed listing is
+// not kept, so the next Check lists again.
 type Verifier struct {
 	Pins   Pins
 	List   func(ctx context.Context, server string) ([]json.RawMessage, error)
@@ -37,9 +38,10 @@ type Verifier struct {
 }
 
 type serverState struct {
-	mu   sync.Mutex // held while listing, so concurrent checks share one listing
-	at   time.Time
-	pins map[string]string // live pin by tool name; nil: nothing cached
+	mu    sync.Mutex // held while listing, so concurrent checks share one listing
+	at    time.Time
+	pins  map[string]string // live pin by tool name; nil: nothing cached
+	stale atomic.Bool       // Invalidate ran since the cached listing started
 }
 
 // Check returns nil when tool on server is pinned and its live pin equals
@@ -63,12 +65,12 @@ func (v *Verifier) Check(ctx context.Context, server, tool string) error {
 	return nil
 }
 
-// Invalidate drops the cached listing for server, so the next Check lists it.
+// Invalidate drops the cached listing for server, so the next Check lists
+// it. It does not wait for a listing in flight (a backend's notification
+// goroutine calls it, and that listing may need the goroutine); that
+// listing still answers its own Check, and the next Check lists again.
 func (v *Verifier) Invalidate(server string) {
-	st := v.state(server)
-	st.mu.Lock()
-	st.pins = nil
-	st.mu.Unlock()
+	v.state(server).stale.Store(true)
 }
 
 func (v *Verifier) state(server string) *serverState {
@@ -97,9 +99,10 @@ func (v *Verifier) live(ctx context.Context, server string) (map[string]string, 
 	st := v.state(server)
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.pins != nil && now().Sub(st.at) < maxAge {
+	if st.pins != nil && !st.stale.Load() && now().Sub(st.at) < maxAge {
 		return st.pins, nil
 	}
+	st.stale.Store(false) // an Invalidate from here on outlives this listing
 	raws, err := v.List(ctx, server)
 	if err != nil {
 		st.pins = nil
@@ -115,9 +118,14 @@ func (v *Verifier) live(ctx context.Context, server string) (map[string]string, 
 	return pins, nil
 }
 
+// Verifier is a Verifier over these pins that lists with list, with the
+// default MaxAge and clock.
+func (p Pins) Verifier(list func(ctx context.Context, server string) ([]json.RawMessage, error)) *Verifier {
+	return &Verifier{Pins: p, List: list}
+}
+
 // Guard returns a call guard over these pins that verifies against list. It
 // is what mcpproxy.ToolPins needs, so mcpproxy does not import this package.
 func (p Pins) Guard(list func(ctx context.Context, server string) ([]json.RawMessage, error)) func(ctx context.Context, server, tool string) error {
-	v := &Verifier{Pins: p, List: list}
-	return v.Check
+	return p.Verifier(list).Check
 }

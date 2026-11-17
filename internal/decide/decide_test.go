@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -204,5 +206,69 @@ func TestDecider_PerBackendThreshold(t *testing.T) {
 	haiku.a.Confidence = 0.3
 	if a := d.Ask(context.Background(), Request{State: "s", Question: testQuestion}); !a.Decided || a.Threshold != 0.25 {
 		t.Fatalf("without a backend threshold the decider's applies: %+v", a)
+	}
+}
+
+func TestDecider_RawProbabilitiesBeforeFilter(t *testing.T) {
+	b := &fakeBackend{a: ans("web", 0.6, map[string]float64{"page": 0.2, "web": 0.6, "workspace": 0.2})}
+	d := &Decider{Name: "t", Backends: []Backend{b}, Threshold: 0.25, Timeout: time.Second, Usage: noUsage}
+	a := d.Ask(context.Background(), Request{State: "s", Question: testQuestion, Allowed: []string{"page", "workspace"}})
+	if !near(a.RawProbabilities["web"], 0.6) || !near(a.RawProbabilities["page"], 0.2) || len(a.RawProbabilities) != 3 {
+		t.Fatalf("raw probabilities = %v", a.RawProbabilities)
+	}
+	if !near(a.Probabilities["page"], 0.5) {
+		t.Fatalf("filtered probabilities changed: %v", a.Probabilities)
+	}
+}
+
+func TestDecider_PromoteDecidesLowConfidenceAndLogsRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "decisions.jsonl")
+	const secret = "UNIQUE-QUESTION-TEXT-91c2"
+	b := &fakeBackend{a: ans("page", 0.18, map[string]float64{"page": 0.54, "web": 0.40, "workspace": 0.06})}
+	d := &Decider{Name: "t", Backends: []Backend{b}, Threshold: 0.25, Timeout: time.Second, Usage: noUsage, Log: &Log{Path: path}}
+	var seen Answer
+	a := d.Ask(context.Background(), Request{State: map[string]string{"q": secret}, Question: testQuestion,
+		Promote: func(x Answer) (string, string) { seen = x; return "page", "page_attached" }})
+	if !a.Decided || a.Undecided != "" || a.Choice != "page" || a.Rule != "page_attached" {
+		t.Fatalf("answer %+v", a)
+	}
+	if seen.Decided || seen.Undecided != UndecidedLowConfidence {
+		t.Errorf("Promote saw %+v", seen)
+	}
+	lines := readLines(t, path)
+	if len(lines) != 1 || lines[0]["rule"] != "page_attached" || lines[0]["decided"] != true || lines[0]["undecided"] != "" {
+		t.Fatalf("log line %v", lines)
+	}
+	raw, _ := lines[0]["raw_probabilities"].(map[string]any)
+	if raw["page"] != 0.54 {
+		t.Errorf("raw_probabilities = %v", lines[0]["raw_probabilities"])
+	}
+	data, _ := os.ReadFile(path) // #nosec G304 -- test temp file
+	if strings.Contains(string(data), secret) {
+		t.Fatalf("log holds state text: %s", data)
+	}
+}
+
+func TestDecider_PromoteNotCalledWhenDecidedOrFailed(t *testing.T) {
+	called := false
+	req := Request{State: "s", Question: testQuestion, Promote: func(Answer) (string, string) { called = true; return "web", "x" }}
+	b := &fakeBackend{a: ans("web", 0.9, map[string]float64{"web": 0.9, "page": 0.1})}
+	d := &Decider{Name: "t", Backends: []Backend{b}, Threshold: 0.25, Timeout: time.Second, Usage: noUsage}
+	if a := d.Ask(context.Background(), req); !a.Decided || a.Rule != "" || called {
+		t.Fatalf("decided answer: %+v called=%v", a, called)
+	}
+	b2 := &fakeBackend{err: ErrCall}
+	d2 := &Decider{Name: "t", Backends: []Backend{b2}, Threshold: 0.25, Timeout: time.Second, Usage: noUsage}
+	if a := d2.Ask(context.Background(), req); a.Decided || called {
+		t.Fatalf("failed answer: %+v called=%v", a, called)
+	}
+}
+
+func TestDecider_PromoteEmptyRuleLeavesUndecided(t *testing.T) {
+	b := &fakeBackend{a: ans("page", 0.18, map[string]float64{"page": 0.54, "web": 0.46})}
+	d := &Decider{Name: "t", Backends: []Backend{b}, Threshold: 0.25, Timeout: time.Second, Usage: noUsage}
+	a := d.Ask(context.Background(), Request{State: "s", Question: testQuestion, Promote: func(Answer) (string, string) { return "", "" }})
+	if a.Decided || a.Undecided != UndecidedLowConfidence || a.Rule != "" {
+		t.Fatalf("answer %+v", a)
 	}
 }

@@ -257,6 +257,7 @@ type toolGatewayParts struct {
 	gw    *lazyGateway
 	snaps *toolSnapshots
 	tools func() remoteapi.ToolsView
+	ro    *toolgateway.ReadonlyServer // the server itself (tests read its wiring)
 }
 
 // newToolGateway builds the gateway over home's registry and pins, served
@@ -269,7 +270,8 @@ func newToolGateway(home, admin string, gwLog *log.Logger, listen func(network, 
 	snaps := &toolSnapshots{store: store, files: snapshotFiles(home), log: gwLog.Printf}
 	tokens := &toolgateway.Tokens{}
 	ro := &toolgateway.ReadonlyServer{Store: store, Token: admin, Tokens: tokens, Log: gwLog,
-		Listen: listen, Build: mcpproxy.BuildReadonly, Serve: mcpproxy.Serve, Rebuild: mcpproxy.BuildReadonlyBackends}
+		Listen: listen, Build: mcpproxy.BuildReadonly, Serve: mcpproxy.Serve, Rebuild: mcpproxy.BuildReadonlyBackends,
+		Runner: sandboxlaunch.RunnerTools(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
 	tokens.Current = ro.Applied
 	gw := &lazyGateway{tokens: tokens, start: ro.Start, refresh: ro.Refresh, stale: ro.Stale}
 	// GET /v1/tools sees the snapshot the next turn compiles against and
@@ -279,7 +281,7 @@ func newToolGateway(home, admin string, gwLog *log.Logger, listen func(network, 
 		reg, obs := snap.Registry(), ro.Observed()
 		return remoteapi.ToolsView{Snapshot: snap, Live: toolgateway.LiveFor(reg, obs), RelistFailed: toolgateway.RelistFailedFor(reg, obs)}
 	}
-	return toolGatewayParts{gw: gw, snaps: snaps, tools: tools}
+	return toolGatewayParts{gw: gw, snaps: snaps, tools: tools, ro: ro}
 }
 
 // migrateToolSources carries readonly.json into tool-sources.yaml once, as

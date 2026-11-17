@@ -1,0 +1,10 @@
+flowchart LR
+  subgraph PANEL["Wingman panel"]
+    Q["question box<br/>paste or drop image (T6)<br/>downscale to 1568 px"]
+    R["Auto: route EVERY question (T4)<br/>earlier questions go along<br/>when the mode changes"]
+  end
+  Q --> R
+  R -->|"POST /v1/route<br/>text + facts (no image)"| RT["autoroute (T1)<br/>rule 5: page if attached,<br/>readable, top, raw p >= 0.50<br/>log has_url (T3)"]
+  R -->|"POST /v1/sessions<br/>text, prior, image (T2, T5)"| API["remote API<br/>image cap 1.5 MiB, png/jpeg/webp/gif"]
+  API --> PG["Page: ACP<br/>TextBlock + ImageBlock"]
+  API --> WB["Web / Workspace: claude -p<br/>--input-format stream-json<br/>text + image blocks"]

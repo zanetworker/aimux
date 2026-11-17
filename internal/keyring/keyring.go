@@ -104,6 +104,41 @@ func (s keychainSource) Lookup(ctx context.Context) (string, error) {
 	return toolResult(ctx, s, b, err, exitKeychainNotFound)
 }
 
+// probeKeychain reports whether the Keychain has a generic password for
+// service, reading only its attributes (no -w): exit 44 is absent, success
+// present, any other outcome an error naming the service and the exit
+// status, never the tool's output.
+func probeKeychain(service string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
+	defer cancel()
+	_, err := run(ctx, "/usr/bin/security", "find-generic-password", "-s", service)
+	if err == nil {
+		return true, nil
+	}
+	var ee *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		return false, fmt.Errorf("keychain %s: %w", service, ctx.Err())
+	case errors.As(err, &ee) && ee.ExitCode() == exitKeychainNotFound:
+		return false, nil
+	case errors.As(err, &ee):
+		return false, fmt.Errorf("keychain %s: exit status %d", service, ee.ExitCode())
+	}
+	return false, fmt.Errorf("keychain %s: could not run security", service)
+}
+
+// probeSecretService reports whether the Secret Service has an item for
+// service. secret-tool has no metadata-only lookup, so it reads the item and
+// discards it: not found (or no secret-tool) is absent, any other failure an
+// error without the key.
+func probeSecretService(service string) (bool, error) {
+	_, err := secretServiceSource{service: service}.Lookup(context.Background())
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // secretServiceSource reads a Secret Service item (GNOME Keyring, KWallet)
 // with `secret-tool lookup service <service>`; it has no key when
 // secret-tool is not installed.

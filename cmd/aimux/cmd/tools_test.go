@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -444,5 +446,180 @@ func TestToolsAdd_JSONWithLegacyConfigStaysJSON(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "Migrated") {
 		t.Errorf("migration message missing from stderr:\n%s", errOut)
+	}
+}
+
+func TestToolsStatus_ClassColumn(t *testing.T) {
+	r := newToolsRig(t)
+	out, _, err := runTools(t, r.env, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(out, "\n")
+	if f := strings.Fields(lines[0]); !reflect.DeepEqual(f, []string{"SET", "TOOL", "STATUS", "CLASS", "APPROVED", "REASON"}) {
+		t.Fatalf("header = %q", lines[0])
+	}
+	if !strings.Contains(out, "outside") {
+		t.Fatalf("no outside row:\n%s", out)
+	}
+	js, _, err := runTools(t, r.env, "status", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Tools []map[string]interface{} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(js), &doc); err != nil || len(doc.Tools) == 0 {
+		t.Fatalf("json: %v %s", err, js)
+	}
+	for _, tl := range doc.Tools {
+		if tl["authorship"] != "outside" {
+			t.Errorf("tool %v authorship = %v", tl["tool"], tl["authorship"])
+		}
+	}
+}
+
+// A cli source is not started yet: status says why for its set's tools.
+func TestToolsStatus_RunnerSourceSaysNotStarted(t *testing.T) {
+	r := newToolsRig(t)
+	r.env.Catalog = mcpproxy.ReadonlyCatalog
+	reg := toolreg.Registry{Version: 1,
+		Sources: map[string]toolreg.Source{"gh": {Type: toolreg.TypeCLI, Pack: "gh"}},
+		Sets:    map[string]toolreg.Set{"gh:readonly": {Source: "gh", Tools: []string{"issue_list"}}}}
+	data, err := toolreg.Marshal(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(toolreg.DefaultPath(r.env.Home), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := runTools(t, r.env, "status")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.Contains(out, "gh:readonly") || !strings.Contains(out, "runner sources are not started yet") {
+		t.Errorf("status lacks the reason:\n%s", out)
+	}
+}
+
+// openshellRec is a sandboxlaunch.Runner standing in for openshell: it
+// records each call and answers sandbox list from ready.
+type openshellRec struct {
+	mu    sync.Mutex
+	verbs []string
+	ready bool
+}
+
+func (o *openshellRec) run(_ context.Context, _ io.Reader, argv ...string) (io.ReadCloser, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	verb := argv[3] + " " + argv[4]
+	if verb == "sandbox provider" {
+		verb += " " + argv[5]
+	}
+	o.verbs = append(o.verbs, verb)
+	out := ""
+	switch verb {
+	case "sandbox list":
+		out = "NAME  CREATED  PHASE\n"
+		if o.ready {
+			out += "aimux-tools  2026-11-16 10:00:00  Ready\n"
+		}
+	case "sandbox create":
+		o.ready = true
+	case "provider list":
+		out = "wingman-claude\naimux-github\n"
+	case "sandbox exec":
+		out = "gh version 2.103.3 (2026-10-26)\n"
+	}
+	return io.NopCloser(strings.NewReader(out)), nil
+}
+
+func (o *openshellRec) calls() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return slices.Clone(o.verbs)
+}
+
+func ghToolsHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	reg := toolreg.DefaultPath(home)
+	if err := os.MkdirAll(filepath.Dir(reg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(reg, []byte("version: 1\nsources:\n  github: {type: cli, pack: gh}\nsets:\n  github:readonly: {source: github, tools: [gh_repo_view]}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// status and diff are read-only: they list a cli source only when
+// aimux-tools is already Ready, and never create or update it. approve
+// ensures it, so the tools it pins are the ones the runner serves.
+func TestTools_RunnerReadOnlyExceptApprove(t *testing.T) {
+	home := ghToolsHome(t)
+	rec := &openshellRec{ready: true}
+	env := toolsEnv{Home: home, Now: time.Now, Catalog: mcpproxy.ReadonlyCatalog,
+		Runner: runnerBinding(rec.run, filepath.Join(home, ".aimux", "sandboxes"))}
+	for _, args := range [][]string{{"status"}, {"diff"}} {
+		out, _, err := runTools(t, env, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if args[0] == "status" && !strings.Contains(out, "gh_repo_view") {
+			t.Errorf("status lists no gh tool:\n%s", out)
+		}
+	}
+	for _, v := range rec.calls() {
+		if v != "sandbox list" && v != "sandbox exec" {
+			t.Errorf("status or diff ran %s", v)
+		}
+	}
+
+	// Not started: down with the hint, still nothing created.
+	rec = &openshellRec{}
+	env.Runner = runnerBinding(rec.run, filepath.Join(home, ".aimux", "sandboxes"))
+	out, errOut, err := runTools(t, env, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out+errOut, "tool runner not started") {
+		t.Errorf("status does not say the runner is not started:\n%s\n%s", out, errOut)
+	}
+	if v := rec.calls(); !slices.Equal(v, []string{"sandbox list"}) {
+		t.Errorf("status ran %v", v)
+	}
+
+	if _, _, err := runTools(t, env, "approve", "github:readonly"); err != nil {
+		t.Fatal(err)
+	}
+	if v := rec.calls(); !slices.Contains(v, "provider list") || !slices.Contains(v, "sandbox create") {
+		t.Errorf("approve did not ensure the runner: %v", v)
+	}
+}
+
+// The first approve lists the gh tools with the runner compiled from the
+// pins as they were (none: an empty policy), then writes the pins: it
+// ensures the runner again from the new snapshot, so the policy the
+// sandbox ends with has the gh endpoints and the aimux-github provider.
+func TestToolsApprove_FirstApproveEnsuresRunnerFromNewPins(t *testing.T) {
+	home := ghToolsHome(t)
+	rec := &openshellRec{}
+	dir := filepath.Join(home, ".aimux", "sandboxes")
+	env := toolsEnv{Home: home, Now: time.Now, Catalog: mcpproxy.ReadonlyCatalog, Runner: runnerBinding(rec.run, dir)}
+	if _, errOut, err := runTools(t, env, "approve", "github:readonly"); err != nil {
+		t.Fatalf("approve: %v\n%s", err, errOut)
+	}
+	policy, err := os.ReadFile(filepath.Join(dir, "aimux-tools.policy.yaml")) //nolint:gosec // G304: test temp dir
+	if err != nil || !strings.Contains(string(policy), "tools_github") || !strings.Contains(string(policy), "api.github.com") {
+		t.Fatalf("final policy lacks the gh endpoints (%v):\n%s", err, policy)
+	}
+	if p, _ := os.ReadFile(filepath.Join(dir, "aimux-tools.providers")); !strings.Contains(string(p), "aimux-github") { //nolint:gosec // G304: test temp dir
+		t.Fatalf("providers = %q, want aimux-github", p)
+	}
+	calls := rec.calls()
+	if !slices.Contains(calls, "policy set") || !slices.Contains(calls, "sandbox provider attach") {
+		t.Fatalf("the runner was not updated after the pins were written: %v", calls)
 	}
 }

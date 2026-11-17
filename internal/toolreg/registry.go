@@ -26,8 +26,17 @@ import (
 
 // Source types.
 const (
-	TypeMCPHTTP    = "mcp-http"    // an MCP server reached over HTTP at URL
-	TypeLocalNotes = "local-notes" // Markdown files under Root, served in process
+	TypeMCPHTTP     = "mcp-http"     // an MCP server reached over HTTP at URL
+	TypeLocalNotes  = "local-notes"  // Markdown files under Root, served in process
+	TypeCLI         = "cli"          // a built-in CLI pack, run in process
+	TypeHTTPOpenAPI = "http-openapi" // an HTTPS API described by a local OpenAPI file
+)
+
+// Authorship classes: who writes the content a source returns.
+const (
+	AuthorshipSelf     = "self"     // content only the owner writes
+	AuthorshipInternal = "internal" // content written by people the owner trusts
+	AuthorshipOutside  = "outside"  // content anyone outside can write; the default
 )
 
 // Source is one place tools come from. Its name in Registry.Sources is the
@@ -35,9 +44,24 @@ const (
 // endpoints (/mcp/<name>) and harness tool names (mcp__<name>__*) all key on
 // it; renaming a source is a new server.
 type Source struct {
-	Type string `yaml:"type"`
-	URL  string `yaml:"url,omitempty"`  // mcp-http only
-	Root string `yaml:"root,omitempty"` // local-notes only: an absolute directory
+	Type       string `yaml:"type"`
+	URL        string `yaml:"url,omitempty"`        // mcp-http only
+	Root       string `yaml:"root,omitempty"`       // local-notes only: an absolute directory
+	Pack       string `yaml:"pack,omitempty"`       // cli only: a built-in pack name
+	Spec       string `yaml:"spec,omitempty"`       // http-openapi only: an absolute path to an OpenAPI file
+	BaseURL    string `yaml:"base_url,omitempty"`   // http-openapi only: https:// only
+	Credential string `yaml:"credential,omitempty"` // http-openapi only: a provider name
+	// Authorship is who writes what the source returns: self, internal or
+	// outside. Empty means outside.
+	Authorship string `yaml:"authorship,omitempty"`
+}
+
+// Class is the source's authorship class: Authorship, or outside when unset.
+func (s Source) Class() string {
+	if s.Authorship == "" {
+		return AuthorshipOutside
+	}
+	return s.Authorship
 }
 
 // Set is a reviewed tool set: exact tool names a source may expose.
@@ -68,6 +92,14 @@ const (
 	wikiAlias = "wiki:readonly"
 	notesSet  = "notes:readonly"
 )
+
+// BuiltinPacks names the packs clipack embeds. toolreg cannot import clipack
+// (clipack's tests import toolgateway, which imports toolreg), so the names
+// are listed here and a test in package toolreg_test checks each against
+// clipack.Builtin.
+var BuiltinPacks = []string{"gh"}
+
+var credentialName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 var safeName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
@@ -152,24 +184,74 @@ func checkSource(name string, s Source) error {
 	if !safeName.MatchString(name) {
 		return errors.New("name must match [A-Za-z0-9_-]+")
 	}
+	switch s.Authorship {
+	case "", AuthorshipSelf, AuthorshipInternal, AuthorshipOutside:
+	default:
+		return fmt.Errorf("authorship %q must be self, internal or outside", s.Authorship)
+	}
+	foreign := func(typ string, fields map[string]string) error {
+		for k, v := range fields {
+			if v != "" {
+				return fmt.Errorf("%s is not for %s sources", k, typ)
+			}
+		}
+		return nil
+	}
 	switch s.Type {
 	case TypeMCPHTTP:
-		if s.Root != "" {
-			return errors.New("root is for local-notes sources")
+		if err := foreign(TypeMCPHTTP, map[string]string{"root": s.Root, "pack": s.Pack, "spec": s.Spec, "base_url": s.BaseURL, "credential": s.Credential}); err != nil {
+			return err
 		}
 		u, err := url.Parse(s.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return fmt.Errorf("url %q must be an http or https URL with a host", s.URL)
+			return errors.New("url must be an http or https URL with a host")
 		}
 	case TypeLocalNotes:
 		if s.URL != "" {
 			return errors.New("url is for mcp-http sources")
 		}
+		if err := foreign(TypeLocalNotes, map[string]string{"pack": s.Pack, "spec": s.Spec, "base_url": s.BaseURL, "credential": s.Credential}); err != nil {
+			return err
+		}
 		if !filepath.IsAbs(s.Root) {
 			return fmt.Errorf("root %q must be an absolute directory", s.Root)
 		}
+	case TypeCLI:
+		if err := foreign(TypeCLI, map[string]string{"url": s.URL, "root": s.Root, "spec": s.Spec, "base_url": s.BaseURL, "credential": s.Credential}); err != nil {
+			return err
+		}
+		if s.Pack == "" {
+			return errors.New("a cli source needs a pack")
+		}
+		if !slices.Contains(BuiltinPacks, s.Pack) {
+			return fmt.Errorf("unknown pack %s", s.Pack)
+		}
+	case TypeHTTPOpenAPI:
+		if err := foreign(TypeHTTPOpenAPI, map[string]string{"url": s.URL, "root": s.Root, "pack": s.Pack}); err != nil {
+			return err
+		}
+		if !filepath.IsAbs(s.Spec) {
+			return fmt.Errorf("spec %q must be an absolute path", s.Spec)
+		}
+		// Never echo the value: it may hold a secret and errors reach logs.
+		u, err := url.Parse(s.BaseURL)
+		switch {
+		case err != nil || u.Host == "":
+			return errors.New("base_url must be an https URL with a host")
+		case u.Scheme != "https":
+			return errors.New("base_url must be https")
+		case u.User != nil:
+			return errors.New("base_url must not contain user info")
+		case u.RawQuery != "":
+			return errors.New("base_url must not contain a query")
+		case u.Fragment != "":
+			return errors.New("base_url must not contain a fragment")
+		}
+		if s.Credential != "" && !credentialName.MatchString(s.Credential) {
+			return errors.New("credential must be lowercase letters, digits and dashes, starting with a letter or digit")
+		}
 	default:
-		return fmt.Errorf("type %q must be %s or %s", s.Type, TypeMCPHTTP, TypeLocalNotes)
+		return fmt.Errorf("type %q must be %s, %s, %s or %s", s.Type, TypeMCPHTTP, TypeLocalNotes, TypeCLI, TypeHTTPOpenAPI)
 	}
 	return nil
 }
@@ -399,7 +481,7 @@ func fromLegacy(data []byte) (Registry, []string, error) {
 		r.Sources[n] = Source{Type: TypeMCPHTTP, URL: h.URL}
 	}
 	if old.WikiRoot != "" {
-		r.Sources["wiki"] = Source{Type: TypeLocalNotes, Root: old.WikiRoot}
+		r.Sources["wiki"] = Source{Type: TypeLocalNotes, Root: old.WikiRoot, Authorship: AuthorshipSelf}
 	}
 	var dropped []string
 	for _, n := range slices.Sorted(maps.Keys(old.Allow)) {

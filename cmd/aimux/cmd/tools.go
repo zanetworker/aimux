@@ -23,7 +23,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/zanetworker/aimux/internal/clipack"
+	"github.com/zanetworker/aimux/internal/httpsource"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
+	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -39,7 +42,14 @@ type toolsEnv struct {
 	Home string
 	// Catalog lists the sources' live tools (mcpproxy.ReadonlyCatalog).
 	Catalog func(ctx context.Context, cfg mcpproxy.ReadonlyConfig) (*mcpproxy.Catalog, map[string]error)
-	Now     func() time.Time
+	// Runner binds the runner sandbox to cli sources so Catalog lists them
+	// (runnerBinding): ensure creates or updates aimux-tools (approve);
+	// otherwise it is only probed. Nil lists none.
+	Runner func(snap toolreg.Snapshot, ensure bool) func(source string) mcpproxy.ToolRunner
+	Now    func() time.Time
+	// ensureRunner is set by approve, the one tools command that may
+	// create or update aimux-tools.
+	ensureRunner bool
 	// IsTTY is whether remove may ask (stdin and stdout are terminals); In
 	// is where the answer is read. Nil: no terminal.
 	IsTTY func() bool
@@ -49,6 +59,7 @@ type toolsEnv struct {
 func newToolsCmd() *cobra.Command {
 	home, _ := os.UserHomeDir()
 	return newToolsCmdWith(toolsEnv{Home: home, Catalog: mcpproxy.ReadonlyCatalog, Now: time.Now,
+		Runner: runnerBinding(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes")),
 		IsTTY: func() bool {
 			return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) // #nosec G115 -- small fds
 		},
@@ -121,6 +132,19 @@ func readRegistry(home string) (reg toolreg.Registry, note string, err error) {
 	return reg, note, nil
 }
 
+// runnerBinding is toolsEnv.Runner over run: with ensure,
+// sandboxlaunch.RunnerTools (creates or updates aimux-tools); without,
+// sandboxlaunch.RunnerProbe (read-only).
+func runnerBinding(run sandboxlaunch.Runner, dir string) func(toolreg.Snapshot, bool) func(string) mcpproxy.ToolRunner {
+	tools, probe := sandboxlaunch.RunnerTools(run, dir), sandboxlaunch.RunnerProbe(run, dir)
+	return func(snap toolreg.Snapshot, ensure bool) func(string) mcpproxy.ToolRunner {
+		if ensure {
+			return tools(snap)
+		}
+		return probe(snap)
+	}
+}
+
 // toolsReview is everything the tools commands judge from.
 type toolsReview struct {
 	reg      toolreg.Registry
@@ -148,7 +172,12 @@ func reviewFrom(ctx context.Context, env toolsEnv, reg toolreg.Registry, note st
 	}
 	ctx, cancel := context.WithTimeout(ctx, toolsListTimeout)
 	defer cancel()
-	cat, down := env.Catalog(ctx, mcpproxy.ReadonlyConfigFrom(reg))
+	cfg := mcpproxy.ReadonlyConfigFrom(reg)
+	if env.Runner != nil {
+		// The runner's policy follows the pins: bind it to the files as read.
+		cfg.Tools = env.Runner(toolreg.NewSnapshot(reg, pins.Table(), nil), env.ensureRunner)
+	}
+	cat, down := env.Catalog(ctx, cfg)
 	problems := []string{}
 	for _, m := range []map[string]error{reg.SourceErrors, reg.SetErrors} {
 		for _, n := range slices.Sorted(maps.Keys(m)) {
@@ -203,7 +232,7 @@ func toolsStatus(ctx context.Context, env toolsEnv, out, errOut io.Writer) error
 		}
 	} else {
 		tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "SET\tTOOL\tSTATUS\tAPPROVED\tREASON")
+		_, _ = fmt.Fprintln(tw, "SET\tTOOL\tSTATUS\tCLASS\tAPPROVED\tREASON")
 		for _, s := range st {
 			set, at := s.Set, "-"
 			if set == "" {
@@ -212,7 +241,11 @@ func toolsStatus(ctx context.Context, env toolsEnv, out, errOut io.Writer) error
 			if s.ApprovedAt != nil {
 				at = s.ApprovedAt.UTC().Format("2006-01-02 15:04")
 			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", set, s.Tool, s.Status, at, s.Reason)
+			class := s.Authorship
+			if class == "" {
+				class = "-"
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", set, s.Tool, s.Status, class, at, s.Reason)
 		}
 		if err := tw.Flush(); err != nil {
 			return err
@@ -364,6 +397,7 @@ func checkExpect(rv toolsReview, target, expect string) error {
 }
 
 func toolsApprove(ctx context.Context, env toolsEnv, targets []string, all bool, expect string, out, errOut io.Writer) error {
+	env.ensureRunner = true // pin what the runner will serve
 	rv, err := loadToolsReview(ctx, env)
 	if err != nil {
 		return err
@@ -414,9 +448,55 @@ func toolsApprove(ctx context.Context, env toolsEnv, targets []string, all bool,
 		}
 		_, _ = fmt.Fprintln(out, toolgateway.Disclaimer)
 	}
+	if wrote {
+		if err := ensureRunnerAfterApprove(ctx, env, rv, res); err != nil {
+			return err
+		}
+	}
 	if len(skipped) > 0 {
 		_, _ = fmt.Fprintln(errOut, "Next: start the backends that are down, check aimux tools status, then approve again")
 		return fmt.Errorf("could not approve %s", strings.Join(skipped, ", "))
+	}
+	return nil
+}
+
+// ensureRunnerAfterApprove ensures aimux-tools again from the pins approve
+// just wrote: the listing ensured it from the pins as they were, so a
+// first approve would leave it with none of the new endpoints or
+// providers. Only when the approved tools include a cli or http-openapi
+// source; once per such source, so each one's error is reported.
+func ensureRunnerAfterApprove(ctx context.Context, env toolsEnv, rv toolsReview, res []toolgateway.Approval) error {
+	if env.Runner == nil {
+		return nil
+	}
+	var sources []string
+	for _, a := range res {
+		if a.Action == toolgateway.ActionSkipped || slices.Contains(sources, a.Source) {
+			continue
+		}
+		if t := rv.reg.Sources[a.Source].Type; t == toolreg.TypeCLI || t == toolreg.TypeHTTPOpenAPI {
+			sources = append(sources, a.Source)
+		}
+	}
+	if len(sources) == 0 {
+		return nil
+	}
+	pins, err := rv.store.LoadFile()
+	if err != nil {
+		return err
+	}
+	slices.Sort(sources)
+	bind := env.Runner(toolreg.NewSnapshot(rv.reg, pins.Table(), nil), true)
+	ctx, cancel := context.WithTimeout(ctx, toolsListTimeout)
+	defer cancel()
+	var errs []error
+	for _, src := range sources {
+		if err := bind(src).Ensure(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", src, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("pins written, but the tool runner was not updated to them: %w", errors.Join(errs...))
 	}
 	return nil
 }
@@ -425,20 +505,32 @@ func toolsApprove(ctx context.Context, env toolsEnv, targets []string, all bool,
 var notesTools = []string{"wiki_search", "wiki_read"}
 
 func newToolsAddCmd(env toolsEnv) *cobra.Command {
-	var folder, name, url, tools string
+	var folder, name, url, tools, authorship, spec, baseURL, credential string
 	cmd := &cobra.Command{
-		Use:       "add <notes|mcp>",
-		ValidArgs: []string{"notes", "mcp"},
+		Use:       "add <notes|mcp|cli|http>",
+		ValidArgs: []string{"notes", "mcp", "cli", "http"},
 		Short:     "Add a source and its <name>:readonly set to tool-sources.yaml; approves nothing",
 		Long: "aimux tools add notes --folder <dir> [--name notes] adds a local-notes source over the folder and its set\n" +
 			"<name>:readonly (wiki_search, wiki_read). aimux tools add mcp --name <name> --url <loopback url> --tools a,b\n" +
 			"adds an MCP server on this Mac and its set <name>:readonly with those exact tools. Every other entry of\n" +
 			"tool-sources.yaml is kept; a name it already has is refused. Nothing is approved: review the new tools with\n" +
-			"aimux tools diff, then approve them with aimux tools approve <name>:readonly.",
-		Args: cobra.ExactArgs(1),
+			"aimux tools diff, then approve them with aimux tools approve <name>:readonly.\n" +
+			"aimux tools add cli <pack> [--name N] [--tools a,b] adds a built-in CLI pack (gh), run read-only in the aimux-tools\n" +
+			"sandbox. aimux tools add http --name N --spec <openapi file> --base-url https://... adds an HTTPS API: each\n" +
+			"GET operation with an operationId becomes a tool. Credentialed HTTP sources are not supported yet.",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: func(c *cobra.Command, args []string) error {
+			if len(args) == 2 && args[0] != "cli" {
+				return fmt.Errorf("add %s takes no argument %q", args[0], args[1])
+			}
+			switch authorship {
+			case "", toolreg.AuthorshipSelf, toolreg.AuthorshipInternal, toolreg.AuthorshipOutside:
+			default:
+				return fmt.Errorf("--authorship %q must be self, internal or outside", authorship)
+			}
 			var src toolreg.Source
 			var list []string
+			var summary string
 			switch args[0] {
 			case "notes":
 				if name == "" {
@@ -454,16 +546,37 @@ func newToolsAddCmd(env toolsEnv) *cobra.Command {
 				if src, list, err = mcpSource(name, url, tools); err != nil {
 					return err
 				}
+			case "cli":
+				var err error
+				if src, list, name, err = cliSource(args[1:], name, tools); err != nil {
+					return err
+				}
+			case "http":
+				var err error
+				if src, list, summary, err = httpSource(name, spec, baseURL, credential, tools); err != nil {
+					return err
+				}
 			default:
-				return fmt.Errorf("unknown source kind %q: want notes or mcp", args[0])
+				return fmt.Errorf("unknown source kind %q: want notes, mcp, cli or http", args[0])
 			}
-			return toolsAdd(env, name, src, list, c.OutOrStdout(), c.ErrOrStderr())
+			class := authorship
+			if class == "" && src.Type == toolreg.TypeLocalNotes {
+				class = toolreg.AuthorshipSelf
+			}
+			if class != toolreg.AuthorshipOutside { // outside is the default: no key
+				src.Authorship = class
+			}
+			return toolsAdd(env, name, src, list, summary, c.OutOrStdout(), c.ErrOrStderr())
 		},
 	}
 	cmd.Flags().StringVar(&folder, "folder", "", "notes: the folder of Markdown notes to search")
-	cmd.Flags().StringVar(&name, "name", "", "The source's name, which its set, pins and tool names key on (notes: default notes)")
+	cmd.Flags().StringVar(&name, "name", "", "The source's name, which its set, pins and tool names key on (notes: default notes; cli: default the pack name; mcp and http: required)")
 	cmd.Flags().StringVar(&url, "url", "", "mcp: the server's http URL on this Mac (127.0.0.1, ::1 or localhost)")
-	cmd.Flags().StringVar(&tools, "tools", "", "mcp: the exact tool names the set may expose, comma separated")
+	cmd.Flags().StringVar(&tools, "tools", "", "mcp: the exact tool names the set may expose (required); cli: pack tools (<pack>_<command>); http: operation tools (<name>_<operation>); comma separated, default all for cli and http")
+	cmd.Flags().StringVar(&authorship, "authorship", "", "Who writes what the source returns: self, internal or outside (notes: default self; mcp, cli, http: default outside)")
+	cmd.Flags().StringVar(&spec, "spec", "", "http: the OpenAPI 3 file (stored by absolute path, not copied)")
+	cmd.Flags().StringVar(&baseURL, "base-url", "", "http: the API's https base URL, without userinfo, query or fragment")
+	cmd.Flags().StringVar(&credential, "credential", "", "http: not supported yet")
 	return cmd
 }
 
@@ -507,6 +620,133 @@ func mcpSource(name, rawURL, tools string) (toolreg.Source, []string, error) {
 	return toolreg.Source{Type: toolreg.TypeMCPHTTP, URL: rawURL}, list, nil
 }
 
+// cliSource is a cli source over a built-in pack; name defaults to the
+// pack. tools, when given, must each be one of the pack's <pack>_<command>.
+func cliSource(args []string, name, tools string) (toolreg.Source, []string, string, error) {
+	if len(args) != 1 {
+		return toolreg.Source{}, nil, "", fmt.Errorf("name the CLI pack: aimux tools add cli <pack> (built in: %s)", strings.Join(clipack.Names(), ", "))
+	}
+	pack, err := clipack.Builtin(args[0])
+	if err != nil {
+		return toolreg.Source{}, nil, "", fmt.Errorf("%w (built in: %s)", err, strings.Join(clipack.Names(), ", "))
+	}
+	if name == "" {
+		name = pack.Name
+	}
+	var all []string
+	for _, c := range pack.Commands {
+		all = append(all, pack.Name+"_"+c.Name)
+	}
+	list, err := pickTools(tools, all)
+	if err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	return toolreg.Source{Type: toolreg.TypeCLI, Pack: pack.Name}, list, name, nil
+}
+
+// pickTools is the comma separated tools, each one of all; all when empty.
+func pickTools(tools string, all []string) ([]string, error) {
+	var list []string
+	for _, t := range strings.Split(tools, ",") {
+		if t = strings.TrimSpace(t); t == "" {
+			continue
+		}
+		if !slices.Contains(all, t) {
+			return nil, fmt.Errorf("--tools: %q is not one of %s", t, strings.Join(all, ", "))
+		}
+		list = append(list, t)
+	}
+	if len(list) == 0 {
+		return all, nil
+	}
+	return list, nil
+}
+
+// checkBaseURL names the wrong part of --base-url, never the URL itself:
+// it may carry userinfo or a query secret. The host must pass
+// clipack.CheckHost and must not be a credentialed builtin pack's host.
+func checkBaseURL(raw string) error {
+	u, err := neturl.Parse(raw)
+	switch {
+	case err != nil:
+		return errors.New("--base-url is not a valid URL")
+	case u.Scheme != "https" || u.Host == "":
+		return errors.New("--base-url must be an https URL with a host")
+	case u.User != nil:
+		return errors.New("--base-url must not contain userinfo")
+	case u.RawQuery != "" || u.ForceQuery:
+		return errors.New("--base-url must not contain a query")
+	case u.Fragment != "":
+		return errors.New("--base-url must not contain a fragment")
+	}
+	// The host is safe to name: userinfo, query and fragment are refused above.
+	if err := clipack.CheckHost(u.Hostname()); err != nil {
+		return fmt.Errorf("--base-url: %w", err)
+	}
+	if pack, ok := clipack.CredentialedHost(u.Hostname()); ok {
+		return fmt.Errorf("--base-url: host %s belongs to the %s CLI pack, whose provider is bound to it; use aimux tools add cli %s", u.Hostname(), pack, pack)
+	}
+	return nil
+}
+
+// httpSource is an http-openapi source over a local spec; its set holds
+// every GET operation the spec offers unless tools narrows it; summary is
+// the count line toolsAdd prints.
+func httpSource(name, spec, baseURL, credential, tools string) (toolreg.Source, []string, string, error) {
+	if credential != "" {
+		return toolreg.Source{}, nil, "", errors.New("--credential: credentialed HTTP sources are not supported yet")
+	}
+	if name == "" {
+		return toolreg.Source{}, nil, "", errors.New("pass --name <name> for the HTTP source")
+	}
+	if spec == "" {
+		return toolreg.Source{}, nil, "", errors.New("pass --spec <file>: the OpenAPI file")
+	}
+	if baseURL == "" {
+		return toolreg.Source{}, nil, "", errors.New("pass --base-url https://...: the API's base URL")
+	}
+	if !filepath.IsAbs(spec) {
+		return toolreg.Source{}, nil, "", fmt.Errorf("--spec %q must be an absolute path", spec)
+	}
+	src := toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: spec, BaseURL: baseURL}
+	if err := checkBaseURL(baseURL); err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	ops, ignored, err := httpOperations(spec)
+	if err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	if len(ops) == 0 {
+		return toolreg.Source{}, nil, "", fmt.Errorf("spec %s has no GET operations with an operationId (%d ignored)", spec, len(ignored))
+	}
+	var all []string
+	for _, op := range ops {
+		all = append(all, httpsource.ToolName(name, op))
+	}
+	list, err := pickTools(tools, all)
+	if err != nil {
+		return toolreg.Source{}, nil, "", err
+	}
+	return src, list, fmt.Sprintf("%d GET operations, %d others ignored", len(ops), len(ignored)), nil
+}
+
+func httpOperations(spec string) ([]httpsource.Operation, []httpsource.Ignored, error) {
+	f, err := os.Open(spec) // #nosec G304 -- the path the owner named
+	if err != nil {
+		return nil, nil, fmt.Errorf("spec %s: %w", spec, errors.Unwrap(err))
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, httpsource.MaxSpecBytes+1))
+	if err != nil {
+		return nil, nil, fmt.Errorf("spec %s: %w", spec, err)
+	}
+	ops, ignored, err := httpsource.Operations(b)
+	if err != nil {
+		return nil, nil, fmt.Errorf("spec %s: %w", spec, err)
+	}
+	return ops, ignored, nil
+}
+
 func isLoopbackHost(h string) bool {
 	if h == "localhost" {
 		return true
@@ -532,7 +772,7 @@ func migrateForEdit(home string, out io.Writer) error {
 	return nil
 }
 
-func toolsAdd(env toolsEnv, name string, src toolreg.Source, tools []string, out, errOut io.Writer) error {
+func toolsAdd(env toolsEnv, name string, src toolreg.Source, tools []string, summary string, out, errOut io.Writer) error {
 	path := toolreg.DefaultPath(env.Home)
 	if err := migrateForEdit(env.Home, errOut); err != nil {
 		return err
@@ -546,8 +786,14 @@ func toolsAdd(env toolsEnv, name string, src toolreg.Source, tools []string, out
 		return writeJSON(out, map[string]any{"schema_version": toolsSchemaVersion, "source": name, "set": set, "tools": tools, "path": path, "next": next})
 	}
 	_, _ = fmt.Fprintf(out, "Added source %s (%s) and set %s (%s) to %s\n", name, src.Type, set, strings.Join(tools, ", "), path)
+	if summary != "" {
+		_, _ = fmt.Fprintln(out, summary)
+	}
 	_, _ = fmt.Fprintln(out, "Nothing is approved yet: its tools stay hidden until you approve them.")
 	_, _ = fmt.Fprintf(errOut, "Next: aimux tools diff %s, then %s\n", set, next)
+	if src.Type == toolreg.TypeCLI || src.Type == toolreg.TypeHTTPOpenAPI {
+		_, _ = fmt.Fprintln(errOut, "Then run aimux sandbox setup if the aimux-tools runner image or a provider is missing.")
+	}
 	return nil
 }
 

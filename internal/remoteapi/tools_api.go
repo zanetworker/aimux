@@ -48,12 +48,15 @@ type ToolsList struct {
 // the name the profile uses. Source is "" for a set that is omitted; URL is
 // the source's URL only when it is a loopback one (no userinfo or query).
 type ToolSetInfo struct {
-	Name   string     `json:"name"`
-	Source string     `json:"source"`
-	URL    string     `json:"url,omitempty"`
-	Status string     `json:"status"`
-	Reason string     `json:"reason,omitempty"`
-	Tools  []ToolInfo `json:"tools"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	URL    string `json:"url,omitempty"`
+	// Authorship is the source's class (self, internal or outside); empty
+	// when the set is omitted.
+	Authorship string     `json:"authorship,omitempty"`
+	Status     string     `json:"status"`
+	Reason     string     `json:"reason,omitempty"`
+	Tools      []ToolInfo `json:"tools"`
 }
 
 // ToolInfo is one tool of a set.
@@ -140,6 +143,7 @@ func (a *API) listTools(w http.ResponseWriter, r *http.Request) {
 			info.Reason = "not in tool-sources.yaml"
 		default:
 			info.Source, info.URL = set.Source, loopbackURL(reg.Sources[set.Source].URL)
+			info.Authorship = reg.Sources[set.Source].Class()
 			info.Tools, info.Status, info.Reason = setTools(snap, set, reg.Sources[set.Source], byTool, v.Live, v.RelistFailed[set.Source], loadErr != nil)
 		}
 		out.Sets = append(out.Sets, info)

@@ -7,11 +7,17 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/zanetworker/aimux/internal/clipack"
+	"github.com/zanetworker/aimux/internal/httpsource"
+	"github.com/zanetworker/aimux/internal/keyring"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/toolgateway"
+	"github.com/zanetworker/aimux/internal/toolreg"
+	aimuxtools "github.com/zanetworker/aimux/sandbox/aimux-tools"
 )
 
 // statusMachine is what sandbox status sees: which of image, provider and
@@ -122,6 +128,9 @@ type statusDoc struct {
 	Provider struct {
 		Name, Status, Error string
 	} `json:"provider"`
+	RunnerProvider struct {
+		Name, Status, Error string
+	} `json:"runner_provider"`
 	Gateway struct {
 		Name, Status, Error string
 	} `json:"gateway"`
@@ -134,6 +143,15 @@ type statusDoc struct {
 		CompiledDigest string `json:"compiled_digest"`
 		Error          string `json:"error"`
 	} `json:"profiles"`
+	Runner struct {
+		Profile        string `json:"profile"`
+		Sandbox        string `json:"sandbox"`
+		Exists         *bool  `json:"exists"`
+		State          string `json:"state"`
+		RecordedDigest string `json:"recorded_digest"`
+		CompiledDigest string `json:"compiled_digest"`
+		Error          string `json:"error"`
+	} `json:"runner"`
 	Next []string `json:"next"`
 }
 
@@ -158,6 +176,7 @@ func TestSandboxStatus_AllPresent(t *testing.T) {
 	for _, want := range []string{
 		"Image:     " + wingmanImage + "  present",
 		"Provider:  wingman-claude  present",
+		"Provider:  aimux-github  missing",
 		"Gateway:   local  reachable",
 		"research",
 		"aimux-research",
@@ -181,6 +200,10 @@ func TestSandboxStatus_AllPresent(t *testing.T) {
 	if d.SchemaVersion != "1" || d.Image.Status != "present" || d.Image.Name != wingmanImage ||
 		d.Provider.Status != "present" || d.Provider.Name != "wingman-claude" || d.Gateway.Status != "reachable" || d.Gateway.Name != "local" {
 		t.Fatalf("components = %+v", d)
+	}
+	// aimux-github is missing, but no source needs it: no Next for it.
+	if d.RunnerProvider.Name != "aimux-github" || d.RunnerProvider.Status != "missing" {
+		t.Fatalf("runner provider = %+v", d.RunnerProvider)
 	}
 	if len(d.Profiles) != 2 || d.Profiles[0].Profile != "research" || d.Profiles[1].Profile != "work-readonly" {
 		t.Fatalf("profiles = %+v, want research and work-readonly", d.Profiles)
@@ -268,7 +291,7 @@ func TestSandboxStatus_GatewayDown(t *testing.T) {
 		}
 	}
 	d := decodeStatus(t, mustJSON(t, env))
-	if d.Gateway.Status != "unreachable" || d.Gateway.Error == "" || d.Provider.Status != "unknown" {
+	if d.Gateway.Status != "unreachable" || d.Gateway.Error == "" || d.Provider.Status != "unknown" || d.RunnerProvider.Status != "unknown" {
 		t.Fatalf("doc = %+v", d)
 	}
 	for _, p := range d.Profiles {
@@ -361,6 +384,156 @@ func snapshotTree(t *testing.T, root string) string {
 	return b.String()
 }
 
+// runnerDigest is the digest aimux-tools compiles to from home right now.
+func runnerDigest(t *testing.T, home string) string {
+	t.Helper()
+	snap, _, err := toolgateway.NewStore(home).Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := profile.CompileRunner(snap, clipack.Builtin, runnerSpecs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c.PolicyDigest
+}
+
+// Status lists the tool runner after the profiles, with its recorded and
+// compiled digests, in the table and as "runner" in JSON.
+func TestSandboxStatus_ListsRunner(t *testing.T) {
+	env, f := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman,
+		sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	writeDigest(t, env.Home, "aimux-tools", "sha256:old-runner")
+	out, _ := runSandboxStatus(t, env, false)
+	if !strings.Contains(out, "(tool runner)  aimux-tools") || !strings.Contains(out, "stale (applies on next turn)") {
+		t.Fatalf("out:\n%s", out)
+	}
+	assertReadOnly(t, f)
+	d := decodeStatus(t, mustJSON(t, env))
+	r := d.Runner
+	want := runnerDigest(t, env.Home)
+	if r.Sandbox != "aimux-tools" || r.Profile != "" || r.State != "stale" || r.RecordedDigest != "sha256:old-runner" ||
+		r.CompiledDigest != want || r.Exists == nil || !*r.Exists {
+		t.Fatalf("runner = %+v, want compiled %s", r, want)
+	}
+	for _, p := range d.Profiles {
+		if p.Sandbox == "aimux-tools" {
+			t.Fatal("runner listed as a profile")
+		}
+	}
+
+	writeDigest(t, env.Home, "aimux-tools", want)
+	if d := decodeStatus(t, mustJSON(t, env)); d.Runner.State != "current" {
+		t.Fatalf("runner = %+v", d.Runner)
+	}
+}
+
+// statusWithAPI is a status rig with an http-openapi source "api" at base
+// whose tool api_get (GET /x) is pinned, and runnerSpecs set to specs.
+func statusWithAPI(t *testing.T, base string, specs func(toolreg.Source) ([]httpsource.Operation, error)) browserEnv {
+	t.Helper()
+	env, _ := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman})
+	path := toolreg.DefaultPath(env.Home)
+	reg, err := toolreg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Sources["api"] = toolreg.Source{Type: toolreg.TypeHTTPOpenAPI, Spec: "/s.yaml", BaseURL: base}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := toolreg.WriteNew(path, reg); err != nil {
+		t.Fatal(err)
+	}
+	raws, err := httpsource.Tools("api", base, []httpsource.Operation{{ID: "get", Path: "/x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := toolgateway.PinTool(raws[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(hashOnly(toolgateway.Pins{
+		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}, "api": {"api_get": hash}})); err != nil {
+		t.Fatal(err)
+	}
+	old := runnerSpecs
+	runnerSpecs = specs
+	t.Cleanup(func() { runnerSpecs = old })
+	return env
+}
+
+// A source whose base host is refused (here localhost) is left out of the
+// runner like a spec error: the runner still compiles for the others, and
+// status blames neither a profile nor the runner.
+func TestSandboxStatus_RunnerRefusedHostStaysOnSource(t *testing.T) {
+	env := statusWithAPI(t, "https://localhost", func(toolreg.Source) ([]httpsource.Operation, error) {
+		return []httpsource.Operation{{ID: "get", Path: "/x"}}, nil
+	})
+	_, errOut := runSandboxStatus(t, env, false)
+	if strings.Contains(errOut, "does not compile") {
+		t.Errorf("a refused host failed the compile: %s", errOut)
+	}
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.Runner.State == "error" || d.Runner.Error != "" {
+		t.Fatalf("runner = %+v", d.Runner)
+	}
+}
+
+// A source whose spec fails is left out of the runner (its listing says
+// why); the runner still compiles for the others.
+func TestSandboxStatus_RunnerSpecErrorStaysOnSource(t *testing.T) {
+	env := statusWithAPI(t, "https://api.example.com", func(toolreg.Source) ([]httpsource.Operation, error) {
+		return nil, errors.New("bad spec")
+	})
+	_, errOut := runSandboxStatus(t, env, false)
+	if strings.Contains(errOut, "does not compile") {
+		t.Errorf("a spec error failed the compile: %s", errOut)
+	}
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.Runner.State == "error" || d.Runner.Error != "" {
+		t.Fatalf("runner = %+v", d.Runner)
+	}
+}
+
+// A source whose provider the gateway lacks is left out of the runner by
+// Ensure; status compiles the same way, so the runner is current, not
+// stale for good.
+func TestSandboxStatus_RunnerMatchesAvailableProviders(t *testing.T) {
+	env, f := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman,
+		sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	path := toolreg.DefaultPath(env.Home)
+	reg, err := toolreg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Sources["github"] = toolreg.Source{Type: toolreg.TypeCLI, Pack: "gh"}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := toolreg.WriteNew(path, reg); err != nil {
+		t.Fatal(err)
+	}
+	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(hashOnly(toolgateway.Pins{
+		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}, "github": {"gh_repo_view": "p5"}})); err != nil {
+		t.Fatal(err)
+	}
+	snap, _, err := toolgateway.NewStore(env.Home).Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, dropped, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, func(p string) bool { return p == "wingman-claude" })
+	if err != nil || dropped["github"] == nil {
+		t.Fatalf("%v %v", err, dropped)
+	}
+	writeDigest(t, env.Home, "aimux-tools", applied.PolicyDigest)
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.Runner.State != "current" || d.Runner.CompiledDigest != applied.PolicyDigest {
+		t.Fatalf("runner = %+v, want current at %s", d.Runner, applied.PolicyDigest)
+	}
+	assertReadOnly(t, f)
+}
+
 // setupMachine answers sandbox setup: image and provider present or not.
 func setupMachine(imagePresent, providerPresent bool, token string) func(argv []string) (string, error) {
 	return func(argv []string) (string, error) {
@@ -373,12 +546,12 @@ func setupMachine(imagePresent, providerPresent bool, token string) func(argv []
 			return "", exitCodeErr{1, ""}
 		case strings.HasPrefix(s, "openshell -g local provider list-profiles"):
 			if providerPresent {
-				return "NAME  TYPE  CATEGORY\nclaude-code-oauth  provider  AGENT\n", nil
+				return "NAME  TYPE  CATEGORY\nclaude-code-oauth  provider  AGENT\naimux-github  provider  SOURCE_CONTROL\n", nil
 			}
 			return "NAME  TYPE  CATEGORY\n", nil
 		case strings.HasPrefix(s, "openshell -g local provider list"):
 			if providerPresent {
-				return providersWithWingman, nil
+				return providersWithWingman + "aimux-github    aimux-github       1  0\n", nil
 			}
 			return "NAME  TYPE  CREDENTIAL_KEYS\n", nil
 		case strings.HasPrefix(s, "security find-generic-password"):
@@ -405,6 +578,7 @@ func TestSandboxSetup_Fresh(t *testing.T) {
 	const token = "sk-ant-oat01-SETUPSECRET" //nolint:gosec // G101: fake token
 	f := &fakeRun{answer: setupMachine(false, false, token)}
 	env := testEnv(t, f)
+	env.RunnerKey = fakeStore("darwin", true, "github_pat_FRESH", nil)
 	dir := filepath.Join(t.TempDir(), "sandbox")
 	out, _, err := runSandboxCmd(t, env, "setup", "--sandbox-dir", dir)
 	if err != nil {
@@ -415,7 +589,8 @@ func TestSandboxSetup_Fresh(t *testing.T) {
 			t.Errorf("out lacks %q:\n%s", want, out)
 		}
 	}
-	if len(f.find("podman", "build")) != 1 || len(f.find("openshell", "-g", "local", "provider", "create")) != 1 {
+	if len(f.find("podman", "build")) != 2 || len(f.find("openshell", "-g", "local", "provider", "create", "--name", wingmanProvider)) != 1 ||
+		len(f.find("openshell", "-g", "local", "provider", "create", "--name", runnerProvider)) != 1 {
 		t.Fatalf("calls = %v", f.calls)
 	}
 	if len(f.find("openshell", "-g", "local", "sandbox")) != 0 {
@@ -437,12 +612,260 @@ func TestSandboxSetup_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "Nothing to do: "+wingmanImage+" and provider wingman-claude are present") {
+	if !strings.Contains(out, "Nothing to do: "+wingmanImage+", "+profile.RunnerImage+" and providers wingman-claude, aimux-github are present") {
 		t.Fatalf("out:\n%s", out)
 	}
 	if len(f.find("podman", "build")) != 0 || len(f.find("openshell", "-g", "local", "provider", "create")) != 0 ||
 		len(f.find("openshell", "-g", "local", "provider", "profile")) != 0 || len(f.find("security")) != 0 {
 		t.Fatalf("setup redid steps: %v", f.calls)
+	}
+}
+
+// runnerSetupMachine is a machine with the Wingman parts present and the
+// runner's image, github profile and aimux-github provider missing. The
+// aimux-github token comes from the env's secret store (fakeStore), never
+// from security, so the machine refuses that call; seen
+// records the Containerfile and profile on disk when build and import run.
+func runnerSetupMachine(seen map[string]string) func(argv []string) (string, error) {
+	return runnerSetupMachineProfiles(seen, "NAME  TYPE  CATEGORY\nclaude-code-oauth  provider  AGENT\n")
+}
+
+// fakeStore is a secret store for goos where the aimux-github item exists
+// or not and holds token; reads counts value reads (nil: not counted).
+func fakeStore(goos string, exists bool, token string, reads *int) secretStore {
+	return secretStore{
+		GOOS:  goos,
+		Probe: func(service string) (bool, error) { return exists && service == "aimux-github", nil },
+		Lookup: func(_ context.Context, service string) (string, error) {
+			if reads != nil {
+				*reads++
+			}
+			if !exists || service != "aimux-github" {
+				return "", keyring.ErrNotFound
+			}
+			return token, nil
+		},
+	}
+}
+
+// runnerSetupMachineProfiles is runnerSetupMachine with list-profiles
+// answering profiles.
+func runnerSetupMachineProfiles(seen map[string]string, profiles string) func(argv []string) (string, error) {
+	base := setupMachine(true, false, "")
+	return func(argv []string) (string, error) {
+		s := strings.Join(argv, " ")
+		fileArg := func(flag string) string {
+			for i, a := range argv {
+				if a == flag && i+1 < len(argv) {
+					b, _ := os.ReadFile(argv[i+1])
+					return string(b)
+				}
+			}
+			return ""
+		}
+		switch {
+		case s == "podman image exists "+wingmanImage:
+			return "", nil
+		case s == "podman image exists "+profile.RunnerImage:
+			return "", exitCodeErr{1, ""}
+		case strings.HasPrefix(s, "podman build"):
+			seen["build"] = fileArg("-f")
+			return "", nil
+		case strings.HasPrefix(s, "openshell -g local profile import"):
+			seen["import"] = fileArg("-f")
+			return "", nil
+		case strings.HasPrefix(s, "openshell -g local provider list-profiles"):
+			return profiles, nil
+		case strings.HasPrefix(s, "openshell -g local provider list"):
+			return providersWithWingman, nil
+		case strings.HasPrefix(s, "security find-generic-password -s aimux-github"):
+			return "", errors.New("the aimux-github token must come from the secret store, not security")
+		}
+		return base(argv)
+	}
+}
+
+// The runner: setup builds localhost/aimux-tools from the embedded
+// Containerfile, lints and imports the trimmed github profile and creates
+// aimux-github with the token in the environment only.
+func TestSandboxSetup_RunnerImageAndProvider(t *testing.T) {
+	const token = "github_pat_RUNNERSECRET" //nolint:gosec // G101: fake token
+	seen := map[string]string{}
+	f := &fakeRun{answer: runnerSetupMachine(seen)}
+	env := testEnv(t, f)
+	env.RunnerKey = fakeStore("darwin", true, token, nil)
+	out, _, err := runSandboxCmd(t, env, "setup")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	builds := f.find("podman", "build", "-t", profile.RunnerImage)
+	if len(builds) != 1 || seen["build"] != string(aimuxtools.Containerfile) {
+		t.Fatalf("builds = %v, Containerfile on disk %q", builds, seen["build"])
+	}
+	lint, imp := f.find("openshell", "-g", "local", "profile", "lint", "-f"), f.find("openshell", "-g", "local", "profile", "import", "-f")
+	if len(lint) != 1 || len(imp) != 1 || seen["import"] != string(aimuxtools.GitHubProfile) {
+		t.Fatalf("lint %v import %v, profile on disk %q", lint, imp, seen["import"])
+	}
+	if slices.Contains(imp[0].argv, "--global") {
+		t.Fatal("profile imported globally; the spike imports it to the workspace")
+	}
+	creates := f.find("openshell", "-g", "local", "provider", "create", "--name", "aimux-github", "--type", "aimux-github", "--credential", "GITHUB_TOKEN")
+	if len(creates) != 1 || !slices.Equal(creates[0].env, []string{"GITHUB_TOKEN=" + token}) {
+		t.Fatalf("creates = %+v", creates)
+	}
+	for _, c := range f.calls {
+		if slices.Contains(c.argv, token) {
+			t.Fatalf("token in argv: %v", c.argv)
+		}
+	}
+	// Order: lint, import, then create.
+	idx := func(verb string) int {
+		for i, c := range f.calls {
+			if len(c.argv) > 4 && c.argv[3]+" "+c.argv[4] == verb {
+				return i
+			}
+		}
+		return -1
+	}
+	if idx("profile lint") >= idx("profile import") || idx("profile import") >= idx("provider create") {
+		t.Fatalf("calls out of order: %v", f.calls)
+	}
+	for _, want := range []string{"Building " + profile.RunnerImage, "Importing provider profile aimux-github", "Creating provider aimux-github"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("out lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, token) {
+		t.Fatal("token printed")
+	}
+	// The temp files are gone.
+	for _, c := range append(builds, imp...) {
+		for i, a := range c.argv {
+			if a == "-f" {
+				if _, err := os.Stat(c.argv[i+1]); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("%s left behind: %v", c.argv[i+1], err)
+				}
+			}
+		}
+	}
+}
+
+// A gateway with the stock or built-in "github" profile but not aimux's:
+// setup still imports aimux-github and creates the provider with it, never
+// with the stock profile (which opens github.com git transport).
+func TestSandboxSetup_RunnerIgnoresStockGitHubProfile(t *testing.T) {
+	seen := map[string]string{}
+	stock := "NAME  TYPE  CATEGORY\nclaude-code-oauth  provider  AGENT\ngithub  provider  SOURCE_CONTROL\n"
+	f := &fakeRun{answer: runnerSetupMachineProfiles(seen, stock)}
+	env := testEnv(t, f)
+	env.RunnerKey = fakeStore("darwin", true, "github_pat_X", nil)
+	out, _, err := runSandboxCmd(t, env, "setup")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(f.find("openshell", "-g", "local", "profile", "import", "-f")) != 1 || seen["import"] != string(aimuxtools.GitHubProfile) {
+		t.Fatalf("aimux-github not imported: %v", f.calls)
+	}
+	creates := f.find("openshell", "-g", "local", "provider", "create")
+	if len(creates) != 1 || !slices.Equal(creates[0].argv[5:], []string{"--name", "aimux-github", "--type", "aimux-github", "--credential", "GITHUB_TOKEN"}) {
+		t.Fatalf("creates = %+v", creates)
+	}
+}
+
+// Without the item in the platform's secret store (or with no secret store
+// at all), setup creates no runner provider, never reads a value, says how
+// to add the item for that platform, and still succeeds: the darwin
+// Keychain line is unchanged, Linux gets secret-tool, others no store.
+func TestSandboxSetup_RunnerProviderNeedsKeychainItem(t *testing.T) {
+	for _, tc := range []struct {
+		goos string
+		want []string
+	}{
+		{"darwin", []string{"(item aimux-github)", "security add-generic-password -U -a \"$USER\" -s aimux-github -w", "fine-grained"}},
+		{"linux", []string{"Secret Service", "secret-tool store --label aimux-github service aimux-github", "fine-grained"}},
+		{"windows", []string{"no supported secret store", "aimux-github"}},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			reads := 0
+			f := &fakeRun{answer: runnerSetupMachine(map[string]string{})}
+			env := testEnv(t, f)
+			env.RunnerKey = fakeStore(tc.goos, false, "", &reads)
+			out, _, err := runSandboxCmd(t, env, "setup")
+			if err != nil {
+				t.Fatalf("%v\n%s", err, out)
+			}
+			if len(f.find("openshell", "-g", "local", "provider", "create")) != 0 || len(f.find("openshell", "-g", "local", "profile")) != 0 {
+				t.Fatalf("calls = %v", f.calls)
+			}
+			if reads != 0 {
+				t.Fatalf("%d value reads of an absent item", reads)
+			}
+			if len(f.find("security", "find-generic-password", "-s", "aimux-github")) != 0 {
+				t.Fatalf("called security: %v", f.calls)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("out lacks %q:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "Nothing to do") {
+				t.Errorf("says nothing to do while the provider is missing:\n%s", out)
+			}
+		})
+	}
+}
+
+// A probe that fails (a Keychain timeout or access error, a locked Secret
+// Service) is not "absent": setup fails naming the store and the item,
+// reads no value, prints no add-token line and creates nothing.
+func TestSandboxSetup_RunnerProbeErrorFails(t *testing.T) {
+	for goos, store := range map[string]string{"darwin": "Keychain", "linux": "Secret Service"} {
+		t.Run(goos, func(t *testing.T) {
+			reads := 0
+			f := &fakeRun{answer: runnerSetupMachine(map[string]string{})}
+			env := testEnv(t, f)
+			env.RunnerKey = secretStore{GOOS: goos,
+				Probe:  func(string) (bool, error) { return false, errors.New("aimux-github: exit status 51") },
+				Lookup: func(context.Context, string) (string, error) { reads++; return "", nil }}
+			out, _, err := runSandboxCmd(t, env, "setup")
+			if err == nil || !strings.Contains(err.Error(), store) || !strings.Contains(err.Error(), "aimux-github") {
+				t.Fatalf("err = %v\n%s", err, out)
+			}
+			if reads != 0 || strings.Contains(out, "add-generic-password") || strings.Contains(out, "secret-tool store") {
+				t.Fatalf("reads %d, out:\n%s", reads, out)
+			}
+			if len(f.find("openshell", "-g", "local", "provider", "create")) != 0 || len(f.find("openshell", "-g", "local", "profile")) != 0 {
+				t.Fatalf("calls = %v", f.calls)
+			}
+		})
+	}
+}
+
+// No secret store wired in (a zero env): the optional provider counts as
+// absent, not a failure.
+func TestSandboxSetup_RunnerNoStoreIsAbsent(t *testing.T) {
+	f := &fakeRun{answer: runnerSetupMachine(map[string]string{})}
+	out, _, err := runSandboxCmd(t, testEnv(t, f), "setup")
+	if err != nil || len(f.find("openshell", "-g", "local", "provider", "create")) != 0 {
+		t.Fatalf("err %v calls %v\n%s", err, f.calls, out)
+	}
+}
+
+// The item exists but its value cannot be read (a locked store): setup
+// fails and names the store, without any token text.
+func TestSandboxSetup_RunnerUnreadableItemFails(t *testing.T) {
+	f := &fakeRun{answer: runnerSetupMachine(map[string]string{})}
+	env := testEnv(t, f)
+	env.RunnerKey = secretStore{GOOS: "darwin", Probe: func(string) (bool, error) { return true, nil },
+		Lookup: func(context.Context, string) (string, error) {
+			return "", errors.New("keychain aimux-github: exit status 51")
+		}}
+	_, _, err := runSandboxCmd(t, env, "setup")
+	if err == nil || !strings.Contains(err.Error(), "aimux-github") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.find("openshell", "-g", "local", "provider", "create")) != 0 {
+		t.Fatal("created the provider without a token")
 	}
 }
 
@@ -604,5 +1027,91 @@ func TestSandboxStatus_UsesCompiledSandboxName(t *testing.T) {
 		if p.Sandbox != c.Sandbox {
 			t.Errorf("%s sandbox = %q, compiled %q", p.Profile, p.Sandbox, c.Sandbox)
 		}
+	}
+}
+
+// ghRunnerHome adds the github cli source with gh_repo_view pinned to the
+// status rig's home.
+func ghRunnerHome(t *testing.T, env browserEnv) {
+	t.Helper()
+	path := toolreg.DefaultPath(env.Home)
+	reg, err := toolreg.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Sources["github"] = toolreg.Source{Type: toolreg.TypeCLI, Pack: "gh"}
+	reg.Sets["github:readonly"] = toolreg.Set{Source: "github", Tools: []string{"gh_repo_view"}}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := toolreg.WriteNew(path, reg); err != nil {
+		t.Fatal(err)
+	}
+	if err := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).Save(hashOnly(toolgateway.Pins{
+		"wiki": {"wiki_search": "p1"}, "jira": {"search": "p2"}, "slack": {"history": "p3"}, "google": {"get_doc": "p4"}, "github": {"gh_repo_view": "p5"}})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The live L2 case: the runner was ensured from the pins before the gh
+// ones were written (an empty policy, no providers) and the gh pins are
+// now approved with aimux-github on the gateway: status says stale, not
+// current, and its compiled digest is the one with the gh endpoints.
+func TestSandboxStatus_RunnerStaleAfterPinsAdded(t *testing.T) {
+	env, f := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman + "aimux-github    github             1  0\n",
+		sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	before, _, err := toolgateway.NewStore(env.Home).Reload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, _, err := profile.CompileRunnerAvailable(before, clipack.Builtin, runnerSpecs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDigest(t, env.Home, "aimux-tools", empty.PolicyDigest)
+	ghRunnerHome(t, env)
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.Runner.State != "stale" || d.Runner.CompiledDigest == empty.PolicyDigest {
+		t.Fatalf("runner = %+v, want stale (recorded is the empty policy)", d.Runner)
+	}
+	assertReadOnly(t, f)
+}
+
+// A runner that does not compile (here: an unreadable pins file) names the
+// runner, not a profile.
+func TestSandboxStatus_RunnerCompileError(t *testing.T) {
+	env, _ := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman})
+	if err := os.WriteFile(toolgateway.DefaultPinsPath(env.Home), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut := runSandboxStatus(t, env, false)
+	if !strings.Contains(errOut, "Next: aimux tools status (the tool runner aimux-tools does not compile; see its error)") {
+		t.Errorf("errOut = %q", errOut)
+	}
+	if d := decodeStatus(t, mustJSON(t, env)); d.Runner.State != "error" || d.Runner.Error == "" {
+		t.Fatalf("runner = %+v", d.Runner)
+	}
+}
+
+// The Provider lines name aimux-github too: present when the gateway has
+// it; missing with a Next line when an approved gh source is left out for
+// lack of it.
+func TestSandboxStatus_RunnerProvider(t *testing.T) {
+	env, _ := statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman + "aimux-github    github             1  0\n",
+		sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	ghRunnerHome(t, env)
+	out, _ := runSandboxStatus(t, env, false)
+	if !strings.Contains(out, "Provider:  aimux-github  present") {
+		t.Fatalf("out:\n%s", out)
+	}
+	if d := decodeStatus(t, mustJSON(t, env)); d.RunnerProvider.Status != "present" {
+		t.Fatalf("runner provider = %+v", d.RunnerProvider)
+	}
+
+	env, _ = statusRig(t, statusMachine{gatewayUp: true, providers: providersWithWingman, sandboxes: []string{"aimux-work-readonly", "aimux-tools"}})
+	ghRunnerHome(t, env)
+	d := decodeStatus(t, mustJSON(t, env))
+	if d.RunnerProvider.Status != "missing" || !slices.Contains(d.Next, "aimux sandbox setup") {
+		t.Fatalf("runner provider = %+v, next = %q", d.RunnerProvider, d.Next)
 	}
 }

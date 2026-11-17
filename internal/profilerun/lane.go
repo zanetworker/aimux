@@ -2,11 +2,16 @@ package profilerun
 
 // AskRequest is one Wingman side-panel question as the lane engines take it.
 type AskRequest struct {
-	URL       string
-	Title     string
-	Page      string
-	Question  string
-	Recap     string
+	URL      string
+	Title    string
+	Page     string
+	Question string
+	// Prior is the user's earlier questions on this page from another
+	// mode, oldest first (no answers); see priorBlock.
+	Prior []string
+	// Image: an image is attached to the question; the prompt frames it as
+	// untrusted data (imageFraming). The image itself is sent separately.
+	Image     bool
 	SessionID string
 	Model     string
 

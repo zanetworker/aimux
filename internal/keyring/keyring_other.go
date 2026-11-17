@@ -11,6 +11,9 @@ import (
 // so it never has a key.
 func System(service string) Source { return notFoundSource{name: "secret store " + service} }
 
+// Probe finds nothing where there is no supported secret store.
+func Probe(string) (bool, error) { return false, nil }
+
 // Exists is always false where there is no supported secret store.
 func Exists(string) bool { return false }
 

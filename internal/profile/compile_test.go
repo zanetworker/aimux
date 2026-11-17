@@ -718,3 +718,52 @@ func TestCheckSandboxName(t *testing.T) {
 		}
 	}
 }
+
+// A cli source's set is granted like any other: the server is the source
+// name, its pinned tools are the grant, and the policy has its /mcp rule.
+func TestCompile_CLISetInGrant(t *testing.T) {
+	reg := toolreg.Registry{Version: 1,
+		Sources: map[string]toolreg.Source{"gh": {Type: toolreg.TypeCLI, Pack: "gh"}},
+		Sets:    map[string]toolreg.Set{"gh:readonly": {Source: "gh", Tools: []string{"issue_list", "pr_view", "unpinned"}}},
+	}
+	sets := RegistrySets(reg, toolgateway.Pins{"gh": {"issue_list": "a", "pr_view": "b"}})
+	m := workReadonly(t)
+	m.Tools = []string{"gh:readonly"}
+	c, err := Compile(m, sets, testGW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := viewScope(c.Capabilities().Grant); !reflect.DeepEqual(got, map[string][]string{"gh": {"issue_list", "pr_view"}}) {
+		t.Errorf("grant = %v", got)
+	}
+	if !strings.Contains(string(c.PolicyYAML), "/mcp/gh") {
+		t.Errorf("policy has no /mcp/gh rule:\n%s", c.PolicyYAML)
+	}
+}
+
+// work-readonly asks for gh:readonly too; without a configured, pinned gh
+// source that set is left out and the profile still compiles from the rest.
+func TestCompile_WorkReadonlyIncludesGHAndLeavesItOutWhenUnconfigured(t *testing.T) {
+	m := workReadonly(t)
+	if !slices.Contains(m.Tools, "gh:readonly") {
+		t.Fatalf("work-readonly tools = %v, want gh:readonly", m.Tools)
+	}
+	c, err := Compile(m, testSets(), testGW)
+	if err != nil {
+		t.Fatalf("compile without a gh source: %v", err)
+	}
+	if slices.Contains(c.Grant.Servers(), "gh") {
+		t.Fatalf("gh granted without a gh source: %v", c.Grant.Servers())
+	}
+	withGH := pinnedSets(toolgateway.Pins{
+		"wiki": {"read_page": "a"}, "jira": {"search": "c"}, "slack": {"history": "e"},
+		"google": {"get_doc": "f"}, "gh": {"gh_issue_list": "g"},
+	})
+	c, err = Compile(m, withGH, testGW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(c.Grant.Servers(), "gh") || !strings.Contains(string(c.PolicyYAML), "/mcp/gh") {
+		t.Fatalf("gh not granted with a pinned gh source: %v", c.Grant.Servers())
+	}
+}

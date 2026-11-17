@@ -53,6 +53,9 @@ type ReadonlyServer struct {
 	// Starter is how a changed registry's backends start on the running
 	// pool (nil: mcpproxy.ReadonlyStarter, what BuildReadonly uses).
 	Starter func(cfg mcpproxy.ReadonlyConfig) mcpproxy.Starter
+	// Runner binds the runner sandbox compiled from a snapshot to each
+	// source (mcpproxy.ReadonlyConfig.Tools); nil starts no cli sources.
+	Runner func(snap toolreg.Snapshot) func(source string) mcpproxy.ToolRunner
 
 	applied atomic.Pointer[toolreg.Snapshot] // the snapshot the servers were built from
 
@@ -66,10 +69,13 @@ type ReadonlyServer struct {
 	all    []string        // every backend built or found down
 	ctx    context.Context // Start's serving context; ends at stop
 
-	obsMu    sync.Mutex
-	observed map[string]Observed          // what the builds and calls listed, by backend
-	built    map[string]map[string]string // each served backend's tools (name -> pin) as built
-	pending  map[string]bool              // backends a call's listing queued for a rebuild
+	obsMu     sync.Mutex
+	observed  map[string]Observed          // what the builds and calls listed, by backend
+	built     map[string]map[string]string // each served backend's tools (name -> pin) as built
+	pending   map[string]bool              // backends with a recheck queued or running
+	coalesced map[string]int               // notifications folded into a queued recheck, logged when it ends
+	dirty     map[string]bool              // pending backends changed again since their recheck began listing
+	stopped   bool                         // stop began: no background work is started any more
 
 	relistMu  sync.Mutex     // held by a background relist or recheck: one at a time
 	relisting atomic.Bool    // a minute relist is queued or running
@@ -138,7 +144,8 @@ func RelistFailedFor(reg toolreg.Registry, obs map[string]Observed) map[string]b
 // down (errs), or listed when a catalog was seen (a build that never
 // filtered lists nothing, so its backends stay unknown). Backends cfg no
 // longer configures are dropped. The other hears each listing a call's
-// check makes (see listed).
+// check makes (see listed), and a backend's tools/list_changed queues a
+// recheck of it (see changed).
 func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyConfig, pins SnapshotPins) (SnapshotPins, func(names []string, errs map[string]error)) {
 	var mu sync.Mutex
 	var seen *mcpproxy.Catalog
@@ -152,6 +159,7 @@ func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyC
 	pins.listed = func(server string, tools []json.RawMessage) {
 		r.listed(snap.Version(), reg.Sources[server].Endpoint(), cfg.Allow, served, server, tools)
 	}
+	pins.onChanged = r.changed
 	return pins, func(names []string, errs map[string]error) {
 		mu.Lock()
 		cat := seen
@@ -197,34 +205,102 @@ func (r *ReadonlyServer) listed(version, endpoint string, allow mcpproxy.Allowli
 		r.observed = map[string]Observed{}
 	}
 	r.observed[server] = Observed{LiveSource: LiveSource{Tools: tools}, Endpoint: endpoint}
-	queue := !maps.Equal(servedTools(tools, pins[server]), r.built[server]) && !r.pending[server]
-	if queue {
-		if r.pending == nil {
-			r.pending = map[string]bool{}
-		}
-		r.pending[server] = true
-	}
+	changed := !maps.Equal(servedTools(tools, pins[server]), r.built[server])
 	r.obsMu.Unlock()
-	if queue {
-		r.bg.Add(1)
-		go func() {
-			defer r.bg.Done()
-			r.recheck(server)
-		}()
+	if changed {
+		r.queueRecheck(server, false)
 	}
 }
 
-// recheck rebuilds server after a call's listing changed what it would
-// serve; it does nothing once the gateway stopped or server is not served.
-func (r *ReadonlyServer) recheck(server string) {
-	defer func() {
-		r.obsMu.Lock()
-		delete(r.pending, server)
-		r.obsMu.Unlock()
+// changed hears a backend's tools/list_changed (SnapshotPins.Changed has
+// already invalidated its listing) and queues a recheck. It logs the first
+// notification of a batch; the rest are counted and logged once when the
+// recheck finishes. It does not block.
+func (r *ReadonlyServer) changed(server string) {
+	r.queueRecheck(server, true)
+}
+
+// queueRecheck runs recheck(server) in the background unless one is
+// already queued or running, so a burst of changes relists it once; one
+// running is marked dirty so it lists once more. After stop began it does
+// nothing (the Add happens under obsMu, so never after stop's Wait).
+func (r *ReadonlyServer) queueRecheck(server string, notified bool) {
+	r.obsMu.Lock()
+	defer r.obsMu.Unlock()
+	if r.stopped {
+		return
+	}
+	if notified {
+		if r.pending[server] {
+			if r.coalesced == nil {
+				r.coalesced = map[string]int{}
+			}
+			r.coalesced[server]++
+		} else {
+			r.Log.Printf("read-only: tools changed: %s (notification)", server)
+		}
+	}
+	if r.pending[server] {
+		if r.dirty == nil {
+			r.dirty = map[string]bool{}
+		}
+		r.dirty[server] = true
+		return
+	}
+	if r.pending == nil {
+		r.pending = map[string]bool{}
+	}
+	r.pending[server] = true
+	r.bg.Add(1)
+	go func() {
+		defer r.bg.Done()
+		r.recheck(server)
 	}()
-	r.relistMu.Lock()
-	defer r.relistMu.Unlock()
-	r.relistNow([]string{server})
+}
+
+// addBackground counts one background job on r.bg unless stop began, and
+// reports whether it did.
+func (r *ReadonlyServer) addBackground() bool {
+	r.obsMu.Lock()
+	defer r.obsMu.Unlock()
+	if r.stopped {
+		return false
+	}
+	r.bg.Add(1)
+	return true
+}
+
+// recheck rebuilds server after a call's listing changed what it would
+// serve, or the backend said its tools changed; it does nothing once the
+// gateway stopped or server is not served. A change queued while it lists
+// (dirty) makes it list once more, since that listing may predate it.
+func (r *ReadonlyServer) recheck(server string) {
+	for {
+		func() {
+			r.relistMu.Lock()
+			defer r.relistMu.Unlock()
+			r.obsMu.Lock()
+			delete(r.dirty, server) // this listing covers what came before it
+			r.obsMu.Unlock()
+			r.relistNow([]string{server})
+		}()
+		r.obsMu.Lock()
+		again := r.dirty[server] && !r.stopped
+		delete(r.dirty, server)
+		var folded int
+		if !again {
+			delete(r.pending, server)
+			folded = r.coalesced[server]
+			delete(r.coalesced, server)
+		}
+		r.obsMu.Unlock()
+		if folded > 0 {
+			r.Log.Printf("read-only: tools changed: %s (%d more notifications coalesced)", server, folded)
+		}
+		if !again {
+			return
+		}
+	}
 }
 
 // servedTools is the tools (name -> pin) a server built from tools under
@@ -297,7 +373,11 @@ func (r *ReadonlyServer) configOf(snap toolreg.Snapshot) mcpproxy.ReadonlyConfig
 			r.Log.Printf("read-only: skipped: %v", m[n])
 		}
 	}
-	return mcpproxy.ReadonlyConfigFrom(reg)
+	cfg := mcpproxy.ReadonlyConfigFrom(reg)
+	if r.Runner != nil {
+		cfg.Tools = r.Runner(snap)
+	}
+	return cfg
 }
 
 func (r *ReadonlyServer) reject(server, tool string, _ error) {
@@ -333,6 +413,9 @@ func (r *ReadonlyServer) Start(ctx context.Context) (stop func(), err error) {
 		return nil, fmt.Errorf("listen on %s: %w", ReadonlyAddr, err)
 	}
 	sctx, cancel := context.WithCancel(ctx)
+	r.obsMu.Lock()
+	r.stopped = false
+	r.obsMu.Unlock()
 	r.mu.Lock()
 	r.cfg, r.pool, r.pins, r.down, r.add, r.remove, r.all, r.ctx = cfg, pool, pins, down, nil, nil, names(servers, down), sctx
 	r.applied.Store(&snap)
@@ -357,6 +440,9 @@ func (r *ReadonlyServer) Start(ctx context.Context) (stop func(), err error) {
 		case <-time.After(5 * time.Second):
 			r.Log.Printf("read-only: server did not stop within 5s")
 		}
+		r.obsMu.Lock()
+		r.stopped = true // no background work starts from here on
+		r.obsMu.Unlock()
 		r.bg.Wait() // their rebuilds end with the cancelled context
 	}, nil
 }
@@ -406,7 +492,9 @@ func (r *ReadonlyServer) Refresh(ctx context.Context) {
 	r.applied.Store(&snap)
 	cfg := r.configOf(snap)
 	r.pins = GatewayPins(snap)
-	if reflect.DeepEqual(cfg, r.cfg) {
+	// Bound runner sources restart on every snapshot (moved), so only a
+	// config without them can take the pins-only path.
+	if sameConfig(cfg, r.cfg) && cfg.Tools == nil {
 		r.Log.Printf("read-only: snapshot %s (pins changed); rebuilding %d backends", snap.Short(), len(r.all))
 		r.apply(ctx, r.all)
 		return
@@ -447,13 +535,30 @@ func backendNames(cfg mcpproxy.ReadonlyConfig) []string {
 	for n := range cfg.Notes {
 		all = append(all, n)
 	}
+	for n := range cfg.Runner {
+		if cfg.StartsRunner(n) {
+			all = append(all, n)
+		}
+	}
 	sort.Strings(all)
 	return slices.Compact(all)
 }
 
+// sameConfig compares a and b without their runner binding: a func is
+// never DeepEqual, and the binding follows the snapshot, which callers
+// compare by version.
+func sameConfig(a, b mcpproxy.ReadonlyConfig) bool {
+	a.Tools, b.Tools = nil, nil
+	return reflect.DeepEqual(a, b)
+}
+
 // moved reports whether backend n is reached differently (or not at all)
-// under next than under prev.
+// under next than under prev. A runner source always moves: next binds the
+// runner sandbox compiled from a new snapshot, whose policy may differ.
 func moved(prev, next mcpproxy.ReadonlyConfig, n string) bool {
+	if _, ok := next.Runner[n]; ok && next.Tools != nil {
+		return true
+	}
 	ph, pok := prev.HTTP[n]
 	nh, nok := next.HTTP[n]
 	pr, prok := prev.Notes[n]
@@ -462,12 +567,18 @@ func moved(prev, next mcpproxy.ReadonlyConfig, n string) bool {
 }
 
 // apply rebuilds the named backends with r.pins on the running pool,
-// replacing or removing each endpoint, and records which are down.
+// replacing or removing each endpoint, and records which are down. The
+// snapshot is accepted already, so its pins become the ones the pool's
+// backends report tools/list_changed to; a background relist never
+// publishes, so one superseded by this snapshot cannot take that back.
 func (r *ReadonlyServer) apply(ctx context.Context, names []string) {
 	if len(names) == 0 {
 		return
 	}
 	pins, observe := r.observing(r.Applied(), r.cfg, r.pins)
+	if r.pool != nil {
+		r.pool.PublishToolPins(pins)
+	}
 	servers, errs := r.Rebuild(ctx, r.cfg, names, pins, r.pool, r.reject)
 	observe(names, errs)
 	r.markBuilt(names, servers, r.pins.Pins)
@@ -496,7 +607,10 @@ func (r *ReadonlyServer) relistInBackground() {
 	if !r.relisting.CompareAndSwap(false, true) {
 		return
 	}
-	r.bg.Add(1)
+	if !r.addBackground() {
+		r.relisting.Store(false)
+		return
+	}
 	go func() {
 		defer r.bg.Done()
 		defer r.relisting.Store(false)
@@ -550,7 +664,7 @@ func (r *ReadonlyServer) relistNow(only []string) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.add == nil || r.Applied().Version() != snap.Version() || !reflect.DeepEqual(cfg, r.cfg) {
+	if r.add == nil || r.Applied().Version() != snap.Version() || !sameConfig(cfg, r.cfg) {
 		return // superseded by a newer snapshot, which rebuilt what it needed
 	}
 	var listed, failed []string

@@ -249,6 +249,12 @@ func toolsChecks(ctx context.Context, env frontEnv) []doctorCheck {
 			fix = "aimux tools diff " + s + ", then aimux tools approve " + s
 		}
 		for _, p := range wanted[s] {
+			// A builtin set outside the default registry (gh:readonly) is
+			// opt-in: not configured is not a problem, since a builtin cannot
+			// drop it. A default set (jira, slack, google, wiki) still warns.
+			if _, isDefault := toolreg.Default().Sets[s]; !isDefault && s != "wiki:readonly" && errors.Is(err, toolreg.ErrNotConfigured) && slices.Contains(profile.BuiltinNames(), p) {
+				continue
+			}
 			omitted = append(omitted, doctorCheck{ID: "tools.omitted." + p + "." + s, Status: checkWarn,
 				Detail: "profile " + p + " requests " + s + ", which its compile leaves out: " + err.Error(), Fix: fix})
 		}

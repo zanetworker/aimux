@@ -1,0 +1,14 @@
+flowchart LR
+  subgraph SRC["MCP server (Slack, Jira, ...)"]
+    T["tool schema changes"] --> N["notifications/tools/list_changed"]
+  end
+  N --> HB["httpBackend / stdioBackend (T1)<br/>OnToolsChanged"]
+  HB --> PC["ToolPins.Changed(server) (T1)"]
+  PC --> V["Verifier.Invalidate(server)<br/>next call re-lists now,<br/>not up to 60 s later"]
+  PC --> RL["ReadonlyServer recheck(server)<br/>drift: tool hidden"]
+  subgraph REG["tool-sources.yaml (T2)"]
+    A["sources.&lt;name&gt;.authorship<br/>self | internal | outside<br/>empty = outside"]
+  end
+  A --> ST["aimux tools status / add (T2)<br/>CLASS column"]
+  A --> API["GET /v1/tools (T2)<br/>authorship per tool"]
+  A -.-> P3["plan 3: research-with-work<br/>preview queries after outside text"]

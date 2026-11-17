@@ -19,6 +19,18 @@ type Backend interface {
 	Close() error
 }
 
+// ToolsChangedNotifier is a Backend that reports its server's
+// notifications/tools/list_changed. Each registered callback runs on the
+// client's notification goroutine and must not block.
+type ToolsChangedNotifier interface {
+	OnToolsChanged(func())
+}
+
+var (
+	_ ToolsChangedNotifier = (*httpBackend)(nil)
+	_ ToolsChangedNotifier = (*stdioBackend)(nil)
+)
+
 // RequestError is a backend's JSON-RPC error answer to a call (unknown
 // tool, invalid params). The server is healthy, so the pool keeps it.
 type RequestError struct {
@@ -54,6 +66,14 @@ type PoolOptions struct {
 	PerSession map[string]bool
 	// OnStart runs after a backend starts, e.g. to refresh the catalog.
 	OnStart func(server string, b Backend)
+	// KeepIdle makes Reap leave shared backends running however long they
+	// are unused (per-session ones still end with their session), for a
+	// pool whose backends must keep listening for notifications.
+	KeepIdle bool
+	// BeforeReady runs after a backend starts and before any caller can
+	// use it, e.g. to subscribe to its notifications. It delays every
+	// caller waiting on the start, so it must not block.
+	BeforeReady func(server string, b Backend)
 	// Now is the clock, for tests.
 	Now func() time.Time
 }
@@ -84,6 +104,9 @@ type Pool struct {
 	closed bool
 	// calls counts each client session's calls in flight, on any server.
 	calls map[string]int
+	// pins is the ToolPins the last read-only build on this pool used: the
+	// ones a backend's tools/list_changed is reported to (BuildReadonly).
+	pins atomic.Pointer[toolPinsRef]
 }
 
 var (
@@ -217,6 +240,9 @@ func (p *Pool) startSlot(k slotKey, s *slot) {
 				_ = r.b.Close()
 			}
 		}()
+	}
+	if err == nil && b != nil && p.opt.BeforeReady != nil {
+		p.opt.BeforeReady(k.server, b)
 	}
 	var abandoned Backend // closed after unlocking: shutdown can take seconds
 	p.mu.Lock()
@@ -369,7 +395,7 @@ func (p *Pool) Reap(idle time.Duration) int {
 		}
 		// A per-session backend ends with its session (CloseSession), as a
 		// direct server ends with its Claude Code process.
-		if k.session == "" && s.err == nil && s.inflight == 0 && now.Sub(s.lastUsed) > idle {
+		if k.session == "" && !p.opt.KeepIdle && s.err == nil && s.inflight == 0 && now.Sub(s.lastUsed) > idle {
 			delete(p.slots, k)
 			victims = append(victims, s.backend)
 		}

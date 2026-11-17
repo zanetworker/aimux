@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -17,9 +18,46 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zanetworker/aimux/internal/clipack"
+	"github.com/zanetworker/aimux/internal/httpsource"
+	"github.com/zanetworker/aimux/internal/keyring"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/toolgateway"
+	aimuxtools "github.com/zanetworker/aimux/sandbox/aimux-tools"
 )
+
+// The tool runner's GitHub provider: created from the Keychain item with
+// aimux's trimmed profile (sandbox/aimux-tools/github-profile.yaml), whose
+// id is not the built-in "github" so that one is never attached.
+const (
+	runnerProvider     = "aimux-github"
+	runnerProfile      = "aimux-github"
+	runnerKeychainItem = "aimux-github"
+	runnerTokenEnv     = "GITHUB_TOKEN" //nolint:gosec // G101: the env var name, not a credential
+)
+
+// secretStore is the platform's secret store (keyring.System): the
+// Keychain on macOS, the Secret Service on Linux, none elsewhere. Probe
+// (keyring.Probe) tells a missing item, (false, nil), from a store that
+// could not be asked, an error; on macOS it reads no secret. A nil func
+// finds nothing.
+type secretStore struct {
+	GOOS   string
+	Probe  func(service string) (bool, error)
+	Lookup func(ctx context.Context, service string) (string, error)
+}
+
+func defaultSecretStore() secretStore {
+	return secretStore{
+		GOOS:   runtime.GOOS,
+		Probe:  keyring.Probe,
+		Lookup: func(ctx context.Context, service string) (string, error) { return keyring.System(service).Lookup(ctx) },
+	}
+}
+
+// runnerSpecs lists an http-openapi source's operations for status's
+// runner compile; a var so tests can make it fail.
+var runnerSpecs = httpsource.SourceOperations
 
 // sandboxSchemaVersion is the schema of `aimux sandbox status --json`.
 const sandboxSchemaVersion = "1"
@@ -44,15 +82,18 @@ func newSandboxCmd() *cobra.Command { return newSandboxCmdWith(defaultBrowserEnv
 func newSandboxCmdWith(env browserEnv) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sandbox",
-		Short: "The OpenShell sandboxes profiles run in: status, setup (image and provider) and verify",
+		Short: "The OpenShell sandboxes profiles and the tool runner run in: status, setup (images and providers) and verify",
 		Long: "Profiles that run in a sandbox (research, work-readonly) get one sandbox each, aimux-<profile>, which\n" +
 			"aimux remote serve creates on first use and updates when the compiled policy changes. These commands\n" +
 			"check and prepare what those sandboxes need; none of them creates a sandbox, except verify, which\n" +
-			"ensures aimux-work-readonly as serve does.",
+			"ensures aimux-work-readonly as serve does.\n\n" +
+			"The tool runner, aimux-tools, is the sandbox cli and http-openapi tools run in.\n" +
+			"The tool gateway creates or updates it on first use with the policy compiled from the approved\n" +
+			"sources; status shows that policy's state.",
 	}
 	status := &cobra.Command{
 		Use:   "status",
-		Short: "Show the sandbox image, provider, OpenShell gateway and each sandboxed profile's policy state; read-only",
+		Short: "Show the sandbox image, providers (wingman-claude, aimux-github), OpenShell gateway, and each sandboxed profile's and the tool runner aimux-tools' policy state; read-only",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return sandboxStatus(c.Context(), env, profileDir(), c.OutOrStdout(), c.ErrOrStderr())
@@ -61,7 +102,7 @@ func newSandboxCmdWith(env browserEnv) *cobra.Command {
 	var sandboxDir string
 	setup := &cobra.Command{
 		Use:   "setup",
-		Short: "Build the sandbox image and create the provider when missing; never creates sandboxes",
+		Short: "Build the sandbox and tool runner images and create the providers when missing (aimux-github only when its token is in the secret store); never creates sandboxes",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			out := c.OutOrStdout()
@@ -71,7 +112,7 @@ func newSandboxCmdWith(env browserEnv) *cobra.Command {
 				return err
 			}
 			if !did {
-				say("Nothing to do: %s and provider %s are present.", wingmanImage, wingmanProvider)
+				say("Nothing to do: %s, %s and providers %s, %s are present.", wingmanImage, profile.RunnerImage, wingmanProvider, runnerProvider)
 			}
 			say("aimux remote serve creates each profile's sandbox on first use (aimux sandbox status shows them).")
 			return nil
@@ -95,10 +136,12 @@ func defaultSandboxDir(home string) string {
 	return filepath.Join(home, "go/src/github.com/zanetworker/wingman/sandbox")
 }
 
-// sandboxSetup builds the sandbox image and imports the provider profile
-// and creates the provider, each only when missing; it starts the OpenShell
-// gateway when it is down (env.Health). It reports whether it did anything.
-// rerun is the command the Keychain instructions tell the owner to run again.
+// sandboxSetup builds the sandbox image and the tool runner image (on top
+// of it), imports the provider profile and creates the provider, then the
+// runner's GitHub provider (runnerSetup), each only when missing; it starts
+// the OpenShell gateway when it is down (env.Health). It reports whether it
+// did anything, or found something the owner must do. rerun is the command
+// the Keychain instructions tell the owner to run again.
 func sandboxSetup(ctx context.Context, env browserEnv, sandboxDir, rerun string, say func(string, ...any)) (bool, error) {
 	if err := env.Health(ctx); err != nil {
 		return false, fmt.Errorf("OpenShell gateway: %w", err)
@@ -109,6 +152,16 @@ func sandboxSetup(ctx context.Context, env browserEnv, sandboxDir, rerun string,
 		say("Building %s from %s", wingmanImage, sandboxDir)
 		if _, err := env.Run(ctx, nil, "podman", "build", "-t", wingmanImage, "-f", filepath.Join(sandboxDir, "Containerfile"), sandboxDir); err != nil {
 			return did, fmt.Errorf("build the sandbox image: %w", err)
+		}
+	}
+	if _, err := env.Run(ctx, nil, "podman", "image", "exists", profile.RunnerImage); err != nil {
+		did = true
+		say("Building %s", profile.RunnerImage)
+		if err := withFile("Containerfile", aimuxtools.Containerfile, func(path string) error {
+			_, err := env.Run(ctx, nil, "podman", "build", "-t", profile.RunnerImage, "-f", path, filepath.Dir(path))
+			return err
+		}); err != nil {
+			return did, fmt.Errorf("build the tool runner image: %w", err)
 		}
 	}
 
@@ -128,28 +181,140 @@ func sandboxSetup(ctx context.Context, env browserEnv, sandboxDir, rerun string,
 	if err != nil {
 		return did, fmt.Errorf("list providers: %w", err)
 	}
-	if hasTableName(providers, wingmanProvider) {
-		return did, nil
+	if !hasTableName(providers, wingmanProvider) {
+		did = true
+		if err := createWingmanProvider(ctx, env, rerun, say); err != nil {
+			return did, err
+		}
 	}
+	if !hasTableName(providers, runnerProvider) {
+		did = true
+		if err := runnerSetup(ctx, env, profiles, rerun, say); err != nil {
+			return did, err
+		}
+	}
+	return did, nil
+}
+
+// createWingmanProvider creates wingman-claude from its Keychain item.
+func createWingmanProvider(ctx context.Context, env browserEnv, rerun string, say func(string, ...any)) error {
 	tok, err := env.Run(ctx, nil, "security", "find-generic-password", "-s", wingmanKeychainItem, "-w")
 	tok = strings.TrimSpace(tok)
 	var ec interface{ ExitCode() int }
 	if err != nil && (!errors.As(err, &ec) || ec.ExitCode() != securityItemNotFound) {
-		return did, fmt.Errorf("read Keychain item %s: %s", wingmanKeychainItem, redact(err.Error(), tok))
+		return fmt.Errorf("read Keychain item %s: %s", wingmanKeychainItem, redact(err.Error(), tok))
 	}
 	if err != nil || tok == "" {
 		say("The Claude token for Wingman is not in the Keychain (item %s). Run:", wingmanKeychainItem)
 		say("  claude setup-token")
 		say("  security add-generic-password -U -a \"$USER\" -s %s -w", wingmanKeychainItem)
 		say("then run `%s` again.", rerun)
-		return did, errors.New("missing Keychain item " + wingmanKeychainItem)
+		return errors.New("missing Keychain item " + wingmanKeychainItem)
 	}
 	say("Creating provider %s", wingmanProvider)
 	if _, err := env.Run(ctx, []string{tokenEnv + "=" + tok}, openshell("provider", "create", "--name", wingmanProvider, "--type", wingmanProfile, "--credential", tokenEnv)...); err != nil {
 		// The child's stderr may echo the credential: redact it.
-		return true, fmt.Errorf("create provider %s: %s", wingmanProvider, redact(err.Error(), tok))
+		return fmt.Errorf("create provider %s: %s", wingmanProvider, redact(err.Error(), tok))
 	}
-	return true, nil
+	return nil
+}
+
+// runnerSetup creates the tool runner's provider aimux-github when the
+// platform secret store (env.RunnerKey) has the item aimux-github, after
+// linting and importing aimux's trimmed GitHub profile if profiles (the
+// list-profiles output) lacks it. The token goes to openshell in the
+// environment only. Without the item, or without a secret store on this
+// platform, it says how to add the item and succeeds: gh tools are
+// optional. It probes first (keyring.Probe), so an absent item is never
+// read; a probe or read that fails for any reason but not-found (a timeout,
+// an access error, a locked store) fails setup, naming the store and item.
+func runnerSetup(ctx context.Context, env browserEnv, profiles, rerun string, say func(string, ...any)) error {
+	st := env.RunnerKey
+	present := false
+	if st.Probe != nil && st.Lookup != nil {
+		var err error
+		if present, err = st.Probe(runnerKeychainItem); err != nil {
+			// keyring errors name the store and an exit status, never the value.
+			return fmt.Errorf("check %s item %s: %w", storeName(st.GOOS), runnerKeychainItem, err)
+		}
+	}
+	var tok string
+	if present {
+		var err error
+		tok, err = st.Lookup(ctx, runnerKeychainItem)
+		if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return fmt.Errorf("read %s item %s: %w", storeName(st.GOOS), runnerKeychainItem, err)
+		}
+		present = err == nil // not found: removed between the probe and the read
+	}
+	if !present {
+		sayAddRunnerToken(st.GOOS, rerun, say)
+		return nil
+	}
+	if !hasTableName(profiles, runnerProfile) {
+		say("Importing provider profile %s", runnerProfile)
+		if err := withFile("github-profile.yaml", aimuxtools.GitHubProfile, func(path string) error {
+			if _, err := env.Run(ctx, nil, openshell("profile", "lint", "-f", path)...); err != nil {
+				return fmt.Errorf("lint: %w", err)
+			}
+			_, err := env.Run(ctx, nil, openshell("profile", "import", "-f", path)...)
+			return err
+		}); err != nil {
+			return fmt.Errorf("import provider profile %s: %w", runnerProfile, err)
+		}
+	}
+	say("Creating provider %s", runnerProvider)
+	if _, err := env.Run(ctx, []string{runnerTokenEnv + "=" + tok}, openshell("provider", "create", "--name", runnerProvider, "--type", runnerProfile, "--credential", runnerTokenEnv)...); err != nil {
+		// The child's stderr may echo the credential: redact it.
+		return fmt.Errorf("create provider %s: %s", runnerProvider, redact(err.Error(), tok))
+	}
+	return nil
+}
+
+// storeName names goos's secret store for messages.
+func storeName(goos string) string {
+	switch goos {
+	case "darwin":
+		return "Keychain"
+	case "linux":
+		return "Secret Service"
+	}
+	return "secret store"
+}
+
+// sayAddRunnerToken says how to store the GitHub token for goos's secret
+// store, or that this platform has none.
+func sayAddRunnerToken(goos, rerun string, say func(string, ...any)) {
+	const kind = "a fine-grained personal access token (public repositories, read-only, no account or organization permissions)"
+	switch goos {
+	case "darwin":
+		say("The GitHub token for the gh tools is not in the Keychain (item %s), so provider %s is not created.", runnerKeychainItem, runnerProvider)
+		say("Create %s, then run:", kind)
+		say("  security add-generic-password -U -a \"$USER\" -s %s -w", runnerKeychainItem)
+	case "linux":
+		say("The GitHub token for the gh tools is not in the Secret Service (service %s), so provider %s is not created.", runnerKeychainItem, runnerProvider)
+		say("Create %s, then run (secret-tool is in libsecret-tools):", kind)
+		say("  secret-tool store --label %s service %s", runnerKeychainItem, runnerKeychainItem)
+	default:
+		say("This platform has no supported secret store for the GitHub token (item %s), so provider %s is not created.", runnerKeychainItem, runnerProvider)
+		return
+	}
+	say("and run `%s` again.", rerun)
+}
+
+// withFile writes data to name in a new private temp directory, runs fn
+// with its path and removes the directory.
+func withFile(name string, data []byte, fn func(path string) error) error {
+	dir, err := os.MkdirTemp("", "aimux-tools-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return fn(path)
 }
 
 // component is one thing status checks: its name, a status word and why
@@ -163,7 +328,7 @@ type component struct {
 // profileSandbox is one sandboxed profile's sandbox in status. Exists is
 // null when the gateway could not be asked.
 type profileSandbox struct {
-	Profile        string `json:"profile"`
+	Profile        string `json:"profile,omitempty"`
 	Sandbox        string `json:"sandbox"`
 	Exists         *bool  `json:"exists"`
 	State          string `json:"state"`
@@ -173,12 +338,16 @@ type profileSandbox struct {
 }
 
 type sandboxReport struct {
-	SchemaVersion string           `json:"schema_version"`
-	Image         component        `json:"image"`
-	Provider      component        `json:"provider"`
-	Gateway       component        `json:"gateway"`
-	Profiles      []profileSandbox `json:"profiles"`
-	Next          []string         `json:"next"`
+	SchemaVersion string    `json:"schema_version"`
+	Image         component `json:"image"`
+	Provider      component `json:"provider"`
+	// RunnerProvider is aimux-github, the gh pack's provider in the tool
+	// runner; missing is only a Next step when an approved source needs it.
+	RunnerProvider component        `json:"runner_provider"`
+	Gateway        component        `json:"gateway"`
+	Profiles       []profileSandbox `json:"profiles"`
+	Runner         profileSandbox   `json:"runner"` // aimux-tools; profile is empty
+	Next           []string         `json:"next"`
 }
 
 // collectSandboxStatus checks everything status shows. It only reads:
@@ -187,7 +356,8 @@ type sandboxReport struct {
 // never migrates or writes). It never starts the gateway.
 func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string) sandboxReport {
 	r := sandboxReport{SchemaVersion: sandboxSchemaVersion, Next: []string{},
-		Image: component{Name: wingmanImage}, Provider: component{Name: wingmanProvider}, Gateway: component{Name: "local"}}
+		Image: component{Name: wingmanImage}, Provider: component{Name: wingmanProvider}, RunnerProvider: component{Name: runnerProvider},
+		Gateway: component{Name: "local"}}
 	next := func(s string) {
 		if !slices.Contains(r.Next, s) {
 			r.Next = append(r.Next, s)
@@ -208,29 +378,70 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 
 	var sandboxes string
 	var listErr error
+	var providers *string // the gateway's provider list, when it listed
 	gwErr := func() error { _, err := env.Run(ctx, nil, openshell("status")...); return err }()
 	if gwErr != nil {
 		r.Gateway.Status, r.Gateway.Error = "unreachable", clipText(gwErr.Error(), 300)
-		r.Provider.Status = "unknown"
+		r.Provider.Status, r.RunnerProvider.Status = "unknown", "unknown"
 		next("start the OpenShell gateway (openshell-gateway --config ~/.config/openshell/gateway-podman.toml; aimux sandbox setup and remote serve start it too), then aimux sandbox status")
 	} else {
 		r.Gateway.Status = "reachable"
-		switch out, err := env.Run(ctx, nil, openshell("provider", "list")...); {
+		out, err := env.Run(ctx, nil, openshell("provider", "list")...)
+		if err == nil {
+			list := out // its own copy: out is reused for sandbox list below
+			providers = &list
+		}
+		switch {
 		case err != nil:
 			r.Provider.Status, r.Provider.Error = "unknown", clipText(err.Error(), 300)
-		case hasTableName(out, wingmanProvider):
-			r.Provider.Status = "present"
+			r.RunnerProvider.Status, r.RunnerProvider.Error = "unknown", r.Provider.Error
 		default:
-			r.Provider.Status = "missing"
-			next("aimux sandbox setup")
+			r.Provider.Status, r.RunnerProvider.Status = "present", "present"
+			if !hasTableName(out, wingmanProvider) {
+				r.Provider.Status = "missing"
+				next("aimux sandbox setup")
+			}
+			if !hasTableName(out, runnerProvider) {
+				r.RunnerProvider.Status = "missing"
+			}
 		}
-		out, err := env.Run(ctx, nil, openshell("sandbox", "list")...)
+		out, err = env.Run(ctx, nil, openshell("sandbox", "list")...)
 		if err != nil {
 			listErr = err
 			r.Gateway.Error = "sandbox list failed: " + clipText(err.Error(), 300)
 			next("openshell -g local sandbox list (it failed; see the gateway line), then aimux sandbox status")
 		}
 		sandboxes = out
+	}
+
+	// sandboxState is one sandbox's row: compiled is its compiled digest,
+	// err why it does not compile, hint the Next line for that error.
+	sandboxState := func(name, sandbox, compiled string, err error, hint string) profileSandbox {
+		p := profileSandbox{Profile: name, Sandbox: sandbox}
+		if b, err := os.ReadFile(filepath.Join(env.Home, ".aimux", "sandboxes", p.Sandbox+".digest")); err == nil { //nolint:gosec // G304: a digest file under the user's own aimux dir, named from a profile name
+			p.RecordedDigest = strings.TrimSpace(string(b))
+		}
+		if gwErr == nil && listErr == nil {
+			exists := hasTableName(sandboxes, p.Sandbox)
+			p.Exists = &exists
+		}
+		switch {
+		case err != nil:
+			p.State, p.Error = stateError, err.Error()
+			next(hint)
+		case p.Exists == nil:
+			p.CompiledDigest, p.State = compiled, stateUnknown
+			if listErr != nil {
+				p.Error = "sandbox list failed"
+			}
+		case !*p.Exists:
+			p.CompiledDigest, p.State = compiled, stateMissing
+		case p.RecordedDigest == compiled:
+			p.CompiledDigest, p.State = compiled, stateCurrent
+		default:
+			p.CompiledDigest, p.State = compiled, stateStale
+		}
+		return p
 	}
 
 	snap, _, snapErr := toolgateway.NewStore(env.Home).Reload()
@@ -255,35 +466,30 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 		if err != nil {
 			sandbox = "aimux-" + name // no compile to name it; profile.Compile's rule
 		}
-		p := profileSandbox{Profile: name, Sandbox: sandbox}
-		if b, err := os.ReadFile(filepath.Join(env.Home, ".aimux", "sandboxes", p.Sandbox+".digest")); err == nil { //nolint:gosec // G304: a digest file under the user's own aimux dir, named from a profile name
-			p.RecordedDigest = strings.TrimSpace(string(b))
-		}
-		if gwErr == nil && listErr == nil {
-			exists := hasTableName(sandboxes, p.Sandbox)
-			p.Exists = &exists
-		}
-		switch {
-		case err != nil:
-			p.State, p.Error = stateError, err.Error()
-			next("aimux tools status (a profile does not compile; see its error)")
-		case p.Exists == nil:
-			p.CompiledDigest, p.State = c.PolicyDigest, stateUnknown
-			if listErr != nil {
-				p.Error = "sandbox list failed"
-			}
-		case !*p.Exists:
-			p.CompiledDigest, p.State = c.PolicyDigest, stateMissing
-		case p.RecordedDigest == c.PolicyDigest:
-			p.CompiledDigest, p.State = c.PolicyDigest, stateCurrent
-		default:
-			p.CompiledDigest, p.State = c.PolicyDigest, stateStale
-		}
-		r.Profiles = append(r.Profiles, p)
+		r.Profiles = append(r.Profiles, sandboxState(name, sandbox, c.PolicyDigest, err, "aimux tools status (a profile does not compile; see its error)"))
 	}
 	if r.Profiles == nil {
 		r.Profiles = []profileSandbox{}
 	}
+	// Compile as Ensure applies it: sources whose provider the gateway lacks
+	// are left out (unknown providers: compile everything).
+	var have func(string) bool
+	if providers != nil {
+		have = func(p string) bool { return hasTableName(*providers, p) }
+	}
+	rc, dropped, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, have)
+	if r.RunnerProvider.Status == "missing" {
+		for _, e := range dropped {
+			if strings.Contains(e.Error(), "provider "+runnerProvider+" ") {
+				next("aimux sandbox setup") // an approved source needs it
+				break
+			}
+		}
+	}
+	if err == nil && snapErr != nil {
+		err = snapErr
+	}
+	r.Runner = sandboxState("", profile.RunnerSandbox, rc.PolicyDigest, err, "aimux tools status (the tool runner "+profile.RunnerSandbox+" does not compile; see its error)")
 	return r
 }
 
@@ -312,11 +518,16 @@ func sandboxStatus(ctx context.Context, env browserEnv, profileDir string, out, 
 		}
 		line("Image", r.Image)
 		line("Provider", r.Provider)
+		line("Provider", r.RunnerProvider)
 		line("Gateway", r.Gateway)
 		_, _ = fmt.Fprintln(out)
 		tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "PROFILE\tSANDBOX\tPOLICY")
-		for _, p := range r.Profiles {
+		for _, p := range append(slices.Clone(r.Profiles), r.Runner) {
+			name := p.Profile
+			if name == "" {
+				name = "(tool runner)"
+			}
 			s := p.State
 			if t, ok := stateText[s]; ok {
 				s = t
@@ -327,7 +538,7 @@ func sandboxStatus(ctx context.Context, env browserEnv, profileDir string, out, 
 			case p.State == stateUnknown && p.Error != "":
 				s = "unknown (" + p.Error + ")"
 			}
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", p.Profile, p.Sandbox, s)
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", name, p.Sandbox, s)
 		}
 		if err := tw.Flush(); err != nil {
 			return err

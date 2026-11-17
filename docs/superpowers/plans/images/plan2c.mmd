@@ -1,0 +1,20 @@
+flowchart LR
+  subgraph AG["agent sandbox (aimux-work-readonly)"]
+    H["claude -p"]
+  end
+  H -->|"MCP tools/call gh_issue_list<br/>OpenShell protocol: mcp rule (wall 1)"| GW
+  subgraph MAC["aimux on the Mac"]
+    GW["read-only gateway :7390<br/>pin check (wall 2)"]
+    RB["runnerBackend (T5)<br/>argument allowlist, no shell (wall 3)"]
+    GW --> RB
+  end
+  RB -->|"openshell sandbox exec aimux-tools<br/>argv only"| RN
+  subgraph RUN["runner sandbox aimux-tools (T4)"]
+    RN["gh / curl"]
+  end
+  RN -->|"L7: rest read-only, graphql query only,<br/>binary scoped, provider injects token (wall 4)"| API["api.github.com<br/>HTTP sources"]
+  PK["packs/gh.yaml (T2)<br/>commands + flags + fragment"] --> RB
+  PK --> PO["runner policy compile (T4)"]
+  OA["OpenAPI GET operations (T6)"] --> RB
+  OA --> PO
+  PO --> RUN

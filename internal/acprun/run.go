@@ -84,6 +84,8 @@ type Run struct {
 	promptGen     int // counts prompts, so a re-sent cancel never reaches the next one
 
 	beforeCancelRetry func() // test hook, between a retry's check and its send
+
+	images bool // the agent takes image blocks (promptCapabilities.image)
 }
 
 // Start launches the adapter, initializes it and loads sessionID. Updates the
@@ -252,6 +254,7 @@ func launch(ctx context.Context, spec Spec, approve Approver) (*Run, acp.Initial
 		_ = r.Close()
 		return nil, acp.InitializeResponse{}, fmt.Errorf("initialize ACP adapter %s: %w", spec.Command, err)
 	}
+	r.images = init.AgentCapabilities.PromptCapabilities.Image
 	return r, init, nil
 }
 
@@ -264,6 +267,27 @@ func (r *Run) setLoading(v bool) {
 // Prompt sends text and blocks until the agent ends its turn, calling onEvent
 // for each event of this turn. It returns the ACP stop reason.
 func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (string, error) {
+	return r.prompt(ctx, []acp.ContentBlock{acp.TextBlock(text)}, onEvent)
+}
+
+// AcceptsImages reports whether the agent advertised image prompts
+// (promptCapabilities.image) when it was initialized.
+func (r *Run) AcceptsImages() bool { return r.images }
+
+// PromptImage is Prompt with img after the text (a text block, then an
+// image block). It returns ErrNoImages, sending nothing, when the agent
+// does not take images; a nil img is Prompt.
+func (r *Run) PromptImage(ctx context.Context, text string, img *Image, onEvent func(Event)) (string, error) {
+	if img == nil {
+		return r.Prompt(ctx, text, onEvent)
+	}
+	if !r.images {
+		return "", ErrNoImages
+	}
+	return r.prompt(ctx, []acp.ContentBlock{acp.TextBlock(text), acp.ImageBlock(img.Data, img.MimeType)}, onEvent)
+}
+
+func (r *Run) prompt(ctx context.Context, blocks []acp.ContentBlock, onEvent func(Event)) (string, error) {
 	r.promptMu.Lock()
 	defer r.promptMu.Unlock()
 	r.cancelMu.Lock()
@@ -294,7 +318,7 @@ func (r *Run) Prompt(ctx context.Context, text string, onEvent func(Event)) (str
 
 	resp, err := r.conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: r.sessionID,
-		Prompt:    []acp.ContentBlock{acp.TextBlock(text)},
+		Prompt:    blocks,
 	})
 	if err != nil {
 		return "", fmt.Errorf("prompt session %s: %w", r.sessionID, err)
