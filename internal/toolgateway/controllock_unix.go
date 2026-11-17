@@ -16,7 +16,7 @@ func lockControl(path string) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("control socket lock: %w", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: an open file descriptor is a small non-negative int
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, fmt.Errorf("another tool gateway is running (%s is locked)", path)

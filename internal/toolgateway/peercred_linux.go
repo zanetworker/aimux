@@ -19,7 +19,7 @@ func peerUID(c net.Conn) (int, error) {
 	}
 	uid, serr := -1, error(nil)
 	if err := raw.Control(func(fd uintptr) {
-		cred, e := unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+		cred, e := unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED) //nolint:gosec // G115: fd is an open file descriptor, a small non-negative int
 		if e != nil {
 			serr = e
 			return
