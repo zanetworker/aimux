@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/history"
@@ -147,6 +148,10 @@ type newSessionRequest struct {
 	Title    string `json:"title"`
 	PageText string `json:"pageText"`
 	Model    string `json:"model"` // optional turn model: sonnet or opus
+	// Prior is the page's earlier questions asked in another mode, oldest
+	// first (questions only, never answers); at most maxPrior of at most
+	// maxPriorRunes characters each.
+	Prior []string `json:"prior"`
 	// Instance is the caller's browser profile (Wingman), so two browsers
 	// on one page keep separate conversations; "" is the legacy behaviour.
 	Instance string `json:"instance"`
@@ -187,6 +192,22 @@ func checkModel(w http.ResponseWriter, model string) bool {
 	return false
 }
 
+// checkPrior answers more than maxPrior earlier questions, or one longer
+// than maxPriorRunes characters, with 400 bad_request (and false).
+func checkPrior(w http.ResponseWriter, prior []string) bool {
+	if len(prior) > maxPrior {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("prior has at most %d questions", maxPrior))
+		return false
+	}
+	for _, q := range prior {
+		if utf8.RuneCountInString(q) > maxPriorRunes {
+			writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("a prior question is at most %d characters", maxPriorRunes))
+			return false
+		}
+	}
+	return true
+}
+
 // Body limits of POST /v1/sessions: maxSessionBody without a profile (as
 // before profiles), maxProfileBody with one, room for a pageText of
 // maxPageText (decoded, as Wingman caps it) even when JSON escaping makes
@@ -195,6 +216,8 @@ const (
 	maxPageText    = 512 << 10
 	maxSessionBody = 1 << 20
 	maxProfileBody = 4 << 20
+	maxPrior       = 5
+	maxPriorRunes  = 2000
 )
 
 // countingReader counts the bytes read through it.
@@ -220,6 +243,9 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 		return
 	}
 	if !checkInstance(w, req.Instance != "", req.Instance) {
+		return
+	}
+	if !checkPrior(w, req.Prior) {
 		return
 	}
 	all, ok := a.loadProfiles(w)
@@ -264,7 +290,7 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 		a.writeProfileFailure(w, req.Profile, err)
 		return
 	}
-	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model})
+	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model, Prior: req.Prior})
 	done(err == nil)
 	if err != nil {
 		a.writeProfileFailure(w, req.Profile, err)

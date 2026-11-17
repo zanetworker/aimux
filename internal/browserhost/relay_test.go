@@ -1016,3 +1016,26 @@ func TestRelay_RouteReportsStarting(t *testing.T) {
 		t.Fatalf("failing start: %+v", evs)
 	}
 }
+
+func TestRelay_ForwardsPrior(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	acceptOnce(f)
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "p1", Type: "ask", Lane: "page", URL: "https://a.example/", Question: "q", Prior: []string{"one", "two"}})
+	p.until(t, "p1")
+	p.send(t, Request{ID: "p2", Type: "ask", Lane: "page", URL: "https://a.example/", Question: "q"})
+	p.until(t, "p2")
+	posts := f.find("POST", "/v1/sessions")
+	if len(posts) != 2 {
+		t.Fatalf("posts = %+v", posts)
+	}
+	got, _ := posts[0].Body["prior"].([]any)
+	if len(got) != 2 || got[0] != "one" || got[1] != "two" {
+		t.Fatalf("prior = %v", posts[0].Body["prior"])
+	}
+	if _, has := posts[1].Body["prior"]; has {
+		t.Fatalf("prior sent when empty: %v", posts[1].Body)
+	}
+}

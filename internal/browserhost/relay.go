@@ -247,6 +247,9 @@ func (s *relaySession) ask(ctx context.Context, req Request, f *inflight, emit f
 	if req.Model != "" {
 		body["model"] = req.Model // the panel's Sonnet/Opus choice; the server checks it
 	}
+	if len(req.Prior) > 0 {
+		body["prior"] = req.Prior // earlier questions only; the server caps them
+	}
 	if req.Instance != "" {
 		body["instance"] = req.Instance
 	}

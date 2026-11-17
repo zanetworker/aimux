@@ -150,6 +150,21 @@ func WithModel(ctx context.Context, model string) context.Context {
 	return context.WithValue(ctx, modelKey{}, model)
 }
 
+// priorKey carries a turn's earlier questions in its context.
+type priorKey struct{}
+
+// WithPrior returns ctx carrying the user's earlier questions on the page
+// (asked in another mode, oldest first) for the turn's prompt.
+func WithPrior(ctx context.Context, prior []string) context.Context {
+	return context.WithValue(ctx, priorKey{}, prior)
+}
+
+// PriorFrom is the turn's earlier questions in ctx, nil when none.
+func PriorFrom(ctx context.Context) []string {
+	p, _ := ctx.Value(priorKey{}).([]string)
+	return p
+}
+
 // ModelFrom is the turn's model choice in ctx, "" when none.
 func ModelFrom(ctx context.Context) string {
 	m, _ := ctx.Value(modelKey{}).(string)

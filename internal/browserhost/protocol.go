@@ -15,6 +15,9 @@ type Request struct {
 	Question string `json:"question,omitempty"`
 	Query    string `json:"query,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// Prior is the page's earlier questions from another mode (questions
+	// only), sent on the first ask after a mode change.
+	Prior []string `json:"prior,omitempty"`
 	// Instance is the panel's browser profile id, so each browser keeps its
 	// own conversations; a malformed one is ignored (legacy behaviour).
 	Instance string `json:"instance,omitempty"`

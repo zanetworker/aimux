@@ -1736,6 +1736,7 @@ components:
         pageText: { type: string, description: "With profile: the page's text for a new session, at most 512 KiB (else 413 page_too_large). Ignored when the session continues." }
         model: { type: string, enum: [sonnet, opus], description: "With profile: this turn's model; omitted keeps the profile's default. Any other value is 400 bad_request." }
         instance: { type: string, pattern: "^[A-Za-z0-9-]{1,64}$", description: "With profile: the caller's instance (Wingman's per-browser-profile id), recorded on the session, so two browsers on one page keep separate conversations. Omitted continues only sessions started without one. Not matching the pattern is 400 bad_request." }
+        prior: { type: array, maxItems: 5, items: { type: string, maxLength: 2000 }, description: "With profile: the page's earlier questions asked in another mode (Auto or a mode change), oldest first, questions only and never answers. The turn's prompt lists them before the question as untrusted context. At most 5 of at most 2000 characters each (else 400 bad_request). Sent by the caller on the first question in a mode after a change; honored on any turn it is present." }
         originOnly: { type: boolean, description: "With profile: a sandbox session's first prompt names only the URL's scheme://host[:port], while the session is still kept and continued under the full url. Requests with and without it never continue each other's session. Wingman sets it for Research on a private page without its text." }
         routed:
           type: object
