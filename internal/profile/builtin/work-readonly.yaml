@@ -1,7 +1,7 @@
 name: work-readonly
 harness: claude-code
 runs: sandbox
-tools: [wiki:readonly, jira:readonly, slack:readonly, google:readonly]
+tools: [wiki:readonly, jira:readonly, slack:readonly, google:readonly, gh:readonly]
 network:
   default: deny
   allow: [model, gateway]

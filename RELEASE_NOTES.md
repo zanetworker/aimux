@@ -47,7 +47,7 @@ Also:
 ### Profiles
 
 - **Format.** `name`, `extends`, `harness`, `model`, `runs` (`host`, `acp`, `sandbox`, `run`), `tools`, `network`, `files`, `credentials`, `settings` and `roles`. Files are read from `$AIMUX_PROFILE_DIR` or `~/.config/aimux/profiles`; unknown fields, a name that differs from the file name and a name that shadows a builtin are errors.
-- **Builtins:** `page`, `work-readonly`, `research`, `coding` and `base`. `research` runs in a sandbox with no tools and network `deny`, allowing `model` and `web`. `research-with-work` is listed but unavailable (`409 profile_not_available`) until a later release.
+- **Builtins:** `page`, `work-readonly`, `research`, `coding` and `base`. `work-readonly` also asks for `gh:readonly`, used once you add and approve the `gh` source (`aimux tools add cli gh`); until then it is left out and `aimux doctor` does not report it. `research` runs in a sandbox with no tools and network `deny`, allowing `model` and `web`. `research-with-work` is listed but unavailable (`409 profile_not_available`) until a later release.
 - **Narrow-only inheritance.** A child may drop tools, network, files and credentials, never add them, and may not switch `network.default` from `deny` to `allow`, inherit your settings or change the harness. `runs` may only move toward more isolation. User profiles must declare `extends`.
 - **Commands.** `aimux profile list`, `show <name>`, `check <name>` (exit 1 and the field that widens) and `migrate`, all with `--json`.
 - **Enforced and cooperative.** The OpenShell policy (egress, MCP methods and tool names, files) and the tool gateway are enforced outside the agent; the harness config only mirrors them.

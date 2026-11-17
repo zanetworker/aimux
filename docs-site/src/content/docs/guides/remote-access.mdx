@@ -444,7 +444,7 @@ The read-only tool gateway listens on `127.0.0.1:7390`. It starts on the first s
 
 ### Which tools a profile gets
 
-`GET /v1/tools` explains, for the tool sets the profiles in your client's scope request, what a turn is granted now. Wingman, for example, sees the sets of `work-readonly` (`wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly`); `cli` sees the sets of every profile. It is read-only: it reads the tool snapshot the next turn compiles against (reloading it when `tool-sources.yaml` or the pins changed, as a turn would; a reload never writes a file, and `readonly.json` is migrated only when `remote serve` starts) and what the tool gateway itself last listed. It never contacts a backend and never starts the gateway. Servers that offer it list the `tools` capability on `GET /v1/health`.
+`GET /v1/tools` explains, for the tool sets the profiles in your client's scope request, what a turn is granted now. Wingman, for example, sees the sets of `work-readonly` (`wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly`, `gh:readonly`; `gh:readonly` shows as not configured until you add the `gh` source); `cli` sees the sets of every profile. It is read-only: it reads the tool snapshot the next turn compiles against (reloading it when `tool-sources.yaml` or the pins changed, as a turn would; a reload never writes a file, and `readonly.json` is migrated only when `remote serve` starts) and what the tool gateway itself last listed. It never contacts a backend and never starts the gateway. Servers that offer it list the `tools` capability on `GET /v1/health`.
 
 ```bash
 curl --unix-socket ~/.aimux/clients/wingman.sock http://aimux.local/v1/tools   # as Wingman

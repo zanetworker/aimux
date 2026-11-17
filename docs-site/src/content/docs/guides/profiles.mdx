@@ -23,7 +23,7 @@ A bad file is skipped and reported (one line on stderr per file, or in the `remo
 ```yaml
 name: my-notes
 extends: builtin:work-readonly
-tools: [wiki:readonly]          # narrower than the parent's four sets
+tools: [wiki:readonly]          # narrower than the parent's five sets
 network: { default: deny, allow: [model, gateway] }
 settings: { inherit_user: false }
 ```
@@ -66,7 +66,7 @@ Every resolved profile has a digest: `sha256:` and the hash of its canonical JSO
 |---|---|---|---|---|
 | `base` | `host` | none | `deny`, allow `model` | yes |
 | `page` | `acp` | none | `deny`, allow `model` | yes |
-| `work-readonly` | `sandbox` | `wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly` | `deny`, allow `model` and `gateway` | yes |
+| `work-readonly` | `sandbox` | `wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly`, `gh:readonly` (opt-in: used once you run `aimux tools add cli gh` and approve it) | `deny`, allow `model` and `gateway` | yes |
 | `coding` | `host` | none declared | `allow` | yes |
 | `research` | `sandbox` | none | `deny`, allow `model` and `web` | yes |
 | `research-with-work` | `run` | none | `deny`, allow `model` | not yet |

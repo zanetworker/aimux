@@ -66,9 +66,9 @@ type Compiled struct {
 	// Providers are the OpenShell providers attached at sandbox create:
 	// [Provider] for a profile sandbox, the sources' credentials for the
 	// tool runner.
-	Providers []string
-	Harness         string // Manifest.Harness: the adapter the engines launch
-	PolicyYAML      []byte
+	Providers  []string
+	Harness    string // Manifest.Harness: the adapter the engines launch
+	PolicyYAML []byte
 	// Grant is the MCP tools the policy allows, the gateway token scopes
 	// and the harness lists (through Capabilities).
 	Grant       ToolGrant
@@ -270,15 +270,15 @@ type binary struct {
 }
 
 type endpoint struct {
-	Host        string    `yaml:"host"`
-	Port        int       `yaml:"port"`
-	Path        string    `yaml:"path,omitempty"`
-	Protocol    string    `yaml:"protocol"`
-	Enforcement string    `yaml:"enforcement"`
-	Access      string    `yaml:"access,omitempty"`
-	MCP         *mcpOpts  `yaml:"mcp,omitempty"`
-	AllowedIPs  []string  `yaml:"allowed_ips,omitempty"`
-	Rules       []rule    `yaml:"rules,omitempty"`
+	Host        string   `yaml:"host"`
+	Port        int      `yaml:"port"`
+	Path        string   `yaml:"path,omitempty"`
+	Protocol    string   `yaml:"protocol"`
+	Enforcement string   `yaml:"enforcement"`
+	Access      string   `yaml:"access,omitempty"`
+	MCP         *mcpOpts `yaml:"mcp,omitempty"`
+	AllowedIPs  []string `yaml:"allowed_ips,omitempty"`
+	Rules       []rule   `yaml:"rules,omitempty"`
 }
 
 type mcpOpts struct {

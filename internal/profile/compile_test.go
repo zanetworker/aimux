@@ -740,3 +740,30 @@ func TestCompile_CLISetInGrant(t *testing.T) {
 		t.Errorf("policy has no /mcp/gh rule:\n%s", c.PolicyYAML)
 	}
 }
+
+// work-readonly asks for gh:readonly too; without a configured, pinned gh
+// source that set is left out and the profile still compiles from the rest.
+func TestCompile_WorkReadonlyIncludesGHAndLeavesItOutWhenUnconfigured(t *testing.T) {
+	m := workReadonly(t)
+	if !slices.Contains(m.Tools, "gh:readonly") {
+		t.Fatalf("work-readonly tools = %v, want gh:readonly", m.Tools)
+	}
+	c, err := Compile(m, testSets(), testGW)
+	if err != nil {
+		t.Fatalf("compile without a gh source: %v", err)
+	}
+	if slices.Contains(c.Grant.Servers(), "gh") {
+		t.Fatalf("gh granted without a gh source: %v", c.Grant.Servers())
+	}
+	withGH := pinnedSets(toolgateway.Pins{
+		"wiki": {"read_page": "a"}, "jira": {"search": "c"}, "slack": {"history": "e"},
+		"google": {"get_doc": "f"}, "gh": {"gh_issue_list": "g"},
+	})
+	c, err = Compile(m, withGH, testGW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(c.Grant.Servers(), "gh") || !strings.Contains(string(c.PolicyYAML), "/mcp/gh") {
+		t.Fatalf("gh not granted with a pinned gh source: %v", c.Grant.Servers())
+	}
+}
