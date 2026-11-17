@@ -76,7 +76,7 @@ func TestRemoveMember_KeepsOtherBytes(t *testing.T) {
 }
 
 func TestDefinitionError_NamesWithout(t *testing.T) {
-	_, err := httpHeaders(t.Context(), "pp", ServerConfig{Type: "http", URL: "https://x", HeaderNames: []string{"A"}}, secretsOf(nil))
+	_, err := httpHeaders(t.Context(), "pp", ServerConfig{Type: "http", URL: "https://x", Secrets: keychainHeaderRefs("pp", []string{"A"})}, secretsOf(nil))
 	if err == nil || !strings.Contains(err.Error(), "uninstall --without pp") {
 		t.Fatalf("err = %v", err)
 	}
@@ -89,13 +89,9 @@ func TestLoadClaudeHTTP_URLVariableInQueryKeptDirect(t *testing.T) {
 	for _, u := range []string{"https://x.example/mcp?key=${AIMUX_URL_TOK}", "https://u:${AIMUX_URL_TOK}@x.example/mcp"} {
 		p := writeClaude(t, `{"q":{"type":"http","url":"`+u+`"}}`)
 		got, kept, err := LoadClaudeHTTPServers(p, 7381, true)
-		if err != nil || len(got) != 0 || keptReason(kept, "q") != "uses ${AIMUX_URL_TOK} in its URL (query or userinfo); keep it direct until URL secrets are supported" {
+		if err != nil || len(got) != 0 || keptReason(kept, "q") != "uses ${AIMUX_URL_TOK} in its URL; keep it direct until Plan 4c" {
 			t.Fatalf("%s: got %v kept %v err %v", u, got, kept, err)
 		}
-	}
-	p := writeClaude(t, `{"h":{"type":"http","url":"https://${AIMUX_URL_TOK}.example/mcp"}}`)
-	if got, _, _ := LoadClaudeHTTPServers(p, 7381, true); len(got) != 1 {
-		t.Fatal("a variable in the host should still move")
 	}
 }
 

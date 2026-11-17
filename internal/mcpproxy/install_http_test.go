@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -226,7 +227,7 @@ func TestInstall_MovesHTTPEntry(t *testing.T) {
 	}
 	servers, _, err := LoadServerFile(fx.servers)
 	must(t, err)
-	if d := servers["pp"]; d.Type != "http" || d.URL != "https://pp.example/mcp" || strings.Join(d.HeaderNames, ",") != "Authorization" {
+	if d := servers["pp"]; d.Type != "http" || d.URL != "https://pp.example/mcp" || !reflect.DeepEqual(d.Secrets, keychainHeaderRefs("pp", []string{"Authorization"})) {
 		t.Fatalf("pp def %+v", d)
 	}
 	item, err := decodeHeaderSecret(fx.vault.items[HeaderService("pp")])
@@ -694,5 +695,80 @@ func TestRedactConfig_DuplicatesRefused(t *testing.T) {
 		if _, err := redactConfig([]byte(cfg), e); err == nil {
 			t.Fatalf("accepted %s", cfg)
 		}
+	}
+}
+
+func TestInstall_HeaderedHTTPNeedsCurrentDaemon(t *testing.T) {
+	fx := newHTTPFX(t, `{"mcpServers":{"slack":{"command":"slack-mcp","args":[]}}}`)
+	must(t, fx.in.Install(nil))
+	fx.in.Version, fx.daemonVersion = "1.2.0", "1.1.0"
+	fx.setEntry("pp", json.RawMessage(`{"type": "http", "url": "https://pp.example/mcp", "headers": {"Authorization": "Bearer x-1"}}`))
+	before, _ := os.ReadFile(fx.claude) // #nosec G304 -- the test's temp config
+	err := fx.in.Install(nil)
+	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+		t.Fatalf("err = %v", err)
+	}
+	after, _ := os.ReadFile(fx.claude) // #nosec G304 -- the test's temp config
+	if string(before) != string(after) || len(fx.vault.items) != 0 {
+		t.Fatal("something changed")
+	}
+	fx.daemonVersion = "1.2.0"
+	must(t, fx.in.Install(nil))
+}
+
+func TestInstall_StdioMoveWithSavedHTTPNeedsCurrentDaemon(t *testing.T) {
+	fx := newHTTPFX(t, httpClaude)
+	must(t, fx.in.Install(nil))
+	fx.in.Version, fx.daemonVersion = "1.2.0", "1.1.0"
+	fx.setEntry("pypi", json.RawMessage(`{"command": "pypi-mcp", "args": []}`))
+	if err := fx.in.Install(nil); err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEdit_SavedHTTPNeedsCurrentDaemon(t *testing.T) {
+	dir := t.TempDir()
+	manifest, servers := dir+"/m.json", dir+"/s.json"
+	m := &Manifest{Version: manifestVersion, Port: 7381, Servers: map[string]MovedEntry{"st": {Original: `{}`, Written: `{}`}}}
+	must(t, saveManifest(manifest, m))
+	must(t, SaveServerFile(servers, map[string]ServerConfig{"st": {Command: "x"}, "dw": {Type: "http", URL: "https://x"}}, []string{"st", "dw"}))
+	status := func() (StatusReport, error) { return StatusReport{Running: true, Version: "1.1.0"}, nil }
+	err := EditServer(context.Background(), EditOptions{Server: "st", ManifestPath: manifest, ServersPath: servers, Status: status, Version: "1.2.0"})
+	if err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestInstall_RemovedServerWithOldDaemonChangesNothing(t *testing.T) {
+	fx := newHTTPFX(t, httpClaude)
+	must(t, fx.in.Install(nil))
+	fx.in.Version, fx.daemonVersion = "1.2.0", "1.1.0"
+	must(t, jsonedit.EditKeyVerbatim(fx.claude, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
+		return removeMember(old, "slack")
+	}))
+	before, _ := os.ReadFile(fx.servers) // #nosec G304 -- the test's temp file
+	if err := fx.in.Install(nil); err == nil || !strings.Contains(err.Error(), "aimux mcp proxy restart") {
+		t.Fatalf("err = %v", err)
+	}
+	after, _ := os.ReadFile(fx.servers) // #nosec G304 -- the test's temp file
+	if string(before) != string(after) {
+		t.Fatal("servers file rewritten under an older daemon")
+	}
+}
+
+func TestCheckDaemonReadsHTTP(t *testing.T) {
+	old := func() (StatusReport, error) { return StatusReport{Running: true, Version: "1.1.0"}, nil }
+	if err := CheckDaemonReadsHTTP(old, "1.2.0", map[string]ServerConfig{"dw": {Type: "http"}}); err == nil {
+		t.Fatal("older daemon with HTTP definitions accepted")
+	}
+	if err := CheckDaemonReadsHTTP(old, "1.2.0", map[string]ServerConfig{"st": {Command: "x"}}); err != nil {
+		t.Fatalf("stdio only refused: %v", err)
+	}
+}
+
+func TestCheckDaemonReadsHTTP_StatusErrorRefuses(t *testing.T) {
+	broken := func() (StatusReport, error) { return StatusReport{}, errors.New("timeout") }
+	if err := CheckDaemonReadsHTTP(broken, "1.2.0", map[string]ServerConfig{"dw": {Type: "http"}}); err == nil {
+		t.Fatal("unverified daemon accepted")
 	}
 }

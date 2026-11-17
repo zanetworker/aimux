@@ -34,7 +34,9 @@ saves the definition and the tools it listed, and reloads that one server in
 place. Any failure before the save leaves the old definition unchanged.
 
 For a server not behind the proxy, run 'aimux mcp proxy install' first.
-Only stdio servers can be edited; an HTTP server is refused.`,
+Only stdio servers can be edited; an HTTP server is refused.
+~/.aimux/mcp-servers.json is generated state: when the server registry of
+a later aimux (Plan 4c) lands, edits made here are overwritten from it.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home, err := os.UserHomeDir()
@@ -74,6 +76,8 @@ func runEdit(home, server string, out io.Writer, editor func(string) error) erro
 			return mcpproxy.ProbeServerDirect(ctx, cfg, 2*time.Minute, base)
 		},
 		Reload:  func() (mcpproxy.ReloadResult, error) { return mcpproxy.ReloadDaemon(m.Port) },
+		Status:  func() (mcpproxy.StatusReport, error) { return getProxyStatus(fmt.Sprintf("127.0.0.1:%d", m.Port)) },
+		Version: rootCmd.Version,
 		Timeout: 2 * time.Minute,
 	})
 }

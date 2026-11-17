@@ -32,7 +32,11 @@ type EditOptions struct {
 	Editor       func(path string) error // opens $EDITOR on path (injectable for tests)
 	Probe        func(ctx context.Context, cfg ServerConfig) ([]json.RawMessage, error)
 	Reload       func() (ReloadResult, error) // reloads the daemon (injectable for tests)
-	Timeout      time.Duration                // probe timeout
+	// Status and Version: when the servers file holds HTTP definitions, a
+	// running proxy of another version refuses the edit (daemonReadsHTTP).
+	Status  func() (StatusReport, error)
+	Version string
+	Timeout time.Duration // probe timeout
 }
 
 // EditServer opens the server's definition in $EDITOR, validates the changes,
@@ -71,6 +75,9 @@ func EditServer(ctx context.Context, opts EditOptions) error {
 	}
 	if cfg.Type == "http" {
 		return fmt.Errorf("%s is an HTTP server; aimux mcp proxy edit changes stdio servers only", opts.Server)
+	}
+	if err := daemonReadsHTTP(opts.Status, opts.Version, holdsHTTP(servers)); err != nil {
+		return err
 	}
 
 	// From here until the temp copy (it holds env values) is removed,

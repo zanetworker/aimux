@@ -490,3 +490,48 @@ func KeptDirectLines(kept []KeptDirect) []string {
 	}
 	return out
 }
+
+// needCurrentDaemon refuses a run that would have a proxy of another
+// aimux version reload HTTP definitions: install and edit reload a running
+// proxy rather than restarting it, and a proxy that does not read header
+// references would call those servers without their headers. It applies
+// when this run moves HTTP servers or the servers file already holds some.
+func (i Installer) needCurrentDaemon(http map[string]HTTPEntry) error {
+	saved, _, err := LoadServerFile(i.ServersPath)
+	if err != nil {
+		return err
+	}
+	return daemonReadsHTTP(i.Status, i.Version, len(http) > 0 || holdsHTTP(saved))
+}
+
+// holdsHTTP reports whether defs has an HTTP definition.
+func holdsHTTP(defs map[string]ServerConfig) bool {
+	for _, d := range defs {
+		if d.Type == "http" {
+			return true
+		}
+	}
+	return false
+}
+
+// daemonReadsHTTP is nil unless needed and the running proxy (status) is
+// another version than this aimux (version).
+func daemonReadsHTTP(status func() (StatusReport, error), version string, needed bool) error {
+	if !needed || status == nil || version == "" {
+		return nil
+	}
+	rep, err := status()
+	if err != nil {
+		return fmt.Errorf("could not check the running proxy's version (%v); nothing was changed, try again", err)
+	}
+	if !rep.Running || rep.Version == version {
+		return nil
+	}
+	return fmt.Errorf("the running proxy is aimux %s, not this %s, and may not read the HTTP servers' header references; run `aimux mcp proxy restart`, then try again; nothing was changed", rep.Version, version)
+}
+
+// CheckDaemonReadsHTTP is daemonReadsHTTP for commands outside install and
+// edit that write the servers file (refresh): defs are its definitions.
+func CheckDaemonReadsHTTP(status func() (StatusReport, error), version string, defs map[string]ServerConfig) error {
+	return daemonReadsHTTP(status, version, holdsHTTP(defs))
+}

@@ -428,6 +428,10 @@ func (i Installer) Install(skip []string) (err error) {
 		return fmt.Errorf("the proxy is installed on port %d but this run would use %d; pass --port %d, "+
 			"or run `aimux mcp proxy uninstall` and install again to change the port; nothing changed", m.Port, i.Port, m.Port)
 	}
+	// Before anything rewrites the servers file (forgetRemoved does too).
+	if err := i.needCurrentDaemon(in.http); err != nil {
+		return err
+	}
 	gone, err := i.forgetRemoved(m)
 	if err != nil {
 		return err
@@ -641,7 +645,7 @@ func (i Installer) saveDefinitions(move []string, stdio map[string]ServerConfig,
 	defs := map[string]ServerConfig{}
 	for _, s := range move {
 		if e, ok := http[s]; ok {
-			defs[s] = ServerConfig{Type: "http", URL: e.URL, HeaderNames: sortedKeys(e.Headers)}
+			defs[s] = ServerConfig{Type: "http", URL: e.URL, Secrets: keychainHeaderRefs(s, sortedKeys(e.Headers))}
 		} else {
 			defs[s] = expandConfig(stdio[s])
 		}
@@ -854,7 +858,7 @@ func entryDefinition(raw json.RawMessage) ServerConfig {
 // none.
 func sameDefinition(a, b ServerConfig) bool {
 	if a.Command != b.Command || len(a.Args) != len(b.Args) || len(a.Env) != len(b.Env) ||
-		a.Type != b.Type || a.URL != b.URL || !slices.Equal(a.HeaderNames, b.HeaderNames) {
+		a.Type != b.Type || a.URL != b.URL || !reflect.DeepEqual(a.Secrets, b.Secrets) {
 		return false
 	}
 	for k := range a.Args {

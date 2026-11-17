@@ -2,7 +2,6 @@ package mcpproxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 
@@ -40,38 +39,44 @@ func DefinitionStarter(cfgs map[string]ServerConfig, resolved []string, secrets 
 	}
 }
 
-// httpHeaders reads server's header values from its Keychain item. Errors
-// name the item and the header, never a value.
-func httpHeaders(ctx context.Context, server string, cfg ServerConfig, secrets SecretReader) (map[string]string, error) {
-	if len(cfg.HeaderNames) == 0 {
+// httpHeaders resolves server's header values from its secret refs, each
+// item read once. Errors name the server, the header and the item, never
+// a value.
+func httpHeaders(ctx context.Context, server string, cfg ServerConfig, reader SecretReader) (map[string]string, error) {
+	if cfg.Secrets == nil || len(cfg.Secrets.Headers) == 0 {
 		return nil, nil
 	}
-	service := HeaderService(server)
 	fix := fmt.Sprintf("unlock the Keychain and restart the proxy; if the item is gone, run aimux mcp proxy uninstall --without %s (then add %s again with claude mcp add)", server, server)
-	if secrets == nil {
-		return nil, fmt.Errorf("keychain item %s is missing or locked (no secret store here); %s", service, fix)
-	}
-	v, err := secrets(ctx, service)
-	if err != nil {
-		cause := "could not read it"
-		if errors.Is(err, keyring.ErrNotFound) {
-			cause = "not found"
+	read := memoReader(reader)
+	headers := make(map[string]string, len(cfg.Secrets.Headers))
+	for _, h := range sortedKeys(cfg.Secrets.Headers) {
+		v, err := resolveSecret(ctx, cfg.Secrets.Headers[h], read)
+		if err != nil {
+			return nil, fmt.Errorf("%s header %s: %w; %s", server, h, err, fix)
 		}
-		return nil, fmt.Errorf("keychain item %s is missing or locked (%s); %s", service, cause, fix)
-	}
-	item, err := decodeHeaderSecret(v)
-	if err != nil {
-		return nil, fmt.Errorf("keychain item %s: %w; %s", service, err, fix)
-	}
-	headers := make(map[string]string, len(cfg.HeaderNames))
-	for _, h := range cfg.HeaderNames {
-		it, ok := item.Headers[h]
-		if !ok {
-			return nil, fmt.Errorf("keychain item %s has no value for header %s; %s", service, h, fix)
-		}
-		headers[h] = it.Value
+		headers[h] = v
 	}
 	return headers, nil
+}
+
+// memoReader reads each item once per call chain; nil stays nil.
+func memoReader(reader SecretReader) SecretReader {
+	if reader == nil {
+		return nil
+	}
+	type result struct {
+		v   string
+		err error
+	}
+	seen := map[string]result{}
+	return func(ctx context.Context, service string) (string, error) {
+		if r, ok := seen[service]; ok {
+			return r.v, r.err
+		}
+		v, err := reader(ctx, service)
+		seen[service] = result{v, err}
+		return v, err
+	}
 }
 
 // definedHTTPBackend is an HTTP backend started from a saved definition; it

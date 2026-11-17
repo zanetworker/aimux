@@ -68,7 +68,7 @@ func TestDefinitionStarter_HTTPSendsKeychainHeaders(t *testing.T) {
 		inner.ServeHTTP(w, r)
 	}))
 	t.Cleanup(ts.Close)
-	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, HeaderNames: []string{"Authorization"}}}
+	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, Secrets: keychainHeaderRefs("pp", []string{"Authorization"})}}
 	st := DefinitionStarter(cfgs, nil, secretsOf(map[string]string{HeaderService("pp"): headerItemFor(t, map[string]string{"Authorization": "Bearer tok"})}))
 	b, err := startDef(t, st, "pp")
 	if err != nil {
@@ -101,7 +101,7 @@ func TestDefinitionStarter_StdioUnchanged(t *testing.T) {
 func TestDefinitionStarter_MissingItemErrorNamesItemOnly(t *testing.T) {
 	mcp := newHTTPMCPServer(t)
 	cfgs := map[string]ServerConfig{
-		"pp": {Type: "http", URL: mcp.URL, HeaderNames: []string{"Authorization"}},
+		"pp": {Type: "http", URL: mcp.URL, Secrets: keychainHeaderRefs("pp", []string{"Authorization"})},
 		"dw": {Type: "http", URL: mcp.URL},
 	}
 	st := DefinitionStarter(cfgs, nil, secretsOf(nil))
@@ -115,7 +115,7 @@ func TestDefinitionStarter_MissingItemErrorNamesItemOnly(t *testing.T) {
 }
 
 func TestDefinitionStarter_ItemLacksHeaderIsError(t *testing.T) {
-	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: "http://127.0.0.1:1/mcp", HeaderNames: []string{"Authorization", "X-Other"}}}
+	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: "http://127.0.0.1:1/mcp", Secrets: keychainHeaderRefs("pp", []string{"Authorization", "X-Other"})}}
 	st := DefinitionStarter(cfgs, nil, secretsOf(map[string]string{HeaderService("pp"): headerItemFor(t, map[string]string{"Authorization": "Bearer tok"})}))
 	_, err := startDef(t, st, "pp")
 	if err == nil || !strings.Contains(err.Error(), "X-Other") || strings.Contains(err.Error(), "tok") {
@@ -128,7 +128,7 @@ func TestHTTPBackend_ErrorsScrubHeaderValues(t *testing.T) {
 		http.Error(w, "denied for "+r.Header.Get("Authorization"), http.StatusInternalServerError)
 	}))
 	t.Cleanup(ts.Close)
-	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, HeaderNames: []string{"Authorization"}}}
+	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, Secrets: keychainHeaderRefs("pp", []string{"Authorization"})}}
 	st := DefinitionStarter(cfgs, nil, secretsOf(map[string]string{HeaderService("pp"): headerItemFor(t, map[string]string{"Authorization": "Bearer " + sentinelHeader})}))
 	_, err := startDef(t, st, "pp")
 	if err == nil || strings.Contains(err.Error(), "SENTINEL") {
@@ -164,7 +164,7 @@ func TestHTTPBackend_ShortHeaderValueScrubbed(t *testing.T) {
 		http.Error(w, "bad key "+r.Header.Get("X-Api-Key"), http.StatusInternalServerError)
 	}))
 	t.Cleanup(ts.Close)
-	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, HeaderNames: []string{"X-Api-Key"}}}
+	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, Secrets: keychainHeaderRefs("pp", []string{"X-Api-Key"})}}
 	st := DefinitionStarter(cfgs, nil, secretsOf(map[string]string{HeaderService("pp"): headerItemFor(t, map[string]string{"X-Api-Key": "q7z"})}))
 	_, err := startDef(t, st, "pp")
 	if err == nil || strings.Contains(err.Error(), "q7z") {
@@ -209,7 +209,7 @@ func TestHTTPBackend_ToolListEchoingHeaderRefused(t *testing.T) {
 	})
 	ts := httptest.NewServer(server.NewStreamableHTTPServer(srv))
 	t.Cleanup(ts.Close)
-	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, HeaderNames: []string{"X-Api-Key"}}}
+	cfgs := map[string]ServerConfig{"pp": {Type: "http", URL: ts.URL, Secrets: keychainHeaderRefs("pp", []string{"X-Api-Key"})}}
 	st := DefinitionStarter(cfgs, nil, secretsOf(map[string]string{HeaderService("pp"): headerItemFor(t, map[string]string{"X-Api-Key": "q7z-secret-value"})}))
 	b, err := startDef(t, st, "pp")
 	if err != nil {

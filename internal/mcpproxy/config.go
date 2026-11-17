@@ -51,10 +51,17 @@ func isProxyCommand(c ServerConfig) bool {
 // still (or again) in the Claude config, which the daemon could not expand.
 // It is also the moved list an installed daemon serves; an empty list (all
 // taken off again) is kept apart from no list (a manual setup).
+// It is generated state: install and edit write it, nothing else should.
 type serversFile struct {
+	Schema            int                     `json:"schema,omitempty"`
+	GeneratedBy       string                  `json:"generatedBy,omitempty"`
 	MCPServers        map[string]ServerConfig `json:"mcpServers"`
 	ResolvedByInstall *[]string               `json:"resolvedByInstall,omitempty"`
 }
+
+// serversSchema is the servers file format this aimux writes; a file
+// without one (written before it) is read as the same.
+const serversSchema = 2
 
 // SaveServers writes the backend definitions the proxy runs, so they survive
 // removing the stdio entries from the Claude config, keeping the file's
@@ -71,7 +78,7 @@ func SaveServers(path string, servers map[string]ServerConfig) error {
 // SaveServerFile writes the definitions and the resolved-by-install set;
 // nil writes no set, an empty slice an empty one.
 func SaveServerFile(path string, servers map[string]ServerConfig, resolved []string) error {
-	f := serversFile{MCPServers: servers}
+	f := serversFile{Schema: serversSchema, GeneratedBy: "aimux mcp proxy install", MCPServers: servers}
 	if resolved != nil {
 		r := append([]string{}, resolved...)
 		sort.Strings(r)
@@ -108,8 +115,23 @@ func LoadServerFile(path string) (map[string]ServerConfig, []string, error) {
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, nil, fmt.Errorf("parse MCP servers %s: %w", path, err)
 	}
+	if f.Schema > serversSchema {
+		return nil, nil, fmt.Errorf("the MCP servers file %s was written by a newer aimux (schema %d, this one reads %d); use that aimux", path, f.Schema, serversSchema)
+	}
 	if f.MCPServers == nil {
 		f.MCPServers = map[string]ServerConfig{}
+	}
+	// An HTTP definition written with header names only (before refs) gets
+	// the refs install writes now: the same item, one field per header.
+	for name, d := range f.MCPServers {
+		if len(d.LegacyHeaderNames) == 0 {
+			continue
+		}
+		if d.Secrets == nil {
+			d.Secrets = keychainHeaderRefs(name, d.LegacyHeaderNames)
+		}
+		d.LegacyHeaderNames = nil
+		f.MCPServers[name] = d
 	}
 	var resolved []string
 	if f.ResolvedByInstall != nil {

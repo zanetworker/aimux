@@ -73,8 +73,10 @@ func LoadClaudeHTTPServers(path string, port int, canStoreSecrets bool) (map[str
 			keep(name, reasonHelper)
 			continue
 		}
-		if v := urlSecretVar(e.URL); v != "" {
-			keep(name, "uses ${"+v+"} in its URL (query or userinfo); keep it direct until URL secrets are supported")
+		// The URL is saved as written, so it may hold no variable: a resolved
+		// one could be a secret (Plan 4c gives URLs secret refs).
+		if m := claudeVar.FindStringSubmatch(e.URL); m != nil {
+			keep(name, "uses ${"+m[1]+"} in its URL; keep it direct until Plan 4c")
 			continue
 		}
 		_, literals, err := redactHeaders(raw)
@@ -82,8 +84,8 @@ func LoadClaudeHTTPServers(path string, port int, canStoreSecrets bool) (map[str
 			keep(name, reasonBadHeaders)
 			continue
 		}
-		entry := HTTPEntry{Raw: raw, URL: expandValue(e.URL), Literals: literals}
-		unset := unsetVar(e.URL)
+		entry := HTTPEntry{Raw: raw, URL: e.URL, Literals: literals}
+		unset := ""
 		if len(literals) > 0 {
 			entry.Headers = make(map[string]string, len(literals))
 			for h, lit := range literals {
@@ -133,29 +135,4 @@ func keychainName(name string) bool {
 		}
 	}
 	return name != ""
-}
-
-// urlSecretVar is the first ${VAR} in the userinfo or the query of a URL
-// as written, or "": a resolved value there would be saved in plain text
-// and shown in every connection error.
-func urlSecretVar(raw string) string {
-	rest := raw
-	if _, after, ok := strings.Cut(rest, "://"); ok {
-		rest = after
-	}
-	authority, _, _ := strings.Cut(rest, "/")
-	authority, _, _ = strings.Cut(authority, "?")
-	var parts []string
-	if userinfo, _, ok := strings.Cut(authority, "@"); ok {
-		parts = append(parts, userinfo)
-	}
-	if _, query, ok := strings.Cut(raw, "?"); ok {
-		parts = append(parts, query)
-	}
-	for _, p := range parts {
-		if m := claudeVar.FindStringSubmatch(p); m != nil {
-			return m[1]
-		}
-	}
-	return ""
 }

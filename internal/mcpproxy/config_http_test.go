@@ -91,13 +91,13 @@ func TestLoadClaudeHTTP_ProxyURLThroughVariableIgnored(t *testing.T) {
 
 func TestLoadClaudeHTTP_VariablesResolved(t *testing.T) {
 	t.Setenv("TOK", "abc123")
-	p := writeClaude(t, `{"v":{"type":"http","url":"https://v/${PATHPART:-mcp}","headers":{"Authorization":"Bearer ${TOK}"}}}`)
+	p := writeClaude(t, `{"v":{"type":"http","url":"https://v/mcp","headers":{"Authorization":"Bearer ${TOK}","X-Mode":"${MODE_AIMUX_TEST:-d}"}}}`)
 	got, kept, err := LoadClaudeHTTPServers(p, 7381, true)
 	if err != nil || len(kept) != 0 {
 		t.Fatalf("kept %v err %v", kept, err)
 	}
 	v := got["v"]
-	if v.Headers["Authorization"] != "Bearer abc123" || v.Literals["Authorization"] != `"Bearer ${TOK}"` || v.URL != "https://v/mcp" {
+	if v.Headers["Authorization"] != "Bearer abc123" || v.Literals["Authorization"] != `"Bearer ${TOK}"` || v.Headers["X-Mode"] != "d" || v.URL != "https://v/mcp" {
 		t.Fatalf("v = %+v", v)
 	}
 }
