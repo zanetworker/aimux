@@ -1,0 +1,13 @@
+flowchart LR
+  CJ["~/.claude.json<br/>HTTP entry<br/>url + headers"] --> CL{"classify (T3, T4)"}
+  CL -->|"oauth field, or<br/>401 + WWW-Authenticate"| KD["kept direct:<br/>needs OAuth (later)"]
+  CL -->|"sse, headersHelper,<br/>unset var, down now"| KD2["kept direct:<br/>reason printed"]
+  CL -->|"no auth or<br/>static headers"| LS["list tools<br/>headers in memory (T6)"]
+  LS --> KC["Keychain item<br/>aimux-mcp-proxy/NAME<br/>written via security -i stdin (T1)"]
+  LS --> SF["servers file<br/>url + header names only (T5)"]
+  KC --> D["proxy daemon 127.0.0.1:7381<br/>reads the item at backend start<br/>scrubs values from errors (T5)"]
+  SF --> D
+  D --> E["entry rewritten:<br/>http://127.0.0.1:7381/mcp/NAME (T7)"]
+  E --> M["manifest v3<br/>original with header values<br/>replaced by a placeholder"]
+  M --> U["uninstall (T8):<br/>placeholder + Keychain literal<br/>= original bytes"]
+  KC --> U
