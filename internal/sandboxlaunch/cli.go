@@ -83,13 +83,40 @@ func envArgs(env map[string]string) ([]string, error) {
 	return pre, nil
 }
 
-// ExecRunner runs commands on the host with os/exec.
-func ExecRunner() Runner {
+// ExecRunner runs commands on the host with os/exec; children inherit this
+// process's environment.
+func ExecRunner() Runner { return execRunner(nil) }
+
+// minimalEnvKeys is what a host openshell child of the tool gateway worker
+// gets from the worker's environment: where to find binaries and config,
+// and which gateway to use. Never a credential (OPENSHELL_OIDC_CLIENT_SECRET
+// stays out).
+var minimalEnvKeys = []string{"PATH", "HOME", "LANG", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+	"OPENSHELL_GATEWAY", "OPENSHELL_GATEWAY_INSECURE", "OPENSHELL_LOCAL_TLS_DIR"}
+
+// MinimalEnvRunner is ExecRunner whose children get only minimalEnvKeys
+// from environ (os.Environ()), so the tool gateway worker's runner sandbox
+// calls never carry the shell's other variables, cloud credentials
+// included.
+func MinimalEnvRunner(environ []string) Runner {
+	env := []string{}
+	for _, kv := range environ {
+		k, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(minimalEnvKeys, k) {
+			env = append(env, kv)
+		}
+	}
+	return execRunner(env)
+}
+
+// execRunner runs commands with env as their environment (nil: inherit).
+func execRunner(env []string) Runner {
 	return func(ctx context.Context, stdin io.Reader, argv ...string) (io.ReadCloser, error) {
 		if len(argv) == 0 {
 			return nil, errors.New("empty command")
 		}
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // G204: argv[0] is the fixed openshell binary from cliBackend; sandbox names are validated and no shell is involved
+		cmd.Env = env
 		cmd.Stdin = stdin
 		setProcessGroup(cmd)
 		cmd.Cancel = func() error { return killProcessGroup(cmd) }

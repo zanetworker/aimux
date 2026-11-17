@@ -282,3 +282,22 @@ func TestListenControl_ConcurrentStartsOneWins(t *testing.T) {
 	}
 	_ = ln.Close()
 }
+
+// An existing folder with a looser mode is tightened to 0700.
+func TestListenControl_TightensExistingFolder(t *testing.T) {
+	path := shortSock(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // the loose mode under test
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // the loose mode under test
+		t.Fatal(err)
+	}
+	ln, err := ListenControl(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	if di, _ := os.Stat(filepath.Dir(path)); di.Mode().Perm() != 0o700 {
+		t.Fatalf("folder mode %v, want 0700", di.Mode().Perm())
+	}
+}

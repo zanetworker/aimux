@@ -18,7 +18,7 @@
 - The sandbox gateway keeps address `127.0.0.1:7390` and URL `http://host.containers.internal:7390` (`toolgateway.ReadonlyAddr`, `ReadonlyURL`); compiled sandbox policies do not change.
 - The two workers never share a `mcpproxy.Pool`, a starter, a catalog cache or a backend process (Codex review: `pool.go:81` keys slots by server name only).
 - Tokens are made by `remote serve` (32 random bytes, `randomToken`), sent once per turn in `PutLease`, kept only in memory on both sides, never written to disk or logged; logs name the session, never the token.
-- A new token per turn, as today (`profilerun/sandbox.go:262`). Lease TTL 15 minutes; `remote serve` renews every 5 minutes while the turn runs; `DeleteLease` when the turn's process exits.
+- A new token per turn, as today (`profilerun/sandbox.go:262`). Lease TTL 15 minutes; `remote serve` renews every 2 minutes while the turn runs; `DeleteLease` when the turn's process exits.
 - Fail closed: unknown, expired or deleted lease means 401; a worker that restarts knows no leases until they are put again; a tool whose pin differs between the lease's snapshot and the worker's current snapshot is dropped from that lease (today's `Tokens.Current` rule).
 - Control socket: `~/.aimux/gateway.sock`, mode 0600, directory `~/.aimux` 0700; every connection's peer uid must equal `os.Getuid()` (darwin `LOCAL_PEERCRED`); HTTP/1.1 JSON over the socket; never exposed on a TCP listener.
 - Sandbox worker child processes get only `PATH`, `HOME`, `LANG`, `TMPDIR` from the worker's environment plus each source's own `env`.
@@ -108,7 +108,7 @@
 - Consumes: `ControlClient`, `Lease`, `ErrUnknownLease`, `ErrGatewayNotRunning`.
 - Produces:
   - `type Leases interface { PutLease(ctx context.Context, l toolgateway.Lease) error; Renew(ctx context.Context, session string, until time.Time) error; DeleteLease(ctx context.Context, session string) error }`; `SandboxEngine.Gateway` becomes `func() (baseURL string, leases Leases, err error)`.
-  - Per turn with a non-empty grant: make the token, `PutLease` with `Allow = c.Grant.Scope()`, `Version = c.Snapshot.Version()`, `Pins` from `c.Snapshot` for the allowed tools, `Expires = now + 15m`; start a renew loop every 5 minutes; on `ErrUnknownLease` put the whole lease again; on process exit stop the loop and `DeleteLease` (errors logged, not returned).
+  - Per turn with a non-empty grant: make the token, `PutLease` with `Allow = c.Grant.Scope()`, `Version = c.Snapshot.Version()`, `Pins` from `c.Snapshot` for the allowed tools, `Expires = now + 15m`; start a renew loop every 2 minutes; on `ErrUnknownLease` put the whole lease again; on process exit stop the loop and `DeleteLease` (errors logged, not returned).
   - `GET /v1/tools` reads `Observed` from the worker (`ControlClient.Observed`); when the worker is not running, tools whose source the gateway never listed are `unknown`, as today.
   - `aimux browser verify` and `aimux sandbox` use the running worker (lease through the socket); when none runs they start an in-process `ReadonlyServer` as today. `remote serve` never starts one.
 

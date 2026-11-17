@@ -210,7 +210,9 @@ aimux mcp proxy gateway uninstall  # stop it; Workspace turns then fail until it
 aimux mcp proxy gateway serve      # run it in the foreground (what launchd runs)
 ```
 
-Every sandbox turn's token is a lease: `aimux remote serve` puts it on the worker over `~/.aimux/gateway.sock` before the turn's claude starts, with the tools the turn may use and the tool snapshot it was compiled at, renews it every 5 minutes, and deletes it when the turn ends. A lease nobody renews expires after 15 minutes. The socket is mode 0600, the worker checks that every connection comes from your user, and it is never offered on a TCP port. A restarted worker knows no leases, so calls fail until `remote serve` puts them again at its next renewal. `aimux mcp proxy status` ends with a `tool gateway:` line.
+Every sandbox turn's token is a lease: `aimux remote serve` puts it on the worker over `~/.aimux/gateway.sock` before the turn's claude starts, with the tools the turn may use and the tool snapshot it was compiled at, renews it every 2 minutes, and deletes it when the turn ends. A lease nobody renews expires after 15 minutes. The socket is mode 0600, the worker checks that every connection comes from your user, and it is never offered on a TCP port. A restarted worker knows no leases, so calls fail until `remote serve` puts them again at its next renewal. `aimux mcp proxy status` ends with a `tool gateway:` line.
+
+The `openshell` commands the worker runs for `cli` and `http-openapi` sources get only `PATH`, `HOME`, `LANG`, `TMPDIR`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `OPENSHELL_GATEWAY`, `OPENSHELL_GATEWAY_INSECURE` and `OPENSHELL_LOCAL_TLS_DIR` from the worker's environment; every other variable stays out, `OPENSHELL_OIDC_CLIENT_SECRET` and cloud credentials included.
 
 ## Check its health
 

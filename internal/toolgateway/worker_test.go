@@ -20,6 +20,7 @@ type fakeGateway struct {
 	relisted  [][]string
 	relistDur time.Duration
 	store     *fakeStore
+	onRefresh func()
 }
 
 func (g *fakeGateway) Applied() toolreg.Snapshot {
@@ -33,6 +34,9 @@ func (g *fakeGateway) Refresh(context.Context) {
 	defer g.mu.Unlock()
 	g.refreshed++
 	g.applied = g.store.cur
+	if g.onRefresh != nil {
+		g.onRefresh()
+	}
 }
 
 func (g *fakeGateway) RelistNow(ctx context.Context, servers []string) error {
@@ -196,5 +200,21 @@ func TestRunWorker_LeaseOverTheSocket(t *testing.T) {
 	case <-stopped:
 	case <-time.After(time.Second):
 		t.Fatal("the gateway was not stopped")
+	}
+}
+
+// A put whose caller is gone by the time the snapshot is loaded stores
+// nothing: the turn may already have deleted it.
+func TestWorker_PutLeaseCancelledDoesNotStore(t *testing.T) {
+	w, gw, st, _ := newTestWorker(t)
+	newer := snapWith("sha256:b")
+	st.next = newer
+	ctx, cancel := context.WithCancel(context.Background())
+	gw.onRefresh = cancel // the client gives up while the worker loads
+	if err := w.PutLease(ctx, leaseUnder(newer)); err == nil {
+		t.Fatal("a cancelled put succeeded")
+	}
+	if w.Tokens.Len() != 0 {
+		t.Fatal("a cancelled put stored its lease")
 	}
 }

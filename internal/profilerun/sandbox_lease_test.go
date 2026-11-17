@@ -195,3 +195,57 @@ func TestSandboxTurn_NoNoticeWhenNothingHeld(t *testing.T) {
 		}
 	}
 }
+
+// slowServerLeases behaves like the worker over the socket: a put that the
+// caller abandons (its context ends) still lands on the worker later.
+type slowServerLeases struct {
+	*fakeLeases
+	delay time.Duration
+	wg    sync.WaitGroup
+}
+
+func (s *slowServerLeases) PutLease(ctx context.Context, l toolgateway.Lease) error {
+	s.mu.Lock()
+	first := len(s.puts) == 0
+	s.mu.Unlock()
+	if first { // the first put is quick: the turn starts
+		return s.fakeLeases.PutLease(ctx, l)
+	}
+	s.wg.Add(1)
+	done := make(chan struct{})
+	go func() { //nolint:gosec // G118: the worker's handler, which the client cannot stop
+		defer s.wg.Done()
+		time.Sleep(s.delay)
+		_ = s.fakeLeases.PutLease(context.Background(), l)
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// A re-put still in flight when the turn ends must not leave a lease behind.
+func TestSandboxTurn_SlowReputRacingTurnEndLeavesNoLease(t *testing.T) {
+	f := &fakeLeases{renewErr: func(int) error { return toolgateway.ErrUnknownLease }}
+	s := &slowServerLeases{fakeLeases: f, delay: 150 * time.Millisecond}
+	f.table = &toolgateway.Tokens{}
+	b := &sbBackend{tokens: f.table, script: func(x string) (string, error, error) { return okStream(x), nil, nil }}
+	e := NewSandboxEngine(&sandboxlaunch.Launcher{Backend: b},
+		func(p string) (profile.Compiled, error) { return compiledFor(p), nil },
+		func() (string, Leases, error) { return "http://host.containers.internal:7390", s, nil })
+	e.ArchiveDir = filepath.Join(t.TempDir(), "archive")
+	e.RenewEvery = 20 * time.Millisecond
+	b.block, b.closed = make(chan struct{}), make(chan struct{})
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	go func() { time.Sleep(40 * time.Millisecond); close(b.block) }() // ends while the re-put runs
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	s.wg.Wait()
+	if n := f.table.Len(); n != 0 {
+		t.Fatalf("%d lease(s) left after the turn ended", n)
+	}
+}

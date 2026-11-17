@@ -60,6 +60,11 @@ func ListenControl(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("control socket directory: %w", err)
 	}
+	// MkdirAll leaves an existing folder as it is: tighten it, so only this
+	// user can reach the socket and its lock.
+	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil { //nolint:gosec // a folder needs x; 0700 is owner-only
+		return nil, fmt.Errorf("control socket directory: %w", err)
+	}
 	// The lock serializes the probe, the removal of a stale socket and the
 	// bind across starting gateways; it is held as long as the listener.
 	lock, err := lockControl(path + ".lock")

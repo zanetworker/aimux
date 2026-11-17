@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
@@ -25,7 +26,8 @@ func NewServer(home, admin string, l *log.Logger, listen func(network, addr stri
 	tokens := &toolgateway.Tokens{}
 	srv := &toolgateway.ReadonlyServer{Store: store, Token: admin, Tokens: tokens, Log: l,
 		Listen: listen, Build: mcpproxy.BuildReadonly, Serve: mcpproxy.Serve, Rebuild: mcpproxy.BuildReadonlyBackends,
-		Runner: sandboxlaunch.RunnerTools(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
+		// openshell children get only what they need, not the worker's env.
+		Runner: sandboxlaunch.RunnerTools(sandboxlaunch.MinimalEnvRunner(os.Environ()), filepath.Join(home, ".aimux", "sandboxes"))}
 	tokens.Current = srv.Applied
 	return srv, store, tokens
 }

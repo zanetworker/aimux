@@ -70,7 +70,7 @@ func (t *Tokens) Renew(session string, until time.Time) error {
 // is how often remote serve renews it while the turn runs.
 const (
 	LeaseTTL        = 15 * time.Minute
-	LeaseRenewEvery = 5 * time.Minute
+	LeaseRenewEvery = 2 * time.Minute
 )
 
 // NewToken is 32 random bytes in hex: a turn's token.

@@ -63,6 +63,12 @@ func (w *Worker) PutLease(ctx context.Context, l Lease) error {
 		w.Server.Refresh(rctx)
 		cancel()
 	}
+	// A caller that stopped waiting (its turn ended, the client timed out)
+	// may already have deleted this lease: storing it now would outlive the
+	// turn.
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("lease for session %s not stored: %w", l.Session, err)
+	}
 	if err := w.Tokens.Put(l); err != nil {
 		return err
 	}

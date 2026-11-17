@@ -547,8 +547,12 @@ type Leases interface {
 }
 
 // leaseCallTimeout bounds a renew or delete the turn makes in the
-// background.
-const leaseCallTimeout = 5 * time.Second
+// background; leasePutTimeout a re-put, which the worker may hold while it
+// loads the lease's snapshot (15 s) and lists its servers (5 s).
+const (
+	leaseCallTimeout = 5 * time.Second
+	leasePutTimeout  = 25 * time.Second
+)
 
 // lease puts the turn's lease (token, the grant, its snapshot and pins)
 // and renews it until end is called, putting it again when the gateway
@@ -564,33 +568,37 @@ func (e *SandboxEngine) lease(ctx context.Context, leases Leases, session, token
 	if every == 0 {
 		every = toolgateway.LeaseRenewEvery
 	}
-	rctx, stop := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
+	// Each renew or re-put runs to its own deadline, never cut short by the
+	// turn's end: a put the client abandoned could still land on the worker
+	// after the delete. end waits for one in flight, then deletes.
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() { //nolint:gosec // G118: on purpose detached from the turn's context, see above
 		defer close(done)
 		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
 			select {
-			case <-rctx.Done():
+			case <-stop:
 				return
 			case <-t.C:
 			}
-			cctx, cancel := context.WithTimeout(rctx, leaseCallTimeout)
 			until := time.Now().Add(toolgateway.LeaseTTL)
+			cctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
 			err := leases.Renew(cctx, session, until)
+			cancel()
 			if errors.Is(err, toolgateway.ErrUnknownLease) {
 				l.Expires = until
-				err = leases.PutLease(cctx, l)
+				pctx, cancel := context.WithTimeout(context.Background(), leasePutTimeout)
+				err = leases.PutLease(pctx, l)
+				cancel()
 			}
-			cancel()
-			if err != nil && rctx.Err() == nil && e.Log != nil {
+			if err != nil && e.Log != nil {
 				e.Log.Warn("tool gateway: lease renewal failed; the turn's tools stop when the lease expires", "session", session, "err", err)
 			}
 		}
 	}()
 	return func() {
-		stop()
+		close(stop)
 		<-done
 		dctx, cancel := context.WithTimeout(context.Background(), leaseCallTimeout)
 		defer cancel()
