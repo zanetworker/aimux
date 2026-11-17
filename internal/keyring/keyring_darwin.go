@@ -3,6 +3,7 @@
 package keyring
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -87,4 +88,40 @@ func Delete(service string) error {
 func MaxStoreValue(service string) int {
 	overhead := len("add-generic-password -U -a " + storeAccount + " -s  -X \n")
 	return (maxSecurityLine - overhead - len(service)) / 2
+}
+
+// runStdin runs bin with stdin; Store sends the value this way so it
+// never appears on a command line.
+var runStdin = func(ctx context.Context, bin string, stdin []byte, args ...string) ([]byte, error) {
+	c := exec.CommandContext(ctx, bin, args...) // #nosec G204 -- fixed binary, args built here
+	c.Stdin = bytes.NewReader(stdin)
+	return c.Output()
+}
+
+// validService reports whether service is safe to put on a `security -i`
+// line: letters, digits and . _ - / only.
+func validService(service string) bool {
+	if service == "" {
+		return false
+	}
+	for _, r := range service {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._-/", r)
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// toolFailure is a secret tool's failure with only its exit status kept
+// (its output could hold the value).
+func toolFailure(ctx context.Context, what string, err error) error {
+	var ee *exec.ExitError
+	switch {
+	case ctx.Err() != nil:
+		return fmt.Errorf("%s: %w", what, ctx.Err())
+	case errors.As(err, &ee):
+		return fmt.Errorf("%s: exit status %d", what, ee.ExitCode())
+	}
+	return fmt.Errorf("%s: could not run security", what)
 }
