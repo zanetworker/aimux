@@ -7,7 +7,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'aimux',
-			description: 'Tame the agent sprawl. See all your agents. Trace what they did. Judge if it was good.',
+			description: 'Tame the agent sprawl. Find every agent session. Jump into any of them. Trace what they did. Judge if it was good.',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/zanetworker/aimux' }],
 			customCss: ['./src/styles/custom.css'],
 			sidebar: [
