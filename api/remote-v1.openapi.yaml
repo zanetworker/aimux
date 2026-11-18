@@ -1222,6 +1222,10 @@ components:
             - gateway_backend_down     # 503, also on turn_error: the tool gateway worker runs but did not take the turn's lease
             - profile_unavailable      # 409 on POST /v1/sessions when the new session's profile fails to compile there (a missing set, an invalid sandbox name); as a turn_error code when an accepted turn fails to compile. A profile the catalog refused answers 400 unknown_profile or 403 profile_not_allowed instead
             - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
+            - run_planner_failed       # turn_error only (research-with-work): the workspace stage failed, nothing was searched
+            - planner_output_invalid   # turn_error only (research-with-work): the workspace stage returned no usable plan
+            - run_reader_failed        # turn_error only (research-with-work): the web stage failed
+            - run_writer_failed        # turn_error only (research-with-work): writing the answer failed
             - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source's address or hidden request details changed; approve it on the Mac
             - pins_busy                # 503: POST /v1/tools/approve: another approval held the pins lock for 5 s; try again
             - pin_stale                # 409: POST /v1/tools/approve: a tool's live definition is not the one the client showed (or is not listed); nothing approved
@@ -2236,6 +2240,11 @@ components:
       required: [stopReason]
       properties:
         stopReason: { type: string, description: "ACP's: end_turn, cancelled, max_tokens, max_turn_requests, refusal." }
+        links:
+          type: array
+          maxItems: 20
+          items: { type: string }
+          description: "On a research-with-work turn that ended normally, the only URLs its answer may show as links: the pages its web stage fetched with a successful WebFetch, deduplicated, at most 20, possibly empty. A client renders any other URL in that answer as plain text. Left out on every other turn."
 
     TurnErrorData:
       type: object
@@ -2247,4 +2256,4 @@ components:
         code:
           type: string
           description: A stable code for programs, when the failure has one (see ErrorBody's codes).
-          enum: [tool_gateway_not_running, gateway_backend_down, image_invalid, profile_unavailable, sandbox_gateway_down]
+          enum: [tool_gateway_not_running, gateway_backend_down, image_invalid, profile_unavailable, sandbox_gateway_down, run_planner_failed, planner_output_invalid, run_reader_failed, run_writer_failed]
