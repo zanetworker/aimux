@@ -221,6 +221,9 @@ type TurnStartedData struct {
 // (end_turn, cancelled, max_tokens, ...).
 type TurnDoneData struct {
 	StopReason string `json:"stopReason"`
+	// Links, on a research-with-work turn, are the only URLs its answer
+	// may show as links (pages its reader fetched); left out otherwise.
+	Links []string `json:"links,omitempty"`
 }
 
 // TurnErrorData is the data of a turn_error event. Message is for a person
