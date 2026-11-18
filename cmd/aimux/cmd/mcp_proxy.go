@@ -256,7 +256,7 @@ func newMCPProxyStatusCmd() *cobra.Command {
 					o.removed = printInstallSection(in, cmd.OutOrStdout(), o.color).Removed
 				}
 			}
-			if err := proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now()); err != nil {
+			if err := proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now); err != nil {
 				return err
 			}
 			if home, err := os.UserHomeDir(); err == nil && !o.json {
@@ -289,7 +289,7 @@ type proxyStatusJSON struct {
 }
 
 // proxyStatus asks the proxy at o.addr for its status and prints it.
-func proxyStatus(ctx context.Context, o proxyStatusOpts, out io.Writer, now time.Time) error {
+func proxyStatus(ctx context.Context, o proxyStatusOpts, out io.Writer, now func() time.Time) error {
 	if o.timeout <= 0 {
 		o.timeout = time.Minute
 	}
@@ -340,7 +340,9 @@ func proxyStatus(ctx context.Context, o proxyStatusOpts, out io.Writer, now time
 		enc.SetIndent("", "  ")
 		return enc.Encode(proxyStatusJSON{rep, o.install})
 	}
-	printProxyStatus(out, o.addr, rep, now, o.color, o.removed...)
+	// Ages are measured once the answer is in: a probe can take a while,
+	// and its failures are stamped while it runs.
+	printProxyStatus(out, o.addr, rep, now(), o.color, o.removed...)
 	return nil
 }
 

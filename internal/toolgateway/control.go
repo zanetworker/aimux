@@ -41,6 +41,10 @@ type ControlStatus struct {
 	Backends  []string  `json:"backends"`
 	Down      []string  `json:"down"`
 	StartedAt time.Time `json:"startedAt"`
+	// Checked is when each backend was last listed or retried by a build,
+	// a rebuild or the periodic relist (not by a call's own pin check); a
+	// down backend's state is as of then.
+	Checked map[string]time.Time `json:"checked,omitempty"`
 }
 
 // observedWire is Observed on the socket: an error travels as its text.

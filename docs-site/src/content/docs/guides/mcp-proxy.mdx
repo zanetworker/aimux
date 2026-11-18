@@ -116,7 +116,7 @@ The fallback: `uninstall`, edit `~/.claude.json`, `install`. `edit` changes stdi
 aimux mcp proxy status
 ```
 
-`status` says which servers `install` moved, any whose entry drifted from its proxy URL (a running session saved a stale copy, or you edited it), stdio and HTTP servers not behind the proxy yet (run `aimux mcp proxy install`), the HTTP servers kept direct with their reason, and whether an upgrade restart is pending. Then it reads the running proxy's `/status` on `127.0.0.1`. Not running is reported, not an error.
+`status` says which servers `install` moved, any whose entry drifted from its proxy URL (a running session saved a stale copy, or you edited it), stdio and HTTP servers not behind the proxy yet (run `aimux mcp proxy install`), the HTTP servers kept direct with their reason, and whether an upgrade restart is pending. Then it reads the running proxy's `/status` on `127.0.0.1`. Not running is reported, not an error. A failed server's state says how long ago it failed (`● failed 12m ago`), so an old failure is not read as live; the next call starts the server again. The `tool gateway:` line at the end says when the worker started and, for each backend that is down, when it was last checked (`down: wiki (checked 40s ago)`; the worker retries a down backend every minute).
 
 Drift: a moved server's entry is no longer its proxy URL. To fix it:
 
@@ -236,7 +236,7 @@ The proxy service has a second worker for OpenShell sandboxes: the read-only too
 
 ```sh
 aimux mcp proxy gateway install    # run it under launchd (com.aimux.tool-gateway), at login and after a crash
-aimux mcp proxy gateway status     # running or not, live leases, backends, which are down
+aimux mcp proxy gateway status     # running or not (since when), live leases, backends, which are down and when each was last checked
 aimux mcp proxy gateway uninstall  # stop it; Workspace turns then fail until it is installed again
 aimux mcp proxy gateway serve      # run it in the foreground (what launchd runs)
 ```

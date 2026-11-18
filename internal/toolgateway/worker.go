@@ -27,6 +27,7 @@ type gatewayServer interface {
 	RelistNow(ctx context.Context, servers []string) error
 	Observed() map[string]Observed
 	Backends() (all, down []string)
+	BackendsChecked() (all, down []string, checked map[string]time.Time)
 }
 
 // snapshotStore is what the worker needs of toolreg.Store.
@@ -103,8 +104,15 @@ func (w *Worker) Observed() map[string]Observed { return w.Server.Observed() }
 
 // Status is the worker at a glance.
 func (w *Worker) Status() ControlStatus {
-	all, down := w.Server.Backends()
-	return ControlStatus{Version: w.Server.Applied().Version(), Leases: w.Tokens.Len(), Backends: all, Down: down, StartedAt: w.started}
+	all, down, at := w.Server.BackendsChecked()
+	// Only backends configured now: a removed source's time is not reported.
+	checked := map[string]time.Time{}
+	for n, at := range at {
+		if slices.Contains(all, n) {
+			checked[n] = at
+		}
+	}
+	return ControlStatus{Version: w.Server.Applied().Version(), Leases: w.Tokens.Len(), Backends: all, Down: down, StartedAt: w.started, Checked: checked}
 }
 
 // RunWorker serves w's gateway (start) and its control socket at path until

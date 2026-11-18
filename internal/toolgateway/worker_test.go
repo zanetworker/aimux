@@ -58,6 +58,11 @@ func (g *fakeGateway) Backends() (all, down []string) {
 	return []string{"jira", "wiki"}, []string{"wiki"}
 }
 
+func (g *fakeGateway) BackendsChecked() (all, down []string, checked map[string]time.Time) {
+	all, down = g.Backends()
+	return all, down, map[string]time.Time{"wiki": time.Unix(100, 0), "gone": time.Unix(50, 0)}
+}
+
 type fakeStore struct {
 	cur     toolreg.Snapshot
 	next    toolreg.Snapshot
@@ -163,6 +168,9 @@ func TestWorker_RenewDeleteStatus(t *testing.T) {
 	st := w.Status()
 	if st.Leases != 1 || st.Version != gw.Applied().Version() || !slices.Equal(st.Down, []string{"wiki"}) {
 		t.Fatalf("Status = %+v", st)
+	}
+	if len(st.Checked) != 1 || !st.Checked["wiki"].Equal(time.Unix(100, 0)) {
+		t.Fatalf("Checked = %v, want wiki only (gone is no longer configured)", st.Checked)
 	}
 	w.DeleteLease("sess-1")
 	if _, _, ok := w.Tokens.Lookup(leaseTok); ok || w.Status().Leases != 0 {

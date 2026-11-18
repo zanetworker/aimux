@@ -49,7 +49,7 @@ func fakeDaemon(t *testing.T, rep mcpproxy.StatusReport) (addr string, got *[]st
 func TestProxyStatus_Table(t *testing.T) {
 	addr, reqs := fakeDaemon(t, fixtureReport())
 	var out bytes.Buffer
-	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr}, &out, statusNow); err != nil {
+	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -71,7 +71,7 @@ func TestProxyStatus_Table(t *testing.T) {
 func TestProxyStatus_JSON(t *testing.T) {
 	addr, _ := fakeDaemon(t, fixtureReport())
 	var out bytes.Buffer
-	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, json: true}, &out, statusNow); err != nil {
+	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, json: true}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
 	var rep mcpproxy.StatusReport
@@ -87,7 +87,7 @@ func TestProxyStatus_ProbeCallsTheProbeEndpoint(t *testing.T) {
 	addr, reqs := fakeDaemon(t, fixtureReport())
 	var out bytes.Buffer
 	o := proxyStatusOpts{addr: addr, probe: true, timeout: 45 * time.Second}
-	if err := proxyStatus(context.Background(), o, &out, statusNow); err != nil {
+	if err := proxyStatus(context.Background(), o, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
 	if len(*reqs) != 1 || (*reqs)[0] != "POST /status/probe?timeout=45s X-Aimux-Probe=1" {
@@ -112,14 +112,14 @@ func closedAddr(t *testing.T) string {
 func TestProxyStatus_NotRunning(t *testing.T) {
 	addr := closedAddr(t)
 	var out bytes.Buffer
-	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr}, &out, statusNow); err != nil {
+	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatalf("not running should not be an error: %v", err)
 	}
 	if want := "MCP proxy is not running on " + addr + "\n"; out.String() != want {
 		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 	out.Reset()
-	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, json: true}, &out, statusNow); err != nil {
+	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, json: true}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(out.String()) != `{"running":false}` {
@@ -133,7 +133,7 @@ func TestProxyStatus_DaemonErrorIsAnError(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out bytes.Buffer
-	err := proxyStatus(context.Background(), proxyStatusOpts{addr: strings.TrimPrefix(srv.URL, "http://")}, &out, statusNow)
+	err := proxyStatus(context.Background(), proxyStatusOpts{addr: strings.TrimPrefix(srv.URL, "http://")}, &out, fixedClock(statusNow))
 	if err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("got %v, want an error naming the status", err)
 	}
@@ -167,7 +167,7 @@ func TestProxyStatus_NeverPrintsEnvValues(t *testing.T) {
 		{addr: addr},
 		{addr: addr, json: true},
 	} {
-		if err := proxyStatus(context.Background(), o, &all, time.Now()); err != nil {
+		if err := proxyStatus(context.Background(), o, &all, time.Now); err != nil {
 			t.Fatal(err)
 		}
 	}

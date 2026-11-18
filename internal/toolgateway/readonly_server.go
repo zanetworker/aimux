@@ -73,6 +73,7 @@ type ReadonlyServer struct {
 
 	obsMu     sync.Mutex
 	observed  map[string]Observed          // what the builds and calls listed, by backend
+	checked   map[string]time.Time         // when each backend was last listed or retried
 	built     map[string]map[string]string // each served backend's tools (name -> pin) as built
 	pending   map[string]bool              // backends with a recheck queued or running
 	coalesced map[string]int               // notifications folded into a queued recheck, logged when it ends
@@ -121,6 +122,18 @@ func (r *ReadonlyServer) Observed() map[string]Observed {
 		out[n] = o
 	}
 	return out
+}
+
+// BackendsChecked is Backends with when each was last listed or retried,
+// read in one snapshot: a retry updates the down list and its time under
+// r.mu, so a backend is never shown down with the time of the check that
+// found it up.
+func (r *ReadonlyServer) BackendsChecked() (all, down []string, checked map[string]time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.obsMu.Lock()
+	defer r.obsMu.Unlock()
+	return slices.Clone(r.all), slices.Clone(r.down), maps.Clone(r.checked)
 }
 
 // LiveFor is obs as Review's live listings under reg: what was listed from
@@ -184,6 +197,15 @@ func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyC
 				delete(r.observed, n)
 			}
 		}
+		for n := range r.checked {
+			if !slices.Contains(keep, n) {
+				delete(r.checked, n)
+			}
+		}
+		if r.checked == nil {
+			r.checked = map[string]time.Time{}
+		}
+		now := time.Now()
 		for _, n := range names {
 			o := Observed{Endpoint: reg.Sources[n].Endpoint()}
 			switch err, down := errs[n]; {
@@ -192,9 +214,10 @@ func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyC
 			case cat != nil:
 				o.Tools = toolsOf(cat.Servers[n])
 			default:
-				continue
+				continue // not listed: no check to stamp
 			}
 			r.observed[n] = o
+			r.checked[n] = now
 		}
 	}
 }
@@ -770,6 +793,10 @@ func (r *ReadonlyServer) markRelistFailed(names []string, errs map[string]error)
 	r.obsMu.Lock()
 	defer r.obsMu.Unlock()
 	for _, n := range names {
+		if r.checked == nil {
+			r.checked = map[string]time.Time{}
+		}
+		r.checked[n] = time.Now()
 		o := r.observed[n]
 		o.RelistFailed = true
 		if r.observed == nil {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -160,16 +161,36 @@ type gatewayStatuser interface {
 // gatewayStatusLine is the gateway worker in one line, for status and
 // doctor.
 func gatewayStatusLine(ctx context.Context, c gatewayStatuser) string {
+	return gatewayStatusLineAt(ctx, c, time.Now)
+}
+
+// gatewayStatusLineAt is gatewayStatusLine with clock now, read once the
+// worker answered: it says when the worker started and when each down
+// backend was last checked (retried every minute), so a last-known state
+// is not read as live.
+func gatewayStatusLineAt(ctx context.Context, c gatewayStatuser, clock func() time.Time) string {
 	st, err := c.Status(ctx)
+	now := clock()
 	switch {
 	case errors.Is(err, toolgateway.ErrGatewayNotRunning):
 		return "tool gateway: not running (Workspace turns fail): run aimux mcp proxy gateway install"
 	case err != nil:
 		return "tool gateway: unknown: " + err.Error()
 	}
-	line := fmt.Sprintf("tool gateway: running, %d leases, %d backends", st.Leases, len(st.Backends))
+	line := "tool gateway: running"
+	if !st.StartedAt.IsZero() {
+		line += " (started " + mcpproxy.Ago(now, st.StartedAt) + ")"
+	}
+	line += fmt.Sprintf(", %d leases, %d backends", st.Leases, len(st.Backends))
 	if len(st.Down) > 0 {
-		line += ", down: " + strings.Join(st.Down, ", ")
+		down := make([]string, len(st.Down))
+		for i, n := range st.Down {
+			down[i] = n
+			if at, ok := st.Checked[n]; ok { // an older worker reports no times
+				down[i] += " (checked " + mcpproxy.Ago(now, at) + ")"
+			}
+		}
+		line += ", down: " + strings.Join(down, ", ")
 	}
 	return line
 }

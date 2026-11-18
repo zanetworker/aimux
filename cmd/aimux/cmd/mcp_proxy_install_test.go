@@ -206,7 +206,7 @@ func TestProxyStatus_JSONIncludesInstall(t *testing.T) {
 	inst := &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"github", "slack"}, Drifted: []string{"slack"}, NotProxied: []string{"pypi"}}
 	addr, _ := fakeDaemon(t, fixtureReport())
 	var out bytes.Buffer
-	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, json: true, install: inst}, &out, statusNow); err != nil {
+	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, json: true, install: inst}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
 	var got struct {
@@ -232,7 +232,7 @@ func TestProxyStatus_JSONIncludesInstall(t *testing.T) {
 	closed := ln.Addr().String()
 	_ = ln.Close()
 	out.Reset()
-	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: closed, json: true, install: inst}, &out, statusNow); err != nil {
+	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: closed, json: true, install: inst}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), `"running":false`) || !strings.Contains(out.String(), `"state":"drifted"`) {
