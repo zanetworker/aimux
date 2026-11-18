@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -82,21 +83,33 @@ func newMCPProxyGatewayInstallCmd() *cobra.Command {
 			if a.Binary, err = stableBinary("aimux mcp proxy gateway install"); err != nil {
 				return err
 			}
-			// launchd opens the log files before starting the worker and
-			// Install writes the plist there: both folders must exist.
-			if err := os.MkdirAll(filepath.Dir(a.PlistPath), 0o755); err != nil { //nolint:gosec // ~/Library/LaunchAgents is world-readable by design
-				return err
-			}
-			if err := os.MkdirAll(a.LogDir, 0o700); err != nil {
-				return err
-			}
-			if err := a.Install(); err != nil {
-				return err
-			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Installed %s (%s); logs in %s\n", gatewayAgentLabel, a.Binary, a.LogDir)
-			return nil
+			return installGatewayAgent(a, cmd.OutOrStdout())
 		},
 	}
+}
+
+// installGatewayAgent writes the worker's plist for a.Binary and restarts
+// the job so launchd runs it, saying which binary it ran before when that
+// was another one.
+func installGatewayAgent(a mcpproxy.Agent, out io.Writer) error {
+	// launchd opens the log files before starting the worker and Install
+	// writes the plist there: both folders must exist.
+	if err := os.MkdirAll(filepath.Dir(a.PlistPath), 0o755); err != nil { //nolint:gosec // ~/Library/LaunchAgents is world-readable by design
+		return err
+	}
+	if err := os.MkdirAll(a.LogDir, 0o700); err != nil {
+		return err
+	}
+	was := mcpproxy.ReadPlistBinary(a.PlistPath)
+	if err := a.Install(); err != nil {
+		return err
+	}
+	switched := ""
+	if was != "" && was != a.Binary {
+		switched = ", was " + was
+	}
+	_, _ = fmt.Fprintf(out, "Installed %s (%s%s); logs in %s\n", gatewayAgentLabel, a.Binary, switched, a.LogDir)
+	return nil
 }
 
 func newMCPProxyGatewayUninstallCmd() *cobra.Command {

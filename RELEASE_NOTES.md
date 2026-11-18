@@ -8,6 +8,10 @@
 
 **The tool gateway logs its retries of a down backend.** A backend that was down when the gateway worker started is still retried every minute and served once it answers (`backend <name> now available`); each failed retry is now logged too, at most once every 10 minutes per backend (`backend <name> still unavailable (retried): <reason>`), so the log shows the worker is still trying.
 
+### Fixes
+
+- **Installing from a new binary switches the launchd job to it.** `aimux mcp proxy install` run from another aimux binary than the one the `com.aimux.mcp-proxy` job runs now rewrites the plist's program to this binary and restarts the job (before, a running proxy only reloaded and kept the old binary). `aimux mcp proxy gateway install` does the same for `com.aimux.tool-gateway` and waits for launchd to unload the old job before loading the new one. Both name the binary the job ran before.
+
 ## aimux v0.15.0
 
 ### Highlights

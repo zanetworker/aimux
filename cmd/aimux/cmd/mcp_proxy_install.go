@@ -232,6 +232,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			"Tool names stay the same, so permission rules keep working unchanged. In ~/.claude/settings.json it sets " +
 			"CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT and adds two hooks: one moves a server you add in a Claude Code session behind the proxy, " +
 			"one names servers still direct when a session starts (uninstall removes both). " +
+			"When the launchd agent runs another aimux binary than this one, install first points the plist's program at this binary and restarts the agent (also when there is nothing new to move). " +
 			"Run it again to move servers added later, and to take off the proxy any moved server you removed from ~/.claude.json (claude mcp remove); servers kept direct with --skip stay direct until --unskip. Moved stdio servers are configured with `aimux mcp proxy edit` (moved HTTP servers by uninstall, edit, install), not in " +
 			"~/.claude.json. What changed is recorded in ~/.aimux/mcp-proxy-install.json; `uninstall` undoes it.",
 		RunE: func(cmd *cobra.Command, args []string) error {

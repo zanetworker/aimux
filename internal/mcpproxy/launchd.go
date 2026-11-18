@@ -147,7 +147,8 @@ func (a Agent) Plist() []byte {
 	return bytes.ReplaceAll(buf.Bytes(), []byte("<true></true>"), []byte("<true/>"))
 }
 
-// Install writes the plist atomically (0644), bootouts (ignoring "not loaded"), then bootstraps
+// Install writes the plist atomically (0644), then restarts the job from it
+// (Restart: bootout, ignoring "not loaded", then bootstrap).
 func (a Agent) Install() error {
 	// Generate plist content
 	plistContent := a.Plist()
@@ -190,25 +191,9 @@ func (a Agent) Install() error {
 	// Successfully written, don't delete in defer
 	tmpFile = nil
 
-	// Bootout existing service (ignore "not loaded" errors)
-	domain := fmt.Sprintf("gui/%d/%s", a.UID, a.Label)
-	out, err := a.Run("launchctl", "bootout", domain)
-	if err != nil {
-		// Ignore "service not loaded" or "could not find service" errors
-		if !isServiceNotFoundError(out, err) {
-			return fmt.Errorf("failed to bootout: %w", err)
-		}
-		// Service not loaded is expected on first install, continue
-	}
-
-	// Bootstrap the service
-	bootstrapDomain := fmt.Sprintf("gui/%d", a.UID)
-	_, err = a.Run("launchctl", "bootstrap", bootstrapDomain, a.PlistPath)
-	if err != nil {
-		return fmt.Errorf("failed to bootstrap: %w", err)
-	}
-
-	return nil
+	// Reload it from the new plist; Restart waits for launchd to unload a
+	// running job, so a bootstrap never lands in the unload window.
+	return a.Restart()
 }
 
 // Restart reloads the service from the plist on disk as it is (bootout,
@@ -397,4 +382,94 @@ func ReadPlistBinary(path string) string {
 		}
 	}
 	return ""
+}
+
+// SwitchBinary points the installed plist at a.Binary when it runs another
+// program: it rewrites only the first ProgramArguments string, then restarts
+// the job with bootout and bootstrap so launchd reads it (kickstart -k would
+// keep the old program). It returns the program the plist ran before, or ""
+// with nothing done when there is no plist, it already runs a.Binary, or
+// a.Binary is empty.
+func (a Agent) SwitchBinary() (string, error) {
+	if a.Binary == "" {
+		return "", nil
+	}
+	b, err := os.ReadFile(a.PlistPath) // #nosec G304 -- the agent's own plist
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	old := ReadPlistBinary(a.PlistPath)
+	if old == a.Binary {
+		return "", nil
+	}
+	nb, err := replacePlistProgram(b, a.Binary)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", a.PlistPath, err)
+	}
+	if err := writePlist(a.PlistPath, nb); err != nil {
+		return "", err
+	}
+	if err := a.Restart(); err != nil {
+		// Put the old program back and load it again, so the old daemon
+		// serves and the next install sees the mismatch and retries.
+		if rerr := writePlist(a.PlistPath, b); rerr != nil {
+			return "", fmt.Errorf("%w; putting the plist back also failed: %v", err, rerr)
+		}
+		if rerr := a.Restart(); rerr != nil {
+			return "", fmt.Errorf("%w; loading the old plist (%s) again also failed: %v", err, old, rerr)
+		}
+		return "", fmt.Errorf("%w; the agent runs %s again", err, old)
+	}
+	return old, nil
+}
+
+// replacePlistProgram swaps the first string of ProgramArguments in plist
+// for program, leaving every other byte as it was.
+func replacePlistProgram(plist []byte, program string) ([]byte, error) {
+	const key = "<key>ProgramArguments</key>"
+	k := bytes.Index(plist, []byte(key))
+	if k < 0 {
+		return nil, errors.New("no ProgramArguments in the launchd plist")
+	}
+	rest := plist[k+len(key):]
+	open := bytes.Index(rest, []byte("<string>"))
+	if open < 0 {
+		return nil, errors.New("ProgramArguments in the launchd plist is empty")
+	}
+	start := k + len(key) + open + len("<string>")
+	end := bytes.Index(plist[start:], []byte("</string>"))
+	if end < 0 {
+		return nil, errors.New("ProgramArguments in the launchd plist is not closed")
+	}
+	var esc bytes.Buffer
+	if err := xml.EscapeText(&esc, []byte(program)); err != nil {
+		return nil, err
+	}
+	out := append([]byte{}, plist[:start]...)
+	out = append(out, esc.Bytes()...)
+	return append(out, plist[start+end:]...), nil
+}
+
+// writePlist replaces the plist at path atomically, readable by launchd.
+func writePlist(path string, b []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".plist-tmp-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	//nolint:gosec // G302: plist files need 0644 to be readable by launchd
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
