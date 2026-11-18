@@ -74,10 +74,20 @@ type AuditEntry struct {
 	QuestionSHA256 string `json:"question_sha256,omitempty"`
 	DecisionID     string `json:"decisionId,omitempty"`
 	Source         string `json:"source,omitempty"`
-	Result         string `json:"result"`
+	// Set and Tools are set on tools_approve lines: the set and each tool
+	// with the pin it was approved at.
+	Set    string         `json:"set,omitempty"`
+	Tools  []ApprovedTool `json:"tools,omitempty"`
+	Result string         `json:"result"`
 	// Count, on a failure line, is how many identical failures it stands
 	// for: those left out in the minute since the last such line, plus this.
 	Count int `json:"count,omitempty"`
+}
+
+// ApprovedTool is one tool of an approval and the pin it was approved at.
+type ApprovedTool struct {
+	Tool string `json:"tool"`
+	Pin  string `json:"pin"`
 }
 
 // collapseEvery: identical failures (same login, device, action and result) are

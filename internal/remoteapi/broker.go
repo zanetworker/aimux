@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -68,6 +69,9 @@ type BrokerOptions struct {
 	// OnTurnEnd, if set, is told the session once a turn has ended (done or
 	// error) and the session can take the next one. It must not block.
 	OnTurnEnd func(session string)
+	// Logf, if set, receives what a client is not shown, such as the cause
+	// behind a coded turn error.
+	Logf func(format string, args ...any)
 }
 
 // ApprovalNotice describes a new permission request for a notification.
@@ -106,6 +110,8 @@ type Broker struct {
 	deps      BrokerDeps
 	opt       BrokerOptions
 	logID     string // names this run's event log; sequence numbers restart with it
+	causeOnce sync.Once
+	causes    chan string // coded failures' causes for Logf (logCause)
 	mu        sync.Mutex
 	sessions  map[string]*sessionLog
 	approvals map[string]*pendingApproval
@@ -264,6 +270,11 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 		}
 		b.emit(session, turn, e.Kind, e.Data)
 	})
+	// In its own goroutine: a log writer that blocks must hold up neither
+	// this turn's end nor other sessions.
+	if _, coded := errcode.Of(err); coded && b.opt.Logf != nil && !errors.Is(err, context.Canceled) {
+		b.logCause(fmt.Sprintf("session %s turn %s: %v", session, turn, err)) // the event has the message only
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	switch {
@@ -287,12 +298,35 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 	}
 }
 
+// causeQueue bounds the causes waiting for a slow log writer.
+const causeQueue = 64
+
+// logCause hands line to Logf on a single writer goroutine through a
+// bounded queue: a stalled log neither delays a turn nor piles up
+// goroutines; past causeQueue waiting lines, new ones are dropped.
+func (b *Broker) logCause(line string) {
+	b.causeOnce.Do(func() {
+		b.causes = make(chan string, causeQueue)
+		go func() {
+			for l := range b.causes {
+				b.opt.Logf("%s", l)
+			}
+		}()
+	})
+	select {
+	case b.causes <- line:
+	default: // the writer is stuck: drop rather than block or grow
+	}
+}
+
 // turnErrorData is a failed turn's event data: a coded error's code and
-// message for a person, else the error text as the message.
+// message for a person, in both error and message (its cause, which can
+// name sandboxes, hosts and command output, stays in the serve log), else
+// the error text.
 func turnErrorData(err error) TurnErrorData {
 	d := TurnErrorData{Error: err.Error(), Message: err.Error()}
 	if e, ok := errcode.Of(err); ok {
-		d.Code, d.Message = e.Code, e.Message
+		d.Code, d.Error, d.Message = e.Code, e.Message, e.Message
 	}
 	return d
 }

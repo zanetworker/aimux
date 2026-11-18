@@ -20,7 +20,10 @@ type observedWorker struct{}
 func (observedWorker) PutLease(context.Context, toolgateway.Lease) error { return nil }
 func (observedWorker) Renew(string, time.Time) error                     { return nil }
 func (observedWorker) DeleteLease(string)                                {}
-func (observedWorker) Status() toolgateway.ControlStatus                 { return toolgateway.ControlStatus{} }
+func (observedWorker) Relist(context.Context, string, []string) (toolgateway.RelistResult, error) {
+	return toolgateway.RelistResult{}, nil
+}
+func (observedWorker) Status() toolgateway.ControlStatus { return toolgateway.ControlStatus{} }
 func (observedWorker) Observed() map[string]toolgateway.Observed {
 	return map[string]toolgateway.Observed{"fake": {LiveSource: toolgateway.LiveSource{Tools: map[string]json.RawMessage{
 		"search": json.RawMessage(`{"name":"search","inputSchema":{"type":"object"}}`)}}, Endpoint: "http://fake/"}}

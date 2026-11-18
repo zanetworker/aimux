@@ -25,7 +25,7 @@ fi
 # (a shallow or single-branch clone) falls back to HEAD with a note, never
 # to an unfiltered run. --new-from-rev filters by changed lines: a finding
 # on an unchanged line (a helper left unused by a deletion elsewhere) is
-# only caught by the full run, make lint-linux, and CI.
+# only caught by a full run (GOOS=linux golangci-lint run ./...) and CI.
 from=${LINT_FROM:-${PRE_COMMIT_FROM_REF:-HEAD}}
 if ! git rev-parse --verify -q "$from^{commit}" >/dev/null; then
   echo "golangci-lint hook: $from not found; checking uncommitted changes only (run make lint-linux)" >&2

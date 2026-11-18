@@ -56,7 +56,7 @@ repos:
       # Lint as CI does (Linux build tags) before a push: new issues in the
       # pushed commits (pre-commit's from-ref; the script says more; a full run
       # would also report what a newer local golangci-lint finds in old code;
-      # make lint-linux runs it). Runs on every push (about 10 s), so a
+      # GOOS=linux golangci-lint run ./... runs it). Runs on every push (about 10 s), so a
       # push that only deletes files or changes go.mod is checked too.
       - id: golangci-lint-linux
         name: golangci-lint (GOOS=linux)

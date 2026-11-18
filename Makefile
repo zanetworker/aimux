@@ -39,8 +39,17 @@ lint:
 	golangci-lint run ./...
 
 # CI lints on Linux: build tags (peercred, procident, controllock) differ.
+# New issues since LINT_BASE (origin/main) only, so old findings in untouched
+# files (a newer local golangci-lint finds more) do not fail it; without that
+# ref (a single-branch clone) it lints everything.
+LINT_BASE ?= origin/main
 lint-linux:
-	GOOS=linux golangci-lint run ./...
+	@if git rev-parse -q --verify "$(LINT_BASE)^{commit}" >/dev/null; then \
+		GOOS=linux golangci-lint run --new-from-rev=$(LINT_BASE) ./...; \
+	else \
+		echo "lint-linux: $(LINT_BASE) not found; linting everything" >&2; \
+		GOOS=linux golangci-lint run ./...; \
+	fi
 
 build-mcp:
 	go build -o bin/k8s-agents-mcp ./cmd/mcp

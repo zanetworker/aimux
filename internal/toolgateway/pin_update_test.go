@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Concurrent updates each read the file as the last one left it: no
@@ -52,5 +53,27 @@ func TestPinStore_UpdateNoChangeAndError(t *testing.T) {
 	}
 	if f, _ := s.LoadFile(); len(f) != 0 {
 		t.Fatalf("a failed update wrote %v", f)
+	}
+}
+
+// A lock held too long fails the update with ErrPinsBusy after a bounded
+// wait instead of hanging the caller.
+func TestPinStore_UpdateGivesUpOnAHeldLock(t *testing.T) {
+	s := PinStore{Path: filepath.Join(t.TempDir(), "pins.json")}
+	old := pinLockWait
+	pinLockWait = 200 * time.Millisecond
+	t.Cleanup(func() { pinLockWait = old })
+	unlock, err := lockPins(s.Path + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	start := time.Now()
+	_, err = s.Update(func(f PinFile) (PinFile, bool, error) { return f, true, nil })
+	if !errors.Is(err, ErrPinsBusy) {
+		t.Fatalf("err %v, want ErrPinsBusy", err)
+	}
+	if d := time.Since(start); d < 150*time.Millisecond || d > 2*time.Second {
+		t.Fatalf("gave up after %v, want about the bounded wait", d)
 	}
 }

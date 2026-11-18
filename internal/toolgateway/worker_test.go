@@ -39,6 +39,13 @@ func (g *fakeGateway) Refresh(context.Context) {
 	}
 }
 
+func (g *fakeGateway) RelistSeen(ctx context.Context, servers []string) (RelistResult, error) {
+	if err := g.RelistNow(ctx, servers); err != nil {
+		return RelistResult{}, err
+	}
+	return RelistResult{Version: g.Applied().Version(), Observed: map[string]Observed{}}, nil
+}
+
 func (g *fakeGateway) RelistNow(ctx context.Context, servers []string) error {
 	g.mu.Lock()
 	g.relisted = append(g.relisted, slices.Clone(servers))

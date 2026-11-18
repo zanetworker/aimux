@@ -1,6 +1,7 @@
 package remoteapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/errcode"
+	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -63,6 +66,19 @@ type ToolsApproveResult struct {
 	Results []toolgateway.Approval `json:"results"`
 	Written bool                   `json:"written"`
 }
+
+// RelistView is an approval's fresh listing of one source: the tool
+// snapshot the gateway listed under and what it saw; Listed is false when
+// the gateway has nothing for the source (not configured there, or its
+// relist failed).
+type RelistView struct {
+	Version string
+	Live    toolgateway.LiveSource
+	Listed  bool
+}
+
+// relistTimeout bounds the fresh listing an approval waits for.
+var relistTimeout = 5 * time.Second
 
 // maxApproveTools bounds one approve request.
 const maxApproveTools = 100
@@ -153,7 +169,9 @@ func clientDefinition(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-// toolsDiff answers GET /v1/tools/{set}/diff, read-only.
+// toolsDiff answers GET /v1/tools/{set}/diff, read-only: it needs the
+// client's tools_approve scope but no step-up, since it changes nothing;
+// POST /v1/tools/approve asks for the step-up.
 func (a *API) toolsDiff(w http.ResponseWriter, r *http.Request) {
 	// Definitions are shown only to a client that may approve them.
 	if !a.Scopes.Clients[a.clientOf(r)].ToolsApprove {
@@ -224,6 +242,64 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// A malformed request is 400 before the gateway is asked anything.
+	for _, t := range req.Tools {
+		switch {
+		case t.Name == "" || t.Pin == "":
+			writeError(w, http.StatusBadRequest, "bad_request", errors.New("each tool needs a name and the pin GET /v1/tools/{set}/diff showed"))
+			return
+		case !slices.Contains(set.Tools, t.Name):
+			writeError(w, http.StatusBadRequest, "bad_request", fmt.Errorf("set %s does not list tool %q", req.Set, t.Name))
+			return
+		}
+	}
+	// A request made against another snapshot is stale whatever the
+	// gateway says: tell the client before asking it.
+	if req.Snapshot != "" && req.Snapshot != v.Snapshot.Version() {
+		writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed since the diff; get the diff again"))
+		return
+	}
+	// Check the pins against what the server lists now, not the gateway's
+	// last listing: a tool that changed since the diff is then stale.
+	if a.Relist != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), relistTimeout)
+		res, err := a.Relist(ctx, set.Source, v.Snapshot.Version())
+		cancel()
+		before := v.Snapshot.Version()
+		switch {
+		case errors.Is(err, toolgateway.ErrGatewayNotRunning):
+			writeError(w, http.StatusServiceUnavailable, errcode.ToolGatewayNotRunning,
+				errors.New(errcode.Message(errcode.ToolGatewayNotRunning)+", then approve again"))
+			return
+		case errors.Is(err, toolgateway.ErrRelistUnsupported):
+			writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
+				errors.New("the tool gateway worker runs an older aimux than remote serve: run aimux mcp proxy gateway install, then approve again"))
+			return
+		case err == nil && a.Tools().Snapshot.Version() != before:
+			writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed while checking; get the diff again"))
+			return
+		case err == nil && !res.Listed:
+			err = fmt.Errorf("the relist did not list %s", set.Source)
+		case err == nil && res.Version != "" && res.Version != before:
+			// The worker listed under another configuration than this
+			// approval checks against (it reloads within a minute).
+			err = fmt.Errorf("the tool gateway listed %s under tool snapshot %s, not %s", set.Source, res.Version, before)
+		case err == nil && res.Live.Err != nil:
+			err = res.Live.Err // the backend is down: unknown, not changed
+		}
+		if err != nil {
+			a.logf("tools approve: relist of %s: %v", set.Source, err)
+			// A known limit: the budget is 5 s for the whole listing, which a
+			// source with many pages of tools can outlast.
+			writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
+				fmt.Errorf("%s did not list its tools within %v (slow or down); nothing was approved, try again", set.Source, relistTimeout))
+			return
+		}
+		// Check against what this relist saw, not a listing read later.
+		v.Live = maps.Clone(v.Live)
+		v.Live[set.Source] = res.Live
+	}
+
 	if req.Snapshot != "" && req.Snapshot != v.Snapshot.Version() {
 		writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed since the diff; get the diff again"))
 		return
@@ -259,6 +335,10 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 		targets = append(targets, req.Set+"/"+t.Name)
 	}
 	res, written, err := a.approvePins(v, targets, pins)
+	if errors.Is(err, toolgateway.ErrPinsBusy) {
+		writeError(w, http.StatusServiceUnavailable, "pins_busy", err)
+		return
+	}
 	if errors.Is(err, errPinsMoved) {
 		writeError(w, http.StatusConflict, "pin_stale", errors.New("another approval changed these tools meanwhile; get the diff again"))
 		return
@@ -268,6 +348,11 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", errors.New("the pins could not be written; see the aimux remote serve log"))
 		return
 	}
+	ta := toolsAudit{set: req.Set}
+	for _, t := range req.Tools { // each pin was checked against the live definition
+		ta.tools = append(ta.tools, devicelogin.ApprovedTool{Tool: t.Name, Pin: t.Pin})
+	}
+	noteTools(w, r, ta)
 	a.logf("tools approve: client %s approved %v (written %v)", client, targets, written)
 	writeJSON(w, http.StatusOK, ToolsApproveResult{Results: res, Written: written})
 }
@@ -343,6 +428,24 @@ func aimuxAnnotations(def json.RawMessage) map[string]string {
 		}
 	}
 	return out
+}
+
+// toolsAudit is what an approval adds to its audit line.
+type toolsAudit struct {
+	set   string
+	tools []devicelogin.ApprovedTool
+}
+
+// noteTools puts ta on the request's audit line: the local note, or the
+// device's recorder.
+func noteTools(w http.ResponseWriter, r *http.Request, ta toolsAudit) {
+	if n := noteOf(r); n != nil {
+		n.tools = ta
+		return
+	}
+	if rec, ok := w.(*statusRecorder); ok {
+		rec.tools = ta
+	}
 }
 
 // errPinsMoved is an approval racing another: a target's record in the

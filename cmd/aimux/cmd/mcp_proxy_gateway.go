@@ -71,7 +71,8 @@ func gatewayAgent(home string) mcpproxy.Agent {
 }
 
 func newMCPProxyGatewayInstallCmd() *cobra.Command {
-	return &cobra.Command{
+	var allowWorktree bool
+	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Run the sandbox tool gateway worker under launchd (com.aimux.tool-gateway), started at login and restarted if it stops",
 		Args:  cobra.NoArgs,
@@ -84,15 +85,39 @@ func newMCPProxyGatewayInstallCmd() *cobra.Command {
 			if a.Binary, err = stableBinary("aimux mcp proxy gateway install"); err != nil {
 				return err
 			}
-			return installGatewayAgent(a, cmd.OutOrStdout())
+			if err := guardWorktreeBinary(a.Binary, allowWorktree, cmd.ErrOrStderr()); err != nil {
+				return err
+			}
+			worker := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home), Timeout: 2 * time.Second}
+			// Ctrl-C or SIGTERM stops the wait for the new worker; the
+			// install is then rolled back like one that never answered.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return withGatewayLifecycle(home, func() error {
+				return installGatewayAgent(ctx, a, cmd.OutOrStdout(), worker, gatewayReadyWait)
+			})
 		},
 	}
+	cmd.Flags().BoolVar(&allowWorktree, "allow-worktree-binary", false, "Install from an aimux built inside a git worktree (the launchd job stops when the worktree is removed)")
+	return cmd
 }
 
+// gatewayReadyWait is how long install waits for the restarted worker to
+// answer: it opens its control socket only after listing every backend
+// (four at a time, an HTTP backend up to 5 s to start and 5 s per page),
+// so the budget leaves room for several slow but healthy ones.
+// gatewayReadyPoll is how often it asks.
+const (
+	gatewayReadyWait = 90 * time.Second
+	gatewayReadyPoll = 250 * time.Millisecond
+)
+
 // installGatewayAgent writes the worker's plist for a.Binary and restarts
-// the job so launchd runs it, saying which binary it ran before when that
-// was another one.
-func installGatewayAgent(a mcpproxy.Agent, out io.Writer) error {
+// the job so launchd runs it (mcpproxy.Agent.InstallChecked), waiting up to
+// wait for a worker started after the restart to answer on its control
+// socket (st); a failed bootstrap or a worker that never answers is undone
+// there. It says which binary the job ran before when that was another.
+func installGatewayAgent(ctx context.Context, a mcpproxy.Agent, out io.Writer, st gatewayStatuser, wait time.Duration) error {
 	// launchd opens the log files before starting the worker and Install
 	// writes the plist there: both folders must exist.
 	if err := os.MkdirAll(filepath.Dir(a.PlistPath), 0o755); err != nil { //nolint:gosec // ~/Library/LaunchAgents is world-readable by design
@@ -101,9 +126,9 @@ func installGatewayAgent(a mcpproxy.Agent, out io.Writer) error {
 	if err := os.MkdirAll(a.LogDir, 0o700); err != nil {
 		return err
 	}
-	was := mcpproxy.ReadPlistBinary(a.PlistPath)
-	if err := a.Install(); err != nil {
-		return err
+	was, err := a.InstallChecked(gatewayReadyWithin(ctx, st, a, wait))
+	if err != nil {
+		return fmt.Errorf("tool gateway worker (waited up to %v): %w", wait, err)
 	}
 	switched := ""
 	if was != "" && was != a.Binary {
@@ -111,6 +136,85 @@ func installGatewayAgent(a mcpproxy.Agent, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(out, "Installed %s (%s%s); logs in %s\n", gatewayAgentLabel, a.Binary, switched, a.LogDir)
 	return nil
+}
+
+// cctxFor is ctx ending at deadline as well.
+func cctxFor(ctx context.Context, deadline time.Time) context.Context {
+	c, cancel := context.WithDeadline(ctx, deadline)
+	context.AfterFunc(c, cancel) // released when c ends
+	return c
+}
+
+// jobPID is a.PID bounded by ctx: launchctl print runs without a context,
+// so a stalled one is left behind (it exits on its own) rather than waited
+// for past the deadline or Ctrl-C.
+func jobPID(ctx context.Context, a mcpproxy.Agent) (int, error) {
+	type result struct {
+		pid int
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		pid, err := a.PID()
+		done <- result{pid, err}
+	}()
+	select {
+	case r := <-done:
+		return r.pid, r.err
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+// gatewayReadyWithin is InstallChecked's readiness check with one deadline,
+// wait from now, for the install and its rollback re-check together: the
+// re-check gets what the first check left, never a second full wait.
+func gatewayReadyWithin(ctx context.Context, st gatewayStatuser, a mcpproxy.Agent, wait time.Duration) func(since time.Time) mcpproxy.Readiness {
+	deadline := time.Now().Add(wait)
+	return func(since time.Time) mcpproxy.Readiness {
+		return gatewayAnswers(ctx, st, a, since, time.Until(deadline))
+	}
+}
+
+// gatewayAnswers polls st, for at most wait in all (each call gets what is
+// left of it, 2 s at most), until the launchd job's own worker, started
+// after since, answers: Ready. A worker that answers without a pid (an
+// older aimux) cannot be told from a foreground gateway serve: ReadyUnknown,
+// as is a check with no time left or one ctx stopped. Otherwise NotReady.
+func gatewayAnswers(ctx context.Context, st gatewayStatuser, a mcpproxy.Agent, since time.Time, wait time.Duration) mcpproxy.Readiness {
+	sleep := a.Sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	deadline := time.Now().Add(wait)
+	if wait <= 0 || ctx.Err() != nil {
+		return mcpproxy.ReadyUnknown // not asked at all
+	}
+	legacy := false
+	for {
+		left := time.Until(deadline)
+		if left <= 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			return mcpproxy.NotReady // interrupted: roll back
+		}
+		cctx, cancel := context.WithTimeout(ctx, min(left, 2*time.Second))
+		s, err := st.Status(cctx)
+		cancel()
+		if err == nil && !s.StartedAt.Before(since) {
+			if s.PID == 0 {
+				legacy = true
+			} else if job, perr := jobPID(cctxFor(ctx, deadline), a); perr == nil && job == s.PID {
+				return mcpproxy.Ready // the launchd job's own worker, not a foreground serve
+			}
+		}
+		sleep(min(gatewayReadyPoll, max(time.Until(deadline), 0)))
+	}
+	if legacy {
+		return mcpproxy.ReadyUnknown
+	}
+	return mcpproxy.NotReady
 }
 
 func newMCPProxyGatewayUninstallCmd() *cobra.Command {
@@ -123,7 +227,7 @@ func newMCPProxyGatewayUninstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := gatewayAgent(home).Uninstall(); err != nil {
+			if err := withGatewayLifecycle(home, gatewayAgent(home).Uninstall); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Removed %s\n", gatewayAgentLabel)

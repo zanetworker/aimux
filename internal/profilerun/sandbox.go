@@ -54,8 +54,12 @@ type SandboxEngine struct {
 	// turn shows before claude answers (the profile's tools held for
 	// review; "" shows nothing) and the servers left out of its MCP config
 	// because every tool granted on them is held back.
-	Review     func(c profile.Compiled) TurnReview
-	ArchiveDir string // default ~/.aimux/archive (the search index scans it)
+	Review func(c profile.Compiled) TurnReview
+	// GatewayCheck, if set, checks the OpenShell gateway (openshell status)
+	// after a sandbox failure: a failed check codes the failure
+	// sandbox_gateway_down. It must not start the gateway.
+	GatewayCheck func(ctx context.Context) error
+	ArchiveDir   string // default ~/.aimux/archive (the search index scans it)
 	// OnStarted, if set, hears once per session that its first turn's
 	// claude process started, as its stream showed (the id is claude's from
 	// then on); remote serve records it (Store.MarkStarted) so a restart
@@ -82,17 +86,22 @@ func leaseFailure(err error) error {
 	return errcode.Wrap(errcode.GatewayBackendDown, err)
 }
 
-// openshellDownSigns are what the openshell CLI says when it cannot reach
-// its gateway.
-var openshellDownSigns = []string{"Connection refused", "connection refused", "tcp connect error", "transport error", "is not reachable", gatewayDownText}
+// gatewayCheckTimeout bounds the OpenShell gateway check after a failure.
+const gatewayCheckTimeout = 5 * time.Second
 
-// sandboxFailure codes err as sandbox_gateway_down when the openshell CLI
-// could not reach the OpenShell gateway; any other failure stays as it is.
-func sandboxFailure(err error) error {
-	for _, sign := range openshellDownSigns {
-		if strings.Contains(err.Error(), sign) {
-			return errcode.Wrap(errcode.SandboxGatewayDown, err)
-		}
+// sandboxFailure codes err as sandbox_gateway_down when the OpenShell
+// gateway check (GatewayCheck) fails now; any other failure, such as an MCP
+// server refusing a connection inside the sandbox, stays as it is. Without
+// a check nothing is coded.
+func (e *SandboxEngine) sandboxFailure(ctx context.Context, err error) error {
+	// A cancelled step is the caller's doing: no probe holding locks.
+	if e.GatewayCheck == nil || ctx.Err() != nil {
+		return err
+	}
+	check, cancel := context.WithTimeout(ctx, gatewayCheckTimeout)
+	defer cancel()
+	if e.GatewayCheck(check) != nil && ctx.Err() == nil {
+		return errcode.Wrap(errcode.SandboxGatewayDown, err)
 	}
 	return err
 }
@@ -160,7 +169,7 @@ func (e *SandboxEngine) ensure(ctx context.Context, c profile.Compiled) error {
 		return nil
 	}
 	if err := e.L.Ensure(ctx, c); err != nil {
-		return sandboxFailure(fmt.Errorf("sandbox %s: %w", c.Sandbox, err))
+		return e.sandboxFailure(ctx, fmt.Errorf("sandbox %s: %w", c.Sandbox, err))
 	}
 	e.mu.Lock()
 	e.ensured[c.Sandbox] = c.PolicyDigest
@@ -344,7 +353,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	rc, err := e.L.Exec(ctx, c, spec.MCPConfig(base, token), prompt, spec.Env, spec.Argv)
 	if err != nil {
 		e.forgetEnsured(c.Sandbox)
-		return "", sandboxFailure(redact(fmt.Errorf("start claude in %s: %w", c.Sandbox, err)))
+		return "", e.sandboxFailure(ctx, redact(fmt.Errorf("start claude in %s: %w", c.Sandbox, err)))
 	}
 	// Deferred after the Revoke above, so it runs before it, even when
 	// onEvent panics: claude is gone before its token is. Close is
@@ -382,7 +391,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	case res.resultErr != "":
 		return "", redact(fmt.Errorf("claude failed: %s", res.resultErr))
 	case !res.sawResult && closeErr != nil:
-		return "", sandboxFailure(redact(fmt.Errorf("claude produced no result: %w", closeErr)))
+		return "", e.sandboxFailure(ctx, redact(fmt.Errorf("claude produced no result: %w", closeErr)))
 	case !res.sawResult:
 		return "", errors.New("claude produced no result")
 	case res.sid != session:

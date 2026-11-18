@@ -214,9 +214,9 @@ func printInstallSection(in mcpproxy.Installer, out io.Writer, color bool) mcppr
 
 func newMCPProxyInstallCmd() *cobra.Command {
 	var (
-		dryRun       bool
-		skip, unskip []string
-		port         int
+		dryRun, allowWorktree bool
+		skip, unskip          []string
+		port                  int
 	)
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -260,6 +260,9 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			if in.Agent.Binary, err = stableBinary("aimux mcp proxy install"); err != nil {
 				return err
 			}
+			if err := guardWorktreeBinary(in.Agent.Binary, allowWorktree, cmd.ErrOrStderr()); err != nil {
+				return err
+			}
 			in.HookBinary = in.Agent.Binary
 			err = in.Install(skip)
 			if interrupted.Load() {
@@ -272,6 +275,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&skip, "skip", nil, "Servers (stdio or HTTP) to leave as direct entries (recorded: later runs keep them direct)")
 	cmd.Flags().StringSliceVar(&unskip, "unskip", nil, "Servers an earlier --skip kept direct, to move this time")
 	cmd.Flags().IntVar(&port, "port", 7381, "Port the proxy listens on at 127.0.0.1")
+	cmd.Flags().BoolVar(&allowWorktree, "allow-worktree-binary", false, "Install from an aimux built inside a git worktree (the launchd job stops when the worktree is removed)")
 	return cmd
 }
 

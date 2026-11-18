@@ -975,12 +975,15 @@ func (i Installer) switchBinary() error {
 	if err != nil {
 		return err
 	}
-	was, err := a.SwitchBinary()
+	was, switched, err := a.SwitchBinary()
 	if err != nil {
 		return fmt.Errorf("point the launchd agent %s at %s: %w", a.Label, a.Binary, err)
 	}
-	if was == "" {
+	if !switched {
 		return nil
+	}
+	if was == "" {
+		was = "an unreadable program"
 	}
 	i.printf("The proxy's launchd agent ran %s; it now runs %s (restarted).\n", was, a.Binary)
 	if i.Status == nil {
@@ -999,7 +1002,7 @@ func (i Installer) switchBinary() error {
 			// Back to the binary that ran, so the proxy serves again and the
 			// next install tries the switch again.
 			cause := fmt.Errorf("the MCP proxy did not answer within %v after switching its launchd agent to %s (logs in %s)", wait, a.Binary, a.LogDir)
-			if err := errors.Join(snap.restore(), a.Restart()); err != nil {
+			if err := errors.Join(writePlist(snap.path, snap.data), a.Restart()); err != nil {
 				return fmt.Errorf("%w; switching it back to %s also failed: %v", cause, was, err)
 			}
 			return fmt.Errorf("%w; it runs %s again", cause, was)

@@ -2,11 +2,13 @@ package remoteapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -32,10 +34,11 @@ type profileWiring struct {
 	catalog func() (map[string]profile.Manifest, error)
 	runs    func(name string) (string, error)
 	engines map[string]profilerun.Engine
-	pageMgr *acprun.Manager            // nil with injected engines
-	sandbox *profilerun.SandboxEngine  // nil with injected engines
-	tools   func() remoteapi.ToolsView // GET /v1/tools; nil with injected engines
-	pins    *toolgateway.PinStore      // POST /v1/tools/approve; nil with injected engines
+	pageMgr *acprun.Manager                                                                 // nil with injected engines
+	sandbox *profilerun.SandboxEngine                                                       // nil with injected engines
+	tools   func() remoteapi.ToolsView                                                      // GET /v1/tools; nil with injected engines
+	pins    *toolgateway.PinStore                                                           // POST /v1/tools/approve; nil with injected engines
+	relist  func(ctx context.Context, source, version string) (remoteapi.RelistView, error) // the worker's fresh listing for an approval
 
 	mu    sync.Mutex
 	owner map[string]profilerun.Engine // session -> the engine that made it
@@ -61,6 +64,9 @@ func (p *profileWiring) Router() *profilerun.Router { return p.router }
 // the step-up of sessions without a profile and the tool sets' view.
 func (p *profileWiring) Install(api *remoteapi.API, scopes clientscope.Scopes, stepUpLegacy bool) {
 	api.Profiles, api.Scopes, api.ProfileSessions, api.Tools, api.Pins = p.servedCatalog, scopes, p.store, p.tools, p.pins
+	if p.relist != nil {
+		api.Relist = p.relist
+	}
 	api.NewProfileSession, api.CancelProfileSession = p.newSession, p.cancelSession
 	api.ProfileHealth, api.StepUpLegacy = p.router.Health, stepUpLegacy
 }
@@ -129,6 +135,16 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	snaps := tg.snaps
 	p.tools = tg.tools
 	p.pins = &toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(home)}
+	p.relist = func(ctx context.Context, source, version string) (remoteapi.RelistView, error) {
+		res, err := tg.worker.Relist(ctx, version, []string{source})
+		if err != nil {
+			return remoteapi.RelistView{}, err
+		}
+		// As GET /v1/tools reads listings: one from another endpoint than
+		// the registry names now, or whose relist failed, is not listed.
+		live, listed := toolgateway.LiveFor(tg.snaps.turn().Registry(), res.Observed)[source]
+		return remoteapi.RelistView{Version: res.Version, Live: live, Listed: listed}, nil
+	}
 
 	launcher := &sandboxlaunch.Launcher{Backend: sandboxlaunch.NewCLIBackend(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
 	compile := func(name string) (profile.Compiled, error) {
@@ -142,6 +158,7 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	p.sandbox.ArchiveDir = filepath.Join(home, ".aimux", "archive")
 	p.sandbox.OnStarted = p.store.MarkStarted
 	p.sandbox.Review = tg.review(dir)
+	p.sandbox.GatewayCheck = openshellGatewayCheck
 	p.sandbox.Log = logger
 	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox}
 	return func() {
@@ -181,7 +198,7 @@ func newToolGateway(home string, gwLog *log.Logger) toolGatewayParts {
 			obs = nil
 		}
 		reg := snap.Registry()
-		return remoteapi.ToolsView{Snapshot: snap, Live: toolgateway.LiveFor(reg, obs), RelistFailed: toolgateway.RelistFailedFor(reg, obs)}
+		return remoteapi.ToolsView{Snapshot: snap, Live: toolgateway.LiveFor(reg, obs), RelistFailed: toolgateway.RelistFailedFor(reg, obs), LiveErr: err}
 	}
 	gateway := func() (string, profilerun.Leases, error) { return toolgateway.ReadonlyURL, worker, nil }
 	return toolGatewayParts{snaps: snaps, tools: tools, gateway: gateway, worker: worker}
@@ -439,4 +456,19 @@ func (p *profileWiring) reap() {
 	if p.pageMgr != nil {
 		p.pageMgr.Reap()
 	}
+}
+
+// openshellGatewayCheck is the sandbox engine's OpenShell gateway check:
+// openshell -g local status, which never starts the gateway. Only a status
+// that ran and failed says the gateway is down; an openshell that cannot be
+// started (not on PATH) says nothing about it, so the failure keeps its own
+// reason. A status the probe's own deadline killed also reads as down;
+// accepted: the next failure's check corrects it.
+func openshellGatewayCheck(ctx context.Context) error {
+	err := exec.CommandContext(ctx, "openshell", "-g", "local", "status").Run() //nolint:gosec // G204: fixed command, no shell
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return err
+	}
+	return nil
 }

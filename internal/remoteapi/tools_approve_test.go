@@ -1,9 +1,11 @@
 package remoteapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -372,5 +374,196 @@ func TestToolsApprove_SnapshotAndPinsMustAgree(t *testing.T) {
 	}
 	if f, _ := r.store.LoadFile(); f["jira"]["b"].Hash != "sha256:cli-meanwhile" {
 		t.Fatal("the other approval was overwritten")
+	}
+}
+
+// The approval's audit line names the set, each tool with the pin it was
+// approved at, and the device and login that approved it.
+func TestToolsApprove_AuditNamesWhatAndWho(t *testing.T) {
+	r := newSteppedUpRig(t)
+	if st, _ := r.post(`{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`); st != 200 {
+		t.Fatalf("approve: %d", st)
+	}
+	var line map[string]any
+	for _, l := range strings.Split(strings.TrimSpace(r.login.audit.String()), "\n") {
+		if strings.Contains(l, `"tools_approve"`) {
+			_ = json.Unmarshal([]byte(l), &line)
+		}
+	}
+	if line["set"] != "jira:readonly" || line["device"] != "iphone" || line["login"] != testLogin {
+		t.Fatalf("audit line %v", line)
+	}
+	tools, _ := line["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["tool"] != "b" || tools[0].(map[string]any)["pin"] != liveB(t) {
+		t.Fatalf("audit tools %v", line["tools"])
+	}
+}
+
+// liveWith is jira's fixture listing with b as def.
+func liveWith(t *testing.T, view ToolsView, def json.RawMessage) toolgateway.LiveSource {
+	t.Helper()
+	tools := maps.Clone(view.Live["jira"].Tools)
+	tools["b"] = def
+	return toolgateway.LiveSource{Tools: tools}
+}
+
+// The approval checks against what its own relist saw: a tool that changed
+// on its server after the diff is stale, even while the cached listing
+// (which a call in flight could also write back) still shows the old one.
+func TestToolsApprove_FreshListingCatchesAChange(t *testing.T) {
+	r := newSteppedUpRig(t)
+	view := r.api.Tools()
+	var relisted []string
+	r.api.Relist = func(_ context.Context, source, _ string) (RelistView, error) {
+		relisted = append(relisted, source)
+		return RelistView{Live: liveWith(t, view, toolDef("b", "boolean")), Listed: true}, nil
+	}
+	before, _ := r.store.LoadFile()
+	if st, out := r.post(`{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`); st != 409 || out["code"] != "pin_stale" {
+		t.Fatalf("%d %v, want 409 pin_stale", st, out)
+	}
+	if len(relisted) != 1 || relisted[0] != "jira" {
+		t.Fatalf("relisted %v, want jira once", relisted)
+	}
+	if after, _ := r.store.LoadFile(); after["jira"]["b"].Hash != before["jira"]["b"].Hash {
+		t.Fatal("pins written for a stale approval")
+	}
+	// The relist saw b as shown: approved, at that definition.
+	r.api.Relist = func(context.Context, string, string) (RelistView, error) {
+		return RelistView{Live: liveWith(t, view, toolDef("b", "integer")), Listed: true}, nil
+	}
+	if st, out := r.post(`{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`); st != 200 {
+		t.Fatalf("matching relist: %d %v", st, out)
+	}
+}
+
+// A backend too slow to list afresh: 503 that says it is slow, nothing
+// written. (Sources whose listing spans many pages may need more than the
+// 5 s budget; a later change.)
+func TestToolsApprove_SlowRelistIs503(t *testing.T) {
+	r := newSteppedUpRig(t)
+	old := relistTimeout
+	relistTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { relistTimeout = old })
+	r.api.Relist = func(ctx context.Context, _, _ string) (RelistView, error) {
+		<-ctx.Done()
+		return RelistView{}, toolgateway.ErrRelistTimeout
+	}
+	before, _ := r.store.LoadFile()
+	st, out := r.post(`{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`)
+	if msg, _ := out["error"].(string); st != 503 || out["code"] != "gateway_backend_down" || !strings.Contains(msg, "slow") || !strings.Contains(msg, "try again") {
+		t.Fatalf("%d %v, want 503 gateway_backend_down saying the source is slow", st, out)
+	}
+	if after, _ := r.store.LoadFile(); after["jira"]["b"].Hash != before["jira"]["b"].Hash {
+		t.Fatal("pins written after a relist timeout")
+	}
+}
+
+// A gateway worker older than remote serve cannot relist: the answer says
+// to reinstall it, not to retry.
+func TestToolsApprove_OlderWorkerSaysReinstall(t *testing.T) {
+	r := newSteppedUpRig(t)
+	r.api.Relist = func(context.Context, string, string) (RelistView, error) {
+		return RelistView{}, toolgateway.ErrRelistUnsupported
+	}
+	st, out := r.post(`{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`)
+	if msg, _ := out["error"].(string); st != 503 || !strings.Contains(msg, "aimux mcp proxy gateway install") || strings.Contains(msg, "try again") {
+		t.Fatalf("%d %v", st, out)
+	}
+}
+
+// A registry or pins reload during the relist makes the request stale even
+// without the snapshot field; a relist that did not list the source, ran
+// under another snapshot, or found it down is 503, never a stale answer.
+func TestToolsApprove_ViewAfterRelistMustBeUsable(t *testing.T) {
+	r := newSteppedUpRig(t)
+	view := r.api.Tools()
+	body := `{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`
+	fresh := RelistView{Live: view.Live["jira"], Listed: true}
+
+	r.api.Tools = func() ToolsView { return view }
+	r.api.Relist = func(context.Context, string, string) (RelistView, error) {
+		reloaded := view
+		reloaded.Snapshot = toolreg.NewSnapshot(view.Snapshot.Registry(), toolreg.PinTable{}, nil)
+		r.api.Tools = func() ToolsView { return reloaded }
+		return fresh, nil
+	}
+	if st, out := r.post(body); st != 409 || out["code"] != "pin_stale" {
+		t.Fatalf("snapshot moved: %d %v", st, out)
+	}
+
+	for name, res := range map[string]RelistView{
+		"not listed":       {},
+		"another snapshot": {Version: "older-snapshot", Live: fresh.Live, Listed: true},
+		"source down":      {Live: toolgateway.LiveSource{Err: errors.New("connection refused")}, Listed: true},
+	} {
+		r.api.Tools = func() ToolsView { return view }
+		r.api.Relist = func(context.Context, string, string) (RelistView, error) { return res, nil }
+		if st, out := r.post(body); st != 503 || out["code"] != "gateway_backend_down" {
+			t.Fatalf("%s: %d %v", name, st, out)
+		}
+	}
+}
+
+// A request against an old snapshot is stale before the gateway is asked:
+// a slow or down worker does not turn it into a 503.
+func TestToolsApprove_StaleSnapshotBeforeRelist(t *testing.T) {
+	r := newSteppedUpRig(t)
+	called := false
+	r.api.Relist = func(context.Context, string, string) (RelistView, error) {
+		called = true
+		return RelistView{}, toolgateway.ErrRelistTimeout
+	}
+	st, out := r.post(`{"set":"jira:readonly","snapshot":"old","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`)
+	if st != 409 || out["code"] != "pin_stale" || called {
+		t.Fatalf("%d %v, relisted %v: want 409 pin_stale without a relist", st, out, called)
+	}
+}
+
+// A malformed request is 400 without asking the gateway to relist.
+func TestToolsApprove_BadRequestBeforeRelist(t *testing.T) {
+	r := newSteppedUpRig(t)
+	called := false
+	r.api.Relist = func(context.Context, string, string) (RelistView, error) {
+		called = true
+		return RelistView{}, toolgateway.ErrRelistTimeout
+	}
+	for _, body := range []string{
+		`{"set":"jira:readonly","tools":[{"name":"zz","pin":"sha256:x"}]}`,
+		`{"set":"jira:readonly","tools":[{"name":"b","pin":""}]}`,
+	} {
+		if st, out := r.post(body); st != 400 || out["code"] != "bad_request" || called {
+			t.Fatalf("%s: %d %v, relisted %v", body, st, out, called)
+		}
+	}
+}
+
+// No gateway worker: the answer says to install it, not to retry.
+func TestToolsApprove_NoWorkerSaysInstall(t *testing.T) {
+	r := newSteppedUpRig(t)
+	r.api.Relist = func(context.Context, string, string) (RelistView, error) {
+		return RelistView{}, toolgateway.ErrGatewayNotRunning
+	}
+	st, out := r.post(`{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`)
+	if msg, _ := out["error"].(string); st != 503 || out["code"] != "tool_gateway_not_running" || !strings.Contains(msg, "aimux mcp proxy gateway install") || strings.Contains(msg, "try again") {
+		t.Fatalf("%d %v", st, out)
+	}
+}
+
+// The relist names the snapshot the approval checks against, so the worker
+// applies it first (back-to-back approvals do not 503 until its refresh).
+func TestToolsApprove_RelistNamesTheSnapshot(t *testing.T) {
+	r := newSteppedUpRig(t)
+	view := r.api.Tools()
+	var asked string
+	r.api.Relist = func(_ context.Context, _, version string) (RelistView, error) {
+		asked = version
+		return RelistView{Version: version, Live: view.Live["jira"], Listed: true}, nil
+	}
+	if st, out := r.post(`{"set":"jira:readonly","tools":[{"name":"b","pin":"` + liveB(t) + `"}]}`); st != 200 {
+		t.Fatalf("%d %v", st, out)
+	}
+	if asked != view.Snapshot.Version() {
+		t.Fatalf("relist asked for %q, want the approval's snapshot %q", asked, view.Snapshot.Version())
 	}
 }

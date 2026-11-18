@@ -238,6 +238,13 @@ type API struct {
 	// Pins, if set with Tools, is the pins file POST /v1/tools/approve
 	// writes (as aimux tools approve does); nil answers 404 not_supported.
 	Pins *toolgateway.PinStore
+	// Relist, if set, has the tool gateway list source afresh before an
+	// approval checks its pins (Tools then reads the new listing); an error
+	// or ctx's end answers 503 and nothing is approved.
+	// It returns the tool snapshot version the gateway listed under.
+	// version is the tool snapshot the approval checks against; the gateway
+	// applies it first when it serves an older one.
+	Relist func(ctx context.Context, source, version string) (RelistView, error)
 	// ModeRouter, if set, answers POST /v1/route (internal/autoroute); nil
 	// answers every question undecided (source unavailable), so the client
 	// asks the person instead.
@@ -361,7 +368,8 @@ func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.
 			act = rec.action
 		}
 		a.DeviceLogin.RecordEntry(r, devicelogin.AuditEntry{Action: act, Session: session, Result: result,
-			QuestionSHA256: rec.route.questionSHA, DecisionID: rec.route.decisionID, Source: rec.route.source})
+			QuestionSHA256: rec.route.questionSHA, DecisionID: rec.route.decisionID, Source: rec.route.source,
+			Set: rec.tools.set, Tools: rec.tools.tools})
 	}
 }
 
@@ -379,6 +387,7 @@ type statusRecorder struct {
 	status int
 	action string     // set by auditAs
 	route  routeAudit // set by noteRoute
+	tools  toolsAudit // set by noteTools
 }
 
 func (s *statusRecorder) WriteHeader(code int) {

@@ -897,7 +897,7 @@ paths:
         annotations, which the pin still covers), and the pin approved now. A tool the
         gateway does not list live has no `pin` or `definition`. Only for a
         client with `tools_approve` in clients.yaml, and a set a profile in
-        its scope requests (`403 forbidden_for_client` otherwise); no URL,
+        its scope requests (`403 forbidden_for_client` otherwise); read-only, so no step-up; no URL,
         endpoint or credential of aimux's (a definition is the server's own
         schema). `reviewOnMac` marks a tool approve refuses.
       operationId: toolsDiff
@@ -922,7 +922,8 @@ paths:
         Approves each named tool of `set` at its live definition, writing the
         pins as `aimux tools approve` does, only if every `pin` still equals
         the live definition's pin (else `409 pin_stale` and nothing is
-        approved), and no tool needs review on the Mac (`409 review_on_mac`:
+        approved; the source is listed afresh first, up to 5 seconds, else
+        `503 gateway_backend_down`), and no tool needs review on the Mac (`409 review_on_mac`:
         its source's address changed since it was approved, or aimux's
         request details, which the diff leaves out, differ from the
         approved definition's). Pins are written under the same lock as
@@ -1221,6 +1222,7 @@ components:
             - profile_unavailable      # 409, also on turn_error: the profile does not resolve or compile now (a bad profile file, a missing set)
             - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
             - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source's address or hidden request details changed; approve it on the Mac
+            - pins_busy                # 503: POST /v1/tools/approve: another approval held the pins lock for 5 s; try again
             - pin_stale                # 409: POST /v1/tools/approve: a tool's live definition is not the one the client showed (or is not listed); nothing approved
 
     Health:
@@ -2239,7 +2241,7 @@ components:
       additionalProperties: false
       required: [error, message]
       properties:
-        error: { type: string, description: "The raw error, for logs." }
+        error: { type: string, description: "The error text; for a coded failure the same message for a person (its cause is only in the serve log)." }
         message: { type: string, description: "A message for people: the code's message when there is a code, else the error text." }
         code:
           type: string

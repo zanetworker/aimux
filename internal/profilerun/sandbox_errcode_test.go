@@ -47,31 +47,52 @@ func (*downBackend) Ensure(context.Context, profile.Compiled) error {
 func TestSandbox_OpenShellGatewayDownIsCoded(t *testing.T) {
 	e, _ := newSandbox(t)
 	e.L = &sandboxlaunch.Launcher{Backend: &downBackend{}}
+	e.GatewayCheck = func(context.Context) error { return errors.New("openshell -g local status: exit status 1") }
 	_, err := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
 	wantCode(t, err, errcode.SandboxGatewayDown)
 
-	// Another sandbox failure keeps its own text and gets no code.
-	e.L = &sandboxlaunch.Launcher{Backend: &failingEnsure{}}
+	// The same "Connection refused" text with the gateway check passing
+	// (an MCP server refusing, say) is not the OpenShell gateway.
+	e.GatewayCheck = func(context.Context) error { return nil }
 	_, err = e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
 	if _, ok := errcode.Of(err); ok || err == nil {
 		t.Fatalf("error %v, want an uncoded failure", err)
 	}
+	// No check wired: never coded from text.
+	e.GatewayCheck = nil
+	if _, err = e.New(context.Background(), Meta{Profile: "work-readonly"}, ""); err == nil {
+		t.Fatal("want a failure")
+	} else if _, ok := errcode.Of(err); ok {
+		t.Fatalf("coded without a gateway check: %v", err)
+	}
 }
 
-type failingEnsure struct{ sbBackend }
-
-func (*failingEnsure) Ensure(context.Context, profile.Compiled) error {
-	return errors.New("sandbox aimux-work-readonly is in phase Failed")
-}
-
-// openshell can start and only fail when its exec ends: the exit error
-// carries the unreachable gateway, and the turn is coded the same way.
+// openshell can start and only fail when its exec ends: when the gateway
+// check then fails, the turn is coded the same way.
 func TestSandboxTurn_OpenShellGatewayDownAtExitIsCoded(t *testing.T) {
 	e, b := newSandbox(t)
+	e.GatewayCheck = func(context.Context) error { return errors.New("down") }
 	b.script = func(string) (string, error, error) {
 		return "", errors.New("exit status 1: error: transport error: tcp connect error: Connection refused"), nil
 	}
 	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
 	_, _, err := sendCollect(t, e, sid, "q")
 	wantCode(t, err, errcode.SandboxGatewayDown)
+}
+
+// A sandbox step that failed because the turn was cancelled is not probed:
+// no gateway check, no code.
+func TestSandbox_CancelledFailureIsNotProbed(t *testing.T) {
+	e, _ := newSandbox(t)
+	probed := false
+	e.GatewayCheck = func(context.Context) error { probed = true; return errors.New("down") }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := e.sandboxFailure(ctx, errors.New("openshell: context canceled"))
+	if probed {
+		t.Fatal("the gateway was probed for a cancelled step")
+	}
+	if _, ok := errcode.Of(err); ok {
+		t.Fatalf("coded: %v", err)
+	}
 }

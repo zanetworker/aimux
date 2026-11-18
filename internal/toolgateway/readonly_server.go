@@ -3,6 +3,7 @@ package toolgateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"maps"
@@ -168,7 +169,7 @@ func RelistFailedFor(reg toolreg.Registry, obs map[string]Observed) map[string]b
 // longer configures are dropped. The other hears each listing a call's
 // check makes (see listed), and a backend's tools/list_changed queues a
 // recheck of it (see changed).
-func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyConfig, pins SnapshotPins) (SnapshotPins, func(names []string, errs map[string]error)) {
+func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyConfig, pins SnapshotPins) (SnapshotPins, func(names []string, errs map[string]error) map[string]Observed) {
 	var mu sync.Mutex
 	var seen *mcpproxy.Catalog
 	pins.seen = func(cat *mcpproxy.Catalog) {
@@ -182,12 +183,13 @@ func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyC
 		r.listed(snap.Version(), reg.Sources[server].Endpoint(), cfg.Allow, served, server, tools)
 	}
 	pins.onChanged = r.changed
-	return pins, func(names []string, errs map[string]error) {
+	return pins, func(names []string, errs map[string]error) map[string]Observed {
 		mu.Lock()
 		cat := seen
 		mu.Unlock()
 		r.obsMu.Lock()
 		defer r.obsMu.Unlock()
+		wrote := map[string]Observed{}
 		if r.observed == nil {
 			r.observed = map[string]Observed{}
 		}
@@ -218,7 +220,9 @@ func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyC
 			}
 			r.observed[n] = o
 			r.checked[n] = now
+			wrote[n] = o
 		}
+		return wrote
 	}
 }
 
@@ -681,6 +685,57 @@ func (r *ReadonlyServer) RelistNow(ctx context.Context, servers []string) error 
 	}
 }
 
+// relistOutcome is what one relistNow saw: the snapshot it listed under
+// and the views it filed for the listed backends; ok is false when it
+// listed nothing usable (not serving yet, or superseded by a newer
+// snapshot, which dropped its results).
+type relistOutcome struct {
+	version string
+	seen    map[string]Observed
+	ok      bool
+}
+
+// ErrRelistDiscarded is a relist whose results were dropped: the gateway was
+// not serving yet, or a newer snapshot replaced the one it listed under.
+var ErrRelistDiscarded = errors.New("the tool gateway dropped the relist (not ready, or its tool snapshot changed meanwhile)")
+
+// RelistSeen is RelistNow returning what that relist itself saw for
+// servers (never the shared Observed cache, which a call's own listing can
+// overwrite) and the snapshot it listed under.
+func (r *ReadonlyServer) RelistSeen(ctx context.Context, servers []string) (RelistResult, error) {
+	done := make(chan relistOutcome, 1)
+	go func() {
+		r.relistMu.Lock()
+		defer r.relistMu.Unlock()
+		if ctx.Err() != nil {
+			done <- relistOutcome{}
+			return
+		}
+		done <- r.relistNow(servers)
+	}()
+	select {
+	case out := <-done:
+		if ctx.Err() != nil {
+			return RelistResult{}, ctx.Err()
+		}
+		if !out.ok {
+			return RelistResult{}, ErrRelistDiscarded
+		}
+		seen := map[string]Observed{}
+		for _, n := range servers {
+			if o, ok := out.seen[n]; ok {
+				if o.Tools != nil {
+					o.Tools = maps.Clone(o.Tools)
+				}
+				seen[n] = o
+			}
+		}
+		return RelistResult{Version: out.version, Observed: seen}, nil
+	case <-ctx.Done():
+		return RelistResult{}, ctx.Err()
+	}
+}
+
 // Backends is every backend the gateway built or found down, and the down
 // ones, both sorted.
 func (r *ReadonlyServer) Backends() (all, down []string) {
@@ -699,11 +754,11 @@ func (r *ReadonlyServer) Backends() (all, down []string) {
 // down), leaving the others' views as listed. A backend that was down is
 // added when it now builds, as Refresh used to on the turn. r.relistMu is
 // held.
-func (r *ReadonlyServer) relistNow(only []string) {
+func (r *ReadonlyServer) relistNow(only []string) relistOutcome {
 	r.mu.Lock()
 	if r.add == nil || r.Rebuild == nil || r.ctx == nil || r.ctx.Err() != nil {
 		r.mu.Unlock()
-		return
+		return relistOutcome{}
 	}
 	snap, cfg, pins, pool, base := r.Applied(), r.cfg, r.pins, r.pool, r.ctx
 	var up, down []string
@@ -719,10 +774,17 @@ func (r *ReadonlyServer) relistNow(only []string) {
 			up = append(up, n)
 		}
 	}
+	// A named source the gateway serves nothing from (it listed, but no
+	// tool is approved) is listed too: an approval checks its definitions.
+	for _, n := range only {
+		if !slices.Contains(r.all, n) && slices.Contains(backendNames(cfg), n) {
+			up = append(up, n)
+		}
+	}
 	r.mu.Unlock()
 	names := append(append([]string(nil), up...), down...)
 	if len(names) == 0 {
-		return
+		return relistOutcome{version: snap.Version(), seen: map[string]Observed{}, ok: true}
 	}
 	ctx, cancel := context.WithTimeout(base, recheckTimeout)
 	defer cancel()
@@ -732,7 +794,7 @@ func (r *ReadonlyServer) relistNow(only []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.add == nil || r.Applied().Version() != snap.Version() || !sameConfig(cfg, r.cfg) {
-		return // superseded by a newer snapshot, which rebuilt what it needed
+		return relistOutcome{} // superseded by a newer snapshot, which rebuilt what it needed
 	}
 	var listed, failed []string
 	for _, n := range up {
@@ -742,8 +804,8 @@ func (r *ReadonlyServer) relistNow(only []string) {
 			listed = append(listed, n)
 		}
 	}
-	record(append(listed, down...), errs)
-	r.markRelistFailed(failed, errs)
+	seen := record(append(listed, down...), errs)
+	maps.Copy(seen, r.markRelistFailed(failed, errs))
 	for _, n := range listed {
 		r.obsMu.Lock()
 		same := maps.Equal(servedTools(r.observed[n].Tools, r.pins.Pins[n]), r.built[n])
@@ -785,13 +847,15 @@ func (r *ReadonlyServer) relistNow(only []string) {
 	}
 	slices.Sort(still)
 	r.down = still
+	return relistOutcome{version: snap.Version(), seen: seen, ok: true}
 }
 
 // markRelistFailed flags names' Observed views RelistFailed, keeping what
 // was last listed of them, and logs why.
-func (r *ReadonlyServer) markRelistFailed(names []string, errs map[string]error) {
+func (r *ReadonlyServer) markRelistFailed(names []string, errs map[string]error) map[string]Observed {
 	r.obsMu.Lock()
 	defer r.obsMu.Unlock()
+	wrote := map[string]Observed{}
 	for _, n := range names {
 		if r.checked == nil {
 			r.checked = map[string]time.Time{}
@@ -803,8 +867,10 @@ func (r *ReadonlyServer) markRelistFailed(names []string, errs map[string]error)
 			r.observed = map[string]Observed{}
 		}
 		r.observed[n] = o
+		wrote[n] = o
 		r.Log.Printf("read-only: relist of %s failed (still served under its pin check): %s", n, clip(errs[n].Error(), 200))
 	}
+	return wrote
 }
 
 // logDown logs each unavailable backend and returns their names, sorted.

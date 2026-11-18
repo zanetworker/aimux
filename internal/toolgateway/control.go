@@ -32,6 +32,9 @@ type ControlHandler interface {
 	DeleteLease(session string)
 	Observed() map[string]Observed
 	Status() ControlStatus
+	// Relist applies the tool snapshot version (when newer) and lists
+	// servers afresh, returning what that relist saw once done or ctx ends.
+	Relist(ctx context.Context, version string, servers []string) (RelistResult, error)
 }
 
 // ControlStatus is the gateway worker at a glance.
@@ -41,6 +44,9 @@ type ControlStatus struct {
 	Backends  []string  `json:"backends"`
 	Down      []string  `json:"down"`
 	StartedAt time.Time `json:"startedAt"`
+	// PID is the worker's process id: install checks it is the launchd
+	// job's, not a foreground gateway serve's.
+	PID int `json:"pid,omitempty"`
 	// Checked is when each backend was last listed or retried by a build,
 	// a rebuild or the periodic relist (not by a call's own pin check); a
 	// down backend's state is as of then.
@@ -53,6 +59,20 @@ type observedWire struct {
 	Err          string                     `json:"err,omitempty"`
 	Endpoint     string                     `json:"endpoint,omitempty"`
 	RelistFailed bool                       `json:"relistFailed,omitempty"`
+}
+
+// relistWire is POST /v1/relist's answer.
+type relistWire struct {
+	Version  string                  `json:"version"`
+	Observed map[string]observedWire `json:"observed"`
+}
+
+func toObservedWire(o Observed) observedWire {
+	ow := observedWire{Tools: o.Tools, Endpoint: o.Endpoint, RelistFailed: o.RelistFailed}
+	if o.Err != nil {
+		ow.Err = o.Err.Error()
+	}
+	return ow
 }
 
 // ListenControl listens on the control socket at path, mode 0600, making
@@ -185,11 +205,33 @@ func ServeControl(ctx context.Context, ln net.Listener, h ControlHandler) error 
 	mux.HandleFunc("GET /v1/observed", func(w http.ResponseWriter, _ *http.Request) {
 		out := map[string]observedWire{}
 		for name, o := range h.Observed() {
-			ow := observedWire{Tools: o.Tools, Endpoint: o.Endpoint, RelistFailed: o.RelistFailed}
-			if o.Err != nil {
-				ow.Err = o.Err.Error()
-			}
-			out[name] = ow
+			out[name] = toObservedWire(o)
+		}
+		controlJSON(w, out)
+	})
+	mux.HandleFunc("POST /v1/relist", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Servers []string `json:"servers"`
+			Version string   `json:"version"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, maxControlBody)).Decode(&body); err != nil || len(body.Servers) == 0 {
+			controlError(w, http.StatusBadRequest, "bad_request", "the relist body needs servers")
+			return
+		}
+		res, err := h.Relist(r.Context(), body.Version, body.Servers)
+		switch {
+		case errors.Is(err, ErrRelistDiscarded):
+			controlError(w, http.StatusConflict, "relist_discarded", err.Error())
+			return
+		case err != nil:
+			controlError(w, http.StatusGatewayTimeout, "relist_timeout", "the relist did not finish in time")
+			return
+		}
+		// What this relist saw and the snapshot it listed under, never the
+		// shared Observed cache, which a call's own listing can overwrite.
+		out := relistWire{Version: res.Version, Observed: map[string]observedWire{}}
+		for n, o := range res.Observed {
+			out.Observed[n] = toObservedWire(o)
 		}
 		controlJSON(w, out)
 	})

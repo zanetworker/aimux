@@ -259,6 +259,13 @@ func (s PinStore) backupV1() error {
 	return nil
 }
 
+// ErrPinsBusy is a pins update that could not take the lock within
+// pinLockWait: another approval holds it.
+var ErrPinsBusy = errors.New("the tool pins are being updated by another approval; try again")
+
+// pinLockWait is how long an update waits for the pins lock.
+var pinLockWait = 5 * time.Second
+
 // Update applies fn to the pins file as it is now and saves the result
 // when fn reports a change, under an exclusive lock on <path>.lock that
 // every Update holds, so two writers (aimux tools approve, the remote API)

@@ -838,8 +838,9 @@ func sessionIDOf(r *http.Request) string {
 // filled in by the handlers.
 type auditNote struct {
 	action, profile, digest, urlHost string
-	route, session                   string // set by localScope before the mux matches
-	routeAudit                              // set by POST /v1/route
+	route, session                   string     // set by localScope before the mux matches
+	routeAudit                                  // set by POST /v1/route
+	tools                            toolsAudit // set by POST /v1/tools/approve
 }
 
 type auditNoteKey struct{}
@@ -890,7 +891,8 @@ func (a *API) localAudit(next http.Handler) http.Handler {
 		}
 		a.auditLog().Write(devicelogin.AuditEntry{Client: client, Action: action, Session: session,
 			Profile: n.profile, Digest: n.digest, URLHost: n.urlHost, Result: result,
-			QuestionSHA256: n.questionSHA, DecisionID: n.decisionID, Source: n.source})
+			QuestionSHA256: n.questionSHA, DecisionID: n.decisionID, Source: n.source,
+			Set: n.tools.set, Tools: n.tools.tools})
 	})
 }
 

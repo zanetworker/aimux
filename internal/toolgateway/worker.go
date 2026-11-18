@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"os"
 	"slices"
 	"time"
 
@@ -25,6 +26,7 @@ type gatewayServer interface {
 	Applied() toolreg.Snapshot
 	Refresh(ctx context.Context)
 	RelistNow(ctx context.Context, servers []string) error
+	RelistSeen(ctx context.Context, servers []string) (RelistResult, error)
 	Observed() map[string]Observed
 	Backends() (all, down []string)
 	BackendsChecked() (all, down []string, checked map[string]time.Time)
@@ -59,14 +61,7 @@ var _ ControlHandler = (*Worker)(nil)
 // A listing that times out is logged; the lease stands, and each call is
 // still checked against its pin.
 func (w *Worker) PutLease(ctx context.Context, l Lease) error {
-	if l.Version != "" && l.Version != w.Server.Applied().Version() {
-		if _, _, err := w.Store.Reload(); err != nil {
-			w.Log.Printf("tool gateway: reload for session %s: %v", l.Session, err)
-		}
-		rctx, cancel := context.WithTimeout(ctx, leaseRefreshTimeout)
-		w.Server.Refresh(rctx)
-		cancel()
-	}
+	w.applyVersion(ctx, l.Version, "session "+l.Session)
 	// A caller that stopped waiting (its turn ended, the client timed out)
 	// may already have deleted this lease: storing it now would outlive the
 	// turn.
@@ -99,6 +94,29 @@ func (w *Worker) DeleteLease(session string) {
 	w.Log.Printf("tool gateway: lease deleted for session %s", session)
 }
 
+// Relist lists servers afresh for a caller that needs the current
+// definitions, such as an approval from a client, returning what that relist
+// saw. A version newer than the one served is applied first, as for a
+// lease, so an approval right after another lists under the new pins.
+func (w *Worker) Relist(ctx context.Context, version string, servers []string) (RelistResult, error) {
+	w.applyVersion(ctx, version, "relist")
+	return w.Server.RelistSeen(ctx, servers)
+}
+
+// applyVersion reloads and applies the tool snapshot when version is not
+// the one served (a lease or relist made under newer files).
+func (w *Worker) applyVersion(ctx context.Context, version, what string) {
+	if version == "" || version == w.Server.Applied().Version() {
+		return
+	}
+	if _, _, err := w.Store.Reload(); err != nil {
+		w.Log.Printf("tool gateway: reload for %s: %v", what, err)
+	}
+	rctx, cancel := context.WithTimeout(ctx, leaseRefreshTimeout)
+	w.Server.Refresh(rctx)
+	cancel()
+}
+
 // Observed is the gateway's listings.
 func (w *Worker) Observed() map[string]Observed { return w.Server.Observed() }
 
@@ -112,7 +130,7 @@ func (w *Worker) Status() ControlStatus {
 			checked[n] = at
 		}
 	}
-	return ControlStatus{Version: w.Server.Applied().Version(), Leases: w.Tokens.Len(), Backends: all, Down: down, StartedAt: w.started, Checked: checked}
+	return ControlStatus{Version: w.Server.Applied().Version(), Leases: w.Tokens.Len(), Backends: all, Down: down, StartedAt: w.started, Checked: checked, PID: os.Getpid()}
 }
 
 // RunWorker serves w's gateway (start) and its control socket at path until

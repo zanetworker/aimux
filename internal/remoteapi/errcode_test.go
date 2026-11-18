@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,4 +66,60 @@ func TestWriteFailure_CodedError(t *testing.T) {
 			t.Errorf("%s: %d %+v, want %d with the message only", code, rec.Code, body, status)
 		}
 	}
+}
+
+// A coded turn_error carries only the message for a person: no openshell
+// output, sandbox name or gateway URL from the cause, which goes to the
+// serve log instead.
+func TestBroker_CodedTurnErrorHidesTheCause(t *testing.T) {
+	cause := errors.New("sandbox aimux-work-readonly: openshell -g local sandbox get: error: transport error: http://127.0.0.1:8080 Connection refused")
+	f := &fakeBackend{sendF: func(context.Context, string, string, func(acprun.Event)) (string, error) {
+		return "", errcode.Wrap(errcode.SandboxGatewayDown, cause)
+	}}
+	logged := make(chan string, 1)
+	block := make(chan struct{}) // a log writer that never returns until the end
+	defer close(block)
+	var b *Broker
+	b = NewBroker(f.deps(&b), BrokerOptions{ApprovalTimeout: time.Second,
+		Logf: func(format string, args ...any) { logged <- fmt.Sprintf(format, args...); <-block }})
+	if _, err := b.Start("s1", "hi", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	evs := waitFor(t, b, "s1", KindTurnError)
+	raw := string(evs[len(evs)-1].Data)
+	for _, leak := range []string{"aimux-work-readonly", "sandbox get", "127.0.0.1:8080", "transport error"} {
+		if strings.Contains(raw, leak) {
+			t.Fatalf("turn_error carries %q: %s", leak, raw)
+		}
+	}
+	var d TurnErrorData
+	_ = json.Unmarshal(evs[len(evs)-1].Data, &d)
+	if d.Error != errcode.Message(errcode.SandboxGatewayDown) || d.Code != errcode.SandboxGatewayDown {
+		t.Fatalf("turn_error %+v", d)
+	}
+	if line := <-logged; !strings.Contains(line, "aimux-work-readonly") {
+		t.Fatalf("logged %q, want the cause", line)
+	}
+}
+
+// A stalled log writer holds one line; the rest are dropped, not queued
+// without bound, and turns still end.
+func TestBroker_StalledLogIsBounded(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	var b *Broker
+	f := &fakeBackend{sendF: func(context.Context, string, string, func(acprun.Event)) (string, error) {
+		return "", errcode.Wrap(errcode.SandboxGatewayDown, errors.New("cause"))
+	}}
+	b = NewBroker(f.deps(&b), BrokerOptions{ApprovalTimeout: time.Second, Logf: func(string, ...any) { <-block }})
+	for i := 0; i < causeQueue+20; i++ {
+		b.logCause("line")
+	}
+	if n := len(b.causes); n > causeQueue {
+		t.Fatalf("%d lines queued, want at most %d", n, causeQueue)
+	}
+	if _, err := b.Start("s1", "hi", "k1"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, b, "s1", KindTurnError) // the turn still ends
 }
