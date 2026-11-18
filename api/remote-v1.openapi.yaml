@@ -887,6 +887,75 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "500": { $ref: "#/components/responses/Error" }
 
+  /v1/tools/{set}/diff:
+    get:
+      summary: A tool set's live definitions and pins, to show before approving
+      description: >
+        Read-only. Each tool of the set with its status, the pin of its
+        live definition (`pin`, what POST /v1/tools/approve takes) and that
+        definition (canonical JSON, without aimux's own `x-aimux-*`
+        annotations, which the pin still covers), and the pin approved now. A tool the
+        gateway does not list live has no `pin` or `definition`. Only for a
+        client with `tools_approve` in clients.yaml, and a set a profile in
+        its scope requests (`403 forbidden_for_client` otherwise); read-only, so no step-up; no URL,
+        endpoint or credential of aimux's (a definition is the server's own
+        schema). `reviewOnMac` marks a tool approve refuses.
+      operationId: toolsDiff
+      parameters:
+        - { name: set, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToolsDiff" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/tools/approve:
+    post:
+      summary: Approve tools of one set at the live definitions the client showed
+      description: >
+        Approves each named tool of `set` at its live definition, writing the
+        pins as `aimux tools approve` does, only if every `pin` still equals
+        the live definition's pin (else `409 pin_stale` and nothing is
+        approved; the source is listed afresh first, up to 5 seconds, else
+        `503 gateway_backend_down`), and no tool needs review on the Mac (`409 review_on_mac`:
+        its source's address changed since it was approved, or aimux's
+        request details, which the diff leaves out, differ from the
+        approved definition's). Pins are written under the same lock as
+        `aimux tools approve`. Needs `tools_approve: true` for the client in clients.yaml
+        (off by default; `403 forbidden_for_client`) and, on every request, a
+        device login under 60 seconds old from a kind in the client's
+        `step_up_kinds` (`403 step_up_required` with `maxAge`; a client with
+        no kinds, a local socket and a token that is not a device session,
+        such as a sandbox's tool gateway token, never pass). The set must be
+        requested by a profile in the client's scope. `400 bad_request` for
+        no tools, more than 100, a tool the set does not list, or a field
+        not listed.
+      operationId: approveTools
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ToolsApproveRequest" }
+      responses:
+        "200":
+          description: Approved (written is false when the pins already matched)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToolsApproveResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
   /v1/route:
     post:
       summary: Pick the mode a question needs (Auto)
@@ -1148,6 +1217,13 @@ components:
             - not_found             # 404: a local client (not cli) asked about a session it did not start; such sessions do not exist for it
             - forbidden_for_client  # 403: a local client (not cli) may not use this route (search, projects, terminal, open on Mac, approvals, devices, describe, queue)
             - client_limit          # 429: the client runs as many sessions, or started as many turns this minute, as it may; see Retry-After
+            - tool_gateway_not_running # 503 (new profile session), also on turn_error: the sandbox tool gateway worker is not running (aimux mcp proxy gateway install)
+            - gateway_backend_down     # 503, also on turn_error: the tool gateway worker runs but did not take the turn's lease
+            - profile_unavailable      # 409, also on turn_error: the profile does not resolve or compile now (a bad profile file, a missing set)
+            - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
+            - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source's address or hidden request details changed; approve it on the Mac
+            - pins_busy                # 503: POST /v1/tools/approve: another approval held the pins lock for 5 s; try again
+            - pin_stale                # 409: POST /v1/tools/approve: a tool's live definition is not the one the client showed (or is not listed); nothing approved
 
     Health:
       type: object
@@ -1160,7 +1236,7 @@ components:
         acpProtocolVersion: { type: integer, minimum: 1, description: "The Agent Client Protocol version `update` events follow." }
         capabilities:
           type: array
-          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe, send_now, profiles, tools] }
+          items: { type: string, enum: [sessions, search, new_sessions, push, terminal_input, device_login, queue, describe, send_now, profiles, tools, tools_approve] }
         session:
           type: string
           enum: [live, none]
@@ -1811,6 +1887,67 @@ components:
           description: Sorted by name.
           items: { $ref: "#/components/schemas/ProfileInfo" }
 
+    ToolsDiff:
+      type: object
+      additionalProperties: false
+      required: [set, source, snapshot, tools]
+      properties:
+        set: { type: string }
+        source: { type: string }
+        snapshot: { type: string }
+        tools:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, status]
+            properties:
+              name: { type: string }
+              status: { type: string, description: "toolgateway's status (active, changed, unpinned, unavailable, source_changed) or unknown." }
+              pin: { type: string, description: "The live definition's pin; absent when not listed live." }
+              approved: { type: string, description: "The pin approved now; absent when none." }
+              definition: { type: object, additionalProperties: true, description: "The live definition, canonical JSON." }
+              reviewOnMac: { type: string, description: "Why this tool cannot be approved from a client (its source's address changed, or request details the diff leaves out changed); approve it on the Mac." }
+
+    ToolsApproveRequest:
+      type: object
+      additionalProperties: false
+      required: [set, tools]
+      properties:
+        set: { type: string }
+        snapshot: { type: string, description: "The diff's snapshot; when given, a request against another one is 409 pin_stale. Send it." }
+        tools:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, pin]
+            properties:
+              name: { type: string }
+              pin: { type: string, description: "The pin GET /v1/tools/{set}/diff showed." }
+
+    ToolsApproveResult:
+      type: object
+      additionalProperties: false
+      required: [results, written]
+      properties:
+        written: { type: boolean }
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [set, source, tool, action]
+            properties:
+              set: { type: string }
+              source: { type: string }
+              tool: { type: string }
+              action: { type: string, description: "approved, upgraded, unchanged, removed or skipped." }
+              reason: { type: string }
+              hash: { type: string }
+
     ToolsList:
       type: object
       additionalProperties: false
@@ -2102,6 +2239,11 @@ components:
     TurnErrorData:
       type: object
       additionalProperties: false
-      required: [error]
+      required: [error, message]
       properties:
-        error: { type: string }
+        error: { type: string, description: "The error text; for a coded failure the same message for a person (its cause is only in the serve log)." }
+        message: { type: string, description: "A message for people: the code's message when there is a code, else the error text." }
+        code:
+          type: string
+          description: A stable code for programs, when the failure has one (see ErrorBody's codes).
+          enum: [tool_gateway_not_running, gateway_backend_down, image_invalid, profile_unavailable, sandbox_gateway_down]

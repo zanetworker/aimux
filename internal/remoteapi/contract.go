@@ -38,6 +38,9 @@ const (
 	CapProfiles = "profiles"
 	// CapTools: GET /v1/tools (the tool sets the caller's profiles request).
 	CapTools = "tools"
+	// CapToolsApprove: GET /v1/tools/{set}/diff and POST /v1/tools/approve
+	// (the client's scope and a step-up still decide each approval).
+	CapToolsApprove = "tools_approve"
 )
 
 // Health is GET /v1/health: who the caller is and what this server offers.
@@ -220,9 +223,12 @@ type TurnDoneData struct {
 	StopReason string `json:"stopReason"`
 }
 
-// TurnErrorData is the data of a turn_error event.
+// TurnErrorData is the data of a turn_error event. Message is for a person
+// and Code, when set, is stable (errcode); Error is the raw error.
 type TurnErrorData struct {
-	Error string `json:"error"`
+	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message"`
 }
 
 // ApprovalData is the data of an approval event: answer it with one of

@@ -17,15 +17,16 @@ The docs site lives in `docs-site/` (Astro Starlight): `cd docs-site && npm ci &
 ## Test
 
 ```sh
-make test               # unit tests
+make test               # unit tests (300s timeout: the slow packages need it under parallel load)
 make test-integration   # adds -tags integration
 make test-all           # adds integration and e2e tags
 make lint               # golangci-lint
+make lint-linux         # golangci-lint with GOOS=linux, as CI lints (new issues since origin/main)
 ```
 
 `test/e2e/discovery/` runs the real binary against seeded sessions in a container; its README has the commands, and CI runs it on pull requests to `main` that touch `cmd/`, `internal/` or `test/e2e/`.
 
-Run `pre-commit run --all-files` before you push; it runs the secrets scan, whitespace and YAML checks and the linters. CI runs lint and the tests on every pull request to `main`, and the gitleaks secrets scan on every push. A verified false positive goes in `.gitleaksignore` by its fingerprint; a real secret gets rotated, never ignored.
+Run `pre-commit run --all-files` before you push; it runs the secrets scan, whitespace and YAML checks and the linters. With `pre-commit install --hook-type pre-push`, each push also lints the pushed commits with `GOOS=linux` (new issues on the lines they change; `make lint` runs the full lint) and runs the MCP proxy conformance check when the proxy changed. CI runs lint and the tests on every pull request to `main`, and the gitleaks secrets scan on every push. A verified false positive goes in `.gitleaksignore` by its fingerprint; a real secret gets rotated, never ignored.
 
 ## Pull requests
 

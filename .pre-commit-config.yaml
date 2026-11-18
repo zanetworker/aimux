@@ -53,6 +53,19 @@ repos:
         pass_filenames: false
         types: [go]
 
+      # Lint as CI does (Linux build tags) before a push: new issues in the
+      # pushed commits (pre-commit's from-ref; the script says more; a full run
+      # would also report what a newer local golangci-lint finds in old code;
+      # GOOS=linux golangci-lint run ./... runs it). Runs on every push (about 10 s), so a
+      # push that only deletes files or changes go.mod is checked too.
+      - id: golangci-lint-linux
+        name: golangci-lint (GOOS=linux)
+        entry: env GOOS=linux scripts/golangci-lint-hook.sh
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-push]
+
       # MCP proxy conformance: run official suite with baseline on pre-push
       - id: mcp-proxy-conformance
         name: mcp-proxy-conformance

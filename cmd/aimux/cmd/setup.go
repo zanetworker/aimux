@@ -221,7 +221,9 @@ func runSetup(ctx context.Context, env frontEnv, o setupOpts, out, errOut io.Wri
 		}
 	}
 
-	if ran {
+	// Approvals can change what the runner needs (a first gh tool needs
+	// aimux-github), so the report is read again after them too.
+	if ran || len(approved) > 0 {
 		sb = collectSandboxStatus(ctx, env.browserEnv, env.ProfileDir)
 	}
 	summary := []summaryLine{
@@ -268,6 +270,37 @@ func runSetup(ctx context.Context, env frontEnv, o setupOpts, out, errOut io.Wri
 	return nil
 }
 
+// sandboxPrepare is what aimux sandbox setup would do for sb: start the
+// gateway, build the sandbox and tool runner images, create the providers
+// (the runner's only when an approved source needs it). Empty: nothing.
+func sandboxPrepare(sb sandboxReport) []string {
+	var what []string
+	if sb.Gateway.Status == "unreachable" {
+		what = append(what, "start the OpenShell gateway")
+	}
+	for _, img := range []component{sb.Image, sb.RunnerImage} {
+		if img.Status == "missing" {
+			what = append(what, "build "+img.Name)
+		}
+	}
+	switch sb.Provider.Status {
+	case "missing":
+		what = append(what, "create provider "+wingmanProvider)
+	case "unknown":
+		if sb.Gateway.Status == "unreachable" {
+			what = append(what, "create provider "+wingmanProvider+" if missing")
+		}
+	}
+	switch {
+	case !sb.RunnerProvider.Needed:
+	case sb.RunnerProvider.Status == "missing":
+		what = append(what, "create provider "+runnerProvider)
+	case sb.RunnerProvider.Status == "unknown" && sb.Gateway.Status == "unreachable":
+		what = append(what, "create provider "+runnerProvider+" if missing")
+	}
+	return what
+}
+
 // missingSteps is each setup step whose result is missing, in the order
 // they run: the tool registry, clients.yaml, the sandbox, the browser host.
 func missingSteps(env frontEnv, o setupOpts, sb sandboxReport) []setupStep {
@@ -288,25 +321,11 @@ func missingSteps(env frontEnv, o setupOpts, sb sandboxReport) []setupStep {
 		steps = append(steps, setupStep{Name: "clients", desc: "Write " + clients + " (the profiles Wingman may ask for, and its limits)",
 			run: func(_ context.Context, say func(string, ...any)) error { return writeDefaultClients(home, say) }})
 	}
-	var what []string
-	if sb.Gateway.Status == "unreachable" {
-		what = append(what, "start the OpenShell gateway")
-	}
-	if sb.Image.Status == "missing" {
-		what = append(what, "build "+wingmanImage)
-	}
-	switch sb.Provider.Status {
-	case "missing":
-		what = append(what, "create provider "+wingmanProvider)
-	case "unknown":
-		if sb.Gateway.Status == "unreachable" {
-			what = append(what, "create provider "+wingmanProvider+" if missing")
-		}
-	}
-	if len(what) > 0 {
+	if what := sandboxPrepare(sb); len(what) > 0 {
+		runner := slices.ContainsFunc(what, func(w string) bool { return strings.HasPrefix(w, "create provider "+runnerProvider) })
 		steps = append(steps, setupStep{Name: "sandbox", desc: "Prepare the sandbox: " + strings.Join(what, ", ") + " (aimux sandbox setup)",
 			run: func(ctx context.Context, say func(string, ...any)) error {
-				_, err := sandboxSetup(ctx, env.browserEnv, o.sandboxDir, "aimux setup", say)
+				_, err := sandboxSetupFor(ctx, env.browserEnv, o.sandboxDir, "aimux setup", say, runner)
 				return err
 			}})
 	}
@@ -407,7 +426,7 @@ func sandboxSummary(r sandboxReport) summaryLine {
 			l.Status = s
 		}
 	}
-	for _, c := range []component{r.Image, r.Provider} {
+	for _, c := range []component{r.Image, r.RunnerImage, r.Provider} {
 		switch c.Status {
 		case "missing":
 			worse(checkFail)
@@ -421,10 +440,15 @@ func sandboxSummary(r sandboxReport) summaryLine {
 			}
 			worse(checkFail)
 			problems = append(problems, c.Name+" unknown ("+c.Error+")")
-			if c.Name == wingmanImage {
+			if c.Name != wingmanProvider { // an image
 				l.Next = appendNew(l.Next, "podman machine start, then aimux setup")
 			}
 		}
+	}
+	if r.RunnerProvider.Status == "missing" && r.RunnerProvider.Needed {
+		worse(checkFail)
+		problems = append(problems, r.RunnerProvider.Name+" missing (an approved source needs it)")
+		l.Next = appendNew(l.Next, "aimux setup --yes (or aimux sandbox setup)")
 	}
 	current, stale := 0, 0
 	for _, p := range r.Profiles {

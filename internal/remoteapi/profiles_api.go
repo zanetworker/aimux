@@ -20,6 +20,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/clientscope"
+	"github.com/zanetworker/aimux/internal/errcode"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/profilerun"
@@ -198,7 +199,7 @@ func checkImage(w http.ResponseWriter, img *imageInput) bool {
 		return true
 	}
 	bad := func(msg string) bool {
-		writeError(w, http.StatusBadRequest, "image_invalid", errors.New(msg))
+		writeError(w, http.StatusBadRequest, errcode.ImageInvalid, errors.New(msg))
 		return false
 	}
 	if !imageTypes[img.MimeType] {
@@ -520,7 +521,10 @@ func (a *API) writeProfileFailure(w http.ResponseWriter, name string, err error)
 		writeError(w, status, code, errProfileStart)
 		return
 	}
-	writeError(w, status, code, err)
+	if _, coded := errcode.Of(err); coded {
+		a.logf("profile %s: %v", name, err) // the body has the message only
+	}
+	writeError(w, status, code, publicError(err))
 }
 
 // hostProfile is the scope name a session without a profile counts as: it
@@ -553,17 +557,23 @@ var errStepUp = errors.New("starting a session that can change your Mac needs a 
 // device client's StepUpKinds. It answers the request (and false) when
 // refused, also without device login, where there is no login to check.
 func (a *API) steppedUp(w http.ResponseWriter, r *http.Request) bool {
-	var age time.Duration
-	var kind string
-	ok := false
-	if a.DeviceLogin != nil {
-		age, kind, ok = a.DeviceLogin.LoginAge(r)
-	}
-	if ok && age < stepUpMaxAge && slices.Contains(a.Scopes.Clients[clientDevice].StepUpKinds, kind) {
+	if a.steppedUpFor(r, a.Scopes.Clients[clientDevice].StepUpKinds) {
 		return true
 	}
 	writeJSON(w, http.StatusForbidden, ErrorBody{Error: errStepUp.Error(), Code: "step_up_required", MaxAge: int(stepUpMaxAge / time.Second)})
 	return false
+}
+
+// steppedUpFor reports whether r carries a device login under
+// stepUpMaxAge old from a device kind in kinds. No kinds, no device login,
+// or a request without a login (a local socket, a token that is not a
+// device session) never passes.
+func (a *API) steppedUpFor(r *http.Request, kinds []string) bool {
+	if a.DeviceLogin == nil || len(kinds) == 0 {
+		return false
+	}
+	age, kind, ok := a.DeviceLogin.LoginAge(r)
+	return ok && age < stepUpMaxAge && slices.Contains(kinds, kind)
 }
 
 var errUnknownProfile = errors.New("no profile by that name (GET /v1/profiles lists them)")
@@ -710,7 +720,10 @@ func confined(client string) bool {
 var openToConfined = map[string]bool{
 	"GET /v1/health": true, "GET /v1/openapi.yaml": true,
 	"GET /v1/profiles": true, "GET /v1/profiles/{name}": true,
-	"GET /v1/tools":    true, // read-only, scoped to the client's profiles
+	"GET /v1/tools": true, // read-only, scoped to the client's profiles
+	// Scoped to the client's profiles; approve also needs tools_approve and
+	// a step-up, which the handler checks.
+	"GET /v1/tools/{set}/diff": true, "POST /v1/tools/approve": true,
 	"GET /v1/sessions": true, "POST /v1/sessions": true,
 	"POST /v1/route": true,
 }
@@ -825,8 +838,9 @@ func sessionIDOf(r *http.Request) string {
 // filled in by the handlers.
 type auditNote struct {
 	action, profile, digest, urlHost string
-	route, session                   string // set by localScope before the mux matches
-	routeAudit                              // set by POST /v1/route
+	route, session                   string     // set by localScope before the mux matches
+	routeAudit                                  // set by POST /v1/route
+	tools                            toolsAudit // set by POST /v1/tools/approve
 }
 
 type auditNoteKey struct{}
@@ -877,7 +891,8 @@ func (a *API) localAudit(next http.Handler) http.Handler {
 		}
 		a.auditLog().Write(devicelogin.AuditEntry{Client: client, Action: action, Session: session,
 			Profile: n.profile, Digest: n.digest, URLHost: n.urlHost, Result: result,
-			QuestionSHA256: n.questionSHA, DecisionID: n.decisionID, Source: n.source})
+			QuestionSHA256: n.questionSHA, DecisionID: n.decisionID, Source: n.source,
+			Set: n.tools.set, Tools: n.tools.tools})
 	})
 }
 

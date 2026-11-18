@@ -428,6 +428,9 @@ func (i Installer) Install(skip []string) (err error) {
 		return fmt.Errorf("the proxy is installed on port %d but this run would use %d; pass --port %d, "+
 			"or run `aimux mcp proxy uninstall` and install again to change the port; nothing changed", m.Port, i.Port, m.Port)
 	}
+	if err := i.switchBinary(); err != nil {
+		return err
+	}
 	// Before anything rewrites the servers file (forgetRemoved does too).
 	if err := i.needCurrentDaemon(in.http); err != nil {
 		return err
@@ -961,6 +964,51 @@ func (s fileSnapshot) restore() error {
 		return nil
 	}
 	return writePrivateFile(s.path, s.data)
+}
+
+// switchBinary points an installed launchd agent that runs another aimux
+// binary at this one and waits until the restarted daemon answers, so a
+// re-run from a new binary never leaves the job on the old one.
+func (i Installer) switchBinary() error {
+	a := i.Agent
+	snap, err := snapshotFile(a.PlistPath)
+	if err != nil {
+		return err
+	}
+	was, switched, err := a.SwitchBinary()
+	if err != nil {
+		return fmt.Errorf("point the launchd agent %s at %s: %w", a.Label, a.Binary, err)
+	}
+	if !switched {
+		return nil
+	}
+	if was == "" {
+		was = "an unreadable program"
+	}
+	i.printf("The proxy's launchd agent ran %s; it now runs %s (restarted).\n", was, a.Binary)
+	if i.Status == nil {
+		return nil
+	}
+	wait := i.Wait
+	if wait <= 0 {
+		wait = defaultWait
+	}
+	deadline := i.now().Add(wait)
+	for {
+		if rep, err := i.Status(); err == nil && rep.Running {
+			return nil
+		}
+		if !i.now().Before(deadline) {
+			// Back to the binary that ran, so the proxy serves again and the
+			// next install tries the switch again.
+			cause := fmt.Errorf("the MCP proxy did not answer within %v after switching its launchd agent to %s (logs in %s)", wait, a.Binary, a.LogDir)
+			if err := errors.Join(writePlist(snap.path, snap.data), a.Restart()); err != nil {
+				return fmt.Errorf("%w; switching it back to %s also failed: %v", cause, was, err)
+			}
+			return fmt.Errorf("%w; it runs %s again", cause, was)
+		}
+		i.sleep(statusPoll)
+	}
 }
 
 // ensureDaemon makes the daemon serve every server in move: a running one

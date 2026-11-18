@@ -476,8 +476,37 @@ func sandboxChecks(r sandboxReport, portFree bool) []doctorCheck {
 	default:
 		cs = append(cs, doctorCheck{ID: "sandbox.image", Status: checkWarn, Detail: "unknown: " + r.Image.Error, Fix: "podman machine start, then aimux doctor"})
 	}
+	switch r.RunnerImage.Status {
+	case "present":
+		cs = append(cs, ok("sandbox.runner_image", r.RunnerImage.Name+" present"))
+	case "missing":
+		cs = append(cs, doctorCheck{ID: "sandbox.runner_image", Status: checkFail, Detail: r.RunnerImage.Name + " missing (cli and http-openapi tools run in it)",
+			Fix: "aimux setup --yes (or aimux sandbox setup)"})
+	default:
+		cs = append(cs, doctorCheck{ID: "sandbox.runner_image", Status: checkWarn, Detail: "unknown: " + r.RunnerImage.Error, Fix: "podman machine start, then aimux doctor"})
+	}
+	if len(r.RunnerDropped) > 0 {
+		var parts []string
+		for _, d := range r.RunnerDropped {
+			parts = append(parts, d.Source+" ("+d.Reason+")")
+		}
+		cs = append(cs, doctorCheck{ID: "sandbox.runner_sources", Status: checkWarn,
+			Detail: "left out of the tool runner: " + strings.Join(parts, "; "), Fix: "aimux sandbox status, then fix what each reason names"})
+	}
 	if r.Gateway.Status != "reachable" {
 		return cs // the provider and sandboxes cannot be asked; the gateway check names it
+	}
+	switch {
+	case r.RunnerProvider.Status == "present":
+		cs = append(cs, ok("sandbox.runner_provider", r.RunnerProvider.Name+" present"))
+	case r.RunnerProvider.Status == "missing" && r.RunnerProvider.Needed:
+		cs = append(cs, doctorCheck{ID: "sandbox.runner_provider", Status: checkFail,
+			Detail: r.RunnerProvider.Name + " missing; an approved source needs it, so its tools are left out of the tool runner",
+			Fix:    "aimux setup --yes (or aimux sandbox setup; it creates it when the GitHub token is in the secret store)"})
+	case r.RunnerProvider.Status == "missing":
+		cs = append(cs, ok("sandbox.runner_provider", r.RunnerProvider.Name+" not created; no approved source needs it"))
+	default:
+		cs = append(cs, doctorCheck{ID: "sandbox.runner_provider", Status: checkWarn, Detail: "unknown: " + r.RunnerProvider.Error, Fix: "openshell -g local provider list, then aimux doctor"})
 	}
 	switch r.Provider.Status {
 	case "present":

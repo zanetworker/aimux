@@ -214,9 +214,9 @@ func printInstallSection(in mcpproxy.Installer, out io.Writer, color bool) mcppr
 
 func newMCPProxyInstallCmd() *cobra.Command {
 	var (
-		dryRun       bool
-		skip, unskip []string
-		port         int
+		dryRun, allowWorktree bool
+		skip, unskip          []string
+		port                  int
 	)
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -232,6 +232,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			"Tool names stay the same, so permission rules keep working unchanged. In ~/.claude/settings.json it sets " +
 			"CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT and adds two hooks: one moves a server you add in a Claude Code session behind the proxy, " +
 			"one names servers still direct when a session starts (uninstall removes both). " +
+			"When the launchd agent runs another aimux binary than this one, install first points the plist's program at this binary and restarts the agent (also when there is nothing new to move). " +
 			"Run it again to move servers added later, and to take off the proxy any moved server you removed from ~/.claude.json (claude mcp remove); servers kept direct with --skip stay direct until --unskip. Moved stdio servers are configured with `aimux mcp proxy edit` (moved HTTP servers by uninstall, edit, install), not in " +
 			"~/.claude.json. What changed is recorded in ~/.aimux/mcp-proxy-install.json; `uninstall` undoes it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -259,6 +260,9 @@ func newMCPProxyInstallCmd() *cobra.Command {
 			if in.Agent.Binary, err = stableBinary("aimux mcp proxy install"); err != nil {
 				return err
 			}
+			if err := guardWorktreeBinary(in.Agent.Binary, allowWorktree, cmd.ErrOrStderr()); err != nil {
+				return err
+			}
 			in.HookBinary = in.Agent.Binary
 			err = in.Install(skip)
 			if interrupted.Load() {
@@ -271,6 +275,7 @@ func newMCPProxyInstallCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&skip, "skip", nil, "Servers (stdio or HTTP) to leave as direct entries (recorded: later runs keep them direct)")
 	cmd.Flags().StringSliceVar(&unskip, "unskip", nil, "Servers an earlier --skip kept direct, to move this time")
 	cmd.Flags().IntVar(&port, "port", 7381, "Port the proxy listens on at 127.0.0.1")
+	cmd.Flags().BoolVar(&allowWorktree, "allow-worktree-binary", false, "Install from an aimux built inside a git worktree (the launchd job stops when the worktree is removed)")
 	return cmd
 }
 

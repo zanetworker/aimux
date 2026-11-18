@@ -68,6 +68,15 @@ func (c ControlClient) do(ctx context.Context, method, path string, in, out any)
 		if e.Error == "unknown_lease" {
 			return fmt.Errorf("%w: %s", ErrUnknownLease, e.Message)
 		}
+		if e.Error == "relist_timeout" {
+			return ErrRelistTimeout
+		}
+		if e.Error == "relist_discarded" {
+			return ErrRelistDiscarded
+		}
+		if resp.StatusCode == http.StatusNotFound && e.Error == "" {
+			return fmt.Errorf("%w: %s %s", errControlNoRoute, method, path)
+		}
 		return fmt.Errorf("tool gateway control: %s %s: %d %s", method, path, resp.StatusCode, e.Message)
 	}
 	if out == nil {
@@ -111,6 +120,10 @@ func (c ControlClient) Observed(ctx context.Context) (map[string]Observed, error
 	if err := c.do(ctx, http.MethodGet, "/v1/observed", nil, &wire); err != nil {
 		return nil, err
 	}
+	return fromObservedWire(wire), nil
+}
+
+func fromObservedWire(wire map[string]observedWire) map[string]Observed {
 	out := make(map[string]Observed, len(wire))
 	for name, o := range wire {
 		ob := Observed{LiveSource: LiveSource{Tools: o.Tools}, Endpoint: o.Endpoint, RelistFailed: o.RelistFailed}
@@ -119,7 +132,48 @@ func (c ControlClient) Observed(ctx context.Context) (map[string]Observed, error
 		}
 		out[name] = ob
 	}
-	return out, nil
+	return out
+}
+
+// ErrRelistTimeout is a relist that did not finish before the caller's
+// deadline: what the backend lists now is unknown.
+var ErrRelistTimeout = errors.New("the tool gateway could not list the source afresh in time")
+
+// ErrRelistUnsupported is a worker from an aimux before /v1/relist: it
+// must be reinstalled from this binary.
+var ErrRelistUnsupported = errors.New("the tool gateway worker runs an older aimux without a fresh relist")
+
+// errControlNoRoute is a route the worker does not serve (an older aimux).
+var errControlNoRoute = errors.New("the tool gateway worker does not serve this route")
+
+// RelistResult is a relist's answer: the tool snapshot the worker listed
+// under and what it then holds for the named servers.
+type RelistResult struct {
+	Version  string
+	Observed map[string]Observed
+}
+
+// Relist has the worker apply the tool snapshot version (when newer than
+// the one it serves) and list servers afresh, waiting until it has, or ctx
+// ends (ErrRelistTimeout). What that relist saw comes back in the same
+// answer, so a caller checks against it, never a cache.
+func (c ControlClient) Relist(ctx context.Context, version string, servers []string) (RelistResult, error) {
+	if dl, ok := ctx.Deadline(); ok {
+		c.Timeout = time.Until(dl) + time.Second // the context ends it first
+	}
+	var out relistWire
+	err := c.do(ctx, http.MethodPost, "/v1/relist", map[string]any{"servers": servers, "version": version}, &out)
+	switch {
+	case errors.Is(err, errControlNoRoute):
+		return RelistResult{}, ErrRelistUnsupported
+	case errors.Is(err, ErrRelistDiscarded):
+		return RelistResult{}, err
+	case err != nil && ctx.Err() != nil:
+		return RelistResult{}, ErrRelistTimeout
+	case err != nil:
+		return RelistResult{}, err
+	}
+	return RelistResult{Version: out.Version, Observed: fromObservedWire(out.Observed)}, nil
 }
 
 // Status is the worker at a glance.

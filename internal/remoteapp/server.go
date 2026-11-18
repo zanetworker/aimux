@@ -415,7 +415,8 @@ func (s *Server) build(w *wiring) error {
 	broker = remoteapi.NewBroker(remoteapi.BrokerDeps{
 		Check: profileRouter.Check, Send: profileRouter.Send, Cancel: profileRouter.Cancel,
 	}, remoteapi.BrokerOptions{ApprovalTimeout: o.ApprovalTimeout, OnApproval: asked, OnApprovalResolved: resolved,
-		OnTurnEnd: func(string) { dispatcher.Kick() }})
+		OnTurnEnd: func(string) { dispatcher.Kick() },
+		Logf:      func(format string, args ...any) { _, _ = fmt.Fprintf(errOut, "remote: "+format+"\n", args...) }})
 	// Keyword ranking only (below), in an index of its own: without
 	// embeddings, refreshing the shared index would mark changed
 	// sessions as seen before the CLI and TUI embed them. One service

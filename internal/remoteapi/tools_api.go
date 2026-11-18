@@ -26,6 +26,9 @@ type ToolsView struct {
 	// RelistFailed is the sources the gateway still serves whose last
 	// relist failed (toolgateway.RelistFailedFor): unknown, not down.
 	RelistFailed map[string]bool
+	// LiveErr is why the gateway's listings could not be read (Live is then
+	// empty): unknown, not changed.
+	LiveErr error
 }
 
 // Set statuses of GET /v1/tools; tool statuses are toolgateway's (active,

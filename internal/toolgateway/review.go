@@ -523,27 +523,84 @@ func HeldBack(reg toolreg.Registry, pins PinFile, live map[string]LiveSource, se
 	return out
 }
 
+// LeftOut is the servers of grant (server to granted tools) on which every
+// granted tool is in held: the gateway serves the turn none of them, so the
+// turn's MCP config leaves the server out. Sorted.
+func LeftOut(held []ToolStatus, grant map[string][]string) []string {
+	isHeld := map[string]bool{}
+	for _, st := range held {
+		isHeld[st.Source+"/"+st.Tool] = true
+	}
+	var out []string
+	for _, srv := range slices.Sorted(maps.Keys(grant)) {
+		tools := grant[srv]
+		if len(tools) > 0 && !slices.ContainsFunc(tools, func(t string) bool { return !isHeld[srv+"/"+t] }) {
+			out = append(out, srv)
+		}
+	}
+	return out
+}
+
 // HeldBackNotice is the one line a turn shows for held: "" when nothing is
-// held.
-func HeldBackNotice(held []ToolStatus) string {
+// held. A source in leftOut is named first, as left out of the turn
+// ("slack: 5 tools changed, held for review, left out of this turn").
+func HeldBackNotice(held []ToolStatus, leftOut []string) string {
 	if len(held) == 0 {
 		return ""
 	}
 	var order []string
-	bySource := map[string][]string{}
+	bySource := map[string][]ToolStatus{}
 	for _, st := range held {
 		if _, seen := bySource[st.Source]; !seen {
 			order = append(order, st.Source)
 		}
-		bySource[st.Source] = append(bySource[st.Source], st.Tool+" "+heldStatuses[st.Status])
+		bySource[st.Source] = append(bySource[st.Source], st)
+	}
+	var lines, parts []string
+	n := 0
+	for _, src := range order {
+		if slices.Contains(leftOut, src) {
+			lines = append(lines, src+": "+countStatuses(bySource[src])+", held for review, left out of this turn")
+			continue
+		}
+		names := make([]string, 0, len(bySource[src]))
+		for _, st := range bySource[src] {
+			names = append(names, st.Tool+" "+heldStatuses[st.Status])
+		}
+		parts = append(parts, src+": "+strings.Join(names, ", "))
+		n += len(names)
+	}
+	if n > 0 {
+		lines = append(lines, fmt.Sprintf("%d %s held for review (%s)", n, toolNoun(n), strings.Join(parts, "; ")))
+	}
+	return strings.Join(lines, "; ") + ": run aimux tools status"
+}
+
+// countStatuses is held tools counted by status: "5 tools changed", or
+// "2 tools (1 changed, 1 source changed)" when they differ.
+func countStatuses(held []ToolStatus) string {
+	var order []string
+	count := map[string]int{}
+	for _, st := range held {
+		w := heldStatuses[st.Status]
+		if count[w] == 0 {
+			order = append(order, w)
+		}
+		count[w]++
+	}
+	if len(order) == 1 {
+		return fmt.Sprintf("%d %s %s", len(held), toolNoun(len(held)), order[0])
 	}
 	parts := make([]string, 0, len(order))
-	for _, src := range order {
-		parts = append(parts, src+": "+strings.Join(bySource[src], ", "))
+	for _, w := range order {
+		parts = append(parts, fmt.Sprintf("%d %s", count[w], w))
 	}
-	noun := "tools"
-	if len(held) == 1 {
-		noun = "tool"
+	return fmt.Sprintf("%d %s (%s)", len(held), toolNoun(len(held)), strings.Join(parts, ", "))
+}
+
+func toolNoun(n int) string {
+	if n == 1 {
+		return "tool"
 	}
-	return fmt.Sprintf("%d %s held for review (%s): run aimux tools status", len(held), noun, strings.Join(parts, "; "))
+	return "tools"
 }

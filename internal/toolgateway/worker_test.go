@@ -39,6 +39,13 @@ func (g *fakeGateway) Refresh(context.Context) {
 	}
 }
 
+func (g *fakeGateway) RelistSeen(ctx context.Context, servers []string) (RelistResult, error) {
+	if err := g.RelistNow(ctx, servers); err != nil {
+		return RelistResult{}, err
+	}
+	return RelistResult{Version: g.Applied().Version(), Observed: map[string]Observed{}}, nil
+}
+
 func (g *fakeGateway) RelistNow(ctx context.Context, servers []string) error {
 	g.mu.Lock()
 	g.relisted = append(g.relisted, slices.Clone(servers))
@@ -56,6 +63,11 @@ func (g *fakeGateway) Observed() map[string]Observed { return nil }
 
 func (g *fakeGateway) Backends() (all, down []string) {
 	return []string{"jira", "wiki"}, []string{"wiki"}
+}
+
+func (g *fakeGateway) BackendsChecked() (all, down []string, checked map[string]time.Time) {
+	all, down = g.Backends()
+	return all, down, map[string]time.Time{"wiki": time.Unix(100, 0), "gone": time.Unix(50, 0)}
 }
 
 type fakeStore struct {
@@ -163,6 +175,9 @@ func TestWorker_RenewDeleteStatus(t *testing.T) {
 	st := w.Status()
 	if st.Leases != 1 || st.Version != gw.Applied().Version() || !slices.Equal(st.Down, []string{"wiki"}) {
 		t.Fatalf("Status = %+v", st)
+	}
+	if len(st.Checked) != 1 || !st.Checked["wiki"].Equal(time.Unix(100, 0)) {
+		t.Fatalf("Checked = %v, want wiki only (gone is no longer configured)", st.Checked)
 	}
 	w.DeleteLease("sess-1")
 	if _, _, ok := w.Tokens.Lookup(leaseTok); ok || w.Status().Leases != 0 {

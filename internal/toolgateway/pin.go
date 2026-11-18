@@ -259,6 +259,37 @@ func (s PinStore) backupV1() error {
 	return nil
 }
 
+// ErrPinsBusy is a pins update that could not take the lock within
+// pinLockWait: another approval holds it.
+var ErrPinsBusy = errors.New("the tool pins are being updated by another approval; try again")
+
+// pinLockWait is how long an update waits for the pins lock.
+var pinLockWait = 5 * time.Second
+
+// Update applies fn to the pins file as it is now and saves the result
+// when fn reports a change, under an exclusive lock on <path>.lock that
+// every Update holds, so two writers (aimux tools approve, the remote API)
+// never drop each other's records. It reports whether it wrote.
+func (s PinStore) Update(fn func(PinFile) (PinFile, bool, error)) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
+		return false, fmt.Errorf("create %s: %w", filepath.Dir(s.Path), err)
+	}
+	unlock, err := lockPins(s.Path + ".lock")
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	cur, err := s.LoadFile()
+	if err != nil {
+		return false, err
+	}
+	next, changed, err := fn(cur)
+	if err != nil || !changed {
+		return false, err
+	}
+	return true, s.Save(next)
+}
+
 // Save writes f as a v2 file, atomically with owner-only permissions. The
 // first write over a v1 file keeps it as pins.json.v1-backup.
 func (s PinStore) Save(f PinFile) error {

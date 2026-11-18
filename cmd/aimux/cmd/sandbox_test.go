@@ -24,6 +24,7 @@ import (
 // gateway are there, and which sandboxes exist.
 type statusMachine struct {
 	image     error // podman image exists: nil present, exit 1 missing, other unknown
+	runnerImg error // the same for the tool runner image
 	gatewayUp bool
 	providers string // provider list output
 	sandboxes []string
@@ -35,6 +36,8 @@ func (m statusMachine) answer(argv []string) (string, error) {
 	switch {
 	case strings.HasPrefix(s, "podman image exists "+wingmanImage):
 		return "", m.image
+	case s == "podman image exists "+profile.RunnerImage:
+		return "", m.runnerImg
 	case s == "openshell -g local status":
 		if !m.gatewayUp {
 			return "", exitCodeErr{1, "Error: connection refused"}
@@ -130,8 +133,13 @@ type statusDoc struct {
 	} `json:"provider"`
 	RunnerProvider struct {
 		Name, Status, Error string
+		Needed              bool
 	} `json:"runner_provider"`
-	Gateway struct {
+	RunnerImage struct {
+		Name, Status, Error string
+	} `json:"runner_image"`
+	RunnerDropped []droppedSource `json:"runner_dropped"`
+	Gateway       struct {
 		Name, Status, Error string
 	} `json:"gateway"`
 	Profiles []struct {

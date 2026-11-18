@@ -19,6 +19,7 @@ import (
 	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/decide"
+	"github.com/zanetworker/aimux/internal/errcode"
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
@@ -29,6 +30,7 @@ import (
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
 	"github.com/zanetworker/aimux/internal/sessionstate"
 	"github.com/zanetworker/aimux/internal/terminput"
+	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/waiting"
 )
 
@@ -233,6 +235,16 @@ type API struct {
 	// snapshot and the gateway's live listings. It must not contact a
 	// backend; nil answers 404 not_supported.
 	Tools func() ToolsView
+	// Pins, if set with Tools, is the pins file POST /v1/tools/approve
+	// writes (as aimux tools approve does); nil answers 404 not_supported.
+	Pins *toolgateway.PinStore
+	// Relist, if set, has the tool gateway list source afresh before an
+	// approval checks its pins (Tools then reads the new listing); an error
+	// or ctx's end answers 503 and nothing is approved.
+	// It returns the tool snapshot version the gateway listed under.
+	// version is the tool snapshot the approval checks against; the gateway
+	// applies it first when it serves an older one.
+	Relist func(ctx context.Context, source, version string) (RelistView, error)
 	// ModeRouter, if set, answers POST /v1/route (internal/autoroute); nil
 	// answers every question undecided (source unavailable), so the client
 	// asks the person instead.
@@ -300,6 +312,8 @@ func (a *API) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/profiles", a.listProfiles)
 	mux.HandleFunc("GET /v1/profiles/{name}", a.getProfile)
 	mux.HandleFunc("GET /v1/tools", a.listTools)
+	mux.HandleFunc("GET /v1/tools/{set}/diff", a.toolsDiff)
+	mux.HandleFunc("POST /v1/tools/approve", a.audited(devicelogin.ActionToolsApprove, false, a.approveTools))
 	mux.HandleFunc("POST /v1/route", a.audited(devicelogin.ActionRoute, false, a.route))
 	mux.HandleFunc("PATCH /v1/sessions/{id}/meta", a.patchMeta)
 	mux.HandleFunc("POST /v1/sessions/{id}/describe", a.audited(devicelogin.ActionDescribe, true, a.describe))
@@ -354,7 +368,8 @@ func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.
 			act = rec.action
 		}
 		a.DeviceLogin.RecordEntry(r, devicelogin.AuditEntry{Action: act, Session: session, Result: result,
-			QuestionSHA256: rec.route.questionSHA, DecisionID: rec.route.decisionID, Source: rec.route.source})
+			QuestionSHA256: rec.route.questionSHA, DecisionID: rec.route.decisionID, Source: rec.route.source,
+			Set: rec.tools.set, Tools: rec.tools.tools})
 	}
 }
 
@@ -372,6 +387,7 @@ type statusRecorder struct {
 	status int
 	action string     // set by auditAs
 	route  routeAudit // set by noteRoute
+	tools  toolsAudit // set by noteTools
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
@@ -402,12 +418,35 @@ func writeError(w http.ResponseWriter, status int, code string, err error) {
 // writeFailure maps aimux errors to statuses and stable codes for clients.
 func writeFailure(w http.ResponseWriter, err error) {
 	status, code := failureStatus(err)
-	writeError(w, status, code, err)
+	writeError(w, status, code, publicError(err))
+}
+
+// codedStatus is the status a coded failure (errcode) answers with.
+var codedStatus = map[string]int{
+	errcode.ToolGatewayNotRunning: http.StatusServiceUnavailable,
+	errcode.GatewayBackendDown:    http.StatusServiceUnavailable,
+	errcode.SandboxGatewayDown:    http.StatusServiceUnavailable,
+	errcode.ProfileUnavailable:    http.StatusConflict,
+	errcode.ImageInvalid:          http.StatusBadRequest,
+}
+
+// publicError is what an error body says of err: a coded error's message
+// for a person (its cause is for the log), else err.
+func publicError(err error) error {
+	if e, ok := errcode.Of(err); ok {
+		return errors.New(e.Message)
+	}
+	return err
 }
 
 // failureStatus is the status and code writeFailure answers err with;
 // anything it does not know is 500 internal.
 func failureStatus(err error) (int, string) {
+	if e, ok := errcode.Of(err); ok {
+		if status, known := codedStatus[e.Code]; known {
+			return status, e.Code
+		}
+	}
 	switch {
 	case errors.Is(err, acprun.ErrUnknownSession):
 		return http.StatusNotFound, "unknown_session"
@@ -493,6 +532,9 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.Profiles != nil && a.Tools != nil {
 		caps = append(caps, CapTools)
+		if a.Pins != nil {
+			caps = append(caps, CapToolsApprove)
+		}
 	}
 	h := Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
 		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps, OpenOnMac: a.Handoff != nil, LocalOnly: a.LocalOnly}

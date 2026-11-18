@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,12 +28,32 @@ func shortSock(t *testing.T) string {
 }
 
 type fakeControl struct {
-	mu      sync.Mutex
-	put     []Lease
-	renewed []string
-	deleted []string
-	putErr  error
-	known   map[string]bool
+	mu       sync.Mutex
+	put      []Lease
+	renewed  []string
+	deleted  []string
+	putErr   error
+	known    map[string]bool
+	relists  [][]string
+	versions []string
+	relist   func(ctx context.Context) error // nil: done at once
+}
+
+// Relist answers with its own view of jira, unlike Observed's cached one,
+// so a test can tell which the control socket returns.
+func (f *fakeControl) Relist(ctx context.Context, version string, servers []string) (RelistResult, error) {
+	f.mu.Lock()
+	f.relists = append(f.relists, servers)
+	f.versions = append(f.versions, version)
+	fn := f.relist
+	f.mu.Unlock()
+	if fn != nil {
+		if err := fn(ctx); err != nil {
+			return RelistResult{}, err
+		}
+	}
+	return RelistResult{Version: "v2", Observed: map[string]Observed{
+		"jira": {LiveSource: LiveSource{Tools: map[string]json.RawMessage{"get": json.RawMessage(`{"name":"get"}`)}}, Endpoint: "https://jira"}}}, nil
 }
 
 func (f *fakeControl) PutLease(_ context.Context, l Lease) error {
@@ -299,5 +320,47 @@ func TestListenControl_TightensExistingFolder(t *testing.T) {
 	defer func() { _ = ln.Close() }()
 	if di, _ := os.Stat(filepath.Dir(path)); di.Mode().Perm() != 0o700 {
 		t.Fatalf("folder mode %v, want 0700", di.Mode().Perm())
+	}
+}
+
+// Relist asks the worker to list servers afresh and waits for it; a relist
+// that outlasts the caller's deadline is ErrRelistTimeout.
+func TestControl_Relist(t *testing.T) {
+	f := &fakeControl{}
+	c, _ := serveFake(t, f)
+	res, err := c.Relist(context.Background(), "want-v2", []string{"jira"})
+	if err != nil || res.Version != "v2" || f.versions[0] != "want-v2" {
+		t.Fatalf("version %q err %v (asked %v), want the relist's own v2", res.Version, err, f.versions)
+	}
+	// The relist's own listing comes back, not the cached Observed (which
+	// has jira down).
+	if o, ok := res.Observed["jira"]; !ok || o.Err != nil || o.Tools["get"] == nil {
+		t.Fatalf("observed %+v, want what the relist saw", res.Observed)
+	}
+	if len(f.relists) != 1 || f.relists[0][0] != "jira" {
+		t.Fatalf("relists %v", f.relists)
+	}
+	f.relist = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := c.Relist(ctx, "", []string{"jira"}); !errors.Is(err, ErrRelistTimeout) {
+		t.Fatalf("err %v, want ErrRelistTimeout", err)
+	}
+}
+
+// A worker from before /v1/relist answers 404: that is ErrRelistUnsupported,
+// so the caller can say the worker needs reinstalling.
+func TestControl_RelistOnAnOlderWorker(t *testing.T) {
+	path := shortSock(t)
+	ln, err := ListenControl(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	_, err = ControlClient{Path: path}.Relist(context.Background(), "", []string{"jira"})
+	if !errors.Is(err, ErrRelistUnsupported) {
+		t.Fatalf("err %v, want ErrRelistUnsupported", err)
 	}
 }

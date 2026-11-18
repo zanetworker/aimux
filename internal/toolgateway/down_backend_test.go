@@ -201,3 +201,35 @@ func TestRunWorker_LogsADownBackendsFailedRetriesOncePerInterval(t *testing.T) {
 	toolgateway.SetDownLogEvery(t, 0) // every failed retry is due again
 	waitFor(t, 5*time.Second, "the next interval's retry logged", func() bool { return strings.Count(logw.String(), line) >= 2 })
 }
+
+// Status says when each backend was last checked, and a down backend's
+// time moves with every failed retry, so its state is never stale unseen.
+// Read over the control socket, as the CLI does.
+func TestRunWorker_StatusSaysWhenADownBackendWasChecked(t *testing.T) {
+	const period = 100 * time.Millisecond
+	w, srv, _, _ := downBackendWorker(t, period)
+	sock := tmpSock(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	before := time.Now()
+	go func() { done <- toolgateway.RunWorker(ctx, w, srv.Start, sock) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("RunWorker = %v", err)
+		}
+	})
+	c := toolgateway.ControlClient{Path: sock}
+	status := func() toolgateway.ControlStatus {
+		st, _ := c.Status(context.Background()) // not up yet: zero, polled again
+		return st
+	}
+	waitFor(t, 5*time.Second, "jira down with a check time", func() bool {
+		st := status()
+		return slices.Contains(st.Down, "jira") && !st.Checked["jira"].Before(before)
+	})
+	first := status().Checked["jira"]
+	waitFor(t, 5*time.Second, "a retry moves jira's check time", func() bool {
+		return status().Checked["jira"].After(first)
+	})
+}

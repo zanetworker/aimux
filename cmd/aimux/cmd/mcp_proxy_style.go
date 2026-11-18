@@ -64,6 +64,14 @@ func stateLabel(st mcpproxy.ServerState) (string, string) {
 	return "○ " + string(st), styleDim
 }
 
+// stateAge is " 12m ago" for a state last seen at at, "" when at is unknown.
+func stateAge(now, at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	return " " + mcpproxy.Ago(now, at)
+}
+
 // stateRank orders the table by what needs attention: failed, then active,
 // then at rest; removed servers go last.
 var stateRank = map[mcpproxy.ServerState]int{mcpproxy.StateFailed: 0, mcpproxy.StateStarting: 1, mcpproxy.StateRunning: 2,
@@ -123,6 +131,9 @@ func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now
 	w := [4]int{len("SERVER"), len("STATE"), len("TOOLS"), len("LAST CALL")}
 	for _, s := range servers {
 		label, style := stateLabel(s.State)
+		if s.State == mcpproxy.StateFailed {
+			label += stateAge(now, s.LastErrorAt) // a failure is last known, not live
+		}
 		if isRemoved(s.Server) {
 			label, style = "○ removed", styleDim
 		}

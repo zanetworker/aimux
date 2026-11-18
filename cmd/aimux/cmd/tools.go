@@ -362,17 +362,18 @@ func printChanges(out io.Writer, changes []toolgateway.Change) {
 // approveAndSave approves targets against rv and writes the pins only when
 // a record changed. It reports whether it wrote.
 func approveAndSave(rv toolsReview, targets []string, now time.Time) ([]toolgateway.Approval, bool, error) {
-	out, res, err := toolgateway.Approve(rv.reg, rv.pins, rv.live, targets, now)
-	if err != nil {
+	// Under the pins lock, from the file as it is now: an approval from the
+	// remote API meanwhile is kept, not overwritten.
+	var res []toolgateway.Approval
+	wrote, err := rv.store.Update(func(pins toolgateway.PinFile) (toolgateway.PinFile, bool, error) {
+		out, r, err := toolgateway.Approve(rv.reg, pins, rv.live, targets, now)
+		res = r
+		return out, err == nil && !reflect.DeepEqual(out, pins), err
+	})
+	if err != nil && res == nil {
 		return nil, false, err
 	}
-	if reflect.DeepEqual(out, rv.pins) {
-		return res, false, nil
-	}
-	if err := rv.store.Save(out); err != nil {
-		return res, false, err
-	}
-	return res, true, nil
+	return res, wrote, err
 }
 
 var expectPattern = regexp.MustCompile(`^[0-9a-f]{12,64}$`)

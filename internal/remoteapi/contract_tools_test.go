@@ -52,6 +52,39 @@ func TestContract_Tools(t *testing.T) {
 		t.Fatalf("capabilities %v, want %s", health["capabilities"], CapTools)
 	}
 
+	// The diff, and approve's refusals (its success needs a device step-up;
+	// tools_approve_test.go covers it).
+	as("cli")
+	if st, body := c.call("GET", "/v1/tools/jira:readonly/diff", "", testLogin); st != 403 || body["code"] != "forbidden_for_client" {
+		t.Fatalf("diff without tools_approve: %d %v", st, body)
+	}
+	cli := api.Scopes.Clients["cli"]
+	cli.ToolsApprove = true
+	api.Scopes.Clients["cli"] = cli
+	if st, body := c.call("GET", "/v1/tools/jira:readonly/diff", "", testLogin); st != 200 || body["source"] != "jira" {
+		t.Fatalf("diff: %d %v", st, body)
+	}
+	if st, body := c.call("GET", "/v1/tools/nope:readonly/diff", "", testLogin); st != 403 || body["code"] != "forbidden_for_client" {
+		t.Fatalf("diff of a set no profile requests: %d %v", st, body)
+	}
+	profiles := api.Profiles
+	api.Profiles = func() (map[string]profile.Manifest, error) { return nil, errors.New("profiles unreadable") }
+	if st, body := c.call("GET", "/v1/tools/jira:readonly/diff", "", testLogin); st != 500 || body["code"] != "internal" {
+		t.Fatalf("diff with profiles unreadable: %d %v", st, body)
+	}
+	api.Profiles = profiles
+	approve := `{"set":"jira:readonly","tools":[{"name":"b","pin":"sha256:x"}]}`
+	cli.ToolsApprove = false
+	api.Scopes.Clients["cli"] = cli
+	if st, body := c.call("POST", "/v1/tools/approve", approve, testLogin); st != 403 || body["code"] != "forbidden_for_client" {
+		t.Fatalf("approve without the scope: %d %v", st, body)
+	}
+	cli.ToolsApprove = true
+	api.Scopes.Clients["cli"] = cli
+	if st, body := c.call("POST", "/v1/tools/approve", approve, testLogin); st != 403 || body["code"] != "step_up_required" {
+		t.Fatalf("approve without a step-up: %d %v", st, body)
+	}
+
 	view = ToolsView{Snapshot: toolreg.NewSnapshot(reg, nil, errors.New("pins unreadable"))}
 	st, body := c.call("GET", "/v1/tools", "", testLogin)
 	if st != 200 || len(body["errors"].([]any)) != 1 {

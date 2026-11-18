@@ -173,9 +173,9 @@ func TestAgent_Install(t *testing.T) {
 		t.Errorf("Plist has wrong permissions: got %o, want 0644", info.Mode().Perm())
 	}
 
-	// Verify call order: bootout then bootstrap
-	if len(fake.calls) != 2 {
-		t.Fatalf("Expected 2 launchctl calls, got %d", len(fake.calls))
+	// Verify call order: bootout, a check that launchd unloaded it, then bootstrap
+	if len(fake.calls) != 3 {
+		t.Fatalf("Expected 3 launchctl calls, got %d", len(fake.calls))
 	}
 
 	bootoutCall := strings.Join(fake.calls[0], " ")
@@ -183,7 +183,7 @@ func TestAgent_Install(t *testing.T) {
 		t.Errorf("First call should be bootout, got: %s", bootoutCall)
 	}
 
-	bootstrapCall := strings.Join(fake.calls[1], " ")
+	bootstrapCall := strings.Join(fake.calls[2], " ")
 	if !strings.Contains(bootstrapCall, "bootstrap gui/501") {
 		t.Errorf("Second call should be bootstrap gui/501, got: %s", bootstrapCall)
 	}
@@ -228,9 +228,9 @@ func TestAgent_Install_Twice(t *testing.T) {
 		t.Fatalf("Second install failed: %v", err)
 	}
 
-	// Should still do bootout + bootstrap
-	if len(fake.calls) != 2 {
-		t.Errorf("Second install should still make 2 calls, got %d", len(fake.calls))
+	// Should still do bootout + unload check + bootstrap
+	if len(fake.calls) != 3 {
+		t.Errorf("Second install should still make 3 calls, got %d", len(fake.calls))
 	}
 }
 
