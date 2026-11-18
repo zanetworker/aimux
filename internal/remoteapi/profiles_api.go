@@ -20,6 +20,7 @@ import (
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/clientscope"
+	"github.com/zanetworker/aimux/internal/errcode"
 	"github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/profilerun"
@@ -198,7 +199,7 @@ func checkImage(w http.ResponseWriter, img *imageInput) bool {
 		return true
 	}
 	bad := func(msg string) bool {
-		writeError(w, http.StatusBadRequest, "image_invalid", errors.New(msg))
+		writeError(w, http.StatusBadRequest, errcode.ImageInvalid, errors.New(msg))
 		return false
 	}
 	if !imageTypes[img.MimeType] {
@@ -520,7 +521,10 @@ func (a *API) writeProfileFailure(w http.ResponseWriter, name string, err error)
 		writeError(w, status, code, errProfileStart)
 		return
 	}
-	writeError(w, status, code, err)
+	if _, coded := errcode.Of(err); coded {
+		a.logf("profile %s: %v", name, err) // the body has the message only
+	}
+	writeError(w, status, code, publicError(err))
 }
 
 // hostProfile is the scope name a session without a profile counts as: it

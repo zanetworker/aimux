@@ -70,7 +70,9 @@ type Event struct {
 	Tool  string `json:"tool,omitempty"`
 	Error string `json:"error,omitempty"`
 	// Code is the aimux API error code behind an error event, when there is
-	// one (image_invalid, client_limit); the panel matches on it.
+	// one (image_invalid, client_limit, tool_gateway_not_running, from an
+	// error response or a turn_error event); the panel matches on it, and
+	// Error is then the message written for a person.
 	Code string `json:"code,omitempty"`
 	Pages []Page `json:"pages,omitempty"`
 	Page  *Page  `json:"page"`

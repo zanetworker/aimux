@@ -1129,3 +1129,38 @@ func TestRelay_ForwardsErrorCode(t *testing.T) {
 		t.Fatalf("events %+v, want an error with code image_invalid", evs)
 	}
 }
+
+// A coded failure reaches the panel with its code and the message for a
+// person, from an API error body and from a turn_error event alike.
+func TestRelay_ForwardsCodeAndMessage(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("POST /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		if b["text"] == "start" {
+			writeJSONStatus(w, http.StatusServiceUnavailable, map[string]any{
+				"error": "Workspace needs the tool gateway: run aimux mcp proxy gateway install", "code": "tool_gateway_not_running"})
+			return
+		}
+		writeJSONStatus(w, http.StatusAccepted, map[string]any{"id": "S1", "turn": "T1", "after": 0, "events": "/v1/sessions/S1/events?after=0"})
+	})
+	f.mux.HandleFunc("GET /v1/sessions/S1/events", func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w, sseEv{1, "T1", "turn_error", map[string]any{
+			"error":   "sandbox aimux-work-readonly: transport error: Connection refused",
+			"code":    "sandbox_gateway_down",
+			"message": "The OpenShell gateway is not reachable: check it with openshell -g local status"}})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	for id, want := range map[string]Event{
+		"start": {Code: "tool_gateway_not_running", Error: "Workspace needs the tool gateway: run aimux mcp proxy gateway install"},
+		"turn":  {Code: "sandbox_gateway_down", Error: "The OpenShell gateway is not reachable: check it with openshell -g local status"},
+	} {
+		p.send(t, Request{ID: id, Type: "ask", Lane: "page", URL: "https://a.example/", Question: id})
+		evs := p.until(t, id)
+		if last := evs[len(evs)-1]; last.Type != "error" || last.Code != want.Code || last.Error != want.Error {
+			t.Errorf("%s: last event %+v, want code %q and message %q", id, last, want.Code, want.Error)
+		}
+	}
+}

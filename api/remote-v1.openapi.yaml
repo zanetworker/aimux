@@ -1148,6 +1148,10 @@ components:
             - not_found             # 404: a local client (not cli) asked about a session it did not start; such sessions do not exist for it
             - forbidden_for_client  # 403: a local client (not cli) may not use this route (search, projects, terminal, open on Mac, approvals, devices, describe, queue)
             - client_limit          # 429: the client runs as many sessions, or started as many turns this minute, as it may; see Retry-After
+            - tool_gateway_not_running # 503 (new profile session), also on turn_error: the sandbox tool gateway worker is not running (aimux mcp proxy gateway install)
+            - gateway_backend_down     # 503, also on turn_error: the tool gateway worker runs but did not take the turn's lease
+            - profile_unavailable      # 409, also on turn_error: the profile does not resolve or compile now (a bad profile file, a missing set)
+            - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
 
     Health:
       type: object
@@ -2102,6 +2106,11 @@ components:
     TurnErrorData:
       type: object
       additionalProperties: false
-      required: [error]
+      required: [error, message]
       properties:
-        error: { type: string }
+        error: { type: string, description: "The raw error, for logs." }
+        message: { type: string, description: "A message for people: the code's message when there is a code, else the error text." }
+        code:
+          type: string
+          description: A stable code for programs, when the failure has one (see ErrorBody's codes).
+          enum: [tool_gateway_not_running, gateway_backend_down, image_invalid, profile_unavailable, sandbox_gateway_down]

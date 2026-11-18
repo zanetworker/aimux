@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/errcode"
 	"github.com/zanetworker/aimux/internal/harnessconfig"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
@@ -35,9 +36,9 @@ const archiveTimeout = time.Minute
 // --resume after), so the transcript archived after each turn carries the
 // same name.
 type SandboxEngine struct {
-	L          *sandboxlaunch.Launcher
-	Compile    func(profile string) (profile.Compiled, error)
-	Gateway    func() (baseURL string, leases Leases, err error)
+	L       *sandboxlaunch.Launcher
+	Compile func(profile string) (profile.Compiled, error)
+	Gateway func() (baseURL string, leases Leases, err error)
 	// RenewEvery is how often a running turn renews its lease (0:
 	// toolgateway.LeaseRenewEvery).
 	RenewEvery time.Duration
@@ -53,7 +54,7 @@ type SandboxEngine struct {
 	// turn shows before claude answers (the profile's tools held for
 	// review; "" shows nothing) and the servers left out of its MCP config
 	// because every tool granted on them is held back.
-	Review func(c profile.Compiled) TurnReview
+	Review     func(c profile.Compiled) TurnReview
 	ArchiveDir string // default ~/.aimux/archive (the search index scans it)
 	// OnStarted, if set, hears once per session that its first turn's
 	// claude process started, as its stream showed (the id is claude's from
@@ -66,6 +67,34 @@ type SandboxEngine struct {
 	sessions map[string]*sbSession
 	ensureMu map[string]chan struct{} // by sandbox name: one Ensure at a time (a slot of 1)
 	ensured  map[string]string        // sandbox -> digest last ensured
+}
+
+// leaseFailure codes a turn's failed lease: the worker not running, or
+// running but not taking it. A cancelled turn stays uncoded.
+func leaseFailure(err error) error {
+	err = fmt.Errorf("tool gateway: %w", err)
+	switch {
+	case errors.Is(err, toolgateway.ErrGatewayNotRunning):
+		return errcode.Wrap(errcode.ToolGatewayNotRunning, err)
+	case errors.Is(err, context.Canceled):
+		return err
+	}
+	return errcode.Wrap(errcode.GatewayBackendDown, err)
+}
+
+// openshellDownSigns are what the openshell CLI says when it cannot reach
+// its gateway.
+var openshellDownSigns = []string{"Connection refused", "connection refused", "tcp connect error", "transport error", "is not reachable", gatewayDownText}
+
+// sandboxFailure codes err as sandbox_gateway_down when the openshell CLI
+// could not reach the OpenShell gateway; any other failure stays as it is.
+func sandboxFailure(err error) error {
+	for _, sign := range openshellDownSigns {
+		if strings.Contains(err.Error(), sign) {
+			return errcode.Wrap(errcode.SandboxGatewayDown, err)
+		}
+	}
+	return err
 }
 
 // TurnReview is what the tool gateway will not serve one turn.
@@ -96,7 +125,7 @@ func NewSandboxEngine(l *sandboxlaunch.Launcher, compile func(profile string) (p
 func (e *SandboxEngine) New(ctx context.Context, m Meta, page string) (string, error) {
 	c, err := e.Compile(m.Profile)
 	if err != nil {
-		return "", fmt.Errorf("profile %s: %w", m.Profile, err)
+		return "", errcode.Wrap(errcode.ProfileUnavailable, fmt.Errorf("profile %s: %w", m.Profile, err))
 	}
 	if err := e.ensure(ctx, c); err != nil {
 		return "", err
@@ -131,7 +160,7 @@ func (e *SandboxEngine) ensure(ctx context.Context, c profile.Compiled) error {
 		return nil
 	}
 	if err := e.L.Ensure(ctx, c); err != nil {
-		return fmt.Errorf("sandbox %s: %w", c.Sandbox, err)
+		return sandboxFailure(fmt.Errorf("sandbox %s: %w", c.Sandbox, err))
 	}
 	e.mu.Lock()
 	e.ensured[c.Sandbox] = c.PolicyDigest
@@ -233,7 +262,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 
 	c, err := e.Compile(st.profile)
 	if err != nil {
-		return "", fmt.Errorf("profile %s: %w", st.profile, err)
+		return "", errcode.Wrap(errcode.ProfileUnavailable, fmt.Errorf("profile %s: %w", st.profile, err))
 	}
 	if err := e.ensure(ctx, c); err != nil {
 		return "", err
@@ -297,7 +326,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 		}
 		end, err := e.lease(ctx, leases, session, token, c)
 		if err != nil {
-			return "", fmt.Errorf("tool gateway: %w", err)
+			return "", leaseFailure(err)
 		}
 		// Deferred before rc.Close, so it runs after it: the lease ends once
 		// the process that held its token is closed. Ending it does not
@@ -315,7 +344,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	rc, err := e.L.Exec(ctx, c, spec.MCPConfig(base, token), prompt, spec.Env, spec.Argv)
 	if err != nil {
 		e.forgetEnsured(c.Sandbox)
-		return "", redact(fmt.Errorf("start claude in %s: %w", c.Sandbox, err))
+		return "", sandboxFailure(redact(fmt.Errorf("start claude in %s: %w", c.Sandbox, err)))
 	}
 	// Deferred after the Revoke above, so it runs before it, even when
 	// onEvent panics: claude is gone before its token is. Close is
@@ -353,7 +382,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	case res.resultErr != "":
 		return "", redact(fmt.Errorf("claude failed: %s", res.resultErr))
 	case !res.sawResult && closeErr != nil:
-		return "", redact(fmt.Errorf("claude produced no result: %w", closeErr))
+		return "", sandboxFailure(redact(fmt.Errorf("claude produced no result: %w", closeErr)))
 	case !res.sawResult:
 		return "", errors.New("claude produced no result")
 	case res.sid != session:

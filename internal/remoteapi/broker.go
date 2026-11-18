@@ -12,6 +12,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/errcode"
 	"github.com/zanetworker/aimux/internal/profilerun"
 )
 
@@ -270,7 +271,7 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 		// Stopped by Cancel before the agent got the prompt.
 		b.appendLocked(session, turn, KindTurnDone, TurnDoneData{StopReason: string(acp.StopReasonCancelled)})
 	case err != nil:
-		b.appendLocked(session, turn, KindTurnError, TurnErrorData{Error: err.Error()})
+		b.appendLocked(session, turn, KindTurnError, turnErrorData(err))
 	default:
 		b.appendLocked(session, turn, KindTurnDone, TurnDoneData{StopReason: stop})
 	}
@@ -284,6 +285,16 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 			close(p.ended)
 		}
 	}
+}
+
+// turnErrorData is a failed turn's event data: a coded error's code and
+// message for a person, else the error text as the message.
+func turnErrorData(err error) TurnErrorData {
+	d := TurnErrorData{Error: err.Error(), Message: err.Error()}
+	if e, ok := errcode.Of(err); ok {
+		d.Code, d.Message = e.Code, e.Message
+	}
+	return d
 }
 
 // LogID names this broker's event log. Sequence numbers start over in a new

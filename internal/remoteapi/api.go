@@ -19,6 +19,7 @@ import (
 	"github.com/zanetworker/aimux/internal/catalog"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/decide"
+	"github.com/zanetworker/aimux/internal/errcode"
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
@@ -402,12 +403,35 @@ func writeError(w http.ResponseWriter, status int, code string, err error) {
 // writeFailure maps aimux errors to statuses and stable codes for clients.
 func writeFailure(w http.ResponseWriter, err error) {
 	status, code := failureStatus(err)
-	writeError(w, status, code, err)
+	writeError(w, status, code, publicError(err))
+}
+
+// codedStatus is the status a coded failure (errcode) answers with.
+var codedStatus = map[string]int{
+	errcode.ToolGatewayNotRunning: http.StatusServiceUnavailable,
+	errcode.GatewayBackendDown:    http.StatusServiceUnavailable,
+	errcode.SandboxGatewayDown:    http.StatusServiceUnavailable,
+	errcode.ProfileUnavailable:    http.StatusConflict,
+	errcode.ImageInvalid:          http.StatusBadRequest,
+}
+
+// publicError is what an error body says of err: a coded error's message
+// for a person (its cause is for the log), else err.
+func publicError(err error) error {
+	if e, ok := errcode.Of(err); ok {
+		return errors.New(e.Message)
+	}
+	return err
 }
 
 // failureStatus is the status and code writeFailure answers err with;
 // anything it does not know is 500 internal.
 func failureStatus(err error) (int, string) {
+	if e, ok := errcode.Of(err); ok {
+		if status, known := codedStatus[e.Code]; known {
+			return status, e.Code
+		}
+	}
 	switch {
 	case errors.Is(err, acprun.ErrUnknownSession):
 		return http.StatusNotFound, "unknown_session"

@@ -220,9 +220,12 @@ type TurnDoneData struct {
 	StopReason string `json:"stopReason"`
 }
 
-// TurnErrorData is the data of a turn_error event.
+// TurnErrorData is the data of a turn_error event. Message is for a person
+// and Code, when set, is stable (errcode); Error is the raw error.
 type TurnErrorData struct {
-	Error string `json:"error"`
+	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message"`
 }
 
 // ApprovalData is the data of an approval event: answer it with one of

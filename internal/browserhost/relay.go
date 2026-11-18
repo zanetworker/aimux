@@ -774,13 +774,21 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 		return true, nil
 	case "turn_error":
 		var d struct {
-			Error string `json:"error"`
+			Error   string `json:"error"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(ev.Data, &d) // an unreadable error still ends the turn
-		if d.Error == "" {
-			d.Error = "the turn failed"
+		if d.Message == "" {
+			d.Message = d.Error
 		}
-		return true, errors.New(d.Error)
+		if d.Message == "" {
+			d.Message = "the turn failed"
+		}
+		if d.Code != "" { // the panel matches on the code, as on an API error
+			return true, &apiError{Code: d.Code, Message: d.Message}
+		}
+		return true, errors.New(d.Message)
 	}
 	return false, nil
 }
