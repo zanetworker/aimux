@@ -434,12 +434,12 @@ func TestHeldBack_OnlyGrantedSets(t *testing.T) {
 
 func TestHeldBackNotice(t *testing.T) {
 	reg, pins, live := reviewFixture(t)
-	n := HeldBackNotice(HeldBack(reg, pins, live, []string{"jira:readonly"}))
+	n := HeldBackNotice(HeldBack(reg, pins, live, []string{"jira:readonly"}), nil)
 	want := "4 tools held for review (jira: drifted changed, fresh unpinned, gone changed, extra new): run aimux tools status"
 	if n != want {
 		t.Fatalf("notice\n got %q\nwant %q", n, want)
 	}
-	if HeldBackNotice(nil) != "" {
+	if HeldBackNotice(nil, nil) != "" {
 		t.Fatal("a notice with nothing held")
 	}
 }

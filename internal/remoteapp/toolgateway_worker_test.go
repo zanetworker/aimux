@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -90,7 +91,8 @@ func TestToolGateway_NoticeNamesHeldBackTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	tg := newToolGateway(home, log.New(io.Discard, "", 0))
-	notice := tg.notice(t.TempDir()) // no user profiles: the builtin work-readonly asks for jira:readonly
+	review := tg.review(t.TempDir())
+	notice := func(c profile.Compiled) string { return review(c).Notice } // no user profiles: the builtin work-readonly asks for jira:readonly
 	c := profile.Compiled{Profile: "work-readonly", Snapshot: tg.snaps.turn()}
 	if got := notice(c); got != "" {
 		t.Fatalf("no worker: notice %q, want none (nothing listed)", got)
@@ -105,6 +107,13 @@ func TestToolGateway_NoticeNamesHeldBackTools(t *testing.T) {
 	// search is listed live but never approved: held for review.
 	if got := notice(c); got != "1 tool held for review (fake: search unpinned): run aimux tools status" {
 		t.Fatalf("notice %q", got)
+	}
+	// Granted fake/search, all of it held back: fake is left out of the turn.
+	granted := c
+	granted.Grant = profile.NewToolGrant(map[string][]string{"fake": {"search"}})
+	if r := review(granted); !reflect.DeepEqual(r.LeftOut, []string{"fake"}) ||
+		r.Notice != "fake: 1 tool unpinned, held for review, left out of this turn: run aimux tools status" {
+		t.Fatalf("review %+v, want fake left out and named", r)
 	}
 	if got := notice(profile.Compiled{Profile: "research", Snapshot: c.Snapshot}); got != "" {
 		t.Fatalf("a profile without tool sets got a notice: %q", got)

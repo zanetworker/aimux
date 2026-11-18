@@ -49,9 +49,11 @@ type SandboxEngine struct {
 	// failed renewal or status check, while the worker is coming back (0:
 	// leaseProbeRetry).
 	ProbeRetryEvery time.Duration
-	// Notice, if set, is one line a turn shows before claude answers (the
-	// profile's tools held for review); "" shows nothing.
-	Notice func(c profile.Compiled) string
+	// Review, if set, is what the gateway will not serve a turn: a line the
+	// turn shows before claude answers (the profile's tools held for
+	// review; "" shows nothing) and the servers left out of its MCP config
+	// because every tool granted on them is held back.
+	Review func(c profile.Compiled) TurnReview
 	ArchiveDir string // default ~/.aimux/archive (the search index scans it)
 	// OnStarted, if set, hears once per session that its first turn's
 	// claude process started, as its stream showed (the id is claude's from
@@ -64,6 +66,12 @@ type SandboxEngine struct {
 	sessions map[string]*sbSession
 	ensureMu map[string]chan struct{} // by sandbox name: one Ensure at a time (a slot of 1)
 	ensured  map[string]string        // sandbox -> digest last ensured
+}
+
+// TurnReview is what the tool gateway will not serve one turn.
+type TurnReview struct {
+	Notice  string   // one line for the turn, "" for none
+	LeftOut []string // granted servers left out of the turn's MCP config
 }
 
 type sbSession struct {
@@ -238,7 +246,18 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	if err != nil {
 		return "", fmt.Errorf("harness %s: %w", harness, err)
 	}
+	var review TurnReview
+	if e.Review != nil {
+		review = e.Review(c)
+	}
 	caps := c.Capabilities()
+	if len(review.LeftOut) > 0 {
+		scope := c.Grant.Scope()
+		for _, srv := range review.LeftOut {
+			delete(scope, srv)
+		}
+		caps.Grant = profile.NewToolGrant(scope)
+	}
 	if model != "" {
 		caps.Model = model // the turn's choice (--model), checked above
 	}
@@ -288,10 +307,8 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	}
 	redact := func(err error) error { return redactToken(err, token) }
 	emit := acpEmitter(onEvent)
-	if e.Notice != nil {
-		if text := e.Notice(c); text != "" {
-			emit(LaneEvent{Type: "notice", Text: text})
-		}
+	if review.Notice != "" {
+		emit(LaneEvent{Type: "notice", Text: review.Notice})
 	}
 
 	// The prompt goes on stdin after the config line, never on a command line.

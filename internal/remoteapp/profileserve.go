@@ -139,7 +139,7 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	p.sandbox = profilerun.NewSandboxEngine(launcher, compile, tg.gateway)
 	p.sandbox.ArchiveDir = filepath.Join(home, ".aimux", "archive")
 	p.sandbox.OnStarted = p.store.MarkStarted
-	p.sandbox.Notice = tg.notice(dir)
+	p.sandbox.Review = tg.review(dir)
 	p.sandbox.Log = logger
 	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox}
 	return func() {
@@ -185,24 +185,29 @@ func newToolGateway(home string, gwLog *log.Logger) toolGatewayParts {
 	return toolGatewayParts{snaps: snaps, tools: tools, gateway: gateway, worker: worker}
 }
 
-// notice is the sandbox engine's Notice over the profiles in dir: the tools
+// review is the sandbox engine's Review over the profiles in dir: the tools
 // of the turn's profile's sets the worker lists but that need review, in
-// one line, or "" (also when the worker cannot be asked).
-func (tg toolGatewayParts) notice(dir string) func(c profile.Compiled) string {
-	return func(c profile.Compiled) string {
+// one line, and the granted servers on which all of them are held back
+// (left out of the turn). Nothing when the worker cannot be asked: its
+// last listings are read, never a fresh listing, so a slow backend never
+// holds up the turn.
+func (tg toolGatewayParts) review(dir string) func(c profile.Compiled) profilerun.TurnReview {
+	return func(c profile.Compiled) profilerun.TurnReview {
 		user, _ := profile.LoadDir(dir) // a bad file is skipped, as everywhere profiles resolve
 		m, err := profile.Resolve(c.Profile, user)
 		if err != nil || len(m.Tools) == 0 {
-			return ""
+			return profilerun.TurnReview{}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), observedTimeout)
 		defer cancel()
 		obs, err := tg.worker.Observed(ctx)
 		if err != nil {
-			return ""
+			return profilerun.TurnReview{}
 		}
 		reg := c.Snapshot.Registry()
-		return toolgateway.HeldBackNotice(toolgateway.HeldBack(reg, toolgateway.PinsOf(c.Snapshot), toolgateway.LiveFor(reg, obs), m.Tools))
+		held := toolgateway.HeldBack(reg, toolgateway.PinsOf(c.Snapshot), toolgateway.LiveFor(reg, obs), m.Tools)
+		left := toolgateway.LeftOut(held, c.Grant.Scope())
+		return profilerun.TurnReview{Notice: toolgateway.HeldBackNotice(held, left), LeftOut: left}
 	}
 }
 

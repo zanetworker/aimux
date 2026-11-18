@@ -157,11 +157,11 @@ func TestSandboxTurn_GatewayNotRunningFailsFast(t *testing.T) {
 // first words; a turn with none says nothing.
 func TestSandboxTurn_NoticeBeforeFirstDelta(t *testing.T) {
 	e, _ := newLeaseSandbox(t, &fakeLeases{})
-	e.Notice = func(c profile.Compiled) string {
+	e.Review = func(c profile.Compiled) TurnReview {
 		if c.Profile != "work-readonly" {
 			t.Errorf("notice asked for %s", c.Profile)
 		}
-		return "1 tool held for review (jira: search changed): run aimux tools status"
+		return TurnReview{Notice: "1 tool held for review (jira: search changed): run aimux tools status"}
 	}
 	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
 	_, evs, err := sendCollect(t, e, sid, "q")
@@ -183,7 +183,7 @@ func TestSandboxTurn_NoticeBeforeFirstDelta(t *testing.T) {
 
 func TestSandboxTurn_NoNoticeWhenNothingHeld(t *testing.T) {
 	e, _ := newLeaseSandbox(t, &fakeLeases{})
-	e.Notice = func(profile.Compiled) string { return "" }
+	e.Review = func(profile.Compiled) TurnReview { return TurnReview{} }
 	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
 	_, evs, err := sendCollect(t, e, sid, "q")
 	if err != nil {
@@ -460,5 +460,31 @@ func TestSandboxTurn_FailedRenewProbesSoon(t *testing.T) {
 	}
 	if puts < 2 {
 		t.Fatalf("%d puts: the lease was not put again soon after the worker came back", puts)
+	}
+}
+
+// A server whose every granted tool is held back is left out of the turn's
+// MCP config and --allowedTools; the lease still carries the whole grant.
+func TestSandboxTurn_LeavesOutAServerWithEveryToolHeld(t *testing.T) {
+	f := &fakeLeases{}
+	e, b := newLeaseSandbox(t, f)
+	e.Review = func(profile.Compiled) TurnReview {
+		return TurnReview{Notice: "wiki: 1 tool changed, held for review, left out of this turn: run aimux tools status", LeftOut: []string{"wiki"}}
+	}
+	sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	if _, _, err := sendCollect(t, e, sid, "q"); err != nil {
+		t.Fatal(err)
+	}
+	ex := b.execs[0]
+	if strings.Contains(ex.cfg, "wiki") || !strings.Contains(ex.cfg, "/mcp/jira") {
+		t.Fatalf("mcp config %s: want jira only", ex.cfg)
+	}
+	args := strings.Join(ex.args, " ")
+	if strings.Contains(args, "mcp__wiki__") || !strings.Contains(args, "mcp__jira__search") {
+		t.Fatalf("args %s: want jira's tool allowed, wiki's not", args)
+	}
+	_, puts := f.snapshot()
+	if len(puts[0].Allow["wiki"]) == 0 {
+		t.Fatalf("lease %v: the grant itself is unchanged", puts[0].Allow)
 	}
 }

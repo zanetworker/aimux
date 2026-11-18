@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- **A server the gateway serves nothing from is left out of the turn.** When every tool a profile grants on a server is held for review, a sandbox turn's MCP config no longer lists that server, so the agent does not try a server that answers with no tools; the turn's notice names it (`slack: 5 tools changed, held for review, left out of this turn`).
 - **Installing from a new binary switches the launchd job to it.** `aimux mcp proxy install` run from another aimux binary than the one the `com.aimux.mcp-proxy` job runs now rewrites the plist's program to this binary and restarts the job (before, a running proxy only reloaded and kept the old binary). `aimux mcp proxy gateway install` does the same for `com.aimux.tool-gateway` and waits for launchd to unload the old job before loading the new one. Both name the binary the job ran before.
 
 ## aimux v0.15.0
