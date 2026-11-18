@@ -76,7 +76,7 @@ const (
 var builtinFS embed.FS
 
 // unavailable builtins exist but cannot be used until a later plan ships.
-var unavailable = map[string]bool{"research-with-work": true}
+var unavailable = map[string]bool{}
 
 var (
 	validRuns  = map[string]bool{"host": true, "acp": true, "sandbox": true, "run": true}

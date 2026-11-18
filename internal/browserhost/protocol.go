@@ -50,7 +50,7 @@ type RouteFacts struct {
 }
 
 // Routed is the route answer an ask followed, with the mode it finally
-// asked in (page, web or workspace).
+// asked in (page, web, workspace or both).
 type Routed struct {
 	DecisionID string `json:"decisionId"`
 	Mode       string `json:"mode"`

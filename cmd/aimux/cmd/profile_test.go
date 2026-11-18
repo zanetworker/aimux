@@ -118,10 +118,7 @@ func TestProfileList_ShowsBuiltinsWithDigest(t *testing.T) {
 	}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) > 0 && f[0] == "research-with-work" && !strings.Contains(line, "false") {
-			t.Errorf("research-with-work should be unavailable: %q", line)
-		}
-		if len(f) > 0 && (f[0] == "page" || f[0] == "research") && !strings.Contains(line, "true") {
+		if len(f) > 0 && (f[0] == "page" || f[0] == "research" || f[0] == "research-with-work") && !strings.Contains(line, "true") {
 			t.Errorf("%s should be available: %q", f[0], line)
 		}
 	}

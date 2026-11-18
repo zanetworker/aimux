@@ -3,7 +3,7 @@ title: Wingman
 description: A Chrome side panel that reads the page you are on, with read-only lookups in your own work tools
 ---
 
-Wingman is a Chrome side panel that summarizes the page you are reading and answers questions about it. It has three modes: Page answers from the page alone, Web also searches and reads the public web, and Workspace also looks things up, read only, in your research wiki, Jira, Slack, Gmail and Drive. Auto, the default, picks one of the three for each question. The extension lives in the [wingman repo](https://github.com/zanetworker/wingman); `aimux browser` is its back end.
+Wingman is a Chrome side panel that summarizes the page you are reading and answers questions about it. It has three modes: Page answers from the page alone, Web also searches and reads the public web, and Workspace also looks things up, read only, in your research wiki, Jira, Slack, Gmail and Drive. Auto, the default, picks one of the three for each question, or Both: your workspace and the web together, where only search queries that pass a privacy check reach the web. The extension lives in the [wingman repo](https://github.com/zanetworker/wingman); `aimux browser` is its back end.
 
 Page text is untrusted input. A page must not be able to cause a write, a message, or data leaving to anywhere except your screen, the model provider and your own read-only lookups.
 
@@ -17,7 +17,7 @@ The mode control under the page title is a radio group: Auto, Page, Web, Workspa
 
 ### Auto
 
-Auto picks Page, Web or Workspace for each new question, then asks in that mode. A line above the answer shows the pick and how likely the model rated it, such as "Auto: Web (73%)", with a Change button: Change asks the same question again in the mode you choose, and later questions on the page use it.
+Auto picks Page, Web, Workspace or Both for each new question, then asks in that mode. Both is only Auto's pick (or `@both`), not a radio button: it looks in your workspace first, checks the web queries it proposes and drops any that carry private detail, searches the web with the rest, and writes the answer with no tools. Its stages show as progress lines, and its answer links only to pages it fetched; any other URL shows as plain text. A line above the answer shows the pick and how likely the model rated it, such as "Auto: Web (73%)", with a Change button: Change asks the same question again in the mode you choose, and later questions on the page use it.
 
 To pick, aimux asks the [mode router](/guides/remote-access/#auto-routing-a-question-to-a-mode) (`POST /v1/route`). What leaves the Mac is only your question (its first 2,000 characters) and three yes or no facts: whether the site is private, whether Wingman can read the page, and whether "Use this page" is on. They go to the Clef-flash model on OpenRouter, requested with zero data retention (OpenRouter provider routing). Never the page's text, title or URL. Without an OpenRouter key, Auto always asks you; see [Auto](/guides/remote-access/#auto-routing-a-question-to-a-mode) for storing the key.
 
@@ -27,7 +27,7 @@ While Auto waits, a status line says "Choosing a mode…", or "Starting aimux…
 
 Follow-up questions on the same page reuse Auto's pick without asking the router again. Navigating to another page, or switching modes, starts over. Quick view in Auto is a Page summary. The privacy rules of each mode still apply: Page and Workspace answer from the page's text, as when you choose them yourself (neither reaches the web), and Web on a private page sends only the URL's origin and no page text unless the chip is on. In Auto the chip reads "Let Web use this page", since it governs only Web; it starts off on private pages, as in Web.
 
-Start a question with `@page`, `@web` or `@workspace` to pick its mode yourself, in any mode: `@web what changed in the latest release?`. The prefix is removed before the question is asked, and it switches only that question. It must come first and be followed by a space or the end, so `@webby` or a mention mid-sentence is not one, and a prefix with no question after it is not sent. In Auto, aimux reads the prefix and never asks the model; in the other modes the panel reads it itself.
+Start a question with `@page`, `@web`, `@workspace` or `@both` to pick its mode yourself, in any mode: `@web what changed in the latest release?`. The prefix is removed before the question is asked, and it switches only that question. It must come first and be followed by a space or the end, so `@webby` or a mention mid-sentence is not one, and a prefix with no question after it is not sent. In Auto, aimux reads the prefix and never asks the model; in the other modes the panel reads it itself.
 
 ### Web
 

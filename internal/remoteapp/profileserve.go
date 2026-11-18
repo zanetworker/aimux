@@ -117,7 +117,7 @@ func buildProfileWiring(home string, getenv func(string) string, errOut io.Write
 	return p, closeAll, nil
 }
 
-// buildEngines builds the real page and sandbox engines into p.
+// buildEngines builds the real page, sandbox and run engines into p.
 func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func(), error) {
 	sessions := filepath.Join(home, ".aimux", "wingman", "sessions")
 	if err := os.MkdirAll(sessions, 0o700); err != nil {
@@ -161,7 +161,12 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	p.sandbox.Review = tg.review(dir)
 	p.sandbox.GatewayCheck = openshellGatewayCheck
 	p.sandbox.Log = logger
-	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox}
+	// research-with-work ("runs: run"): planner and reader in sandboxes,
+	// the writer on the page engine; Resolve checks roles as the catalog does.
+	run := &profilerun.RunEngine{Planner: p.sandbox, Reader: p.sandbox, Writer: page, Compile: compile,
+		Resolve: func(name string) (profile.Manifest, error) { return resolveChecked(dir, name) },
+		Store:   p.store, Log: logger}
+	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox, "run": run}
 	return func() {
 		p.pageMgr.Close()
 	}, nil

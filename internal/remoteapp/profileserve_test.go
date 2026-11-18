@@ -355,3 +355,34 @@ func writeFile(t *testing.T, p, body string) {
 		t.Fatal(err)
 	}
 }
+
+// The real wiring registers the run engine, so research-with-work (its
+// roles resolve) is served available, with its planner and reader on the
+// sandbox engine and its writer on the page engine.
+func TestServedCatalog_ResearchWithWorkAvailable(t *testing.T) {
+	p, closeAll, err := buildProfileWiring(t.TempDir(), noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	all, err := p.servedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rww := all["research-with-work"]; !rww.Available || rww.Runs != "run" {
+		t.Fatalf("research-with-work = runs %q available %v, want run and available", rww.Runs, rww.Available)
+	}
+	run, ok := p.engines["run"].(*profilerun.RunEngine)
+	if !ok {
+		t.Fatalf("engines[run] = %T, want *profilerun.RunEngine", p.engines["run"])
+	}
+	if run.Planner != p.sandbox || run.Reader != p.sandbox || run.Writer != p.engines["acp"] {
+		t.Fatal("run engine stages are not on the sandbox (planner, reader) and page (writer) engines")
+	}
+	if run.Store != p.store || run.Compile == nil || run.Resolve == nil {
+		t.Fatal("run engine has no store, compile or resolve")
+	}
+	if _, err := run.Resolve("research-with-work"); err != nil {
+		t.Fatalf("Resolve(research-with-work) = %v", err)
+	}
+}

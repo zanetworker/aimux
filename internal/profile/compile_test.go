@@ -612,8 +612,8 @@ func TestBuiltins_ResearchAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rww.Available {
-		t.Error("research-with-work must stay unavailable")
+	if !rww.Available {
+		t.Error("research-with-work is available now its run engine ships")
 	}
 }
 

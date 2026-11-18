@@ -69,9 +69,9 @@ Every resolved profile has a digest: `sha256:` and the hash of its canonical JSO
 | `work-readonly` | `sandbox` | `wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly`, `gh:readonly` (opt-in: used once you run `aimux tools add cli gh` and approve it) | `deny`, allow `model` and `gateway` | yes |
 | `coding` | `host` | none declared | `allow` | yes |
 | `research` | `sandbox` | none | `deny`, allow `model` and `web` | yes |
-| `research-with-work` | `run` | none | `deny`, allow `model` | not yet |
+| `research-with-work` | `run` | none (its stages run under its roles) | `deny`, allow `model` | yes |
 
-`research` reaches the public web read only: WebSearch, and WebFetch with GET only on a reviewed list of top-level domains and apex hosts, with private addresses blocked. It has no tools and no `gateway`, so it holds no private data. `research-with-work` exists so clients can list it, but a session under it is refused with `409 profile_not_available` until a later release. Through the remote API, `coding` and `base` (`runs: host`) are listed with `available: false` too and refused the same way, since `remote serve` has no engine for them yet: start a host session without a profile instead. `aimux profile list` shows the manifest's own `available`.
+`research` reaches the public web read only: WebSearch, and WebFetch with GET only on a reviewed list of top-level domains and apex hosts, with private addresses blocked. It has no tools and no `gateway`, so it holds no private data. `research-with-work` answers a question from your workspace and the web together, in four stages, each its own child session: a planner under its `planner` role (`work-readonly`: your private tools, no web) looks things up and proposes up to 5 public search queries; a check drops any query that carries private detail (a URL, email, IP, hostname, issue key, token or credential, a UUID, high-entropy text, or 8 words copied from the question, page or tool results), naming only the reason; a reader under `research` (web only, no private data) answers the accepted queries and nothing else, and is skipped when none is accepted; a writer under its `writer` role (`page`: no tools, no web) writes the answer from the labeled results. Only the writer's text reaches the client, with a progress notice per stage, and the answer's `turn_done` carries the pages the reader fetched as its only links. It takes no image. Through the remote API, `coding` and `base` (`runs: host`) are listed with `available: false` and refused with `409 profile_not_available`, since `remote serve` has no engine for them yet: start a host session without a profile instead. `aimux profile list` shows the manifest's own `available`.
 
 Builtins other than `page` are roots: they have no `extends`. `base` is the narrowest root, and `page` extends it. A user profile can extend any builtin and narrow it. Extending `base` or `page` gives a profile with no tools that can only stay as it is or move to a more isolated `runs`.
 
@@ -154,7 +154,7 @@ aimux profile migrate             # write each v1 profile as a v2 file
 
 A profile that does not resolve (it widens its parent or extends a missing profile) stays in `aimux profile list` with empty `runs`, `available: false` and digest `-`; the reason is printed on stderr and the command still exits 0. `aimux profile show` and `aimux profile check` exit 1 with the reason. `aimux profile check` also exits 1 for a sandbox profile whose sandbox name is invalid (`aimux-<name>` must be lowercase ASCII letters and digits in dash-separated runs, with no leading, trailing or doubled dash, at most 19 characters; policy compilation refuses it too) and for a role that does not check (see `roles` above), naming the role and its cause.
 
-`check` validates the manifest; it does not say whether the profile is available. A profile like `research-with-work` checks ok while `available` is false in `list`.
+`check` validates the manifest; it does not say whether the profile is available. A profile can check ok while `available` is false in `list`.
 
 ### Sandboxes
 
