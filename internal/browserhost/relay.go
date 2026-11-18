@@ -34,7 +34,7 @@ const (
 )
 
 // profileOfLane is the profile each panel lane asks under.
-var profileOfLane = map[string]string{"page": "page", "research": "research", "work": "work-readonly"}
+var profileOfLane = map[string]string{"page": "page", "research": "research", "work": "work-readonly", "both": "research-with-work"}
 
 // Relay serves one Wingman side panel over native messaging (the frames and
 // Request/Event JSON the extension speaks) by turning its requests into
@@ -770,7 +770,11 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 		}
 		return false, nil
 	case "turn_done":
-		emit(Event{Type: "done"})
+		var d struct {
+			Links []string `json:"links"`
+		}
+		_ = json.Unmarshal(ev.Data, &d) // a turn_done without links (most turns) ends the turn the same
+		emit(Event{Type: "done", Links: d.Links})
 		return true, nil
 	case "turn_error":
 		var d struct {

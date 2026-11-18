@@ -74,8 +74,12 @@ type Event struct {
 	// error response or a turn_error event); the panel matches on it, and
 	// Error is then the message written for a person.
 	Code string `json:"code,omitempty"`
-	Pages []Page `json:"pages,omitempty"`
-	Page  *Page  `json:"page"`
+	// Links, on the done event of a both-lane answer (research-with-work),
+	// are the only URLs the panel may show as links: pages the reader
+	// fetched. Left out on every other done event.
+	Links []string `json:"links,omitempty"`
+	Pages []Page   `json:"pages,omitempty"`
+	Page  *Page    `json:"page"`
 
 	Mode          string             `json:"mode,omitempty"`
 	Profile       string             `json:"profile,omitempty"`
