@@ -85,17 +85,18 @@ func LoadDecider(path string) (decide.DeciderConfig, error) {
 // is an ordinary question. Such a question is not stripped or rewritten
 // (that would change what the person asked); it is routed by the person
 // instead.
-var steering = regexp.MustCompile(`(?i)\b(?:choose|pick|use|switch\s+to|route(?:\s+(?:it|this))?\s+to)\s+(?:the\s+)?(?:page|web|workspace)(?:\s+mode)?(?:\s*$|\s*[.,;:!?)"']|\s+(?:for|to|and|instead|please|now)\b)|\bignore\s+(?:your|previous|all|the)(?:\s+(?:previous|prior|above))?\s+instructions\b`)
+var steering = regexp.MustCompile(`(?i)\b(?:choose|pick|use|switch\s+to|route(?:\s+(?:it|this))?\s+to)\s+(?:the\s+)?(?:page|web|workspace|both)(?:\s+mode)?(?:\s*$|\s*[.,;:!?)"']|\s+(?:for|to|and|instead|please|now)\b)|\bignore\s+(?:your|previous|all|the)(?:\s+(?:previous|prior|above))?\s+instructions\b`)
 
 // modes lists the modes in their fixed order, which breaks ties and picks
 // the first allowed mode when nothing better is known.
-var modes = []string{"page", "web", "workspace"}
+var modes = []string{"page", "web", "workspace", "both"}
 
 // profiles maps each mode to the client profile it runs under.
 var profiles = map[string]string{
 	"page":      "page",
 	"web":       "research",
 	"workspace": "work-readonly",
+	"both":      "research-with-work",
 }
 
 // ModeQuestion is the decision asked of the model.
@@ -106,6 +107,7 @@ var ModeQuestion = decide.Question{
 		"page":      "Answer only from the web page the user has open, or text or a screenshot they pasted: explain, summarize, translate, what this says or means. No tools, no web.",
 		"web":       "Needs a public web search or fetching public pages: news, releases, prices, public documentation, facts about products, people or places.",
 		"workspace": "Needs the owner's private sources: their notes or wiki, Jira, Slack, Gmail, Google Drive, calendar or past work sessions. Read-only, no web.",
+		"both":      "Needs the owner's private sources and the public web together: compare internal plans or notes with public releases, docs or news.",
 	},
 }
 
@@ -294,6 +296,10 @@ func allowedFor(f Facts, allowedProfiles []string) []string {
 	var out []string
 	for _, m := range modes {
 		if m == "page" && !f.PageReadable {
+			continue
+		}
+		// both combines workspace and web, so it needs both halves too.
+		if m == "both" && (!contains(allowedProfiles, profiles["web"]) || !contains(allowedProfiles, profiles["workspace"])) {
 			continue
 		}
 		if contains(allowedProfiles, profiles[m]) {
