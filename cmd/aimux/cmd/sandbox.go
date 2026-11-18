@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -145,6 +146,13 @@ func defaultSandboxDir(home string) string {
 // did anything, or found something the owner must do. rerun is the command
 // the Keychain instructions tell the owner to run again.
 func sandboxSetup(ctx context.Context, env browserEnv, sandboxDir, rerun string, say func(string, ...any)) (bool, error) {
+	return sandboxSetupFor(ctx, env, sandboxDir, rerun, say, true)
+}
+
+// sandboxSetupFor is sandboxSetup; runner false leaves the runner's
+// provider alone (aimux setup when no approved source needs it), so an
+// image-only repair never reads the secret store.
+func sandboxSetupFor(ctx context.Context, env browserEnv, sandboxDir, rerun string, say func(string, ...any), runner bool) (bool, error) {
 	if err := env.Health(ctx); err != nil {
 		return false, fmt.Errorf("OpenShell gateway: %w", err)
 	}
@@ -189,7 +197,7 @@ func sandboxSetup(ctx context.Context, env browserEnv, sandboxDir, rerun string,
 			return did, err
 		}
 	}
-	if !hasTableName(providers, runnerProvider) {
+	if runner && !hasTableName(providers, runnerProvider) {
 		did = true
 		if err := runnerSetup(ctx, env, profiles, rerun, say); err != nil {
 			return did, err
@@ -325,6 +333,15 @@ type component struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
+	// Needed is set on the runner provider when an approved source needs
+	// it (a missing one is then a problem, else not).
+	Needed bool `json:"needed,omitempty"`
+}
+
+// droppedSource is a source left out of the tool runner, and why.
+type droppedSource struct {
+	Source string `json:"source"`
+	Reason string `json:"reason"`
 }
 
 // profileSandbox is one sandboxed profile's sandbox in status. Exists is
@@ -342,14 +359,19 @@ type profileSandbox struct {
 type sandboxReport struct {
 	SchemaVersion string    `json:"schema_version"`
 	Image         component `json:"image"`
-	Provider      component `json:"provider"`
+	// RunnerImage is the tool runner's image (aimux-tools), built on Image.
+	RunnerImage component `json:"runner_image"`
+	Provider    component `json:"provider"`
 	// RunnerProvider is aimux-github, the gh pack's provider in the tool
 	// runner; missing is only a Next step when an approved source needs it.
 	RunnerProvider component        `json:"runner_provider"`
 	Gateway        component        `json:"gateway"`
 	Profiles       []profileSandbox `json:"profiles"`
 	Runner         profileSandbox   `json:"runner"` // aimux-tools; profile is empty
-	Next           []string         `json:"next"`
+	// RunnerDropped is each source left out of the runner (a missing
+	// provider, a spec that fails, a refused base URL), sorted by source.
+	RunnerDropped []droppedSource `json:"runner_dropped"`
+	Next          []string        `json:"next"`
 }
 
 // collectSandboxStatus checks everything status shows. It only reads:
@@ -357,26 +379,30 @@ type sandboxReport struct {
 // the recorded digests and a compile from the current snapshot (which
 // never migrates or writes). It never starts the gateway.
 func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string) sandboxReport {
-	r := sandboxReport{SchemaVersion: sandboxSchemaVersion, Next: []string{},
-		Image: component{Name: wingmanImage}, Provider: component{Name: wingmanProvider}, RunnerProvider: component{Name: runnerProvider},
-		Gateway: component{Name: "local"}}
+	r := sandboxReport{SchemaVersion: sandboxSchemaVersion, Next: []string{}, RunnerDropped: []droppedSource{},
+		Image: component{Name: wingmanImage}, RunnerImage: component{Name: profile.RunnerImage}, Provider: component{Name: wingmanProvider},
+		RunnerProvider: component{Name: runnerProvider}, Gateway: component{Name: "local"}}
 	next := func(s string) {
 		if !slices.Contains(r.Next, s) {
 			r.Next = append(r.Next, s)
 		}
 	}
 
-	var ec interface{ ExitCode() int }
-	switch _, err := env.Run(ctx, nil, "podman", "image", "exists", wingmanImage); {
-	case err == nil:
-		r.Image.Status = "present"
-	case errors.As(err, &ec) && ec.ExitCode() == 1:
-		r.Image.Status = "missing"
-		next("aimux sandbox setup")
-	default:
-		r.Image.Status, r.Image.Error = "unknown", clipText(err.Error(), 300)
-		next("podman machine start, then aimux sandbox status")
+	image := func(c *component) {
+		var ec interface{ ExitCode() int }
+		switch _, err := env.Run(ctx, nil, "podman", "image", "exists", c.Name); {
+		case err == nil:
+			c.Status = "present"
+		case errors.As(err, &ec) && ec.ExitCode() == 1:
+			c.Status = "missing"
+			next("aimux sandbox setup")
+		default:
+			c.Status, c.Error = "unknown", clipText(err.Error(), 300)
+			next("podman machine start, then aimux sandbox status")
+		}
 	}
+	image(&r.Image)
+	image(&r.RunnerImage)
 
 	var sandboxes string
 	var listErr error
@@ -480,13 +506,16 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 		have = func(p string) bool { return hasTableName(*providers, p) }
 	}
 	rc, dropped, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, have)
-	if r.RunnerProvider.Status == "missing" {
-		for _, e := range dropped {
-			if strings.Contains(e.Error(), "provider "+runnerProvider+" ") {
-				next("aimux sandbox setup") // an approved source needs it
-				break
-			}
-		}
+	for _, src := range slices.Sorted(maps.Keys(dropped)) {
+		r.RunnerDropped = append(r.RunnerDropped, droppedSource{Source: src, Reason: clipText(dropped[src].Error(), 300)})
+	}
+	// Needed: the runner compiled with every provider available attaches
+	// it, so an approved source uses it (from the compiler, not its text).
+	if all, _, err := profile.CompileRunnerAvailable(snap, clipack.Builtin, runnerSpecs, nil); err == nil {
+		r.RunnerProvider.Needed = slices.Contains(all.Providers, runnerProvider)
+	}
+	if r.RunnerProvider.Status == "missing" && r.RunnerProvider.Needed {
+		next("aimux sandbox setup")
 	}
 	if err == nil && snapErr != nil {
 		err = snapErr
@@ -519,6 +548,7 @@ func sandboxStatus(ctx context.Context, env browserEnv, profileDir string, out, 
 			_, _ = fmt.Fprintf(out, "%-10s %s  %s\n", label+":", c.Name, s)
 		}
 		line("Image", r.Image)
+		line("Image", r.RunnerImage)
 		line("Provider", r.Provider)
 		line("Provider", r.RunnerProvider)
 		line("Gateway", r.Gateway)
@@ -544,6 +574,12 @@ func sandboxStatus(ctx context.Context, env browserEnv, profileDir string, out, 
 		}
 		if err := tw.Flush(); err != nil {
 			return err
+		}
+		if len(r.RunnerDropped) > 0 {
+			_, _ = fmt.Fprintln(out, "\nLeft out of the tool runner:")
+			for _, d := range r.RunnerDropped {
+				_, _ = fmt.Fprintf(out, "  %s: %s\n", d.Source, d.Reason)
+			}
 		}
 	}
 	for _, n := range r.Next {

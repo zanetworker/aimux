@@ -78,7 +78,7 @@ The manifest allows only your extension id, and the host checks it again: Chrome
 
 ## Set up the work lane
 
-The front door is `aimux setup`: it checks every concern and runs only the missing steps below (the tool registry, `clients.yaml`, the sandbox image and provider, and, with `--extension-id <id>`, the install above), asks before each on a terminal (`--yes` runs them without asking), offers changed tools for review on a terminal only, and ends with one line per concern. `aimux doctor` checks the same things read-only and names one fix per problem. [Troubleshooting](/guides/troubleshooting/) has both. The steps one by one:
+The front door is `aimux setup`: it checks every concern and runs only the missing steps below (the tool registry, `clients.yaml`, the sandbox and tool runner images, the providers (the runner's `aimux-github` only when an approved source needs it), and, with `--extension-id <id>`, the install above), asks before each on a terminal (`--yes` runs them without asking), offers changed tools for review on a terminal only, and ends with one line per concern. `aimux doctor` checks the same things read-only and names one fix per problem. [Troubleshooting](/guides/troubleshooting/) has both. The steps one by one:
 
 Page questions work after `install`. For Workspace and Web, run once:
 
