@@ -38,6 +38,9 @@ const (
 	CapProfiles = "profiles"
 	// CapTools: GET /v1/tools (the tool sets the caller's profiles request).
 	CapTools = "tools"
+	// CapToolsApprove: GET /v1/tools/{set}/diff and POST /v1/tools/approve
+	// (the client's scope and a step-up still decide each approval).
+	CapToolsApprove = "tools_approve"
 )
 
 // Health is GET /v1/health: who the caller is and what this server offers.

@@ -406,7 +406,7 @@ clients:
     max_sessions: 3
 ```
 
-A client's entry overrides only the fields it sets. Fields left out keep that client's defaults, and clients not in the file keep theirs. Fields per client: `profiles`, `socket`, `max_sessions`, `turns_per_minute` and `step_up_kinds`. An unknown field, or any of these, stops `remote serve` with the file's path in the error:
+A client's entry overrides only the fields it sets. Fields left out keep that client's defaults, and clients not in the file keep theirs. Fields per client: `profiles`, `socket`, `max_sessions`, `turns_per_minute`, `step_up_kinds` and `tools_approve` (off for every client unless set; see [Approving tools from a client](#approving-tools-from-a-client)). The `clients.yaml` that `aimux setup` writes lists `tools_approve: false` for Wingman. An unknown field, or any of these, stops `remote serve` with the file's path in the error:
 
 - the `*` wildcard for any client but `cli`,
 - `coding` in `wingman`'s profiles,
@@ -421,6 +421,20 @@ The limits count what a client has running, not what it keeps: `max_sessions` is
 
 A request from a device that would run a session on the Mac itself (a `runs: host` profile such as `coding`) needs a recent login: a device login under 60 seconds old, from a device kind in the `device` client's `step_up_kinds` (by default a Secure Enclave iPhone, so not a passkey in the web client). Otherwise it answers `403 step_up_required` with `maxAge: 60`: log in again and retry. Without device login there is no login to check, so the request is refused.
 
+### Approving tools from a client
+
+A client can show a changed tool and approve it, instead of the owner running `aimux tools approve` on the Mac. `GET /v1/tools/{set}/diff` returns each tool of the set with its status, its live definition and that definition's `pin`, the pin approved now, and `reviewOnMac` when the tool can only be approved on the Mac (no URL, endpoint or credential of aimux's); only for a client with `tools_approve` and a set a profile in its scope requests. `POST /v1/tools/approve` with `{"set","snapshot","tools":[{"name","pin"}]}` (`snapshot` from the diff: a request against another snapshot, after a registry or pins change, is `409 pin_stale`) approves those tools at their live definitions and writes `~/.aimux/tools/pins.json` as `aimux tools approve` does, answering `{"results":[{"set","source","tool","action","hash"}],"written"}`. It checks, in order:
+
+1. `tools_approve: true` for the client in `clients.yaml` (else `403 forbidden_for_client`);
+2. a step-up on every request: a device login under 60 seconds old from a kind in the client's `step_up_kinds` (else `403 step_up_required` with `maxAge: 60`). A client with no kinds, such as Wingman, a request over a local socket and a token that is not a device session (a sandbox's tool gateway token included) never pass, so only a device client can approve today;
+3. the set is requested by a profile in the client's scope (else `403 forbidden_for_client`), and each tool is in the set (else `400 bad_request`);
+4. every `pin` is still the live definition's pin (else `409 pin_stale` and nothing is approved: the definition changed since the client showed it, or the gateway no longer lists it).
+5. no tool needs review on the Mac (else `409 review_on_mac`): one whose source's address changed since it was approved, or whose request details that the diff leaves out (an `http-openapi` tool's base URL and path) differ from the approved definition's, or a new `http-openapi` tool, whose details were never shown.
+
+Pins are written under a lock that `aimux tools approve` takes too, and a tool whose pin another approval changed after the check is refused (`409 pin_stale`), so neither drops the other's approval. The live definitions are the tool gateway's last listing (relisted every minute and when a call finds a tool changed), not a fresh one: a tool that changed on its server since then is approved at the listed definition, and the gateway's check on every call keeps serving it only while it matches.
+
+The next turn uses the new pins, as after `aimux tools approve`. Each approval request is a `tools_approve` line in the audit log (the device and login, the result) and a line in the `remote serve` log with the client and tools. The diff leaves out aimux's own `x-aimux-*` annotations (an `http-openapi` tool's base URL and path), which the pin still covers. `GET /v1/health` lists `tools_approve` in `capabilities` when the server offers both routes; the client's scope and the step-up still decide each approval.
+
 `remote_access.step_up_legacy: true` applies the same step-up to new sessions started without a profile, which run on the Mac like `coding`. It is off by default so existing clients keep working.
 
 ### What a local client can reach
@@ -429,7 +443,7 @@ A local client other than `cli` sees and drives only the profile sessions it sta
 
 | Allowed | Refused |
 |---|---|
-| `GET /v1/health`, `GET /v1/openapi.yaml`, `GET /v1/profiles`, `GET /v1/profiles/{name}`, `GET /v1/tools`, `GET /v1/sessions` (its own sessions only), `POST /v1/sessions`, `POST /v1/route` | Everything else: search, projects, terminal routes, Open on Mac, approvals, devices, `describe`, the queue routes, the web client. These answer `403 forbidden_for_client` |
+| `GET /v1/health`, `GET /v1/openapi.yaml`, `GET /v1/profiles`, `GET /v1/profiles/{name}`, `GET /v1/tools`, `GET /v1/tools/{set}/diff`, `POST /v1/tools/approve` (which also needs `tools_approve` and a step-up), `GET /v1/sessions` (its own sessions only), `POST /v1/sessions`, `POST /v1/route` | Everything else: search, projects, terminal routes, Open on Mac, approvals, devices, `describe`, the queue routes, the web client. These answer `403 forbidden_for_client` |
 | For a session it started: the detail, `events`, `messages`, `cancel` and `meta` | The same routes on any other session, a host session or one that does not exist. These answer `404 not_found` |
 
 Refusals happen before any handler runs, so nothing is read or done for them.
@@ -560,7 +574,7 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 
 | Method and path | Purpose |
 |---|---|
-| `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`, `push`, `terminal_input`, `device_login`, `queue`, `describe`, `send_now`, `profiles`, `tools`). With the `describe` capability it also has `"naming":{"today","limit","failing","reason","paused"}` (today's automatic naming; see [Finding sessions](#finding-sessions)). With device login on it also has `"session"`: `live` when the request carries a live login, else `none`. While the profile sessions file cannot be read it also has `"profileStore"`, naming the file and how to recover (no profile session can be routed until then). With `remote_access.links.jira_base` set it also has `"links":{"jiraBase","jiraProjects"}` (see [Links in replies](#links-in-replies)) |
+| `GET /v1/health` | `{"status","login","version","acpProtocolVersion","capabilities"}`: who you are, the aimux version, the ACP version `update` events follow, and what this server offers (`sessions`, `search`, `new_sessions`, `push`, `terminal_input`, `device_login`, `queue`, `describe`, `send_now`, `profiles`, `tools`, `tools_approve`). With the `describe` capability it also has `"naming":{"today","limit","failing","reason","paused"}` (today's automatic naming; see [Finding sessions](#finding-sessions)). With device login on it also has `"session"`: `live` when the request carries a live login, else `none`. While the profile sessions file cannot be read it also has `"profileStore"`, naming the file and how to recover (no profile session can be routed until then). With `remote_access.links.jira_base` set it also has `"links":{"jiraBase","jiraProjects"}` (see [Links in replies](#links-in-replies)) |
 | `POST /v1/auth/pair` | Body `{"code","kind","publicKey",...}`: pair this device with a code from `aimux remote pair` and log it in (capability `device_login`). `kind` is `secure-enclave` (with `signature`, over `aimux-pair-v1\n<host>\n<code>`) or `webauthn` (with `credentialId`, `userHandle`, `clientDataJSON` and `authenticatorData` from the passkey's creation). The exact fields and signed strings are in the contract |
 | `POST /v1/auth/challenge` | Body `{"deviceId"}`, or `{}` for a passkey that finds its own device: `{"challenge"}`, valid 60 s, single use |
 | `POST /v1/auth/login` | Body `{"deviceId","challenge","signature",...}`: `{"deviceId","name"}`, plus `token` for the iPhone app (send it as `Authorization: Bearer <token>`); the web client gets the `__Host-aimux_session` cookie instead |
@@ -575,6 +589,8 @@ Responses are JSON. Errors are `{"error": "<message for people>", "code": "<stab
 | `GET /v1/profiles` | `{"profiles":[{"name","runs","available","digest","allowed"}]}`, sorted by name; `allowed` is whether the caller's client may ask for the profile (capability `profiles`) |
 | `GET /v1/profiles/{name}` | The profile resolved through its `extends` chain, as `aimux profile show --json` prints it, plus `digest`, `available` and `allowed`; `404 unknown_profile` |
 | `GET /v1/tools` | `{"snapshot","sets":[{"name","source","url","authorship","status","reason","tools":[{"name","status","reason","approvedAt"}]}],"errors":[{"set","source","message"}]}` for the sets the caller's profiles request, sorted by name; `authorship` is `self`, `internal` or `outside`, left out when the set's source is gone; read-only, no backend contacted (capability `tools`). See **Which tools a profile gets** above |
+| `GET /v1/tools/{set}/diff` | `{"set","source","snapshot","tools":[{"name","status","pin","approved","definition"}]}`: the set's live definitions and pins, for a set in the caller's scope. See [Approving tools from a client](#approving-tools-from-a-client) |
+| `POST /v1/tools/approve` | Body `{"set","tools":[{"name","pin"}]}`: `{"results","written"}`. Needs `tools_approve` and a step-up; `409 pin_stale` when a pin no longer matches. See [Approving tools from a client](#approving-tools-from-a-client) |
 | `GET /v1/sessions/{id}/events` | The session's events: a server-sent event stream, or one JSON page `{"events","log"}` with `?wait=0` |
 | `POST /v1/sessions/{id}/cancel` | Stop the running turn |
 | `GET /v1/sessions/{id}/queue` | The session's queue `{"state","reason","note","items":[{"id","text","state","created"}]}` (capability `queue`); `state` is `running` or `paused`, item states are `waiting`, `sending` and `answering`. A session without a queue has an empty one |

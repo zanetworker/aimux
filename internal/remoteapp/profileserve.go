@@ -35,6 +35,7 @@ type profileWiring struct {
 	pageMgr *acprun.Manager            // nil with injected engines
 	sandbox *profilerun.SandboxEngine  // nil with injected engines
 	tools   func() remoteapi.ToolsView // GET /v1/tools; nil with injected engines
+	pins    *toolgateway.PinStore      // POST /v1/tools/approve; nil with injected engines
 
 	mu    sync.Mutex
 	owner map[string]profilerun.Engine // session -> the engine that made it
@@ -59,7 +60,7 @@ func (p *profileWiring) Router() *profilerun.Router { return p.router }
 // the store, the engines' session start and cancel, the store's health,
 // the step-up of sessions without a profile and the tool sets' view.
 func (p *profileWiring) Install(api *remoteapi.API, scopes clientscope.Scopes, stepUpLegacy bool) {
-	api.Profiles, api.Scopes, api.ProfileSessions, api.Tools = p.servedCatalog, scopes, p.store, p.tools
+	api.Profiles, api.Scopes, api.ProfileSessions, api.Tools, api.Pins = p.servedCatalog, scopes, p.store, p.tools, p.pins
 	api.NewProfileSession, api.CancelProfileSession = p.newSession, p.cancelSession
 	api.ProfileHealth, api.StepUpLegacy = p.router.Health, stepUpLegacy
 }
@@ -127,6 +128,7 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	tg := newToolGateway(home, gwLog)
 	snaps := tg.snaps
 	p.tools = tg.tools
+	p.pins = &toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(home)}
 
 	launcher := &sandboxlaunch.Launcher{Backend: sandboxlaunch.NewCLIBackend(sandboxlaunch.ExecRunner(), filepath.Join(home, ".aimux", "sandboxes"))}
 	compile := func(name string) (profile.Compiled, error) {

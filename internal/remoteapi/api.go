@@ -30,6 +30,7 @@ import (
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
 	"github.com/zanetworker/aimux/internal/sessionstate"
 	"github.com/zanetworker/aimux/internal/terminput"
+	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/waiting"
 )
 
@@ -234,6 +235,9 @@ type API struct {
 	// snapshot and the gateway's live listings. It must not contact a
 	// backend; nil answers 404 not_supported.
 	Tools func() ToolsView
+	// Pins, if set with Tools, is the pins file POST /v1/tools/approve
+	// writes (as aimux tools approve does); nil answers 404 not_supported.
+	Pins *toolgateway.PinStore
 	// ModeRouter, if set, answers POST /v1/route (internal/autoroute); nil
 	// answers every question undecided (source unavailable), so the client
 	// asks the person instead.
@@ -301,6 +305,8 @@ func (a *API) routes() *http.ServeMux {
 	mux.HandleFunc("GET /v1/profiles", a.listProfiles)
 	mux.HandleFunc("GET /v1/profiles/{name}", a.getProfile)
 	mux.HandleFunc("GET /v1/tools", a.listTools)
+	mux.HandleFunc("GET /v1/tools/{set}/diff", a.toolsDiff)
+	mux.HandleFunc("POST /v1/tools/approve", a.audited(devicelogin.ActionToolsApprove, false, a.approveTools))
 	mux.HandleFunc("POST /v1/route", a.audited(devicelogin.ActionRoute, false, a.route))
 	mux.HandleFunc("PATCH /v1/sessions/{id}/meta", a.patchMeta)
 	mux.HandleFunc("POST /v1/sessions/{id}/describe", a.audited(devicelogin.ActionDescribe, true, a.describe))
@@ -517,6 +523,9 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.Profiles != nil && a.Tools != nil {
 		caps = append(caps, CapTools)
+		if a.Pins != nil {
+			caps = append(caps, CapToolsApprove)
+		}
 	}
 	h := Health{Status: "ok", Login: LoginFrom(r.Context()), Version: a.Version,
 		ACPProtocolVersion: int(acp.ProtocolVersionNumber), Capabilities: caps, OpenOnMac: a.Handoff != nil, LocalOnly: a.LocalOnly}

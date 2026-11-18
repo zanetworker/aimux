@@ -42,6 +42,8 @@ const (
 	ActionMetaEdit = "meta_edit"
 	ActionPin      = "pin"
 	ActionUnpin    = "unpin"
+	// ActionToolsApprove: tool definitions approved (POST /v1/tools/approve).
+	ActionToolsApprove = "tools_approve"
 	// ActionHide: a session removed from the lists (Wingman's history delete).
 	ActionHide = "hide"
 	// ActionOpenOnMac: a session handed from the phone to an iTerm2 tab.

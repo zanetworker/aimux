@@ -39,6 +39,10 @@ type Client struct {
 	MaxSessions    int      `yaml:"max_sessions"`
 	TurnsPerMinute int      `yaml:"turns_per_minute"`
 	StepUpKinds    []string `yaml:"step_up_kinds"`
+	// ToolsApprove lets the client approve tool definitions (POST
+	// /v1/tools/approve), each time after a step-up of one of StepUpKinds.
+	// Off for every client unless clients.yaml turns it on.
+	ToolsApprove bool `yaml:"tools_approve"`
 }
 
 // DefaultPath is where the scopes file lives.
@@ -95,6 +99,7 @@ type fileClient struct {
 	MaxSessions    *int     `yaml:"max_sessions"`
 	TurnsPerMinute *int     `yaml:"turns_per_minute"`
 	StepUpKinds    []string `yaml:"step_up_kinds"`
+	ToolsApprove   *bool    `yaml:"tools_approve"`
 }
 
 // Load reads path. A missing file yields Defaults(). A file entry overrides only
@@ -142,6 +147,9 @@ func Load(path string) (Scopes, error) {
 		}
 		if f.StepUpKinds != nil {
 			c.StepUpKinds = f.StepUpKinds
+		}
+		if f.ToolsApprove != nil {
+			c.ToolsApprove = *f.ToolsApprove
 		}
 		out.Clients[name] = c
 	}
