@@ -36,8 +36,8 @@ func (s *Scrubber) Add(v string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	plain := jsonInner(v)
-	forms := []string{v, url.QueryEscape(v), url.PathEscape(v), plain, strings.ReplaceAll(plain, "/", `\/`)}
+	plain, raw := jsonInner(v, true), jsonInner(v, false)
+	forms := []string{v, url.QueryEscape(v), url.PathEscape(v), plain, strings.ReplaceAll(plain, "/", `\/`), raw, strings.ReplaceAll(raw, "/", `\/`)}
 	if b, ok := strings.CutPrefix(v, "Basic "); ok {
 		if dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b)); err == nil {
 			cred := string(dec)
@@ -65,9 +65,7 @@ func (s *Scrubber) Add(v string) {
 func (s *Scrubber) Scrub(text string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, v := range s.long {
-		text = strings.ReplaceAll(text, v, redacted)
-	}
+	text = redactSpans(text, s.long)
 	for _, tok := range s.tokens {
 		text = replaceWholeToken(text, tok)
 	}
@@ -100,11 +98,60 @@ func wordByte(c byte) bool {
 	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
-// jsonInner is v as it appears inside a JSON string from json.Marshal.
-func jsonInner(v string) string {
-	b, err := json.Marshal(v)
-	if err != nil || len(b) < 2 {
+// jsonInner is v as it appears inside a JSON string, with or without HTML
+// escaping (json.Marshal escapes <, > and &; other encoders do not).
+func jsonInner(v string, escapeHTML bool) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(escapeHTML)
+	if err := enc.Encode(v); err != nil {
 		return ""
 	}
-	return string(b[1 : len(b)-1])
+	out := strings.TrimSuffix(b.String(), "\n")
+	if len(out) < 2 {
+		return ""
+	}
+	return out[1 : len(out)-1]
+}
+
+// redactSpans finds every occurrence of every value in the original text,
+// merges overlapping spans, then replaces each merged span once, so one
+// replacement never breaks the match of an overlapping value.
+func redactSpans(text string, values []string) string {
+	type span struct{ start, end int }
+	var spans []span
+	for _, v := range values {
+		for i := 0; ; {
+			j := strings.Index(text[i:], v)
+			if j < 0 {
+				break
+			}
+			spans = append(spans, span{i + j, i + j + len(v)})
+			i += j + 1
+		}
+	}
+	if len(spans) == 0 {
+		return text
+	}
+	sort.Slice(spans, func(a, b int) bool { return spans[a].start < spans[b].start })
+	var b strings.Builder
+	pos, cur := 0, spans[0]
+	flush := func(sp span) {
+		b.WriteString(text[pos:sp.start])
+		b.WriteString(redacted)
+		pos = sp.end
+	}
+	for _, sp := range spans[1:] {
+		if sp.start <= cur.end {
+			if sp.end > cur.end {
+				cur.end = sp.end
+			}
+			continue
+		}
+		flush(cur)
+		cur = sp
+	}
+	flush(cur)
+	b.WriteString(text[pos:])
+	return b.String()
 }

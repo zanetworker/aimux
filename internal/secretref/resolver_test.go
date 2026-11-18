@@ -393,3 +393,33 @@ func TestFile_NamedPipeDoesNotBlock(t *testing.T) {
 		t.Fatal("resolving a named pipe blocked")
 	}
 }
+
+func TestFile_ReadsWholeFile(t *testing.T) {
+	body := strings.Repeat("# pad\n", 2000) + "LATE=late-value\n"
+	p := writeFile(t, 0o600, body)
+	r, _ := newTestResolver(t, nil, nil)
+	v, err := r.Resolve(context.Background(), "s", Refs{Env: map[string]Ref{"LATE": {File: &FileRef{Path: p, Key: "LATE"}}}})
+	if err != nil || v.Env["LATE"] != "late-value" {
+		t.Fatalf("got %v, %v", v.Env, err)
+	}
+}
+
+func TestScrub_JSONWithoutHTMLEscaping(t *testing.T) {
+	s := NewScrubber()
+	s.Add(`a<b>&"c-secret`)
+	if out := s.Scrub(`{"v":"a<b>&\"c-secret"}`); strings.Contains(out, "c-secret") {
+		t.Fatalf("not scrubbed: %s", out)
+	}
+}
+
+func TestScrub_OverlappingValues(t *testing.T) {
+	s := NewScrubber()
+	s.Add("abcdefgh-1234")
+	s.Add("gh-1234-zyxwvu")
+	out := s.Scrub("x abcdefgh-1234-zyxwvu y")
+	for _, part := range []string{"abcdef", "zyxwvu", "1234"} {
+		if strings.Contains(out, part) {
+			t.Fatalf("overlap left %q in %q", part, out)
+		}
+	}
+}

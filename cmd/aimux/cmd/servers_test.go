@@ -117,3 +117,22 @@ func TestServersMigrate_WritesSplitFiles(t *testing.T) {
 		t.Error("a second migrate must refuse")
 	}
 }
+
+func TestServersMigrate_JSON(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".config", "aimux")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tool-sources.yaml"), []byte("version: 1\nsources: {}\nsets: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runServers(t, serversEnv{Home: home}, "migrate", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got["servers"] == "" || got["sets"] == "" {
+		t.Fatalf("json: %v %s", err, out)
+	}
+}

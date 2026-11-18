@@ -114,6 +114,10 @@ func newServersMigrateCmd(env serversEnv) *cobra.Command {
 			if err := toolreg.MigrateSplit(dir); err != nil {
 				return err
 			}
+			if jsonOutput {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{
+					"servers": toolreg.ServersPath(env.Home), "sets": toolreg.SetsPath(env.Home), "migrated": toolreg.DefaultPath(env.Home) + ".migrated"})
+			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s and %s; tool-sources.yaml is kept as tool-sources.yaml.migrated.\n",
 				toolreg.ServersPath(env.Home), toolreg.SetsPath(env.Home))
 			return nil

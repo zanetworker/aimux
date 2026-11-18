@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // ServerDef is the part of a server definition Discover reads.
@@ -92,8 +93,9 @@ func Discover(def ServerDef) ([]Finding, error) {
 			return nil, err
 		}
 		for _, p := range []string{filepath.Join(cwd, ".env"), filepath.Join(filepath.Dir(cwd), ".env")} {
-			usable := usableFile(p)
-			for _, d := range dotenvNames(p) {
+			names, strict := dotenvNames(p)
+			usable := strict && usableFile(p)
+			for _, d := range names {
 				add(Finding{Name: d.name, Where: p, Kind: "dotenv_key", FileRefOK: usable && !d.export})
 			}
 		}
@@ -150,31 +152,43 @@ type dotenvName struct {
 	export bool
 }
 
-// dotenvNames is the names a dotenv file defines; a missing or non-regular
-// file is none. Each line's value is skipped in bounded reads, so a long
-// value hides no later name.
-func dotenvNames(path string) []dotenvName {
+// dotenvNames is the names a dotenv file defines, and whether every line
+// has the strict form the file backend accepts (NAME=value, a comment or
+// blank, no export, at most 64 KiB); a missing or non-regular file is none.
+// Values are never kept: each line is read only up to its name, and the
+// rest is skipped in bounded reads.
+func dotenvNames(path string) ([]dotenvName, bool) {
 	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
-		return nil
+		return nil, false
 	}
 	f, err := os.Open(path) //nolint:gosec // G304: a dotenv beside the server's own cwd; only names are read
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	defer func() { _ = f.Close() }()
 	var names []dotenvName
+	strict, total := true, 0
 	r := bufio.NewReaderSize(f, 4096)
 	for {
 		line, err := r.ReadSlice('\n')
+		total += len(line)
 		head := string(line)
 		for errors.Is(err, bufio.ErrBufferFull) { // skip the rest of a long line
-			_, err = r.ReadSlice('\n')
+			line, err = r.ReadSlice('\n')
+			total += len(line)
 		}
-		if m := dotenvRE.FindStringSubmatch(head); m != nil {
+		trimmed := strings.TrimSpace(head)
+		switch m := dotenvRE.FindStringSubmatch(head); {
+		case m != nil:
 			names = append(names, dotenvName{name: m[2], export: m[1] != ""})
+			if m[1] != "" {
+				strict = false
+			}
+		case trimmed != "" && !strings.HasPrefix(trimmed, "#"):
+			strict = false
 		}
 		if err != nil {
-			return names
+			return names, strict && total <= 64<<10
 		}
 	}
 }

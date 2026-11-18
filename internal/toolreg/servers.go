@@ -107,13 +107,14 @@ func LoadInventory(path string) (Inventory, error) {
 	inv := Inventory{Version: 1, Servers: map[string]Server{}, Errors: map[string]error{}}
 	for name, node := range raw.Servers {
 		var s Server
-		b, _ := yaml.Marshal(&node)
-		dec := yaml.NewDecoder(bytes.NewReader(b))
-		dec.KnownFields(true)
-		if err := dec.Decode(&s); err != nil && !errors.Is(err, io.EOF) {
+		if key := unknownKey(&node); key != "" {
+			inv.Errors[name] = fmt.Errorf("servers %s: server %q (line %d): unknown field %q", path, name, node.Line, key)
+			continue
+		}
+		if err := node.Decode(&s); err != nil { // resolves aliases
 			// The decoder's text can quote a field's value, which may be a
 			// literal secret: report only where it failed.
-			inv.Errors[name] = fmt.Errorf("servers %s: server %q (line %d): a field is unknown or has the wrong type", path, name, node.Line)
+			inv.Errors[name] = fmt.Errorf("servers %s: server %q (line %d): a field has the wrong type", path, name, node.Line)
 			continue
 		}
 		if err := checkServer(name, s); err != nil {
@@ -139,7 +140,7 @@ func checkServer(name string, s Server) error {
 		return errors.New("command starts with an empty program")
 	}
 	if s.URL != "" && !strings.HasPrefix(s.URL, "http://") && !strings.HasPrefix(s.URL, "https://") {
-		return fmt.Errorf("url %q is not http or https", s.URL)
+		return errors.New("url is not http or https")
 	}
 	for _, part := range []map[string]secretref.Ref{s.Secrets.Env, s.Secrets.Headers} {
 		for n, ref := range part {
@@ -159,15 +160,12 @@ type setEntry struct {
 	Tools  []string `yaml:"tools,flow"`
 }
 
-// splitMode reports whether the directory holds servers.yaml or
-// tool-sets.yaml; then tool-sources.yaml is not read.
+// splitMode reports whether servers.yaml exists in dir; then
+// tool-sources.yaml is not read. MigrateSplit writes it last, so a crash
+// before it leaves the old file in charge.
 func splitMode(dir string) bool {
-	for _, f := range []string{serversFile, setsFile} {
-		if _, err := os.Lstat(filepath.Join(dir, f)); err == nil {
-			return true
-		}
-	}
-	return false
+	_, err := os.Lstat(filepath.Join(dir, serversFile))
+	return err == nil
 }
 
 // loadSplit builds the gateway's Registry from servers.yaml and
@@ -184,7 +182,11 @@ func loadSplit(dir string, setsData []byte) (Registry, error) {
 	setsPath := filepath.Join(dir, setsFile)
 	if setsData == nil {
 		b, err := os.ReadFile(setsPath) //nolint:gosec // G304: the user's own tool-sets.yaml
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) {
+			if _, lerr := os.Lstat(setsPath); lerr == nil {
+				return Registry{}, fmt.Errorf("read tool sets %s: it is a link to a missing file", setsPath)
+			}
+		} else if err != nil {
 			return Registry{}, fmt.Errorf("read tool sets %s: %w", setsPath, err)
 		}
 		setsData = b
@@ -223,7 +225,17 @@ func loadSplit(dir string, setsData []byte) (Registry, error) {
 		r.Sources[server] = sourceOf(s)
 		r.Sets[name] = Set{Source: server, Tools: e.Tools}
 	}
-	return validated(setsPath, r), nil
+	r = validated(setsPath, r)
+	used := map[string]bool{}
+	for _, set := range r.Sets {
+		used[set.Source] = true
+	}
+	for name := range r.Sources {
+		if !used[name] { // named only by sets that were rejected
+			delete(r.Sources, name)
+		}
+	}
+	return r, nil
 }
 
 // sourceOf is the gateway's view of a server a set references.
@@ -252,4 +264,26 @@ var legacyNoteOnce sync.Once
 // LegacyNote is told once per process that tool-sources.yaml is read.
 var LegacyNote = func(path string) {
 	_, _ = fmt.Fprintf(os.Stderr, "%s is read for this release; run aimux servers migrate\n", path)
+}
+
+// serverKeys are the fields a servers.yaml entry may set.
+var serverKeys = map[string]bool{"command": true, "cwd": true, "url": true, "env": true, "secrets": true, "keep_running": true,
+	"adopt_existing": true, "ready": true, "type": true, "root": true, "pack": true, "spec": true, "base_url": true,
+	"credential": true, "authorship": true}
+
+// unknownKey is the first key of a server's mapping (an alias followed) that
+// is not a Server field, or "".
+func unknownKey(n *yaml.Node) string {
+	for n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	if n.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if k := n.Content[i].Value; !serverKeys[k] && k != "<<" {
+			return k
+		}
+	}
+	return ""
 }

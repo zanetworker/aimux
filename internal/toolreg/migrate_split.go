@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,8 +19,13 @@ import (
 // either new file exists.
 func MigrateSplit(dir string) error {
 	legacy := filepath.Join(dir, "tool-sources.yaml")
+	unlock, err := lockMigrate(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if splitMode(dir) {
-		return fmt.Errorf("%s or %s already exists in %s; nothing was changed", serversFile, setsFile, dir)
+		return fmt.Errorf("%s already exists in %s; nothing was changed", serversFile, dir)
 	}
 	data, err := os.ReadFile(legacy) //nolint:gosec // G304: the user's own tool-sources.yaml
 	if err != nil {
@@ -50,11 +56,21 @@ func MigrateSplit(dir string) error {
 		return err
 	}
 	serversPath, setsPath := filepath.Join(dir, serversFile), filepath.Join(dir, setsFile)
-	if err := writeAtomic(serversPath, srv); err != nil {
-		return err
+	// tool-sets.yaml first (replacing one a crashed run left), servers.yaml
+	// last: split mode starts only when servers.yaml exists, so a crash in
+	// between leaves tool-sources.yaml in charge.
+	if _, err := os.Lstat(setsPath); err == nil {
+		// Never lose a tool-sets.yaml someone wrote, or a crashed run left:
+		// keep it beside the new one.
+		if err := os.Rename(setsPath, setsPath+".before-migrate"); err != nil {
+			return fmt.Errorf("keep the existing %s: %w; nothing was changed", setsPath, err)
+		}
 	}
 	if err := writeAtomic(setsPath, st); err != nil {
-		_ = os.Remove(serversPath)
+		return err
+	}
+	if err := writeAtomic(serversPath, srv); err != nil {
+		_ = os.Remove(setsPath)
 		return err
 	}
 	after, err := loadSplit(dir, nil)
@@ -125,4 +141,20 @@ func samePolicy(a, b Registry) bool {
 		}
 	}
 	return true
+}
+
+// lockMigrate lets one migration run at a time in dir.
+func lockMigrate(dir string) (func(), error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, ".migrate.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: a lock beside the user's own config
+	if err != nil {
+		return nil, fmt.Errorf("migration lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: an open file descriptor is a small non-negative int
+		_ = f.Close()
+		return nil, errors.New("another aimux servers migrate is running; try again when it finishes")
+	}
+	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() }, nil //nolint:gosec // G115: as above
 }

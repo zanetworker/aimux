@@ -266,3 +266,114 @@ func TestSplit_UnknownTopKeyRefused(t *testing.T) {
 		t.Fatal("a misspelled top-level key must be an error")
 	}
 }
+
+func TestMigrateSplit_CrashBeforeServersKeepsLegacy(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, filepath.Join(dir, "tool-sources.yaml"), legacyFixture)
+	// A crash after tool-sets.yaml was written and before servers.yaml.
+	writeYAML(t, filepath.Join(dir, "tool-sets.yaml"), "version: 1\nsets: {}\n")
+	reg, err := Load(filepath.Join(dir, "tool-sources.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Sets) != 2 {
+		t.Fatalf("without servers.yaml the legacy file must still rule: %+v", reg.Sets)
+	}
+	if err := MigrateSplit(dir); err != nil {
+		t.Fatalf("migrate must finish over a leftover tool-sets.yaml: %v", err)
+	}
+	after, err := Load(filepath.Join(dir, "tool-sources.yaml"))
+	if err != nil || len(after.Sets) != 2 {
+		t.Fatalf("after: %+v, %v", after.Sets, err)
+	}
+}
+
+func TestLoadInventory_AliasesResolve(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "servers.yaml")
+	writeYAML(t, p, "version: 1\nservers:\n  a: &base\n    url: http://127.0.0.1:1/mcp\n  b: *base\n")
+	inv, err := LoadInventory(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Servers["b"].URL != "http://127.0.0.1:1/mcp" {
+		t.Fatalf("alias not resolved: %+v errors=%v", inv.Servers, inv.Errors)
+	}
+}
+
+func TestSplit_DanglingSetsLinkIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, filepath.Join(dir, "servers.yaml"), "version: 1\nservers: {}\n")
+	if err := os.Symlink(filepath.Join(dir, "missing.yaml"), filepath.Join(dir, "tool-sets.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(filepath.Join(dir, "tool-sources.yaml")); err == nil {
+		t.Fatal("a dangling tool-sets.yaml link must be an error")
+	}
+}
+
+func TestSplit_RejectedSetKeepsItsServerOut(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, filepath.Join(dir, "servers.yaml"), "version: 1\nservers:\n  only:\n    url: http://127.0.0.1:1/mcp\n")
+	writeYAML(t, filepath.Join(dir, "tool-sets.yaml"), "version: 1\nsets:\n  only:readonly:\n    server: only\n    tools: []\n")
+	reg, err := Load(filepath.Join(dir, "tool-sources.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reg.SetErrors["only:readonly"] == nil {
+		t.Skip("an empty tool list is accepted; nothing to check")
+	}
+	if _, ok := reg.Sources["only"]; ok {
+		t.Fatal("a server named only by a rejected set must not reach the gateway")
+	}
+}
+
+func TestLoadInventory_BadURLNotInError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "servers.yaml")
+	writeYAML(t, p, "version: 1\nservers:\n  s:\n    url: ftp://user:pw-sentinel@host/x\n")
+	inv, _ := LoadInventory(p)
+	if e := inv.Errors["s"]; e == nil || strings.Contains(e.Error(), "pw-sentinel") {
+		t.Fatalf("want an error without the url: %v", e)
+	}
+}
+
+func TestReadHome_LeftoverReadonlyJSONDoesNotBlockSplit(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".config", "aimux")
+	writeYAML(t, filepath.Join(dir, "tool-sources.yaml"), legacyFixture)
+	writeYAML(t, LegacyPath(home), "{not json")
+	if err := MigrateSplit(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadHome(home); err != nil {
+		t.Fatalf("a leftover readonly.json must not matter in split mode: %v", err)
+	}
+	if _, err := AddToSet(DefaultPath(home), "jira:readonly", "new"); err != nil {
+		t.Fatalf("approve into a set must work in split mode: %v", err)
+	}
+}
+
+func TestMigrateSplit_KeepsAnExistingToolSets(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, filepath.Join(dir, "tool-sources.yaml"), legacyFixture)
+	writeYAML(t, filepath.Join(dir, "tool-sets.yaml"), "version: 1\n# hand-written\nsets: {}\n")
+	if err := MigrateSplit(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "tool-sets.yaml.before-migrate")) //nolint:gosec // test temp file
+	if err != nil || !strings.Contains(string(b), "hand-written") {
+		t.Fatalf("the existing tool-sets.yaml must be kept: %v %s", err, b)
+	}
+}
+
+func TestMigrateSplit_SecondRunWhileLockedRefuses(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, filepath.Join(dir, "tool-sources.yaml"), legacyFixture)
+	unlock, err := lockMigrate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	if err := MigrateSplit(dir); err == nil || !strings.Contains(err.Error(), "another") {
+		t.Fatalf("want a refusal while another migrate runs, got %v", err)
+	}
+}

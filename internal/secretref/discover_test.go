@@ -251,8 +251,17 @@ func TestDiscover_FileRefOKOnlyForUsableLines(t *testing.T) {
 			ok[f.Name] = f.FileRefOK
 		}
 	}
-	if !ok["GOOD"] || ok["BAD"] {
-		t.Fatalf("FileRefOK: %v", ok)
+	if ok["GOOD"] || ok["BAD"] {
+		t.Fatalf("an export line makes the whole file unusable for the file backend: %v", ok)
+	}
+	clean := t.TempDir()
+	if err := os.WriteFile(filepath.Join(clean, ".env"), []byte("# c\nGOOD=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range mustDiscover(t, ServerDef{Cwd: clean}) {
+		if f.Name == "GOOD" && !f.FileRefOK {
+			t.Fatal("a strict 0600 .env is usable")
+		}
 	}
 	loose := t.TempDir()
 	if err := os.WriteFile(filepath.Join(loose, ".env"), []byte("G=1\n"), 0o600); err != nil {
@@ -264,6 +273,18 @@ func TestDiscover_FileRefOKOnlyForUsableLines(t *testing.T) {
 	for _, f := range mustDiscover(t, ServerDef{Cwd: loose}) {
 		if f.Name == "G" && f.FileRefOK {
 			t.Fatal("a world-readable .env is not usable as a file reference")
+		}
+	}
+}
+
+func TestDiscover_FileRefOKNeedsAStrictFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("GOOD=1\nnot a line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range mustDiscover(t, ServerDef{Cwd: dir}) {
+		if f.Name == "GOOD" && f.FileRefOK {
+			t.Fatal("a .env the file backend would refuse is not usable as a file reference")
 		}
 	}
 }

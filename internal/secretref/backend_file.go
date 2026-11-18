@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"syscall"
@@ -39,12 +40,14 @@ func (r *Resolver) file(ref FileRef) (string, error) {
 	case fi.Mode().Perm()&0o077 != 0:
 		return "", fmt.Errorf("%s has mode %o; it must be 0600 or stricter (chmod 600 %s)", path, fi.Mode().Perm(), path)
 	}
-	b := make([]byte, maxFileBytes+1)
-	n, _ := f.Read(b)
-	if n > maxFileBytes {
+	b, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("%s: cannot read", path)
+	}
+	if len(b) > maxFileBytes {
 		return "", fmt.Errorf("%s is over 64 KiB", path)
 	}
-	body := string(b[:n])
+	body := string(b)
 	if ref.Key == "" {
 		v := strings.TrimSpace(body)
 		if v == "" {
