@@ -344,7 +344,17 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 		defer end()
 	}
 	redact := func(err error) error { return redactToken(err, token) }
-	emit := acpEmitter(onEvent)
+	toClient := acpEmitter(onEvent)
+	collect := toolResultsFrom(ctx)
+	emit := func(ev LaneEvent) {
+		if ev.Type == "tool_result" { // stays in aimux: only the turn's collector sees it
+			if collect != nil {
+				collect(ToolResult{Name: ev.Tool, Input: ev.Input, Output: ev.Text, Failed: ev.Failed})
+			}
+			return
+		}
+		toClient(ev)
+	}
 	if review.Notice != "" {
 		emit(LaneEvent{Type: "notice", Text: review.Notice})
 	}

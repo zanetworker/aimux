@@ -51,11 +51,14 @@ func TestStreamJSONToEvents(t *testing.T) {
 			seq = append(seq, "d:"+e.Text)
 		case "tool_call":
 			seq = append(seq, "t:"+e.Tool)
+		case "tool_result": // for the run engine's collector; the sandbox engine never forwards it
+			seq = append(seq, "r:"+e.Tool+":"+e.Input)
 		default:
 			t.Fatalf("unexpected event %v", e)
 		}
 	}
-	want := []string{"d:Let me check Jira. ", "t:mcp__jira__search_issues_jql", "d:\n\nNow Slack. ", "t:mcp__slack__search_messages", "d:\n\nThree issues, five messages."}
+	want := []string{"d:Let me check Jira. ", "t:mcp__jira__search_issues_jql", `r:mcp__jira__search_issues_jql:{"jql": "project = RHOAIENG"}`,
+		"d:\n\nNow Slack. ", "t:mcp__slack__search_messages", "r:mcp__slack__search_messages:" + slackInput(t, f), "d:\n\nThree issues, five messages."}
 	if !reflect.DeepEqual(seq, want) {
 		t.Fatalf("events = %q", seq)
 	}
@@ -233,4 +236,33 @@ func TestParseStream_WebFetchSnippetIsURL(t *testing.T) {
 	if !reflect.DeepEqual(evs, want) {
 		t.Fatalf("events %+v, want %+v", evs, want)
 	}
+}
+
+// slackInput is the Slack tool_use input in the fixture, as it appears there.
+func slackInput(t *testing.T, fixture string) string {
+	t.Helper()
+	i := strings.Index(fixture, `"name":"mcp__slack__search_messages"`)
+	if i < 0 {
+		i = strings.Index(fixture, `"name": "mcp__slack__search_messages"`)
+	}
+	j := strings.Index(fixture[i:], `"input":`)
+	if i < 0 || j < 0 {
+		t.Fatal("fixture has no slack tool input")
+	}
+	rest := fixture[i+j+len(`"input":`):]
+	rest = strings.TrimLeft(rest, " ")
+	depth := 0
+	for k, r := range rest {
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return rest[:k+1]
+			}
+		}
+	}
+	t.Fatal("unterminated slack input")
+	return ""
 }

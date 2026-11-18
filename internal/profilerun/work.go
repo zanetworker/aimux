@@ -55,6 +55,7 @@ func parseStream(r io.Reader, emit func(LaneEvent), onSession func(id string)) (
 	var st streamResult
 	sawSession := false
 	toolNames := map[string]string{}
+	toolInputs := map[string]string{}
 	wrote := false // text already sent: later text blocks start a paragraph
 	for {
 		raw, ok, err := readLine(br)
@@ -111,11 +112,13 @@ func parseStream(r io.Reader, emit func(LaneEvent), onSession func(id string)) (
 					}
 				case "tool_use":
 					toolNames[b.ID] = b.Name
+					toolInputs[b.ID] = string(b.Input)
 					emit(LaneEvent{Type: "tool_call", Tool: b.Name, Text: toolSnippet(b.Name, b.Input)})
 				case "tool_result":
 					if b.IsError {
 						emit(LaneEvent{Type: "tool_call", Tool: toolNames[b.ToolUseID], Text: "failed: " + clip(toolText(b.Content), maxToolErrText)})
 					}
+					emit(LaneEvent{Type: "tool_result", Tool: toolNames[b.ToolUseID], Input: toolInputs[b.ToolUseID], Text: toolText(b.Content), Failed: b.IsError})
 				}
 			}
 		case "result":
