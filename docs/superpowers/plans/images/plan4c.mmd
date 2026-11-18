@@ -1,0 +1,23 @@
+flowchart LR
+  subgraph cfg["~/.config/aimux"]
+    servers["servers.yaml<br/>every server: how to start or reach it,<br/>secret references (names only)"]
+    sets["tool-sets.yaml<br/>approved sandbox tools,<br/>by server name"]
+  end
+  import["aimux servers import<br/>(~/.claude.json, mcp-servers.json)<br/>never creates sets"] --> servers
+  resolver["internal/secrets resolver<br/>keychain | file | cmd | env<br/>values only in memory"]
+  servers --> resolver
+  subgraph proxy["aimux mcp proxy"]
+    local["local worker :7381<br/>all servers"]
+    sandbox["sandbox worker :7390<br/>only servers in granted sets"]
+    sup["supervisor<br/>start, ready probe, backoff,<br/>keep_running, process group"]
+  end
+  servers --> local
+  servers --> sup
+  sets --> sandbox
+  resolver --> sup
+  resolver --> local
+  resolver --> provider["OpenShell provider<br/>(gh token, resolved on the host)"]
+  sup --> managed["managed HTTP servers<br/>mermaid, Jira, google_workspace,<br/>Sauron, draw.io"]
+  local --> managed
+  local --> remote["remote HTTP<br/>deepwiki, devpulse, ..."]
+  local --> stdio["stdio servers"]
