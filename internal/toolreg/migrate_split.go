@@ -55,8 +55,16 @@ func MigrateSplit(dir string) error {
 	if err != nil {
 		return err
 	}
+	// Check the result in memory before writing anything.
+	after, err := loadSplitData(dir, srv, st)
+	if err == nil && !splitCheck(before, after) {
+		err = errors.New("they would grant sandboxes a different set of tools")
+	}
+	if err != nil {
+		return fmt.Errorf("the split files would not reproduce tool-sources.yaml, so nothing was written: %w", err)
+	}
 	serversPath, setsPath := filepath.Join(dir, serversFile), filepath.Join(dir, setsFile)
-	// tool-sets.yaml first (replacing one a crashed run left), servers.yaml
+	// tool-sets.yaml first (an existing one is kept aside), servers.yaml
 	// last: split mode starts only when servers.yaml exists, so a crash in
 	// between leaves tool-sources.yaml in charge.
 	if _, err := os.Lstat(setsPath); err == nil {
@@ -72,15 +80,6 @@ func MigrateSplit(dir string) error {
 	if err := writeAtomic(serversPath, srv); err != nil {
 		_ = os.Remove(setsPath)
 		return err
-	}
-	after, err := loadSplit(dir, nil)
-	if err == nil && !samePolicy(before, after) {
-		err = errors.New("they would grant sandboxes a different set of tools")
-	}
-	if err != nil {
-		_ = os.Remove(serversPath)
-		_ = os.Remove(setsPath)
-		return fmt.Errorf("the split files did not reproduce tool-sources.yaml, so nothing was changed: %w", err)
 	}
 	if err := os.Rename(legacy, legacy+".migrated"); err != nil {
 		return errors.Join(fmt.Errorf("wrote %s and %s, but could not rename %s", serversPath, setsPath, legacy), err)
@@ -127,6 +126,9 @@ func writeAtomic(path string, data []byte) error {
 	}
 	return nil
 }
+
+// splitCheck is samePolicy; tests replace it.
+var splitCheck = samePolicy
 
 // samePolicy reports whether two registries grant the same tools from the
 // same sources.

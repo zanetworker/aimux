@@ -377,3 +377,58 @@ func TestMigrateSplit_SecondRunWhileLockedRefuses(t *testing.T) {
 		t.Fatalf("want a refusal while another migrate runs, got %v", err)
 	}
 }
+
+func TestMigrateSplit_InvalidResultWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	// A legacy source the split loader cannot reproduce: a cli pack is fine,
+	// so make the set name a server whose source fails the split checks.
+	writeYAML(t, filepath.Join(dir, "tool-sources.yaml"), legacyFixture)
+	old := splitCheck
+	splitCheck = func(_, _ Registry) bool { return false }
+	defer func() { splitCheck = old }()
+	if err := MigrateSplit(dir); err == nil {
+		t.Fatal("want an error")
+	}
+	for _, f := range []string{"servers.yaml", "tool-sets.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Errorf("%s must not be written when the result is invalid", f)
+		}
+	}
+}
+
+func TestServerURL_AnySchemeCase(t *testing.T) {
+	for _, u := range []string{"HTTP://127.0.0.1:1/mcp", "Https://host/mcp"} {
+		if err := checkServer("s", Server{URL: u}); err != nil {
+			t.Errorf("%s: %v", u, err)
+		}
+	}
+	for _, u := range []string{"ftp://h/x", "http://", "nope"} {
+		if err := checkServer("s", Server{URL: u}); err == nil {
+			t.Errorf("%s: want an error", u)
+		}
+	}
+}
+
+func TestLoadInventory_UnknownNestedField(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "servers.yaml")
+	writeYAML(t, p, "version: 1\nservers:\n  a:\n    url: http://127.0.0.1:1/mcp\n    secrets:\n      env:\n        T:\n          keychain: {item: aimux/a, feild: env.T}\n  b:\n    command: [/bin/b]\n    url: http://127.0.0.1:2/mcp\n    ready: {type: mcp, timout: 5s}\n")
+	inv, err := LoadInventory(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"a", "b"} {
+		if inv.Errors[n] == nil {
+			t.Errorf("%s: a misspelled nested field must be an error", n)
+		}
+	}
+}
+
+func TestSplit_SetsDecodeErrorHasNoValue(t *testing.T) {
+	dir := t.TempDir()
+	writeYAML(t, filepath.Join(dir, "servers.yaml"), "version: 1\nservers: {}\n")
+	writeYAML(t, filepath.Join(dir, "tool-sets.yaml"), "version: 1\nsets:\n  x:\n    server: s\n    tools: sq7val\n")
+	_, err := Load(filepath.Join(dir, "tool-sources.yaml"))
+	if err == nil || strings.Contains(err.Error(), "sq7val") {
+		t.Fatalf("want an error without the value: %v", err)
+	}
+}

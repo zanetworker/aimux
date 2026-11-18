@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +97,11 @@ func LoadInventory(path string) (Inventory, error) {
 	if err != nil {
 		return Inventory{}, fmt.Errorf("read servers %s: %w", path, err)
 	}
+	return parseInventory(path, data)
+}
+
+// parseInventory is LoadInventory on data already read.
+func parseInventory(path string, data []byte) (Inventory, error) {
 	var raw struct {
 		Version int                  `yaml:"version"`
 		Servers map[string]yaml.Node `yaml:"servers"`
@@ -107,7 +115,7 @@ func LoadInventory(path string) (Inventory, error) {
 	inv := Inventory{Version: 1, Servers: map[string]Server{}, Errors: map[string]error{}}
 	for name, node := range raw.Servers {
 		var s Server
-		if key := unknownKey(&node); key != "" {
+		if key := unknownField(&node, reflect.TypeOf(Server{})); key != "" {
 			inv.Errors[name] = fmt.Errorf("servers %s: server %q (line %d): unknown field %q", path, name, node.Line, key)
 			continue
 		}
@@ -139,8 +147,11 @@ func checkServer(name string, s Server) error {
 	if len(s.Command) > 0 && s.Command[0] == "" {
 		return errors.New("command starts with an empty program")
 	}
-	if s.URL != "" && !strings.HasPrefix(s.URL, "http://") && !strings.HasPrefix(s.URL, "https://") {
-		return errors.New("url is not http or https")
+	if s.URL != "" {
+		u, err := url.Parse(s.URL)
+		if err != nil || (!strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) || u.Host == "" {
+			return errors.New("url is not an http or https address with a host")
+		}
 	}
 	for _, part := range []map[string]secretref.Ref{s.Secrets.Env, s.Secrets.Headers} {
 		for n, ref := range part {
@@ -172,10 +183,27 @@ func splitMode(dir string) bool {
 // tool-sets.yaml in dir. Only servers a set references become Sources: a
 // server no set names is local-only and never reaches the sandbox gateway.
 func loadSplit(dir string, setsData []byte) (Registry, error) {
+	return loadSplitData(dir, nil, setsData)
+}
+
+// loadSplitData is loadSplit with servers.yaml's and tool-sets.yaml's
+// content given (nil: read from dir), so a migration can check its result
+// before writing anything.
+func loadSplitData(dir string, serversData, setsData []byte) (Registry, error) {
 	inv := Inventory{Servers: map[string]Server{}, Errors: map[string]error{}}
-	if _, err := os.Lstat(filepath.Join(dir, serversFile)); err == nil {
+	serversPath := filepath.Join(dir, serversFile)
+	if serversData == nil {
+		if _, err := os.Lstat(serversPath); err == nil {
+			b, err := os.ReadFile(serversPath) //nolint:gosec // G304: the user's own servers.yaml
+			if err != nil {
+				return Registry{}, fmt.Errorf("read servers %s: %w", serversPath, err)
+			}
+			serversData = b
+		}
+	}
+	if serversData != nil {
 		var err error
-		if inv, err = LoadInventory(filepath.Join(dir, serversFile)); err != nil {
+		if inv, err = parseInventory(serversPath, serversData); err != nil {
 			return Registry{}, err
 		}
 	}
@@ -251,7 +279,7 @@ func singleDoc(data []byte, into any, known bool) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(known)
 	if err := dec.Decode(into); err != nil && !errors.Is(err, io.EOF) {
-		return err
+		return sanitized(err)
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("holds more than one YAML document")
@@ -266,23 +294,58 @@ var LegacyNote = func(path string) {
 	_, _ = fmt.Fprintf(os.Stderr, "%s is read for this release; run aimux servers migrate\n", path)
 }
 
-// serverKeys are the fields a servers.yaml entry may set.
-var serverKeys = map[string]bool{"command": true, "cwd": true, "url": true, "env": true, "secrets": true, "keep_running": true,
-	"adopt_existing": true, "ready": true, "type": true, "root": true, "pack": true, "spec": true, "base_url": true,
-	"credential": true, "authorship": true}
+var yamlLineRE = regexp.MustCompile(`line (\d+)`)
 
-// unknownKey is the first key of a server's mapping (an alias followed) that
-// is not a Server field, or "".
-func unknownKey(n *yaml.Node) string {
+// sanitized is a YAML decode error without the values the decoder quotes
+// (a value may be a literal secret): only the line numbers are kept.
+func sanitized(err error) error {
+	var lines []string
+	for _, m := range yamlLineRE.FindAllStringSubmatch(err.Error(), -1) {
+		lines = append(lines, m[1])
+	}
+	if len(lines) == 0 {
+		return errors.New("not valid YAML for this file")
+	}
+	return fmt.Errorf("unknown field or wrong type at line %s", strings.Join(lines, ", "))
+}
+
+// unknownField is the dotted path of the first mapping key, at any depth,
+// that t's yaml tags do not name (aliases followed), or "".
+func unknownField(n *yaml.Node, t reflect.Type) string {
 	for n.Kind == yaml.AliasNode && n.Alias != nil {
 		n = n.Alias
 	}
-	if n.Kind != yaml.MappingNode {
-		return ""
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
 	}
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if k := n.Content[i].Value; !serverKeys[k] && k != "<<" {
-			return k
+	switch {
+	case t.Kind() == reflect.Map && n.Kind == yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if p := unknownField(n.Content[i+1], t.Elem()); p != "" {
+				return n.Content[i].Value + "." + p
+			}
+		}
+	case t.Kind() == reflect.Struct && n.Kind == yaml.MappingNode && t != reflect.TypeOf(time.Duration(0)):
+		fields := map[string]reflect.Type{}
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+			if name != "" && name != "-" {
+				fields[name] = f.Type
+			}
+		}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i].Value
+			if k == "<<" {
+				continue
+			}
+			ft, ok := fields[k]
+			if !ok {
+				return k
+			}
+			if p := unknownField(n.Content[i+1], ft); p != "" {
+				return k + "." + p
+			}
 		}
 	}
 	return ""
