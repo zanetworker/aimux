@@ -263,5 +263,5 @@ TEST_SANDBOX=<name> TEST_SESSION_ID=<uuid> \
   go test -tags integration ./internal/otel/ -timeout 180s -v
 
 # Full project
-go test ./... -timeout 30s
+make test  # go test ./... -timeout 300s
 ```

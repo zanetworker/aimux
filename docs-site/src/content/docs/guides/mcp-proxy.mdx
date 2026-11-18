@@ -306,7 +306,7 @@ The script exits 0 when all failures match the baseline, and exits non-zero on:
 - **Unexpected failures** (new regressions)
 - **Stale baseline entries** (a listed scenario now passes, so the baseline needs updating)
 
-This runs on every relevant push: locally through pre-commit's `pre-push` stage (run `pre-commit install --hook-type pre-push` once per clone; other pre-commit hooks stay on commit), and in GitHub Actions when MCP proxy code changes.
+This runs on every relevant push: locally through pre-commit's `pre-push` stage (run `pre-commit install --hook-type pre-push` once per clone; the same stage also lints the pushed commits with `GOOS=linux`, and the other pre-commit hooks stay on commit), and in GitHub Actions when MCP proxy code changes.
 
 ## Live check
 

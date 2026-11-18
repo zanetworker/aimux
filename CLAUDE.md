@@ -6,7 +6,7 @@ Multi-agent TUI dashboard. See `.claude/CLAUDE.md` for full project guide.
 
 ```bash
 go build -o aimux ./cmd/aimux
-go test ./... -timeout 30s
+make test  # go test ./... -timeout 300s
 ```
 
 ## Single-File Verification

@@ -19,4 +19,16 @@ if [ -z "$(find "$dist" -type f ! -name '.*' ! -name '_*' -print -quit 2>/dev/nu
   mkdir -p "$dist"
   printf '<!-- placeholder for golangci-lint; build the web app with make build -->\n' > "$placeholder"
 fi
-golangci-lint run --timeout=5m --new-from-rev=HEAD
+# The base new issues are counted from: LINT_FROM, else on pre-push the
+# remote's ref pre-commit passes (PRE_COMMIT_FROM_REF: the pushed commits),
+# else HEAD (on commit: the staged change). A base that does not resolve
+# (a shallow or single-branch clone) falls back to HEAD with a note, never
+# to an unfiltered run. --new-from-rev filters by changed lines: a finding
+# on an unchanged line (a helper left unused by a deletion elsewhere) is
+# only caught by the full run, make lint-linux, and CI.
+from=${LINT_FROM:-${PRE_COMMIT_FROM_REF:-HEAD}}
+if ! git rev-parse --verify -q "$from^{commit}" >/dev/null; then
+  echo "golangci-lint hook: $from not found; checking uncommitted changes only (run make lint-linux)" >&2
+  from=HEAD
+fi
+golangci-lint run --timeout=5m --new-from-rev="$from"

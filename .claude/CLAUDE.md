@@ -44,7 +44,7 @@ The pre-commit hook `layer-discipline` enforces the hard constraint (no TUI impo
 Before committing or pushing ANY code:
 1. Run `go build ./...` -- must compile with zero errors
 2. Run `go vet ./...` -- must pass with zero issues
-3. Run `go test ./... -timeout 30s` -- ALL packages must pass
+3. Run `make test` -- ALL packages must pass
 4. Check for missing tests: every new method, function, or behavior MUST have tests
 5. When fixing something for one provider, verify the same fix applies to all three (Claude, Codex, Gemini)
 
@@ -406,7 +406,7 @@ go test ./internal/agent/ -timeout 30s -run TestName  # Run one test
 
 ```bash
 go build -o aimux ./cmd/aimux    # Build
-go test ./... -timeout 30s              # All tests (120+ tests)
+make test                               # All tests: go test ./... -timeout 300s (30s is load-sensitive)
 node --test "clients/web/webapp/*.test.mjs"   # Phone web client (the plain directory form fails on Node 22)
 node --test web/src/components/*.test.ts      # Dashboard pure modules (sessionFilter.ts; Node strips the types)
 cd clients/ios && xcodegen generate && xcodebuild test -scheme Aimux -project Aimux.xcodeproj -destination 'platform=iOS Simulator,name=<iPhone>'   # iPhone app

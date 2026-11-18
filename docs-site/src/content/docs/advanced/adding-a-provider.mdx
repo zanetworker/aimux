@@ -80,7 +80,7 @@ Providers: map[string]ProviderConfig{
 
 ```bash
 go build -o aimux ./cmd/aimux
-go test ./... -timeout 30s
+make test  # go test ./... -timeout 300s
 ```
 
 Your provider now appears in the `:new` launcher. Flesh out methods as you learn how the agent stores its data.
@@ -540,7 +540,7 @@ The test helpers `assertArgPresent`, `assertArgAbsent`, and `assertArgsContain` 
 
 ```bash
 go test ./internal/provider/ -v -timeout 30s
-go test ./... -timeout 30s
+make test  # go test ./... -timeout 300s
 ```
 
 ## Complete Example: Adding an "aider" Provider
@@ -959,7 +959,7 @@ func TestAiderSpawnArgs(t *testing.T) {
 
 ```bash
 go test ./internal/provider/ -v -timeout 30s
-go test ./... -timeout 30s
+make test  # go test ./... -timeout 300s
 go build -o aimux ./cmd/aimux
 ./aimux  # verify aider appears in :new launcher
 ```

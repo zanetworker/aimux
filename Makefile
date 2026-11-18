@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-integration test-all install lint build-mcp build-agent-claude push-agent-claude web-build web-dev build-all
+.PHONY: build run clean test test-integration test-all install lint lint-linux build-mcp build-agent-claude push-agent-claude web-build web-dev build-all
 
 BINARY=aimux
 REGISTRY=quay.io/azaalouk
@@ -21,8 +21,10 @@ build-all: web-build build
 run: build
 	./$(BINARY)
 
+# 300s: the slow packages (cmd, mcpproxy, remoteapi) pass in seconds alone
+# but went past 30s under parallel load.
 test:
-	go test ./... -timeout 30s
+	go test ./... -timeout 300s
 
 test-integration:
 	go test -tags integration ./... -timeout 30s
@@ -35,6 +37,10 @@ install: build
 
 lint:
 	golangci-lint run ./...
+
+# CI lints on Linux: build tags (peercred, procident, controllock) differ.
+lint-linux:
+	GOOS=linux golangci-lint run ./...
 
 build-mcp:
 	go build -o bin/k8s-agents-mcp ./cmd/mcp
