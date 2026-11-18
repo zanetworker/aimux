@@ -43,6 +43,9 @@ type Worker struct {
 	Log    *log.Logger
 	// FreshListTimeout bounds the listing of a new lease's servers; 0: 5 s.
 	FreshListTimeout time.Duration
+	// RefreshEvery is how often RunWorker reloads and refreshes; 0:
+	// workerRefreshEvery.
+	RefreshEvery time.Duration
 
 	started time.Time
 }
@@ -121,7 +124,11 @@ func RunWorker(ctx context.Context, w *Worker, start func(context.Context) (func
 	// whose lease is not back yet counts from when leases can be put.
 	w.Tokens.StartGrace(time.Now())
 	go func() {
-		t := time.NewTicker(workerRefreshEvery)
+		every := w.RefreshEvery
+		if every <= 0 {
+			every = workerRefreshEvery
+		}
+		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
 			select {

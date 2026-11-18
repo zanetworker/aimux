@@ -68,6 +68,8 @@ type ReadonlyServer struct {
 	down   []string
 	all    []string        // every backend built or found down
 	ctx    context.Context // Start's serving context; ends at stop
+	// downLogged is when each down backend's failed retry was last logged.
+	downLogged map[string]time.Time
 
 	obsMu     sync.Mutex
 	observed  map[string]Observed          // what the builds and calls listed, by backend
@@ -85,6 +87,13 @@ type ReadonlyServer struct {
 // recheckTimeout bounds the background rebuild of one backend whose
 // listing changed.
 const recheckTimeout = 15 * time.Second
+
+// downLogEvery is how often a down backend's failed retry is logged (a
+// time.Duration; atomic so tests can change it): often enough that the log
+// shows the gateway still tries, rarely enough not to spam it.
+var downLogEvery atomic.Int64
+
+func init() { downLogEvery.Store(int64(10 * time.Minute)) }
 
 // Observed is one source as the gateway last listed it while building its
 // servers: its allowed live tools, or why it could not be listed, and the
@@ -739,8 +748,16 @@ func (r *ReadonlyServer) relistNow(only []string) {
 		if srv, ok := servers[n]; ok {
 			r.add(n, srv)
 			r.Log.Printf("read-only: backend %s now available", n)
-		} else {
-			still = append(still, n)
+			delete(r.downLogged, n)
+			continue
+		}
+		still = append(still, n)
+		if err := errs[n]; err != nil && time.Since(r.downLogged[n]) >= time.Duration(downLogEvery.Load()) {
+			if r.downLogged == nil {
+				r.downLogged = map[string]time.Time{}
+			}
+			r.downLogged[n] = time.Now()
+			r.Log.Printf("read-only: backend %s still unavailable (retried): %s", n, clip(err.Error(), 200))
 		}
 	}
 	slices.Sort(still)
