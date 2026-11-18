@@ -707,7 +707,7 @@ func TestCheckSandboxName(t *testing.T) {
 	}{
 		{"research-1234", "sandbox", false}, // 19 with the prefix
 		{"research-12345", "sandbox", true}, // 20
-		{"research-with-work", "run", true}, // 24
+		{"research-with-work", "run", false}, // a run profile has no sandbox of its own
 		{"page-with-a-long-name", "acp", false},
 		{"coding-with-a-long-name", "host", false},
 	}

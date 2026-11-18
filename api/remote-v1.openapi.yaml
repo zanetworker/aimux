@@ -847,6 +847,7 @@ paths:
   /v1/profiles:
     get:
       summary: The profiles, and which the caller's client may use
+      description: A profile that does not resolve (a widening or a missing parent), or whose roles do not check (a role's profile is missing, does not resolve, is invalid or has an invalid sandbox name), is left out and logged on the server; asking for it is 404 unknown_profile on GET /v1/profiles/{name}, 400 unknown_profile on POST /v1/sessions, and 403 profile_not_allowed on a later message to a session started under it. A message queued before the profile's roles broke is not refused with a status; its turn ends in a turn_error whose message names the broken role. GET /v1/tools leaves out the tool sets that only such profiles request, and their diff and approval answer 403 forbidden_for_client. A profile whose own sandbox name is invalid passes this catalog and fails when it compiles, with 409 profile_unavailable on POST /v1/sessions, or a turn_error with code profile_unavailable when a turn already accepted fails to compile.
       operationId: listProfiles
       responses:
         "200":
@@ -1208,8 +1209,8 @@ components:
             - no_terminal        # 503: Open on Mac, but this Mac cannot open an iTerm2 tab
             - not_authorized     # 403: macOS refused aimux control of iTerm2 (Open on Mac)
             - timeout            # 504: Open on Mac: the tab opened but Claude did not pick up the session in time
-            - unknown_profile       # 400 (new session), 404 (profile detail): no profile by that name
-            - profile_not_allowed   # 403: the client's scope does not allow the profile (Wingman never gets a host profile), or a local client acts on a session it did not start
+            - unknown_profile       # 400 (new session), 404 (profile detail): no profile by that name, or one that does not resolve (a widening, a missing parent, a role whose profile does not resolve or validate)
+            - profile_not_allowed   # 403: the client's scope does not allow the profile (Wingman never gets a host profile), a local client acts on a session it did not start, or a later message goes to a session whose profile no longer resolves or whose roles no longer check
             - step_up_required      # 403: a host profile from a device needs a login under maxAge seconds old from an allowed device kind
             - profile_not_available # 409: the profile exists but the Mac cannot run it yet
             - page_too_large        # 413: pageText is over 512 KiB
@@ -1219,7 +1220,7 @@ components:
             - client_limit          # 429: the client runs as many sessions, or started as many turns this minute, as it may; see Retry-After
             - tool_gateway_not_running # 503 (new profile session), also on turn_error: the sandbox tool gateway worker is not running (aimux mcp proxy gateway install)
             - gateway_backend_down     # 503, also on turn_error: the tool gateway worker runs but did not take the turn's lease
-            - profile_unavailable      # 409, also on turn_error: the profile does not resolve or compile now (a bad profile file, a missing set)
+            - profile_unavailable      # 409 on POST /v1/sessions when the new session's profile fails to compile there (a missing set, an invalid sandbox name); as a turn_error code when an accepted turn fails to compile. A profile the catalog refused answers 400 unknown_profile or 403 profile_not_allowed instead
             - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
             - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source's address or hidden request details changed; approve it on the Mac
             - pins_busy                # 503: POST /v1/tools/approve: another approval held the pins lock for 5 s; try again

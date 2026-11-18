@@ -8,5 +8,5 @@ network:
 settings:
   inherit_user: false
 roles:
-  planner: research-planner
-  writer: research-writer
+  planner: work-readonly
+  writer: page

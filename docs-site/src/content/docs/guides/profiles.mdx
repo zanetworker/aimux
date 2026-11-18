@@ -30,7 +30,7 @@ settings: { inherit_user: false }
 
 | Field | Meaning |
 |---|---|
-| `name` | Must equal the file name without `.yaml`. A profile that runs in a sandbox (`runs: sandbox` or `run`) gets the sandbox `aimux-<name>`, and OpenShell allows 19 characters, so its name is at most 13 characters; `check` and every session fail a longer one |
+| `name` | Must equal the file name without `.yaml`. A profile that runs in a sandbox (`runs: sandbox`) gets the sandbox `aimux-<name>`, which must be lowercase ASCII letters and digits in dash-separated runs (no leading, trailing or doubled dash) and at most 19 characters (OpenShell's limit), so the name is at most 13 characters; `check`, policy compilation and every session refuse another. A `run` profile has no sandbox of its own: its stages run under its roles' profiles |
 | `extends` | The profile this one narrows: `builtin:<name>` or the name of another user profile |
 | `harness` | The agent harness; `claude-code` (the default for a root, and the only one with an adapter). A child cannot change it |
 | `model` | `provider` and `name`; a child may set either. For `acp` sessions, `name` (`sonnet` or `opus`) is the default when a request names no model |
@@ -42,7 +42,7 @@ settings: { inherit_user: false }
 | `credentials` | Names of credentials the session may use |
 | `settings` | `inherit_user`: load your own harness settings (default `false`) |
 | `unsafe_patterns` | `true` allows `*` and `?` in `tools`; without it a pattern is rejected |
-| `roles` | Role to profile name, for profiles that run several roles; targets are not checked yet |
+| `roles` | Role to profile name, for profiles that run several roles (`research-with-work`: `planner: work-readonly`, `writer: page`). Every target, and its own roles, must resolve and validate, and a target that runs in a sandbox must have a valid sandbox name. A missing target is refused with `role <role>: profile <name> not found`; a target that extends a missing profile, is invalid or has an invalid sandbox name is refused with its own error. A cycle of roles between valid profiles is accepted. A child that sets `roles` replaces its parent's whole map; one that leaves it out inherits it. Roles are checked where a profile is admitted: `aimux profile check` exits 1, and `GET /v1/profiles` leaves the profile out (its server log says why). `aimux profile show`, `list`, `aimux sandbox status` and doctor do not check roles. While a role is invalid, a turn already running finishes or can be cancelled, a later message to that session answers `403 profile_not_allowed`, a message queued before the role broke ends in a `turn_error` naming the role, and a new session `400 unknown_profile` |
 
 ### Narrow-only inheritance
 
@@ -146,11 +146,13 @@ See [Pinned tools](/guides/wingman/#pinned-tools) for the setup output and what 
 ```bash
 aimux profile list                # builtins first, then yours: name, runs, available, digest
 aimux profile show work-readonly  # the resolved manifest and its digest
-aimux profile check my-notes      # resolve and validate; exit 1 with the reason if it fails
+aimux profile check my-notes      # resolve, validate, check the sandbox name and roles; exit 1 with the reason if any fails
 aimux profile migrate             # write each v1 profile as a v2 file
 ```
 
-`show` prints the full digest; the `list` table shortens it to 12 characters. All four accept `--json`. `check` exits 1 when the profile does not resolve or its sandbox name is too long, and its message names the field that widens. `list` prints a profile that does not resolve with `-` as its digest and the reason on stderr.
+`show` prints the full digest; the `list` table shortens it to 12 characters. All four accept `--json`. `check` exits 1 when the profile does not resolve (its message names the field that widens), when its sandbox name is over 19 characters with the `aimux-` prefix or is not lowercase ASCII letters and digits in dash-separated runs (no leading, trailing or doubled dash), or when a role it names does not check (the message names the role and the cause). `list` prints a profile that does not resolve with `-` as its digest and the reason on stderr.
+
+A profile that does not resolve (it widens its parent or extends a missing profile) stays in `aimux profile list` with empty `runs`, `available: false` and digest `-`; the reason is printed on stderr and the command still exits 0. `aimux profile show` and `aimux profile check` exit 1 with the reason. `aimux profile check` also exits 1 for a sandbox profile whose sandbox name is invalid (`aimux-<name>` must be lowercase ASCII letters and digits in dash-separated runs, with no leading, trailing or doubled dash, at most 19 characters; policy compilation refuses it too) and for a role that does not check (see `roles` above), naming the role and its cause.
 
 `check` validates the manifest; it does not say whether the profile is available. A profile like `research-with-work` checks ok while `available` is false in `list`.
 
@@ -159,7 +161,7 @@ aimux profile migrate             # write each v1 profile as a v2 file
 A profile that runs in a sandbox (`runs: sandbox`, such as `research` and `work-readonly`) gets one OpenShell sandbox, `aimux-<profile>`. `aimux remote serve` creates it on the profile's first turn and, when the compiled policy changes (a new approval, an edited profile), updates its policy on the next turn. The digest of the policy it last applied is in `~/.aimux/sandboxes/<sandbox>.digest`.
 
 ```bash
-aimux sandbox status          # both images, providers, gateway, each sandboxed profile's and the tool runner's policy state, sources left out of the runner; read-only
+aimux sandbox status          # both images, providers, gateway, the policy state of each available runs: sandbox profile and of the tool runner, sources left out of the runner; read-only
 aimux sandbox status --json
 aimux sandbox setup           # build both images and create the providers when missing; creates no sandbox
 aimux sandbox verify          # egress checks inside aimux-work-readonly (was aimux browser verify)

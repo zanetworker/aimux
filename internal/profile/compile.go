@@ -134,22 +134,36 @@ func CompileAt(m Manifest, snap toolreg.Snapshot, gw GatewayAddr) (Compiled, err
 	return c, nil
 }
 
-// CheckSandboxName fails a profile that runs in a sandbox ("sandbox" or
-// "run") whose sandbox name, "aimux-" + name, is longer than OpenShell
+// CheckSandboxName fails a profile that runs in a sandbox ("sandbox")
+// whose sandbox name, "aimux-" + name, is longer than OpenShell
 // allows; profiles that run elsewhere pass.
 func CheckSandboxName(m Manifest) error {
-	if m.Runs != "sandbox" && m.Runs != "run" {
+	if m.Runs != "sandbox" { // a run profile has no sandbox: its stages run under its roles' profiles
 		return nil
 	}
 	sandbox := "aimux-" + m.Name
 	if len(sandbox) > maxSandboxName {
 		return fmt.Errorf("%w: %q is %d characters, OpenShell allows %d", ErrNameTooLong, sandbox, len(sandbox), maxSandboxName)
 	}
+	if !ValidSandboxName(sandbox) {
+		return fmt.Errorf("%w: sandbox name %q must be lowercase letters and digits in dash-separated runs (no leading, trailing or doubled dash)", ErrUnsupported, sandbox)
+	}
 	return nil
 }
 
+// sandboxNameRE is the one rule for a sandbox name: a DNS-1123 label
+// (lowercase letters and digits in dash-separated runs: no leading,
+// trailing or doubled dash), so it never reads as a flag or a path and
+// OpenShell accepts it. The launcher (sandboxlaunch) checks every name with
+// ValidSandboxName too.
+var sandboxNameRE = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
+// ValidSandboxName reports whether name is a sandbox name aimux will pass
+// to openshell.
+func ValidSandboxName(name string) bool { return len(name) <= 63 && sandboxNameRE.MatchString(name) }
+
 func Compile(m Manifest, sets ToolSets, gw GatewayAddr) (Compiled, error) {
-	if m.Runs != "sandbox" && m.Runs != "run" {
+	if m.Runs != "sandbox" { // a run profile is compiled stage by stage, under its roles' profiles
 		return Compiled{}, fmt.Errorf("%w: %s runs %q", ErrNotSandboxed, m.Name, m.Runs)
 	}
 	if !m.Available {

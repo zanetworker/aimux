@@ -111,7 +111,8 @@ func buildProfileWiring(home string, getenv func(string) string, errOut io.Write
 		}
 		closeAll = closeReal
 	}
-	p.router = &profilerun.Router{Store: p.store, Engines: p.engines, Runs: p.runs}
+	p.router = &profilerun.Router{Store: p.store, Engines: p.engines, Runs: p.runs,
+		Admit: func(name string) error { _, err := resolveChecked(dir, name); return err }}
 	p.adopt(errOut)
 	return p, closeAll, nil
 }
@@ -315,6 +316,18 @@ func (s *toolSnapshots) turn() toolreg.Snapshot {
 		}
 	}
 	return s.store.Current()
+}
+
+// resolveChecked resolves the profile name (user profiles in dir, then the
+// built-ins) and checks its roles, as the catalog admits it: no new turn
+// starts under a profile whose roles do not check (Router.Admit).
+func resolveChecked(dir, name string) (profile.Manifest, error) {
+	user, _ := profile.LoadDir(dir) // a bad file is skipped; the catalog logs it
+	m, err := profile.Resolve(name, user)
+	if err != nil {
+		return profile.Manifest{}, err
+	}
+	return m, profile.CheckRoles(m, user)
 }
 
 // compileProfile compiles the profile name (user profiles in dir, then the
