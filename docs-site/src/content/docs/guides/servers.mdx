@@ -1,0 +1,36 @@
+---
+title: Servers and Secrets
+description: Find which secrets an MCP server needs before aimux runs it
+---
+
+aimux is gaining one list of every MCP server it knows, with each server's secrets written as references (a Keychain item, a file, a command or an environment variable), never as values. This page grows with that work; today it covers the first step.
+
+## Find the secrets a server needs
+
+Before writing a server's entry, find which variables it reads:
+
+```sh
+aimux servers discover JirAIa --cwd ~/product-ops/Jira/mcp-server
+aimux servers discover mermaid -- mcp-mermaid -t streamable
+```
+
+`discover` never reads a value. It looks at:
+
+- `${NAME}` references in the command you give after `--`;
+- names defined in `<cwd>/.env` and `<cwd>/../.env` (only the part before `=`);
+- environment reads in the server's source under `<cwd>` (`os.getenv`, `os.environ`, `os.Getenv`, `process.env`), at most 2,000 files.
+
+It prints one line per finding and a suggested reference for each name: a `file` reference when a `.env` defines it, otherwise a field of the Keychain item `aimux/<name>`. Pick one per name; the resolver that reads them comes next.
+
+## Two files: servers and tool sets
+
+The tool gateway used to read one file, `~/.config/aimux/tool-sources.yaml`, for both what a source is and which of its tools sandboxes may use. Those are now two files with two jobs:
+
+| File | Says | Grants a sandbox anything? |
+|---|---|---|
+| `~/.config/aimux/servers.yaml` | every server: how to start it (`command`, `cwd`) or reach it (`url`), and its secrets as references | No |
+| `~/.config/aimux/tool-sets.yaml` | the reviewed tool sets: a `server` and its exact `tools` | Yes, for the profiles that name the set |
+
+Only servers a set names reach the sandbox gateway. A server no set names stays local, so a write-capable server you use from Claude Code is never offered to a sandbox by being listed. A set must name an HTTP server; a stdio server cannot back a sandbox set.
+
+Run `aimux servers migrate` once to split your existing file: it writes both files from `tool-sources.yaml` (comments kept) and keeps the old file as `tool-sources.yaml.migrated`. Server names do not change, so approved tools stay approved. Until you migrate, `tool-sources.yaml` is still read (with one note per process). Once the new files exist, `aimux tools approve --add-to-set` writes to `tool-sets.yaml`; `aimux tools add` and `remove` refuse, and you edit `servers.yaml` and `tool-sets.yaml` directly for now.

@@ -59,6 +59,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newRemoteCmd())
 	rootCmd.AddCommand(newBrowserCmd())
 	rootCmd.AddCommand(newToolsCmd())
+	rootCmd.AddCommand(newServersCmd())
 	rootCmd.AddCommand(newSandboxCmd())
 	rootCmd.AddCommand(newRouterCmd())
 	rootCmd.AddCommand(newSetupCmd())

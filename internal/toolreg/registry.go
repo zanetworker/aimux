@@ -139,6 +139,9 @@ func Default() Registry {
 // whole file with an error naming it; a malformed source or set only drops
 // that entry (see Registry).
 func Load(path string) (Registry, error) {
+	if dir := filepath.Dir(path); splitMode(dir) {
+		return loadSplit(dir, nil)
+	}
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is the user's own tool-sources.yaml
 	if errors.Is(err, fs.ErrNotExist) {
 		if _, lerr := os.Lstat(path); lerr == nil { // the name exists: a dangling link
@@ -164,7 +167,22 @@ func parse(path string, data []byte) (Registry, error) {
 	if r.Version != 1 {
 		return Registry{}, fmt.Errorf("tool sources %s: version must be 1, got %d", path, r.Version)
 	}
+	if _, err := os.Lstat(path); err == nil && filepath.Base(path) == "tool-sources.yaml" {
+		legacyNoteOnce.Do(func() { LegacyNote(path) })
+	}
 	r.SourceErrors, r.SetErrors = map[string]error{}, map[string]error{}
+	return validated(path, r), nil
+}
+
+// validated drops each source or set that fails its checks into
+// SourceErrors or SetErrors.
+func validated(path string, r Registry) Registry {
+	if r.SourceErrors == nil {
+		r.SourceErrors = map[string]error{}
+	}
+	if r.SetErrors == nil {
+		r.SetErrors = map[string]error{}
+	}
 	for n, s := range r.Sources {
 		if err := checkSource(n, s); err != nil {
 			r.SourceErrors[n] = fmt.Errorf("tool sources %s: source %q: %w", path, n, err)
@@ -177,7 +195,7 @@ func parse(path string, data []byte) (Registry, error) {
 			delete(r.Sets, n)
 		}
 	}
-	return r, nil
+	return r
 }
 
 func checkSource(name string, s Source) error {
@@ -424,6 +442,9 @@ func Migrate(oldPath, regPath string) (migrated bool, err error) {
 // nothing is written. Only after the registry is written and loads back is
 // oldPath renamed to oldPath.migrated.
 func MigrateReport(oldPath, regPath string) (Migration, error) {
+	if splitMode(filepath.Dir(regPath)) {
+		return Migration{}, nil // servers.yaml and tool-sets.yaml are in use: never recreate tool-sources.yaml
+	}
 	if _, err := os.Lstat(regPath); err == nil {
 		return Migration{}, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -509,6 +530,9 @@ func fromLegacy(data []byte) (Registry, []string, error) {
 // setup, and before aimux tools add or remove writes.
 func ReadHome(home string) (Registry, error) {
 	reg := DefaultPath(home)
+	if dir := filepath.Dir(reg); splitMode(dir) {
+		return loadSplit(dir, nil) // migrated: tool-sources.yaml is gone or ignored
+	}
 	if _, err := os.Lstat(reg); !errors.Is(err, fs.ErrNotExist) {
 		return Load(reg)
 	}

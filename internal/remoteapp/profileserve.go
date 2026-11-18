@@ -273,7 +273,7 @@ const snapshotReloadEvery = 60 * time.Second
 // snapshotFiles is what the store reads under home: the registry, the
 // readonly.json it migrates from, and the pins.
 func snapshotFiles(home string) []string {
-	return []string{toolreg.DefaultPath(home), toolreg.LegacyPath(home), toolgateway.DefaultPinsPath(home)}
+	return []string{toolreg.DefaultPath(home), toolreg.LegacyPath(home), toolreg.ServersPath(home), toolreg.SetsPath(home), toolgateway.DefaultPinsPath(home)}
 }
 
 // stampOf is each file's modification time, size and inode, or "missing".

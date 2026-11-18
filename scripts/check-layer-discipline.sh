@@ -53,13 +53,15 @@ fi
 # from aimux; keyring only the standard library. internal/autoroute (the mode use
 # case) may import decide but no remote API, browserhost or frontend package.
 # internal/toolreg (the tool-source registry, its snapshot and Store) is core
-# config: no aimux imports. The pins file belongs to internal/toolgateway, which
+# config: its only aimux import is internal/secretref, the secret reference
+# types and resolver, itself core (keyring only), so servers.yaml can hold
+# typed references. The pins file belongs to internal/toolgateway, which
 # hands its records to the Store as a toolreg.PinTable (toolgateway.NewStore),
 # so the snapshot dependency points toolgateway -> toolreg only. toolgateway
 # may import only mcpproxy and toolreg from aimux (no profile, remote API or
 # frontend package), so the compiler and remote serve sit above both.
 if command -v go >/dev/null; then
-  for spec in "internal/decide:internal/llm internal/cost internal/keyring" "internal/keyring:" "internal/autoroute:internal/decide" "internal/toolreg:" "internal/toolgateway:internal/mcpproxy internal/toolreg"; do
+  for spec in "internal/decide:internal/llm internal/cost internal/keyring" "internal/keyring:" "internal/autoroute:internal/decide" "internal/toolreg:internal/secretref" "internal/secretref:internal/keyring" "internal/toolgateway:internal/mcpproxy internal/toolreg"; do
     pkg=${spec%%:*}; allow=${spec#*:}
     [ -d "$pkg" ] || continue
     for imp in $(go list -f '{{join .Imports " "}}' "./$pkg"); do

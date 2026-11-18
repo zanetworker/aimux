@@ -34,6 +34,9 @@ var (
 // source or set that would not load cleanly. The file is replaced
 // atomically (0600); a link is followed and its target replaced.
 func AddSource(path, name string, src Source, tools []string) (string, error) {
+	if splitMode(filepath.Dir(path)) {
+		return "", errSplitEdit
+	}
 	set := name + ":readonly"
 	if err := checkSource(name, src); err != nil {
 		return "", fmt.Errorf("source %q: %w", name, err)
@@ -62,12 +65,19 @@ func AddSource(path, name string, src Source, tools []string) (string, error) {
 	return set, nil
 }
 
+// errSplitEdit is AddSource and RemoveSource once servers.yaml and
+// tool-sets.yaml are in use: edit those files directly for now.
+var errSplitEdit = errors.New("servers.yaml and tool-sets.yaml are in use; edit them directly (aimux tools add and remove do not edit them yet)")
+
 // AddToSet appends tool to set's tools in the registry at path, keeping
 // every other line, and returns undo, which puts the file back while it
 // still holds this edit. A tool already in the set changes nothing (the
 // file is not rewritten; undo does nothing); a missing file or set is an
 // error (ErrNoSet).
 func AddToSet(path, set, tool string) (undo func() error, err error) {
+	if dir := filepath.Dir(path); splitMode(dir) {
+		path = filepath.Join(dir, setsFile) // the sets live in tool-sets.yaml now
+	}
 	if r, err := Load(path); err == nil {
 		if s, ok := r.Sets[set]; ok && slices.Contains(s.Tools, tool) {
 			return func() error { return nil }, nil
@@ -119,6 +129,9 @@ func AddToSet(path, set, tool string) (undo func() error, err error) {
 // removed sets, sorted. A missing file or source is an error (ErrNoSource
 // for the source) and nothing is written. Pins are not touched.
 func RemoveSource(path, name string) ([]string, error) {
+	if splitMode(filepath.Dir(path)) {
+		return nil, errSplitEdit
+	}
 	var removed []string
 	err := editFile(path, false, func(root *yaml.Node) error {
 		sources, sets := section(root, "sources"), section(root, "sets")
@@ -163,7 +176,7 @@ func editFileUndo(path string, create bool, edit func(root *yaml.Node) error, ch
 	if err != nil {
 		return nil, err
 	}
-	before, err := parse(path, data)
+	before, err := parseFor(path, data)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +199,7 @@ func editFileUndo(path string, create bool, edit func(root *yaml.Node) error, ch
 	if err := enc.Close(); err != nil {
 		return nil, fmt.Errorf("encode tool sources: %w", err)
 	}
-	after, err := parse(path, b.Bytes())
+	after, err := parseFor(path, b.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -314,4 +327,13 @@ func appendEntry(m *yaml.Node, key string, v any) error {
 	}
 	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &val)
 	return nil
+}
+
+// parseFor reads an edited file's registry: tool-sets.yaml through the split
+// loader (with servers.yaml beside it), anything else as tool-sources.yaml.
+func parseFor(path string, data []byte) (Registry, error) {
+	if filepath.Base(path) == setsFile {
+		return loadSplit(filepath.Dir(path), data)
+	}
+	return parse(path, data)
 }
