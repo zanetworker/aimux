@@ -195,6 +195,50 @@ func wrap(text string, width, hang int) []string {
 // escapes matches the ANSI styles paint adds.
 var escapes = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
+// cutDistinct cuts each name to n cells; names that would then read the
+// same as another's keep their ending after the ellipsis, as short as
+// tells them apart ("playwright-b…a", "playwright-b…o"). The same name
+// twice stays the same.
+func cutDistinct(names []string, n int) []string {
+	out := make([]string, len(names))
+	for i, s := range names {
+		out[i] = cut(s, n)
+	}
+	clash := func(i int) bool {
+		for j := range names {
+			if j != i && names[j] != names[i] && out[j] == out[i] {
+				return true
+			}
+		}
+		return false
+	}
+	var clashing []int
+	for i := range names {
+		if out[i] != names[i] && clash(i) {
+			clashing = append(clashing, i)
+		}
+	}
+	// Endings grow together, one rune at a time, until no cut name reads
+	// like another's or the head would be gone.
+	for k := 1; len(clashing) > 0 && k < n-1; k++ {
+		for _, i := range clashing {
+			r := []rune(names[i])
+			tail := string(r[max(len(r)-k, 0):])
+			out[i] = runewidth.Truncate(names[i], max(n-runewidth.StringWidth(tail), 1), "…") + tail
+		}
+		var still []int
+		for _, i := range clashing {
+			if clash(i) {
+				still = append(still, i)
+			}
+		}
+		if len(still) == 0 {
+			break
+		}
+	}
+	return out
+}
+
 // commandWords splits text at spaces outside backticks.
 func commandWords(text string) []string {
 	var words []string
@@ -459,9 +503,14 @@ func printStatusPage(out io.Writer, p statusPage) {
 			w[0] = max(min(w[0], p.width-4-w[1]), 8)
 		}
 	}
+	names := make([]string, len(rows))
+	for i, r := range rows {
+		names[i] = r.cells[0]
+	}
+	names = cutDistinct(names, w[0])
 	var problems, rest []string
-	for _, r := range rows {
-		r.cells[0] = cut(r.cells[0], w[0])
+	for i, r := range rows {
+		r.cells[0] = names[i]
 		// The last column is not padded, so a line never ends in spaces.
 		line := "  " + pad(r.cells[0], w[0]) + "  " + paint(c, r.style, r.cells[1])
 		if !narrow {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/mattn/go-runewidth"
 )
 
 const (
@@ -38,6 +39,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// The status page's golden text is measured with narrow ambiguous
+	// characters whatever the locale (a CJK LC_ALL or RUNEWIDTH_EASTASIAN=1
+	// would make " · " and "●" two cells wide); child processes inherit it.
+	_ = os.Setenv("RUNEWIDTH_EASTASIAN", "0")
+	runewidth.EastAsianWidth = false
+	runewidth.DefaultCondition = runewidth.NewCondition()
 	os.Exit(m.Run())
 }
 

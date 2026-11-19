@@ -543,3 +543,28 @@ func TestJoinWrapped_EastAsianSeparatorFits(t *testing.T) {
 		}
 	}
 }
+
+// Names cut to fit that would read the same keep a short ending each, so
+// every row still says which server it is.
+func TestStatusPage_CutNamesStayDistinct(t *testing.T) {
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
+	for _, n := range []string{"playwright-browser-alpha", "playwright-browser-bravo", "slack"} {
+		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateRunning}})
+	}
+	rep.Servers[0].State = mcpproxy.StateFailed
+	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 44, all: true})
+	var names []string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "  playw") {
+			names = append(names, strings.Fields(line)[0])
+		}
+	}
+	if len(names) != 2 || names[0] == names[1] || !strings.HasSuffix(names[0], "a") || !strings.HasSuffix(names[1], "o") ||
+		!strings.Contains(names[0], "…") {
+		t.Fatalf("cut names %q:\n%s", names, got)
+	}
+	if got := cutDistinct([]string{"slack", "abcdefgh-one", "abcdefgh-two", "abcdefgh-two"}, 8); got[0] != "slack" ||
+		got[1] == got[2] || got[2] != got[3] {
+		t.Fatalf("cutDistinct %q", got)
+	}
+}
