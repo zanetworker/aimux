@@ -900,7 +900,10 @@ paths:
         client with `tools_approve` in clients.yaml, and a set a profile in
         its scope requests (`403 forbidden_for_client` otherwise); read-only, so no step-up; no URL,
         endpoint or credential of aimux's (a definition is the server's own
-        schema). `reviewOnMac` marks a tool approve refuses.
+        schema). `reviewOnMac` marks a tool approve refuses. A set the
+        registry skipped (a floating command, an identity error, a held
+        managed server) is `404 not_found`; `GET /v1/tools` gives the
+        reason.
       operationId: toolsDiff
       parameters:
         - { name: set, in: path, required: true, schema: { type: string } }
@@ -925,7 +928,9 @@ paths:
         the live definition's pin (else `409 pin_stale` and nothing is
         approved; the source is listed afresh first, up to 5 seconds, else
         `503 gateway_backend_down`), and no tool needs review on the Mac (`409 review_on_mac`:
-        its source's address changed since it was approved, or aimux's
+        its source's address, or the identity of its servers.yaml server
+        (url, command, args, cwd, secret names, executable), changed since
+        it was approved, or aimux's
         request details, which the diff leaves out, differ from the
         approved definition's). Pins are written under the same lock as
         `aimux tools approve`. Needs `tools_approve: true` for the client in clients.yaml
@@ -936,7 +941,8 @@ paths:
         such as a sandbox's tool gateway token, never pass). The set must be
         requested by a profile in the client's scope. `400 bad_request` for
         no tools, more than 100, a tool the set does not list, or a field
-        not listed.
+        not listed. A set the registry skipped is `404 not_found` (`GET /v1/tools`
+        gives the reason).
       operationId: approveTools
       requestBody:
         required: true
@@ -1222,7 +1228,7 @@ components:
             - gateway_backend_down     # 503, also on turn_error: the tool gateway worker runs but did not take the turn's lease
             - profile_unavailable      # 409, also on turn_error: the profile does not resolve or compile now (a bad profile file, a missing set)
             - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
-            - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source's address or hidden request details changed; approve it on the Mac
+            - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source (address or server identity) or hidden request details changed; approve it on the Mac
             - pins_busy                # 503: POST /v1/tools/approve: another approval held the pins lock for 5 s; try again
             - pin_stale                # 409: POST /v1/tools/approve: a tool's live definition is not the one the client showed (or is not listed); nothing approved
 
@@ -1908,7 +1914,7 @@ components:
               pin: { type: string, description: "The live definition's pin; absent when not listed live." }
               approved: { type: string, description: "The pin approved now; absent when none." }
               definition: { type: object, additionalProperties: true, description: "The live definition, canonical JSON." }
-              reviewOnMac: { type: string, description: "Why this tool cannot be approved from a client (its source's address changed, or request details the diff leaves out changed); approve it on the Mac." }
+              reviewOnMac: { type: string, description: "Why this tool cannot be approved from a client (its source's address or server identity changed, or request details the diff leaves out changed); approve it on the Mac." }
 
     ToolsApproveRequest:
       type: object
@@ -1945,7 +1951,7 @@ components:
               set: { type: string }
               source: { type: string }
               tool: { type: string }
-              action: { type: string, description: "approved, upgraded, unchanged, removed or skipped." }
+              action: { type: string, description: "approved, upgraded (a v1 pin gained its definition, or a URL pin now records its server's identity; written is true), unchanged, removed or skipped." }
               reason: { type: string }
               hash: { type: string }
 
@@ -2004,7 +2010,9 @@ components:
             approved. changed: differs from the approved definition or is
             no longer listed. unavailable: its backend is down or does not
             list it. source_changed: approved from another endpoint than
-            the registry names. unknown: the gateway has not listed
+            the registry names, or for another identity of a servers.yaml
+            server (url, command, args, cwd, secret names, executable).
+            unknown: the gateway has not listed
             its source yet, or its last relist failed while the source is
             still served (reason "unknown (relist failed): ..."). `aimux tools diff` and `aimux tools approve`
             on the Mac review them.

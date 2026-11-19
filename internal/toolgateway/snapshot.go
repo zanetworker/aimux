@@ -94,6 +94,11 @@ type SnapshotPins struct {
 	verifiers *verifierSet
 	// onChanged, if set, hears each server Changed is told about.
 	onChanged func(server string)
+	// applied, if set, is the snapshot the gateway serves now: a call to a
+	// server whose identity there differs from Snap's is refused, so a
+	// server built under an older identity takes no call once a refresh
+	// has applied the new one, even before the rebuild replaces it.
+	applied func() toolreg.Snapshot
 }
 
 var _ mcpproxy.ToolPins = SnapshotPins{}
@@ -126,12 +131,35 @@ func (p SnapshotPins) Guard(list func(ctx context.Context, server string) ([]jso
 	v := p.Pins.Verifier(list)
 	p.verifiers.add(v)
 	check := v.Check
+	moved := func(server, tool string) error {
+		if cur := p.current(); cur.Version() != "" && cur.PinSource(server) != p.Snap.PinSource(server) {
+			return fmt.Errorf("%s/%s: %w (the server's identity changed); run aimux tools status", server, tool, ErrSourceChanged)
+		}
+		return nil
+	}
 	return func(ctx context.Context, server, tool string) error {
+		if err := moved(server, tool); err != nil {
+			return err
+		}
 		if p.Snap.SourceChanged(server, tool) {
 			return fmt.Errorf("%s/%s: %w; run aimux tools status", server, tool, ErrSourceChanged)
 		}
-		return check(ctx, server, tool)
+		if err := check(ctx, server, tool); err != nil {
+			return err
+		}
+		// Again after the check, which may list live and take a while: a
+		// refresh applied meanwhile has retired this server.
+		return moved(server, tool)
 	}
+}
+
+// current is the applied snapshot, or a zero one when none is applied yet
+// (the gateway is still starting, so its build is the one served).
+func (p SnapshotPins) current() toolreg.Snapshot {
+	if p.applied == nil {
+		return toolreg.Snapshot{}
+	}
+	return p.applied()
 }
 
 // Changed hears that server sent tools/list_changed: each guard's verifier

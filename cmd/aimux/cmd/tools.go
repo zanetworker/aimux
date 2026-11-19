@@ -72,7 +72,12 @@ func newToolsCmdWith(env toolsEnv) *cobra.Command {
 		Use:   "tools",
 		Short: "Review the tools aimux exposes: status, diff and approve pins; add or remove sources",
 		Long: "Each set in ~/.config/aimux/tool-sets.yaml (or the older tool-sources.yaml) names the tools a server may expose.\n" +
-			"A tool is served only while its live definition matches the one approved into ~/.aimux/tools/pins.json.\n" +
+			"A tool is served only while its live definition matches the one approved into ~/.aimux/tools/pins.json and,\n" +
+			"for an HTTP server in servers.yaml, the server's identity (url, secret names; for one aimux starts also its\n" +
+			"command, args, cwd and executable) is the one it was approved under; a pin that recorded the server's URL\n" +
+			"still matches while the URL is unchanged, until the next approve rewrites it. A set naming a server aimux\n" +
+			"starts is held for now; a set whose server floats (npx, pnpm dlx, uvx, go run without an exact version) or\n" +
+			"whose program cannot be found or hashed is skipped; status names the reason.\n" +
 			"add and remove edit tool-sources.yaml only; with servers.yaml, edit the two files. add, remove and\n" +
 			"approve --add-to-set refuse while aimux servers migrate or another of these edits runs; try again when it\n" +
 			"finishes.\n" +

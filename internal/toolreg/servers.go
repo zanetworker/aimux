@@ -232,7 +232,8 @@ func loadSplitData(dir string, serversData, setsData []byte) (Registry, error) {
 			return Registry{}, fmt.Errorf("tool sets %s: version must be 1, got %d", setsPath, raw.Version)
 		}
 	}
-	r := Registry{Version: 1, Sources: map[string]Source{}, Sets: map[string]Set{}, SourceErrors: map[string]error{}, SetErrors: map[string]error{}}
+	r := Registry{Version: 1, Sources: map[string]Source{}, Sets: map[string]Set{}, SourceErrors: map[string]error{}, SetErrors: map[string]error{}, Identities: map[string]string{}}
+	ids := map[string]string{} // each server hashed once
 	for name, e := range raw.Sets {
 		server := e.Server
 		if server == "" {
@@ -250,6 +251,27 @@ func loadSplitData(dir string, serversData, setsData []byte) (Registry, error) {
 			r.SetErrors[name] = fmt.Errorf("tool sets %s: set %q: server %q is stdio; a sandbox set needs an HTTP server", setsPath, name, server)
 			continue
 		}
+		if floating, why := Floating(s.Command); floating {
+			r.SetErrors[name] = fmt.Errorf("tool sets %s: set %q: server %q: %s", setsPath, name, server, why)
+			continue
+		}
+		if s.Transport() == "http" || s.Transport() == "managed-http" {
+			id, ok := ids[server]
+			if !ok {
+				var err error
+				if id, err = s.Identity(HashFile); err != nil {
+					// Held, not served: approvals are bound to an identity.
+					r.SetErrors[name] = fmt.Errorf("tool sets %s: set %q: server %q: identity: %w", setsPath, name, server, err)
+					continue
+				}
+				ids[server] = id
+			}
+			if s.Transport() == "managed-http" {
+				r.SetErrors[name] = fmt.Errorf("tool sets %s: set %q: server %q: %s", setsPath, name, server, ManagedHeldReason)
+				continue
+			}
+			r.Identities[server] = id
+		}
 		r.Sources[server] = sourceOf(s)
 		r.Sets[name] = Set{Source: server, Tools: e.Tools}
 	}
@@ -261,6 +283,7 @@ func loadSplitData(dir string, serversData, setsData []byte) (Registry, error) {
 	for name := range r.Sources {
 		if !used[name] { // named only by sets that were rejected
 			delete(r.Sources, name)
+			delete(r.Identities, name)
 		}
 	}
 	return r, nil

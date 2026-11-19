@@ -119,7 +119,7 @@ func (a *API) setForClient(w http.ResponseWriter, r *http.Request, name string) 
 	}
 	set, err := v.Snapshot.Registry().Resolve(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", errors.New("not a set in tool-sources.yaml"))
+		writeError(w, http.StatusNotFound, "not_found", errors.New("not a set in the registry (a skipped set is listed with its reason in GET /v1/tools)"))
 		return ToolsView{}, toolreg.Set{}, false
 	}
 	return v, set, true
@@ -390,7 +390,7 @@ func (a *API) approvedPins() toolgateway.PinFile {
 // them with.
 func localReview(v ToolsView, pins toolgateway.PinFile, source, tool, status string) string {
 	if status == toolgateway.StatusSourceChanged {
-		return "its source's address changed since it was approved"
+		return "its source changed since it was approved (its address, or a servers.yaml server's command, executable, cwd or secret names)"
 	}
 	raw, ok := v.Live[source].Tools[tool]
 	if !ok {

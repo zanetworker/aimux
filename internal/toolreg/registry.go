@@ -80,6 +80,9 @@ type Registry struct {
 	Sets         map[string]Set    `yaml:"sets"`
 	SourceErrors map[string]error  `yaml:"-"`
 	SetErrors    map[string]error  `yaml:"-"`
+	// Identities is each source's Server.Identity, in split mode only:
+	// what a new approval records instead of the endpoint.
+	Identities map[string]string `yaml:"-"`
 }
 
 // ErrNotConfigured is a set the registry does not define, or dropped.

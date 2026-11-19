@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -180,7 +181,9 @@ func (t *Tokens) Lookup(token string) (session string, allow map[string][]string
 }
 
 // samePins is allow less each tool not pinned in both with the same hash
-// and source. A server keeps its entry, possibly empty.
+// and source, both sources read by b's registry (so a URL pin and the
+// identity it stands for are the same source, across an approve upgrade
+// or aimux servers migrate). A server keeps its entry, possibly empty.
 func samePins(allow map[string][]string, a map[string]map[string]toolreg.Pin, b toolreg.Snapshot) map[string][]string {
 	out := make(map[string][]string, len(allow))
 	for s, tools := range allow {
@@ -188,7 +191,7 @@ func samePins(allow map[string][]string, a map[string]map[string]toolreg.Pin, b 
 		for _, tool := range tools {
 			pa, okA := a[s][tool]
 			pb, okB := b.Pin(s, tool)
-			if okA && okB && pa.Hash == pb.Hash && pa.Source == pb.Source {
+			if okA && okB && pa.Hash == pb.Hash && resolvedSource(b, s, pa) == resolvedSource(b, s, pb) {
 				kept = append(kept, tool)
 			}
 		}
@@ -197,12 +200,26 @@ func samePins(allow map[string][]string, a map[string]map[string]toolreg.Pin, b 
 	return out
 }
 
-// PinsFor is snap's pin of each tool in allow, the Pins a Lease carries.
+// resolvedSource is p's recorded source as snap's registry reads it: a pin
+// that recorded the server's URL, which the registry accepts for a server
+// with an identity, stands for that identity. So approve rewriting a URL
+// pin to the identity it already matched is no change for a lease, while
+// a real identity change still is. A v1 pin (no source) stays unknown.
+func resolvedSource(snap toolreg.Snapshot, server string, p toolreg.Pin) string {
+	if p.Source == "" || strings.HasPrefix(p.Source, "id:") || snap.SourceChangedFrom(server, p.Source) {
+		return p.Source
+	}
+	return snap.PinSource(server)
+}
+
+// PinsFor is snap's pin of each tool in allow, the Pins a Lease carries,
+// each source resolved as snap reads it (see resolvedSource).
 func PinsFor(snap toolreg.Snapshot, allow map[string][]string) map[string]map[string]toolreg.Pin {
 	out := map[string]map[string]toolreg.Pin{}
 	for s, tools := range allow {
 		for _, tool := range tools {
 			if p, ok := snap.Pin(s, tool); ok {
+				p.Source = resolvedSource(snap, s, p)
 				if out[s] == nil {
 					out[s] = map[string]toolreg.Pin{}
 				}

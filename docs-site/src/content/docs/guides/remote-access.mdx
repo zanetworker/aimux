@@ -430,7 +430,9 @@ A client can show a changed tool and approve it, instead of the owner running `a
 3. the set is requested by a profile in the client's scope (else `403 forbidden_for_client`), and each tool is in the set (else `400 bad_request`);
 4. the request's `snapshot`, when given, is the current one (else `409 pin_stale`); then the tool gateway lists the set's source afresh, up to 5 seconds (else `503 gateway_backend_down`; `503 tool_gateway_not_running` when the worker is not running, which retrying cannot fix: install it);
 5. every `pin` is still the pin of the definition that listing saw (else `409 pin_stale` and nothing is approved: the definition changed since the client showed it, or the gateway no longer lists it).
-6. no tool needs review on the Mac (else `409 review_on_mac`): one whose source's address changed since it was approved, or whose request details that the diff leaves out (an `http-openapi` tool's base URL and path) differ from the approved definition's, or a new `http-openapi` tool, whose details were never shown.
+A set the registry skipped (a floating command, an identity error, a held managed server) answers `404 not_found` to both calls; `GET /v1/tools` lists it `unavailable` with the reason. Approving a tool whose pin recorded its server's URL rewrites it to the server's identity and reports `upgraded` with `written: true`.
+
+6. no tool needs review on the Mac (else `409 review_on_mac`): one whose source changed since it was approved (its address, or a `servers.yaml` server's identity), or whose request details that the diff leaves out (an `http-openapi` tool's base URL and path) differ from the approved definition's, or a new `http-openapi` tool, whose details were never shown.
 
 Pins are written under a lock that `aimux tools approve` takes too (held by another approval for 5 seconds: `503 pins_busy`, try again), and a tool whose pin another approval changed after the check is refused (`409 pin_stale`), so neither drops the other's approval. Before checking the pins, the tool gateway applies the tool configuration the approval checks against (when it still serves an older one, such as right after another approval) and lists the set's source afresh (up to 5 seconds); the pins are checked against what that relist itself saw, so a tool that changed on its server after the diff is `409 pin_stale`; a source that cannot be listed in time, is down, or whose relist the gateway dropped is `503 gateway_backend_down` (try again; a source with many pages of tools can outlast the 5 seconds), and nothing is approved.
 
@@ -467,7 +469,7 @@ Here `tool-sources.yaml` means the active registry: `servers.yaml` and `tool-set
 curl --unix-socket ~/.aimux/clients/wingman.sock http://aimux.local/v1/tools   # as Wingman
 ```
 
-Each set has a `status`: `available` (every tool is granted), `partial` (some are) or `unavailable` (none is), with a short `reason`. Each tool has its own:
+Each set has a `status`: `available` (every tool is granted), `partial` (some are) or `unavailable` (none is), with a short `reason`. A set the registry skipped (a floating command, an `identity:` error, or a held managed server) is `unavailable`, with the reason in `errors`. Each tool has its own:
 
 | Tool status | Meaning | What to do |
 |---|---|---|
@@ -475,12 +477,12 @@ Each set has a `status`: `available` (every tool is granted), `partial` (some ar
 | `unpinned` | Listed live, never approved | `aimux tools diff`, then `aimux tools approve <set>` |
 | `changed` | Differs from the approved definition, or no longer listed | `aimux tools diff <set>`, then approve |
 | `unavailable` | Its backend is down (reason `backend unavailable`, or `notes folder not found` for a notes source; the detail is in the gateway worker's log, `~/.aimux/logs/tool-gateway`), or does not list it | Start the backend; the gateway worker retries it once a minute on its own |
-| `source_changed` | Approved from another endpoint than `tool-sources.yaml` now names | `aimux tools approve <set>` |
+| `source_changed` | Approved from another endpoint than `tool-sources.yaml` now names , or for another identity of a `servers.yaml` server (url, command, args, cwd, secret names or executable, even at the same address); approve it on the Mac | `aimux tools approve <set>` |
 | `unknown` | The gateway worker has not listed its source yet (or is not running: `aimux mcp proxy gateway status`), or its last relist failed or timed out while the source is still served (reason `unknown (relist failed)`) | Run a turn; a pinned `unknown` tool is still granted, and calls still pass the pin check |
 
 A set also lists `newOnServer`: tools its source offers that no set lists and no pin covers (`aimux tools status` shows them as `new_on_server`). They are never granted; add one with `aimux tools approve <source>/<tool> --add-to-set <set>`.
 
-A sandbox turn whose profile has tools held for review (changed, unpinned, approved from another address, or new on the server) starts with one `aimux_notice` session update, before the answer: `{"sessionUpdate": "aimux_notice", "content": {"type": "text", "text": "2 tools held for review (jira: search changed; mysrc: new_tool new): run aimux tools status"}}`. A server on which every tool the profile grants is held back is left out of the turn's MCP config (the agent does not see it at all), and the notice names it first: `slack: 5 tools changed, held for review, left out of this turn; ...`. aimux decides this from the gateway worker's last listings, never a fresh one, so a slow backend does not hold up the turn. It comes from aimux, not the agent; clients that do not know the kind can skip it.
+A sandbox turn whose profile has tools held for review (changed, unpinned, approved from another address or another identity of its `servers.yaml` server, or new on the server) starts with one `aimux_notice` session update, before the answer: `{"sessionUpdate": "aimux_notice", "content": {"type": "text", "text": "2 tools held for review (jira: search changed; mysrc: new_tool new): run aimux tools status"}}`. A server on which every tool the profile grants is held back is left out of the turn's MCP config (the agent does not see it at all), and the notice names it first: `slack: 5 tools changed, held for review, left out of this turn; ...`. aimux decides this from the gateway worker's last listings, never a fresh one, so a slow backend does not hold up the turn. It comes from aimux, not the agent; clients that do not know the kind can skip it.
 
 Each set also has `authorship`: who writes what its source returns, `self`, `internal` or `outside` (the source's `authorship` in `tool-sources.yaml`; a source without one is `outside`). It is left out when the set's source is no longer in `tool-sources.yaml`.
 

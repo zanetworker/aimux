@@ -37,7 +37,7 @@ const (
 // Approval actions, as `aimux tools approve` reports them.
 const (
 	ActionApproved  = "approved"  // the live definition is now pinned
-	ActionUpgraded  = "upgraded"  // a v1 pin that matches now stores its definition
+	ActionUpgraded  = "upgraded"  // a v1 pin that matches now stores its definition, or a URL pin now records the identity
 	ActionRemoved   = "removed"   // the pin of a tool no longer listed is dropped
 	ActionUnchanged = "unchanged" // already approved as it is live
 	ActionSkipped   = "skipped"   // could not be approved (see Reason)
@@ -114,7 +114,11 @@ func lookup(reg toolreg.Registry, pins PinFile, live map[string]LiveSource, set,
 	v.unavailable = v.status == StatusUnavailable
 	if v.pinned && reg.SourceChanged(src, v.pin.Source) {
 		v.status = StatusSourceChanged
-		v.reason = fmt.Sprintf("approved from %s; tool-sources.yaml now points %s at %q", v.pin.Source, src, reg.Sources[src].Endpoint())
+		if strings.HasPrefix(v.pin.Source, "id:") {
+			v.reason = fmt.Sprintf("approved for another definition of %s; servers.yaml changed its url, command, args, cwd, secret names or executable", src)
+		} else {
+			v.reason = fmt.Sprintf("approved from %s; the registry now points %s at %q", v.pin.Source, src, reg.Sources[src].Endpoint())
+		}
 	}
 	return v
 }
@@ -424,7 +428,8 @@ func ShortHash(pin string) string {
 // its record (no new approved_at); a v1 pin that matches gains its
 // definition; a pinned tool the backend no longer lists loses its pin; a
 // tool whose backend is down or that is not listed is skipped. Each approved
-// record carries now and the source's endpoint.
+// record carries now and the source's PinSource (identity or endpoint); an
+// active pin recorded under the endpoint is rewritten to the identity.
 func Approve(reg toolreg.Registry, pins PinFile, live map[string]LiveSource, targets []string, now time.Time) (PinFile, []Approval, error) {
 	type target struct{ set, tool string }
 	var want []target
@@ -469,14 +474,14 @@ func Approve(reg toolreg.Registry, pins PinFile, live map[string]LiveSource, tar
 				delete(out, s.Source)
 			}
 			a.Action = ActionRemoved
-		case v.status == StatusActive && v.pin.Definition != nil:
+		case v.status == StatusActive && v.pin.Definition != nil && v.pin.Source == reg.PinSource(s.Source):
 			a.Action = ActionUnchanged
 		default:
 			def, _ := Canonical(v.live) // PinTool succeeded on it in lookup
 			if out[s.Source] == nil {
 				out[s.Source] = map[string]PinRecord{}
 			}
-			out[s.Source][tg.tool] = PinRecord{Hash: v.liveHash, Definition: def, ApprovedAt: now.UTC(), Source: reg.Sources[s.Source].Endpoint()}
+			out[s.Source][tg.tool] = PinRecord{Hash: v.liveHash, Definition: def, ApprovedAt: now.UTC(), Source: reg.PinSource(s.Source)}
 			a.Action, a.Hash = ActionApproved, v.liveHash
 			if v.status == StatusActive {
 				a.Action = ActionUpgraded
