@@ -518,3 +518,17 @@ func TestProfileWiring_TurnLinksFromRunTranscript(t *testing.T) {
 		t.Fatal("links for a session not in the store")
 	}
 }
+
+// Install gives the run engine the API's per-client set check, so a Both
+// turn's held-tools notice offers only sets the client may approve.
+func TestProfileWiring_InstallWiresRunSetsFor(t *testing.T) {
+	p, closeAll, err := buildProfileWiring(t.TempDir(), noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	p.Install(&remoteapi.API{}, clientscope.Defaults(), false)
+	if run := p.engines["run"].(*profilerun.RunEngine); run.SetsFor == nil {
+		t.Fatal("run engine has no SetsFor after Install")
+	}
+}

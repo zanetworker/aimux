@@ -2212,7 +2212,12 @@ components:
         /v1/tools/{set}/diff for each. Absent when no held tool is in a set.
         A research-with-work turn also sends its stage progress lines as
         aimux_notice without sets, and passes on its workspace (planner)
-        stage's held-tools notice, sets included, at most once per turn.
+        stage's held-tools notice at most once per turn: its full text, with
+        sets kept only for the sets the client that asked for the turn may
+        open with GET /v1/tools/{set}/diff (tools_approve, and a profile in
+        its own scope that requests the set; a run profile's roles do not
+        widen it), and left out when none remain or the turn came from the
+        queue.
         Clients that do not know it can skip it.
       required: [sessionUpdate]
       properties:

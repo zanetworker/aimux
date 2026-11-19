@@ -843,7 +843,7 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	turn, err := a.Broker.StartWith(session, req.Text, req.Key, TurnOptions{Model: req.Model})
+	turn, err := a.Broker.StartWith(session, req.Text, req.Key, TurnOptions{Model: req.Model, Caller: a.clientOf(r)})
 	done(err == nil)
 	if err != nil {
 		writeFailure(w, err)

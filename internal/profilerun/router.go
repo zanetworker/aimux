@@ -204,6 +204,22 @@ func NoWebFrom(ctx context.Context) bool {
 	return v
 }
 
+// callerKey carries the client that asked for a turn.
+type callerKey struct{}
+
+// WithCaller returns ctx carrying the authenticated client that asked for
+// the turn, which may differ from the session's creator (Meta.Client).
+func WithCaller(ctx context.Context, client string) context.Context {
+	return context.WithValue(ctx, callerKey{}, client)
+}
+
+// CallerFrom is the client that asked for the turn, "" when not known (a
+// queued message).
+func CallerFrom(ctx context.Context) string {
+	c, _ := ctx.Value(callerKey{}).(string)
+	return c
+}
+
 // imageKey carries a turn's attached image in its context.
 type imageKey struct{}
 

@@ -122,6 +122,28 @@ func (a *API) setForClient(w http.ResponseWriter, r *http.Request, name string) 
 	return v, set, true
 }
 
+// ApprovableSets is sets, in order, kept to those client may diff and
+// approve under its own scope (tools_approve and requestsSet, the diff
+// endpoint's checks); none when tools_approve is off:
+// a run profile's roles do not widen it. Nil when the profiles cannot be
+// read.
+func (a *API) ApprovableSets(client string, sets []string) []string {
+	if !a.Scopes.Clients[client].ToolsApprove || a.Profiles == nil { // toolsDiff's own gate
+		return nil
+	}
+	all, err := a.Profiles()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, s := range sets {
+		if a.requestsSet(client, all, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // requestsSet reports whether a profile in client's scope requests set.
 func (a *API) requestsSet(client string, all map[string]profile.Manifest, set string) bool {
 	for _, m := range all {
