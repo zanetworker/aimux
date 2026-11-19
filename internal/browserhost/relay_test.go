@@ -1234,3 +1234,20 @@ func TestRelay_CancelEndsAToolsApprove(t *testing.T) {
 		t.Fatal("the approval request was not cancelled")
 	}
 }
+
+// A diff too large for one native message (Chrome's 1 MiB) is not split:
+// the panel gets one coded error saying to review on the Mac.
+func TestRelay_ToolsDiffTooLarge(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("GET /v1/tools/{set}/diff", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"set": "big:readonly", "pad": strings.Repeat("x", MaxOutbound)})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "d", Type: "tools.diff", Set: "big:readonly"})
+	evs := p.until(t, "d")
+	if len(evs) != 1 || evs[0].Type != "error" || evs[0].Code != "diff_too_large" || !strings.Contains(evs[0].Error, "aimux tools diff") {
+		t.Fatalf("events %+v, want one diff_too_large error", evs)
+	}
+}

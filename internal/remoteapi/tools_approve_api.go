@@ -272,43 +272,8 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 	}
 	// Check the pins against what the server lists now, not the gateway's
 	// last listing: a tool that changed since the diff is then stale.
-	if a.Relist != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), relistTimeout)
-		res, err := a.Relist(ctx, set.Source, v.Snapshot.Version())
-		cancel()
-		before := v.Snapshot.Version()
-		switch {
-		case errors.Is(err, toolgateway.ErrGatewayNotRunning):
-			writeError(w, http.StatusServiceUnavailable, errcode.ToolGatewayNotRunning,
-				errors.New(errcode.Message(errcode.ToolGatewayNotRunning)+", then approve again"))
-			return
-		case errors.Is(err, toolgateway.ErrRelistUnsupported):
-			writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
-				errors.New("the tool gateway worker runs an older aimux than remote serve: run aimux mcp proxy gateway install, then approve again"))
-			return
-		case err == nil && a.Tools().Snapshot.Version() != before:
-			writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed while checking; get the diff again"))
-			return
-		case err == nil && !res.Listed:
-			err = fmt.Errorf("the relist did not list %s", set.Source)
-		case err == nil && res.Version != "" && res.Version != before:
-			// The worker listed under another configuration than this
-			// approval checks against (it reloads within a minute).
-			err = fmt.Errorf("the tool gateway listed %s under tool snapshot %s, not %s", set.Source, res.Version, before)
-		case err == nil && res.Live.Err != nil:
-			err = res.Live.Err // the backend is down: unknown, not changed
-		}
-		if err != nil {
-			a.logf("tools approve: relist of %s: %v", set.Source, err)
-			// A known limit: the budget is 5 s for the whole listing, which a
-			// source with many pages of tools can outlast.
-			writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
-				fmt.Errorf("%s did not list its tools within %v (slow or down); nothing was approved, try again", set.Source, relistTimeout))
-			return
-		}
-		// Check against what this relist saw, not a listing read later.
-		v.Live = maps.Clone(v.Live)
-		v.Live[set.Source] = res.Live
+	if v, ok = a.freshListing(w, r, set, v); !ok {
+		return
 	}
 
 	if req.Snapshot != "" && req.Snapshot != v.Snapshot.Version() {
@@ -380,6 +345,17 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "forbidden_for_client", errSetNotForClient)
 			return
 		}
+		// The backend may have changed a tool while the dialog was open:
+		// list it afresh again; the pins shown must still be what it lists.
+		if v, ok = a.freshListing(w, r, set, v); !ok {
+			return
+		}
+		for _, t := range req.Tools {
+			if live, _ := livePin(v, set.Source, t.Name); live != t.Pin {
+				writeError(w, http.StatusConflict, "pin_stale", fmt.Errorf("%s changed on its server while the approval was open on the Mac; nothing was approved, get the diff again", t.Name))
+				return
+			}
+		}
 		stepUp = StepUpMacConfirm
 	}
 	res, written, err := a.approvePins(r.Context(), v, targets, pins)
@@ -403,6 +379,53 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 	noteTools(w, r, ta)
 	a.logf("tools approve: client %s approved %v (written %v)", client, targets, written)
 	writeJSON(w, http.StatusOK, ToolsApproveResult{Results: res, Written: written})
+}
+
+// freshListing has the gateway apply v's tool snapshot and list set's
+// source afresh, and returns v with that relist's own listing of it; it
+// answers the request (and false) when the listing cannot be had or the
+// configuration moved. Without Relist, v is returned as is.
+func (a *API) freshListing(w http.ResponseWriter, r *http.Request, set toolreg.Set, v ToolsView) (ToolsView, bool) {
+	if a.Relist == nil {
+		return v, true
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), relistTimeout)
+	res, err := a.Relist(ctx, set.Source, v.Snapshot.Version())
+	cancel()
+	before := v.Snapshot.Version()
+	switch {
+	case errors.Is(err, toolgateway.ErrGatewayNotRunning):
+		writeError(w, http.StatusServiceUnavailable, errcode.ToolGatewayNotRunning,
+			errors.New(errcode.Message(errcode.ToolGatewayNotRunning)+", then approve again"))
+		return v, false
+	case errors.Is(err, toolgateway.ErrRelistUnsupported):
+		writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
+			errors.New("the tool gateway worker runs an older aimux than remote serve: run aimux mcp proxy gateway install, then approve again"))
+		return v, false
+	case err == nil && a.Tools().Snapshot.Version() != before:
+		writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed while checking; get the diff again"))
+		return v, false
+	case err == nil && !res.Listed:
+		err = fmt.Errorf("the relist did not list %s", set.Source)
+	case err == nil && res.Version != "" && res.Version != before:
+		// The worker listed under another configuration than this
+		// approval checks against (it reloads within a minute).
+		err = fmt.Errorf("the tool gateway listed %s under tool snapshot %s, not %s", set.Source, res.Version, before)
+	case err == nil && res.Live.Err != nil:
+		err = res.Live.Err // the backend is down: unknown, not changed
+	}
+	if err != nil {
+		a.logf("tools approve: relist of %s: %v", set.Source, err)
+		// A known limit: the budget is 5 s for the whole listing, which a
+		// source with many pages of tools can outlast.
+		writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
+			fmt.Errorf("%s did not list its tools within %v (slow or down); nothing was approved, try again", set.Source, relistTimeout))
+		return v, false
+	}
+	// Check against what this relist saw, not a listing read later.
+	v.Live = maps.Clone(v.Live)
+	v.Live[set.Source] = res.Live
+	return v, true
 }
 
 // toolStatuses is each tool of source's review status under v.

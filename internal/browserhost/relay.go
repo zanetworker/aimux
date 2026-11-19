@@ -235,7 +235,14 @@ func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emi
 			fail(err)
 			return
 		}
-		emit(Event{Type: "tools_diff", Data: out})
+		ev := Event{ID: req.ID, Type: "tools_diff", Data: out}
+		if b, err := json.Marshal(ev); err != nil || len(b) > MaxOutbound {
+			// Not split across messages: one the panel cannot show whole
+			// is reviewed on the Mac instead.
+			fail(&apiError{Code: "diff_too_large", Message: "the diff of " + req.Set + " is too large to review in the panel: run aimux tools diff on the Mac"})
+			return
+		}
+		emit(ev)
 		emit(Event{Type: "done"})
 	case "tools.approve":
 		// The step-up happens on the Mac (a dialog aimux shows); this only

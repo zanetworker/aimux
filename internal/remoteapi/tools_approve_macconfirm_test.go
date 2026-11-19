@@ -3,6 +3,7 @@ package remoteapi
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -242,5 +243,38 @@ func TestApprovePins_CancelledRequestDoesNotCommit(t *testing.T) {
 	}
 	if after, _ := m.api.Pins.LoadFile(); after["jira"]["c"].Hash != "" {
 		t.Fatalf("pin written: %+v", after["jira"]["c"])
+	}
+}
+
+// After Approve the source is listed afresh again: a tool the backend
+// changed while the dialog was open is stale, and nothing is written.
+func TestToolsApprove_MacConfirmRelistsAfterApprove(t *testing.T) {
+	m := newMacRig(t, macconfirm.Approved)
+	view := m.api.Tools()
+	calls := 0
+	m.api.Relist = func(context.Context, string, string) (RelistView, error) {
+		calls++
+		live := view.Live["jira"]
+		if calls > 1 { // after the dialog: the backend changed b
+			tools := maps.Clone(live.Tools)
+			tools["b"] = toolDef("b", "boolean")
+			live = toolgateway.LiveSource{Tools: tools}
+		}
+		return RelistView{Live: live, Listed: true}, nil
+	}
+	before, _ := m.api.Pins.LoadFile()
+	if st, out := m.approveB(t); st != 409 || out["code"] != "pin_stale" {
+		t.Fatalf("%d %v, want 409 pin_stale", st, out)
+	}
+	if calls != 2 || len(m.shown) != 1 {
+		t.Fatalf("relists %d, dialogs %d: want a relist before and after the dialog", calls, len(m.shown))
+	}
+	if after, _ := m.api.Pins.LoadFile(); after["jira"]["b"].Hash != before["jira"]["b"].Hash {
+		t.Fatal("pins written for a tool that changed during the dialog")
+	}
+	// Unchanged across the dialog: approved.
+	calls = -100
+	if st, out := m.approveB(t); st != 200 {
+		t.Fatalf("unchanged: %d %v", st, out)
 	}
 }
