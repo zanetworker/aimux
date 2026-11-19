@@ -239,35 +239,37 @@ func newMCPProxyStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the running proxy's servers: state, tools, last call, last error",
-		Long: "Says which servers `install` moved, any whose entry drifted from its proxy URL, stdio servers not behind " +
-			"the proxy yet and whether an upgrade restart is pending, then reads the running proxy's /status " +
-			"on 127.0.0.1. With --probe the proxy starts each configured server once and lists its tools before " +
-			"reporting. Not running is reported, not an error.",
+		Long: "Reads the running proxy's /status on 127.0.0.1 and shows the daemon with a count per state, what " +
+			"needs you (an upgrade restart pending, entries drifted from their proxy URL, stdio and HTTP servers not " +
+			"behind the proxy yet, hooks off), then the servers with a problem (failed, or a recent error), the " +
+			"active ones, the never-started ones on one line, the tool gateway and the install notes. --all lists " +
+			"every server as a row and shows errors that are past as (old). With --probe the proxy starts each " +
+			"configured server once and lists its tools before reporting. Not running is reported, not an error; " +
+			"a proxy that gives no status is an error.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.addr = fmt.Sprintf("127.0.0.1:%d", port)
-			o.color = statusColor(cmd.OutOrStdout())
+			o.color, o.width = statusColor(cmd.OutOrStdout()), termWidth(cmd.OutOrStdout())
 			if home, err := os.UserHomeDir(); err == nil {
 				in := proxyInstaller(home, port, cmd.OutOrStdout())
-				if o.json {
-					if st, err := in.InstallStatus(); err == nil {
-						o.install = &st
-					}
+				if st, err := in.InstallStatus(); err == nil {
+					o.install, o.upgradeText = &st, in.UpgradeText(st.DaemonVersion)
 				} else {
-					o.removed = printInstallSection(in, cmd.OutOrStdout(), o.color).Removed
+					o.installErr = err
+				}
+				o.claudeConfig = in.ClaudeConfig
+				o.gateway = func() string {
+					st, err := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}.Status(cmd.Context())
+					line, _ := gatewayStatusStyled(st, err, time.Now(), o.color, o.width)
+					return line
 				}
 			}
-			if err := proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now); err != nil {
-				return err
-			}
-			if home, err := os.UserHomeDir(); err == nil && !o.json {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), gatewayStatusLine(cmd.Context(), toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}))
-			}
-			return nil
+			return proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 7381, "Port the proxy listens on at 127.0.0.1")
 	cmd.Flags().BoolVar(&o.json, "json", false, "Print the status as JSON")
 	cmd.Flags().BoolVar(&o.probe, "probe", false, "Start each configured server once and list its tools first")
+	cmd.Flags().BoolVar(&o.all, "all", false, "List every server as a row, never-started and removed ones too, with past errors")
 	cmd.Flags().DurationVar(&o.timeout, "timeout", time.Minute, "How long --probe may take")
 	return cmd
 }
@@ -276,10 +278,34 @@ type proxyStatusOpts struct {
 	addr    string // host:port of the proxy
 	json    bool
 	probe   bool
-	timeout time.Duration          // for probe; default one minute
+	timeout time.Duration // for probe; default one minute
+	all     bool
 	install *mcpproxy.InstallState // added to --json output when set
-	color   bool                   // ANSI styles (a terminal without NO_COLOR)
-	removed []string               // moved servers whose entry left the Claude config
+	// The rest is for the text page only.
+	installErr   error // why the install state could not be read
+	claudeConfig string
+	upgradeText  string
+	gateway      func() string // the styled tool gateway line, read once the proxy answered
+	color        bool          // ANSI styles (a terminal without NO_COLOR)
+	width        int           // terminal columns, 0 when piped
+}
+
+// page is the text page for rep (nil: the proxy is not running).
+func (o proxyStatusOpts) page(rep *mcpproxy.StatusReport, now time.Time) statusPage {
+	return statusPage{addr: o.addr, rep: rep, install: o.install, installErr: o.installErr, claudeConfig: o.claudeConfig,
+		upgradeText: o.upgradeText, gateway: o.gateway, now: now, color: o.color, width: o.width, all: o.all}
+}
+
+// noAnswer prints what the command knows when the proxy gave no status,
+// and returns err (text mode only; --json just fails).
+func (o proxyStatusOpts) noAnswer(out io.Writer, now time.Time, err error) error {
+	if !o.json {
+		o.gateway = nil // the proxy's failure is reported now, not after the gateway answers
+		p := o.page(nil, now)
+		p.noAnswer = true
+		printStatusPage(out, p)
+	}
+	return err
 }
 
 // proxyStatusJSON is the --json answer: the daemon's report plus the install state.
@@ -321,19 +347,22 @@ func proxyStatus(ctx context.Context, o proxyStatusOpts, out io.Writer, now func
 			_, _ = fmt.Fprintln(out, string(b))
 			return nil
 		}
-		_, _ = fmt.Fprintf(out, "MCP proxy is not running on %s\n", o.addr)
+		printStatusPage(out, o.page(nil, now()))
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("ask the MCP proxy on %s for its status: %w", o.addr, err)
+		return o.noAnswer(out, now(), fmt.Errorf("ask the MCP proxy on %s for its status: %w", o.addr, err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("MCP proxy on %s answered %s", o.addr, resp.Status)
+		return o.noAnswer(out, now(), fmt.Errorf("MCP proxy on %s answered %s", o.addr, resp.Status))
 	}
 	var rep mcpproxy.StatusReport
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rep); err != nil {
-		return fmt.Errorf("read the MCP proxy's status from %s: %w", o.addr, err)
+		return o.noAnswer(out, now(), fmt.Errorf("read the MCP proxy's status from %s: %w", o.addr, err))
+	}
+	if !rep.Running || rep.PID <= 0 || rep.StartedAt.IsZero() { // a running proxy always gives these: this is something else on the port
+		return o.noAnswer(out, now(), fmt.Errorf("the answer on %s is not an MCP proxy's status", o.addr))
 	}
 	if o.json {
 		enc := json.NewEncoder(out)
@@ -342,7 +371,7 @@ func proxyStatus(ctx context.Context, o proxyStatusOpts, out io.Writer, now func
 	}
 	// Ages are measured once the answer is in: a probe can take a while,
 	// and its failures are stamped while it runs.
-	printProxyStatus(out, o.addr, rep, now(), o.color, o.removed...)
+	printStatusPage(out, o.page(&rep, now()))
 	return nil
 }
 

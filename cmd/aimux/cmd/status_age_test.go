@@ -15,16 +15,12 @@ import (
 func TestPrintProxyStatus_FailedStateShowsItsAge(t *testing.T) {
 	rep := fixtureReport()
 	rep.Servers[1].LastErrorAt = statusNow.Add(-12 * time.Minute)
-	var out bytes.Buffer
-	printProxyStatus(&out, "127.0.0.1:7381", rep, statusNow, false)
-	if !strings.Contains(out.String(), "● failed 12m ago") {
-		t.Fatalf("output lacks the failure's age:\n%s", out.String())
+	if got := renderRep(rep, false, false); !strings.Contains(got, "● failed 12m ago") {
+		t.Fatalf("output lacks the failure's age:\n%s", got)
 	}
 	// A failure with no time (an older daemon) shows no age.
-	out.Reset()
-	printProxyStatus(&out, "127.0.0.1:7381", fixtureReport(), statusNow, false)
-	if strings.Contains(out.String(), "failed never") || strings.Contains(out.String(), "failed just") {
-		t.Fatalf("a failure without a time got an age:\n%s", out.String())
+	if got := renderRep(fixtureReport(), false, false); strings.Contains(got, "failed never") || strings.Contains(got, "failed just") {
+		t.Fatalf("a failure without a time got an age:\n%s", got)
 	}
 }
 

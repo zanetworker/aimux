@@ -772,3 +772,37 @@ func TestCheckDaemonReadsHTTP_StatusErrorRefuses(t *testing.T) {
 		t.Fatal("unverified daemon accepted")
 	}
 }
+
+// A server the last install recorded as needing OAuth whose entry later
+// gained an "oauth" key (Claude Code adds it after a sign-in) is kept
+// direct for the same reason twice, from the manifest and from the
+// config: status lists it once, with the reason the config gives now.
+func TestInstallStatus_KeptDirectOnceWhenRecordedAndInConfig(t *testing.T) {
+	fx := newHTTPFX(t, httpClaude)
+	must(t, fx.in.Install(nil))
+	must(t, jsonedit.EditKeyVerbatim(fx.claude, "mcpServers", func(old json.RawMessage) (json.RawMessage, error) {
+		return jsonedit.SetMember(old, "granola", json.RawMessage(`{"type":"http","url":"https://mcp.granola.ai/mcp","oauth":{"clientId":"x"}}`))
+	}))
+	st, err := fx.in.InstallStatus()
+	must(t, err)
+	n := 0
+	for _, k := range st.KeptDirect {
+		if k.Server == "granola" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("granola kept direct %d times: %v", n, st.KeptDirect)
+	}
+	if got := KeptDirectLines(st.KeptDirect); len(got) != 1 || got[0] != "kept direct: needs OAuth (later): granola" {
+		t.Fatalf("lines %q", got)
+	}
+}
+
+// KeptDirectLines names a server once per reason even when given twice.
+func TestKeptDirectLines_Dedupes(t *testing.T) {
+	got := KeptDirectLines([]KeptDirect{{"brand", ReasonNeedsOAuth}, {"amp", ReasonNeedsOAuth}, {"brand", ReasonNeedsOAuth}})
+	if len(got) != 1 || got[0] != "kept direct: needs OAuth (later): amp, brand" {
+		t.Fatalf("lines %q", got)
+	}
+}

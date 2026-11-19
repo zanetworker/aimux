@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -484,8 +485,7 @@ func KeptDirectLines(kept []KeptDirect) []string {
 	}
 	var out []string
 	for _, reason := range sortedKeys(by) {
-		names := by[reason]
-		sort.Strings(names)
+		names := slices.Compact(slices.Sorted(slices.Values(by[reason])))
 		out = append(out, "kept direct: "+reason+": "+strings.Join(names, ", "))
 	}
 	return out

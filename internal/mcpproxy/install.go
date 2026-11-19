@@ -1361,12 +1361,17 @@ func (i Installer) InstallStatus() (InstallState, error) {
 			st.NotProxied = append(st.NotProxied, name)
 		}
 	}
+	// A recorded server whose entry now gives its own reason (an "oauth"
+	// key Claude Code added after a sign-in) is listed once, with the
+	// config's reason, which comes first.
+	listed := map[string]bool{}
 	for _, k := range append(staticKept, recordedDirect...) {
-		if _, moved := m.Servers[k.Server]; moved || contains(m.Skipped, k.Server) {
+		if _, moved := m.Servers[k.Server]; moved || contains(m.Skipped, k.Server) || listed[k.Server] {
 			continue
 		}
 		if _, ok := members[k.Server]; ok {
 			st.KeptDirect = append(st.KeptDirect, k)
+			listed[k.Server] = true
 		}
 	}
 	sort.Slice(st.KeptDirect, func(a, b int) bool { return st.KeptDirect[a].Server < st.KeptDirect[b].Server })
