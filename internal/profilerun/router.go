@@ -188,6 +188,22 @@ func ModelFrom(ctx context.Context) string {
 	return m
 }
 
+// noWebKey marks a turn that must not reach the web.
+type noWebKey struct{}
+
+// WithNoWeb returns ctx for a turn that must not reach the web (a run's
+// planner stage): the sandbox engine refuses it when its profile compiles
+// with web, whatever the profile was when the run was admitted.
+func WithNoWeb(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noWebKey{}, true)
+}
+
+// NoWebFrom reports whether ctx forbids the web.
+func NoWebFrom(ctx context.Context) bool {
+	v, _ := ctx.Value(noWebKey{}).(bool)
+	return v
+}
+
 // imageKey carries a turn's attached image in its context.
 type imageKey struct{}
 

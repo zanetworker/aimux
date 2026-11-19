@@ -386,3 +386,36 @@ func TestServedCatalog_ResearchWithWorkAvailable(t *testing.T) {
 		t.Fatalf("Resolve(research-with-work) = %v", err)
 	}
 }
+
+// Run sessions live only in the process: after a restart each recorded one
+// is marked Lost (kept in history, never continued by a page request),
+// while sandbox sessions are adopted as before.
+func TestProfileWiring_RestartMarksRunSessionsLost(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	const run, sb = "66666666-2222-4333-8444-555555555555", "77777777-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "research-with-work", Client: "wingman", URL: "https://x.example/", Created: at, Started: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(sb, profilerun.Meta{Profile: "work-readonly", Client: "wingman", URL: "https://x.example/", Created: at, Started: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	if m, _ := p.store.Get(run); !m.Lost || m.Hidden {
+		t.Fatalf("run session = %+v, want Lost and not hidden", m)
+	}
+	if m, _ := p.store.Get(sb); m.Lost {
+		t.Fatal("a sandbox session was marked lost")
+	}
+	if _, ok := p.store.FindPage("wingman", "", "https://x.example/", "research-with-work", false, false); ok {
+		t.Fatal("a page request would continue the lost run session")
+	}
+	if err := p.router.Check(run); err == nil {
+		t.Fatal("Check of the lost run session = nil, want it reported")
+	}
+}

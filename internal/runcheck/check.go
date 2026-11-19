@@ -46,6 +46,7 @@ const (
 	ReasonUUID         = "uuid"
 	ReasonHighEntropy  = "high_entropy"
 	ReasonOverlap      = "overlap"
+	ReasonEncoding     = "encoding"
 )
 
 // Private is everything the planner saw that must not reach the web: the
@@ -53,6 +54,7 @@ const (
 type Private struct {
 	Question, PageText, Notes string
 	ToolInputs, ToolOutputs   []string
+	Prior                     []string // the page's earlier questions
 }
 
 // Rejection is one refused query: its position in the planner's list and why.
@@ -68,25 +70,18 @@ var (
 	emailRE      = regexp.MustCompile(`[^\s@]+@[^\s@]+\.[^\s@]+`)
 	ipv4RE       = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)
 	ipv6RE       = regexp.MustCompile(`(?i)\b[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,7}\b`)
-	hostnameRE   = regexp.MustCompile(`(?i)\b(?:[a-z0-9-]+\.)+([a-z]{2,24})\b`)
-	issueKeyRE   = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-\d+\b`)
-	credentialRE = regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|client[_-]?secret)\s*[=:]\s*\S+`)
+	dottedRE     = regexp.MustCompile(`[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+`)
+	versionRE    = regexp.MustCompile(`(?i)^v?\d+(?:\.\d+)+$`)
+	issueKeyRE   = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-\d+\b`)       // an upper-case key: always refused
+	anyKeyRE     = regexp.MustCompile(`(?i)\b[a-z][a-z0-9]{1,9}-(\d+)\b`) // any case: refused with 4+ digits or when the planner saw it
+	issueKeySpRE = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9} \d+\b`)       // an upper-case key with a space
+	credentialRE = regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|client[_-]?secret)\s*[=:]\s*\S+|\b(password|passwd|passphrase|secret|token|api[ _-]?key|access[ _-]?key)\s+is\s+\S+`)
+	awsKeyRE     = regexp.MustCompile(`\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b`)
 	uuidRE       = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
 	jwtRE        = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 	runRE        = regexp.MustCompile(`[A-Za-z0-9+/=_-]{24,}`)
 	wordRE       = regexp.MustCompile(`[\p{L}\p{N}]+`)
 )
-
-// hostTLDs are the top-level labels that make a dotted word a host name;
-// internal suffixes are in it too. A dotted word with another last label
-// (node.js, v1.2) is not taken for a host.
-var hostTLDs = map[string]bool{
-	"com": true, "net": true, "org": true, "io": true, "dev": true, "ai": true, "app": true, "cloud": true,
-	"co": true, "edu": true, "gov": true, "info": true, "biz": true, "me": true, "us": true, "uk": true,
-	"de": true, "fr": true, "eu": true, "ca": true, "au": true, "in": true, "cn": true, "jp": true,
-	"sh": true, "xyz": true, "tech": true, "site": true, "online": true, "page": true,
-	"internal": true, "corp": true, "local": true, "lan": true, "intranet": true, "home": true,
-}
 
 // Check returns the queries that may be sent, normalized, and why each
 // other one may not. Rules apply in order: normalization; control
@@ -94,7 +89,7 @@ var hostTLDs = map[string]bool{
 // percent-decoded once; overlap with the private inputs; then the count and
 // byte budget, so a rejected query never uses up the budget.
 func Check(queries []string, p Private) (accepted []string, rejected []Rejection) {
-	private := shingles(p)
+	private, keys := shingles(p), privateKeys(p)
 	total := 0
 	for i, raw := range queries {
 		reason := ""
@@ -108,13 +103,24 @@ func Check(queries []string, p Private) (accepted []string, rejected []Rejection
 			reason = ReasonTooLong
 		default:
 			// The decoded form first: it shows what an encoded query hides.
-			if dec, err := url.QueryUnescape(q); err == nil && dec != q {
-				reason = patternReason(normalize(dec))
+			// One that does not decode is refused, since its decoded form
+			// cannot be checked.
+			dec, err := url.QueryUnescape(q)
+			if err != nil {
+				reason = ReasonEncoding
+				break
+			}
+			dec = normalize(dec)
+			if dec != q {
+				reason = patternReason(dec)
 			}
 			if reason == "" {
 				reason = patternReason(q)
 			}
-			if reason == "" && overlaps(q, private) {
+			if reason == "" && (seenKey(q, keys) || seenKey(dec, keys)) {
+				reason = ReasonIssueKey
+			}
+			if reason == "" && (overlaps(q, private) || overlaps(dec, private)) {
 				reason = ReasonOverlap
 			}
 		}
@@ -136,9 +142,24 @@ func Check(queries []string, p Private) (accepted []string, rejected []Rejection
 	return accepted, rejected
 }
 
-// normalize is NFKC with whitespace collapsed and trimmed.
+// normalize is NFKC with look-alike dots and dashes folded to ASCII and
+// whitespace collapsed and trimmed, so an address or key written with them
+// reads as one.
 func normalize(s string) string {
-	return strings.Join(strings.Fields(norm.NFKC.String(s)), " ")
+	return strings.Join(strings.Fields(strings.Map(fold, norm.NFKC.String(s))), " ")
+}
+
+// fold maps the dots NFKC leaves (ideographic and halfwidth full stops,
+// small and fullwidth full stops, one-dot leader) to "." and every Unicode
+// dash and the minus sign to "-".
+func fold(r rune) rune {
+	switch {
+	case r == '\u3002' || r == '\uff61' || r == '\ufe52' || r == '\uff0e' || r == '\u2024' || r == '\ufe12':
+		return '.'
+	case r == '\u2212' || r == '\ufe63' || r == '\uff0d' || (r != '-' && unicode.Is(unicode.Pd, r)):
+		return '-'
+	}
+	return r
 }
 
 // hasControl reports control, bidi and zero-width characters other than
@@ -163,25 +184,66 @@ func patternReason(q string) string {
 		return ReasonEmail
 	case ipv4RE.MatchString(q), ipv6RE.MatchString(q):
 		return ReasonIP
-	case isHost(q):
-		return ReasonHostname
-	case issueKeyRE.MatchString(q):
+	case issueKeyRE.MatchString(q), issueKeySpRE.MatchString(q), longKey(q):
 		return ReasonIssueKey
 	case credentialRE.MatchString(q):
 		return ReasonCredential
 	case uuidRE.MatchString(q):
 		return ReasonUUID
-	case jwtRE.MatchString(q), mcpproxy.ScrubTokens(q) != q:
+	case jwtRE.MatchString(q), awsKeyRE.MatchString(q), mcpproxy.ScrubTokens(q) != q:
 		return ReasonToken
+	case isHost(q):
+		return ReasonHostname
 	case highEntropy(q):
 		return ReasonHighEntropy
 	}
 	return ""
 }
 
+// longKey reports a key in any case whose number has 4 or more digits
+// (rhaieng-1234); a short one (gpt-4, sha-256) passes unless the planner
+// saw it (privateKeys).
+func longKey(q string) bool {
+	for _, m := range anyKeyRE.FindAllStringSubmatch(q, -1) {
+		if len(m[1]) >= 4 {
+			return true
+		}
+	}
+	return false
+}
+
+// privateKeys is every issue-key-shaped word in the private inputs, upper
+// case.
+func privateKeys(p Private) map[string]bool {
+	out := map[string]bool{}
+	add := func(s string) {
+		for _, k := range anyKeyRE.FindAllString(normalize(s), -1) {
+			out[strings.ToUpper(k)] = true
+		}
+	}
+	for _, s := range append([]string{p.Question, p.PageText, p.Notes}, append(append(p.Prior, p.ToolInputs...), p.ToolOutputs...)...) {
+		add(s)
+	}
+	return out
+}
+
+// seenKey reports a key in q, any case, that the planner saw.
+func seenKey(q string, keys map[string]bool) bool {
+	for _, k := range anyKeyRE.FindAllString(q, -1) {
+		if keys[strings.ToUpper(k)] {
+			return true
+		}
+	}
+	return false
+}
+
+// isHost reports any dotted name of two or more labels, whatever its last
+// label: an internal suffix (.redhat, .nl, .corp) is as private as a known
+// one, so no list of suffixes decides. A version number (v1.2.3) is not a
+// name; a dotted product name (node.js) is refused with the hosts.
 func isHost(q string) bool {
-	for _, m := range hostnameRE.FindAllStringSubmatch(q, -1) {
-		if hostTLDs[strings.ToLower(m[1])] {
+	for _, m := range dottedRE.FindAllString(q, -1) {
+		if !versionRE.MatchString(m) && strings.IndexFunc(m, unicode.IsLetter) >= 0 {
 			return true
 		}
 	}
@@ -235,6 +297,9 @@ func shingles(p Private) map[string]bool {
 	add(p.Question)
 	add(p.PageText)
 	add(p.Notes)
+	for _, s := range p.Prior {
+		add(s)
+	}
 	for _, s := range p.ToolInputs {
 		add(s)
 	}

@@ -180,3 +180,26 @@ func TestStore_FindPageKeysOnWithPage(t *testing.T) {
 		t.Fatalf("legacy with page = %q, want none", id)
 	}
 }
+
+// FindPage never continues a session marked Lost (a run lost in a
+// restart), so the page starts a new one; Get still returns it.
+func TestStore_FindPageSkipsLost(t *testing.T) {
+	s := newStore(t)
+	m := Meta{Profile: "research-with-work", Client: "wingman", URL: "https://x.example/", Created: time.Now()}
+	if err := s.Put("r1", m); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := s.FindPage("wingman", "", m.URL, m.Profile, false, false); !ok || id != "r1" {
+		t.Fatalf("FindPage = %q %v before Lost", id, ok)
+	}
+	m.Lost = true
+	if err := s.Put("r1", m); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := s.FindPage("wingman", "", m.URL, m.Profile, false, false); ok {
+		t.Fatalf("FindPage continued lost session %q", id)
+	}
+	if got, ok := s.Get("r1"); !ok || got.Hidden {
+		t.Fatalf("Get = %+v %v, want it kept and not hidden", got, ok)
+	}
+}

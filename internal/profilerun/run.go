@@ -92,13 +92,24 @@ func (e *RunEngine) Cancel(session string) error {
 	}
 	e.mu.Unlock()
 	if s == nil {
-		return fmt.Errorf("unknown run session %s", session)
+		return nil // lost in a restart or never started here: nothing runs
 	}
 	if cancel != nil {
 		cancel()
 	}
 	if child != nil {
 		return child.Cancel(childID)
+	}
+	return nil
+}
+
+// Check reports whether Send can serve session: a run session lives only
+// in this process, so one recorded before a restart is lost.
+func (e *RunEngine) Check(session string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.sessions[session] == nil {
+		return fmt.Errorf("run session %s was lost when aimux restarted (or started elsewhere); ask again from the page: %w", session, acprun.ErrNotRunning)
 	}
 	return nil
 }
@@ -138,7 +149,7 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 	e.save(session, st)
 	var results []ToolResult
 	var resMu sync.Mutex
-	pctx := WithToolResults(ctx, func(r ToolResult) {
+	pctx := WithToolResults(WithNoWeb(ctx), func(r ToolResult) {
 		resMu.Lock()
 		results = append(results, r)
 		resMu.Unlock()
@@ -158,11 +169,11 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 	resMu.Lock()
 	planResults := slices.Clone(results)
 	resMu.Unlock()
-	st.OutsideAttempted, st.OutsideSucceeded = e.outsideReads(plannerProfile, planResults)
+	st.OutsideAttempted, st.OutsideSucceeded = e.outsideReads(plannerProfile, st.Children["planner"], planResults)
 
 	// 2. Check every proposed query; fail closed.
 	st.Stage = StageChecking
-	priv := runcheck.Private{Question: text, PageText: s.page, Notes: p.PrivateNotes}
+	priv := runcheck.Private{Question: text, PageText: s.page, Notes: p.PrivateNotes, Prior: PriorFrom(ctx)}
 	for _, r := range planResults {
 		priv.ToolInputs = append(priv.ToolInputs, r.Input)
 		priv.ToolOutputs = append(priv.ToolOutputs, r.Output)
@@ -222,6 +233,9 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 // stream, the child's text is the client's answer; otherwise only its
 // tool calls reach the client, titled with prefix.
 func (e *RunEngine) stage(ctx context.Context, session string, st *RunState, role string, eng Engine, m Meta, page, prompt, prefix string, onEvent func(acprun.Event), stream bool) (string, error) {
+	if err := ctx.Err(); err != nil { // a cancelled turn starts no child
+		return "", err
+	}
 	id, err := eng.New(ctx, m, page)
 	if err != nil {
 		return "", fmt.Errorf("start %s: %w", role, err)
@@ -302,28 +316,47 @@ func (e *RunEngine) save(session string, st RunState) {
 	}
 }
 
-// outsideReads maps the planner's tool calls to their sources through its
-// compiled grant and snapshot, never by tool name, and returns the sources
-// whose content anyone outside can write: those a call was made to, and
-// those a call succeeded on.
-func (e *RunEngine) outsideReads(plannerProfile string, results []ToolResult) (attempted, succeeded []string) {
-	if e.Compile == nil || len(results) == 0 {
+// outsideReads maps the planner's tool calls to their sources through the
+// grant and snapshot its turn ran under (its engine's TurnCompiled, else a
+// fresh compile), never by tool name, and returns the sources whose
+// content anyone outside can write: those a call was made to, and those a
+// call succeeded on. It fails closed: with no Compiled, or a server the
+// snapshot does not know, every MCP server called counts as outside.
+func (e *RunEngine) outsideReads(plannerProfile, plannerSession string, results []ToolResult) (attempted, succeeded []string) {
+	if len(results) == 0 {
 		return nil, nil
 	}
-	c, err := e.Compile(plannerProfile)
-	if err != nil {
-		return nil, nil
+	var c profile.Compiled
+	ok := false
+	if tc, is := e.Planner.(TurnCompiler); is {
+		c, ok = tc.TurnCompiled(plannerSession)
+	}
+	if !ok && e.Compile != nil {
+		var err error
+		if c, err = e.Compile(plannerProfile); err == nil {
+			ok = true
+		} else {
+			log := e.Log
+			if log == nil {
+				log = slog.Default()
+			}
+			log.Warn("run session: planner grant unknown, every server it called counts as outside", "profile", plannerProfile, "err", err)
+		}
 	}
 	scope := c.Grant.Scope()
 	sources := c.Snapshot.Registry().Sources
 	for _, r := range results {
-		server, tool, ok := mcpTool(r.Name)
-		if !ok || !slices.Contains(scope[server], tool) {
+		server, tool, isMCP := mcpTool(r.Name)
+		if !isMCP {
 			continue
 		}
-		src, known := sources[server]
-		if !known || src.Class() != toolreg.AuthorshipOutside {
-			continue
+		if ok {
+			if !slices.Contains(scope[server], tool) {
+				continue
+			}
+			if src, known := sources[server]; known && src.Class() != toolreg.AuthorshipOutside {
+				continue
+			}
 		}
 		attempted = addSorted(attempted, server)
 		if !r.Failed {

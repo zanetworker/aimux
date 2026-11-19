@@ -91,17 +91,19 @@ func TestValidate_RoleTargetBrokenChainNamesTheAncestor(t *testing.T) {
 }
 
 // A role target's own roles are checked too, and a cycle of roles ends.
+// Nesting goes through a role with no shape (helper): a planner or writer
+// is never a run profile.
 func TestValidate_NestedRolesAndCycles(t *testing.T) {
 	user := map[string]Manifest{
 		"inner": {Name: "inner", Extends: "builtin:research-with-work", Roles: map[string]string{"planner": "missing"}},
-		"mine":  {Name: "mine", Extends: "builtin:research-with-work", Roles: map[string]string{"planner": "inner", "writer": "page"}},
+		"mine":  {Name: "mine", Extends: "builtin:research-with-work", Roles: map[string]string{"planner": "work-readonly", "writer": "page", "helper": "inner"}},
 	}
 	_, err := resolveChecked("mine", user)
 	if err == nil || !strings.Contains(err.Error(), "profile missing not found") {
 		t.Fatalf("Resolve = %v, want the nested role's missing target", err)
 	}
-	user["a"] = Manifest{Name: "a", Extends: "builtin:research-with-work", Roles: map[string]string{"planner": "b", "writer": "page"}}
-	user["b"] = Manifest{Name: "b", Extends: "builtin:research-with-work", Roles: map[string]string{"planner": "a", "writer": "page"}}
+	user["a"] = Manifest{Name: "a", Extends: "builtin:research-with-work", Roles: map[string]string{"planner": "work-readonly", "writer": "page", "helper": "b"}}
+	user["b"] = Manifest{Name: "b", Extends: "builtin:research-with-work", Roles: map[string]string{"planner": "work-readonly", "writer": "page", "helper": "a"}}
 	if _, err := resolveChecked("a", user); err != nil {
 		t.Fatalf("a role cycle of valid profiles: %v", err)
 	}
@@ -180,5 +182,44 @@ func TestCheckRoles_EmptyTargetRefused(t *testing.T) {
 	err = CheckRoles(m, user)
 	if err == nil || !strings.Contains(err.Error(), "role planner: no profile named") {
 		t.Fatalf("CheckRoles = %v, want role planner: no profile named", err)
+	}
+}
+
+// Roles have a shape: a planner runs in a sandbox without web, a writer
+// runs on the page engine without tools or web. A target of another shape
+// is refused by role. A reader role is not shaped: the run always reads
+// the web under the built-in research profile.
+func TestCheckRoles_RoleShape(t *testing.T) {
+	cases := []struct {
+		roles map[string]string
+		want  string // "" accepted
+	}{
+		{map[string]string{"planner": "work-readonly", "writer": "page"}, ""},
+		{map[string]string{"planner": "research", "writer": "page"}, "role planner: profile research may not reach the web"},
+		{map[string]string{"planner": "page", "writer": "page"}, "role planner: profile page runs acp, want sandbox"},
+		{map[string]string{"planner": "work-readonly", "writer": "research"}, "role writer: profile research runs sandbox, want acp"},
+		{map[string]string{"planner": "work-readonly", "writer": "mywriter"}, "role writer: profile mywriter has tools"},
+		{map[string]string{"planner": "work-readonly", "writer": "page", "reader": "work-readonly"}, ""},
+	}
+	for _, c := range cases {
+		user := map[string]Manifest{
+			"mine":     {Name: "mine", Extends: "builtin:research-with-work", Roles: c.roles},
+			"mywriter": {Name: "mywriter", Extends: "builtin:page"},
+		}
+		if c.roles["writer"] == "mywriter" {
+			// a page child cannot add tools, so give the writer a root with tools on acp
+			user["mywriter"] = Manifest{Name: "mywriter", Harness: "claude-code", Runs: "acp", Tools: []string{"wiki:readonly"}, Network: NetworkSpec{Default: "deny", Allow: []string{"model"}}}
+		}
+		m, err := Resolve("mine", user)
+		if err != nil {
+			t.Fatalf("%v: Resolve = %v", c.roles, err)
+		}
+		err = CheckRoles(m, user)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%v: CheckRoles = %v, want ok", c.roles, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%v: CheckRoles = %v, want %q", c.roles, err, c.want)
+		}
 	}
 }

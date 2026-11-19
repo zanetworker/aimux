@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -191,6 +192,35 @@ func CheckRoles(m Manifest, user map[string]Manifest) error {
 	return validateRoles(m, builtins(), user, map[string]bool{})
 }
 
+// roleShape checks that a role's target can do that role's job and no
+// more: a planner reads private tools in a sandbox and never the web; a
+// writer composes on the page engine with no tools and no web. Other role
+// names are not shaped (a run reads the web under the built-in research
+// profile, never a reader role).
+func roleShape(role string, t Manifest) error {
+	web := slices.Contains(t.Network.Allow, "web")
+	switch role {
+	case "planner":
+		if t.Runs != "sandbox" {
+			return fmt.Errorf("profile %s runs %s, want sandbox", t.Name, t.Runs)
+		}
+		if web {
+			return fmt.Errorf("profile %s may not reach the web", t.Name)
+		}
+	case "writer":
+		if t.Runs != "acp" {
+			return fmt.Errorf("profile %s runs %s, want acp", t.Name, t.Runs)
+		}
+		if len(t.Tools) > 0 {
+			return fmt.Errorf("profile %s has tools", t.Name)
+		}
+		if web {
+			return fmt.Errorf("profile %s may not reach the web", t.Name)
+		}
+	}
+	return nil
+}
+
 // validateRoles checks that every role m names is a profile that resolves
 // and validates, and that its own roles do too, so an engine never starts a
 // stage under a profile that does not exist. seen ends a cycle of roles.
@@ -219,7 +249,10 @@ func validateRoles(m Manifest, bi, user map[string]Manifest, seen map[string]boo
 			var tm Manifest
 			if tm, err = resolve(target, bi, user, map[string]bool{}); err == nil {
 				if err = validate(tm); err == nil {
-					if err = CheckSandboxName(tm); err == nil {
+					if err = roleShape(r, tm); err == nil {
+						err = CheckSandboxName(tm)
+					}
+					if err == nil {
 						err = validateRoles(tm, bi, user, seen)
 					}
 				}

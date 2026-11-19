@@ -847,7 +847,7 @@ paths:
   /v1/profiles:
     get:
       summary: The profiles, and which the caller's client may use
-      description: A profile that does not resolve (a widening or a missing parent), or whose roles do not check (a role's profile is missing, does not resolve, is invalid or has an invalid sandbox name), is left out and logged on the server; asking for it is 404 unknown_profile on GET /v1/profiles/{name}, 400 unknown_profile on POST /v1/sessions, and 403 profile_not_allowed on a later message to a session started under it. A message queued before the profile's roles broke is not refused with a status; its turn ends in a turn_error whose message names the broken role. GET /v1/tools leaves out the tool sets that only such profiles request, and their diff and approval answer 403 forbidden_for_client. A profile whose own sandbox name is invalid passes this catalog and fails when it compiles, with 409 profile_unavailable on POST /v1/sessions, or a turn_error with code profile_unavailable when a turn already accepted fails to compile.
+      description: A profile that does not resolve (a widening or a missing parent), or whose roles do not check (a role's profile is missing, does not resolve, is invalid or has an invalid sandbox name), is left out and logged on the server; asking for it is 404 unknown_profile on GET /v1/profiles/{name}, 400 unknown_profile on POST /v1/sessions, and 403 profile_not_allowed on a later message to a session started under it. A message queued before the profile's roles broke is not refused with a status; its turn ends in a turn_error whose message names the broken role. GET /v1/tools leaves out the tool sets that only such profiles request, and their diff and approval answer 403 forbidden_for_client. A profile whose planner role is not a sandbox profile without web, or whose writer role is not an acp profile without tools or web, is refused the same way. A run profile (research-with-work) takes no image; one sent ends its turn in a turn_error with code image_invalid. A profile whose own sandbox name is invalid passes this catalog and fails when it compiles, with 409 profile_unavailable on POST /v1/sessions, or a turn_error with code profile_unavailable when a turn already accepted fails to compile.
       operationId: listProfiles
       responses:
         "200":
@@ -1168,7 +1168,7 @@ components:
             - open_in_terminal   # 409: read only here while open in a terminal on the Mac
             - busy               # 409: a turn is already running, Claude is working in the terminal session, or the session's queue is sending
             - in_use             # 409: another aimux process drives the session
-            - not_running        # 409: cancel with no running turn
+            - not_running        # 409: cancel with no running turn, or a message to a run session (research-with-work) lost when remote serve restarted; POST /v1/sessions for its page starts a new one
             - invalid_option     # 400: not one of the approval's options
             - ownership_unknown  # 503: Claude's session registry is unreadable
             - too_many_runs      # 503: every run slot is busy (session creation)
@@ -1831,7 +1831,7 @@ components:
           description: "With profile: the `POST /v1/route` answer this question followed. Once the session starts, the decision log records the mode its profile runs in and whether that kept the pick. An unknown `decisionId` is ignored."
           properties:
             decisionId: { type: string }
-            mode: { type: string, enum: [page, web, workspace] }
+            mode: { type: string, enum: [page, web, workspace, both] }
             source: { type: string, enum: [override, model, unavailable, override_blocked] }
         image:
           type: object
@@ -1861,7 +1861,7 @@ components:
       additionalProperties: false
       required: [mode, profile, confidence, probabilities, decided, source, text]
       properties:
-        mode: { type: string, enum: [page, web, workspace, ""], description: "The pick, or the suggestion when not decided. Empty when no mode is in scope, for override_blocked, and for reason steering." }
+        mode: { type: string, enum: [page, web, workspace, both, ""], description: "both is research-with-work (workspace and web together), offered only when the client may use research, work-readonly and research-with-work. The pick, or the suggestion when not decided. Empty when no mode is in scope, for override_blocked, and for reason steering." }
         profile: { type: string, description: "The profile mode runs under (page, research, work-readonly); empty with mode." }
         confidence: { type: number, minimum: 0, maximum: 1 }
         probabilities: { type: object, additionalProperties: { type: number }, description: "Over the allowed modes only; empty when the model was not asked or did not answer." }

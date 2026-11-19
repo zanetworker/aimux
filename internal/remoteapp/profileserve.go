@@ -352,7 +352,7 @@ func compileProfile(snap toolreg.Snapshot, dir, name string) (profile.Compiled, 
 }
 
 // adopt makes the sandbox sessions in the store known to the sandbox
-// engine again (a restart). A started one resumes. One whose first turn
+// engine again (a restart), and marks run sessions Lost. A started one resumes. One whose first turn
 // never started cannot (claude never made its id) and its page is not
 // stored, so the engine drops it, and it is hidden here so its page starts
 // a new session rather than reaching the dropped one. A store that cannot be
@@ -367,7 +367,17 @@ func (p *profileWiring) adopt(errOut io.Writer) {
 		return
 	}
 	for id, m := range all {
-		if runs, err := p.runs(m.Profile); err != nil || runs != "sandbox" {
+		runs, err := p.runs(m.Profile)
+		if err == nil && runs == "run" && !m.Lost {
+			// A run session lives only in the process that ran it: keep it
+			// in history, but a page request starts a new one.
+			m.Lost = true
+			if err := p.store.Put(id, m); err != nil {
+				_, _ = fmt.Fprintf(errOut, "profile session %s: mark the run session lost: %v\n", id, err)
+			}
+			continue
+		}
+		if err != nil || runs != "sandbox" {
 			continue
 		}
 		p.sandbox.Adopt(id, m, nil) // the store keeps no page
