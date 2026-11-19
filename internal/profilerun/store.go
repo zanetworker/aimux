@@ -19,10 +19,6 @@ type Meta struct {
 	// Hidden: the owner removed it from the lists (Wingman's history
 	// delete); FindPage never continues it.
 	Hidden bool `json:",omitempty"`
-	// Lost: a run session recorded before a restart; the run engine keeps
-	// its sessions in memory, so it cannot continue. It stays in history,
-	// but FindPage never continues it.
-	Lost bool `json:",omitempty"`
 	// Started: the first turn's claude showed the session in its stream, so
 	// claude has created the session id and later turns resume it (sandbox
 	// sessions).
@@ -172,7 +168,7 @@ func (s *Store) save(all map[string]Meta) error {
 func (s *Store) FindPage(client, instance, url, profile string, withPage, originOnly bool) (session string, ok bool) {
 	var best Meta
 	for id, m := range s.List(client) {
-		if m.Instance != instance || m.URL != url || m.Profile != profile || m.WithPage != withPage || m.OriginOnly != originOnly || m.Hidden || m.Lost {
+		if m.Instance != instance || m.URL != url || m.Profile != profile || m.WithPage != withPage || m.OriginOnly != originOnly || m.Hidden {
 			continue
 		}
 		if !ok || m.Created.After(best.Created) || (m.Created.Equal(best.Created) && id > session) {

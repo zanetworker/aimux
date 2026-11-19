@@ -2,13 +2,18 @@ package profilerun
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/zanetworker/aimux/internal/acprun"
+	claudehistory "github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
+	"github.com/zanetworker/aimux/internal/provider"
 	"github.com/zanetworker/aimux/internal/runcheck"
 	"github.com/zanetworker/aimux/internal/toolreg"
 )
@@ -147,4 +152,96 @@ type ctxStage struct {
 func (s ctxStage) Send(ctx context.Context, id, text string, onEvent func(acprun.Event)) (string, error) {
 	*s.noWeb = NoWebFrom(ctx)
 	return s.fakeStage.Send(ctx, id, text, onEvent)
+}
+
+// Each finished run turn appends its question and answer to the run's own
+// transcript in the archive (Claude's JSONL shape), so the conversation is
+// readable after a restart, when the run itself cannot continue. A failed
+// turn writes nothing.
+func TestRun_TranscriptKeepsQuestionAndAnswer(t *testing.T) {
+	r := newRunRig(t, stageScript{deltas: []string{plannerReply(nil, "secret notes")}}, stageScript{}, stageScript{deltas: []string{"the ", "answer"}})
+	r.e.ArchiveDir = t.TempDir()
+	id := r.start(t, Meta{Client: "wingman"}, "page text")
+	for _, q := range []string{"first?", "second?"} {
+		if _, err := r.send(context.Background(), id, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(RunTranscriptPath(r.e.ArchiveDir, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var e struct {
+			Type      string `json:"type"`
+			SessionID string `json:"sessionId"`
+			Timestamp string `json:"timestamp"`
+			Message   struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("line %q: %v", line, err)
+		}
+		if e.SessionID != id || e.Timestamp == "" || e.Type != e.Message.Role {
+			t.Fatalf("line %q: wrong session, time or role", line)
+		}
+		got = append(got, e.Type+":"+string(e.Message.Content))
+	}
+	want := []string{`user:"first?"`, `assistant:[{"type":"text","text":"the answer"}]`, `user:"second?"`, `assistant:[{"type":"text","text":"the answer"}]`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("transcript %v, want %v", got, want)
+	}
+	if strings.Contains(string(data), "secret notes") || strings.Contains(string(data), "page text") {
+		t.Fatal("the transcript holds the planner's notes or the page text")
+	}
+	failing := newRunRig(t, stageScript{err: errors.New("boom")}, stageScript{}, stageScript{})
+	failing.e.ArchiveDir = t.TempDir()
+	fid := failing.start(t, Meta{Client: "wingman"}, "")
+	_, _ = failing.send(context.Background(), fid, "q")
+	if _, err := os.Stat(RunTranscriptPath(failing.e.ArchiveDir, fid)); !os.IsNotExist(err) {
+		t.Fatalf("a failed turn wrote a transcript: %v", err)
+	}
+}
+
+// The run transcript reads as one turn per question through the real Claude
+// parser the session detail uses.
+func TestRun_TranscriptParsesAsTurns(t *testing.T) {
+	r := newRunRig(t, stageScript{deltas: []string{plannerReply(nil, "")}}, stageScript{}, stageScript{deltas: []string{"an answer"}})
+	r.e.ArchiveDir = t.TempDir()
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	for _, q := range []string{"first?", "second?"} {
+		if _, err := r.send(context.Background(), id, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	turns, err := (&provider.Claude{}).ParseTrace(RunTranscriptPath(r.e.ArchiveDir, id))
+	if err != nil || len(turns) != 2 {
+		t.Fatalf("parse: %v, %d turns, want 2", err, len(turns))
+	}
+	if !strings.Contains(strings.Join(turns[0].UserLines, " "), "first?") || !strings.Contains(turns[1].OutputText, "an answer") {
+		t.Fatalf("turns %+v", turns)
+	}
+}
+
+// Only a run session id (a UUID) names a transcript file: anything else,
+// such as a path, writes nothing.
+func TestRun_TranscriptOnlyForSessionIDs(t *testing.T) {
+	e := &RunEngine{ArchiveDir: t.TempDir()}
+	e.appendTranscript("../escape", "q", "a")
+	entries, _ := os.ReadDir(e.ArchiveDir)
+	if len(entries) != 0 {
+		t.Fatalf("a non-id session wrote %v", entries)
+	}
+}
+
+// Run transcripts hold private workspace detail: they live in a folder the
+// search index and session lists skip, as Wingman's page sessions do.
+func TestRun_TranscriptFolderIsSkippedByIndex(t *testing.T) {
+	path := RunTranscriptPath(t.TempDir(), "11111111-2222-4333-8444-555555555555")
+	if !claudehistory.IsWingmanProjectDir(filepath.Base(filepath.Dir(path))) {
+		t.Fatalf("transcript folder %q is not one the index skips", filepath.Base(filepath.Dir(path)))
+	}
 }

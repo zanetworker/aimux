@@ -38,7 +38,14 @@ func TestCheck_IssueKeyVariants(t *testing.T) {
 		rejectedWith(t, q, Private{}, ReasonIssueKey)
 	}
 	rejectedWith(t, "status of osd-12", Private{ToolOutputs: []string{"OSD-12 is blocked"}}, ReasonIssueKey)
-	for _, q := range []string{"gpt-4 release notes", "utf-8 decoding", "sha-256 collisions", "llama-3 benchmarks"} {
+	rejectedWith(t, "status of OSD 12", Private{ToolOutputs: []string{"OSD-12 is blocked"}}, ReasonIssueKey)
+	// A key the planner saw matches in any case, dashed or spaced, either way round.
+	rejectedWith(t, "osd 12 status", Private{ToolOutputs: []string{"OSD-12 is blocked"}}, ReasonIssueKey)
+	rejectedWith(t, "osd-12 status", Private{Prior: []string{"what about OSD 12"}}, ReasonIssueKey)
+	if acc, rej := Check([]string{"openshell november 2026 release"}, Private{Notes: "the november 2026 plan"}); len(acc) != 1 {
+		t.Errorf("a lower-case word and a year in the notes made a key: rejected %v", rej)
+	}
+	for _, q := range []string{"gpt-4 release notes", "utf-8 decoding", "sha-256 collisions", "llama-3 benchmarks", "TLS 1.3 handshake", "HTTP 2 flow control", "RHEL 10 release notes", "ISO 27001 controls", "RFC 9110 semantics"} {
 		if acc, rej := Check([]string{q}, Private{}); len(acc) != 1 {
 			t.Errorf("%q: accepted %v rejected %v, want accepted", q, acc, rej)
 		}

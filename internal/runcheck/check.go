@@ -66,21 +66,22 @@ type Rejection struct {
 func (r Rejection) String() string { return fmt.Sprintf("query %d: %s", r.Index+1, r.Reason) }
 
 var (
-	urlRE        = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://|\bwww\.`)
-	emailRE      = regexp.MustCompile(`[^\s@]+@[^\s@]+\.[^\s@]+`)
-	ipv4RE       = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)
-	ipv6RE       = regexp.MustCompile(`(?i)\b[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,7}\b`)
-	dottedRE     = regexp.MustCompile(`[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+`)
-	versionRE    = regexp.MustCompile(`(?i)^v?\d+(?:\.\d+)+$`)
-	issueKeyRE   = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-\d+\b`)       // an upper-case key: always refused
-	anyKeyRE     = regexp.MustCompile(`(?i)\b[a-z][a-z0-9]{1,9}-(\d+)\b`) // any case: refused with 4+ digits or when the planner saw it
-	issueKeySpRE = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9} \d+\b`)       // an upper-case key with a space
-	credentialRE = regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|client[_-]?secret)\s*[=:]\s*\S+|\b(password|passwd|passphrase|secret|token|api[ _-]?key|access[ _-]?key)\s+is\s+\S+`)
-	awsKeyRE     = regexp.MustCompile(`\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b`)
-	uuidRE       = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
-	jwtRE        = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
-	runRE        = regexp.MustCompile(`[A-Za-z0-9+/=_-]{24,}`)
-	wordRE       = regexp.MustCompile(`[\p{L}\p{N}]+`)
+	urlRE          = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://|\bwww\.`)
+	emailRE        = regexp.MustCompile(`[^\s@]+@[^\s@]+\.[^\s@]+`)
+	ipv4RE         = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)
+	ipv6RE         = regexp.MustCompile(`(?i)\b[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,7}\b`)
+	dottedRE       = regexp.MustCompile(`[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+`)
+	versionRE      = regexp.MustCompile(`(?i)^v?\d+(?:\.\d+)+$`)
+	issueKeyRE     = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-\d+\b`)          // an upper-case key: always refused
+	anySpacedKeyRE = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9}) (\d+)\b`)  // a spaced key in any case, matched only against keys the planner saw
+	anyKeyRE       = regexp.MustCompile(`(?i)\b[a-z][a-z0-9]{1,9}-(\d+)\b`)    // any case: refused with 4+ digits or when the planner saw it
+	issueKeySpRE   = regexp.MustCompile(`\b([A-Z][A-Z0-9]{1,9}) (\d+)(\.\d)?`) // an upper-case key, a space, a number
+	credentialRE   = regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|client[_-]?secret)\s*[=:]\s*\S+|\b(password|passwd|passphrase|secret|token|api[ _-]?key|access[ _-]?key)\s+is\s+\S+`)
+	awsKeyRE       = regexp.MustCompile(`\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b`)
+	uuidRE         = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	jwtRE          = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
+	runRE          = regexp.MustCompile(`[A-Za-z0-9+/=_-]{24,}`)
+	wordRE         = regexp.MustCompile(`[\p{L}\p{N}]+`)
 )
 
 // Check returns the queries that may be sent, normalized, and why each
@@ -184,7 +185,7 @@ func patternReason(q string) string {
 		return ReasonEmail
 	case ipv4RE.MatchString(q), ipv6RE.MatchString(q):
 		return ReasonIP
-	case issueKeyRE.MatchString(q), issueKeySpRE.MatchString(q), longKey(q):
+	case issueKeyRE.MatchString(q), spacedKey(q), longKey(q):
 		return ReasonIssueKey
 	case credentialRE.MatchString(q):
 		return ReasonCredential
@@ -200,6 +201,19 @@ func patternReason(q string) string {
 	return ""
 }
 
+// spacedKey reports "RHAIENG 1234": an upper-case key of 4 or more
+// characters and a number of 4 or more digits that is not a version. A
+// short or public-looking one ("TLS 1.3", "HTTP 2", "RHEL 10", "ISO
+// 27001") passes unless the planner saw it (seenKey).
+func spacedKey(q string) bool {
+	for _, m := range issueKeySpRE.FindAllStringSubmatch(q, -1) {
+		if m[3] == "" && len(m[1]) >= 4 && len(m[2]) >= 4 {
+			return true
+		}
+	}
+	return false
+}
+
 // longKey reports a key in any case whose number has 4 or more digits
 // (rhaieng-1234); a short one (gpt-4, sha-256) passes unless the planner
 // saw it (privateKeys).
@@ -212,13 +226,18 @@ func longKey(q string) bool {
 	return false
 }
 
-// privateKeys is every issue-key-shaped word in the private inputs, upper
-// case.
+// privateKeys is every issue key in the private inputs, as KEY-NUMBER in
+// upper case: dashed in any case, or spaced with an upper-case key ("OSD
+// 12"; a lower-case word and a number, "november 2026", is not a key).
 func privateKeys(p Private) map[string]bool {
 	out := map[string]bool{}
 	add := func(s string) {
-		for _, k := range anyKeyRE.FindAllString(normalize(s), -1) {
+		s = normalize(s)
+		for _, k := range anyKeyRE.FindAllString(s, -1) {
 			out[strings.ToUpper(k)] = true
+		}
+		for _, m := range issueKeySpRE.FindAllStringSubmatch(s, -1) {
+			out[m[1]+"-"+m[2]] = true
 		}
 	}
 	for _, s := range append([]string{p.Question, p.PageText, p.Notes}, append(append(p.Prior, p.ToolInputs...), p.ToolOutputs...)...) {
@@ -227,10 +246,16 @@ func privateKeys(p Private) map[string]bool {
 	return out
 }
 
-// seenKey reports a key in q, any case, that the planner saw.
+// seenKey reports a key in q, any case, dashed or spaced, that the
+// planner saw.
 func seenKey(q string, keys map[string]bool) bool {
 	for _, k := range anyKeyRE.FindAllString(q, -1) {
 		if keys[strings.ToUpper(k)] {
+			return true
+		}
+	}
+	for _, m := range anySpacedKeyRE.FindAllStringSubmatch(q, -1) {
+		if keys[strings.ToUpper(m[1])+"-"+m[2]] {
 			return true
 		}
 	}

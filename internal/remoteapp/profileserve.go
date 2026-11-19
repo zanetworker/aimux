@@ -69,6 +69,7 @@ func (p *profileWiring) Install(api *remoteapi.API, scopes clientscope.Scopes, s
 	}
 	api.NewProfileSession, api.CancelProfileSession = p.newSession, p.cancelSession
 	api.ProfileHealth, api.StepUpLegacy = p.router.Health, stepUpLegacy
+	api.ProfileSessionLive = p.live
 }
 
 // servedCatalog is the catalog the API serves: a profile whose Runs has no
@@ -165,7 +166,7 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	// the writer on the page engine; Resolve checks roles as the catalog does.
 	run := &profilerun.RunEngine{Planner: p.sandbox, Reader: p.sandbox, Writer: page, Compile: compile,
 		Resolve: func(name string) (profile.Manifest, error) { return resolveChecked(dir, name) },
-		Store:   p.store, Log: logger}
+		Store:   p.store, Log: logger, ArchiveDir: p.sandbox.ArchiveDir}
 	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox, "run": run}
 	return func() {
 		p.pageMgr.Close()
@@ -352,7 +353,8 @@ func compileProfile(snap toolreg.Snapshot, dir, name string) (profile.Compiled, 
 }
 
 // adopt makes the sandbox sessions in the store known to the sandbox
-// engine again (a restart), and marks run sessions Lost. A started one resumes. One whose first turn
+// engine again (a restart). Run sessions are not adopted: the run engine
+// holds them in memory only, and live says so to page reuse. A started one resumes. One whose first turn
 // never started cannot (claude never made its id) and its page is not
 // stored, so the engine drops it, and it is hidden here so its page starts
 // a new session rather than reaching the dropped one. A store that cannot be
@@ -367,17 +369,7 @@ func (p *profileWiring) adopt(errOut io.Writer) {
 		return
 	}
 	for id, m := range all {
-		runs, err := p.runs(m.Profile)
-		if err == nil && runs == "run" && !m.Lost {
-			// A run session lives only in the process that ran it: keep it
-			// in history, but a page request starts a new one.
-			m.Lost = true
-			if err := p.store.Put(id, m); err != nil {
-				_, _ = fmt.Fprintf(errOut, "profile session %s: mark the run session lost: %v\n", id, err)
-			}
-			continue
-		}
-		if err != nil || runs != "sandbox" {
+		if runs, err := p.runs(m.Profile); err != nil || runs != "sandbox" {
 			continue
 		}
 		p.sandbox.Adopt(id, m, nil) // the store keeps no page
@@ -436,6 +428,23 @@ func (p *profileWiring) cancelSession(id string) error {
 	return e.Cancel(id)
 }
 
+// live reports whether a recorded profile session can still run here, for
+// page reuse: false only for a run session the run engine does not hold
+// (lost when remote serve restarted, or another remote serve's). It reads
+// the store and writes nothing, so two serve processes sharing the store
+// never mark each other's sessions.
+func (p *profileWiring) live(id string) bool {
+	m, ok := p.store.Get(id)
+	if !ok {
+		return true
+	}
+	if runs, err := p.runs(m.Profile); err != nil || runs != "run" {
+		return true
+	}
+	e, ok := p.engines["run"].(profilerun.Checker)
+	return ok && e.Check(id) == nil
+}
+
 // owns reports whether pid is an adapter process of the page engine, which
 // holds its session in Claude's registry without being a terminal.
 func (p *profileWiring) owns(pid int) bool { return p.pageMgr != nil && p.pageMgr.Owns(pid) }
@@ -473,6 +482,11 @@ func (p *profileWiring) archived(id string) string {
 	if !ok {
 		return ""
 	}
+	// A run's own transcript is read whatever its profile is now (removed
+	// or renamed): history does not depend on the profile resolving.
+	if f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, id); discovery.ValidSessionID(id) && fileExists(f) {
+		return f
+	}
 	if runs, err := p.runs(m.Profile); err != nil || runs != "sandbox" {
 		return ""
 	}
@@ -499,4 +513,10 @@ func openshellGatewayCheck(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// fileExists reports a regular file at path.
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }

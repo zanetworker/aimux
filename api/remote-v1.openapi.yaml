@@ -121,12 +121,13 @@ info:
     `Retry-After`. Nothing starts on any refusal.
 
     Auto mode: `POST /v1/route` picks the mode a question needs (`page`,
-    `web` or `workspace`, run under the profiles `page`, `research` and
-    `work-readonly`) among the modes whose profile the caller's client may
+    `web`, `workspace` or `both`, run under the profiles `page`, `research`,
+    `work-readonly` and `research-with-work`; `both` only when the client
+    may use `research` and `work-readonly` too) among the modes whose profile the caller's client may
     use and the Mac can run. Only the question and three facts go to the
     decision model (OpenRouter, zero data retention providers only); never
-    page text, titles or URLs. A question starting with `@page`, `@web` or
-    `@workspace` skips the model. The answer is always `200`: without a
+    page text, titles or URLs. A question starting with `@page`, `@web`,
+    `@workspace` or `@both` skips the model. The answer is always `200`: without a
     key, a working model or a confident pick it is `decided: false` with a
     suggested mode for the client to confirm. `routed` on the
     `POST /v1/sessions` that follows records in the Mac's decision log
@@ -962,7 +963,7 @@ paths:
       summary: Pick the mode a question needs (Auto)
       description: >
         Rate limited to 60 calls a minute per client (`429 client_limit`
-        with `Retry-After`); overrides (`@page`, `@web`, `@workspace`) are
+        with `Retry-After`); overrides (`@page`, `@web`, `@workspace`, `@both`) are
         not counted, and all paired devices of a client share its budget. It
         counts toward no session or turn limit.
         `400 bad_request` for an empty `text` or any field not listed.
@@ -1478,6 +1479,7 @@ components:
 
     SessionDetail:
       type: object
+      description: "A research-with-work session's turns are read from its own transcript (each completed turn's question and final answer, never the stages' private inputs), also after remote serve restarted, when the run itself can no longer continue."
       additionalProperties: false
       required: [id, provider, title, project, lastActive, state, pinned, turns]
       properties:
@@ -1817,7 +1819,7 @@ components:
         text: { type: string, minLength: 1 }
         key: { type: string, description: "Idempotency key for retries." }
         profile: { type: string, description: "Run the session under this profile (one of `GET /v1/profiles` with `allowed`)." }
-        url: { type: string, description: "With profile: the page the question is about; the same client, url and profile continue one session." }
+        url: { type: string, description: "With profile: the page the question is about; the same client, url and profile continue one session, unless this remote serve cannot run it any more (a research-with-work session after a restart, or one another remote serve holds): then a new session starts. A message to the old id answers 409 not_running." }
         title: { type: string, description: "With profile: the page's title." }
         pageText: { type: string, description: "With profile: the page's text for a new session, at most 512 KiB (else 413 page_too_large). Ignored when the session continues." }
         model: { type: string, enum: [sonnet, opus], description: "With profile: this turn's model; omitted keeps the profile's default. Any other value is 400 bad_request." }
@@ -1837,7 +1839,7 @@ components:
           type: object
           additionalProperties: false
           required: [mimeType, data]
-          description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): one image pasted into the question (a screenshot). The model sees it after the prompt text, framed as untrusted data from the user's screen like page text: instructions in it are never followed. A mimeType other than these, data that is not plain base64 (no `data:` prefix, no line breaks), bytes that are not of the stated type, or more than 1,572,864 bytes (1.5 MiB) of base64 is 400 image_invalid. Events and history show only the question text; the agent's own transcript keeps the image."
+          description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): one image pasted into the question (a screenshot). The model sees it after the prompt text, framed as untrusted data from the user's screen like page text: instructions in it are never followed. A mimeType other than these, data that is not plain base64 (no `data:` prefix, no line breaks), bytes that are not of the stated type, or more than 1,572,864 bytes (1.5 MiB) of base64 is 400 image_invalid. A run profile (research-with-work) takes no image; one sent is accepted and its turn ends in a turn_error with code image_invalid. Events and history show only the question text; the agent's own transcript keeps the image."
           properties:
             mimeType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
             data: { type: string, maxLength: 1572864, description: "The image bytes in standard base64." }
@@ -1847,7 +1849,7 @@ components:
       additionalProperties: false
       required: [text]
       properties:
-        text: { type: string, minLength: 1, description: "The question as typed, with any @page, @web or @workspace prefix. At most 2,000 characters reach the model." }
+        text: { type: string, minLength: 1, description: "The question as typed, with any @page, @web, @workspace or @both prefix. At most 2,000 characters reach the model." }
         facts:
           type: object
           additionalProperties: false
@@ -1862,7 +1864,7 @@ components:
       required: [mode, profile, confidence, probabilities, decided, source, text]
       properties:
         mode: { type: string, enum: [page, web, workspace, both, ""], description: "both is research-with-work (workspace and web together), offered only when the client may use research, work-readonly and research-with-work. The pick, or the suggestion when not decided. Empty when no mode is in scope, for override_blocked, and for reason steering." }
-        profile: { type: string, description: "The profile mode runs under (page, research, work-readonly); empty with mode." }
+        profile: { type: string, description: "The profile mode runs under (page, research, work-readonly, research-with-work); empty with mode." }
         confidence: { type: number, minimum: 0, maximum: 1 }
         probabilities: { type: object, additionalProperties: { type: number }, description: "Over the allowed modes only; empty when the model was not asked or did not answer." }
         decided: { type: boolean, description: "True for an override and for a confident model pick; otherwise the client asks the person, with mode preselected." }
@@ -1878,7 +1880,7 @@ components:
       properties:
         name: { type: string }
         runs: { type: string, enum: [host, acp, sandbox, run], description: "host: on the Mac itself, with the owner's settings. acp and sandbox: confined sessions." }
-        available: { type: boolean, description: "False for a profile the Mac cannot run yet, including host and run profiles, which have no engine yet (409 profile_not_available)." }
+        available: { type: boolean, description: "False for a profile the Mac cannot run yet, including host profiles, which have no engine yet (409 profile_not_available). A run profile (research-with-work) is available when its roles check." }
         digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$", description: "Of the resolved manifest; changes whenever the profile does." }
         allowed: { type: boolean, description: "The caller's client may ask for it." }
 

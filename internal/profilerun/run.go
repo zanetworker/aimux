@@ -6,13 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/errcode"
+	claudehistory "github.com/zanetworker/aimux/internal/history"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/runcheck"
 	"github.com/zanetworker/aimux/internal/toolreg"
@@ -45,6 +50,9 @@ type RunEngine struct {
 	// Store records each turn's RunState; nil keeps it in memory only.
 	Store *Store
 	Log   *slog.Logger
+	// ArchiveDir is where each run session's own transcript (its questions
+	// and answers) is kept (RunTranscriptPath); "" keeps none.
+	ArchiveDir string
 
 	mu       sync.Mutex
 	sessions map[string]*runSession
@@ -217,7 +225,8 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 	e.save(session, st)
 	notice("Writing the answer")
 	wctx := WithPrior(ctx, nil)
-	if _, err := e.stage(wctx, session, &st, "writer", e.Writer, childMeta(s.meta, writerProfile), "", writerPrompt(text, p.PrivateNotes, findings, st.Links, st.Rejected, len(st.Accepted) > 0), "", onEvent, true); err != nil {
+	answer, err := e.stage(wctx, session, &st, "writer", e.Writer, childMeta(s.meta, writerProfile), "", writerPrompt(text, p.PrivateNotes, findings, st.Links, st.Rejected, len(st.Accepted) > 0), "", onEvent, true)
+	if err != nil {
 		if ctx.Err() != nil {
 			return fail(ctx.Err())
 		}
@@ -225,6 +234,7 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 	}
 	st.Stage = StageDone
 	e.save(session, st)
+	e.appendTranscript(session, text, answer)
 	SetTurnLinks(ctx, slices.Clone(st.Links))
 	return "end_turn", nil
 }
@@ -313,6 +323,74 @@ func (e *RunEngine) save(session string, st RunState) {
 			log = slog.Default()
 		}
 		log.Warn("run session: stage state not recorded", "session", session, "err", err)
+	}
+}
+
+// sessionIDRE is a run session id as New makes it (a UUID): only such an
+// id names a transcript file.
+var sessionIDRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// RunTranscriptPath is session's own transcript under archiveDir: its
+// questions and final answers in Claude's JSONL shape, the file the
+// session detail reads (the stages' child transcripts hold the private
+// inputs, never shown as the conversation). Its folder is one the search
+// index and session lists skip (history.WingmanRunsDirName): the answers
+// can carry private workspace detail.
+func RunTranscriptPath(archiveDir, session string) string {
+	return filepath.Join(archiveDir, claudehistory.WingmanRunsDirName(), session+".jsonl")
+}
+
+// appendTranscript adds one finished turn to session's transcript. A
+// failure is logged, never the turn's.
+func (e *RunEngine) appendTranscript(session, question, answer string) {
+	if e.ArchiveDir == "" || !sessionIDRE.MatchString(session) {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	type textBlock struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	type message struct {
+		Role    string `json:"role"`
+		Content any    `json:"content"`
+	}
+	type line struct {
+		Type      string  `json:"type"`
+		SessionID string  `json:"sessionId"`
+		Timestamp string  `json:"timestamp"`
+		Message   message `json:"message"`
+	}
+	var buf strings.Builder
+	for _, l := range []line{
+		{Type: "user", SessionID: session, Timestamp: now, Message: message{Role: "user", Content: question}},
+		{Type: "assistant", SessionID: session, Timestamp: now, Message: message{Role: "assistant", Content: []textBlock{{Type: "text", Text: answer}}}},
+	} {
+		b, err := json.Marshal(l)
+		if err != nil {
+			continue
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	path := RunTranscriptPath(e.ArchiveDir, session)
+	err := os.MkdirAll(filepath.Dir(path), 0o700)
+	if err == nil {
+		var f *os.File
+		if f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil { //nolint:gosec // G304: path is ArchiveDir plus a checked session UUID
+
+			_, err = f.WriteString(buf.String())
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+		}
+	}
+	if err != nil {
+		log := e.Log
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("run session: transcript not written", "session", session, "err", err)
 	}
 }
 

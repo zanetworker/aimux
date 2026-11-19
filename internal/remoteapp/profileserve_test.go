@@ -387,10 +387,11 @@ func TestServedCatalog_ResearchWithWorkAvailable(t *testing.T) {
 	}
 }
 
-// Run sessions live only in the process: after a restart each recorded one
-// is marked Lost (kept in history, never continued by a page request),
-// while sandbox sessions are adopted as before.
-func TestProfileWiring_RestartMarksRunSessionsLost(t *testing.T) {
+// Run sessions live only in the process that ran them. A restart writes
+// nothing to the shared store (another remote serve may own those
+// sessions); page reuse asks the serving engine instead: a run session it
+// does not know is not live, a sandbox session it adopted is.
+func TestProfileWiring_DeadRunSessionNotLive(t *testing.T) {
 	home := t.TempDir()
 	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
 	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
@@ -401,21 +402,86 @@ func TestProfileWiring_RestartMarksRunSessionsLost(t *testing.T) {
 	if err := store.Put(sb, profilerun.Meta{Profile: "work-readonly", Client: "wingman", URL: "https://x.example/", Created: at, Started: true}); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.ReadFile(store.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeAll()
-	if m, _ := p.store.Get(run); !m.Lost || m.Hidden {
-		t.Fatalf("run session = %+v, want Lost and not hidden", m)
+	if after, _ := os.ReadFile(store.Path); string(after) != string(before) {
+		t.Fatal("startup rewrote the shared profile store")
 	}
-	if m, _ := p.store.Get(sb); m.Lost {
-		t.Fatal("a sandbox session was marked lost")
+	if p.live(run) {
+		t.Fatal("a run session this process does not hold is live")
 	}
-	if _, ok := p.store.FindPage("wingman", "", "https://x.example/", "research-with-work", false, false); ok {
-		t.Fatal("a page request would continue the lost run session")
+	if !p.live(sb) {
+		t.Fatal("an adopted sandbox session is not live")
 	}
-	if err := p.router.Check(run); err == nil {
-		t.Fatal("Check of the lost run session = nil, want it reported")
+	if !p.live("not-a-profile-session") {
+		t.Fatal("a session without Meta must not be judged here")
+	}
+	api := &remoteapi.API{}
+	p.Install(api, clientscope.Defaults(), false)
+	if api.ProfileSessionLive == nil || api.ProfileSessionLive(run) {
+		t.Fatal("Install did not set ProfileSessionLive")
+	}
+}
+
+// A run session's turns are kept as its own transcript in aimux's archive
+// (question and answer), which the session detail reads after a restart.
+func TestProfileWiring_ArchivedNamesRunTranscript(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	const run = "88888888-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "research-with-work", Client: "wingman"}); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	re := p.engines["run"].(*profilerun.RunEngine)
+	if re.ArchiveDir != p.sandbox.ArchiveDir {
+		t.Fatalf("run ArchiveDir %q, want the sandbox archive %q", re.ArchiveDir, p.sandbox.ArchiveDir)
+	}
+	f := profilerun.RunTranscriptPath(re.ArchiveDir, run)
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.archived(run); got != f {
+		t.Fatalf("archived(run) = %q, want %q", got, f)
+	}
+}
+
+// A run session's transcript is read even when its profile no longer
+// resolves (removed or renamed): history does not depend on the profile.
+func TestProfileWiring_ArchivedRunWithoutItsProfile(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	const run = "99999999-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "my-gone-run", Client: "wingman"}); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, run)
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.archived(run); got != f {
+		t.Fatalf("archived = %q, want %q", got, f)
 	}
 }
