@@ -13,6 +13,8 @@ const (
 	ImageInvalid          = "image_invalid"            // a question's image is refused
 	ProfileUnavailable    = "profile_unavailable"      // the turn's profile does not resolve or compile
 	SandboxGatewayDown    = "sandbox_gateway_down"     // the OpenShell gateway is not reachable
+	ServerPortInUse       = "server_port_in_use"       // a managed server's port is taken by a process aimux did not start
+	ServerCrashLoop       = "server_crash_loop"        // a managed server crashed 5 times in 5 minutes and is not restarted
 )
 
 var messages = map[string]string{
@@ -21,6 +23,8 @@ var messages = map[string]string{
 	ImageInvalid:          "The image cannot be used: paste a PNG, JPEG, WebP or GIF of at most 1.5 MiB",
 	ProfileUnavailable:    "This mode's profile could not be loaded: run aimux profile check",
 	SandboxGatewayDown:    "The OpenShell gateway is not reachable: check it with openshell -g local status",
+	ServerPortInUse:       "A server's port is in use by a process aimux did not start: check aimux servers status",
+	ServerCrashLoop:       "A server keeps crashing and is no longer restarted: check aimux servers status, then aimux servers restart",
 }
 
 // Message is code's message for a person; "" for an unknown code.
