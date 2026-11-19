@@ -22,6 +22,10 @@ const wildcard = "*"
 // cliClient is the only client allowed the wildcard.
 const cliClient = "cli"
 
+// StepUpMacConfirm is the step-up kind of a native confirm dialog on the
+// Mac: aimux asks the person there, the client cannot answer it.
+const StepUpMacConfirm = "mac-confirm"
+
 const (
 	wingmanClient = "wingman"
 	deviceClient  = "device"
@@ -41,7 +45,7 @@ type Client struct {
 	StepUpKinds    []string `yaml:"step_up_kinds"`
 	// ToolsApprove lets the client approve tool definitions (POST
 	// /v1/tools/approve), each time after a step-up of one of StepUpKinds.
-	// Off for every client unless clients.yaml turns it on.
+	// On by default only for wingman (with mac-confirm).
 	ToolsApprove bool `yaml:"tools_approve"`
 }
 
@@ -61,6 +65,10 @@ func Defaults() Scopes {
 			Socket:         filepath.Join(home, ".aimux", "clients", "wingman.sock"),
 			MaxSessions:    2,
 			TurnsPerMinute: 20,
+			// Approving a changed tool from the panel needs the person at
+			// the Mac to click Approve in aimux's dialog each time.
+			ToolsApprove: true,
+			StepUpKinds:  []string{StepUpMacConfirm},
 		},
 		"device": {
 			Profiles:    append(append([]string(nil), base...), "coding"),

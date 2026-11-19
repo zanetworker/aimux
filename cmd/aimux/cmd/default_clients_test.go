@@ -9,9 +9,9 @@ import (
 	"github.com/zanetworker/aimux/internal/clientscope"
 )
 
-// The clients.yaml setup writes names tools_approve for Wingman, off, and
-// loads as the defaults do.
-func TestWriteDefaultClients_ListsToolsApproveOff(t *testing.T) {
+// The clients.yaml setup writes turns tools_approve on for Wingman with the
+// mac-confirm step-up, and loads as the defaults do.
+func TestWriteDefaultClients_ListsToolsApproveWithMacConfirm(t *testing.T) {
 	home := t.TempDir()
 	if err := writeDefaultClients(home, func(string, ...any) {}); err != nil {
 		t.Fatal(err)
@@ -21,11 +21,11 @@ func TestWriteDefaultClients_ListsToolsApproveOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "    tools_approve: false\n") {
+	if !strings.Contains(string(b), "    tools_approve: true\n") || !strings.Contains(string(b), "    step_up_kinds: [mac-confirm]\n") {
 		t.Fatalf("clients.yaml:\n%s", b)
 	}
 	s, err := clientscope.Load(p)
-	if err != nil || s.Clients["wingman"].ToolsApprove {
-		t.Fatalf("err %v, wingman approve %v", err, s.Clients["wingman"].ToolsApprove)
+	if w := s.Clients["wingman"]; err != nil || !w.ToolsApprove || len(w.StepUpKinds) != 1 || w.StepUpKinds[0] != clientscope.StepUpMacConfirm {
+		t.Fatalf("err %v, wingman %+v", err, s.Clients["wingman"])
 	}
 }

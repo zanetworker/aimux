@@ -930,7 +930,9 @@ paths:
         `aimux tools approve`. Needs `tools_approve: true` for the client in clients.yaml
         (off by default; `403 forbidden_for_client`) and, on every request, a
         device login under 60 seconds old from a kind in the client's
-        `step_up_kinds` (`403 step_up_required` with `maxAge`; a client with
+        `step_up_kinds`, or, with the kind `mac-confirm`, Approve in a dialog
+        aimux shows on the Mac once every other check passed
+        (`403 step_up_required`, with `maxAge` for a device login; a client with
         no kinds, a local socket and a token that is not a device session,
         such as a sandbox's tool gateway token, never pass). The set must be
         requested by a profile in the client's scope. `400 bad_request` for
@@ -1223,6 +1225,7 @@ components:
             - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
             - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source's address or hidden request details changed; approve it on the Mac
             - pins_busy                # 503: POST /v1/tools/approve: another approval held the pins lock for 5 s; try again
+            - confirm_pending          # 503: POST /v1/tools/approve: an approval is already waiting in the dialog on the Mac; answer it, then try again
             - pin_stale                # 409: POST /v1/tools/approve: a tool's live definition is not the one the client showed (or is not listed); nothing approved
 
     Health:

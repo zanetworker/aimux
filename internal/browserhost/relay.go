@@ -118,6 +118,10 @@ type inflight struct {
 	mu       sync.Mutex
 	canceled bool
 	session  string // the v1 session, once known
+	// abort: cancelling ends the request itself (a tool approval, so the
+	// dialog on the Mac closes and nothing is approved after the panel let
+	// go); a session's turn is stopped with a v1 cancel instead.
+	abort bool
 }
 
 func (s *relaySession) dispatch(ctx context.Context, msg []byte) {
@@ -139,7 +143,7 @@ func (s *relaySession) dispatch(ctx context.Context, msg []byte) {
 		return
 	}
 	rctx, rcancel := context.WithCancel(ctx)
-	f := &inflight{cancel: rcancel}
+	f := &inflight{cancel: rcancel, abort: strings.HasPrefix(req.Type, "tools.")}
 	s.mu.Lock()
 	if s.inflight[req.ID] != nil {
 		s.mu.Unlock()
@@ -224,6 +228,28 @@ func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emi
 			fail(err)
 			return
 		}
+		emit(Event{Type: "done"})
+	case "tools.diff":
+		var out json.RawMessage
+		if err := s.call(ctx, http.MethodGet, "/v1/tools/"+url.PathEscape(req.Set)+"/diff", nil, &out); err != nil {
+			fail(err)
+			return
+		}
+		emit(Event{Type: "tools_diff", Data: out})
+		emit(Event{Type: "done"})
+	case "tools.approve":
+		// The step-up happens on the Mac (a dialog aimux shows); this only
+		// forwards what the panel showed and the answer.
+		var out json.RawMessage
+		body := map[string]any{"set": req.Set, "tools": req.Tools}
+		if req.Snapshot != "" {
+			body["snapshot"] = req.Snapshot
+		}
+		if err := s.call(ctx, http.MethodPost, "/v1/tools/approve", body, &out); err != nil {
+			fail(err)
+			return
+		}
+		emit(Event{Type: "tools_approved", Data: out})
 		emit(Event{Type: "done"})
 	default:
 		fail(errors.New("unknown request type: " + req.Type))
@@ -343,9 +369,12 @@ func (s *relaySession) cancel(id string) {
 	}
 	session := f.session
 	f.mu.Unlock()
-	if session != "" {
+	switch {
+	case session != "":
 		s.postCancel(session)
 		f.cancel() // stop following the stream
+	case f.abort:
+		f.cancel()
 	}
 }
 

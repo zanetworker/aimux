@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/macconfirm"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/remoteapi"
@@ -66,6 +68,11 @@ func (p *profileWiring) Install(api *remoteapi.API, scopes clientscope.Scopes, s
 	api.Profiles, api.Scopes, api.ProfileSessions, api.Tools, api.Pins = p.servedCatalog, scopes, p.store, p.tools, p.pins
 	if p.relist != nil {
 		api.Relist = p.relist
+	}
+	// The mac-confirm step-up: a native dialog on this Mac, which a client
+	// can ask for but never answer. None elsewhere.
+	if runtime.GOOS == "darwin" {
+		api.MacConfirm = macconfirm.System.Confirm
 	}
 	api.NewProfileSession, api.CancelProfileSession = p.newSession, p.cancelSession
 	api.ProfileHealth, api.StepUpLegacy = p.router.Health, stepUpLegacy
