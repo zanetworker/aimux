@@ -106,7 +106,9 @@ info:
     each of their requests writes an audit line (client, action, profile,
     digest, the page's host, result; never text, pages, tokens or full
     URLs). Local clients other than `cli` reach only health, the contract,
-    the profiles, the session list, new sessions, `POST /v1/route` and, for the sessions
+    the profiles, the tool sets (`GET /v1/tools`; the diff and approve
+    routes also need `tools_approve`, and approve a step-up, `mac-confirm`
+    for a local client), the session list, new sessions, `POST /v1/route` and, for the sessions
     they started, the detail, events, messages, cancel and meta (any
     other session is `404 not_found`); every other route, describe and
     the queue routes included, is `403 forbidden_for_client`. A follow-up message counts
@@ -930,13 +932,16 @@ paths:
         request details, which the diff leaves out, differ from the
         approved definition's). Pins are written under the same lock as
         `aimux tools approve`. Needs `tools_approve: true` for the client in clients.yaml
-        (off by default; `403 forbidden_for_client`) and, on every request, a
+        (off by default except for Wingman, which a new clients.yaml gives
+        `tools_approve: true` with `step_up_kinds: [mac-confirm]`, so it
+        approves over its local socket; `403 forbidden_for_client`) and, on every request, a
         device login under 60 seconds old from a kind in the client's
         `step_up_kinds`, or, with the kind `mac-confirm`, Approve in a dialog
         aimux shows on the Mac once every other check passed
         (`403 step_up_required`, with `maxAge` for a device login; a client with
-        no kinds, a local socket and a token that is not a device session,
-        such as a sandbox's tool gateway token, never pass). The set must be
+        no kinds and a token that is not a device session, such as a
+        sandbox's tool gateway token, never pass; a local socket has no
+        device login, so it passes only with `mac-confirm`). The set must be
         requested by a profile in the client's scope. `400 bad_request` for
         no tools, more than 100, a tool the set does not list, or a field
         not listed.
@@ -1889,7 +1894,7 @@ components:
       required: [name, runs, available, digest, allowed]
       properties:
         name: { type: string }
-        runs: { type: string, enum: [host, acp, sandbox, run], description: "host: on the Mac itself, with the owner's settings. acp and sandbox: confined sessions." }
+        runs: { type: string, enum: [host, acp, sandbox, run], description: "host: on the Mac itself, with the owner's settings. acp and sandbox: confined sessions. run: a multi-stage run whose roles run under other profiles (research-with-work)." }
         available: { type: boolean, description: "False for a profile the Mac cannot run yet, including host profiles, which have no engine yet (409 profile_not_available). A run profile (research-with-work) is available when its roles check." }
         digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$", description: "Of the resolved manifest; changes whenever the profile does." }
         allowed: { type: boolean, description: "The caller's client may ask for it." }

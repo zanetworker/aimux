@@ -7,7 +7,7 @@ import (
 
 // Request is one message from the Wingman side panel.
 // Type is ask | route | history.list | history.get | history.delete |
-// tools.diff | tools.approve | cancel.
+// tools.diff | tools.approve | profiles.list | cancel.
 type Request struct {
 	ID       string `json:"id"`
 	Type     string `json:"type"`
@@ -74,7 +74,8 @@ type Routed struct {
 }
 
 // Event is one message streamed back to the side panel.
-// Type is delta | tool_call | done | error | history | route | status. A
+// Type is delta | tool_call | done | error | history | route | status |
+// tools_diff | tools_approved | profiles. A
 // status (route requests only) has Text starting or routing. A tool_call's
 // Text is its snippet (a WebFetch's url), when it has one; a route's is the
 // question with any @mode prefix removed, and its other fields are the
@@ -86,7 +87,9 @@ type Event struct {
 	// profile names them): the panel opens each one's diff.
 	Sets []string `json:"sets,omitempty"`
 	// Data is the API's answer to tools.diff (Type tools_diff) and
-	// tools.approve (Type tools_approved), as is.
+	// tools.approve (Type tools_approved), as is; on a profiles event (to
+	// profiles.list) it is {"profiles": [{name, runs, available, digest}]},
+	// only the profiles this client may use.
 	Data  json.RawMessage `json:"data,omitempty"`
 	Text  string          `json:"text,omitempty"`
 	Tool  string          `json:"tool,omitempty"`
