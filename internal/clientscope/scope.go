@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -207,6 +208,11 @@ func (f fileClient) validate(name string) error {
 	}
 	if name == deviceClient && f.StepUpKinds != nil && len(f.StepUpKinds) == 0 {
 		return fmt.Errorf("client %q: step_up_kinds must not be empty", name)
+	}
+	// The dialog appears on the Mac: a remote device's request would be
+	// approved by whoever is at the Mac, not by the person on the device.
+	if name == deviceClient && slices.Contains(f.StepUpKinds, StepUpMacConfirm) {
+		return fmt.Errorf("client %q: step_up_kind %s is for local clients only (the person approving must be at the Mac); use secure-enclave", name, StepUpMacConfirm)
 	}
 	return nil
 }

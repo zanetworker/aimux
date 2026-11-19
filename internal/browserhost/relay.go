@@ -781,6 +781,7 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 			Title   string `json:"title"`
 			Status  string `json:"status"`
 			Content json.RawMessage
+			Sets    []string `json:"sets"` // an aimux_notice's held tools' sets
 		}
 		if json.Unmarshal(ev.Data, &u) != nil {
 			return false, nil
@@ -800,7 +801,7 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 				Text string `json:"text"`
 			}
 			if json.Unmarshal(u.Content, &c) == nil && c.Type == "text" && c.Text != "" {
-				emit(Event{Type: "notice", Text: c.Text})
+				emit(Event{Type: "notice", Text: c.Text, Sets: u.Sets})
 			}
 		case "tool_call":
 			ev := Event{Type: "tool_call", Tool: u.Title}

@@ -2192,11 +2192,15 @@ components:
         own, aimux_notice ({"sessionUpdate": "aimux_notice", "content":
         {"type": "text", "text": ...}}): a line for the user, not the
         agent's, sent at most once per sandbox turn before the answer when
-        tools of the profile's sets are held for review. Clients that do not
-        know it can skip it.
+        tools of the profile's sets are held for review, with an optional
+        "sets" (string array, sorted, each once): the sets, as the profile
+        names them, whose tools are held; a client can open GET
+        /v1/tools/{set}/diff for each. Absent when no held tool is in a set.
+        Clients that do not know it can skip it.
       required: [sessionUpdate]
       properties:
         sessionUpdate: { type: string }
+        sets: { type: array, items: { type: string }, description: "aimux_notice only: the sets of the held tools." }
 
     ApprovalData:
       type: object

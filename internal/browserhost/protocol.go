@@ -82,6 +82,9 @@ type Routed struct {
 type Event struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
+	// Sets, on a notice of tools held for review, is their sets (as the
+	// profile names them): the panel opens each one's diff.
+	Sets []string `json:"sets,omitempty"`
 	// Data is the API's answer to tools.diff (Type tools_diff) and
 	// tools.approve (Type tools_approved), as is.
 	Data  json.RawMessage `json:"data,omitempty"`

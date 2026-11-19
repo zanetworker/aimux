@@ -26,4 +26,5 @@ type LaneEvent struct {
 	Type string
 	Text string
 	Tool string
+	Sets []string // a notice's held tools' sets
 }

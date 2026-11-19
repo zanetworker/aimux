@@ -1,6 +1,9 @@
 package clientscope
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // By default only Wingman may approve tools, each time after the person at
 // the Mac confirms (mac-confirm); the device client keeps secure-enclave and
@@ -32,5 +35,17 @@ func TestToolsApprove_DefaultsAndFile(t *testing.T) {
 	s, err = Load(write(t, "clients:\n  device:\n    max_sessions: 3\n"))
 	if err != nil || s.Clients["device"].ToolsApprove {
 		t.Fatalf("err %v, approve %v", err, s.Clients["device"].ToolsApprove)
+	}
+}
+
+// mac-confirm is for local clients only: the person approving must be at
+// the Mac, so the device client (tailnet) cannot use it.
+func TestLoad_DeviceMacConfirmRefused(t *testing.T) {
+	_, err := Load(write(t, "clients:\n  device:\n    step_up_kinds: [secure-enclave, mac-confirm]\n"))
+	if err == nil || !strings.Contains(err.Error(), "mac-confirm") || !strings.Contains(err.Error(), "device") {
+		t.Fatalf("err %v, want a refusal naming mac-confirm and device", err)
+	}
+	if _, err := Load(write(t, "clients:\n  wingman:\n    step_up_kinds: [mac-confirm]\n")); err != nil {
+		t.Fatalf("wingman with mac-confirm: %v", err)
 	}
 }

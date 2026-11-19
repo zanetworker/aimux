@@ -547,7 +547,10 @@ func confirmText(client, set, source string, tools []ToolApproveEntry, v ToolsVi
 	return b.String()
 }
 
-// changeSummary is one line on what approving changes for a tool.
+// changeSummary is what approving changes for a tool: "changed", then
+// each changed field on its own line with its value before and after (cut
+// to about 60 characters). Every field is listed: a batch too long for the
+// dialog is refused rather than shown in part.
 func changeSummary(ch toolgateway.Change) string {
 	switch ch.Kind {
 	case "":
@@ -555,21 +558,35 @@ func changeSummary(ch toolgateway.Change) string {
 	case toolgateway.KindAdded:
 		return "new, not approved before"
 	}
-	var paths []string
+	var lines []string
 	for _, f := range ch.Fields {
-		if !strings.Contains(f.Path, "x-aimux-") { // aimux's own annotations stay on the Mac's review
-			paths = append(paths, f.Path)
+		if strings.Contains(f.Path, "x-aimux-") { // aimux's own annotations stay on the Mac's review
+			continue
 		}
+		lines = append(lines, "    "+f.Path+": "+shortValue(f.Before)+" -> "+shortValue(f.After))
 	}
 	switch {
-	case len(paths) == 0 && ch.Note != "":
+	case len(lines) == 0 && ch.Note != "":
 		return "changed (" + ch.Note + ")"
-	case len(paths) == 0:
+	case len(lines) == 0:
 		return "changed"
-	case len(paths) > 3:
-		return fmt.Sprintf("changed: %s and %d more", strings.Join(paths[:3], ", "), len(paths)-3)
 	}
-	return "changed: " + strings.Join(paths, ", ")
+	return "changed\n" + strings.Join(lines, "\n")
+}
+
+// maxShownValue is how much of a field value the dialog shows.
+const maxShownValue = 60
+
+// shortValue is v for the dialog: "(none)" when absent, else cut to
+// maxShownValue characters with an ellipsis.
+func shortValue(v string) string {
+	if v == "" {
+		return "(none)"
+	}
+	if r := []rune(v); len(r) > maxShownValue {
+		return string(r[:maxShownValue-1]) + "…"
+	}
+	return v
 }
 
 // noteTools puts ta on the request's audit line: the local note, or the

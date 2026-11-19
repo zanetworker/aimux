@@ -233,7 +233,8 @@ func (tg toolGatewayParts) review(dir string) func(c profile.Compiled) profileru
 		reg := c.Snapshot.Registry()
 		held := toolgateway.HeldBack(reg, toolgateway.PinsOf(c.Snapshot), toolgateway.LiveFor(reg, obs), m.Tools)
 		left := toolgateway.LeftOut(held, c.Grant.Scope())
-		return profilerun.TurnReview{Notice: toolgateway.HeldBackNotice(held, left), LeftOut: left}
+		return profilerun.TurnReview{Notice: toolgateway.HeldBackNotice(held, left), LeftOut: left,
+			Sets: toolgateway.HeldSets(reg, held, m.Tools)}
 	}
 }
 

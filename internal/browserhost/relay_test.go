@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1282,5 +1283,25 @@ func TestRelay_CancelledToolsApproveOneTerminalEvent(t *testing.T) {
 		case <-late:
 			return
 		}
+	}
+}
+
+// A notice's held sets reach the panel as sets (the panel opens their
+// diffs); a notice without sets has none.
+func TestRelay_NoticeCarriesSets(t *testing.T) {
+	var got []Event
+	data, _ := json.Marshal(map[string]any{"sessionUpdate": "aimux_notice", "sets": []string{"jira:readonly", "wiki:readonly"},
+		"content": map[string]any{"type": "text", "text": "2 tools held for review: run aimux tools status"}})
+	if _, err := mapEvent(v1Event{Kind: "update", Data: data}, func(e Event) { got = append(got, e) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Sets, []string{"jira:readonly", "wiki:readonly"}) {
+		t.Fatalf("events %+v, want the notice's sets", got)
+	}
+	got = nil
+	data, _ = json.Marshal(map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "1 tool held"}})
+	_, _ = mapEvent(v1Event{Kind: "update", Data: data}, func(e Event) { got = append(got, e) })
+	if b, _ := json.Marshal(got[0]); strings.Contains(string(b), `"sets"`) {
+		t.Fatalf("a notice without sets sends sets: %s", b)
 	}
 }

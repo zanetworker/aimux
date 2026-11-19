@@ -70,7 +70,7 @@ func TestToolsApprove_MacConfirmApproves(t *testing.T) {
 		t.Fatalf("dialogs %q titles %q", m.shown, m.titles)
 	}
 	text := m.shown[0]
-	for _, want := range []string{"jira:readonly", "b:", "changed", "inputSchema"} {
+	for _, want := range []string{"jira:readonly", "b:", "changed", `inputSchema.properties.q.type: "string" -> "integer"`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("dialog text lacks %q:\n%s", want, text)
 		}
@@ -276,5 +276,35 @@ func TestToolsApprove_MacConfirmRelistsAfterApprove(t *testing.T) {
 	calls = -100
 	if st, out := m.approveB(t); st != 200 {
 		t.Fatalf("unchanged: %d %v", st, out)
+	}
+}
+
+// The dialog shows each changed field with its value before and after,
+// long values cut with an ellipsis, every field listed (a batch that does
+// not fit is refused, never shortened by dropping fields).
+func TestChangeSummary_BeforeAndAfter(t *testing.T) {
+	long := strings.Repeat("a", 200)
+	ch := toolgateway.Change{Kind: toolgateway.KindChanged, Fields: []toolgateway.FieldChange{
+		{Path: "inputSchema.properties.limit.maximum", Before: "50", After: "1000"},
+		{Path: "description", Before: `"` + long + `"`, After: `"short"`},
+		{Path: "inputSchema.properties.q", After: `{"type":"string"}`},
+		{Path: "annotations.readOnlyHint", Before: "true"},
+		{Path: "a.b", Before: "1", After: "2"},
+		{Path: "annotations.x-aimux-base", Before: `"https://a"`, After: `"https://b"`},
+	}}
+	got := changeSummary(ch)
+	for _, want := range []string{
+		"inputSchema.properties.limit.maximum: 50 -> 1000",
+		`description: "` + strings.Repeat("a", 58) + "… -> \"short\"",
+		`inputSchema.properties.q: (none) -> {"type":"string"}`,
+		"annotations.readOnlyHint: true -> (none)",
+		"a.b: 1 -> 2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "x-aimux") || strings.Contains(got, "more") {
+		t.Errorf("summary shows aimux's own annotations or hides fields:\n%s", got)
 	}
 }

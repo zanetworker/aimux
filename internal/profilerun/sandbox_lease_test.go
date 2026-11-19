@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -486,5 +487,31 @@ func TestSandboxTurn_LeavesOutAServerWithEveryToolHeld(t *testing.T) {
 	_, puts := f.snapshot()
 	if len(puts[0].Allow["wiki"]) == 0 {
 		t.Fatalf("lease %v: the grant itself is unchanged", puts[0].Allow)
+	}
+}
+
+// A notice for held tools carries their sets, for the client to open the
+// diff of each; a notice without held sets has no sets field.
+func TestSandboxTurn_NoticeCarriesSets(t *testing.T) {
+	for name, c := range map[string]struct {
+		sets []string
+		want any
+	}{
+		"held":    {sets: []string{"jira:readonly", "wiki:readonly"}, want: []any{"jira:readonly", "wiki:readonly"}},
+		"no sets": {sets: nil, want: nil},
+	} {
+		e, _ := newLeaseSandbox(t, &fakeLeases{})
+		e.Review = func(profile.Compiled) TurnReview {
+			return TurnReview{Notice: "2 tools held for review (...): run aimux tools status", Sets: c.sets}
+		}
+		sid, _ := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+		_, evs, err := sendCollect(t, e, sid, "q")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, has := evs[0]["sets"]
+		if evs[0]["sessionUpdate"] != "aimux_notice" || !reflect.DeepEqual(got, c.want) || has != (c.want != nil) {
+			t.Fatalf("%s: notice %v, want sets %v", name, evs[0], c.want)
+		}
 	}
 }
