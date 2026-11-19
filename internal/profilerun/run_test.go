@@ -23,6 +23,7 @@ type stageScript struct {
 	calls   []string     // tool_call titles emitted
 	err     error
 	waitCtx bool // block until the turn is cancelled
+	updates []map[string]any // raw session updates emitted first (aimux_notice)
 }
 
 type fakeStage struct {
@@ -55,6 +56,9 @@ func (f *fakeStage) Send(ctx context.Context, _ string, text string, onEvent fun
 	s := f.script
 	f.mu.Unlock()
 	f.started <- struct{}{}
+	for _, u := range s.updates {
+		onEvent(updateEvent(u))
+	}
 	for _, title := range s.calls {
 		onEvent(updateEvent(map[string]any{"sessionUpdate": "tool_call", "toolCallId": title, "title": title, "status": "pending"}))
 	}
@@ -393,5 +397,39 @@ func TestRun_LinksAreFetchedURLsOnly(t *testing.T) {
 	want := []string{"https://github.com/NVIDIA/OpenShell/releases"}
 	if !reflect.DeepEqual(reported, want) {
 		t.Fatalf("reported links %v, want %v", reported, want)
+	}
+}
+
+// The planner's notice of held tools reaches the client once per turn with
+// its sets, so a client can offer to approve them; a reader's notice and a
+// second planner notice do not.
+func TestRun_ForwardsPlannerNoticeWithSets(t *testing.T) {
+	held := map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "2 tools held for review (jira: a changed): run aimux tools status"}, "sets": []any{"jira:readonly"}}
+	again := map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "another"}}
+	readerNote := map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "reader note"}}
+	r := newRunRig(t,
+		stageScript{updates: []map[string]any{held, again}, deltas: []string{plannerReply([]string{"openshell release notes"}, "")}},
+		stageScript{updates: []map[string]any{readerNote}, deltas: []string{"found"}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var forwarded []map[string]any
+	for _, ev := range r.events {
+		var u map[string]any
+		_ = json.Unmarshal(ev.Data, &u)
+		if u["sessionUpdate"] == "aimux_notice" && u["sets"] != nil {
+			forwarded = append(forwarded, u)
+		}
+		if c, _ := u["content"].(map[string]any); c != nil && (c["text"] == "another" || c["text"] == "reader note") {
+			t.Fatalf("forwarded %v", c["text"])
+		}
+	}
+	if len(forwarded) != 1 || !reflect.DeepEqual(forwarded[0]["sets"], []any{"jira:readonly"}) {
+		t.Fatalf("held-tools notices forwarded: %v", forwarded)
 	}
 }

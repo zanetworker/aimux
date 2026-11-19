@@ -267,6 +267,7 @@ func (e *RunEngine) stage(ctx context.Context, session string, st *RunState, rol
 		return "", ctx.Err()
 	}
 	var text strings.Builder
+	noticed := false // the planner's first notice (held tools and their sets) reaches the client once
 	_, err = eng.Send(ctx, id, prompt, func(ev acprun.Event) {
 		if t, ok := deltaText(ev); ok {
 			text.WriteString(t)
@@ -277,6 +278,11 @@ func (e *RunEngine) stage(ctx context.Context, session string, st *RunState, rol
 		}
 		if stream {
 			onEvent(ev)
+			return
+		}
+		if role == "planner" && !noticed && isNotice(ev) {
+			noticed = true
+			onEvent(ev) // as sent, sets included, so a client can offer to approve them
 			return
 		}
 		if ev2, ok := prefixToolCall(ev, prefix); ok {
@@ -565,6 +571,17 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// isNotice reports an aimux_notice session update.
+func isNotice(ev acprun.Event) bool {
+	if ev.Kind != acprun.KindUpdate {
+		return false
+	}
+	var u struct {
+		Kind string `json:"sessionUpdate"`
+	}
+	return json.Unmarshal(ev.Data, &u) == nil && u.Kind == "aimux_notice"
 }
 
 // noticeEmitter sends aimux's own progress lines as aimux_notice updates.

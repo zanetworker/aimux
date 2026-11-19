@@ -2210,6 +2210,9 @@ components:
         "sets" (string array, sorted, each once): the sets, as the profile
         names them, whose tools are held; a client can open GET
         /v1/tools/{set}/diff for each. Absent when no held tool is in a set.
+        A research-with-work turn also sends its stage progress lines as
+        aimux_notice without sets, and passes on its workspace (planner)
+        stage's held-tools notice, sets included, at most once per turn.
         Clients that do not know it can skip it.
       required: [sessionUpdate]
       properties:
