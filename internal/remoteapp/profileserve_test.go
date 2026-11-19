@@ -485,3 +485,36 @@ func TestProfileWiring_ArchivedRunWithoutItsProfile(t *testing.T) {
 		t.Fatalf("archived = %q, want %q", got, f)
 	}
 }
+
+// turnLinks reads a run session's per-turn link sets from its transcript;
+// other sessions have none.
+func TestProfileWiring_TurnLinksFromRunTranscript(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	const run = "aaaaaaaa-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "research-with-work", Client: "wingman"}); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, run)
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"type":"user","timestamp":"2026-11-19T10:00:00Z","message":{"role":"user","content":"q"}}
+{"type":"assistant","timestamp":"2026-11-19T10:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"a"}]},"aimuxLinks":["https://github.com/x"]}
+`
+	if err := os.WriteFile(f, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC).UnixNano()
+	if got := p.turnLinks(run)[at]; len(got) != 1 || got[0] != "https://github.com/x" {
+		t.Fatalf("turnLinks = %v", p.turnLinks(run))
+	}
+	if p.turnLinks("bbbbbbbb-2222-4333-8444-555555555555") != nil {
+		t.Fatal("links for a session not in the store")
+	}
+}

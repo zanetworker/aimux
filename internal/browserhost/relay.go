@@ -495,6 +495,7 @@ func (s *relaySession) getPage(ctx context.Context, instance, pageURL string) (*
 				User  string    `json:"user"`
 				Reply string    `json:"reply"`
 				Image bool      `json:"image"`
+				Links []string  `json:"links"`
 				Tools []struct {
 					Name string `json:"name"`
 				} `json:"tools"`
@@ -513,7 +514,7 @@ func (s *relaySession) getPage(ctx context.Context, instance, pageURL string) (*
 			for _, tl := range t.Tools {
 				tools = append(tools, tl.Name)
 			}
-			p.Turns = append(p.Turns, Turn{At: t.Time, Lane: laneOfProfile(ss.Profile), Question: profilerun.QuestionOf(t.User), Answer: t.Reply, ToolCalls: tools, Image: t.Image})
+			p.Turns = append(p.Turns, Turn{At: t.Time, Lane: laneOfProfile(ss.Profile), Question: profilerun.QuestionOf(t.User), Answer: t.Reply, ToolCalls: tools, Image: t.Image, Links: t.Links})
 			if t.Time.After(p.LastAsked) {
 				p.LastAsked = t.Time
 			}

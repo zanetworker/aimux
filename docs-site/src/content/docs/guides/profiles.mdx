@@ -34,7 +34,7 @@ settings: { inherit_user: false }
 | `extends` | The profile this one narrows: `builtin:<name>` or the name of another user profile |
 | `harness` | The agent harness; `claude-code` (the default for a root, and the only one with an adapter). A child cannot change it |
 | `model` | `provider` and `name`; a child may set either. For `acp` sessions, `name` (`sonnet` or `opus`) is the default when a request names no model |
-| `runs` | Where it runs: `host` (the Mac itself, with your settings), `acp` (a no-tools agent session on the Wingman adapter), `sandbox` (an OpenShell sandbox), `run` (a run of stages, each under one of its roles: `research-with-work`). Default `host` for a root |
+| `runs` | Where it runs: `host` (the Mac itself, with your settings), `acp` (a no-tools agent session on the Wingman adapter), `sandbox` (an OpenShell sandbox), `run` (`research-with-work`: a planner and a writer under its roles, a reader always under the built-in `research`, and a query check aimux runs itself). Default `host` for a root |
 | `dir` | A working directory carried over from a v1 profile; not a permission |
 | `tools` | Exact tool names or reviewed sets such as `jira:readonly`; `[]` is none. A set whose server has no approved tools (none approved yet with `aimux tools approve`, its backend was down, or the name is misspelled) is left out and grants nothing; a profile whose sets all lack pins fails to compile |
 | `network` | `default` (`deny` or `allow`) and `allow`, a list of `model`, `gateway` or `web` |

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 )
 
 // The panel's both lane asks under research-with-work, and the turn's
@@ -58,5 +59,32 @@ func TestRelay_ForwardsLinks(t *testing.T) {
 	evs := p.until(t, "q1")
 	if last := evs[len(evs)-1]; last.Type != "done" || last.Links != nil {
 		t.Fatalf("last event %+v, want done without links", last)
+	}
+}
+
+// A history turn's link set reaches the panel, so a reopened Both answer
+// keeps its fetched links.
+func TestRelay_HistoryForwardsTurnLinks(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	t0 := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
+	const pageURL = "https://a.example/both"
+	f.mux.HandleFunc("GET /v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"sessions": []any{session("r1", "research-with-work", pageURL, "A", t0)}})
+	})
+	f.mux.HandleFunc("GET /v1/sessions/r1", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"id": "r1", "turns": []any{
+			map[string]any{"number": 1, "time": t0, "user": "compare?", "reply": "See [x](https://github.com/x).", "tools": []any{}, "links": []any{"https://github.com/x"}},
+		}})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "g", Type: "history.get", URL: pageURL})
+	e := p.first(t, "g")
+	if e.Page == nil || len(e.Page.Turns) != 1 || e.Page.Turns[0].Lane != "both" {
+		t.Fatalf("event = %+v", e)
+	}
+	if !reflect.DeepEqual(e.Page.Turns[0].Links, []string{"https://github.com/x"}) {
+		t.Fatalf("links = %v", e.Page.Turns[0].Links)
 	}
 }

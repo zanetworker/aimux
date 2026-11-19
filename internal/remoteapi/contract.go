@@ -142,6 +142,9 @@ type Turn struct {
 	// Image: the question was asked with an attached image (the prompt
 	// framed one, profilerun.ImageOf); the image itself is never in history.
 	Image bool `json:"image,omitempty"`
+	// Links, on a research-with-work turn, are the pages its web stage
+	// fetched: the only URLs its answer may show as links.
+	Links []string `json:"links,omitempty"`
 
 	// question is the whole question as asked, before User's cut and trim,
 	// for comparing questions in process (pagePrior); never sent.

@@ -515,6 +515,22 @@ func openshellGatewayCheck(ctx context.Context) error {
 	return nil
 }
 
+// turnLinks is a run session's link set per turn, read from its own
+// transcript (LocalIndex.TurnLinks); nil for any other session.
+func (p *profileWiring) turnLinks(id string) map[int64][]string {
+	if p.sandbox == nil || !discovery.ValidSessionID(id) {
+		return nil
+	}
+	if _, ok := p.store.Get(id); !ok {
+		return nil
+	}
+	f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, id)
+	if !fileExists(f) {
+		return nil
+	}
+	return profilerun.RunTranscriptLinks(f)
+}
+
 // fileExists reports a regular file at path.
 func fileExists(path string) bool {
 	fi, err := os.Stat(path)

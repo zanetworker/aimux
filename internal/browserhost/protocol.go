@@ -100,6 +100,9 @@ type Turn struct {
 	ToolCalls []string  `json:"toolCalls"`
 	// Image: the question was asked with an image (never the image itself).
 	Image bool `json:"image,omitempty"`
+	// Links, on a both turn, are the only URLs its answer may show as
+	// links (the pages aimux fetched).
+	Links []string `json:"links,omitempty"`
 }
 
 // Page is a page's conversation in the JSON shape the panel reads (the

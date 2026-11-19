@@ -230,7 +230,7 @@ func TestRun_TranscriptParsesAsTurns(t *testing.T) {
 // such as a path, writes nothing.
 func TestRun_TranscriptOnlyForSessionIDs(t *testing.T) {
 	e := &RunEngine{ArchiveDir: t.TempDir()}
-	e.appendTranscript("../escape", "q", "a")
+	e.appendTranscript("../escape", "q", "a", nil)
 	entries, _ := os.ReadDir(e.ArchiveDir)
 	if len(entries) != 0 {
 		t.Fatalf("a non-id session wrote %v", entries)
@@ -243,5 +243,32 @@ func TestRun_TranscriptFolderIsSkippedByIndex(t *testing.T) {
 	path := RunTranscriptPath(t.TempDir(), "11111111-2222-4333-8444-555555555555")
 	if !claudehistory.IsWingmanProjectDir(filepath.Base(filepath.Dir(path))) {
 		t.Fatalf("transcript folder %q is not one the index skips", filepath.Base(filepath.Dir(path)))
+	}
+}
+
+// Each run turn's fetched link set is kept with its answer in the
+// transcript, keyed so it lines up with the turn the Claude parser reads.
+func TestRun_TranscriptLinksMatchParsedTurns(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"openshell egress release notes"}, "")}},
+		stageScript{deltas: []string{"found"}, tools: []ToolResult{{Name: "WebFetch", Input: `{"url":"https://github.com/x"}`, Output: "ok"}}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	r.e.ArchiveDir = t.TempDir()
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "first?"); err != nil {
+		t.Fatal(err)
+	}
+	path := RunTranscriptPath(r.e.ArchiveDir, id)
+	turns, err := (&provider.Claude{}).ParseTrace(path)
+	if err != nil || len(turns) != 1 {
+		t.Fatalf("parse: %v, %d turns", err, len(turns))
+	}
+	links := RunTranscriptLinks(path)
+	if got := links[turns[0].Timestamp.UnixNano()]; !reflect.DeepEqual(got, []string{"https://github.com/x"}) {
+		t.Fatalf("links for the parsed turn = %v (all %v), want the fetched page", got, links)
+	}
+	if RunTranscriptLinks(filepath.Join(t.TempDir(), "none.jsonl")) != nil {
+		t.Fatal("links of a missing transcript")
 	}
 }

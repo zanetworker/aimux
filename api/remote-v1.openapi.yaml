@@ -1300,7 +1300,10 @@ components:
       type: string
       enum: [idle, open_in_terminal, busy, unavailable]
       description: >
-        idle: can be continued. open_in_terminal: read only here while a
+        idle: can be continued; a research-with-work session this remote
+        serve does not hold (from before a restart, or another serve's)
+        also shows idle, but a message to it answers 409 not_running and a
+        page request starts a new session. open_in_terminal: read only here while a
         terminal on the Mac holds it. busy: aimux is running a turn.
         unavailable: created here, but its first message failed before Claude
         saved it.
@@ -1456,6 +1459,10 @@ components:
           type: array
           items: { $ref: "#/components/schemas/TurnTool" }
         image: { type: boolean, description: "Present and true when the question was asked with an attached image (POST /v1/sessions image); absent otherwise. The image itself is never in history." }
+        links:
+          type: array
+          items: { type: string }
+          description: "On a research-with-work turn, the pages its web stage fetched, kept with the answer: the only URLs a client may show as links when it reopens that answer. Absent on other turns and on a run turn that fetched nothing."
 
     TurnTool:
       type: object
@@ -1824,7 +1831,7 @@ components:
         pageText: { type: string, description: "With profile: the page's text for a new session, at most 512 KiB (else 413 page_too_large). Ignored when the session continues." }
         model: { type: string, enum: [sonnet, opus], description: "With profile: this turn's model; omitted keeps the profile's default. Any other value is 400 bad_request." }
         instance: { type: string, pattern: "^[A-Za-z0-9-]{1,64}$", description: "With profile: the caller's instance (Wingman's per-browser-profile id), recorded on the session, so two browsers on one page keep separate conversations. Omitted continues only sessions started without one. Not matching the pattern is 400 bad_request." }
-        prior: { type: array, maxItems: 5, items: { type: string, maxLength: 2000 }, description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): the page's earlier questions asked in another mode (Auto or a mode change), oldest first, questions only and never answers. The turn's prompt lists them before the question as untrusted context. At most 5 of at most 2000 characters each (else 400 bad_request). Default when absent (or null): aimux computes it. The page conversation is every session of the same client and instance on the same url (any profile, with or without page text, not hidden); when its most recent answered turn (one that ended with assistant text, complete or partial) ran in another profile than this request, prior is that conversation's questions as stored in session history (each line trimmed, blank lines dropped), oldest first, distinct in that form (first kept), without this question (compared in the same form), the last 5, each cut to 2000 characters; otherwise it is empty. An explicit prior, including [], overrides the default." }
+        prior: { type: array, maxItems: 5, items: { type: string, maxLength: 2000 }, description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): the page's earlier questions asked in another mode (Auto or a mode change), oldest first, questions only and never answers. The turn's prompt lists them before the question as untrusted context. At most 5 of at most 2000 characters each (else 400 bad_request). Default when absent (or null): aimux computes it. The page conversation is every session of the same client and instance on the same url (any profile, with or without page text, not hidden); when its most recent answered turn (one that ended with assistant text, complete or partial) ran in another profile than this request, or this request's profile is a run profile (research-with-work, which keeps no conversation between turns), prior is that conversation's questions as stored in session history (each line trimmed, blank lines dropped), oldest first, distinct in that form (first kept), without this question (compared in the same form), the last 5, each cut to 2000 characters; otherwise it is empty. An explicit prior, including [], overrides the default." }
         originOnly: { type: boolean, description: "With profile: a sandbox session's first prompt names only the URL's scheme://host[:port], while the session is still kept and continued under the full url. Requests with and without it never continue each other's session. Wingman sets it for Research on a private page without its text." }
         routed:
           type: object

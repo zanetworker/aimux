@@ -234,7 +234,7 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 	}
 	st.Stage = StageDone
 	e.save(session, st)
-	e.appendTranscript(session, text, answer)
+	e.appendTranscript(session, text, answer, st.Links)
 	SetTurnLinks(ctx, slices.Clone(st.Links))
 	return "end_turn", nil
 }
@@ -342,7 +342,7 @@ func RunTranscriptPath(archiveDir, session string) string {
 
 // appendTranscript adds one finished turn to session's transcript. A
 // failure is logged, never the turn's.
-func (e *RunEngine) appendTranscript(session, question, answer string) {
+func (e *RunEngine) appendTranscript(session, question, answer string, links []string) {
 	if e.ArchiveDir == "" || !sessionIDRE.MatchString(session) {
 		return
 	}
@@ -360,11 +360,14 @@ func (e *RunEngine) appendTranscript(session, question, answer string) {
 		SessionID string  `json:"sessionId"`
 		Timestamp string  `json:"timestamp"`
 		Message   message `json:"message"`
+		// Links, on the answer, are the turn's fetched pages
+		// (RunTranscriptLinks); the Claude parser ignores the field.
+		Links []string `json:"aimuxLinks,omitempty"`
 	}
 	var buf strings.Builder
 	for _, l := range []line{
 		{Type: "user", SessionID: session, Timestamp: now, Message: message{Role: "user", Content: question}},
-		{Type: "assistant", SessionID: session, Timestamp: now, Message: message{Role: "assistant", Content: []textBlock{{Type: "text", Text: answer}}}},
+		{Type: "assistant", SessionID: session, Timestamp: now, Message: message{Role: "assistant", Content: []textBlock{{Type: "text", Text: answer}}}, Links: links},
 	} {
 		b, err := json.Marshal(l)
 		if err != nil {
@@ -392,6 +395,38 @@ func (e *RunEngine) appendTranscript(session, question, answer string) {
 		}
 		log.Warn("run session: transcript not written", "session", session, "err", err)
 	}
+}
+
+// RunTranscriptLinks is each turn's link set in the run transcript at
+// path, by the turn's question time (UnixNano, as the Claude parser reads
+// it); nil when the file cannot be read. A turn whose answer carries no
+// links is absent.
+func RunTranscriptLinks(path string) map[int64][]string {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: a transcript path the caller built with RunTranscriptPath
+	if err != nil {
+		return nil
+	}
+	out := map[int64][]string{}
+	var at time.Time
+	for _, raw := range strings.Split(string(data), "\n") {
+		var l struct {
+			Type      string   `json:"type"`
+			Timestamp string   `json:"timestamp"`
+			Links     []string `json:"aimuxLinks"`
+		}
+		if json.Unmarshal([]byte(raw), &l) != nil {
+			continue
+		}
+		switch l.Type {
+		case "user":
+			at, _ = time.Parse(time.RFC3339Nano, l.Timestamp)
+		case "assistant":
+			if len(l.Links) > 0 && !at.IsZero() {
+				out[at.UnixNano()] = l.Links
+			}
+		}
+	}
+	return out
 }
 
 // outsideReads maps the planner's tool calls to their sources through the
