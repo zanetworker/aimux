@@ -604,8 +604,8 @@ func writeDefaultClients(home string, say func(string, ...any)) error {
 		"    profiles: [" + strings.Join(w.Profiles, ", ") + "]\n" +
 		fmt.Sprintf("    max_sessions: %d\n    turns_per_minute: %d\n", w.MaxSessions, w.TurnsPerMinute) +
 		"    # Approve changed tools from the panel (POST /v1/tools/approve). Each approval\n" +
-		"    # also needs a step-up from a kind in step_up_kinds, which Wingman has none of yet.\n" +
-		fmt.Sprintf("    tools_approve: %v\n", w.ToolsApprove)
+		"    # waits for you to click Approve in a dialog aimux shows on this Mac (mac-confirm).\n" +
+		fmt.Sprintf("    tools_approve: %v\n    step_up_kinds: [%s]\n", w.ToolsApprove, strings.Join(w.StepUpKinds, ", "))
 	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: p is clients.yaml under the user's own aimux config dir
 	if errors.Is(err, os.ErrExist) {
 		return nil

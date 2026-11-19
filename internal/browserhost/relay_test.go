@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1162,5 +1163,145 @@ func TestRelay_ForwardsCodeAndMessage(t *testing.T) {
 		if last := evs[len(evs)-1]; last.Type != "error" || last.Code != want.Code || last.Error != want.Error {
 			t.Errorf("%s: last event %+v, want code %q and message %q", id, last, want.Code, want.Error)
 		}
+	}
+}
+
+// The panel reviews and approves tools through the relay: tools.diff is
+// GET /v1/tools/{set}/diff, tools.approve is POST /v1/tools/approve with the
+// set, snapshot and pins the panel showed; the answers come back as is,
+// and a refusal (step_up_required, after Cancel on the Mac) as an error
+// event with its code.
+func TestRelay_ToolsDiffAndApprove(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	var approved map[string]any
+	f.mux.HandleFunc("GET /v1/tools/{set}/diff", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"set": r.PathValue("set"), "snapshot": "s1", "tools": []any{}})
+	})
+	f.mux.HandleFunc("POST /v1/tools/approve", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&approved)
+		if approved["snapshot"] == "cancel" {
+			writeJSONStatus(w, http.StatusForbidden, map[string]any{"error": "the approval was cancelled on the Mac; nothing was approved", "code": "step_up_required"})
+			return
+		}
+		writeJSONStatus(w, http.StatusOK, map[string]any{"results": []any{}, "written": true})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+
+	p.send(t, Request{ID: "d", Type: "tools.diff", Set: "jira:readonly"})
+	evs := p.until(t, "d")
+	if len(evs) < 2 || evs[len(evs)-2].Type != "tools_diff" || evs[len(evs)-1].Type != "done" || !strings.Contains(string(evs[len(evs)-2].Data), `"set":"jira:readonly"`) {
+		t.Fatalf("diff events %+v", evs)
+	}
+
+	p.send(t, Request{ID: "a", Type: "tools.approve", Set: "jira:readonly", Snapshot: "s1", Tools: []ToolPin{{Name: "b", Pin: "sha256:x"}}})
+	evs = p.until(t, "a")
+	if len(evs) < 2 || evs[len(evs)-2].Type != "tools_approved" || evs[len(evs)-1].Type != "done" || !strings.Contains(string(evs[len(evs)-2].Data), `"written":true`) {
+		t.Fatalf("approve events %+v", evs)
+	}
+	tools, _ := approved["tools"].([]any)
+	if approved["set"] != "jira:readonly" || approved["snapshot"] != "s1" || len(tools) != 1 || tools[0].(map[string]any)["pin"] != "sha256:x" {
+		t.Fatalf("approve body %v", approved)
+	}
+
+	p.send(t, Request{ID: "c", Type: "tools.approve", Set: "jira:readonly", Snapshot: "cancel", Tools: []ToolPin{{Name: "b", Pin: "sha256:x"}}})
+	evs = p.until(t, "c")
+	if last := evs[len(evs)-1]; last.Type != "error" || last.Code != "step_up_required" || !strings.Contains(last.Error, "cancelled on the Mac") {
+		t.Fatalf("cancelled approve events %+v", evs)
+	}
+}
+
+// Cancelling a tools.approve in the panel cancels its HTTP request, so the
+// dialog on the Mac is closed and Approve can no longer write pins.
+func TestRelay_CancelEndsAToolsApprove(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	started, ended := make(chan struct{}), make(chan struct{})
+	f.mux.HandleFunc("POST /v1/tools/approve", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body) // as the API reads it before the dialog; a disconnect is noticed only after the body
+		close(started)
+		<-r.Context().Done() // waiting on the Mac until the request goes away
+		close(ended)
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "a", Type: "tools.approve", Set: "jira:readonly", Tools: []ToolPin{{Name: "b", Pin: "sha256:x"}}})
+	<-started
+	p.send(t, Request{ID: "a", Type: "cancel"})
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the approval request was not cancelled")
+	}
+}
+
+// A diff too large for one native message (Chrome's 1 MiB) is not split:
+// the panel gets one coded error saying to review on the Mac.
+func TestRelay_ToolsDiffTooLarge(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("GET /v1/tools/{set}/diff", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"set": "big:readonly", "pad": strings.Repeat("x", MaxOutbound)})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "d", Type: "tools.diff", Set: "big:readonly"})
+	evs := p.until(t, "d")
+	if len(evs) != 1 || evs[0].Type != "error" || evs[0].Code != "diff_too_large" || !strings.Contains(evs[0].Error, "aimux tools diff") {
+		t.Fatalf("events %+v, want one diff_too_large error", evs)
+	}
+}
+
+// A cancelled tools.approve gets exactly one terminal event, the done of
+// the cancel, never also the request's own context-canceled error.
+func TestRelay_CancelledToolsApproveOneTerminalEvent(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	started := make(chan struct{})
+	f.mux.HandleFunc("POST /v1/tools/approve", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		close(started)
+		<-r.Context().Done()
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "a", Type: "tools.approve", Set: "jira:readonly", Tools: []ToolPin{{Name: "b", Pin: "sha256:x"}}})
+	<-started
+	p.send(t, Request{ID: "a", Type: "cancel"})
+	evs := p.until(t, "a")
+	if evs[len(evs)-1].Type != "done" {
+		t.Fatalf("first terminal event %+v, want the cancel's done", evs[len(evs)-1])
+	}
+	late := time.After(500 * time.Millisecond) // a late error would arrive here
+	for {
+		select {
+		case e := <-p.events:
+			if e.ID == "a" {
+				t.Fatalf("a second event for the cancelled request: %+v", e)
+			}
+		case <-late:
+			return
+		}
+	}
+}
+
+// A notice's held sets reach the panel as sets (the panel opens their
+// diffs); a notice without sets has none.
+func TestRelay_NoticeCarriesSets(t *testing.T) {
+	var got []Event
+	data, _ := json.Marshal(map[string]any{"sessionUpdate": "aimux_notice", "sets": []string{"jira:readonly", "wiki:readonly"},
+		"content": map[string]any{"type": "text", "text": "2 tools held for review: run aimux tools status"}})
+	if _, err := mapEvent(v1Event{Kind: "update", Data: data}, func(e Event) { got = append(got, e) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Sets, []string{"jira:readonly", "wiki:readonly"}) {
+		t.Fatalf("events %+v, want the notice's sets", got)
+	}
+	got = nil
+	data, _ = json.Marshal(map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "1 tool held"}})
+	_, _ = mapEvent(v1Event{Kind: "update", Data: data}, func(e Event) { got = append(got, e) })
+	if b, _ := json.Marshal(got[0]); strings.Contains(string(b), `"sets"`) {
+		t.Fatalf("a notice without sets sends sets: %s", b)
 	}
 }

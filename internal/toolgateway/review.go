@@ -523,6 +523,27 @@ func HeldBack(reg toolreg.Registry, pins PinFile, live map[string]LiveSource, se
 	return out
 }
 
+// HeldSets is the names in requested (as the profile asks for them, an
+// alias such as wiki:readonly included) of the sets that list a held tool,
+// sorted and once each; nil when none. A client opens the diff of each; a
+// tool no set lists (new_on_server) names no set.
+func HeldSets(reg toolreg.Registry, held []ToolStatus, requested []string) []string {
+	var out []string
+	for _, name := range requested {
+		s, err := reg.Resolve(name)
+		if err != nil || slices.Contains(out, name) {
+			continue
+		}
+		if slices.ContainsFunc(held, func(st ToolStatus) bool {
+			return st.Source == s.Source && slices.Contains(s.Tools, st.Tool)
+		}) {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // LeftOut is the servers of grant (server to granted tools) on which every
 // granted tool is in held: the gateway serves the turn none of them, so the
 // turn's MCP config leaves the server out. Sorted.

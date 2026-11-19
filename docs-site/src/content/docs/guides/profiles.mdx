@@ -94,7 +94,7 @@ A profile names tool sets such as `google:readonly`, never tool names. What a se
 
 ### Reviewing and approving tools
 
-Only `aimux tools approve` writes pins. Three commands, each with `--json`:
+Only `aimux tools approve` writes pins on the Mac; a client allowed to (Wingman by default) can also approve from its panel through `POST /v1/tools/approve`, and each such approval waits for you to click **Approve** in a dialog aimux shows on the Mac, naming the set, each tool and what changed (see [Approving tools from a client](/guides/remote-access/#approving-tools-from-a-client)). Three commands, each with `--json`:
 
 | Command | What it does |
 |---|---|

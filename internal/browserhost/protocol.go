@@ -1,9 +1,13 @@
 package browserhost
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Request is one message from the Wingman side panel.
-// Type is ask | route | history.list | history.get | history.delete | cancel.
+// Type is ask | route | history.list | history.get | history.delete |
+// tools.diff | tools.approve | cancel.
 type Request struct {
 	ID       string `json:"id"`
 	Type     string `json:"type"`
@@ -33,6 +37,18 @@ type Request struct {
 	// Image is one image pasted into an ask's question, forwarded to POST
 	// /v1/sessions as is (the server checks it).
 	Image *Image `json:"image,omitempty"`
+	// Set, Snapshot and Tools are a tools.diff (Set) or tools.approve
+	// request: the set, the diff's snapshot and each tool with the pin the
+	// panel showed, forwarded as is (aimux checks them and asks on the Mac).
+	Set      string    `json:"set,omitempty"`
+	Snapshot string    `json:"snapshot,omitempty"`
+	Tools    []ToolPin `json:"tools,omitempty"`
+}
+
+// ToolPin is a tool to approve at the pin the panel showed.
+type ToolPin struct {
+	Name string `json:"name"`
+	Pin  string `json:"pin"`
 }
 
 // Image is an image attached to a question: its mime type and base64 bytes
@@ -64,11 +80,17 @@ type Routed struct {
 // question with any @mode prefix removed, and its other fields are the
 // POST /v1/route answer (Source unsupported: the serve has no Auto).
 type Event struct {
-	ID    string `json:"id"`
-	Type  string `json:"type"`
-	Text  string `json:"text,omitempty"`
-	Tool  string `json:"tool,omitempty"`
-	Error string `json:"error,omitempty"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	// Sets, on a notice of tools held for review, is their sets (as the
+	// profile names them): the panel opens each one's diff.
+	Sets []string `json:"sets,omitempty"`
+	// Data is the API's answer to tools.diff (Type tools_diff) and
+	// tools.approve (Type tools_approved), as is.
+	Data  json.RawMessage `json:"data,omitempty"`
+	Text  string          `json:"text,omitempty"`
+	Tool  string          `json:"tool,omitempty"`
+	Error string          `json:"error,omitempty"`
 	// Code is the aimux API error code behind an error event, when there is
 	// one (image_invalid, client_limit, tool_gateway_not_running, from an
 	// error response or a turn_error event); the panel matches on it, and

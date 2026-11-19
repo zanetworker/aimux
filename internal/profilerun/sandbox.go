@@ -109,6 +109,7 @@ func (e *SandboxEngine) sandboxFailure(ctx context.Context, err error) error {
 // TurnReview is what the tool gateway will not serve one turn.
 type TurnReview struct {
 	Notice  string   // one line for the turn, "" for none
+	Sets    []string // the sets (as the profile names them) of the held tools
 	LeftOut []string // granted servers left out of the turn's MCP config
 }
 
@@ -404,7 +405,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 		toClient(ev)
 	}
 	if review.Notice != "" {
-		emit(LaneEvent{Type: "notice", Text: review.Notice})
+		emit(LaneEvent{Type: "notice", Text: review.Notice, Sets: review.Sets})
 	}
 
 	// The prompt goes on stdin after the config line, never on a command line.
@@ -629,6 +630,9 @@ func acpEmitter(onEvent func(acprun.Event)) func(LaneEvent) {
 			// aimux's own line for the client (held-back tools), not the
 			// agent's; ACP clients that do not know it skip it.
 			u = map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": ev.Text}}
+			if len(ev.Sets) > 0 { // the held tools' sets, for a client to open their diffs
+				u["sets"] = ev.Sets
+			}
 		default:
 			return
 		}

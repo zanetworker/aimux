@@ -26,6 +26,7 @@ type LaneEvent struct {
 	Type string
 	Text string
 	Tool string
+	Sets []string // a notice's held tools' sets
 	// Input and Failed are set on "tool_result" events only (the tool's
 	// JSON input; whether the result was an error). Those events stay in
 	// aimux: the sandbox engine hands them to the turn's collector
