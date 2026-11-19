@@ -36,14 +36,22 @@ func (s *Scrubber) Add(v string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	plain, raw := jsonInner(v, true), jsonInner(v, false)
-	forms := []string{v, url.QueryEscape(v), url.PathEscape(v), plain, strings.ReplaceAll(plain, "/", `\/`), raw, strings.ReplaceAll(raw, "/", `\/`)}
-	if b, ok := strings.CutPrefix(v, "Basic "); ok {
-		if dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(b)); err == nil {
-			cred := string(dec)
-			forms = append(forms, cred, b)
-			if _, pass, ok := strings.Cut(cred, ":"); ok {
-				forms = append(forms, pass)
+	forms := encodedForms(v)
+	// An Authorization value: the credential after its scheme (any case)
+	// is often echoed alone.
+	if scheme, cred, ok := strings.Cut(strings.TrimSpace(v), " "); ok && strings.TrimSpace(cred) != "" {
+		cred = strings.TrimSpace(cred)
+		switch strings.ToLower(scheme) {
+		case "bearer", "token":
+			forms = append(forms, encodedForms(cred)...)
+		case "basic":
+			forms = append(forms, encodedForms(cred)...)
+			if dec, err := base64.StdEncoding.DecodeString(cred); err == nil {
+				user := string(dec)
+				forms = append(forms, encodedForms(user)...)
+				if _, pass, ok := strings.Cut(user, ":"); ok {
+					forms = append(forms, encodedForms(pass)...)
+				}
 			}
 		}
 	}
@@ -59,6 +67,13 @@ func (s *Scrubber) Add(v string) {
 		}
 	}
 	sort.Slice(s.long, func(i, j int) bool { return len(s.long[i]) > len(s.long[j]) })
+}
+
+// encodedForms is v as written, URL query and path escaped, and JSON
+// escaped (with and without HTML escaping, slashes plain or escaped).
+func encodedForms(v string) []string {
+	plain, raw := jsonInner(v, true), jsonInner(v, false)
+	return []string{v, url.QueryEscape(v), url.PathEscape(v), plain, strings.ReplaceAll(plain, "/", `\/`), raw, strings.ReplaceAll(raw, "/", `\/`)}
 }
 
 // Scrub returns text with every registered form replaced.

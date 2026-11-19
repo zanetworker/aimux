@@ -198,8 +198,10 @@ func TestAddToSet_SplitModeEditsToolSets(t *testing.T) {
 	dir := t.TempDir()
 	writeYAML(t, filepath.Join(dir, "servers.yaml"), "version: 1\nservers:\n  jira:\n    url: http://127.0.0.1:8001/mcp\n")
 	writeYAML(t, filepath.Join(dir, "tool-sets.yaml"), "version: 1\n# keep me\nsets:\n  jira:readonly:\n    server: jira\n    tools: [search]\n")
-	if _, err := AddToSet(filepath.Join(dir, "tool-sources.yaml"), "jira:readonly", "get"); err != nil {
+	if e, err := AddToSet(filepath.Join(dir, "tool-sources.yaml"), "jira:readonly", "get"); err != nil {
 		t.Fatal(err)
+	} else {
+		e.Keep()
 	}
 	reg, err := Load(filepath.Join(dir, "tool-sources.yaml"))
 	if err != nil {
@@ -347,8 +349,10 @@ func TestReadHome_LeftoverReadonlyJSONDoesNotBlockSplit(t *testing.T) {
 	if _, err := ReadHome(home); err != nil {
 		t.Fatalf("a leftover readonly.json must not matter in split mode: %v", err)
 	}
-	if _, err := AddToSet(DefaultPath(home), "jira:readonly", "new"); err != nil {
+	if e, err := AddToSet(DefaultPath(home), "jira:readonly", "new"); err != nil {
 		t.Fatalf("approve into a set must work in split mode: %v", err)
+	} else {
+		e.Keep()
 	}
 }
 

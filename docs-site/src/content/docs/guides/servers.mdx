@@ -14,13 +14,13 @@ aimux servers discover JirAIa --cwd ~/product-ops/Jira/mcp-server
 aimux servers discover mermaid -- mcp-mermaid -t streamable
 ```
 
-`discover` never reads a value. It looks at:
+`discover` never shows or keeps a value. It looks at:
 
 - `${NAME}` references in the command you give after `--`;
-- names defined in `<cwd>/.env` and `<cwd>/../.env` (only the part before `=`);
-- environment reads in the server's source under `<cwd>` (`os.getenv`, `os.environ`, `os.Getenv`, `process.env`), at most 2,000 files.
+- names defined in `<cwd>/.env` and `<cwd>/../.env` (values are never shown or kept; their syntax is checked, so a `.env` the resolver would refuse, such as one with an unquoted value followed by ` #` or text after a closing quote, gets Keychain suggestions for all its names instead of `file` ones, since one such line makes the resolver refuse the whole file);
+- environment reads in the server's source under `<cwd>` (`os.getenv`, `os.environ`, `os.Getenv`, `process.env`), at most 2,000 files and the first 1 MiB of each (a note says when either limit cut the scan).
 
-It prints one line per finding and a suggested reference for each name: a `file` reference when a `.env` defines it, otherwise a field of the Keychain item `aimux/<name>`. Pick one per name; the resolver that reads them comes next.
+It prints one line per finding and a suggested reference for each name: a `file` reference when a `.env` defines it and the resolver would accept that whole file (a regular file you own, mode 0600 or stricter, at most 64 KiB, `NAME=value` lines only), otherwise the field `env.<NAME>` of the Keychain item `aimux/<server>`. With `--json` the findings carry a `kind`: `config_ref`, `dotenv_key`, `source_read`, `note` (the 2,000-file limit stopped the scan) or `note_truncated` (that file was read only to 1 MiB). Pick one per name; the resolver that reads them comes next.
 
 ## Two files: servers and tool sets
 
@@ -31,6 +31,31 @@ The tool gateway used to read one file, `~/.config/aimux/tool-sources.yaml`, for
 | `~/.config/aimux/servers.yaml` | every server: how to start it (`command`, `cwd`) or reach it (`url`), and its secrets as references | No |
 | `~/.config/aimux/tool-sets.yaml` | the reviewed tool sets: a `server` and its exact `tools` | Yes, for the profiles that name the set |
 
-Only servers a set names reach the sandbox gateway. A server no set names stays local, so a write-capable server you use from Claude Code is never offered to a sandbox by being listed. A set must name an HTTP server; a stdio server cannot back a sandbox set.
+Only servers a set names reach the sandbox gateway. A set may also name a built-in source in `servers.yaml` (`type: local-notes`, `cli` or `http-openapi`):
 
-Run `aimux servers migrate` once to split your existing file: it writes both files from `tool-sources.yaml` (comments kept) and keeps the old file as `tool-sources.yaml.migrated`. Server names do not change, so approved tools stay approved. Until you migrate, `tool-sources.yaml` is still read (with one note per process). Once the new files exist, `aimux tools approve --add-to-set` writes to `tool-sets.yaml`; `aimux tools add` and `remove` refuse, and you edit `servers.yaml` and `tool-sets.yaml` directly for now.
+```yaml
+# servers.yaml
+version: 1
+servers:
+  jira:
+    url: http://127.0.0.1:8001/mcp
+  gh:
+    type: cli
+    pack: gh
+```
+
+```yaml
+# tool-sets.yaml
+version: 1
+sets:
+  jira:readonly:
+    server: jira
+    tools: [search_issues_jql, get_issue_details]
+  gh:readonly:
+    server: gh
+    tools: [gh_pr_list]
+```
+
+Then approve the set as before: `aimux tools approve gh:readonly`. A server no set names stays local, so a write-capable server you use from Claude Code is never offered to a sandbox by being listed. A set must name an HTTP server or a built-in source; a stdio server cannot back a sandbox set. The sandbox gateway never resolves a `servers.yaml` secret reference: it reaches set servers by their `url` and runs built-in sources itself, and the references are only for the host.
+
+Run `aimux servers migrate` once to split your existing file: it writes both files from `tool-sources.yaml` (comments kept) and keeps the old file as `tool-sources.yaml.migrated`. An existing `tool-sets.yaml` (yours, or one a crashed run left) is kept aside as `tool-sets.yaml.before-migrate`, or `.before-migrate.1` and so on when that name is taken, never overwritten, and put back if writing either new file fails (unless another `tool-sets.yaml` appeared meanwhile: then yours stays in its backup and the error names it). If someone else creates `servers.yaml` meanwhile, it is left alone and the sets are rolled back; if someone edits the `servers.yaml` this run wrote before the failure, it is kept together with the `tool-sets.yaml` written with it, and the error asks you to check both. Moving a file aside needs a filesystem with an atomic no-replace rename (APFS, ext4, XFS and most local filesystems); without one, the migration refuses and moves nothing. It refuses when `servers.yaml` already exists, and exits 1 while `aimux tools add`, `remove` or `approve --add-to-set` holds the same lock (try again when it finishes). While a migration runs, `aimux tools add`, `remove` and `approve --add-to-set` refuse and ask you to try again. Server names do not change, so approved tools stay approved. Until you migrate, `tool-sources.yaml` is still read (with one note per process). Once the new files exist, `aimux tools approve --add-to-set` writes to `tool-sets.yaml`; `aimux tools add` and `remove` refuse, and you edit `servers.yaml` and `tool-sets.yaml` directly for now.

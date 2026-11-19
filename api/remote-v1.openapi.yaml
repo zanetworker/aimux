@@ -869,7 +869,8 @@ paths:
         and what the tool gateway itself last listed. No backend is
         contacted: a source the gateway has not listed yet (it starts with
         the first sandbox turn) shows its tools as `unknown`. Sets the
-        compiler would omit (not in tool-sources.yaml, rejected there, or
+        compiler would omit (not in the registry, tool-sets.yaml and
+        servers.yaml or the older tool-sources.yaml, rejected there, or
         not a `<name>:<kind>` name) are listed `unavailable` with the
         reason. When the registry or the pins do not load, `errors` holds
         one entry and every set is `unavailable`. No definition, schema,
@@ -1960,7 +1961,7 @@ components:
           items: { $ref: "#/components/schemas/ToolSetInfo" }
         errors:
           type: array
-          description: tool-sources.yaml problems with a set or source in scope, or one entry without set or source when the registry or pins did not load.
+          description: Registry problems (tool-sets.yaml and servers.yaml, or the older tool-sources.yaml) with a set or source in scope, or one entry without set or source when the registry or pins did not load.
           items: { $ref: "#/components/schemas/ToolsError" }
 
     ToolSetInfo:
@@ -1974,7 +1975,7 @@ components:
         authorship:
           type: string
           enum: [self, internal, outside]
-          description: "Who writes what the source returns, from tool-sources.yaml (unset means outside); absent for a set that is omitted."
+          description: "Who writes what the source returns, from the server's authorship in servers.yaml or tool-sources.yaml (unset means outside); absent for a set that is omitted."
         status:
           type: string
           enum: [available, partial, unavailable]
@@ -2003,7 +2004,7 @@ components:
             approved. changed: differs from the approved definition or is
             no longer listed. unavailable: its backend is down or does not
             list it. source_changed: approved from another endpoint than
-            tool-sources.yaml names. unknown: the gateway has not listed
+            the registry names. unknown: the gateway has not listed
             its source yet, or its last relist failed while the source is
             still served (reason "unknown (relist failed): ..."). `aimux tools diff` and `aimux tools approve`
             on the Mac review them.

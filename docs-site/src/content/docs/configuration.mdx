@@ -10,7 +10,9 @@ aimux reads its configuration from these files:
 | `~/.aimux/config.yaml` | The settings on this page: providers, runtimes, sessions, remote access and the rest |
 | `~/.config/aimux/clients.yaml` | Each local client's scope: its socket, profiles and limits (see [Client scopes](/guides/remote-access/#client-scopes)) |
 | `~/.config/aimux/profiles/` | Your own profiles, one file each (see [Profiles](/guides/profiles/#where-they-live)) |
-| `~/.config/aimux/tool-sources.yaml` | The tool sources and reviewed tool sets (see [Tool sources](/guides/wingman/#tool-sources)) |
+| `~/.config/aimux/servers.yaml` | Every MCP server and built-in source (`local-notes`, `cli`, `http-openapi`): how to start or reach it, its secrets as references; grants nothing. When it exists, it and `tool-sets.yaml` are the registry and `tool-sources.yaml` is not read (see [Servers](/guides/servers/)) |
+| `~/.config/aimux/tool-sets.yaml` | The reviewed tool sets, each naming a server in `servers.yaml` (see [Servers](/guides/servers/)) |
+| `~/.config/aimux/tool-sources.yaml` | The older single file of tool sources and sets, read until `aimux servers migrate` splits it (see [Tool sources](/guides/wingman/#tool-sources)) |
 | `~/.config/aimux/deciders.yaml` | The decider Auto uses to pick a mode (see [Auto](/guides/remote-access/#auto-routing-a-question-to-a-mode)) |
 
 aimux also writes state you approve but do not edit by hand: `~/.aimux/tools/pins.json`, the pinned tools (see [Pinned tools](/guides/wingman/#pinned-tools)), written by `aimux tools approve`.

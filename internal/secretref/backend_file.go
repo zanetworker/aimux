@@ -66,10 +66,34 @@ func (r *Resolver) file(ref FileRef) (string, error) {
 	return v, nil
 }
 
+// dotenvValue is a dotenv value (trimmed, as written) as the resolver
+// reads it: the bytes inside its quotes (a quote after an odd run of
+// backslashes does not close it, and is kept as written), or as is. ok is false when anything
+// follows the closing quote, or an unquoted value holds " #": other dotenv
+// readers drop that as a comment, some keep it, so the resolver refuses it
+// and discover does not suggest the file.
+func dotenvValue(v string) (string, bool) {
+	backslashesBefore := func(s string, i int) int {
+		n := 0
+		for i--; i >= 0 && s[i] == '\\'; i-- {
+			n++
+		}
+		return n
+	}
+	if len(v) > 0 && (v[0] == '"' || v[0] == '\'') {
+		for end := 1; end < len(v); end++ {
+			if v[end] == v[0] && backslashesBefore(v, end)%2 == 0 { // an escaped quote does not close it
+				return v[1:end], end+1 == len(v)
+			}
+		}
+	}
+	return v, !strings.Contains(v, " #")
+}
+
 // parseDotenv reads KEY=value lines strictly: # comments and blank lines are
 // skipped, a value may be wrapped in matching single or double quotes, and
-// nothing is interpolated or run. An export line or a line without "=" is
-// an error naming the line number, never its content.
+// nothing is interpolated or run. An export line, a line without "=", or an
+// unquoted value followed by " #" is an error naming the line number, never its content.
 func parseDotenv(body string) (map[string]string, error) {
 	out := map[string]string{}
 	sc := bufio.NewScanner(strings.NewReader(body))
@@ -87,9 +111,10 @@ func parseDotenv(body string) (map[string]string, error) {
 		if !ok || !dotenvRE.MatchString(k+"=") {
 			return nil, fmt.Errorf("line %d is not NAME=value", n)
 		}
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-			v = v[1 : len(v)-1]
+		v, ok = dotenvValue(strings.TrimSpace(v))
+		if !ok {
+			// Other dotenv readers drop " # ..." as a comment; some keep it.
+			return nil, fmt.Errorf("line %d has a comment after its value (\" #\" unquoted, or text after the closing quote); quote the value, or move the comment to its own line", n)
 		}
 		out[k] = v
 	}

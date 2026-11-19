@@ -18,9 +18,9 @@ To fix what is missing in one go, run `aimux setup` (see [below](#aimux-setup)).
 
 | Check id | Status | Problem | Fix |
 |---|---|---|---|
-| `tools.legacy` | warn | `tool-sources.yaml` is absent and `~/.aimux/wingman/readonly.json` is not migrated yet; it is read in its place. | `aimux setup --yes (migrates it once; the old file is kept as readonly.json.migrated)` |
+| `tools.legacy` | warn | `tool-sources.yaml` is absent and `~/.aimux/wingman/readonly.json` is not migrated yet (doctor reports it even when `servers.yaml` is in use; the split files are what is read then). | `aimux setup --yes (migrates it once; the old file is kept as readonly.json.migrated)` |
 | `tools.pins` | fail | `~/.aimux/tools/pins.json` does not read. Until it is fixed no tool is granted or served. | `move ~/.aimux/tools/pins.json aside, then aimux tools diff and aimux tools approve <set> for each set you review` |
-| `tools.registry` | fail | The registry does not load at all (strict YAML: an unknown key, a second document, a wrong version). The other tools checks are skipped. | `fix <registry> (strict YAML; aimux tools status shows the same error)` |
+| `tools.registry` | fail | The registry does not load at all (strict YAML: an unknown key, a second document, a wrong version); after migration, the error names `servers.yaml` or `tool-sets.yaml`, the file to fix. The other tools checks are skipped. | `fix <registry> (strict YAML; aimux tools status shows the same error)` |
 | `tools.registry.set.<set>` | warn | One set is malformed or points at an unknown or broken source, so it is skipped. The detail names the profiles that request it. | `fix set <set> in <registry>, then aimux tools status` |
 | `tools.registry.source.<source>` | warn | One source is malformed, so it and its sets are skipped. | `fix source <source> in <registry>, then aimux tools status` |
 | `tools.review` | fail | The live tools could not be judged at all (rare). | `aimux tools status` |
@@ -30,6 +30,8 @@ To fix what is missing in one go, run `aimux setup` (see [below](#aimux-setup)).
 | `tools.omitted.<profile>.<set>` | warn | A profile requests a set its compile leaves out (not in the registry, or none of its tools pinned). The profile runs without it. A builtin's opt-in set (`gh:readonly` in `work-readonly`) that is not in the registry at all is not reported. | No pinned tools: `aimux tools diff <set>, then aimux tools approve <set>`. Not in the registry: `add set <set> to <registry>, or remove it from the profile` |
 
 A pin detects schema changes; it does not prove a tool is read-only.
+
+Once `aimux servers migrate` has run, `<registry>` above is `~/.config/aimux/servers.yaml` for a source (server) problem (`tools.registry.source.<source>`) and `~/.config/aimux/tool-sets.yaml` for a set problem (`tools.registry.set.<set>`, and adding a tool to a set for `tools.no_set.<source>/<tool>`), and a fix that says `aimux tools add` means editing those files (`add` and `remove` work on `tool-sources.yaml` only).
 
 ## Router
 

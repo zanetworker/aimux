@@ -232,7 +232,7 @@ The catalog is also refreshed whenever a server starts, and tools it did not lis
 
 ## The sandbox tool gateway
 
-The proxy service has a second worker for OpenShell sandboxes: the read-only tool gateway on `127.0.0.1:7390`, which sandboxes reach as `host.containers.internal:7390`. It serves only the tools approved in `~/.config/aimux/tool-sources.yaml` (see `aimux tools`), from its own pool of backends: it never shares a server process, a cache or an environment with the proxy on `:7381`, and each restarts on its own.
+The proxy service has a second worker for OpenShell sandboxes: the read-only tool gateway on `127.0.0.1:7390`, which sandboxes reach as `host.containers.internal:7390`. It serves only the tools approved in `~/.config/aimux/tool-sets.yaml` (or, before `aimux servers migrate`, `tool-sources.yaml`), which list the tools a set may use, and only once each is approved into `~/.aimux/tools/pins.json` (see `aimux tools`), from its own pool of backends: it never shares a server process, a cache or an environment with the proxy on `:7381`, and each restarts on its own.
 
 ```sh
 aimux mcp proxy gateway install    # run it under launchd (com.aimux.tool-gateway), at login and after a crash

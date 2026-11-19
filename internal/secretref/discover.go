@@ -5,8 +5,10 @@ package secretref
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -41,6 +43,36 @@ type Finding struct {
 // maxScanFiles bounds the source scan under cwd.
 const maxScanFiles = 2000
 
+// dotenvStrictMax is the largest .env discover offers file references into.
+const dotenvStrictMax = 64 << 10
+
+// maxSourceBytes is how much of each source file the scan reads.
+const maxSourceBytes = 1 << 20
+
+// NoteTruncated is a note that a source file was read only in part.
+const NoteTruncated = "note_truncated"
+
+// dotenvOK is whether the resolver accepts a dotenv value as written.
+func dotenvOK(v string) bool {
+	_, ok := dotenvValue(v)
+	return ok
+}
+
+// readCapped is at most limit bytes of the file at p, and whether there
+// was more.
+func readCapped(p string, limit int64) ([]byte, bool, error) {
+	f, err := os.Open(p) //nolint:gosec // G304: the server's own source tree, scanned for names
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = f.Close() }() // read-only
+	b, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if int64(len(b)) > limit {
+		return b[:limit], true, err
+	}
+	return b, false, err
+}
+
 var (
 	configRefRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}`)
 	dotenvRE    = regexp.MustCompile(`^\s*(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=`)
@@ -66,6 +98,9 @@ func Discover(def ServerDef) ([]Finding, error) {
 	var out []Finding
 	add := func(f Finding) {
 		k := f.Kind + ":" + f.Name
+		if f.Kind == NoteTruncated {
+			k += ":" + f.Where // one note per cut file
+		}
 		if seen[k] {
 			return
 		}
@@ -168,7 +203,9 @@ func dotenvNames(path string) ([]dotenvName, bool) {
 	defer func() { _ = f.Close() }()
 	var names []dotenvName
 	strict, total := true, 0
-	r := bufio.NewReaderSize(f, 4096)
+	// A buffer as large as a strict file may be, so every line it would
+	// accept is checked whole (a longer file is never strict).
+	r := bufio.NewReaderSize(f, dotenvStrictMax+1)
 	for {
 		line, err := r.ReadSlice('\n')
 		total += len(line)
@@ -180,15 +217,18 @@ func dotenvNames(path string) ([]dotenvName, bool) {
 		trimmed := strings.TrimSpace(head)
 		switch m := dotenvRE.FindStringSubmatch(head); {
 		case m != nil:
-			names = append(names, dotenvName{name: m[2], export: m[1] != ""})
-			if m[1] != "" {
+			// A copy: m[2] shares head's memory, which holds the value.
+			names = append(names, dotenvName{name: strings.Clone(m[2]), export: m[1] != ""})
+			// The value is looked at only for the resolver's refusal rule,
+			// never kept.
+			if m[1] != "" || !dotenvOK(strings.TrimSpace(head[len(m[0]):])) {
 				strict = false
 			}
 		case trimmed != "" && !strings.HasPrefix(trimmed, "#"):
 			strict = false
 		}
 		if err != nil {
-			return names, strict && total <= 64<<10
+			return names, strict && total <= dotenvStrictMax
 		}
 	}
 }
@@ -217,11 +257,17 @@ func scanSource(root string) []Finding {
 			return filepath.SkipAll
 		}
 		n++
-		data, err := os.ReadFile(p) //nolint:gosec // G304: the server's own source tree, scanned for names
+		data, cut, err := readCapped(p, maxSourceBytes)
 		if err != nil {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
+		if cut {
+			out = append(out, Finding{Where: rel, Kind: NoteTruncated})
+			// Scan whole lines only: a name cut at the limit would read as a
+			// shorter one.
+			data = data[:bytes.LastIndexByte(data, '\n')+1]
+		}
 		text := string(data)
 		var nl []int // newline offsets, so a match's line is a binary search
 		for i := 0; i < len(text); i++ {
@@ -254,7 +300,7 @@ func Suggest(server string, fs []Finding) map[string]string {
 		}
 	}
 	for _, f := range fs {
-		if f.Name == "" || f.Kind == "note" {
+		if f.Name == "" || f.Kind == "note" || f.Kind == NoteTruncated {
 			continue
 		}
 		if _, ok := out[f.Name]; !ok {
