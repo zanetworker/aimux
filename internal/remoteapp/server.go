@@ -437,6 +437,8 @@ func (s *Server) build(w *wiring) error {
 		Running: func(id string) bool { return manager.Running(id) || profiles.running(id) },
 		// Finished sandbox sessions' transcripts are only in aimux's archive.
 		Archived: profiles.archived,
+		// A research-with-work turn's fetched pages, kept with its answer.
+		TurnLinks: profiles.turnLinks,
 		// Keyword ranking: every hit shows where the words matched, and a
 		// query nothing contains finds nothing. The index is refreshed in
 		// the background (the search refresh job); refreshing per query

@@ -66,7 +66,7 @@ type RouteFacts struct {
 }
 
 // Routed is the route answer an ask followed, with the mode it finally
-// asked in (page, web or workspace).
+// asked in (page, web, workspace or both).
 type Routed struct {
 	DecisionID string `json:"decisionId"`
 	Mode       string `json:"mode"`
@@ -95,9 +95,13 @@ type Event struct {
 	// one (image_invalid, client_limit, tool_gateway_not_running, from an
 	// error response or a turn_error event); the panel matches on it, and
 	// Error is then the message written for a person.
-	Code  string `json:"code,omitempty"`
-	Pages []Page `json:"pages,omitempty"`
-	Page  *Page  `json:"page"`
+	Code string `json:"code,omitempty"`
+	// Links, on the done event of a both-lane answer (research-with-work),
+	// are the only URLs the panel may show as links: pages the reader
+	// fetched. Left out on every other done event.
+	Links []string `json:"links,omitempty"`
+	Pages []Page   `json:"pages,omitempty"`
+	Page  *Page    `json:"page"`
 
 	Mode          string             `json:"mode,omitempty"`
 	Profile       string             `json:"profile,omitempty"`
@@ -118,6 +122,9 @@ type Turn struct {
 	ToolCalls []string  `json:"toolCalls"`
 	// Image: the question was asked with an image (never the image itself).
 	Image bool `json:"image,omitempty"`
+	// Links, on a both turn, are the only URLs its answer may show as
+	// links (the pages aimux fetched).
+	Links []string `json:"links,omitempty"`
 }
 
 // Page is a page's conversation in the JSON shape the panel reads (the

@@ -64,7 +64,7 @@ func newRouterCmdWith(env routerEnv) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "router",
 		Short: "Inspect and try Auto mode's mode router: status and test",
-		Long: "Auto mode asks a small model which mode (page, web or workspace) a question needs. status shows how the\n" +
+		Long: "Auto mode asks a small model which mode (page, web, workspace or both) a question needs. status shows how the\n" +
 			"router is set up; test routes one question for real, with your key, and never runs the question itself.",
 	}
 	status := &cobra.Command{

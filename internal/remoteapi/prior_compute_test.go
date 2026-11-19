@@ -215,3 +215,19 @@ func TestProfileSession_PriorComparesStoredForm(t *testing.T) {
 	pr.serve()
 	wantPrior(t, pr.ask(`{"profile":"research","url":"`+priorURL+`","text":"z"}`), []string{"a\nb", "c"})
 }
+
+// A run profile (research-with-work) starts fresh stages every turn and
+// keeps no conversation, so a follow-up in it carries the earlier
+// questions even when its last answer ran in the same profile.
+func TestProfileSession_RunProfileFollowUpCarriesPrior(t *testing.T) {
+	pr := newPriorRig(t)
+	pr.api.Profiles = func() (map[string]profile.Manifest, error) {
+		all := testProfiles()
+		all["research-with-work"] = profile.Manifest{Name: "research-with-work", Harness: "claude-code", Runs: "run", Available: true,
+			Network: profile.NetworkSpec{Default: "deny", Allow: []string{"model"}}}
+		return all, nil
+	}
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, "Q1", "A1"), q(2, "Q2", "A2"))
+	pr.serve()
+	wantPrior(t, pr.ask(`{"profile":"research-with-work","url":"`+priorURL+`","text":"how does that compare?"}`), []string{"Q1", "Q2"})
+}

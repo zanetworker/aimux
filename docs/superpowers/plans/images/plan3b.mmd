@@ -1,0 +1,13 @@
+flowchart LR
+  Q["Question (+ page text)"] --> P
+  subgraph RUN["run engine: one profile session (research-with-work)"]
+    P["1 Planner<br/>work-readonly sandbox<br/>private tools via gateway lease<br/>returns JSON: public_queries, private_notes"]
+    C{"2 Query check (Go, deterministic)<br/>normalize, no tokens, keys, emails,<br/>URLs, hosts, overlap with private text,<br/>byte budget; fail closed"}
+    R["3 Reader<br/>research sandbox<br/>GET-only public web<br/>sees only accepted queries"]
+    W["4 Writer<br/>page engine (ACP)<br/>no tools, no network<br/>labeled: question, private_notes,<br/>reader answer + fetched citations"]
+    P --> C
+    C -- "accepted queries" --> R
+    C -- "none accepted" --> W
+    R --> W
+  end
+  W --> A["Answer<br/>links only to fetched citations<br/>(others inert)<br/>flags: outside_read, rejected queries"]

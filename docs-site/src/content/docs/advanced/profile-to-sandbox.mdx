@@ -11,6 +11,14 @@ For contributors. This page follows one profile with `runs: sandbox` from its ma
 profile manifest (builtin or ~/.config/aimux/profiles)
         |  profile.Resolve        internal/profile/manifest.go
         |  extends parent; a child may only narrow
+        |  profile.CheckRoles, only where a profile is admitted
+        |  (aimux profile check, the remote API catalog, and before
+        |  every new turn, queued ones included: Router.Admit):
+        |  every role target and its own roles resolve and
+        |  validate, with a valid sandbox name; a planner role
+        |  runs: sandbox without web, a writer role runs: acp
+        |  with no tools and no web; routing and
+        |  cancelling a running turn use Resolve alone
         v
 resolved Manifest
         |  toolreg.Snapshot          internal/toolreg/snapshot.go
@@ -18,6 +26,9 @@ resolved Manifest
         |  server + listed tools pinned (not source_changed)
         v
 profile.CompileAt(m, snap, gw)    internal/profile/compile.go
+        |  refuses a sandbox name over 19 characters or not in
+        |  lowercase letters and digits in dash-separated runs
+        |  (no leading, trailing or doubled dash; CheckSandboxName)
         |
         +--> (a) PolicyYAML + PolicyDigest   buildPolicy / marshalPolicy
         |        OpenShell network, MCP tool, file and binary rules
@@ -41,7 +52,7 @@ profile.CompileAt(m, snap, gw)    internal/profile/compile.go
                  Spec: argv for `claude -p ...` + MCP config renderer
 ```
 
-Compile fails before any of this runs when the profile does not run in a sandbox, is not available, lacks `model` in `network.allow`, has a sandbox name over 19 characters, or requests tools whose sets all lack pins.
+Compile fails before any of this runs when the profile does not run in a sandbox, is not available, lacks `model` in `network.allow`, has an invalid sandbox name (`aimux-<name>` over 19 characters, or not lowercase letters and digits in dash-separated runs: no leading, trailing or doubled dash), or requests tools whose sets all lack pins.
 
 ## What each output feeds
 

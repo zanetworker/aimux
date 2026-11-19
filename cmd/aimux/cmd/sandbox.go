@@ -483,7 +483,7 @@ func collectSandboxStatus(ctx context.Context, env browserEnv, profileDir string
 	slices.Sort(names)
 	for _, name := range names {
 		m, err := profile.Resolve(name, user)
-		if err != nil || (m.Runs != "sandbox" && m.Runs != "run") || !m.Available {
+		if err != nil || m.Runs != "sandbox" || !m.Available { // a run profile has no sandbox of its own
 			continue // not sandboxed (page runs over acp) or not offered
 		}
 		c, err := profile.CompileAt(m, snap, profile.GatewayAddr{})

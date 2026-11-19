@@ -398,7 +398,11 @@ func (a *API) profileSession(ctx context.Context, client string, m profile.Manif
 				return id, true
 			}
 			if req.URL != "" {
-				return a.ProfileSessions.FindPage(client, req.Instance, req.URL, m.Name, withPage, req.OriginOnly)
+				id, ok := a.ProfileSessions.FindPage(client, req.Instance, req.URL, m.Name, withPage, req.OriginOnly)
+				if ok && a.ProfileSessionLive != nil && !a.ProfileSessionLive(id) {
+					return "", false // the engine lost it (a run after a restart): start anew
+				}
+				return id, ok
 			}
 			return "", false
 		},
