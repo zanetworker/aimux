@@ -170,10 +170,11 @@ func cut(s string, n int) string {
 	return runewidth.Truncate(s, n, "…")
 }
 
-// wrap breaks text at spaces so no line passes width runes; lines after
-// the first start with hang spaces. width 0 keeps one line.
+// wrap breaks text at spaces so no line passes width cells; lines after
+// the first start with hang spaces. A command in backticks is one word, so
+// it is never broken and pastes whole. width 0 keeps one line.
 func wrap(text string, width, hang int) []string {
-	words := strings.Fields(text)
+	words := commandWords(text)
 	lead := text[:len(text)-len(strings.TrimLeft(text, " "))]
 	if width <= 0 || len(words) == 0 {
 		return []string{text}
@@ -194,6 +195,31 @@ func wrap(text string, width, hang int) []string {
 // escapes matches the ANSI styles paint adds.
 var escapes = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
+// commandWords splits text at spaces outside backticks.
+func commandWords(text string) []string {
+	var words []string
+	var cur strings.Builder
+	in := false
+	for _, r := range text {
+		switch {
+		case r == '`':
+			in = !in
+			cur.WriteRune(r)
+		case r == ' ' && !in:
+			if cur.Len() > 0 {
+				words = append(words, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		words = append(words, cur.String())
+	}
+	return words
+}
+
 // joinWrapped joins styled parts with a dim " · ", starting a new line
 // (indented two spaces) before a part that would pass width; width 0 keeps
 // one line. Escape codes never count as width.
@@ -206,7 +232,7 @@ func joinWrapped(parts []string, color bool, width int) []string {
 		switch {
 		case i == 0:
 			line = part
-		case width > 0 && visible(line)+3+visible(part) > width:
+		case width > 0 && visible(line)+visible(" · ")+visible(part) > width:
 			lines = append(lines, line)
 			line = "  " + part
 		default:
@@ -569,7 +595,7 @@ func gatewayStatusStyled(st toolgateway.ControlStatus, err error, now time.Time,
 			prefix := fmt.Sprintf("%d down: ", len(st.Down))
 			last := len(lines) - 1
 			if one := prefix + strings.Join(down, ", "); width <= 0 ||
-				runewidth.StringWidth(escapes.ReplaceAllString(lines[last], ""))+3+runewidth.StringWidth(one) <= width {
+				runewidth.StringWidth(escapes.ReplaceAllString(lines[last], ""))+runewidth.StringWidth(" · ")+runewidth.StringWidth(one) <= width {
 				lines[last] += paint(color, styleDim, " · ") + paint(color, styleRed, one)
 			} else {
 				for _, l := range wrapItems("  "+prefix, down, width, 4) {

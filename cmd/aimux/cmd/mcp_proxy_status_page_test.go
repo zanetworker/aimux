@@ -337,6 +337,11 @@ func TestStatusPage_VeryNarrowDropsColumns(t *testing.T) {
 	p.gateway = func() string { return gw }
 	got := render(p)
 	for _, line := range strings.Split(got, "\n") {
+		// A command wider than the terminal stays whole on a line of its
+		// own: it overflows, but pastes as one command.
+		if words := commandWords(line); len(words) == 1 && strings.Count(words[0], "`") == 2 {
+			continue
+		}
 		if n := len([]rune(line)); n > 40 {
 			t.Fatalf("line of %d runes over width 40: %q\n%s", n, line, got)
 		}
@@ -504,6 +509,37 @@ func TestStatusPage_WideCharactersFit(t *testing.T) {
 		}
 		if a, b := col("日本語サーバー"), col("slack"); a != b {
 			t.Fatalf("width %d: state column at cell %d and %d:\n%s", width, a, b, got)
+		}
+	}
+}
+
+// A command in backticks is never broken across lines, so it pastes whole.
+func TestWrap_KeepsCommandsWhole(t *testing.T) {
+	text := "! drifted: slack (its entry is no longer the proxy URL); to fix it, " + mcpproxy.DriftFix
+	for _, width := range []int{40, 60, 80} {
+		for _, line := range wrap(text, width, 2) {
+			if strings.Count(line, "`")%2 != 0 {
+				t.Fatalf("width %d: command broken across lines at %q\n%q", width, line, wrap(text, width, 2))
+			}
+		}
+	}
+	if got := wrap("a `b c` d", 4, 2); len(got) != 3 || got[1] != "  `b c`" {
+		t.Fatalf("a command too long for a line goes whole on its own: %q", got)
+	}
+}
+
+// The separator is measured like the text: where the locale makes " · "
+// wider than three cells, header lines still fit.
+func TestJoinWrapped_EastAsianSeparatorFits(t *testing.T) {
+	old := runewidth.DefaultCondition.EastAsianWidth
+	runewidth.DefaultCondition.EastAsianWidth = true
+	defer func() { runewidth.DefaultCondition.EastAsianWidth = old }()
+	parts := []string{"MCP proxy ● running", "pid 99", "aimux v0.15.0", "up 3h", "127.0.0.1:7381"}
+	for width := 30; width <= 80; width++ {
+		for _, line := range joinWrapped(parts, false, width) {
+			if n := runewidth.StringWidth(line); n > width {
+				t.Fatalf("line of %d cells over %d: %q", n, width, line)
+			}
 		}
 	}
 }

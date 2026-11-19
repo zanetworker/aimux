@@ -241,9 +241,10 @@ func newMCPProxyStatusCmd() *cobra.Command {
 		Short: "Show the running proxy's servers: state, tools, last call, last error",
 		Long: "Reads the running proxy's /status on 127.0.0.1 and shows the daemon with a count per state, what " +
 			"needs you (an upgrade restart pending, entries drifted from their proxy URL, stdio and HTTP servers not " +
-			"behind the proxy yet, hooks off), then the servers with a problem (failed, or a recent error), the " +
-			"active ones, the never-started ones on one line, the tool gateway and the install notes. --all lists " +
-			"every server as a row and shows errors that are past as (old). With --probe the proxy starts each " +
+			"behind the proxy yet, hooks off), then the servers with a problem (failed, or an error the server has " +
+			"not recovered from, whatever its age), the " +
+			"active ones, the never-started ones on one line, the tool gateway and the install notes. --all (text " +
+			"only) lists every server as a row and shows errors that are past as (old). With --probe the proxy starts each " +
 			"configured server once and lists its tools before reporting. Not running is reported, not an error; " +
 			"a proxy that gives no status is an error.",
 		RunE: func(cmd *cobra.Command, args []string) error {
