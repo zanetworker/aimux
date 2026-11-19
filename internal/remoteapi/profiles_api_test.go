@@ -615,3 +615,22 @@ func TestNewSession_RetryKeyScopedToInstance(t *testing.T) {
 		r.idle(c.want)
 	}
 }
+
+// A page request never continues a session the serving engine cannot run
+// (a run session lost when remote serve restarted): it starts a new one.
+func TestNewSession_DeadSessionNotContinued(t *testing.T) {
+	r := newProfileRig(t)
+	r.api.ProfileSessionLive = func(id string) bool { return id != "p-1" }
+	r.serve()
+	ask := func(want string) {
+		t.Helper()
+		resp, out := r.do("POST", "/v1/sessions", `{"profile":"page","url":"https://example.com/a","text":"q"}`)
+		if resp.StatusCode != 202 || out["id"] != want {
+			t.Fatalf("%d %v, want 202 %s", resp.StatusCode, out, want)
+		}
+		r.idle(want)
+	}
+	ask("p-1")
+	ask("p-2") // p-1 is not live: a new session
+	ask("p-2") // p-2 is: continued
+}

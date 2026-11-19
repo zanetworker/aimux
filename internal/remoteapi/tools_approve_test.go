@@ -348,7 +348,7 @@ func TestApprovePins_RefusesARecordThatMoved(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.api.approvePins(r.api.Tools(), []string{"jira:readonly/b"}, checked); !errors.Is(err, errPinsMoved) {
+	if _, _, err := r.api.approvePins(context.Background(), r.api.Tools(), []string{"jira:readonly/b"}, checked); !errors.Is(err, errPinsMoved) {
 		t.Fatalf("err %v, want errPinsMoved", err)
 	}
 	if f, _ := r.store.LoadFile(); f["jira"]["b"].Hash != "sha256:from-the-mac" {

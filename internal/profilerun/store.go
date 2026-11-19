@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/zanetworker/aimux/internal/runcheck"
 )
 
 // Meta is what aimux records about a session started under a profile.
@@ -33,6 +35,34 @@ type Meta struct {
 	// a private page with "Use this page" off). Keyed like WithPage, so a
 	// question asked one way never continues a session started the other.
 	OriginOnly bool `json:",omitempty"`
+	// Run is a research-with-work session's stage state (run engine);
+	// nil for every other session and for files from before runs.
+	Run *RunState `json:",omitempty"`
+}
+
+// Run stages, in order; a run ends in StageDone or StageFailed.
+const (
+	StagePlanning = "planning"
+	StageChecking = "checking"
+	StageReading  = "reading"
+	StageWriting  = "writing"
+	StageDone     = "done"
+	StageFailed   = "failed"
+)
+
+// RunState is where a run session's latest turn got to: its stage, the
+// child sessions each stage ran in, the queries the check accepted and why
+// it rejected the others (reasons only, never the text), the sources of
+// outside-written content the turn read (attempted and succeeded), and the
+// links its answer may show (pages the reader fetched).
+type RunState struct {
+	Stage            string               `json:"stage"`
+	Children         map[string]string    `json:"children,omitempty"`
+	Accepted         []string             `json:"accepted,omitempty"`
+	Rejected         []runcheck.Rejection `json:"rejected,omitempty"`
+	OutsideAttempted []string             `json:"outsideAttempted,omitempty"`
+	OutsideSucceeded []string             `json:"outsideSucceeded,omitempty"`
+	Links            []string             `json:"links,omitempty"`
 }
 
 // Store keeps session Meta in one JSON file (0600, written atomically), by
@@ -191,6 +221,24 @@ func (s *Store) MarkStarted(session string) error {
 		return nil
 	}
 	m.Started = true
+	all[session] = m
+	return s.save(all)
+}
+
+// SetRun records session's run state, keeping the rest of its Meta. A
+// session not in the store is an error.
+func (s *Store) SetRun(session string, r RunState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all, err := s.load()
+	if err != nil {
+		return err
+	}
+	m, ok := all[session]
+	if !ok {
+		return fmt.Errorf("profile session %s is not recorded", session)
+	}
+	m.Run = &r
 	all[session] = m
 	return s.save(all)
 }

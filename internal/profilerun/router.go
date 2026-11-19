@@ -30,6 +30,11 @@ type Router struct {
 	FallbackCancel func(session string) error
 	// Runs resolves a profile name to its Manifest.Runs.
 	Runs func(profile string) (string, error)
+	// Admit, if set, must accept a profile before a new turn of its
+	// session starts (Send, which queued messages also go through): a
+	// profile whose roles stopped checking gets no new turn. Check and
+	// Cancel never call it, so a running turn can still be stopped.
+	Admit func(profile string) error
 	// Log gets one line per distinct store failure; default slog.Default().
 	Log *slog.Logger
 
@@ -72,12 +77,17 @@ func (r *Router) storeError(err error) error {
 
 // Send continues session with text.
 func (r *Router) Send(ctx context.Context, session, text string, onEvent func(acprun.Event)) (string, error) {
-	e, profiled, err := r.engine(session)
+	e, m, profiled, err := r.engineMeta(session)
 	if err != nil {
 		return "", err
 	}
 	if !profiled {
 		return r.Fallback(ctx, session, text, onEvent)
+	}
+	if r.Admit != nil {
+		if err := r.Admit(m.Profile); err != nil {
+			return "", fmt.Errorf("session %s: %w", session, err)
+		}
 	}
 	return e.Send(ctx, session, text, onEvent)
 }
@@ -117,28 +127,35 @@ type Checker interface {
 
 // engine finds session's engine; profiled is false for a session without Meta.
 func (r *Router) engine(session string) (e Engine, profiled bool, err error) {
+	e, _, profiled, err = r.engineMeta(session)
+	return e, profiled, err
+}
+
+// engineMeta is engine with the Meta it routed by, so admission checks the
+// same profile the turn is routed with (one store read).
+func (r *Router) engineMeta(session string) (e Engine, m Meta, profiled bool, err error) {
 	if r.Store == nil {
-		return nil, false, nil
+		return nil, Meta{}, false, nil
 	}
 	m, ok, err := r.Store.lookup(session)
 	if err := r.storeError(err); err != nil {
-		return nil, false, err
+		return nil, Meta{}, false, err
 	}
 	if !ok {
-		return nil, false, nil
+		return nil, Meta{}, false, nil
 	}
 	if r.Runs == nil {
-		return nil, true, fmt.Errorf("session %s: profile %q cannot be resolved", session, m.Profile)
+		return nil, m, true, fmt.Errorf("session %s: profile %q cannot be resolved", session, m.Profile)
 	}
 	runs, err := r.Runs(m.Profile)
 	if err != nil {
-		return nil, true, fmt.Errorf("session %s: profile %q: %w", session, m.Profile, err)
+		return nil, m, true, fmt.Errorf("session %s: profile %q: %w", session, m.Profile, err)
 	}
 	e = r.Engines[runs]
 	if e == nil {
-		return nil, true, fmt.Errorf("session %s: no engine for profile %q (runs %s)", session, m.Profile, runs)
+		return nil, m, true, fmt.Errorf("session %s: no engine for profile %q (runs %s)", session, m.Profile, runs)
 	}
-	return e, true, nil
+	return e, m, true, nil
 }
 
 // modelKey carries a turn's model choice in its context.
@@ -169,6 +186,22 @@ func PriorFrom(ctx context.Context) []string {
 func ModelFrom(ctx context.Context) string {
 	m, _ := ctx.Value(modelKey{}).(string)
 	return m
+}
+
+// noWebKey marks a turn that must not reach the web.
+type noWebKey struct{}
+
+// WithNoWeb returns ctx for a turn that must not reach the web (a run's
+// planner stage): the sandbox engine refuses it when its profile compiles
+// with web, whatever the profile was when the run was admitted.
+func WithNoWeb(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noWebKey{}, true)
+}
+
+// NoWebFrom reports whether ctx forbids the web.
+func NoWebFrom(ctx context.Context) bool {
+	v, _ := ctx.Value(noWebKey{}).(bool)
+	return v
 }
 
 // imageKey carries a turn's attached image in its context.

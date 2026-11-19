@@ -236,8 +236,6 @@ type cliBackend struct {
 }
 
 var (
-	// sandboxNameRE keeps a sandbox name from reading as a flag or a path.
-	sandboxNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	// terminalPhases end the Ready wait: the sandbox will not become Ready.
 	terminalPhases = map[string]bool{"Error": true, "Failed": true, "Stopped": true, "Completed": true}
 )
@@ -281,7 +279,7 @@ func (b *cliBackend) phase(ctx context.Context, name string) (string, bool, erro
 }
 
 func (b *cliBackend) Ensure(ctx context.Context, c profile.Compiled) error {
-	if !sandboxNameRE.MatchString(c.Sandbox) {
+	if !profile.ValidSandboxName(c.Sandbox) {
 		return fmt.Errorf("invalid sandbox name %q", c.Sandbox)
 	}
 	if err := os.MkdirAll(b.dir, 0o700); err != nil {
@@ -441,7 +439,7 @@ func writeFile0600(path string, data []byte) error {
 // wrapper hands to the command as its stdin unchanged. env goes to the command alone, through
 // an `env` prefix (envArgs).
 func (b *cliBackend) Exec(ctx context.Context, c profile.Compiled, mcpConfig, prompt string, env map[string]string, args []string) (io.ReadCloser, error) {
-	if !sandboxNameRE.MatchString(c.Sandbox) {
+	if !profile.ValidSandboxName(c.Sandbox) {
 		return nil, fmt.Errorf("invalid sandbox name %q", c.Sandbox)
 	}
 	if strings.ContainsAny(mcpConfig, "\r\n") {
@@ -479,7 +477,7 @@ var toolEnv = []string{"GH_CONFIG_DIR=/tmp/gh", "XDG_CACHE_HOME=/tmp/cache"}
 // and its exit status with a nil error; err is for a command that could
 // not run or did not exit on its own.
 func (b *cliBackend) RunTool(ctx context.Context, sandbox string, argv []string) (stdout, stderr []byte, exit int, err error) {
-	if !sandboxNameRE.MatchString(sandbox) {
+	if !profile.ValidSandboxName(sandbox) {
 		return nil, nil, 0, fmt.Errorf("invalid sandbox name %q", sandbox)
 	}
 	if len(argv) == 0 || !filepath.IsAbs(argv[0]) {
@@ -530,7 +528,7 @@ func (b *cliBackend) RunTool(ctx context.Context, sandbox string, argv []string)
 // Download reads remotePath with `cat` in the sandbox; localPath is written
 // only when the whole read succeeded.
 func (b *cliBackend) Download(ctx context.Context, sandbox, remotePath, localPath string) error {
-	if !sandboxNameRE.MatchString(sandbox) {
+	if !profile.ValidSandboxName(sandbox) {
 		return fmt.Errorf("invalid sandbox name %q", sandbox)
 	}
 	if !filepath.IsAbs(remotePath) || strings.ContainsAny(remotePath, "\r\n") {

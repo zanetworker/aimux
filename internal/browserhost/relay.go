@@ -34,7 +34,7 @@ const (
 )
 
 // profileOfLane is the profile each panel lane asks under.
-var profileOfLane = map[string]string{"page": "page", "research": "research", "work": "work-readonly"}
+var profileOfLane = map[string]string{"page": "page", "research": "research", "work": "work-readonly", "both": "research-with-work"}
 
 // Relay serves one Wingman side panel over native messaging (the frames and
 // Request/Event JSON the extension speaks) by turning its requests into
@@ -118,6 +118,10 @@ type inflight struct {
 	mu       sync.Mutex
 	canceled bool
 	session  string // the v1 session, once known
+	// abort: cancelling ends the request itself (a tool approval, so the
+	// dialog on the Mac closes and nothing is approved after the panel let
+	// go); a session's turn is stopped with a v1 cancel instead.
+	abort bool
 }
 
 func (s *relaySession) dispatch(ctx context.Context, msg []byte) {
@@ -139,7 +143,7 @@ func (s *relaySession) dispatch(ctx context.Context, msg []byte) {
 		return
 	}
 	rctx, rcancel := context.WithCancel(ctx)
-	f := &inflight{cancel: rcancel}
+	f := &inflight{cancel: rcancel, abort: strings.HasPrefix(req.Type, "tools.")}
 	s.mu.Lock()
 	if s.inflight[req.ID] != nil {
 		s.mu.Unlock()
@@ -224,6 +228,35 @@ func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emi
 			fail(err)
 			return
 		}
+		emit(Event{Type: "done"})
+	case "tools.diff":
+		var out json.RawMessage
+		if err := s.call(ctx, http.MethodGet, "/v1/tools/"+url.PathEscape(req.Set)+"/diff", nil, &out); err != nil {
+			fail(err)
+			return
+		}
+		ev := Event{ID: req.ID, Type: "tools_diff", Data: out}
+		if b, err := json.Marshal(ev); err != nil || len(b) > MaxOutbound {
+			// Not split across messages: one the panel cannot show whole
+			// is reviewed on the Mac instead.
+			fail(&apiError{Code: "diff_too_large", Message: "the diff of " + req.Set + " is too large to review in the panel: run aimux tools diff on the Mac"})
+			return
+		}
+		emit(ev)
+		emit(Event{Type: "done"})
+	case "tools.approve":
+		// The step-up happens on the Mac (a dialog aimux shows); this only
+		// forwards what the panel showed and the answer.
+		var out json.RawMessage
+		body := map[string]any{"set": req.Set, "tools": req.Tools}
+		if req.Snapshot != "" {
+			body["snapshot"] = req.Snapshot
+		}
+		if err := s.call(ctx, http.MethodPost, "/v1/tools/approve", body, &out); err != nil {
+			fail(err)
+			return
+		}
+		emit(Event{Type: "tools_approved", Data: out})
 		emit(Event{Type: "done"})
 	default:
 		fail(errors.New("unknown request type: " + req.Type))
@@ -337,8 +370,16 @@ func (s *relaySession) cancel(id string) {
 		return
 	}
 	f.mu.Lock()
-	if !f.canceled {
-		f.canceled = true
+	ack := !f.canceled
+	f.canceled = true // no event of the request's own after this
+	f.mu.Unlock()
+	if f.abort {
+		// A tool request ends before the acknowledgement is written, so a
+		// blocked panel output cannot keep the dialog on the Mac open.
+		f.cancel()
+	}
+	f.mu.Lock()
+	if ack {
 		s.send(Event{ID: id, Type: "done"})
 	}
 	session := f.session
@@ -495,6 +536,7 @@ func (s *relaySession) getPage(ctx context.Context, instance, pageURL string) (*
 				User  string    `json:"user"`
 				Reply string    `json:"reply"`
 				Image bool      `json:"image"`
+				Links []string  `json:"links"`
 				Tools []struct {
 					Name string `json:"name"`
 				} `json:"tools"`
@@ -513,7 +555,7 @@ func (s *relaySession) getPage(ctx context.Context, instance, pageURL string) (*
 			for _, tl := range t.Tools {
 				tools = append(tools, tl.Name)
 			}
-			p.Turns = append(p.Turns, Turn{At: t.Time, Lane: laneOfProfile(ss.Profile), Question: profilerun.QuestionOf(t.User), Answer: t.Reply, ToolCalls: tools, Image: t.Image})
+			p.Turns = append(p.Turns, Turn{At: t.Time, Lane: laneOfProfile(ss.Profile), Question: profilerun.QuestionOf(t.User), Answer: t.Reply, ToolCalls: tools, Image: t.Image, Links: t.Links})
 			if t.Time.After(p.LastAsked) {
 				p.LastAsked = t.Time
 			}
@@ -740,6 +782,7 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 			Title   string `json:"title"`
 			Status  string `json:"status"`
 			Content json.RawMessage
+			Sets    []string `json:"sets"` // an aimux_notice's held tools' sets
 		}
 		if json.Unmarshal(ev.Data, &u) != nil {
 			return false, nil
@@ -759,7 +802,7 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 				Text string `json:"text"`
 			}
 			if json.Unmarshal(u.Content, &c) == nil && c.Type == "text" && c.Text != "" {
-				emit(Event{Type: "notice", Text: c.Text})
+				emit(Event{Type: "notice", Text: c.Text, Sets: u.Sets})
 			}
 		case "tool_call":
 			ev := Event{Type: "tool_call", Tool: u.Title}
@@ -770,7 +813,11 @@ func mapEvent(ev v1Event, emit func(Event)) (end bool, err error) {
 		}
 		return false, nil
 	case "turn_done":
-		emit(Event{Type: "done"})
+		var d struct {
+			Links []string `json:"links"`
+		}
+		_ = json.Unmarshal(ev.Data, &d) // a turn_done without links (most turns) ends the turn the same
+		emit(Event{Type: "done", Links: d.Links})
 		return true, nil
 	case "turn_error":
 		var d struct {

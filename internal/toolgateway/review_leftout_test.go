@@ -3,6 +3,8 @@ package toolgateway
 import (
 	"reflect"
 	"testing"
+
+	"github.com/zanetworker/aimux/internal/toolreg"
 )
 
 func held(src string, tools map[string]string) []ToolStatus {
@@ -49,5 +51,30 @@ func TestHeldBackNotice_NamesALeftOutServer(t *testing.T) {
 	one := held("slack", map[string]string{"a": StatusChanged})
 	if got := HeldBackNotice(one, []string{"slack"}); got != "slack: 1 tool changed, held for review, left out of this turn: run aimux tools status" {
 		t.Fatalf("one tool: %q", got)
+	}
+}
+
+// HeldSets is the requested set names whose tools are held, sorted and
+// once each, under the name the profile asked for (an alias included); a
+// tool no set lists (new_on_server) names none.
+func TestHeldSets(t *testing.T) {
+	reg := toolreg.Registry{Version: 1,
+		Sources: map[string]toolreg.Source{"jira": {}, "notes": {}},
+		Sets: map[string]toolreg.Set{
+			"jira:readonly":  {Source: "jira", Tools: []string{"a", "b"}},
+			"jira:triage":    {Source: "jira", Tools: []string{"b"}},
+			"notes:readonly": {Source: "notes", Tools: []string{"wiki_search"}},
+		}}
+	h := []ToolStatus{
+		{Set: "jira:readonly", Source: "jira", Tool: "b", Status: StatusChanged},
+		{Set: "notes:readonly", Source: "notes", Tool: "wiki_search", Status: StatusUnpinned},
+		{Source: "jira", Tool: "extra", Status: StatusNewOnServer},
+	}
+	got := HeldSets(reg, h, []string{"wiki:readonly", "jira:triage", "jira:readonly", "jira:readonly"})
+	if want := []string{"jira:readonly", "jira:triage", "wiki:readonly"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("HeldSets = %v, want %v", got, want)
+	}
+	if got := HeldSets(reg, nil, []string{"jira:readonly"}); got != nil {
+		t.Fatalf("nothing held: %v, want nil", got)
 	}
 }

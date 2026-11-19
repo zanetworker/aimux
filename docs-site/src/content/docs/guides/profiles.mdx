@@ -30,11 +30,11 @@ settings: { inherit_user: false }
 
 | Field | Meaning |
 |---|---|
-| `name` | Must equal the file name without `.yaml`. A profile that runs in a sandbox (`runs: sandbox` or `run`) gets the sandbox `aimux-<name>`, and OpenShell allows 19 characters, so its name is at most 13 characters; `check` and every session fail a longer one |
+| `name` | Must equal the file name without `.yaml`. A profile that runs in a sandbox (`runs: sandbox`) gets the sandbox `aimux-<name>`, which must be lowercase ASCII letters and digits in dash-separated runs (no leading, trailing or doubled dash) and at most 19 characters (OpenShell's limit), so the name is at most 13 characters; `check`, policy compilation and every session refuse another. A `run` profile has no sandbox of its own: its stages run under its roles' profiles |
 | `extends` | The profile this one narrows: `builtin:<name>` or the name of another user profile |
 | `harness` | The agent harness; `claude-code` (the default for a root, and the only one with an adapter). A child cannot change it |
 | `model` | `provider` and `name`; a child may set either. For `acp` sessions, `name` (`sonnet` or `opus`) is the default when a request names no model |
-| `runs` | Where it runs: `host` (the Mac itself, with your settings), `acp` (a no-tools agent session on the Wingman adapter), `sandbox` (an OpenShell sandbox), `run` (reserved for runs started by a later release). Default `host` for a root |
+| `runs` | Where it runs: `host` (the Mac itself, with your settings), `acp` (a no-tools agent session on the Wingman adapter), `sandbox` (an OpenShell sandbox), `run` (`research-with-work`: a planner and a writer under its roles, a reader always under the built-in `research`, and a query check aimux runs itself). Default `host` for a root |
 | `dir` | A working directory carried over from a v1 profile; not a permission |
 | `tools` | Exact tool names or reviewed sets such as `jira:readonly`; `[]` is none. A set whose server has no approved tools (none approved yet with `aimux tools approve`, its backend was down, or the name is misspelled) is left out and grants nothing; a profile whose sets all lack pins fails to compile |
 | `network` | `default` (`deny` or `allow`) and `allow`, a list of `model`, `gateway` or `web` |
@@ -42,7 +42,7 @@ settings: { inherit_user: false }
 | `credentials` | Names of credentials the session may use |
 | `settings` | `inherit_user`: load your own harness settings (default `false`) |
 | `unsafe_patterns` | `true` allows `*` and `?` in `tools`; without it a pattern is rejected |
-| `roles` | Role to profile name, for profiles that run several roles; targets are not checked yet |
+| `roles` | Role to profile name, for profiles that run several roles (`research-with-work`: `planner: work-readonly`, `writer: page`). Every target, and its own roles, must resolve and validate, and a target that runs in a sandbox must have a valid sandbox name. A missing target is refused with `role <role>: profile <name> not found`; a target that extends a missing profile, is invalid or has an invalid sandbox name is refused with its own error. Roles have a shape: a `planner` must run in a sandbox without `web`, a `writer` on the page engine (`acp`) with no tools and no `web`; another shape is refused naming the role (`role writer: profile research runs sandbox, want acp`). Only `planner` and `writer` are used by the run; other role names are not shaped or used. The planner's turn also refuses a profile that compiles with `web` when it launches (`profile_unavailable`), so a profile edited after admission cannot give it the web; the client sees `run_planner_failed`, with `profile_unavailable` as the cause in the `remote serve` log. A cycle of roles between valid profiles is accepted. A child that sets `roles` replaces its parent's whole map; one that leaves it out inherits it. Roles are checked where a profile is admitted: `aimux profile check` exits 1, and `GET /v1/profiles` leaves the profile out (its server log says why). `aimux profile show`, `list`, `aimux sandbox status` and doctor do not check roles. While a role is invalid, a turn already running finishes or can be cancelled, a later message to that session answers `403 profile_not_allowed`, a message queued before the role broke ends in a `turn_error` naming the role, and a new session `400 unknown_profile` |
 
 ### Narrow-only inheritance
 
@@ -69,9 +69,9 @@ Every resolved profile has a digest: `sha256:` and the hash of its canonical JSO
 | `work-readonly` | `sandbox` | `wiki:readonly`, `jira:readonly`, `slack:readonly`, `google:readonly`, `gh:readonly` (opt-in: used once you run `aimux tools add cli gh` and approve it) | `deny`, allow `model` and `gateway` | yes |
 | `coding` | `host` | none declared | `allow` | yes |
 | `research` | `sandbox` | none | `deny`, allow `model` and `web` | yes |
-| `research-with-work` | `run` | none | `deny`, allow `model` | not yet |
+| `research-with-work` | `run` | none (its stages run under its roles) | `deny`, allow `model` | yes |
 
-`research` reaches the public web read only: WebSearch, and WebFetch with GET only on a reviewed list of top-level domains and apex hosts, with private addresses blocked. It has no tools and no `gateway`, so it holds no private data. `research-with-work` exists so clients can list it, but a session under it is refused with `409 profile_not_available` until a later release. Through the remote API, `coding` and `base` (`runs: host`) are listed with `available: false` too and refused the same way, since `remote serve` has no engine for them yet: start a host session without a profile instead. `aimux profile list` shows the manifest's own `available`.
+`research` reaches the public web read only: WebSearch, and WebFetch with GET only on a reviewed list of top-level domains and apex hosts, with private addresses blocked. It has no tools and no `gateway`, so it holds no private data. `research-with-work` answers a question from your workspace and the web together, in four stages; the planner, reader and writer each run in their own child session, the check in aimux itself: a planner under its `planner` role (`work-readonly`: your private tools, no web) looks things up and proposes up to 5 public search queries; a heuristic check drops a query that looks like it carries private detail, naming only the reason; it catches the shapes below, not every leak. It folds look-alike dots and Unicode dashes to ASCII first and checks the query as written and percent-decoded once (a query that does not decode is dropped as `encoding`), then refuses a URL, an email, an IP, any dotted name of two or more labels whatever its suffix (a numeric version such as `v1.2.3` is exempt; `node.js` is not), an issue key with any dash (`RHAIENG-1234`, `RHAIENG 1234` with a key of 4 or more characters and a number of 4 or more digits, or in any case `rhaieng-1234` when the number has 4 or more digits; and any key the planner saw (dashed in any case, or spaced with an upper-case key), matched in the query in any case, dashed or spaced; `gpt-4`, `sha-256`, `TLS 1.3`, `HTTP 2` and `RHEL 10` pass unless the planner saw them), a token, AWS access key id or credential (`password=...`, `the password is ...`), a UUID, high-entropy text, or 8 consecutive words, in the query or its decoded form, copied from the question, the page, the page's earlier questions (the request's `prior`, given or computed), the planner's private notes or its tool calls and results. A span of fewer than 8 words, or the same words reordered, passes that last check: a known residual risk; a reader always under the built-in `research` profile (web only, no private data; a `reader` role is not used) answers the accepted queries and nothing else, and is skipped when none is accepted; a writer under its `writer` role (`page`: no tools, no web) writes the answer from the labeled results. Only the writer's text reaches the client, with a progress notice per stage, and the answer's `turn_done` carries the pages the reader fetched as its only links. It takes no image. Through the remote API, `coding` and `base` (`runs: host`) are listed with `available: false` and refused with `409 profile_not_available`, since `remote serve` has no engine for them yet: start a host session without a profile instead. `aimux profile list` shows the manifest's own `available`.
 
 Builtins other than `page` are roots: they have no `extends`. `base` is the narrowest root, and `page` extends it. A user profile can extend any builtin and narrow it. Extending `base` or `page` gives a profile with no tools that can only stay as it is or move to a more isolated `runs`.
 
@@ -94,7 +94,7 @@ A profile names tool sets such as `google:readonly`, never tool names. What a se
 
 ### Reviewing and approving tools
 
-Only `aimux tools approve` writes pins. Three commands, each with `--json`:
+Only `aimux tools approve` writes pins on the Mac; a client allowed to (Wingman by default) can also approve from its panel through `POST /v1/tools/approve`, and each such approval waits for you to click **Approve** in a dialog aimux shows on the Mac, naming the set, each tool and what changed (see [Approving tools from a client](/guides/remote-access/#approving-tools-from-a-client)). Three commands, each with `--json`:
 
 | Command | What it does |
 |---|---|
@@ -146,20 +146,22 @@ See [Pinned tools](/guides/wingman/#pinned-tools) for the setup output and what 
 ```bash
 aimux profile list                # builtins first, then yours: name, runs, available, digest
 aimux profile show work-readonly  # the resolved manifest and its digest
-aimux profile check my-notes      # resolve and validate; exit 1 with the reason if it fails
+aimux profile check my-notes      # resolve, validate, check the sandbox name and roles; exit 1 with the reason if any fails
 aimux profile migrate             # write each v1 profile as a v2 file
 ```
 
-`show` prints the full digest; the `list` table shortens it to 12 characters. All four accept `--json`. `check` exits 1 when the profile does not resolve or its sandbox name is too long, and its message names the field that widens. `list` prints a profile that does not resolve with `-` as its digest and the reason on stderr.
+`show` prints the full digest; the `list` table shortens it to 12 characters. All four accept `--json`. `check` exits 1 when the profile does not resolve (its message names the field that widens), when its sandbox name is over 19 characters with the `aimux-` prefix or is not lowercase ASCII letters and digits in dash-separated runs (no leading, trailing or doubled dash), or when a role it names does not check (the message names the role and the cause). `list` prints a profile that does not resolve with `-` as its digest and the reason on stderr.
 
-`check` validates the manifest; it does not say whether the profile is available. A profile like `research-with-work` checks ok while `available` is false in `list`.
+A profile that does not resolve (it widens its parent or extends a missing profile) stays in `aimux profile list` with empty `runs`, `available: false` and digest `-`; the reason is printed on stderr and the command still exits 0. `aimux profile show` and `aimux profile check` exit 1 with the reason. `aimux profile check` also exits 1 for a sandbox profile whose sandbox name is invalid (`aimux-<name>` must be lowercase ASCII letters and digits in dash-separated runs, with no leading, trailing or doubled dash, at most 19 characters; policy compilation refuses it too) and for a role that does not check (see `roles` above), naming the role and its cause.
+
+`check` validates the manifest; it does not say whether the profile is available. A profile can check ok while `available` is false in `list`.
 
 ### Sandboxes
 
 A profile that runs in a sandbox (`runs: sandbox`, such as `research` and `work-readonly`) gets one OpenShell sandbox, `aimux-<profile>`. `aimux remote serve` creates it on the profile's first turn and, when the compiled policy changes (a new approval, an edited profile), updates its policy on the next turn. The digest of the policy it last applied is in `~/.aimux/sandboxes/<sandbox>.digest`.
 
 ```bash
-aimux sandbox status          # both images, providers, gateway, each sandboxed profile's and the tool runner's policy state, sources left out of the runner; read-only
+aimux sandbox status          # both images, providers, gateway, the policy state of each available runs: sandbox profile and of the tool runner, sources left out of the runner; read-only
 aimux sandbox status --json
 aimux sandbox setup           # build both images and create the providers when missing; creates no sandbox
 aimux sandbox verify          # egress checks inside aimux-work-readonly (was aimux browser verify)

@@ -274,7 +274,7 @@ func TestBuiltins_AllResolveAndPageHasNoTools(t *testing.T) {
 	if base.Runs != "host" || base.Network.Default != "deny" || base.Settings.InheritUser || len(base.Tools) != 0 {
 		t.Fatalf("base = %+v", base)
 	}
-	for name, want := range map[string]bool{"base": true, "page": true, "work-readonly": true, "coding": true, "research": true, "research-with-work": false} {
+	for name, want := range map[string]bool{"base": true, "page": true, "work-readonly": true, "coding": true, "research": true, "research-with-work": true} {
 		m, _ := Resolve(name, nil)
 		if m.Available != want {
 			t.Errorf("%s Available = %v, want %v", name, m.Available, want)

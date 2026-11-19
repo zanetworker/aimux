@@ -200,7 +200,7 @@ func newProfileShowCmd() *cobra.Command {
 func newProfileCheckCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "check <name>",
-		Short: "Validate a profile; exits 1 with the error if it does not resolve",
+		Short: "Validate a profile; exits 1 with the error if it does not resolve, its sandbox name is invalid, or a role it names does not check",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			user, err := loadUserProfiles(cmd)
@@ -210,6 +210,9 @@ func newProfileCheckCmd() *cobra.Command {
 			m, err := profile.Resolve(args[0], user)
 			if err == nil {
 				err = profile.CheckSandboxName(m)
+			}
+			if err == nil {
+				err = profile.CheckRoles(m, user)
 			}
 			if err != nil {
 				return fmt.Errorf("profile %s: %w", args[0], err)

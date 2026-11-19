@@ -343,7 +343,7 @@ func TestNewSession_ChangeAfterDecidedPickLogsChanged(t *testing.T) {
 }
 
 func TestModeOfProfile(t *testing.T) {
-	for profile, want := range map[string]string{"page": "page", "research": "web", "work-readonly": "workspace", "research-with-work": "research-with-work"} {
+	for profile, want := range map[string]string{"page": "page", "research": "web", "work-readonly": "workspace", "research-with-work": "both"} {
 		if got := modeOfProfile(profile); got != want {
 			t.Errorf("modeOfProfile(%q) = %q, want %q", profile, got, want)
 		}

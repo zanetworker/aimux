@@ -398,7 +398,11 @@ func (a *API) profileSession(ctx context.Context, client string, m profile.Manif
 				return id, true
 			}
 			if req.URL != "" {
-				return a.ProfileSessions.FindPage(client, req.Instance, req.URL, m.Name, withPage, req.OriginOnly)
+				id, ok := a.ProfileSessions.FindPage(client, req.Instance, req.URL, m.Name, withPage, req.OriginOnly)
+				if ok && a.ProfileSessionLive != nil && !a.ProfileSessionLive(id) {
+					return "", false // the engine lost it (a run after a restart): start anew
+				}
+				return id, ok
 			}
 			return "", false
 		},
@@ -569,11 +573,17 @@ func (a *API) steppedUp(w http.ResponseWriter, r *http.Request) bool {
 // or a request without a login (a local socket, a token that is not a
 // device session) never passes.
 func (a *API) steppedUpFor(r *http.Request, kinds []string) bool {
+	_, ok := a.stepUpKind(r, kinds)
+	return ok
+}
+
+// stepUpKind is steppedUpFor with the device kind that passed it.
+func (a *API) stepUpKind(r *http.Request, kinds []string) (string, bool) {
 	if a.DeviceLogin == nil || len(kinds) == 0 {
-		return false
+		return "", false
 	}
 	age, kind, ok := a.DeviceLogin.LoginAge(r)
-	return ok && age < stepUpMaxAge && slices.Contains(kinds, kind)
+	return kind, ok && age < stepUpMaxAge && slices.Contains(kinds, kind)
 }
 
 var errUnknownProfile = errors.New("no profile by that name (GET /v1/profiles lists them)")
@@ -892,7 +902,7 @@ func (a *API) localAudit(next http.Handler) http.Handler {
 		a.auditLog().Write(devicelogin.AuditEntry{Client: client, Action: action, Session: session,
 			Profile: n.profile, Digest: n.digest, URLHost: n.urlHost, Result: result,
 			QuestionSHA256: n.questionSHA, DecisionID: n.decisionID, Source: n.source,
-			Set: n.tools.set, Tools: n.tools.tools})
+			Set: n.tools.set, Tools: n.tools.tools, StepUp: n.tools.stepUp})
 	})
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/zanetworker/aimux/internal/acprun"
 	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/discovery"
+	"github.com/zanetworker/aimux/internal/macconfirm"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/remoteapi"
@@ -67,8 +69,14 @@ func (p *profileWiring) Install(api *remoteapi.API, scopes clientscope.Scopes, s
 	if p.relist != nil {
 		api.Relist = p.relist
 	}
+	// The mac-confirm step-up: a native dialog on this Mac, which a client
+	// can ask for but never answer. None elsewhere.
+	if runtime.GOOS == "darwin" {
+		api.MacConfirm = macconfirm.System.Confirm
+	}
 	api.NewProfileSession, api.CancelProfileSession = p.newSession, p.cancelSession
 	api.ProfileHealth, api.StepUpLegacy = p.router.Health, stepUpLegacy
+	api.ProfileSessionLive = p.live
 }
 
 // servedCatalog is the catalog the API serves: a profile whose Runs has no
@@ -111,12 +119,13 @@ func buildProfileWiring(home string, getenv func(string) string, errOut io.Write
 		}
 		closeAll = closeReal
 	}
-	p.router = &profilerun.Router{Store: p.store, Engines: p.engines, Runs: p.runs}
+	p.router = &profilerun.Router{Store: p.store, Engines: p.engines, Runs: p.runs,
+		Admit: func(name string) error { _, err := resolveChecked(dir, name); return err }}
 	p.adopt(errOut)
 	return p, closeAll, nil
 }
 
-// buildEngines builds the real page and sandbox engines into p.
+// buildEngines builds the real page, sandbox and run engines into p.
 func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func(), error) {
 	sessions := filepath.Join(home, ".aimux", "wingman", "sessions")
 	if err := os.MkdirAll(sessions, 0o700); err != nil {
@@ -160,7 +169,12 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	p.sandbox.Review = tg.review(dir)
 	p.sandbox.GatewayCheck = openshellGatewayCheck
 	p.sandbox.Log = logger
-	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox}
+	// research-with-work ("runs: run"): planner and reader in sandboxes,
+	// the writer on the page engine; Resolve checks roles as the catalog does.
+	run := &profilerun.RunEngine{Planner: p.sandbox, Reader: p.sandbox, Writer: page, Compile: compile,
+		Resolve: func(name string) (profile.Manifest, error) { return resolveChecked(dir, name) },
+		Store:   p.store, Log: logger, ArchiveDir: p.sandbox.ArchiveDir}
+	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox, "run": run}
 	return func() {
 		p.pageMgr.Close()
 	}, nil
@@ -226,7 +240,8 @@ func (tg toolGatewayParts) review(dir string) func(c profile.Compiled) profileru
 		reg := c.Snapshot.Registry()
 		held := toolgateway.HeldBack(reg, toolgateway.PinsOf(c.Snapshot), toolgateway.LiveFor(reg, obs), m.Tools)
 		left := toolgateway.LeftOut(held, c.Grant.Scope())
-		return profilerun.TurnReview{Notice: toolgateway.HeldBackNotice(held, left), LeftOut: left}
+		return profilerun.TurnReview{Notice: toolgateway.HeldBackNotice(held, left), LeftOut: left,
+			Sets: toolgateway.HeldSets(reg, held, m.Tools)}
 	}
 }
 
@@ -317,6 +332,18 @@ func (s *toolSnapshots) turn() toolreg.Snapshot {
 	return s.store.Current()
 }
 
+// resolveChecked resolves the profile name (user profiles in dir, then the
+// built-ins) and checks its roles, as the catalog admits it: no new turn
+// starts under a profile whose roles do not check (Router.Admit).
+func resolveChecked(dir, name string) (profile.Manifest, error) {
+	user, _ := profile.LoadDir(dir) // a bad file is skipped; the catalog logs it
+	m, err := profile.Resolve(name, user)
+	if err != nil {
+		return profile.Manifest{}, err
+	}
+	return m, profile.CheckRoles(m, user)
+}
+
 // compileProfile compiles the profile name (user profiles in dir, then the
 // built-ins) against snap. A registry that did not load leaves every set
 // unavailable and its error is added to the compile error.
@@ -334,7 +361,8 @@ func compileProfile(snap toolreg.Snapshot, dir, name string) (profile.Compiled, 
 }
 
 // adopt makes the sandbox sessions in the store known to the sandbox
-// engine again (a restart). A started one resumes. One whose first turn
+// engine again (a restart). Run sessions are not adopted: the run engine
+// holds them in memory only, and live says so to page reuse. A started one resumes. One whose first turn
 // never started cannot (claude never made its id) and its page is not
 // stored, so the engine drops it, and it is hidden here so its page starts
 // a new session rather than reaching the dropped one. A store that cannot be
@@ -408,6 +436,23 @@ func (p *profileWiring) cancelSession(id string) error {
 	return e.Cancel(id)
 }
 
+// live reports whether a recorded profile session can still run here, for
+// page reuse: false only for a run session the run engine does not hold
+// (lost when remote serve restarted, or another remote serve's). It reads
+// the store and writes nothing, so two serve processes sharing the store
+// never mark each other's sessions.
+func (p *profileWiring) live(id string) bool {
+	m, ok := p.store.Get(id)
+	if !ok {
+		return true
+	}
+	if runs, err := p.runs(m.Profile); err != nil || runs != "run" {
+		return true
+	}
+	e, ok := p.engines["run"].(profilerun.Checker)
+	return ok && e.Check(id) == nil
+}
+
 // owns reports whether pid is an adapter process of the page engine, which
 // holds its session in Claude's registry without being a terminal.
 func (p *profileWiring) owns(pid int) bool { return p.pageMgr != nil && p.pageMgr.Owns(pid) }
@@ -445,6 +490,11 @@ func (p *profileWiring) archived(id string) string {
 	if !ok {
 		return ""
 	}
+	// A run's own transcript is read whatever its profile is now (removed
+	// or renamed): history does not depend on the profile resolving.
+	if f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, id); discovery.ValidSessionID(id) && fileExists(f) {
+		return f
+	}
 	if runs, err := p.runs(m.Profile); err != nil || runs != "sandbox" {
 		return ""
 	}
@@ -471,4 +521,26 @@ func openshellGatewayCheck(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// turnLinks is a run session's link set per turn, read from its own
+// transcript (LocalIndex.TurnLinks); nil for any other session.
+func (p *profileWiring) turnLinks(id string) map[int64][]string {
+	if p.sandbox == nil || !discovery.ValidSessionID(id) {
+		return nil
+	}
+	if _, ok := p.store.Get(id); !ok {
+		return nil
+	}
+	f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, id)
+	if !fileExists(f) {
+		return nil
+	}
+	return profilerun.RunTranscriptLinks(f)
+}
+
+// fileExists reports a regular file at path.
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }

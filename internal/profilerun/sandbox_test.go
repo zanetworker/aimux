@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/acprun"
+	"github.com/zanetworker/aimux/internal/errcode"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/sandboxlaunch"
 	"github.com/zanetworker/aimux/internal/toolgateway"
@@ -747,5 +748,79 @@ func TestAcpEmitter_ToolSnippetInContent(t *testing.T) {
 	}
 	if got[2]["status"] != "failed" || text(got[2]) != "failed: no access" {
 		t.Fatalf("failed update %v", got[2])
+	}
+}
+
+// The sandbox engine reports the Compiled a session's latest turn ran
+// under (New's until a turn runs), so a run reads its planner's grant.
+func TestSandboxEngine_TurnCompiled(t *testing.T) {
+	e, _ := newSandbox(t)
+	if _, ok := e.TurnCompiled("nope"); ok {
+		t.Fatal("TurnCompiled of an unknown session")
+	}
+	id, err := e.New(context.Background(), Meta{Profile: "work-readonly"}, "page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := e.TurnCompiled(id)
+	if !ok || c.Profile != compiledFor("work-readonly").Profile || c.Grant.Empty() != compiledFor("work-readonly").Grant.Empty() {
+		t.Fatalf("TurnCompiled after New = %+v %v", c, ok)
+	}
+	// The turn recompiles; TurnCompiled is now the turn's, not New's.
+	compile := e.Compile
+	e.Compile = func(p string) (profile.Compiled, error) {
+		c, err := compile(p)
+		c.Digest, c.PolicyYAML = "dg-turn", []byte("network_policies: {}")
+		return c, err
+	}
+	if _, _, err := sendCollect(t, e, id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := e.TurnCompiled(id); !ok || c.Digest != "dg-turn" || len(c.PolicyYAML) != 0 {
+		t.Fatalf("TurnCompiled after a turn = %q %v (policy %d bytes), want the turn's compile dg-turn without its policy", c.Digest, ok, len(c.PolicyYAML))
+	}
+	other, err := e.New(context.Background(), Meta{Profile: "research"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := e.TurnCompiled(other); c.Profile != "research" {
+		t.Fatalf("TurnCompiled(other) = %q, want its own profile", c.Profile)
+	}
+}
+
+// A turn whose context forbids the web (a run's planner stage) is refused
+// when its profile compiles with web, before any sandbox runs.
+func TestSandboxEngine_NoWebRefusesWebProfile(t *testing.T) {
+	e, b := newSandbox(t)
+	compile := e.Compile
+	e.Compile = func(p string) (profile.Compiled, error) {
+		c, err := compile(p)
+		c.Web = p == "research"
+		return c, err
+	}
+	// New under no-web refuses before any sandbox is ensured.
+	if _, err := e.New(WithNoWeb(context.Background()), Meta{Profile: "research"}, ""); err == nil || !strings.Contains(err.Error(), "reaches the web") {
+		t.Fatalf("New = %v, want refused: reaches the web", err)
+	}
+	if n := b.ensures["aimux-research"]; n != 0 {
+		t.Fatalf("a refused New ensured the sandbox %d times", n)
+	}
+	id, err := e.New(context.Background(), Meta{Profile: "research"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	execs := len(b.execs)
+	_, err = e.Send(WithNoWeb(context.Background()), id, "q", func(acprun.Event) {})
+	if err == nil || !strings.Contains(err.Error(), "reaches the web") {
+		t.Fatalf("Send = %v, want refused: reaches the web", err)
+	}
+	if ce, ok := errcode.Of(err); !ok || ce.Code != errcode.ProfileUnavailable {
+		t.Fatalf("code = %+v, want profile_unavailable", ce)
+	}
+	if len(b.execs) != execs {
+		t.Fatal("a sandbox ran for a refused turn")
+	}
+	if _, err := e.Send(context.Background(), id, "q", func(acprun.Event) {}); err != nil {
+		t.Fatalf("Send without no-web = %v", err)
 	}
 }

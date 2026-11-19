@@ -109,6 +109,7 @@ func (e *SandboxEngine) sandboxFailure(ctx context.Context, err error) error {
 // TurnReview is what the tool gateway will not serve one turn.
 type TurnReview struct {
 	Notice  string   // one line for the turn, "" for none
+	Sets    []string // the sets (as the profile names them) of the held tools
 	LeftOut []string // granted servers left out of the turn's MCP config
 }
 
@@ -118,6 +119,45 @@ type sbSession struct {
 	created bool               // a claude process has run under this id: resume it
 	cancel  context.CancelFunc // the running turn's, nil between turns
 	dropped bool               // adopted unstarted without its page: unusable
+	// compiled is what the latest turn ran under (New's until a turn runs),
+	// without its policy text.
+	compiled *profile.Compiled
+}
+
+// TurnCompiler is an engine that reports the Compiled a session's latest
+// turn ran under, so a run reads its planner's grant and snapshot rather
+// than compiling again.
+type TurnCompiler interface {
+	TurnCompiled(session string) (profile.Compiled, bool)
+}
+
+// noWebCheck refuses c when ctx forbids the web (a run's planner stage)
+// and c reaches it, before any policy is applied.
+func noWebCheck(ctx context.Context, name string, c profile.Compiled) error {
+	if NoWebFrom(ctx) && c.Web {
+		return errcode.Wrap(errcode.ProfileUnavailable, fmt.Errorf("profile %s reaches the web, which this stage may not", name))
+	}
+	return nil
+}
+
+// slim is c without its policy text, which TurnCompiled's readers never
+// need: a session keeps only what names its grant and sources.
+func slim(c profile.Compiled) *profile.Compiled {
+	c.PolicyYAML = nil
+	return &c
+}
+
+// TurnCompiled is the Compiled session's latest turn ran under, or New's
+// before any turn; false for a session this engine does not know or that
+// was adopted after a restart and has run no turn since.
+func (e *SandboxEngine) TurnCompiled(session string) (profile.Compiled, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st := e.sessions[session]
+	if st == nil || st.compiled == nil {
+		return profile.Compiled{}, false
+	}
+	return *st.compiled, true
 }
 
 // NewSandboxEngine returns a sandbox engine. compile turns a profile name
@@ -136,6 +176,9 @@ func (e *SandboxEngine) New(ctx context.Context, m Meta, page string) (string, e
 	if err != nil {
 		return "", errcode.Wrap(errcode.ProfileUnavailable, fmt.Errorf("profile %s: %w", m.Profile, err))
 	}
+	if err := noWebCheck(ctx, m.Profile, c); err != nil { // before any policy is applied
+		return "", err
+	}
 	if err := e.ensure(ctx, c); err != nil {
 		return "", err
 	}
@@ -148,7 +191,7 @@ func (e *SandboxEngine) New(ctx context.Context, m Meta, page string) (string, e
 	if e.sessions == nil {
 		e.sessions = map[string]*sbSession{}
 	}
-	e.sessions[id] = &sbSession{profile: m.Profile, first: &AskRequest{URL: m.URL, Title: m.Title, Page: page, OriginOnly: m.OriginOnly}}
+	e.sessions[id] = &sbSession{profile: m.Profile, first: &AskRequest{URL: m.URL, Title: m.Title, Page: page, OriginOnly: m.OriginOnly}, compiled: slim(c)}
 	return id, nil
 }
 
@@ -273,6 +316,12 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	if err != nil {
 		return "", errcode.Wrap(errcode.ProfileUnavailable, fmt.Errorf("profile %s: %w", st.profile, err))
 	}
+	if err := noWebCheck(ctx, st.profile, c); err != nil {
+		return "", err
+	}
+	e.mu.Lock()
+	st.compiled = slim(c)
+	e.mu.Unlock()
 	if err := e.ensure(ctx, c); err != nil {
 		return "", err
 	}
@@ -344,9 +393,19 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 		defer end()
 	}
 	redact := func(err error) error { return redactToken(err, token) }
-	emit := acpEmitter(onEvent)
+	toClient := acpEmitter(onEvent)
+	collect := toolResultsFrom(ctx)
+	emit := func(ev LaneEvent) {
+		if ev.Type == "tool_result" { // stays in aimux: only the turn's collector sees it
+			if collect != nil {
+				collect(ToolResult{Name: ev.Tool, Input: ev.Input, Output: ev.Text, Failed: ev.Failed})
+			}
+			return
+		}
+		toClient(ev)
+	}
 	if review.Notice != "" {
-		emit(LaneEvent{Type: "notice", Text: review.Notice})
+		emit(LaneEvent{Type: "notice", Text: review.Notice, Sets: review.Sets})
 	}
 
 	// The prompt goes on stdin after the config line, never on a command line.
@@ -571,6 +630,9 @@ func acpEmitter(onEvent func(acprun.Event)) func(LaneEvent) {
 			// aimux's own line for the client (held-back tools), not the
 			// agent's; ACP clients that do not know it skip it.
 			u = map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": ev.Text}}
+			if len(ev.Sets) > 0 { // the held tools' sets, for a client to open their diffs
+				u["sets"] = ev.Sets
+			}
 		default:
 			return
 		}
