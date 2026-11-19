@@ -65,9 +65,7 @@ func Fits(text string) bool { return len(text) <= MaxText }
 // giving up after GiveUpAfter seconds. Only a click on Approve is
 // Approved; the error, when not nil, says why no answer was had.
 func (d Dialog) Confirm(ctx context.Context, title, text string) (Answer, error) {
-	script := "display dialog " + Quote(text) + " with title " + Quote(title) +
-		` buttons {"Cancel", "Approve"} default button "Cancel" cancel button "Cancel" with icon caution giving up after ` +
-		strconv.Itoa(GiveUpAfter)
+	script := Script(title, text)
 	cmd := d.Command
 	if cmd == "" {
 		cmd = "osascript"
@@ -89,6 +87,15 @@ func (d Dialog) Confirm(ctx context.Context, title, text string) (Answer, error)
 		return Approved, nil
 	}
 	return Cancelled, nil
+}
+
+// Script is the AppleScript Confirm runs: text titled title, buttons
+// Cancel (the default, also the cancel button) and Approve, giving up after
+// GiveUpAfter seconds.
+func Script(title, text string) string {
+	return "display dialog " + Quote(text) + " with title " + Quote(title) +
+		` buttons {"Cancel", "Approve"} default button "Cancel" cancel button "Cancel" with icon caution giving up after ` +
+		strconv.Itoa(GiveUpAfter)
 }
 
 // Quote is s as an AppleScript string literal: backslashes and double

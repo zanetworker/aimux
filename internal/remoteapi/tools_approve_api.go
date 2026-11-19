@@ -339,12 +339,6 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed while the approval was open on the Mac; get the diff again"))
 			return
 		}
-		// Profiles are not in the snapshot: check the client may still use
-		// the set (its scope, the profiles that request it).
-		if all, err := a.Profiles(); err != nil || !a.requestsSet(client, all, req.Set) {
-			writeError(w, http.StatusForbidden, "forbidden_for_client", errSetNotForClient)
-			return
-		}
 		// The backend may have changed a tool while the dialog was open:
 		// list it afresh again; the pins shown must still be what it lists.
 		if v, ok = a.freshListing(w, r, set, v); !ok {
@@ -355,6 +349,13 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusConflict, "pin_stale", fmt.Errorf("%s changed on its server while the approval was open on the Mac; nothing was approved, get the diff again", t.Name))
 				return
 			}
+		}
+		// Profiles are not in the snapshot: check, last before writing, that
+		// the client may still use the set (its scope, the profiles that
+		// request it).
+		if all, err := a.Profiles(); err != nil || !a.requestsSet(client, all, req.Set) {
+			writeError(w, http.StatusForbidden, "forbidden_for_client", errSetNotForClient)
+			return
 		}
 		stepUp = StepUpMacConfirm
 	}

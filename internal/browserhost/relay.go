@@ -369,6 +369,11 @@ func (s *relaySession) cancel(id string) {
 		s.send(Event{ID: id, Type: "done"})
 		return
 	}
+	if f.abort {
+		// A tool request ends before the acknowledgement is written, so a
+		// blocked panel output cannot keep the dialog on the Mac open.
+		f.cancel()
+	}
 	f.mu.Lock()
 	if !f.canceled {
 		f.canceled = true
@@ -376,12 +381,9 @@ func (s *relaySession) cancel(id string) {
 	}
 	session := f.session
 	f.mu.Unlock()
-	switch {
-	case session != "":
+	if session != "" {
 		s.postCancel(session)
 		f.cancel() // stop following the stream
-	case f.abort:
-		f.cancel()
 	}
 }
 

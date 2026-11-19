@@ -31,10 +31,10 @@ func TestConfirm_OnlyApproveCounts(t *testing.T) {
 		err  error
 		want Answer
 	}{
-		"approve":  {out: "button returned:Approve, gave up:false\n", want: Approved},
-		"cancel":   {out: "", err: errors.New("execution error: User canceled. (-128)"), want: Cancelled},
-		"timeout":  {out: "button returned:, gave up:true\n", want: TimedOut},
-		"no gui":   {out: "", err: errors.New("execution error: No user interaction allowed. (-1713)"), want: Unavailable},
+		"approve":   {out: "button returned:Approve, gave up:false\n", want: Approved},
+		"cancel":    {out: "", err: errors.New("execution error: User canceled. (-128)"), want: Cancelled},
+		"timeout":   {out: "button returned:, gave up:true\n", want: TimedOut},
+		"no gui":    {out: "", err: errors.New("execution error: No user interaction allowed. (-1713)"), want: Unavailable},
 		"gibberish": {out: "button returned:Approve, gave up:true\n", want: TimedOut},
 	} {
 		f := &fakeOsascript{out: c.out, err: c.err}
@@ -134,5 +134,19 @@ func TestConfirm_CancelOnStderrOfARealProcess(t *testing.T) {
 func TestFits(t *testing.T) {
 	if !Fits(strings.Repeat("x", MaxText)) || Fits(strings.Repeat("x", MaxText+1)) {
 		t.Fatal("Fits does not match MaxText")
+	}
+}
+
+// The exact script Confirm runs compiles with the real AppleScript
+// compiler (osacompile: nothing runs, no dialog), quotes in a tool name
+// included.
+func TestScript_CompilesWithOsacompile(t *testing.T) {
+	if _, err := exec.LookPath("osacompile"); err != nil {
+		t.Skip("no osacompile on this system")
+	}
+	out := filepath.Join(t.TempDir(), "dialog.scpt")
+	script := Script("aimux: approve tools", "wingman asks to approve tools of jira:readonly:\n- b\"x\\y: changed")
+	if b, err := exec.Command("osacompile", "-o", out, "-e", script).CombinedOutput(); err != nil { //nolint:gosec // G204: fixed command, the package's own script
+		t.Fatalf("osacompile: %v: %s\nscript: %s", err, b, script)
 	}
 }
