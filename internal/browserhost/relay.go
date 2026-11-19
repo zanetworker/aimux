@@ -369,14 +369,17 @@ func (s *relaySession) cancel(id string) {
 		s.send(Event{ID: id, Type: "done"})
 		return
 	}
+	f.mu.Lock()
+	ack := !f.canceled
+	f.canceled = true // no event of the request's own after this
+	f.mu.Unlock()
 	if f.abort {
 		// A tool request ends before the acknowledgement is written, so a
 		// blocked panel output cannot keep the dialog on the Mac open.
 		f.cancel()
 	}
 	f.mu.Lock()
-	if !f.canceled {
-		f.canceled = true
+	if ack {
 		s.send(Event{ID: id, Type: "done"})
 	}
 	session := f.session

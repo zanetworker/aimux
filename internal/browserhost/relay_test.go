@@ -1251,3 +1251,36 @@ func TestRelay_ToolsDiffTooLarge(t *testing.T) {
 		t.Fatalf("events %+v, want one diff_too_large error", evs)
 	}
 }
+
+// A cancelled tools.approve gets exactly one terminal event, the done of
+// the cancel, never also the request's own context-canceled error.
+func TestRelay_CancelledToolsApproveOneTerminalEvent(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	started := make(chan struct{})
+	f.mux.HandleFunc("POST /v1/tools/approve", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		close(started)
+		<-r.Context().Done()
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "a", Type: "tools.approve", Set: "jira:readonly", Tools: []ToolPin{{Name: "b", Pin: "sha256:x"}}})
+	<-started
+	p.send(t, Request{ID: "a", Type: "cancel"})
+	evs := p.until(t, "a")
+	if evs[len(evs)-1].Type != "done" {
+		t.Fatalf("first terminal event %+v, want the cancel's done", evs[len(evs)-1])
+	}
+	late := time.After(500 * time.Millisecond) // a late error would arrive here
+	for {
+		select {
+		case e := <-p.events:
+			if e.ID == "a" {
+				t.Fatalf("a second event for the cancelled request: %+v", e)
+			}
+		case <-late:
+			return
+		}
+	}
+}
