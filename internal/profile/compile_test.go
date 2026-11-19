@@ -612,8 +612,8 @@ func TestBuiltins_ResearchAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rww.Available {
-		t.Error("research-with-work must stay unavailable")
+	if !rww.Available {
+		t.Error("research-with-work is available now its run engine ships")
 	}
 }
 
@@ -707,7 +707,7 @@ func TestCheckSandboxName(t *testing.T) {
 	}{
 		{"research-1234", "sandbox", false}, // 19 with the prefix
 		{"research-12345", "sandbox", true}, // 20
-		{"research-with-work", "run", true}, // 24
+		{"research-with-work", "run", false}, // a run profile has no sandbox of its own
 		{"page-with-a-long-name", "acp", false},
 		{"coding-with-a-long-name", "host", false},
 	}

@@ -76,3 +76,26 @@ func TestProfileCatalog_ResolvedBuiltinsAndUserProfiles(t *testing.T) {
 		t.Errorf("bad file not logged: %q", logged.String())
 	}
 }
+
+// A profile naming a role that does not resolve is left out of the
+// catalog the API serves, and the reason is logged.
+func TestProfileCatalog_LeavesOutABrokenRole(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "mine.yaml"), []byte("name: mine\nextends: builtin:research-with-work\nroles:\n  planner: nope\n  writer: page\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var logged strings.Builder
+	all, err := profileCatalog(dir, &logged)()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := all["mine"]; ok {
+		t.Fatal("a profile with a broken role is in the catalog")
+	}
+	if _, ok := all["research-with-work"]; !ok {
+		t.Fatal("the builtin research-with-work fell out of the catalog")
+	}
+	if !strings.Contains(logged.String(), "role planner: profile nope not found") {
+		t.Fatalf("log %q lacks the reason", logged.String())
+	}
+}

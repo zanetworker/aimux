@@ -81,7 +81,7 @@ Reuse on every invocation:
 aimux spawn --profile mysetup
 ```
 
-Explicit flags override profile values. Manage saved profiles (`aimux profile list` lists the v2 profiles; `aimux profile migrate` converts the saved ones):
+Explicit flags override profile values. Manage saved profiles (`aimux profile list` lists the v2 profiles, showing a profile that does not resolve with digest `-` and the reason on stderr, and still exits 0; `aimux profile check <name>` exits 1 when the profile does not resolve, its sandbox name is invalid, or a role it names does not check (a missing or invalid target, a `planner` that is not a `runs: sandbox` profile without `web`, or a `writer` that is not a `runs: acp` profile without tools or `web`); `aimux profile migrate` converts the saved ones):
 
 ```bash
 aimux profile get mysetup --json

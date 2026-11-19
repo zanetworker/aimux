@@ -26,4 +26,10 @@ type LaneEvent struct {
 	Type string
 	Text string
 	Tool string
+	// Input and Failed are set on "tool_result" events only (the tool's
+	// JSON input; whether the result was an error). Those events stay in
+	// aimux: the sandbox engine hands them to the turn's collector
+	// (WithToolResults) and never to a client.
+	Input  string
+	Failed bool
 }

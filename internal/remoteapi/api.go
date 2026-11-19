@@ -220,6 +220,10 @@ type API struct {
 	// ProfileHealth, if set, reports whether the profile sessions file can
 	// be read (profilerun.Router.Health); its error shows in /v1/health.
 	ProfileHealth func() error
+	// ProfileSessionLive, if set, reports whether the engine can still run
+	// a recorded profile session; a page request never continues one that
+	// is not (a run session lost when remote serve restarted).
+	ProfileSessionLive func(session string) bool
 	// StepUpLegacy (remote_access.step_up_legacy) applies the host-profile
 	// step-up to new sessions without a profile, which run on the host.
 	StepUpLegacy bool

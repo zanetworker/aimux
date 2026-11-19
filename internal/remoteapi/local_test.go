@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -817,5 +818,40 @@ func TestTurnOf_WebFetchSnippetIsURL(t *testing.T) {
 	tools := turnOf(turns[0]).Tools
 	if len(tools) != 1 || tools[0].Name != "WebFetch" || tools[0].Snippet != "https://en.wikipedia.org/wiki/X" {
 		t.Fatalf("tools = %+v", tools)
+	}
+}
+
+// TurnLinks, when it names a turn by its time, puts that turn's link set
+// (a research-with-work answer's fetched pages) on the turn; other turns
+// carry none.
+func TestLocalIndex_TurnLinks(t *testing.T) {
+	x := localFixture(t, NewBroker(BrokerDeps{}, BrokerOptions{}))
+	archived := filepath.Join(t.TempDir(), "openshell-work", "sandboxed.jsonl")
+	x.Archived = func(id string) string {
+		if id == "sandboxed" {
+			return archived
+		}
+		return ""
+	}
+	d, err := x.Session(context.Background(), "sandboxed", 2)
+	if err != nil || len(d.Turns) != 2 {
+		t.Fatalf("detail: %v %+v", err, d)
+	}
+	// The fixture's turns share one time: a key at another time names no
+	// turn, a key at that time names them.
+	at := d.Turns[1].Time
+	keyed := map[int64][]string{at.Add(time.Second).UnixNano(): {"https://other.example/"}}
+	x.TurnLinks = func(id string) map[int64][]string {
+		if id != "sandboxed" {
+			return nil
+		}
+		return keyed
+	}
+	if d, err = x.Session(context.Background(), "sandboxed", 2); err != nil || d.Turns[0].Links != nil || d.Turns[1].Links != nil {
+		t.Fatalf("a link set at another time landed on a turn: %v %v / %v", err, d.Turns[0].Links, d.Turns[1].Links)
+	}
+	keyed = map[int64][]string{at.UnixNano(): {"https://github.com/x"}}
+	if d, err = x.Session(context.Background(), "sandboxed", 2); err != nil || !reflect.DeepEqual(d.Turns[1].Links, []string{"https://github.com/x"}) {
+		t.Fatalf("links %v %v", err, d.Turns[1].Links)
 	}
 }

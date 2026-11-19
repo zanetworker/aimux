@@ -13,6 +13,10 @@ const (
 	ImageInvalid          = "image_invalid"            // a question's image is refused
 	ProfileUnavailable    = "profile_unavailable"      // the turn's profile does not resolve or compile
 	SandboxGatewayDown    = "sandbox_gateway_down"     // the OpenShell gateway is not reachable
+	RunPlannerFailed      = "run_planner_failed"       // research-with-work: the workspace stage failed
+	PlannerOutputInvalid  = "planner_output_invalid"   // research-with-work: the planner did not return its plan
+	RunReaderFailed       = "run_reader_failed"        // research-with-work: the web stage failed
+	RunWriterFailed       = "run_writer_failed"        // research-with-work: writing the answer failed
 )
 
 var messages = map[string]string{
@@ -21,6 +25,10 @@ var messages = map[string]string{
 	ImageInvalid:          "The image cannot be used: paste a PNG, JPEG, WebP or GIF of at most 1.5 MiB",
 	ProfileUnavailable:    "This mode's profile could not be loaded: run aimux profile check",
 	SandboxGatewayDown:    "The OpenShell gateway is not reachable: check it with openshell -g local status",
+	RunPlannerFailed:      "Looking in your workspace failed, so nothing was searched: try again, or ask in Workspace mode",
+	PlannerOutputInvalid:  "The workspace step did not return a usable plan, so nothing was searched: try again or rephrase",
+	RunReaderFailed:       "Searching the web failed: try again, or ask in Web mode",
+	RunWriterFailed:       "Writing the answer failed after the lookups: try again",
 }
 
 // Message is code's message for a person; "" for an unknown code.
