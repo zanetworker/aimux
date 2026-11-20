@@ -1067,12 +1067,15 @@ func pageKey(u string) string {
 // sessionPath is /v1/sessions/{id} with id escaped.
 func sessionPath(id string) string { return "/v1/sessions/" + url.PathEscape(id) }
 
-// panelProfile is one profile as the panel sees it.
+// panelProfile is one profile as the panel sees it. Allowed is true on every
+// entry sent (the list is filtered to allowed ones) and is kept because the
+// panel offers a mode only when available and allowed are both true.
 type panelProfile struct {
 	Name      string `json:"name"`
 	Runs      string `json:"runs"`
 	Available bool   `json:"available"`
 	Digest    string `json:"digest"`
+	Allowed   bool   `json:"allowed"`
 }
 
 // listProfiles is GET /v1/profiles for this client, as {"profiles": [...]}
@@ -1080,10 +1083,7 @@ type panelProfile struct {
 // when its profile is there.
 func (s *relaySession) listProfiles(ctx context.Context) (json.RawMessage, error) {
 	var in struct {
-		Profiles []struct {
-			panelProfile
-			Allowed bool `json:"allowed"`
-		} `json:"profiles"`
+		Profiles []panelProfile `json:"profiles"`
 	}
 	if err := s.call(ctx, http.MethodGet, "/v1/profiles", nil, &in); err != nil {
 		return nil, err
@@ -1093,7 +1093,7 @@ func (s *relaySession) listProfiles(ctx context.Context) (json.RawMessage, error
 	}{Profiles: []panelProfile{}}
 	for _, p := range in.Profiles {
 		if p.Allowed {
-			out.Profiles = append(out.Profiles, p.panelProfile)
+			out.Profiles = append(out.Profiles, p)
 		}
 	}
 	return json.Marshal(out)

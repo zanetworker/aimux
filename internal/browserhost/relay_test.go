@@ -1332,7 +1332,8 @@ func TestRelay_ProfilesList(t *testing.T) {
 	if err := json.Unmarshal(evs[len(evs)-2].Data, &got); err != nil {
 		t.Fatalf("profiles data %s: %v", evs[len(evs)-2].Data, err)
 	}
-	want := map[string]any{"name": "research-with-work", "runs": "run", "available": true, "digest": "sha256:r"}
+	// allowed stays on each entry: the panel shows a mode only when allowed is true.
+	want := map[string]any{"name": "research-with-work", "runs": "run", "available": true, "digest": "sha256:r", "allowed": true}
 	if len(got.Profiles) != 1 || !reflect.DeepEqual(got.Profiles[0], want) {
 		t.Fatalf("profiles %v, want only %v", got.Profiles, want)
 	}

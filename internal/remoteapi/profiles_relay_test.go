@@ -55,8 +55,8 @@ func TestRelayProfilesList_RealWingmanAPI(t *testing.T) {
 	byName := map[string]map[string]any{}
 	for _, pr := range got.Profiles {
 		n, _ := pr["name"].(string)
-		if !want[n] || len(pr) != 4 || pr["digest"] != builtins[n].Digest() {
-			t.Fatalf("profile %v: not allowed for wingman, or not name, runs, available and digest", pr)
+		if !want[n] || len(pr) != 5 || pr["digest"] != builtins[n].Digest() || pr["allowed"] != true {
+			t.Fatalf("profile %v: not allowed for wingman, or not name, runs, available, digest and allowed true", pr)
 		}
 		byName[n] = pr
 	}
