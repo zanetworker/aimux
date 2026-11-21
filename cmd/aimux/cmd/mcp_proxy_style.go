@@ -62,8 +62,8 @@ func stateLabel(st mcpproxy.ServerState) (string, string) {
 		return "◐ starting", styleBold
 	case mcpproxy.StateIdleStopped:
 		return "○ idle", styleDim
-	case mcpproxy.StateNotStarted:
-		return "○ not started", styleDim
+	case mcpproxy.StateNotStarted: // lazy: the proxy starts it on its first tools/call
+		return "○ ready", styleDim
 	}
 	return "○ " + string(st), styleDim
 }
@@ -116,6 +116,7 @@ type serverKind int
 const (
 	kindFailed     serverKind = iota // failed, or a probe could not start it
 	kindWarning                      // live, but its last error is newer than its last call and start
+	kindNoRoute                      // never started, and the proxy has no endpoint for it (no cached tools)
 	kindActive                       // starting, running or idle
 	kindNotStarted                   // never started
 	kindRemoved                      // its entry left the Claude config
@@ -155,6 +156,8 @@ func errorKind(s mcpproxy.ServerReport) serverKind {
 		return kindFailed
 	case s.LastError != "" && !errorIsPast(s):
 		return kindWarning
+	case s.State == mcpproxy.StateNotStarted && !s.Endpoint:
+		return kindNoRoute
 	case s.State == mcpproxy.StateNotStarted:
 		return kindNotStarted
 	}
@@ -314,6 +317,25 @@ func wrapItems(prefix string, items []string, width, hang int) []string {
 	return append(lines, line)
 }
 
+// noRouteFix is what gives a never-started server without an endpoint its
+// route: cache its tools, then have the proxy serve them.
+const noRouteFix = "`aimux mcp proxy refresh`, then `aimux mcp proxy restart` (a proxy you run by hand: start `aimux mcp proxy serve` again with your original flags)"
+
+// heading is the first of a list's headings that fits width with room for
+// one short name (width 0: the first), else the last cut to width.
+func heading(width int, headings ...string) string {
+	for _, h := range headings {
+		if width <= 0 || runewidth.StringWidth(h)+3 <= width {
+			return h
+		}
+	}
+	h := headings[len(headings)-1]
+	if runewidth.StringWidth(strings.TrimRight(h, " ")) > width {
+		return cut(strings.TrimRight(h, " "), width)
+	}
+	return h
+}
+
 // span is how long ago t was, without "ago": "3h", "0s".
 func span(now, t time.Time) string {
 	if s := mcpproxy.Ago(now, t); s != "just now" {
@@ -388,6 +410,8 @@ func printStatusPage(out io.Writer, p statusPage) {
 			case s.kind == kindWarning:
 				count[kindWarning]++
 				byState[s.State]++
+			case s.kind == kindNoRoute:
+				count[kindNoRoute]++
 			default:
 				byState[s.State]++
 			}
@@ -408,10 +432,11 @@ func printStatusPage(out io.Writer, p statusPage) {
 		part(byState[mcpproxy.StateFailed], "failed", styleRed, true)
 		part(probeFailed, "probe failed", styleRed, false)
 		part(count[kindWarning], map[bool]string{true: "warning", false: "warnings"}[count[kindWarning] == 1], styleYellow, false)
+		part(count[kindNoRoute], "no route", styleYellow, false)
 		part(byState[mcpproxy.StateRunning], "running", styleGreen, true)
 		part(byState[mcpproxy.StateStarting], "starting", styleBold, false)
 		part(byState[mcpproxy.StateIdleStopped], "idle", styleDim, false)
-		part(byState[mcpproxy.StateNotStarted], "not started", styleDim, false)
+		part(byState[mcpproxy.StateNotStarted], "ready", styleDim, false)
 		part(count[kindRemoved], "removed", styleDim, false)
 		parts[0] = fmt.Sprintf("%d servers: ", len(p.rep.Servers)) + parts[0]
 		head = append(head, joinWrapped(parts, c, p.width)...)
@@ -433,12 +458,15 @@ func printStatusPage(out io.Writer, p statusPage) {
 		dStyle []string
 	}
 	var rows []row
-	var notStarted []string
+	var notStarted, noRoute []string
 	w := [3]int{}
 	for _, s := range servers {
-		if !p.all && (s.kind == kindNotStarted || s.kind == kindRemoved) {
-			if s.kind == kindNotStarted {
+		if !p.all && (s.kind == kindNotStarted || s.kind == kindNoRoute || s.kind == kindRemoved) {
+			switch s.kind {
+			case kindNotStarted:
 				notStarted = append(notStarted, printable(s.Server))
+			case kindNoRoute:
+				noRoute = append(noRoute, printable(s.Server))
 			}
 			continue
 		}
@@ -446,8 +474,11 @@ func printStatusPage(out io.Writer, p statusPage) {
 		if s.kind == kindFailed && s.State == mcpproxy.StateFailed {
 			label += stateAge(p.now, s.LastErrorAt) // a failure is last known, not live
 		}
-		if s.kind == kindRemoved {
+		switch s.kind {
+		case kindRemoved:
 			label, style = "○ removed", styleDim
+		case kindNoRoute:
+			label, style = "○ no route", styleYellow
 		}
 		last := "never called"
 		if !s.LastCall.IsZero() {
@@ -521,16 +552,25 @@ func printStatusPage(out io.Writer, p statusPage) {
 		for i, d := range r.detail {
 			lines = append(lines, paint(c, r.dStyle[i], "      "+d))
 		}
-		if r.kind <= kindWarning {
+		if r.kind <= kindNoRoute {
 			problems = append(problems, lines...)
 		} else {
 			rest = append(rest, lines...)
 		}
 	}
+	if len(noRoute) > 0 { // with the problems: a session's calls to these fail
+		for _, line := range wrapItems(heading(p.width, fmt.Sprintf("  ! %d no route: ", len(noRoute))), noRoute, p.width, 4) {
+			problems = append(problems, paint(c, styleYellow, line))
+		}
+		for _, line := range wrap("    "+noRouteFix, p.width, 4) {
+			problems = append(problems, paint(c, styleDim, line))
+		}
+	}
 	blocks = append(blocks, problems, rest)
 	if len(notStarted) > 0 {
 		var ns []string
-		for _, line := range wrapItems(fmt.Sprintf("  ○ %d not started: ", len(notStarted)), notStarted, p.width, 4) {
+		h := heading(p.width, fmt.Sprintf("  ○ %d ready, start on first call: ", len(notStarted)), fmt.Sprintf("  ○ %d ready: ", len(notStarted)))
+		for _, line := range wrapItems(h, notStarted, p.width, 4) {
 			ns = append(ns, paint(c, styleDim, line))
 		}
 		blocks = append(blocks, ns)

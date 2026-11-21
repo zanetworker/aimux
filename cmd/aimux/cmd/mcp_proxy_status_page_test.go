@@ -20,7 +20,7 @@ import (
 // whose entry left the Claude config (minutes).
 func pageReport() mcpproxy.StatusReport {
 	srv := func(name string, st mcpproxy.ServerState, tools int) mcpproxy.ServerReport {
-		return mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: name, State: st}, Tools: tools}
+		return mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: name, State: st}, Tools: tools, Endpoint: true}
 	}
 	slack := srv("slack", mcpproxy.StateRunning, 12)
 	slack.LastCall, slack.LastError, slack.LastErrorAt = statusNow.Add(-2*time.Minute), "write: broken pipe", statusNow.Add(-time.Hour)
@@ -63,7 +63,7 @@ func render(p statusPage) string {
 }
 
 const goldenCompact = `MCP proxy ● running · pid 99 · aimux v0.15.0 · up 3h · 127.0.0.1:7381
-9 servers: 1 failed · 1 warning · 2 running · 1 idle · 4 not started · 1 removed
+9 servers: 1 failed · 1 warning · 2 running · 1 idle · 4 ready · 1 removed
 ! upgrade restart pending: the running proxy is aimux v0.15.0, this binary is
   v0.16.0; restart it when convenient with ` + "`aimux mcp proxy restart`" + `
 
@@ -77,7 +77,7 @@ const goldenCompact = `MCP proxy ● running · pid 99 · aimux v0.15.0 · up 3h
   slack                      ● running         12 tools  called 2m ago
   nanobanana-image-creation  ○ idle            4 tools   called 30m ago
 
-  ○ 4 not started: brief, chrome-devtools, deepwiki, pypi
+  ○ 4 ready, start on first call: brief, chrome-devtools, deepwiki, pypi
 
 tool gateway ● running 17h · 0 leases · 5 backends
 
@@ -105,7 +105,7 @@ func TestStatusPage_AllListsEveryServer(t *testing.T) {
 	p.all = true
 	got := render(p)
 	for _, want := range []string{
-		"  brief                      ○ not started     13 tools  never called\n",
+		"  brief                      ○ ready           13 tools  never called\n",
 		"  minutes                    ○ removed         0 tools   never called\n",
 		"  slack                      ● running         12 tools  called 2m ago\n      (old) write: broken pipe · 1h ago\n",
 	} {
@@ -113,7 +113,7 @@ func TestStatusPage_AllListsEveryServer(t *testing.T) {
 			t.Fatalf("--all page lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "not started: brief") {
+	if strings.Contains(got, "start on first call: brief") {
 		t.Fatalf("--all still collapses the never-started servers:\n%s", got)
 	}
 	if strings.Index(got, "  minutes ") < strings.Index(got, "  pypi ") {
@@ -150,7 +150,7 @@ func TestStatusPage_ColorsSignalState(t *testing.T) {
 	got := render(p)
 	for _, want := range []string{
 		"\x1b[32m● running\x1b[0m", // header
-		"\x1b[31m1 failed\x1b[0m", "\x1b[33m1 warning\x1b[0m", "\x1b[32m2 running\x1b[0m", "\x1b[2m4 not started\x1b[0m",
+		"\x1b[31m1 failed\x1b[0m", "\x1b[33m1 warning\x1b[0m", "\x1b[32m2 running\x1b[0m", "\x1b[2m4 ready\x1b[0m",
 		"\x1b[31m● failed 12m ago",                    // failed row
 		"\x1b[31m      exec: gh-mcp: not found",       // its error
 		"\x1b[33m      timed out after 1m0s · 3m ago", // a recent error on a live server
@@ -196,11 +196,11 @@ func TestStatusPage_TruncatesToWidth(t *testing.T) {
 func TestStatusPage_NotStartedWraps(t *testing.T) {
 	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
 	for _, n := range []string{"alpha-server", "bravo-server", "charlie-server", "delta-server", "echo-server", "foxtrot-server", "golf-server"} {
-		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}})
+		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}, Endpoint: true})
 	}
 	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 60})
-	want := "  ○ 7 not started: alpha-server, bravo-server,\n" +
-		"    charlie-server, delta-server, echo-server,\n" +
+	want := "  ○ 7 ready, start on first call: alpha-server,\n" +
+		"    bravo-server, charlie-server, delta-server, echo-server,\n" +
 		"    foxtrot-server, golf-server\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("not-started line:\n%s", got)
@@ -292,7 +292,7 @@ func TestStatusPage_HeaderWraps(t *testing.T) {
 	got := render(p)
 	for _, want := range []string{
 		"MCP proxy ● running · pid 99 · aimux v0.15.0\n  up 3h · 127.0.0.1:7381\n",
-		"9 servers: 1 failed · 1 warning · 2 running\n  1 idle · 4 not started · 1 removed\n",
+		"9 servers: 1 failed · 1 warning · 2 running\n  1 idle · 4 ready · 1 removed\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("lacks %q:\n%s", want, got)
@@ -395,15 +395,15 @@ func TestStatusPage_VersionIsPrintable(t *testing.T) {
 // line, and one too long for any line is cut, never past the width.
 func TestStatusPage_LongListItemFits(t *testing.T) {
 	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
-		{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateNotStarted}},
-		{ServerStatus: mcpproxy.ServerStatus{Server: strings.Repeat("z", 60), State: mcpproxy.StateNotStarted}}}}
+		{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateNotStarted}, Endpoint: true},
+		{ServerStatus: mcpproxy.ServerStatus{Server: strings.Repeat("z", 60), State: mcpproxy.StateNotStarted}, Endpoint: true}}}
 	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 40})
 	for _, line := range strings.Split(got, "\n") {
 		if n := len([]rune(line)); n > 40 {
 			t.Fatalf("line of %d runes over width 40: %q\n%s", n, line, got)
 		}
 	}
-	if !strings.Contains(got, "  ○ 2 not started:\n    nanobanana-image-creation,\n    zzz") {
+	if !strings.Contains(got, "  ○ 2 ready, start on first call:\n    nanobanana-image-creation,\n    zzz") {
 		t.Fatalf("list:\n%s", got)
 	}
 }
@@ -426,7 +426,7 @@ func TestStatusPage_ProxyPartBeforeTheGateway(t *testing.T) {
 	p := page()
 	var out bytes.Buffer
 	p.gateway = func() string {
-		if !strings.Contains(out.String(), "○ 4 not started: brief") {
+		if !strings.Contains(out.String(), "○ 4 ready, start on first call: brief") {
 			t.Fatalf("gateway asked before the servers were printed:\n%s", out.String())
 		}
 		return "tool gateway ● running 17h · 0 leases · 5 backends"
@@ -494,6 +494,9 @@ func TestStatusPage_WideCharactersFit(t *testing.T) {
 	for _, width := range []int{80, 40} {
 		got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: width})
 		for _, line := range strings.Split(got, "\n") {
+			if width < 30 && !strings.Contains(line, "○") {
+				continue // the header has its own minimum; this is the ready heading's test
+			}
 			if n := runewidth.StringWidth(line); n > width {
 				t.Fatalf("width %d: line of %d cells: %q\n%s", width, n, line, got)
 			}
@@ -566,5 +569,65 @@ func TestStatusPage_CutNamesStayDistinct(t *testing.T) {
 	if got := cutDistinct([]string{"slack", "abcdefgh-one", "abcdefgh-two", "abcdefgh-two"}, 8); got[0] != "slack" ||
 		got[1] == got[2] || got[2] != got[3] {
 		t.Fatalf("cutDistinct %q", got)
+	}
+}
+
+// A never-started server the proxy has no route for (no cached tools) is
+// not ready: it is counted and shown apart, with the fix.
+func TestStatusPage_NoRouteIsNotReady(t *testing.T) {
+	p := page()
+	rep := pageReport()
+	for i := range rep.Servers {
+		if rep.Servers[i].Server == "pypi" {
+			rep.Servers[i].Endpoint = false
+		}
+	}
+	p.rep = &rep
+	got := render(p)
+	for _, want := range []string{
+		"9 servers: 1 failed · 1 warning · 1 no route · 2 running · 1 idle · 3 ready\n  1 removed\n",
+		"  ! 1 no route: pypi\n    `aimux mcp proxy refresh`, then `aimux mcp proxy restart`",
+		"start `aimux mcp proxy serve` again with your original flags",
+		"  ○ 3 ready, start on first call: brief, chrome-devtools, deepwiki\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("page lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "no route: pypi") > strings.Index(got, "  slack ") {
+		t.Fatalf("no-route servers not with the problems, before the active ones:\n%s", got)
+	}
+	p.all = true
+	if got := render(p); !strings.Contains(got, "  pypi                       ○ no route        0 tools   never called\n") {
+		t.Fatalf("--all row for a server without a route:\n%s", got)
+	}
+}
+
+// On a narrow terminal the ready heading shortens so no line passes the
+// width; on a wide one it keeps the explanation.
+func TestStatusPage_ReadyHeadingFitsNarrowTerminal(t *testing.T) {
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
+	for _, n := range []string{"ab", "cd", "ef"} {
+		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}, Endpoint: true})
+	}
+	for _, width := range []int{30, 12, 11} {
+		got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: width})
+		for _, line := range strings.Split(got, "\n") {
+			if width < 30 && !strings.Contains(line, "○") {
+				continue // the header has its own minimum; this is the ready heading's test
+			}
+			if n := runewidth.StringWidth(line); n > width {
+				t.Fatalf("width %d: line of %d cells: %q\n%s", width, n, line, got)
+			}
+		}
+		if width == 30 && !strings.Contains(got, "  ○ 3 ready: ab, cd, ef\n") {
+			t.Fatalf("width 30: short heading missing:\n%s", got)
+		}
+	}
+	// The full heading plus its first name fits exactly at its own width.
+	full := "  ○ 3 ready, start on first call: ab,"
+	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: runewidth.StringWidth(full)})
+	if !strings.Contains(got, full+"\n") {
+		t.Fatalf("full heading not kept when it fits:\n%s", got)
 	}
 }

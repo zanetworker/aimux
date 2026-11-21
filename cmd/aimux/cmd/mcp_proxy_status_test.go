@@ -214,7 +214,7 @@ func styledReport() mcpproxy.StatusReport {
 	rep.Servers = append(rep.Servers,
 		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateIdleStopped,
 			LastCall: statusNow.Add(-30 * time.Minute)}, Tools: 4},
-		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "brief", State: mcpproxy.StateNotStarted}, Tools: 13})
+		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "brief", State: mcpproxy.StateNotStarted}, Tools: 13, Endpoint: true})
 	return rep
 }
 
@@ -233,8 +233,8 @@ func renderRep(rep mcpproxy.StatusReport, color, all bool, removed ...string) st
 func TestPrintProxyStatus_ColorStatesAndSummary(t *testing.T) {
 	got := renderRep(styledReport(), true, true)
 	for _, want := range []string{
-		"\x1b[32m● running", "\x1b[31m● failed", "\x1b[2m○ idle", "\x1b[2m○ not started",
-		"4 servers: ", "1 running", "1 idle", "1 not started", "1 failed",
+		"\x1b[32m● running", "\x1b[31m● failed", "\x1b[2m○ idle", "\x1b[2m○ ready",
+		"4 servers: ", "1 running", "1 idle", "1 ready", "1 failed",
 		"pid 99", "line one", // the failed server's stderr tail
 	} {
 		if !strings.Contains(got, want) {
@@ -356,5 +356,36 @@ func TestProxyStatus_AnswerWithoutARunningProxyIsAnError(t *testing.T) {
 			}
 		}
 		srv.Close()
+	}
+}
+
+// A never-started (lazy) server reads as ready on the page, never as "not
+// started", while --json keeps the state name not_started for scripts.
+func TestProxyStatus_NeverStartedReadsReadyJSONKeepsName(t *testing.T) {
+	rep := fixtureReport()
+	rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "context7", State: mcpproxy.StateNotStarted}, Tools: 2, Endpoint: true})
+	addr, _ := fakeDaemon(t, rep)
+	for _, all := range []bool{false, true} {
+		var out bytes.Buffer
+		if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, all: all}, &out, fixedClock(statusNow)); err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if strings.Contains(got, "not started") || !strings.Contains(got, "1 ready") {
+			t.Fatalf("all=%v: page should say ready, not \"not started\":\n%s", all, got)
+		}
+	}
+	var out bytes.Buffer
+	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, json: true}, &out, fixedClock(statusNow)); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Servers []struct{ Server, State string }
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(got.Servers); n != 3 || got.Servers[2].Server != "context7" || got.Servers[2].State != "not_started" {
+		t.Fatalf("--json lost the not_started state name: %+v", got.Servers)
 	}
 }
