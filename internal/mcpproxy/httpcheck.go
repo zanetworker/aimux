@@ -2,6 +2,8 @@ package mcpproxy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"sort"
@@ -30,6 +32,19 @@ const (
 )
 
 const checkInitialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"aimux-install-check","version":"1"}}}`
+
+// ConfigDigest identifies what install checked of an HTTP entry: its URL
+// and its header names, sorted. It is a hash, and header values never go
+// into it, so a manifest record holds no credential.
+func ConfigDigest(e HTTPEntry) string {
+	names := make([]string, 0, len(e.Headers))
+	for n := range e.Headers {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	sum := sha256.Sum256([]byte(e.URL + "\n" + strings.Join(names, "\n")))
+	return hex.EncodeToString(sum[:16])
+}
 
 // CheckHTTPServer POSTs one MCP initialize request with headers and reads
 // only the status line and WWW-Authenticate; the body is discarded. 502,
@@ -83,9 +98,11 @@ func checkAll(ctx context.Context, entries map[string]HTTPEntry, check func(cont
 			case r == NeedsOAuth && len(e.Headers) == 0:
 				k := KeptDirect{Server: name, Reason: ReasonNeedsOAuth}
 				kept, oauth = append(kept, k), append(oauth, k)
-			case r == NeedsOAuth: // a decision, not a passing state: recorded too
+			case r == NeedsOAuth: // a decision, not a passing state: recorded too, for this configuration
 				k := KeptDirect{Server: name, Reason: reasonRefusedHeaders}
-				kept, oauth = append(kept, k), append(oauth, k)
+				kept = append(kept, k)
+				k.Config = ConfigDigest(e)
+				oauth = append(oauth, k)
 			default:
 				kept = append(kept, KeptDirect{Server: name, Reason: reasonUnreachable})
 			}

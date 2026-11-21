@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"github.com/spf13/pflag"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 )
@@ -144,13 +146,17 @@ func TestStatusPage_Golden60(t *testing.T) {
 	}
 }
 
-// Below 60 columns the columns stay and lines are cut at the width.
+// Below 60 columns the columns stay and lines are cut at the width; only a
+// fix command, on a line of its own, may pass it, whole.
 func TestStatusPage_NarrowCutsLines(t *testing.T) {
 	p := page()
 	for _, width := range []int{40, 30} {
 		p.width = width
 		got := render(p)
 		for _, line := range strings.Split(got, "\n") {
+			if cmd := strings.TrimLeft(line, " "); strings.HasPrefix(cmd, "aimux mcp proxy ") && !strings.Contains(cmd, "…") {
+				continue
+			}
 			if n := runewidth.StringWidth(line); n > width {
 				t.Fatalf("width %d: line of %d cells: %q\n%s", width, n, line, got)
 			}
@@ -270,12 +276,24 @@ func TestStatusPage_InstallWarnings(t *testing.T) {
 	st := &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"slack"}, Drifted: []string{"slack"}, NotProxied: []string{"pypi"}}
 	got := render(statusPage{addr: "a", install: st, now: statusNow})
 	for _, want := range []string{
-		"WARNING  drifted: slack (entry is no longer the proxy URL); then aimux mcp proxy install  aimux mcp proxy uninstall\n",
 		"WARNING  not behind the proxy: pypi",
 		"WARNING  hooks off: servers you add later stay direct",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("lacks %q:\n%s", want, got)
+		}
+	}
+	// Drift's two steps: uninstall on its row, then install on the next,
+	// both in the FIX column.
+	lines := strings.Split(got, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "WARNING  drifted: slack (entry is no longer the proxy URL)") {
+			next := lines[i+1]
+			col := strings.Index(line, "aimux mcp proxy uninstall")
+			if !strings.HasSuffix(line, "aimux mcp proxy uninstall") || !strings.HasPrefix(next, "         then ") ||
+				strings.Index(next, "aimux mcp proxy install") != col || !strings.HasSuffix(next, "aimux mcp proxy install") {
+				t.Fatalf("drift steps:\n%s\n%s", line, next)
+			}
 		}
 	}
 	got = render(statusPage{addr: "a", install: &mcpproxy.InstallState{State: mcpproxy.InstallNotInstalled}, now: statusNow})
@@ -338,8 +356,9 @@ func TestStatusPage_NoRoute(t *testing.T) {
 	for _, want := range []string{
 		"jira                       running   5      4m ago\npypi                       no route  0      never\n",
 		"(3 ready, 1 failed, 1 warning, 1 no route, 1 removed; --all lists them)\n",
-		"WARNING  1 no route: pypi (no cached tools; restart the proxy after the refresh)",
-		"aimux mcp proxy refresh\n",
+		"WARNING  1 no route: pypi (no cached tools)",
+		"  aimux mcp proxy refresh\n         then",
+		"  aimux mcp proxy restart\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("page lacks %q:\n%s", want, got)
@@ -578,5 +597,82 @@ func TestJoinWrapped_EastAsianSeparatorFits(t *testing.T) {
 				t.Fatalf("line of %d cells over %d: %q", n, width, line)
 			}
 		}
+	}
+}
+
+// Every step of a fix stays visible and whole: follow-up steps are rows of
+// their own ("then"), MESSAGE is cut instead of FIX, and a FIX too wide to
+// share a line goes on a line of its own, uncut.
+func TestStatusPage_FixStepsNeverCut(t *testing.T) {
+	st := &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Hooks: true, Moved: []string{"slack"},
+		Drifted: []string{"slack-with-a-rather-long-server-name-that-drifted"}}
+	for _, width := range []int{80, 60, 40} {
+		got := render(statusPage{addr: "a", install: st, now: statusNow, width: width})
+		for _, cmd := range []string{"aimux mcp proxy uninstall", "aimux mcp proxy install"} {
+			if !strings.Contains(got, cmd+"\n") {
+				t.Fatalf("width %d: fix step %q not whole on its line:\n%s", width, cmd, got)
+			}
+		}
+		if strings.Index(got, "aimux mcp proxy uninstall") > strings.Index(got, "aimux mcp proxy install\n") {
+			t.Fatalf("width %d: steps out of order:\n%s", width, got)
+		}
+	}
+	// A skip list too long to share a line with any message: the command
+	// gets a line of its own, whole, past the width if it must be.
+	long := &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: true, Moved: []string{"a"},
+		Skipped: []string{"first-skipped-server", "second-skipped-server", "third-skipped-server"}}
+	got := render(statusPage{addr: "a", install: long, now: statusNow, width: 60})
+	want := "aimux mcp proxy install --unskip first-skipped-server --unskip second-skipped-server --unskip third-skipped-server\n"
+	if !strings.Contains(got, "\n       "+want) { // under MESSAGE: LEVEL is 5 cells with INFO rows only
+		t.Fatalf("long fix not on a line of its own, whole:\n%s", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if n := runewidth.StringWidth(line); n > 60 && !strings.Contains(line, "aimux mcp proxy install --unskip") {
+			t.Fatalf("a line other than the long fix passes 60: %q", line)
+		}
+	}
+}
+
+// A very long server name in the errors table is cut so AGE and some of
+// MESSAGE always show at 60 columns.
+func TestStatusPage_ErrorsKeepAgeAndMessage(t *testing.T) {
+	name := strings.Repeat("n", 60)
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
+		{ServerStatus: mcpproxy.ServerStatus{Server: name, State: mcpproxy.StateFailed, LastError: "exec: not found", LastErrorAt: statusNow.Add(-12 * time.Minute)}}}}
+	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 60})
+	var row string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "nnnn") && strings.Contains(line, "12m") {
+			row = line
+		}
+	}
+	if row == "" || !strings.Contains(row, "…  12m  exec: n") || runewidth.StringWidth(row) > 60 {
+		t.Fatalf("errors row %q: want the name cut, AGE and MESSAGE shown, within 60:\n%s", row, got)
+	}
+}
+
+// Skipped names come from ~/.claude.json: the --unskip command quotes each
+// for the shell, so it runs as written and the flag gets every name intact.
+func TestStatusPage_UnskipCommandQuotesNames(t *testing.T) {
+	names := []string{"pp", "my server$HOME", "it's"}
+	st := &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: true, Moved: []string{"a"}, Skipped: names}
+	got := render(statusPage{addr: "a", install: st, now: statusNow})
+	i := strings.Index(got, "aimux mcp proxy install --unskip")
+	if i < 0 {
+		t.Fatalf("no unskip command:\n%s", got)
+	}
+	cmd := strings.TrimSpace(got[i : i+strings.Index(got[i:], "\n")])
+	// The real shell splits the command; the real flag parser reads it.
+	argv, err := exec.Command("sh", "-c", "set -- "+strings.TrimPrefix(cmd, "aimux mcp proxy install ")+`; for a in "$@"; do printf '%s\0' "$a"; done`).Output() // #nosec G204 -- the test runs the page's own command through a real shell on purpose
+	if err != nil {
+		t.Fatalf("shell could not run %q: %v", cmd, err)
+	}
+	fs := pflag.NewFlagSet("install", pflag.ContinueOnError)
+	unskip := fs.StringSlice("unskip", nil, "")
+	if err := fs.Parse(strings.Split(strings.TrimSuffix(string(argv), "\x00"), "\x00")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(*unskip, "|") != strings.Join(names, "|") {
+		t.Fatalf("--unskip parsed as %q from %q, want %q", *unskip, cmd, names)
 	}
 }

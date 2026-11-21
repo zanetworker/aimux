@@ -21,6 +21,11 @@ type HTTPEntry struct {
 type KeptDirect struct {
 	Server string `json:"server"`
 	Reason string `json:"reason"`
+	// Config is ConfigDigest of the entry install checked, in a manifest
+	// record that holds only while the entry keeps that configuration;
+	// empty for a record that holds whatever it is (needs OAuth), and in
+	// what status reports.
+	Config string `json:"config,omitempty"`
 }
 
 // ReasonNeedsOAuth is the kept-direct reason for servers that sign in with

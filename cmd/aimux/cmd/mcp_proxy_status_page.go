@@ -19,14 +19,15 @@ import (
 type cell struct{ text, style string }
 
 // table is a header row over aligned rows, columns two spaces apart and
-// measured in terminal cells. When it is wider than the terminal, column
-// flex is cut with an ellipsis (to minFlex at least; names cuts server
-// names so they stay distinct); past that, each line is cut at the width.
+// measured in terminal cells. When it is wider than the terminal, the
+// shrink columns are cut with an ellipsis, in order, each to minFlex at
+// least (names: column 0 holds server names, cut so they stay distinct);
+// past that, each line is cut at the width.
 type table struct {
-	head  []string
-	rows  [][]cell
-	flex  int
-	names bool
+	head   []string
+	rows   [][]cell
+	shrink []int
+	names  bool
 }
 
 // minFlex is the narrowest a cut column gets.
@@ -51,17 +52,25 @@ func (t table) lines(color bool, width int) []string {
 	for _, n := range w {
 		total += n
 	}
-	if over := total - width; width > 0 && over > 0 {
-		w[t.flex] = max(w[t.flex]-over, minFlex, runewidth.StringWidth(t.head[t.flex]))
+	over := total - width
+	for _, c := range t.shrink {
+		if width <= 0 || over <= 0 {
+			break
+		}
+		by := min(over, w[c]-max(minFlex, runewidth.StringWidth(t.head[c])))
+		if by <= 0 {
+			continue
+		}
+		w[c], over = w[c]-by, over-by
 		col := make([]string, len(rows))
 		for i, r := range rows {
-			col[i] = r[t.flex].text
+			col[i] = r[c].text
 		}
-		if t.names {
-			col = cutDistinct(col, w[t.flex])
+		if c == 0 && t.names {
+			col = cutDistinct(col, w[c])
 		}
 		for i := range rows {
-			rows[i][t.flex].text = cut(col[i], w[t.flex])
+			rows[i][c].text = cut(col[i], w[c])
 		}
 	}
 	head := make([]cell, len(t.head))
@@ -108,9 +117,15 @@ func tableLine(cells []cell, w []int, color bool, width int) string {
 	return b.String()
 }
 
-// message is one row of the LEVEL/MESSAGE/FIX table; fix is one command
-// to copy, or empty.
-type message struct{ text, fix string }
+// message is one row of the LEVEL/MESSAGE/FIX table; fix is the commands
+// to run, in order (none for a note that needs nothing).
+type message struct {
+	text string
+	fix  []string
+}
+
+// fixes is a message's fix steps.
+func fixes(cmds ...string) []string { return cmds }
 
 // shownServer is a server with where it goes on the page.
 type shownServer struct {
@@ -126,7 +141,7 @@ type shownServer struct {
 // first (its status call is bounded), so its row lines up with the proxy's.
 func printStatusPage(out io.Writer, p statusPage) {
 	var warn []message
-	comp := table{head: []string{"COMPONENT", "STATE", "VERSION", "UPTIME", "ADDRESS"}, flex: 4, rows: [][]cell{proxyRow(p)}}
+	comp := table{head: []string{"COMPONENT", "STATE", "VERSION", "UPTIME", "ADDRESS"}, shrink: []int{4}, rows: [][]cell{proxyRow(p)}}
 	if p.gateway != nil {
 		row, w := gatewayRow(p)
 		comp.rows = append(comp.rows, row)
@@ -150,14 +165,7 @@ func printStatusPage(out io.Writer, p statusPage) {
 		warn = append(warn, *nr)
 	}
 	if len(warn)+len(info) > 0 {
-		t := table{head: []string{"LEVEL", "MESSAGE", "FIX"}, flex: 1}
-		for _, m := range warn {
-			t.rows = append(t.rows, []cell{{"WARNING", styleYellow}, {m.text, ""}, {m.fix, ""}})
-		}
-		for _, m := range info {
-			t.rows = append(t.rows, []cell{{"INFO", styleDim}, {m.text, styleDim}, {m.fix, styleDim}})
-		}
-		blocks = append(blocks, t.lines(p.color, p.width))
+		blocks = append(blocks, messageLines(warn, info, p.color, p.width))
 	}
 
 	for i, b := range blocks {
@@ -166,6 +174,76 @@ func printStatusPage(out io.Writer, p statusPage) {
 		}
 		_, _ = fmt.Fprintln(out, strings.Join(b, "\n"))
 	}
+}
+
+// messageLines is the LEVEL/MESSAGE/FIX table. A fix's later steps are rows
+// of their own ("then"), and a fix command is never cut: MESSAGE is cut
+// instead, and when a fix leaves no room for MESSAGE (minFlex cells) the
+// FIX column goes: each command is then a line of its own under MESSAGE,
+// whole, even past the width.
+func messageLines(warn, info []message, color bool, width int) []string {
+	type row struct {
+		level, style string
+		m            message
+	}
+	var rows []row
+	for _, m := range warn {
+		rows = append(rows, row{"WARNING", "", m})
+	}
+	for _, m := range info {
+		rows = append(rows, row{"INFO", styleDim, m})
+	}
+	levelW, fixW := runewidth.StringWidth("LEVEL"), runewidth.StringWidth("FIX")
+	for _, r := range rows {
+		levelW = max(levelW, runewidth.StringWidth(r.level))
+		for _, f := range r.m.fix {
+			fixW = max(fixW, runewidth.StringWidth(f))
+		}
+	}
+	levelStyle := func(r row) string { return map[bool]string{true: styleYellow, false: styleDim}[r.level == "WARNING"] }
+	if width <= 0 || levelW+2+minFlex+2+fixW <= width {
+		t := table{head: []string{"LEVEL", "MESSAGE", "FIX"}, shrink: []int{1}}
+		for _, r := range rows {
+			first := ""
+			if len(r.m.fix) > 0 {
+				first = r.m.fix[0]
+			}
+			t.rows = append(t.rows, []cell{{r.level, levelStyle(r)}, {r.m.text, r.style}, {first, r.style}})
+			for _, f := range r.m.fix[min(1, len(r.m.fix)):] {
+				t.rows = append(t.rows, []cell{{"", ""}, {"then", styleDim}, {f, r.style}})
+			}
+		}
+		return t.lines(color, width)
+	}
+	t := table{head: []string{"LEVEL", "MESSAGE"}, shrink: []int{1}}
+	var steps [][]string // the fix lines after each row
+	for _, r := range rows {
+		t.rows = append(t.rows, []cell{{r.level, levelStyle(r)}, {r.m.text, r.style}})
+		var s []string
+		for i, f := range r.m.fix {
+			if i > 0 {
+				f = "then " + f
+			}
+			s = append(s, strings.Repeat(" ", levelW+2)+paint(color, r.style, f))
+		}
+		steps = append(steps, s)
+	}
+	lines := t.lines(color, width)
+	out := []string{lines[0]}
+	for i, line := range lines[1:] {
+		out = append(append(out, line), steps[i]...)
+	}
+	return out
+}
+
+// shellWord is s as one POSIX shell word: bare when it has only characters
+// the shell takes literally, else single-quoted, so a name from the Claude
+// config pastes as written.
+func shellWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:@+=%") == "" {
+		return s
+	}
+	return shellQuote(s)
 }
 
 // proxyRow is the proxy's COMPONENT row.
@@ -187,10 +265,10 @@ func gatewayRow(p statusPage) ([]cell, []message) {
 	switch {
 	case errors.Is(err, toolgateway.ErrGatewayNotRunning):
 		return []cell{{"gateway", ""}, {"not running", styleRed}, {"-", ""}, {"-", ""}, {"Workspace turns fail", ""}},
-			[]message{{"tool gateway not running: Workspace turns fail", "aimux mcp proxy gateway install"}}
+			[]message{{"tool gateway not running: Workspace turns fail", fixes("aimux mcp proxy gateway install")}}
 	case err != nil:
 		return []cell{{"gateway", ""}, {"unknown", styleYellow}, {"-", ""}, {"-", ""}, {"", ""}},
-			[]message{{"tool gateway: " + err.Error(), ""}}
+			[]message{{"tool gateway: " + err.Error(), nil}}
 	}
 	uptime := "-"
 	if !st.StartedAt.IsZero() {
@@ -208,7 +286,7 @@ func gatewayRow(p statusPage) ([]cell, []message) {
 			down[i] += " (checked " + mcpproxy.Ago(p.now, at) + ")"
 		}
 	}
-	return row, []message{{plural(len(st.Down), "gateway backend", "gateway backends") + " down: " + strings.Join(down, ", "), ""}}
+	return row, []message{{plural(len(st.Down), "gateway backend", "gateway backends") + " down: " + strings.Join(down, ", "), nil}}
 }
 
 // shortVersion shortens an image digest ("sha256:" and 64 hex digits) to
@@ -286,7 +364,7 @@ func stateCell(s shownServer) cell {
 }
 
 func serverTable(shown []shownServer, p statusPage) table {
-	t := table{head: []string{"SERVER", "STATE", "TOOLS", "LAST CALL"}, flex: 0, names: true}
+	t := table{head: []string{"SERVER", "STATE", "TOOLS", "LAST CALL"}, shrink: []int{0}, names: true}
 	for _, s := range shown {
 		last := cell{"never", styleDim}
 		if !s.LastCall.IsZero() {
@@ -347,7 +425,7 @@ func serverSummary(servers []shownServer, p statusPage) string {
 // last lines of a failed start's stderr) red, a recent error on a live
 // server yellow, and with all an error that is past, dim and marked old.
 func errorTable(shown []shownServer, p statusPage) table {
-	t := table{head: []string{"SERVER", "AGE", "MESSAGE"}, flex: 2}
+	t := table{head: []string{"SERVER", "AGE", "MESSAGE"}, shrink: []int{2, 0}, names: true}
 	for _, s := range shown {
 		age := "-"
 		if !s.LastErrorAt.IsZero() {
@@ -392,51 +470,55 @@ func noRouteMessage(servers []shownServer) *message {
 	if len(names) == 0 {
 		return nil
 	}
-	return &message{fmt.Sprintf("%d no route: %s (no cached tools; restart the proxy after the refresh)", len(names), strings.Join(names, ", ")),
-		"aimux mcp proxy refresh"}
+	return &message{fmt.Sprintf("%d no route: %s (no cached tools)", len(names), strings.Join(names, ", ")),
+		fixes("aimux mcp proxy refresh", "aimux mcp proxy restart")}
 }
 
 // installMessages are what the install state asks of the owner (warn) and
 // its facts at rest (info).
 func installMessages(p statusPage) (warn, info []message) {
 	if p.installErr != nil {
-		return []message{{"install state unknown: " + p.installErr.Error(), ""}}, nil
+		return []message{{"install state unknown: " + p.installErr.Error(), nil}}, nil
 	}
 	st := p.install
 	if st == nil {
 		return nil, nil
 	}
 	if st.State == mcpproxy.InstallNotInstalled {
-		return []message{{"not installed: Claude Code's servers are direct", "aimux mcp proxy install"}}, nil
+		return []message{{"not installed: Claude Code's servers are direct", fixes("aimux mcp proxy install")}}, nil
 	}
 	if len(st.Drifted) > 0 {
-		warn = append(warn, message{fmt.Sprintf("drifted: %s (entry is no longer the proxy URL); then aimux mcp proxy install",
-			strings.Join(st.Drifted, ", ")), "aimux mcp proxy uninstall"})
+		warn = append(warn, message{fmt.Sprintf("drifted: %s (entry is no longer the proxy URL)", strings.Join(st.Drifted, ", ")),
+			fixes("aimux mcp proxy uninstall", "aimux mcp proxy install")})
 	}
 	if len(st.NotProxied) > 0 {
-		warn = append(warn, message{"not behind the proxy: " + strings.Join(st.NotProxied, ", "), "aimux mcp proxy install"})
+		warn = append(warn, message{"not behind the proxy: " + strings.Join(st.NotProxied, ", "), fixes("aimux mcp proxy install")})
 	}
 	if st.UpgradePending && p.cliVersion != "" {
 		warn = append(warn, message{fmt.Sprintf("upgrade restart pending (proxy %s, cli %s)", cmp.Or(printable(st.DaemonVersion), "older"), p.cliVersion),
-			"aimux mcp proxy restart"})
+			fixes("aimux mcp proxy restart")})
 	}
 	if !st.Hooks {
-		warn = append(warn, message{"hooks off: servers you add later stay direct", "aimux mcp proxy install"})
+		warn = append(warn, message{"hooks off: servers you add later stay direct", fixes("aimux mcp proxy install")})
 	}
-	info = append(info, message{plural(len(st.Moved), "server", "servers") + " behind the proxy", ""})
+	info = append(info, message{plural(len(st.Moved), "server", "servers") + " behind the proxy", nil})
 	if st.Hooks {
-		info = append(info, message{"hooks on", ""})
+		info = append(info, message{"hooks on", nil})
 	}
 	if len(st.Removed) > 0 {
 		info = append(info, message{fmt.Sprintf("removed from %s: %s (still served, unused)", p.claudeConfig, strings.Join(st.Removed, ", ")),
-			"aimux mcp proxy install"})
+			fixes("aimux mcp proxy install")})
 	}
 	if len(st.Skipped) > 0 {
-		info = append(info, message{"kept direct (--skip): " + strings.Join(st.Skipped, ", "),
-			"aimux mcp proxy install --unskip " + strings.Join(st.Skipped, ",")})
+		// One --unskip per name: the flag splits a value at commas.
+		cmd := "aimux mcp proxy install"
+		for _, n := range st.Skipped {
+			cmd += " --unskip " + shellWord(n)
+		}
+		info = append(info, message{"kept direct (--skip): " + strings.Join(st.Skipped, ", "), fixes(cmd)})
 	}
 	for _, line := range mcpproxy.KeptDirectLines(st.KeptDirect) {
-		info = append(info, message{line, ""})
+		info = append(info, message{line, nil})
 	}
 	return warn, info
 }

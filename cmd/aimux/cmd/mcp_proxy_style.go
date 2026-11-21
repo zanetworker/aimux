@@ -40,15 +40,6 @@ func paint(on bool, style, s string) string {
 	return "\x1b[" + style + "m" + s + "\x1b[0m"
 }
 
-// pad pads s with spaces to width terminal cells; colour is applied after padding, so
-// escape codes never count as width.
-func pad(s string, width int) string {
-	if n := runewidth.StringWidth(s); n < width {
-		return s + strings.Repeat(" ", width-n)
-	}
-	return s
-}
-
 // stateRank orders servers of one kind: active before at rest.
 var stateRank = map[mcpproxy.ServerState]int{mcpproxy.StateFailed: 0, mcpproxy.StateStarting: 1, mcpproxy.StateRunning: 2,
 	mcpproxy.StateIdleStopped: 3, mcpproxy.StateNotStarted: 4}
