@@ -238,6 +238,10 @@ type cliBackend struct {
 var (
 	// terminalPhases end the Ready wait: the sandbox will not become Ready.
 	terminalPhases = map[string]bool{"Error": true, "Failed": true, "Stopped": true, "Completed": true}
+	// deadPhases are terminal phases nobody chose (Stopped is someone's
+	// choice): Ensure replaces such a sandbox once, since it holds nothing
+	// to keep and would otherwise fail every turn until deleted by hand.
+	deadPhases = map[string]bool{"Error": true, "Failed": true, "Completed": true}
 )
 
 // NewCLIBackend drives the openshell CLI. policyDir holds each sandbox's
@@ -290,11 +294,17 @@ func (b *cliBackend) Ensure(ctx context.Context, c profile.Compiled) error {
 	if err := writeFile0600(policy, c.PolicyYAML); err != nil {
 		return err
 	}
-	_, exists, err := b.phase(ctx, c.Sandbox)
+	phase, exists, err := b.phase(ctx, c.Sandbox)
 	if err != nil {
 		return err
 	}
 	providersFile := filepath.Join(b.dir, c.Sandbox+".providers")
+	if exists && deadPhases[phase] {
+		if err := b.replaceDead(ctx, c.Sandbox, phase, digestFile, providersFile); err != nil {
+			return err
+		}
+		exists = false
+	}
 	if !exists {
 		args := []string{"sandbox", "create", "--name", c.Sandbox, "--from", c.Image, "--policy", policy}
 		for _, p := range c.Providers {
@@ -386,6 +396,36 @@ func writeProviders(file string, providers []string) error {
 // prints it.
 func isConflict(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "Conflict:") || strings.Contains(err.Error(), "concurrent modification"))
+}
+
+// replaceDead deletes a sandbox in a dead phase and its recorded digest and
+// providers, and waits until the gateway no longer lists it.
+func (b *cliBackend) replaceDead(ctx context.Context, name, phase, digestFile, providersFile string) error {
+	if _, err := b.output(ctx, nil, "sandbox", "delete", name); err != nil {
+		return fmt.Errorf("delete sandbox %s (phase %s): %w", name, phase, err)
+	}
+	for _, f := range []string{digestFile, providersFile} {
+		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	last := phase
+	for i := 0; i < b.readyPolls; i++ {
+		p, ok, err := b.phase(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		last = p
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(b.pollEvery):
+		}
+	}
+	return fmt.Errorf("sandbox %s still %s after delete (it was in phase %s); see `openshell -g %s sandbox get %s`", name, last, phase, b.gateway, name)
 }
 
 func (b *cliBackend) waitReady(ctx context.Context, name string) error {
