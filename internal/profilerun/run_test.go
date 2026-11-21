@@ -604,3 +604,35 @@ func TestRun_NoSearchFollowUpMayUseEarlier(t *testing.T) {
 		t.Fatalf("writer prompt does not allow the earlier conversation without a search: %q", p)
 	}
 }
+
+// The owner's public names reach the check: a name the planner read is sent
+// when the owner listed it as public, and refused (with how to allow it)
+// when not.
+func TestRun_PublicNamesReachTheCheck(t *testing.T) {
+	for _, tc := range []struct {
+		public   []string
+		accepted bool
+	}{{[]string{"Globex Cloud"}, true}, {nil, false}} {
+		r := newRunRig(t,
+			stageScript{deltas: []string{plannerReply([]string{"globex cloud agent sandboxes"}, "notes")},
+				tools: []ToolResult{{Name: "mcp__slack__search", Input: "{}", Output: "we compared it with Globex Cloud last week"}}},
+			stageScript{deltas: []string{"found"}},
+			stageScript{deltas: []string{"answer"}},
+		)
+		r.e.PublicNames = func() []string { return tc.public }
+		id := r.start(t, Meta{Client: "wingman"}, "")
+		if _, err := r.send(context.Background(), id, "how do sandboxes compare"); err != nil {
+			t.Fatal(err)
+		}
+		m, _ := r.store.Get(id)
+		if got := len(m.Run.Accepted) == 1; got != tc.accepted {
+			t.Fatalf("public %v: run %+v, want accepted %v", tc.public, m.Run, tc.accepted)
+		}
+		if !tc.accepted {
+			_, notices, _ := r.texts()
+			if !slicesContain(notices, "1 query was not sent: private_name (a name from your workspace; to allow a public one, add it to ~/.config/aimux/public-names.txt)") {
+				t.Fatalf("notices %q, want the private_name hint", notices)
+			}
+		}
+	}
+}
