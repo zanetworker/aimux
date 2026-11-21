@@ -846,7 +846,11 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 	opt := TurnOptions{Model: req.Model, Caller: client}
 	if profiled { // a run profile keeps no conversation: carry the page's, as POST /v1/sessions does
 		if m, found := a.ProfileSessions.Get(session); found && !a.keepsContext(m.Profile) {
-			opt.Prior, opt.Earlier = a.pagePrior(r.Context(), client, m.Profile, newSessionRequest{URL: m.URL, Instance: m.Instance, Text: req.Text})
+			if m.URL == "" { // no page to group by: the session's own turns
+				opt.Earlier = a.sessionEarlier(r.Context(), session)
+			} else {
+				opt.Prior, opt.Earlier = a.pagePrior(r.Context(), client, m.Profile, newSessionRequest{URL: m.URL, Instance: m.Instance, Text: req.Text})
+			}
 		}
 	}
 	turn, err := a.Broker.StartWith(session, req.Text, req.Key, opt)

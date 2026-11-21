@@ -34,6 +34,7 @@ type fakeStage struct {
 	prompts   []string
 	priors    [][]string
 	stages    []bool // whether each Send ran as a run stage (runStageFrom)
+	earliers  [][]Exchange
 	cancelled []string
 	started   chan struct{}
 }
@@ -55,6 +56,7 @@ func (f *fakeStage) Send(ctx context.Context, _ string, text string, onEvent fun
 	f.prompts = append(f.prompts, text)
 	f.priors = append(f.priors, PriorFrom(ctx))
 	f.stages = append(f.stages, runStageFrom(ctx))
+	f.earliers = append(f.earliers, EarlierFrom(ctx))
 	s := f.script
 	f.mu.Unlock()
 	f.started <- struct{}{}
@@ -516,8 +518,8 @@ func TestRun_FollowUpCarriesEarlierExchanges(t *testing.T) {
 			t.Errorf("reader prompt carries %q", leak)
 		}
 	}
-	if r.reader.priors[0] != nil {
-		t.Fatalf("reader prior %v, want none", r.reader.priors[0])
+	if r.reader.priors[0] != nil || r.reader.earliers[0] != nil {
+		t.Fatalf("reader prior %v earlier %v, want none in its context", r.reader.priors[0], r.reader.earliers[0])
 	}
 	if r.planner.priors[0] != nil {
 		t.Fatalf("planner prior %v: the earlier questions come once, in the exchanges block", r.planner.priors[0])

@@ -79,25 +79,11 @@ func (a *API) pagePrior(ctx context.Context, client, prof string, req newSession
 	}
 	var earlier []profilerun.Exchange
 	if !keeps { // a run profile keeps no conversation: carry the answers too
-		for _, t := range turns {
-			if strings.TrimSpace(t.Reply) == "" {
-				continue
-			}
-			q := t.question
-			if q == "" {
-				q = t.User
-			}
-			q = profilerun.StoredForm(q)
-			if r := []rune(q); len(r) > maxPriorRunes {
-				q = string(r[:maxPriorRunes])
-			}
-			ans := t.Reply
-			if r := []rune(ans); len(r) > maxEarlierAnswerRunes {
-				ans = string(r[:maxEarlierAnswerRunes])
-			}
-			earlier = append(earlier, profilerun.Exchange{Question: q, Answer: ans})
+		ts := make([]Turn, len(turns))
+		for i, t := range turns {
+			ts[i] = t.Turn
 		}
-		earlier = earlier[max(0, len(earlier)-maxPrior):]
+		earlier = exchanges(ts)
 	}
 	seen := map[string]bool{profilerun.StoredForm(req.Text): true}
 	var qs []string
@@ -120,4 +106,44 @@ func (a *API) pagePrior(ctx context.Context, client, prof string, req newSession
 		}
 	}
 	return qs, earlier
+}
+
+// exchanges is turns' answered ones as question and answer, in order: the
+// question in its stored form cut to maxPriorRunes, the answer cut to
+// maxEarlierAnswerRunes, the last maxPrior of them.
+func exchanges(turns []Turn) []profilerun.Exchange {
+	var out []profilerun.Exchange
+	for _, t := range turns {
+		if strings.TrimSpace(t.Reply) == "" {
+			continue
+		}
+		q := t.question
+		if q == "" {
+			q = t.User
+		}
+		q = profilerun.StoredForm(q)
+		if r := []rune(q); len(r) > maxPriorRunes {
+			q = string(r[:maxPriorRunes])
+		}
+		ans := t.Reply
+		if r := []rune(ans); len(r) > maxEarlierAnswerRunes {
+			ans = string(r[:maxEarlierAnswerRunes])
+		}
+		out = append(out, profilerun.Exchange{Question: q, Answer: ans})
+	}
+	return out[max(0, len(out)-maxPrior):]
+}
+
+// sessionEarlier is a run session's own answered turns (exchanges), for a
+// follow-up by id to a session without a page URL to group by; nil when its
+// history cannot be read.
+func (a *API) sessionEarlier(ctx context.Context, session string) []profilerun.Exchange {
+	if a.Session == nil {
+		return nil
+	}
+	d, err := a.Session(ctx, session, priorHistoryTurns)
+	if err != nil {
+		return nil
+	}
+	return exchanges(d.Turns)
 }

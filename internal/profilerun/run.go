@@ -223,7 +223,7 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 		notice(fmt.Sprintf("Searching the web: %d %s", len(st.Accepted), plural(len(st.Accepted), "query", "queries")))
 		var fetched []ToolResult
 		var fMu sync.Mutex
-		rctx := WithToolResults(WithPrior(ctx, nil), func(r ToolResult) {
+		rctx := WithToolResults(WithEarlier(WithPrior(ctx, nil), nil), func(r ToolResult) {
 			fMu.Lock()
 			fetched = append(fetched, r)
 			fMu.Unlock()

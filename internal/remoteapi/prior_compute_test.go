@@ -322,3 +322,21 @@ func TestSendMessage_RunSessionCarriesEarlier(t *testing.T) {
 		t.Fatalf("earlier %q, want Q1/A1", pr.earlier)
 	}
 }
+
+// A run session without a page URL still carries its own answered turns on
+// a follow-up by id: there is no page to group by, so its transcript is it.
+func TestSendMessage_RunSessionWithoutURLCarriesItsOwnHistory(t *testing.T) {
+	pr := runPriorRig(t)
+	pr.seed("old-run", "wingman", "research-with-work", "", "", q(1, "Q1", "A1"), q(2, "Q2 failed", ""))
+	pr.serve()
+	resp, out := pr.do("POST", "/v1/sessions/old-run/messages", `{"text":"expand on that"}`)
+	if resp.StatusCode != 202 {
+		t.Fatalf("messages: %d %v", resp.StatusCode, out)
+	}
+	pr.idle("old-run")
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	if len(pr.earlier) != 1 || !reflect.DeepEqual(pr.earlier[0], []profilerun.Exchange{{Question: "Q1", Answer: "A1"}}) {
+		t.Fatalf("earlier %q, want the session's own Q1/A1", pr.earlier)
+	}
+}
