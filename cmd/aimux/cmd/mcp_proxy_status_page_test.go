@@ -586,7 +586,8 @@ func TestStatusPage_NoRouteIsNotReady(t *testing.T) {
 	got := render(p)
 	for _, want := range []string{
 		"9 servers: 1 failed · 1 warning · 1 no route · 2 running · 1 idle · 3 ready\n  1 removed\n",
-		"  ! 1 no route: pypi\n    `aimux mcp proxy refresh`, then `aimux mcp proxy restart`\n",
+		"  ! 1 no route: pypi\n    `aimux mcp proxy refresh`, then `aimux mcp proxy restart`",
+		"start `aimux mcp proxy serve` again",
 		"  ○ 3 ready, start on first call: brief, chrome-devtools, deepwiki\n",
 	} {
 		if !strings.Contains(got, want) {
