@@ -457,7 +457,9 @@ func (i Installer) HookCheck(cwd string) HookReply {
 		drift := fmt.Sprintf("Running direct again instead of through the aimux proxy: %s; to fix it, %s.", strings.Join(st.Drifted, ", "), DriftFix)
 		user = strings.TrimSpace(user + " " + drift)
 	}
-	if len(st.Moved) > 0 && !i.proxyAnswers() {
+	// Only entries still on the proxy fail when it is down; the manifest
+	// also lists ones removed or reverted to a direct command.
+	if onProxy(st) && !i.proxyAnswers() {
 		user = strings.TrimSpace(ProxyDownMessage(i.proxyAddr()) + "\n" + user)
 	}
 	claude := user
@@ -466,6 +468,16 @@ func (i Installer) HookCheck(cwd string) HookReply {
 		claude = strings.TrimSpace(claude + " " + note)
 	}
 	return HookReply{User: user, Claude: claude}
+}
+
+// onProxy reports whether a moved entry still points at the proxy.
+func onProxy(st InstallState) bool {
+	for _, n := range st.Moved {
+		if !contains(st.Removed, n) && !contains(st.Drifted, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // movedReply says what an install the add hook ran did with the servers

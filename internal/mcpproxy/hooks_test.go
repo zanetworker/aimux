@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zanetworker/aimux/internal/claudehooks"
+	"github.com/zanetworker/aimux/internal/jsonedit"
 )
 
 func TestIsServerAdd(t *testing.T) {
@@ -410,5 +411,41 @@ func TestProxyAddrDefaultsToPort(t *testing.T) {
 	}
 	if got := (Installer{Port: 7381, ProxyAddr: "127.0.0.1:9"}).proxyAddr(); got != "127.0.0.1:9" {
 		t.Fatalf("proxyAddr %q", got)
+	}
+}
+
+// The proxy is dialed only for moved entries that still point at it: a
+// manifest whose entries were all reverted to direct commands or removed
+// from the Claude config gives no proxy line, while one entry left on the
+// proxy is enough for it.
+func TestHookCheck_ProxyLineOnlyForEntriesStillOnTheProxy(t *testing.T) {
+	direct := map[string]json.RawMessage{
+		"slack":  json.RawMessage(`{"command": "npx", "args": ["-y", "slack-mcp"]}`),
+		"aimux":  json.RawMessage(`{"command": "/usr/local/bin/aimux", "args": ["mcp", "serve"]}`),
+		"github": json.RawMessage(`{"command": "gh-mcp"}`),
+	}
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	fx.in.ProxyAddr = closedAddr(t)
+	for name, v := range direct {
+		fx.setEntry(name, v)
+	}
+	r := fx.in.HookCheck("/w")
+	if strings.Contains(r.User, "not answering") || !strings.Contains(r.User, DriftFix) {
+		t.Fatalf("all reverted to direct: %+v, want the drift line only", r)
+	}
+	fx.setEntry("slack", httpEntry("slack")) // one back on the proxy
+	if r := fx.in.HookCheck("/w"); !strings.HasPrefix(r.User, ProxyDownMessage(fx.in.ProxyAddr)+"\n") {
+		t.Fatalf("one entry on the proxy: %+v, want the proxy line first", r)
+	}
+
+	gone := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, gone.in.Install(nil))
+	gone.in.ProxyAddr = closedAddr(t)
+	must(t, jsonedit.EditKeyVerbatim(gone.claude, "mcpServers", func(json.RawMessage) (json.RawMessage, error) {
+		return json.RawMessage(`{}`), nil
+	}))
+	if r := gone.in.HookCheck("/w"); strings.Contains(r.User, "not answering") {
+		t.Fatalf("all moved entries removed: %+v, want no proxy line", r)
 	}
 }

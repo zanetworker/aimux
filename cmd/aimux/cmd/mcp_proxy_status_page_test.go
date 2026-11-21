@@ -20,7 +20,7 @@ import (
 // whose entry left the Claude config (minutes).
 func pageReport() mcpproxy.StatusReport {
 	srv := func(name string, st mcpproxy.ServerState, tools int) mcpproxy.ServerReport {
-		return mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: name, State: st}, Tools: tools}
+		return mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: name, State: st}, Tools: tools, Endpoint: true}
 	}
 	slack := srv("slack", mcpproxy.StateRunning, 12)
 	slack.LastCall, slack.LastError, slack.LastErrorAt = statusNow.Add(-2*time.Minute), "write: broken pipe", statusNow.Add(-time.Hour)
@@ -196,7 +196,7 @@ func TestStatusPage_TruncatesToWidth(t *testing.T) {
 func TestStatusPage_NotStartedWraps(t *testing.T) {
 	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
 	for _, n := range []string{"alpha-server", "bravo-server", "charlie-server", "delta-server", "echo-server", "foxtrot-server", "golf-server"} {
-		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}})
+		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}, Endpoint: true})
 	}
 	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 60})
 	want := "  ○ 7 ready, start on first call: alpha-server,\n" +
@@ -395,8 +395,8 @@ func TestStatusPage_VersionIsPrintable(t *testing.T) {
 // line, and one too long for any line is cut, never past the width.
 func TestStatusPage_LongListItemFits(t *testing.T) {
 	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
-		{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateNotStarted}},
-		{ServerStatus: mcpproxy.ServerStatus{Server: strings.Repeat("z", 60), State: mcpproxy.StateNotStarted}}}}
+		{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateNotStarted}, Endpoint: true},
+		{ServerStatus: mcpproxy.ServerStatus{Server: strings.Repeat("z", 60), State: mcpproxy.StateNotStarted}, Endpoint: true}}}
 	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 40})
 	for _, line := range strings.Split(got, "\n") {
 		if n := len([]rune(line)); n > 40 {
@@ -494,6 +494,9 @@ func TestStatusPage_WideCharactersFit(t *testing.T) {
 	for _, width := range []int{80, 40} {
 		got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: width})
 		for _, line := range strings.Split(got, "\n") {
+			if width < 30 && !strings.Contains(line, "○") {
+				continue // the header has its own minimum; this is the ready heading's test
+			}
 			if n := runewidth.StringWidth(line); n > width {
 				t.Fatalf("width %d: line of %d cells: %q\n%s", width, n, line, got)
 			}
@@ -566,5 +569,64 @@ func TestStatusPage_CutNamesStayDistinct(t *testing.T) {
 	if got := cutDistinct([]string{"slack", "abcdefgh-one", "abcdefgh-two", "abcdefgh-two"}, 8); got[0] != "slack" ||
 		got[1] == got[2] || got[2] != got[3] {
 		t.Fatalf("cutDistinct %q", got)
+	}
+}
+
+// A never-started server the proxy has no route for (no cached tools) is
+// not ready: it is counted and shown apart, with the fix.
+func TestStatusPage_NoRouteIsNotReady(t *testing.T) {
+	p := page()
+	rep := pageReport()
+	for i := range rep.Servers {
+		if rep.Servers[i].Server == "pypi" {
+			rep.Servers[i].Endpoint = false
+		}
+	}
+	p.rep = &rep
+	got := render(p)
+	for _, want := range []string{
+		"9 servers: 1 failed · 1 warning · 1 no route · 2 running · 1 idle · 3 ready\n  1 removed\n",
+		"  ! 1 no route: pypi\n    `aimux mcp proxy refresh`, then `aimux mcp proxy restart`\n",
+		"  ○ 3 ready, start on first call: brief, chrome-devtools, deepwiki\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("page lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "no route: pypi") > strings.Index(got, "  slack ") {
+		t.Fatalf("no-route servers not with the problems, before the active ones:\n%s", got)
+	}
+	p.all = true
+	if got := render(p); !strings.Contains(got, "  pypi                       ○ no route        0 tools   never called\n") {
+		t.Fatalf("--all row for a server without a route:\n%s", got)
+	}
+}
+
+// On a narrow terminal the ready heading shortens so no line passes the
+// width; on a wide one it keeps the explanation.
+func TestStatusPage_ReadyHeadingFitsNarrowTerminal(t *testing.T) {
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
+	for _, n := range []string{"ab", "cd", "ef"} {
+		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}, Endpoint: true})
+	}
+	for _, width := range []int{30, 12, 11} {
+		got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: width})
+		for _, line := range strings.Split(got, "\n") {
+			if width < 30 && !strings.Contains(line, "○") {
+				continue // the header has its own minimum; this is the ready heading's test
+			}
+			if n := runewidth.StringWidth(line); n > width {
+				t.Fatalf("width %d: line of %d cells: %q\n%s", width, n, line, got)
+			}
+		}
+		if width == 30 && !strings.Contains(got, "  ○ 3 ready: ab, cd, ef\n") {
+			t.Fatalf("width 30: short heading missing:\n%s", got)
+		}
+	}
+	// The full heading plus its first name fits exactly at its own width.
+	full := "  ○ 3 ready, start on first call: ab,"
+	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: runewidth.StringWidth(full)})
+	if !strings.Contains(got, full+"\n") {
+		t.Fatalf("full heading not kept when it fits:\n%s", got)
 	}
 }

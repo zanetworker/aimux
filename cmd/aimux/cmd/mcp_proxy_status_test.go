@@ -214,7 +214,7 @@ func styledReport() mcpproxy.StatusReport {
 	rep.Servers = append(rep.Servers,
 		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateIdleStopped,
 			LastCall: statusNow.Add(-30 * time.Minute)}, Tools: 4},
-		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "brief", State: mcpproxy.StateNotStarted}, Tools: 13})
+		mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "brief", State: mcpproxy.StateNotStarted}, Tools: 13, Endpoint: true})
 	return rep
 }
 
@@ -363,7 +363,7 @@ func TestProxyStatus_AnswerWithoutARunningProxyIsAnError(t *testing.T) {
 // started", while --json keeps the state name not_started for scripts.
 func TestProxyStatus_NeverStartedReadsReadyJSONKeepsName(t *testing.T) {
 	rep := fixtureReport()
-	rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "context7", State: mcpproxy.StateNotStarted}, Tools: 2})
+	rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "context7", State: mcpproxy.StateNotStarted}, Tools: 2, Endpoint: true})
 	addr, _ := fakeDaemon(t, rep)
 	for _, all := range []bool{false, true} {
 		var out bytes.Buffer
