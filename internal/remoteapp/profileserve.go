@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zanetworker/aimux/internal/runcheck"
 	"io"
 	"log"
 	"log/slog"
@@ -176,7 +177,14 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	// the writer on the page engine; Resolve checks roles as the catalog does.
 	run := &profilerun.RunEngine{Planner: p.sandbox, Reader: p.sandbox, Writer: page, Compile: compile,
 		Resolve: func(name string) (profile.Manifest, error) { return resolveChecked(dir, name) },
-		Store:   p.store, Log: logger, ArchiveDir: p.sandbox.ArchiveDir}
+		Store:   p.store, Log: logger, ArchiveDir: p.sandbox.ArchiveDir,
+		PublicNames: func() []string {
+			names, err := runcheck.LoadPublicNames(filepath.Join(home, ".config", "aimux", "public-names.txt"))
+			if err != nil {
+				logger.Warn("public names unreadable; only the shipped list applies", "err", err)
+			}
+			return names
+		}}
 	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox, "run": run}
 	return func() {
 		p.pageMgr.Close()

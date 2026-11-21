@@ -1,8 +1,9 @@
 // Package runcheck decides which web search queries a research-with-work
 // planner proposed may leave the machine. The check is deterministic and
 // fails closed: a query that looks like it carries private content (a URL,
-// an address, an issue key, a credential, a token, or a span copied from
-// what the planner read) is rejected, with a reason that never repeats the
+// an address, an issue key, a credential, a token, a span copied from what
+// the planner read, or a name the private inputs use and no public-names
+// phrase covers) is rejected, with a reason that never repeats the
 // query. No model approves a query.
 package runcheck
 
@@ -55,6 +56,9 @@ type Private struct {
 	Question, PageText, Notes string
 	ToolInputs, ToolOutputs   []string
 	Prior                     []string // the page's earlier questions, and a run follow-up's earlier answers
+	// PublicNames are the owner's own public names (LoadPublicNames), added
+	// to the shipped list; they are not private input.
+	PublicNames []string
 }
 
 // Rejection is one refused query: its position in the planner's list and why.
@@ -91,6 +95,7 @@ var (
 // byte budget, so a rejected query never uses up the budget.
 func Check(queries []string, p Private) (accepted []string, rejected []Rejection) {
 	private, keys := shingles(p), privateKeys(p)
+	cands, public := nameCandidates(privateTexts(p)), append(append([][]string(nil), builtinPhrases...), phrases(p.PublicNames)...)
 	total := 0
 	for i, raw := range queries {
 		reason := ""
@@ -123,6 +128,9 @@ func Check(queries []string, p Private) (accepted []string, rejected []Rejection
 			}
 			if reason == "" && (overlaps(q, private) || overlaps(dec, private)) {
 				reason = ReasonOverlap
+			}
+			if reason == "" && (namesPrivate(q, cands, public) || namesPrivate(dec, cands, public)) {
+				reason = ReasonPrivateName
 			}
 		}
 		if reason == "" {
