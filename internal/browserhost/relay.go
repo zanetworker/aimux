@@ -120,7 +120,8 @@ type inflight struct {
 	session  string // the v1 session, once known
 	// abort: cancelling ends the request itself (a tool approval, so the
 	// dialog on the Mac closes and nothing is approved after the panel let
-	// go); a session's turn is stopped with a v1 cancel instead.
+	// go; a profile list, so none is left running); a session's turn is
+	// stopped with a v1 cancel instead.
 	abort bool
 }
 
@@ -143,7 +144,7 @@ func (s *relaySession) dispatch(ctx context.Context, msg []byte) {
 		return
 	}
 	rctx, rcancel := context.WithCancel(ctx)
-	f := &inflight{cancel: rcancel, abort: strings.HasPrefix(req.Type, "tools.")}
+	f := &inflight{cancel: rcancel, abort: strings.HasPrefix(req.Type, "tools.") || req.Type == "profiles.list"}
 	s.mu.Lock()
 	if s.inflight[req.ID] != nil {
 		s.mu.Unlock()
@@ -240,6 +241,19 @@ func (s *relaySession) handle(ctx context.Context, req Request, f *inflight, emi
 			// Not split across messages: one the panel cannot show whole
 			// is reviewed on the Mac instead.
 			fail(&apiError{Code: "diff_too_large", Message: "the diff of " + req.Set + " is too large to review in the panel: run aimux tools diff on the Mac"})
+			return
+		}
+		emit(ev)
+		emit(Event{Type: "done"})
+	case "profiles.list":
+		data, err := s.listProfiles(ctx)
+		if err != nil {
+			fail(err)
+			return
+		}
+		ev := Event{ID: req.ID, Type: "profiles", Data: data}
+		if b, err := json.Marshal(ev); err != nil || len(b) > MaxOutbound {
+			fail(&apiError{Code: "profiles_too_large", Message: "the profile list is too large to send to the panel: run aimux profile list on the Mac"})
 			return
 		}
 		emit(ev)
@@ -1052,3 +1066,35 @@ func pageKey(u string) string {
 
 // sessionPath is /v1/sessions/{id} with id escaped.
 func sessionPath(id string) string { return "/v1/sessions/" + url.PathEscape(id) }
+
+// panelProfile is one profile as the panel sees it. Allowed is true on every
+// entry sent (the list is filtered to allowed ones) and is kept because the
+// panel offers a mode only when available and allowed are both true.
+type panelProfile struct {
+	Name      string `json:"name"`
+	Runs      string `json:"runs"`
+	Available bool   `json:"available"`
+	Digest    string `json:"digest"`
+	Allowed   bool   `json:"allowed"`
+}
+
+// listProfiles is GET /v1/profiles for this client, as {"profiles": [...]}
+// holding only the profiles it may use, so the panel offers a mode only
+// when its profile is there.
+func (s *relaySession) listProfiles(ctx context.Context) (json.RawMessage, error) {
+	var in struct {
+		Profiles []panelProfile `json:"profiles"`
+	}
+	if err := s.call(ctx, http.MethodGet, "/v1/profiles", nil, &in); err != nil {
+		return nil, err
+	}
+	out := struct {
+		Profiles []panelProfile `json:"profiles"`
+	}{Profiles: []panelProfile{}}
+	for _, p := range in.Profiles {
+		if p.Allowed {
+			out.Profiles = append(out.Profiles, p)
+		}
+	}
+	return json.Marshal(out)
+}

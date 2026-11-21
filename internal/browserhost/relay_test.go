@@ -1305,3 +1305,97 @@ func TestRelay_NoticeCarriesSets(t *testing.T) {
 		t.Fatalf("a notice without sets sends sets: %s", b)
 	}
 }
+
+// profiles.list is GET /v1/profiles for this client: the panel gets a
+// profiles event with each profile the client may use (name, runs,
+// available, digest); one the client is not allowed is left out.
+func TestRelay_ProfilesList(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("GET /v1/profiles", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"profiles": []any{
+			map[string]any{"name": "coding", "runs": "host", "available": true, "digest": "sha256:c", "allowed": false},
+			map[string]any{"name": "research-with-work", "runs": "run", "available": true, "digest": "sha256:r", "allowed": true},
+		}})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+
+	p.send(t, Request{ID: "p", Type: "profiles.list"})
+	evs := p.until(t, "p")
+	if len(evs) < 2 || evs[len(evs)-2].Type != "profiles" || evs[len(evs)-1].Type != "done" {
+		t.Fatalf("events %+v, want profiles then done", evs)
+	}
+	var got struct {
+		Profiles []map[string]any `json:"profiles"`
+	}
+	if err := json.Unmarshal(evs[len(evs)-2].Data, &got); err != nil {
+		t.Fatalf("profiles data %s: %v", evs[len(evs)-2].Data, err)
+	}
+	// allowed stays on each entry: the panel shows a mode only when allowed is true.
+	want := map[string]any{"name": "research-with-work", "runs": "run", "available": true, "digest": "sha256:r", "allowed": true}
+	if len(got.Profiles) != 1 || !reflect.DeepEqual(got.Profiles[0], want) {
+		t.Fatalf("profiles %v, want only %v", got.Profiles, want)
+	}
+	if n := len(f.find(http.MethodGet, "/v1/profiles")); n != 1 {
+		t.Fatalf("GET /v1/profiles called %d times, want 1", n)
+	}
+}
+
+// An API refusal of profiles.list reaches the panel as an error with its code.
+func TestRelay_ProfilesListError(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("GET /v1/profiles", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"error": "the profiles could not be read on the Mac", "code": "internal"})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "p", Type: "profiles.list"})
+	evs := p.until(t, "p")
+	if last := evs[len(evs)-1]; last.Type != "error" || last.Code != "internal" {
+		t.Fatalf("events %+v, want an internal error", evs)
+	}
+}
+
+// A profile list too large for one native message gets one coded error
+// and nothing else: no profiles event, no done after it.
+func TestRelay_ProfilesListTooLarge(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	f.mux.HandleFunc("GET /v1/profiles", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONStatus(w, http.StatusOK, map[string]any{"profiles": []any{
+			map[string]any{"name": strings.Repeat("p", MaxOutbound), "runs": "sandbox", "available": true, "digest": "d", "allowed": true},
+		}})
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "p", Type: "profiles.list"})
+	evs := p.until(t, "p")
+	if len(evs) != 1 || evs[0].Type != "error" || evs[0].Code != "profiles_too_large" {
+		t.Fatalf("events %+v, want one profiles_too_large error", evs)
+	}
+}
+
+// Cancelling a profiles.list ends its HTTP request, so nothing of it is
+// left running after the panel is told it ended.
+func TestRelay_CancelEndsAProfilesList(t *testing.T) {
+	sock := sockPath(t)
+	f := newFakeV1()
+	started, ended := make(chan struct{}), make(chan struct{})
+	f.mux.HandleFunc("GET /v1/profiles", func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done() // a stalled catalog
+		close(ended)
+	})
+	listenV1(t, sock, f)
+	p := startPanel(t, &Relay{Socket: sock})
+	p.send(t, Request{ID: "p", Type: "profiles.list"})
+	<-started
+	p.send(t, Request{ID: "p", Type: "cancel"})
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the profiles request was not cancelled")
+	}
+}
