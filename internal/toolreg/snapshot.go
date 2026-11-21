@@ -54,12 +54,27 @@ func (s Source) Endpoint() string {
 	return s.URL
 }
 
-// SourceChanged reports whether a pin recorded from endpoint recorded no
-// longer matches server's current endpoint (a source the registry dropped
-// has none). An empty recorded endpoint (a v1 pin) is unknown, never
-// changed.
+// PinSource is what an approval of server's tools records: its identity
+// (split mode), else its endpoint.
+func (r Registry) PinSource(server string) string {
+	if id := r.Identities[server]; id != "" {
+		return id
+	}
+	return r.Sources[server].Endpoint()
+}
+
+// SourceChanged reports whether a pin recorded as recorded no longer
+// matches server: neither its identity nor (a pin made before identities)
+// its current endpoint. A source the registry dropped matches nothing. An
+// empty recorded value (a v1 pin) is unknown, never changed.
 func (r Registry) SourceChanged(server, recorded string) bool {
-	return recorded != "" && recorded != r.Sources[server].Endpoint()
+	if recorded == "" {
+		return false
+	}
+	if _, ok := r.Sources[server]; !ok {
+		return true
+	}
+	return recorded != r.PinSource(server) && recorded != r.Sources[server].Endpoint()
 }
 
 // Snapshot is one consistent view of the registry and the pins, with a
@@ -85,7 +100,7 @@ func NewSnapshot(reg Registry, pins PinTable, loadErr error) Snapshot {
 
 func cloneRegistry(r Registry) Registry {
 	out := Registry{Version: r.Version, Sources: maps.Clone(r.Sources), Sets: make(map[string]Set, len(r.Sets)),
-		SourceErrors: maps.Clone(r.SourceErrors), SetErrors: maps.Clone(r.SetErrors)}
+		SourceErrors: maps.Clone(r.SourceErrors), SetErrors: maps.Clone(r.SetErrors), Identities: maps.Clone(r.Identities)}
 	if out.Sources == nil {
 		out.Sources = map[string]Source{}
 	}
@@ -107,12 +122,23 @@ func (s Snapshot) hash() string {
 	if s.err != nil {
 		loadErr = s.err.Error()
 	}
+	// Why a set or source is left out is part of the version, so what
+	// status tells the owner is never stale.
+	dropped := map[string]string{}
+	for n, e := range s.reg.SetErrors {
+		dropped["set "+n] = e.Error()
+	}
+	for n, e := range s.reg.SourceErrors {
+		dropped["source "+n] = e.Error()
+	}
 	canon, _ := json.Marshal(struct { // plain strings and maps always encode
-		Sources map[string]Source
-		Sets    map[string]Set
-		Pins    PinTable
-		Err     string `json:",omitempty"`
-	}{s.reg.Sources, sets, s.pins, loadErr})
+		Sources    map[string]Source
+		Sets       map[string]Set
+		Pins       PinTable
+		Err        string            `json:",omitempty"`
+		Identities map[string]string `json:",omitempty"`
+		Dropped    map[string]string `json:",omitempty"`
+	}{s.reg.Sources, sets, s.pins, loadErr, s.reg.Identities, dropped})
 	sum := sha256.Sum256(canon)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
@@ -150,6 +176,14 @@ func (s Snapshot) SourceChanged(server, tool string) bool {
 	p, ok := s.pins[server][tool]
 	return ok && s.reg.SourceChanged(server, p.Source)
 }
+
+// SourceChangedFrom is Registry.SourceChanged for a recorded source.
+func (s Snapshot) SourceChangedFrom(server, recorded string) bool {
+	return s.reg.SourceChanged(server, recorded)
+}
+
+// PinSource is the registry's PinSource for server.
+func (s Snapshot) PinSource(server string) string { return s.reg.PinSource(server) }
 
 // Before reports whether s was loaded by a Store before o.
 func (s Snapshot) Before(o Snapshot) bool { return s.seq < o.seq }

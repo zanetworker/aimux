@@ -71,8 +71,16 @@ func newToolsCmdWith(env toolsEnv) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tools",
 		Short: "Review the tools aimux exposes: status, diff and approve pins; add or remove sources",
-		Long: "Each set in ~/.config/aimux/tool-sources.yaml names the tools a source may expose. A tool is served only\n" +
-			"while its live definition matches the one approved into ~/.aimux/tools/pins.json.\n" +
+		Long: "Each set in ~/.config/aimux/tool-sets.yaml (or the older tool-sources.yaml) names the tools a server may expose.\n" +
+			"A tool is served only while its live definition matches the one approved into ~/.aimux/tools/pins.json and,\n" +
+			"for an HTTP server in servers.yaml, the server's identity (url, secret names; for one aimux starts also its\n" +
+			"command, args, cwd and executable) is the one it was approved under; a pin that recorded the server's URL\n" +
+			"still matches while the URL is unchanged, until the next approve rewrites it. A set naming a server aimux\n" +
+			"starts is held for now; a set whose server floats (npx, pnpm dlx, uvx, go run without an exact version) or\n" +
+			"whose program cannot be found or hashed is skipped; status names the reason.\n" +
+			"add and remove edit tool-sources.yaml only; with servers.yaml, edit the two files. add, remove and\n" +
+			"approve --add-to-set refuse while aimux servers migrate or another of these edits runs; try again when it\n" +
+			"finishes.\n" +
 			toolgateway.Disclaimer,
 	}
 	status := &cobra.Command{
@@ -99,7 +107,8 @@ func newToolsCmdWith(env toolsEnv) *cobra.Command {
 		Long: "Pins the definitions the sources list now, and prints each one pinned with its short hash. A definition\n" +
 			"can change between aimux tools diff and approve: pass --expect <hash> (the live hash diff printed) with one\n" +
 			"set/tool to refuse when the live definition is another one. A tool a source offers that no set lists\n" +
-			"(status new_on_server) is added and pinned in one step with: approve <source>/<tool> --add-to-set <set>.",
+			"(status new_on_server) is added and pinned in one step with: approve <source>/<tool> --add-to-set <set>\n" +
+			"(the set is written to tool-sets.yaml once servers.yaml exists, else to tool-sources.yaml).",
 		RunE: func(c *cobra.Command, args []string) error {
 			if addToSet != "" {
 				if all || len(args) != 1 || !strings.Contains(args[0], "/") || expect != "" {
@@ -919,11 +928,13 @@ func toolsApproveIntoSet(ctx context.Context, env toolsEnv, target, set string, 
 		_, _ = fmt.Fprintf(errOut, "Warning: %s does not mark this tool read-only (no readOnlyHint); the set is named %s\n", src, set)
 	}
 	// The set change stands only if the pin does: when approve fails before
-	// pinning, undo puts tool-sources.yaml back, unless it changed since.
-	undo, err := toolreg.AddToSet(toolreg.DefaultPath(env.Home), set, tool)
+	// pinning, Undo puts the set file back, unless it changed since. The
+	// migrate lock is held until then.
+	edit, err := toolreg.AddToSet(toolreg.DefaultPath(env.Home), set, tool)
 	if err != nil {
 		return err
 	}
+	defer edit.Keep()
 	aerr := toolsApprove(ctx, env, []string{set + "/" + tool}, false, hash, out, errOut)
 	if aerr == nil {
 		return nil
@@ -931,7 +942,7 @@ func toolsApproveIntoSet(ctx context.Context, env toolsEnv, target, set string, 
 	if pins, perr := (toolgateway.PinStore{Path: toolgateway.DefaultPinsPath(env.Home)}).LoadFile(); perr == nil && pins[src][tool].Hash == hash {
 		return aerr // pinned: the set keeps the tool
 	}
-	if err := undo(); err != nil {
+	if err := edit.Undo(); err != nil {
 		return fmt.Errorf("%w; tool-sources.yaml was not put back (%v): remove %s from %s by hand", aerr, err, tool, set)
 	}
 	return aerr

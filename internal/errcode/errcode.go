@@ -17,6 +17,8 @@ const (
 	PlannerOutputInvalid  = "planner_output_invalid"   // research-with-work: the planner did not return its plan
 	RunReaderFailed       = "run_reader_failed"        // research-with-work: the web stage failed
 	RunWriterFailed       = "run_writer_failed"        // research-with-work: writing the answer failed
+	ServerPortInUse       = "server_port_in_use"       // a managed server's port is taken by a process aimux did not start
+	ServerCrashLoop       = "server_crash_loop"        // a managed server crashed 5 times in 5 minutes and is not restarted
 )
 
 var messages = map[string]string{
@@ -29,6 +31,8 @@ var messages = map[string]string{
 	PlannerOutputInvalid:  "The workspace step did not return a usable plan, so nothing was searched: try again or rephrase",
 	RunReaderFailed:       "Searching the web failed: try again, or ask in Web mode",
 	RunWriterFailed:       "Writing the answer failed after the lookups: try again",
+	ServerPortInUse:       "A server's port is in use by a process aimux did not start: check aimux servers status",
+	ServerCrashLoop:       "A server keeps crashing and is no longer restarted: check aimux servers status, then aimux servers restart",
 }
 
 // Message is code's message for a person; "" for an unknown code.

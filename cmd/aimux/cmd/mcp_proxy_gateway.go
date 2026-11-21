@@ -26,7 +26,7 @@ func newMCPProxyGatewayCmd() *cobra.Command {
 		Use:   "gateway",
 		Short: "The sandbox tool gateway worker: pinned read-only tools for OpenShell sandboxes on 127.0.0.1:7390",
 		Long: "The sandbox tool gateway is the second worker of the aimux mcp proxy service. It serves the read-only tools " +
-			"approved in ~/.config/aimux/tool-sources.yaml to OpenShell sandboxes (host.containers.internal:7390), with its own " +
+			"approved in ~/.config/aimux/tool-sets.yaml (or the older tool-sources.yaml) and pinned in ~/.aimux/tools/pins.json to OpenShell sandboxes (host.containers.internal:7390), with its own " +
 			"pool of backends, and takes each sandbox turn's token as a lease from aimux remote serve over ~/.aimux/gateway.sock.",
 	}
 	cmd.AddCommand(newMCPProxyGatewayServeCmd(), newMCPProxyGatewayInstallCmd(), newMCPProxyGatewayUninstallCmd(), newMCPProxyGatewayStatusCmd())

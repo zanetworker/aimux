@@ -165,9 +165,72 @@ func (g *listenGuard) failed(why string) {
 
 type httpBackend struct {
 	server string
-	c      *client.Client
 	listID atomic.Int64
 	sc     *scrubber // hides the header values in every error it returns
+
+	mu      sync.Mutex
+	c       *client.Client
+	dial    func(ctx context.Context) (*client.Client, error) // a new session, for renew
+	changed []func()                                          // OnToolsChanged callbacks, kept for a new session
+}
+
+// client is the current session's client.
+func (b *httpBackend) client() *client.Client {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.c
+}
+
+// sessionLost reports whether err says the server no longer knows the
+// session (it restarted): mcp-go's 404, or FastMCP's 400 "No valid
+// session ID provided". The request was not run, so it can be sent again.
+func sessionLost(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, transport.ErrSessionTerminated) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "status 400") && strings.Contains(msg, "session id")
+}
+
+// renew replaces a session the server forgot with a new one (initialize
+// again), keeping the tools/list_changed callbacks, unless another call
+// already did since old was current.
+func (b *httpBackend) renew(ctx context.Context, old *client.Client) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.c != old {
+		return nil
+	}
+	if b.dial == nil {
+		return errors.New("no way to open a new session")
+	}
+	c, err := b.dial(ctx)
+	if err != nil {
+		return err
+	}
+	_ = old.Close()
+	b.c = c
+	for _, fn := range b.changed {
+		onToolsChanged(c, fn)
+	}
+	return nil
+}
+
+// withSession runs do on the current session; when the server answers that
+// it does not know the session, it opens a new one and runs do once more.
+func withSession[T any](ctx context.Context, b *httpBackend, do func(*client.Client) (T, error)) (T, error) {
+	c := b.client()
+	res, err := do(c)
+	if !sessionLost(err) {
+		return res, err
+	}
+	if rerr := b.renew(ctx, c); rerr != nil {
+		return res, errors.Join(err, fmt.Errorf("open a new session with %s: %w", b.server, rerr))
+	}
+	return do(b.client())
 }
 
 // headerScrubbedError is err with its header values scrubbed; errors.As and errors.Is
@@ -277,7 +340,22 @@ func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig, sc *
 	if len(cfg.Headers) > 0 {
 		opts = append(opts, transport.WithHTTPHeaders(cfg.Headers))
 	}
-	trans, err := transport.NewStreamableHTTP(cfg.URL, opts...)
+	b := &httpBackend{server: server}
+	b.dial = func(ctx context.Context) (*client.Client, error) { return dialHTTP(ctx, server, cfg.URL, opts) }
+	c, err := b.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b.c = c
+	return b, nil
+}
+
+// dialHTTP opens a session with the server at url: a started client that
+// has sent initialize.
+func dialHTTP(ctx context.Context, server, url string, opts []transport.StreamableHTTPCOption) (*client.Client, error) {
+	ctx, cancel := context.WithTimeout(ctx, httpStartTimeout)
+	defer cancel()
+	trans, err := transport.NewStreamableHTTP(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("connect MCP server %s: %w", server, err)
 	}
@@ -297,7 +375,7 @@ func startHTTPRaw(ctx context.Context, server string, cfg HTTPServerConfig, sc *
 		_ = c.Close()
 		return nil, fmt.Errorf("initialize MCP server %s: %w", server, err)
 	}
-	return &httpBackend{server: server, c: c}, nil
+	return c, nil
 }
 
 // ListToolsRaw pages through tools/list and returns each tool's JSON as sent.
@@ -353,6 +431,11 @@ func echoesValue(sc *scrubber, raw json.RawMessage) bool {
 }
 
 func (b *httpBackend) listToolsRaw(ctx context.Context) ([]json.RawMessage, error) {
+	return withSession(ctx, b, func(c *client.Client) ([]json.RawMessage, error) { return b.listPages(ctx, c) })
+}
+
+// listPages lists every page of tools on c's session.
+func (b *httpBackend) listPages(ctx context.Context, c *client.Client) ([]json.RawMessage, error) {
 	var tools []json.RawMessage
 	cursor := ""
 	for {
@@ -362,7 +445,7 @@ func (b *httpBackend) listToolsRaw(ctx context.Context) ([]json.RawMessage, erro
 		}
 		id := mcp.NewRequestId(fmt.Sprintf("aimux-list-%d", b.listID.Add(1)))
 		pctx, cancel := context.WithTimeout(ctx, httpListTimeout)
-		resp, err := b.c.GetTransport().SendRequest(pctx, transport.JSONRPCRequest{
+		resp, err := c.GetTransport().SendRequest(pctx, transport.JSONRPCRequest{
 			JSONRPC: mcp.JSONRPC_VERSION, ID: id, Method: string(mcp.MethodToolsList), Params: params,
 		})
 		cancel()
@@ -397,7 +480,7 @@ func (b *httpBackend) callTool(ctx context.Context, req mcp.CallToolRequest) (*m
 	ctx, cancel := context.WithTimeout(ctx, httpCallTimeout)
 	defer cancel()
 	req.Params.Meta = withoutProtocolMeta(req.Params.Meta)
-	res, err := b.c.CallTool(ctx, req)
+	res, err := withSession(ctx, b, func(c *client.Client) (*mcp.CallToolResult, error) { return c.CallTool(ctx, req) })
 	var terr *transport.Error
 	if err != nil && !errors.As(err, &terr) {
 		// A JSON-RPC error answer: the server is alive and well.
@@ -410,7 +493,12 @@ func (b *httpBackend) callTool(ctx context.Context, req mcp.CallToolRequest) (*m
 }
 
 // OnToolsChanged runs fn on each tools/list_changed the server sends.
-func (b *httpBackend) OnToolsChanged(fn func()) { onToolsChanged(b.c, fn) }
+func (b *httpBackend) OnToolsChanged(fn func()) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.changed = append(b.changed, fn)
+	onToolsChanged(b.c, fn)
+}
 
 // onToolsChanged registers fn on c for tools/list_changed only; c keeps
 // its other notification handlers.
@@ -422,7 +510,7 @@ func onToolsChanged(c *client.Client, fn func()) {
 	})
 }
 
-func (b *httpBackend) Close() error { return b.c.Close() }
+func (b *httpBackend) Close() error { return b.client().Close() }
 
 // protocolMetaPrefix marks _meta keys that describe one connection (protocol
 // version, client info and capabilities, log level), not the call.

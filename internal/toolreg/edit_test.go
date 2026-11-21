@@ -221,8 +221,10 @@ func TestRemoveSource_Refusals(t *testing.T) {
 
 func TestAddToSet_AppendsKeepsComments(t *testing.T) {
 	p := regFile(t, editBase)
-	if _, err := AddToSet(p, "jira:readonly", "new_tool"); err != nil {
+	if e, err := AddToSet(p, "jira:readonly", "new_tool"); err != nil {
 		t.Fatal(err)
+	} else {
+		e.Keep()
 	}
 	data, _ := readFile(p)
 	if !strings.Contains(string(data), "# my own note about jira") || !strings.Contains(string(data), "relative/dir") {
@@ -240,8 +242,10 @@ func TestAddToSet_AppendsKeepsComments(t *testing.T) {
 func TestAddToSet_NoOpWhenPresent(t *testing.T) {
 	p := regFile(t, editBase)
 	before, _ := readFile(p)
-	if _, err := AddToSet(p, "jira:readonly", "get_comments"); err != nil {
+	if e, err := AddToSet(p, "jira:readonly", "get_comments"); err != nil {
 		t.Fatal(err)
+	} else {
+		e.Keep()
 	}
 	after, _ := readFile(p)
 	if string(before) != string(after) {
@@ -281,17 +285,17 @@ sets:
 func TestAddToSet_UndoRestoresOnlyItsOwnEdit(t *testing.T) {
 	p := regFile(t, editBase)
 	orig, _ := readFile(p)
-	undo, err := AddToSet(p, "jira:readonly", "new_tool")
+	edit, err := AddToSet(p, "jira:readonly", "new_tool")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := undo(); err != nil {
+	if err := edit.Undo(); err != nil {
 		t.Fatal(err)
 	}
 	if now, _ := readFile(p); string(now) != string(orig) {
 		t.Fatalf("undo did not restore the file:\n%s", now)
 	}
-	undo, err = AddToSet(p, "jira:readonly", "new_tool")
+	edit, err = AddToSet(p, "jira:readonly", "new_tool")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +303,7 @@ func TestAddToSet_UndoRestoresOnlyItsOwnEdit(t *testing.T) {
 	if err := os.WriteFile(p, other, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := undo(); err == nil {
+	if err := edit.Undo(); err == nil {
 		t.Fatal("undo overwrote an edit made after it")
 	}
 	if now, _ := readFile(p); string(now) != string(other) {

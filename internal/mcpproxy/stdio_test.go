@@ -77,6 +77,10 @@ func TestMain(m *testing.M) {
 		_ = server.ServeStdio(server.NewMCPServer("no-tools", "1.0.0"))
 		return
 	}
+	if addr := os.Getenv(testHTTPAddrEnv); addr != "" {
+		runHTTPTestServer(addr) // a managed HTTP server (supervisor_test.go)
+		return
+	}
 	if os.Getenv(testServerEnv) == "1" {
 		if v := os.Getenv(testRequireEnv); v != "" && os.Getenv(v) == "" {
 			fmt.Fprintf(os.Stderr, "%s is not set\n", v)

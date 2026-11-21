@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,14 +16,19 @@ import (
 )
 
 // slowLaunchd is launchd as it behaves: bootout returns before the job is
-// unloaded, and a bootstrap in that window fails with exit status 5.
+// unloaded, and a bootstrap in that window fails with exit status 5. run
+// may be called from several goroutines (a readiness check runs print while
+// the install waits), so mu guards every field.
 type slowLaunchd struct {
+	mu                sync.Mutex
 	loaded, unloading bool
 	lag               int
 	calls             []string
 }
 
 func (l *slowLaunchd) run(_ string, args ...string) ([]byte, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.calls = append(l.calls, args[0])
 	if l.unloading {
 		if l.lag--; l.lag <= 0 {

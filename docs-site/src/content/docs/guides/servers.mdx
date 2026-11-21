@@ -1,0 +1,69 @@
+---
+title: Servers and Secrets
+description: Find which secrets an MCP server needs before aimux runs it
+---
+
+aimux is gaining one list of every MCP server it knows, with each server's secrets written as references (a Keychain item, a file, a command or an environment variable), never as values. This page grows with that work; today it covers the first step.
+
+## Find the secrets a server needs
+
+Before writing a server's entry, find which variables it reads:
+
+```sh
+aimux servers discover JirAIa --cwd ~/product-ops/Jira/mcp-server
+aimux servers discover mermaid -- mcp-mermaid -t streamable
+```
+
+`discover` never shows or keeps a value. It looks at:
+
+- `${NAME}` references in the command you give after `--`;
+- names defined in `<cwd>/.env` and `<cwd>/../.env` (values are never shown or kept; their syntax is checked, so a `.env` the resolver would refuse, such as one with an unquoted value followed by ` #` or text after a closing quote, gets Keychain suggestions for all its names instead of `file` ones, since one such line makes the resolver refuse the whole file);
+- environment reads in the server's source under `<cwd>` (`os.getenv`, `os.environ`, `os.Getenv`, `process.env`), at most 2,000 files and the first 1 MiB of each (a note says when either limit cut the scan).
+
+It prints one line per finding and a suggested reference for each name: a `file` reference when a `.env` defines it and the resolver would accept that whole file (a regular file you own, mode 0600 or stricter, at most 64 KiB, `NAME=value` lines only), otherwise the field `env.<NAME>` of the Keychain item `aimux/<server>`. With `--json` the findings carry a `kind`: `config_ref`, `dotenv_key`, `source_read`, `note` (the 2,000-file limit stopped the scan) or `note_truncated` (that file was read only to 1 MiB). Pick one per name; the resolver that reads them comes next.
+
+## Two files: servers and tool sets
+
+The tool gateway used to read one file, `~/.config/aimux/tool-sources.yaml`, for both what a source is and which of its tools sandboxes may use. Those are now two files with two jobs:
+
+| File | Says | Grants a sandbox anything? |
+|---|---|---|
+| `~/.config/aimux/servers.yaml` | every server: how to start it (`command`, `cwd`) or reach it (`url`), and its secrets as references | No |
+| `~/.config/aimux/tool-sets.yaml` | the reviewed tool sets: a `server` and its exact `tools` | Yes, for the profiles that name the set |
+
+Only servers a set names reach the sandbox gateway. A set may also name a built-in source in `servers.yaml` (`type: local-notes`, `cli` or `http-openapi`):
+
+```yaml
+# servers.yaml
+version: 1
+servers:
+  jira:
+    url: http://127.0.0.1:8001/mcp
+  gh:
+    type: cli
+    pack: gh
+```
+
+```yaml
+# tool-sets.yaml
+version: 1
+sets:
+  jira:readonly:
+    server: jira
+    tools: [search_issues_jql, get_issue_details]
+  gh:readonly:
+    server: gh
+    tools: [gh_pr_list]
+```
+
+Then approve the set as before: `aimux tools approve gh:readonly`. A server no set names stays local, so a write-capable server you use from Claude Code is never offered to a sandbox by being listed. A set must name an HTTP server or a built-in source; a stdio server cannot back a sandbox set. The sandbox gateway never resolves a `servers.yaml` secret reference: it reaches set servers by their `url` and runs built-in sources itself, and the references are only for the host.
+
+Run `aimux servers migrate` once to split your existing file: it writes both files from `tool-sources.yaml` (comments kept) and keeps the old file as `tool-sources.yaml.migrated`. An existing `tool-sets.yaml` (yours, or one a crashed run left) is kept aside as `tool-sets.yaml.before-migrate`, or `.before-migrate.1` and so on when that name is taken, never overwritten, and put back if writing either new file fails (unless another `tool-sets.yaml` appeared meanwhile: then yours stays in its backup and the error names it). If someone else creates `servers.yaml` meanwhile, it is left alone and the sets are rolled back; if someone edits the `servers.yaml` this run wrote before the failure, it is kept together with the `tool-sets.yaml` written with it, and the error asks you to check both. Moving a file aside needs a filesystem with an atomic no-replace rename (APFS, ext4, XFS and most local filesystems); without one, the migration refuses and moves nothing. It refuses when `servers.yaml` already exists, and exits 1 while `aimux tools add`, `remove` or `approve --add-to-set` holds the same lock (try again when it finishes). While a migration runs, `aimux tools add`, `remove` and `approve --add-to-set` refuse and ask you to try again. Server names do not change, so approved tools stay approved. Until you migrate, `tool-sources.yaml` is still read (with one note per process). Once the new files exist, `aimux tools approve --add-to-set` writes to `tool-sets.yaml`; `aimux tools add` and `remove` refuse, and you edit `servers.yaml` and `tool-sets.yaml` directly for now.
+
+## Approvals follow the server, not its URL
+
+An approved tool of an HTTP server in `servers.yaml` records the server's identity (other source types keep recording their address or folder): a digest of its transport, `url`, the names of its secrets (never where they come from or their values) and, for a server aimux starts, its `command` and arguments, `cwd` and the content of the executable `command` runs. The url's scheme and host compare case-insensitively (an IPv6 zone keeps its case). Change any of these (for a remote server: its url or secret names; for one aimux starts, once its sets are no longer held, also the command, args, cwd or a new binary at the same path) and the server's tools become `source_changed` in `aimux tools status`: the sandbox gateway, as soon as it applies the reloaded snapshot (within a minute, or at the next work turn), stops serving the server and holds its tools until you run `aimux tools approve` again. The registry hashes the executable on disk, so a replaced binary is noticed at the next reload (within a minute) with no YAML edit. Tools approved before `servers.yaml`, which recorded the URL, still count as approved while the URL is exactly the same as written (the identity compares scheme and host case-insensitively, the old URL pins do not); the next approve rewrites them to the identity. The local proxy is not affected.
+
+A set cannot name a server whose command picks its version at each start: `go run`, `npx` or `pnpm dlx` of a package without an exact `@<version>`, or `uvx` without `==<version>` (or `@<version>`), for the tool, or the package `uvx --from` names in its place, and every `--with` (`-w`) or `--package`; `uvx --with-requirements` and `--with-editable` name no version to check, so they float too; `@latest`, ranges (`@^2.4.0`, `>=1.2`) and wildcards (`==1.*`) count as no version. `aimux tools status` warns that such a set is skipped, with `floating command; pin a version or a built binary` (in `--json`, under `registry_errors`). For a server aimux starts, a bare program name such as `uvx` is looked up only on the server's own `env: PATH`, so give an absolute path or set `PATH`; a relative program needs an absolute `cwd`. A set whose program cannot be found or is not a regular executable file is skipped the same way with an `identity:` error. These checks run for a server aimux starts even while its sets are held, so the reason you see is the first one to fix. A server no set names may float.
+
+For now a set naming a server aimux starts (`command` and `url`) is held, even with a pinned version or a built binary: `managed server: approval waits until aimux runs it and can tie the listing to the process it started`. The gateway reaches such a server by its url only, so it cannot tell whether the process answering is the one you approved. The hold lifts when aimux's supervisor runs these servers and records the identity each process was started under; a server you start by hand (its port taken when aimux tries) stays held.

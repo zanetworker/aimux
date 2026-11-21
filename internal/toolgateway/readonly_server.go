@@ -102,7 +102,7 @@ func init() { downLogEvery.Store(int64(10 * time.Minute)) }
 // registry endpoint it was listed from.
 type Observed struct {
 	LiveSource
-	Endpoint string
+	Endpoint string // the source's PinSource when listed: its identity or endpoint
 	// RelistFailed: the last relist of this served backend failed (or
 	// timed out); LiveSource is from the listing before, and the backend is
 	// still served under its call guard.
@@ -143,7 +143,7 @@ func (r *ReadonlyServer) BackendsChecked() (all, down []string, checked map[stri
 func LiveFor(reg toolreg.Registry, obs map[string]Observed) map[string]LiveSource {
 	out := map[string]LiveSource{}
 	for n, o := range obs {
-		if src, ok := reg.Sources[n]; ok && src.Endpoint() == o.Endpoint && !o.RelistFailed {
+		if _, ok := reg.Sources[n]; ok && reg.PinSource(n) == o.Endpoint && !o.RelistFailed {
 			out[n] = o.LiveSource
 		}
 	}
@@ -155,7 +155,7 @@ func LiveFor(reg toolreg.Registry, obs map[string]Observed) map[string]LiveSourc
 func RelistFailedFor(reg toolreg.Registry, obs map[string]Observed) map[string]bool {
 	out := map[string]bool{}
 	for n, o := range obs {
-		if src, ok := reg.Sources[n]; ok && src.Endpoint() == o.Endpoint && o.RelistFailed {
+		if _, ok := reg.Sources[n]; ok && reg.PinSource(n) == o.Endpoint && o.RelistFailed {
 			out[n] = true
 		}
 	}
@@ -172,6 +172,7 @@ func RelistFailedFor(reg toolreg.Registry, obs map[string]Observed) map[string]b
 func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyConfig, pins SnapshotPins) (SnapshotPins, func(names []string, errs map[string]error) map[string]Observed) {
 	var mu sync.Mutex
 	var seen *mcpproxy.Catalog
+	pins.applied = r.Applied
 	pins.seen = func(cat *mcpproxy.Catalog) {
 		mu.Lock()
 		seen = cat
@@ -180,7 +181,7 @@ func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyC
 	reg := snap.Registry()
 	served := pins.Pins
 	pins.listed = func(server string, tools []json.RawMessage) {
-		r.listed(snap.Version(), reg.Sources[server].Endpoint(), cfg.Allow, served, server, tools)
+		r.listed(snap.Version(), reg.PinSource(server), cfg.Allow, served, server, tools)
 	}
 	pins.onChanged = r.changed
 	return pins, func(names []string, errs map[string]error) map[string]Observed {
@@ -209,7 +210,7 @@ func (r *ReadonlyServer) observing(snap toolreg.Snapshot, cfg mcpproxy.ReadonlyC
 		}
 		now := time.Now()
 		for _, n := range names {
-			o := Observed{Endpoint: reg.Sources[n].Endpoint()}
+			o := Observed{Endpoint: reg.PinSource(n)}
 			switch err, down := errs[n]; {
 			case down:
 				o.Err = err
@@ -526,12 +527,20 @@ func (r *ReadonlyServer) Refresh(ctx context.Context) {
 	if snap.Version() == r.Applied().Version() {
 		return // applied by a turn that held the lock first
 	}
+	prev := r.Applied().Registry()
 	r.applied.Store(&snap)
 	cfg := r.configOf(snap)
 	r.pins = GatewayPins(snap)
+	// A server whose identity changed at the same URL (new binary, args)
+	// is moved too: a server built under the old identity must not take a
+	// call while the rebuild runs.
+	reg := snap.Registry()
+	idMoved := func(n string) bool { return prev.PinSource(n) != reg.PinSource(n) }
 	// Bound runner sources restart on every snapshot (moved), so only a
 	// config without them can take the pins-only path.
-	if sameConfig(cfg, r.cfg) && cfg.Tools == nil {
+	// Every configured backend counts, served or not: the pool may hold a
+	// session the build listed but serves nothing from.
+	if sameConfig(cfg, r.cfg) && cfg.Tools == nil && !slices.ContainsFunc(backendNames(r.cfg), idMoved) {
 		r.Log.Printf("read-only: snapshot %s (pins changed); rebuilding %d backends", snap.Short(), len(r.all))
 		r.apply(ctx, r.all)
 		return
@@ -544,8 +553,8 @@ func (r *ReadonlyServer) Refresh(ctx context.Context) {
 			start = r.Starter
 		}
 		r.pool.SetStarter(start(cfg))
-		for _, n := range r.all {
-			if moved(r.cfg, cfg, n) {
+		for _, n := range backendNames(r.cfg) {
+			if moved(r.cfg, cfg, n) || idMoved(n) {
 				r.pool.RetireServer(n)() // one with a call in flight closes after it
 			}
 		}
@@ -556,7 +565,7 @@ func (r *ReadonlyServer) Refresh(ctx context.Context) {
 			if r.remove(n) {
 				r.Log.Printf("read-only: backend %s removed (no longer in tool-sources.yaml)", n)
 			}
-		case moved(r.cfg, cfg, n):
+		case moved(r.cfg, cfg, n) || idMoved(n):
 			// Not found until the rebuild adds it back, so no call reaches
 			// the new endpoint through a server built for the old one.
 			r.remove(n)

@@ -38,7 +38,7 @@ func TestOf_UncodedAndNil(t *testing.T) {
 
 // Every code has a message for a person, and no unknown code gets one.
 func TestMessage_EveryCode(t *testing.T) {
-	for _, c := range []string{ToolGatewayNotRunning, GatewayBackendDown, ImageInvalid, ProfileUnavailable, SandboxGatewayDown} {
+	for _, c := range []string{ToolGatewayNotRunning, GatewayBackendDown, ImageInvalid, ProfileUnavailable, SandboxGatewayDown, ServerPortInUse, ServerCrashLoop} {
 		if Message(c) == "" {
 			t.Errorf("%s has no message", c)
 		}
