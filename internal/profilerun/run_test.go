@@ -483,3 +483,63 @@ func TestRun_ForwardedNoticeSetsFilteredByClient(t *testing.T) {
 		}
 	}
 }
+
+// A follow-up carries the page's earlier questions and answers to the
+// planner and the writer, never to the reader, and the check counts the
+// earlier answers as private: a query repeating one is not sent.
+func TestRun_FollowUpCarriesEarlierExchanges(t *testing.T) {
+	leaked := "zephyr rollout plan for the northern region data centers" // 9 words: the check flags a copied run of 8
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"openshell egress release notes", leaked}, "notes")}},
+		stageScript{deltas: []string{"found"}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	ctx := WithEarlier(context.Background(), []Exchange{
+		{Question: "EARLIERQ which epics slip", Answer: "EARLIERA the " + leaked + " slips to March (RHAISTRAT-1234)"},
+	})
+	if _, err := r.send(ctx, id, "expand on the first point"); err != nil {
+		t.Fatal(err)
+	}
+	for stage, p := range map[string]string{"planner": r.planner.prompts[0], "writer": r.write.prompts[0]} {
+		for _, want := range []string{"EARLIERQ which epics slip", "EARLIERA the zephyr", "expand on the first point"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s prompt lacks %q", stage, want)
+			}
+		}
+	}
+	p := r.reader.prompts[0]
+	for _, leak := range []string{"EARLIERQ", "EARLIERA", "zephyr", "RHAISTRAT", "expand on"} {
+		if strings.Contains(p, leak) {
+			t.Errorf("reader prompt carries %q", leak)
+		}
+	}
+	if r.reader.priors[0] != nil {
+		t.Fatalf("reader prior %v, want none", r.reader.priors[0])
+	}
+	if r.planner.priors[0] != nil {
+		t.Fatalf("planner prior %v: the earlier questions come once, in the exchanges block", r.planner.priors[0])
+	}
+	m, _ := r.store.Get(id)
+	if !reflect.DeepEqual(m.Run.Accepted, []string{"openshell egress release notes"}) || len(m.Run.Rejected) != 1 || m.Run.Rejected[0].Reason != "overlap" {
+		t.Fatalf("run state %+v, want the query repeating the earlier answer rejected (overlap)", m.Run)
+	}
+}
+
+// With no earlier exchanges, the prompts carry no exchanges block.
+func TestRun_NoEarlierNoBlock(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"openshell egress release notes"}, "notes")}},
+		stageScript{deltas: []string{"found"}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "first question"); err != nil {
+		t.Fatal(err)
+	}
+	for stage, p := range map[string]string{"planner": r.planner.prompts[0], "writer": r.write.prompts[0]} {
+		if strings.Contains(p, "earlier conversation") {
+			t.Errorf("%s prompt has an exchanges block with no earlier exchanges", stage)
+		}
+	}
+}

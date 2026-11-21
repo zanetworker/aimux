@@ -170,6 +170,23 @@ func WithModel(ctx context.Context, model string) context.Context {
 // priorKey carries a turn's earlier questions in its context.
 type priorKey struct{}
 
+type earlierKey struct{}
+
+// Exchange is one earlier question on the page and the answer it got.
+type Exchange struct{ Question, Answer string }
+
+// WithEarlier carries the page's earlier questions and answers, oldest
+// first, for a run profile's follow-up (its stages start fresh each turn).
+func WithEarlier(ctx context.Context, earlier []Exchange) context.Context {
+	return context.WithValue(ctx, earlierKey{}, earlier)
+}
+
+// EarlierFrom is the turn's earlier exchanges in ctx, nil when none.
+func EarlierFrom(ctx context.Context) []Exchange {
+	e, _ := ctx.Value(earlierKey{}).([]Exchange)
+	return e
+}
+
 // WithPrior returns ctx carrying the user's earlier questions on the page
 // (asked in another mode, oldest first) for the turn's prompt.
 func WithPrior(ctx context.Context, prior []string) context.Context {

@@ -54,7 +54,7 @@ const (
 type Private struct {
 	Question, PageText, Notes string
 	ToolInputs, ToolOutputs   []string
-	Prior                     []string // the page's earlier questions
+	Prior                     []string // the page's earlier questions, and a run follow-up's earlier answers
 }
 
 // Rejection is one refused query: its position in the planner's list and why.

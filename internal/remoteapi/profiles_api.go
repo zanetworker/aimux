@@ -152,7 +152,8 @@ type newSessionRequest struct {
 	PageText string `json:"pageText"`
 	Model    string `json:"model"` // optional turn model: sonnet or opus
 	// Prior is the page's earlier questions asked in another mode, oldest
-	// first (questions only, never answers); at most maxPrior of at most
+	// first (questions only, never answers; aimux adds a run profile's
+	// earlier answers itself, see pagePrior); at most maxPrior of at most
 	// maxPriorRunes characters each. Absent (nil), aimux computes it
 	// (pagePrior); an explicit one, even [], is used as sent.
 	Prior []string `json:"prior"`
@@ -273,6 +274,9 @@ const (
 	maxProfileBody = 6 << 20
 	maxPrior       = 5
 	maxPriorRunes  = 2000
+	// maxEarlierAnswerRunes caps each earlier answer a run profile's
+	// follow-up carries (profilerun.WithEarlier).
+	maxEarlierAnswerRunes = 4000
 )
 
 // countingReader counts the bytes read through it.
@@ -342,8 +346,9 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 	if !ok {
 		return
 	}
-	if req.Prior == nil { // absent: aimux picks it; an explicit [] stays empty
-		req.Prior = a.pagePrior(r.Context(), client, m.Name, req)
+	var earlier []profilerun.Exchange
+	if req.Prior == nil { // absent: aimux picks it (and a run profile's earlier answers); an explicit [] stays empty
+		req.Prior, earlier = a.pagePrior(r.Context(), client, m.Name, req)
 	}
 	id, err := a.profileSession(r.Context(), client, m, req)
 	if err != nil {
@@ -351,7 +356,7 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 		a.writeProfileFailure(w, req.Profile, err)
 		return
 	}
-	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model, Prior: req.Prior, Image: req.Image.image(), Caller: client})
+	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model, Prior: req.Prior, Earlier: earlier, Image: req.Image.image(), Caller: client})
 	done(err == nil)
 	if err != nil {
 		a.writeProfileFailure(w, req.Profile, err)

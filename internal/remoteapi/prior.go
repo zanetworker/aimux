@@ -21,7 +21,7 @@ type pageTurn struct {
 // keepsContext reports whether prof's sessions keep their conversation
 // from turn to turn. A run profile (runs: run, research-with-work) starts
 // fresh stages every turn, so a follow-up in it is treated like a mode
-// change and carries the earlier questions. A profile the catalog cannot
+// change and carries the earlier questions (and their answers). A profile the catalog cannot
 // name is taken to keep context (no prior, as before).
 func (a *API) keepsContext(prof string) bool {
 	if a.Profiles == nil {
@@ -45,10 +45,13 @@ func (a *API) keepsContext(prof string) bool {
 // current question too; first kept), without the current question, the
 // last maxPrior of them, and only then each cut to maxPriorRunes code
 // points. Otherwise, and without a url or history, it is nil. A session
-// whose history cannot be read is left out.
-func (a *API) pagePrior(ctx context.Context, client, prof string, req newSessionRequest) []string {
+// whose history cannot be read is left out. For a profile that does not
+// keep context, the second result is the conversation's answered turns as
+// question and answer (stored form, oldest first, the last maxPrior, each
+// answer cut to maxEarlierAnswerRunes); otherwise it is nil.
+func (a *API) pagePrior(ctx context.Context, client, prof string, req newSessionRequest) ([]string, []profilerun.Exchange) {
 	if req.URL == "" || a.Session == nil || a.ProfileSessions == nil {
-		return nil
+		return nil, nil
 	}
 	var turns []pageTurn
 	for id, m := range a.ProfileSessions.List(client) {
@@ -70,8 +73,27 @@ func (a *API) pagePrior(ctx context.Context, client, prof string, req newSession
 			last = i
 		}
 	}
-	if last < 0 || (turns[last].profile == prof && a.keepsContext(prof)) {
-		return nil
+	keeps := a.keepsContext(prof)
+	if last < 0 || (turns[last].profile == prof && keeps) {
+		return nil, nil
+	}
+	var earlier []profilerun.Exchange
+	if !keeps { // a run profile keeps no conversation: carry the answers too
+		for _, t := range turns {
+			if strings.TrimSpace(t.Reply) == "" {
+				continue
+			}
+			q := t.question
+			if q == "" {
+				q = t.User
+			}
+			ans := t.Reply
+			if r := []rune(ans); len(r) > maxEarlierAnswerRunes {
+				ans = string(r[:maxEarlierAnswerRunes])
+			}
+			earlier = append(earlier, profilerun.Exchange{Question: profilerun.StoredForm(q), Answer: ans})
+		}
+		earlier = earlier[max(0, len(earlier)-maxPrior):]
 	}
 	seen := map[string]bool{profilerun.StoredForm(req.Text): true}
 	var qs []string
@@ -93,5 +115,5 @@ func (a *API) pagePrior(ctx context.Context, client, prof string, req newSession
 			qs[i] = string(r[:maxPriorRunes])
 		}
 	}
-	return qs
+	return qs, earlier
 }
