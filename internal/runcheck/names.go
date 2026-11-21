@@ -39,14 +39,23 @@ var functionWords = map[string]bool{
 	"our": true, "their": true, "team": true, "name": true, "names": true, "list": true,
 }
 
-// labeledRE finds a name given by a label, in any case: "codename: bluefin",
-// "customer acme". Only the one word after the label counts.
-var labeledRE = regexp.MustCompile(`(?i)\b(?:customer|client|account|codename|code name|project|contact|owner|partner)s?\s*[:=]?\s+([\p{L}\p{N}]+)`)
+// labeledRE finds a name given by a label with a separator, in any case and
+// any quoting: "codename: bluefin", {"codename":"bluefin"}, project = "x".
+// Only the one word after the label counts; a label word in prose with no
+// separator ("customer adoption") marks nothing.
+var labeledRE = regexp.MustCompile(`(?i)\b(?:customer|client|account|codename|code name|project|contact|owner|partner)s?["']?\s*[:=]\s*["']?([\p{L}\p{N}]+)`)
 
-// sentenceBreak reports whether r, the last non-space rune before a word,
-// starts a new sentence or field, so a capital there says nothing.
+// sentenceBreak reports whether r, the last rune before a word that is
+// neither a space nor inline formatting, starts a new sentence or field, so
+// a capital there says nothing.
 func sentenceBreak(r rune) bool {
-	return strings.ContainsRune(".!?:;\"'()[]{}<>|*#•\n\r\t=", r)
+	return strings.ContainsRune(".!?:;{}[]<>|•\n\r\t=", r)
+}
+
+// inlineMark is formatting or quoting around a word ("**Globex**",
+// "\"Globex\"", "(Globex"), skipped when looking back for a sentence break.
+func inlineMark(r rune) bool {
+	return r == ' ' || strings.ContainsRune("*_`~\"'()#", r)
 }
 
 // nameCandidates is every word the private texts use as a name, lower-cased:
@@ -103,7 +112,7 @@ func afterBreak(s string, i int) bool {
 		} else {
 			i--
 		}
-		if r == ' ' {
+		if inlineMark(r) {
 			continue
 		}
 		return sentenceBreak(r)
@@ -211,5 +220,8 @@ func LoadPublicNames(path string) ([]string, error) {
 		}
 		out = append(out, line)
 	}
-	return out, sc.Err()
+	if err := sc.Err(); err != nil {
+		return nil, err // a list read in part is no list: the shipped one alone applies
+	}
+	return out, nil
 }

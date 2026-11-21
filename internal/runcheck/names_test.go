@@ -123,3 +123,43 @@ func TestLoadPublicNames(t *testing.T) {
 		t.Fatalf("missing file = %q, %v; want nil, nil", got, err)
 	}
 }
+
+// Structured labels (JSON keys, no space after the colon) mark a name;
+// inline formatting and quotes do not hide a mid-sentence name; a label word
+// in ordinary prose with no separator marks nothing.
+func TestCheck_PrivateNameForms(t *testing.T) {
+	cases := []struct {
+		private, query, reason string
+	}{
+		{`{"codename":"bluefin","status":"green"}`, "bluefin release", ReasonPrivateName},
+		{`codename:bluefin`, "bluefin release", ReasonPrivateName},
+		{`project = "Kestrel"`, "kestrel agents", ReasonPrivateName},
+		{`We met with **Globex** yesterday.`, "globex agents", ReasonPrivateName},
+		{`We met with "Globex" yesterday.`, "globex agents", ReasonPrivateName},
+		{`Customer adoption is growing in banks.`, "agent adoption in banks", ""},
+		{`our customer adoption numbers`, "adoption of agent sandboxes", ""},
+	}
+	for _, c := range cases {
+		acc, rej := Check([]string{c.query}, Private{ToolOutputs: []string{c.private}})
+		got := ""
+		if len(rej) == 1 {
+			got = rej[0].Reason
+		}
+		if got != c.reason || (c.reason == "" && len(acc) != 1) {
+			t.Errorf("private %q, query %q: accepted %v rejected %v, want %q", c.private, c.query, acc, rej, c.reason)
+		}
+	}
+}
+
+// A public-names file that cannot be read in full gives no names, so the
+// check falls back to the shipped list alone, as the log says.
+func TestLoadPublicNames_PartialReadGivesNone(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "public-names.txt")
+	if err := os.WriteFile(f, []byte("Daytona Cloud\n"+strings.Repeat("x", 70*1024)+"\nE2B\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadPublicNames(f)
+	if err == nil || got != nil {
+		t.Fatalf("LoadPublicNames = %q, %v; want nil and an error", got, err)
+	}
+}
