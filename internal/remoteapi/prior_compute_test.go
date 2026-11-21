@@ -19,9 +19,12 @@ import (
 // history (a.Session) and the prior each sent turn carried.
 type priorRig struct {
 	*profileRig
-	mu    sync.Mutex
-	turns map[string][]Turn
-	sent  [][]string
+	mu      sync.Mutex
+	turns   map[string][]Turn
+	sent    [][]string
+	earlier [][]profilerun.Exchange
+	// lastEarlier is the earlier exchanges the last ask's turn carried.
+	lastEarlier []profilerun.Exchange
 }
 
 const priorURL = "https://e.example/a"
@@ -50,6 +53,7 @@ func newPriorRig(t *testing.T) *priorRig {
 	pr.f.sendF = func(ctx context.Context, _, _ string, _ func(acprun.Event)) (string, error) {
 		pr.mu.Lock()
 		pr.sent = append(pr.sent, profilerun.PriorFrom(ctx))
+		pr.earlier = append(pr.earlier, profilerun.EarlierFrom(ctx))
 		pr.mu.Unlock()
 		return "end_turn", nil
 	}
@@ -85,6 +89,8 @@ func (pr *priorRig) ask(body string) []string {
 	}
 	got := pr.sent[0]
 	pr.sent = nil
+	pr.lastEarlier = pr.earlier[0]
+	pr.earlier = nil
 	return got
 }
 
@@ -230,4 +236,107 @@ func TestProfileSession_RunProfileFollowUpCarriesPrior(t *testing.T) {
 	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, "Q1", "A1"), q(2, "Q2", "A2"))
 	pr.serve()
 	wantPrior(t, pr.ask(`{"profile":"research-with-work","url":"`+priorURL+`","text":"how does that compare?"}`), []string{"Q1", "Q2"})
+}
+
+// runRig is a prior rig whose catalog has research-with-work (runs: run).
+func runPriorRig(t *testing.T) *priorRig {
+	pr := newPriorRig(t)
+	pr.api.Profiles = func() (map[string]profile.Manifest, error) {
+		all := testProfiles()
+		m := all["research"]
+		m.Available = true
+		all["research"] = m
+		all["research-with-work"] = profile.Manifest{Name: "research-with-work", Harness: "claude-code", Runs: "run", Available: true,
+			Network: profile.NetworkSpec{Default: "deny", Allow: []string{"model"}}}
+		return all, nil
+	}
+	return pr
+}
+
+// A run profile's follow-up carries the page's earlier questions and the
+// answers they got (its stages keep no conversation): answered turns only,
+// oldest first, the last maxPrior, each answer cut to maxEarlierAnswerRunes.
+func TestProfileSession_RunProfileFollowUpCarriesEarlierAnswers(t *testing.T) {
+	pr := runPriorRig(t)
+	long := strings.Repeat("a", maxEarlierAnswerRunes+50)
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL,
+		q(1, "Q1", "A1"), q(2, "Q2 failed", ""), q(3, "Q3", "A3"), q(4, "Q4", "A4"), q(5, "Q5", "A5"), q(6, "Q6", "A6"), q(7, "Q7", long))
+	pr.serve()
+	pr.ask(`{"profile":"research-with-work","url":"` + priorURL + `","text":"expand on the first point"}`)
+	want := []profilerun.Exchange{{Question: "Q3", Answer: "A3"}, {Question: "Q4", Answer: "A4"}, {Question: "Q5", Answer: "A5"}, {Question: "Q6", Answer: "A6"}, {Question: "Q7", Answer: long[:maxEarlierAnswerRunes]}}
+	if !reflect.DeepEqual(pr.lastEarlier, want) {
+		t.Fatalf("earlier %q\nwant      %q", pr.lastEarlier, want)
+	}
+}
+
+// Answers go only to a run profile: a mode change into a session profile
+// carries the earlier questions alone, as before.
+func TestProfileSession_ModeChangeCarriesNoAnswers(t *testing.T) {
+	pr := runPriorRig(t)
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, "Q1", "A1"))
+	pr.serve()
+	wantPrior(t, pr.ask(`{"profile":"research","url":"`+priorURL+`","text":"and on the web?"}`), []string{"Q1"})
+	if pr.lastEarlier != nil {
+		t.Fatalf("earlier %q, want none for a session profile", pr.lastEarlier)
+	}
+}
+
+// An explicit prior from the client replaces what aimux would compute,
+// answers included.
+func TestProfileSession_ExplicitPriorNoAnswers(t *testing.T) {
+	pr := runPriorRig(t)
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, "Q1", "A1"))
+	pr.serve()
+	wantPrior(t, pr.ask(`{"profile":"research-with-work","url":"`+priorURL+`","text":"next","prior":["mine"]}`), []string{"mine"})
+	if pr.lastEarlier != nil {
+		t.Fatalf("earlier %q, want none with an explicit prior", pr.lastEarlier)
+	}
+}
+
+// An earlier question in an exchange is cut like the prior's questions.
+func TestProfileSession_EarlierQuestionsCut(t *testing.T) {
+	pr := runPriorRig(t)
+	long := strings.Repeat("q", maxPriorRunes+10)
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, long, "A1"))
+	pr.serve()
+	pr.ask(`{"profile":"research-with-work","url":"` + priorURL + `","text":"next"}`)
+	if len(pr.lastEarlier) != 1 || pr.lastEarlier[0].Question != long[:maxPriorRunes] {
+		t.Fatalf("earlier %q, want the question cut to %d", pr.lastEarlier, maxPriorRunes)
+	}
+}
+
+// A follow-up sent to the run session by id (POST /v1/sessions/{id}/messages)
+// carries the same earlier exchanges as one through POST /v1/sessions.
+func TestSendMessage_RunSessionCarriesEarlier(t *testing.T) {
+	pr := runPriorRig(t)
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, "Q1", "A1"))
+	pr.serve()
+	resp, out := pr.do("POST", "/v1/sessions/old-run/messages", `{"text":"expand on that"}`)
+	if resp.StatusCode != 202 {
+		t.Fatalf("messages: %d %v", resp.StatusCode, out)
+	}
+	pr.idle("old-run")
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	if len(pr.earlier) != 1 || !reflect.DeepEqual(pr.earlier[0], []profilerun.Exchange{{Question: "Q1", Answer: "A1"}}) {
+		t.Fatalf("earlier %q, want Q1/A1", pr.earlier)
+	}
+}
+
+// A run session without a page URL still carries its own answered turns on
+// a follow-up by id: there is no page to group by, so its transcript is it.
+func TestSendMessage_RunSessionWithoutURLCarriesItsOwnHistory(t *testing.T) {
+	pr := runPriorRig(t)
+	pr.seed("old-run", "wingman", "research-with-work", "", "", q(1, "Q1", "A1"), q(2, "Q2 failed", ""))
+	pr.serve()
+	resp, out := pr.do("POST", "/v1/sessions/old-run/messages", `{"text":"expand on that"}`)
+	if resp.StatusCode != 202 {
+		t.Fatalf("messages: %d %v", resp.StatusCode, out)
+	}
+	pr.idle("old-run")
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	if len(pr.earlier) != 1 || !reflect.DeepEqual(pr.earlier[0], []profilerun.Exchange{{Question: "Q1", Answer: "A1"}}) {
+		t.Fatalf("earlier %q, want the session's own Q1/A1", pr.earlier)
+	}
 }

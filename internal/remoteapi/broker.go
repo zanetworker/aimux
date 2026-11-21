@@ -191,6 +191,10 @@ type TurnOptions struct {
 	// Prior is the user's earlier questions on the page from another mode
 	// (checked by the API), handed to the engine as profilerun.WithPrior.
 	Prior []string
+	// Earlier is a run profile follow-up's earlier questions and answers
+	// on the page (computed by the API), handed to the engine as
+	// profilerun.WithEarlier.
+	Earlier []profilerun.Exchange
 	// Image is the image pasted into the question (checked by the API),
 	// handed to the engine as profilerun.WithImage; nil for none.
 	Image *acprun.Image
@@ -239,6 +243,9 @@ func (b *Broker) StartWith(session, text, key string, opt TurnOptions) (string, 
 	}
 	if len(opt.Prior) > 0 {
 		ctx = profilerun.WithPrior(ctx, opt.Prior)
+	}
+	if len(opt.Earlier) > 0 {
+		ctx = profilerun.WithEarlier(ctx, opt.Earlier)
 	}
 	if opt.Image != nil {
 		ctx = profilerun.WithImage(ctx, opt.Image)

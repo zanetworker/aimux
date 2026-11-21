@@ -33,6 +33,8 @@ type fakeStage struct {
 	pages     []string
 	prompts   []string
 	priors    [][]string
+	stages    []bool // whether each Send ran as a run stage (runStageFrom)
+	earliers  [][]Exchange
 	cancelled []string
 	started   chan struct{}
 }
@@ -53,6 +55,8 @@ func (f *fakeStage) Send(ctx context.Context, _ string, text string, onEvent fun
 	f.mu.Lock()
 	f.prompts = append(f.prompts, text)
 	f.priors = append(f.priors, PriorFrom(ctx))
+	f.stages = append(f.stages, runStageFrom(ctx))
+	f.earliers = append(f.earliers, EarlierFrom(ctx))
 	s := f.script
 	f.mu.Unlock()
 	f.started <- struct{}{}
@@ -481,5 +485,122 @@ func TestRun_ForwardedNoticeSetsFilteredByClient(t *testing.T) {
 		if !reflect.DeepEqual(got["sets"], c.want) {
 			t.Fatalf("%s: sets = %v, want %v", name, got["sets"], c.want)
 		}
+	}
+}
+
+// A follow-up carries the page's earlier questions and answers to the
+// planner and the writer, never to the reader, and the check counts the
+// earlier answers as private: a query repeating one is not sent.
+func TestRun_FollowUpCarriesEarlierExchanges(t *testing.T) {
+	leaked := "zephyr rollout plan for the northern region data centers" // 9 words: the check flags a copied run of 8
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"openshell egress release notes", leaked}, "notes")}},
+		stageScript{deltas: []string{"found"}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	ctx := WithEarlier(context.Background(), []Exchange{
+		{Question: "EARLIERQ which epics slip", Answer: "EARLIERA the " + leaked + " slips to March (RHAISTRAT-1234)"},
+	})
+	if _, err := r.send(ctx, id, "expand on the first point"); err != nil {
+		t.Fatal(err)
+	}
+	for stage, p := range map[string]string{"planner": r.planner.prompts[0], "writer": r.write.prompts[0]} {
+		for _, want := range []string{"EARLIERQ which epics slip", "EARLIERA the zephyr", "expand on the first point"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("%s prompt lacks %q", stage, want)
+			}
+		}
+	}
+	p := r.reader.prompts[0]
+	for _, leak := range []string{"EARLIERQ", "EARLIERA", "zephyr", "RHAISTRAT", "expand on"} {
+		if strings.Contains(p, leak) {
+			t.Errorf("reader prompt carries %q", leak)
+		}
+	}
+	if r.reader.priors[0] != nil || r.reader.earliers[0] != nil {
+		t.Fatalf("reader prior %v earlier %v, want none in its context", r.reader.priors[0], r.reader.earliers[0])
+	}
+	if r.planner.priors[0] != nil {
+		t.Fatalf("planner prior %v: the earlier questions come once, in the exchanges block", r.planner.priors[0])
+	}
+	m, _ := r.store.Get(id)
+	if !reflect.DeepEqual(m.Run.Accepted, []string{"openshell egress release notes"}) || len(m.Run.Rejected) != 1 || m.Run.Rejected[0].Reason != "overlap" {
+		t.Fatalf("run state %+v, want the query repeating the earlier answer rejected (overlap)", m.Run)
+	}
+}
+
+// With no earlier exchanges, the prompts carry no exchanges block.
+func TestRun_NoEarlierNoBlock(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"openshell egress release notes"}, "notes")}},
+		stageScript{deltas: []string{"found"}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "first question"); err != nil {
+		t.Fatal(err)
+	}
+	for stage, p := range map[string]string{"planner": r.planner.prompts[0], "writer": r.write.prompts[0]} {
+		if strings.Contains(p, "earlier conversation") {
+			t.Errorf("%s prompt has an exchanges block with no earlier exchanges", stage)
+		}
+	}
+}
+
+// Every stage runs marked as a run stage, so its transcript is archived out
+// of the search index (it can hold earlier answers with web text).
+func TestRun_StagesMarkedAsRunStages(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"openshell egress release notes"}, "notes")}},
+		stageScript{deltas: []string{"found"}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	for name, f := range map[string]*fakeStage{"planner": r.planner, "reader": r.reader, "writer": r.write} {
+		if len(f.stages) != 1 || !f.stages[0] {
+			t.Errorf("%s stages %v, want one marked run stage", name, f.stages)
+		}
+	}
+}
+
+// The planner keeps an earlier question that no exchange carries (one that
+// failed without an answer), and gets the answered ones only in the block.
+func TestRun_PlannerKeepsUnansweredPriorQuestions(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply(nil, "notes")}},
+		stageScript{},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	ctx := WithPrior(context.Background(), []string{"Q1 answered", "Q2 failed"})
+	ctx = WithEarlier(ctx, []Exchange{{Question: "Q1 answered", Answer: "A1"}})
+	if _, err := r.send(ctx, id, "try again"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.planner.priors[0]; !reflect.DeepEqual(got, []string{"Q2 failed"}) {
+		t.Fatalf("planner prior %q, want only the question no exchange carries", got)
+	}
+}
+
+// When the web is not searched, the writer may still answer from the
+// earlier conversation, not "the private notes alone".
+func TestRun_NoSearchFollowUpMayUseEarlier(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply(nil, "notes")}},
+		stageScript{},
+		stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	ctx := WithEarlier(context.Background(), []Exchange{{Question: "Q1", Answer: "A1"}})
+	if _, err := r.send(ctx, id, "expand on the first point"); err != nil {
+		t.Fatal(err)
+	}
+	p := r.write.prompts[0]
+	if strings.Contains(p, "private notes alone") || !strings.Contains(p, "private notes and the earlier conversation") {
+		t.Fatalf("writer prompt does not allow the earlier conversation without a search: %q", p)
 	}
 }
