@@ -87,11 +87,15 @@ func (a *API) pagePrior(ctx context.Context, client, prof string, req newSession
 			if q == "" {
 				q = t.User
 			}
+			q = profilerun.StoredForm(q)
+			if r := []rune(q); len(r) > maxPriorRunes {
+				q = string(r[:maxPriorRunes])
+			}
 			ans := t.Reply
 			if r := []rune(ans); len(r) > maxEarlierAnswerRunes {
 				ans = string(r[:maxEarlierAnswerRunes])
 			}
-			earlier = append(earlier, profilerun.Exchange{Question: profilerun.StoredForm(q), Answer: ans})
+			earlier = append(earlier, profilerun.Exchange{Question: q, Answer: ans})
 		}
 		earlier = earlier[max(0, len(earlier)-maxPrior):]
 	}

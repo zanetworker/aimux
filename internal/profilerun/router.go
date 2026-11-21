@@ -172,6 +172,21 @@ type priorKey struct{}
 
 type earlierKey struct{}
 
+type runStageKey struct{}
+
+// withRunStage marks a turn as a stage of a run (research-with-work): the
+// sandbox engine archives its transcript out of the search index, since a
+// stage prompt can carry earlier answers with web text.
+func withRunStage(ctx context.Context) context.Context {
+	return context.WithValue(ctx, runStageKey{}, true)
+}
+
+// runStageFrom reports whether ctx is a run stage's turn.
+func runStageFrom(ctx context.Context) bool {
+	v, _ := ctx.Value(runStageKey{}).(bool)
+	return v
+}
+
 // Exchange is one earlier question on the page and the answer it got.
 type Exchange struct{ Question, Answer string }
 

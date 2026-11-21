@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	claudehistory "github.com/zanetworker/aimux/internal/history"
 	"io"
 	"log/slog"
 	"net/url"
@@ -440,7 +441,7 @@ func (e *SandboxEngine) Send(ctx context.Context, session, text string, onEvent 
 	closeErr := rc.Close()
 
 	if res.sawResult {
-		e.archive(c.Sandbox, session)
+		e.archive(c.Sandbox, session, runStageFrom(ctx))
 	}
 	switch {
 	case ctx.Err() != nil:
@@ -533,10 +534,16 @@ func (e *SandboxEngine) Cancel(session string) error {
 }
 
 // archive copies the transcript out; a failure is logged, never the turn's.
-func (e *SandboxEngine) archive(sandbox, session string) {
+// A run stage's transcript goes under the runs folder, which the search
+// index and session lists skip, like the run's own transcript.
+func (e *SandboxEngine) archive(sandbox, session string, runStage bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), archiveTimeout)
 	defer cancel()
-	if err := sandboxlaunch.Archive(ctx, e.L.Backend, sandbox, session, e.ArchiveDir); err != nil && e.Log != nil {
+	dir := e.ArchiveDir
+	if runStage {
+		dir = filepath.Join(dir, claudehistory.WingmanRunsDirName())
+	}
+	if err := sandboxlaunch.Archive(ctx, e.L.Backend, sandbox, session, dir); err != nil && e.Log != nil {
 		e.Log.Warn("profile session: archive failed", "session", session, "err", err)
 	}
 }

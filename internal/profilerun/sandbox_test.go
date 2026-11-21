@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	claudehistory "github.com/zanetworker/aimux/internal/history"
 	"io"
 	"os"
 	"path/filepath"
@@ -822,5 +823,26 @@ func TestSandboxEngine_NoWebRefusesWebProfile(t *testing.T) {
 	}
 	if _, err := e.Send(context.Background(), id, "q", func(acprun.Event) {}); err != nil {
 		t.Fatalf("Send without no-web = %v", err)
+	}
+}
+
+// A run stage's transcript is archived under the runs folder the search
+// index skips (one level deeper than the index looks), not with the
+// sandbox's indexed transcripts.
+func TestSandboxEngine_RunStageArchivedOutOfIndex(t *testing.T) {
+	e, _ := newSandbox(t)
+	sid, err := e.New(context.Background(), Meta{Profile: "work-readonly"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Send(withRunStage(context.Background()), sid, "q", func(acprun.Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(e.ArchiveDir, claudehistory.WingmanRunsDirName(), "openshell-aimux-work-readonly", sid+".jsonl")
+	if fi, err := os.Stat(want); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("archive %s: %v %v", want, fi, err)
+	}
+	if m, _ := filepath.Glob(filepath.Join(e.ArchiveDir, "*", "*.jsonl")); len(m) != 0 {
+		t.Fatalf("indexable transcripts %q, want none for a run stage", m)
 	}
 }

@@ -292,3 +292,33 @@ func TestProfileSession_ExplicitPriorNoAnswers(t *testing.T) {
 		t.Fatalf("earlier %q, want none with an explicit prior", pr.lastEarlier)
 	}
 }
+
+// An earlier question in an exchange is cut like the prior's questions.
+func TestProfileSession_EarlierQuestionsCut(t *testing.T) {
+	pr := runPriorRig(t)
+	long := strings.Repeat("q", maxPriorRunes+10)
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, long, "A1"))
+	pr.serve()
+	pr.ask(`{"profile":"research-with-work","url":"` + priorURL + `","text":"next"}`)
+	if len(pr.lastEarlier) != 1 || pr.lastEarlier[0].Question != long[:maxPriorRunes] {
+		t.Fatalf("earlier %q, want the question cut to %d", pr.lastEarlier, maxPriorRunes)
+	}
+}
+
+// A follow-up sent to the run session by id (POST /v1/sessions/{id}/messages)
+// carries the same earlier exchanges as one through POST /v1/sessions.
+func TestSendMessage_RunSessionCarriesEarlier(t *testing.T) {
+	pr := runPriorRig(t)
+	pr.seed("old-run", "wingman", "research-with-work", "", priorURL, q(1, "Q1", "A1"))
+	pr.serve()
+	resp, out := pr.do("POST", "/v1/sessions/old-run/messages", `{"text":"expand on that"}`)
+	if resp.StatusCode != 202 {
+		t.Fatalf("messages: %d %v", resp.StatusCode, out)
+	}
+	pr.idle("old-run")
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	if len(pr.earlier) != 1 || !reflect.DeepEqual(pr.earlier[0], []profilerun.Exchange{{Question: "Q1", Answer: "A1"}}) {
+		t.Fatalf("earlier %q, want Q1/A1", pr.earlier)
+	}
+}

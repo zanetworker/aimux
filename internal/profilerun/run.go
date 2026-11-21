@@ -167,7 +167,13 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 	earlier := EarlierFrom(ctx)
 	planCtx := ctx
 	if len(earlier) > 0 {
-		planCtx = WithPrior(ctx, nil)
+		var rest []string // earlier questions no exchange carries (no answer)
+		for _, q := range PriorFrom(ctx) {
+			if !slices.ContainsFunc(earlier, func(x Exchange) bool { return x.Question == q }) {
+				rest = append(rest, q)
+			}
+		}
+		planCtx = WithPrior(ctx, rest)
 	}
 	pctx := WithToolResults(WithNoWeb(planCtx), func(r ToolResult) {
 		resMu.Lock()
@@ -262,6 +268,7 @@ func (e *RunEngine) stage(ctx context.Context, session string, st *RunState, rol
 	if err := ctx.Err(); err != nil { // a cancelled turn starts no child
 		return "", err
 	}
+	ctx = withRunStage(ctx)
 	id, err := eng.New(ctx, m, page)
 	if err != nil {
 		return "", fmt.Errorf("start %s: %w", role, err)
@@ -731,7 +738,11 @@ func writerPrompt(question string, earlier []Exchange, notes, findings string, l
 			}
 			b.WriteString(" (the proposed queries looked private: " + strings.Join(reasons, ", ") + ")")
 		}
-		b.WriteString(". Say so in one sentence, and answer from the private notes alone.\n\n")
+		if len(earlier) > 0 {
+			b.WriteString(". Say so in one sentence, and answer from the private notes and the earlier conversation.\n\n")
+		} else {
+			b.WriteString(". Say so in one sentence, and answer from the private notes alone.\n\n")
+		}
 	}
 	fmt.Fprintf(&b, "<%s>\n%s\n</%s>\n\n", notesTag, notes, notesTag)
 	fmt.Fprintf(&b, "<%s>\n%s\n</%s>\n\n", webTag, findings, webTag)
