@@ -194,14 +194,6 @@ func TestMCPProxyUninstall_NotInstalled(t *testing.T) {
 	}
 }
 
-func TestPrintInstallSection_NotInstalled(t *testing.T) {
-	var out bytes.Buffer
-	printInstallSection(proxyInstaller(t.TempDir(), 7381, &out), &out, false)
-	if !strings.Contains(out.String(), "not installed") {
-		t.Fatalf("output:\n%s", out.String())
-	}
-}
-
 func TestProxyStatus_JSONIncludesInstall(t *testing.T) {
 	inst := &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"github", "slack"}, Drifted: []string{"slack"}, NotProxied: []string{"pypi"}}
 	addr, _ := fakeDaemon(t, fixtureReport())

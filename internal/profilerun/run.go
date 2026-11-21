@@ -49,7 +49,10 @@ type RunEngine struct {
 	Resolve func(profile string) (profile.Manifest, error)
 	// Store records each turn's RunState; nil keeps it in memory only.
 	Store *Store
-	Log   *slog.Logger
+	// SetsFor keeps the held-tools sets the turn's caller (CallerFrom) may
+	// approve (the API's GET /v1/tools/{set}/diff check); nil keeps none.
+	SetsFor func(client string, sets []string) []string
+	Log     *slog.Logger
 	// ArchiveDir is where each run session's own transcript (its questions
 	// and answers) is kept (RunTranscriptPath); "" keeps none.
 	ArchiveDir string
@@ -267,6 +270,7 @@ func (e *RunEngine) stage(ctx context.Context, session string, st *RunState, rol
 		return "", ctx.Err()
 	}
 	var text strings.Builder
+	noticed := false // the planner's first notice (held tools and their sets) reaches the client once
 	_, err = eng.Send(ctx, id, prompt, func(ev acprun.Event) {
 		if t, ok := deltaText(ev); ok {
 			text.WriteString(t)
@@ -277,6 +281,11 @@ func (e *RunEngine) stage(ctx context.Context, session string, st *RunState, rol
 		}
 		if stream {
 			onEvent(ev)
+			return
+		}
+		if role == "planner" && !noticed && isNotice(ev) {
+			noticed = true
+			onEvent(e.clientNotice(ev, CallerFrom(ctx)))
 			return
 		}
 		if ev2, ok := prefixToolCall(ev, prefix); ok {
@@ -565,6 +574,48 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// clientNotice is a planner's notice for the turn's caller: its full text,
+// with sets kept only when that client may approve them (SetsFor, the diff
+// endpoint's check) and left out when none remain, no check is set or the
+// caller is not known (a queued message), so a panel then falls back to
+// the copy command.
+func (e *RunEngine) clientNotice(ev acprun.Event, client string) acprun.Event {
+	var u map[string]any
+	if json.Unmarshal(ev.Data, &u) != nil {
+		return ev
+	}
+	raw, _ := u["sets"].([]any)
+	delete(u, "sets")
+	var sets []string
+	for _, s := range raw {
+		if str, ok := s.(string); ok {
+			sets = append(sets, str)
+		}
+	}
+	if len(sets) > 0 && e.SetsFor != nil && client != "" {
+		if keep := e.SetsFor(client, sets); len(keep) > 0 {
+			u["sets"] = keep
+		}
+	}
+	b, err := json.Marshal(u)
+	if err != nil {
+		return ev
+	}
+	ev.Data = b
+	return ev
+}
+
+// isNotice reports an aimux_notice session update.
+func isNotice(ev acprun.Event) bool {
+	if ev.Kind != acprun.KindUpdate {
+		return false
+	}
+	var u struct {
+		Kind string `json:"sessionUpdate"`
+	}
+	return json.Unmarshal(ev.Data, &u) == nil && u.Kind == "aimux_notice"
 }
 
 // noticeEmitter sends aimux's own progress lines as aimux_notice updates.

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -53,8 +54,7 @@ func TestProxyStatus_Table(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"SERVER", "STATE", "TOOLS", "LAST CALL", "LAST ERROR",
-		"slack", "running", "12", "2m ago", "github", "failed", "exec: gh-mcp: not found", "never",
+	for _, want := range []string{"slack", "running", "12 tools", "called 2m ago", "github", "failed", "exec: gh-mcp: not found", "never called",
 		"pid 99", "line one", "line two"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("table lacks %q:\n%s", want, got)
@@ -115,7 +115,7 @@ func TestProxyStatus_NotRunning(t *testing.T) {
 	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatalf("not running should not be an error: %v", err)
 	}
-	if want := "MCP proxy is not running on " + addr + "\n"; out.String() != want {
+	if want := "MCP proxy ○ not running on " + addr + "\n"; out.String() != want {
 		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 	out.Reset()
@@ -133,9 +133,39 @@ func TestProxyStatus_DaemonErrorIsAnError(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out bytes.Buffer
-	err := proxyStatus(context.Background(), proxyStatusOpts{addr: strings.TrimPrefix(srv.URL, "http://")}, &out, fixedClock(statusNow))
+	o := proxyStatusOpts{addr: strings.TrimPrefix(srv.URL, "http://"),
+		install: &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"slack"}, Drifted: []string{"slack"}, Hooks: true}}
+	asked := false
+	o.gateway = func() string { asked = true; return "tool gateway" }
+	err := proxyStatus(context.Background(), o, &out, fixedClock(statusNow))
+	if asked {
+		t.Fatal("a proxy that gave no status still waited on the tool gateway")
+	}
 	if err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("got %v, want an error naming the status", err)
+	}
+	// What the command already knows still helps with the broken daemon.
+	if got := out.String(); !strings.Contains(got, "MCP proxy ? no status") || !strings.Contains(got, "! drifted: slack") {
+		t.Fatalf("install diagnostics lost on a daemon error:\n%s", got)
+	}
+}
+
+// The gateway line is read once the proxy answered, so a long probe does
+// not leave it stale.
+func TestProxyStatus_GatewayReadAfterTheAnswer(t *testing.T) {
+	addr, got := fakeDaemon(t, fixtureReport())
+	o := proxyStatusOpts{addr: addr, probe: true, timeout: time.Second, gateway: func() string {
+		if len(*got) == 0 {
+			return "tool gateway read before the proxy answered"
+		}
+		return "tool gateway read after"
+	}}
+	var out bytes.Buffer
+	if err := proxyStatus(context.Background(), o, &out, fixedClock(statusNow)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "tool gateway read after") {
+		t.Fatalf("output:\n%s", out.String())
 	}
 }
 
@@ -152,7 +182,7 @@ func TestProxyStatus_NeverPrintsEnvValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool := mcpproxy.NewPool(mcpproxy.StdioStarter(cfgs), mcpproxy.PoolOptions{})
-	mon := &mcpproxy.Monitor{Pool: pool, Servers: []string{"leaky"}, Port: ln.Addr().(*net.TCPAddr).Port}
+	mon := &mcpproxy.Monitor{Pool: pool, Servers: []string{"leaky"}, Port: ln.Addr().(*net.TCPAddr).Port, PID: os.Getpid(), StartedAt: time.Now()}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -190,13 +220,21 @@ func styledReport() mcpproxy.StatusReport {
 
 var ansiRE = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
+// renderRep is the page for rep alone; removed names servers whose entry
+// left the Claude config.
+func renderRep(rep mcpproxy.StatusReport, color, all bool, removed ...string) string {
+	p := statusPage{addr: "127.0.0.1:7381", rep: &rep, now: statusNow, color: color, all: all}
+	if len(removed) > 0 {
+		p.install = &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: true, Removed: removed}
+	}
+	return render(p)
+}
+
 func TestPrintProxyStatus_ColorStatesAndSummary(t *testing.T) {
-	var out bytes.Buffer
-	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, true)
-	got := out.String()
+	got := renderRep(styledReport(), true, true)
 	for _, want := range []string{
 		"\x1b[32m● running", "\x1b[31m● failed", "\x1b[2m○ idle", "\x1b[2m○ not started",
-		"4 servers", "1 running", "1 idle", "1 not started", "1 failed",
+		"4 servers: ", "1 running", "1 idle", "1 not started", "1 failed",
 		"pid 99", "line one", // the failed server's stderr tail
 	} {
 		if !strings.Contains(got, want) {
@@ -209,11 +247,10 @@ func TestPrintProxyStatus_ColorStatesAndSummary(t *testing.T) {
 }
 
 func TestPrintProxyStatus_ColumnsStayAlignedWithColor(t *testing.T) {
-	var out bytes.Buffer
-	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, true)
+	got := renderRep(styledReport(), true, true)
 	row := regexp.MustCompile(`^(\s*\S+\s+)([●○◐] [a-z ]+?)\s{2,}(\d+)\s`)
 	var stateCols, toolCols []int
-	for _, line := range strings.Split(ansiRE.ReplaceAllString(out.String(), ""), "\n") {
+	for _, line := range strings.Split(ansiRE.ReplaceAllString(got, ""), "\n") {
 		m := row.FindStringSubmatchIndex(line)
 		if m == nil {
 			continue
@@ -222,19 +259,17 @@ func TestPrintProxyStatus_ColumnsStayAlignedWithColor(t *testing.T) {
 		toolCols = append(toolCols, len([]rune(line[:m[6]])))
 	}
 	if len(stateCols) != 4 {
-		t.Fatalf("found %d table rows, want 4:\n%s", len(stateCols), out.String())
+		t.Fatalf("found %d table rows, want 4:\n%s", len(stateCols), got)
 	}
 	for i := range stateCols {
 		if stateCols[i] != stateCols[0] || toolCols[i] != toolCols[0] {
-			t.Fatalf("columns misaligned with colour on: state %v, tools %v\n%s", stateCols, toolCols, out.String())
+			t.Fatalf("columns misaligned with colour on: state %v, tools %v\n%s", stateCols, toolCols, got)
 		}
 	}
 }
 
 func TestPrintProxyStatus_PlainHasNoEscapes(t *testing.T) {
-	var out bytes.Buffer
-	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, false)
-	if got := out.String(); strings.Contains(got, "\x1b") || !strings.Contains(got, "● running") || !strings.Contains(got, "4 servers") {
+	if got := renderRep(styledReport(), false, false); strings.Contains(got, "\x1b") || !strings.Contains(got, "● running") || !strings.Contains(got, "4 servers") {
 		t.Fatalf("plain status:\n%q", got)
 	}
 }
@@ -242,9 +277,8 @@ func TestPrintProxyStatus_PlainHasNoEscapes(t *testing.T) {
 func TestPrintInstallState_CountsRemovedDriftAndUpgrade(t *testing.T) {
 	st := mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"aimux", "github", "minutes", "slack"},
 		Drifted: []string{"slack"}, Removed: []string{"minutes"}, UpgradePending: true, DaemonVersion: "v1"}
-	var out bytes.Buffer
-	printInstallState(&out, st, "/home/x/.claude.json", "restart with `launchctl kickstart -k gui/501/com.aimux.mcp-proxy`", false)
-	got := out.String()
+	got := render(statusPage{addr: "a", install: &st, claudeConfig: "/home/x/.claude.json", now: statusNow,
+		upgradeText: "restart with `launchctl kickstart -k gui/501/com.aimux.mcp-proxy`"})
 	for _, want := range []string{"4 servers behind the proxy", "aimux mcp proxy edit", "minutes", "removed from /home/x/.claude.json",
 		"slack", "drifted", "launchctl kickstart"} {
 		if !strings.Contains(got, want) {
@@ -275,20 +309,16 @@ func tableNames(t *testing.T, out string) []string {
 func TestPrintProxyStatus_SortsByStateThenName(t *testing.T) {
 	rep := styledReport() // slack running, github failed, nanobanana idle, brief not started
 	rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "aimux", State: mcpproxy.StateRunning}})
-	var out bytes.Buffer
-	printProxyStatus(&out, "127.0.0.1:7381", rep, statusNow, false)
 	want := []string{"github", "aimux", "slack", "nanobanana-image-creation", "brief"}
-	if got := tableNames(t, out.String()); strings.Join(got, ",") != strings.Join(want, ",") {
+	if got := tableNames(t, renderRep(rep, false, true)); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("rows %v, want %v", got, want)
 	}
 }
 
-// A server removed from ~/.claude.json shows as removed, last, and counts as
-// removed rather than in its live state.
+// With --all, a server removed from ~/.claude.json shows as removed, last,
+// and counts as removed rather than in its live state.
 func TestPrintProxyStatus_RemovedServerIsMarkedAndLast(t *testing.T) {
-	var out bytes.Buffer
-	printProxyStatus(&out, "127.0.0.1:7381", styledReport(), statusNow, false, "nanobanana-image-creation")
-	got := out.String()
+	got := renderRep(styledReport(), false, true, "nanobanana-image-creation")
 	names := tableNames(t, got)
 	if names[len(names)-1] != "nanobanana-image-creation" {
 		t.Fatalf("removed server not last: %v", names)
@@ -306,10 +336,25 @@ func TestPrintInstallState_Hooks(t *testing.T) {
 		{true, "hooks on: a server you add in a session moves behind the proxy"},
 		{false, "hooks off: servers you add later stay direct; `aimux mcp proxy install` adds the hooks"},
 	} {
-		var out bytes.Buffer
-		printInstallState(&out, mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Moved: []string{"a"}, Hooks: tc.on}, "/c", "", false)
-		if !strings.Contains(out.String(), tc.want) {
-			t.Fatalf("Hooks=%v: install section lacks %q:\n%s", tc.on, tc.want, out.String())
+		got := render(statusPage{addr: "a", install: &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Moved: []string{"a"}, Hooks: tc.on}, now: statusNow})
+		if !strings.Contains(got, tc.want) {
+			t.Fatalf("Hooks=%v: install section lacks %q:\n%s", tc.on, tc.want, got)
 		}
+	}
+}
+
+// Something else on the port that answers 200 without a running proxy's
+// report is no status, never a green running page.
+func TestProxyStatus_AnswerWithoutARunningProxyIsAnError(t *testing.T) {
+	for _, body := range []string{"{}", "null", `{"running":true}`} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+		for _, js := range []bool{false, true} {
+			var out bytes.Buffer
+			err := proxyStatus(context.Background(), proxyStatusOpts{addr: strings.TrimPrefix(srv.URL, "http://"), json: js}, &out, fixedClock(statusNow))
+			if err == nil || strings.Contains(out.String(), "● running") {
+				t.Fatalf("body %s json=%v: err %v, output:\n%s", body, js, err, out.String())
+			}
+		}
+		srv.Close()
 	}
 }

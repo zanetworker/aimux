@@ -166,16 +166,86 @@ func TestEnsure_PassesEveryProvider(t *testing.T) {
 	}
 }
 
-func TestCLIEnsure_ErrorPhaseFails(t *testing.T) {
-	f := &fakeRunner{respond: func(argv []string) (string, error) {
-		if argv[4] == "list" {
-			return listHeader + "aimux-work-readonly  2026-11-11 10:00:00  Error\n", nil
+// phaseSeq answers each sandbox list with the next phase of
+// aimux-work-readonly ("" lists it as gone), repeating the last one.
+func phaseSeq(phases ...string) *fakeRunner {
+	i := 0
+	return &fakeRunner{respond: func(argv []string) (string, error) {
+		if argv[4] != "list" {
+			return "", nil
 		}
-		return "", nil
+		p := phases[min(i, len(phases)-1)]
+		i++
+		if p == "" {
+			return listHeader + "wingman-work  2026-11-10 11:10:34  Ready\n", nil
+		}
+		return listHeader + "aimux-work-readonly  2026-11-11 10:00:00  " + p + "\n", nil
 	}}
+}
+
+// A dead sandbox (Error, Failed, Completed) holds nothing to keep: Ensure
+// deletes it, waits until it is gone, and creates it from the current
+// policy, with no policy set on the new one.
+func TestCLIEnsure_ReplacesDeadSandbox(t *testing.T) {
+	for _, dead := range []string{"Error", "Failed", "Completed"} {
+		t.Run(dead, func(t *testing.T) {
+			dir := t.TempDir()
+			digest := filepath.Join(dir, "aimux-work-readonly.digest")
+			if err := os.WriteFile(digest, []byte("sha256:old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f := phaseSeq(dead, "Deleting", "", "Provisioning", "Ready")
+			if err := newTestCLI(f, dir).Ensure(context.Background(), compiled("sha256:one")); err != nil {
+				t.Fatalf("Ensure: %v", err)
+			}
+			want := []string{"sandbox list", "sandbox delete", "sandbox list", "sandbox list", "sandbox create", "sandbox list", "sandbox list"}
+			if v := f.verbs(); !slices.Equal(v, want) {
+				t.Fatalf("calls = %v\nwant    %v", v, want)
+			}
+			if got := f.call("sandbox delete"); !slices.Equal(got[5:], []string{"aimux-work-readonly"}) {
+				t.Fatalf("delete = %q", got)
+			}
+			if d, _ := os.ReadFile(digest); string(d) != "sha256:one" { //nolint:gosec // G304: path is in the test temp dir
+				t.Fatalf("digest = %q, want the new one", d)
+			}
+		})
+	}
+}
+
+// One replacement per Ensure: a new sandbox that dies too fails the turn
+// with its phase named, and is not deleted again.
+func TestCLIEnsure_DeadAfterReplaceFails(t *testing.T) {
+	f := phaseSeq("Error", "", "Error")
 	err := newTestCLI(f, t.TempDir()).Ensure(context.Background(), compiled("sha256:one"))
-	if err == nil || !strings.Contains(err.Error(), "Error") {
+	if err == nil || !strings.Contains(err.Error(), "phase Error") {
 		t.Fatalf("err = %v, want the Error phase named", err)
+	}
+	if n := slices.Index(f.verbs(), "sandbox delete"); n < 0 || slices.Contains(f.verbs()[n+1:], "sandbox delete") {
+		t.Fatalf("calls = %v, want exactly one delete", f.verbs())
+	}
+}
+
+// Stopped is someone's choice: Ensure leaves it and says so.
+func TestCLIEnsure_StoppedNotReplaced(t *testing.T) {
+	f := phaseSeq("Stopped")
+	err := newTestCLI(f, t.TempDir()).Ensure(context.Background(), compiled("sha256:one"))
+	if err == nil || !strings.Contains(err.Error(), "phase Stopped") {
+		t.Fatalf("err = %v, want the Stopped phase named", err)
+	}
+	if f.call("sandbox delete") != nil || f.call("sandbox create") != nil {
+		t.Fatalf("calls = %v, want no delete or create", f.verbs())
+	}
+}
+
+// A delete that never finishes fails instead of creating over it.
+func TestCLIEnsure_DeleteNeverFinishes(t *testing.T) {
+	f := phaseSeq("Error", "Deleting")
+	err := newTestCLI(f, t.TempDir()).Ensure(context.Background(), compiled("sha256:one"))
+	if err == nil || !strings.Contains(err.Error(), "still") {
+		t.Fatalf("err = %v, want the stuck delete named", err)
+	}
+	if f.call("sandbox create") != nil {
+		t.Fatalf("calls = %v, want no create", f.verbs())
 	}
 }
 
@@ -782,12 +852,40 @@ func TestRunnerProbe_ReadOnly(t *testing.T) {
 	}
 }
 
-// Ensure never starts a stopped sandbox (it only creates a missing one),
-// so a stopped or failed runner says how to bring it back, without "setup".
+// A failed runner is replaced like any dead sandbox: deleted, then created.
+func TestToolSandbox_FailedReplaced(t *testing.T) {
+	lists := 0
+	f := &fakeRunner{respond: func(a []string) (string, error) {
+		switch a[3] + " " + a[4] {
+		case "provider list":
+			return "aimux-github\n", nil
+		case "sandbox list":
+			lists++
+			phase := []string{"Failed", "Failed", "", "Ready"}[min(lists-1, 3)]
+			if phase == "" {
+				return listHeader, nil
+			}
+			return listHeader + "aimux-tools  2026-11-16 10:00:00  " + phase + "\n", nil
+		}
+		return "", nil
+	}}
+	ts := NewToolSandbox(f.run, t.TempDir(), func(func(string) bool) (profile.Compiled, map[string]error, error) {
+		return profile.Compiled{Sandbox: profile.RunnerSandbox, Image: profile.RunnerImage, PolicyDigest: "d", PolicyYAML: []byte("version: 1\n")}, nil, nil
+	})
+	if err := ts.For("github").Ensure(context.Background()); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if f.call("sandbox delete") == nil || f.call("sandbox create") == nil {
+		t.Fatalf("calls = %v, want delete then create", f.verbs())
+	}
+}
+
+// Ensure never starts a stopped sandbox (it only creates a missing one or
+// replaces a dead one), so a stopped runner says how to start it, without
+// "setup".
 func TestToolSandbox_StoppedSaysHow(t *testing.T) {
 	for phase, want := range map[string]string{
 		"Stopped": "openshell -g local sandbox start aimux-tools",
-		"Failed":  "openshell -g local sandbox delete aimux-tools",
 	} {
 		f := &fakeRunner{respond: func(a []string) (string, error) {
 			switch a[3] + " " + a[4] {

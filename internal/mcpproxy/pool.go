@@ -204,7 +204,7 @@ func (p *Pool) markBroken(k slotKey, s *slot, msg string, reason FailureReason) 
 	p.mu.Lock()
 	if p.slots[k] == s {
 		delete(p.slots, k)
-		p.stats(k.server).markFailed(msg, reason, p.opt.Now())
+		p.stats(k.server).markFailed(msg, reason, p.opt.Now(), k.session)
 	}
 	p.mu.Unlock()
 }
@@ -259,11 +259,14 @@ func (p *Pool) startSlot(k slotKey, s *slot) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			reason = ReasonTimedOut
 		}
-		st.markFailed(err.Error(), reason, p.opt.Now())
+		st.markFailed(err.Error(), reason, p.opt.Now(), k.session)
 		st.stderrTail = stderrTailOf(err)
 	} else {
 		st.started, st.failed = true, false
 		st.startedAt = p.opt.Now()
+		if k.session == st.errSession {
+			st.errPast = true
+		}
 		st.stderrTail = nil
 	}
 	switch {
@@ -353,6 +356,7 @@ func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToo
 		}
 		var requestErr *RequestError
 		if errors.As(err, &requestErr) {
+			p.answered(k, s)
 			return mcp.NewToolResultErrorf("%s: %s failed: %v", server, req.Params.Name, err)
 		}
 		// A transport error or our timeout may leave the server wedged;
@@ -369,7 +373,25 @@ func (p *Pool) Call(ctx context.Context, server, session string, req mcp.CallToo
 	if res == nil {
 		return mcp.NewToolResultErrorf("%s: %s returned no result", server, req.Params.Name)
 	}
+	if ctx.Err() == nil { // a reply racing the caller's cancel proves nothing
+		p.answered(k, s)
+	}
 	return res
+}
+
+// answered records that the server answered a call, when s is still its
+// live backend: a late answer from one a reload retired says nothing about
+// the server as it now runs.
+func (p *Pool) answered(k slotKey, s *slot) {
+	p.mu.Lock()
+	if p.slots[k] == s {
+		st := p.stats(k.server)
+		st.lastOK = p.opt.Now()
+		if k.session == st.errSession {
+			st.errPast = true
+		}
+	}
+	p.mu.Unlock()
 }
 
 // countFailure counts a call that failed because of the server: it could

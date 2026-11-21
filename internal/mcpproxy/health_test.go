@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -351,4 +352,179 @@ func TestStatus_ReasonSaysHowItFailed(t *testing.T) {
 			t.Fatalf("Reason %q, want %q", s.Reason, ReasonExited)
 		}
 	})
+}
+
+// LastOK is when the server last answered a call (a result, a tool's own
+// error or a JSON-RPC error answer): a cancelled call or a broken transport
+// never moves it, unlike LastCall, which is stamped when a call comes in.
+func TestStatus_LastOKOnlyWhenTheServerAnswered(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_000_000, 0)}
+	fs := newFakeStarter()
+	var mu sync.Mutex
+	answer := func(ctx context.Context) (*mcp.CallToolResult, error) { return mcp.NewToolResultText("ok"), nil }
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		mu.Lock()
+		f := answer
+		mu.Unlock()
+		return f(ctx)
+	}
+	set := func(f func(context.Context) (*mcp.CallToolResult, error)) { mu.Lock(); answer = f; mu.Unlock() }
+	p := NewPool(fs.start, PoolOptions{Now: clock.Now})
+	defer p.Close()
+
+	if s := statusOf(t, p, "s"); !s.LastOK.IsZero() {
+		t.Fatalf("LastOK before any call: %v", s.LastOK)
+	}
+	p.Call(context.Background(), "s", "", req("t"))
+	answered := clock.Now()
+	if s := statusOf(t, p, "s"); !s.LastOK.Equal(answered) {
+		t.Fatalf("LastOK %v after an answer, want %v", s.LastOK, answered)
+	}
+
+	clock.Add(time.Minute)
+	set(func(ctx context.Context) (*mcp.CallToolResult, error) { <-ctx.Done(); return nil, ctx.Err() })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	p.Call(ctx, "s", "", req("t"))
+	cancel()
+	if s := statusOf(t, p, "s"); !s.LastOK.Equal(answered) || !s.LastCall.After(answered) {
+		t.Fatalf("a cancelled call moved LastOK: %+v", s)
+	}
+
+	clock.Add(time.Minute)
+	set(func(context.Context) (*mcp.CallToolResult, error) {
+		return nil, &RequestError{Err: errors.New("unknown tool")}
+	})
+	p.Call(context.Background(), "s", "", req("t"))
+	if s := statusOf(t, p, "s"); !s.LastOK.Equal(clock.Now()) {
+		t.Fatalf("a JSON-RPC error answer is an answer: LastOK %v, want %v", s.LastOK, clock.Now())
+	}
+
+	clock.Add(time.Minute)
+	set(func(context.Context) (*mcp.CallToolResult, error) { return nil, errors.New("broken pipe") })
+	before := statusOf(t, p, "s").LastOK
+	p.Call(context.Background(), "s", "", req("t"))
+	if s := statusOf(t, p, "s"); !s.LastOK.Equal(before) {
+		t.Fatalf("a broken transport moved LastOK: %+v", s)
+	}
+}
+
+// A call that finishes on a backend a reload retired is not an answer from
+// the server as it now runs: when the replacement fails to start meanwhile,
+// LastOK stays put, so the failure is not shown as past.
+func TestStatus_LastOKIgnoresARetiredBackend(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_000_000, 0)}
+	fs := newFakeStarter()
+	started, release := make(chan struct{}), make(chan struct{})
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		close(started)
+		<-release
+		return mcp.NewToolResultText("late"), nil
+	}
+	p := NewPool(fs.start, PoolOptions{Now: clock.Now})
+	defer p.Close()
+
+	done := make(chan *mcp.CallToolResult, 1)
+	go func() { done <- p.Call(context.Background(), "s", "", req("t")) }()
+	<-started
+	closeRetired := p.RetireServer("s")
+	defer closeRetired()
+
+	clock.Add(time.Minute)
+	fs.mu.Lock()
+	fs.fail["s"] = errors.New("exec: s-mcp: not found")
+	fs.mu.Unlock()
+	if r := p.Call(context.Background(), "s", "", req("t")); !r.IsError {
+		t.Fatalf("replacement start should fail: %+v", r)
+	}
+	clock.Add(time.Minute)
+	close(release)
+	if r := <-done; r.IsError {
+		t.Fatalf("the retired backend's call: %+v", r)
+	}
+	s := statusOf(t, p, "s")
+	if !s.LastOK.IsZero() {
+		t.Fatalf("a retired backend's late answer moved LastOK to %v (last error at %v)", s.LastOK, s.LastErrorAt)
+	}
+	if s.State != StateFailed {
+		t.Fatalf("state %s, want failed", s.State)
+	}
+}
+
+// ErrorPast: the server answered a call or started well after its last
+// error, in the session the error came from. For a per-session server one
+// session's healthy backend says nothing about another session's failure.
+func TestStatus_ErrorPastOnlyInTheFailedSession(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_000_000, 0)}
+	fs := newFakeStarter()
+	var broken atomic.Bool
+	fs.callFn = func(context.Context) (*mcp.CallToolResult, error) {
+		if broken.Load() {
+			return nil, errors.New("broken pipe")
+		}
+		return mcp.NewToolResultText("ok"), nil
+	}
+	p := NewPool(fs.start, PoolOptions{Now: clock.Now, PerSession: map[string]bool{"pw": true}})
+	defer p.Close()
+
+	broken.Store(true)
+	p.Call(context.Background(), "pw", "a", req("t"))
+	broken.Store(false)
+	if s := statusOf(t, p, "pw"); s.LastError == "" || s.ErrorPast == nil || *s.ErrorPast {
+		t.Fatalf("after session a broke: %+v", s)
+	}
+	clock.Add(time.Minute)
+	p.Call(context.Background(), "pw", "b", req("t"))
+	if s := statusOf(t, p, "pw"); s.ErrorPast == nil || *s.ErrorPast {
+		t.Fatalf("session b's answer made session a's error past: %+v", s)
+	}
+	clock.Add(time.Minute)
+	p.Call(context.Background(), "pw", "a", req("t"))
+	if s := statusOf(t, p, "pw"); s.ErrorPast == nil || !*s.ErrorPast {
+		t.Fatalf("session a answered again, error still current: %+v", s)
+	}
+
+	// A shared server: any good answer after the error makes it past.
+	broken.Store(true)
+	p.Call(context.Background(), "s", "", req("t"))
+	broken.Store(false)
+	if s := statusOf(t, p, "s"); s.ErrorPast == nil || *s.ErrorPast {
+		t.Fatalf("shared server error past at once: %+v", s)
+	}
+	p.Call(context.Background(), "s", "", req("t"))
+	if s := statusOf(t, p, "s"); s.ErrorPast == nil || !*s.ErrorPast {
+		t.Fatalf("shared server answered, error still current: %+v", s)
+	}
+}
+
+// A reply that arrives when the caller has already cancelled is not
+// counted as an answer: LastOK stays put. The backend returns its reply
+// only once the caller's context is done, the race a stdio reply and a
+// cancel can produce.
+func TestStatus_LastOKNotAfterACancel(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_000_000, 0)}
+	fs := newFakeStarter()
+	fs.callFn = func(ctx context.Context) (*mcp.CallToolResult, error) {
+		<-ctx.Done()
+		return mcp.NewToolResultText("late reply"), nil
+	}
+	p := NewPool(fs.start, PoolOptions{Now: clock.Now})
+	defer p.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+	p.Call(ctx, "s", "", req("t"))
+	if s := statusOf(t, p, "s"); !s.LastOK.IsZero() {
+		t.Fatalf("a reply after the caller cancelled moved LastOK to %v", s.LastOK)
+	}
+}
+
+// ErrorPast is reported only for a server with an error, so a client can
+// tell a daemon that says "not past" from one too old to say.
+func TestStatus_ErrorPastOnlyWithAnError(t *testing.T) {
+	fs := newFakeStarter()
+	p := NewPool(fs.start, PoolOptions{})
+	defer p.Close()
+	p.Call(context.Background(), "s", "", req("t"))
+	if s := statusOf(t, p, "s"); s.ErrorPast != nil {
+		t.Fatalf("ErrorPast %v with no error", *s.ErrorPast)
+	}
 }
