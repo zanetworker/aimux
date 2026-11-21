@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+
+	"github.com/zanetworker/aimux/internal/clientscope"
+	"github.com/zanetworker/aimux/internal/remoteapi"
 )
 
 // fakeOpenshell puts an openshell on PATH that exits with code.
@@ -45,5 +49,20 @@ func TestProfileWiring_SandboxGatewayCheckRunsOpenshell(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if err := check(context.Background()); err != nil {
 		t.Fatalf("openshell missing read as the gateway down: %v", err)
+	}
+}
+
+// remote serve on a Mac offers the mac-confirm step-up: the API gets the
+// native dialog; elsewhere it gets none, so the kind is unusable.
+func TestProfileWiring_InstallsTheMacConfirmDialog(t *testing.T) {
+	p, closeAll, err := buildProfileWiring(t.TempDir(), noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	api := &remoteapi.API{}
+	p.Install(api, clientscope.Defaults(), false)
+	if got := api.MacConfirm != nil; got != (runtime.GOOS == "darwin") {
+		t.Fatalf("MacConfirm set %v on %s", got, runtime.GOOS)
 	}
 }

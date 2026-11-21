@@ -99,6 +99,7 @@ func TestModeQuestion_VerbatimConstraints(t *testing.T) {
 		"page":      "Answer only from the web page the user has open, or text or a screenshot they pasted: explain, summarize, translate, what this says or means. No tools, no web.",
 		"web":       "Needs a public web search or fetching public pages: news, releases, prices, public documentation, facts about products, people or places.",
 		"workspace": "Needs the owner's private sources: their notes or wiki, Jira, Slack, Gmail, Google Drive, calendar or past work sessions. Read-only, no web.",
+		"both":      "Needs the owner's private sources and the public web together: compare internal plans or notes with public releases, docs or news.",
 	}
 	if !reflect.DeepEqual(q.Options, want) {
 		t.Errorf("Options = %v", q.Options)

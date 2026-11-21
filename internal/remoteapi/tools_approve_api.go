@@ -13,7 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zanetworker/aimux/internal/clientscope"
 	"github.com/zanetworker/aimux/internal/errcode"
+	"github.com/zanetworker/aimux/internal/macconfirm"
+	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/remoteapi/devicelogin"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 	"github.com/zanetworker/aimux/internal/toolreg"
@@ -101,13 +104,7 @@ func (a *API) setForClient(w http.ResponseWriter, r *http.Request, name string) 
 		return ToolsView{}, toolreg.Set{}, false
 	}
 	client := a.clientOf(r)
-	requested := false
-	for _, m := range all {
-		if a.profileAllowed(client, m) && slices.Contains(m.Tools, name) {
-			requested = true
-		}
-	}
-	if !requested {
+	if !a.requestsSet(client, all, name) {
 		writeError(w, http.StatusForbidden, "forbidden_for_client", errSetNotForClient)
 		return ToolsView{}, toolreg.Set{}, false
 	}
@@ -123,6 +120,38 @@ func (a *API) setForClient(w http.ResponseWriter, r *http.Request, name string) 
 		return ToolsView{}, toolreg.Set{}, false
 	}
 	return v, set, true
+}
+
+// ApprovableSets is sets, in order, kept to those client may diff and
+// approve under its own scope (tools_approve and requestsSet, the diff
+// endpoint's checks); none when tools_approve is off:
+// a run profile's roles do not widen it. Nil when the profiles cannot be
+// read.
+func (a *API) ApprovableSets(client string, sets []string) []string {
+	if !a.Scopes.Clients[client].ToolsApprove || a.Profiles == nil { // toolsDiff's own gate
+		return nil
+	}
+	all, err := a.Profiles()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, s := range sets {
+		if a.requestsSet(client, all, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// requestsSet reports whether a profile in client's scope requests set.
+func (a *API) requestsSet(client string, all map[string]profile.Manifest, set string) bool {
+	for _, m := range all {
+		if a.profileAllowed(client, m) && slices.Contains(m.Tools, set) {
+			return true
+		}
+	}
+	return false
 }
 
 // livePin is the pin of tool's live definition under v, "" when the
@@ -215,7 +244,11 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "forbidden_for_client", errApproveNotAllowed)
 		return
 	}
-	if !a.steppedUpFor(r, c.StepUpKinds) {
+	// A device step-up is checked now; a mac-confirm one is asked once the
+	// request is known good, just before the pins are written.
+	stepUp, deviceOK := a.stepUpKind(r, c.StepUpKinds)
+	macConfirm := !deviceOK && slices.Contains(c.StepUpKinds, StepUpMacConfirm) && a.MacConfirm != nil
+	if !deviceOK && !macConfirm {
 		writeJSON(w, http.StatusForbidden, ErrorBody{Error: errApproveStepUp.Error(), Code: "step_up_required", MaxAge: int(stepUpMaxAge / time.Second)})
 		return
 	}
@@ -261,43 +294,8 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 	}
 	// Check the pins against what the server lists now, not the gateway's
 	// last listing: a tool that changed since the diff is then stale.
-	if a.Relist != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), relistTimeout)
-		res, err := a.Relist(ctx, set.Source, v.Snapshot.Version())
-		cancel()
-		before := v.Snapshot.Version()
-		switch {
-		case errors.Is(err, toolgateway.ErrGatewayNotRunning):
-			writeError(w, http.StatusServiceUnavailable, errcode.ToolGatewayNotRunning,
-				errors.New(errcode.Message(errcode.ToolGatewayNotRunning)+", then approve again"))
-			return
-		case errors.Is(err, toolgateway.ErrRelistUnsupported):
-			writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
-				errors.New("the tool gateway worker runs an older aimux than remote serve: run aimux mcp proxy gateway install, then approve again"))
-			return
-		case err == nil && a.Tools().Snapshot.Version() != before:
-			writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed while checking; get the diff again"))
-			return
-		case err == nil && !res.Listed:
-			err = fmt.Errorf("the relist did not list %s", set.Source)
-		case err == nil && res.Version != "" && res.Version != before:
-			// The worker listed under another configuration than this
-			// approval checks against (it reloads within a minute).
-			err = fmt.Errorf("the tool gateway listed %s under tool snapshot %s, not %s", set.Source, res.Version, before)
-		case err == nil && res.Live.Err != nil:
-			err = res.Live.Err // the backend is down: unknown, not changed
-		}
-		if err != nil {
-			a.logf("tools approve: relist of %s: %v", set.Source, err)
-			// A known limit: the budget is 5 s for the whole listing, which a
-			// source with many pages of tools can outlast.
-			writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
-				fmt.Errorf("%s did not list its tools within %v (slow or down); nothing was approved, try again", set.Source, relistTimeout))
-			return
-		}
-		// Check against what this relist saw, not a listing read later.
-		v.Live = maps.Clone(v.Live)
-		v.Live[set.Source] = res.Live
+	if v, ok = a.freshListing(w, r, set, v); !ok {
+		return
 	}
 
 	if req.Snapshot != "" && req.Snapshot != v.Snapshot.Version() {
@@ -334,7 +332,56 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 		}
 		targets = append(targets, req.Set+"/"+t.Name)
 	}
-	res, written, err := a.approvePins(v, targets, pins)
+	if macConfirm {
+		text := confirmText(client, req.Set, set.Source, req.Tools, v, pins)
+		if !macconfirm.Fits(text) {
+			writeError(w, http.StatusBadRequest, "bad_request", errors.New("too many tools to show in one confirmation on the Mac; approve fewer at a time"))
+			return
+		}
+		// One dialog at a time on the Mac: a second request while one
+		// waits would stack prompts.
+		if !a.confirming.CompareAndSwap(false, true) {
+			writeError(w, http.StatusServiceUnavailable, "confirm_pending", errors.New("an approval is already waiting for an answer on the Mac; answer it, then try again"))
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), (macconfirm.GiveUpAfter+10)*time.Second)
+		ans, err := a.MacConfirm(ctx, macConfirmTitle, text)
+		cancel()
+		a.confirming.Store(false)
+		if ans != macconfirm.Approved {
+			if err != nil {
+				a.logf("tools approve: mac-confirm for client %s: %v", client, err)
+			}
+			writeJSON(w, http.StatusForbidden, ErrorBody{Error: macConfirmRefusal(ans), Code: "step_up_required"})
+			return
+		}
+		// The person approved what aimux showed; anything that changed while
+		// the dialog was open makes that stale.
+		if a.Tools().Snapshot.Version() != v.Snapshot.Version() {
+			writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed while the approval was open on the Mac; get the diff again"))
+			return
+		}
+		// The backend may have changed a tool while the dialog was open:
+		// list it afresh again; the pins shown must still be what it lists.
+		if v, ok = a.freshListing(w, r, set, v); !ok {
+			return
+		}
+		for _, t := range req.Tools {
+			if live, _ := livePin(v, set.Source, t.Name); live != t.Pin {
+				writeError(w, http.StatusConflict, "pin_stale", fmt.Errorf("%s changed on its server while the approval was open on the Mac; nothing was approved, get the diff again", t.Name))
+				return
+			}
+		}
+		// Profiles are not in the snapshot: check, last before writing, that
+		// the client may still use the set (its scope, the profiles that
+		// request it).
+		if all, err := a.Profiles(); err != nil || !a.requestsSet(client, all, req.Set) {
+			writeError(w, http.StatusForbidden, "forbidden_for_client", errSetNotForClient)
+			return
+		}
+		stepUp = StepUpMacConfirm
+	}
+	res, written, err := a.approvePins(r.Context(), v, targets, pins)
 	if errors.Is(err, toolgateway.ErrPinsBusy) {
 		writeError(w, http.StatusServiceUnavailable, "pins_busy", err)
 		return
@@ -348,13 +395,60 @@ func (a *API) approveTools(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", errors.New("the pins could not be written; see the aimux remote serve log"))
 		return
 	}
-	ta := toolsAudit{set: req.Set}
+	ta := toolsAudit{set: req.Set, stepUp: stepUp}
 	for _, t := range req.Tools { // each pin was checked against the live definition
 		ta.tools = append(ta.tools, devicelogin.ApprovedTool{Tool: t.Name, Pin: t.Pin})
 	}
 	noteTools(w, r, ta)
 	a.logf("tools approve: client %s approved %v (written %v)", client, targets, written)
 	writeJSON(w, http.StatusOK, ToolsApproveResult{Results: res, Written: written})
+}
+
+// freshListing has the gateway apply v's tool snapshot and list set's
+// source afresh, and returns v with that relist's own listing of it; it
+// answers the request (and false) when the listing cannot be had or the
+// configuration moved. Without Relist, v is returned as is.
+func (a *API) freshListing(w http.ResponseWriter, r *http.Request, set toolreg.Set, v ToolsView) (ToolsView, bool) {
+	if a.Relist == nil {
+		return v, true
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), relistTimeout)
+	res, err := a.Relist(ctx, set.Source, v.Snapshot.Version())
+	cancel()
+	before := v.Snapshot.Version()
+	switch {
+	case errors.Is(err, toolgateway.ErrGatewayNotRunning):
+		writeError(w, http.StatusServiceUnavailable, errcode.ToolGatewayNotRunning,
+			errors.New(errcode.Message(errcode.ToolGatewayNotRunning)+", then approve again"))
+		return v, false
+	case errors.Is(err, toolgateway.ErrRelistUnsupported):
+		writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
+			errors.New("the tool gateway worker runs an older aimux than remote serve: run aimux mcp proxy gateway install, then approve again"))
+		return v, false
+	case err == nil && a.Tools().Snapshot.Version() != before:
+		writeError(w, http.StatusConflict, "pin_stale", errors.New("the tool configuration changed while checking; get the diff again"))
+		return v, false
+	case err == nil && !res.Listed:
+		err = fmt.Errorf("the relist did not list %s", set.Source)
+	case err == nil && res.Version != "" && res.Version != before:
+		// The worker listed under another configuration than this
+		// approval checks against (it reloads within a minute).
+		err = fmt.Errorf("the tool gateway listed %s under tool snapshot %s, not %s", set.Source, res.Version, before)
+	case err == nil && res.Live.Err != nil:
+		err = res.Live.Err // the backend is down: unknown, not changed
+	}
+	if err != nil {
+		a.logf("tools approve: relist of %s: %v", set.Source, err)
+		// A known limit: the budget is 5 s for the whole listing, which a
+		// source with many pages of tools can outlast.
+		writeError(w, http.StatusServiceUnavailable, "gateway_backend_down",
+			fmt.Errorf("%s did not list its tools within %v (slow or down); nothing was approved, try again", set.Source, relistTimeout))
+		return v, false
+	}
+	// Check against what this relist saw, not a listing read later.
+	v.Live = maps.Clone(v.Live)
+	v.Live[set.Source] = res.Live
+	return v, true
 }
 
 // toolStatuses is each tool of source's review status under v.
@@ -432,8 +526,89 @@ func aimuxAnnotations(def json.RawMessage) map[string]string {
 
 // toolsAudit is what an approval adds to its audit line.
 type toolsAudit struct {
-	set   string
-	tools []devicelogin.ApprovedTool
+	set    string
+	tools  []devicelogin.ApprovedTool
+	stepUp string // the step-up kind that allowed it
+}
+
+// StepUpMacConfirm is the step-up kind of a confirm dialog on the Mac.
+const StepUpMacConfirm = clientscope.StepUpMacConfirm
+
+// macConfirmTitle is the confirm dialog's title.
+const macConfirmTitle = "aimux: approve tools"
+
+// macConfirmRefusal is the 403 message for a dialog that did not approve.
+func macConfirmRefusal(ans macconfirm.Answer) string {
+	switch ans {
+	case macconfirm.Cancelled:
+		return "the approval was cancelled on the Mac; nothing was approved"
+	case macconfirm.TimedOut:
+		return "no one answered the approval on the Mac within 60 seconds; nothing was approved"
+	}
+	return "aimux could not ask on the Mac (no one logged in to its desktop, or the dialog could not be shown); nothing was approved"
+}
+
+// confirmText is what the Mac's dialog says: the client, the set, and for
+// each tool a one-line summary of what changed, all from aimux's own diff
+// of the live definitions it checked (never text from the client).
+func confirmText(client, set, source string, tools []ToolApproveEntry, v ToolsView, pins toolgateway.PinFile) string {
+	// By source and tool: a set asked for under an alias (wiki:readonly)
+	// is diffed under its real name (notes:readonly).
+	changes := map[string]toolgateway.Change{}
+	for _, ch := range toolgateway.Diff(v.Snapshot.Registry(), pins, v.Live) {
+		if ch.Source == source {
+			changes[ch.Tool] = ch
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s asks to approve tools of %s (source %s):\n\n", client, set, source)
+	for _, t := range tools {
+		fmt.Fprintf(&b, "- %s: %s\n", t.Name, changeSummary(changes[t.Name]))
+	}
+	b.WriteString("\nApprove only if you asked for this from that client.")
+	return b.String()
+}
+
+// changeSummary is what approving changes for a tool: "changed", then
+// each changed field on its own line with its value before and after (cut
+// to about 60 characters). Every field is listed: a batch too long for the
+// dialog is refused rather than shown in part.
+func changeSummary(ch toolgateway.Change) string {
+	switch ch.Kind {
+	case "":
+		return "unchanged"
+	case toolgateway.KindAdded:
+		return "new, not approved before"
+	}
+	var lines []string
+	for _, f := range ch.Fields {
+		if strings.Contains(f.Path, "x-aimux-") { // aimux's own annotations stay on the Mac's review
+			continue
+		}
+		lines = append(lines, "    "+f.Path+": "+shortValue(f.Before)+" -> "+shortValue(f.After))
+	}
+	switch {
+	case len(lines) == 0 && ch.Note != "":
+		return "changed (" + ch.Note + ")"
+	case len(lines) == 0:
+		return "changed"
+	}
+	return "changed\n" + strings.Join(lines, "\n")
+}
+
+// maxShownValue is how much of a field value the dialog shows.
+const maxShownValue = 60
+
+// shortValue is v for the dialog: "(none)" when absent, else cut to
+// maxShownValue characters with an ellipsis.
+func shortValue(v string) string {
+	if v == "" {
+		return "(none)"
+	}
+	if r := []rune(v); len(r) > maxShownValue {
+		return string(r[:maxShownValue-1]) + "…"
+	}
+	return v
 }
 
 // noteTools puts ta on the request's audit line: the local note, or the
@@ -457,10 +632,15 @@ var errPinsMoved = errors.New("the pins changed since the request was checked")
 // aimux tools approve takes too, saving it when a record changed. A target
 // whose record changed since checked (another approval meanwhile) fails
 // the whole request with errPinsMoved.
-func (a *API) approvePins(v ToolsView, targets []string, checked toolgateway.PinFile) ([]toolgateway.Approval, bool, error) {
+func (a *API) approvePins(ctx context.Context, v ToolsView, targets []string, checked toolgateway.PinFile) ([]toolgateway.Approval, bool, error) {
 	reg := v.Snapshot.Registry()
 	var res []toolgateway.Approval
 	written, err := a.Pins.Update(func(pins toolgateway.PinFile) (toolgateway.PinFile, bool, error) {
+		// A request cancelled while it waited (after Approve on the Mac,
+		// for the lock) commits nothing: the client has let go.
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		for _, tg := range targets {
 			set, tool, _ := strings.Cut(tg, "/")
 			s, _ := reg.Resolve(set) // resolved by the handler

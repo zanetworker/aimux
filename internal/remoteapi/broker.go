@@ -194,6 +194,9 @@ type TurnOptions struct {
 	// Image is the image pasted into the question (checked by the API),
 	// handed to the engine as profilerun.WithImage; nil for none.
 	Image *acprun.Image
+	// Caller is the authenticated client that asked for the turn, handed
+	// to the engine as profilerun.WithCaller; "" when not known.
+	Caller string
 }
 
 // StartWith is Start with the turn's options.
@@ -240,6 +243,11 @@ func (b *Broker) StartWith(session, text, key string, opt TurnOptions) (string, 
 	if opt.Image != nil {
 		ctx = profilerun.WithImage(ctx, opt.Image)
 	}
+	if opt.Caller != "" {
+		ctx = profilerun.WithCaller(ctx, opt.Caller)
+	}
+	links := &turnLinks{}
+	ctx = profilerun.WithTurnLinks(ctx, links.set)
 	l.active = turn
 	l.cancel = cancel
 	if key != "" {
@@ -248,13 +256,31 @@ func (b *Broker) StartWith(session, text, key string, opt TurnOptions) (string, 
 	b.appendLocked(session, turn, KindTurnStarted, TurnStartedData{Text: text})
 	b.mu.Unlock()
 
-	go b.run(ctx, cancel, session, turn, text)
+	go b.run(ctx, cancel, session, turn, text, links)
 	return turn, nil
+}
+
+// turnLinks holds the links a turn's engine reported (SetTurnLinks).
+type turnLinks struct {
+	mu    sync.Mutex
+	links []string
+}
+
+func (t *turnLinks) set(l []string) {
+	t.mu.Lock()
+	t.links = l
+	t.mu.Unlock()
+}
+
+func (t *turnLinks) get() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.links
 }
 
 // run executes a turn. Its context outlives the request that started it (the
 // client follows the turn through the event log) and is cancelled by Cancel.
-func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, turn, text string) {
+func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, turn, text string, links *turnLinks) {
 	defer cancel()
 	defer func() { // after the unlock below: the session is free by then
 		if b.opt.OnTurnEnd != nil {
@@ -284,7 +310,7 @@ func (b *Broker) run(ctx context.Context, cancel context.CancelFunc, session, tu
 	case err != nil:
 		b.appendLocked(session, turn, KindTurnError, turnErrorData(err))
 	default:
-		b.appendLocked(session, turn, KindTurnDone, TurnDoneData{StopReason: stop})
+		b.appendLocked(session, turn, KindTurnDone, TurnDoneData{StopReason: stop, Links: links.get()})
 	}
 	l := b.log(session)
 	l.active = ""

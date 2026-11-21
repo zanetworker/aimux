@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"github.com/zanetworker/aimux/internal/profile"
 )
 
 // uuidRE is the canonical form Claude Code names its transcripts with.
@@ -19,7 +21,7 @@ func Archive(ctx context.Context, b Backend, sandbox, sessionID, archiveDir stri
 	if !uuidRE.MatchString(sessionID) {
 		return fmt.Errorf("session id %q is not a UUID", sessionID)
 	}
-	if !sandboxNameRE.MatchString(sandbox) {
+	if !profile.ValidSandboxName(sandbox) {
 		return fmt.Errorf("invalid sandbox name %q", sandbox)
 	}
 	local := filepath.Join(archiveDir, "openshell-"+sandbox, sessionID+".jsonl")

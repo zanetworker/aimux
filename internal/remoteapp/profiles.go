@@ -54,6 +54,9 @@ func profileCatalog(dir string, log io.Writer) func() (map[string]profile.Manife
 		out := map[string]profile.Manifest{}
 		for _, n := range profile.BuiltinNames() {
 			m, err := profile.Resolve("builtin:"+n, user)
+			if err == nil {
+				err = profile.CheckRoles(m, user)
+			}
 			if err != nil {
 				problems = append(problems, fmt.Sprintf("builtin profile %s: %v", n, err))
 				continue
@@ -63,6 +66,9 @@ func profileCatalog(dir string, log io.Writer) func() (map[string]profile.Manife
 		}
 		for n := range user {
 			m, err := profile.Resolve(n, user)
+			if err == nil {
+				err = profile.CheckRoles(m, user)
+			}
 			if err != nil {
 				problems = append(problems, fmt.Sprintf("profile %s: %v", n, err))
 				continue

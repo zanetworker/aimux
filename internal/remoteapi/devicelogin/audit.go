@@ -76,9 +76,12 @@ type AuditEntry struct {
 	Source         string `json:"source,omitempty"`
 	// Set and Tools are set on tools_approve lines: the set and each tool
 	// with the pin it was approved at.
-	Set    string         `json:"set,omitempty"`
-	Tools  []ApprovedTool `json:"tools,omitempty"`
-	Result string         `json:"result"`
+	Set   string         `json:"set,omitempty"`
+	Tools []ApprovedTool `json:"tools,omitempty"`
+	// StepUp is the step-up kind that allowed the action (mac-confirm, or a
+	// device kind such as secure-enclave).
+	StepUp string `json:"step_up,omitempty"`
+	Result string `json:"result"`
 	// Count, on a failure line, is how many identical failures it stands
 	// for: those left out in the minute since the last such line, plus this.
 	Count int `json:"count,omitempty"`

@@ -58,11 +58,11 @@ func (s SourceTools) Ensure(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Ensure creates a missing sandbox but never starts or replaces one
-	// that stopped or failed: say how.
+	// Ensure creates a missing sandbox and replaces a dead one, but never
+	// starts one someone stopped: say how.
 	if phase, ok, err := s.t.b.phase(ctx, profile.RunnerSandbox); err != nil {
 		return err
-	} else if ok && terminalPhases[phase] {
+	} else if ok && terminalPhases[phase] && !deadPhases[phase] {
 		return stoppedRunner(phase)
 	}
 	if err := s.t.b.Ensure(ctx, c); err != nil {

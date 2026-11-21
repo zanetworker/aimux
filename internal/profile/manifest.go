@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -33,7 +34,7 @@ type Manifest struct {
 	Credentials    []string          `yaml:"credentials" json:"credentials"`
 	Settings       SettingsSpec      `yaml:"settings" json:"settings"`
 	UnsafePatterns bool              `yaml:"unsafe_patterns" json:"unsafe_patterns"`
-	Roles          map[string]string `yaml:"roles" json:"roles"` // role -> profile; targets are not validated yet
+	Roles          map[string]string `yaml:"roles" json:"roles"` // role -> profile; CheckRoles checks every target
 	Available      bool              `yaml:"-" json:"-"`
 }
 
@@ -76,7 +77,7 @@ const (
 var builtinFS embed.FS
 
 // unavailable builtins exist but cannot be used until a later plan ships.
-var unavailable = map[string]bool{"research-with-work": true}
+var unavailable = map[string]bool{}
 
 var (
 	validRuns  = map[string]bool{"host": true, "acp": true, "sandbox": true, "run": true}
@@ -179,6 +180,96 @@ func Resolve(name string, user map[string]Manifest) (Manifest, error) {
 		return Manifest{}, err
 	}
 	return m, validate(m)
+}
+
+// CheckRoles checks that every role m names is a profile that resolves and
+// validates, with a sandbox name OpenShell accepts, and that its own roles
+// do too. It is separate from Resolve on purpose: where a profile is
+// admitted (aimux profile check, the remote API catalog, the run engine
+// before a turn) a broken role refuses it, while routing, cancelling and
+// recovering a session already running under it keep working.
+func CheckRoles(m Manifest, user map[string]Manifest) error {
+	return validateRoles(m, builtins(), user, map[string]bool{})
+}
+
+// roleShape checks that a role's target can do that role's job and no
+// more: a planner reads private tools in a sandbox and never the web; a
+// writer composes on the page engine with no tools and no web. Other role
+// names are not shaped (a run reads the web under the built-in research
+// profile, never a reader role).
+func roleShape(role string, t Manifest) error {
+	web := slices.Contains(t.Network.Allow, "web")
+	switch role {
+	case "planner":
+		if t.Runs != "sandbox" {
+			return fmt.Errorf("profile %s runs %s, want sandbox", t.Name, t.Runs)
+		}
+		if web {
+			return fmt.Errorf("profile %s may not reach the web", t.Name)
+		}
+	case "writer":
+		if t.Runs != "acp" {
+			return fmt.Errorf("profile %s runs %s, want acp", t.Name, t.Runs)
+		}
+		if len(t.Tools) > 0 {
+			return fmt.Errorf("profile %s has tools", t.Name)
+		}
+		if web {
+			return fmt.Errorf("profile %s may not reach the web", t.Name)
+		}
+	}
+	return nil
+}
+
+// validateRoles checks that every role m names is a profile that resolves
+// and validates, and that its own roles do too, so an engine never starts a
+// stage under a profile that does not exist. seen ends a cycle of roles.
+func validateRoles(m Manifest, bi, user map[string]Manifest, seen map[string]bool) error {
+	if seen[m.Name] {
+		return nil
+	}
+	seen[m.Name] = true
+	roles := make([]string, 0, len(m.Roles))
+	for r := range m.Roles {
+		roles = append(roles, r)
+	}
+	sort.Strings(roles)
+	for _, r := range roles {
+		target := m.Roles[r]
+		if target == "" {
+			return fmt.Errorf("profile %q: role %s: no profile named; set it to a profile name", m.Name, r)
+		}
+		_, _, found, err := lookup(target, bi, user)
+		if err == nil && !found {
+			return fmt.Errorf("profile %q: role %s: profile %s not found", m.Name, r, target)
+		}
+		if err == nil {
+			// The target exists: a broken extends chain or an invalid
+			// manifest keeps its own error, naming what is wrong.
+			var tm Manifest
+			if tm, err = resolve(target, bi, user, map[string]bool{}); err == nil {
+				if err = validate(tm); err == nil {
+					if err = roleShape(r, tm); err == nil {
+						err = CheckSandboxName(tm)
+					}
+					if err == nil {
+						err = validateRoles(tm, bi, user, seen)
+					}
+				}
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("profile %q: role %s: %w", m.Name, r, err)
+		}
+	}
+	return nil
+}
+
+// Role is the profile that plays role in m (Manifest.Roles); ok is false
+// when m names no such role.
+func (m Manifest) Role(role string) (string, bool) {
+	p, ok := m.Roles[role]
+	return p, ok && p != ""
 }
 
 // lookup finds ref. A bare name that is both a builtin and a user entry is an

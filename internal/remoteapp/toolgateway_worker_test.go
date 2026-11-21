@@ -118,6 +118,13 @@ func TestToolGateway_NoticeNamesHeldBackTools(t *testing.T) {
 		r.Notice != "fake: 1 tool unpinned, held for review, left out of this turn: run aimux tools status" {
 		t.Fatalf("review %+v, want fake left out and named", r)
 	}
+	// The notice names the held tool's set as the profile asks for it.
+	if r := review(c); !reflect.DeepEqual(r.Sets, []string{"jira:readonly"}) {
+		t.Fatalf("review sets %v, want [jira:readonly]", r.Sets)
+	}
+	if r := review(profile.Compiled{Profile: "research", Snapshot: c.Snapshot}); r.Sets != nil {
+		t.Fatalf("no held tools: sets %v", r.Sets)
+	}
 	if got := notice(profile.Compiled{Profile: "research", Snapshot: c.Snapshot}); got != "" {
 		t.Fatalf("a profile without tool sets got a notice: %q", got)
 	}

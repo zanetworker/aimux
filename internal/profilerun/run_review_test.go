@@ -1,0 +1,274 @@
+package profilerun
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/zanetworker/aimux/internal/acprun"
+	claudehistory "github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/profile"
+	"github.com/zanetworker/aimux/internal/provider"
+	"github.com/zanetworker/aimux/internal/runcheck"
+	"github.com/zanetworker/aimux/internal/toolreg"
+)
+
+// compiledStage is a planner engine that reports the Compiled its turn ran
+// under, as the sandbox engine does.
+type compiledStage struct {
+	*fakeStage
+	by map[string]profile.Compiled // by child session id
+}
+
+func (s compiledStage) TurnCompiled(id string) (profile.Compiled, bool) {
+	c, ok := s.by[id]
+	return c, ok
+}
+
+// The outside flags come from the Compiled the planner's turn ran under,
+// not from a fresh compile that may differ (a source reclassified since).
+func TestRun_OutsideFlagsFromPlannerTurnCompile(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply(nil, "notes")}, tools: []ToolResult{{Name: "mcp__jira__search", Output: "ok"}}},
+		stageScript{}, stageScript{deltas: []string{"answer"}},
+	)
+	turn, _ := runCompile("work-readonly")
+	reg := turn.Snapshot.Registry()
+	src := reg.Sources["jira"]
+	src.Authorship = toolreg.AuthorshipOutside
+	reg.Sources["jira"] = src
+	turn.Snapshot = toolreg.NewSnapshot(reg, nil, nil)
+	// Only the planner child's own id carries the turn's Compiled; any other
+	// id falls back to runCompile, where jira is internal.
+	r.e.Planner = compiledStage{r.planner, map[string]profile.Compiled{"work-readonly-child": turn}}
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := r.store.Get(id)
+	if !reflect.DeepEqual(m.Run.OutsideAttempted, []string{"jira"}) || !reflect.DeepEqual(m.Run.OutsideSucceeded, []string{"jira"}) {
+		t.Fatalf("outside %v / %v, want jira from the turn's compile", m.Run.OutsideAttempted, m.Run.OutsideSucceeded)
+	}
+}
+
+// With no turn Compiled and a compile that fails, every server the planner
+// called counts as outside: the flags fail closed, never empty.
+func TestRun_OutsideFlagsFailClosedOnCompileError(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply(nil, "notes")}, tools: []ToolResult{
+			{Name: "mcp__jira__search", Output: "ok"},
+			{Name: "mcp__gh__issue_view", Output: "boom", Failed: true},
+			{Name: "Read", Output: "local"},
+		}},
+		stageScript{}, stageScript{deltas: []string{"answer"}},
+	)
+	r.e.Compile = func(string) (profile.Compiled, error) { return profile.Compiled{}, errors.New("registry unreadable") }
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := r.store.Get(id)
+	if !reflect.DeepEqual(m.Run.OutsideAttempted, []string{"gh", "jira"}) || !reflect.DeepEqual(m.Run.OutsideSucceeded, []string{"jira"}) {
+		t.Fatalf("outside %v / %v, want [gh jira] / [jira]", m.Run.OutsideAttempted, m.Run.OutsideSucceeded)
+	}
+}
+
+// The page's earlier questions are private to the query check.
+func TestRun_PriorQuestionsReachTheCheck(t *testing.T) {
+	prior := "how does the customer acme rollout plan for the egress proxy look"
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"customer acme rollout plan for the egress proxy look"}, "")}},
+		stageScript{}, stageScript{deltas: []string{"answer"}},
+	)
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(WithPrior(context.Background(), []string{prior}), id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := r.store.Get(id)
+	if len(m.Run.Accepted) != 0 || len(m.Run.Rejected) != 1 || m.Run.Rejected[0].Reason != runcheck.ReasonOverlap {
+		t.Fatalf("accepted %v rejected %v, want the prior-copying query rejected as overlap", m.Run.Accepted, m.Run.Rejected)
+	}
+}
+
+// A turn cancelled before a stage starts creates no child session.
+func TestRun_CancelledTurnStartsNoChild(t *testing.T) {
+	r := newRunRig(t, stageScript{deltas: []string{plannerReply(nil, "")}}, stageScript{}, stageScript{})
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.send(ctx, id, "q"); err == nil {
+		t.Fatal("a cancelled turn succeeded")
+	}
+	if len(r.planner.metas) != 0 {
+		t.Fatalf("planner child created %d times for a cancelled turn", len(r.planner.metas))
+	}
+}
+
+// A run session lost in a restart is reported by Check (so the API says
+// so before a turn), and cancelling it is not an error.
+func TestRun_CheckerReportsLostSession(t *testing.T) {
+	r := newRunRig(t, stageScript{}, stageScript{}, stageScript{})
+	var c Checker = r.e
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if err := c.Check(id); err != nil {
+		t.Fatalf("Check(known) = %v", err)
+	}
+	err := c.Check("lost")
+	if err == nil || !strings.Contains(err.Error(), "ask again from the page") {
+		t.Fatalf("Check(lost) = %v, want ask again from the page", err)
+	}
+	if err := r.e.Cancel("lost"); err != nil {
+		t.Fatalf("Cancel(lost) = %v, want nil", err)
+	}
+}
+
+// The planner stage runs with web forbidden for its launch: the engine
+// that compiles it refuses a profile that reaches the web, whatever the
+// role check saw at admission.
+func TestRun_PlannerStageForbidsWeb(t *testing.T) {
+	r := newRunRig(t, stageScript{deltas: []string{plannerReply(nil, "")}}, stageScript{}, stageScript{deltas: []string{"a"}})
+	var plannerNoWeb, writerNoWeb bool
+	r.e.Planner = ctxStage{r.planner, &plannerNoWeb}
+	r.e.Writer = ctxStage{r.write, &writerNoWeb}
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if !plannerNoWeb || writerNoWeb {
+		t.Fatalf("no-web: planner %v writer %v, want planner only", plannerNoWeb, writerNoWeb)
+	}
+}
+
+type ctxStage struct {
+	*fakeStage
+	noWeb *bool
+}
+
+func (s ctxStage) Send(ctx context.Context, id, text string, onEvent func(acprun.Event)) (string, error) {
+	*s.noWeb = NoWebFrom(ctx)
+	return s.fakeStage.Send(ctx, id, text, onEvent)
+}
+
+// Each finished run turn appends its question and answer to the run's own
+// transcript in the archive (Claude's JSONL shape), so the conversation is
+// readable after a restart, when the run itself cannot continue. A failed
+// turn writes nothing.
+func TestRun_TranscriptKeepsQuestionAndAnswer(t *testing.T) {
+	r := newRunRig(t, stageScript{deltas: []string{plannerReply(nil, "secret notes")}}, stageScript{}, stageScript{deltas: []string{"the ", "answer"}})
+	r.e.ArchiveDir = t.TempDir()
+	id := r.start(t, Meta{Client: "wingman"}, "page text")
+	for _, q := range []string{"first?", "second?"} {
+		if _, err := r.send(context.Background(), id, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(RunTranscriptPath(r.e.ArchiveDir, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var e struct {
+			Type      string `json:"type"`
+			SessionID string `json:"sessionId"`
+			Timestamp string `json:"timestamp"`
+			Message   struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatalf("line %q: %v", line, err)
+		}
+		if e.SessionID != id || e.Timestamp == "" || e.Type != e.Message.Role {
+			t.Fatalf("line %q: wrong session, time or role", line)
+		}
+		got = append(got, e.Type+":"+string(e.Message.Content))
+	}
+	want := []string{`user:"first?"`, `assistant:[{"type":"text","text":"the answer"}]`, `user:"second?"`, `assistant:[{"type":"text","text":"the answer"}]`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("transcript %v, want %v", got, want)
+	}
+	if strings.Contains(string(data), "secret notes") || strings.Contains(string(data), "page text") {
+		t.Fatal("the transcript holds the planner's notes or the page text")
+	}
+	failing := newRunRig(t, stageScript{err: errors.New("boom")}, stageScript{}, stageScript{})
+	failing.e.ArchiveDir = t.TempDir()
+	fid := failing.start(t, Meta{Client: "wingman"}, "")
+	_, _ = failing.send(context.Background(), fid, "q")
+	if _, err := os.Stat(RunTranscriptPath(failing.e.ArchiveDir, fid)); !os.IsNotExist(err) {
+		t.Fatalf("a failed turn wrote a transcript: %v", err)
+	}
+}
+
+// The run transcript reads as one turn per question through the real Claude
+// parser the session detail uses.
+func TestRun_TranscriptParsesAsTurns(t *testing.T) {
+	r := newRunRig(t, stageScript{deltas: []string{plannerReply(nil, "")}}, stageScript{}, stageScript{deltas: []string{"an answer"}})
+	r.e.ArchiveDir = t.TempDir()
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	for _, q := range []string{"first?", "second?"} {
+		if _, err := r.send(context.Background(), id, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	turns, err := (&provider.Claude{}).ParseTrace(RunTranscriptPath(r.e.ArchiveDir, id))
+	if err != nil || len(turns) != 2 {
+		t.Fatalf("parse: %v, %d turns, want 2", err, len(turns))
+	}
+	if !strings.Contains(strings.Join(turns[0].UserLines, " "), "first?") || !strings.Contains(turns[1].OutputText, "an answer") {
+		t.Fatalf("turns %+v", turns)
+	}
+}
+
+// Only a run session id (a UUID) names a transcript file: anything else,
+// such as a path, writes nothing.
+func TestRun_TranscriptOnlyForSessionIDs(t *testing.T) {
+	e := &RunEngine{ArchiveDir: t.TempDir()}
+	e.appendTranscript("../escape", "q", "a", nil)
+	entries, _ := os.ReadDir(e.ArchiveDir)
+	if len(entries) != 0 {
+		t.Fatalf("a non-id session wrote %v", entries)
+	}
+}
+
+// Run transcripts hold private workspace detail: they live in a folder the
+// search index and session lists skip, as Wingman's page sessions do.
+func TestRun_TranscriptFolderIsSkippedByIndex(t *testing.T) {
+	path := RunTranscriptPath(t.TempDir(), "11111111-2222-4333-8444-555555555555")
+	if !claudehistory.IsWingmanProjectDir(filepath.Base(filepath.Dir(path))) {
+		t.Fatalf("transcript folder %q is not one the index skips", filepath.Base(filepath.Dir(path)))
+	}
+}
+
+// Each run turn's fetched link set is kept with its answer in the
+// transcript, keyed so it lines up with the turn the Claude parser reads.
+func TestRun_TranscriptLinksMatchParsedTurns(t *testing.T) {
+	r := newRunRig(t,
+		stageScript{deltas: []string{plannerReply([]string{"openshell egress release notes"}, "")}},
+		stageScript{deltas: []string{"found"}, tools: []ToolResult{{Name: "WebFetch", Input: `{"url":"https://github.com/x"}`, Output: "ok"}}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	r.e.ArchiveDir = t.TempDir()
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(context.Background(), id, "first?"); err != nil {
+		t.Fatal(err)
+	}
+	path := RunTranscriptPath(r.e.ArchiveDir, id)
+	turns, err := (&provider.Claude{}).ParseTrace(path)
+	if err != nil || len(turns) != 1 {
+		t.Fatalf("parse: %v, %d turns", err, len(turns))
+	}
+	links := RunTranscriptLinks(path)
+	if got := links[turns[0].Timestamp.UnixNano()]; !reflect.DeepEqual(got, []string{"https://github.com/x"}) {
+		t.Fatalf("links for the parsed turn = %v (all %v), want the fetched page", got, links)
+	}
+	if RunTranscriptLinks(filepath.Join(t.TempDir(), "none.jsonl")) != nil {
+		t.Fatal("links of a missing transcript")
+	}
+}

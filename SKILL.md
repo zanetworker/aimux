@@ -81,7 +81,7 @@ Reuse on every invocation:
 aimux spawn --profile mysetup
 ```
 
-Explicit flags override profile values. Manage saved profiles (`aimux profile list` lists the v2 profiles; `aimux profile migrate` converts the saved ones):
+Explicit flags override profile values. Manage saved profiles (`aimux profile list` lists the v2 profiles, showing a profile that does not resolve with digest `-` and the reason on stderr, and still exits 0; `aimux profile check <name>` exits 1 when the profile does not resolve, its sandbox name is invalid, or a role it names does not check (a missing or invalid target, a `planner` that is not a `runs: sandbox` profile without `web`, or a `writer` that is not a `runs: acp` profile without tools or `web`); `aimux profile migrate` converts the saved ones):
 
 ```bash
 aimux profile get mysetup --json
@@ -138,7 +138,7 @@ aimux spawn gpt
 # Error: invalid provider "gpt" (must be one of: claude, codex)
 ```
 
-Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config. `aimux chat`, `aimux jump`, `aimux remote serve`, `aimux mcp proxy`, `aimux browser`, `aimux profile`, `aimux tools`, `aimux servers`, `aimux sandbox`, `aimux router`, `aimux setup` and `aimux doctor` return 1 for every failure, including missing arguments, an unknown session and a bad setting. Status commands exit 0 and report problems on stderr; `aimux doctor` exits 1 only when a check fails.
+Exit codes: 0=success, 1=error, 2=usage, 3=not-found, 4=config. `aimux chat`, `aimux jump`, `aimux remote serve`, `aimux mcp proxy`, `aimux browser`, `aimux profile`, `aimux tools`, `aimux servers`, `aimux sandbox`, `aimux router`, `aimux setup` and `aimux doctor` return 1 for every failure, including missing arguments, an unknown session and a bad setting. Status commands exit 0 and report problems on stderr, except that `aimux mcp proxy status` reports its findings on stdout (exit 0 when the proxy is stopped) and exits 1 when the proxy takes the connection but gives no valid status (with `--json` too: plain text on stderr, no JSON on stdout); `aimux doctor` exits 1 only when a check fails.
 
 With `--json`, errors go to stderr as structured JSON (except `aimux chat`, whose `--json` covers the event stream; its errors stay plain text):
 

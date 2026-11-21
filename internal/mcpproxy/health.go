@@ -42,7 +42,15 @@ type ServerStatus struct {
 	Instances int         `json:"instances"`     // >1 for per-session servers
 	PID       int         `json:"pid,omitempty"` // 0 unless exactly one instance runs
 	StartedAt time.Time   `json:"startedAt,omitzero"`
-	LastCall  time.Time   `json:"lastCall,omitzero"`
+	LastCall  time.Time   `json:"lastCall,omitzero"` // when the last call came in, whatever became of it
+	// LastOK is when the server last answered a call (a result, a tool's
+	// own error or a JSON-RPC error answer): an error before it is past.
+	LastOK time.Time `json:"lastOK,omitzero"`
+	// ErrorPast: after LastError the server answered a call or started
+	// well in the session the error came from (any, for a shared server),
+	// so the error no longer describes it. Set whenever there is a
+	// LastError; nil there means a daemon too old to say.
+	ErrorPast *bool `json:"errorPast,omitempty"`
 	// Calls counts every tool call routed to the server. Failures counts
 	// the calls that failed because of it (start failed, timed out, broken
 	// transport), so Failures <= Calls: N callers waiting on one failed
@@ -63,11 +71,14 @@ type serverStats struct {
 	failed     bool // the last start failed, or the backend broke after it
 	startedAt  time.Time
 	lastCall   time.Time
+	lastOK     time.Time
 	calls      int
 	failures   int
 	lastError  string
 	reason     FailureReason
 	lastErrAt  time.Time
+	errSession string // the session of the last error ("" for a shared server)
+	errPast    bool   // answered or started well in errSession since the last error
 	stderrTail []string
 }
 
@@ -83,8 +94,9 @@ func (p *Pool) stats(server string) *serverStats {
 
 // markFailed records that the server is broken until its next good start.
 // The caller holds p.mu.
-func (st *serverStats) markFailed(msg string, reason FailureReason, at time.Time) {
+func (st *serverStats) markFailed(msg string, reason FailureReason, at time.Time, session string) {
 	st.failed = true
+	st.errSession, st.errPast = session, false
 	st.lastError = firstLine(msg)
 	st.reason = reason
 	st.lastErrAt = at
@@ -127,9 +139,13 @@ func (p *Pool) Status(servers []string) []ServerStatus {
 		st := ServerStatus{Server: name}
 		h := p.health[name]
 		if h != nil {
-			st.StartedAt, st.LastCall = h.startedAt, h.lastCall
+			st.StartedAt, st.LastCall, st.LastOK = h.startedAt, h.lastCall, h.lastOK
 			st.Calls, st.Failures = h.calls, h.failures
 			st.LastError, st.LastErrorAt, st.Reason = h.lastError, h.lastErrAt, h.reason
+			if h.lastError != "" {
+				past := h.errPast
+				st.ErrorPast = &past
+			}
 			st.StderrTail = append([]string(nil), h.stderrTail...)
 		}
 		var l live

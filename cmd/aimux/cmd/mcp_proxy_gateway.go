@@ -246,11 +246,12 @@ func newMCPProxyGatewayStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			line := gatewayStatusLine(cmd.Context(), toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)})
+			st, err := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}.Status(cmd.Context())
 			w := cmd.OutOrStdout()
-			if !strings.HasPrefix(line, "tool gateway: running") {
+			if err != nil {
 				w = cmd.ErrOrStderr() // a problem, as other status commands report them
 			}
+			line, _ := gatewayStatusStyled(st, err, time.Now(), statusColor(w), termWidth(w))
 			_, _ = fmt.Fprintln(w, line)
 			return nil
 		},

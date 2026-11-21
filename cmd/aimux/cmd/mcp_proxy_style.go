@@ -1,18 +1,22 @@
 package cmd
 
 import (
+	"cmp"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
+	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
+	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
 // ANSI styles for `aimux mcp proxy status`: one colour for a server's state
@@ -39,10 +43,10 @@ func paint(on bool, style, s string) string {
 	return "\x1b[" + style + "m" + s + "\x1b[0m"
 }
 
-// pad pads s with spaces to width runes; colour is applied after padding, so
+// pad pads s with spaces to width terminal cells; colour is applied after padding, so
 // escape codes never count as width.
 func pad(s string, width int) string {
-	if n := utf8.RuneCountInString(s); n < width {
+	if n := runewidth.StringWidth(s); n < width {
 		return s + strings.Repeat(" ", width-n)
 	}
 	return s
@@ -72,144 +76,583 @@ func stateAge(now, at time.Time) string {
 	return " " + mcpproxy.Ago(now, at)
 }
 
-// stateRank orders the table by what needs attention: failed, then active,
-// then at rest; removed servers go last.
+// stateRank orders servers of one kind: active before at rest.
 var stateRank = map[mcpproxy.ServerState]int{mcpproxy.StateFailed: 0, mcpproxy.StateStarting: 1, mcpproxy.StateRunning: 2,
 	mcpproxy.StateIdleStopped: 3, mcpproxy.StateNotStarted: 4}
 
-// printProxyStatus prints the daemon line, a summary of server states, the
-// server table (failed and active first), then the stderr tail of each
-// failed server. removed are servers whose entry left ~/.claude.json: shown
-// as removed, last, and counted apart.
-func printProxyStatus(out io.Writer, addr string, rep mcpproxy.StatusReport, now time.Time, color bool, removed ...string) {
-	isRemoved := func(name string) bool { return slices.Contains(removed, name) }
-	servers := slices.Clone(rep.Servers)
-	sort.SliceStable(servers, func(a, b int) bool {
-		ra, rb := stateRank[servers[a].State], stateRank[servers[b].State]
-		if isRemoved(servers[a].Server) {
-			ra = 9
-		}
-		if isRemoved(servers[b].Server) {
-			rb = 9
-		}
-		if ra != rb {
-			return ra < rb
-		}
-		return servers[a].Server < servers[b].Server
-	})
-	_, _ = fmt.Fprintf(out, "%s on %s · pid %d · started %s\n", paint(color, styleBold, "MCP proxy"), addr, rep.PID, mcpproxy.Ago(now, rep.StartedAt))
+// termWidth is w's terminal width in columns, 0 when w is not a terminal
+// (piped output is never cut or wrapped).
+func termWidth(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok || !term.IsTerminal(int(f.Fd())) { // #nosec G115 -- small fd
+		return 0
+	}
+	cols, _, err := term.GetSize(int(f.Fd())) // #nosec G115 -- small fd
+	if err != nil {
+		return 0
+	}
+	return cols
+}
 
-	count := map[mcpproxy.ServerState]int{}
-	nRemoved := 0
-	for _, s := range servers {
-		if isRemoved(s.Server) {
-			nRemoved++
-			continue
-		}
-		count[s.State]++
-	}
-	parts := []string{fmt.Sprintf("%d servers", len(rep.Servers))}
-	part := func(n int, label, style string, always bool) {
-		if n == 0 && !always {
-			return
-		}
-		if n == 0 {
-			style = styleDim
-		}
-		parts = append(parts, paint(color, style, fmt.Sprintf("%d %s", n, label)))
-	}
-	part(count[mcpproxy.StateRunning], "running", styleGreen, true)
-	part(count[mcpproxy.StateStarting], "starting", styleBold, false)
-	part(count[mcpproxy.StateIdleStopped], "idle", styleDim, false)
-	part(count[mcpproxy.StateNotStarted], "not started", styleDim, false)
-	part(count[mcpproxy.StateFailed], "failed", styleRed, true)
-	part(nRemoved, "removed", styleDim, false)
-	_, _ = fmt.Fprintf(out, "%s\n\n", strings.Join(parts, paint(color, styleDim, " · ")))
+// statusPage is everything `aimux mcp proxy status` prints.
+type statusPage struct {
+	addr         string
+	rep          *mcpproxy.StatusReport // nil: the proxy is not running
+	install      *mcpproxy.InstallState // nil: not read
+	installErr   error                  // why the install state could not be read
+	claudeConfig string
+	upgradeText  string
+	gateway      func() string // the tool gateway line, styled, asked once the proxy's part is out; nil or "" leaves it out
+	noAnswer     bool          // the proxy took the connection but gave no status
+	now          time.Time
+	color        bool
+	width        int  // terminal columns; 0 cuts and wraps nothing
+	all          bool // every server as a row, instead of never-started ones on one line
+}
 
-	type row struct{ name, state, stateStyle, tools, last, err string }
-	rows := make([]row, 0, len(servers))
-	w := [4]int{len("SERVER"), len("STATE"), len("TOOLS"), len("LAST CALL")}
-	for _, s := range servers {
-		label, style := stateLabel(s.State)
-		if s.State == mcpproxy.StateFailed {
-			label += stateAge(now, s.LastErrorAt) // a failure is last known, not live
-		}
-		if isRemoved(s.Server) {
-			label, style = "○ removed", styleDim
-		}
-		lastErr := s.LastError
-		if s.ProbeError != "" {
-			lastErr = s.ProbeError
-		}
-		r := row{printable(s.Server), label, style, fmt.Sprint(s.Tools), mcpproxy.Ago(now, s.LastCall), printable(lastErr)}
-		for i, v := range []string{r.name, r.state, r.tools, r.last} {
-			if n := utf8.RuneCountInString(v); n > w[i] {
-				w[i] = n
-			}
-		}
-		rows = append(rows, r)
+// serverKind is where a server goes on the page, problems first.
+type serverKind int
+
+const (
+	kindFailed     serverKind = iota // failed, or a probe could not start it
+	kindWarning                      // live, but its last error is newer than its last call and start
+	kindActive                       // starting, running or idle
+	kindNotStarted                   // never started
+	kindRemoved                      // its entry left the Claude config
+)
+
+// errorIsPast reports whether the daemon says the server answered a call
+// or started well after its last error, in the session the error came
+// from, so the error no longer describes it. A daemon too old to say
+// (no errorPast) is not guessed at: its error is old unless it came after
+// the server's last answer.
+func errorIsPast(s mcpproxy.ServerReport) bool {
+	if s.State == mcpproxy.StateFailed {
+		return false
 	}
-	_, _ = fmt.Fprintf(out, "  %s\n", paint(color, styleDim, strings.TrimRight(
-		pad("SERVER", w[0])+"  "+pad("STATE", w[1])+"  "+pad("TOOLS", w[2])+"  "+pad("LAST CALL", w[3])+"  LAST ERROR", " ")))
-	for _, r := range rows {
-		last := paint(color, map[bool]string{true: styleDim}[r.last == "never"], pad(r.last, w[3]))
-		errText := r.err
-		if errText == "" {
-			errText = paint(color, styleDim, "-")
-		} else {
-			errText = paint(color, styleRed, errText)
-		}
-		_, _ = fmt.Fprintf(out, "  %s  %s  %s  %s  %s\n", pad(r.name, w[0]), paint(color, r.stateStyle, pad(r.state, w[1])),
-			pad(r.tools, w[2]), last, errText)
+	if s.ErrorPast == nil {
+		return s.LastOK.IsZero() || !s.LastErrorAt.After(s.LastOK)
 	}
-	for _, s := range servers {
-		if s.State != mcpproxy.StateFailed || len(s.StderrTail) == 0 {
-			continue
-		}
-		_, _ = fmt.Fprintf(out, "\n%s\n", paint(color, styleRed, printable(s.Server)+" stderr:"))
-		for _, line := range s.StderrTail {
-			_, _ = fmt.Fprintf(out, "  %s\n", paint(color, styleDim, printable(line)))
-		}
+	return *s.ErrorPast
+}
+
+// classify places a server; errorKind is how its own error reads (failed,
+// warning or neither), whether or not its entry was removed.
+func classify(s mcpproxy.ServerReport, removed bool) serverKind {
+	switch k := errorKind(s); {
+	case s.ProbeError != "": // a probe the owner just asked for
+		return kindFailed
+	case removed:
+		return kindRemoved
+	default:
+		return k
 	}
 }
 
-// printInstallState prints what install moved, compactly (the table lists
-// the servers): removed entries and drift apart, things to act on in yellow.
-func printInstallState(out io.Writer, st mcpproxy.InstallState, claudeConfig, upgradeText string, color bool) {
+func errorKind(s mcpproxy.ServerReport) serverKind {
+	switch {
+	case s.ProbeError != "" || s.State == mcpproxy.StateFailed:
+		return kindFailed
+	case s.LastError != "" && !errorIsPast(s):
+		return kindWarning
+	case s.State == mcpproxy.StateNotStarted:
+		return kindNotStarted
+	}
+	return kindActive
+}
+
+// cut shortens s to n terminal cells ending in an ellipsis; n <= 0 keeps
+// it whole.
+func cut(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	return runewidth.Truncate(s, n, "…")
+}
+
+// wrap breaks text at spaces so no line passes width cells; lines after
+// the first start with hang spaces. A command in backticks is one word, so
+// it is never broken and pastes whole. width 0 keeps one line.
+func wrap(text string, width, hang int) []string {
+	words := commandWords(text)
+	lead := text[:len(text)-len(strings.TrimLeft(text, " "))]
+	if width <= 0 || len(words) == 0 {
+		return []string{text}
+	}
+	var lines []string
+	line := lead + words[0]
+	for _, w := range words[1:] {
+		if runewidth.StringWidth(line)+1+runewidth.StringWidth(w) > width {
+			lines = append(lines, line)
+			line = strings.Repeat(" ", hang) + w
+			continue
+		}
+		line += " " + w
+	}
+	return append(lines, line)
+}
+
+// escapes matches the ANSI styles paint adds.
+var escapes = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// cutDistinct cuts each name to n cells; names that would then read the
+// same as another's keep their ending after the ellipsis, as short as
+// tells them apart ("playwright-b…a", "playwright-b…o"). The same name
+// twice stays the same.
+func cutDistinct(names []string, n int) []string {
+	out := make([]string, len(names))
+	for i, s := range names {
+		out[i] = cut(s, n)
+	}
+	clash := func(i int) bool {
+		for j := range names {
+			if j != i && names[j] != names[i] && out[j] == out[i] {
+				return true
+			}
+		}
+		return false
+	}
+	var clashing []int
+	for i := range names {
+		if out[i] != names[i] && clash(i) {
+			clashing = append(clashing, i)
+		}
+	}
+	// Endings grow together, one rune at a time, until no cut name reads
+	// like another's or the head would be gone.
+	for k := 1; len(clashing) > 0 && k < n-1; k++ {
+		for _, i := range clashing {
+			r := []rune(names[i])
+			tail := string(r[max(len(r)-k, 0):])
+			out[i] = runewidth.Truncate(names[i], max(n-runewidth.StringWidth(tail), 1), "…") + tail
+		}
+		var still []int
+		for _, i := range clashing {
+			if clash(i) {
+				still = append(still, i)
+			}
+		}
+		if len(still) == 0 {
+			break
+		}
+	}
+	return out
+}
+
+// commandWords splits text at spaces outside backticks.
+func commandWords(text string) []string {
+	var words []string
+	var cur strings.Builder
+	in := false
+	for _, r := range text {
+		switch {
+		case r == '`':
+			in = !in
+			cur.WriteRune(r)
+		case r == ' ' && !in:
+			if cur.Len() > 0 {
+				words = append(words, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		words = append(words, cur.String())
+	}
+	return words
+}
+
+// joinWrapped joins styled parts with a dim " · ", starting a new line
+// (indented two spaces) before a part that would pass width; width 0 keeps
+// one line. Escape codes never count as width.
+func joinWrapped(parts []string, color bool, width int) []string {
+	sep := paint(color, styleDim, " · ")
+	visible := func(s string) int { return runewidth.StringWidth(escapes.ReplaceAllString(s, "")) }
+	var lines []string
+	line := ""
+	for i, part := range parts {
+		switch {
+		case i == 0:
+			line = part
+		case width > 0 && visible(line)+visible(" · ")+visible(part) > width:
+			lines = append(lines, line)
+			line = "  " + part
+		default:
+			line += sep + part
+		}
+	}
+	return append(lines, line)
+}
+
+// wrapItems lists items after prefix, comma separated, breaking only
+// between items so no line passes width; later lines start with hang
+// spaces, and an item too long for a line of its own is cut. width 0
+// keeps one line.
+func wrapItems(prefix string, items []string, width, hang int) []string {
+	var lines []string
+	line, onLine := prefix, 0
+	for i, it := range items {
+		if i < len(items)-1 {
+			it += ","
+		}
+		sep := " "
+		if onLine == 0 {
+			sep = ""
+		}
+		if width > 0 && runewidth.StringWidth(line)+len(sep)+runewidth.StringWidth(it) > width && (onLine > 0 || i == 0) {
+			lines = append(lines, strings.TrimRight(line, " "))
+			line, onLine, sep = strings.Repeat(" ", hang), 0, ""
+		}
+		if width > 0 {
+			it = cut(it, max(width-runewidth.StringWidth(line), 1))
+		}
+		line += sep + it
+		onLine++
+	}
+	return append(lines, line)
+}
+
+// span is how long ago t was, without "ago": "3h", "0s".
+func span(now, t time.Time) string {
+	if s := mcpproxy.Ago(now, t); s != "just now" {
+		return strings.TrimSuffix(s, " ago")
+	}
+	return "0s"
+}
+
+// printStatusPage prints the proxy line and a count per state, what needs
+// the owner (yellow), the servers with a problem (red failed, yellow recent
+// error) and then the active ones, never-started servers on one line
+// (every server with all), the gateway line, and dim notes. Colour only
+// when p.color; the text is the same either way.
+func printStatusPage(out io.Writer, p statusPage) {
+	c := p.color
+	var blocks [][]string
+
+	installed := p.install != nil && p.install.State != mcpproxy.InstallNotInstalled
+	var head []string
+	switch {
+	case p.noAnswer:
+		head = append(head, paint(c, styleBold, "MCP proxy")+" "+paint(c, styleYellow, "? no status")+" from "+p.addr)
+	case p.rep == nil:
+		glyph, style := "○ not running", styleDim
+		if installed {
+			glyph, style = "● not running", styleRed
+		}
+		head = append(head, paint(c, styleBold, "MCP proxy")+" "+paint(c, style, glyph)+" on "+p.addr)
+	default:
+		parts := []string{paint(c, styleBold, "MCP proxy") + " " + paint(c, styleGreen, "● running"), fmt.Sprintf("pid %d", p.rep.PID)}
+		if p.rep.Version != "" {
+			parts = append(parts, "aimux "+printable(p.rep.Version))
+		}
+		parts = append(parts, "up "+span(p.now, p.rep.StartedAt), p.addr)
+		head = append(head, joinWrapped(parts, c, p.width)...)
+	}
+
+	var removed []string
+	if p.install != nil {
+		removed = p.install.Removed
+	}
+	type server struct {
+		mcpproxy.ServerReport
+		kind serverKind
+	}
+	var servers []server
+	if p.rep != nil {
+		for _, s := range p.rep.Servers {
+			servers = append(servers, server{s, classify(s, slices.Contains(removed, s.Server))})
+		}
+		sort.SliceStable(servers, func(a, b int) bool {
+			x, y := servers[a], servers[b]
+			if x.kind != y.kind {
+				return x.kind < y.kind
+			}
+			if rx, ry := stateRank[x.State], stateRank[y.State]; rx != ry {
+				return rx < ry
+			}
+			return x.Server < y.Server
+		})
+		// A count per state of the servers still configured; a probe that
+		// failed on a server that did not fail, and a recent error on a live
+		// one, are counted apart and not instead of its state.
+		count := map[serverKind]int{}
+		byState := map[mcpproxy.ServerState]int{}
+		probeFailed := 0
+		for _, s := range servers {
+			isRemoved := slices.Contains(removed, s.Server)
+			switch {
+			case isRemoved:
+				count[kindRemoved]++
+			case s.kind == kindWarning:
+				count[kindWarning]++
+				byState[s.State]++
+			default:
+				byState[s.State]++
+			}
+			if s.ProbeError != "" && (isRemoved || s.State != mcpproxy.StateFailed) {
+				probeFailed++
+			}
+		}
+		parts := []string{}
+		part := func(n int, label, style string, always bool) {
+			if n == 0 && !always {
+				return
+			}
+			if n == 0 {
+				style = styleDim
+			}
+			parts = append(parts, paint(c, style, fmt.Sprintf("%d %s", n, label)))
+		}
+		part(byState[mcpproxy.StateFailed], "failed", styleRed, true)
+		part(probeFailed, "probe failed", styleRed, false)
+		part(count[kindWarning], map[bool]string{true: "warning", false: "warnings"}[count[kindWarning] == 1], styleYellow, false)
+		part(byState[mcpproxy.StateRunning], "running", styleGreen, true)
+		part(byState[mcpproxy.StateStarting], "starting", styleBold, false)
+		part(byState[mcpproxy.StateIdleStopped], "idle", styleDim, false)
+		part(byState[mcpproxy.StateNotStarted], "not started", styleDim, false)
+		part(count[kindRemoved], "removed", styleDim, false)
+		parts[0] = fmt.Sprintf("%d servers: ", len(p.rep.Servers)) + parts[0]
+		head = append(head, joinWrapped(parts, c, p.width)...)
+	}
+	for _, w := range installWarnings(p) {
+		for _, line := range wrap("! "+w, p.width, 2) {
+			head = append(head, paint(c, styleYellow, line))
+		}
+	}
+	blocks = append(blocks, head)
+
+	// Rows: the shown servers in aligned columns, each problem followed by
+	// its error (and a failed start's stderr) on indented lines.
+	type row struct {
+		server
+		cells  [4]string
+		style  string
+		detail []string // plain text
+		dStyle []string
+	}
+	var rows []row
+	var notStarted []string
+	w := [3]int{}
+	for _, s := range servers {
+		if !p.all && (s.kind == kindNotStarted || s.kind == kindRemoved) {
+			if s.kind == kindNotStarted {
+				notStarted = append(notStarted, printable(s.Server))
+			}
+			continue
+		}
+		label, style := stateLabel(s.State)
+		if s.kind == kindFailed && s.State == mcpproxy.StateFailed {
+			label += stateAge(p.now, s.LastErrorAt) // a failure is last known, not live
+		}
+		if s.kind == kindRemoved {
+			label, style = "○ removed", styleDim
+		}
+		last := "never called"
+		if !s.LastCall.IsZero() {
+			last = "called " + mcpproxy.Ago(p.now, s.LastCall)
+		}
+		r := row{server: s, cells: [4]string{printable(s.Server), label, plural(s.Tools, "tool", "tools"), last}, style: style}
+		add := func(text, style string) {
+			r.detail = append(r.detail, cut(printable(text), p.width-6))
+			r.dStyle = append(r.dStyle, style)
+		}
+		age := ""
+		if !s.LastErrorAt.IsZero() {
+			age = " · " + mcpproxy.Ago(p.now, s.LastErrorAt)
+		}
+		ek := s.kind
+		if ek == kindRemoved {
+			ek = errorKind(s.ServerReport) // its entry left the config; its backend's errors are still its own
+		}
+		switch {
+		case ek == kindFailed:
+			if e := cmp.Or(s.ProbeError, s.LastError); e != "" {
+				add(e, styleRed)
+			}
+			if s.State == mcpproxy.StateFailed {
+				for _, line := range s.StderrTail {
+					add(line, styleDim)
+				}
+			}
+		case ek == kindWarning:
+			// The error is cut, never its age.
+			r.detail = append(r.detail, cut(printable(s.LastError), p.width-6-runewidth.StringWidth(age))+age)
+			r.dStyle = append(r.dStyle, styleYellow)
+		case s.LastError != "" && p.all:
+			add("(old) "+s.LastError+age, styleDim)
+		}
+		for i, v := range r.cells[:3] {
+			w[i] = max(w[i], runewidth.StringWidth(v))
+		}
+		rows = append(rows, r)
+	}
+	// On a narrow terminal the name column gives way (to 8 at least); when
+	// that is not enough, rows keep the name and state only.
+	lastW := 0
+	for _, r := range rows {
+		lastW = max(lastW, runewidth.StringWidth(r.cells[3]))
+	}
+	narrow := false
+	if over := 2 + w[0] + 2 + w[1] + 2 + w[2] + 2 + lastW - p.width; p.width > 0 && over > 0 {
+		if w[0]-over >= 8 {
+			w[0] -= over
+		} else {
+			narrow = true
+			w[0] = max(min(w[0], p.width-4-w[1]), 8)
+		}
+	}
+	names := make([]string, len(rows))
+	for i, r := range rows {
+		names[i] = r.cells[0]
+	}
+	names = cutDistinct(names, w[0])
+	var problems, rest []string
+	for i, r := range rows {
+		r.cells[0] = names[i]
+		// The last column is not padded, so a line never ends in spaces.
+		line := "  " + pad(r.cells[0], w[0]) + "  " + paint(c, r.style, r.cells[1])
+		if !narrow {
+			line = "  " + pad(r.cells[0], w[0]) + "  " + paint(c, r.style, pad(r.cells[1], w[1])) + "  " + pad(r.cells[2], w[2]) + "  " +
+				paint(c, map[bool]string{true: styleDim}[r.LastCall.IsZero()], r.cells[3])
+		}
+		lines := []string{line}
+		for i, d := range r.detail {
+			lines = append(lines, paint(c, r.dStyle[i], "      "+d))
+		}
+		if r.kind <= kindWarning {
+			problems = append(problems, lines...)
+		} else {
+			rest = append(rest, lines...)
+		}
+	}
+	blocks = append(blocks, problems, rest)
+	if len(notStarted) > 0 {
+		var ns []string
+		for _, line := range wrapItems(fmt.Sprintf("  ○ %d not started: ", len(notStarted)), notStarted, p.width, 4) {
+			ns = append(ns, paint(c, styleDim, line))
+		}
+		blocks = append(blocks, ns)
+	}
+
+	first := true
+	emit := func(blocks ...[]string) {
+		for _, b := range blocks {
+			if len(b) == 0 {
+				continue
+			}
+			if !first {
+				_, _ = fmt.Fprintln(out)
+			}
+			first = false
+			_, _ = fmt.Fprintln(out, strings.Join(b, "\n"))
+		}
+	}
+	// The proxy's part is out before the gateway is asked: a gateway that
+	// stalls never holds back what the proxy said.
+	emit(blocks...)
+	if p.gateway != nil {
+		if g := p.gateway(); g != "" {
+			emit([]string{g})
+		}
+	}
+	var notes []string
+	for _, n := range installNotes(p) {
+		for _, line := range wrap("· "+n, p.width, 2) {
+			notes = append(notes, paint(c, styleDim, line))
+		}
+	}
+	emit(notes)
+}
+
+// installWarnings are what the owner should act on, from the install state.
+func installWarnings(p statusPage) []string {
+	if p.installErr != nil {
+		return []string{"install state unknown: " + p.installErr.Error()}
+	}
+	st := p.install
+	if st == nil {
+		return nil
+	}
 	if st.State == mcpproxy.InstallNotInstalled {
-		_, _ = fmt.Fprintf(out, "Install: not installed (`aimux mcp proxy install` moves Claude Code's stdio and HTTP servers behind the proxy)\n")
-		return
+		return []string{"not installed: `aimux mcp proxy install` moves Claude Code's stdio and HTTP servers behind the proxy"}
 	}
-	_, _ = fmt.Fprintf(out, "%d servers behind the proxy %s\n", len(st.Moved),
-		paint(color, styleDim, "· change one with `aimux mcp proxy edit <server>`"))
-	warn := func(format string, a ...any) {
-		_, _ = fmt.Fprintf(out, "  %s %s\n", paint(color, styleYellow, "!"), fmt.Sprintf(format, a...))
-	}
-	note := func(format string, a ...any) {
-		_, _ = fmt.Fprintf(out, "  %s\n", paint(color, styleDim, "· "+fmt.Sprintf(format, a...)))
-	}
+	var out []string
 	if len(st.Drifted) > 0 {
-		warn("drifted: %s (its entry is no longer the proxy URL: a running session saved an old copy, or it was edited); to fix it, %s",
-			strings.Join(st.Drifted, ", "), mcpproxy.DriftFix)
+		out = append(out, fmt.Sprintf("drifted: %s (its entry is no longer the proxy URL: a running session saved an old copy, or it was edited); to fix it, %s",
+			strings.Join(st.Drifted, ", "), mcpproxy.DriftFix))
 	}
 	if len(st.NotProxied) > 0 {
-		warn("not behind the proxy: %s (`aimux mcp proxy install` moves them)", strings.Join(st.NotProxied, ", "))
+		out = append(out, fmt.Sprintf("not behind the proxy: %s (`aimux mcp proxy install` moves them)", strings.Join(st.NotProxied, ", ")))
 	}
-	if st.UpgradePending {
-		warn("%s", upgradeText)
+	if st.UpgradePending && p.upgradeText != "" {
+		out = append(out, p.upgradeText)
 	}
+	if !st.Hooks {
+		out = append(out, "hooks off: servers you add later stay direct; `aimux mcp proxy install` adds the hooks")
+	}
+	return out
+}
+
+// installNotes are the install facts at rest, shown dim.
+func installNotes(p statusPage) []string {
+	st := p.install
+	if st == nil || st.State == mcpproxy.InstallNotInstalled {
+		return nil
+	}
+	out := []string{fmt.Sprintf("%d servers behind the proxy; change one with `aimux mcp proxy edit <server>`", len(st.Moved))}
 	if st.Hooks {
-		note("hooks on: a server you add in a session moves behind the proxy; servers still direct are named when a session starts")
-	} else {
-		warn("hooks off: servers you add later stay direct; `aimux mcp proxy install` adds the hooks")
+		out = append(out, "hooks on: a server you add in a session moves behind the proxy; servers still direct are named when a session starts")
 	}
 	if len(st.Removed) > 0 {
-		note("removed from %s: %s (still served by the proxy, unused; `aimux mcp proxy install` takes them off)", claudeConfig, strings.Join(st.Removed, ", "))
+		out = append(out, fmt.Sprintf("removed from %s: %s (still served by the proxy, unused; `aimux mcp proxy install` takes them off)",
+			p.claudeConfig, strings.Join(st.Removed, ", ")))
 	}
 	if len(st.Skipped) > 0 {
-		note("kept direct: %s (`aimux mcp proxy install --unskip <name>` moves one)", strings.Join(st.Skipped, ", "))
+		out = append(out, fmt.Sprintf("kept direct: %s (`aimux mcp proxy install --unskip <name>` moves one)", strings.Join(st.Skipped, ", ")))
 	}
-	for _, line := range mcpproxy.KeptDirectLines(st.KeptDirect) {
-		note("%s", line)
+	return append(out, mcpproxy.KeptDirectLines(st.KeptDirect)...)
+}
+
+// gatewayStatusStyled is the tool gateway in the page's style, from its
+// status or the error asking for it, broken at a separator to fit width;
+// ok is false when the worker is not running or did not answer.
+func gatewayStatusStyled(st toolgateway.ControlStatus, err error, now time.Time, color bool, width int) (line string, ok bool) {
+	name := paint(color, styleBold, "tool gateway")
+	var parts []string
+	switch {
+	case errors.Is(err, toolgateway.ErrGatewayNotRunning):
+		parts = []string{name + " " + paint(color, styleRed, "● not running"), "Workspace turns fail", "run `aimux mcp proxy gateway install`"}
+	case err != nil:
+		parts = []string{name + " " + paint(color, styleYellow, "? unknown") + ": " + err.Error()}
+	default:
+		state := "● running"
+		if !st.StartedAt.IsZero() {
+			state += " " + span(now, st.StartedAt)
+		}
+		parts = []string{name + " " + paint(color, styleGreen, state), plural(st.Leases, "lease", "leases"), plural(len(st.Backends), "backend", "backends")}
+		if len(st.Down) > 0 {
+			down := make([]string, len(st.Down))
+			for i, n := range st.Down {
+				down[i] = n
+				if at, ok := st.Checked[n]; ok { // an older worker reports no times
+					down[i] += " (checked " + mcpproxy.Ago(now, at) + ")"
+				}
+			}
+			lines := joinWrapped(parts, color, width)
+			prefix := fmt.Sprintf("%d down: ", len(st.Down))
+			last := len(lines) - 1
+			if one := prefix + strings.Join(down, ", "); width <= 0 ||
+				runewidth.StringWidth(escapes.ReplaceAllString(lines[last], ""))+runewidth.StringWidth(" · ")+runewidth.StringWidth(one) <= width {
+				lines[last] += paint(color, styleDim, " · ") + paint(color, styleRed, one)
+			} else {
+				for _, l := range wrapItems("  "+prefix, down, width, 4) {
+					lines = append(lines, paint(color, styleRed, l))
+				}
+			}
+			return strings.Join(lines, "\n"), true
+		}
 	}
+	return strings.Join(joinWrapped(parts, color, width), "\n"), err == nil
 }

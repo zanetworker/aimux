@@ -15,6 +15,14 @@ func WingmanSessionsDir() string {
 	return filepath.Join(home, ".aimux", "wingman", "sessions")
 }
 
+// WingmanRunsDirName is the folder name, under aimux's archive, of
+// research-with-work's own transcripts: a Wingman project dir name
+// (IsWingmanProjectDir), so session lists and the search index skip it
+// like the page lane's sessions.
+func WingmanRunsDirName() string {
+	return encodeProjectDir(filepath.Join(filepath.Dir(WingmanSessionsDir()), "runs"))
+}
+
 // IsWingmanProjectDir reports whether name, a ~/.claude/projects directory
 // name, is a session dir whose cwd is ~/.aimux/wingman or below it. It
 // compares encoded names, the way Claude encodes a cwd ('/' and '.' to '-').

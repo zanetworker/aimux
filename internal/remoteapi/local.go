@@ -74,6 +74,10 @@ type LocalIndex struct {
 	// It is read in NewProvider's format and only when no provider has the
 	// session's file.
 	Archived func(id string) string
+	// TurnLinks, if set, is the link set of each of a session's turns by
+	// the turn's time (UnixNano): a research-with-work answer's fetched
+	// pages (profilerun.RunTranscriptLinks); nil for other sessions.
+	TurnLinks func(id string) map[int64][]string
 
 	cache catalog.Cache // the latest scan, for Lookup
 }
@@ -267,8 +271,14 @@ func (x *LocalIndex) session(ctx context.Context, id string, turns int, withTerm
 			CacheReadTokens: indexed.CacheReadTokens, CacheWriteTokens: indexed.CacheWriteTokens, Turns: indexed.TurnCount,
 			StartTime: timeOrNil(indexed.StartTime), DurationMin: indexed.DurationMin, Model: indexed.Model, GitBranch: indexed.GitBranch}
 	}
+	var links map[int64][]string
+	if x.TurnLinks != nil {
+		links = x.TurnLinks(id)
+	}
 	for _, t := range parsed {
-		d.Turns = append(d.Turns, turnOf(t))
+		turn := turnOf(t)
+		turn.Links = links[turn.Time.UnixNano()]
+		d.Turns = append(d.Turns, turn)
 	}
 	return d, nil
 }

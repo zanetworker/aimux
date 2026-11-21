@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -23,6 +24,7 @@ import (
 	"github.com/zanetworker/aimux/internal/folders"
 	"github.com/zanetworker/aimux/internal/harness"
 	"github.com/zanetworker/aimux/internal/history"
+	"github.com/zanetworker/aimux/internal/macconfirm"
 	"github.com/zanetworker/aimux/internal/profile"
 	"github.com/zanetworker/aimux/internal/profilerun"
 	"github.com/zanetworker/aimux/internal/push"
@@ -220,6 +222,10 @@ type API struct {
 	// ProfileHealth, if set, reports whether the profile sessions file can
 	// be read (profilerun.Router.Health); its error shows in /v1/health.
 	ProfileHealth func() error
+	// ProfileSessionLive, if set, reports whether the engine can still run
+	// a recorded profile session; a page request never continues one that
+	// is not (a run session lost when remote serve restarted).
+	ProfileSessionLive func(session string) bool
 	// StepUpLegacy (remote_access.step_up_legacy) applies the host-profile
 	// step-up to new sessions without a profile, which run on the host.
 	StepUpLegacy bool
@@ -245,6 +251,11 @@ type API struct {
 	// version is the tool snapshot the approval checks against; the gateway
 	// applies it first when it serves an older one.
 	Relist func(ctx context.Context, source, version string) (RelistView, error)
+	// MacConfirm, if set, shows the person at the Mac a native confirm
+	// dialog (macconfirm.System on macOS): the mac-confirm step-up of an
+	// approval. nil makes that kind unusable here.
+	MacConfirm func(ctx context.Context, title, text string) (macconfirm.Answer, error)
+	confirming atomic.Bool // a mac-confirm dialog is open
 	// ModeRouter, if set, answers POST /v1/route (internal/autoroute); nil
 	// answers every question undecided (source unavailable), so the client
 	// asks the person instead.
@@ -369,7 +380,7 @@ func (a *API) audited(action string, withSession bool, h http.HandlerFunc) http.
 		}
 		a.DeviceLogin.RecordEntry(r, devicelogin.AuditEntry{Action: act, Session: session, Result: result,
 			QuestionSHA256: rec.route.questionSHA, DecisionID: rec.route.decisionID, Source: rec.route.source,
-			Set: rec.tools.set, Tools: rec.tools.tools})
+			Set: rec.tools.set, Tools: rec.tools.tools, StepUp: rec.tools.stepUp})
 	}
 }
 
@@ -832,7 +843,7 @@ func (a *API) sendMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	turn, err := a.Broker.StartWith(session, req.Text, req.Key, TurnOptions{Model: req.Model})
+	turn, err := a.Broker.StartWith(session, req.Text, req.Key, TurnOptions{Model: req.Model, Caller: a.clientOf(r)})
 	done(err == nil)
 	if err != nil {
 		writeFailure(w, err)

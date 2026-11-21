@@ -106,7 +106,9 @@ info:
     each of their requests writes an audit line (client, action, profile,
     digest, the page's host, result; never text, pages, tokens or full
     URLs). Local clients other than `cli` reach only health, the contract,
-    the profiles, the session list, new sessions, `POST /v1/route` and, for the sessions
+    the profiles, the tool sets (`GET /v1/tools`; the diff and approve
+    routes also need `tools_approve`, and approve a step-up, `mac-confirm`
+    for a local client), the session list, new sessions, `POST /v1/route` and, for the sessions
     they started, the detail, events, messages, cancel and meta (any
     other session is `404 not_found`); every other route, describe and
     the queue routes included, is `403 forbidden_for_client`. A follow-up message counts
@@ -121,12 +123,13 @@ info:
     `Retry-After`. Nothing starts on any refusal.
 
     Auto mode: `POST /v1/route` picks the mode a question needs (`page`,
-    `web` or `workspace`, run under the profiles `page`, `research` and
-    `work-readonly`) among the modes whose profile the caller's client may
+    `web`, `workspace` or `both`, run under the profiles `page`, `research`,
+    `work-readonly` and `research-with-work`; `both` only when the client
+    may use `research` and `work-readonly` too) among the modes whose profile the caller's client may
     use and the Mac can run. Only the question and three facts go to the
     decision model (OpenRouter, zero data retention providers only); never
-    page text, titles or URLs. A question starting with `@page`, `@web` or
-    `@workspace` skips the model. The answer is always `200`: without a
+    page text, titles or URLs. A question starting with `@page`, `@web`,
+    `@workspace` or `@both` skips the model. The answer is always `200`: without a
     key, a working model or a confident pick it is `decided: false` with a
     suggested mode for the client to confirm. `routed` on the
     `POST /v1/sessions` that follows records in the Mac's decision log
@@ -847,6 +850,7 @@ paths:
   /v1/profiles:
     get:
       summary: The profiles, and which the caller's client may use
+      description: A profile that does not resolve (a widening or a missing parent), or whose roles do not check (a role's profile is missing, does not resolve, is invalid or has an invalid sandbox name), is left out and logged on the server; asking for it is 404 unknown_profile on GET /v1/profiles/{name}, 400 unknown_profile on POST /v1/sessions, and 403 profile_not_allowed on a later message to a session started under it. A message queued before the profile's roles broke is not refused with a status; its turn ends in a turn_error whose message names the broken role. GET /v1/tools leaves out the tool sets that only such profiles request, and their diff and approval answer 403 forbidden_for_client. A profile whose planner role is not a sandbox profile without web, or whose writer role is not an acp profile without tools or web, is refused the same way. A run profile (research-with-work) takes no image; one sent ends its turn in a turn_error with code image_invalid. A profile whose own sandbox name is invalid passes this catalog and fails when it compiles, with 409 profile_unavailable on POST /v1/sessions, or a turn_error with code profile_unavailable when a turn already accepted fails to compile.
       operationId: listProfiles
       responses:
         "200":
@@ -934,11 +938,16 @@ paths:
         request details, which the diff leaves out, differ from the
         approved definition's). Pins are written under the same lock as
         `aimux tools approve`. Needs `tools_approve: true` for the client in clients.yaml
-        (off by default; `403 forbidden_for_client`) and, on every request, a
+        (off by default except for Wingman, which a new clients.yaml gives
+        `tools_approve: true` with `step_up_kinds: [mac-confirm]`, so it
+        approves over its local socket; `403 forbidden_for_client`) and, on every request, a
         device login under 60 seconds old from a kind in the client's
-        `step_up_kinds` (`403 step_up_required` with `maxAge`; a client with
-        no kinds, a local socket and a token that is not a device session,
-        such as a sandbox's tool gateway token, never pass). The set must be
+        `step_up_kinds`, or, with the kind `mac-confirm`, Approve in a dialog
+        aimux shows on the Mac once every other check passed
+        (`403 step_up_required`, with `maxAge` for a device login; a client with
+        no kinds and a token that is not a device session, such as a
+        sandbox's tool gateway token, never pass; a local socket has no
+        device login, so it passes only with `mac-confirm`). The set must be
         requested by a profile in the client's scope. `400 bad_request` for
         no tools, more than 100, a tool the set does not list, or a field
         not listed. A set the registry skipped is `404 not_found` (`GET /v1/tools`
@@ -968,7 +977,7 @@ paths:
       summary: Pick the mode a question needs (Auto)
       description: >
         Rate limited to 60 calls a minute per client (`429 client_limit`
-        with `Retry-After`); overrides (`@page`, `@web`, `@workspace`) are
+        with `Retry-After`); overrides (`@page`, `@web`, `@workspace`, `@both`) are
         not counted, and all paired devices of a client share its budget. It
         counts toward no session or turn limit.
         `400 bad_request` for an empty `text` or any field not listed.
@@ -1174,7 +1183,7 @@ components:
             - open_in_terminal   # 409: read only here while open in a terminal on the Mac
             - busy               # 409: a turn is already running, Claude is working in the terminal session, or the session's queue is sending
             - in_use             # 409: another aimux process drives the session
-            - not_running        # 409: cancel with no running turn
+            - not_running        # 409: cancel with no running turn, or a message to a run session (research-with-work) lost when remote serve restarted; POST /v1/sessions for its page starts a new one
             - invalid_option     # 400: not one of the approval's options
             - ownership_unknown  # 503: Claude's session registry is unreadable
             - too_many_runs      # 503: every run slot is busy (session creation)
@@ -1215,8 +1224,8 @@ components:
             - no_terminal        # 503: Open on Mac, but this Mac cannot open an iTerm2 tab
             - not_authorized     # 403: macOS refused aimux control of iTerm2 (Open on Mac)
             - timeout            # 504: Open on Mac: the tab opened but Claude did not pick up the session in time
-            - unknown_profile       # 400 (new session), 404 (profile detail): no profile by that name
-            - profile_not_allowed   # 403: the client's scope does not allow the profile (Wingman never gets a host profile), or a local client acts on a session it did not start
+            - unknown_profile       # 400 (new session), 404 (profile detail): no profile by that name, or one that does not resolve (a widening, a missing parent, a role whose profile does not resolve or validate)
+            - profile_not_allowed   # 403: the client's scope does not allow the profile (Wingman never gets a host profile), a local client acts on a session it did not start, or a later message goes to a session whose profile no longer resolves or whose roles no longer check
             - step_up_required      # 403: a host profile from a device needs a login under maxAge seconds old from an allowed device kind
             - profile_not_available # 409: the profile exists but the Mac cannot run it yet
             - page_too_large        # 413: pageText is over 512 KiB
@@ -1226,10 +1235,15 @@ components:
             - client_limit          # 429: the client runs as many sessions, or started as many turns this minute, as it may; see Retry-After
             - tool_gateway_not_running # 503 (new profile session), also on turn_error: the sandbox tool gateway worker is not running (aimux mcp proxy gateway install)
             - gateway_backend_down     # 503, also on turn_error: the tool gateway worker runs but did not take the turn's lease
-            - profile_unavailable      # 409, also on turn_error: the profile does not resolve or compile now (a bad profile file, a missing set)
+            - profile_unavailable      # 409 on POST /v1/sessions when the new session's profile fails to compile there (a missing set, an invalid sandbox name); as a turn_error code when an accepted turn fails to compile. A profile the catalog refused answers 400 unknown_profile or 403 profile_not_allowed instead
             - sandbox_gateway_down     # 503, also on turn_error: the OpenShell gateway is not reachable
+            - run_planner_failed       # turn_error only (research-with-work): the workspace stage failed, nothing was searched
+            - planner_output_invalid   # turn_error only (research-with-work): the workspace stage returned no usable plan
+            - run_reader_failed        # turn_error only (research-with-work): the web stage failed
+            - run_writer_failed        # turn_error only (research-with-work): writing the answer failed
             - review_on_mac            # 409: POST /v1/tools/approve: a tool whose source (address or server identity) or hidden request details changed; approve it on the Mac
             - pins_busy                # 503: POST /v1/tools/approve: another approval held the pins lock for 5 s; try again
+            - confirm_pending          # 503: POST /v1/tools/approve: an approval is already waiting in the dialog on the Mac; answer it, then try again
             - pin_stale                # 409: POST /v1/tools/approve: a tool's live definition is not the one the client showed (or is not listed); nothing approved
 
     Health:
@@ -1301,7 +1315,10 @@ components:
       type: string
       enum: [idle, open_in_terminal, busy, unavailable]
       description: >
-        idle: can be continued. open_in_terminal: read only here while a
+        idle: can be continued; a research-with-work session this remote
+        serve does not hold (from before a restart, or another serve's)
+        also shows idle, but a message to it answers 409 not_running and a
+        page request starts a new session. open_in_terminal: read only here while a
         terminal on the Mac holds it. busy: aimux is running a turn.
         unavailable: created here, but its first message failed before Claude
         saved it.
@@ -1457,6 +1474,10 @@ components:
           type: array
           items: { $ref: "#/components/schemas/TurnTool" }
         image: { type: boolean, description: "Present and true when the question was asked with an attached image (POST /v1/sessions image); absent otherwise. The image itself is never in history." }
+        links:
+          type: array
+          items: { type: string }
+          description: "On a research-with-work turn, the pages its web stage fetched, kept with the answer: the only URLs a client may show as links when it reopens that answer. Absent on other turns and on a run turn that fetched nothing."
 
     TurnTool:
       type: object
@@ -1480,6 +1501,7 @@ components:
 
     SessionDetail:
       type: object
+      description: "A research-with-work session's turns are read from its own transcript (each completed turn's question and final answer, never the stages' private inputs), also after remote serve restarted, when the run itself can no longer continue."
       additionalProperties: false
       required: [id, provider, title, project, lastActive, state, pinned, turns]
       properties:
@@ -1819,12 +1841,12 @@ components:
         text: { type: string, minLength: 1 }
         key: { type: string, description: "Idempotency key for retries." }
         profile: { type: string, description: "Run the session under this profile (one of `GET /v1/profiles` with `allowed`)." }
-        url: { type: string, description: "With profile: the page the question is about; the same client, url and profile continue one session." }
+        url: { type: string, description: "With profile: the page the question is about; the same client, url and profile continue one session, unless this remote serve cannot run it any more (a research-with-work session after a restart, or one another remote serve holds): then a new session starts. A message to the old id answers 409 not_running." }
         title: { type: string, description: "With profile: the page's title." }
         pageText: { type: string, description: "With profile: the page's text for a new session, at most 512 KiB (else 413 page_too_large). Ignored when the session continues." }
         model: { type: string, enum: [sonnet, opus], description: "With profile: this turn's model; omitted keeps the profile's default. Any other value is 400 bad_request." }
         instance: { type: string, pattern: "^[A-Za-z0-9-]{1,64}$", description: "With profile: the caller's instance (Wingman's per-browser-profile id), recorded on the session, so two browsers on one page keep separate conversations. Omitted continues only sessions started without one. Not matching the pattern is 400 bad_request." }
-        prior: { type: array, maxItems: 5, items: { type: string, maxLength: 2000 }, description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): the page's earlier questions asked in another mode (Auto or a mode change), oldest first, questions only and never answers. The turn's prompt lists them before the question as untrusted context. At most 5 of at most 2000 characters each (else 400 bad_request). Default when absent (or null): aimux computes it. The page conversation is every session of the same client and instance on the same url (any profile, with or without page text, not hidden); when its most recent answered turn (one that ended with assistant text, complete or partial) ran in another profile than this request, prior is that conversation's questions as stored in session history (each line trimmed, blank lines dropped), oldest first, distinct in that form (first kept), without this question (compared in the same form), the last 5, each cut to 2000 characters; otherwise it is empty. An explicit prior, including [], overrides the default." }
+        prior: { type: array, maxItems: 5, items: { type: string, maxLength: 2000 }, description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): the page's earlier questions asked in another mode (Auto or a mode change), oldest first, questions only and never answers. The turn's prompt lists them before the question as untrusted context. At most 5 of at most 2000 characters each (else 400 bad_request). Default when absent (or null): aimux computes it. The page conversation is every session of the same client and instance on the same url (any profile, with or without page text, not hidden); when its most recent answered turn (one that ended with assistant text, complete or partial) ran in another profile than this request, or this request's profile is a run profile (research-with-work, which keeps no conversation between turns), prior is that conversation's questions as stored in session history (each line trimmed, blank lines dropped), oldest first, distinct in that form (first kept), without this question (compared in the same form), the last 5, each cut to 2000 characters; otherwise it is empty. An explicit prior, including [], overrides the default." }
         originOnly: { type: boolean, description: "With profile: a sandbox session's first prompt names only the URL's scheme://host[:port], while the session is still kept and continued under the full url. Requests with and without it never continue each other's session. Wingman sets it for Research on a private page without its text." }
         routed:
           type: object
@@ -1833,13 +1855,13 @@ components:
           description: "With profile: the `POST /v1/route` answer this question followed. Once the session starts, the decision log records the mode its profile runs in and whether that kept the pick. An unknown `decisionId` is ignored."
           properties:
             decisionId: { type: string }
-            mode: { type: string, enum: [page, web, workspace] }
+            mode: { type: string, enum: [page, web, workspace, both] }
             source: { type: string, enum: [override, model, unavailable, override_blocked] }
         image:
           type: object
           additionalProperties: false
           required: [mimeType, data]
-          description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): one image pasted into the question (a screenshot). The model sees it after the prompt text, framed as untrusted data from the user's screen like page text: instructions in it are never followed. A mimeType other than these, data that is not plain base64 (no `data:` prefix, no line breaks), bytes that are not of the stated type, or more than 1,572,864 bytes (1.5 MiB) of base64 is 400 image_invalid. Events and history show only the question text; the agent's own transcript keeps the image."
+          description: "Only with profile (without one, or on POST /v1/sessions/{id}/messages, it is 400 bad_request): one image pasted into the question (a screenshot). The model sees it after the prompt text, framed as untrusted data from the user's screen like page text: instructions in it are never followed. A mimeType other than these, data that is not plain base64 (no `data:` prefix, no line breaks), bytes that are not of the stated type, or more than 1,572,864 bytes (1.5 MiB) of base64 is 400 image_invalid. A run profile (research-with-work) takes no image; one sent is accepted and its turn ends in a turn_error with code image_invalid. Events and history show only the question text; the agent's own transcript keeps the image."
           properties:
             mimeType: { type: string, enum: [image/png, image/jpeg, image/webp, image/gif] }
             data: { type: string, maxLength: 1572864, description: "The image bytes in standard base64." }
@@ -1849,7 +1871,7 @@ components:
       additionalProperties: false
       required: [text]
       properties:
-        text: { type: string, minLength: 1, description: "The question as typed, with any @page, @web or @workspace prefix. At most 2,000 characters reach the model." }
+        text: { type: string, minLength: 1, description: "The question as typed, with any @page, @web, @workspace or @both prefix. At most 2,000 characters reach the model." }
         facts:
           type: object
           additionalProperties: false
@@ -1863,8 +1885,8 @@ components:
       additionalProperties: false
       required: [mode, profile, confidence, probabilities, decided, source, text]
       properties:
-        mode: { type: string, enum: [page, web, workspace, ""], description: "The pick, or the suggestion when not decided. Empty when no mode is in scope, for override_blocked, and for reason steering." }
-        profile: { type: string, description: "The profile mode runs under (page, research, work-readonly); empty with mode." }
+        mode: { type: string, enum: [page, web, workspace, both, ""], description: "both is research-with-work (workspace and web together), offered only when the client may use research, work-readonly and research-with-work. The pick, or the suggestion when not decided. Empty when no mode is in scope, for override_blocked, and for reason steering." }
+        profile: { type: string, description: "The profile mode runs under (page, research, work-readonly, research-with-work); empty with mode." }
         confidence: { type: number, minimum: 0, maximum: 1 }
         probabilities: { type: object, additionalProperties: { type: number }, description: "Over the allowed modes only; empty when the model was not asked or did not answer." }
         decided: { type: boolean, description: "True for an override and for a confident model pick; otherwise the client asks the person, with mode preselected." }
@@ -1879,8 +1901,8 @@ components:
       required: [name, runs, available, digest, allowed]
       properties:
         name: { type: string }
-        runs: { type: string, enum: [host, acp, sandbox, run], description: "host: on the Mac itself, with the owner's settings. acp and sandbox: confined sessions." }
-        available: { type: boolean, description: "False for a profile the Mac cannot run yet, including host and run profiles, which have no engine yet (409 profile_not_available)." }
+        runs: { type: string, enum: [host, acp, sandbox, run], description: "host: on the Mac itself, with the owner's settings. acp and sandbox: confined sessions. run: a multi-stage run whose roles run under other profiles (research-with-work)." }
+        available: { type: boolean, description: "False for a profile the Mac cannot run yet, including host profiles, which have no engine yet (409 profile_not_available). A run profile (research-with-work) is available when its roles check." }
         digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$", description: "Of the resolved manifest; changes whenever the profile does." }
         allowed: { type: boolean, description: "The caller's client may ask for it." }
 
@@ -2198,11 +2220,23 @@ components:
         own, aimux_notice ({"sessionUpdate": "aimux_notice", "content":
         {"type": "text", "text": ...}}): a line for the user, not the
         agent's, sent at most once per sandbox turn before the answer when
-        tools of the profile's sets are held for review. Clients that do not
-        know it can skip it.
+        tools of the profile's sets are held for review, with an optional
+        "sets" (string array, sorted, each once): the sets, as the profile
+        names them, whose tools are held; a client can open GET
+        /v1/tools/{set}/diff for each. Absent when no held tool is in a set.
+        A research-with-work turn also sends its stage progress lines as
+        aimux_notice without sets, and passes on its workspace (planner)
+        stage's held-tools notice at most once per turn: its full text, with
+        sets kept only for the sets the client that asked for the turn may
+        open with GET /v1/tools/{set}/diff (tools_approve, and a profile in
+        its own scope that requests the set; a run profile's roles do not
+        widen it), and left out when none remain or the turn came from the
+        queue.
+        Clients that do not know it can skip it.
       required: [sessionUpdate]
       properties:
         sessionUpdate: { type: string }
+        sets: { type: array, items: { type: string }, description: "aimux_notice only: the sets of the held tools." }
 
     ApprovalData:
       type: object
@@ -2244,6 +2278,11 @@ components:
       required: [stopReason]
       properties:
         stopReason: { type: string, description: "ACP's: end_turn, cancelled, max_tokens, max_turn_requests, refusal." }
+        links:
+          type: array
+          maxItems: 20
+          items: { type: string }
+          description: "On a research-with-work turn that ended normally, the only URLs its answer may show as links: the pages its web stage fetched with a successful WebFetch, deduplicated, at most 20, possibly empty. A client renders any other URL in that answer as plain text. Left out on every other turn."
 
     TurnErrorData:
       type: object
@@ -2255,4 +2294,4 @@ components:
         code:
           type: string
           description: A stable code for programs, when the failure has one (see ErrorBody's codes).
-          enum: [tool_gateway_not_running, gateway_backend_down, image_invalid, profile_unavailable, sandbox_gateway_down]
+          enum: [tool_gateway_not_running, gateway_backend_down, image_invalid, profile_unavailable, sandbox_gateway_down, run_planner_failed, planner_output_invalid, run_reader_failed, run_writer_failed]

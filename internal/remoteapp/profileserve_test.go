@@ -355,3 +355,180 @@ func writeFile(t *testing.T, p, body string) {
 		t.Fatal(err)
 	}
 }
+
+// The real wiring registers the run engine, so research-with-work (its
+// roles resolve) is served available, with its planner and reader on the
+// sandbox engine and its writer on the page engine.
+func TestServedCatalog_ResearchWithWorkAvailable(t *testing.T) {
+	p, closeAll, err := buildProfileWiring(t.TempDir(), noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	all, err := p.servedCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rww := all["research-with-work"]; !rww.Available || rww.Runs != "run" {
+		t.Fatalf("research-with-work = runs %q available %v, want run and available", rww.Runs, rww.Available)
+	}
+	run, ok := p.engines["run"].(*profilerun.RunEngine)
+	if !ok {
+		t.Fatalf("engines[run] = %T, want *profilerun.RunEngine", p.engines["run"])
+	}
+	if run.Planner != p.sandbox || run.Reader != p.sandbox || run.Writer != p.engines["acp"] {
+		t.Fatal("run engine stages are not on the sandbox (planner, reader) and page (writer) engines")
+	}
+	if run.Store != p.store || run.Compile == nil || run.Resolve == nil {
+		t.Fatal("run engine has no store, compile or resolve")
+	}
+	if _, err := run.Resolve("research-with-work"); err != nil {
+		t.Fatalf("Resolve(research-with-work) = %v", err)
+	}
+}
+
+// Run sessions live only in the process that ran them. A restart writes
+// nothing to the shared store (another remote serve may own those
+// sessions); page reuse asks the serving engine instead: a run session it
+// does not know is not live, a sandbox session it adopted is.
+func TestProfileWiring_DeadRunSessionNotLive(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	at := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	const run, sb = "66666666-2222-4333-8444-555555555555", "77777777-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "research-with-work", Client: "wingman", URL: "https://x.example/", Created: at, Started: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(sb, profilerun.Meta{Profile: "work-readonly", Client: "wingman", URL: "https://x.example/", Created: at, Started: true}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(store.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	if after, _ := os.ReadFile(store.Path); string(after) != string(before) {
+		t.Fatal("startup rewrote the shared profile store")
+	}
+	if p.live(run) {
+		t.Fatal("a run session this process does not hold is live")
+	}
+	if !p.live(sb) {
+		t.Fatal("an adopted sandbox session is not live")
+	}
+	if !p.live("not-a-profile-session") {
+		t.Fatal("a session without Meta must not be judged here")
+	}
+	api := &remoteapi.API{}
+	p.Install(api, clientscope.Defaults(), false)
+	if api.ProfileSessionLive == nil || api.ProfileSessionLive(run) {
+		t.Fatal("Install did not set ProfileSessionLive")
+	}
+}
+
+// A run session's turns are kept as its own transcript in aimux's archive
+// (question and answer), which the session detail reads after a restart.
+func TestProfileWiring_ArchivedNamesRunTranscript(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	const run = "88888888-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "research-with-work", Client: "wingman"}); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	re := p.engines["run"].(*profilerun.RunEngine)
+	if re.ArchiveDir != p.sandbox.ArchiveDir {
+		t.Fatalf("run ArchiveDir %q, want the sandbox archive %q", re.ArchiveDir, p.sandbox.ArchiveDir)
+	}
+	f := profilerun.RunTranscriptPath(re.ArchiveDir, run)
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.archived(run); got != f {
+		t.Fatalf("archived(run) = %q, want %q", got, f)
+	}
+}
+
+// A run session's transcript is read even when its profile no longer
+// resolves (removed or renamed): history does not depend on the profile.
+func TestProfileWiring_ArchivedRunWithoutItsProfile(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	const run = "99999999-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "my-gone-run", Client: "wingman"}); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, run)
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.archived(run); got != f {
+		t.Fatalf("archived = %q, want %q", got, f)
+	}
+}
+
+// turnLinks reads a run session's per-turn link sets from its transcript;
+// other sessions have none.
+func TestProfileWiring_TurnLinksFromRunTranscript(t *testing.T) {
+	home := t.TempDir()
+	store := &profilerun.Store{Path: profilerun.DefaultStorePath(home)}
+	const run = "aaaaaaaa-2222-4333-8444-555555555555"
+	if err := store.Put(run, profilerun.Meta{Profile: "research-with-work", Client: "wingman"}); err != nil {
+		t.Fatal(err)
+	}
+	p, closeAll, err := buildProfileWiring(home, noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	f := profilerun.RunTranscriptPath(p.sandbox.ArchiveDir, run)
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := `{"type":"user","timestamp":"2026-11-19T10:00:00Z","message":{"role":"user","content":"q"}}
+{"type":"assistant","timestamp":"2026-11-19T10:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":"a"}]},"aimuxLinks":["https://github.com/x"]}
+`
+	if err := os.WriteFile(f, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC).UnixNano()
+	if got := p.turnLinks(run)[at]; len(got) != 1 || got[0] != "https://github.com/x" {
+		t.Fatalf("turnLinks = %v", p.turnLinks(run))
+	}
+	if p.turnLinks("bbbbbbbb-2222-4333-8444-555555555555") != nil {
+		t.Fatal("links for a session not in the store")
+	}
+}
+
+// Install gives the run engine the API's per-client set check, so a Both
+// turn's held-tools notice offers only sets the client may approve.
+func TestProfileWiring_InstallWiresRunSetsFor(t *testing.T) {
+	p, closeAll, err := buildProfileWiring(t.TempDir(), noEnv, &bytes.Buffer{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	p.Install(&remoteapi.API{}, clientscope.Defaults(), false)
+	if run := p.engines["run"].(*profilerun.RunEngine); run.SetsFor == nil {
+		t.Fatal("run engine has no SetsFor after Install")
+	}
+}

@@ -18,11 +18,28 @@ type pageTurn struct {
 	profile string
 }
 
+// keepsContext reports whether prof's sessions keep their conversation
+// from turn to turn. A run profile (runs: run, research-with-work) starts
+// fresh stages every turn, so a follow-up in it is treated like a mode
+// change and carries the earlier questions. A profile the catalog cannot
+// name is taken to keep context (no prior, as before).
+func (a *API) keepsContext(prof string) bool {
+	if a.Profiles == nil {
+		return true
+	}
+	all, err := a.Profiles()
+	if err != nil {
+		return true
+	}
+	m, ok := all[prof]
+	return !ok || m.Runs != "run"
+}
+
 // pagePrior is the prior aimux sends when a request on a page has none:
 // the page conversation is every session client's instance has on req.URL
 // (any profile, with or without page text, not hidden). When its last
 // answered turn (one that ended with text) ran in a profile other than
-// prof, prior is the conversation's questions in time order, distinct by
+// prof, or prof does not keep context (keepsContext), prior is the conversation's questions in time order, distinct by
 // the whole question (Turn.question, not User's 8 KiB cut), compared in
 // the form history stores it (profilerun.StoredForm, applied to the
 // current question too; first kept), without the current question, the
@@ -53,7 +70,7 @@ func (a *API) pagePrior(ctx context.Context, client, prof string, req newSession
 			last = i
 		}
 	}
-	if last < 0 || turns[last].profile == prof {
+	if last < 0 || (turns[last].profile == prof && a.keepsContext(prof)) {
 		return nil
 	}
 	seen := map[string]bool{profilerun.StoredForm(req.Text): true}
