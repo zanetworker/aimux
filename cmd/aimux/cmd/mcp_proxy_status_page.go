@@ -117,15 +117,33 @@ func tableLine(cells []cell, w []int, color bool, width int) string {
 	return b.String()
 }
 
-// message is one row of the LEVEL/MESSAGE/FIX table; fix is the commands
-// to run, in order (none for a note that needs nothing).
+// message is one row of the LEVEL/MESSAGE/FIX table; fix is the steps to
+// run, in order (none for a note that needs nothing).
 type message struct {
 	text string
-	fix  []string
+	fix  []step
 }
 
-// fixes is a message's fix steps.
-func fixes(cmds ...string) []string { return cmds }
+// step is one command of a fix; note qualifies it ("again with your
+// original flags") on its "then" row.
+type step struct{ cmd, note string }
+
+// fixes is a fix of plain steps.
+func fixes(cmds ...string) []step {
+	out := make([]step, len(cmds))
+	for i, c := range cmds {
+		out[i] = step{cmd: c}
+	}
+	return out
+}
+
+// thenLabel is a later step's MESSAGE: "then", with its note.
+func thenLabel(s step) string {
+	if s.note == "" {
+		return "then"
+	}
+	return "then, " + s.note
+}
 
 // shownServer is a server with where it goes on the page.
 type shownServer struct {
@@ -161,7 +179,7 @@ func printStatusPage(out io.Writer, p statusPage) {
 
 	install, info := installMessages(p)
 	warn = append(install, warn...)
-	if nr := noRouteMessage(servers); nr != nil {
+	if nr := noRouteMessage(servers, p.handRun); nr != nil {
 		warn = append(warn, *nr)
 	}
 	if len(warn)+len(info) > 0 {
@@ -197,7 +215,7 @@ func messageLines(warn, info []message, color bool, width int) []string {
 	for _, r := range rows {
 		levelW = max(levelW, runewidth.StringWidth(r.level))
 		for _, f := range r.m.fix {
-			fixW = max(fixW, runewidth.StringWidth(f))
+			fixW = max(fixW, runewidth.StringWidth(f.cmd))
 		}
 	}
 	levelStyle := func(r row) string { return map[bool]string{true: styleYellow, false: styleDim}[r.level == "WARNING"] }
@@ -206,11 +224,11 @@ func messageLines(warn, info []message, color bool, width int) []string {
 		for _, r := range rows {
 			first := ""
 			if len(r.m.fix) > 0 {
-				first = r.m.fix[0]
+				first = r.m.fix[0].cmd
 			}
 			t.rows = append(t.rows, []cell{{r.level, levelStyle(r)}, {r.m.text, r.style}, {first, r.style}})
 			for _, f := range r.m.fix[min(1, len(r.m.fix)):] {
-				t.rows = append(t.rows, []cell{{"", ""}, {"then", styleDim}, {f, r.style}})
+				t.rows = append(t.rows, []cell{{"", ""}, {thenLabel(f), styleDim}, {f.cmd, r.style}})
 			}
 		}
 		return t.lines(color, width)
@@ -220,11 +238,12 @@ func messageLines(warn, info []message, color bool, width int) []string {
 	for _, r := range rows {
 		t.rows = append(t.rows, []cell{{r.level, levelStyle(r)}, {r.m.text, r.style}})
 		var s []string
+		indent := strings.Repeat(" ", levelW+2)
 		for i, f := range r.m.fix {
-			if i > 0 {
-				f = "then " + f
+			if i > 0 { // the label on a line of its own, so the command line pastes as it is
+				s = append(s, indent+paint(color, styleDim, thenLabel(f)+":"))
 			}
-			s = append(s, strings.Repeat(" ", levelW+2)+paint(color, r.style, f))
+			s = append(s, indent+paint(color, r.style, f.cmd))
 		}
 		steps = append(steps, s)
 	}
@@ -244,6 +263,32 @@ func shellWord(s string) string {
 		return s
 	}
 	return shellQuote(s)
+}
+
+// csvField is s as one field of a comma-separated flag value (pflag's
+// StringSlice reads it as CSV): quoted, with quotes doubled, when it holds
+// a comma, a quote or a line break.
+func csvField(s string) string {
+	if !strings.ContainsAny(s, ",\"\r\n") {
+		return s
+	}
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// defaultPort is the proxy's port unless install was given another.
+const defaultPort = 7381
+
+// installCmd is `aimux mcp proxy install` with args, on the port install
+// recorded when it is not the default (install refuses another port).
+func installCmd(p statusPage, args ...string) string {
+	cmd := "aimux mcp proxy install"
+	if p.installPort != 0 && p.installPort != defaultPort {
+		cmd += fmt.Sprintf(" --port %d", p.installPort)
+	}
+	for _, a := range args {
+		cmd += " " + a
+	}
+	return cmd
 }
 
 // proxyRow is the proxy's COMPONENT row.
@@ -274,8 +319,13 @@ func gatewayRow(p statusPage) ([]cell, []message) {
 	if !st.StartedAt.IsZero() {
 		uptime = span(p.now, st.StartedAt)
 	}
-	row := []cell{{"gateway", ""}, {"running", styleGreen}, {cmp.Or(shortVersion(printable(st.Version)), "-"), ""}, {uptime, ""},
-		{plural(st.Leases, "lease", "leases") + ", " + plural(len(st.Backends), "backend", "backends"), ""}}
+	// The worker reports no build version; its Version is the tool-policy
+	// snapshot it serves, a detail.
+	detail := plural(st.Leases, "lease", "leases") + ", " + plural(len(st.Backends), "backend", "backends")
+	if st.Version != "" {
+		detail += ", snapshot " + shortVersion(printable(st.Version))
+	}
+	row := []cell{{"gateway", ""}, {"running", styleGreen}, {"-", ""}, {uptime, ""}, {detail, ""}}
 	if len(st.Down) == 0 {
 		return row, nil
 	}
@@ -289,8 +339,8 @@ func gatewayRow(p statusPage) ([]cell, []message) {
 	return row, []message{{plural(len(st.Down), "gateway backend", "gateway backends") + " down: " + strings.Join(down, ", "), nil}}
 }
 
-// shortVersion shortens an image digest ("sha256:" and 64 hex digits) to
-// its first 12 digits, as container tools show it; other versions stay.
+// shortVersion shortens a digest ("sha256:" and 64 hex digits) to its
+// first 12 digits, as container tools show one; anything else stays.
 func shortVersion(v string) string {
 	const prefix, keep = "sha256:", 12
 	if strings.HasPrefix(v, prefix) && len(v) > len(prefix)+keep {
@@ -459,8 +509,9 @@ func errorTable(shown []shownServer, p statusPage) table {
 }
 
 // noRouteMessage is the warning for never-started servers the proxy has
-// no route for (no cached tools); nil when there are none.
-func noRouteMessage(servers []shownServer) *message {
+// no route for (no cached tools): refresh, then restart the installed
+// proxy, or start a hand-run one again; nil when there are none.
+func noRouteMessage(servers []shownServer, handRun bool) *message {
 	var names []string
 	for _, s := range servers {
 		if s.kind == kindNoRoute {
@@ -470,8 +521,12 @@ func noRouteMessage(servers []shownServer) *message {
 	if len(names) == 0 {
 		return nil
 	}
-	return &message{fmt.Sprintf("%d no route: %s (no cached tools)", len(names), strings.Join(names, ", ")),
+	m := &message{fmt.Sprintf("%d no route: %s (no cached tools)", len(names), strings.Join(names, ", ")),
 		fixes("aimux mcp proxy refresh", "aimux mcp proxy restart")}
+	if handRun {
+		m.fix[1] = step{cmd: "aimux mcp proxy serve", note: "again with your original flags"}
+	}
+	return m
 }
 
 // installMessages are what the install state asks of the owner (warn) and
@@ -485,21 +540,21 @@ func installMessages(p statusPage) (warn, info []message) {
 		return nil, nil
 	}
 	if st.State == mcpproxy.InstallNotInstalled {
-		return []message{{"not installed: Claude Code's servers are direct", fixes("aimux mcp proxy install")}}, nil
+		return []message{{"not installed: Claude Code's servers are direct", fixes(installCmd(p))}}, nil
 	}
 	if len(st.Drifted) > 0 {
 		warn = append(warn, message{fmt.Sprintf("drifted: %s (entry is no longer the proxy URL)", strings.Join(st.Drifted, ", ")),
-			fixes("aimux mcp proxy uninstall", "aimux mcp proxy install")})
+			fixes("aimux mcp proxy uninstall", installCmd(p))})
 	}
 	if len(st.NotProxied) > 0 {
-		warn = append(warn, message{"not behind the proxy: " + strings.Join(st.NotProxied, ", "), fixes("aimux mcp proxy install")})
+		warn = append(warn, message{"not behind the proxy: " + strings.Join(st.NotProxied, ", "), fixes(installCmd(p))})
 	}
 	if st.UpgradePending && p.cliVersion != "" {
 		warn = append(warn, message{fmt.Sprintf("upgrade restart pending (proxy %s, cli %s)", cmp.Or(printable(st.DaemonVersion), "older"), p.cliVersion),
 			fixes("aimux mcp proxy restart")})
 	}
 	if !st.Hooks {
-		warn = append(warn, message{"hooks off: servers you add later stay direct", fixes("aimux mcp proxy install")})
+		warn = append(warn, message{"hooks off: servers you add later stay direct", fixes(installCmd(p))})
 	}
 	info = append(info, message{plural(len(st.Moved), "server", "servers") + " behind the proxy", nil})
 	if st.Hooks {
@@ -507,15 +562,15 @@ func installMessages(p statusPage) (warn, info []message) {
 	}
 	if len(st.Removed) > 0 {
 		info = append(info, message{fmt.Sprintf("removed from %s: %s (still served, unused)", p.claudeConfig, strings.Join(st.Removed, ", ")),
-			fixes("aimux mcp proxy install")})
+			fixes(installCmd(p))})
 	}
 	if len(st.Skipped) > 0 {
 		// One --unskip per name: the flag splits a value at commas.
-		cmd := "aimux mcp proxy install"
+		var args []string
 		for _, n := range st.Skipped {
-			cmd += " --unskip " + shellWord(n)
+			args = append(args, "--unskip", shellWord(csvField(n)))
 		}
-		info = append(info, message{"kept direct (--skip): " + strings.Join(st.Skipped, ", "), fixes(cmd)})
+		info = append(info, message{"kept direct (--skip): " + strings.Join(st.Skipped, ", "), fixes(installCmd(p, args...))})
 	}
 	for _, line := range mcpproxy.KeptDirectLines(st.KeptDirect) {
 		info = append(info, message{line, nil})

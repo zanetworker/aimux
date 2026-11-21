@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -165,7 +166,7 @@ func TestProxyStatus_GatewayReadAfterTheAnswer(t *testing.T) {
 	if err := proxyStatus(context.Background(), o, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "\ngateway    running  read-after") {
+	if !strings.Contains(out.String(), "snapshot read-after\n") || strings.Contains(out.String(), "read-before") {
 		t.Fatalf("output:\n%s", out.String())
 	}
 }
@@ -396,5 +397,36 @@ func TestProxyStatus_NeverStartedReadsReadyJSONKeepsName(t *testing.T) {
 	}
 	if n := len(got.Servers); n != 3 || got.Servers[2].Server != "context7" || got.Servers[2].State != "not_started" {
 		t.Fatalf("--json lost the not_started state name: %+v", got.Servers)
+	}
+}
+
+// The proxy is hand-run (restart cannot reach it) without the launchd
+// agent, or when it is on another port than install recorded.
+func TestProxyHandRun(t *testing.T) {
+	home := t.TempDir()
+	in := proxyInstaller(home, 7381, &bytes.Buffer{})
+	if port, hand := proxyHandRun(in, 7381); port != 0 || !hand {
+		t.Fatalf("no agent, no manifest: port %d handRun %v, want 0 true", port, hand)
+	}
+	if err := os.MkdirAll(filepath.Dir(in.Agent.PlistPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in.Agent.PlistPath, []byte("<plist/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if port, hand := proxyHandRun(in, 7381); port != 0 || hand {
+		t.Fatalf("agent, no manifest: port %d handRun %v, want 0 false", port, hand)
+	}
+	if err := os.MkdirAll(filepath.Dir(in.ManifestPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in.ManifestPath, []byte(`{"version":2,"port":8000,"servers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if port, hand := proxyHandRun(in, 8000); port != 8000 || hand {
+		t.Fatalf("agent on the installed port: port %d handRun %v, want 8000 false", port, hand)
+	}
+	if port, hand := proxyHandRun(in, 7381); port != 8000 || !hand {
+		t.Fatalf("another port than installed: port %d handRun %v, want 8000 true", port, hand)
 	}
 }

@@ -324,20 +324,21 @@ func TestStatusPage_Gateway(t *testing.T) {
 		t.Fatalf("gateway unknown:\n%s", got)
 	}
 	p.gateway = func() (toolgateway.ControlStatus, error) {
-		return toolgateway.ControlStatus{Version: "v0.16.0", Leases: 1, Backends: []string{"jira", "wiki"}, Down: []string{"wiki"},
+		return toolgateway.ControlStatus{Leases: 1, Backends: []string{"jira", "wiki", "slack"}, Down: []string{"wiki", "slack"},
 			StartedAt: statusNow.Add(-time.Hour), Checked: map[string]time.Time{"wiki": statusNow.Add(-40 * time.Second)}}, nil
 	}
 	got = render(p)
-	if !strings.Contains(got, "\ngateway    running  v0.16.0  1h      1 lease, 2 backends\n") ||
-		!strings.Contains(got, "WARNING  1 gateway backend down: wiki (checked 40s ago)") {
-		t.Fatalf("gateway down backend:\n%s", got)
+	if !strings.Contains(got, "\ngateway    running  -        1h      1 lease, 3 backends\n") ||
+		strings.Count(got, "gateway backend") != 1 || !strings.Contains(got, "WARNING  2 gateway backends down: wiki (checked 40s ago), slack") {
+		t.Fatalf("down backends not one warning:\n%s", got)
 	}
-	// A gateway that reports an image digest as its version shows it short.
+	// The worker's version is its tool-policy snapshot, not a build: VERSION
+	// says -, and the snapshot (short) goes with the details.
 	p.gateway = func() (toolgateway.ControlStatus, error) {
 		return toolgateway.ControlStatus{Version: "sha256:33b556ac47673560952dbe03f13d29a9b54f5b5cf1b7801ecbbde5246926b430"}, nil
 	}
-	if got := render(p); !strings.Contains(got, "\ngateway    running  sha256:33b556ac4767  -       0 leases, 0 backends\n") {
-		t.Fatalf("digest version not shortened:\n%s", got)
+	if got := render(p); !strings.Contains(got, "\ngateway    running  -        -       0 leases, 0 backends, snapshot sha256:33b556ac4767\n") {
+		t.Fatalf("snapshot not in the details:\n%s", got)
 	}
 	p.gateway = nil
 	if got := render(p); strings.Contains(got, "\ngateway ") {
@@ -362,6 +363,19 @@ func TestStatusPage_NoRoute(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("page lacks %q:\n%s", want, got)
+		}
+	}
+	// A proxy without the launchd job (run by hand): restart cannot work,
+	// so the second step is serve, again with the original flags.
+	p.handRun = true
+	got = render(p)
+	if strings.Contains(got, "aimux mcp proxy restart\n") && !strings.Contains(got, "upgrade restart pending") ||
+		!strings.Contains(got, "then, again with your original flags") || !strings.Contains(got, "  aimux mcp proxy serve\n") {
+		t.Fatalf("hand-run proxy: want refresh, then serve again:\n%s", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "then") && strings.HasSuffix(line, "aimux mcp proxy restart") {
+			t.Fatalf("hand-run proxy still told to restart: %q", line)
 		}
 	}
 }
@@ -654,7 +668,7 @@ func TestStatusPage_ErrorsKeepAgeAndMessage(t *testing.T) {
 // Skipped names come from ~/.claude.json: the --unskip command quotes each
 // for the shell, so it runs as written and the flag gets every name intact.
 func TestStatusPage_UnskipCommandQuotesNames(t *testing.T) {
-	names := []string{"pp", "my server$HOME", "it's"}
+	names := []string{"pp", "my server$HOME", "it's", "team,dev", `say "hi"`}
 	st := &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: true, Moved: []string{"a"}, Skipped: names}
 	got := render(statusPage{addr: "a", install: st, now: statusNow})
 	i := strings.Index(got, "aimux mcp proxy install --unskip")
@@ -674,5 +688,24 @@ func TestStatusPage_UnskipCommandQuotesNames(t *testing.T) {
 	}
 	if strings.Join(*unskip, "|") != strings.Join(names, "|") {
 		t.Fatalf("--unskip parsed as %q from %q, want %q", *unskip, cmd, names)
+	}
+}
+
+// A proxy installed on another port than the default: every install fix
+// carries --port, or install would refuse the default port.
+func TestStatusPage_InstallFixesCarryThePort(t *testing.T) {
+	st := &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: false, Moved: []string{"a"}, NotProxied: []string{"x"}, Skipped: []string{"pp"}}
+	got := render(statusPage{addr: "127.0.0.1:8000", install: st, installPort: 8000, now: statusNow})
+	for _, want := range []string{"aimux mcp proxy install --port 8000 --unskip pp\n", "not behind the proxy: x", "aimux mcp proxy install --port 8000\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "aimux mcp proxy install\n") || strings.Contains(got, "install --unskip") {
+		t.Fatalf("an install fix without --port:\n%s", got)
+	}
+	// The default port needs no flag.
+	if got := render(statusPage{addr: "a", install: st, installPort: 7381, now: statusNow}); strings.Contains(got, "--port") {
+		t.Fatalf("--port for the default port:\n%s", got)
 	}
 }

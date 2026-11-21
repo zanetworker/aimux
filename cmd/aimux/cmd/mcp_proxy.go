@@ -259,6 +259,7 @@ func newMCPProxyStatusCmd() *cobra.Command {
 					o.installErr = err
 				}
 				o.claudeConfig = in.ClaudeConfig
+				o.installPort, o.handRun = proxyHandRun(in, port)
 				o.gateway = func() (toolgateway.ControlStatus, error) {
 					return toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}.Status(cmd.Context())
 				}
@@ -285,15 +286,31 @@ type proxyStatusOpts struct {
 	installErr   error // why the install state could not be read
 	claudeConfig string
 	cliVersion   string                                    // this aimux's version, for an upgrade restart pending
+	installPort  int                                       // the port install recorded; 0 when none
+	handRun      bool                                      // the proxy on addr is not the installed launchd job
 	gateway      func() (toolgateway.ControlStatus, error) // the tool gateway's status, read once the proxy answered
 	color        bool                                      // ANSI styles (a terminal without NO_COLOR)
 	width        int                                       // terminal columns, 0 when piped
 }
 
+// proxyHandRun is the port install recorded (0 when none) and whether the
+// proxy on port is not the installed launchd job, so `aimux mcp proxy
+// restart` cannot reach it: no launchd agent, or another port than the
+// recorded one.
+func proxyHandRun(in mcpproxy.Installer, port int) (installPort int, handRun bool) {
+	if m, err := mcpproxy.LoadManifest(in.ManifestPath); err == nil && m != nil {
+		installPort = m.Port
+	}
+	if _, err := os.Stat(in.Agent.PlistPath); err != nil {
+		return installPort, true
+	}
+	return installPort, installPort != 0 && installPort != port
+}
+
 // page is the text page for rep (nil: the proxy is not running).
 func (o proxyStatusOpts) page(rep *mcpproxy.StatusReport, now time.Time) statusPage {
 	return statusPage{addr: o.addr, rep: rep, install: o.install, installErr: o.installErr, claudeConfig: o.claudeConfig,
-		cliVersion: o.cliVersion, gateway: o.gateway, now: now, color: o.color, width: o.width, all: o.all}
+		cliVersion: o.cliVersion, installPort: o.installPort, handRun: o.handRun, gateway: o.gateway, now: now, color: o.color, width: o.width, all: o.all}
 }
 
 // noAnswer prints what the command knows when the proxy gave no status,

@@ -66,6 +66,8 @@ type statusPage struct {
 	installErr   error                  // why the install state could not be read
 	claudeConfig string
 	cliVersion   string                                    // this aimux's version, for an upgrade restart pending
+	installPort  int                                       // the port install recorded; 0 when none. Install fixes carry --port when it is not the default
+	handRun      bool                                      // the proxy answering is not the installed launchd job: restart cannot reach it
 	gateway      func() (toolgateway.ControlStatus, error) // the tool gateway's status; nil leaves its row out
 	noAnswer     bool                                      // the proxy took the connection but gave no status
 	now          time.Time
