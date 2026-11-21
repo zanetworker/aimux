@@ -150,6 +150,7 @@ type Installer struct {
 	Settings     string // ~/.claude/settings.json, for the http idle limit and the hooks; empty leaves it alone
 	HookBinary   string // the aimux the hooks run; empty adds no hooks
 	Port         int    // the daemon's port on 127.0.0.1
+	ProxyAddr    string // where the SessionStart hook dials the daemon; empty is 127.0.0.1:Port
 	Version      string // this aimux's version, compared with the daemon's
 	// Unskip are recorded --skip servers this run moves after all.
 	Unskip []string

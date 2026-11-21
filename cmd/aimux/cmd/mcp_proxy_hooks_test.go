@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,3 +62,41 @@ func TestProxyHooks_SilentCases(t *testing.T) {
 		}
 	}
 }
+
+// With a moved server and nothing listening on the proxy's address, the
+// SessionStart answer leads with the proxy line, to the owner and Claude.
+func TestProxyHooks_CheckSaysProxyIsDown(t *testing.T) {
+	home := t.TempDir()
+	write := func(path, body string) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := `{"type":"http","url":"` + mcpproxy.EntryURL(7381, "ctx") + `"}`
+	write(filepath.Join(home, ".aimux", "mcp-proxy-install.json"), `{"version":2,"port":7381,"servers":{"ctx":{"original":"{\"command\":\"ctx-mcp\"}","written":`+strconvQuote(entry)+`}}}`)
+	write(filepath.Join(home, ".claude.json"), `{"mcpServers":{"ctx":`+entry+`}}`)
+	in := proxyInstaller(home, 7381, &bytes.Buffer{})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.ProxyAddr = ln.Addr().String()
+	_ = ln.Close()
+	var out bytes.Buffer
+	if err := answerProxyHook("check", strings.NewReader(`{"cwd":"/w"}`), &out, in); err != nil {
+		t.Fatal(err)
+	}
+	var got hookOutput
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("not JSON: %q (%v)", out.String(), err)
+	}
+	want := mcpproxy.ProxyDownMessage(in.ProxyAddr)
+	if got.SystemMessage != want || got.HookSpecificOutput.AdditionalContext != want {
+		t.Fatalf("answer %+v, want %q", got, want)
+	}
+}
+
+func strconvQuote(s string) string { b, _ := json.Marshal(s); return string(b) }

@@ -63,7 +63,7 @@ func render(p statusPage) string {
 }
 
 const goldenCompact = `MCP proxy ● running · pid 99 · aimux v0.15.0 · up 3h · 127.0.0.1:7381
-9 servers: 1 failed · 1 warning · 2 running · 1 idle · 4 not started · 1 removed
+9 servers: 1 failed · 1 warning · 2 running · 1 idle · 4 ready · 1 removed
 ! upgrade restart pending: the running proxy is aimux v0.15.0, this binary is
   v0.16.0; restart it when convenient with ` + "`aimux mcp proxy restart`" + `
 
@@ -77,7 +77,7 @@ const goldenCompact = `MCP proxy ● running · pid 99 · aimux v0.15.0 · up 3h
   slack                      ● running         12 tools  called 2m ago
   nanobanana-image-creation  ○ idle            4 tools   called 30m ago
 
-  ○ 4 not started: brief, chrome-devtools, deepwiki, pypi
+  ○ 4 ready, start on first call: brief, chrome-devtools, deepwiki, pypi
 
 tool gateway ● running 17h · 0 leases · 5 backends
 
@@ -105,7 +105,7 @@ func TestStatusPage_AllListsEveryServer(t *testing.T) {
 	p.all = true
 	got := render(p)
 	for _, want := range []string{
-		"  brief                      ○ not started     13 tools  never called\n",
+		"  brief                      ○ ready           13 tools  never called\n",
 		"  minutes                    ○ removed         0 tools   never called\n",
 		"  slack                      ● running         12 tools  called 2m ago\n      (old) write: broken pipe · 1h ago\n",
 	} {
@@ -113,7 +113,7 @@ func TestStatusPage_AllListsEveryServer(t *testing.T) {
 			t.Fatalf("--all page lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "not started: brief") {
+	if strings.Contains(got, "start on first call: brief") {
 		t.Fatalf("--all still collapses the never-started servers:\n%s", got)
 	}
 	if strings.Index(got, "  minutes ") < strings.Index(got, "  pypi ") {
@@ -150,7 +150,7 @@ func TestStatusPage_ColorsSignalState(t *testing.T) {
 	got := render(p)
 	for _, want := range []string{
 		"\x1b[32m● running\x1b[0m", // header
-		"\x1b[31m1 failed\x1b[0m", "\x1b[33m1 warning\x1b[0m", "\x1b[32m2 running\x1b[0m", "\x1b[2m4 not started\x1b[0m",
+		"\x1b[31m1 failed\x1b[0m", "\x1b[33m1 warning\x1b[0m", "\x1b[32m2 running\x1b[0m", "\x1b[2m4 ready\x1b[0m",
 		"\x1b[31m● failed 12m ago",                    // failed row
 		"\x1b[31m      exec: gh-mcp: not found",       // its error
 		"\x1b[33m      timed out after 1m0s · 3m ago", // a recent error on a live server
@@ -199,8 +199,8 @@ func TestStatusPage_NotStartedWraps(t *testing.T) {
 		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}})
 	}
 	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 60})
-	want := "  ○ 7 not started: alpha-server, bravo-server,\n" +
-		"    charlie-server, delta-server, echo-server,\n" +
+	want := "  ○ 7 ready, start on first call: alpha-server,\n" +
+		"    bravo-server, charlie-server, delta-server, echo-server,\n" +
 		"    foxtrot-server, golf-server\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("not-started line:\n%s", got)
@@ -292,7 +292,7 @@ func TestStatusPage_HeaderWraps(t *testing.T) {
 	got := render(p)
 	for _, want := range []string{
 		"MCP proxy ● running · pid 99 · aimux v0.15.0\n  up 3h · 127.0.0.1:7381\n",
-		"9 servers: 1 failed · 1 warning · 2 running\n  1 idle · 4 not started · 1 removed\n",
+		"9 servers: 1 failed · 1 warning · 2 running\n  1 idle · 4 ready · 1 removed\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("lacks %q:\n%s", want, got)
@@ -403,7 +403,7 @@ func TestStatusPage_LongListItemFits(t *testing.T) {
 			t.Fatalf("line of %d runes over width 40: %q\n%s", n, line, got)
 		}
 	}
-	if !strings.Contains(got, "  ○ 2 not started:\n    nanobanana-image-creation,\n    zzz") {
+	if !strings.Contains(got, "  ○ 2 ready, start on first call:\n    nanobanana-image-creation,\n    zzz") {
 		t.Fatalf("list:\n%s", got)
 	}
 }
@@ -426,7 +426,7 @@ func TestStatusPage_ProxyPartBeforeTheGateway(t *testing.T) {
 	p := page()
 	var out bytes.Buffer
 	p.gateway = func() string {
-		if !strings.Contains(out.String(), "○ 4 not started: brief") {
+		if !strings.Contains(out.String(), "○ 4 ready, start on first call: brief") {
 			t.Fatalf("gateway asked before the servers were printed:\n%s", out.String())
 		}
 		return "tool gateway ● running 17h · 0 leases · 5 backends"

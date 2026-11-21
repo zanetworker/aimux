@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/zanetworker/aimux/internal/claudehooks"
 )
@@ -348,6 +350,34 @@ func CheckMessage(direct []string) string {
 	return fmt.Sprintf("%d MCP servers are not behind the aimux proxy: %s. Run aimux mcp proxy install.", len(direct), strings.Join(direct, ", "))
 }
 
+// ProxyDownMessage says the proxy at addr took no connection, so the
+// session's proxied servers fail, and how to recover.
+func ProxyDownMessage(addr string) string {
+	return fmt.Sprintf("aimux MCP proxy is not answering on %s, so this session's proxied MCP servers will fail. Fix: aimux mcp proxy restart, then /mcp Reconnect (or restart this session).", addr)
+}
+
+// proxyDialTimeout bounds the SessionStart hook's dial, so a session start
+// never waits on it for long.
+const proxyDialTimeout = time.Second
+
+func (i Installer) proxyAddr() string {
+	if i.ProxyAddr != "" {
+		return i.ProxyAddr
+	}
+	return net.JoinHostPort("127.0.0.1", fmt.Sprint(i.Port))
+}
+
+// proxyAnswers reports whether the proxy takes a TCP connection within
+// proxyDialTimeout. Refused (down, mid-restart) or timed out is false.
+func (i Installer) proxyAnswers() bool {
+	c, err := net.DialTimeout("tcp", i.proxyAddr(), proxyDialTimeout)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
+}
+
 // HookReply is what a hook says: User is shown to the owner, Claude goes
 // into the session's context. Both empty: the hook prints nothing.
 type HookReply struct {
@@ -413,9 +443,10 @@ func (i Installer) projectReply(command, cwd string) HookReply {
 	return HookReply{User: msg, Claude: msg}
 }
 
-// HookCheck answers the SessionStart hook for a session at cwd: the stdio
-// servers still direct, read from files only. Project-only servers for cwd
-// go to Claude, not the owner's line (the proxy cannot share them).
+// HookCheck answers the SessionStart hook for a session at cwd: a proxy
+// that takes no connection (its own line, first), then the stdio servers
+// still direct, read from files. Project-only servers for cwd go to
+// Claude, not the owner's line (the proxy cannot share them).
 func (i Installer) HookCheck(cwd string) HookReply {
 	st, err := i.quiet().InstallStatus()
 	if err != nil || st.State == InstallNotInstalled {
@@ -425,6 +456,9 @@ func (i Installer) HookCheck(cwd string) HookReply {
 	if len(st.Drifted) > 0 { // moved, but a stale session wrote the direct entry back
 		drift := fmt.Sprintf("Running direct again instead of through the aimux proxy: %s; to fix it, %s.", strings.Join(st.Drifted, ", "), DriftFix)
 		user = strings.TrimSpace(user + " " + drift)
+	}
+	if len(st.Moved) > 0 && !i.proxyAnswers() {
+		user = strings.TrimSpace(ProxyDownMessage(i.proxyAddr()) + "\n" + user)
 	}
 	claude := user
 	if project, err := ProjectServers(i.ClaudeConfig, cwd); err == nil && len(project) > 0 {

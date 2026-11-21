@@ -62,8 +62,8 @@ func stateLabel(st mcpproxy.ServerState) (string, string) {
 		return "◐ starting", styleBold
 	case mcpproxy.StateIdleStopped:
 		return "○ idle", styleDim
-	case mcpproxy.StateNotStarted:
-		return "○ not started", styleDim
+	case mcpproxy.StateNotStarted: // lazy: the proxy starts it on its first tools/call
+		return "○ ready", styleDim
 	}
 	return "○ " + string(st), styleDim
 }
@@ -411,7 +411,7 @@ func printStatusPage(out io.Writer, p statusPage) {
 		part(byState[mcpproxy.StateRunning], "running", styleGreen, true)
 		part(byState[mcpproxy.StateStarting], "starting", styleBold, false)
 		part(byState[mcpproxy.StateIdleStopped], "idle", styleDim, false)
-		part(byState[mcpproxy.StateNotStarted], "not started", styleDim, false)
+		part(byState[mcpproxy.StateNotStarted], "ready", styleDim, false)
 		part(count[kindRemoved], "removed", styleDim, false)
 		parts[0] = fmt.Sprintf("%d servers: ", len(p.rep.Servers)) + parts[0]
 		head = append(head, joinWrapped(parts, c, p.width)...)
@@ -530,7 +530,7 @@ func printStatusPage(out io.Writer, p statusPage) {
 	blocks = append(blocks, problems, rest)
 	if len(notStarted) > 0 {
 		var ns []string
-		for _, line := range wrapItems(fmt.Sprintf("  ○ %d not started: ", len(notStarted)), notStarted, p.width, 4) {
+		for _, line := range wrapItems(fmt.Sprintf("  ○ %d ready, start on first call: ", len(notStarted)), notStarted, p.width, 4) {
 			ns = append(ns, paint(c, styleDim, line))
 		}
 		blocks = append(blocks, ns)

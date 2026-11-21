@@ -2,6 +2,7 @@ package mcpproxy
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -350,5 +351,64 @@ func TestIsServerAdd_CommandPrefixes(t *testing.T) {
 		if IsServerAdd(c) {
 			t.Errorf("IsServerAdd(%q) = true, want false", c)
 		}
+	}
+}
+
+// closedAddr is a loopback address nothing listens on.
+func closedAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	must(t, err)
+	addr := ln.Addr().String()
+	must(t, ln.Close())
+	return addr
+}
+
+// A proxy that does not answer gets one line of its own, first, with the
+// fix; it goes to Claude too. An answering proxy adds nothing.
+func TestHookCheck_ProxyNotAnswering(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	must(t, fx.in.Install(nil))
+	if r := fx.in.HookCheck("/w"); r != (HookReply{}) {
+		t.Fatalf("proxy answering, all moved: %+v, want nothing", r)
+	}
+	fx.in.ProxyAddr = closedAddr(t)
+	start := time.Now()
+	r := fx.in.HookCheck("/w")
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("check took %v, want it bounded near 1s", d)
+	}
+	want := ProxyDownMessage(fx.in.ProxyAddr)
+	if r.User != want || r.Claude != want {
+		t.Fatalf("reply %+v, want %q", r, want)
+	}
+	if !strings.Contains(want, "not answering on "+fx.in.ProxyAddr) || !strings.Contains(want, "aimux mcp proxy restart") || strings.Contains(want, "\n") {
+		t.Fatalf("message %q", want)
+	}
+	// With a direct server too: the proxy line first, the other on its own line.
+	fx.setEntry("a", json.RawMessage(`{"command": "a-mcp"}`))
+	r = fx.in.HookCheck("/w")
+	if wantBoth := want + "\n" + CheckMessage([]string{"a"}); r.User != wantBoth || r.Claude != wantBoth {
+		t.Fatalf("reply %+v, want %q", r, wantBoth)
+	}
+}
+
+// Not installed: the proxy is not this session's concern, so a closed port
+// says nothing.
+func TestHookCheck_ProxyDownButNotInstalled(t *testing.T) {
+	fx := newInstallFX(t, fixtureClaude, fixtureSettings)
+	fx.in.ProxyAddr = closedAddr(t)
+	if r := fx.in.HookCheck("/w"); r != (HookReply{}) {
+		t.Fatalf("not installed: %+v, want nothing", r)
+	}
+}
+
+// The default address is the proxy's own port on loopback.
+func TestProxyAddrDefaultsToPort(t *testing.T) {
+	if got := (Installer{Port: 7381}).proxyAddr(); got != "127.0.0.1:7381" {
+		t.Fatalf("proxyAddr %q", got)
+	}
+	if got := (Installer{Port: 7381, ProxyAddr: "127.0.0.1:9"}).proxyAddr(); got != "127.0.0.1:9" {
+		t.Fatalf("proxyAddr %q", got)
 	}
 }

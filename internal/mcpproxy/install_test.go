@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -209,6 +210,20 @@ func newInstallFX(t *testing.T, claude, settings string) *installFX {
 		Out:       &fx.out,
 		Wait:      time.Second,
 	}
+	// A real listener stands in for the running proxy the hook dials.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	must(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	fx.in.ProxyAddr = ln.Addr().String()
 	fx.clock = time.Unix(1_000_000_000, 0)
 	fx.in.Now = func() time.Time { return fx.clock }
 	fx.in.Sleep = func(d time.Duration) { fx.clock = fx.clock.Add(d) }
