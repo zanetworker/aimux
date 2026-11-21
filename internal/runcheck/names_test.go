@@ -163,3 +163,37 @@ func TestLoadPublicNames_PartialReadGivesNone(t *testing.T) {
 		t.Fatalf("LoadPublicNames = %q, %v; want nil and an error", got, err)
 	}
 }
+
+// Round-2 review cases: model-written lowercase text does not clear a name
+// the workspace capitalized; bold Markdown labels mark a name; common
+// technical acronyms and terms stay public; a line-leading bullet starts a
+// sentence.
+func TestCheck_PrivateNameReviewCases(t *testing.T) {
+	cases := []struct {
+		name   string
+		p      Private
+		query  string
+		reason string
+	}{
+		{"notes do not clear", Private{ToolOutputs: []string{"We met Globex last week."}, Notes: "globex wants sandboxes"}, "globex sandboxes", ReasonPrivateName},
+		{"earlier answer does not clear", Private{ToolOutputs: []string{"We met Globex last week."}, Prior: []string{"globex is a customer"}}, "globex sandboxes", ReasonPrivateName},
+		{"question does not clear", Private{ToolOutputs: []string{"We met Globex last week."}, Question: "what does globex need"}, "globex sandboxes", ReasonPrivateName},
+		{"tool output lowercase clears", Private{ToolOutputs: []string{"The Bank team met.", "every bank wants agents"}}, "bank agent adoption", ""},
+		{"bold label", Private{ToolOutputs: []string{"**Customer:** Globex"}}, "globex sandboxes", ReasonPrivateName},
+		{"underscore label", Private{ToolOutputs: []string{"__codename__ = kestrel"}}, "kestrel agents", ReasonPrivateName},
+		{"acronyms public", Private{Question: "How do AI agents use an LLM API on a GPU?"}, "AI agents LLM API GPU sandboxing", ""},
+		{"tech terms public", Private{ToolOutputs: []string{"We run it as SaaS with DevOps and OAuth on macOS."}}, "saas devops oauth macos agents", ""},
+		{"dash bullet", Private{ToolOutputs: []string{"Status:\n- Sandboxing is enabled\n+ Egress is on"}}, "sandboxing egress best practices", ""},
+		{"dash mid-sentence still a name", Private{ToolOutputs: []string{"the pilot - Globex said yes"}}, "globex pilot", ReasonPrivateName},
+	}
+	for _, c := range cases {
+		acc, rej := Check([]string{c.query}, c.p)
+		got := ""
+		if len(rej) == 1 {
+			got = rej[0].Reason
+		}
+		if got != c.reason || (c.reason == "" && len(acc) != 1) {
+			t.Errorf("%s: query %q accepted %v rejected %v, want %q", c.name, c.query, acc, rej, c.reason)
+		}
+	}
+}

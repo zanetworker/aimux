@@ -43,7 +43,7 @@ var functionWords = map[string]bool{
 // any quoting: "codename: bluefin", {"codename":"bluefin"}, project = "x".
 // Only the one word after the label counts; a label word in prose with no
 // separator ("customer adoption") marks nothing.
-var labeledRE = regexp.MustCompile(`(?i)\b(?:customer|client|account|codename|code name|project|contact|owner|partner)s?["']?\s*[:=]\s*["']?([\p{L}\p{N}]+)`)
+var labeledRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:customer|client|account|codename|code name|project|contact|owner|partner)s?[*_"']*\s*[:=]\s*[*_"']*\s*([\p{L}\p{N}]+)`)
 
 // sentenceBreak reports whether r, the last rune before a word that is
 // neither a space nor inline formatting, starts a new sentence or field, so
@@ -59,11 +59,20 @@ func inlineMark(r rune) bool {
 }
 
 // nameCandidates is every word the private texts use as a name, lower-cased:
-// a word capitalized mid-sentence that never appears in lower case in them
-// (nor is a month, weekday or I), every mixed-case word ("OpenShell"), and
-// every labeled one ("codename: bluefin").
-func nameCandidates(texts []string) map[string]bool {
+// a word capitalized mid-sentence that never appears in lower case in
+// evidence (nor is a month, weekday or I), every mixed-case word
+// ("OpenShell"), and every labeled one ("codename: bluefin"). evidence is
+// the workspace's own text (page, tool results), never text a model or the
+// question wrote, so a planner note in lower case cannot clear a name.
+func nameCandidates(texts, evidence []string) map[string]bool {
 	lower := map[string]bool{}
+	for _, s := range evidence {
+		for _, w := range wordRE.FindAllString(norm.NFKC.String(s), -1) {
+			if w == strings.ToLower(w) {
+				lower[w] = true
+			}
+		}
+	}
 	capMid := map[string]bool{}
 	out := map[string]bool{}
 	for _, s := range texts {
@@ -76,7 +85,6 @@ func nameCandidates(texts []string) map[string]bool {
 			}
 			switch {
 			case w == lw:
-				lower[lw] = true
 			case mixedCase(w):
 				out[lw] = true
 			case !afterBreak(s, loc[0]):
@@ -115,7 +123,25 @@ func afterBreak(s string, i int) bool {
 		if inlineMark(r) {
 			continue
 		}
+		if r == '-' || r == '+' { // a list bullet only at the start of a line
+			return lineStart(s, i)
+		}
 		return sentenceBreak(r)
+	}
+	return true
+}
+
+// lineStart reports whether only spaces or tabs come before byte i on its line.
+func lineStart(s string, i int) bool {
+	for i > 0 {
+		switch s[i-1] {
+		case ' ', '\t':
+			i--
+		case '\n', '\r':
+			return true
+		default:
+			return false
+		}
 	}
 	return true
 }
@@ -189,6 +215,11 @@ func namesPrivate(q string, cands map[string]bool, public [][]string) bool {
 		}
 	}
 	return false
+}
+
+// evidenceTexts is the workspace's own text in p: the page and tool results.
+func evidenceTexts(p Private) []string {
+	return append([]string{p.PageText}, p.ToolOutputs...)
 }
 
 // privateTexts is every private input of p.

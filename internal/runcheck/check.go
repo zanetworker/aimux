@@ -95,7 +95,7 @@ var (
 // byte budget, so a rejected query never uses up the budget.
 func Check(queries []string, p Private) (accepted []string, rejected []Rejection) {
 	private, keys := shingles(p), privateKeys(p)
-	cands, public := nameCandidates(privateTexts(p)), append(append([][]string(nil), builtinPhrases...), phrases(p.PublicNames)...)
+	cands, public := nameCandidates(privateTexts(p), evidenceTexts(p)), append(append([][]string(nil), builtinPhrases...), phrases(p.PublicNames)...)
 	total := 0
 	for i, raw := range queries {
 		reason := ""
