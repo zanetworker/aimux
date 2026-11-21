@@ -194,6 +194,9 @@ type TurnOptions struct {
 	// Image is the image pasted into the question (checked by the API),
 	// handed to the engine as profilerun.WithImage; nil for none.
 	Image *acprun.Image
+	// Caller is the authenticated client that asked for the turn, handed
+	// to the engine as profilerun.WithCaller; "" when not known.
+	Caller string
 }
 
 // StartWith is Start with the turn's options.
@@ -239,6 +242,9 @@ func (b *Broker) StartWith(session, text, key string, opt TurnOptions) (string, 
 	}
 	if opt.Image != nil {
 		ctx = profilerun.WithImage(ctx, opt.Image)
+	}
+	if opt.Caller != "" {
+		ctx = profilerun.WithCaller(ctx, opt.Caller)
 	}
 	links := &turnLinks{}
 	ctx = profilerun.WithTurnLinks(ctx, links.set)

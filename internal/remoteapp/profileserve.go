@@ -76,6 +76,9 @@ func (p *profileWiring) Install(api *remoteapi.API, scopes clientscope.Scopes, s
 	}
 	api.NewProfileSession, api.CancelProfileSession = p.newSession, p.cancelSession
 	api.ProfileHealth, api.StepUpLegacy = p.router.Health, stepUpLegacy
+	if run, ok := p.engines["run"].(*profilerun.RunEngine); ok {
+		run.SetsFor = api.ApprovableSets // a Both notice offers only sets the client may approve
+	}
 	api.ProfileSessionLive = p.live
 }
 

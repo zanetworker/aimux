@@ -351,7 +351,7 @@ func (a *API) newProfileSession(w http.ResponseWriter, r *http.Request, req newS
 		a.writeProfileFailure(w, req.Profile, err)
 		return
 	}
-	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model, Prior: req.Prior, Image: req.Image.image()})
+	turn, err := a.Broker.StartWith(id, req.Text, req.Key, TurnOptions{Model: req.Model, Prior: req.Prior, Image: req.Image.image(), Caller: client})
 	done(err == nil)
 	if err != nil {
 		a.writeProfileFailure(w, req.Profile, err)

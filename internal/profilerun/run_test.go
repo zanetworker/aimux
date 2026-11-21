@@ -22,7 +22,8 @@ type stageScript struct {
 	tools   []ToolResult // reported to the turn's tool-result collector
 	calls   []string     // tool_call titles emitted
 	err     error
-	waitCtx bool // block until the turn is cancelled
+	waitCtx bool             // block until the turn is cancelled
+	updates []map[string]any // raw session updates emitted first (aimux_notice)
 }
 
 type fakeStage struct {
@@ -55,6 +56,9 @@ func (f *fakeStage) Send(ctx context.Context, _ string, text string, onEvent fun
 	s := f.script
 	f.mu.Unlock()
 	f.started <- struct{}{}
+	for _, u := range s.updates {
+		onEvent(updateEvent(u))
+	}
 	for _, title := range s.calls {
 		onEvent(updateEvent(map[string]any{"sessionUpdate": "tool_call", "toolCallId": title, "title": title, "status": "pending"}))
 	}
@@ -393,5 +397,89 @@ func TestRun_LinksAreFetchedURLsOnly(t *testing.T) {
 	want := []string{"https://github.com/NVIDIA/OpenShell/releases"}
 	if !reflect.DeepEqual(reported, want) {
 		t.Fatalf("reported links %v, want %v", reported, want)
+	}
+}
+
+// The planner's notice of held tools reaches the client once per turn with
+// its sets, so a client can offer to approve them; a reader's notice and a
+// second planner notice do not.
+func TestRun_ForwardsPlannerNoticeWithSets(t *testing.T) {
+	held := map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "2 tools held for review (jira: a changed): run aimux tools status"}, "sets": []any{"jira:readonly"}}
+	again := map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "another"}}
+	readerNote := map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": "reader note"}}
+	r := newRunRig(t,
+		stageScript{updates: []map[string]any{held, again}, deltas: []string{plannerReply([]string{"openshell release notes"}, "")}},
+		stageScript{updates: []map[string]any{readerNote}, deltas: []string{"found"}},
+		stageScript{deltas: []string{"answer"}},
+	)
+	var asked []string
+	r.e.SetsFor = func(client string, sets []string) []string {
+		asked = append(asked, client)
+		return sets
+	}
+	id := r.start(t, Meta{Client: "wingman"}, "")
+	if _, err := r.send(WithCaller(context.Background(), "device"), id, "q"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(asked, []string{"device"}) {
+		t.Fatalf("SetsFor asked for %v, want the turn's caller once (not the session's creator)", asked)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var forwarded []map[string]any
+	for _, ev := range r.events {
+		var u map[string]any
+		_ = json.Unmarshal(ev.Data, &u)
+		if u["sessionUpdate"] == "aimux_notice" && u["sets"] != nil {
+			forwarded = append(forwarded, u)
+		}
+		if c, _ := u["content"].(map[string]any); c != nil && (c["text"] == "another" || c["text"] == "reader note") {
+			t.Fatalf("forwarded %v", c["text"])
+		}
+	}
+	if len(forwarded) != 1 || !reflect.DeepEqual(forwarded[0]["sets"], []any{"jira:readonly"}) {
+		t.Fatalf("held-tools notices forwarded: %v", forwarded)
+	}
+}
+
+// The forwarded notice keeps its full text, but sets lists only those the
+// session's client may approve; with none, or no check wired, sets is left
+// out so the panel falls back to the copy command.
+func TestRun_ForwardedNoticeSetsFilteredByClient(t *testing.T) {
+	text := "2 tools held for review (jira: a changed; wiki: b new): run aimux tools status"
+	held := map[string]any{"sessionUpdate": "aimux_notice", "content": map[string]any{"type": "text", "text": text}, "sets": []any{"jira:readonly", "wiki:readonly"}}
+	for name, c := range map[string]struct {
+		setsFor func(string, []string) []string
+		want    any
+	}{
+		"subset":    {func(_ string, s []string) []string { return s[1:] }, []any{"wiki:readonly"}},
+		"none":      {func(string, []string) []string { return nil }, nil},
+		"nil":       {nil, nil},
+		"no caller": {func(_ string, s []string) []string { return s }, nil},
+	} {
+		r := newRunRig(t, stageScript{updates: []map[string]any{held}, deltas: []string{plannerReply(nil, "")}}, stageScript{}, stageScript{deltas: []string{"a"}})
+		r.e.SetsFor = c.setsFor
+		id := r.start(t, Meta{Client: "wingman"}, "")
+		ctx := WithCaller(context.Background(), "wingman")
+		if name == "no caller" { // a queued turn: who asked is not known, so no sets
+			ctx = context.Background()
+		}
+		if _, err := r.send(ctx, id, "q"); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		for _, ev := range r.events {
+			var u map[string]any
+			_ = json.Unmarshal(ev.Data, &u)
+			if cc, _ := u["content"].(map[string]any); cc != nil && cc["text"] == text {
+				got = u
+			}
+		}
+		if got == nil {
+			t.Fatalf("%s: the held-tools notice was not forwarded", name)
+		}
+		if !reflect.DeepEqual(got["sets"], c.want) {
+			t.Fatalf("%s: sets = %v, want %v", name, got["sets"], c.want)
+		}
 	}
 }
