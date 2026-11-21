@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -43,19 +44,19 @@ var functionWords = map[string]bool{
 // any quoting: "codename: bluefin", {"codename":"bluefin"}, project = "x".
 // Only the one word after the label counts; a label word in prose with no
 // separator ("customer adoption") marks nothing.
-var labeledRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:customer|client|account|codename|code name|project|contact|owner|partner)s?[*_"']*\s*[:=]\s*[*_"']*\s*([\p{L}\p{N}]+)`)
+var labeledRE = regexp.MustCompile("(?i)(?:^|[^a-z0-9])(?:customer|client|account|codename|code name|project|contact|owner|partner)s?[*_\"'`]*\\s*[:=]\\s*[*_\"'`]*\\s*([\\p{L}\\p{N}]+)")
 
 // sentenceBreak reports whether r, the last rune before a word that is
 // neither a space nor inline formatting, starts a new sentence or field, so
 // a capital there says nothing.
 func sentenceBreak(r rune) bool {
-	return strings.ContainsRune(".!?:;{}[]<>|•\n\r\t=", r)
+	return strings.ContainsRune(".!?:;{}<>|•\n\r\t=", r)
 }
 
 // inlineMark is formatting or quoting around a word ("**Globex**",
-// "\"Globex\"", "(Globex"), skipped when looking back for a sentence break.
+// "\"Globex\"", "(Globex", "[Globex](...)"), skipped when looking back for a sentence break.
 func inlineMark(r rune) bool {
-	return r == ' ' || strings.ContainsRune("*_`~\"'()#", r)
+	return r == ' ' || strings.ContainsRune("*_`~\"'()[]#", r)
 }
 
 // nameCandidates is every word the private texts use as a name, lower-cased:
@@ -69,7 +70,7 @@ func nameCandidates(texts, evidence []string) map[string]bool {
 	for _, s := range evidence {
 		for _, w := range wordRE.FindAllString(norm.NFKC.String(s), -1) {
 			if w == strings.ToLower(w) {
-				lower[w] = true
+				lower[foldCase(w)] = true
 			}
 		}
 	}
@@ -79,12 +80,12 @@ func nameCandidates(texts, evidence []string) map[string]bool {
 		s = norm.NFKC.String(s)
 		for _, loc := range wordRE.FindAllStringIndex(s, -1) {
 			w := s[loc[0]:loc[1]]
-			lw := strings.ToLower(w)
+			lw := foldCase(w)
 			if len([]rune(w)) < 2 || isDigits(w) {
 				continue
 			}
 			switch {
-			case w == lw:
+			case w == strings.ToLower(w):
 			case mixedCase(w):
 				out[lw] = true
 			case !afterBreak(s, loc[0]):
@@ -92,7 +93,7 @@ func nameCandidates(texts, evidence []string) map[string]bool {
 			}
 		}
 		for _, m := range labeledRE.FindAllStringSubmatch(s, -1) {
-			if lw := strings.ToLower(m[1]); !functionWords[lw] && !isDigits(lw) && len([]rune(lw)) > 1 {
+			if lw := foldCase(m[1]); !functionWords[lw] && !isDigits(lw) && len([]rune(lw)) > 1 {
 				out[lw] = true
 			}
 		}
@@ -183,7 +184,26 @@ func phrases(names []string) [][]string {
 }
 
 // builtinPhrases is the shipped list, tokenized once.
-var builtinPhrases = phrases(strings.Split(builtinPublicNames, "\n"))
+var builtinPhrases = phrases(parseNames(builtinPublicNames))
+
+// parseNames is the names in a list, one per line: text after # is a
+// comment, blank lines are skipped. Both lists are read with it.
+func parseNames(list string) []string {
+	var out []string
+	for _, line := range strings.Split(list, "\n") {
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// foldCase is s in Unicode case-folded form, the one form names, evidence,
+// queries and public phrases are compared in.
+func foldCase(s string) string { return cases.Fold().String(s) }
 
 // namesPrivate reports whether q, once every public phrase in it is blanked
 // out (whole phrases only), still has a word among cands.
@@ -227,11 +247,12 @@ func privateTexts(p Private) []string {
 	out := []string{p.Question, p.PageText, p.Notes}
 	out = append(out, p.Prior...)
 	out = append(out, p.ToolInputs...)
+	out = append(out, p.FailedOutputs...)
 	return append(out, p.ToolOutputs...)
 }
 
 // LoadPublicNames reads the owner's public names, one phrase per line;
-// blank lines and lines starting with # are skipped. A missing file is no
+// text after # is a comment and blank lines are skipped (parseNames). A missing file is no
 // names and no error.
 func LoadPublicNames(path string) ([]string, error) {
 	f, err := os.Open(path) //nolint:gosec // G304: the owner's own config file
@@ -245,11 +266,7 @@ func LoadPublicNames(path string) ([]string, error) {
 	var out []string
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		out = append(out, line)
+		out = append(out, parseNames(sc.Text())...)
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err // a list read in part is no list: the shipped one alone applies

@@ -197,3 +197,31 @@ func TestCheck_PrivateNameReviewCases(t *testing.T) {
 		}
 	}
 }
+
+// Round-3 review cases.
+func TestCheck_PrivateNameRound3(t *testing.T) {
+	cases := []struct {
+		name   string
+		p      Private
+		query  string
+		reason string
+	}{
+		{"code span label", Private{ToolOutputs: []string{"codename: `bluefin`"}}, "bluefin release", ReasonPrivateName},
+		{"markdown link mid-sentence", Private{ToolOutputs: []string{"We met with [Globex](https://x.example/1) yesterday."}}, "globex agents", ReasonPrivateName},
+		{"failed output does not clear", Private{PageText: "We met Globex today.", FailedOutputs: []string{"error: repo globex not found"}}, "globex agents", ReasonPrivateName},
+		{"failed output is still private", Private{FailedOutputs: []string{"error: the Kestrel lookup failed"}}, "kestrel agents", ReasonPrivateName},
+		{"unicode case fold", Private{ToolOutputs: []string{"codename: ΆΡΗΣ"}}, "άρης agents", ReasonPrivateName},
+		{"shipped comments are not names", Private{ToolOutputs: []string{"We met Public Names yesterday."}}, "public names agents", ReasonPrivateName},
+		{"inline comment in extra list", Private{ToolOutputs: []string{"We use Globex Cloud now."}, PublicNames: []string{"Globex Cloud # public vendor"}}, "globex cloud agents", ""},
+	}
+	for _, c := range cases {
+		acc, rej := Check([]string{c.query}, c.p)
+		got := ""
+		if len(rej) == 1 {
+			got = rej[0].Reason
+		}
+		if got != c.reason || (c.reason == "" && len(acc) != 1) {
+			t.Errorf("%s: query %q accepted %v rejected %v, want %q", c.name, c.query, acc, rej, c.reason)
+		}
+	}
+}

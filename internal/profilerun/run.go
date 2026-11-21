@@ -212,7 +212,11 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 	}
 	for _, r := range planResults {
 		priv.ToolInputs = append(priv.ToolInputs, r.Input)
-		priv.ToolOutputs = append(priv.ToolOutputs, r.Output)
+		if r.Failed {
+			priv.FailedOutputs = append(priv.FailedOutputs, r.Output)
+		} else {
+			priv.ToolOutputs = append(priv.ToolOutputs, r.Output)
+		}
 	}
 	st.Accepted, st.Rejected = runcheck.Check(p.PublicQueries, priv)
 	if len(st.Rejected) > 0 {

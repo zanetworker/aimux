@@ -59,6 +59,10 @@ type Private struct {
 	// PublicNames are the owner's own public names (LoadPublicNames), added
 	// to the shipped list; they are not private input.
 	PublicNames []string
+	// FailedOutputs are failed tool calls' outputs (errors, stderr): private,
+	// but never evidence that a word is ordinary, since they can echo what
+	// the planner sent.
+	FailedOutputs []string
 }
 
 // Rejection is one refused query: its position in the planner's list and why.
@@ -95,7 +99,7 @@ var (
 // byte budget, so a rejected query never uses up the budget.
 func Check(queries []string, p Private) (accepted []string, rejected []Rejection) {
 	private, keys := shingles(p), privateKeys(p)
-	cands, public := nameCandidates(privateTexts(p), evidenceTexts(p)), append(append([][]string(nil), builtinPhrases...), phrases(p.PublicNames)...)
+	cands, public := nameCandidates(privateTexts(p), evidenceTexts(p)), append(append([][]string(nil), builtinPhrases...), phrases(parseNames(strings.Join(p.PublicNames, "\n")))...)
 	total := 0
 	for i, raw := range queries {
 		reason := ""
@@ -248,7 +252,7 @@ func privateKeys(p Private) map[string]bool {
 			out[m[1]+"-"+m[2]] = true
 		}
 	}
-	for _, s := range append([]string{p.Question, p.PageText, p.Notes}, append(append(p.Prior, p.ToolInputs...), p.ToolOutputs...)...) {
+	for _, s := range privateTexts(p) {
 		add(s)
 	}
 	return out
@@ -314,7 +318,7 @@ func entropy(s string) float64 {
 
 // words is s normalized and lowercased, split into letter and digit runs.
 func words(s string) []string {
-	return wordRE.FindAllString(strings.ToLower(norm.NFKC.String(s)), -1)
+	return wordRE.FindAllString(foldCase(norm.NFKC.String(s)), -1)
 }
 
 // shingles is every run of overlapWords consecutive words in the private
@@ -337,6 +341,9 @@ func shingles(p Private) map[string]bool {
 		add(s)
 	}
 	for _, s := range p.ToolOutputs {
+		add(s)
+	}
+	for _, s := range p.FailedOutputs {
 		add(s)
 	}
 	return out
