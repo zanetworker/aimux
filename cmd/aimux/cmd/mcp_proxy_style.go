@@ -319,7 +319,7 @@ func wrapItems(prefix string, items []string, width, hang int) []string {
 
 // noRouteFix is what gives a never-started server without an endpoint its
 // route: cache its tools, then have the proxy serve them.
-const noRouteFix = "`aimux mcp proxy refresh`, then `aimux mcp proxy restart` (a proxy you run by hand: start `aimux mcp proxy serve` again)"
+const noRouteFix = "`aimux mcp proxy refresh`, then `aimux mcp proxy restart` (a proxy you run by hand: start `aimux mcp proxy serve` again with your original flags)"
 
 // heading is the first of a list's headings that fits width with room for
 // one short name (width 0: the first), else the last cut to width.
