@@ -64,8 +64,9 @@ func CheckHTTPServer(ctx context.Context, url string, headers map[string]string)
 
 // checkAll runs check for each entry in parallel and splits the result:
 // the names to move, every server kept direct with its reason, and the
-// subset that needs OAuth (recorded so status can name them without a
-// network call). All three are sorted by name.
+// subset recorded in the manifest so status can name them without a
+// network call: those that need OAuth or refused their headers (401). An
+// unreachable server is not recorded: running install again moves it. All three are sorted by name.
 func checkAll(ctx context.Context, entries map[string]HTTPEntry, check func(context.Context, string, map[string]string) HTTPReach) (move []string, kept []KeptDirect, oauth []KeptDirect) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -82,8 +83,9 @@ func checkAll(ctx context.Context, entries map[string]HTTPEntry, check func(cont
 			case r == NeedsOAuth && len(e.Headers) == 0:
 				k := KeptDirect{Server: name, Reason: ReasonNeedsOAuth}
 				kept, oauth = append(kept, k), append(oauth, k)
-			case r == NeedsOAuth:
-				kept = append(kept, KeptDirect{Server: name, Reason: reasonRefusedHeaders})
+			case r == NeedsOAuth: // a decision, not a passing state: recorded too
+				k := KeptDirect{Server: name, Reason: reasonRefusedHeaders}
+				kept, oauth = append(kept, k), append(oauth, k)
 			default:
 				kept = append(kept, KeptDirect{Server: name, Reason: reasonUnreachable})
 			}

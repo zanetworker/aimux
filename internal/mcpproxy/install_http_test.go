@@ -806,3 +806,33 @@ func TestKeptDirectLines_Dedupes(t *testing.T) {
 		t.Fatalf("lines %q", got)
 	}
 }
+
+// A server whose headers install saw refused (401) is kept direct on
+// purpose: status lists it under kept direct with that reason, never as
+// not behind the proxy (whose fix is install), and the SessionStart hook
+// does not name it. Unreachable stays not behind: running install again is
+// the fix once it is up.
+func TestInstallStatus_RefusedHeadersIsKeptDirectNotNotProxied(t *testing.T) {
+	fx := newHTTPFX(t, httpClaude)
+	fx.reach["https://pp.example/mcp"] = NeedsOAuth // pp has headers: a 401 means they were refused
+	must(t, fx.in.Install(nil))
+	m, _ := LoadManifest(fx.manifest)
+	if keptReason(m.Direct, "pp") != reasonRefusedHeaders {
+		t.Fatalf("manifest direct %v: pp's reason not recorded", m.Direct)
+	}
+	fx.in.CheckHTTP = func(context.Context, string, map[string]string) HTTPReach {
+		t.Fatal("status probed the network")
+		return Reachable
+	}
+	st, err := fx.in.InstallStatus()
+	must(t, err)
+	if contains(st.NotProxied, "pp") || !contains(st.NotProxied, "devsrv") {
+		t.Fatalf("notProxied %v: want devsrv only, not pp", st.NotProxied)
+	}
+	if keptReason(st.KeptDirect, "pp") != reasonRefusedHeaders {
+		t.Fatalf("kept %v: pp not kept direct with its reason", st.KeptDirect)
+	}
+	if r := fx.in.HookCheck("/w"); strings.Contains(r.User, "pp") || !strings.Contains(r.User, "devsrv") {
+		t.Fatalf("session-start line %q: want devsrv named, pp not", r.User)
+	}
+}
