@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zanetworker/aimux/internal/mcpproxy"
+	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
 var statusNow = time.Unix(1_700_000_000, 0)
@@ -54,8 +56,8 @@ func TestProxyStatus_Table(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"slack", "running", "12 tools", "called 2m ago", "github", "failed", "exec: gh-mcp: not found", "never called",
-		"pid 99", "line one", "line two"} {
+	for _, want := range []string{"slack", "running", "2m ago", "github", "failed", "exec: gh-mcp: not found", "never",
+		"line one", "line two"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("table lacks %q:\n%s", want, got)
 		}
@@ -115,7 +117,7 @@ func TestProxyStatus_NotRunning(t *testing.T) {
 	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr}, &out, fixedClock(statusNow)); err != nil {
 		t.Fatalf("not running should not be an error: %v", err)
 	}
-	if want := "MCP proxy ○ not running on " + addr + "\n"; out.String() != want {
+	if want := "COMPONENT  STATE        VERSION  UPTIME  ADDRESS\nproxy      not running  -        -       " + addr + "\n"; out.String() != want {
 		t.Fatalf("got %q, want %q", out.String(), want)
 	}
 	out.Reset()
@@ -136,7 +138,7 @@ func TestProxyStatus_DaemonErrorIsAnError(t *testing.T) {
 	o := proxyStatusOpts{addr: strings.TrimPrefix(srv.URL, "http://"),
 		install: &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"slack"}, Drifted: []string{"slack"}, Hooks: true}}
 	asked := false
-	o.gateway = func() string { asked = true; return "tool gateway" }
+	o.gateway = func() (toolgateway.ControlStatus, error) { asked = true; return toolgateway.ControlStatus{}, nil }
 	err := proxyStatus(context.Background(), o, &out, fixedClock(statusNow))
 	if asked {
 		t.Fatal("a proxy that gave no status still waited on the tool gateway")
@@ -145,7 +147,7 @@ func TestProxyStatus_DaemonErrorIsAnError(t *testing.T) {
 		t.Fatalf("got %v, want an error naming the status", err)
 	}
 	// What the command already knows still helps with the broken daemon.
-	if got := out.String(); !strings.Contains(got, "MCP proxy ? no status") || !strings.Contains(got, "! drifted: slack") {
+	if got := out.String(); !strings.Contains(got, "\nproxy      no status") || !strings.Contains(got, "WARNING  drifted: slack") {
 		t.Fatalf("install diagnostics lost on a daemon error:\n%s", got)
 	}
 }
@@ -154,17 +156,17 @@ func TestProxyStatus_DaemonErrorIsAnError(t *testing.T) {
 // not leave it stale.
 func TestProxyStatus_GatewayReadAfterTheAnswer(t *testing.T) {
 	addr, got := fakeDaemon(t, fixtureReport())
-	o := proxyStatusOpts{addr: addr, probe: true, timeout: time.Second, gateway: func() string {
+	o := proxyStatusOpts{addr: addr, probe: true, timeout: time.Second, gateway: func() (toolgateway.ControlStatus, error) {
 		if len(*got) == 0 {
-			return "tool gateway read before the proxy answered"
+			return toolgateway.ControlStatus{Version: "read-before"}, nil
 		}
-		return "tool gateway read after"
+		return toolgateway.ControlStatus{Version: "read-after"}, nil
 	}}
 	var out bytes.Buffer
 	if err := proxyStatus(context.Background(), o, &out, fixedClock(statusNow)); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "tool gateway read after") {
+	if !strings.Contains(out.String(), "snapshot read-after\n") || strings.Contains(out.String(), "read-before") {
 		t.Fatalf("output:\n%s", out.String())
 	}
 }
@@ -233,9 +235,8 @@ func renderRep(rep mcpproxy.StatusReport, color, all bool, removed ...string) st
 func TestPrintProxyStatus_ColorStatesAndSummary(t *testing.T) {
 	got := renderRep(styledReport(), true, true)
 	for _, want := range []string{
-		"\x1b[32m● running", "\x1b[31m● failed", "\x1b[2m○ idle", "\x1b[2m○ ready",
-		"4 servers: ", "1 running", "1 idle", "1 ready", "1 failed",
-		"pid 99", "line one", // the failed server's stderr tail
+		"\x1b[32mrunning", "\x1b[31mfailed", "\x1b[2midle", "\x1b[2mready",
+		"(1 ready, 1 failed)", "line one", // the failed server's stderr tail
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("styled status lacks %q:\n%s", want, got)
@@ -247,29 +248,42 @@ func TestPrintProxyStatus_ColorStatesAndSummary(t *testing.T) {
 }
 
 func TestPrintProxyStatus_ColumnsStayAlignedWithColor(t *testing.T) {
-	got := renderRep(styledReport(), true, true)
-	row := regexp.MustCompile(`^(\s*\S+\s+)([●○◐] [a-z ]+?)\s{2,}(\d+)\s`)
-	var stateCols, toolCols []int
-	for _, line := range strings.Split(ansiRE.ReplaceAllString(got, ""), "\n") {
+	got := ansiRE.ReplaceAllString(renderRep(styledReport(), true, true), "")
+	lines := serverRows(t, got)
+	head := lines[0]
+	stateCol, toolCol := strings.Index(head, "STATE"), strings.Index(head, "TOOLS")
+	row := regexp.MustCompile(`^(\S+\s+)(\S+\s+)\d`)
+	for _, line := range lines[1:] {
 		m := row.FindStringSubmatchIndex(line)
-		if m == nil {
-			continue
+		if m == nil || m[3] != stateCol || m[5] != toolCol {
+			t.Fatalf("row %q not aligned under STATE at %d and TOOLS at %d:\n%s", line, stateCol, toolCol, got)
 		}
-		stateCols = append(stateCols, len([]rune(line[:m[4]])))
-		toolCols = append(toolCols, len([]rune(line[:m[6]])))
 	}
-	if len(stateCols) != 4 {
-		t.Fatalf("found %d table rows, want 4:\n%s", len(stateCols), got)
-	}
-	for i := range stateCols {
-		if stateCols[i] != stateCols[0] || toolCols[i] != toolCols[0] {
-			t.Fatalf("columns misaligned with colour on: state %v, tools %v\n%s", stateCols, toolCols, got)
-		}
+	if len(lines) != 5 {
+		t.Fatalf("found %d server rows, want 4:\n%s", len(lines)-1, got)
 	}
 }
 
+// serverRows is the SERVER table of a plain page: its header, then each row.
+func serverRows(t *testing.T, plain string) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(plain, "\n") {
+		switch {
+		case strings.HasPrefix(line, "SERVER ") && strings.Contains(line, "LAST CALL"):
+			out = []string{line}
+		case out != nil && strings.HasPrefix(line, "("):
+			return out
+		case out != nil:
+			out = append(out, line)
+		}
+	}
+	t.Fatalf("no server table:\n%s", plain)
+	return nil
+}
+
 func TestPrintProxyStatus_PlainHasNoEscapes(t *testing.T) {
-	if got := renderRep(styledReport(), false, false); strings.Contains(got, "\x1b") || !strings.Contains(got, "● running") || !strings.Contains(got, "4 servers") {
+	if got := renderRep(styledReport(), false, false); strings.Contains(got, "\x1b") || !strings.Contains(got, "running") || !strings.Contains(got, "(1 ready, 1 failed; --all lists them)") {
 		t.Fatalf("plain status:\n%q", got)
 	}
 }
@@ -277,10 +291,9 @@ func TestPrintProxyStatus_PlainHasNoEscapes(t *testing.T) {
 func TestPrintInstallState_CountsRemovedDriftAndUpgrade(t *testing.T) {
 	st := mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"aimux", "github", "minutes", "slack"},
 		Drifted: []string{"slack"}, Removed: []string{"minutes"}, UpgradePending: true, DaemonVersion: "v1"}
-	got := render(statusPage{addr: "a", install: &st, claudeConfig: "/home/x/.claude.json", now: statusNow,
-		upgradeText: "restart with `launchctl kickstart -k gui/501/com.aimux.mcp-proxy`"})
-	for _, want := range []string{"4 servers behind the proxy", "aimux mcp proxy edit", "minutes", "removed from /home/x/.claude.json",
-		"slack", "drifted", "launchctl kickstart"} {
+	got := render(statusPage{addr: "a", install: &st, claudeConfig: "/home/x/.claude.json", now: statusNow, cliVersion: "v2"})
+	for _, want := range []string{"4 servers behind the proxy", "minutes", "removed from /home/x/.claude.json",
+		"drifted: slack", "upgrade restart pending (proxy v1, cli v2)", "aimux mcp proxy restart"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("install section lacks %q:\n%s", want, got)
 		}
@@ -295,12 +308,9 @@ func TestPrintInstallState_CountsRemovedDriftAndUpgrade(t *testing.T) {
 
 func tableNames(t *testing.T, out string) []string {
 	t.Helper()
-	row := regexp.MustCompile(`^\s+(\S+)\s+[●○◐] `)
 	var names []string
-	for _, line := range strings.Split(ansiRE.ReplaceAllString(out, ""), "\n") {
-		if m := row.FindStringSubmatch(line); m != nil {
-			names = append(names, m[1])
-		}
+	for _, line := range serverRows(t, ansiRE.ReplaceAllString(out, ""))[1:] {
+		names = append(names, strings.Fields(line)[0])
 	}
 	return names
 }
@@ -323,7 +333,7 @@ func TestPrintProxyStatus_RemovedServerIsMarkedAndLast(t *testing.T) {
 	if names[len(names)-1] != "nanobanana-image-creation" {
 		t.Fatalf("removed server not last: %v", names)
 	}
-	if !strings.Contains(got, "○ removed") || !strings.Contains(got, "1 removed") || strings.Contains(got, "1 idle") {
+	if !strings.Contains(got, "\nnanobanana-image-creation  removed ") || !strings.Contains(got, "1 removed)") {
 		t.Fatalf("removed server not marked or counted apart:\n%s", got)
 	}
 }
@@ -333,8 +343,8 @@ func TestPrintInstallState_Hooks(t *testing.T) {
 		on   bool
 		want string
 	}{
-		{true, "hooks on: a server you add in a session moves behind the proxy"},
-		{false, "hooks off: servers you add later stay direct; `aimux mcp proxy install` adds the hooks"},
+		{true, "\nINFO   hooks on\n"}, // LEVEL is as wide as its widest value
+		{false, "\nWARNING  hooks off: servers you add later stay direct  aimux mcp proxy install\n"},
 	} {
 		got := render(statusPage{addr: "a", install: &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Moved: []string{"a"}, Hooks: tc.on}, now: statusNow})
 		if !strings.Contains(got, tc.want) {
@@ -351,7 +361,7 @@ func TestProxyStatus_AnswerWithoutARunningProxyIsAnError(t *testing.T) {
 		for _, js := range []bool{false, true} {
 			var out bytes.Buffer
 			err := proxyStatus(context.Background(), proxyStatusOpts{addr: strings.TrimPrefix(srv.URL, "http://"), json: js}, &out, fixedClock(statusNow))
-			if err == nil || strings.Contains(out.String(), "● running") {
+			if err == nil || strings.Contains(out.String(), "proxy      running") {
 				t.Fatalf("body %s json=%v: err %v, output:\n%s", body, js, err, out.String())
 			}
 		}
@@ -387,5 +397,36 @@ func TestProxyStatus_NeverStartedReadsReadyJSONKeepsName(t *testing.T) {
 	}
 	if n := len(got.Servers); n != 3 || got.Servers[2].Server != "context7" || got.Servers[2].State != "not_started" {
 		t.Fatalf("--json lost the not_started state name: %+v", got.Servers)
+	}
+}
+
+// The proxy is hand-run (restart cannot reach it) without the launchd
+// agent, or when it is on another port than install recorded.
+func TestProxyHandRun(t *testing.T) {
+	home := t.TempDir()
+	in := proxyInstaller(home, 7381, &bytes.Buffer{})
+	if port, hand := proxyHandRun(in, 7381); port != 0 || !hand {
+		t.Fatalf("no agent, no manifest: port %d handRun %v, want 0 true", port, hand)
+	}
+	if err := os.MkdirAll(filepath.Dir(in.Agent.PlistPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in.Agent.PlistPath, []byte("<plist/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if port, hand := proxyHandRun(in, 7381); port != 0 || hand {
+		t.Fatalf("agent, no manifest: port %d handRun %v, want 0 false", port, hand)
+	}
+	if err := os.MkdirAll(filepath.Dir(in.ManifestPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in.ManifestPath, []byte(`{"version":2,"port":8000,"servers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if port, hand := proxyHandRun(in, 8000); port != 8000 || hand {
+		t.Fatalf("agent on the installed port: port %d handRun %v, want 8000 false", port, hand)
+	}
+	if port, hand := proxyHandRun(in, 7381); port != 8000 || !hand {
+		t.Fatalf("another port than installed: port %d handRun %v, want 8000 true", port, hand)
 	}
 }

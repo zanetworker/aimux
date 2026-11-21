@@ -10,16 +10,16 @@ import (
 	"github.com/zanetworker/aimux/internal/toolgateway"
 )
 
-// A failed server's state says how long ago it failed, so a failure from
+// A failed server's error says how long ago it failed, so a failure from
 // yesterday is not read as live.
-func TestPrintProxyStatus_FailedStateShowsItsAge(t *testing.T) {
+func TestPrintProxyStatus_FailedErrorShowsItsAge(t *testing.T) {
 	rep := fixtureReport()
 	rep.Servers[1].LastErrorAt = statusNow.Add(-12 * time.Minute)
-	if got := renderRep(rep, false, false); !strings.Contains(got, "● failed 12m ago") {
+	if got := renderRep(rep, false, false); !strings.Contains(got, "\ngithub  12m  exec: gh-mcp: not found") {
 		t.Fatalf("output lacks the failure's age:\n%s", got)
 	}
 	// A failure with no time (an older daemon) shows no age.
-	if got := renderRep(fixtureReport(), false, false); strings.Contains(got, "failed never") || strings.Contains(got, "failed just") {
+	if got := renderRep(fixtureReport(), false, false); !strings.Contains(got, "\ngithub  -    exec: gh-mcp: not found") {
 		t.Fatalf("a failure without a time got an age:\n%s", got)
 	}
 }
@@ -37,22 +37,20 @@ func TestGatewayStatusLine_SaysHowOldEachStateIs(t *testing.T) {
 	}
 }
 
-func TestStateAge(t *testing.T) {
+func TestSpan(t *testing.T) {
 	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
 		at   time.Time
 		want string
 	}{
-		{time.Time{}, ""},
-		{now.Add(-12 * time.Minute), " 12m ago"},
-		{now.Add(-40 * time.Second), " 40s ago"},
-		{now.Add(time.Minute), " just now"}, // a clock a little ahead is not "in the future"
+		{now.Add(-12 * time.Minute), "12m"},
+		{now.Add(-40 * time.Second), "40s"},
+		{now.Add(time.Minute), "0s"}, // a clock a little ahead is not "in the future"
 	} {
-		if got := stateAge(now, c.at); got != c.want {
-			t.Errorf("stateAge(%v) = %q, want %q", c.at, got, c.want)
+		if got := span(now, c.at); got != c.want {
+			t.Errorf("span(%v) = %q, want %q", c.at, got, c.want)
 		}
 	}
-
 }
 
 // fixedClock is a clock that always reads at.
@@ -74,7 +72,7 @@ func TestProxyStatus_AgesMeasuredAfterTheAnswer(t *testing.T) {
 	if err := proxyStatus(context.Background(), proxyStatusOpts{addr: addr, probe: true, timeout: time.Second}, &out, clock); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "failed 40s ago") {
+	if !strings.Contains(out.String(), "\ngithub  40s  exec: gh-mcp") {
 		t.Fatalf("output:\n%s", out.String())
 	}
 }

@@ -1334,10 +1334,14 @@ func (i Installer) InstallStatus() (InstallState, error) {
 	direct := map[string]bool{}
 	var recordedDirect []KeptDirect
 	for _, k := range m.Direct {
-		if _, isStdio := stdio[k.Server]; !isStdio && entryURL(members[k.Server]) != "" {
-			direct[k.Server] = true
-			recordedDirect = append(recordedDirect, k)
+		if _, isStdio := stdio[k.Server]; isStdio || entryURL(members[k.Server]) == "" {
+			continue
 		}
+		if e, ok := httpAll[k.Server]; k.Config != "" && (!ok || ConfigDigest(e) != k.Config) {
+			continue // checked under another URL or other headers: not known any more
+		}
+		direct[k.Server] = true
+		recordedDirect = append(recordedDirect, KeptDirect{Server: k.Server, Reason: k.Reason})
 	}
 	for _, name := range sortedKeys(httpAll) {
 		if reason := headersTooLong(i.Vault, name, httpAll[name]); reason != "" {

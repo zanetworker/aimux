@@ -239,13 +239,13 @@ func newMCPProxyStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the running proxy's servers: state, tools, last call, last error",
-		Long: "Reads the running proxy's /status on 127.0.0.1 and shows the daemon with a count per state, what " +
-			"needs you (an upgrade restart pending, entries drifted from their proxy URL, stdio and HTTP servers not " +
-			"behind the proxy yet, hooks off), then the servers with a problem (failed, or an error the server has " +
-			"not recovered from, whatever its age, and never-started servers with no route, which need " +
-			"aimux mcp proxy refresh and a proxy restart), the active ones, the never-started ones that are ready " +
-			"(they start on their first call) on one line, the tool gateway and the install notes. --all (text " +
-			"only) lists every server as a row and shows errors that are past as (old). With --probe the proxy starts each " +
+		Long: "Reads the running proxy's /status on 127.0.0.1 and prints tables: COMPONENT (the proxy and the tool " +
+			"gateway: state, version, uptime, address), SERVER (problems first: failed, a recent error, no route; then " +
+			"running, starting and idle; ready servers, which start on their first call, are counted in the line under " +
+			"it), ERRORS (each failed or warning server's message and age), and LEVEL/MESSAGE/FIX (WARNING for what " +
+			"needs you, INFO for notes, each with the command to run when there is one). On a narrow terminal the " +
+			"widest text column is cut with an ellipsis. --all (text only) adds the ready and removed servers as rows " +
+			"and shows errors that are past as (old). --json is unchanged. With --probe the proxy starts each " +
 			"configured server once and lists its tools before reporting. Not running is reported, not an error; " +
 			"a proxy that gives no status is an error.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -254,15 +254,14 @@ func newMCPProxyStatusCmd() *cobra.Command {
 			if home, err := os.UserHomeDir(); err == nil {
 				in := proxyInstaller(home, port, cmd.OutOrStdout())
 				if st, err := in.InstallStatus(); err == nil {
-					o.install, o.upgradeText = &st, in.UpgradeText(st.DaemonVersion)
+					o.install, o.cliVersion = &st, in.Version
 				} else {
 					o.installErr = err
 				}
 				o.claudeConfig = in.ClaudeConfig
-				o.gateway = func() string {
-					st, err := toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}.Status(cmd.Context())
-					line, _ := gatewayStatusStyled(st, err, time.Now(), o.color, o.width)
-					return line
+				o.installPort, o.handRun = proxyHandRun(in, port)
+				o.gateway = func() (toolgateway.ControlStatus, error) {
+					return toolgateway.ControlClient{Path: toolgateway.ControlSocketPath(home)}.Status(cmd.Context())
 				}
 			}
 			return proxyStatus(cmd.Context(), o, cmd.OutOrStdout(), time.Now)
@@ -271,7 +270,7 @@ func newMCPProxyStatusCmd() *cobra.Command {
 	cmd.Flags().IntVar(&port, "port", 7381, "Port the proxy listens on at 127.0.0.1")
 	cmd.Flags().BoolVar(&o.json, "json", false, "Print the status as JSON")
 	cmd.Flags().BoolVar(&o.probe, "probe", false, "Start each configured server once and list its tools first")
-	cmd.Flags().BoolVar(&o.all, "all", false, "List every server as a row, never-started and removed ones too, with past errors")
+	cmd.Flags().BoolVar(&o.all, "all", false, "List every server as a row, ready and removed ones too, with past errors")
 	cmd.Flags().DurationVar(&o.timeout, "timeout", time.Minute, "How long --probe may take")
 	return cmd
 }
@@ -286,16 +285,32 @@ type proxyStatusOpts struct {
 	// The rest is for the text page only.
 	installErr   error // why the install state could not be read
 	claudeConfig string
-	upgradeText  string
-	gateway      func() string // the styled tool gateway line, read once the proxy answered
-	color        bool          // ANSI styles (a terminal without NO_COLOR)
-	width        int           // terminal columns, 0 when piped
+	cliVersion   string                                    // this aimux's version, for an upgrade restart pending
+	installPort  int                                       // the port install recorded; 0 when none
+	handRun      bool                                      // the proxy on addr is not the installed launchd job
+	gateway      func() (toolgateway.ControlStatus, error) // the tool gateway's status, read once the proxy answered
+	color        bool                                      // ANSI styles (a terminal without NO_COLOR)
+	width        int                                       // terminal columns, 0 when piped
+}
+
+// proxyHandRun is the port install recorded (0 when none) and whether the
+// proxy on port is not the installed launchd job, so `aimux mcp proxy
+// restart` cannot reach it: no launchd agent, or another port than the
+// recorded one.
+func proxyHandRun(in mcpproxy.Installer, port int) (installPort int, handRun bool) {
+	if m, err := mcpproxy.LoadManifest(in.ManifestPath); err == nil && m != nil {
+		installPort = m.Port
+	}
+	if _, err := os.Stat(in.Agent.PlistPath); err != nil {
+		return installPort, true
+	}
+	return installPort, installPort != 0 && installPort != port
 }
 
 // page is the text page for rep (nil: the proxy is not running).
 func (o proxyStatusOpts) page(rep *mcpproxy.StatusReport, now time.Time) statusPage {
 	return statusPage{addr: o.addr, rep: rep, install: o.install, installErr: o.installErr, claudeConfig: o.claudeConfig,
-		upgradeText: o.upgradeText, gateway: o.gateway, now: now, color: o.color, width: o.width, all: o.all}
+		cliVersion: o.cliVersion, installPort: o.installPort, handRun: o.handRun, gateway: o.gateway, now: now, color: o.color, width: o.width, all: o.all}
 }
 
 // noAnswer prints what the command knows when the proxy gave no status,

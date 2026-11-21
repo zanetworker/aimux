@@ -112,8 +112,8 @@ func TestCheckAll_ReasonsAndSplit(t *testing.T) {
 			t.Fatalf("%s: %q (kept %v)", name, keptReason(kept, name), kept)
 		}
 	}
-	if len(oauth) != 1 || oauth[0].Server != "oauth" {
-		t.Fatalf("oauth %v", oauth)
+	if len(oauth) != 2 || keptReason(oauth, "oauth") != ReasonNeedsOAuth || keptReason(oauth, "hdr401") != reasonRefusedHeaders {
+		t.Fatalf("recorded %v: want oauth and hdr401, not down", oauth)
 	}
 }
 
