@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -49,12 +48,13 @@ func newModelProxyServeCmd() *cobra.Command {
 			}
 			backend := modelproxy.NewCodexBackend(command, cmd.ErrOrStderr())
 			defer backend.Close()
-			// The HUD reads the plan's Codex allowance from this file, in Codex mode or not.
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("find home folder for the Codex usage file: %w", err)
+			if port == modelproxy.StablePort {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("find home folder for the Codex usage file: %w", err)
+				}
+				go modelproxy.PollUsage(ctx, backend.ReadUsage, modelproxy.UsageFile(home, port), 2*time.Minute, cmd.ErrOrStderr())
 			}
-			go modelproxy.PollUsage(ctx, backend.ReadUsage, filepath.Join(home, ".aimux", "codex-usage.json"), 2*time.Minute, cmd.ErrOrStderr())
 			server := &http.Server{
 				Handler:           modelproxy.NewHandler(backend, key),
 				ReadHeaderTimeout: 5 * time.Second,
@@ -69,7 +69,7 @@ func newModelProxyServeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&port, "port", 7385, "Port on 127.0.0.1 (clients send the key stored in the "+modelproxy.KeyService+" Keychain entry)")
+	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port on 127.0.0.1 (clients send the key stored in the "+modelproxy.KeyService+" Keychain entry)")
 	cmd.Flags().StringVar(&command, "codex-command", "", "Codex executable (default: codex-lean if available, otherwise codex)")
 	return cmd
 }

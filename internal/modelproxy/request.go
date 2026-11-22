@@ -22,7 +22,18 @@ type messageRequest struct {
 		Description string          `json:"description"`
 		InputSchema json.RawMessage `json:"input_schema"`
 	} `json:"tools"`
+	// OutputConfig carries Claude Code's effort setting (`/effort`), for example {"effort":"high"}.
+	OutputConfig struct {
+		Effort string `json:"effort"`
+	} `json:"output_config"`
 }
+
+// imageNote stands in for an image: rejecting the request would fail every later request of the session, because
+// Claude Code resends the whole history.
+const imageNote = "[image omitted: the Codex backend did not receive this image]"
+
+// codexEfforts are the reasoning efforts Claude Code and Codex share; anything else runs at high.
+var codexEfforts = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
 
 type requestBlock struct {
 	Type      string          `json:"type"`
@@ -33,11 +44,41 @@ type requestBlock struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 	IsError   bool            `json:"is_error"`
+	Source    *struct {
+		Type      string `json:"type"`
+		MediaType string `json:"media_type"`
+		Data      string `json:"data"`
+		URL       string `json:"url"`
+	} `json:"source"`
+	// imageURL is the data: or https: URL of an image block, resolved by decodeContent.
+	imageURL string
 }
 
+// textPart is one content part sent to Codex: text ("text", "input_text", "output_text"), an image in injected
+// history ("input_image", image_url) or an image in turn input ("image", url).
 type textPart struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string
+	Text     string
+	ImageURL string
+}
+
+func (p textPart) MarshalJSON() ([]byte, error) {
+	switch p.Type {
+	case "input_image":
+		return json.Marshal(struct {
+			Type     string `json:"type"`
+			ImageURL string `json:"image_url"`
+		}{p.Type, p.ImageURL})
+	case "image":
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			URL  string `json:"url"`
+		}{p.Type, p.ImageURL})
+	}
+	return json.Marshal(struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}{p.Type, p.Text})
 }
 
 type dynamicTool struct {
@@ -62,9 +103,14 @@ func decodeContent(raw json.RawMessage) ([]requestBlock, error) {
 	if err := json.Unmarshal(raw, &blocks); err != nil {
 		return nil, errors.New("content must be a string or a list of blocks")
 	}
-	for _, block := range blocks {
-		if block.Type == "image" {
-			return nil, errors.New("images are not supported by the codex backend")
+	for i, block := range blocks {
+		if block.Type != "image" {
+			continue
+		}
+		if url := imageSourceURL(block); url != "" {
+			blocks[i].imageURL = url
+		} else {
+			blocks[i] = requestBlock{Type: "text", Text: imageNote}
 		}
 	}
 	return blocks, nil
@@ -93,7 +139,10 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 		if id == "" {
 			return turn, errors.New("codex model ID is empty")
 		}
-		turn.Model, turn.Effort = id, ""
+		turn.Model, turn.Effort = id, "high"
+		if codexEfforts[req.OutputConfig.Effort] {
+			turn.Effort = req.OutputConfig.Effort
+		}
 	}
 	var err error
 	turn.System, err = joinText(req.System)
@@ -152,9 +201,18 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 			switch block.Type {
 			case "text":
 				if !last || trailingSystem {
-					text = append(text, textPart{textType, block.Text})
+					text = append(text, textPart{Type: textType, Text: block.Text})
 				} else if msg.Role == "user" {
-					turn.Input = append(turn.Input, textPart{"text", block.Text})
+					turn.Input = append(turn.Input, textPart{Type: "text", Text: block.Text})
+				}
+			case "image":
+				switch {
+				case msg.Role == "assistant":
+					text = append(text, textPart{Type: textType, Text: imageNote})
+				case !last || trailingSystem:
+					text = append(text, textPart{Type: "input_image", ImageURL: block.imageURL})
+				default:
+					turn.Input = append(turn.Input, textPart{Type: "image", ImageURL: block.imageURL})
 				}
 			case "tool_use":
 				if !last {
@@ -168,17 +226,14 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 				}
 			case "tool_result":
 				flush()
-				output, err := joinText(block.Content)
+				output, err := toolOutput(block.Content, block.IsError)
 				if err != nil {
 					return turn, err
-				}
-				if block.IsError {
-					output = "Error: " + output
 				}
 				turn.History = append(turn.History, struct {
 					Type   string `json:"type"`
 					CallID string `json:"call_id"`
-					Output string `json:"output"`
+					Output any    `json:"output"`
 				}{"function_call_output", block.ToolUseID, output})
 			case "thinking", "redacted_thinking":
 			default:
@@ -203,4 +258,56 @@ func codexToolName(name string) string {
 		return "mcp_" + rest
 	}
 	return name
+}
+
+// imageSourceURL turns an Anthropic image source into the URL Codex takes: base64 data becomes a data: URL, a url
+// source passes through. An unusable source gives "".
+func imageSourceURL(block requestBlock) string {
+	src := block.Source
+	switch {
+	case src == nil:
+		return ""
+	case src.Type == "base64" && src.MediaType != "" && src.Data != "":
+		return "data:" + src.MediaType + ";base64," + src.Data
+	case src.Type == "url" && src.URL != "":
+		return src.URL
+	}
+	return ""
+}
+
+// toolOutput is a tool result as Codex takes it: a string when it holds only text (joined by newlines), or a list of
+// input_text and input_image parts when it holds an image. An error result is prefixed with "Error: ".
+func toolOutput(raw json.RawMessage, isError bool) (any, error) {
+	blocks, err := decodeContent(raw)
+	if err != nil {
+		return nil, err
+	}
+	var parts []textPart
+	var text []string
+	hasImage := false
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			parts = append(parts, textPart{Type: "input_text", Text: block.Text})
+			text = append(text, block.Text)
+		case "image":
+			parts = append(parts, textPart{Type: "input_image", ImageURL: block.imageURL})
+			hasImage = true
+		}
+	}
+	prefix := ""
+	if isError {
+		prefix = "Error: "
+	}
+	if !hasImage {
+		return prefix + strings.Join(text, "\n"), nil
+	}
+	if prefix != "" {
+		if len(parts) > 0 && parts[0].Type == "input_text" {
+			parts[0].Text = prefix + parts[0].Text
+		} else {
+			parts = append([]textPart{{Type: "input_text", Text: prefix}}, parts...)
+		}
+	}
+	return parts, nil
 }

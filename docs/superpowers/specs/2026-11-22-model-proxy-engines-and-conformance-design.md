@@ -90,3 +90,20 @@ B3's assumption to verify first: that the SDK's stream accumulator can be fed a 
 - A quality comparison of GPT-6.2 through the proxy against Claude on real tasks.
 - Before merge: README section, `qa-tools:pr-review`, a launchd agent so the proxy runs on its own.
 - OpenAI terms for using Codex as another tool's engine remain unconfirmed.
+
+## Do first: stable and dev channels
+
+The owner now works in Codex mode (`claude-codex`) while this code changes, so the stable proxy must never move under a running session.
+
+- **Stable:** `~/go/bin/aimux`, launchd `com.aimux.model-proxy`, port 7385, used by `claude-codex`. Changed only by `promote`.
+- **Dev:** build from this worktree to `~/go/bin/aimux-dev`, run by hand on port 7386 (`aimux-dev model proxy serve --port 7386`); a `claude-codex-dev` shell function points at 7386 (same Keychain key).
+- **Promote** (script in the repo, for example `scripts/model-proxy-promote`): unit tests, golangci-lint, `AIMUX_LIVE_CODEX=1` live test, one `claude -p` end-to-end task through the dev proxy; only when all pass: copy the stable binary to `~/go/bin/aimux.prev`, atomic swap, `launchctl kickstart -k gui/$UID/com.aimux.model-proxy`, check `/v1/models` answers 200. **Rollback**: swap `aimux.prev` back and kickstart.
+- **Codex CLI:** pin it (`brew pin codex`) so an upgrade cannot change the stable channel; upgrade deliberately, then run the live test.
+- **HUD:** the statusline runs claude-hud from `src/` directly, so edits there hit every open session at once. Point `~/.claude/hooks/hud-statusline.sh` at a pinned copy (a separate checkout at a known commit), updated by promote.
+- **Rule for Codex-mode sessions:** never rebuild or restart port 7385 from inside one; never send screenshots until image support exists (the proxy returns 400 on image blocks).
+
+## Next: prompt caching through conversation reuse
+
+Measured on the first real Codex-mode session (102 model steps in 32 minutes): median 9.3 s per step (Claude: 5.1 s), about 153k input tokens per step, cache hit 0%, and weekly Codex usage up from 19% to 20%. Almost all of those tokens are Claude Code's own prompt (system prompt, tool schemas, MCP; about 77k fixed) plus the history, sent uncached because the proxy opens a fresh ephemeral Codex thread for every request, so OpenAI's prompt cache never matches.
+
+Design: keep one Codex thread per Claude Code session (key: the session id in the request's `metadata.user_id` JSON). When a request's history extends what that thread already holds (same prefix, same system prompt and tools), inject only the new items and start the turn; otherwise (rewind, compaction, edited history, changed tools) start a fresh thread as today. Measure `cachedInputTokens` before and after, and the per-step latency with the transcript script used above. Close idle threads after a timeout.

@@ -43,7 +43,7 @@ func newFakeBackend(t *testing.T) (*CodexBackend, string) {
 }
 
 func fakeTurn(text string) TurnRequest {
-	return TurnRequest{Model: defaultModel, Effort: "low", Input: []textPart{{"text", text}}}
+	return TurnRequest{Model: defaultModel, Effort: "low", Input: []textPart{{Type: "text", Text: text}}}
 }
 
 func TestCodexBackendTurn(t *testing.T) {

@@ -264,7 +264,7 @@ func main() {
 					completed(tid, "completed")
 					continue
 				}
-				require(th.model == "gpt-6.2-astra" && p.Effort == "" && len(th.history) == 3, "expected explicit model, default effort and three history items")
+				require(th.model == "gpt-6.2-astra" && p.Effort == "high" && len(th.history) == 3, "expected explicit model, high effort and three history items")
 				require(string(th.history[1]) == `{"type":"function_call","name":"Read","call_id":"call-t1","arguments":"{\"path\":\"a.txt\"}"}`, "expected injected Read call")
 				require(string(th.history[2]) == `{"type":"function_call_output","call_id":"call-t1","output":"PAPAYA"}`, "expected injected result")
 				delta(tid, "PAPAYA")

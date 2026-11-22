@@ -27,7 +27,7 @@ func TestMapRequest(t *testing.T) {
 		{
 			name:  "tool result only",
 			body:  `{"model":"codex:gpt-6.2-astra","system":"base","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"fruit"}]}]}`,
-			model: "gpt-6.2-astra", system: "base",
+			model: "gpt-6.2-astra", effort: "high", system: "base",
 			items: `[{"type":"function_call_output","call_id":"x","output":"fruit"}]`, input: `[]`,
 		},
 		{
@@ -37,7 +37,7 @@ func TestMapRequest(t *testing.T) {
 				{"role":"assistant","content":"ok"},
 				{"role":"user","content":"second"},
 				{"role":"system","content":[{"type":"text","text":"reminder two"}]}]}`,
-			model: "gpt-6.2-sol",
+			model: "gpt-6.2-sol", effort: "high",
 			// A reminder after the final user message must reach Codex after it, so the final user text is
 			// injected too and the turn starts with empty input.
 			items: `[{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"reminder one"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]},{"type":"message","role":"developer","content":[{"type":"input_text","text":"reminder two"}]}]`,
@@ -52,8 +52,47 @@ func TestMapRequest(t *testing.T) {
 		},
 		{name: "only system messages", body: `{"messages":[{"role":"system","content":"x"}]}`, wantErr: "messages must contain a user message"},
 		{name: "unknown role", body: `{"messages":[{"role":"tool","content":"x"},{"role":"user","content":"y"}]}`, wantErr: `unsupported message role "tool"`},
-		{name: "image", body: `{"messages":[{"role":"user","content":[{"type":"image"}]}]}`, wantErr: "images are not supported by the codex backend"},
-		{name: "nested image", body: `{"messages":[{"role":"user","content":[{"type":"tool_result","content":[{"type":"image"}]}]}]}`, wantErr: "images are not supported by the codex backend"},
+		{
+			name:  "image in the latest user message becomes a turn input",
+			body:  `{"messages":[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]}`,
+			model: "gpt-6.2-sol", effort: "low", items: `null`,
+			input: `[{"type":"text","text":"look"},{"type":"image","url":"data:image/png;base64,AAAA"}]`,
+		},
+		{
+			name:  "image in an earlier user message is injected as input_image",
+			body:  `{"messages":[{"role":"user","content":[{"type":"text","text":"this one"},{"type":"image","source":{"type":"url","url":"https://example.com/a.png"}}]},{"role":"assistant","content":"ok"},{"role":"user","content":"color?"}]}`,
+			model: "gpt-6.2-sol", effort: "low",
+			items: `[{"type":"message","role":"user","content":[{"type":"input_text","text":"this one"},{"type":"input_image","image_url":"https://example.com/a.png"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]`,
+			input: `[{"type":"text","text":"color?"}]`,
+		},
+		{
+			name:  "image in a tool result makes the output a list of parts",
+			body:  `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","is_error":true,"content":[{"type":"text","text":"shot"},{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"BBBB"}}]}]}]}`,
+			model: "gpt-6.2-sol", effort: "low",
+			items: `[{"type":"function_call_output","call_id":"t","output":[{"type":"input_text","text":"Error: shot"},{"type":"input_image","image_url":"data:image/jpeg;base64,BBBB"}]}]`, input: `[]`,
+		},
+		{
+			// An image without a usable source must not fail every later request of the session: it becomes a note.
+			name: "image without a usable source becomes a note", body: `{"messages":[{"role":"user","content":[{"type":"image"}]}]}`,
+			model: "gpt-6.2-sol", effort: "low", items: `null`,
+			input: `[{"type":"text","text":"[image omitted: the Codex backend did not receive this image]"}]`,
+		},
+		{
+			name: "codex model takes Claude Code's effort", body: `{"model":"codex:gpt-6.2-sol","output_config":{"effort":"xhigh"},"messages":[{"role":"user","content":"hi"}]}`,
+			model: "gpt-6.2-sol", effort: "xhigh", items: `null`, input: `[{"type":"text","text":"hi"}]`,
+		},
+		{
+			name: "codex model without effort defaults to high", body: `{"model":"codex:gpt-6.2-sol","messages":[{"role":"user","content":"hi"}]}`,
+			model: "gpt-6.2-sol", effort: "high", items: `null`, input: `[{"type":"text","text":"hi"}]`,
+		},
+		{
+			name: "unknown effort becomes high", body: `{"model":"codex:gpt-6.2-sol","output_config":{"effort":"turbo"},"messages":[{"role":"user","content":"hi"}]}`,
+			model: "gpt-6.2-sol", effort: "high", items: `null`, input: `[{"type":"text","text":"hi"}]`,
+		},
+		{
+			name: "background calls stay low whatever the effort", body: `{"model":"claude-haiku-5-5","output_config":{"effort":"max"},"messages":[{"role":"user","content":"title"}]}`,
+			model: "gpt-6.2-sol", effort: "low", items: `null`, input: `[{"type":"text","text":"title"}]`,
+		},
 		{name: "empty messages", body: `{"messages":[]}`, wantErr: "messages must contain a user message"},
 		{name: "empty model prefix", body: `{"model":"codex:","messages":[{"role":"user","content":"test"}]}`, wantErr: "codex model ID is empty"},
 	}

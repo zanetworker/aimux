@@ -107,7 +107,6 @@ func TestMessagesErrors(t *testing.T) {
 	}{
 		{"bad JSON", `{`, "invalid_request_error", "invalid JSON", 400},
 		{"trailing JSON", `{} {}`, "invalid_request_error", "invalid JSON", 400},
-		{"image", `{"messages":[{"role":"user","content":[{"type":"image"}]}],"stream":true}`, "invalid_request_error", "images are not supported by the codex backend", 400},
 		{"interrupted", `{"messages":[{"role":"user","content":"interrupted"}]}`, "api_error", "codex turn interrupted", 502},
 		{"crashed", `{"messages":[{"role":"user","content":"crash"}],"stream":true}`, "api_error", "app-server exited", 502},
 	} {
@@ -297,4 +296,14 @@ func TestHandlerRequiresKey(t *testing.T) {
 	if res := call(NewHandler(backend, ""), "x-api-key", ""); res.Code != http.StatusUnauthorized {
 		t.Fatalf("an empty configured key must reject every request, got %d", res.Code)
 	}
+}
+
+func TestMessagesWithImageSucceeds(t *testing.T) {
+	backend, _ := newFakeBackend(t)
+	res := request(NewHandler(backend, testKey), http.MethodPost, "/v1/messages",
+		`{"messages":[{"role":"user","content":[{"type":"text","text":"see"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("a request with an image must not fail the session: status %d, body %s", res.Code, res.Body)
+	}
+	checkJSON(t, res.Body.Bytes(), "stop_reason", "end_turn", "content", []any{map[string]any{"type": "text", "text": "see"}})
 }
