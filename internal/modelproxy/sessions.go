@@ -18,12 +18,17 @@ type sessionKey struct {
 }
 
 type sessionInput struct {
-	key        sessionKey
-	prefixes   []prefixHash
-	offsets    []int
-	lastRole   string
-	lastBlocks []requestBlock
-	outcome    string
+	key      sessionKey
+	prefixes []prefixHash
+	offsets  []int
+	// messages runs parallel to prefixes[1:], so the thread's held count indexes the first new message.
+	messages []inputMessage
+	outcome  string
+}
+
+type inputMessage struct {
+	role   string
+	blocks []requestBlock
 }
 
 func newSessionInput(id string, req TurnRequest, count int) *sessionInput {
@@ -46,7 +51,7 @@ func newSessionInput(id string, req TurnRequest, count int) *sessionInput {
 func (s *sessionInput) record(msg conversationMessage, blocks []requestBlock, offset int) {
 	s.prefixes = append(s.prefixes, hashMessage(s.prefixes[len(s.prefixes)-1], msg))
 	s.offsets = append(s.offsets, offset)
-	s.lastRole, s.lastBlocks = msg.Role, blocks
+	s.messages = append(s.messages, inputMessage{msg.Role, blocks})
 }
 
 // Hash every message field except transport-only cache markers, independent of JSON formatting.
@@ -237,6 +242,19 @@ func (s *sessions) replaceConfiguration(input *sessionInput) *sessionThread {
 	return nil
 }
 
+// userBlocks joins the blocks of consecutive user messages. An assistant message among them is history the
+// proxy did not produce, so there is nothing to continue and it returns nil.
+func userBlocks(messages []inputMessage) []requestBlock {
+	blocks := make([]requestBlock, 0, len(messages))
+	for _, msg := range messages {
+		if msg.role != "user" {
+			return nil
+		}
+		blocks = append(blocks, msg.blocks...)
+	}
+	return blocks
+}
+
 func (t *sessionThread) expiryReason() string {
 	if t.turnID != "" {
 		return "pause_timeout"
@@ -270,8 +288,10 @@ func (t *sessionThread) match(p *appServer, req TurnRequest) (string, *toolConti
 	case len(t.pending) == 0:
 		// mapRequest has already validated the final user message and ordered any trailing reminders.
 		return "hit_idle", nil
-	case incoming == held+1 && input.lastRole == "user":
-		if continuation := matchToolResults(t.pending, input.lastBlocks); continuation != nil {
+	default:
+		// Claude Code answers parallel calls over as many user messages as it likes, and its hooks add more
+		// after them, so every new message counts, not only the last one.
+		if continuation := matchToolResults(t.pending, userBlocks(input.messages[held:])); continuation != nil {
 			return "hit_continuation", continuation
 		}
 	}
