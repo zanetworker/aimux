@@ -1,0 +1,268 @@
+{
+ "elements": [
+  {
+   "type": "card",
+   "x": 20,
+   "y": 40,
+   "w": 170,
+   "h": 60,
+   "tone": "anchor",
+   "title": "Claude Code",
+   "desc": "runs every tool;\nhooks fire"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     190,
+     70
+    ],
+    [
+     270,
+     70
+    ]
+   ]
+  },
+  {
+   "type": "text",
+   "x": 194,
+   "y": 44,
+   "w": 74,
+   "text": "Messages API",
+   "italic": true,
+   "size": 10
+  },
+  {
+   "type": "container",
+   "kind": "open",
+   "x": 270,
+   "y": 20,
+   "w": 830,
+   "h": 330,
+   "label": "aimux model proxy (127.0.0.1:7385, key required)"
+  },
+  {
+   "type": "card",
+   "x": 290,
+   "y": 52,
+   "w": 790,
+   "h": 46,
+   "title": "Front-end: Anthropic Messages API",
+   "desc": "parses with anthropic-sdk-go types; Claude Code habits normalized here (in-conversation system messages)"
+  },
+  {
+   "type": "container",
+   "kind": "gray",
+   "x": 290,
+   "y": 116,
+   "w": 790,
+   "h": 96,
+   "label": "Wrappers: each one is itself an Engine, so they stack"
+  },
+  {
+   "type": "card",
+   "x": 306,
+   "y": 146,
+   "w": 180,
+   "h": 54,
+   "title": "Recorder",
+   "desc": "saves fixtures"
+  },
+  {
+   "type": "card",
+   "x": 500,
+   "y": 146,
+   "w": 180,
+   "h": 54,
+   "title": "Meter",
+   "desc": "usage per engine"
+  },
+  {
+   "type": "card",
+   "x": 694,
+   "y": 146,
+   "w": 180,
+   "h": 54,
+   "title": "Fallback",
+   "desc": "quota out: next engine"
+  },
+  {
+   "type": "card",
+   "x": 888,
+   "y": 146,
+   "w": 180,
+   "h": 54,
+   "tone": "focus",
+   "title": "Router",
+   "desc": "model prefix and rules"
+  },
+  {
+   "type": "card",
+   "x": 290,
+   "y": 236,
+   "w": 250,
+   "h": 96,
+   "title": "codex engine",
+   "desc": "today's code: lean catalog,\nmcp_ rename, preamble,\nusage wait, crash retry"
+  },
+  {
+   "type": "card",
+   "x": 560,
+   "y": 236,
+   "w": 250,
+   "h": 96,
+   "title": "passthrough engine",
+   "desc": "forwards Anthropic requests;\nkey from Keychain"
+  },
+  {
+   "type": "card",
+   "x": 830,
+   "y": 236,
+   "w": 250,
+   "h": 96,
+   "kind": "closed",
+   "title": "translated engine",
+   "desc": "later: OpenAI-only APIs\n(Bifrost core, unverified)"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     978,
+     200
+    ],
+    [
+     978,
+     218
+    ],
+    [
+     415,
+     218
+    ],
+    [
+     415,
+     236
+    ]
+   ],
+   "tone": "focus"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     685,
+     218
+    ],
+    [
+     685,
+     236
+    ]
+   ],
+   "tone": "focus"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     955,
+     218
+    ],
+    [
+     955,
+     236
+    ]
+   ],
+   "tone": "focus"
+  },
+  {
+   "type": "card",
+   "x": 290,
+   "y": 390,
+   "w": 250,
+   "h": 54,
+   "kind": "closed",
+   "title": "codex app-server",
+   "desc": "ChatGPT plan, Codex allowance"
+  },
+  {
+   "type": "card",
+   "x": 560,
+   "y": 390,
+   "w": 250,
+   "h": 54,
+   "kind": "closed",
+   "title": "OpenRouter, EnMaaS, Anthropic",
+   "desc": "speak Anthropic already"
+  },
+  {
+   "type": "card",
+   "x": 830,
+   "y": 390,
+   "w": 250,
+   "h": 54,
+   "kind": "closed",
+   "title": "OpenAI-format APIs",
+   "desc": "e.g. EnMaaS GPT models"
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     415,
+     332
+    ],
+    [
+     415,
+     390
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     685,
+     332
+    ],
+    [
+     685,
+     390
+    ]
+   ]
+  },
+  {
+   "type": "edge",
+   "points": [
+    [
+     955,
+     332
+    ],
+    [
+     955,
+     390
+    ]
+   ]
+  },
+  {
+   "type": "legend",
+   "x": 20,
+   "y": 470,
+   "items": [
+    {
+     "kind": "open",
+     "tone": "focus",
+     "text": "routing: the new seam"
+    },
+    {
+     "kind": "open",
+     "tone": "anchor",
+     "text": "the harness"
+    },
+    {
+     "kind": "closed",
+     "text": "outside the proxy, or not built yet"
+    }
+   ]
+  }
+ ]
+}
