@@ -19,9 +19,37 @@ import (
 func newModelCmd() *cobra.Command {
 	model := &cobra.Command{Use: "model", Short: "Work with model APIs"}
 	proxy := &cobra.Command{Use: "proxy", Short: "Expose a local Anthropic Messages API"}
-	proxy.AddCommand(newModelProxyServeCmd())
+	proxy.AddCommand(newModelProxyServeCmd(), newModelProxyStatusCmd())
 	model.AddCommand(proxy)
 	return model
+}
+
+func newModelProxyStatusCmd() *cobra.Command {
+	var port int
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show whether the model proxy is answering, and how its last turn and Codex check went",
+		Long: "Reads the running proxy's /health on 127.0.0.1 and prints: the proxy's own state and uptime, whether " +
+			"its Codex app-server is running, how many turns it has sent to Codex and how the last one went, and the " +
+			"same for the rate-limit checks behind the HUD's usage file (they cost no tokens, so a recent one proves " +
+			"the Codex login still works). Nothing here starts Codex or spends tokens. Exits non-zero when the proxy " +
+			"is degraded or not running, so a monitor can act on the exit code.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
+			key, err := keyring.Stored(modelproxy.KeyService).Lookup(cmd.Context())
+			if err != nil {
+				if errors.Is(err, keyring.ErrNotFound) {
+					return fmt.Errorf("no proxy key in the %s secret-store entry yet; start the proxy once with: aimux model proxy serve", modelproxy.KeyService)
+				}
+				return fmt.Errorf("read the model proxy key: %w", err)
+			}
+			addr := fmt.Sprintf("127.0.0.1:%d", port)
+			return modelProxyStatus(cmd.Context(), addr, key, cmd.OutOrStdout(), time.Now)
+		},
+	}
+	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port the proxy listens on at 127.0.0.1")
+	return cmd
 }
 
 func newModelProxyServeCmd() *cobra.Command {
