@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,7 +22,23 @@ var bareTOMLKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 func disabledMCPArgs(ctx context.Context, command string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, command, "mcp", "list", "--disable", "plugins", "--json").Output() // #nosec G204 -- the owner-configured Codex command, fixed args
+	// List from an empty directory, as app-server runs: a project config in the caller's directory would add
+	// servers app-server does not define, and switching those off makes Codex reject the whole config.
+	path, err := exec.LookPath(command)
+	if err == nil {
+		path, err = filepath.Abs(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find Codex command: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "aimux-codex-mcp-")
+	if err != nil {
+		return nil, fmt.Errorf("create directory to list Codex MCP servers: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	cmd := exec.CommandContext(ctx, path, "mcp", "list", "--disable", "plugins", "--json") // #nosec G204 -- the owner-configured Codex command, fixed args
+	cmd.Dir = dir
+	out, err := cmd.Output()
 	if err != nil {
 		detail := ""
 		var exit *exec.ExitError

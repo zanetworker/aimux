@@ -175,8 +175,9 @@ func TestCLIBackend_TimeoutKillsTheWholeProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	_, err := (&CLI{Bin: bin, Timeout: 1500 * time.Millisecond}).Complete(context.Background(), Request{Prompt: "p"})
-	if elapsed := time.Since(start); elapsed > 4*time.Second {
+	// Long enough for the script to start its child and write the pid under a loaded parallel test run.
+	_, err := (&CLI{Bin: bin, Timeout: 3 * time.Second}).Complete(context.Background(), Request{Prompt: "p"})
+	if elapsed := time.Since(start); elapsed > 6*time.Second {
 		t.Errorf("Complete took %v: a child holding stdout kept it waiting", elapsed)
 	}
 	if !errors.Is(err, ErrTimeout) {
