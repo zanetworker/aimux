@@ -12,6 +12,7 @@ type TurnRequest struct {
 	Input                 []textPart
 	// ToolNames maps each tool name sent to Codex back to the Claude Code name it stands for.
 	ToolNames map[string]string
+	session   *sessionInput
 }
 
 type ToolCall struct {
@@ -20,8 +21,11 @@ type ToolCall struct {
 }
 
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	// InputTokens counts uncached input. Add CacheReadInputTokens for the full prompt.
+	InputTokens          int `json:"input_tokens"`
+	OutputTokens         int `json:"output_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+	estimated            bool
 }
 
 type Event struct {

@@ -39,6 +39,7 @@ type CodexBackend struct {
 	catalogPath string
 	versionOnce sync.Once
 	closed      bool
+	sessions    sessions
 }
 
 // NewCodexBackend starts app-server on the first turn. An empty command
@@ -50,7 +51,10 @@ func NewCodexBackend(command string, stderr io.Writer) *CodexBackend {
 			command = "codex-lean"
 		}
 	}
-	return &CodexBackend{command: command, stderr: stderr}
+	return &CodexBackend{
+		command: command, stderr: stderr,
+		sessions: sessions{pauseTimeout: 10 * time.Minute, idleTimeout: 30 * time.Minute},
+	}
 }
 
 func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
@@ -120,6 +124,7 @@ func (b *CodexBackend) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.closed = true
+	b.sessions.close()
 	if b.server != nil {
 		b.server.close()
 		b.server = nil
@@ -130,9 +135,25 @@ func (b *CodexBackend) Close() {
 	}
 }
 
+func (b *CodexBackend) logMessage(outcome string, usage Usage, firstByte time.Duration) {
+	if b.stderr == nil {
+		return
+	}
+	if usage.estimated {
+		_, _ = fmt.Fprintf(b.stderr, "model proxy: session=%s usage=estimated estimated_input_tokens=%d estimated_cached_input_tokens=%d ttfb_ms=%d\n",
+			outcome, usage.InputTokens, usage.CacheReadInputTokens, firstByte.Milliseconds())
+		return
+	}
+	_, _ = fmt.Fprintf(b.stderr, "model proxy: session=%s input_tokens=%d cached_input_tokens=%d ttfb_ms=%d\n",
+		outcome, usage.InputTokens, usage.CacheReadInputTokens, firstByte.Milliseconds())
+}
+
 // Run runs one turn. When Codex exits before anything reached the client, the turn is retried once on a fresh
 // process: each request is self-contained, so a retry repeats nothing the client has seen.
 func (b *CodexBackend) Run(ctx context.Context, req TurnRequest, emit func(Event) error) (Usage, error) {
+	if req.session != nil {
+		return b.runSession(ctx, req, emit)
+	}
 	emitted := false
 	tracked := func(event Event) error {
 		emitted = true
@@ -155,62 +176,18 @@ func (b *CodexBackend) runOnce(ctx context.Context, req TurnRequest, emit func(E
 	// just before the client disconnected can still be interrupted by ID.
 	startCtx, cancelStart := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancelStart()
-	var thread struct {
-		Thread struct{ ID string } `json:"thread"`
-	}
-	if err := p.call(startCtx, "thread/start", map[string]any{
-		"ephemeral": true, "cwd": p.cwd, "sandbox": "read-only", "approvalPolicy": "never",
-		"model": req.Model, "baseInstructions": baseInstructions(req.System), "dynamicTools": req.Tools,
-	}, &thread); err != nil {
+	threadID, err := p.startThread(startCtx, req)
+	if err != nil {
 		return usage, err
-	}
-	threadID := thread.Thread.ID
-	if threadID == "" {
-		return usage, errors.New("thread/start returned no thread ID")
 	}
 	events := p.subscribe(threadID)
-	defer func() {
-		p.mu.Lock()
-		delete(p.threads, threadID)
-		p.mu.Unlock()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		// Unsubscribe is best effort for ephemeral threads, including after exit.
-		_ = p.call(cleanupCtx, "thread/unsubscribe", map[string]string{"threadId": threadID}, nil)
-	}()
+	defer p.unsubscribe(threadID)
 
-	if len(req.History) > 0 {
-		if err := p.call(ctx, "thread/inject_items", map[string]any{"threadId": threadID, "items": req.History}, nil); err != nil {
-			return usage, err
-		}
-	}
-	if err := ctx.Err(); err != nil {
+	turnID, err := p.startTurn(ctx, startCtx, threadID, req.History, req.Input, req.Effort)
+	if err != nil {
 		return usage, err
 	}
-	input := req.Input
-	if input == nil {
-		input = []textPart{}
-	}
-	params := map[string]any{"threadId": threadID, "input": input}
-	if req.Effort != "" {
-		params["effort"] = req.Effort
-	}
-	var started struct {
-		Turn struct{ ID string } `json:"turn"`
-	}
-	if err := p.call(startCtx, "turn/start", params, &started); err != nil {
-		return usage, err
-	}
-	turnID := started.Turn.ID
-	if turnID == "" {
-		return usage, errors.New("turn/start returned no turn ID")
-	}
 
-	interrupt := func() error {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		return p.call(cleanupCtx, "turn/interrupt", map[string]string{"threadId": threadID, "turnId": turnID}, nil)
-	}
 	// After a tool call is handed to Claude Code, the interrupt waits for the step's usage report: Codex can
 	// dispatch the call before reporting usage, and an interrupted response reports none. The model is blocked on
 	// the tool result meanwhile, so waiting costs only the time until usage arrives (at most usageGrace).
@@ -221,7 +198,7 @@ func (b *CodexBackend) runOnce(ctx context.Context, req TurnRequest, emit func(E
 			return nil
 		}
 		interrupted = true
-		return interrupt()
+		return p.interrupt(threadID, turnID)
 	}
 	defer func() {
 		if !completed {
@@ -262,7 +239,12 @@ func (b *CodexBackend) runOnce(ctx context.Context, req TurnRequest, emit func(E
 					}
 				}
 			case "thread/tokenUsage/updated":
-				usage = Usage{event.TokenUsage.Total.InputTokens, event.TokenUsage.Total.OutputTokens}
+				last := event.TokenUsage.Last
+				usage = Usage{
+					InputTokens:          max(0, last.InputTokens-last.CachedInputTokens),
+					OutputTokens:         event.TokenUsage.Total.OutputTokens,
+					CacheReadInputTokens: last.CachedInputTokens,
+				}
 				if handedOff {
 					if err := stop(); err != nil {
 						return usage, err
@@ -296,11 +278,72 @@ func (b *CodexBackend) runOnce(ctx context.Context, req TurnRequest, emit func(E
 	}
 }
 
+func (p *appServer) startThread(ctx context.Context, req TurnRequest) (string, error) {
+	var result struct {
+		Thread struct{ ID string }
+	}
+	if err := p.call(ctx, "thread/start", map[string]any{
+		"ephemeral": true, "cwd": p.cwd, "sandbox": "read-only", "approvalPolicy": "never",
+		"model": req.Model, "baseInstructions": baseInstructions(req.System), "dynamicTools": req.Tools,
+	}, &result); err != nil {
+		return "", err
+	}
+	if result.Thread.ID == "" {
+		return "", errors.New("thread/start returned no thread ID")
+	}
+	return result.Thread.ID, nil
+}
+
+func (p *appServer) startTurn(ctx, startCtx context.Context, threadID string, history []any, input []textPart, effort string) (string, error) {
+	if len(history) > 0 {
+		if err := p.call(ctx, "thread/inject_items", map[string]any{"threadId": threadID, "items": history}, nil); err != nil {
+			return "", err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if input == nil {
+		input = []textPart{}
+	}
+	params := map[string]any{"threadId": threadID, "input": input}
+	if effort != "" {
+		params["effort"] = effort
+	}
+	var result struct {
+		Turn struct{ ID string }
+	}
+	if err := p.call(startCtx, "turn/start", params, &result); err != nil {
+		return "", err
+	}
+	if result.Turn.ID == "" {
+		return "", errors.New("turn/start returned no turn ID")
+	}
+	return result.Turn.ID, nil
+}
+
+func (p *appServer) interrupt(threadID, turnID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return p.call(ctx, "turn/interrupt", map[string]string{"threadId": threadID, "turnId": turnID}, nil)
+}
+
+func (p *appServer) unsubscribe(threadID string) {
+	p.mu.Lock()
+	delete(p.threads, threadID)
+	p.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	// Unsubscribe is best effort for ephemeral threads, including after exit.
+	_ = p.call(ctx, "thread/unsubscribe", map[string]string{"threadId": threadID}, nil)
+}
+
 type codexEvent struct {
 	TurnID, Delta, CallID, Tool string
 	Arguments                   json.RawMessage
 	TokenUsage                  struct {
-		Total struct{ InputTokens, OutputTokens int }
+		Total struct{ OutputTokens int }
+		Last  struct{ InputTokens, OutputTokens, CachedInputTokens int }
 	}
 	Turn struct {
 		ID, Status string

@@ -18,6 +18,7 @@ type request struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
+	Result json.RawMessage `json:"result"`
 }
 
 type thread struct {
@@ -28,6 +29,11 @@ type thread struct {
 		Name string `json:"name"`
 	}
 	history []json.RawMessage
+}
+
+type heldTurn struct {
+	pending               int
+	text, image, reminder string
 }
 
 func main() {
@@ -110,7 +116,10 @@ func main() {
 	}
 	usage := func(tid string, input int) {
 		notify("thread/tokenUsage/updated", tid, map[string]any{"turnId": tid + "-turn",
-			"tokenUsage": map[string]any{"total": map[string]int{"inputTokens": input, "outputTokens": 3}}})
+			"tokenUsage": map[string]any{
+				"total": map[string]int{"inputTokens": input, "outputTokens": 3},
+				"last":  map[string]int{"inputTokens": input, "outputTokens": 3},
+			}})
 	}
 	completed := func(tid, status string) {
 		notify("turn/completed", tid, map[string]any{"turn": map[string]string{"id": tid + "-turn", "status": status}})
@@ -124,6 +133,12 @@ func main() {
 	toolCall := func(tid, id string) { toolCallNamed(tid, id, "Read") }
 
 	threads := make(map[string]*thread)
+	held := make(map[string]*heldTurn)
+	type pendingCall struct {
+		threadID string
+		image    bool
+	}
+	pending := make(map[string]pendingCall)
 	sequence := 0
 	initialized := false
 	var firstConcurrent request
@@ -188,7 +203,11 @@ func main() {
 			}
 			decode(msg.Params, &p)
 			require(threads[p.ThreadID] != nil && len(p.Items) != 0, "expected non-empty history on a known thread")
-			threads[p.ThreadID].history = p.Items
+			threads[p.ThreadID].history = append(threads[p.ThreadID].history, p.Items...)
+			logEvent(fmt.Sprintf("inject %s %d", p.ThreadID, len(p.Items)))
+			for _, item := range p.Items {
+				logEvent(fmt.Sprintf("inject_item %s %s", p.ThreadID, item))
+			}
 			respond(msg.ID, struct{}{})
 		case "turn/start":
 			var p struct {
@@ -198,7 +217,11 @@ func main() {
 			decode(msg.Params, &p)
 			tid := p.ThreadID
 			th := threads[tid]
-			require(th != nil && p.Input != nil, "expected known thread and input array")
+			if th == nil {
+				send(map[string]any{"id": msg.ID, "error": map[string]any{"code": -32602, "message": "thread not found"}})
+				continue
+			}
+			require(p.Input != nil, "expected input array")
 			logEvent("turn " + tid)
 			text, images := "", 0
 			if len(p.Input) > 0 {
@@ -261,6 +284,33 @@ func main() {
 				usage(tid, 17)
 				toolCall(tid, "tool-request")
 				toolCall(tid, "second-tool-request")
+			case "session-parallel", "session-parallel-late", "session-tool", "session-tool-with-usage":
+				require(len(th.tools) == 1 && th.tools[0].Name == "Read", "expected dynamic Read")
+				held[tid] = &heldTurn{pending: 1}
+				delta(tid, "before tools")
+				if text == "session-tool-with-usage" {
+					usage(tid, 17)
+				}
+				first := fmt.Sprintf("%q", tid+"-request")
+				pending[first] = pendingCall{threadID: tid}
+				toolCall(tid, tid+"-request")
+				if text == "session-parallel" || text == "session-parallel-late" {
+					held[tid].pending++
+					id := 100 + sequence
+					pending[strconv.Itoa(id)] = pendingCall{threadID: tid, image: true}
+					second := func() {
+						send(map[string]any{"id": id, "method": "item/tool/call", "params": map[string]any{
+							"threadId": tid, "turnId": tid + "-turn", "callId": "call-" + tid + "-second",
+							"tool": "Read", "arguments": map[string]string{"path": "b.txt"},
+						}})
+						logEvent("sent " + tid + " second")
+					}
+					if text == "session-parallel-late" {
+						time.AfterFunc(450*time.Millisecond, second)
+					} else {
+						second()
+					}
+				}
 			case "tool-late-usage":
 				// Like real Codex: the tool call can be dispatched before the response's usage is reported, and an
 				// interrupted response reports none.
@@ -273,6 +323,26 @@ func main() {
 						usage(tid, 23)
 					}
 				})
+			case "partial-cache", "full-cache", "excess-cache":
+				input, cached := 23, 21
+				switch text {
+				case "full-cache":
+					input, cached = 17, 17
+				case "excess-cache":
+					input, cached = 17, 18
+				}
+				delta(tid, text)
+				notify("thread/tokenUsage/updated", tid, map[string]any{"turnId": tid + "-turn",
+					"tokenUsage": map[string]any{
+						"total": map[string]int{"inputTokens": input + 19, "cachedInputTokens": cached + 7, "outputTokens": 5},
+						"last":  map[string]int{"inputTokens": input, "cachedInputTokens": cached, "outputTokens": 3},
+					}})
+				completed(tid, "completed")
+			case "expire-thread":
+				delta(tid, "expired")
+				usage(tid, 17)
+				completed(tid, "completed")
+				delete(threads, tid)
 			case "crash-once":
 				delta(tid, "recovered")
 				usage(tid, 17)
@@ -299,6 +369,20 @@ func main() {
 					completed(tid, "completed")
 					continue
 				}
+				if len(th.history) != 0 {
+					var last struct {
+						Role    string
+						Content []struct{ Text string }
+					}
+					decode(th.history[len(th.history)-1], &last)
+					if last.Role == "developer" && len(last.Content) != 0 {
+						logEvent("empty_input " + tid)
+						delta(tid, last.Content[0].Text)
+						usage(tid, 17)
+						completed(tid, "completed")
+						continue
+					}
+				}
 				require(th.model == "gpt-6.2-astra" && p.Effort == "high" && len(th.history) == 3, "expected explicit model, high effort and three history items")
 				require(string(th.history[1]) == `{"type":"function_call","name":"Read","call_id":"call-t1","arguments":"{\"path\":\"a.txt\"}"}`, "expected injected Read call")
 				require(string(th.history[2]) == `{"type":"function_call_output","call_id":"call-t1","output":"PAPAYA"}`, "expected injected result")
@@ -312,6 +396,74 @@ func main() {
 				delta(tid, text)
 				usage(tid, 17)
 				completed(tid, "completed")
+			}
+		case "turn/steer":
+			var p struct {
+				ThreadID, ExpectedTurnID string
+				Input                    []struct{ Type, Text string }
+			}
+			decode(msg.Params, &p)
+			turn := held[p.ThreadID]
+			require(turn != nil && p.ExpectedTurnID == p.ThreadID+"-turn", "steered the wrong turn")
+			for _, part := range p.Input {
+				require(part.Type == "text", "expected text steering input")
+				turn.reminder += part.Text
+			}
+			logEvent("steer " + p.ThreadID)
+			respond(msg.ID, map[string]string{"turnId": p.ExpectedTurnID})
+		case "":
+			call, ok := pending[string(msg.ID)]
+			require(ok, "answered an unknown tool request")
+			turn := held[call.threadID]
+			require(turn != nil, "answered an inactive turn")
+			var result struct {
+				ContentItems []struct{ Type, Text, ImageURL string }
+				Success      *bool
+			}
+			decode(msg.Result, &result)
+			require(result.Success != nil && result.ContentItems != nil, "expected dynamic tool response")
+			var content strings.Builder
+			hasImage := false
+			for _, part := range result.ContentItems {
+				switch part.Type {
+				case "inputImage":
+					require(strings.HasPrefix(part.ImageURL, "data:image/png;base64,"), "expected a PNG")
+					hasImage = true
+					content.WriteString("<image>")
+				case "inputText":
+					content.WriteString(part.Text)
+				default:
+					fail("unexpected dynamic tool content type: " + part.Type)
+				}
+			}
+			value := content.String()
+			if !*result.Success {
+				value = "failed(" + value + ")"
+			}
+			if call.image {
+				require(!*result.Success && hasImage, "expected an image error")
+				turn.image = value
+			} else {
+				turn.text = value
+			}
+			delete(pending, string(msg.ID))
+			turn.pending--
+			logEvent("answer " + call.threadID)
+			if turn.pending == 0 {
+				// Codex reports the held model request's usage only after the client answers.
+				notify("thread/tokenUsage/updated", call.threadID, map[string]any{"turnId": call.threadID + "-turn",
+					"tokenUsage": map[string]any{
+						"total": map[string]int{"inputTokens": 19, "cachedInputTokens": 7, "outputTokens": 2},
+						"last":  map[string]int{"inputTokens": 19, "cachedInputTokens": 7, "outputTokens": 2},
+					}})
+				delta(call.threadID, turn.text+turn.image+"|"+turn.reminder)
+				notify("thread/tokenUsage/updated", call.threadID, map[string]any{"turnId": call.threadID + "-turn",
+					"tokenUsage": map[string]any{
+						"total": map[string]int{"inputTokens": 42, "cachedInputTokens": 28, "outputTokens": 6},
+						"last":  map[string]int{"inputTokens": 23, "cachedInputTokens": 21, "outputTokens": 4},
+					}})
+				completed(call.threadID, "completed")
+				delete(held, call.threadID)
 			}
 		case "account/rateLimits/read":
 			respond(msg.ID, json.RawMessage(`{"ordinaryUsageAllowed":true,"rateLimits":{"limitId":"codex",`+
@@ -332,6 +484,12 @@ func main() {
 			decode(msg.Params, &p)
 			logEvent("unsubscribe " + p.ThreadID)
 			delete(threads, p.ThreadID)
+			delete(held, p.ThreadID)
+			for id, call := range pending {
+				if call.threadID == p.ThreadID {
+					delete(pending, id)
+				}
+			}
 			respond(msg.ID, map[string]string{"status": "unsubscribed"})
 		default:
 			fail("unexpected method: " + msg.Method)

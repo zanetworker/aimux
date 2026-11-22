@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type rpcMessage struct {
@@ -21,6 +22,7 @@ type rpcMessage struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+	receivedAt time.Time
 }
 
 type appServer struct {
@@ -124,6 +126,9 @@ func (p *appServer) route(msg rpcMessage) {
 			return
 		}
 		if events := p.threads[target.ThreadID]; events != nil {
+			if msg.Method == "item/tool/call" {
+				msg.receivedAt = time.Now()
+			}
 			select {
 			case events <- msg:
 			default:
@@ -144,6 +149,23 @@ func (p *appServer) subscribe(threadID string) chan rpcMessage {
 }
 
 func (p *appServer) send(ctx context.Context, id int, method string, params any) error {
+	return p.write(ctx, method, struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id,omitempty"`
+		Method  string `json:"method"`
+		Params  any    `json:"params,omitempty"`
+	}{"2.0", id, method, params})
+}
+
+func (p *appServer) respond(ctx context.Context, id json.RawMessage, result toolAnswer) error {
+	return p.write(ctx, "dynamic tool answer", struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  toolAnswer      `json:"result"`
+	}{"2.0", id, result})
+}
+
+func (p *appServer) write(ctx context.Context, operation string, msg any) error {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -154,13 +176,8 @@ func (p *appServer) send(ctx context.Context, id int, method string, params any)
 		return p.err
 	default:
 	}
-	if err := p.writer.Encode(struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      int    `json:"id,omitempty"`
-		Method  string `json:"method"`
-		Params  any    `json:"params,omitempty"`
-	}{"2.0", id, method, params}); err != nil {
-		return fmt.Errorf("write %s to Codex app-server: %w", method, err)
+	if err := p.writer.Encode(msg); err != nil {
+		return fmt.Errorf("write %s to Codex app-server: %w", operation, err)
 	}
 	return nil
 }
