@@ -29,6 +29,14 @@ The command exits non-zero when the proxy is degraded or not running, so a monit
 
 The same report is `GET /health` on the proxy, as JSON, with the key every route needs: 200 when healthy, 503 when degraded.
 
+## Speed
+
+The proxy asks Codex for the `priority` service tier, which Codex calls Fast. Measured on gpt-6.2-sol through the proxy: about 55 output tokens a second against 34 on the standard tier, so a 700-token answer arrives in 12 to 14 seconds instead of 22 to 24. It spends the plan's allowance faster; `aimux model proxy serve --service-tier standard` leaves Codex's own default in place.
+
+Reasoning effort comes from Claude Code and is passed through unchanged (`--effort`, or `/effort` in a session): low, medium, high, xhigh and max all mean the same to Codex. A request for a `codex:` model that carries no effort runs at high, and a background request (any other model name) runs at low. gpt-6.2-sol's own default is low, so high costs time Claude Code did not ask for on simple steps: with a 150-token answer, medium on the Fast tier reached the first token in 2.3 seconds and finished in 4.4, against 2.9 to 3.2 and 6.8 to 7.2 at high on the standard tier.
+
+The proxy itself adds about 33 ms to a request, measured against a fake app-server that answers at once; the rest of the wait is Codex and the model.
+
 ## Check prompt caching
 
 Claude Code requests with a `codex:` model and a session ID can reuse an ephemeral Codex thread while the conversation history, system prompt, and tools match. One handoff can return several `tool_use` blocks (calls Codex makes within 300 ms of each other), in streaming and non-streaming responses alike; the next request continues the same turn only when its last user message carries a `tool_result` for every one of them, otherwise the proxy starts a fresh thread. A tool handoff waits for results for up to 10 minutes. The proxy releases idle threads after 30 minutes. Requests without a session ID and background requests use a fresh thread.

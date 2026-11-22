@@ -54,12 +54,17 @@ func newModelProxyStatusCmd() *cobra.Command {
 
 func newModelProxyServeCmd() *cobra.Command {
 	var port int
-	var command string
+	var command, serviceTier string
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the Codex model proxy on 127.0.0.1",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if serviceTier != modelproxy.ServiceTierPriority && serviceTier != modelproxy.ServiceTierStandard {
+				cmd.SilenceUsage = true
+				return fmt.Errorf("unknown --service-tier %q: choose %s or %s",
+					serviceTier, modelproxy.ServiceTierPriority, modelproxy.ServiceTierStandard)
+			}
 			addr := fmt.Sprintf("127.0.0.1:%d", port)
 			ln, err := net.Listen("tcp4", addr)
 			if err != nil {
@@ -74,7 +79,9 @@ func newModelProxyServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			backend := modelproxy.NewCodexBackend(command, cmd.ErrOrStderr())
+			backend := modelproxy.NewCodexBackend(modelproxy.CodexOptions{
+				Command: command, ServiceTier: serviceTier, Stderr: cmd.ErrOrStderr(),
+			})
 			defer backend.Close()
 			if port == modelproxy.StablePort {
 				home, err := os.UserHomeDir()
@@ -99,5 +106,7 @@ func newModelProxyServeCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port on 127.0.0.1 (clients send the key stored in the "+modelproxy.KeyService+" Keychain entry)")
 	cmd.Flags().StringVar(&command, "codex-command", "", "Codex executable (default: codex-lean if available, otherwise codex)")
+	cmd.Flags().StringVar(&serviceTier, "service-tier", modelproxy.ServiceTierPriority,
+		"OpenAI service tier: priority is Codex's Fast tier (about twice the tokens a second, spending the plan's allowance faster); standard leaves Codex's own default")
 	return cmd
 }

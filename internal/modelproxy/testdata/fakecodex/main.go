@@ -101,6 +101,7 @@ func main() {
 	}
 	defer log.Close()
 	logEvent := func(event string) { _, _ = fmt.Fprintln(log, event) }
+	logEvent("args " + strings.Join(os.Args[1:], " "))
 	var sendMu sync.Mutex
 	var interruptedMu sync.Mutex
 	interrupted := map[string]bool{}

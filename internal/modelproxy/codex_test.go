@@ -37,9 +37,39 @@ func newFakeBackend(t *testing.T) (*CodexBackend, string) {
 	t.Helper()
 	log := filepath.Join(t.TempDir(), "protocol.log")
 	t.Setenv("AIMUX_FAKE_CODEX_LOG", log)
-	backend := NewCodexBackend(fakeCodex, os.Stderr)
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Stderr: os.Stderr})
 	t.Cleanup(backend.Close)
 	return backend, log
+}
+
+// The Fast ("priority") service tier roughly halves the time a long answer takes, so the proxy asks for it
+// unless the owner chooses the standard tier to spend the plan's allowance more slowly.
+func TestCodexBackendAsksForTheFastServiceTier(t *testing.T) {
+	for _, tc := range []struct {
+		name, tier string
+		want       bool
+	}{
+		{name: "by default", want: true},
+		{name: "asked for", tier: ServiceTierPriority, want: true},
+		{name: "standard", tier: ServiceTierStandard, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "protocol.log")
+			t.Setenv("AIMUX_FAKE_CODEX_LOG", log)
+			backend := NewCodexBackend(CodexOptions{Command: fakeCodex, ServiceTier: tc.tier, Stderr: os.Stderr})
+			t.Cleanup(backend.Close)
+			if _, err := backend.Run(context.Background(), fakeTurn("hello"), func(Event) error { return nil }); err != nil {
+				t.Fatal(err)
+			}
+			args, err := os.ReadFile(log) // #nosec G304 -- test temp file
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(args), `-c service_tier="priority"`); got != tc.want {
+				t.Errorf("service_tier flag present = %v, want %v: %s", got, tc.want, args)
+			}
+		})
+	}
 }
 
 func fakeTurn(text string) TurnRequest {
@@ -221,7 +251,7 @@ func TestCodexBackendWarnsOnUntestedVersion(t *testing.T) {
 			t.Setenv("AIMUX_FAKE_CODEX_LOG", filepath.Join(t.TempDir(), "protocol.log"))
 			t.Setenv("AIMUX_FAKE_CODEX_VERSION", tc.version)
 			var stderr strings.Builder
-			backend := NewCodexBackend(fakeCodex, &stderr)
+			backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Stderr: &stderr})
 			defer backend.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
