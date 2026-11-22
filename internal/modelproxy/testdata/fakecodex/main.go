@@ -62,6 +62,10 @@ func main() {
 			os.Exit(5)
 		}
 		servers := `{"name":"github","enabled":true},{"name":"odd.name","enabled":true},{"name":"off","enabled":false}`
+		if _, err := os.Stat(filepath.Join(".codex", "config.toml")); err == nil {
+			// Like real Codex, a project config in the working directory adds its servers to the list.
+			servers += `,{"name":"project_only","enabled":true}`
+		}
 		if !slices.Contains(os.Args, "plugins") {
 			// Like real Codex, servers from plugins are listed unless plugins are disabled.
 			servers += `,{"name":"codex_app","enabled":true}`
@@ -74,6 +78,8 @@ func main() {
 	// Like real Codex 0.170: a -c entry for a server the config does not define (a plugin's) makes it reject the
 	// whole config ("invalid transport").
 	require(!strings.Contains(strings.Join(os.Args[2:], " "), "mcp_servers.codex_app."), "invalid transport in mcp_servers.codex_app")
+	// app-server runs in the proxy's empty working directory, where a project's servers are not defined either.
+	require(!strings.Contains(strings.Join(os.Args[2:], " "), "mcp_servers.project_only."), "invalid transport in mcp_servers.project_only")
 	// Like real Codex, configured MCP servers would start and offer their tools unless each is switched off.
 	for _, flag := range []string{"-c mcp_servers.github.enabled=false", `-c mcp_servers."odd.name".enabled=false`} {
 		require(strings.Contains(" "+strings.Join(os.Args[2:], " ")+" ", " "+flag+" "), "MCP server left enabled: missing "+flag)
