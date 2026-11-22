@@ -16,6 +16,19 @@ aimux-dev model proxy serve --port 7386
 
 In another terminal, run `claude-codex-dev`, then `claude`. In your shell setup, define `claude-codex-dev` to call your existing `claude-codex` function with `AIMUX_MODEL_PROXY_PORT=7386`. Both channels use the existing `aimux-model-proxy` Keychain entry. Only the stable listener publishes the Codex usage snapshot for the HUD. Images reach Codex on both channels: pasted screenshots, images in earlier messages, and images a tool returns (such as `Read` on a PNG), from base64 data or an https URL. An image block without a usable source is replaced with a short note, so a session never gets stuck on it.
 
+## Check that it is healthy
+
+```bash
+aimux model proxy status            # the stable listener on 7385
+aimux model proxy status --port 7386  # a dev listener
+```
+
+It prints the proxy's state and uptime, whether its Codex app-server is running, how many turns it has sent to Codex and how the last one went, and the same for the rate-limit checks behind the usage snapshot. Those checks cost no tokens, so a recent one shows the Codex login still works; only the stable listener makes them. Asking costs nothing and never starts Codex.
+
+The command exits non-zero when the proxy is degraded or not running, so a monitor can act on the exit code. The proxy is degraded when its most recent turn failed, or its most recent rate-limit check failed; a later success clears it. A request Claude Code malformed is not counted, and neither is a turn you interrupted.
+
+The same report is `GET /health` on the proxy, as JSON, with the key every route needs: 200 when healthy, 503 when degraded.
+
 ## Check prompt caching
 
 Claude Code requests with a `codex:` model and a session ID can reuse an ephemeral Codex thread while the conversation history, system prompt, and tools match. One handoff can return several `tool_use` blocks (calls Codex makes within 300 ms of each other), in streaming and non-streaming responses alike; the next request continues the same turn only when its last user message carries a `tool_result` for every one of them, otherwise the proxy starts a fresh thread. A tool handoff waits for results for up to 10 minutes. The proxy releases idle threads after 30 minutes. Requests without a session ID and background requests use a fresh thread.

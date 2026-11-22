@@ -69,8 +69,15 @@ func parseRateLimits(raw json.RawMessage) (CodexUsage, error) {
 	return u, nil
 }
 
-// ReadUsage asks the proxy's Codex process for the plan's current Codex allowance.
+// ReadUsage asks the proxy's Codex process for the plan's current Codex allowance. It costs no tokens, so its
+// result is also the standing Codex check GET /health reports.
 func (b *CodexBackend) ReadUsage(ctx context.Context) (CodexUsage, error) {
+	u, err := b.readUsage(ctx)
+	b.vitals.observe(ctx, &b.vitals.probe, err)
+	return u, err
+}
+
+func (b *CodexBackend) readUsage(ctx context.Context) (CodexUsage, error) {
 	p, err := b.process(ctx)
 	if err != nil {
 		return CodexUsage{}, err

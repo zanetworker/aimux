@@ -16,6 +16,18 @@ import (
 // Authorization Bearer token; an empty key rejects every request, so the proxy never runs open.
 func NewHandler(backend Backend, key string) http.Handler {
 	mux := http.NewServeMux()
+	// A backend that reports no health leaves the route unregistered, so a caller gets 404 rather than a made-up
+	// answer. 503 on degraded lets a monitor act on the status code alone.
+	if reporter, ok := backend.(interface{ health() Health }); ok {
+		mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+			health := reporter.health()
+			status := http.StatusOK
+			if health.Status != "ok" {
+				status = http.StatusServiceUnavailable
+			}
+			writeJSON(w, status, health)
+		})
+	}
 	mux.HandleFunc("GET /v1/models", listModels)
 	mux.HandleFunc("POST /v1/messages/count_tokens", func(w http.ResponseWriter, r *http.Request) {
 		if _, size, ok := readRequest(w, r); ok {

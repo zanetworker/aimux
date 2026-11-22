@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,6 +41,9 @@ type CodexBackend struct {
 	versionOnce sync.Once
 	closed      bool
 	sessions    sessions
+	vitals      healthState
+	// current mirrors server for readers that must not wait on mu, such as health.
+	current atomic.Pointer[appServer]
 }
 
 // NewCodexBackend starts app-server on the first turn. An empty command
@@ -53,6 +57,7 @@ func NewCodexBackend(command string, stderr io.Writer) *CodexBackend {
 	}
 	return &CodexBackend{
 		command: command, stderr: stderr,
+		vitals:   healthState{startedAt: time.Now().UTC()},
 		sessions: sessions{pauseTimeout: 10 * time.Minute, idleTimeout: 30 * time.Minute},
 	}
 }
@@ -70,6 +75,7 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 		select {
 		case <-b.server.done:
 			b.server = nil
+			b.current.Store(nil)
 		default:
 			return b.server, nil
 		}
@@ -117,6 +123,7 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 		return nil, err
 	}
 	b.server = p
+	b.current.Store(p)
 	return p, nil
 }
 
@@ -128,6 +135,7 @@ func (b *CodexBackend) Close() {
 	if b.server != nil {
 		b.server.close()
 		b.server = nil
+		b.current.Store(nil)
 	}
 	if b.catalogPath != "" {
 		_ = os.Remove(b.catalogPath)
@@ -150,7 +158,29 @@ func (b *CodexBackend) logMessage(outcome string, usage Usage, firstByte time.Du
 
 // Run runs one turn. When Codex exits before anything reached the client, the turn is retried once on a fresh
 // process: each request is self-contained, so a retry repeats nothing the client has seen.
+// Run answers one turn and records how it went for GET /health. A turn the client abandoned is left out: the
+// proxy is not unwell because Claude Code was interrupted.
 func (b *CodexBackend) Run(ctx context.Context, req TurnRequest, emit func(Event) error) (Usage, error) {
+	usage, err := b.run(ctx, req, emit)
+	b.vitals.observe(ctx, &b.vitals.requests, err)
+	return usage, err
+}
+
+// health reports the proxy's own state without starting Codex or calling it. It reads the app-server through
+// current, never b.mu, because process() holds that lock across a Codex start of several seconds.
+func (b *CodexBackend) health() Health {
+	running := false
+	if p := b.current.Load(); p != nil {
+		select {
+		case <-p.done:
+		default:
+			running = true
+		}
+	}
+	return b.vitals.snapshot(b.command, running)
+}
+
+func (b *CodexBackend) run(ctx context.Context, req TurnRequest, emit func(Event) error) (Usage, error) {
 	if req.session != nil {
 		return b.runSession(ctx, req, emit)
 	}
