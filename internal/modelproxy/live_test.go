@@ -16,7 +16,7 @@ func TestLiveCodex(t *testing.T) {
 	if os.Getenv("AIMUX_LIVE_CODEX") != "1" {
 		t.Skip("set AIMUX_LIVE_CODEX=1 to use your Codex login")
 	}
-	backend := NewCodexBackend("", os.Stderr)
+	backend := NewCodexBackend(CodexOptions{Stderr: os.Stderr})
 	defer backend.Close()
 	server := httptest.NewServer(NewHandler(backend, testKey))
 	defer server.Close()

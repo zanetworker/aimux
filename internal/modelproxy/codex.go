@@ -32,8 +32,9 @@ const codexPreamble = "You are the model behind Claude Code. Claude Code runs ev
 	"~/.claude/rules at session start). Use only the tools provided here, and load skills through the Skill tool."
 
 type CodexBackend struct {
-	command string
-	stderr  io.Writer
+	command     string
+	serviceTier string
+	stderr      io.Writer
 
 	mu          sync.Mutex
 	server      *appServer
@@ -46,9 +47,29 @@ type CodexBackend struct {
 	current atomic.Pointer[appServer]
 }
 
-// NewCodexBackend starts app-server on the first turn. An empty command
-// prefers codex-lean when available and falls back to codex.
-func NewCodexBackend(command string, stderr io.Writer) *CodexBackend {
+// Service tiers decide how fast OpenAI serves a turn.
+const (
+	// ServiceTierPriority is Codex's "Fast" tier. Measured against the standard tier on gpt-6.2-sol: about 55
+	// tokens a second against 34, so a long answer arrives in roughly half the time. It spends the plan's
+	// allowance faster, which is why it can be turned off.
+	ServiceTierPriority = "priority"
+	// ServiceTierStandard leaves Codex's own default in place: the proxy then asks for no tier at all.
+	ServiceTierStandard = "standard"
+)
+
+// CodexOptions configures a Codex backend. The zero value is the default setup: codex-lean when it is installed,
+// the Fast service tier, and no stderr.
+type CodexOptions struct {
+	// Command is the Codex executable. Empty prefers codex-lean when available and falls back to codex.
+	Command string
+	// ServiceTier is ServiceTierPriority (the default, also when empty) or ServiceTierStandard.
+	ServiceTier string
+	Stderr      io.Writer
+}
+
+// NewCodexBackend starts app-server on the first turn.
+func NewCodexBackend(opts CodexOptions) *CodexBackend {
+	command := opts.Command
 	if command == "" {
 		command = "codex"
 		if _, err := exec.LookPath("codex-lean"); err == nil {
@@ -56,7 +77,7 @@ func NewCodexBackend(command string, stderr io.Writer) *CodexBackend {
 		}
 	}
 	return &CodexBackend{
-		command: command, stderr: stderr,
+		command: command, stderr: opts.Stderr, serviceTier: opts.ServiceTier,
 		vitals:   healthState{startedAt: time.Now().UTC()},
 		sessions: sessions{pauseTimeout: 10 * time.Minute, idleTimeout: 30 * time.Minute},
 	}
@@ -98,6 +119,9 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 	args = append(args, mcpArgs...)
 	for _, feature := range disabledCodexFeatures {
 		args = append(args, "--disable", feature)
+	}
+	if b.serviceTier != ServiceTierStandard {
+		args = append(args, "-c", `service_tier="`+ServiceTierPriority+`"`)
 	}
 	args = append(args, "-c", `web_search="disabled"`, "-c", "tools.update_plan.enabled=false",
 		"-c", "tools.experimental_request_user_input.enabled=false",

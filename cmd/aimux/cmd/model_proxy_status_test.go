@@ -153,3 +153,15 @@ func healthJSON(t *testing.T, value any) string {
 	}
 	return string(data)
 }
+
+func TestModelProxyServeRejectsAnUnknownServiceTier(t *testing.T) {
+	root := newModelCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"proxy", "serve", "--service-tier", "turbo", "--port", "0"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "priority") || !strings.Contains(err.Error(), "standard") {
+		t.Fatalf("err = %v, want it to name the two tiers", err)
+	}
+}

@@ -110,7 +110,7 @@ func TestHealthCountsOnlyTurnsSentToCodex(t *testing.T) {
 }
 
 func TestHealthReportsAFailedTurn(t *testing.T) {
-	backend := NewCodexBackend(t.TempDir()+"/missing-codex", io.Discard)
+	backend := NewCodexBackend(CodexOptions{Command: t.TempDir() + "/missing-codex", Stderr: io.Discard})
 	t.Cleanup(backend.Close)
 	handler := NewHandler(backend, testKey)
 	if res := request(handler, http.MethodPost, "/v1/messages", healthTurn); res.Code != http.StatusBadGateway {
