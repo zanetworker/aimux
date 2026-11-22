@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -62,9 +64,18 @@ func listModels(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// maxRequestBytes bounds a request body so one client cannot exhaust the shared proxy's memory. It is well above
+// what Claude Code sends: Anthropic's own Messages API limit is 32 MB, images included.
+var maxRequestBytes int64 = 64 << 20
+
 func readRequest(w http.ResponseWriter, r *http.Request) (messageRequest, int, bool) {
 	var request messageRequest
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", fmt.Sprintf("request body is over %d bytes", maxRequestBytes))
+		return request, 0, false
+	}
 	if err != nil || !json.Valid(body) {
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid JSON request body")
 		return request, 0, false

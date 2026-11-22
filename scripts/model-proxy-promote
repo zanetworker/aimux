@@ -33,6 +33,27 @@ models_ok() {
   [[ $(printf 'header = "x-api-key: %s"\n' "$key" | curl -q --config - --noproxy '*' -s --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1/v1/models") == 200 ]]
 }
 
+# One real answer through the proxy: /v1/models is a static list and never touches Codex.
+inference_ok() {
+  local body='{"model":"codex:gpt-6.2-sol","max_tokens":256,"messages":[{"role":"user","content":"Reply with exactly AIMUX_PROXY_OK and nothing else."}]}'
+  printf 'header = "x-api-key: %s"\n' "$key" |
+    curl -q --config - --noproxy '*' -s --max-time 120 -H 'content-type: application/json' -d "$body" "http://127.0.0.1:$1/v1/messages" |
+    grep -q 'AIMUX_PROXY_OK'
+}
+
+# Armed from the binary swap until stable passes its checks, so an interrupt or failure in between restores
+# the previous binary instead of leaving an unchecked one for launchd to start.
+rollback_armed=0
+rollback_if_armed() {
+  [[ ${rollback_armed:-0} == 1 ]] || return 0
+  rollback_armed=0
+  if restore_previous && launchctl kickstart -k "$job"; then
+    printf 'Restored the previous stable binary (%s).\n' "$previous" >&2
+  else
+    printf 'Could not restore %s; run: %s rollback\n' "$previous" "$0" >&2
+  fi
+}
+
 wait_for_models() {
   local attempt
   for ((attempt=0; attempt<30; attempt++)); do
@@ -106,7 +127,7 @@ main() {
   esac
   lock=$bin_dir/.aimux-model-proxy-promotion
   mkdir "$lock" || die "Another promotion or rollback is in progress (lock: $lock)."
-  trap 'if [[ -n "$dev_pid" ]]; then kill "$dev_pid" 2>/dev/null || true; wait "$dev_pid" || true; fi; rm -rf "$scratch"; rmdir "$lock"' EXIT
+  trap 'rollback_if_armed; if [[ -n "$dev_pid" ]]; then kill "$dev_pid" 2>/dev/null || true; wait "$dev_pid" || true; fi; rm -rf "$scratch"; rmdir "$lock"' EXIT
   launchctl print "$job" >/dev/null || die "The stable launchd job is not loaded: $job"
   set +x
   key=$(security find-generic-password -a aimux -s aimux-model-proxy -w) || die 'The proxy Keychain entry is unavailable.'
@@ -144,13 +165,16 @@ main() {
   [[ "$answer" == AIMUX_PROXY_OK ]] || die 'Claude Code smoke test did not return AIMUX_PROXY_OK; stable was not changed.'
   kill -0 "$dev_pid" 2>/dev/null || die 'Candidate exited during the smoke test; stable was not changed.'
 
+  rollback_armed=1
   install_candidate "$scratch/aimux"
-  if ! launchctl kickstart -k "$job" || ! wait_for_models 7385; then
+  if ! launchctl kickstart -k "$job" || ! wait_for_models 7385 || ! inference_ok 7385; then
+    rollback_armed=0
     if restore_previous && launchctl kickstart -k "$job" && wait_for_models 7385; then
-      die 'Candidate failed its stable health check; restored the previous binary.'
+      die 'Candidate failed its stable health or inference check; restored the previous binary.'
     fi
     die "Candidate failed and automatic rollback did not recover the stable proxy. Backup: $previous"
   fi
+  rollback_armed=0
   activate_hud || die 'Stable proxy is healthy, but the HUD pin could not be switched.'
   printf 'Promoted the tested binary; port 7385 is healthy. Rollback: %s rollback\n' "$0"
   exit 0

@@ -50,8 +50,28 @@ func main() {
 			`{"slug":"gpt-6.2-astra","tool_mode":"code_mode_only","multi_agent_version":"v2","apply_patch_tool_type":"freeform"}]}`)
 		return
 	}
+	if len(os.Args) > 2 && os.Args[1] == "mcp" && os.Args[2] == "list" {
+		if os.Getenv("AIMUX_FAKE_CODEX_MCP_FAIL") != "" {
+			fmt.Fprintln(os.Stderr, "fakecodex: cannot read config")
+			os.Exit(5)
+		}
+		servers := `{"name":"github","enabled":true},{"name":"odd.name","enabled":true},{"name":"off","enabled":false}`
+		if !slices.Contains(os.Args, "plugins") {
+			// Like real Codex, servers from plugins are listed unless plugins are disabled.
+			servers += `,{"name":"codex_app","enabled":true}`
+		}
+		fmt.Println("[" + servers + "]")
+		return
+	}
 	require(len(os.Args) > 1 && os.Args[1] == "app-server", "expected app-server")
 	requireLeanCatalog(os.Args[2:])
+	// Like real Codex 0.170: a -c entry for a server the config does not define (a plugin's) makes it reject the
+	// whole config ("invalid transport").
+	require(!strings.Contains(strings.Join(os.Args[2:], " "), "mcp_servers.codex_app."), "invalid transport in mcp_servers.codex_app")
+	// Like real Codex, configured MCP servers would start and offer their tools unless each is switched off.
+	for _, flag := range []string{"-c mcp_servers.github.enabled=false", `-c mcp_servers."odd.name".enabled=false`} {
+		require(strings.Contains(" "+strings.Join(os.Args[2:], " ")+" ", " "+flag+" "), "MCP server left enabled: missing "+flag)
+	}
 	for _, flag := range []string{"--disable hooks", "--disable shell_tool", "--disable skill_search",
 		`-c web_search="disabled"`, "-c tools.update_plan.enabled=false", "-c tools.experimental_request_user_input.enabled=false",
 		// Claude Code supplies the real cwd and permissions; Codex's own context names the proxy's empty
@@ -173,17 +193,29 @@ func main() {
 		case "turn/start":
 			var p struct {
 				ThreadID, Effort string
-				Input            []struct{ Type, Text string }
+				Input            []struct{ Type, Text, URL string }
 			}
 			decode(msg.Params, &p)
 			tid := p.ThreadID
 			th := threads[tid]
 			require(th != nil && p.Input != nil, "expected known thread and input array")
 			logEvent("turn " + tid)
-			text := ""
+			text, images := "", 0
 			if len(p.Input) > 0 {
-				require(p.Input[0].Type == "text", "expected text input")
-				text = p.Input[0].Text
+				// Turn input holds text parts and image parts ({"type":"image","url":...}), in any order.
+				for _, part := range p.Input {
+					switch part.Type {
+					case "text":
+						if text == "" {
+							text = part.Text
+						}
+					case "image":
+						require(strings.HasPrefix(part.URL, "data:image/") || strings.HasPrefix(part.URL, "https://"), "image input without a data: or https: url")
+						images++
+					default:
+						fail("unexpected turn input type: " + part.Type)
+					}
+				}
 			}
 			if text == "crash" {
 				os.Exit(3)
@@ -260,6 +292,9 @@ func main() {
 				completed(tid, "interrupted")
 			case "":
 				if len(p.Input) != 0 {
+					if images > 0 {
+						delta(tid, fmt.Sprintf("+%d image", images))
+					}
 					usage(tid, 17)
 					completed(tid, "completed")
 					continue
@@ -271,6 +306,9 @@ func main() {
 				usage(tid, 17)
 				completed(tid, "completed")
 			default:
+				if images > 0 {
+					text = fmt.Sprintf("%s+%d image", text, images)
+				}
 				delta(tid, text)
 				usage(tid, 17)
 				completed(tid, "completed")

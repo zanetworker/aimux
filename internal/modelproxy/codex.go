@@ -80,7 +80,12 @@ func (b *CodexBackend) process(ctx context.Context) (*appServer, error) {
 		_ = os.Remove(b.catalogPath)
 	}
 	b.catalogPath = catalog
+	mcpArgs, err := disabledMCPArgs(ctx, b.command)
+	if err != nil {
+		return nil, err
+	}
 	args := []string{"app-server", "--enable", "omit_skill_descriptions", "-c", "model_catalog_json=" + strconv.Quote(catalog)}
+	args = append(args, mcpArgs...)
 	for _, feature := range disabledCodexFeatures {
 		args = append(args, "--disable", feature)
 	}

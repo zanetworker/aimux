@@ -14,7 +14,7 @@ scripts/model-proxy-promote build-dev
 aimux-dev model proxy serve --port 7386
 ```
 
-In another terminal, run `claude-codex-dev`, then `claude`. In your shell setup, define `claude-codex-dev` to call your existing `claude-codex` function with `AIMUX_MODEL_PROXY_PORT=7386`. Both channels use the existing `aimux-model-proxy` Keychain entry. Only the stable listener publishes the Codex usage snapshot for the HUD. Do not send screenshots through the stable proxy: it rejects image blocks.
+In another terminal, run `claude-codex-dev`, then `claude`. In your shell setup, define `claude-codex-dev` to call your existing `claude-codex` function with `AIMUX_MODEL_PROXY_PORT=7386`. Both channels use the existing `aimux-model-proxy` Keychain entry. Only the stable listener publishes the Codex usage snapshot for the HUD. Images reach Codex on both channels: pasted screenshots, images in earlier messages, and images a tool returns (such as `Read` on a PNG), from base64 data or an https URL. An image block without a usable source is replaced with a short note, so a session never gets stuck on it.
 
 ## Promote or roll back from a fresh terminal
 

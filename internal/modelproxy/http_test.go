@@ -305,5 +305,34 @@ func TestMessagesWithImageSucceeds(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("a request with an image must not fail the session: status %d, body %s", res.Code, res.Body)
 	}
-	checkJSON(t, res.Body.Bytes(), "stop_reason", "end_turn", "content", []any{map[string]any{"type": "text", "text": "see"}})
+	// The fixture reports how many images reached Codex's turn input.
+	checkJSON(t, res.Body.Bytes(), "stop_reason", "end_turn", "content", []any{map[string]any{"type": "text", "text": "see+1 image"}})
+
+	only := request(NewHandler(backend, testKey), http.MethodPost, "/v1/messages",
+		`{"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://example.com/a.png"}}]}]}`)
+	if only.Code != http.StatusOK {
+		t.Fatalf("image-only message: status %d, body %s", only.Code, only.Body)
+	}
+	checkJSON(t, only.Body.Bytes(), "content", []any{map[string]any{"type": "text", "text": "+1 image"}})
+}
+
+func TestMessagesRejectsOversizedBodies(t *testing.T) {
+	saved := maxRequestBytes
+	maxRequestBytes = 1024
+	t.Cleanup(func() { maxRequestBytes = saved })
+	backend, _ := newFakeBackend(t)
+	big := `{"messages":[{"role":"user","content":"` + strings.Repeat("x", 2048) + `"}]}`
+	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+		res := request(NewHandler(backend, testKey), http.MethodPost, path, big)
+		if res.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("%s: status %d, want 413; body %s", path, res.Code, res.Body)
+		}
+		checkJSON(t, res.Body.Bytes(), "type", "error")
+		if !strings.Contains(res.Body.String(), "request_too_large") {
+			t.Fatalf("%s: body %s, want request_too_large", path, res.Body)
+		}
+	}
+	if res := request(NewHandler(backend, testKey), http.MethodPost, "/v1/messages", `{"messages":[{"role":"user","content":"small"}]}`); res.Code != http.StatusOK {
+		t.Fatalf("a small request failed: %d %s", res.Code, res.Body)
+	}
 }
