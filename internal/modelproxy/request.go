@@ -9,15 +9,18 @@ import (
 
 const defaultModel = "gpt-6.2-sol"
 
+type conversationMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
 type messageRequest struct {
-	Model    string          `json:"model"`
-	System   json.RawMessage `json:"system"`
-	Stream   bool            `json:"stream"`
-	Messages []struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
-	} `json:"messages"`
-	Tools []struct {
+	Model    string                `json:"model"`
+	System   json.RawMessage       `json:"system"`
+	Metadata json.RawMessage       `json:"metadata"`
+	Stream   bool                  `json:"stream"`
+	Messages []conversationMessage `json:"messages"`
+	Tools    []struct {
 		Name        string          `json:"name"`
 		Description string          `json:"description"`
 		InputSchema json.RawMessage `json:"input_schema"`
@@ -135,7 +138,8 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 		Model: defaultModel, Effort: "low",
 		Input: []textPart{}, Tools: make([]dynamicTool, 0, len(req.Tools)),
 	}
-	if id, explicit := strings.CutPrefix(req.Model, "codex:"); explicit {
+	id, explicit := strings.CutPrefix(req.Model, "codex:")
+	if explicit {
 		if id == "" {
 			return turn, errors.New("codex model ID is empty")
 		}
@@ -168,11 +172,26 @@ func mapRequest(req messageRequest) (TurnRequest, error) {
 			lastIdx = i
 		}
 	}
+	if explicit {
+		var metadata struct {
+			UserID string `json:"user_id"`
+		}
+		var user struct {
+			SessionID string `json:"session_id"`
+		}
+		if json.Unmarshal(req.Metadata, &metadata) == nil &&
+			json.Unmarshal([]byte(metadata.UserID), &user) == nil && user.SessionID != "" {
+			turn.session = newSessionInput(user.SessionID, turn, len(req.Messages))
+		}
+	}
 	trailingSystem := lastIdx >= 0 && lastIdx < len(req.Messages)-1
 	for i, msg := range req.Messages {
 		blocks, err := decodeContent(msg.Content)
 		if err != nil {
 			return turn, err
+		}
+		if turn.session != nil {
+			turn.session.record(msg, blocks, len(turn.History))
 		}
 		last := i == lastIdx
 		textType, itemRole := "input_text", msg.Role
@@ -275,6 +294,8 @@ func imageSourceURL(block requestBlock) string {
 	return ""
 }
 
+const toolErrorPrefix = "Error: "
+
 // toolOutput is a tool result as Codex takes it: a string when it holds only text (joined by newlines), or a list of
 // input_text and input_image parts when it holds an image. An error result is prefixed with "Error: ".
 func toolOutput(raw json.RawMessage, isError bool) (any, error) {
@@ -297,7 +318,7 @@ func toolOutput(raw json.RawMessage, isError bool) (any, error) {
 	}
 	prefix := ""
 	if isError {
-		prefix = "Error: "
+		prefix = toolErrorPrefix
 	}
 	if !hasImage {
 		return prefix + strings.Join(text, "\n"), nil

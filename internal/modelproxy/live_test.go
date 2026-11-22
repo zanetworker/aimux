@@ -23,11 +23,14 @@ func TestLiveCodex(t *testing.T) {
 	client := server.Client()
 	client.Timeout = 120 * time.Second
 
-	post := func(model string, messages []map[string]any, stream bool) []byte {
+	post := func(messages []map[string]any) messageResponse {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{
-			"model": model, "stream": stream, "messages": messages,
-			"system": "Follow the user's instructions. Use the Lookup tool if asked. When its result is present, answer with the result alone.",
+			"model": "codex:" + defaultModel, "messages": messages,
+			"metadata": map[string]string{"user_id": `{"session_id":"aimux-live-cache-test"}`},
+			// Use a stable prefix large enough to be eligible for the provider's prompt cache.
+			"system": "Follow the user's instructions. Use the Lookup tool if asked. When its result is present, answer with the result alone. " +
+				strings.Repeat("Background reference entry for this test. ", 800),
 			"tools": []map[string]any{{
 				"name": "Lookup", "description": "Look up an item by key.",
 				"input_schema": json.RawMessage(`{"type":"object","properties":{"key":{"type":"string"}},"required":["key"],"additionalProperties":false}`),
@@ -51,58 +54,43 @@ func TestLiveCodex(t *testing.T) {
 		if err != nil || res.StatusCode != http.StatusOK {
 			t.Fatalf("real Codex HTTP response %d: %s, %v", res.StatusCode, output, err)
 		}
-		return output
+		var response messageResponse
+		if err := json.Unmarshal(output, &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
 	}
 	messages := []map[string]any{{"role": "user", "content": "Call the Lookup tool with key fruit."}}
-	events := readSSE(t, bytes.NewReader(post("claude-haiku", messages, true)))
+	first := post(messages)
 	var tool responseBlock
-	var args json.RawMessage
-	for _, event := range events {
-		switch event.Type {
-		case "content_block_start":
-			var block responseBlock
-			if err := json.Unmarshal(event.ContentBlock, &block); err != nil {
-				t.Fatal(err)
-			}
-			if block.Type == "tool_use" {
-				tool = block
-			}
-		case "content_block_delta":
-			var delta struct {
-				PartialJSON string `json:"partial_json"`
-			}
-			if err := json.Unmarshal(event.Delta, &delta); err != nil {
-				t.Fatal(err)
-			}
-			if delta.PartialJSON != "" {
-				args = json.RawMessage(delta.PartialJSON)
-			}
-		case "message_delta":
-			checkJSON(t, event.Delta, "stop_reason", "tool_use")
-			t.Logf("tool turn usage %s", event.Usage)
+	for _, block := range first.Content {
+		if block.Type == "tool_use" {
+			tool = block
 		}
 	}
-	if tool.Name != "Lookup" || tool.ID == "" || len(args) == 0 || events[len(events)-1].Type != "message_stop" {
-		t.Fatalf("expected completed Lookup handoff, got %+v", events)
+	if first.StopReason == nil || *first.StopReason != "tool_use" || tool.Name != "Lookup" || tool.ID == "" {
+		t.Fatalf("expected a completed Lookup handoff, got %+v", first)
 	}
-	checkJSON(t, args, "key", "fruit")
-	tool.Input = args
+	checkJSON(t, tool.Input, "key", "fruit")
+	t.Logf("tool handoff usage %+v", first.Usage)
 	messages = append(messages,
-		map[string]any{"role": "assistant", "content": []responseBlock{tool}},
+		map[string]any{"role": "assistant", "content": first.Content},
 		map[string]any{"role": "user", "content": []map[string]string{{
 			"type": "tool_result", "tool_use_id": tool.ID, "content": "PAPAYA",
 		}}},
 	)
-	var response messageResponse
-	output := post("claude-haiku", messages, false)
-	if err := json.Unmarshal(output, &response); err != nil {
-		t.Fatal(err)
-	}
+	response := post(messages)
+	promptTokens := response.Usage.InputTokens + response.Usage.CacheReadInputTokens
 	if response.StopReason == nil || *response.StopReason != "end_turn" ||
 		len(response.Content) == 0 || response.Content[0].Text == nil ||
 		!strings.Contains(strings.ToUpper(*response.Content[0].Text), "PAPAYA") ||
-		response.Usage.InputTokens <= 0 {
-		t.Fatalf("Codex did not continue using the injected result: %s", output)
+		promptTokens <= 0 {
+		t.Fatalf("Codex did not continue using the tool result: %+v", response)
 	}
 	t.Logf("continuation usage %+v", response.Usage)
+	// The continuation reports the input and cache counts of its last model request.
+	if response.Usage.CacheReadInputTokens*5 <= promptTokens*4 {
+		t.Fatalf("continuation cache_read_input_tokens = %d, want more than 80%% of the %d prompt tokens",
+			response.Usage.CacheReadInputTokens, promptTokens)
+	}
 }

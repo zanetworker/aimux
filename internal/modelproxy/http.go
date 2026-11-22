@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // NewHandler serves the Anthropic Messages API over backend. Every request must carry key, as x-api-key or as an
@@ -88,6 +89,21 @@ func readRequest(w http.ResponseWriter, r *http.Request) (messageRequest, int, b
 }
 
 func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
+	var usage Usage
+	var session *sessionInput
+	outcome := "invalid_request"
+	if logger, ok := backend.(interface {
+		logMessage(string, Usage, time.Duration)
+	}); ok {
+		timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
+		w = timing
+		defer func() {
+			if session != nil {
+				outcome = session.outcome
+			}
+			logger.logMessage(outcome, usage, timing.firstByte)
+		}()
+	}
 	request, _, ok := readRequest(w, r)
 	if !ok {
 		return
@@ -97,6 +113,7 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 		writeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	outcome, session = "stateless", turn.session
 	model := request.Model
 	if model == "" {
 		model = "codex:" + turn.Model
@@ -107,8 +124,8 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 	stream := messageStream{w: w, message: message}
 	reason := "end_turn"
 	var text strings.Builder
-	var tool *ToolCall
-	usage, err := backend.Run(r.Context(), turn, func(event Event) error {
+	var tools []*ToolCall
+	usage, err = backend.Run(r.Context(), turn, func(event Event) error {
 		if event.Tool != nil {
 			reason = "tool_use"
 			if name, ok := turn.ToolNames[event.Tool.Name]; ok {
@@ -119,7 +136,7 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 			return stream.emit(event)
 		}
 		if event.Tool != nil {
-			tool = event.Tool
+			tools = append(tools, event.Tool)
 		} else {
 			text.WriteString(event.Text)
 		}
@@ -148,12 +165,34 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 		value := text.String()
 		message.Content = append(message.Content, responseBlock{Type: "text", Text: &value})
 	}
-	if tool != nil {
+	for _, tool := range tools {
 		message.Content = append(message.Content, responseBlock{Type: "tool_use", ID: tool.ID, Name: tool.Name, Input: tool.Input})
 	}
 	message.StopReason, message.Usage = &reason, usage
 	writeJSON(w, http.StatusOK, message)
 }
+
+type messageTiming struct {
+	http.ResponseWriter
+	started   time.Time
+	firstByte time.Duration
+}
+
+func (w *messageTiming) WriteHeader(status int) {
+	if w.firstByte < 0 {
+		w.firstByte = time.Since(w.started)
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *messageTiming) Write(data []byte) (int, error) {
+	if w.firstByte < 0 {
+		w.firstByte = time.Since(w.started)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *messageTiming) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func writeError(w http.ResponseWriter, status int, kind, message string) {
 	writeJSON(w, status, map[string]any{"type": "error", "error": apiError{kind, message}})

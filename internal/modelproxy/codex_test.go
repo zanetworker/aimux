@@ -68,7 +68,7 @@ func TestCodexBackendTurn(t *testing.T) {
 	})
 	if err != nil || gotText != "before tool" || gotTool == nil ||
 		gotTool.ID != "call-t1" || gotTool.Name != "Read" || string(gotTool.Input) != `{"path":"a.txt"}` ||
-		usage != (Usage{17, 3}) {
+		usage != (Usage{InputTokens: 17, OutputTokens: 3}) {
 		t.Fatalf("text %q, tool %+v, usage %+v, err %v", gotText, gotTool, usage, err)
 	}
 	waitForLog(t, log, "interrupt t1")
@@ -112,7 +112,7 @@ func TestCodexBackendCrashAndRestart(t *testing.T) {
 		t.Fatalf("crash: text %q, err %v", got, err)
 	}
 	usage, err := backend.Run(ctx, fakeTurn("recovered"), emit)
-	if err != nil || got != "recovered" || usage != (Usage{17, 3}) {
+	if err != nil || got != "recovered" || usage != (Usage{InputTokens: 17, OutputTokens: 3}) {
 		t.Fatalf("restart: text %q, usage %+v, err %v", got, usage, err)
 	}
 	logBytes, err := os.ReadFile(log) // #nosec G304 -- test temp file
@@ -128,7 +128,7 @@ func TestCodexBackendRetriesOnceWhenCodexDiesBeforeOutput(t *testing.T) {
 	defer cancel()
 	var got string
 	usage, err := backend.Run(ctx, fakeTurn("crash-once"), func(event Event) error { got += event.Text; return nil })
-	if err != nil || got != "recovered" || usage != (Usage{17, 3}) {
+	if err != nil || got != "recovered" || usage != (Usage{InputTokens: 17, OutputTokens: 3}) {
 		t.Fatalf("text %q, usage %+v, err %v; want the retried turn to succeed", got, usage, err)
 	}
 	logBytes, err := os.ReadFile(log) // #nosec G304 -- test temp file
@@ -166,7 +166,7 @@ func TestCodexBackendConcurrentTurns(t *testing.T) {
 		if r.prompt == "concurrent two" {
 			wantInput = 29
 		}
-		if r.err != nil || r.text != r.prompt || r.usage != (Usage{wantInput, 3}) {
+		if r.err != nil || r.text != r.prompt || r.usage != (Usage{InputTokens: wantInput, OutputTokens: 3}) {
 			t.Fatalf("crossed turns: %+v", r)
 		}
 	}
@@ -205,7 +205,7 @@ func TestCodexBackendWaitsForUsageAfterToolCall(t *testing.T) {
 	if err != nil || gotTool == nil || gotTool.Name != "Read" {
 		t.Fatalf("tool %+v, err %v", gotTool, err)
 	}
-	if usage != (Usage{23, 3}) {
+	if usage != (Usage{InputTokens: 23, OutputTokens: 3}) {
 		t.Fatalf("usage = %+v, want the usage reported after the tool call {23 3}", usage)
 	}
 	waitForLog(t, log, "interrupt t1")

@@ -43,7 +43,7 @@ func TestMessagesToolLoop(t *testing.T) {
 		t.Fatalf("unexpected block indexes: %+v", events)
 	}
 	checkJSON(t, events[8].Delta, "stop_reason", "tool_use")
-	checkJSON(t, events[8].Usage, "input_tokens", float64(17), "output_tokens", float64(3))
+	checkJSON(t, events[8].Usage, "input_tokens", float64(17), "cache_read_input_tokens", float64(0), "output_tokens", float64(3))
 
 	second := request(handler, http.MethodPost, "/v1/messages", `{"model":"codex:gpt-6.2-astra","messages":[
 		{"role":"user","content":"previous"},{"role":"assistant","content":[{"type":"tool_use","id":"call-t1","name":"Read","input":{"path":"a.txt"}}]},
@@ -53,7 +53,7 @@ func TestMessagesToolLoop(t *testing.T) {
 	}
 	checkJSON(t, second.Body.Bytes(), "role", "assistant", "model", "codex:gpt-6.2-astra", "stop_reason", "end_turn",
 		"content", []any{map[string]any{"type": "text", "text": "PAPAYA"}},
-		"usage", map[string]any{"input_tokens": float64(17), "output_tokens": float64(3)})
+		"usage", map[string]any{"input_tokens": float64(17), "cache_read_input_tokens": float64(0), "output_tokens": float64(3)})
 }
 
 func TestMessagesJSONToolsAndEmptyText(t *testing.T) {
@@ -74,6 +74,42 @@ func TestMessagesJSONToolsAndEmptyText(t *testing.T) {
 		t.Fatalf("empty response: status %d, events %+v", empty.Code, events)
 	}
 	checkJSON(t, events[1].Delta, "stop_reason", "end_turn")
+}
+
+func TestMessagesStatelessCachedUsage(t *testing.T) {
+	backend, _ := newFakeBackend(t)
+	h := NewHandler(backend, testKey)
+	for _, tc := range []struct {
+		prompt        string
+		input, cached float64
+		stream        bool
+	}{
+		{"partial-cache", 2, 21, true},
+		{"full-cache", 0, 17, false},
+		{"excess-cache", 0, 18, false},
+	} {
+		t.Run(tc.prompt, func(t *testing.T) {
+			body := `{"messages":[{"role":"user","content":"` + tc.prompt + `"}]`
+			if tc.stream {
+				body += `,"stream":true`
+			}
+			res := request(h, http.MethodPost, "/v1/messages", body+`}`)
+			if res.Code != http.StatusOK {
+				t.Fatalf("HTTP %d: %s", res.Code, res.Body)
+			}
+			want := map[string]any{"input_tokens": tc.input, "cache_read_input_tokens": tc.cached, "output_tokens": float64(5)}
+			if tc.stream {
+				events := readSSE(t, res.Body)
+				if len(events) < 2 || events[len(events)-2].Type != "message_delta" {
+					t.Fatalf("missing message_delta: %+v", events)
+				}
+				checkJSON(t, events[len(events)-2].Usage, "input_tokens", tc.input,
+					"cache_read_input_tokens", tc.cached, "output_tokens", float64(5))
+			} else {
+				checkJSON(t, res.Body.Bytes(), "usage", want)
+			}
+		})
+	}
 }
 
 func TestProxyEndpoints(t *testing.T) {

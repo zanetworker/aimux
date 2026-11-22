@@ -93,7 +93,9 @@ func (s *messageStream) emit(event Event) error {
 		}); err != nil {
 			return err
 		}
-		return s.write("content_block_stop", map[string]any{"index": s.index})
+		err := s.write("content_block_stop", map[string]any{"index": s.index})
+		s.index++
+		return err
 	}
 	if !s.textOpen {
 		empty := ""
