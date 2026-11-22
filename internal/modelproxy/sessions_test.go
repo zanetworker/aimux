@@ -182,6 +182,62 @@ func TestSessionContinuesParallelToolCalls(t *testing.T) {
 	}
 }
 
+// Claude Code splits parallel tool results over separate user messages, and its hooks add messages of their own
+// after them. Measured on a live session, two of every three requests took that shape, and each one threw the
+// thread away and reprocessed the whole conversation: 36.5 s against 4.8 s for a continuation.
+func TestSessionContinuesToolResultsSplitOverMessages(t *testing.T) {
+	backend, log := newFakeBackend(t)
+	h := NewHandler(backend, testKey)
+	model, id := "codex:"+defaultModel, `{"session_id":"session-parallel"}`
+	first := conversation("user", `"session-parallel"`)
+	paused := sessionPost(t, h, model, id, first)
+	if len(paused.Content) != 3 || paused.Content[1].ID != "call-t1" || paused.Content[2].ID != "call-t1-second" {
+		t.Fatalf("expected two tool calls, got %+v", paused)
+	}
+	// The same answers as the one-message case, split the way Claude Code sends them.
+	history := []conversationMessage{first, sessionAssistant(t, paused),
+		conversation("user", `[{"type":"tool_result","tool_use_id":"call-t1-second","is_error":true,
+			"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}]`),
+		conversation("user", `[{"type":"tool_result","tool_use_id":"call-t1","is_error":true,
+			"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"BBBB"}}]}]`),
+		conversation("user", `[{"type":"text","text":"reminder"}]`),
+	}
+	finished := sessionPost(t, h, model, id, history...)
+	if finished.StopReason == nil || *finished.StopReason != "end_turn" || len(finished.Content) != 1 || finished.Content[0].Text == nil {
+		t.Fatalf("the same turn should see both tool outputs: %+v", finished)
+	}
+	if got := *finished.Content[0].Text; got != "failed(Error: <image>)failed(Error: <image>)|reminder" {
+		t.Errorf("continued tool outputs and reminder = %q", got)
+	}
+	data := protocolLog(t, log)
+	if strings.Count(data, "thread ") != 1 || strings.Count(data, "turn ") != 1 || strings.Count(data, "answer ") != 2 {
+		t.Fatalf("expected both answers on the one paused turn, not a fresh thread:\n%s", data)
+	}
+}
+
+// An assistant message among the new ones is history the proxy did not produce, so the thread cannot be reused.
+func TestSessionFallsBackOnAnUnknownAssistantMessage(t *testing.T) {
+	backend, log := newFakeBackend(t)
+	h := NewHandler(backend, testKey)
+	model, id := "codex:"+defaultModel, `{"session_id":"session-parallel"}`
+	first := conversation("user", `"session-parallel"`)
+	paused := sessionPost(t, h, model, id, first)
+	// Answers the paused turn would accept, so the assistant message is the only reason to fall back.
+	history := []conversationMessage{first, sessionAssistant(t, paused),
+		conversation("user", `[
+			{"type":"tool_result","tool_use_id":"call-t1-second","is_error":true,
+			 "content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]},
+			{"type":"tool_result","tool_use_id":"call-t1","is_error":true,
+			 "content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"BBBB"}}]}]`),
+		conversation("assistant", `[{"type":"text","text":"not ours"}]`),
+		conversation("user", `"session-tool"`),
+	}
+	sessionPost(t, h, model, id, history...)
+	if data := protocolLog(t, log); strings.Count(data, "thread ") != 2 {
+		t.Fatalf("expected a fresh thread after an assistant message the proxy did not produce:\n%s", data)
+	}
+}
+
 func TestSessionFallsBackWithoutAnsweringStaleCalls(t *testing.T) {
 	model, id := "codex:"+defaultModel, `{"session_id":"fallback"}`
 	first := conversation("user", `"session-parallel"`)
