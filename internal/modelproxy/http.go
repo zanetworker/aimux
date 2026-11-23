@@ -127,15 +127,15 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, reque
 		timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
 		w = timing
 		defer func() {
-			detail := ""
+			detail, tag := "", ""
 			if session != nil {
-				outcome, detail = session.outcome, session.detail
+				outcome, detail, tag = session.outcome, session.detail, session.tag
 			}
 			if hasLogger {
 				logger.logMessage(outcome, usage, timing.firstByte)
 			}
 			requests.Record(Record{
-				At: timing.started, Outcome: outcome, Detail: detail, Model: model, Effort: effort,
+				At: timing.started, Outcome: outcome, Detail: detail, Session: tag, Model: model, Effort: effort,
 				Status: timing.status, TTFB: timing.firstByte, Duration: time.Since(timing.started),
 				Usage: usage, Error: failure,
 			})

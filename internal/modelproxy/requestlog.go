@@ -11,9 +11,11 @@ import (
 // Record is one answered request, as the proxy's history file keeps it. It holds how the request went, never what
 // it said: no prompt, no answer, no tool arguments.
 type Record struct {
-	At       time.Time
-	Outcome  string
-	Detail   string
+	At      time.Time
+	Outcome string
+	Detail  string
+	// Session is the conversation's tag from SessionTag, empty when the request carried no session id.
+	Session  string
 	Model    string
 	Effort   string
 	Status   int
@@ -28,6 +30,7 @@ type line struct {
 	At                string `json:"at"`
 	Outcome           string `json:"outcome"`
 	Detail            string `json:"detail,omitempty"`
+	Session           string `json:"session,omitempty"`
 	Model             string `json:"model,omitempty"`
 	Effort            string `json:"effort,omitempty"`
 	Status            int    `json:"status"`
@@ -75,7 +78,7 @@ func (l *RequestLog) Record(record Record) {
 		at = time.Now()
 	}
 	data, err := json.Marshal(line{
-		At: at.UTC().Format(time.RFC3339), Outcome: bounded(record.Outcome), Detail: bounded(record.Detail),
+		At: at.UTC().Format(time.RFC3339), Outcome: bounded(record.Outcome), Detail: bounded(record.Detail), Session: bounded(record.Session),
 		Model: bounded(record.Model), Effort: bounded(record.Effort), Status: record.Status,
 		TTFBms: record.TTFB.Milliseconds(), DurationMs: record.Duration.Milliseconds(),
 		InputTokens: record.Usage.InputTokens, CachedInputTokens: record.Usage.CacheReadInputTokens,
