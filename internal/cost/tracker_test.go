@@ -103,10 +103,10 @@ func TestNormalizeModelAliases(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"opus", "claude-opus-4-7"},
-		{"sonnet", "claude-sonnet-4-6"},
-		{"haiku", "claude-haiku-4-5"},
-		{"Opus", "claude-opus-4-7"},
+		{"opus", "claude-opus-5-5"},
+		{"sonnet", "claude-sonnet-5-5"},
+		{"haiku", "claude-haiku-5-5"},
+		{"Opus", "claude-opus-5-5"},
 	}
 	for _, tt := range tests {
 		got := normalizeModel(tt.input)
@@ -117,10 +117,10 @@ func TestNormalizeModelAliases(t *testing.T) {
 }
 
 func TestCalculateWithAlias(t *testing.T) {
-	// "opus" alias -> claude-opus-4-7 -> $5/$25
+	// "opus" alias -> claude-opus-5-5 -> $4/$20
 	got := Calculate("opus", 1_000_000, 100_000, 0, 0)
-	if !almostEqual(got, 7.50) {
-		t.Errorf("Opus alias 1M input + 100K output: got $%.4f, want $7.50", got)
+	if !almostEqual(got, 6.00) {
+		t.Errorf("Opus alias 1M input + 100K output: got $%.4f, want $6.00", got)
 	}
 }
 
@@ -151,6 +151,51 @@ func TestAllModelsHavePricing(t *testing.T) {
 		}
 		if p.Output <= 0 {
 			t.Errorf("model %q has zero/negative Output price", model)
+		}
+	}
+}
+
+// The models in daily use must be priced, or a session shows $0 and some lists hide it.
+func TestCurrentModelsArePriced(t *testing.T) {
+	// Published prices, https://platform.claude.com/docs/en/about-claude/pricing (read 2026-11-23).
+	for _, tc := range []struct {
+		model                                string
+		input, output, cacheRead, cacheWrite float64
+	}{
+		{"claude-opus-5-5", 4, 20, 0.20, 5},
+		{"claude-sonnet-5-5", 2, 10, 0.10, 2.50},
+		{"claude-haiku-5-5", 0.10, 0.50, 0.01, 0.125},
+		{"claude-fable-5-2", 8, 40, 0.20, 10},
+		{"claude-opus-5", 5, 25, 0.50, 6.25},
+		{"claude-sonnet-5", 2, 10, 0.20, 2.50},
+	} {
+		if !Priced(tc.model) {
+			t.Errorf("%s is not priced", tc.model)
+			continue
+		}
+		got := Calculate(tc.model, 1_000_000, 0, 0, 0)
+		if got != tc.input {
+			t.Errorf("%s input = %.3f, want %.3f", tc.model, got, tc.input)
+		}
+		if got := Calculate(tc.model, 0, 1_000_000, 0, 0); got != tc.output {
+			t.Errorf("%s output = %.3f, want %.3f", tc.model, got, tc.output)
+		}
+		if got := Calculate(tc.model, 0, 0, 1_000_000, 0); got != tc.cacheRead {
+			t.Errorf("%s cache read = %.3f, want %.3f", tc.model, got, tc.cacheRead)
+		}
+		if got := Calculate(tc.model, 0, 0, 0, 1_000_000); got != tc.cacheWrite {
+			t.Errorf("%s cache write = %.3f, want %.3f", tc.model, got, tc.cacheWrite)
+		}
+	}
+}
+
+// A bare alias means the current generation, not the one current when the table was written.
+func TestAliasesPointAtTheCurrentGeneration(t *testing.T) {
+	for alias, want := range map[string]string{
+		"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5",
+	} {
+		if got := normalizeModel(alias); got != want {
+			t.Errorf("%s resolves to %s, want %s", alias, got, want)
 		}
 	}
 }
