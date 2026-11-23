@@ -578,3 +578,39 @@ func TestSessionToolAliasesUseDifferentThreads(t *testing.T) {
 		t.Fatalf("expected the changed tool name to start a fresh thread:\n%s", data)
 	}
 }
+
+// A fallback that says only its name leaves the next investigation to guesswork: the live bug where Claude Code
+// split tool results over messages was found by printing these numbers by hand.
+func TestSessionFallbackExplainsItselfInTheRequestLog(t *testing.T) {
+	backend, _ := newFakeBackend(t)
+	path := filepath.Join(t.TempDir(), "requests.jsonl")
+	requests, err := OpenRequestLog(path, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = requests.Close() }()
+	h := NewHandler(backend, testKey, WithRequestLog(requests))
+	model, id := "codex:"+defaultModel, `{"session_id":"session-parallel"}`
+	first := conversation("user", `"session-parallel"`)
+	paused := sessionPost(t, h, model, id, first)
+	// Two calls are pending; answering one of them cannot continue the turn.
+	sessionPost(t, h, model, id, first, sessionAssistant(t, paused),
+		conversation("user", `[{"type":"tool_result","tool_use_id":"call-t1","content":"one"},{"type":"text","text":"replay"}]`))
+	records := readRecords(t, path)
+	if len(records) != 2 {
+		t.Fatalf("got %d records, want one per request", len(records))
+	}
+	last := records[1]
+	if last["outcome"] != "unmatched_tool_result" {
+		t.Fatalf("outcome = %v, want the fallback", last["outcome"])
+	}
+	detail, _ := last["detail"].(string)
+	for _, want := range []string{"pending=2", "tail=[user:tool_result,text]"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("fallback detail %q does not mention %q", detail, want)
+		}
+	}
+	if last["model"] != model || last["effort"] != "high" || last["status"] != float64(200) {
+		t.Errorf("record lacks the request's shape: %v", last)
+	}
+}

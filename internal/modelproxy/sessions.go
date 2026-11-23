@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +26,9 @@ type sessionInput struct {
 	// messages runs parallel to prefixes[1:], so the thread's held count indexes the first new message.
 	messages []inputMessage
 	outcome  string
+	// detail says what differed when outcome is a fallback, for the request log. It names shapes and counts,
+	// never content.
+	detail string
 }
 
 type inputMessage struct {
@@ -242,6 +247,26 @@ func (s *sessions) replaceConfiguration(input *sessionInput) *sessionThread {
 	return nil
 }
 
+// describeTail names the message and block shapes that did not answer the pending calls, so a fallback in the
+// request log can be diagnosed without the conversation. It carries no text, only kinds and counts.
+func describeTail(messages []inputMessage, pending int) string {
+	shapes := make([]string, 0, len(messages))
+	for i, msg := range messages {
+		if i == maxTailDetail {
+			shapes = append(shapes, fmt.Sprintf("+%d more", len(messages)-i))
+			break
+		}
+		kinds := make([]string, 0, len(msg.blocks))
+		for _, block := range msg.blocks {
+			kinds = append(kinds, block.Type)
+		}
+		shapes = append(shapes, msg.role+":"+strings.Join(kinds, ","))
+	}
+	return fmt.Sprintf("pending=%d tail=[%s]", pending, strings.Join(shapes, " "))
+}
+
+const maxTailDetail = 6
+
 // userBlocks joins the blocks of consecutive user messages. An assistant message among them is history the
 // proxy did not produce, so there is nothing to continue and it returns nil.
 func userBlocks(messages []inputMessage) []requestBlock {
@@ -296,6 +321,7 @@ func (t *sessionThread) match(p *appServer, req TurnRequest) (string, *toolConti
 		}
 	}
 	if len(t.pending) != 0 {
+		input.detail = describeTail(input.messages[held:], len(t.pending))
 		return "unmatched_tool_result", nil
 	}
 	return "prefix_changed", nil

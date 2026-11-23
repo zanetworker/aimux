@@ -1,6 +1,7 @@
 package modelproxy
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
@@ -14,7 +15,21 @@ import (
 
 // NewHandler serves the Anthropic Messages API over backend. Every request must carry key, as x-api-key or as an
 // Authorization Bearer token; an empty key rejects every request, so the proxy never runs open.
-func NewHandler(backend Backend, key string) http.Handler {
+// HandlerOption configures the handler beyond its backend and key.
+type HandlerOption func(*handlerConfig)
+
+type handlerConfig struct{ requests *RequestLog }
+
+// WithRequestLog records one line per answered request, for `aimux model proxy stats`.
+func WithRequestLog(log *RequestLog) HandlerOption {
+	return func(c *handlerConfig) { c.requests = log }
+}
+
+func NewHandler(backend Backend, key string, options ...HandlerOption) http.Handler {
+	config := handlerConfig{}
+	for _, option := range options {
+		option(&config)
+	}
 	mux := http.NewServeMux()
 	// A backend that reports no health leaves the route unregistered, so a caller gets 404 rather than a made-up
 	// answer. 503 on degraded lets a monitor act on the status code alone.
@@ -25,17 +40,17 @@ func NewHandler(backend Backend, key string) http.Handler {
 			if health.Status != "ok" {
 				status = http.StatusServiceUnavailable
 			}
-			writeJSON(w, status, health)
+			_ = writeJSON(w, status, health)
 		})
 	}
 	mux.HandleFunc("GET /v1/models", listModels)
 	mux.HandleFunc("POST /v1/messages/count_tokens", func(w http.ResponseWriter, r *http.Request) {
 		if _, size, ok := readRequest(w, r); ok {
-			writeJSON(w, http.StatusOK, map[string]int{"input_tokens": size / 4})
+			_ = writeJSON(w, http.StatusOK, map[string]int{"input_tokens": size / 4})
 		}
 	})
 	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
-		serveMessage(w, r, backend)
+		serveMessage(w, r, backend, config.requests)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !validKey(r, key) {
@@ -72,7 +87,7 @@ func listModels(w http.ResponseWriter, _ *http.Request) {
 		{"codex:" + defaultModel, "model", defaultModel, "1970-01-01T00:00:00Z"},
 		{"codex:gpt-6.2-astra", "model", "gpt-6.2-astra", "1970-01-01T00:00:00Z"},
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	_ = writeJSON(w, http.StatusOK, map[string]any{
 		"data": data, "first_id": data[0].ID, "last_id": data[1].ID, "has_more": false,
 	})
 }
@@ -100,20 +115,30 @@ func readRequest(w http.ResponseWriter, r *http.Request) (messageRequest, int, b
 	return request, len(body), true
 }
 
-func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
+func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, requests *RequestLog) {
 	var usage Usage
 	var session *sessionInput
+	var failure, model, effort string
 	outcome := "invalid_request"
-	if logger, ok := backend.(interface {
+	logger, hasLogger := backend.(interface {
 		logMessage(string, Usage, time.Duration)
-	}); ok {
+	})
+	if hasLogger || requests != nil {
 		timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
 		w = timing
 		defer func() {
+			detail := ""
 			if session != nil {
-				outcome = session.outcome
+				outcome, detail = session.outcome, session.detail
 			}
-			logger.logMessage(outcome, usage, timing.firstByte)
+			if hasLogger {
+				logger.logMessage(outcome, usage, timing.firstByte)
+			}
+			requests.Record(Record{
+				At: timing.started, Outcome: outcome, Detail: detail, Model: model, Effort: effort,
+				Status: timing.status, TTFB: timing.firstByte, Duration: time.Since(timing.started),
+				Usage: usage, Error: failure,
+			})
 		}()
 	}
 	request, _, ok := readRequest(w, r)
@@ -122,11 +147,12 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 	}
 	turn, err := mapRequest(request)
 	if err != nil {
+		failure = "unsupported_request"
 		writeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
 	outcome, session = "stateless", turn.session
-	model := request.Model
+	model, effort = request.Model, turn.Effort
 	if model == "" {
 		model = "codex:" + turn.Model
 	}
@@ -155,9 +181,12 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 		return nil
 	})
 	if r.Context().Err() != nil {
+		failure = "client_gone"
 		return
 	}
 	if err != nil {
+		// The client is told what went wrong; the history keeps a kind, so no upstream text reaches the file.
+		failure = classifyFailure(err)
 		if stream.started {
 			if stream.closeText() == nil {
 				// A lost connection cannot receive an error event.
@@ -169,8 +198,11 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 		return
 	}
 	if request.Stream {
-		// Headers or earlier events may already have reached the client.
-		_ = stream.finish(reason, usage)
+		// Headers or earlier events may already have reached the client; a client that left mid-stream never
+		// saw message_stop, so the history should not count the request as delivered.
+		if err := stream.finish(reason, usage); err != nil {
+			failure = "stream_cut_short"
+		}
 		return
 	}
 	if text.Len() > 0 {
@@ -181,18 +213,25 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend) {
 		message.Content = append(message.Content, responseBlock{Type: "tool_use", ID: tool.ID, Name: tool.Name, Input: tool.Input})
 	}
 	message.StopReason, message.Usage = &reason, usage
-	writeJSON(w, http.StatusOK, message)
+	if err := writeJSON(w, http.StatusOK, message); err != nil {
+		failure = "response_not_delivered"
+	}
 }
 
 type messageTiming struct {
 	http.ResponseWriter
 	started   time.Time
 	firstByte time.Duration
+	// status is what the client was actually told, which a streamed failure cannot change after the fact.
+	status int
 }
 
 func (w *messageTiming) WriteHeader(status int) {
 	if w.firstByte < 0 {
 		w.firstByte = time.Since(w.started)
+	}
+	if w.status == 0 {
+		w.status = status
 	}
 	w.ResponseWriter.WriteHeader(status)
 }
@@ -201,18 +240,40 @@ func (w *messageTiming) Write(data []byte) (int, error) {
 	if w.firstByte < 0 {
 		w.firstByte = time.Since(w.started)
 	}
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
 	return w.ResponseWriter.Write(data)
 }
 
 func (w *messageTiming) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-func writeError(w http.ResponseWriter, status int, kind, message string) {
-	writeJSON(w, status, map[string]any{"type": "error", "error": apiError{kind, message}})
+// classifyFailure names a failure in a fixed vocabulary, so the history stays free of content a model or a tool
+// may have echoed into an error message.
+func classifyFailure(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, errAppServerExited):
+		return "app_server_exited"
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "cancelled"
+	case strings.Contains(err.Error(), "codex turn"):
+		return "turn_failed"
+	default:
+		return "upstream_error"
+	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
+func writeError(w http.ResponseWriter, status int, kind, message string) {
+	// An error response the client cannot receive leaves nothing further to do.
+	_ = writeJSON(w, status, map[string]any{"type": "error", "error": apiError{kind, message}})
+}
+
+// writeJSON reports a failed write so the caller can record that the client never got the answer; there is no
+// second response to send it.
+func writeJSON(w http.ResponseWriter, status int, value any) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// There is no remaining response to send if the client disconnects.
-	_ = json.NewEncoder(w).Encode(value)
+	return json.NewEncoder(w).Encode(value)
 }

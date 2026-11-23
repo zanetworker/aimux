@@ -37,6 +37,17 @@ Reasoning effort comes from Claude Code and is passed through unchanged (`--effo
 
 The proxy itself adds about 33 ms to a request, measured against a fake app-server that answers at once; the rest of the wait is Codex and the model.
 
+## Read what the proxy has been doing
+
+Each listener appends one JSON line per answered `POST /v1/messages` request (not `/health` or `/v1/models`) to `~/.aimux/logs/model-proxy/requests.jsonl` (`requests-<port>.jsonl` for a dev listener): time, outcome, model, effort, status, time to first byte, duration and token counts, plus what a fallback says about itself. No prompts, answers or tool arguments are written. The file rolls over to `.1` at 8 MB and only that pair is kept, so the history covers roughly the last 50,000 requests rather than a fixed stretch of time, and never grows beyond 16 MB.
+
+```bash
+aimux model proxy stats --since 24h    # the stable listener
+aimux model proxy stats --port 7386 --since 2h
+```
+
+It prints a row per outcome, slowest first, with counts, mean and 95th percentile duration, average prompt size and failures, then the fallback shapes. Read the outcomes in three groups. `hit_continuation` and `hit_idle` reused a thread, so the prompt was cached. `new_session` (a conversation's first request), `stateless` (a background request or one without a session id) and `invalid_request` (rejected before Codex saw it) are all normal. Everything else is a fallback: the thread could not be reused and the conversation was reprocessed, which is slow on a long one, so a large count there is worth investigating. `jq` reads the same file for anything the summary does not cover.
+
 ## Check prompt caching
 
 Claude Code requests with a `codex:` model and a session ID can reuse an ephemeral Codex thread while the conversation history, system prompt, and tools match. One handoff can return several `tool_use` blocks (calls Codex makes within 300 ms of each other), in streaming and non-streaming responses alike; the next request continues the same turn when the user messages added since the handoff carry a `tool_result` for every one of them, however Claude Code spreads them: one message with several results, one message each, or further messages from hooks after them. Text and images in those messages reach the turn as steering input. An assistant message among them is history the proxy did not produce, so it starts a fresh thread instead, as it does when a result is missing. A tool handoff waits for results for up to 10 minutes. The proxy releases idle threads after 30 minutes. Requests without a session ID and background requests use a fresh thread.
