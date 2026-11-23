@@ -321,7 +321,9 @@ func TestBuild_WiresEveryJob(t *testing.T) {
 	if err := s.build(w); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := names(w), "device login, queue events, chat queue*, folders*, waiting alerts*, reap idle runs, search refresh, mode router warm"; got != want {
+	// search refresh is awaited: it writes ~/.aimux/search.db, and a serve that returns mid-write leaves a
+	// half-written index behind (it also failed the temp HOME cleanup in these tests under load).
+	if got, want := names(w), "device login, queue events, chat queue*, folders*, waiting alerts*, reap idle runs, search refresh*, mode router warm"; got != want {
 		t.Fatalf("jobs %s, want %s", got, want)
 	}
 	if len(w.closers) != 7 {
@@ -338,7 +340,7 @@ func TestBuild_WiresEveryJob(t *testing.T) {
 	if err := s2.build(w2); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := names(w2), "queue events, chat queue*, namer*, folders*, waiting alerts*, reap idle runs, search refresh, mode router warm"; got != want {
+	if got, want := names(w2), "queue events, chat queue*, namer*, folders*, waiting alerts*, reap idle runs, search refresh*, mode router warm"; got != want {
 		t.Fatalf("jobs %s, want %s", got, want)
 	}
 }
