@@ -44,9 +44,10 @@ Each listener appends one JSON line per answered `POST /v1/messages` request (no
 ```bash
 aimux model proxy stats --since 24h    # the stable listener
 aimux model proxy stats --port 7386 --since 2h
+aimux model proxy stats --since 6h --session 146917eb-1666-4076-9ba6-9c7cf9ccbf7a
 ```
 
-It prints a row per outcome, slowest first, with counts, mean and 95th percentile duration, average prompt size and failures, then the fallback shapes. Read the outcomes in three groups. `hit_continuation` and `hit_idle` reused a thread, so the prompt was cached. `new_session` (a conversation's first request), `stateless` (a background request or one without a session id) and `invalid_request` (rejected before Codex saw it) are all normal. Everything else is a fallback: the thread could not be reused and the conversation was reprocessed, which is slow on a long one, so a large count there is worth investigating. `jq` reads the same file for anything the summary does not cover.
+It prints a row per outcome, slowest first, with counts, mean and 95th percentile duration, average prompt size and failures, then the fallback shapes. Read the outcomes in three groups. `hit_continuation` and `hit_idle` reused a thread, so the prompt was cached. `new_session` (a conversation's first request), `stateless` (a background request or one without a session id) and `invalid_request` (rejected before Codex saw it) are all normal. Everything else is a fallback: the thread could not be reused and the conversation was reprocessed, which is slow on a long one, so a large count there is worth investigating. When the window holds more than one conversation it also lists them, the costliest first, so one slow session is not hidden in an average. A conversation appears as a short one-way tag rather than its session id: `--session` takes either, hashing an id to its tag, and requests that carried no session id are grouped as `(no session id)`, which is worth noticing because they can never reuse a thread. `jq` reads the same file for anything the summary does not cover.
 
 ## Check prompt caching
 

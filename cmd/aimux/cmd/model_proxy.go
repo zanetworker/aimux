@@ -56,13 +56,16 @@ func newModelProxyStatusCmd() *cobra.Command {
 func newModelProxyStatsCmd() *cobra.Command {
 	var port int
 	var since time.Duration
+	var session string
 	cmd := &cobra.Command{
 		Use:   "stats",
 		Short: "Summarise the proxy's recent requests: how each kind went and how long it took",
 		Long: "Reads the request history the proxy writes (one JSON line per answered request, no prompts or " +
 			"answers) and prints a row per outcome, slowest first: how many, the mean and 95th percentile time, " +
 			"the average prompt size and how many failed. Fallbacks also print what they say about themselves, " +
-			"which is where the next fix usually hides. Reads files only, so the proxy need not be running.",
+			"which is where the next fix usually hides. When the window holds more than one conversation it also " +
+			"lists them, costliest first, by a short one-way tag; --session takes a session id (hashed to its " +
+			"tag) or the tag itself. Reads files only, so the proxy need not be running.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
@@ -70,11 +73,12 @@ func newModelProxyStatsCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("find home folder for the request log: %w", err)
 			}
-			return modelProxyStats(modelproxy.RequestLogFile(home, port), since, cmd.OutOrStdout(), time.Now)
+			return modelProxyStats(modelproxy.RequestLogFile(home, port), since, session, cmd.OutOrStdout(), time.Now)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Which listener's history to read")
 	cmd.Flags().DurationVar(&since, "since", 24*time.Hour, "How far back to summarise, such as 2h or 168h")
+	cmd.Flags().StringVar(&session, "session", "", "Only one conversation: a Claude Code session id, or the tag the history shows")
 	return cmd
 }
 

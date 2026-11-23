@@ -111,3 +111,55 @@ func TestRequestStatsSkipsEstimatedPrompts(t *testing.T) {
 		t.Errorf("mean prompt = %d over %d samples, want one measured sample", got.MeanPrompt, got.PromptSamples)
 	}
 }
+
+// Without a way to tell conversations apart, "is one session causing this" can only be answered by matching
+// timestamps by hand, which is how the system-reminder fallback was attributed before this existed.
+func TestRequestStatsGroupsBySession(t *testing.T) {
+	path := writeHistory(t,
+		`{"at":"2026-11-22T20:55:00Z","outcome":"unmatched_tool_result","session":"aaaa1111","status":200,"duration_ms":40000}`,
+		`{"at":"2026-11-22T20:56:00Z","outcome":"hit_continuation","session":"aaaa1111","status":200,"duration_ms":5000}`,
+		`{"at":"2026-11-22T20:57:00Z","outcome":"hit_continuation","session":"bbbb2222","status":200,"duration_ms":4000}`,
+		`{"at":"2026-11-22T20:58:00Z","outcome":"stateless","status":200,"duration_ms":9000}`,
+	)
+	stats, err := ReadRequestStats(path, time.Hour, statsNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Sessions) != 3 {
+		t.Fatalf("got %d sessions, want two conversations and the requests without one: %+v", len(stats.Sessions), stats.Sessions)
+	}
+	// Slowest conversation first: that is the one worth looking at.
+	slowest := stats.Sessions[0]
+	if slowest.Session != "aaaa1111" || slowest.Count != 2 || slowest.Fallbacks != 1 {
+		t.Errorf("slowest session = %+v, want aaaa1111 with 2 requests and 1 fallback", slowest)
+	}
+	if last := stats.Sessions[len(stats.Sessions)-1]; last.Session != "" || last.Count != 1 {
+		t.Errorf("requests without a session should be grouped on their own: %+v", last)
+	}
+}
+
+func TestRequestStatsFiltersToOneSession(t *testing.T) {
+	path := writeHistory(t,
+		`{"at":"2026-11-22T20:55:00Z","outcome":"hit_continuation","session":"aaaa1111","status":200,"duration_ms":5000}`,
+		`{"at":"2026-11-22T20:56:00Z","outcome":"hit_continuation","session":"bbbb2222","status":200,"duration_ms":4000}`,
+	)
+	stats, err := ReadRequestStats(path, time.Hour, statsNow, "aaaa1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total != 1 || len(stats.Sessions) != 1 || stats.Sessions[0].Session != "aaaa1111" {
+		t.Fatalf("filtering kept %d requests: %+v", stats.Total, stats.Sessions)
+	}
+}
+
+// The history must group conversations without naming them: the hash is one way, from an id you already have.
+func TestSessionTagIsAStableShortHash(t *testing.T) {
+	id := "146917eb-1666-4076-9ba6-9c7cf9ccbf7a"
+	tag := SessionTag(id)
+	if len(tag) != 8 || tag != SessionTag(id) {
+		t.Fatalf("tag %q is not a stable 8-character hash", tag)
+	}
+	if strings.Contains(id, tag) || SessionTag("") != "" {
+		t.Errorf("tag %q should not be part of the id, and an absent id has no tag", tag)
+	}
+}

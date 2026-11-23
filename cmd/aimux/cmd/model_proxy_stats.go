@@ -12,8 +12,13 @@ import (
 
 // modelProxyStats prints the summary modelproxy builds from the proxy's request history. Reading and counting
 // live in the package that writes the history; this is the rendering.
-func modelProxyStats(path string, window time.Duration, out io.Writer, now func() time.Time) error {
-	stats, err := modelproxy.ReadRequestStats(path, window, now())
+// session may be a session id or the tag the history uses; an id is hashed to its tag first.
+func modelProxyStats(path string, window time.Duration, session string, out io.Writer, now func() time.Time) error {
+	tag := session
+	if len(tag) != 8 && tag != "" {
+		tag = modelproxy.SessionTag(session)
+	}
+	stats, err := modelproxy.ReadRequestStats(path, window, now(), tag)
 	if err != nil {
 		return err
 	}
@@ -32,6 +37,7 @@ func modelProxyStats(path string, window time.Duration, out io.Writer, now func(
 	if err := table.Flush(); err != nil {
 		return fmt.Errorf("write the summary: %w", err)
 	}
+	writeSessions(out, stats.Sessions)
 	writeFallbackDetails(out, stats.Outcomes)
 	writeHistoryWarnings(out, stats, window)
 	// A reader that went away mid-summary should not look like a clean run.
@@ -49,6 +55,30 @@ func writeHistoryWarnings(out io.Writer, stats modelproxy.RequestStats, window t
 	if stats.Incomplete {
 		_, _ = fmt.Fprintf(out, "\nThe history could not be read to its end, so this covers less than %s.\n", window)
 	}
+}
+
+// writeSessions shows which conversations the window covers, the costliest first, so one slow session is not
+// hidden in an average. A conversation is named by its tag: hash a session id to find it.
+func writeSessions(out io.Writer, sessions []modelproxy.SessionStats) {
+	if len(sessions) < 2 {
+		return
+	}
+	_, _ = fmt.Fprintln(out, "\nSESSIONS")
+	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(table, "SESSION\tN\tMEAN\tSLOWEST\tFALLBACKS")
+	for i, conversation := range sessions {
+		if i == 6 {
+			_, _ = fmt.Fprintf(table, "%d more\n", len(sessions)-i)
+			break
+		}
+		name := conversation.Session
+		if name == "" {
+			name = "(no session id)"
+		}
+		_, _ = fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%d\n", name, conversation.Count,
+			shortDuration(conversation.Mean), shortDuration(conversation.Slowest), conversation.Fallbacks)
+	}
+	_ = table.Flush()
 }
 
 // writeFallbackDetails prints what the fallbacks said about themselves, which is where the next fix usually hides.

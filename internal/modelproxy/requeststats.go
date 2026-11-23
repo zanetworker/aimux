@@ -27,11 +27,23 @@ type OutcomeStats struct {
 	Details map[string]int
 }
 
+// SessionStats is how one conversation's requests went. An empty Session groups the requests that carried no
+// session id, which can never reuse a thread.
+type SessionStats struct {
+	Session   string
+	Count     int
+	Fallbacks int
+	Mean      time.Duration
+	Slowest   time.Duration
+}
+
 // RequestStats summarises a window of the proxy's request history.
 type RequestStats struct {
 	Window   time.Duration
 	Total    int
 	Outcomes []OutcomeStats
+	// Sessions is the same window grouped by conversation, slowest first.
+	Sessions []SessionStats
 	// Damaged counts lines that could not be read; Incomplete says the file could not be read to its end, so
 	// the summary covers less than it claims.
 	Damaged    int
@@ -39,8 +51,13 @@ type RequestStats struct {
 }
 
 // ReadRequestStats summarises the request history at path, and its one rolled-over file, over the window ending
-// at now. It reads files only, so it works while the proxy runs.
-func ReadRequestStats(path string, window time.Duration, now time.Time) (RequestStats, error) {
+// at now. It reads files only, so it works while the proxy runs. With a session tag it keeps only that
+// conversation's requests.
+func ReadRequestStats(path string, window time.Duration, now time.Time, session ...string) (RequestStats, error) {
+	only := ""
+	if len(session) != 0 {
+		only = session[0]
+	}
 	stats := RequestStats{Window: window}
 	records, damaged, incomplete, err := readRequestRecords(path, now.Add(-window))
 	if err != nil {
@@ -50,8 +67,27 @@ func ReadRequestStats(path string, window time.Duration, now time.Time) (Request
 	byOutcome := map[string]*OutcomeStats{}
 	durations := map[string][]time.Duration{}
 	prompts := map[string]int{}
+	sessions := map[string]*SessionStats{}
+	sessionDurations := map[string][]time.Duration{}
 	for _, record := range records {
+		if only != "" && record.Session != only {
+			continue
+		}
 		stats.Total++
+		conversation := sessions[record.Session]
+		if conversation == nil {
+			conversation = &SessionStats{Session: record.Session}
+			sessions[record.Session] = conversation
+		}
+		conversation.Count++
+		took := time.Duration(record.DurationMs) * time.Millisecond
+		sessionDurations[record.Session] = append(sessionDurations[record.Session], took)
+		if took > conversation.Slowest {
+			conversation.Slowest = took
+		}
+		if isFallback(record.Outcome) {
+			conversation.Fallbacks++
+		}
 		outcome := byOutcome[record.Outcome]
 		if outcome == nil {
 			outcome = &OutcomeStats{Outcome: record.Outcome, Details: map[string]int{}}
@@ -79,6 +115,21 @@ func ReadRequestStats(path string, window time.Duration, now time.Time) (Request
 		}
 		stats.Outcomes = append(stats.Outcomes, *outcome)
 	}
+	for tag, conversation := range sessions {
+		conversation.Mean = meanDuration(sessionDurations[tag])
+		stats.Sessions = append(stats.Sessions, *conversation)
+	}
+	// The conversation that spent the most time first, and the requests without a session id last.
+	sort.Slice(stats.Sessions, func(i, j int) bool {
+		if (stats.Sessions[i].Session == "") != (stats.Sessions[j].Session == "") {
+			return stats.Sessions[j].Session == ""
+		}
+		left, right := stats.Sessions[i], stats.Sessions[j]
+		if left.Mean*time.Duration(left.Count) != right.Mean*time.Duration(right.Count) {
+			return left.Mean*time.Duration(left.Count) > right.Mean*time.Duration(right.Count)
+		}
+		return left.Session < right.Session
+	})
 	// Slowest first: the row worth reading is the one costing the most time.
 	sort.Slice(stats.Outcomes, func(i, j int) bool {
 		if stats.Outcomes[i].Mean != stats.Outcomes[j].Mean {
@@ -158,6 +209,16 @@ func sameFile(before, after os.FileInfo) bool {
 		return before == nil && after == nil
 	}
 	return os.SameFile(before, after) && after.Size() >= before.Size()
+}
+
+// isFallback says whether an outcome means the thread could not be reused, so the conversation was reprocessed.
+func isFallback(outcome string) bool {
+	switch outcome {
+	case "hit_continuation", "hit_idle", "new_session", "stateless", "invalid_request":
+		return false
+	default:
+		return true
+	}
 }
 
 func meanDuration(values []time.Duration) time.Duration {

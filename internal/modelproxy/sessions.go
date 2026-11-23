@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,8 +20,20 @@ type sessionKey struct {
 	config prefixHash
 }
 
+// SessionTag is the short, one-way name a conversation goes by in the request history: enough to group its
+// requests and to look up a session you already know by hashing it, without the history naming any conversation.
+func SessionTag(id string) string {
+	if id == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("aimux-model-proxy-session\x00" + id))
+	return hex.EncodeToString(sum[:4])
+}
+
 type sessionInput struct {
-	key      sessionKey
+	key sessionKey
+	// tag names this conversation in the request history.
+	tag      string
 	prefixes []prefixHash
 	offsets  []int
 	// messages runs parallel to prefixes[1:], so the thread's held count indexes the first new message.
@@ -48,7 +61,7 @@ func newSessionInput(id string, req TurnRequest, count int) *sessionInput {
 		Tools  []dynamicTool
 	}{req.System, tools})
 	return &sessionInput{
-		key: sessionKey{id, sha256.Sum256(config)}, prefixes: make([]prefixHash, 1, count+1),
+		key: sessionKey{id, sha256.Sum256(config)}, tag: SessionTag(id), prefixes: make([]prefixHash, 1, count+1),
 		offsets: make([]int, 0, count),
 	}
 }
