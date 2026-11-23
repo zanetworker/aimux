@@ -29,9 +29,15 @@ func modelProxyStats(path string, window time.Duration, out io.Writer, now func(
 		_, _ = fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%s\t%d\n", outcome.Outcome, outcome.Count,
 			shortDuration(outcome.Mean), shortDuration(outcome.P95), tokens(outcome), outcome.Failed)
 	}
-	_ = table.Flush()
+	if err := table.Flush(); err != nil {
+		return fmt.Errorf("write the summary: %w", err)
+	}
 	writeFallbackDetails(out, stats.Outcomes)
 	writeHistoryWarnings(out, stats, window)
+	// A reader that went away mid-summary should not look like a clean run.
+	if _, err := fmt.Fprint(out, ""); err != nil {
+		return fmt.Errorf("write the summary: %w", err)
+	}
 	return nil
 }
 

@@ -40,13 +40,13 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 			if health.Status != "ok" {
 				status = http.StatusServiceUnavailable
 			}
-			writeJSON(w, status, health)
+			_ = writeJSON(w, status, health)
 		})
 	}
 	mux.HandleFunc("GET /v1/models", listModels)
 	mux.HandleFunc("POST /v1/messages/count_tokens", func(w http.ResponseWriter, r *http.Request) {
 		if _, size, ok := readRequest(w, r); ok {
-			writeJSON(w, http.StatusOK, map[string]int{"input_tokens": size / 4})
+			_ = writeJSON(w, http.StatusOK, map[string]int{"input_tokens": size / 4})
 		}
 	})
 	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +87,7 @@ func listModels(w http.ResponseWriter, _ *http.Request) {
 		{"codex:" + defaultModel, "model", defaultModel, "1970-01-01T00:00:00Z"},
 		{"codex:gpt-6.2-astra", "model", "gpt-6.2-astra", "1970-01-01T00:00:00Z"},
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	_ = writeJSON(w, http.StatusOK, map[string]any{
 		"data": data, "first_id": data[0].ID, "last_id": data[1].ID, "has_more": false,
 	})
 }
@@ -213,7 +213,9 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, reque
 		message.Content = append(message.Content, responseBlock{Type: "tool_use", ID: tool.ID, Name: tool.Name, Input: tool.Input})
 	}
 	message.StopReason, message.Usage = &reason, usage
-	writeJSON(w, http.StatusOK, message)
+	if err := writeJSON(w, http.StatusOK, message); err != nil {
+		failure = "response_not_delivered"
+	}
 }
 
 type messageTiming struct {
@@ -264,12 +266,14 @@ func classifyFailure(err error) string {
 }
 
 func writeError(w http.ResponseWriter, status int, kind, message string) {
-	writeJSON(w, status, map[string]any{"type": "error", "error": apiError{kind, message}})
+	// An error response the client cannot receive leaves nothing further to do.
+	_ = writeJSON(w, status, map[string]any{"type": "error", "error": apiError{kind, message}})
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
+// writeJSON reports a failed write so the caller can record that the client never got the answer; there is no
+// second response to send it.
+func writeJSON(w http.ResponseWriter, status int, value any) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// There is no remaining response to send if the client disconnects.
-	_ = json.NewEncoder(w).Encode(value)
+	return json.NewEncoder(w).Encode(value)
 }

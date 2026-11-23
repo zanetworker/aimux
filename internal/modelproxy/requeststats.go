@@ -102,8 +102,13 @@ func readRequestRecords(path string, since time.Time) ([]line, int, bool, error)
 			return nil, 0, false, fmt.Errorf("no request history at %s yet: it is written by a proxy running this aimux", path)
 		}
 		after, _ := os.Stat(path)
-		if attempt > 0 || sameFile(before, after) {
+		if sameFile(before, after) {
 			return records, damaged, incomplete, nil
+		}
+		if attempt > 0 {
+			// It rotated again during the retry: a file may have slipped past unread, so say the summary is
+			// not the whole window rather than imply it is.
+			return records, damaged, true, nil
 		}
 	}
 }
