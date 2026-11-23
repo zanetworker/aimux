@@ -20,6 +20,10 @@ type sessionKey struct {
 	config prefixHash
 }
 
+// NoSession marks a request that carried no session id, as against an older record written before tags
+// existed, which has no tag at all and may well have reused a thread.
+const NoSession = "-"
+
 // SessionTag is the short, one-way name a conversation goes by in the request history: enough to group its
 // requests and to look up a session you already know by hashing it, without the history naming any conversation.
 func SessionTag(id string) string {

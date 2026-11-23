@@ -37,7 +37,9 @@ func modelProxyStats(path string, window time.Duration, session string, out io.W
 	if err := table.Flush(); err != nil {
 		return fmt.Errorf("write the summary: %w", err)
 	}
-	writeSessions(out, stats.Sessions)
+	if err := writeSessions(out, stats.Sessions); err != nil {
+		return fmt.Errorf("write the summary: %w", err)
+	}
 	writeFallbackDetails(out, stats.Outcomes)
 	writeHistoryWarnings(out, stats, window)
 	// A reader that went away mid-summary should not look like a clean run.
@@ -59,9 +61,9 @@ func writeHistoryWarnings(out io.Writer, stats modelproxy.RequestStats, window t
 
 // writeSessions shows which conversations the window covers, the costliest first, so one slow session is not
 // hidden in an average. A conversation is named by its tag: hash a session id to find it.
-func writeSessions(out io.Writer, sessions []modelproxy.SessionStats) {
+func writeSessions(out io.Writer, sessions []modelproxy.SessionStats) error {
 	if len(sessions) < 2 {
-		return
+		return nil
 	}
 	_, _ = fmt.Fprintln(out, "\nSESSIONS")
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
@@ -72,13 +74,16 @@ func writeSessions(out io.Writer, sessions []modelproxy.SessionStats) {
 			break
 		}
 		name := conversation.Session
-		if name == "" {
+		switch name {
+		case modelproxy.NoSession:
 			name = "(no session id)"
+		case "":
+			name = "(before session tags)"
 		}
 		_, _ = fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%d\n", name, conversation.Count,
 			shortDuration(conversation.Mean), shortDuration(conversation.Slowest), conversation.Fallbacks)
 	}
-	_ = table.Flush()
+	return table.Flush()
 }
 
 // writeFallbackDetails prints what the fallbacks said about themselves, which is where the next fix usually hides.

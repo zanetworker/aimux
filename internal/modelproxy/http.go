@@ -127,7 +127,7 @@ func serveMessage(w http.ResponseWriter, r *http.Request, backend Backend, reque
 		timing := &messageTiming{ResponseWriter: w, started: time.Now(), firstByte: -time.Millisecond}
 		w = timing
 		defer func() {
-			detail, tag := "", ""
+			detail, tag := "", NoSession
 			if session != nil {
 				outcome, detail, tag = session.outcome, session.detail, session.tag
 			}

@@ -14,7 +14,8 @@ type Record struct {
 	At      time.Time
 	Outcome string
 	Detail  string
-	// Session is the conversation's tag from SessionTag, empty when the request carried no session id.
+	// Session is the conversation's tag from SessionTag, or NoSession when the request carried no session
+	// id. An absent tag means the record predates tags, which is not the same thing.
 	Session  string
 	Model    string
 	Effort   string
