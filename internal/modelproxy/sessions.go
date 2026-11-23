@@ -267,12 +267,14 @@ func describeTail(messages []inputMessage, pending int) string {
 
 const maxTailDetail = 6
 
-// userBlocks joins the blocks of consecutive user messages. An assistant message among them is history the
-// proxy did not produce, so there is nothing to continue and it returns nil.
-func userBlocks(messages []inputMessage) []requestBlock {
+// answerBlocks joins the blocks of the messages added since the handoff. Claude Code sends tool results over as
+// many user messages as it likes and follows them with in-conversation system messages (reminders from its
+// hooks), which steer the turn like any other text. An assistant message among them is history the proxy did not
+// produce, so there is nothing to continue and it returns nil.
+func answerBlocks(messages []inputMessage) []requestBlock {
 	blocks := make([]requestBlock, 0, len(messages))
 	for _, msg := range messages {
-		if msg.role != "user" {
+		if msg.role != "user" && msg.role != "system" {
 			return nil
 		}
 		blocks = append(blocks, msg.blocks...)
@@ -316,7 +318,7 @@ func (t *sessionThread) match(p *appServer, req TurnRequest) (string, *toolConti
 	default:
 		// Claude Code answers parallel calls over as many user messages as it likes, and its hooks add more
 		// after them, so every new message counts, not only the last one.
-		if continuation := matchToolResults(t.pending, userBlocks(input.messages[held:])); continuation != nil {
+		if continuation := matchToolResults(t.pending, answerBlocks(input.messages[held:])); continuation != nil {
 			return "hit_continuation", continuation
 		}
 	}
