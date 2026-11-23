@@ -163,3 +163,24 @@ func TestSessionTagIsAStableShortHash(t *testing.T) {
 		t.Errorf("tag %q should not be part of the id, and an absent id has no tag", tag)
 	}
 }
+
+// Records written before session tags existed have no session either, and they can show thread reuse. The
+// summary must not file them with requests that genuinely had no session id.
+func TestRequestStatsSeparatesLegacyRecordsFromSessionlessOnes(t *testing.T) {
+	path := writeHistory(t,
+		`{"at":"2026-11-22T20:55:00Z","outcome":"hit_continuation","status":200,"duration_ms":5000}`,
+		`{"at":"2026-11-22T20:56:00Z","outcome":"stateless","session":"-","status":200,"duration_ms":9000}`,
+		`{"at":"2026-11-22T20:57:00Z","outcome":"hit_continuation","session":"aaaa1111","status":200,"duration_ms":4000}`,
+	)
+	stats, err := ReadRequestStats(path, time.Hour, statsNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, c := range stats.Sessions {
+		got[c.Session] = c.Count
+	}
+	if got[NoSession] != 1 || got[""] != 1 || got["aaaa1111"] != 1 {
+		t.Fatalf("sessions = %v, want one each for sessionless, legacy and the tagged conversation", got)
+	}
+}

@@ -96,14 +96,15 @@ func TestModelProxyStatsShowsConversations(t *testing.T) {
 		sessionRecord(now.Add(-5*time.Minute), "unmatched_tool_result", "aaaa1111", 40000),
 		sessionRecord(now.Add(-4*time.Minute), "hit_continuation", "aaaa1111", 5000),
 		sessionRecord(now.Add(-3*time.Minute), "hit_continuation", "bbbb2222", 4000),
-		sessionRecord(now.Add(-2*time.Minute), "stateless", "", 9000),
+		sessionRecord(now.Add(-2*time.Minute), "stateless", modelproxy.NoSession, 9000),
+		sessionRecord(now.Add(-1*time.Minute), "hit_continuation", "", 3000),
 	)
 	var out bytes.Buffer
 	if err := modelProxyStats(path, time.Hour, "", &out, func() time.Time { return now }); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"SESSION", "aaaa1111", "bbbb2222", "no session id"} {
+	for _, want := range []string{"SESSION", "aaaa1111", "bbbb2222", "no session id", "before session tags"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("output does not mention %q:\n%s", want, text)
 		}
