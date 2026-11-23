@@ -215,6 +215,28 @@ func TestSessionContinuesToolResultsSplitOverMessages(t *testing.T) {
 	}
 }
 
+// Claude Code follows a tool result with an in-conversation system message (a reminder). The live proxy's
+// history named this shape as the one still throwing threads away: pending=1 tail=[user:tool_result system:text].
+func TestSessionContinuesAfterASystemReminder(t *testing.T) {
+	backend, log := newFakeBackend(t)
+	h := NewHandler(backend, testKey)
+	model, id := "codex:"+defaultModel, `{"session_id":"session-tool"}`
+	first := conversation("user", `"session-tool"`)
+	paused := sessionPost(t, h, model, id, first)
+	if len(paused.Content) != 2 || paused.Content[1].Type != "tool_use" {
+		t.Fatalf("expected a tool call, got %+v", paused)
+	}
+	finished := sessionPost(t, h, model, id, first, sessionAssistant(t, paused),
+		conversation("user", `[{"type":"tool_result","tool_use_id":"call-t1","content":"one"}]`),
+		conversation("system", `"a reminder from a hook"`))
+	if finished.StopReason == nil || *finished.StopReason != "end_turn" {
+		t.Fatalf("the paused turn should have continued: %+v", finished)
+	}
+	if data := protocolLog(t, log); strings.Count(data, "thread ") != 1 || strings.Count(data, "answer ") != 1 {
+		t.Fatalf("expected the answer on the one paused turn, not a fresh thread:\n%s", data)
+	}
+}
+
 // An assistant message among the new ones is history the proxy did not produce, so the thread cannot be reused.
 func TestSessionFallsBackOnAnUnknownAssistantMessage(t *testing.T) {
 	backend, log := newFakeBackend(t)
