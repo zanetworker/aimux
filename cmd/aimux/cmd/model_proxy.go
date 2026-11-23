@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 func newModelCmd() *cobra.Command {
 	model := &cobra.Command{Use: "model", Short: "Work with model APIs"}
 	proxy := &cobra.Command{Use: "proxy", Short: "Expose a local Anthropic Messages API"}
-	proxy.AddCommand(newModelProxyServeCmd(), newModelProxyStatusCmd())
+	proxy.AddCommand(newModelProxyServeCmd(), newModelProxyStatusCmd(), newModelProxyStatsCmd())
 	model.AddCommand(proxy)
 	return model
 }
@@ -49,6 +50,31 @@ func newModelProxyStatusCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Port the proxy listens on at 127.0.0.1")
+	return cmd
+}
+
+func newModelProxyStatsCmd() *cobra.Command {
+	var port int
+	var since time.Duration
+	cmd := &cobra.Command{
+		Use:   "stats",
+		Short: "Summarise the proxy's recent requests: how each kind went and how long it took",
+		Long: "Reads the request history the proxy writes (one JSON line per answered request, no prompts or " +
+			"answers) and prints a row per outcome, slowest first: how many, the mean and 95th percentile time, " +
+			"the average prompt size and how many failed. Fallbacks also print what they say about themselves, " +
+			"which is where the next fix usually hides. Reads files only, so the proxy need not be running.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("find home folder for the request log: %w", err)
+			}
+			return modelProxyStats(modelproxy.RequestLogFile(home, port), since, cmd.OutOrStdout(), time.Now)
+		},
+	}
+	cmd.Flags().IntVar(&port, "port", modelproxy.StablePort, "Which listener's history to read")
+	cmd.Flags().DurationVar(&since, "since", 24*time.Hour, "How far back to summarise, such as 2h or 168h")
 	return cmd
 }
 
@@ -83,6 +109,26 @@ func newModelProxyServeCmd() *cobra.Command {
 				Command: command, ServiceTier: serviceTier, Stderr: cmd.ErrOrStderr(),
 			})
 			defer backend.Close()
+			var handlerOptions []modelproxy.HandlerOption
+			if home, err := os.UserHomeDir(); err == nil {
+				// The bound port, not the flag: --port 0 asks the OS for one, and two such listeners must not
+				// share a history file.
+				bound := port
+				if tcp, ok := ln.Addr().(*net.TCPAddr); ok {
+					bound = tcp.Port
+				}
+				path := modelproxy.RequestLogFile(home, bound)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "model proxy: no request history: %v\n", err)
+				}
+				// A proxy that cannot keep its history should still answer: say so and serve on.
+				if requests, err := modelproxy.OpenRequestLog(path, modelproxy.RequestLogLimit); err != nil {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "model proxy: no request history: %v\n", err)
+				} else {
+					defer func() { _ = requests.Close() }()
+					handlerOptions = append(handlerOptions, modelproxy.WithRequestLog(requests))
+				}
+			}
 			if port == modelproxy.StablePort {
 				home, err := os.UserHomeDir()
 				if err != nil {
@@ -91,7 +137,7 @@ func newModelProxyServeCmd() *cobra.Command {
 				go modelproxy.PollUsage(ctx, backend.ReadUsage, modelproxy.UsageFile(home, port), 2*time.Minute, cmd.ErrOrStderr())
 			}
 			server := &http.Server{
-				Handler:           modelproxy.NewHandler(backend, key),
+				Handler:           modelproxy.NewHandler(backend, key, handlerOptions...),
 				ReadHeaderTimeout: 5 * time.Second,
 				BaseContext:       func(net.Listener) context.Context { return ctx },
 			}

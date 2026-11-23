@@ -75,11 +75,11 @@ func (l *RequestLog) Record(record Record) {
 		at = time.Now()
 	}
 	data, err := json.Marshal(line{
-		At: at.UTC().Format(time.RFC3339), Outcome: record.Outcome, Detail: record.Detail,
-		Model: record.Model, Effort: record.Effort, Status: record.Status,
+		At: at.UTC().Format(time.RFC3339), Outcome: bounded(record.Outcome), Detail: bounded(record.Detail),
+		Model: bounded(record.Model), Effort: bounded(record.Effort), Status: record.Status,
 		TTFBms: record.TTFB.Milliseconds(), DurationMs: record.Duration.Milliseconds(),
 		InputTokens: record.Usage.InputTokens, CachedInputTokens: record.Usage.CacheReadInputTokens,
-		OutputTokens: record.Usage.OutputTokens, Estimated: record.Usage.estimated, Error: record.Error,
+		OutputTokens: record.Usage.OutputTokens, Estimated: record.Usage.estimated, Error: bounded(record.Error),
 	})
 	if err != nil {
 		return
@@ -99,15 +99,33 @@ func (l *RequestLog) Record(record Record) {
 	}
 	if l.limit > 0 && l.size+int64(len(data)) > l.limit {
 		l.rollOver()
+		// Rotation failed and the file is already full: drop this record rather than grow without end.
+		if l.size+int64(len(data)) > l.limit {
+			return
+		}
 	}
 	if l.file == nil {
 		return
 	}
+	before := l.size
 	written, err := l.file.Write(data)
-	if err != nil {
-		return
-	}
 	l.size += int64(written)
+	if err != nil || written != len(data) {
+		// A half-written line would join the next one and lose both, so cut back to the last whole record.
+		if l.file.Truncate(before) == nil {
+			l.size = before
+		}
+	}
+}
+
+// bounded keeps one field short enough that a record always fits a reader's line buffer, whatever a client sent
+// as its model name.
+func bounded(value string) string {
+	const maxField = 300
+	if len(value) <= maxField {
+		return value
+	}
+	return value[:maxField] + "…"
 }
 
 // rollOver keeps one previous file. The caller holds the mutex. Whatever fails, it ends with a handle worth
