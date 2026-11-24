@@ -65,6 +65,7 @@ type CodexOptions struct {
 	// ServiceTier is ServiceTierPriority (the default, also when empty) or ServiceTierStandard.
 	ServiceTier string
 	Stderr      io.Writer
+	Version     string
 }
 
 // NewCodexBackend starts app-server on the first turn.
@@ -78,7 +79,7 @@ func NewCodexBackend(opts CodexOptions) *CodexBackend {
 	}
 	return &CodexBackend{
 		command: command, stderr: opts.Stderr, serviceTier: opts.ServiceTier,
-		vitals:   healthState{startedAt: time.Now().UTC()},
+		vitals:   healthState{version: opts.Version, startedAt: time.Now().UTC()},
 		sessions: sessions{pauseTimeout: 10 * time.Minute, idleTimeout: 30 * time.Minute},
 	}
 }

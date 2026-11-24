@@ -20,6 +20,21 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Service names a receiver reports in its health response. Only `aimux collect` builds the collector; the TUI
+// starts the same receiver for itself.
+const (
+	CollectorService = "aimux-collector"
+	ReceiverService  = "aimux-receiver"
+)
+
+// ReceiverHealth is the receiver's health response.
+type ReceiverHealth struct {
+	Service    string     `json:"service"`
+	Version    string     `json:"version"`
+	StartedAt  time.Time  `json:"started_at"`
+	LastSpanAt *time.Time `json:"last_span_at,omitempty"`
+}
+
 // Receiver is an OTLP/HTTP trace receiver that listens for incoming spans
 // from Claude Code, Codex CLI, or any OTEL-instrumented agent.
 // It stores spans in a SpanStore for the TUI to display.
@@ -28,6 +43,9 @@ type Receiver struct {
 	server        *http.Server
 	port          int
 	keysByService map[string]subagent.AttrKeys
+	version       string
+	service       string
+	startedAt     time.Time
 
 	mu         sync.Mutex // protects counters and debugLog
 	traceCount int        // number of /v1/traces requests received
@@ -44,12 +62,21 @@ func NewReceiverWithKeys(store *SpanStore, port int, keys map[string]subagent.At
 		store:         store,
 		port:          port,
 		keysByService: keys,
+		service:       ReceiverService,
+		startedAt:     time.Now().UTC(),
 	}
 }
 
 // NewReceiver creates a new OTLP/HTTP receiver.
 func NewReceiver(store *SpanStore, port int) *Receiver {
 	return NewReceiverWithKeys(store, port, nil)
+}
+
+// NewReceiverWithVersion creates the collector's receiver: its health response names the collector and its build.
+func NewReceiverWithVersion(store *SpanStore, port int, version string) *Receiver {
+	r := NewReceiver(store, port)
+	r.version, r.service = version, CollectorService
+	return r
 }
 
 // SetBindAll configures the receiver to listen on all interfaces (0.0.0.0)
@@ -63,6 +90,7 @@ func (r *Receiver) SetBindAll(v bool) {
 // Non-blocking -- runs the server in a goroutine.
 func (r *Receiver) Start() error {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", r.handleHealth)
 	mux.HandleFunc("/v1/traces", r.handleTraces)
 	mux.HandleFunc("/v1/logs", r.handleLogs)
 	mux.HandleFunc("/v1/metrics", r.handleMetrics) // accept but ignore metrics
@@ -90,6 +118,26 @@ func (r *Receiver) Start() error {
 	}()
 
 	return nil
+}
+
+func (r *Receiver) handleHealth(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	health := ReceiverHealth{
+		Service:   r.service,
+		Version:   r.version,
+		StartedAt: r.startedAt,
+	}
+	if lastSpanAt := r.store.LastUpdate(); !lastSpanAt.IsZero() {
+		lastSpanAt = lastSpanAt.UTC()
+		health.LastSpanAt = &lastSpanAt
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(health)
 }
 
 // loggingMiddleware records every incoming request for diagnostics.

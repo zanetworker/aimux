@@ -108,6 +108,7 @@ Use the Claude Code or Codex built-in history instead if you run one agent at a 
 | Review the tools a profile may call | `aimux tools status`, `aimux tools diff`, `aimux tools approve`; add or remove a source with `aimux tools add notes --folder <dir>`, `aimux tools add mcp ...`, `aimux tools add cli gh`, `aimux tools add http --spec ... --base-url ...`, `aimux tools remove <source>` (with `servers.yaml`, edit it and `tool-sets.yaml` instead; see [Servers](https://aimux.ai/guides/servers/)) |
 | Define servers and their secrets | `aimux servers discover <name> --cwd <dir>` (the variables a server reads, with a suggested reference each), `aimux servers migrate` (split `tool-sources.yaml` into `servers.yaml` and `tool-sets.yaml`) |
 | Set up everything missing, then check it | `aimux setup` (runs only missing steps), `aimux doctor` (read-only, one fix per problem) |
+| Check the background services | `aimux status` (model proxy, MCP proxy, tool gateway, collector; one fix per problem; exit 1 when one needs attention) |
 | See what a profile allows | `aimux profile list`, `aimux profile show work-readonly`, `aimux profile check <name>` |
 
 <details>
@@ -135,6 +136,7 @@ sandbox        The OpenShell sandboxes profiles and the tool runner run in: stat
 sessions       Browse and search past sessions
 setup          Check every concern and run only the missing setup steps; on a terminal, offer to review changed tools
 spawn          Start a new AI agent session
+status         Check the model proxy, MCP proxy, tool gateway, and collector
 tools          Review the tools aimux exposes: status, diff and approve pins; add or remove sources
 version        Show aimux version
 web            Launch web dashboard
