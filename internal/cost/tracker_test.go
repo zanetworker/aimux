@@ -164,6 +164,7 @@ func TestCurrentModelsArePriced(t *testing.T) {
 	}{
 		{"claude-opus-5-5", 4, 20, 0.20, 5},
 		{"claude-sonnet-5-5", 2, 10, 0.10, 2.50},
+		// Calculate prices at the standard rates; CalculateRequest applies Haiku's long-prompt rates.
 		{"claude-haiku-5-5", 0.10, 0.50, 0.01, 0.125},
 		{"claude-fable-5-2", 8, 40, 0.20, 10},
 		{"claude-opus-5", 5, 25, 0.50, 6.25},
@@ -197,5 +198,29 @@ func TestAliasesPointAtTheCurrentGeneration(t *testing.T) {
 		if got := normalizeModel(alias); got != want {
 			t.Errorf("%s resolves to %s, want %s", alias, got, want)
 		}
+	}
+}
+
+// Claude Haiku 5.5 charges five times its standard rates for one request whose prompt passes 100,000
+// tokens, counting cache reads and writes. A session's totals are not one prompt, so they stay standard.
+func TestHaikuLongPromptPricing(t *testing.T) {
+	const short, long = 100_000, 100_001
+	if got, want := CalculateRequest("claude-haiku-5-5", short, 0, 0, 0), 0.01; !almostEqual(got, want) {
+		t.Errorf("a prompt exactly at the threshold = %.5f, want the standard rate %.5f", got, want)
+	}
+	if got, want := CalculateRequest("claude-haiku-5-5", long, 0, 0, 0), 0.0500005; !almostEqual(got, want) {
+		t.Errorf("a prompt one token over = %.5f, want the long rate %.5f", got, want)
+	}
+	// Cache tokens count toward the threshold.
+	if got, want := CalculateRequest("claude-haiku-5-5", 60_000, 0, 50_000, 0), 0.0325; !almostEqual(got, want) {
+		t.Errorf("input plus cache reads over the threshold = %.5f, want the long rate %.5f", got, want)
+	}
+	// The comment's worked example: 200,000 input and 1,000 output.
+	if got, want := CalculateRequest("claude-haiku-5-5", 200_000, 1_000, 0, 0), 0.1025; !almostEqual(got, want) {
+		t.Errorf("200k input and 1k output = %.5f, want %.5f", got, want)
+	}
+	// A session that adds up to more than the threshold is still many short prompts.
+	if got, want := Calculate("claude-haiku-5-5", 500_000, 10_000, 0, 0), 0.055; !almostEqual(got, want) {
+		t.Errorf("session totals = %.5f, want the standard rate %.5f", got, want)
 	}
 }

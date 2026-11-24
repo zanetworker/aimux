@@ -44,7 +44,8 @@ func AppendUsage(path string, u Usage) error {
 	}
 	if u.CostUSD == nil {
 		if Priced(u.Model) {
-			c := Calculate(u.Model, u.InputTokens, u.OutputTokens, 0, 0)
+			// One request: a long prompt is billed at its own rate on the models that have one.
+			c := CalculateRequest(u.Model, u.InputTokens, u.OutputTokens, 0, 0)
 			u.CostUSD = &c
 		} else {
 			u.CostUnknown = true
