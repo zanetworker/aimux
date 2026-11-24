@@ -8,9 +8,8 @@ The one place that says what is done, what is next, and what is waiting. The des
 
 ## Where we are
 
-The first slice is merged and live: the model proxy and the collector run build 194, and `aimux status` reads
-all ok. The MCP proxy still runs build 184 and shows "restart pending" until the owner runs
-`aimux mcp proxy restart` at a quiet moment; the tool gateway reports no build.
+The first slice is merged and live: the model proxy, the MCP proxy and the collector all run build 194, and
+`aimux status` reads all ok. The tool gateway reports no build, so its build is not known from the table.
 
 Next come three small pieces of work (below), then the ledger (slice 1), which is the next piece of real work.
 
