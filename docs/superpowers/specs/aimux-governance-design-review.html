@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux: one record for everything an agent does</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #13161b; --text: #d6dae2; --text-dim: #9aa1ad;
+    --head: #f2f4f8; --accent: #8fbf88; --accent2: #cea451; --border: #262b34;
+    --code-bg: #1a1e25; --link: #8ab4d8; --figure-bg: #13161b; --figure-border: #262b34;
+    --hairline: #1d222b; --faint: #8a9099; --code-text: #c8cfda;
+    color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    --bg: #f7f6f3; --panel: #ffffff; --text: #2c313a; --text-dim: #5d6572;
+    --head: #171b22; --accent: #477a40; --accent2: #97701f; --border: #dedbd4;
+    --code-bg: #efede8; --link: #2e6b9e; --hairline: #e6e3dc; --faint: #6a6f77;
+    --code-text: #3a414d; --figure-bg: #ffffff; --figure-border: #dedbd4;
+    color-scheme: light;
+  }
+
+  /* === SVG THEME SELECTORS === */
+  html[data-theme="light"] figure svg [fill="#f2f4f8"] { fill: #171b22; }
+  html[data-theme="light"] figure svg [fill="#c8cfda"] { fill: #3a414d; }
+  html[data-theme="light"] figure svg [fill="#9aa1ad"] { fill: #555d69; }
+  html[data-theme="light"] figure svg [fill="#8a9099"] { fill: #8a8f98; }
+  html[data-theme="light"] figure svg [fill="#8fbf88"] { fill: #477a40; }
+  html[data-theme="light"] figure svg [fill="#cea451"] { fill: #97701f; }
+  html[data-theme="light"] figure svg [fill="#c96f6f"] { fill: #b04848; }
+  html[data-theme="light"] figure svg [fill="#20242c"] { fill: #f2f0eb; }
+  html[data-theme="light"] figure svg [fill="#1a1e25"] { fill: #f2f0eb; }
+  html[data-theme="light"] figure svg [fill="#181c23"] { fill: #faf8f4; }
+  html[data-theme="light"] figure svg [fill="rgba(255,255,255,.015)"] { fill: rgba(0,0,0,.02); }
+  html[data-theme="light"] figure svg [fill="rgba(143,191,136,.06)"] { fill: rgba(71,122,64,.07); }
+  html[data-theme="light"] figure svg [fill="rgba(201,111,111,.06)"] { fill: rgba(176,72,72,.07); }
+  html[data-theme="light"] figure svg [fill="rgba(206,164,81,.05)"] { fill: rgba(151,112,31,.07); }
+  html[data-theme="light"] figure svg [stroke="#8fbf88"] { stroke: #477a40; }
+  html[data-theme="light"] figure svg [stroke="#cea451"] { stroke: #97701f; }
+  html[data-theme="light"] figure svg [stroke="#c96f6f"] { stroke: #b04848; }
+  html[data-theme="light"] figure svg [stroke="#9aa1ad"] { stroke: #767c87; }
+  html[data-theme="light"] figure svg [stroke="#565b66"] { stroke: #a09a90; }
+  html[data-theme="light"] figure svg [stroke="#2c313b"] { stroke: #d9d5cc; }
+  html[data-theme="light"] figure svg [stroke="#3a404c"] { stroke: #c7c2b8; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16.5px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 64px 40px 96px; }
+  .kicker {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; letter-spacing: 3px; color: var(--accent);
+    text-transform: uppercase; margin-bottom: 14px;
+  }
+  h1 { color: var(--head); font-size: 34px; line-height: 1.25; font-weight: 750; letter-spacing: -.3px; margin: 0 0 10px; }
+  .subtitle { color: var(--text-dim); font-size: 17px; margin: 0 0 8px; }
+  .meta {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; color: var(--faint); letter-spacing: .5px;
+    padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 40px;
+  }
+  h2 { color: var(--head); font-size: 23px; font-weight: 700; letter-spacing: -.2px; margin: 52px 0 14px; padding-top: 26px; border-top: 1px solid var(--border); }
+  h2:first-of-type { border-top: none; padding-top: 0; margin-top: 36px; }
+  h3 { color: var(--head); font-size: 17.5px; font-weight: 700; margin: 30px 0 8px; }
+  p { margin: 0 0 15px; }
+  b, strong { color: var(--head); font-weight: 650; }
+  a { color: var(--link); }
+  code {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: .86em; background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; color: var(--code-text);
+  }
+  ul, ol { margin: 0 0 15px; padding-left: 26px; }
+  li { margin-bottom: 7px; }
+  li::marker { color: var(--accent); }
+  ol li::marker { color: var(--text-dim); font-weight: 600; }
+  .claim {
+    margin: 26px 0; padding: 20px 24px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 10px;
+    color: var(--head); font-size: 17px;
+  }
+  .claim p { margin: 0; }
+  dl.terms { margin: 0 0 15px; }
+  dl.terms div { display: grid; grid-template-columns: 150px 1fr; gap: 14px; padding: 8px 0; border-bottom: 1px dashed var(--hairline); }
+  dl.terms div:last-child { border-bottom: none; }
+  dl.terms dt { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 14px; color: var(--accent); font-weight: 600; padding-top: 2px; }
+  dl.terms dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  pre.term { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 12.5px/1.55 "SF Mono", ui-monospace, Menlo, Consolas, monospace; color: var(--text); margin: 0 0 18px; }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin: 18px 0 22px; font-size: 14.5px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 600; font-size: 12.5px; letter-spacing: 1px; text-transform: uppercase; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  td.yes { color: var(--accent); }
+  td.no { color: var(--accent2); }
+  ol.principles { padding-left: 0; counter-reset: pr; list-style: none; }
+  ol.principles li { counter-increment: pr; margin-bottom: 12px; padding: 13px 17px 13px 48px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; position: relative; }
+  ol.principles li::before { content: counter(pr); position: absolute; left: 17px; top: 14px; font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--accent); font-weight: 700; }
+  figure { margin: 26px 0 30px; }
+  figure svg { width: 100%; height: auto; display: block; background: var(--figure-bg); border: 1px solid var(--figure-border); border-radius: 10px; padding: 14px; }
+  figcaption { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; color: var(--faint); letter-spacing: .3px; margin-top: 9px; }
+  figure text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  figure .m { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+  html { scroll-behavior: smooth; }
+  h2[id] { scroll-margin-top: 24px; }
+  nav.toc { display: none; }
+  @media (min-width: 1320px) {
+    nav.toc { display: block; position: fixed; top: 72px; left: 28px; width: 210px; max-height: calc(100vh - 110px); overflow-y: auto; font-size: 12.5px; line-height: 1.5; }
+    nav.toc .toc-title { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 2px; color: var(--faint); text-transform: uppercase; margin: 0 0 10px 12px; }
+    nav.toc a { display: block; color: var(--text-dim); text-decoration: none; padding: 3px 10px; border-left: 2px solid var(--border); }
+    nav.toc a:hover { color: var(--text); }
+    nav.toc a.active { color: var(--accent); border-left-color: var(--accent); }
+  }
+  .theme-toggle { position: fixed; top: 18px; right: 20px; z-index: 10; font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 1.5px; cursor: pointer; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; }
+  .theme-toggle:hover { color: var(--head); }
+  footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--border); font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--faint); letter-spacing: .4px; }
+</style>
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('aimux-design-theme');
+    if (!t && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) t = 'light';
+    if (t) document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+})();
+</script>
+</head>
+<body>
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle color scheme">MODE</button>
+<nav class="toc" aria-label="Sections">
+  <div class="toc-title">Sections</div>
+  <a href="#why">Why this exists</a>
+  <a href="#machine">The whole machine</a>
+  <a href="#request">One request, end to end</a>
+  <a href="#disk">Where things live</a>
+  <a href="#today">The four chokepoints</a>
+  <a href="#gap">The gap, in one picture</a>
+  <a href="#flows">Four paths, four answers</a>
+  <a href="#idea">The idea</a>
+  <a href="#engines">One door, many engines</a>
+  <a href="#reuse">Built to be reused</a>
+  <a href="#buys">What it buys you</a>
+  <a href="#costs">What it costs</a>
+  <a href="#scope">One developer first</a>
+  <a href="#order">The order of work</a>
+  <a href="#decide">What I need from you</a>
+</nav>
+<div class="page">
+
+  <div class="kicker">aimux · design review</div>
+  <h1>One record for everything an agent does</h1>
+  <p class="subtitle">Governance, metering, actuators and evals, for one developer's machine.</p>
+  <div class="meta">24 NOVEMBER 2026 · COMPANION TO docs/superpowers/specs/2026-11-23-aimux-governance-metering-and-evals-design.md</div>
+
+  <h2 id="why">Why this exists</h2>
+
+  <p>On 22 November a Codex session sat at <em>Deliberating… 3m 42s</em>. Each step was taking 36 to 56 seconds, and nothing in aimux could say why. The model proxy kept its records in one file, the MCP proxy kept counters in memory, neither named a session, and the built-in tools that do most of the work crossed nothing at all.</p>
+
+  <p>Adding one line of detail to one of those records found the cause in minutes: Claude Code was splitting tool results across messages, so the proxy threw away its cached conversation on nearly every step and reprocessed 280,000 tokens. Two fixes later, fallbacks went from 203 in a day to 2, and the median step went from 36.5 seconds to 4.8.</p>
+
+  <div class="claim">
+    <p>That is the whole argument. The expensive part was not the bug; it was the day spent not being able to see it.</p>
+  </div>
+
+  <p>The ambition is larger than debugging, and it is yours: the proxy should be where you <em>govern access to everything and see your use</em>, and eventually where actuators act on what they see, switching backends as quotas run down. None of that is possible while the record is missing.</p>
+
+
+  <h2 id="machine">The whole machine</h2>
+
+  <p>aimux is one Go binary that plays several roles at once. Read the picture top to bottom: ways in, the shared logic, the places every agent action crosses, where agents run, how their work is seen and judged, and what is remembered afterwards.</p>
+
+  <figure>
+    <svg viewBox="0 0 980 556" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="aimux in six layers: front doors, controller, chokepoints, run, see and judge, remember">
+      <text x="24" y="22" fill="#9aa1ad" font-size="12" class="m">WAYS IN</text>
+      <rect x="24" y="32" width="176" height="48" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="36" y="52" fill="#f2f4f8" font-size="12.5">CLI</text>
+      <text x="36" y="69" fill="#8a9099" font-size="11">aimux, about 40 commands</text>
+      <rect x="212" y="32" width="176" height="48" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="224" y="52" fill="#f2f4f8" font-size="12.5">TUI</text>
+      <text x="224" y="69" fill="#8a9099" font-size="11">panes, keyboard</text>
+      <rect x="400" y="32" width="176" height="48" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="412" y="52" fill="#f2f4f8" font-size="12.5">web dashboard</text>
+      <text x="412" y="69" fill="#8a9099" font-size="11">aimux web, port 3000</text>
+      <rect x="588" y="32" width="176" height="48" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="600" y="52" fill="#f2f4f8" font-size="12.5">remote API</text>
+      <text x="600" y="69" fill="#8a9099" font-size="11">your phone, approvals</text>
+      <rect x="776" y="32" width="176" height="48" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="788" y="52" fill="#f2f4f8" font-size="12.5">MCP server</text>
+      <text x="788" y="69" fill="#8a9099" font-size="11">other agents search here</text>
+
+      <rect x="24" y="94" width="928" height="32" rx="7" fill="#181c23" stroke="#3a404c"/>
+      <text x="36" y="115" fill="#f2f4f8" font-size="12.5">controller</text>
+      <text x="118" y="115" fill="#8a9099" font-size="11.5">the logic every way in shares, so a feature written once shows up in all of them</text>
+
+      <rect x="16" y="140" width="948" height="92" rx="10" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/>
+      <text x="30" y="160" fill="#8fbf88" font-size="12" class="m">THE DOORS: WHAT AGENT ACTIONS PASS THROUGH</text>
+      <rect x="30" y="170" width="220" height="48" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="42" y="190" fill="#f2f4f8" font-size="12.5">model proxy :7385</text>
+      <text x="42" y="207" fill="#8a9099" font-size="11">model calls, answered by Codex</text>
+      <rect x="262" y="170" width="220" height="48" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="274" y="190" fill="#f2f4f8" font-size="12.5">MCP proxy :7381</text>
+      <text x="274" y="207" fill="#8a9099" font-size="11">one set of MCP servers for all</text>
+      <rect x="494" y="170" width="220" height="48" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="506" y="190" fill="#f2f4f8" font-size="12.5">tool gateway :7390</text>
+      <text x="506" y="207" fill="#8a9099" font-size="11">pinned tools for sandboxes</text>
+      <rect x="726" y="170" width="224" height="48" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="738" y="190" fill="#f2f4f8" font-size="12.5">hooks (the harness's own)</text>
+      <text x="738" y="207" fill="#8a9099" font-size="11">aimux installs 8: alerts, housekeeping</text>
+
+      <rect x="16" y="246" width="948" height="92" rx="10" fill="rgba(255,255,255,.015)" stroke="#3a404c"/>
+      <text x="30" y="266" fill="#9aa1ad" font-size="12" class="m">RUN: WHERE THE AGENTS ACTUALLY ARE</text>
+      <rect x="30" y="276" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="42" y="296" fill="#f2f4f8" font-size="12.5">spawn</text>
+      <text x="42" y="313" fill="#8a9099" font-size="11">local: start, attach, kill</text>
+      <rect x="216" y="276" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="228" y="296" fill="#f2f4f8" font-size="12.5">sandbox launch</text>
+      <text x="228" y="313" fill="#8a9099" font-size="11">OpenShell, isolated</text>
+      <rect x="402" y="276" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b" stroke-dasharray="5 4"/>
+      <text x="414" y="296" fill="#f2f4f8" font-size="12.5">Kubernetes pods</text>
+      <text x="414" y="313" fill="#8a9099" font-size="11">your cluster</text>
+      <rect x="588" y="276" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="600" y="296" fill="#f2f4f8" font-size="12.5">acprun</text>
+      <text x="600" y="313" fill="#8a9099" font-size="11">continue an idle session</text>
+      <rect x="774" y="276" width="176" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="786" y="296" fill="#f2f4f8" font-size="12.5">profiles</text>
+      <text x="786" y="313" fill="#8a9099" font-size="11">saved launch setups</text>
+
+      <rect x="16" y="352" width="948" height="92" rx="10" fill="rgba(255,255,255,.015)" stroke="#3a404c"/>
+      <text x="30" y="372" fill="#9aa1ad" font-size="12" class="m">SEE AND JUDGE</text>
+      <rect x="30" y="382" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="42" y="402" fill="#f2f4f8" font-size="12.5">OTLP receiver :4318</text>
+      <text x="42" y="419" fill="#8a9099" font-size="11">telemetry comes in</text>
+      <rect x="216" y="382" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="228" y="402" fill="#f2f4f8" font-size="12.5">spans to turns</text>
+      <text x="228" y="419" fill="#8a9099" font-size="11">a readable trace</text>
+      <rect x="402" y="382" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="414" y="402" fill="#f2f4f8" font-size="12.5">cost</text>
+      <text x="414" y="419" fill="#8a9099" font-size="11">tokens into dollars</text>
+      <rect x="588" y="382" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="600" y="402" fill="#f2f4f8" font-size="12.5">review and labels</text>
+      <text x="600" y="419" fill="#8a9099" font-size="11">good, bad, waste</text>
+      <rect x="774" y="382" width="176" height="48" rx="7" fill="#181c23" stroke="#2c313b" stroke-dasharray="5 4"/>
+      <text x="786" y="402" fill="#f2f4f8" font-size="12.5">MLflow, Jaeger</text>
+      <text x="786" y="419" fill="#8a9099" font-size="11">where exports go</text>
+
+      <rect x="16" y="458" width="948" height="92" rx="10" fill="rgba(255,255,255,.015)" stroke="#3a404c"/>
+      <text x="30" y="478" fill="#9aa1ad" font-size="12" class="m">REMEMBER</text>
+      <rect x="30" y="488" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="42" y="508" fill="#f2f4f8" font-size="12.5">history</text>
+      <text x="42" y="525" fill="#8a9099" font-size="11">finds every past session</text>
+      <rect x="216" y="488" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="228" y="508" fill="#f2f4f8" font-size="12.5">search</text>
+      <text x="228" y="525" fill="#8a9099" font-size="11">an index over transcripts</text>
+      <rect x="402" y="488" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="414" y="508" fill="#f2f4f8" font-size="12.5">insight</text>
+      <text x="414" y="525" fill="#8a9099" font-size="11">patterns across sessions</text>
+      <rect x="588" y="488" width="174" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="600" y="508" fill="#f2f4f8" font-size="12.5">sessiondiff</text>
+      <text x="600" y="525" fill="#8a9099" font-size="11">what a session changed</text>
+      <rect x="774" y="488" width="176" height="48" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="786" y="508" fill="#f2f4f8" font-size="12.5">platform</text>
+      <text x="786" y="525" fill="#8a9099" font-size="11">config, keys, notify, decide</text>
+    </svg>
+    <figcaption>FIGURE 1 · Six layers. Solid boxes are aimux; dashed boxes are outside it. The green band is where this design does its work.</figcaption>
+  </figure>
+
+  <dl class="terms">
+    <div><dt>ways in</dt><dd>Five doors to the same work. The phone goes through the remote API with a device login; other agents reach aimux as an MCP server, which is how a session can search your past sessions.</dd></div>
+    <div><dt>controller</dt><dd>One Go package (<code>internal/controller</code>, about 5,000 lines) holding every operation you can perform on an agent or a session, each written once as a plain function with its own tests. It builds the list of agents you see (filter, sort, hide, archive, badges, which one needs you next), starts and stops them (launch locally or in a sandbox, resume, kill, jump to a running one), keeps what you say about a session (star, tags, note, value), adds up cost per project, decides when to notify you, and exports a reviewed trace as JSONL or OTLP. The terminal UI, the dashboard, the CLI and the phone call these functions and only draw the result, so a feature added once behaves the same through every door. It is not a process and it does not sit in the path of a request: the chokepoints below run on their own, and today their numbers (proxy health, request stats) are reachable from the CLI only, not through the controller. Moving them behind it is part of the design.</dd></div>
+    <div><dt>chokepoints</dt><dd>Four places an agent's actions pass through. Three are long-running processes with ports; the fourth is Claude Code's hook mechanism. The next sections are about these.</dd></div>
+    <div><dt>run</dt><dd>aimux does not replace Claude Code or Codex. It starts them, attaches to them, or continues them, on your machine, in an OpenShell sandbox, or on a cluster.</dd></div>
+    <div><dt>see and judge</dt><dd>Telemetry arrives as OTLP, is turned into a turn-by-turn trace you can review like a pull request, priced, and labelled. Labelled turns leave as exports. This half is mature.</dd></div>
+    <div><dt>remember</dt><dd>aimux reads the session files Claude Code and Codex already write, read-only, and keeps a search index over them. It never owns your transcripts.</dd></div>
+  </dl>
+
+  <h2 id="request">One request, end to end</h2>
+
+  <p>The layers make more sense with something moving through them. Here is what happens when you are in a <code>claude-codex</code> shell and ask for a small fix. Claude Code is the harness: it owns the conversation and runs every tool. Codex only decides what to do next.</p>
+
+  <figure>
+    <svg viewBox="0 0 980 492" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Sequence: Claude Code sends a request to the model proxy, which continues a cached Codex turn; Codex asks for an Edit; Claude Code runs it under its own permissions and hooks; the result goes back and the answer streams">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#9aa1ad"/>
+        </marker>
+        <marker id="ahd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#565b66"/>
+        </marker>
+      </defs>
+      <rect x="40" y="14" width="180" height="34" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="130" y="36" fill="#f2f4f8" font-size="13" text-anchor="middle">Claude Code</text>
+      <rect x="300" y="14" width="180" height="34" rx="7" fill="#20242c" stroke="#8fbf88"/>
+      <text x="390" y="36" fill="#f2f4f8" font-size="13" text-anchor="middle">model proxy :7385</text>
+      <rect x="560" y="14" width="180" height="34" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="650" y="36" fill="#f2f4f8" font-size="13" text-anchor="middle">Codex</text>
+      <rect x="790" y="14" width="170" height="34" rx="7" fill="#20242c" stroke="#8fbf88"/>
+      <text x="875" y="36" fill="#f2f4f8" font-size="13" text-anchor="middle">MCP proxy :7381</text>
+
+      <line x1="130" y1="48" x2="130" y2="480" stroke="#565b66" stroke-dasharray="4 5"/>
+      <line x1="390" y1="48" x2="390" y2="480" stroke="#565b66" stroke-dasharray="4 5"/>
+      <line x1="650" y1="48" x2="650" y2="480" stroke="#565b66" stroke-dasharray="4 5"/>
+      <line x1="875" y1="48" x2="875" y2="480" stroke="#565b66" stroke-dasharray="4 5"/>
+
+      <text x="142" y="78" fill="#c8cfda" font-size="11.5">1 · your prompt, the tools, a session id</text>
+      <line x1="130" y1="86" x2="386" y2="86" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+
+      <text x="402" y="114" fill="#c8cfda" font-size="11.5">2 · checks the key, finds this</text>
+      <text x="402" y="129" fill="#c8cfda" font-size="11.5">conversation's open thread</text>
+
+      <text x="402" y="156" fill="#c8cfda" font-size="11.5">3 · continues it, cached</text>
+      <line x1="390" y1="164" x2="646" y2="164" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+
+      <text x="402" y="192" fill="#c8cfda" font-size="11.5">4 · decides: call Edit</text>
+      <line x1="650" y1="200" x2="394" y2="200" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+
+      <text x="142" y="228" fill="#c8cfda" font-size="11.5">5 · tool call; the turn stays open</text>
+      <line x1="390" y1="236" x2="134" y2="236" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+
+      <rect x="138" y="250" width="244" height="46" rx="7" fill="rgba(201,111,111,.06)" stroke="#c96f6f" stroke-dasharray="6 4"/>
+      <text x="150" y="269" fill="#f2f4f8" font-size="11.5">6 · runs Edit: permissions, your hooks</text>
+      <text x="150" y="286" fill="#c96f6f" font-size="11.5">aimux only counts this, afterwards</text>
+
+      <text x="142" y="318" fill="#c8cfda" font-size="11.5">7 · the result of the edit</text>
+      <line x1="130" y1="326" x2="386" y2="326" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+
+      <text x="402" y="346" fill="#c8cfda" font-size="11.5">8 · answers the open call</text>
+      <line x1="390" y1="354" x2="646" y2="354" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+
+      <text x="402" y="378" fill="#c8cfda" font-size="11.5">9 · the answer streams</text>
+      <line x1="650" y1="386" x2="394" y2="386" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+      <text x="142" y="378" fill="#c8cfda" font-size="11.5">and reaches you</text>
+      <line x1="390" y1="386" x2="134" y2="386" stroke="#9aa1ad" stroke-width="1.5" marker-end="url(#ah)"/>
+
+      <text x="402" y="410" fill="#cea451" font-size="11.5">one line written per request:</text>
+      <text x="402" y="425" fill="#cea451" font-size="11.5">outcome, tokens, time, session</text>
+
+      <text x="142" y="462" fill="#8a9099" font-size="11.5">an MCP tool takes this path instead: allowlist, then its server</text>
+      <line x1="130" y1="472" x2="871" y2="472" stroke="#565b66" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#ahd)"/>
+    </svg>
+    <figcaption>FIGURE 2 · Steps 3 and 8 are why Codex mode is fast: the conversation stays open on Codex's side, so only the new part is sent. Step 6 is the weak spot: counted afterwards, never recorded call by call.</figcaption>
+  </figure>
+
+  <p>Three things in that picture carry most of what happened this week. <b>Steps 3 and 8</b> are prompt caching: when the proxy recognises the conversation, a step costs about five seconds; when it does not, the whole history is sent again, which on a long session took 36 to 56. <b>Step 6</b> is the blind spot: the tool runs inside Claude Code, under its permissions and your hooks, and aimux only counts it afterwards, as a total per tool, with no record of the single call. And the <b>gold note</b> is the only durable record of the whole exchange: one line, with no prompt and no answer in it.</p>
+
+  <h2 id="disk">Where things live</h2>
+
+  <p>Four background processes, kept running by launchd, and a handful of files. Knowing these is most of knowing the system.</p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Process</th><th>Port</th><th>What it is for</th></tr></thead>
+    <tbody>
+      <tr><td>model proxy</td><td>7385</td><td>Codex mode. Changes only through the promote script, which tests a candidate before swapping it in.</td></tr>
+      <tr><td>MCP proxy</td><td>7381</td><td>Starts each MCP server once and shares it across sessions, instead of once per session.</td></tr>
+      <tr><td>tool gateway</td><td>7390</td><td>Serves sandboxed agents a pinned, read-only subset of tools.</td></tr>
+      <tr><td>collector</td><td>4318</td><td>Receives telemetry from Claude Code and Codex and keeps the per-tool token counts.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Is this well structured?</h3>
+
+  <p>The split is right; the housekeeping is not. Separate processes mean a restart of one does not drop the others' connections, each can change at its own pace, and launchd does the supervising. But nothing treats the four as one system, and it shows:</p>
+
+  <ul>
+    <li><b>Three builds ran at once</b> when I looked. The program files have since caught up with each other, but the processes already running have not all been restarted. The model proxy was on build 169, the MCP proxy on 128, the tool gateway on 137 from a second copy of the program, and the command line is 178. Only the model proxy has a tested promote step.</li>
+    <li><b>Two status formats, no overall one.</b> The model proxy and the MCP proxy each print their own shape. There is no <code>aimux status</code>.</li>
+    <li><b>Logs in four places.</b> Three processes log under <code>~/.aimux/logs/</code>; the collector logs under <code>~/.claude/logs/</code> and is named differently from the rest.</li>
+    <li><b>One flat folder.</b> <code>~/.aimux/</code> holds about forty items at one level: state, locks, caches, databases, settings and dated backups.</li>
+  </ul>
+
+  <p>The design keeps the four processes and adds a thin layer: one status command, one health answer that every process gives in the same shape, one place per kind of file, and promote for all four. The status command comes first, because it needs nothing else to exist:</p>
+
+<pre class="term">aimux v0.14.0-178    4 services, 2 need attention
+
+SERVICE       STATE     BUILD  UP    ADDRESS         LAST ACTIVITY
+model proxy   ok        169    38m   127.0.0.1:7385  turn 2m ago
+mcp proxy     ok        128    2d    127.0.0.1:7381  call 12h ago
+tool gateway  degraded  137    2d    127.0.0.1:7390  lease 1d ago
+collector     ok        178    2d    127.0.0.1:4318  span 4s ago
+
+NEEDS ATTENTION                                   FIX
+tool gateway: 1 of 5 backends down (slack)        aimux mcp proxy status
+mcp proxy: build 128 is older than the CLI (178)  aimux mcp proxy restart</pre>
+
+  <p>What makes it dependable rather than only tidy:</p>
+
+  <ul>
+    <li><b>Always all four lines</b>, in the same order, with the same four words for state: ok, degraded, down, not installed.</li>
+    <li><b>Every problem comes with one command</b> that fixes it or shows more.</li>
+    <li><b>It cannot hang.</b> Each process gets two seconds to answer; one that stays silent is shown as down and the other three still print. Asking never restarts or changes anything.</li>
+    <li><b>The exit code is the answer</b>: 0 when nothing needs attention, 1 when something does. A script or the dashboard reads the same facts as JSON.</li>
+    <li><b>One build is the normal state.</b> All four run the same program file, and one command upgrades them: it tests the new build on spare ports, swaps the file once, then restarts the processes one at a time, checking each is healthy before moving on and putting the old build back if one is not. A process with sessions connected to it waits for a quiet moment, or for your go-ahead, and shows as "restart pending" until then.</li>
+    <li><b>A different build is either brief or deliberate, and says which.</b> During an upgrade it reads "restart pending". A process you keep on another build on purpose reads "pinned" and is not a problem. Anything else is drift and appears under "needs attention" with its fix. Files that two processes share carry a format number, and a process that meets a newer one than it knows refuses to write.</li>
+    <li><b>Details stay in the per-process commands.</b> This one only tells you whether to look.</li>
+  </ul>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>File</th><th>Written by</th><th>Holds</th></tr></thead>
+    <tbody>
+      <tr><td><code>~/.aimux/logs/model-proxy/requests.jsonl</code></td><td>model proxy</td><td>One line per model call. What <code>aimux model proxy stats</code> reads.</td></tr>
+      <tr><td><code>~/.aimux/codex-usage.json</code></td><td>model proxy</td><td>The Codex allowance, refreshed every two minutes. What the HUD bar reads.</td></tr>
+      <tr><td><code>~/.aimux/search.db</code></td><td>search</td><td>The index over your session transcripts.</td></tr>
+      <tr><td><code>~/.aimux/tools/pins.json</code></td><td>tool gateway</td><td>The approved shape of each pinned tool.</td></tr>
+      <tr><td><code>~/.config/aimux/servers.yaml</code>, <code>tool-sets.yaml</code></td><td>you</td><td>Which servers exist, and which of their tools you approved.</td></tr>
+      <tr><td><code>~/.claude/projects/…/*.jsonl</code></td><td>Claude Code</td><td>The transcripts themselves. aimux only reads them.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="today">The four chokepoints</h2>
+
+  <p>The green band deserves a closer look, because the design is about it. Four places already stand between an agent and the world, and three of them are among the largest components in the codebase.</p>
+
+  <dl class="terms">
+    <div><dt>model proxy</dt><dd>Port 7385. Only sessions started in a <code>claude-codex</code> shell send their model calls here. A normal Claude Code session talks to Anthropic directly and never touches it; aimux learns about those calls afterwards, from the telemetry Claude Code sends to the collector. For the calls it does carry, it records outcome, tokens, latency and which conversation. 5,200 lines.</dd></div>
+    <div><dt>MCP proxy</dt><dd>Port 7381. MCP tool calls from sessions set up to use it. Holds the allowlist and the server supervisors. 25,000 lines.</dd></div>
+    <div><dt>tool gateway</dt><dd>Port 7390. Hands sandboxed agents a short list of tools you approved, instead of everything a server offers. Each approved tool is stored with a fingerprint of its definition (name, description, inputs); if the server later changes that definition, the gateway stops serving the tool until you look at the change and approve it again. It detects a changed tool; it does not prove a tool is harmless. 8,000 lines, and today only sandboxed agents go through it.</dd></div>
+    <div><dt>hooks</dt><dd>A mechanism of the harness, not of aimux, and the only place that sees <code>Read</code>, <code>Edit</code> and <code>Bash</code> with the session id, or can refuse one. aimux installs eight entries into Claude Code: two keep the MCP proxy in order, six drive the "waiting for you" alert on your phone. None records a tool call. Codex has hooks too, with nearly the same event names, and aimux installs none there yet.</dd></div>
+  </dl>
+
+  <p>Below them sits a mature half you have already built: an OTLP receiver, a span store, a trace view with inline diffs, GOOD / BAD / WASTE labels, cost pricing, and export to MLflow, Jaeger or JSONL. Nothing new is needed to view or ship events.</p>
+
+  <h2 id="gap">The gap, in one picture</h2>
+
+  <figure>
+    <svg viewBox="0 0 980 430" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Agents cross four chokepoints; each keeps its own record in its own place; below them the observe and export half is mature but unconnected">
+      <text x="24" y="30" fill="#9aa1ad" font-size="12" class="m">YOUR AGENTS</text>
+      <rect x="24" y="42" width="200" height="40" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="38" y="60" fill="#f2f4f8" font-size="13">Claude Code, local</text>
+      <text x="38" y="75" fill="#8a9099" font-size="11">model + every tool</text>
+      <rect x="240" y="42" width="200" height="40" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="254" y="60" fill="#f2f4f8" font-size="13">claude-codex</text>
+      <text x="254" y="75" fill="#8a9099" font-size="11">model through the proxy</text>
+      <rect x="456" y="42" width="200" height="40" rx="7" fill="#20242c" stroke="#2c313b"/>
+      <text x="470" y="60" fill="#f2f4f8" font-size="13">sandboxed agent</text>
+      <text x="470" y="75" fill="#8a9099" font-size="11">OpenShell, Kubernetes</text>
+
+      <rect x="16" y="104" width="948" height="112" rx="10" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/>
+      <text x="30" y="124" fill="#8fbf88" font-size="12" class="m">CHOKEPOINTS: EVERYTHING CROSSES ONE OF THESE</text>
+      <rect x="30" y="134" width="222" height="68" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="44" y="154" fill="#f2f4f8" font-size="13">model proxy :7385</text>
+      <text x="44" y="172" fill="#9aa1ad" font-size="11">records a line per request</text>
+      <text x="44" y="189" fill="#8a9099" font-size="11">requests.jsonl</text>
+      <rect x="266" y="134" width="222" height="68" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="280" y="154" fill="#f2f4f8" font-size="13">MCP proxy :7381</text>
+      <text x="280" y="172" fill="#9aa1ad" font-size="11">counts calls in memory</text>
+      <text x="280" y="189" fill="#8a9099" font-size="11">/status, lost on restart</text>
+      <rect x="502" y="134" width="222" height="68" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="516" y="154" fill="#f2f4f8" font-size="13">tool gateway :7390</text>
+      <text x="516" y="172" fill="#9aa1ad" font-size="11">pins tool schemas</text>
+      <text x="516" y="189" fill="#8a9099" font-size="11">sandboxes only</text>
+      <rect x="738" y="134" width="212" height="68" rx="7" fill="#1a1e25" stroke="#2c313b"/>
+      <text x="752" y="154" fill="#f2f4f8" font-size="13">hooks (the harness's own)</text>
+      <text x="752" y="172" fill="#9aa1ad" font-size="11">could see Read, Edit, Bash</text>
+      <text x="752" y="189" fill="#8a9099" font-size="11">aimux's 8 record no tool call</text>
+
+      <rect x="16" y="238" width="948" height="54" rx="10" fill="rgba(201,111,111,.06)" stroke="#c96f6f" stroke-dasharray="7 5"/>
+      <text x="30" y="262" fill="#c96f6f" font-size="13">MISSING: one record across the four</text>
+      <text x="30" y="280" fill="#9aa1ad" font-size="11.5">so nothing joins them, meters them, or applies a rule once</text>
+
+      <rect x="16" y="314" width="948" height="100" rx="10" fill="rgba(255,255,255,.015)" stroke="#3a404c"/>
+      <text x="30" y="334" fill="#9aa1ad" font-size="12" class="m">ALREADY BUILT: SEE, JUDGE, EXPORT, AND PRICE FOR CLAUDE MODELS</text>
+      <rect x="30" y="346" width="176" height="52" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="44" y="366" fill="#f2f4f8" font-size="12.5">OTLP receiver</text>
+      <text x="44" y="383" fill="#8a9099" font-size="11">:4318, span store</text>
+      <rect x="218" y="346" width="176" height="52" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="232" y="366" fill="#f2f4f8" font-size="12.5">trace and review</text>
+      <text x="232" y="383" fill="#8a9099" font-size="11">turns, inline diffs</text>
+      <rect x="406" y="346" width="176" height="52" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="420" y="366" fill="#f2f4f8" font-size="12.5">cost</text>
+      <text x="420" y="383" fill="#8a9099" font-size="11">per-model pricing</text>
+      <rect x="594" y="346" width="176" height="52" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="608" y="366" fill="#f2f4f8" font-size="12.5">labels</text>
+      <text x="608" y="383" fill="#8a9099" font-size="11">good / bad / waste</text>
+      <rect x="782" y="346" width="168" height="52" rx="7" fill="#181c23" stroke="#2c313b" stroke-dasharray="5 4"/>
+      <text x="796" y="366" fill="#f2f4f8" font-size="12.5">MLflow, Jaeger</text>
+      <text x="796" y="383" fill="#8a9099" font-size="11">export targets</text>
+
+      <line x1="490" y1="86" x2="490" y2="100" stroke="#9aa1ad" stroke-width="1.5"/>
+      <line x1="490" y1="220" x2="490" y2="234" stroke="#c96f6f" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <line x1="490" y1="296" x2="490" y2="310" stroke="#565b66" stroke-width="1.5" stroke-dasharray="5 4"/>
+    </svg>
+    <figcaption>FIGURE 3 · The top half generates events. The bottom half already knows how to show, price and ship them. No per-call record connects the two.</figcaption>
+  </figure>
+
+  <h2 id="flows">Four paths, four answers</h2>
+
+  <p>The asymmetry is sharper than it looks. The environment that holds your credentials and your filesystem is the least governed; the isolated one is the most.</p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>What happens</th><th>Crosses</th><th>Recorded</th><th>Can be refused</th></tr></thead>
+    <tbody>
+      <tr><td>A model call in Codex mode</td><td>model proxy</td><td class="yes">yes, one line</td><td class="no">no</td></tr>
+      <tr><td>An MCP tool call, local session</td><td>MCP proxy</td><td class="no">counters only</td><td class="yes">allowlist, static</td></tr>
+      <tr><td><code>Read</code>, <code>Edit</code>, <code>Bash</code></td><td>nothing aimux owns</td><td class="no">totals only, afterwards</td><td class="no">your own hooks, not aimux</td></tr>
+      <tr><td>A tool call inside a sandbox</td><td>tool gateway</td><td class="no">text log lines; the sandbox keeps its own log</td><td class="yes">token scope, allowlist, pin</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Row three is the one that matters most: those are the majority of what an agent does. They are already counted: Claude Code reports each tool use to the collector, which keeps, per session and per tool, the number of calls, the tokens and the cost. What is missing is the single call: which tool, when, in what order, how long, and whether it was allowed. The file and the command themselves stay in the transcript, and the record points to the place. That is what the reporting hook adds. Refusing a call would be a separate, earlier hook, and is not part of the first release. Row four is what rows one to three should look like.</p>
+
+  <h2 id="idea">The idea</h2>
+
+  <p>One event shape, emitted wherever a crossing happens, written once and rendered twice.</p>
+
+  <figure>
+    <svg viewBox="0 0 980 330" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Chokepoints emit one event shape into a ledger; the ledger feeds the meter, policy and actuators, and is exported as spans to the trace view and MLflow">
+      <rect x="20" y="24" width="250" height="100" rx="9" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/>
+      <text x="34" y="46" fill="#8fbf88" font-size="12" class="m">EVERY CROSSING</text>
+      <text x="34" y="68" fill="#f2f4f8" font-size="12.5">model call · tool call · verdict · switch</text>
+      <text x="34" y="88" fill="#9aa1ad" font-size="11.5">who, what, how long, how much,</text>
+      <text x="34" y="105" fill="#9aa1ad" font-size="11.5">allowed or refused. No content.</text>
+
+      <rect x="330" y="46" width="200" height="56" rx="9" fill="#20242c" stroke="#8fbf88" stroke-width="1.6"/>
+      <text x="344" y="70" fill="#f2f4f8" font-size="14">the ledger</text>
+      <text x="344" y="89" fill="#8a9099" font-size="11">one line per crossing</text>
+
+      <rect x="600" y="20" width="356" height="52" rx="9" fill="#181c23" stroke="#2c313b"/>
+      <text x="616" y="42" fill="#f2f4f8" font-size="12.5">spans to :4318</text>
+      <text x="616" y="60" fill="#8a9099" font-size="11">the trace view and MLflow you already run</text>
+
+      <rect x="600" y="86" width="356" height="52" rx="9" fill="#181c23" stroke="#2c313b"/>
+      <text x="616" y="108" fill="#f2f4f8" font-size="12.5">the meter</text>
+      <text x="616" y="126" fill="#8a9099" font-size="11">spend and volume per session, project, day</text>
+
+      <rect x="330" y="176" width="200" height="56" rx="9" fill="rgba(206,164,81,.05)" stroke="#cea451"/>
+      <text x="344" y="200" fill="#f2f4f8" font-size="14">rules</text>
+      <text x="344" y="219" fill="#8a9099" font-size="11">rules written once</text>
+
+      <rect x="600" y="166" width="356" height="76" rx="9" fill="rgba(206,164,81,.05)" stroke="#cea451"/>
+      <text x="616" y="188" fill="#cea451" font-size="12" class="m">ACTUATORS</text>
+      <text x="616" y="210" fill="#f2f4f8" font-size="12.5">switch engine on quota · cap · refuse · pause</text>
+      <text x="616" y="229" fill="#9aa1ad" font-size="11.5">dry run first: say what it would do, change nothing</text>
+
+      <rect x="20" y="258" width="936" height="54" rx="9" fill="rgba(255,255,255,.015)" stroke="#3a404c" stroke-dasharray="6 4"/>
+      <text x="34" y="280" fill="#9aa1ad" font-size="12" class="m">THE LOOP</text>
+      <text x="110" y="280" fill="#f2f4f8" font-size="12.5">the ledger says what it cost; the labels say whether it was any good; the router reads both</text>
+      <text x="110" y="299" fill="#8a9099" font-size="11.5">without the evals half, "the best model for this work" is a preference rather than evidence</text>
+
+      <line x1="270" y1="74" x2="326" y2="74" stroke="#9aa1ad" stroke-width="1.5"/>
+      <line x1="530" y1="62" x2="596" y2="46" stroke="#9aa1ad" stroke-width="1.5"/>
+      <line x1="530" y1="86" x2="596" y2="108" stroke="#9aa1ad" stroke-width="1.5"/>
+      <line x1="430" y1="102" x2="430" y2="172" stroke="#565b66" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <line x1="530" y1="204" x2="596" y2="204" stroke="#cea451" stroke-width="1.5"/>
+    </svg>
+    <figcaption>FIGURE 4 · Written once as a ledger line, rendered again as a span. The ledger answers "what did I spend this week"; the span answers "what happened in this turn".</figcaption>
+  </figure>
+
+  <p>Three properties are worth insisting on. The record holds shapes, counts and outcomes, never prompts or tool arguments, which is already true of the model proxy's history. The ledger is the one authoritative copy, so a disagreement between views has an answer. And a dropped event is counted and shown, because a governance layer that quietly loses records is worse than none: it reports compliance it cannot back.</p>
+
+
+  <h3>Can everything be connected?</h3>
+
+  <p>Yes, and the connection is a few small labels each line carries: which conversation, which turn within it, and which call (plus a run label that ties together the three helpers of one Wingman question). Here is one turn as the ledger would hold it. Different writers produced these lines, each in its own file, and the labels are what make them one story.</p>
+
+  <figure>
+    <svg viewBox="0 0 980 520" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Six ledger lines for one turn, written by the model proxy, the hook, the MCP proxy and a label; every line carries the same session and turn labels, and tool calls name the model call they came from">
+      <text x="24" y="30" fill="#f2f4f8" font-size="14">One turn: "fix the failing test"</text>
+      <text x="24" y="50" fill="#8a9099" font-size="11.5">six lines, joined by the labels on the right</text>
+      <text x="38" y="80" fill="#9aa1ad" font-size="11" class="m">WHEN</text>
+      <text x="112" y="80" fill="#9aa1ad" font-size="11" class="m">WRITTEN BY</text>
+      <text x="218" y="80" fill="#9aa1ad" font-size="11" class="m">WHAT HAPPENED</text>
+      <text x="556" y="80" fill="#8fbf88" font-size="11" class="m">CONVERSATION</text>
+      <text x="660" y="80" fill="#cea451" font-size="11" class="m">TURN</text>
+      <text x="752" y="80" fill="#9aa1ad" font-size="11" class="m">CALL</text>
+      <rect x="24" y="92" width="932" height="36" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="38" y="115" fill="#8a9099" font-size="11.5" class="m">10:41:02</text>
+      <text x="112" y="115" fill="#9aa1ad" font-size="12">model proxy</text>
+      <text x="218" y="115" fill="#f2f4f8" font-size="12.5">model call · sol · 5.1 s · 100k tokens</text>
+      <rect x="556" y="99" width="92" height="22" rx="11" fill="rgba(143,191,136,.10)" stroke="#8fbf88"/><text x="602" y="114" fill="#8fbf88" font-size="11" text-anchor="middle" class="m">00686f1e</text>
+      <rect x="660" y="99" width="72" height="22" rx="11" fill="rgba(206,164,81,.10)" stroke="#cea451"/><text x="696" y="114" fill="#cea451" font-size="11" text-anchor="middle" class="m">turn 14</text>
+      <text x="752" y="115" fill="#f2f4f8" font-size="12" class="m">m1</text>
+      <rect x="24" y="136" width="932" height="36" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="38" y="159" fill="#8a9099" font-size="11.5" class="m">10:41:07</text>
+      <text x="112" y="159" fill="#9aa1ad" font-size="12">collector</text>
+      <text x="218" y="159" fill="#f2f4f8" font-size="12.5">tool Read · 40 ms · allowed</text>
+      <rect x="556" y="143" width="92" height="22" rx="11" fill="rgba(143,191,136,.10)" stroke="#8fbf88"/><text x="602" y="158" fill="#8fbf88" font-size="11" text-anchor="middle" class="m">00686f1e</text>
+      <rect x="660" y="143" width="72" height="22" rx="11" fill="rgba(206,164,81,.10)" stroke="#cea451"/><text x="696" y="158" fill="#cea451" font-size="11" text-anchor="middle" class="m">turn 14</text>
+      <text x="752" y="159" fill="#f2f4f8" font-size="12" class="m">t1</text>
+
+      <rect x="24" y="180" width="932" height="36" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="38" y="203" fill="#8a9099" font-size="11.5" class="m">10:41:08</text>
+      <text x="112" y="203" fill="#9aa1ad" font-size="12">collector</text>
+      <text x="218" y="203" fill="#f2f4f8" font-size="12.5">tool Bash · 2.3 s · allowed</text>
+      <rect x="556" y="187" width="92" height="22" rx="11" fill="rgba(143,191,136,.10)" stroke="#8fbf88"/><text x="602" y="202" fill="#8fbf88" font-size="11" text-anchor="middle" class="m">00686f1e</text>
+      <rect x="660" y="187" width="72" height="22" rx="11" fill="rgba(206,164,81,.10)" stroke="#cea451"/><text x="696" y="202" fill="#cea451" font-size="11" text-anchor="middle" class="m">turn 14</text>
+      <text x="752" y="203" fill="#f2f4f8" font-size="12" class="m">t2</text>
+
+      <rect x="24" y="224" width="932" height="36" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="38" y="247" fill="#8a9099" font-size="11.5" class="m">10:41:10</text>
+      <text x="112" y="247" fill="#9aa1ad" font-size="12">collector</text>
+      <text x="218" y="247" fill="#f2f4f8" font-size="12.5">tool JirAIa get_issue · 0.8 s</text>
+      <rect x="556" y="231" width="92" height="22" rx="11" fill="rgba(143,191,136,.10)" stroke="#8fbf88"/><text x="602" y="246" fill="#8fbf88" font-size="11" text-anchor="middle" class="m">00686f1e</text>
+      <rect x="660" y="231" width="72" height="22" rx="11" fill="rgba(206,164,81,.10)" stroke="#cea451"/><text x="696" y="246" fill="#cea451" font-size="11" text-anchor="middle" class="m">turn 14</text>
+      <text x="752" y="247" fill="#f2f4f8" font-size="12" class="m">t3</text>
+
+      <rect x="24" y="268" width="932" height="36" rx="7" fill="#181c23" stroke="#2c313b"/>
+      <text x="38" y="291" fill="#8a9099" font-size="11.5" class="m">10:41:12</text>
+      <text x="112" y="291" fill="#9aa1ad" font-size="12">model proxy</text>
+      <text x="218" y="291" fill="#f2f4f8" font-size="12.5">model call · sol · 4.8 s · 101k tokens</text>
+      <rect x="556" y="275" width="92" height="22" rx="11" fill="rgba(143,191,136,.10)" stroke="#8fbf88"/><text x="602" y="290" fill="#8fbf88" font-size="11" text-anchor="middle" class="m">00686f1e</text>
+      <rect x="660" y="275" width="72" height="22" rx="11" fill="rgba(206,164,81,.10)" stroke="#cea451"/><text x="696" y="290" fill="#cea451" font-size="11" text-anchor="middle" class="m">turn 14</text>
+      <text x="752" y="291" fill="#f2f4f8" font-size="12" class="m">m2</text>
+      <rect x="24" y="312" width="932" height="36" rx="7" fill="rgba(206,164,81,.05)" stroke="#cea451"/>
+      <text x="38" y="335" fill="#8a9099" font-size="11.5" class="m">later</text>
+      <text x="112" y="335" fill="#9aa1ad" font-size="12">you</text>
+      <text x="218" y="335" fill="#f2f4f8" font-size="12.5">label: BAD · "edited the wrong file"</text>
+      <rect x="556" y="319" width="92" height="22" rx="11" fill="rgba(143,191,136,.10)" stroke="#8fbf88"/><text x="602" y="334" fill="#8fbf88" font-size="11" text-anchor="middle" class="m">00686f1e</text>
+      <rect x="660" y="319" width="72" height="22" rx="11" fill="rgba(206,164,81,.10)" stroke="#cea451"/><text x="696" y="334" fill="#cea451" font-size="11" text-anchor="middle" class="m">turn 14</text>
+
+      <rect x="24" y="370" width="456" height="122" rx="9" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/>
+      <text x="38" y="392" fill="#8fbf88" font-size="12" class="m">WHAT THE LABELS LET YOU ASK</text>
+      <text x="38" y="414" fill="#f2f4f8" font-size="12">What did this turn cost, and where did the time go?</text>
+      <text x="38" y="433" fill="#f2f4f8" font-size="12">Which tools ran in this turn, and in what order?</text>
+      <text x="38" y="452" fill="#f2f4f8" font-size="12">What did the turns I marked BAD have in common?</text>
+      <text x="38" y="471" fill="#f2f4f8" font-size="12">Show me the words: open the transcript at turn 14.</text>
+
+      <rect x="500" y="370" width="456" height="122" rx="9" fill="#181c23" stroke="#3a404c" stroke-dasharray="6 4"/>
+      <text x="514" y="392" fill="#9aa1ad" font-size="12" class="m">WHERE THE JOIN IS WEAK TODAY</text>
+      <text x="514" y="414" fill="#f2f4f8" font-size="12">MCP proxy lines: cross-check only, until it knows the conversation</text>
+      <text x="514" y="433" fill="#f2f4f8" font-size="12">Background model calls: they arrive with no conversation</text>
+      <text x="514" y="452" fill="#f2f4f8" font-size="12">Claude calls sent straight to Anthropic: totals only</text>
+      <text x="514" y="471" fill="#8a9099" font-size="11.5">each is shown as "unmatched", never guessed into a turn</text>
+    </svg>
+    <figcaption>FIGURE 5 · Tool calls reach the ledger through the collector: the hook hands each one over. Your label is not a ledger line; it lives with the other labels and joins by the same tags. The ledger holds no prompts and no file contents. The conversation and turn labels are also the address of the words, which stay in the transcript.</figcaption>
+  </figure>
+
+  <p>Only the conversation label exists today, as a short tag in the model proxy's history. The turn and call labels are new, and agreeing exactly where each writer gets them is the first piece of work, before any ledger code. One rule keeps the count honest: every tool call has exactly one line that counts. Where a hook reports the call, that line is the record; the MCP proxy's line for the same call is kept only as a cross-check. So a call can never be counted twice, and a line whose labels are missing is shown as unmatched, never guessed into a turn.</p>
+
+  <h2 id="engines">One door, many engines</h2>
+
+  <p>Codex mode is the first thing the model proxy does, not what it is for. The proxy is one door that Claude Code talks to, with several engines behind it and a router that picks one. An engine is anything that can answer: a model service, or another agent program running its own loop. Codex is already the second kind.</p>
+
+  <figure>
+    <svg viewBox="0 0 980 300" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Claude Code sends requests to the model proxy; a router inside it picks one of four engines: Codex, running today; Anthropic passthrough, next; an OpenAI-compatible endpoint, later; and Codex with web search">
+      <rect x="20" y="110" width="170" height="64" rx="9" fill="#181c23" stroke="#2c313b"/>
+      <text x="34" y="136" fill="#f2f4f8" font-size="13">Claude Code</text>
+      <text x="34" y="156" fill="#8a9099" font-size="11">keeps the transcript</text>
+
+      <rect x="250" y="60" width="270" height="164" rx="10" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/>
+      <text x="266" y="84" fill="#8fbf88" font-size="12" class="m">MODEL PROXY · ONE DOOR</text>
+      <rect x="266" y="100" width="238" height="50" rx="8" fill="#20242c" stroke="#8fbf88" stroke-width="1.5"/>
+      <text x="280" y="121" fill="#f2f4f8" font-size="13">router</text>
+      <text x="280" y="139" fill="#8a9099" font-size="11">picks when a session starts</text>
+      <text x="266" y="174" fill="#9aa1ad" font-size="11.5">chooses on: allowance left,</text>
+      <text x="266" y="191" fill="#9aa1ad" font-size="11.5">what the work needs, how heavy,</text>
+      <text x="266" y="208" fill="#9aa1ad" font-size="11.5">cost, and later your labels</text>
+
+      <rect x="590" y="16" width="366" height="56" rx="9" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/>
+      <text x="606" y="39" fill="#f2f4f8" font-size="12.5">Codex</text>
+      <text x="606" y="58" fill="#8a9099" font-size="11">an agent program as a backend · running today</text>
+
+      <rect x="590" y="86" width="366" height="56" rx="9" fill="rgba(206,164,81,.05)" stroke="#cea451"/>
+      <text x="606" y="109" fill="#f2f4f8" font-size="12.5">Anthropic, passed straight through</text>
+      <text x="606" y="128" fill="#8a9099" font-size="11">next · brings every Claude call through the door</text>
+
+      <rect x="590" y="156" width="366" height="56" rx="9" fill="#181c23" stroke="#2c313b" stroke-dasharray="5 4"/>
+      <text x="606" y="179" fill="#f2f4f8" font-size="12.5">any OpenAI-style endpoint</text>
+      <text x="606" y="198" fill="#8a9099" font-size="11">later · a local model, or your company gateway</text>
+
+      <rect x="590" y="226" width="366" height="56" rx="9" fill="#181c23" stroke="#2c313b" stroke-dasharray="5 4"/>
+      <text x="606" y="249" fill="#f2f4f8" font-size="12.5">Codex with web search on</text>
+      <text x="606" y="268" fill="#8a9099" font-size="11">a setting per door · for research questions</text>
+
+      <line x1="190" y1="142" x2="246" y2="142" stroke="#9aa1ad" stroke-width="1.5"/>
+      <line x1="520" y1="118" x2="586" y2="46" stroke="#9aa1ad" stroke-width="1.5"/>
+      <line x1="520" y1="124" x2="586" y2="114" stroke="#cea451" stroke-width="1.5"/>
+      <line x1="520" y1="130" x2="586" y2="182" stroke="#565b66" stroke-width="1.5" stroke-dasharray="5 4"/>
+      <line x1="520" y1="136" x2="586" y2="252" stroke="#565b66" stroke-width="1.5" stroke-dasharray="5 4"/>
+    </svg>
+    <figcaption>FIGURE 6 · Green runs today, gold is next, dashed is later. The second engine is built before the router, so the shape engines share is drawn from two real ones.</figcaption>
+  </figure>
+
+  <p><b>One rule about failure.</b> If the proxy is down, a session that goes through it stops with a clear message. It is never quietly sent straight to the provider, because that would change both what is governed and what you are billed for.</p>
+
+  <p><b>Why Anthropic comes second.</b> Today only sessions you start in Codex mode go through the proxy; a normal Claude session never touches it. Passing Anthropic's calls straight through changes that: every model call crosses one door, so the meter counts all of them and the router can choose for all of them. One thing is untested: whether your Claude subscription login works when Claude Code is pointed at a local address. That test is moved to the very start of the work, beside <code>aimux status</code>, because routing and half of what the meter can see depend on it. If it fails, direct Claude calls stay known only through telemetry.</p>
+
+  <h3>When the choice is made</h3>
+
+  <p>At the start of a session, not on every request. Changing engine in the middle throws away the open conversation and sends the whole history again, about 36 seconds instead of 5. So for a terminal session the choice is made once, at the start; for Wingman it is made per helper, each time. A switch in the middle is the exception: you ask for it, or a limit error arrives and you had opted in to falling back.</p>
+
+  <h3>The right model for each task, without losing context</h3>
+
+  <p>Context is never lost by changing model: Claude Code holds the whole conversation and sends it with every request. What a change costs is warm-up, because a model that has not seen the recent turns must read them first. The design pays that rarely, in four levels built in order:</p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Level</th><th>How it works</th><th>Warm-up cost</th></tr></thead>
+    <tbody>
+      <tr><td>1. By hand</td><td>You change the model inside a session, as you do today. The proxy sends the next request to that engine.</td><td>Paid once per change</td></tr>
+      <tr><td>2. By role</td><td>Helpers that already run as their own conversations (subagents, background calls) each get the engine that suits them. Your main conversation stays where it is.</td><td>None</td></tr>
+      <tr><td>3. Both sides kept warm</td><td>The engine you left keeps its place for a while. Coming back, it only reads the turns it missed.</td><td>Small</td></tr>
+      <tr><td>4. Automatic</td><td>You pick "auto" as the model, and aimux chooses for the task.</td><td>Paid only when worth it</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><b>A written catalog.</b> One file says what each model is good at, what it is weak at, its speed and cost, and where each claim comes from. <code>aimux models</code> prints it. The router reads the same file, so what you read and what it does cannot drift apart. It starts from public benchmarks, marked as such, and is replaced by measurements from your own sessions.</p>
+
+  <p><b>Who decides when you pick auto.</b> You write the rules in that file and the proxy applies them: the role, what the task needs, the allowance left. No model makes the choice. When the rules do not settle it, the route function Wingman already uses names the kind of work, once per task, and your file turns that into a model. Auto never interrupts a turn, leaves your main conversation alone unless you allow otherwise, says in one line what it chose, and is overridden the moment you name a model.</p>
+
+  <p><b>How it improves.</b> Whether you kept a choice or changed it, your labels, and your own cases replayed on each model all feed the catalog's numbers. Changing what auto does remains a change you make to the file.</p>
+
+  <h3>Switching a session that is already running</h3>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>The switch</th><th>What is copied</th><th>What it costs</th></tr></thead>
+    <tbody>
+      <tr><td>Same program, other engine: Claude Code moving between Anthropic and Codex</td><td>Nothing. Claude Code holds the transcript and sends it with each request.</td><td>One full resend of the conversation, then fast again.</td></tr>
+      <tr><td>Other program: Claude Code to Codex's own terminal, or back</td><td>The whole history, into a new session that points back at the old one.</td><td>A new session; the two are recorded as one piece of work.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>"The whole history" is delivered in three layers, because keeping everything and fitting everything into the model's working memory are different promises:</p>
+
+  <ol>
+    <li><b>Nothing is lost.</b> The original transcript stays put, and the new session can read any part of it on demand. The reading tool that exists today is not enough: it cuts long exchanges and leaves out tool results, so this needs a reader over the transcript file itself.</li>
+    <li><b>As much as fits, word for word.</b> The newest exchanges are loaded in full up to a set share of the new model's working memory. Only what does not fit is summarised, and the summary says how much it stands for.</li>
+    <li><b>A true conversion where the target can take it.</b> The proxy already rebuilds a Codex conversation from a full Claude transcript whenever it starts one. A handoff to Codex reuses that. Those conversations are temporary today, so a handoff needs one that Codex keeps; whether Codex's own terminal can then reopen it is untested, as is the opposite direction.</li>
+  </ol>
+
+  <p>A session longer than the new model's working memory cannot be held whole by any program; Claude Code summarises in the same situation. The first layer is what makes that safe. Every switch is written down: from which engine, to which, who or what asked, and what the resend cost.</p>
+
+  <p>Three safeguards apply to every switch. It happens only between turns, never while a tool is still running. The old session stays usable until the new one has answered once. And the first time a project's conversation would go to a provider that kind of content has not been sent to before, you are asked; a rule cannot make that choice for you.</p>
+
+  <h2 id="reuse">Built to be reused</h2>
+
+  <p>There are three proxies today and there will be more. They share almost nothing: the same small jobs are written again in each. Checking a request's key exists in five places, writing lines to a log in nine, starting a listener in six, and answering a health check in only one.</p>
+
+  <p>What gets reused is a small base that every proxy stands on. A new proxy then writes only what is particular to the protocol it speaks.</p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>The base, written once</th><th>Each proxy, written for its protocol</th></tr></thead>
+    <tbody>
+      <tr><td>The listener and its key check, plus a guarded entrance a sandbox can reach</td><td>The protocol it speaks</td></tr>
+      <tr><td>The labels: run, conversation, turn, call</td><td>How it finds them in its own requests</td></tr>
+      <tr><td>Writing ledger lines, and counting any it had to drop</td><td>Which lines it writes</td></tr>
+      <tr><td>The allow-or-refuse check</td><td>Where in its flow the check sits</td></tr>
+      <tr><td>The health answer that <code>aimux status</code> reads</td><td>Its own detail</td></tr>
+      <tr><td>Install, upgrade, roll back</td><td>Its engines or backends</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Routing, the meter, traces and evals read the ledger. They never need to know which proxy wrote a line, and that is what lets a fourth proxy arrive without changing any of them.</p>
+
+  <p>The base is pulled out of code that already works, one piece at a time, each when its second user is being written. Nothing is built for a user that does not exist yet.</p>
+
+  <h3>Wingman is the second user</h3>
+
+  <p>Wingman is the browser side panel. aimux does its thinking: it picks a mode, starts sandboxes, and answers one question with three helpers (a planner that reads your work tools, a reader that searches the web, a writer). The work on how Wingman chooses its models, started in another session, is now part of this design. Compared with that work, this design had gaps, now closed:</p>
+
+  <ul>
+    <li><b>Wingman does not go through the proxy at all today.</b> Its sandboxes call Anthropic directly. When the planner hit Claude's weekly limit on 23 November, nothing could take over. The proxy gets an entrance sandboxes can reach, so Wingman's calls cross the same door.</li>
+    <li><b>One list of engines, not two.</b> The other session had proposed a separate models file. The list stays with the proxy, and a Wingman profile just names which policy each helper uses.</li>
+    <li><b>Falling back when the limit error arrives.</b> Claude does not report how much allowance is left, so the proxy also reacts to the error itself: only if you opted in, and always saying so.</li>
+    <li><b>Private data stays where it is allowed.</b> The planner sees Jira and Slack; the reader sees the public web. Each engine is marked for whether it may receive private data, and a helper can only fall back to engines its data may reach.</li>
+    <li><b>One question counts once.</b> The three helpers are three sessions; a shared run label ties them together.</li>
+    <li><b>The tool gateway writes ledger lines too.</b> It already knows which session every call belongs to, better than any other part.</li>
+  </ul>
+
+  <p>The two efforts would change the same files, so the engine work is done once, here, with Wingman as its second user.</p>
+
+  <h2 id="buys">What it buys you</h2>
+
+  <ol class="principles">
+    <li><b>An answer to "why is this slow", in one command.</b> Yesterday's bug needed an afternoon and a throwaway script. The same question is now <code>aimux model proxy stats</code>, and the second bug it found took minutes.</li>
+    <li><b>Spend you can see per session and per project.</b> Prices exist for the Claude models; the Codex models you use are not priced yet and show as "unpriced" until they are. Estimates are always labelled as estimates.</li>
+    <li><b>Switching backend as a quota runs down.</b> Your own goal. It needs two numbers that nothing currently produces together: what is left, and what each session is spending.</li>
+    <li><b>Tool changes you notice.</b> Pins already catch a server quietly changing a tool's schema, but only for sandboxes. Your local sessions have your credentials and no such check.</li>
+    <li><b>Evals from real work.</b> A labelled turn and its cost share one identity, so "this turn was bad, cost $1.40 and had two refused tools" becomes one record set rather than three.</li>
+  </ol>
+
+  <h2 id="costs">What it costs</h2>
+
+  <p>Four ways this could be worse than doing nothing, written down so they can be checked against:</p>
+
+  <div class="claim">
+    <p><b>A slower agent.</b> The proxy adds about 33 milliseconds today, measured against a fake server that answers instantly. A step takes three to five seconds, so the proxy is under one percent of it; the rest is Codex and the model. Bookkeeping must not spend that budget. Rewriting the proxy in a faster language would recover a few of those milliseconds at the price of 5,200 lines and their tests, so the design does not do it. What moves the number is keeping the conversation open (five seconds a step instead of thirty-six), the Fast tier, and the effort level.</p>
+  </div>
+
+  <p><b>Silent bypass.</b> A layer that misses <code>Read</code>, <code>Edit</code> and <code>Bash</code> would report compliance while governing a minority of the work. That is why the hook comes early rather than last.</p>
+
+  <p><b>Plumbing nobody looks at.</b> The first steps produce data, not features. If you never run the command, the work was wasted, which is the argument for stopping after the visibility release and checking.</p>
+
+  <p><b>Quietly becoming a product.</b> Multi-tenant, always-on, cluster-deployed agent governance is OpenShell and OCE, your day job. If this starts needing an operator and roles, that is a choice to build a different thing, not a step to drift into.</p>
+
+  <h2 id="scope">One developer first</h2>
+
+  <p>The control plane is your laptop, which is what the code already assumes: four launchd jobs, state under <code>~/.aimux</code>, the key in the Keychain. Nothing else is ruled out; it is sequenced. Two habits keep the door open at no cost today: components take an address rather than assuming localhost, and every event carries the host.</p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Later</th><th>What keeps it cheap to add</th></tr></thead>
+    <tbody>
+      <tr><td>A second machine, or a control plane elsewhere</td><td>no hard-coded localhost</td></tr>
+      <tr><td>Events from several hosts</td><td>the host travels with the event</td></tr>
+      <tr><td>A team, tenants, roles</td><td>identity is a field, not an assumption</td></tr>
+      <tr><td>Agents that run while the laptop sleeps</td><td>the pull pattern already exists for clusters; until then the ledger shows a gap rather than implying the window was governed</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>One simplification is taken deliberately and written down: one machine, with one writer per ledger file. That is the first thing a second form factor would force us to revisit.</p>
+
+  <h2 id="order">The order of work</h2>
+
+  <figure>
+    <svg viewBox="0 0 980 250" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Nine steps in three groups: four that make things visible, four that act on what is seen, and evals; several prerequisites are already done">
+      <text x="24" y="28" fill="#8fbf88" font-size="12" class="m">ALREADY DONE (22–24 NOVEMBER)</text>
+      <rect x="24" y="38" width="930" height="38" rx="8" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/>
+      <text x="38" y="62" fill="#f2f4f8" font-size="12.5">prompt caching · session tags · request history and stats · pricing for the Claude models · the flaky promote fixed</text>
+
+      <text x="24" y="106" fill="#9aa1ad" font-size="12" class="m">FIRST: MAKE IT VISIBLE · STEP 0: LOGIN TEST, AIMUX STATUS, LABEL CONTRACT</text>
+      <rect x="24" y="116" width="222" height="52" rx="8" fill="#20242c" stroke="#2c313b"/>
+      <text x="38" y="137" fill="#f2f4f8" font-size="12.5">1 · event and ledger</text>
+      <text x="38" y="155" fill="#8a9099" font-size="11">the proxy emits first</text>
+      <rect x="258" y="116" width="222" height="52" rx="8" fill="#20242c" stroke="#2c313b"/>
+      <text x="272" y="137" fill="#f2f4f8" font-size="12.5">2 · entry wrapper</text>
+      <text x="272" y="155" fill="#8a9099" font-size="11">replaces your shell function</text>
+      <rect x="492" y="116" width="222" height="52" rx="8" fill="#20242c" stroke="#2c313b"/>
+      <text x="506" y="137" fill="#f2f4f8" font-size="12.5">3 · reporting hook</text>
+      <text x="506" y="155" fill="#8a9099" font-size="11">Read, Edit, Bash at last</text>
+      <rect x="726" y="116" width="228" height="52" rx="8" fill="#20242c" stroke="#2c313b"/>
+      <text x="740" y="137" fill="#f2f4f8" font-size="12.5">4 · MCP local path</text>
+      <text x="740" y="155" fill="#8a9099" font-size="11">per-call events, pin warnings</text>
+
+      <text x="24" y="198" fill="#cea451" font-size="12" class="m">THEN: ACT ON IT</text>
+      <rect x="24" y="206" width="690" height="34" rx="8" fill="rgba(206,164,81,.05)" stroke="#cea451"/>
+      <text x="38" y="228" fill="#f2f4f8" font-size="12.5">5 meter · 6 spans · 7 rules · 8 second engine, routing, switching</text>
+      <rect x="726" y="206" width="228" height="34" rx="8" fill="#181c23" stroke="#2c313b" stroke-dasharray="5 4"/>
+      <text x="740" y="228" fill="#f2f4f8" font-size="12.5">9 · evals, partly built</text>
+    </svg>
+    <figcaption>FIGURE 7 · Steps 1 to 4 need no decision from you beyond approval. Steps 5 to 8 are a programme, and each one waits on the data the first four produce.</figcaption>
+  </figure>
+
+  <p>The order in the spec is now: first a test of whether your Claude login works through the proxy, <code>aimux status</code>, and a short written contract for the labels. Then the visibility release, steps 1 to 4, where nothing is refused or switched. Then costs, traces, rules, and engines with routing. Evals run alongside, built by the eval session. Routing on cost and quality, moving a session to another program, and the full upgrade command are deliberately left for later.</p>
+
+  <h2 id="decide">What I need from you</h2>
+
+  <p>Nothing has been built from this design. The open questions have grown and are kept up to date in the one-page version and at the end of the spec. The main ones:</p>
+
+  <ol>
+    <li><b>Is the evaluation plan still the plan?</b> It is now written into the spec and has been checked by the eval session. Still yours to confirm: that session-to-evals and continuous learning both move into aimux, and that eval work starts with the corrections format.</li>
+    <li><b>Does the hook refuse, or only report, in its first version?</b> Report-only is safer and still gives the meter its attribution. Refusing puts aimux in the path of every built-in tool call.</li>
+    <li><b>Answered: native Codex sessions are in scope.</b> Codex has its own hooks, so the design installs aimux's hooks per harness, through one small installer with a Claude Code and a Codex implementation.</li>
+    <li><b>Where would a Claude-side remaining allowance come from?</b> The Codex side is polled every two minutes. Nothing equivalent exists for Claude, so quota switching would start one-sided.</li>
+  </ol>
+
+  <p>If the programme is more than you want to commit to, approving the first steps and the visibility release (steps 0 to 4) and leaving the rest as recorded direction is a reasonable place to stop. The full specification, including the event fields, the review findings and what is left to the builder, is in <code>2026-11-23-aimux-governance-metering-and-evals-design.md</code> beside this file.</p>
+
+  <footer>AIMUX · DESIGN REVIEW · COMPANION TO THE SPEC IN docs/superpowers/specs/</footer>
+
+</div>
+<script>
+(function () {
+  var KEY = 'aimux-design-theme';
+  var btn = document.getElementById('themeToggle');
+  function label() {
+    btn.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? '☀ LIGHT' : '☾ DARK';
+  }
+  label();
+  btn.addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    label();
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+  });
+})();
+(function () {
+  var heads = [].slice.call(document.querySelectorAll('h2[id]'));
+  var links = {};
+  [].slice.call(document.querySelectorAll('nav.toc a')).forEach(function (a) {
+    links[a.getAttribute('href').slice(1)] = a;
+  });
+  var current = null;
+  function spy() {
+    var y = window.scrollY + 130, cur = heads[0];
+    for (var i = 0; i < heads.length; i++) if (heads[i].offsetTop <= y) cur = heads[i];
+    if (!cur || cur === current) return;
+    current = cur;
+    for (var id in links) links[id].className = '';
+    if (links[cur.id]) links[cur.id].className = 'active';
+  }
+  window.addEventListener('scroll', spy, { passive: true });
+  window.addEventListener('resize', spy);
+  spy();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+  "theme": "redhat",
+  "style": "paper",
+  "elements": [
+    {"type": "container", "x": 40, "y": 20, "w": 1400, "h": 114, "label": "FRONT DOORS: the same work, five ways in"},
+    {"type": "card", "x": 60, "y": 50, "w": 250, "h": 64, "title": "CLI", "sub": "aimux <verb>", "desc": "40 commands"},
+    {"type": "card", "x": 330, "y": 50, "w": 230, "h": 64, "title": "TUI", "sub": "aimux", "desc": "panes, keyboard"},
+    {"type": "card", "x": 580, "y": 50, "w": 250, "h": 64, "title": "web dashboard", "sub": "aimux web, :3000", "desc": "browser"},
+    {"type": "card", "x": 850, "y": 50, "w": 280, "h": 64, "title": "remote API", "sub": "phone, another laptop", "desc": "device login, approvals"},
+    {"type": "card", "x": 1150, "y": 50, "w": 270, "h": 64, "title": "aimux as an MCP server", "sub": "for other agents", "desc": "search, resume sessions"},
+
+    {"type": "card", "x": 490, "y": 150, "w": 500, "h": 44, "title": "controller", "sub": "one implementation behind every front door", "align": "center"},
+
+    {"type": "container", "x": 40, "y": 230, "w": 1400, "h": 132, "tone": "ink", "label": "CHOKEPOINTS: every model call and every tool call crosses one of these"},
+    {"type": "card", "x": 60, "y": 268, "w": 330, "h": 72, "title": "model proxy :7385", "sub": "Messages API, answered by Codex", "desc": "request history · health · stats · Fast tier"},
+    {"type": "card", "x": 410, "y": 268, "w": 330, "h": 72, "title": "MCP proxy :7381", "sub": "one set of MCP servers for all sessions", "desc": "supervisors · allowlist · status"},
+    {"type": "card", "x": 760, "y": 268, "w": 320, "h": 72, "title": "tool gateway :7390", "sub": "pins what a tool may do", "desc": "hash of its schema and promise"},
+    {"type": "card", "x": 1100, "y": 268, "w": 320, "h": 72, "title": "hooks (the harness's own)", "sub": "could see Read, Edit, Bash", "desc": "aimux installs 8: alerts, housekeeping"},
+
+    {"type": "card", "x": 240, "y": 378, "w": 1000, "h": 58, "kind": "closed", "tone": "focus", "title": "missing: one record across all four", "desc": "each keeps its own shape in its own place, so nothing joins them, meters them, or enforces a rule once", "align": "center"},
+
+    {"type": "container", "x": 40, "y": 460, "w": 680, "h": 174, "label": "OBSERVE"},
+    {"type": "card", "x": 60, "y": 496, "w": 300, "h": 64, "title": "OTLP receiver :4318", "sub": "telemetry from Claude Code", "desc": "and from Codex"},
+    {"type": "card", "x": 380, "y": 496, "w": 320, "h": 64, "title": "span store", "sub": "keeps the spans it receives", "desc": "plus a reader for Kubernetes"},
+    {"type": "card", "x": 60, "y": 572, "w": 300, "h": 44, "title": "cost", "sub": "model pricing to spend"},
+    {"type": "card", "x": 380, "y": 572, "w": 320, "h": 44, "title": "spans to turns", "sub": "two formats, detected"},
+
+    {"type": "container", "x": 760, "y": 460, "w": 680, "h": 174, "label": "JUDGE AND EXPORT"},
+    {"type": "card", "x": 780, "y": 496, "w": 300, "h": 64, "title": "trace and review", "sub": "turn by turn, inline diffs", "desc": "PR-style panel"},
+    {"type": "card", "x": 1100, "y": 496, "w": 320, "h": 64, "title": "labels", "sub": "GOOD / BAD / WASTE, with notes", "desc": "real runs become evals"},
+    {"type": "card", "x": 780, "y": 572, "w": 300, "h": 44, "title": "export", "sub": "OTLP, or JSONL files"},
+    {"type": "card", "x": 1100, "y": 572, "w": 320, "h": 44, "kind": "closed", "title": "MLflow · Jaeger · any OTLP"},
+
+    {"type": "container", "x": 40, "y": 648, "w": 1400, "h": 118, "label": "RUN: where the agents actually are"},
+    {"type": "card", "x": 60, "y": 685, "w": 250, "h": 64, "title": "spawn", "sub": "local sessions", "desc": "start, attach, kill"},
+    {"type": "card", "x": 330, "y": 685, "w": 280, "h": 64, "title": "sandbox launch", "sub": "OpenShell sandboxes", "desc": "isolated, remote"},
+    {"type": "card", "x": 630, "y": 685, "w": 260, "h": 64, "kind": "closed", "title": "Kubernetes pods", "sub": "your cluster", "desc": "agents as workloads"},
+    {"type": "card", "x": 910, "y": 685, "w": 250, "h": 64, "title": "acprun", "sub": "ACP adapters", "desc": "continue a session"},
+    {"type": "card", "x": 1180, "y": 685, "w": 240, "h": 64, "title": "profiles", "sub": "saved launch setups", "desc": "and profile runs"},
+
+    {"type": "container", "x": 40, "y": 782, "w": 1400, "h": 118, "label": "KNOW: what it remembers about past work"},
+    {"type": "card", "x": 60, "y": 818, "w": 320, "h": 64, "title": "history", "sub": "finds every past session", "desc": "Claude Code and Codex"},
+    {"type": "card", "x": 400, "y": 818, "w": 330, "h": 64, "title": "search", "sub": "SQLite index over transcripts", "desc": "hybrid and keyword"},
+    {"type": "card", "x": 750, "y": 818, "w": 330, "h": 64, "title": "insight, correlator", "sub": "patterns across sessions", "desc": "what went with what"},
+    {"type": "card", "x": 1100, "y": 818, "w": 320, "h": 64, "title": "sessiondiff", "sub": "what a session changed", "desc": "diffs beside the terminal"},
+
+    {"type": "text", "x": 40, "y": 912, "w": 240, "text": "PLATFORM", "bold": true, "size": 11},
+    {"type": "pills", "x": 40, "y": 934, "w": 150, "per_row": 8, "items": ["config", "keyring", "secretref", "netguard", "notify", "decide", "autoroute", "debuglog"]},
+
+    {"type": "edge", "points": [[740, 128], [740, 150]]},
+    {"type": "edge", "points": [[740, 194], [740, 230]]},
+    {"type": "edge", "points": [[740, 362], [740, 378]], "dashed": true},
+    {"type": "edge", "points": [[400, 436], [400, 460]], "dashed": true, "label": "would feed"},
+    {"type": "edge", "points": [[720, 540], [760, 540]]},
+
+    {"type": "legend", "x": 40, "y": 986, "items": [
+      {"kind": "open", "text": "aimux component"},
+      {"kind": "closed", "text": "external, or not built yet"},
+      {"kind": "open", "tone": "ink", "text": "control plane: the chokepoints"},
+      {"kind": "closed", "tone": "focus", "text": "the gap this design would fill"}
+    ]}
+  ]
+}

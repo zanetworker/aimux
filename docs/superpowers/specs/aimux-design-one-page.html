@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aimux design on one page</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #13161b; --text: #d6dae2; --text-dim: #9aa1ad;
+    --head: #f2f4f8; --accent: #8fbf88; --accent2: #cea451; --border: #262b34;
+    --code-bg: #1a1e25; --link: #8ab4d8; --figure-bg: #13161b; --figure-border: #262b34;
+    --hairline: #1d222b; --faint: #8a9099; --code-text: #c8cfda;
+    color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    --bg: #f7f6f3; --panel: #ffffff; --text: #2c313a; --text-dim: #5d6572;
+    --head: #171b22; --accent: #477a40; --accent2: #97701f; --border: #dedbd4;
+    --code-bg: #efede8; --link: #2e6b9e; --hairline: #e6e3dc; --faint: #6a6f77;
+    --code-text: #3a414d; --figure-bg: #ffffff; --figure-border: #dedbd4;
+    color-scheme: light;
+  }
+
+  /* === SVG THEME SELECTORS === */
+  html[data-theme="light"] figure svg [fill="#f2f4f8"] { fill: #171b22; }
+  html[data-theme="light"] figure svg [fill="#c8cfda"] { fill: #3a414d; }
+  html[data-theme="light"] figure svg [fill="#9aa1ad"] { fill: #555d69; }
+  html[data-theme="light"] figure svg [fill="#8a9099"] { fill: #8a8f98; }
+  html[data-theme="light"] figure svg [fill="#8fbf88"] { fill: #477a40; }
+  html[data-theme="light"] figure svg [fill="#cea451"] { fill: #97701f; }
+  html[data-theme="light"] figure svg [fill="#c96f6f"] { fill: #b04848; }
+  html[data-theme="light"] figure svg [fill="#20242c"] { fill: #f2f0eb; }
+  html[data-theme="light"] figure svg [fill="#1a1e25"] { fill: #f2f0eb; }
+  html[data-theme="light"] figure svg [fill="#181c23"] { fill: #faf8f4; }
+  html[data-theme="light"] figure svg [fill="rgba(255,255,255,.015)"] { fill: rgba(0,0,0,.02); }
+  html[data-theme="light"] figure svg [fill="rgba(143,191,136,.06)"] { fill: rgba(71,122,64,.07); }
+  html[data-theme="light"] figure svg [fill="rgba(201,111,111,.06)"] { fill: rgba(176,72,72,.07); }
+  html[data-theme="light"] figure svg [fill="rgba(206,164,81,.05)"] { fill: rgba(151,112,31,.07); }
+  html[data-theme="light"] figure svg [stroke="#8fbf88"] { stroke: #477a40; }
+  html[data-theme="light"] figure svg [stroke="#cea451"] { stroke: #97701f; }
+  html[data-theme="light"] figure svg [stroke="#c96f6f"] { stroke: #b04848; }
+  html[data-theme="light"] figure svg [stroke="#9aa1ad"] { stroke: #767c87; }
+  html[data-theme="light"] figure svg [stroke="#565b66"] { stroke: #a09a90; }
+  html[data-theme="light"] figure svg [stroke="#2c313b"] { stroke: #d9d5cc; }
+  html[data-theme="light"] figure svg [stroke="#3a404c"] { stroke: #c7c2b8; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16.5px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 64px 40px 96px; }
+  .kicker {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; letter-spacing: 3px; color: var(--accent);
+    text-transform: uppercase; margin-bottom: 14px;
+  }
+  h1 { color: var(--head); font-size: 34px; line-height: 1.25; font-weight: 750; letter-spacing: -.3px; margin: 0 0 10px; }
+  .subtitle { color: var(--text-dim); font-size: 17px; margin: 0 0 8px; }
+  .meta {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px; color: var(--faint); letter-spacing: .5px;
+    padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 40px;
+  }
+  h2 { color: var(--head); font-size: 23px; font-weight: 700; letter-spacing: -.2px; margin: 52px 0 14px; padding-top: 26px; border-top: 1px solid var(--border); }
+  h2:first-of-type { border-top: none; padding-top: 0; margin-top: 36px; }
+  h3 { color: var(--head); font-size: 17.5px; font-weight: 700; margin: 30px 0 8px; }
+  p { margin: 0 0 15px; }
+  b, strong { color: var(--head); font-weight: 650; }
+  a { color: var(--link); }
+  code {
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: .86em; background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 6px; color: var(--code-text);
+  }
+  ul, ol { margin: 0 0 15px; padding-left: 26px; }
+  li { margin-bottom: 7px; }
+  li::marker { color: var(--accent); }
+  ol li::marker { color: var(--text-dim); font-weight: 600; }
+  .claim {
+    margin: 26px 0; padding: 20px 24px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 10px;
+    color: var(--head); font-size: 17px;
+  }
+  .claim p { margin: 0; }
+  dl.terms { margin: 0 0 15px; }
+  dl.terms div { display: grid; grid-template-columns: 150px 1fr; gap: 14px; padding: 8px 0; border-bottom: 1px dashed var(--hairline); }
+  dl.terms div:last-child { border-bottom: none; }
+  dl.terms dt { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 14px; color: var(--accent); font-weight: 600; padding-top: 2px; }
+  dl.terms dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  pre.term { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 12.5px/1.55 "SF Mono", ui-monospace, Menlo, Consolas, monospace; color: var(--text); margin: 0 0 18px; }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin: 18px 0 22px; font-size: 14.5px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 600; font-size: 12.5px; letter-spacing: 1px; text-transform: uppercase; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 14px 10px 0; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  td.yes { color: var(--accent); }
+  td.no { color: var(--accent2); }
+  ol.principles { padding-left: 0; counter-reset: pr; list-style: none; }
+  ol.principles li { counter-increment: pr; margin-bottom: 12px; padding: 13px 17px 13px 48px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; position: relative; }
+  ol.principles li::before { content: counter(pr); position: absolute; left: 17px; top: 14px; font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 13px; color: var(--accent); font-weight: 700; }
+  figure { margin: 26px 0 30px; }
+  figure svg { width: 100%; height: auto; display: block; background: var(--figure-bg); border: 1px solid var(--figure-border); border-radius: 10px; padding: 14px; }
+  figcaption { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; color: var(--faint); letter-spacing: .3px; margin-top: 9px; }
+  figure text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  figure .m { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+  html { scroll-behavior: smooth; }
+  h2[id] { scroll-margin-top: 24px; }
+  nav.toc { display: none; }
+  @media (min-width: 1320px) {
+    nav.toc { display: block; position: fixed; top: 72px; left: 28px; width: 210px; max-height: calc(100vh - 110px); overflow-y: auto; font-size: 12.5px; line-height: 1.5; }
+    nav.toc .toc-title { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 2px; color: var(--faint); text-transform: uppercase; margin: 0 0 10px 12px; }
+    nav.toc a { display: block; color: var(--text-dim); text-decoration: none; padding: 3px 10px; border-left: 2px solid var(--border); }
+    nav.toc a:hover { color: var(--text); }
+    nav.toc a.active { color: var(--accent); border-left-color: var(--accent); }
+  }
+  .theme-toggle { position: fixed; top: 18px; right: 20px; z-index: 10; font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 1.5px; cursor: pointer; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; }
+  .theme-toggle:hover { color: var(--head); }
+  footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--border); font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--faint); letter-spacing: .4px; }
+</style>
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('aimux-design-theme');
+    if (!t && window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) t = 'light';
+    if (t) document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+})();
+</script>
+</head>
+<body>
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle color scheme">MODE</button>
+<div class="page">
+
+  <div class="kicker">aimux · the design on one page</div>
+  <h1>One record, one base, one door</h1>
+  <p class="subtitle">The five-minute version. Everything here is expanded in the longer review and the spec.</p>
+
+  <h2 id="problem">The problem</h2>
+  <p>Your agents work through several aimux pieces that were each built alone. Each keeps its own notes in its own shape, so you cannot ask one question across them: what did this cost, what did the agent actually do, was it any good, and should the next one go somewhere else.</p>
+
+  <h2 id="idea">The idea, in one picture</h2>
+  <figure>
+    <svg viewBox="0 0 980 414" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Agents go through four doors that share one base; the doors write one ledger; status, meter, traces, routing and evals all read the ledger">
+      <rect x="24" y="16" width="932" height="46" rx="8" fill="#181c23" stroke="#2c313b"/><text x="38" y="45" fill="#f2f4f8" font-size="13">Your agents</text><text x="130" y="45" fill="#8a9099" font-size="11.5">Claude Code · Codex · Wingman</text>
+      <line x1="490" y1="62" x2="490" y2="82" stroke="#9aa1ad" stroke-width="1.5"/>
+      <rect x="24" y="84" width="932" height="150" rx="10" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/><text x="38" y="106" fill="#8fbf88" font-size="12" class="m">THE DOORS · WHAT AGENTS DO PASSES THROUGH THESE</text>
+      <rect x="38" y="118" width="213" height="56" rx="8" fill="#20242c" stroke="#3a404c"/><text x="52" y="142" fill="#f2f4f8" font-size="13">model proxy</text><text x="52" y="161" fill="#8a9099" font-size="11">model calls, any engine</text>
+      <rect x="265" y="118" width="213" height="56" rx="8" fill="#20242c" stroke="#3a404c"/><text x="279" y="142" fill="#f2f4f8" font-size="13">MCP proxy</text><text x="279" y="161" fill="#8a9099" font-size="11">shared tools</text>
+      <rect x="492" y="118" width="213" height="56" rx="8" fill="#20242c" stroke="#3a404c"/><text x="506" y="142" fill="#f2f4f8" font-size="13">tool gateway</text><text x="506" y="161" fill="#8a9099" font-size="11">tools for sandboxes</text>
+      <rect x="719" y="118" width="213" height="56" rx="8" fill="#20242c" stroke="#3a404c"/><text x="733" y="142" fill="#f2f4f8" font-size="13">hooks</text><text x="733" y="161" fill="#8a9099" font-size="11">Read, Edit, Bash</text>
+      <rect x="38" y="186" width="894" height="36" rx="8" fill="rgba(206,164,81,.05)" stroke="#cea451"/><text x="52" y="209" fill="#cea451" font-size="11.5" class="m">ONE SHARED BASE</text><text x="186" y="209" fill="#f2f4f8" font-size="12">who is asking · write the record · allow or refuse · health</text>
+      <line x1="490" y1="234" x2="490" y2="256" stroke="#9aa1ad" stroke-width="1.5"/>
+      <rect x="174" y="258" width="632" height="60" rx="9" fill="#20242c" stroke="#8fbf88" stroke-width="1.6"/><text x="190" y="283" fill="#f2f4f8" font-size="14">the ledger</text><text x="190" y="303" fill="#8a9099" font-size="11.5">one line per action: who, what, how long, how much, allowed or not. Never the content.</text>
+      <line x1="490" y1="318" x2="490" y2="340" stroke="#9aa1ad" stroke-width="1.5"/>
+      <rect x="24" y="342" width="180" height="56" rx="8" fill="#181c23" stroke="#2c313b"/><text x="38" y="366" fill="#f2f4f8" font-size="13">status</text><text x="38" y="385" fill="#8a9099" font-size="11">is everything up?</text>
+      <rect x="212" y="342" width="180" height="56" rx="8" fill="#181c23" stroke="#2c313b"/><text x="226" y="366" fill="#f2f4f8" font-size="13">meter</text><text x="226" y="385" fill="#8a9099" font-size="11">what did it cost?</text>
+      <rect x="400" y="342" width="180" height="56" rx="8" fill="#181c23" stroke="#2c313b"/><text x="414" y="366" fill="#f2f4f8" font-size="13">traces</text><text x="414" y="385" fill="#8a9099" font-size="11">what happened?</text>
+      <rect x="588" y="342" width="180" height="56" rx="8" fill="#181c23" stroke="#2c313b"/><text x="602" y="366" fill="#f2f4f8" font-size="13">routing</text><text x="602" y="385" fill="#8a9099" font-size="11">which engine next?</text>
+      <rect x="776" y="342" width="180" height="56" rx="8" fill="#181c23" stroke="#2c313b"/><text x="790" y="366" fill="#f2f4f8" font-size="13">evals</text><text x="790" y="385" fill="#8a9099" font-size="11">was it any good?</text>
+    </svg>
+    <figcaption>Agents go through doors. The doors share one base and write one ledger. What a door cannot see is reported as not covered, never as fine.</figcaption>
+  </figure>
+
+  <h2 id="emit">Who writes a line, when, and where</h2>
+  <p>Each long-running piece writes its own lines into its own file, when an action finishes. The one exception is tool calls reported by a hook, which go through the collector. Reading is the only thing that brings the files together.</p>
+  <figure>
+    <svg viewBox="0 0 980 358" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Four writers each append to their own file under the ledger folder when an action finishes; readers open all four files and merge them by time. The hook is indirect: it hands its event to the collector, which writes it">
+      <text x="24" y="26" fill="#9aa1ad" font-size="11" class="m">WHO WRITES</text><text x="232" y="26" fill="#9aa1ad" font-size="11" class="m">WHEN</text><text x="500" y="26" fill="#9aa1ad" font-size="11" class="m">INTO WHICH FILE, UNDER ~/.aimux/ledger/</text>
+      <rect x="24" y="38" width="190" height="42" rx="8" fill="#20242c" stroke="#8fbf88"/><text x="38" y="64" fill="#f2f4f8" font-size="13">model proxy</text>
+      <text x="232" y="64" fill="#9aa1ad" font-size="12">after the answer has been sent</text>
+      <line x1="214" y1="59" x2="226" y2="59" stroke="#9aa1ad" stroke-width="1.5"/><line x1="470" y1="59" x2="494" y2="59" stroke="#9aa1ad" stroke-width="1.5"/>
+      <rect x="496" y="38" width="220" height="42" rx="8" fill="#181c23" stroke="#2c313b"/><text x="510" y="64" fill="#f2f4f8" font-size="12.5" class="m">model-proxy.jsonl</text>
+      <line x1="716" y1="59" x2="770" y2="140" stroke="#565b66" stroke-width="1.2"/>
+      <rect x="24" y="92" width="190" height="42" rx="8" fill="#20242c" stroke="#8fbf88"/><text x="38" y="118" fill="#f2f4f8" font-size="13">MCP proxy</text>
+      <text x="232" y="118" fill="#9aa1ad" font-size="12">when a tool call returns</text>
+      <line x1="214" y1="113" x2="226" y2="113" stroke="#9aa1ad" stroke-width="1.5"/><line x1="470" y1="113" x2="494" y2="113" stroke="#9aa1ad" stroke-width="1.5"/>
+      <rect x="496" y="92" width="220" height="42" rx="8" fill="#181c23" stroke="#2c313b"/><text x="510" y="118" fill="#f2f4f8" font-size="12.5" class="m">mcp-proxy.jsonl</text>
+      <line x1="716" y1="113" x2="770" y2="140" stroke="#565b66" stroke-width="1.2"/>
+      <rect x="24" y="146" width="190" height="42" rx="8" fill="#20242c" stroke="#8fbf88"/><text x="38" y="172" fill="#f2f4f8" font-size="13">tool gateway</text>
+      <text x="232" y="172" fill="#9aa1ad" font-size="12">when a sandbox tool call returns</text>
+      <line x1="214" y1="167" x2="226" y2="167" stroke="#9aa1ad" stroke-width="1.5"/><line x1="470" y1="167" x2="494" y2="167" stroke="#9aa1ad" stroke-width="1.5"/>
+      <rect x="496" y="146" width="220" height="42" rx="8" fill="#181c23" stroke="#2c313b"/><text x="510" y="172" fill="#f2f4f8" font-size="12.5" class="m">tool-gateway.jsonl</text>
+      <line x1="716" y1="167" x2="770" y2="140" stroke="#565b66" stroke-width="1.2"/>
+      <rect x="24" y="200" width="190" height="42" rx="8" fill="#20242c" stroke="#8fbf88"/><text x="38" y="226" fill="#f2f4f8" font-size="13">collector</text>
+      <text x="232" y="226" fill="#9aa1ad" font-size="12">after a tool call a hook reports</text>
+      <line x1="214" y1="221" x2="226" y2="221" stroke="#9aa1ad" stroke-width="1.5"/><line x1="470" y1="221" x2="494" y2="221" stroke="#9aa1ad" stroke-width="1.5"/>
+      <rect x="496" y="200" width="220" height="42" rx="8" fill="#181c23" stroke="#2c313b"/><text x="510" y="226" fill="#f2f4f8" font-size="12.5" class="m">collector.jsonl</text>
+      <line x1="716" y1="221" x2="770" y2="140" stroke="#565b66" stroke-width="1.2"/>
+      <rect x="772" y="84" width="184" height="112" rx="9" fill="rgba(143,191,136,.06)" stroke="#8fbf88"/><text x="786" y="108" fill="#8fbf88" font-size="11.5" class="m">READ TOGETHER</text><text x="786" y="130" fill="#f2f4f8" font-size="12">sorted by time, for</text><text x="786" y="149" fill="#f2f4f8" font-size="12">status, meter,</text><text x="786" y="168" fill="#f2f4f8" font-size="12">routing and evals</text><text x="786" y="186" fill="#8a9099" font-size="11">readers never write</text>
+      <rect x="24" y="260" width="932" height="82" rx="9" fill="rgba(206,164,81,.05)" stroke="#cea451"/><text x="38" y="284" fill="#cea451" font-size="11.5" class="m">THE ONE INDIRECT PATH</text><text x="38" y="306" fill="#f2f4f8" font-size="12">Claude Code or Codex runs a tool, then runs aimux's small hook program, which hands the event to the collector.</text><text x="38" y="325" fill="#f2f4f8" font-size="12">If the collector is down, the event waits in a holding folder and is picked up later.</text>
+    </svg>
+    <figcaption>Four writers, four files, one folder. Each file has exactly one writer, so no two processes can spoil each other's lines.</figcaption>
+  </figure>
+  <ul>
+    <li><b>Writing happens after the action</b>, so nothing waits for it. If a write fails, the action still completes and the miss is counted.</li>
+    <li><b>Every tool call has exactly one line that counts.</b> Where a hook reports it, that is the record; the MCP proxy's line for the same call is only a cross-check. Nothing is counted twice.</li>
+    <li><b>The hook cannot own a file</b>, because many hooks run at once, one per tool call. So it passes its event to the collector, which is already running and already has a way to receive it.</li>
+    <li><b>A refusal is written by the door that refused.</b> There is no separate policy process.</li>
+    <li><b>Your labels are not in the ledger.</b> They stay where they are today and connect through the conversation and turn tags.</li>
+  </ul>
+
+  <h3>Is that reliable enough?</h3>
+  <p>For counting cost and seeing what happened, yes. It is not a tamper-proof audit log and does not claim to be: a line is written after its action, so a crash in between loses it. What the design adds is a way to know how complete it is, instead of hoping:</p>
+  <ul>
+    <li><b>Every writer numbers its lines.</b> A missing number is a lost line, and any reader can see it.</li>
+    <li><b>The hook keeps its event if the collector is down</b>, as a small file the collector picks up later.</li>
+    <li><b>A regular cross-check against two other sources</b> that already exist: the transcripts, and the totals Claude Code reports itself. The difference per conversation is the measured reliability.</li>
+    <li><b>A refusal is written before the answer goes back</b>, because it is the one line whose loss matters.</li>
+  </ul>
+
+  <h3>Who joins it all up?</h3>
+  <p>Nobody, afterwards. The joining is decided when a line is written, because each line already carries its tags. Reading is just: open the files, sort by time, group by tag. One function does that, and the terminal, the dashboard and the phone all call it. Nothing is guessed from timing; a line with missing tags is shown as unmatched.</p>
+
+  <h3>Does it follow a standard?</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>For</th><th>Standard</th><th>How it is used</th></tr></thead>
+    <tbody>
+      <tr><td>The names of the fields</td><td>OpenTelemetry's conventions for AI calls</td><td>aimux already uses them in its trace code. A ledger line uses the same names, so turning it into a trace is a repackaging.</td></tr>
+      <tr><td>Sending to other tools</td><td>OTLP</td><td>The ledger is exported this way to MLflow and the trace view.</td></tr>
+      <tr><td>What a sandbox allowed or refused</td><td>OCSF</td><td>OpenShell already writes it. aimux reads it and does not copy the format.</td></tr>
+      <tr><td>Evals</td><td>ATIF</td><td>The shape of a recorded session that benchmark tools read.</td></tr>
+      <tr><td>Turn, run, and proxy outcomes</td><td>None exists</td><td>aimux's own names, kept in their own namespace.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="parts">The five parts</h2>
+  <ol class="principles">
+    <li><b>One record.</b> Every model call, tool call and allow-or-refuse outcome becomes one line, tagged with the conversation, turn and call it belongs to (and, for Wingman, the question). Those tags are what connect everything.</li>
+    <li><b>One base.</b> The proxies keep their own protocols and share the plumbing. A new proxy only writes what is special about it.</li>
+    <li><b>One door, many engines, the right one per task.</b> Codex is the first engine behind the model proxy; Anthropic comes next if a login test passes. Then you can use a different model for each task in one session without losing context: by hand, by role (your main conversation on one model, helpers on another), and later automatically when the saving is worth it.</li>
+    <li><b>One view.</b> <code>aimux status</code> shows every background process in one table, and one command upgrades them together.</li>
+    <li><b>Evals from real work.</b> A turn you mark as bad, plus what you said instead, becomes a test case that any model can be run against.</li>
+  </ol>
+
+  <h2 id="routing">Routing per task, without losing context</h2>
+  <p>Context is never lost by changing model, because Claude Code holds the whole conversation and sends it with every request. What a change costs is warm-up: a model that has not seen the recent turns has to read them first, which on a long session took 36 to 56 seconds. So the design is about paying that rarely.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Level</th><th>How it works</th><th>Warm-up cost</th></tr></thead>
+    <tbody>
+      <tr><td>1. By hand</td><td>You change the model inside a session, as you do today. The proxy sends the next request to that engine.</td><td>Paid once per change</td></tr>
+      <tr><td>2. By role</td><td>Helpers that already run as their own conversations (subagents, background calls) each get the engine that suits them, while your main conversation stays where it is.</td><td>None</td></tr>
+      <tr><td>3. Both sides kept warm</td><td>The engine you left keeps its place for a while. Coming back, it only reads the turns it missed.</td><td>Small</td></tr>
+      <tr><td>4. Automatic</td><td>aimux proposes a switch only when the saving on the task is bigger than the warm-up, and shows you the sum first.</td><td>Paid only when worth it</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <h3>A written catalog, and "auto"</h3>
+  <ul>
+    <li><b>One catalog says what each model is good at</b>, what it is weak at, its speed and cost, and where each claim comes from. <code>aimux models</code> prints it. It is the same file the router uses, so what you read and what it does cannot drift apart.</li>
+    <li><b>"Auto" is just another model name.</b> You pick a model as you do today, or pick auto and aimux chooses for that task. Naming a model always wins.</li>
+    <li><b>Auto decides by rules first</b> (the role, what the task needs, the allowance left, the catalog). When the rules do not settle it, it uses the route function Wingman already has, once per task, with the same privacy limits.</li>
+    <li><b>The catalog learns from your own work</b>: whether you kept a choice or changed it, your labels, and your own cases replayed on each model. It starts from public benchmarks, marked as such, and aimux never rewrites it without you.</li>
+  </ul>
+  <h3>Will auto get in the way, and who decides?</h3>
+  <ul>
+    <li><b>You write the rules; the proxy applies them.</b> The router is ordinary code inside the model proxy, reading your catalog file. No model makes the choice. At most, a small model names the kind of work, and your file turns that into a model.</li>
+    <li><b>Nothing changes unless you pick auto.</b></li>
+    <li><b>It never interrupts.</b> It chooses only when a session or a helper starts, or when you send a new request. Never mid-step, never while a tool is running.</li>
+    <li><b>By default it leaves your main conversation alone</b> and chooses only for helpers and new sessions, which costs nothing. Moving the main conversation is a separate switch, off at first.</li>
+    <li><b>It tells you what it chose and why</b>, in one line, and naming a model always overrides it.</li>
+  </ul>
+  <p>Level 3 depends on something untested, whether Codex can be handed turns another model produced.</p>
+
+  <h2 id="order">What gets built, in order</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>When</th><th>What</th><th>What you get</th></tr></thead>
+    <tbody>
+      <tr><td>First</td><td>A test: does your Claude login work through the proxy? <code>aimux status</code>. And a short written contract for the tags, with one test.</td><td>The answer half the plan depends on, one clean health view, and a foundation the rest stands on.</td></tr>
+      <tr><td>Then</td><td>The ledger, a proper way to start sessions, a hook that reports every tool call, and the same for MCP tools.</td><td>You can see everything, per conversation and per turn. Nothing is blocked yet.</td></tr>
+      <tr><td>After that</td><td>Full costs, traces from the ledger, rules, the second engine, routing, switching.</td><td>aimux starts acting on what it sees.</td></tr>
+      <tr><td>Later, if needed</td><td>Routing on cost and quality, moving a session to another program, a full upgrade command.</td><td>Left out on purpose until the earlier steps show the need.</td></tr>
+      <tr><td>Paused</td><td>Evals. Continuous learning keeps running as it does today.</td><td>Resumes once this programme is done; its design is saved.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="decide">What I need from you</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Decision</th><th>My recommendation</th></tr></thead>
+    <tbody>
+      <tr><td>Approve everything, or only the "see everything" part?</td><td>Only the "see everything" part for now. It is small and useful on its own.</td></tr>
+      <tr><td>Should the tool-call hook ever be able to refuse?</td><td>It only reports in the first release. Decide afterwards, with real data.</td></tr>
+      <tr><td>Evals</td><td>Decided: paused until this programme is done.</td></tr>
+      <tr><td>How does aimux know Claude's allowance is running out?</td><td>It cannot ask. React when the limit error arrives, only if you opted in.</td></tr>
+      <tr><td>What should session-to-policy become?</td><td>Yours to say. Your prompt there was cut off.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="claim">
+    <p>Nothing is built and nothing is committed. Five reviews have been folded in: three by Codex, one each by the Wingman and eval sessions.</p>
+  </div>
+
+  <p>For more: <a href="aimux-governance-design-review.html">the longer review, with all the diagrams</a>, and <a href="2026-11-23-aimux-governance-metering-and-evals-design.md">the full spec</a> for whoever builds it.</p>
+
+</div>
+<script>
+(function () {
+  var KEY = 'aimux-design-theme';
+  var btn = document.getElementById('themeToggle');
+  function label() {
+    btn.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? '☀ LIGHT' : '☾ DARK';
+  }
+  label();
+  btn.addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    label();
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

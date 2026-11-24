@@ -1,0 +1,29 @@
+{
+  "theme": "redhat", "style": "paper",
+  "elements": [
+    {"type": "container", "x": 40, "y": 20, "w": 440, "h": 330, "tone": "ink", "label": "TRACK A · aimux status (0b)"},
+    {"type": "card", "x": 60, "y": 58, "w": 400, "h": 58, "title": "1 · overview controller", "sub": "parallel probes, 2 s limit, build drift"},
+    {"type": "card", "x": 60, "y": 128, "w": 400, "h": 58, "title": "2 · health answers", "sub": "build in model proxy; collector /health"},
+    {"type": "card", "x": 60, "y": 198, "w": 400, "h": 58, "title": "3 · four probes", "sub": "not installed, wrong process, key rejected"},
+    {"type": "card", "x": 60, "y": 268, "w": 400, "h": 58, "title": "4 · the command", "sub": "table, --json, exit code"},
+    {"type": "edge", "points": [[260, 116], [260, 128]]},
+    {"type": "edge", "points": [[260, 186], [260, 198]]},
+    {"type": "edge", "points": [[260, 256], [260, 268]]},
+
+    {"type": "container", "x": 510, "y": 20, "w": 440, "h": 150, "label": "TRACK B · identity contract (0c)"},
+    {"type": "card", "x": 530, "y": 58, "w": 400, "h": 88, "title": "5 · line type and counting rule", "sub": "internal/ledger, no file I/O yet", "desc": "every action counted exactly once"},
+
+    {"type": "container", "x": 510, "y": 200, "w": 440, "h": 150, "label": "TRACK C · passthrough test (0a)"},
+    {"type": "card", "x": 530, "y": 238, "w": 400, "h": 88, "kind": "closed", "title": "6 · experiment, then a results note", "sub": "host half here, sandbox half with Wingman", "desc": "nothing merged but the note"},
+
+    {"type": "card", "x": 240, "y": 380, "w": 510, "h": 56, "tone": "focus", "title": "then: step 1, the ledger", "sub": "stands on tracks B and C; status shows it running", "align": "center"},
+    {"type": "edge", "points": [[260, 350], [260, 366], [400, 366], [400, 380]], "dashed": true},
+    {"type": "edge", "points": [[730, 350], [730, 366], [600, 366], [600, 380]], "dashed": true},
+
+    {"type": "legend", "x": 40, "y": 456, "items": [
+      {"kind": "open", "tone": "ink", "text": "code, four tasks in order"},
+      {"kind": "open", "text": "code, one task"},
+      {"kind": "closed", "text": "experiment, no code merged"}
+    ]}
+  ]
+}
