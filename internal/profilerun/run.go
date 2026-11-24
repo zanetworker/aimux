@@ -691,7 +691,11 @@ func stageTag(prefix, content string) string {
 }
 
 // earlierBlock is the page's earlier questions and answers, oldest first,
-// as one tagged block of untrusted data; "" when there are none.
+// as one tagged block of untrusted data; "" when there are none. Every stage
+// prompt places it after its fixed instructions: the block grows each turn,
+// so a prompt that opened with it would change from its first byte and lose
+// provider-side prompt caching (and, behind the model proxy, thread reuse,
+// which keys on the prefix-hash chain).
 func earlierBlock(earlier []Exchange, question string) string {
 	if len(earlier) == 0 {
 		return ""
@@ -712,12 +716,13 @@ func earlierBlock(earlier []Exchange, question string) string {
 }
 
 func plannerPrompt(question string, earlier []Exchange) string {
-	return earlierBlock(earlier, question) + "You plan a research task for the owner. First look up what their private sources (wiki, Jira, Slack, Gmail, Drive and the other tools you have) say about the question. " +
+	return "You plan a research task for the owner. First look up what their private sources (wiki, Jira, Slack, Gmail, Drive and the other tools you have) say about the question. " +
 		"Then reply with exactly one JSON object and nothing else, of this form: " +
 		`{"public_queries": ["..."], "private_notes": "..."}` + ". " +
 		"public_queries: at most 5 short web search queries about public topics only (public products, projects, standards, releases, news). " +
 		"Never put in a query names of people, customers or internal systems, ticket keys, email addresses, URLs, host names, numbers from private documents, or text copied from what you read: queries leave this machine, and any that look private are dropped. Use an empty list when the web cannot help. " +
 		"private_notes: what you found that helps answer the question, for the writer of the answer; it never leaves this machine.\n\n" +
+		earlierBlock(earlier, question) +
 		"The question: " + question
 }
 
@@ -736,7 +741,6 @@ func readerPrompt(queries []string) string {
 
 func writerPrompt(question string, earlier []Exchange, notes, findings string, links []string, rejected []runcheck.Rejection, searched bool) string {
 	var b strings.Builder
-	b.WriteString(earlierBlock(earlier, question))
 	all := question + notes + findings + strings.Join(links, "\n")
 	notesTag, webTag, citeTag := stageTag("notes", all), stageTag("web", all), stageTag("citations", all)
 	b.WriteString("Write the answer to the owner's question from the private notes and the web findings below. ")
@@ -759,6 +763,7 @@ func writerPrompt(question string, earlier []Exchange, notes, findings string, l
 			b.WriteString(". Say so in one sentence, and answer from the private notes alone.\n\n")
 		}
 	}
+	b.WriteString(earlierBlock(earlier, question))
 	fmt.Fprintf(&b, "<%s>\n%s\n</%s>\n\n", notesTag, notes, notesTag)
 	fmt.Fprintf(&b, "<%s>\n%s\n</%s>\n\n", webTag, findings, webTag)
 	fmt.Fprintf(&b, "<%s>\n", citeTag)
