@@ -8,6 +8,9 @@ Two shorter versions sit beside this file: `aimux-design-one-page.html` (five mi
 `aimux-governance-design-review.html` (the architecture explained with diagrams). This file is for whoever
 builds it. Where the three disagree, this file is right and the others are stale.
 
+What is done, what is next and what is waiting is tracked in `../plans/governance-roadmap.md`, which is
+updated with each piece of work. This file says what to build; that one says where we are.
+
 ![Architecture today](assets/aimux-architecture-full.png)
 
 ## Why
@@ -356,7 +359,20 @@ system.
    port), swap the binary once, restart the services one at a time with a health check after each, and on a
    failed check restart exactly the ones already switched on the previous build. A service with live
    connections restarts when idle or on the owner's confirmation.
-4. **One place per kind of file.** Logs under `~/.aimux/logs/<service>/`, the collector included and its job
+4. **Services run from their own copy of the program, not from the one the owner types.** Today three of
+   the four launchd jobs start `~/go/bin/aimux`, which is also where `go install` puts a fresh build, so any
+   install silently changes what a service will run the next time it restarts or crashes, tested or not. On
+   2026-11-24 the stable model proxy was running build 178 while that file had become 184: a crash would
+   have brought up a build no promote had tested. The fourth job runs a second copy under
+   `~/.aimux/wingman/bin/`, updated by hand. Instead:
+   - the CLI stays where it is and changes freely;
+   - services run from one location only the upgrade step writes, `~/.aimux/services/`, holding the current
+     build and the previous one for rollback, with every launchd job pointing there;
+   - so the file a service was started from is the file it would restart from, and the only time a running
+     service differs from it is during an upgrade, labelled `restart pending`;
+   - a service kept on another build on purpose is an explicit pin recorded there and shown as `pinned`,
+     which replaces the hand-maintained second copy.
+5. **One place per kind of file.** Logs under `~/.aimux/logs/<service>/`, the collector included and its job
    renamed `com.aimux.collector`; backups in `~/.aimux/backups/`. Moving existing files is its own step with
    a backup, never a side effect of something else. Every file two processes share carries a format
    version, and a process that meets a newer one than it knows refuses to write.
