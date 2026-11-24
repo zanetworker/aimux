@@ -1,0 +1,15 @@
+flowchart TD
+  R["Claude Code request"] --> B{"codex: model and a session_id?"}
+  B -- no --> S["stateless path (today): fresh thread"]
+  B -- yes --> T{"session thread for session_id + system/tools hash?"}
+  T -- no --> F["path 3: fresh thread, becomes the session thread"]
+  T -- yes --> P{"request = held prefix + our tool_use + tool_results for every paused call?"}
+  P -- yes --> C["path 1: answer the paused item/tool/call requests, same turn continues (cached)"]
+  P -- no --> I{"held prefix + new messages ending in a user message, nothing paused?"}
+  I -- yes --> N["path 2: inject only the new messages, new turn (cached)"]
+  I -- no --> X["interrupt any paused turn, drop the thread"] --> F
+  C --> E{"model calls a tool?"}
+  N --> E
+  F --> E
+  E -- yes --> H["pause: return tool_use, keep Codex's request open (10 min max)"]
+  E -- no --> D["end_turn; thread stays idle (30 min max)"]

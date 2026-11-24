@@ -55,6 +55,7 @@ func RegisterAll(d Deps) {
 	rootCmd.AddCommand(newJumpCmd(d.Discover, controller.DefaultFocuser()))
 	rootCmd.AddCommand(newCollectCmd())
 	rootCmd.AddCommand(newMCPCmd())
+	rootCmd.AddCommand(newModelCmd())
 	rootCmd.AddCommand(newChatCmd())
 	rootCmd.AddCommand(newRemoteCmd())
 	rootCmd.AddCommand(newBrowserCmd())

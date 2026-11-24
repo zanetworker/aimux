@@ -3,13 +3,16 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"github.com/spf13/pflag"
 	"github.com/zanetworker/aimux/internal/mcpproxy"
 	"github.com/zanetworker/aimux/internal/toolgateway"
 )
@@ -20,7 +23,7 @@ import (
 // whose entry left the Claude config (minutes).
 func pageReport() mcpproxy.StatusReport {
 	srv := func(name string, st mcpproxy.ServerState, tools int) mcpproxy.ServerReport {
-		return mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: name, State: st}, Tools: tools}
+		return mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: name, State: st}, Tools: tools, Endpoint: true}
 	}
 	slack := srv("slack", mcpproxy.StateRunning, 12)
 	slack.LastCall, slack.LastError, slack.LastErrorAt = statusNow.Add(-2*time.Minute), "write: broken pipe", statusNow.Add(-time.Hour)
@@ -49,11 +52,14 @@ func pageInstall() *mcpproxy.InstallState {
 			{Server: "brand", Reason: mcpproxy.ReasonNeedsOAuth}, {Server: "brand", Reason: mcpproxy.ReasonNeedsOAuth}}}
 }
 
+func pageGateway() (toolgateway.ControlStatus, error) {
+	return toolgateway.ControlStatus{StartedAt: statusNow.Add(-17 * time.Hour), Backends: make([]string, 5)}, nil
+}
+
 func page() statusPage {
 	rep := pageReport()
 	return statusPage{addr: "127.0.0.1:7381", rep: &rep, install: pageInstall(), claudeConfig: "/home/x/.claude.json",
-		upgradeText: "upgrade restart pending: the running proxy is aimux v0.15.0, this binary is v0.16.0; restart it when convenient with `aimux mcp proxy restart`",
-		gateway:     func() string { return "tool gateway ● running 17h · 0 leases · 5 backends" }, now: statusNow, width: 80}
+		cliVersion: "v0.16.0", gateway: pageGateway, now: statusNow, width: 120}
 }
 
 func render(p statusPage) string {
@@ -62,256 +68,328 @@ func render(p statusPage) string {
 	return out.String()
 }
 
-const goldenCompact = `MCP proxy ● running · pid 99 · aimux v0.15.0 · up 3h · 127.0.0.1:7381
-9 servers: 1 failed · 1 warning · 2 running · 1 idle · 4 not started · 1 removed
-! upgrade restart pending: the running proxy is aimux v0.15.0, this binary is
-  v0.16.0; restart it when convenient with ` + "`aimux mcp proxy restart`" + `
+// messages is the LEVEL/MESSAGE/FIX table with MESSAGE padded to msgW
+// cells; a row without a fix ends after its message.
+func messages(msgW int, rows ...[3]string) string {
+	var b strings.Builder
+	line := func(level, msg, fix string) {
+		if fix == "" {
+			fmt.Fprintf(&b, "%-7s  %s\n", level, msg)
+			return
+		}
+		fmt.Fprintf(&b, "%-7s  %s  %s\n", level, msg+strings.Repeat(" ", max(msgW-runewidth.StringWidth(msg), 0)), fix)
+	}
+	line("LEVEL", "MESSAGE", "FIX")
+	for _, r := range rows {
+		line(r[0], r[1], r[2])
+	}
+	return b.String()
+}
 
-  github                     ● failed 12m ago  0 tools   never called
-      exec: gh-mcp: not found
-      line one
-      line two
-  jira                       ● running         5 tools   called 4m ago
-      timed out after 1m0s · 3m ago
+const goldenTop = `COMPONENT  STATE    VERSION  UPTIME  ADDRESS
+proxy      running  v0.15.0  3h      127.0.0.1:7381
+gateway    running  -        17h     0 leases, 5 backends
 
-  slack                      ● running         12 tools  called 2m ago
-  nanobanana-image-creation  ○ idle            4 tools   called 30m ago
+SERVER                     STATE    TOOLS  LAST CALL
+github                     failed   0      never
+jira                       running  5      4m ago
+slack                      running  12     2m ago
+nanobanana-image-creation  idle     4      30m ago
+(4 ready, 1 failed, 1 warning, 1 removed; --all lists them)
 
-  ○ 4 not started: brief, chrome-devtools, deepwiki, pypi
+SERVER  AGE  MESSAGE
+github  12m  exec: gh-mcp: not found
+             line one
+             line two
+jira    3m   timed out after 1m0s
 
-tool gateway ● running 17h · 0 leases · 5 backends
-
-· 9 servers behind the proxy; change one with ` + "`aimux mcp proxy edit <server>`" + `
-· hooks on: a server you add in a session moves behind the proxy; servers still
-  direct are named when a session starts
-· removed from /home/x/.claude.json: minutes (still served by the proxy, unused;
-  ` + "`aimux mcp proxy install`" + ` takes them off)
-· kept direct: pp (` + "`aimux mcp proxy install --unskip <name>`" + ` moves one)
-· kept direct: needs OAuth (later): Amplitude, brand
 `
 
-// The default page: problems first with their error, then the active
-// servers, the never-started ones on one line, the gateway, dim notes.
-func TestStatusPage_GoldenCompact(t *testing.T) {
-	if got := render(page()); got != goldenCompact {
-		t.Fatalf("compact page\n--- got\n%s\n--- want\n%s", got, goldenCompact)
+var pageMessages = [][3]string{
+	{"WARNING", "upgrade restart pending (proxy v0.15.0, cli v0.16.0)", "aimux mcp proxy restart"},
+	{"INFO", "9 servers behind the proxy", ""},
+	{"INFO", "hooks on", ""},
+	{"INFO", "removed from /home/x/.claude.json: minutes (still served, unused)", "aimux mcp proxy install"},
+	{"INFO", "kept direct (--skip): pp", "aimux mcp proxy install --unskip pp"},
+	{"INFO", "kept direct: needs OAuth (later): Amplitude, brand", ""},
+}
+
+// The default page at 120 columns: four tables, problems first, ready
+// servers in the summary line, errors in their own table, one table of
+// what needs you and the notes.
+func TestStatusPage_Golden120(t *testing.T) {
+	want := goldenTop + messages(65, pageMessages...)
+	if got := render(page()); got != want {
+		t.Fatalf("page\n--- got\n%s\n--- want\n%s", got, want)
 	}
 }
 
-// --all lists every server, never-started and removed ones too, and shows
-// an old error dim and marked instead of hiding it.
+// At 60 columns the widest text column (MESSAGE) is cut with an ellipsis;
+// FIX commands stay whole and nothing passes the width.
+func TestStatusPage_Golden60(t *testing.T) {
+	p := page()
+	p.width = 60
+	var rows [][3]string
+	for _, r := range pageMessages {
+		r[1] = runewidth.Truncate(r[1], 14, "…")
+		rows = append(rows, r)
+	}
+	want := goldenTop + messages(14, rows...)
+	got := render(p)
+	if got != want {
+		t.Fatalf("page\n--- got\n%s\n--- want\n%s", got, want)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if n := runewidth.StringWidth(line); n > 60 {
+			t.Fatalf("line of %d cells over 60: %q", n, line)
+		}
+	}
+}
+
+// Below 60 columns the columns stay and lines are cut at the width; only a
+// fix command, on a line of its own, may pass it, whole.
+func TestStatusPage_NarrowCutsLines(t *testing.T) {
+	p := page()
+	for _, width := range []int{40, 30} {
+		p.width = width
+		got := render(p)
+		for _, line := range strings.Split(got, "\n") {
+			if cmd := strings.TrimLeft(line, " "); strings.HasPrefix(cmd, "aimux mcp proxy ") && !strings.Contains(cmd, "…") {
+				continue
+			}
+			if n := runewidth.StringWidth(line); n > width {
+				t.Fatalf("width %d: line of %d cells: %q\n%s", width, n, line, got)
+			}
+		}
+		for _, head := range []string{"COMPONENT  STATE", "\nSERVER  ", "\nLEVEL    MESSAGE"} {
+			if !strings.Contains(got, head) {
+				t.Fatalf("width %d: header %q gone:\n%s", width, head, got)
+			}
+		}
+	}
+}
+
+// --all adds the ready servers (STATE ready) and the removed ones as rows,
+// shows a past error dim and marked old, and drops the --all hint.
 func TestStatusPage_AllListsEveryServer(t *testing.T) {
 	p := page()
 	p.all = true
 	got := render(p)
 	for _, want := range []string{
-		"  brief                      ○ not started     13 tools  never called\n",
-		"  minutes                    ○ removed         0 tools   never called\n",
-		"  slack                      ● running         12 tools  called 2m ago\n      (old) write: broken pipe · 1h ago\n",
+		"SERVER                     STATE    TOOLS  LAST CALL\n",
+		"brief                      ready    13     never\n",
+		"chrome-devtools            ready    20     never\n",
+		"minutes                    removed  0      never\n",
+		"slack   1h   (old) write: broken pipe\n",
+		"(4 ready, 1 failed, 1 warning, 1 removed)\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("--all page lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "not started: brief") {
-		t.Fatalf("--all still collapses the never-started servers:\n%s", got)
-	}
-	if strings.Index(got, "  minutes ") < strings.Index(got, "  pypi ") {
-		t.Fatalf("removed server not after the never-started ones:\n%s", got)
+	if strings.Index(got, "\nminutes ") < strings.Index(got, "\npypi ") {
+		t.Fatalf("removed server not after the ready ones:\n%s", got)
 	}
 }
 
-// An error the daemon reports as past (answered or started well since, in
-// the error's session) is past: never red, and hidden from the default page.
-func TestStatusPage_OldErrorNeverRed(t *testing.T) {
+// Piped (no colour, width 0): no escape codes and nothing cut; with colour
+// the text and alignment are the same once the escapes are gone.
+func TestStatusPage_NoTTYIsPlain(t *testing.T) {
 	p := page()
-	p.color, p.all = true, true
-	got := render(p)
-	if strings.Contains(got, "\x1b[31m      (old)") || !strings.Contains(got, "\x1b[2m      (old) write: broken pipe") {
-		t.Fatalf("old error not dim:\n%q", got)
-	}
-	p.all = false
-	if got := render(p); strings.Contains(got, "broken pipe") {
-		t.Fatalf("default page shows a past error:\n%s", got)
-	}
-	// The daemon says nothing recovered in the error's session (a call came
-	// in but got no answer, or another session answered): still a warning.
+	p.width = 0
 	rep := pageReport()
-	rep.Servers[0].ErrorPast = ptr(false)
+	rep.Servers[1].LastError = strings.Repeat("x", 200)
 	p.rep = &rep
-	if got := render(p); !strings.Contains(got, "      write: broken pipe · 1h ago") || strings.Contains(got, "(old)") {
-		t.Fatalf("an error with no answer since is not shown as recent:\n%s", got)
+	plain := render(p)
+	if strings.Contains(plain, "\x1b") || !strings.Contains(plain, strings.Repeat("x", 200)) {
+		t.Fatalf("piped page has escapes or a cut error:\n%s", plain)
+	}
+	p.color = true
+	if got := ansiRE.ReplaceAllString(render(p), ""); got != plain {
+		t.Fatalf("colour changed the text or alignment:\n%s", got)
 	}
 }
 
-func TestStatusPage_ColorsSignalState(t *testing.T) {
+func TestStatusPage_Colors(t *testing.T) {
 	p := page()
 	p.color = true
 	got := render(p)
 	for _, want := range []string{
-		"\x1b[32m● running\x1b[0m", // header
-		"\x1b[31m1 failed\x1b[0m", "\x1b[33m1 warning\x1b[0m", "\x1b[32m2 running\x1b[0m", "\x1b[2m4 not started\x1b[0m",
-		"\x1b[31m● failed 12m ago",                    // failed row
-		"\x1b[31m      exec: gh-mcp: not found",       // its error
-		"\x1b[33m      timed out after 1m0s · 3m ago", // a recent error on a live server
-		"\x1b[2m○ idle",
-		"\x1b[33m! upgrade restart pending",
-		"\x1b[2m· kept direct: needs OAuth (later): Amplitude, brand",
+		"\x1b[1mCOMPONENT", "\x1b[1mSERVER", "\x1b[1mLEVEL",
+		"\x1b[32mrunning", "\x1b[31mfailed", "\x1b[2midle",
+		"\x1b[33mrunning", // jira: live, with a recent error
+		"\x1b[31mexec: gh-mcp: not found", "\x1b[33mtimed out after 1m0s",
+		"\x1b[33mWARNING", "\x1b[2mINFO",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("coloured page lacks %q:\n%q", want, got)
 		}
 	}
-	if plain := ansiRE.ReplaceAllString(got, ""); plain != goldenCompact {
-		t.Fatalf("colour changed the text or alignment:\n%s", plain)
-	}
-	if strings.Contains(render(page()), "\x1b") {
-		t.Fatal("plain page carries escape codes")
-	}
 }
 
-// Long errors end in an ellipsis within the terminal width; piped output
-// (width 0) keeps them whole.
-func TestStatusPage_TruncatesToWidth(t *testing.T) {
-	p := page()
-	rep := pageReport()
-	rep.Servers[1].LastError = strings.Repeat("x", 200)
-	p.rep = &rep
-	got := render(p)
-	for _, line := range strings.Split(got, "\n") {
-		if n := len([]rune(line)); n > 80 {
-			t.Fatalf("line of %d runes over width 80: %q", n, line)
+// The page is tables: no bullets, glyphs, "!" lines or " · " separators.
+func TestStatusPage_NoProseMarkers(t *testing.T) {
+	got := render(page())
+	for _, bad := range []string{"·", "●", "○", "◐", "\n! "} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("page has %q:\n%s", bad, got)
 		}
 	}
-	if !strings.Contains(got, "x…\n") {
-		t.Fatalf("long error not cut with an ellipsis:\n%s", got)
-	}
-	p.width = 0
-	if !strings.Contains(render(p), strings.Repeat("x", 200)) {
-		t.Fatal("piped output cut the error")
-	}
 }
 
-// The never-started line wraps under itself, never past the width.
-func TestStatusPage_NotStartedWraps(t *testing.T) {
-	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
-	for _, n := range []string{"alpha-server", "bravo-server", "charlie-server", "delta-server", "echo-server", "foxtrot-server", "golf-server"} {
-		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateNotStarted}})
+// A server install kept direct with a recorded reason is a note with that
+// reason, never a warning to run install.
+func TestStatusPage_KeptDirectWithReasonIsInfo(t *testing.T) {
+	p := page()
+	st := pageInstall()
+	st.KeptDirect = append(st.KeptDirect, mcpproxy.KeptDirect{Server: "productpages", Reason: "the server refused its headers (401)"})
+	p.install = st
+	got := render(p)
+	if !strings.Contains(got, "\nINFO     kept direct: the server refused its headers (401): productpages\n") {
+		t.Fatalf("productpages not an INFO kept-direct row:\n%s", got)
 	}
-	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 60})
-	want := "  ○ 7 not started: alpha-server, bravo-server,\n" +
-		"    charlie-server, delta-server, echo-server,\n" +
-		"    foxtrot-server, golf-server\n"
-	if !strings.Contains(got, want) {
-		t.Fatalf("not-started line:\n%s", got)
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "WARNING") && strings.Contains(line, "productpages") {
+			t.Fatalf("productpages in a warning: %q", line)
+		}
 	}
 }
 
 func TestStatusPage_NotRunning(t *testing.T) {
-	if got := render(statusPage{addr: "127.0.0.1:7381", now: statusNow}); got != "MCP proxy ○ not running on 127.0.0.1:7381\n" {
-		t.Fatalf("not running, not installed: %q", got)
+	want := "COMPONENT  STATE        VERSION  UPTIME  ADDRESS\nproxy      not running  -        -       127.0.0.1:7381\n"
+	if got := render(statusPage{addr: "127.0.0.1:7381", now: statusNow}); got != want {
+		t.Fatalf("not running, not installed:\n%q\nwant\n%q", got, want)
 	}
 	p := page()
 	p.rep, p.color = nil, true
 	got := render(p)
-	if !strings.HasPrefix(got, "\x1b[1mMCP proxy\x1b[0m \x1b[31m● not running\x1b[0m on 127.0.0.1:7381\n") || !strings.Contains(got, "· hooks on") {
+	if !strings.Contains(got, "\x1b[31mnot running") || !strings.Contains(got, "hooks on") || strings.Contains(got, "SERVER") {
 		t.Fatalf("not running while installed:\n%q", got)
+	}
+	p.noAnswer, p.color = true, false
+	if got := render(p); !strings.Contains(got, "\nproxy      no status") {
+		t.Fatalf("no answer:\n%s", got)
 	}
 }
 
 func TestStatusPage_InstallWarnings(t *testing.T) {
 	st := &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Moved: []string{"slack"}, Drifted: []string{"slack"}, NotProxied: []string{"pypi"}}
 	got := render(statusPage{addr: "a", install: st, now: statusNow})
-	for _, want := range []string{"! drifted: slack", "! not behind the proxy: pypi", "! hooks off"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("lacks %q:\n%s", want, got)
-		}
-	}
-	got = render(statusPage{addr: "a", install: &mcpproxy.InstallState{State: mcpproxy.InstallNotInstalled}, now: statusNow})
-	if !strings.Contains(got, "! not installed: `aimux mcp proxy install` moves") {
-		t.Fatalf("not installed:\n%s", got)
-	}
-	got = render(statusPage{addr: "a", installErr: errors.New("parse Claude config"), now: statusNow})
-	if !strings.Contains(got, "! install state unknown: parse Claude config") {
-		t.Fatalf("install error:\n%s", got)
-	}
-}
-
-// Colour only on a terminal: a buffer or a file never gets it.
-func TestStatusColor_OnlyOnATerminal(t *testing.T) {
-	if statusColor(&bytes.Buffer{}) {
-		t.Fatal("colour for a buffer")
-	}
-	f, err := os.Create(filepath.Join(t.TempDir(), "out"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = f.Close() }()
-	if statusColor(f) || termWidth(f) != 0 {
-		t.Fatal("colour or a width for a file")
-	}
-}
-
-func TestGatewayStatusStyled(t *testing.T) {
-	now := statusNow
-	st := toolgateway.ControlStatus{Leases: 2, Backends: []string{"jira", "slack", "wiki"}, Down: []string{"slack", "wiki"},
-		StartedAt: now.Add(-17 * time.Hour), Checked: map[string]time.Time{"wiki": now.Add(-40 * time.Second)}}
-	line, ok := gatewayStatusStyled(st, nil, now, false, 0)
-	if want := "tool gateway ● running 17h · 2 leases · 3 backends · 2 down: slack, wiki (checked 40s ago)"; line != want || !ok {
-		t.Fatalf("line\n got %q\nwant %q", line, want)
-	}
-	line, _ = gatewayStatusStyled(st, nil, now, true, 0)
-	if !strings.Contains(line, "\x1b[32m● running") || !strings.Contains(line, "\x1b[31m2 down: slack, wiki") {
-		t.Fatalf("coloured line %q", line)
-	}
-	st.Down, st.Leases, st.Backends = nil, 1, []string{"jira"}
-	if line, _ = gatewayStatusStyled(st, nil, now, false, 0); line != "tool gateway ● running 17h · 1 lease · 1 backend" {
-		t.Fatalf("singular line %q", line)
-	}
-	line, ok = gatewayStatusStyled(st, toolgateway.ErrGatewayNotRunning, now, false, 0)
-	if ok || line != "tool gateway ● not running · Workspace turns fail · run `aimux mcp proxy gateway install`" {
-		t.Fatalf("not running line %q", line)
-	}
-	// On a narrow terminal it breaks at a separator, colour or not.
-	for _, color := range []bool{false, true} {
-		line, _ = gatewayStatusStyled(st, toolgateway.ErrGatewayNotRunning, now, color, 60)
-		if got := ansiRE.ReplaceAllString(line, ""); got != "tool gateway ● not running · Workspace turns fail\n  run `aimux mcp proxy gateway install`" {
-			t.Fatalf("color=%v: wrapped line %q", color, got)
-		}
-	}
-	line, ok = gatewayStatusStyled(st, errors.New("dial: refused"), now, false, 0)
-	if ok || line != "tool gateway ? unknown: dial: refused" {
-		t.Fatalf("unknown line %q", line)
-	}
-}
-
-// The header and summary lines break at a separator, never past the width.
-func TestStatusPage_HeaderWraps(t *testing.T) {
-	p := page()
-	p.width = 50
-	got := render(p)
 	for _, want := range []string{
-		"MCP proxy ● running · pid 99 · aimux v0.15.0\n  up 3h · 127.0.0.1:7381\n",
-		"9 servers: 1 failed · 1 warning · 2 running\n  1 idle · 4 not started · 1 removed\n",
+		"WARNING  not behind the proxy: pypi",
+		"WARNING  hooks off: servers you add later stay direct",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("lacks %q:\n%s", want, got)
 		}
 	}
-}
-
-// On a narrow terminal a long server name is cut so rows fit too.
-func TestStatusPage_NarrowTerminalFits(t *testing.T) {
-	p := page()
-	p.width = 60
-	got := render(p)
-	for _, line := range strings.Split(got, "\n") {
-		if n := len([]rune(line)); n > 60 {
-			t.Fatalf("line of %d runes over width 60: %q\n%s", n, line, got)
+	// Drift's two steps: uninstall on its row, then install on the next,
+	// both in the FIX column.
+	lines := strings.Split(got, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "WARNING  drifted: slack (entry is no longer the proxy URL)") {
+			next := lines[i+1]
+			col := strings.Index(line, "aimux mcp proxy uninstall")
+			if !strings.HasSuffix(line, "aimux mcp proxy uninstall") || !strings.HasPrefix(next, "         then ") ||
+				strings.Index(next, "aimux mcp proxy install") != col || !strings.HasSuffix(next, "aimux mcp proxy install") {
+				t.Fatalf("drift steps:\n%s\n%s", line, next)
+			}
 		}
 	}
-	if !strings.Contains(got, "  nanobanana-im…  ○ idle            4 tools   called 30m ago\n") {
-		t.Fatalf("long name not cut:\n%s", got)
+	got = render(statusPage{addr: "a", install: &mcpproxy.InstallState{State: mcpproxy.InstallNotInstalled}, now: statusNow})
+	if !strings.Contains(got, "WARNING  not installed: Claude Code's servers are direct  aimux mcp proxy install\n") {
+		t.Fatalf("not installed:\n%s", got)
+	}
+	got = render(statusPage{addr: "a", installErr: errors.New("parse Claude config"), now: statusNow})
+	if !strings.Contains(got, "WARNING  install state unknown: parse Claude config\n") {
+		t.Fatalf("install error:\n%s", got)
+	}
+}
+
+// The gateway row and its warnings: not running, unknown, down backends.
+func TestStatusPage_Gateway(t *testing.T) {
+	p := page()
+	p.gateway = func() (toolgateway.ControlStatus, error) {
+		return toolgateway.ControlStatus{}, toolgateway.ErrGatewayNotRunning
+	}
+	got := render(p)
+	if !strings.Contains(got, "\ngateway    not running  -        -       Workspace turns fail\n") ||
+		!strings.Contains(got, "WARNING  tool gateway not running: Workspace turns fail") || !strings.Contains(got, "aimux mcp proxy gateway install\n") {
+		t.Fatalf("gateway not running:\n%s", got)
+	}
+	p.gateway = func() (toolgateway.ControlStatus, error) {
+		return toolgateway.ControlStatus{}, errors.New("dial: refused")
+	}
+	if got := render(p); !strings.Contains(got, "\ngateway    unknown ") || !strings.Contains(got, "WARNING  tool gateway: dial: refused") {
+		t.Fatalf("gateway unknown:\n%s", got)
+	}
+	p.gateway = func() (toolgateway.ControlStatus, error) {
+		return toolgateway.ControlStatus{Leases: 1, Backends: []string{"jira", "wiki", "slack"}, Down: []string{"wiki", "slack"},
+			StartedAt: statusNow.Add(-time.Hour), Checked: map[string]time.Time{"wiki": statusNow.Add(-40 * time.Second)}}, nil
+	}
+	got = render(p)
+	if !strings.Contains(got, "\ngateway    running  -        1h      1 lease, 3 backends\n") ||
+		strings.Count(got, "gateway backend") != 1 || !strings.Contains(got, "WARNING  2 gateway backends down: wiki (checked 40s ago), slack") {
+		t.Fatalf("down backends not one warning:\n%s", got)
+	}
+	// The worker's version is its tool-policy snapshot, not a build: VERSION
+	// says -, and the snapshot (short) goes with the details.
+	p.gateway = func() (toolgateway.ControlStatus, error) {
+		return toolgateway.ControlStatus{Version: "sha256:33b556ac47673560952dbe03f13d29a9b54f5b5cf1b7801ecbbde5246926b430"}, nil
+	}
+	if got := render(p); !strings.Contains(got, "\ngateway    running  -        -       0 leases, 0 backends, snapshot sha256:33b556ac4767\n") {
+		t.Fatalf("snapshot not in the details:\n%s", got)
+	}
+	p.gateway = nil
+	if got := render(p); strings.Contains(got, "\ngateway ") {
+		t.Fatalf("no gateway asked, but a row:\n%s", got)
+	}
+}
+
+// A never-started server the proxy has no route for is a problem row and a
+// warning with the fix, not ready.
+func TestStatusPage_NoRoute(t *testing.T) {
+	p := page()
+	rep := pageReport()
+	rep.Servers[4].Endpoint = false // pypi
+	p.rep = &rep
+	got := render(p)
+	for _, want := range []string{
+		"jira                       running   5      4m ago\npypi                       no route  0      never\n",
+		"(3 ready, 1 failed, 1 warning, 1 no route, 1 removed; --all lists them)\n",
+		"WARNING  1 no route: pypi (no cached tools)",
+		"  aimux mcp proxy refresh\n         then",
+		"  aimux mcp proxy restart\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("page lacks %q:\n%s", want, got)
+		}
+	}
+	// A proxy without the launchd job (run by hand): restart cannot work,
+	// so the second step is serve, again with the original flags.
+	p.handRun = true
+	got = render(p)
+	if strings.Contains(got, "aimux mcp proxy restart\n") && !strings.Contains(got, "upgrade restart pending") ||
+		!strings.Contains(got, "then, again with your original flags") || !strings.Contains(got, "  aimux mcp proxy serve\n") {
+		t.Fatalf("hand-run proxy: want refresh, then serve again:\n%s", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "then") && strings.HasSuffix(line, "aimux mcp proxy restart") {
+			t.Fatalf("hand-run proxy still told to restart: %q", line)
+		}
+	}
+}
+
+// A probe that fails on a server that keeps running is counted apart from
+// failed servers; its error is in the errors table.
+func TestStatusPage_ProbeFailureOnARunningServer(t *testing.T) {
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
+		{ServerStatus: mcpproxy.ServerStatus{Server: "slack", State: mcpproxy.StateRunning}, ProbeError: "tools/list: method not found"}}}
+	got := render(statusPage{addr: "a", rep: &rep, now: statusNow})
+	for _, want := range []string{"\nslack   running  0      never\n", "(0 ready, 0 failed, 1 probe failed)\n", "\nslack   -    tools/list: method not found\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lacks %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -323,117 +401,8 @@ func TestStatusPage_RemovedServerProbeFailureShows(t *testing.T) {
 	rep.Servers[8].ProbeError = "exec: minutes: not found"
 	p.rep = &rep
 	got := render(p)
-	if !strings.Contains(got, "  minutes ") || !strings.Contains(got, "      exec: minutes: not found\n") {
+	if !strings.Contains(got, "\nminutes  ") || !strings.Contains(got, "\nminutes  -    exec: minutes: not found\n") {
 		t.Fatalf("probe failure of a removed server hidden:\n%s", got)
-	}
-}
-
-// Too narrow for every column even with the name cut: the row keeps the
-// name and state only.
-func TestStatusPage_VeryNarrowDropsColumns(t *testing.T) {
-	p := page()
-	p.width = 40
-	gw, _ := gatewayStatusStyled(toolgateway.ControlStatus{StartedAt: statusNow.Add(-17 * time.Hour), Backends: make([]string, 5)}, nil, statusNow, false, 40)
-	p.gateway = func() string { return gw }
-	got := render(p)
-	for _, line := range strings.Split(got, "\n") {
-		// A command wider than the terminal stays whole on a line of its
-		// own: it overflows, but pastes as one command.
-		if words := commandWords(line); len(words) == 1 && strings.Count(words[0], "`") == 2 {
-			continue
-		}
-		if n := len([]rune(line)); n > 40 {
-			t.Fatalf("line of %d runes over width 40: %q\n%s", n, line, got)
-		}
-	}
-	if !strings.Contains(got, "  github                ● failed 12m ago\n") || !strings.Contains(got, "  nanobanana-image-cr…  ○ idle\n") {
-		t.Fatalf("narrow row:\n%s", got)
-	}
-}
-
-// A long list of down backends wraps between backends, each keeping its
-// check age.
-func TestGatewayStatusStyled_DownListWraps(t *testing.T) {
-	st := toolgateway.ControlStatus{Backends: []string{"a", "b", "c"}, Down: []string{"jira-cloud", "slack-workspace", "wiki-internal"},
-		Checked: map[string]time.Time{"jira-cloud": statusNow.Add(-40 * time.Second), "slack-workspace": statusNow.Add(-time.Minute), "wiki-internal": statusNow.Add(-2 * time.Minute)}}
-	for _, color := range []bool{false, true} {
-		line, _ := gatewayStatusStyled(st, nil, statusNow, color, 60)
-		want := "tool gateway ● running · 0 leases · 3 backends\n" +
-			"  3 down: jira-cloud (checked 40s ago),\n" +
-			"    slack-workspace (checked 1m ago),\n" +
-			"    wiki-internal (checked 2m ago)"
-		if got := ansiRE.ReplaceAllString(line, ""); got != want {
-			t.Fatalf("color=%v:\n got %q\nwant %q", color, got, want)
-		}
-	}
-}
-
-// A probe that fails on a server that keeps running is counted apart from
-// failed servers, so the header never says failed for a running row.
-func TestStatusPage_ProbeFailureOnARunningServer(t *testing.T) {
-	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
-		{ServerStatus: mcpproxy.ServerStatus{Server: "slack", State: mcpproxy.StateRunning}, ProbeError: "tools/list: method not found"}}}
-	got := render(statusPage{addr: "a", rep: &rep, now: statusNow})
-	if !strings.Contains(got, "1 servers: 0 failed · 1 probe failed · 1 running\n") {
-		t.Fatalf("counts:\n%s", got)
-	}
-	if !strings.Contains(got, "  slack  ● running  0 tools  never called\n      tools/list: method not found\n") {
-		t.Fatalf("row:\n%s", got)
-	}
-}
-
-// The daemon's version comes from whatever answers on the port: control
-// characters never reach the terminal.
-func TestStatusPage_VersionIsPrintable(t *testing.T) {
-	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Version: "v1\x1b[2J"}
-	if got := render(statusPage{addr: "a", rep: &rep, now: statusNow}); strings.Contains(got, "\x1b") || !strings.Contains(got, "aimux v1?[2J") {
-		t.Fatalf("version: %q", got)
-	}
-}
-
-// A list item too long for the line after the prefix moves to the next
-// line, and one too long for any line is cut, never past the width.
-func TestStatusPage_LongListItemFits(t *testing.T) {
-	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
-		{ServerStatus: mcpproxy.ServerStatus{Server: "nanobanana-image-creation", State: mcpproxy.StateNotStarted}},
-		{ServerStatus: mcpproxy.ServerStatus{Server: strings.Repeat("z", 60), State: mcpproxy.StateNotStarted}}}}
-	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 40})
-	for _, line := range strings.Split(got, "\n") {
-		if n := len([]rune(line)); n > 40 {
-			t.Fatalf("line of %d runes over width 40: %q\n%s", n, line, got)
-		}
-	}
-	if !strings.Contains(got, "  ○ 2 not started:\n    nanobanana-image-creation,\n    zzz") {
-		t.Fatalf("list:\n%s", got)
-	}
-}
-
-// A long recent error is cut, never its age.
-func TestStatusPage_WarningKeepsItsAge(t *testing.T) {
-	p := page()
-	rep := pageReport()
-	rep.Servers[2].LastError = strings.Repeat("y", 200)
-	p.rep = &rep
-	got := render(p)
-	if !strings.Contains(got, "y… · 3m ago\n") {
-		t.Fatalf("age lost:\n%s", got)
-	}
-}
-
-// The proxy's part of the page is out before the tool gateway is asked, so
-// a gateway that stalls never hides what the proxy said.
-func TestStatusPage_ProxyPartBeforeTheGateway(t *testing.T) {
-	p := page()
-	var out bytes.Buffer
-	p.gateway = func() string {
-		if !strings.Contains(out.String(), "○ 4 not started: brief") {
-			t.Fatalf("gateway asked before the servers were printed:\n%s", out.String())
-		}
-		return "tool gateway ● running 17h · 0 leases · 5 backends"
-	}
-	printStatusPage(&out, p)
-	if out.String() != goldenCompact {
-		t.Fatalf("page:\n%s", out.String())
 	}
 }
 
@@ -447,7 +416,7 @@ func TestStatusPage_AllRemovedServerKeepsCurrentFailure(t *testing.T) {
 	m.State, m.LastError, m.LastErrorAt, m.StderrTail = mcpproxy.StateFailed, "exec: minutes: not found", statusNow.Add(-time.Minute), []string{"no such file"}
 	p.rep = &rep
 	got := render(p)
-	for _, want := range []string{"○ removed", "\x1b[31m      exec: minutes: not found", "\x1b[2m      no such file"} {
+	for _, want := range []string{"removed", "\x1b[31mexec: minutes: not found", "\x1b[2mno such file"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("lacks %q:\n%q", want, got)
 		}
@@ -457,11 +426,31 @@ func TestStatusPage_AllRemovedServerKeepsCurrentFailure(t *testing.T) {
 	}
 }
 
+// An error the daemon reports as past is never red, and hidden from the
+// default page; one with nothing recovered since is a warning.
+func TestStatusPage_OldErrorNeverRed(t *testing.T) {
+	p := page()
+	p.color, p.all = true, true
+	got := render(p)
+	if !strings.Contains(got, "\x1b[2m(old) write: broken pipe") || strings.Contains(got, "\x1b[31m(old)") {
+		t.Fatalf("old error not dim:\n%q", got)
+	}
+	p.all, p.color = false, false
+	if got := render(p); strings.Contains(got, "broken pipe") {
+		t.Fatalf("default page shows a past error:\n%s", got)
+	}
+	rep := pageReport()
+	rep.Servers[0].ErrorPast = ptr(false)
+	p.rep = &rep
+	if got := render(p); !strings.Contains(got, "\nslack   1h   write: broken pipe\n") || strings.Contains(got, "(old)") {
+		t.Fatalf("an error with no answer since is not shown as recent:\n%s", got)
+	}
+}
+
 func ptr[T any](v T) *T { return &v }
 
 // A daemon from before errorPast sends none: an error it kept is old
-// unless it came after the server's last answer, never a yellow warning
-// on a guess.
+// unless it came after the server's last answer, never a warning on a guess.
 func TestStatusPage_OlderDaemonErrorsAreOld(t *testing.T) {
 	srv := func(lastOK time.Time) mcpproxy.ServerReport {
 		return mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: "slack", State: mcpproxy.StateRunning,
@@ -484,14 +473,23 @@ func TestStatusPage_OlderDaemonErrorsAreOld(t *testing.T) {
 	}
 }
 
-// Width is measured in terminal cells: wide characters count twice, so a
-// Japanese error is cut to fit and wide names keep the columns aligned.
+// The daemon's version comes from whatever answers on the port: control
+// characters never reach the terminal.
+func TestStatusPage_VersionIsPrintable(t *testing.T) {
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Version: "v1\x1b[2J"}
+	if got := render(statusPage{addr: "a", rep: &rep, now: statusNow}); strings.Contains(got, "\x1b") || !strings.Contains(got, "v1?[2J") {
+		t.Fatalf("version: %q", got)
+	}
+}
+
+// Width is measured in terminal cells: a Japanese error is cut to fit and
+// wide names keep the STATE column aligned.
 func TestStatusPage_WideCharactersFit(t *testing.T) {
 	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
 		{ServerStatus: mcpproxy.ServerStatus{Server: "日本語サーバー", State: mcpproxy.StateFailed,
 			LastError: strings.Repeat("接続できません", 20), LastErrorAt: statusNow}},
 		{ServerStatus: mcpproxy.ServerStatus{Server: "slack", State: mcpproxy.StateFailed, LastErrorAt: statusNow}}}}
-	for _, width := range []int{80, 40} {
+	for _, width := range []int{80, 60} {
 		got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: width})
 		for _, line := range strings.Split(got, "\n") {
 			if n := runewidth.StringWidth(line); n > width {
@@ -500,8 +498,8 @@ func TestStatusPage_WideCharactersFit(t *testing.T) {
 		}
 		col := func(name string) int {
 			for _, line := range strings.Split(got, "\n") {
-				if strings.HasPrefix(line, "  "+name) {
-					return runewidth.StringWidth(line[:strings.Index(line, "●")])
+				if strings.HasPrefix(line, name+" ") && strings.Contains(line, "failed") {
+					return runewidth.StringWidth(line[:strings.Index(line, "failed")])
 				}
 			}
 			t.Fatalf("no row for %s:\n%s", name, got)
@@ -513,28 +511,100 @@ func TestStatusPage_WideCharactersFit(t *testing.T) {
 	}
 }
 
-// A command in backticks is never broken across lines, so it pastes whole.
-func TestWrap_KeepsCommandsWhole(t *testing.T) {
-	text := "! drifted: slack (its entry is no longer the proxy URL); to fix it, " + mcpproxy.DriftFix
-	for _, width := range []int{40, 60, 80} {
-		for _, line := range wrap(text, width, 2) {
-			if strings.Count(line, "`")%2 != 0 {
-				t.Fatalf("width %d: command broken across lines at %q\n%q", width, line, wrap(text, width, 2))
-			}
+// Names cut to fit that would read the same keep a short ending each.
+func TestStatusPage_CutNamesStayDistinct(t *testing.T) {
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
+	for _, n := range []string{"playwright-browser-alpha-long-name-a", "playwright-browser-alpha-long-name-o", "slack"} {
+		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateRunning}})
+	}
+	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 44})
+	var names []string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "playw") {
+			names = append(names, strings.Fields(line)[0])
 		}
 	}
-	if got := wrap("a `b c` d", 4, 2); len(got) != 3 || got[1] != "  `b c`" {
-		t.Fatalf("a command too long for a line goes whole on its own: %q", got)
+	if len(names) != 2 || names[0] == names[1] || !strings.Contains(names[0], "…") {
+		t.Fatalf("cut names %q:\n%s", names, got)
+	}
+	if got := cutDistinct([]string{"slack", "abcdefgh-one", "abcdefgh-two", "abcdefgh-two"}, 8); got[0] != "slack" ||
+		got[1] == got[2] || got[2] != got[3] {
+		t.Fatalf("cutDistinct %q", got)
+	}
+}
+
+// Colour only on a terminal: a buffer or a file never gets it.
+func TestStatusColor_OnlyOnATerminal(t *testing.T) {
+	if statusColor(&bytes.Buffer{}) {
+		t.Fatal("colour for a buffer")
+	}
+	f, err := os.Create(filepath.Join(t.TempDir(), "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if statusColor(f) || termWidth(f) != 0 {
+		t.Fatal("colour or a width for a file")
+	}
+}
+
+// `aimux mcp proxy gateway status` keeps its one styled line.
+func TestGatewayStatusStyled(t *testing.T) {
+	now := statusNow
+	st := toolgateway.ControlStatus{Leases: 2, Backends: []string{"jira", "slack", "wiki"}, Down: []string{"slack", "wiki"},
+		StartedAt: now.Add(-17 * time.Hour), Checked: map[string]time.Time{"wiki": now.Add(-40 * time.Second)}}
+	line, ok := gatewayStatusStyled(st, nil, now, false, 0)
+	if want := "tool gateway ● running 17h · 2 leases · 3 backends · 2 down: slack, wiki (checked 40s ago)"; line != want || !ok {
+		t.Fatalf("line\n got %q\nwant %q", line, want)
+	}
+	line, _ = gatewayStatusStyled(st, nil, now, true, 0)
+	if !strings.Contains(line, "\x1b[32m● running") || !strings.Contains(line, "\x1b[31m2 down: slack, wiki") {
+		t.Fatalf("coloured line %q", line)
+	}
+	st.Down, st.Leases, st.Backends = nil, 1, []string{"jira"}
+	if line, _ = gatewayStatusStyled(st, nil, now, false, 0); line != "tool gateway ● running 17h · 1 lease · 1 backend" {
+		t.Fatalf("singular line %q", line)
+	}
+	line, ok = gatewayStatusStyled(st, toolgateway.ErrGatewayNotRunning, now, false, 0)
+	if ok || line != "tool gateway ● not running · Workspace turns fail · run `aimux mcp proxy gateway install`" {
+		t.Fatalf("not running line %q", line)
+	}
+	for _, color := range []bool{false, true} {
+		line, _ = gatewayStatusStyled(st, toolgateway.ErrGatewayNotRunning, now, color, 60)
+		if got := ansiRE.ReplaceAllString(line, ""); got != "tool gateway ● not running · Workspace turns fail\n  run `aimux mcp proxy gateway install`" {
+			t.Fatalf("color=%v: wrapped line %q", color, got)
+		}
+	}
+	line, ok = gatewayStatusStyled(st, errors.New("dial: refused"), now, false, 0)
+	if ok || line != "tool gateway ? unknown: dial: refused" {
+		t.Fatalf("unknown line %q", line)
+	}
+}
+
+// A long list of down backends wraps between backends, each keeping its
+// check age.
+func TestGatewayStatusStyled_DownListWraps(t *testing.T) {
+	st := toolgateway.ControlStatus{Backends: []string{"a", "b", "c"}, Down: []string{"jira-cloud", "slack-workspace", "wiki-internal"},
+		Checked: map[string]time.Time{"jira-cloud": statusNow.Add(-40 * time.Second), "slack-workspace": statusNow.Add(-time.Minute), "wiki-internal": statusNow.Add(-2 * time.Minute)}}
+	for _, color := range []bool{false, true} {
+		line, _ := gatewayStatusStyled(st, nil, statusNow, color, 60)
+		want := "tool gateway ● running · 0 leases · 3 backends\n" +
+			"  3 down: jira-cloud (checked 40s ago),\n" +
+			"    slack-workspace (checked 1m ago),\n" +
+			"    wiki-internal (checked 2m ago)"
+		if got := ansiRE.ReplaceAllString(line, ""); got != want {
+			t.Fatalf("color=%v:\n got %q\nwant %q", color, got, want)
+		}
 	}
 }
 
 // The separator is measured like the text: where the locale makes " · "
-// wider than three cells, header lines still fit.
+// wider than three cells, the gateway line still fits.
 func TestJoinWrapped_EastAsianSeparatorFits(t *testing.T) {
 	old := runewidth.DefaultCondition.EastAsianWidth
 	runewidth.DefaultCondition.EastAsianWidth = true
 	defer func() { runewidth.DefaultCondition.EastAsianWidth = old }()
-	parts := []string{"MCP proxy ● running", "pid 99", "aimux v0.15.0", "up 3h", "127.0.0.1:7381"}
+	parts := []string{"tool gateway ● running", "2 leases", "3 backends", "1 down"}
 	for width := 30; width <= 80; width++ {
 		for _, line := range joinWrapped(parts, false, width) {
 			if n := runewidth.StringWidth(line); n > width {
@@ -544,27 +614,98 @@ func TestJoinWrapped_EastAsianSeparatorFits(t *testing.T) {
 	}
 }
 
-// Names cut to fit that would read the same keep a short ending each, so
-// every row still says which server it is.
-func TestStatusPage_CutNamesStayDistinct(t *testing.T) {
-	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow}
-	for _, n := range []string{"playwright-browser-alpha", "playwright-browser-bravo", "slack"} {
-		rep.Servers = append(rep.Servers, mcpproxy.ServerReport{ServerStatus: mcpproxy.ServerStatus{Server: n, State: mcpproxy.StateRunning}})
-	}
-	rep.Servers[0].State = mcpproxy.StateFailed
-	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 44, all: true})
-	var names []string
-	for _, line := range strings.Split(got, "\n") {
-		if strings.HasPrefix(line, "  playw") {
-			names = append(names, strings.Fields(line)[0])
+// Every step of a fix stays visible and whole: follow-up steps are rows of
+// their own ("then"), MESSAGE is cut instead of FIX, and a FIX too wide to
+// share a line goes on a line of its own, uncut.
+func TestStatusPage_FixStepsNeverCut(t *testing.T) {
+	st := &mcpproxy.InstallState{State: mcpproxy.InstallDrifted, Hooks: true, Moved: []string{"slack"},
+		Drifted: []string{"slack-with-a-rather-long-server-name-that-drifted"}}
+	for _, width := range []int{80, 60, 40} {
+		got := render(statusPage{addr: "a", install: st, now: statusNow, width: width})
+		for _, cmd := range []string{"aimux mcp proxy uninstall", "aimux mcp proxy install"} {
+			if !strings.Contains(got, cmd+"\n") {
+				t.Fatalf("width %d: fix step %q not whole on its line:\n%s", width, cmd, got)
+			}
+		}
+		if strings.Index(got, "aimux mcp proxy uninstall") > strings.Index(got, "aimux mcp proxy install\n") {
+			t.Fatalf("width %d: steps out of order:\n%s", width, got)
 		}
 	}
-	if len(names) != 2 || names[0] == names[1] || !strings.HasSuffix(names[0], "a") || !strings.HasSuffix(names[1], "o") ||
-		!strings.Contains(names[0], "…") {
-		t.Fatalf("cut names %q:\n%s", names, got)
+	// A skip list too long to share a line with any message: the command
+	// gets a line of its own, whole, past the width if it must be.
+	long := &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: true, Moved: []string{"a"},
+		Skipped: []string{"first-skipped-server", "second-skipped-server", "third-skipped-server"}}
+	got := render(statusPage{addr: "a", install: long, now: statusNow, width: 60})
+	want := "aimux mcp proxy install --unskip first-skipped-server --unskip second-skipped-server --unskip third-skipped-server\n"
+	if !strings.Contains(got, "\n       "+want) { // under MESSAGE: LEVEL is 5 cells with INFO rows only
+		t.Fatalf("long fix not on a line of its own, whole:\n%s", got)
 	}
-	if got := cutDistinct([]string{"slack", "abcdefgh-one", "abcdefgh-two", "abcdefgh-two"}, 8); got[0] != "slack" ||
-		got[1] == got[2] || got[2] != got[3] {
-		t.Fatalf("cutDistinct %q", got)
+	for _, line := range strings.Split(got, "\n") {
+		if n := runewidth.StringWidth(line); n > 60 && !strings.Contains(line, "aimux mcp proxy install --unskip") {
+			t.Fatalf("a line other than the long fix passes 60: %q", line)
+		}
+	}
+}
+
+// A very long server name in the errors table is cut so AGE and some of
+// MESSAGE always show at 60 columns.
+func TestStatusPage_ErrorsKeepAgeAndMessage(t *testing.T) {
+	name := strings.Repeat("n", 60)
+	rep := mcpproxy.StatusReport{Running: true, PID: 1, StartedAt: statusNow, Servers: []mcpproxy.ServerReport{
+		{ServerStatus: mcpproxy.ServerStatus{Server: name, State: mcpproxy.StateFailed, LastError: "exec: not found", LastErrorAt: statusNow.Add(-12 * time.Minute)}}}}
+	got := render(statusPage{addr: "a", rep: &rep, now: statusNow, width: 60})
+	var row string
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "nnnn") && strings.Contains(line, "12m") {
+			row = line
+		}
+	}
+	if row == "" || !strings.Contains(row, "…  12m  exec: n") || runewidth.StringWidth(row) > 60 {
+		t.Fatalf("errors row %q: want the name cut, AGE and MESSAGE shown, within 60:\n%s", row, got)
+	}
+}
+
+// Skipped names come from ~/.claude.json: the --unskip command quotes each
+// for the shell, so it runs as written and the flag gets every name intact.
+func TestStatusPage_UnskipCommandQuotesNames(t *testing.T) {
+	names := []string{"pp", "my server$HOME", "it's", "team,dev", `say "hi"`}
+	st := &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: true, Moved: []string{"a"}, Skipped: names}
+	got := render(statusPage{addr: "a", install: st, now: statusNow})
+	i := strings.Index(got, "aimux mcp proxy install --unskip")
+	if i < 0 {
+		t.Fatalf("no unskip command:\n%s", got)
+	}
+	cmd := strings.TrimSpace(got[i : i+strings.Index(got[i:], "\n")])
+	// The real shell splits the command; the real flag parser reads it.
+	argv, err := exec.Command("sh", "-c", "set -- "+strings.TrimPrefix(cmd, "aimux mcp proxy install ")+`; for a in "$@"; do printf '%s\0' "$a"; done`).Output() // #nosec G204 -- the test runs the page's own command through a real shell on purpose
+	if err != nil {
+		t.Fatalf("shell could not run %q: %v", cmd, err)
+	}
+	fs := pflag.NewFlagSet("install", pflag.ContinueOnError)
+	unskip := fs.StringSlice("unskip", nil, "")
+	if err := fs.Parse(strings.Split(strings.TrimSuffix(string(argv), "\x00"), "\x00")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(*unskip, "|") != strings.Join(names, "|") {
+		t.Fatalf("--unskip parsed as %q from %q, want %q", *unskip, cmd, names)
+	}
+}
+
+// A proxy installed on another port than the default: every install fix
+// carries --port, or install would refuse the default port.
+func TestStatusPage_InstallFixesCarryThePort(t *testing.T) {
+	st := &mcpproxy.InstallState{State: mcpproxy.InstallInPlace, Hooks: false, Moved: []string{"a"}, NotProxied: []string{"x"}, Skipped: []string{"pp"}}
+	got := render(statusPage{addr: "127.0.0.1:8000", install: st, installPort: 8000, now: statusNow})
+	for _, want := range []string{"aimux mcp proxy install --port 8000 --unskip pp\n", "not behind the proxy: x", "aimux mcp proxy install --port 8000\n"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "aimux mcp proxy install\n") || strings.Contains(got, "install --unskip") {
+		t.Fatalf("an install fix without --port:\n%s", got)
+	}
+	// The default port needs no flag.
+	if got := render(statusPage{addr: "a", install: st, installPort: 7381, now: statusNow}); strings.Contains(got, "--port") {
+		t.Fatalf("--port for the default port:\n%s", got)
 	}
 }

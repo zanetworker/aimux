@@ -150,6 +150,7 @@ type Installer struct {
 	Settings     string // ~/.claude/settings.json, for the http idle limit and the hooks; empty leaves it alone
 	HookBinary   string // the aimux the hooks run; empty adds no hooks
 	Port         int    // the daemon's port on 127.0.0.1
+	ProxyAddr    string // where the SessionStart hook dials the daemon; empty is 127.0.0.1:Port
 	Version      string // this aimux's version, compared with the daemon's
 	// Unskip are recorded --skip servers this run moves after all.
 	Unskip []string
@@ -1333,10 +1334,14 @@ func (i Installer) InstallStatus() (InstallState, error) {
 	direct := map[string]bool{}
 	var recordedDirect []KeptDirect
 	for _, k := range m.Direct {
-		if _, isStdio := stdio[k.Server]; !isStdio && entryURL(members[k.Server]) != "" {
-			direct[k.Server] = true
-			recordedDirect = append(recordedDirect, k)
+		if _, isStdio := stdio[k.Server]; isStdio || entryURL(members[k.Server]) == "" {
+			continue
 		}
+		if e, ok := httpAll[k.Server]; k.Config != "" && (!ok || ConfigDigest(e) != k.Config) {
+			continue // checked under another URL or other headers: not known any more
+		}
+		direct[k.Server] = true
+		recordedDirect = append(recordedDirect, KeptDirect{Server: k.Server, Reason: k.Reason})
 	}
 	for _, name := range sortedKeys(httpAll) {
 		if reason := headersTooLong(i.Vault, name, httpAll[name]); reason != "" {

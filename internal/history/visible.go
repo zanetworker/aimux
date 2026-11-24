@@ -20,7 +20,7 @@ const (
 	KindSubagent  Kind = 1 << iota // a subagent's transcript
 	KindAutomated                  // started by a program (IsAutomated)
 	KindAnalyzer                   // started by aimux's own analysis or hook prompts
-	KindNearEmpty                  // no cost and at most 5 turns
+	KindNearEmpty                  // no cost, no tokens, and at most 5 turns
 	KindUndated                    // neither a start nor a last-active time
 	KindHidden                     // the owner hid it (Meta.Hidden); no reveal lifts it
 )
@@ -42,7 +42,9 @@ func Kinds(s Session) Kind {
 	if isAnalyzer(s) {
 		k |= KindAnalyzer
 	}
-	if s.CostUSD == 0 && s.TurnCount <= 5 {
+	// Tokens with no cost means the model is not in the price table, not that nothing happened: pricing lags
+	// model launches, and treating $0 as empty hid every short session on a new model (issue #76).
+	if s.CostUSD == 0 && s.TokensIn+s.TokensOut == 0 && s.TurnCount <= 5 {
 		k |= KindNearEmpty
 	}
 	if s.StartTime.IsZero() && s.LastActive.IsZero() {

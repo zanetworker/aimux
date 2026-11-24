@@ -605,7 +605,9 @@ func (s *Server) build(w *wiring) error {
 			runWaitingAlerts(ctx, waits, waitingAlerts(pushes, sessionTitle, errOut))
 		}},
 		job{name: "reap idle runs", run: every(time.Minute, func() { manager.Reap(); profiles.reap() })},
-		job{name: "search refresh", run: refreshing(searcher.Refresh, time.Minute, errOut)},
+		// Awaited: a refresh writes ~/.aimux/search.db, so a serve that returns while one is in flight
+		// leaves a half-written index. The loop returns as soon as the current refresh ends.
+		job{name: "search refresh", await: true, run: refreshing(searcher.Refresh, time.Minute, errOut)},
 	)
 	if api.ModeRouter != nil {
 		warm := s.warmRouter

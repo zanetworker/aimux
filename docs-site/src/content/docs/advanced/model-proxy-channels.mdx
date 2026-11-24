@@ -1,0 +1,68 @@
+---
+title: Model proxy channels
+description: Test changes on port 7386 without interrupting Claude Code sessions on port 7385.
+---
+
+The macOS stable proxy runs `~/go/bin/aimux` on `127.0.0.1:7385` under the `com.aimux.model-proxy` LaunchAgent. `claude-codex` uses that listener. Do not replace the binary or restart the job while a Claude Code session uses it. Other aimux commands may use the same binary, so avoid installing an unrelated build to that path.
+
+## Test on the dev channel
+
+With the dashboard assets built, run this from the development worktree:
+
+```bash
+scripts/model-proxy-promote build-dev
+aimux-dev model proxy serve --port 7386
+```
+
+In another terminal, run `claude-codex-dev`, then `claude`. In your shell setup, define `claude-codex-dev` to call your existing `claude-codex` function with `AIMUX_MODEL_PROXY_PORT=7386`. Both channels use the existing `aimux-model-proxy` Keychain entry. Only the stable listener publishes the Codex usage snapshot for the HUD. Images reach Codex on both channels: pasted screenshots, images in earlier messages, and images a tool returns (such as `Read` on a PNG), from base64 data or an https URL. An image block without a usable source is replaced with a short note, so a session never gets stuck on it.
+
+## Check that it is healthy
+
+```bash
+aimux model proxy status            # the stable listener on 7385
+aimux model proxy status --port 7386  # a dev listener
+```
+
+It prints the proxy's state and uptime, whether its Codex app-server is running, how many turns it has sent to Codex and how the last one went, and the same for the rate-limit checks behind the usage snapshot. Those checks cost no tokens, so a recent one shows the Codex login still works; only the stable listener makes them. Asking costs nothing and never starts Codex.
+
+The command exits non-zero when the proxy is degraded or not running, so a monitor can act on the exit code. The proxy is degraded when its most recent turn failed, or its most recent rate-limit check failed; a later success clears it. A request Claude Code malformed is not counted, and neither is a turn you interrupted.
+
+The same report is `GET /health` on the proxy, as JSON, with the key every route needs: 200 when healthy, 503 when degraded.
+
+## Speed
+
+The proxy asks Codex for the `priority` service tier, which Codex calls Fast. Measured on gpt-6.2-sol through the proxy: about 55 output tokens a second against 34 on the standard tier, so a 700-token answer arrives in 12 to 14 seconds instead of 22 to 24. It spends the plan's allowance faster; `aimux model proxy serve --service-tier standard` leaves Codex's own default in place.
+
+Reasoning effort comes from Claude Code and is passed through unchanged (`--effort`, or `/effort` in a session): low, medium, high, xhigh and max all mean the same to Codex. A request for a `codex:` model that carries no effort runs at high, and a background request (any other model name) runs at low. gpt-6.2-sol's own default is low, so high costs time Claude Code did not ask for on simple steps: with a 150-token answer, medium on the Fast tier reached the first token in 2.3 seconds and finished in 4.4, against 2.9 to 3.2 and 6.8 to 7.2 at high on the standard tier.
+
+The proxy itself adds about 33 ms to a request, measured against a fake app-server that answers at once; the rest of the wait is Codex and the model.
+
+## Read what the proxy has been doing
+
+Each listener appends one JSON line per answered `POST /v1/messages` request (not `/health` or `/v1/models`) to `~/.aimux/logs/model-proxy/requests.jsonl` (`requests-<port>.jsonl` for a dev listener): time, outcome, model, effort, status, time to first byte, duration and token counts, plus what a fallback says about itself. No prompts, answers or tool arguments are written. The file rolls over to `.1` at 8 MB and only that pair is kept, so the history covers roughly the last 50,000 requests rather than a fixed stretch of time, and never grows beyond 16 MB.
+
+```bash
+aimux model proxy stats --since 24h    # the stable listener
+aimux model proxy stats --port 7386 --since 2h
+aimux model proxy stats --since 6h --session 146917eb-1666-4076-9ba6-9c7cf9ccbf7a
+```
+
+It prints a row per outcome, slowest first, with counts, mean and 95th percentile duration, average prompt size and failures, then the fallback shapes. Read the outcomes in three groups. `hit_continuation` and `hit_idle` reused a thread, so the prompt was cached. `new_session` (a conversation's first request), `stateless` (a background request or one without a session id) and `invalid_request` (rejected before Codex saw it) are all normal. Everything else is a fallback: the thread could not be reused and the conversation was reprocessed, which is slow on a long one, so a large count there is worth investigating. When the window holds more than one conversation it also lists them, the costliest first, so one slow session is not hidden in an average. A conversation appears as a short one-way tag rather than its session id: `--session` takes either, hashing an id to its tag, and requests that carried no session id are grouped as `(no session id)`, which is worth noticing because they can never reuse a thread. Records written before this release carry no tag at all and are grouped separately as `(before session tags)`; they may well show thread reuse, so do not read them as sessionless. `jq` reads the same file for anything the summary does not cover.
+
+## Check prompt caching
+
+Claude Code requests with a `codex:` model and a session ID can reuse an ephemeral Codex thread while the conversation history, system prompt, and tools match. One handoff can return several `tool_use` blocks (calls Codex makes within 300 ms of each other), in streaming and non-streaming responses alike; the next request continues the same turn when the user messages added since the handoff carry a `tool_result` for every one of them, however Claude Code spreads them: one message with several results, one message each, or further user and in-conversation `system` messages (its hooks' reminders) after them. Text and images in those messages reach the turn as steering input. An assistant message among them is history the proxy did not produce, so it starts a fresh thread instead, as it does when a result is missing. A tool handoff waits for results for up to 10 minutes. The proxy releases idle threads after 30 minutes. Requests without a session ID and background requests use a fresh thread.
+
+For the last model request Codex reports, `usage.input_tokens` counts uncached input and `usage.cache_read_input_tokens` counts cached input. Add them to get the full prompt size. In a session, `usage.output_tokens` sums the outputs reported during that Messages request.
+
+The proxy logs the reuse outcome, token counts, and time to first byte on stderr for each Messages request. If a session hands off a tool before Codex reports usage, the response estimates the prompt counts from the last report on that thread and reports zero output tokens. The proxy logs these estimates as `usage=estimated` with `estimated_input_tokens` and `estimated_cached_input_tokens`. The counts start at zero on a fresh thread.
+
+## Promote or roll back from a fresh terminal
+
+Close stable Claude Code sessions and stop the hand-run dev listener first. In a fresh terminal outside Claude Code, run `scripts/model-proxy-promote promote`. The script runs the Go suite, channel tests, golangci-lint against the `origin/main` baseline, and the live Codex test. It then builds a candidate, starts it on `7386`, and checks a `claude -p` response through it. The live checks use your Codex allowance.
+
+Only then does it back up `aimux` to `aimux.prev`, replace the binary by rename, restart the LaunchAgent, and require authenticated HTTP 200 from `/v1/models`. If the stable health check fails, it tries to restore the backup. Run `scripts/model-proxy-promote rollback` from a fresh terminal to restore that backup manually. It restarts the same job and checks the same endpoint.
+
+With a local `claude-hud` clone under `~/go/src/github.com/zanetworker/claude-hud`, `scripts/model-proxy-promote pin-hud [commit]` prepares a detached checkout at a committed revision (defaults to `HEAD`). Point your statusline wrapper at `~/.claude/claude-hud-pins/current/src/index.ts`. Promotion switches that pin after the proxy health check. To use a previous HUD revision, run `pin-hud` with its commit; proxy rollback only restores the executable.
+
+Pin Codex with `brew pin --cask codex` for the Homebrew cask. To upgrade, unpin it deliberately, upgrade, pin it again, and rerun the live check before relying on the new version.

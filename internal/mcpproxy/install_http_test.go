@@ -801,8 +801,77 @@ func TestInstallStatus_KeptDirectOnceWhenRecordedAndInConfig(t *testing.T) {
 
 // KeptDirectLines names a server once per reason even when given twice.
 func TestKeptDirectLines_Dedupes(t *testing.T) {
-	got := KeptDirectLines([]KeptDirect{{"brand", ReasonNeedsOAuth}, {"amp", ReasonNeedsOAuth}, {"brand", ReasonNeedsOAuth}})
+	got := KeptDirectLines([]KeptDirect{{Server: "brand", Reason: ReasonNeedsOAuth}, {Server: "amp", Reason: ReasonNeedsOAuth}, {Server: "brand", Reason: ReasonNeedsOAuth}})
 	if len(got) != 1 || got[0] != "kept direct: needs OAuth (later): amp, brand" {
 		t.Fatalf("lines %q", got)
+	}
+}
+
+// A server whose headers install saw refused (401) is kept direct on
+// purpose: status lists it under kept direct with that reason, never as
+// not behind the proxy (whose fix is install), and the SessionStart hook
+// does not name it. Unreachable stays not behind: running install again is
+// the fix once it is up.
+func TestInstallStatus_RefusedHeadersIsKeptDirectNotNotProxied(t *testing.T) {
+	fx := newHTTPFX(t, httpClaude)
+	fx.reach["https://pp.example/mcp"] = NeedsOAuth // pp has headers: a 401 means they were refused
+	must(t, fx.in.Install(nil))
+	m, _ := LoadManifest(fx.manifest)
+	if keptReason(m.Direct, "pp") != reasonRefusedHeaders {
+		t.Fatalf("manifest direct %v: pp's reason not recorded", m.Direct)
+	}
+	fx.in.CheckHTTP = func(context.Context, string, map[string]string) HTTPReach {
+		t.Fatal("status probed the network")
+		return Reachable
+	}
+	st, err := fx.in.InstallStatus()
+	must(t, err)
+	if contains(st.NotProxied, "pp") || !contains(st.NotProxied, "devsrv") {
+		t.Fatalf("notProxied %v: want devsrv only, not pp", st.NotProxied)
+	}
+	if keptReason(st.KeptDirect, "pp") != reasonRefusedHeaders {
+		t.Fatalf("kept %v: pp not kept direct with its reason", st.KeptDirect)
+	}
+	if r := fx.in.HookCheck("/w"); strings.Contains(r.User, "pp") || !strings.Contains(r.User, "devsrv") {
+		t.Fatalf("session-start line %q: want devsrv named, pp not", r.User)
+	}
+}
+
+// The refused-headers record is bound to the configuration install checked
+// (its URL and header names, hashed; no values): once the entry's URL or
+// header names change, status names the server as not behind the proxy
+// again, so running install checks the new configuration.
+func TestInstallStatus_RefusedHeadersRecordFollowsTheConfig(t *testing.T) {
+	fx := newHTTPFX(t, httpClaude)
+	fx.reach["https://pp.example/mcp"] = NeedsOAuth
+	must(t, fx.in.Install(nil))
+	if b := fx.read(fx.manifest); strings.Contains(b, sentinelValue) || strings.Contains(b, "pp.example") {
+		t.Fatalf("manifest holds a header value or the URL:\n%s", b)
+	}
+	status := func() InstallState {
+		t.Helper()
+		st, err := fx.in.InstallStatus()
+		must(t, err)
+		return st
+	}
+	if st := status(); contains(st.NotProxied, "pp") {
+		t.Fatalf("unchanged config: pp should stay recorded, notProxied %v", st.NotProxied)
+	}
+	if b, _ := json.Marshal(status().KeptDirect); strings.Contains(string(b), "config") {
+		t.Fatalf("status exposes the record's digest: %s", b)
+	}
+	for name, entry := range map[string]string{
+		"url":          `{"type": "http", "url": "https://pp2.example/mcp", "headers": {"Authorization": "Bearer x"}}`,
+		"header names": `{"type": "http", "url": "https://pp.example/mcp", "headers": {"X-Api-Key": "x"}}`,
+	} {
+		fx.setEntry("pp", json.RawMessage(entry))
+		if st := status(); !contains(st.NotProxied, "pp") || keptReason(st.KeptDirect, "pp") != "" {
+			t.Fatalf("%s changed: pp still recorded (notProxied %v, kept %v)", name, st.NotProxied, st.KeptDirect)
+		}
+	}
+	// Only the header's value changed: the same configuration, still recorded.
+	fx.setEntry("pp", json.RawMessage(`{"type": "http", "url": "https://pp.example/mcp", "headers": {"Authorization": "Bearer other"}}`))
+	if st := status(); contains(st.NotProxied, "pp") || keptReason(st.KeptDirect, "pp") != reasonRefusedHeaders {
+		t.Fatalf("value-only change: pp not recorded (notProxied %v, kept %v)", st.NotProxied, st.KeptDirect)
 	}
 }

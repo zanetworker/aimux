@@ -176,3 +176,16 @@ func TestSurfaceOpts(t *testing.T) {
 		}
 	}
 }
+
+// A model the price table does not know costs $0, which must not be read as an empty session: that hid
+// every short Claude 5.x session until the table caught up (issue #76).
+func TestUnpricedSessionIsNotNearEmpty(t *testing.T) {
+	unpriced := Session{TurnCount: 3, CostUSD: 0, TokensIn: 40_000, TokensOut: 900}
+	if Kinds(unpriced)&KindNearEmpty != 0 {
+		t.Error("a session with turns and messages was hidden because its model has no price")
+	}
+	empty := Session{TurnCount: 1, CostUSD: 0}
+	if Kinds(empty)&KindNearEmpty == 0 {
+		t.Error("a genuinely near-empty session on a priced model should still be marked")
+	}
+}

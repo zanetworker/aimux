@@ -43,6 +43,7 @@ export default defineConfig({
 						{ label: 'Adding a Provider', slug: 'advanced/adding-a-provider' },
 						{ label: 'Kubernetes Quickstart', slug: 'advanced/k8s-quickstart' },
 						{ label: 'Profile to Sandbox', slug: 'advanced/profile-to-sandbox' },
+						{ label: 'Model proxy channels', slug: 'advanced/model-proxy-channels' },
 					],
 				},
 			],

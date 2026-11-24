@@ -1,0 +1,183 @@
+#!/bin/bash
+set -euo pipefail
+
+bin_dir=$HOME/go/bin
+stable=$bin_dir/aimux
+previous=$stable.prev
+dev=$stable-dev
+job=gui/$(id -u)/com.aimux.model-proxy
+hud_repo=$HOME/go/src/github.com/zanetworker/claude-hud
+hud_root=$HOME/.claude/claude-hud-pins
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+# Stage beside the destination so replacing a running binary is one rename.
+replace_binary() (
+  staged=$(mktemp "$bin_dir/.aimux-swap.XXXXXX")
+  trap 'rm -f "$staged"' EXIT
+  cp -p "$1" "$staged" && mv -f "$staged" "$2"
+)
+
+install_candidate() {
+  [[ -x "$stable" && -f "$stable" ]] || { printf 'No stable binary at %s\n' "$stable" >&2; return 1; }
+  replace_binary "$stable" "$previous" && replace_binary "$1" "$stable"
+}
+
+restore_previous() {
+  [[ -x "$previous" && -f "$previous" ]] || { printf 'No rollback binary at %s\n' "$previous" >&2; return 1; }
+  replace_binary "$previous" "$stable"
+}
+
+# Use stdin for the header so the shared key never appears in argv.
+models_ok() {
+  [[ $(printf 'header = "x-api-key: %s"\n' "$key" | curl -q --config - --noproxy '*' -s --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$1/v1/models") == 200 ]]
+}
+
+# One real answer through the proxy: /v1/models is a static list and never touches Codex.
+inference_ok() {
+  local body='{"model":"codex:gpt-6.2-sol","max_tokens":256,"messages":[{"role":"user","content":"Reply with exactly AIMUX_PROXY_OK and nothing else."}]}'
+  printf 'header = "x-api-key: %s"\n' "$key" |
+    curl -q --config - --noproxy '*' -s --max-time 120 -H 'content-type: application/json' -d "$body" "http://127.0.0.1:$1/v1/messages" |
+    grep -q 'AIMUX_PROXY_OK'
+}
+
+# Armed from the binary swap until stable passes its checks, so an interrupt or failure in between restores
+# the previous binary instead of leaving an unchecked one for launchd to start.
+rollback_armed=0
+rollback_if_armed() {
+  [[ ${rollback_armed:-0} == 1 ]] || return 0
+  rollback_armed=0
+  if restore_previous && launchctl kickstart -k "$job"; then
+    printf 'Restored the previous stable binary (%s).\n' "$previous" >&2
+  else
+    printf 'Could not restore %s; run: %s rollback\n' "$previous" "$0" >&2
+  fi
+}
+
+wait_for_models() {
+  local attempt
+  for ((attempt=0; attempt<30; attempt++)); do
+    if [[ -n ${2:-} ]]; then
+      kill -0 "$2" 2>/dev/null || return 1
+      # A competing listener must not be mistaken for the binary just built.
+      if ! grep -Fxq 'Model proxy at http://127.0.0.1:7386' "$3"; then sleep 1; continue; fi
+    fi
+    models_ok "$1" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+build_candidate() {
+  go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" -o "$1" ./cmd/aimux
+}
+
+prepare_hud() {
+  local revision
+  revision=$(git -C "$hud_repo" rev-parse --verify "${1:-HEAD}^{commit}") || return 1
+  hud_checkout=$hud_root/$revision
+  mkdir -p "$hud_root" || return 1
+  if [[ ! -d "$hud_checkout" ]]; then
+    git -C "$hud_repo" worktree add --detach "$hud_checkout" "$revision" >&2 || return 1
+  fi
+  [[ $(git -C "$hud_checkout" rev-parse HEAD) == "$revision" &&
+     -z $(git -C "$hud_checkout" status --porcelain) && -f "$hud_checkout/src/index.ts" ]]
+}
+
+activate_hud() (
+  stage=$(mktemp -d "$hud_root/.current.XXXXXX")
+  trap 'rm -rf "$stage"' EXIT
+  ln -s "$hud_checkout" "$stage/current" && mv -fh "$stage/current" "$hud_root/current"
+)
+
+main() {
+  local action=${1:-} dev_pid= scratch= lock= key= hud_checkout=
+  case "$action" in
+    -h|--help) printf 'Usage: %s {build-dev|pin-hud [commit]|promote [hud-commit]|rollback}\n' "$0"; return ;;
+    build-dev|rollback) [[ $# == 1 ]] || die 'Too many arguments; see --help.' ;;
+    pin-hud|promote) [[ $# -le 2 ]] || die 'Too many arguments; see --help.' ;;
+    *) die 'Choose build-dev, pin-hud, promote, or rollback; see --help.' ;;
+  esac
+  case "$action" in
+    promote|rollback)
+      [[ -z ${CLAUDECODE:-}${CLAUDE_CODEX_MODEL:-} ]] || die 'Run this outside Claude Code in a fresh terminal, after closing stable proxy sessions.'
+      [[ -t 0 ]] || die 'Run this interactively in a fresh terminal.'
+      ;;
+  esac
+  cd "$(dirname "$0")/.."
+  mkdir -p "$bin_dir"
+  scratch=$(mktemp -d)
+  # Bash runs EXIT after main returns, when its locals are no longer in scope.
+  trap 'rm -rf "$scratch"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  case "$action" in
+    build-dev)
+      build_candidate "$scratch/aimux"
+      replace_binary "$scratch/aimux" "$dev"
+      printf 'Built %s. Start it with: aimux-dev model proxy serve --port 7386\n' "$dev"
+      exit 0
+      ;;
+    pin-hud)
+      prepare_hud "${2:-HEAD}" || die 'HUD checkout is missing or not clean; no change to the active pin.'
+      activate_hud
+      printf 'Pinned HUD to %s\n' "$hud_checkout"
+      exit 0
+      ;;
+  esac
+  lock=$bin_dir/.aimux-model-proxy-promotion
+  mkdir "$lock" || die "Another promotion or rollback is in progress (lock: $lock)."
+  trap 'rollback_if_armed; if [[ -n "$dev_pid" ]]; then kill "$dev_pid" 2>/dev/null || true; wait "$dev_pid" || true; fi; rm -rf "$scratch"; rmdir "$lock"' EXIT
+  launchctl print "$job" >/dev/null || die "The stable launchd job is not loaded: $job"
+  set +x
+  key=$(security find-generic-password -a aimux -s aimux-model-proxy -w) || die 'The proxy Keychain entry is unavailable.'
+  [[ "$key" =~ ^[a-zA-Z0-9_-]+$ ]] || die 'The proxy Keychain entry has an invalid key.'
+  if [[ "$action" == rollback ]]; then
+    restore_previous
+    launchctl kickstart -k "$job" && wait_for_models 7385 || die 'Rollback binary restored, but the stable proxy did not become healthy.'
+    printf 'Restored the previous stable binary; port 7385 is healthy.\n'
+    exit 0
+  fi
+
+  command -v timeout >/dev/null || die 'Install GNU coreutils for the bounded Claude Code smoke test.'
+  command -v lsof >/dev/null || die 'lsof is required to check that port 7386 is free.'
+  if lsof -nP -iTCP:7386 -sTCP:LISTEN >/dev/null; then die 'Port 7386 is occupied; stop your dev proxy before promoting.'; fi
+  make test
+  bash scripts/model-proxy-promote_test.sh
+  # Match CI's baseline policy: lint changes since main, not unrelated findings.
+  golangci-lint run --new-from-rev=origin/main ./...
+  AIMUX_LIVE_CODEX=1 go test ./internal/modelproxy/ -run '^TestLiveCodex$' -count=1 -timeout 300s -v
+  prepare_hud "${2:-HEAD}" || die 'HUD checkout is missing or not clean; stable was not changed.'
+  build_candidate "$scratch/aimux"
+  replace_binary "$scratch/aimux" "$dev"
+  "$scratch/aimux" model proxy serve --port 7386 >"$scratch/dev.log" 2>&1 &
+  dev_pid=$!
+  if ! wait_for_models 7386 "$dev_pid" "$scratch/dev.log"; then
+    die 'Candidate did not start on port 7386; run aimux-dev manually to inspect startup errors.'
+  fi
+  mkdir "$scratch/smoke"
+  if ! answer=$(cd "$scratch/smoke" && unset ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY &&
+      ANTHROPIC_BASE_URL=http://127.0.0.1:7386 ANTHROPIC_API_KEY="$key" \
+        timeout 150 claude --bare -p --strict-mcp-config --no-session-persistence --tools '' --model codex:gpt-6.2-sol \
+        'Reply with exactly AIMUX_PROXY_OK and nothing else.'); then
+    die 'Claude Code smoke test failed; stable was not changed.'
+  fi
+  [[ "$answer" == AIMUX_PROXY_OK ]] || die 'Claude Code smoke test did not return AIMUX_PROXY_OK; stable was not changed.'
+  kill -0 "$dev_pid" 2>/dev/null || die 'Candidate exited during the smoke test; stable was not changed.'
+
+  rollback_armed=1
+  install_candidate "$scratch/aimux"
+  if ! launchctl kickstart -k "$job" || ! wait_for_models 7385 || ! inference_ok 7385; then
+    rollback_armed=0
+    if restore_previous && launchctl kickstart -k "$job" && wait_for_models 7385; then
+      die 'Candidate failed its stable health or inference check; restored the previous binary.'
+    fi
+    die "Candidate failed and automatic rollback did not recover the stable proxy. Backup: $previous"
+  fi
+  rollback_armed=0
+  activate_hud || die 'Stable proxy is healthy, but the HUD pin could not be switched.'
+  printf 'Promoted the tested binary; port 7385 is healthy. Rollback: %s rollback\n' "$0"
+  exit 0
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

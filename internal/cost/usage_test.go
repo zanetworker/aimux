@@ -39,9 +39,9 @@ func TestAppendUsage_WritesOneLinePerCall(t *testing.T) {
 	if !second.Estimated {
 		t.Error("estimated flag lost")
 	}
-	// haiku 4.5 alias pricing: 10/1M*$1 + 5/1M*$5
-	if second.CostUSD == nil || !almostEqual(*second.CostUSD*1e6, 35) {
-		t.Errorf("cost filled from pricing = %v, want 0.000035", second.CostUSD)
+	// haiku 5.5 alias pricing: 10/1M*$0.10 + 5/1M*$0.50
+	if second.CostUSD == nil || !almostEqual(*second.CostUSD*1e6, 3.5) {
+		t.Errorf("cost filled from pricing = %v, want 0.0000035", second.CostUSD)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestAppendUsage_UnwritablePathErrors(t *testing.T) {
 
 func TestAppendUsage_UnpricedModelIsMarkedUnknown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "usage.jsonl")
-	if err := AppendUsage(path, Usage{Label: "naming", Model: "claude-haiku-5-5", InputTokens: 700, OutputTokens: 90}); err != nil {
+	if err := AppendUsage(path, Usage{Label: "naming", Model: "a-model-released-after-this-table", InputTokens: 700, OutputTokens: 90}); err != nil {
 		t.Fatal(err)
 	}
 	if err := AppendUsage(path, Usage{Label: "naming", Model: "claude-haiku-4-5", InputTokens: 700}); err != nil {
@@ -109,7 +109,7 @@ func TestAppendUsage_UnpricedModelIsMarkedUnknown(t *testing.T) {
 	if priced["cost_unknown"] != nil || priced["cost_usd"].(float64) == 0 {
 		t.Errorf("priced = %v", priced)
 	}
-	if Priced("claude-haiku-5-5") || !Priced("claude-haiku-4-5") || !Priced("haiku") {
+	if Priced("a-model-released-after-this-table") || !Priced("claude-haiku-4-5") || !Priced("haiku") {
 		t.Error("Priced")
 	}
 }
