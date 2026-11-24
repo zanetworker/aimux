@@ -692,10 +692,15 @@ func stageTag(prefix, content string) string {
 
 // earlierBlock is the page's earlier questions and answers, oldest first,
 // as one tagged block of untrusted data; "" when there are none. Every stage
-// prompt places it after its fixed instructions: the block grows each turn,
-// so a prompt that opened with it would change from its first byte and lose
-// provider-side prompt caching (and, behind the model proxy, thread reuse,
-// which keys on the prefix-hash chain).
+// prompt places it after its fixed instructions, since the block grows each
+// turn and a prompt that opened with it would differ from its first byte.
+// This is about provider-side prompt caching, which matches on a prefix of
+// the rendered prompt. It has no bearing on the model proxy's thread reuse:
+// that keys on the session id plus whole-message hashes (modelproxy
+// hashMessage), and each stage is a new session every turn anyway.
+// Caching still needs every earlier byte to be stable, which a page block's
+// content-derived tag (sandboxTurnPrompt) and the writer's citation tag are
+// not, so this ordering is necessary rather than sufficient.
 func earlierBlock(earlier []Exchange, question string) string {
 	if len(earlier) == 0 {
 		return ""
