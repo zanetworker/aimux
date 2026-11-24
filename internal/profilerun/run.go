@@ -56,6 +56,9 @@ type RunEngine struct {
 	// ArchiveDir is where each run session's own transcript (its questions
 	// and answers) is kept (RunTranscriptPath); "" keeps none.
 	ArchiveDir string
+	// PublicNames, if set, is the owner's public names for the query check
+	// (runcheck.LoadPublicNames), read each turn so edits apply at once.
+	PublicNames func() []string
 
 	mu       sync.Mutex
 	sessions map[string]*runSession
@@ -204,9 +207,16 @@ func (e *RunEngine) Send(ctx context.Context, session, text string, onEvent func
 		prior = append(prior, x.Question, x.Answer)
 	}
 	priv := runcheck.Private{Question: text, PageText: s.page, Notes: p.PrivateNotes, Prior: prior}
+	if e.PublicNames != nil {
+		priv.PublicNames = e.PublicNames()
+	}
 	for _, r := range planResults {
 		priv.ToolInputs = append(priv.ToolInputs, r.Input)
-		priv.ToolOutputs = append(priv.ToolOutputs, r.Output)
+		if r.Failed {
+			priv.FailedOutputs = append(priv.FailedOutputs, r.Output)
+		} else {
+			priv.ToolOutputs = append(priv.ToolOutputs, r.Output)
+		}
 	}
 	st.Accepted, st.Rejected = runcheck.Check(p.PublicQueries, priv)
 	if len(st.Rejected) > 0 {
@@ -584,6 +594,11 @@ func rejectionNotice(rej []runcheck.Rejection) string {
 	for _, r := range rej {
 		if !slices.Contains(reasons, r.Reason) {
 			reasons = append(reasons, r.Reason)
+		}
+	}
+	for i, r := range reasons {
+		if r == runcheck.ReasonPrivateName {
+			reasons[i] = r + " (a name from your workspace; to allow a public one, add it to ~/.config/aimux/public-names.txt)"
 		}
 	}
 	return fmt.Sprintf("%d %s not sent: %s", len(rej), plural(len(rej), "query was", "queries were"), strings.Join(reasons, ", "))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/zanetworker/aimux/internal/runcheck"
 	"io"
 	"log"
 	"log/slog"
@@ -176,7 +177,8 @@ func (p *profileWiring) buildEngines(home, dir string, errOut io.Writer) (func()
 	// the writer on the page engine; Resolve checks roles as the catalog does.
 	run := &profilerun.RunEngine{Planner: p.sandbox, Reader: p.sandbox, Writer: page, Compile: compile,
 		Resolve: func(name string) (profile.Manifest, error) { return resolveChecked(dir, name) },
-		Store:   p.store, Log: logger, ArchiveDir: p.sandbox.ArchiveDir}
+		Store:   p.store, Log: logger, ArchiveDir: p.sandbox.ArchiveDir,
+		PublicNames: publicNamesLoader(home, logger)}
 	p.engines = map[string]profilerun.Engine{"acp": page, "sandbox": p.sandbox, "run": run}
 	return func() {
 		p.pageMgr.Close()
@@ -546,4 +548,18 @@ func (p *profileWiring) turnLinks(id string) map[int64][]string {
 func fileExists(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.Mode().IsRegular()
+}
+
+// publicNamesLoader reads the owner's public names from
+// ~/.config/aimux/public-names.txt under home on every call, so an edit
+// applies to the next turn; an unreadable file is logged and gives none.
+func publicNamesLoader(home string, logger *slog.Logger) func() []string {
+	path := filepath.Join(home, ".config", "aimux", "public-names.txt")
+	return func() []string {
+		names, err := runcheck.LoadPublicNames(path)
+		if err != nil {
+			logger.Warn("public names unreadable; only the shipped list applies", "err", err)
+		}
+		return names
+	}
 }
