@@ -636,3 +636,28 @@ func TestRun_PublicNamesReachTheCheck(t *testing.T) {
 		}
 	}
 }
+
+// Stage prompts put their fixed instructions before the earlier conversation,
+// which grows every turn: a variable prefix defeats provider-side caching and,
+// behind the model proxy, thread reuse (the key is the prefix-hash chain).
+func TestRun_StagePromptsPutStableTextFirst(t *testing.T) {
+	earlier := []Exchange{{Question: "EARLIERQ which epics slip", Answer: "EARLIERA the pilot slips"}}
+	for _, tc := range []struct {
+		name, prompt, fixed, last string
+	}{
+		{"planner", plannerPrompt("the question", earlier), "You plan a research task", "The question: "},
+		{"writer", writerPrompt("the question", earlier, "notes", "found", nil, nil, true),
+			"Write the answer to the owner's question", "The owner's question: "},
+	} {
+		fixed := strings.Index(tc.prompt, tc.fixed)
+		block := strings.Index(tc.prompt, "EARLIERQ")
+		last := strings.LastIndex(tc.prompt, tc.last)
+		if fixed < 0 || block < 0 || last < 0 {
+			t.Fatalf("%s: missing part (fixed %d, earlier %d, question %d)", tc.name, fixed, block, last)
+		}
+		if fixed >= block || block >= last {
+			t.Errorf("%s: want fixed instructions, then the earlier conversation, then the question; got %d, %d, %d",
+				tc.name, fixed, block, last)
+		}
+	}
+}
