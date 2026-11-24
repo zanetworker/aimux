@@ -151,6 +151,16 @@ func TestHealthNeedsTheProxyKey(t *testing.T) {
 	}
 }
 
+func TestHealth_ReportsVersion(t *testing.T) {
+	const version = "v0.14.0-184-gabc"
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Version: version})
+	t.Cleanup(backend.Close)
+	health := readHealth(t, NewHandler(backend, testKey), http.StatusOK)
+	if health.Version != version {
+		t.Errorf("health version = %q, want %q", health.Version, version)
+	}
+}
+
 func readHealth(t *testing.T, handler http.Handler, status int) Health {
 	t.Helper()
 	res := request(handler, http.MethodGet, "/health", "")
@@ -162,4 +172,108 @@ func readHealth(t *testing.T, handler http.Handler, status int) Health {
 		t.Fatalf("decode health %s: %v", res.Body, err)
 	}
 	return health
+}
+
+func TestLiveness_AnswersWithoutTheKey(t *testing.T) {
+	const version = "v0.15.0-2-gabc"
+	backend := NewCodexBackend(CodexOptions{Command: fakeCodex, Version: version, Stderr: io.Discard})
+	t.Cleanup(backend.Close)
+	live := readLiveness(t, NewHandler(backend, testKey))
+	if live.Service != "aimux-model-proxy" || live.Status != "ok" || live.Version != version || live.StartedAt.IsZero() {
+		t.Fatalf("liveness = %+v, want service aimux-model-proxy, status ok, version %q, a start time", live, version)
+	}
+	if live.LastOKAt != nil {
+		t.Errorf("last_ok_at = %v before any turn, want none", live.LastOKAt)
+	}
+}
+
+func TestLiveness_ReportsLastTurn(t *testing.T) {
+	backend, _ := newFakeBackend(t)
+	handler := NewHandler(backend, testKey)
+	if res := request(handler, http.MethodPost, "/v1/messages", healthTurn); res.Code != http.StatusOK {
+		t.Fatalf("turn status %d: %s", res.Code, res.Body)
+	}
+	if live := readLiveness(t, handler); live.Status != "ok" || live.LastOKAt == nil {
+		t.Fatalf("after a turn: %+v, want ok with last_ok_at", live)
+	}
+}
+
+func TestLiveness_HidesTheErrorText(t *testing.T) {
+	const marker = "SECRET-MARKER-7f3a"
+	backend := NewCodexBackend(CodexOptions{Command: t.TempDir() + "/" + marker, Stderr: io.Discard})
+	t.Cleanup(backend.Close)
+	handler := NewHandler(backend, testKey)
+	if res := request(handler, http.MethodPost, "/v1/messages", healthTurn); res.Code != http.StatusBadGateway {
+		t.Fatalf("turn status %d, want 502: %s", res.Code, res.Body)
+	}
+	if health := readHealth(t, handler, http.StatusServiceUnavailable); !strings.Contains(health.Reason, marker) {
+		t.Fatalf("keyed health reason %q lacks the marker; the test no longer proves anything", health.Reason)
+	}
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("healthz status %d, want 200", res.Code)
+	}
+	body := res.Body.String()
+	if strings.Contains(body, marker) {
+		t.Fatalf("healthz leaks the error text: %s", body)
+	}
+	for _, field := range []string{"reason", "last_error", "command", "total", "failed", "codex"} {
+		if strings.Contains(body, `"`+field+`"`) {
+			t.Errorf("healthz carries %q: %s", field, body)
+		}
+	}
+	var live Liveness
+	if err := json.Unmarshal(res.Body.Bytes(), &live); err != nil || live.Status != "degraded" {
+		t.Fatalf("liveness %+v (%v), want degraded", live, err)
+	}
+}
+
+func TestLiveness_EveryOtherPathNeedsTheKey(t *testing.T) {
+	backend, _ := newFakeBackend(t)
+	handler := NewHandler(backend, testKey)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/health"},
+		{http.MethodGet, "/v1/models"},
+		{http.MethodPost, "/v1/messages"},
+		{http.MethodPost, "/v1/messages/count_tokens"},
+		{http.MethodPost, "/healthz"},
+		{http.MethodGet, "/healthz/x"},
+		{http.MethodGet, "/nope"},
+	} {
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, httptest.NewRequest(tc.method, tc.path, strings.NewReader(healthTurn)))
+		if res.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s without a key: status %d, want 401", tc.method, tc.path, res.Code)
+		}
+	}
+}
+
+func TestLiveness_AbsentWithoutHealth(t *testing.T) {
+	res := httptest.NewRecorder()
+	NewHandler(&fakeBackendNoHealth{}, testKey).ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("healthz on a backend without health: status %d, want 401", res.Code)
+	}
+}
+
+func readLiveness(t *testing.T, handler http.Handler) Liveness {
+	t.Helper()
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("healthz status %d, want 200: %s", res.Code, res.Body)
+	}
+	var live Liveness
+	if err := json.Unmarshal(res.Body.Bytes(), &live); err != nil {
+		t.Fatalf("decode healthz %s: %v", res.Body, err)
+	}
+	return live
+}
+
+// fakeBackendNoHealth is a backend that keeps no health record, like one built outside NewCodexBackend.
+type fakeBackendNoHealth struct{}
+
+func (fakeBackendNoHealth) Run(context.Context, TurnRequest, func(Event) error) (Usage, error) {
+	return Usage{}, errors.New("no turns here")
 }

@@ -27,7 +27,7 @@ It prints the proxy's state and uptime, whether its Codex app-server is running,
 
 The command exits non-zero when the proxy is degraded or not running, so a monitor can act on the exit code. The proxy is degraded when its most recent turn failed, or its most recent rate-limit check failed; a later success clears it. A request Claude Code malformed is not counted, and neither is a turn you interrupted.
 
-The same report is `GET /health` on the proxy, as JSON, with the key every route needs: 200 when healthy, 503 when degraded.
+The same report is `GET /health` on the proxy, as JSON: 200 when healthy, 503 when degraded. `GET /health` requires the proxy key, like every route but one. `GET /healthz` is that one exception: it needs no key and always answers 200 with less: the service name, `ok` or `degraded`, the build, the start time and the last successful turn, without error text or counts. `aimux status` reads `/healthz`.
 
 ## Speed
 

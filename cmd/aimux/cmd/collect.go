@@ -39,7 +39,7 @@ func newCollectCmd() *cobra.Command {
 			dataDir := filepath.Join(home, ".aimux", "data", "context")
 
 			store := aimuxotel.NewSpanStore()
-			receiver := aimuxotel.NewReceiver(store, port)
+			receiver := aimuxotel.NewReceiverWithVersion(store, port, rootCmd.Version)
 			if err := receiver.Start(); err != nil {
 				return fmt.Errorf("start receiver on :%d: %w", port, err)
 			}

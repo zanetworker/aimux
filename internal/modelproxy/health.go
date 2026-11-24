@@ -13,6 +13,7 @@ type Health struct {
 	// Status is "ok" or "degraded"; Reason says what went wrong, and is empty while the status is ok.
 	Status        string      `json:"status"`
 	Reason        string      `json:"reason,omitempty"`
+	Version       string      `json:"version,omitempty"`
 	StartedAt     time.Time   `json:"started_at"`
 	UptimeSeconds int64       `json:"uptime_seconds"`
 	Codex         CodexHealth `json:"codex"`
@@ -70,6 +71,7 @@ func (s stageState) report() StageHealth {
 // health reader cannot hold up a turn.
 type healthState struct {
 	mu        sync.Mutex
+	version   string
 	startedAt time.Time
 	requests  stageState
 	probe     stageState
@@ -94,6 +96,7 @@ func (h *healthState) snapshot(command string, appServerRunning bool) Health {
 	defer h.mu.Unlock()
 	health := Health{
 		Status:    "ok",
+		Version:   h.version,
 		StartedAt: h.startedAt,
 		Codex:     CodexHealth{Command: command, AppServerRunning: appServerRunning},
 		Requests:  h.requests.report(),
@@ -119,4 +122,24 @@ func (h *healthState) observe(ctx context.Context, stage *stageState, err error)
 		return
 	}
 	h.record(stage, err)
+}
+
+// LivenessService names the model proxy in its keyless liveness answer.
+const LivenessService = "aimux-model-proxy"
+
+// Liveness is what anyone on this machine may learn without the key: enough for a status check, no error text.
+type Liveness struct {
+	Service   string     `json:"service"` // always "aimux-model-proxy"
+	Status    string     `json:"status"`  // "ok" or "degraded"
+	Version   string     `json:"version,omitempty"`
+	StartedAt time.Time  `json:"started_at"`
+	LastOKAt  *time.Time `json:"last_ok_at,omitempty"` // last successful turn
+}
+
+// liveness keeps only the fields Liveness allows from a full health report.
+func liveness(health Health) Liveness {
+	return Liveness{
+		Service: LivenessService, Status: health.Status, Version: health.Version,
+		StartedAt: health.StartedAt, LastOKAt: health.Requests.LastOKAt,
+	}
 }

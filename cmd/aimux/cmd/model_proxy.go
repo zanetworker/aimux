@@ -110,7 +110,7 @@ func newModelProxyServeCmd() *cobra.Command {
 				return err
 			}
 			backend := modelproxy.NewCodexBackend(modelproxy.CodexOptions{
-				Command: command, ServiceTier: serviceTier, Stderr: cmd.ErrOrStderr(),
+				Command: command, ServiceTier: serviceTier, Stderr: cmd.ErrOrStderr(), Version: rootCmd.Version,
 			})
 			defer backend.Close()
 			var handlerOptions []modelproxy.HandlerOption

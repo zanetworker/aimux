@@ -31,9 +31,10 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 		option(&config)
 	}
 	mux := http.NewServeMux()
+	reporter, hasHealth := backend.(interface{ health() Health })
 	// A backend that reports no health leaves the route unregistered, so a caller gets 404 rather than a made-up
 	// answer. 503 on degraded lets a monitor act on the status code alone.
-	if reporter, ok := backend.(interface{ health() Health }); ok {
+	if hasHealth {
 		mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 			health := reporter.health()
 			status := http.StatusOK
@@ -53,6 +54,12 @@ func NewHandler(backend Backend, key string, options ...HandlerOption) http.Hand
 		serveMessage(w, r, backend, config.requests)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// GET /healthz is the one keyless answer, so `aimux status` never has to hand the key to an unknown
+		// listener. It always answers 200 and carries no error text; the keyed /health has the detail.
+		if hasHealth && r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+			_ = writeJSON(w, http.StatusOK, liveness(reporter.health()))
+			return
+		}
 		if !validKey(r, key) {
 			writeError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing proxy key")
 			return

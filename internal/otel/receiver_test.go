@@ -2,6 +2,7 @@ package otel
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,11 +11,163 @@ import (
 
 	"github.com/zanetworker/aimux/internal/subagent"
 	collectorlogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	collectorpb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestReceiverHealth(t *testing.T) {
+	const version = "v0.14.0-184-gabc"
+	beforeStart := time.Now()
+	handler := receiverHealthTestHandler(t, version)
+	type healthResponse struct {
+		Service    string          `json:"service"`
+		Version    string          `json:"version"`
+		StartedAt  time.Time       `json:"started_at"`
+		LastSpanAt json.RawMessage `json:"last_span_at"`
+	}
+	readHealth := func() healthResponse {
+		t.Helper()
+		resp := getReceiverHealth(t, handler)
+		var health healthResponse
+		decoder := json.NewDecoder(resp.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&health); err != nil {
+			t.Fatalf("decode receiver health: %v", err)
+		}
+		return health
+	}
+
+	initial := readHealth()
+	if initial.Service != "aimux-collector" || initial.Version != version {
+		t.Errorf("health service = %q, version = %q, want aimux-collector and %q", initial.Service, initial.Version, version)
+	}
+	if initial.StartedAt.Before(beforeStart) || initial.StartedAt.After(time.Now()) {
+		t.Errorf("started_at = %v, want receiver startup time", initial.StartedAt)
+	}
+	if initial.LastSpanAt != nil {
+		t.Errorf("last_span_at before ingestion = %s, want omitted", initial.LastSpanAt)
+	}
+
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, httptest.NewRequest(http.MethodPost, "/health", nil))
+	if rejected.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /health status = %d, want 405", rejected.Code)
+	}
+	postReceiverHealthTraces(t, handler, &collectorpb.ExportTraceServiceRequest{})
+	if empty := readHealth(); empty.LastSpanAt != nil {
+		t.Errorf("last_span_at after an empty export = %s, want omitted", empty.LastSpanAt)
+	}
+
+	beforePost := time.Now()
+	postReceiverHealthTraces(t, handler, receiverHealthTrace("hello"))
+	afterPost := time.Now()
+	updated := readHealth()
+	if !updated.StartedAt.Equal(initial.StartedAt) {
+		t.Errorf("started_at changed from %v to %v", initial.StartedAt, updated.StartedAt)
+	}
+	var lastSpanAt time.Time
+	if err := json.Unmarshal(updated.LastSpanAt, &lastSpanAt); err != nil {
+		t.Fatalf("decode last_span_at: %v", err)
+	}
+	if lastSpanAt.Before(beforePost) || lastSpanAt.After(afterPost) {
+		t.Errorf("last_span_at = %v, want the span's arrival time", lastSpanAt)
+	}
+}
+
+func TestReceiverHealth_CarriesNoSpanContent(t *testing.T) {
+	const prompt = "SECRET-PROMPT"
+	handler := receiverHealthTestHandler(t, "dev")
+	postReceiverHealthTraces(t, handler, receiverHealthTrace(prompt))
+	resp := getReceiverHealth(t, handler)
+	if bytes.Contains(resp.Body.Bytes(), []byte(prompt)) {
+		t.Error("receiver health exposed span content")
+	}
+}
+
+// Only `aimux collect` builds a receiver with a version; the TUI's own receiver must not claim to be the collector.
+func TestReceiverHealth_ServiceNameComesFromConstruction(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		receiver *Receiver
+		want     string
+	}{
+		{"collector", NewReceiverWithVersion(NewSpanStore(), 0, "dev"), "aimux-collector"},
+		{"plain receiver", NewReceiver(NewSpanStore(), 0), "aimux-receiver"},
+		{"TUI receiver with keys", NewReceiverWithKeys(NewSpanStore(), 0, map[string]subagent.AttrKeys{}), "aimux-receiver"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.receiver.Start(); err != nil {
+				t.Fatalf("Start error: %v", err)
+			}
+			t.Cleanup(tc.receiver.Stop)
+			var health ReceiverHealth
+			if err := json.Unmarshal(getReceiverHealth(t, tc.receiver.server.Handler).Body.Bytes(), &health); err != nil {
+				t.Fatal(err)
+			}
+			if health.Service != tc.want {
+				t.Errorf("service = %q, want %q", health.Service, tc.want)
+			}
+		})
+	}
+}
+
+func receiverHealthTestHandler(t *testing.T, version string) http.Handler {
+	t.Helper()
+	receiver := NewReceiverWithVersion(NewSpanStore(), 0, version)
+	if err := receiver.Start(); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	t.Cleanup(receiver.Stop)
+	return receiver.server.Handler
+}
+
+func getReceiverHealth(t *testing.T, handler http.Handler) *httptest.ResponseRecorder {
+	t.Helper()
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /health status = %d, want 200", resp.Code)
+	}
+	if got := resp.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("GET /health Content-Type = %q, want application/json", got)
+	}
+	return resp
+}
+
+func postReceiverHealthTraces(t *testing.T, handler http.Handler, traces *collectorpb.ExportTraceServiceRequest) {
+	t.Helper()
+	body, err := proto.Marshal(traces)
+	if err != nil {
+		t.Fatalf("encode traces: %v", err)
+	}
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	handler.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("POST /v1/traces status = %d, want 200: %s", resp.Code, resp.Body)
+	}
+}
+
+func receiverHealthTrace(prompt string) *collectorpb.ExportTraceServiceRequest {
+	span := &tracepb.Span{
+		TraceId: []byte("health-testtrace"),
+		SpanId:  []byte("testspan"),
+		Name:    "user_prompt",
+		Attributes: []*commonpb.KeyValue{
+			{Key: "gen_ai.input.messages", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: prompt}}},
+		},
+	}
+	return &collectorpb.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{
+			{ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{span}}}},
+		},
+	}
+}
 
 func TestReceiver_StartAndStop(t *testing.T) {
 	store := NewSpanStore()
