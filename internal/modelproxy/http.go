@@ -263,7 +263,9 @@ func classifyFailure(err error) string {
 		return ""
 	case errors.Is(err, errAppServerExited):
 		return "app_server_exited"
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
 		return "cancelled"
 	case strings.Contains(err.Error(), "codex turn"):
 		return "turn_failed"

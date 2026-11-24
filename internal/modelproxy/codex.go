@@ -35,6 +35,8 @@ type CodexBackend struct {
 	command     string
 	serviceTier string
 	stderr      io.Writer
+	// lifecycleTimeout bounds each lifecycle RPC (thread/start, turn/start) on its own.
+	lifecycleTimeout time.Duration
 
 	mu          sync.Mutex
 	server      *appServer
@@ -78,7 +80,7 @@ func NewCodexBackend(opts CodexOptions) *CodexBackend {
 		}
 	}
 	return &CodexBackend{
-		command: command, stderr: opts.Stderr, serviceTier: opts.ServiceTier,
+		command: command, stderr: opts.Stderr, serviceTier: opts.ServiceTier, lifecycleTimeout: 15 * time.Second,
 		vitals:   healthState{version: opts.Version, startedAt: time.Now().UTC()},
 		sessions: sessions{pauseTimeout: 10 * time.Minute, idleTimeout: 30 * time.Minute},
 	}
@@ -227,18 +229,14 @@ func (b *CodexBackend) runOnce(ctx context.Context, req TurnRequest, emit func(E
 	if err != nil {
 		return usage, err
 	}
-	// Keep lifecycle RPCs alive briefly after cancellation so a turn started
-	// just before the client disconnected can still be interrupted by ID.
-	startCtx, cancelStart := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	defer cancelStart()
-	threadID, err := p.startThread(startCtx, req)
+	threadID, err := p.startThread(ctx, b.lifecycleTimeout, req)
 	if err != nil {
 		return usage, err
 	}
 	events := p.subscribe(threadID)
 	defer p.unsubscribe(threadID)
 
-	turnID, err := p.startTurn(ctx, startCtx, threadID, req.History, req.Input, req.Effort)
+	turnID, err := p.startTurn(ctx, b.lifecycleTimeout, threadID, req.History, req.Input, req.Effort)
 	if err != nil {
 		return usage, err
 	}
@@ -333,11 +331,19 @@ func (b *CodexBackend) runOnce(ctx context.Context, req TurnRequest, emit func(E
 	}
 }
 
-func (p *appServer) startThread(ctx context.Context, req TurnRequest) (string, error) {
+// lifecycleContext bounds one lifecycle RPC from the moment it is made. It stays alive briefly after cancellation
+// so a turn started just before the client disconnected can still be interrupted by ID.
+func lifecycleContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
+}
+
+func (p *appServer) startThread(ctx context.Context, timeout time.Duration, req TurnRequest) (string, error) {
+	startCtx, cancel := lifecycleContext(ctx, timeout)
+	defer cancel()
 	var result struct {
 		Thread struct{ ID string }
 	}
-	if err := p.call(ctx, "thread/start", map[string]any{
+	if err := p.call(startCtx, "thread/start", map[string]any{
 		"ephemeral": true, "cwd": p.cwd, "sandbox": "read-only", "approvalPolicy": "never",
 		"model": req.Model, "baseInstructions": baseInstructions(req.System), "dynamicTools": req.Tools,
 	}, &result); err != nil {
@@ -349,7 +355,8 @@ func (p *appServer) startThread(ctx context.Context, req TurnRequest) (string, e
 	return result.Thread.ID, nil
 }
 
-func (p *appServer) startTurn(ctx, startCtx context.Context, threadID string, history []any, input []textPart, effort string) (string, error) {
+func (p *appServer) startTurn(ctx context.Context, timeout time.Duration, threadID string, history []any, input []textPart, effort string) (string, error) {
+	// Injecting a long history can take longer than a lifecycle timeout, so it runs on the request's own context.
 	if len(history) > 0 {
 		if err := p.call(ctx, "thread/inject_items", map[string]any{"threadId": threadID, "items": history}, nil); err != nil {
 			return "", err
@@ -368,6 +375,8 @@ func (p *appServer) startTurn(ctx, startCtx context.Context, threadID string, hi
 	var result struct {
 		Turn struct{ ID string }
 	}
+	startCtx, cancel := lifecycleContext(ctx, timeout)
+	defer cancel()
 	if err := p.call(startCtx, "turn/start", params, &result); err != nil {
 		return "", err
 	}
