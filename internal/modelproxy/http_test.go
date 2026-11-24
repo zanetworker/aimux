@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -370,5 +372,25 @@ func TestMessagesRejectsOversizedBodies(t *testing.T) {
 	}
 	if res := request(NewHandler(backend, testKey), http.MethodPost, "/v1/messages", `{"messages":[{"role":"user","content":"small"}]}`); res.Code != http.StatusOK {
 		t.Fatalf("a small request failed: %d %s", res.Code, res.Body)
+	}
+}
+
+// A deadline is the proxy giving up, not the client going away: calling it "cancelled" hid a 15 second lifecycle
+// timeout for days.
+func TestClassifyFailureTellsATimeoutFromACancellation(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{nil, ""},
+		{fmt.Errorf("turn/start: %w", context.DeadlineExceeded), "timeout"},
+		{context.Canceled, "cancelled"},
+		{fmt.Errorf("read: %w", context.Canceled), "cancelled"},
+		{errors.New("codex turn failed: boom"), "turn_failed"},
+		{errors.New("something else"), "upstream_error"},
+	} {
+		if got := classifyFailure(tc.err); got != tc.want {
+			t.Errorf("classifyFailure(%v) = %q, want %q", tc.err, got, tc.want)
+		}
 	}
 }

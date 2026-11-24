@@ -3,6 +3,7 @@ package modelproxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -265,5 +266,52 @@ func TestCodexBackendWarnsOnUntestedVersion(t *testing.T) {
 				t.Fatalf("stderr %q, want %q", stderr.String(), tc.want)
 			}
 		})
+	}
+}
+
+// The lifecycle timeout bounds each lifecycle RPC on its own. Injecting a long history can take longer than that,
+// and must not use up the clock turn/start gets: in production every new conversation with a long history failed
+// after exactly 15 seconds, and each retry failed the same way.
+func TestCodexBackendStartsTurnAfterSlowHistoryInjection(t *testing.T) {
+	backend, log := newFakeBackend(t)
+	backend.lifecycleTimeout = 200 * time.Millisecond
+	t.Setenv("AIMUX_FAKE_CODEX_INJECT_DELAY_MS", "500")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	req := fakeTurn("after slow history")
+	req.History = []any{json.RawMessage(`{"type":"message","role":"user","content":[{"type":"input_text","text":"previous"}]}`)}
+	var text string
+	_, err := backend.Run(ctx, req, func(event Event) error {
+		text += event.Text
+		return nil
+	})
+	if err != nil || text != "after slow history" {
+		t.Fatalf("text %q, err %v", text, err)
+	}
+	if data := protocolLog(t, log); !strings.Contains(data, "inject t1 1") || !strings.Contains(data, "turn t1") {
+		t.Fatalf("expected the history injected and the turn started:\n%s", data)
+	}
+}
+
+// A turn/start Codex never answers still fails once its own lifecycle timeout runs out, instead of hanging.
+func TestCodexBackendTurnStartTimesOut(t *testing.T) {
+	backend, log := newFakeBackend(t)
+	backend.lifecycleTimeout = 200 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err := backend.Run(ctx, fakeTurn("no-turn-ack"), func(Event) error { return nil })
+	took := time.Since(started)
+	if !errors.Is(err, context.DeadlineExceeded) || took < 200*time.Millisecond || took > 5*time.Second {
+		t.Fatalf("err %v after %v, want a deadline after about 200ms", err, took)
+	}
+	// thread/start shares the timeout and the error, so prove the deadline came from turn/start: the fake
+	// logs a turn only once it has received one.
+	protocol, err := os.ReadFile(log) //nolint:gosec // G304: the test's own log in its temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(protocol), "turn ") {
+		t.Fatalf("the deadline came before turn/start was sent; fake log:\n%s", protocol)
 	}
 }

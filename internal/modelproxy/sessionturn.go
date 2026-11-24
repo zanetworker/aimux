@@ -14,9 +14,6 @@ func (b *CodexBackend) runSessionTurn(ctx context.Context, entry *sessionEntry, 
 	if err != nil {
 		return Usage{}, false, err
 	}
-	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	defer cancel()
-
 	history := req.History
 	thread := entry.thread
 	var continuation *toolContinuation
@@ -35,7 +32,7 @@ func (b *CodexBackend) runSessionTurn(ctx context.Context, entry *sessionEntry, 
 		}
 	}
 	if entry.thread == nil {
-		id, err := p.startThread(startCtx, req)
+		id, err := p.startThread(ctx, b.lifecycleTimeout, req)
 		if err != nil {
 			return Usage{}, false, err
 		}
@@ -45,7 +42,7 @@ func (b *CodexBackend) runSessionTurn(ctx context.Context, entry *sessionEntry, 
 	if continuation != nil {
 		err = thread.resume(ctx, continuation)
 	} else {
-		thread.turnID, err = p.startTurn(ctx, startCtx, thread.id, history, req.Input, req.Effort)
+		thread.turnID, err = p.startTurn(ctx, b.lifecycleTimeout, thread.id, history, req.Input, req.Effort)
 	}
 	if err != nil {
 		thread.close()

@@ -215,6 +215,10 @@ func main() {
 			for _, item := range p.Items {
 				logEvent(fmt.Sprintf("inject_item %s %s", p.ThreadID, item))
 			}
+			// A long history takes real Codex a while to inject.
+			if delay, err := strconv.Atoi(os.Getenv("AIMUX_FAKE_CODEX_INJECT_DELAY_MS")); err == nil {
+				time.Sleep(time.Duration(delay) * time.Millisecond)
+			}
 			respond(msg.ID, struct{}{})
 		case "turn/start":
 			var p struct {
@@ -259,6 +263,9 @@ func main() {
 			}
 			if text == "cancel-before-ack" {
 				awaitRelease(log.Name())
+			}
+			if text == "no-turn-ack" {
+				continue
 			}
 			result := func(id json.RawMessage, tid string) {
 				respond(id, map[string]any{"turn": map[string]string{"id": tid + "-turn", "status": "inProgress"}})

@@ -636,3 +636,21 @@ func TestSessionFallbackExplainsItselfInTheRequestLog(t *testing.T) {
 		t.Errorf("record lacks the request's shape: %v", last)
 	}
 }
+
+// A new session injects the whole conversation before its first turn. However long that takes, turn/start gets
+// its own lifecycle timeout.
+func TestNewSessionStartsTurnAfterSlowHistoryInjection(t *testing.T) {
+	backend, log := newFakeBackend(t)
+	backend.lifecycleTimeout = 200 * time.Millisecond
+	t.Setenv("AIMUX_FAKE_CODEX_INJECT_DELAY_MS", "500")
+	h := NewHandler(backend, testKey)
+	model, id := "codex:"+defaultModel, `{"session_id":"session-slow-history"}`
+	answer := sessionPost(t, h, model, id,
+		conversation("user", `"first"`), conversation("assistant", `"first"`), conversation("user", `"after slow history"`))
+	if len(answer.Content) != 1 || answer.Content[0].Text == nil || *answer.Content[0].Text != "after slow history" {
+		t.Fatalf("unexpected answer: %+v", answer)
+	}
+	if data := protocolLog(t, log); !strings.Contains(data, "inject t1 2") || !strings.Contains(data, "turn t1") {
+		t.Fatalf("expected the history injected and the turn started:\n%s", data)
+	}
+}
