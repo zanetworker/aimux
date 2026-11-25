@@ -54,6 +54,19 @@ Writing the line never changes the answer: it happens after the response, and a 
 
 The request history and `aimux model proxy stats` are unchanged.
 
+## Codex alone, in one line
+
+```bash
+lines="$(aimux model proxy env --codex)" && eval "$lines"             # codex:gpt-6.2-sol
+lines="$(aimux model proxy env --codex gpt-6.2-astra)" && eval "$lines"
+```
+
+With `--codex` the shell is set for Codex alone, the way the proxy has been used from the start: the proxy's address, the proxy key as the API key, and the model pinned to `codex:<model>`. No Claude login is involved, and the proxy needs no `--anthropic`. The listener is still asked to prove it holds the key before anything is printed. A shell function that did this by hand can become that one line. When `AIMUX_MODEL_PROXY_PORT` is set in the shell, it stands in for `--port`, so a function that pointed at the dev channel that way still does.
+
+`aimux model proxy env --off` undoes either form; in a script, run it as `lines="$(aimux model proxy env --off)" && eval "$lines"`, since it can fail and print nothing. Going from the Codex form to the two-engine form also drops the model the Codex form pinned. Each form leaves a marker in the shell (`AIMUX_MODEL_PROXY_ENV`) saying which one set it, so undoing does not depend on reading the proxy key again. It always unsets the base URL and the marker. After the Codex form it also unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`, which that form set. After the two-engine form it leaves both alone, so a key or a model of your own stays. In a shell set by hand, with no marker, it unsets `ANTHROPIC_API_KEY` only when that is the proxy key; if it cannot read the key to tell, it prints nothing and says what to unset yourself.
+
+The command sets nothing about telemetry: whether Claude Code reports to the collector, and with it whether prompts are logged there, stays a choice made in your own shell setup.
+
 ## A second engine: Anthropic
 
 `aimux model proxy serve --anthropic` adds a second engine. It is off unless the flag is given, and with it off nothing below applies.
@@ -89,13 +102,13 @@ claude --model codex:gpt-6.2-sol           # answered by Codex
 eval "$(aimux model proxy env --off)"      # back to Anthropic directly
 ```
 
-`aimux model proxy env` prints two lines for the shell: it sets `ANTHROPIC_BASE_URL` to the proxy's address with the key as its prefix, and unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so Claude Code uses your Claude login. It says nothing about the model; a session uses whatever model you give it. Sessions started from that shell, and the sessions they start, go through the proxy. Other shells are untouched.
+`aimux model proxy env` prints a few lines for the shell: it sets `ANTHROPIC_BASE_URL` to the proxy's address with the key as its prefix, unsets `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` so Claude Code uses your Claude login, and leaves a marker saying it did. It says nothing about the model; a session uses whatever model you give it. Sessions started from that shell, and the sessions they start, go through the proxy. Other shells are untouched.
 
 The first line is written in two steps on purpose. `eval "$(aimux model proxy env)"` also works, but when the command fails it prints nothing, `eval` of nothing succeeds, and the next `claude` would run outside the proxy without saying so. With `&&` a failure stops there.
 
 The output holds the proxy key. The command refuses to print it to a terminal, and a shell with tracing on (`set -x`) would print the line as it runs it, so turn tracing off first.
 
-Before it prints anything, the command checks what is listening on the port, because a session pointed there will send it the key, your Claude login and every conversation. It sends a random challenge to the keyless `GET /healthz` and accepts only an answer signed with the proxy key and the port it was asked on (`proof`), which another program on that port cannot produce, even by passing the question on to the real proxy elsewhere; the key itself is not sent. The check is made once, when the command runs. The same answer lists the proxy's `engines`. It prints nothing, and fails, when nothing proves to be the proxy, when the proxy was started without `--anthropic`, or when the shell is set for another provider (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`), which would make Claude Code ignore the base URL. `--off` prints the line that unsets `ANTHROPIC_BASE_URL`, the one variable that held the key, and needs no running proxy.
+Before it prints anything, the command checks what is listening on the port, because a session pointed there will send it the key, your Claude login and every conversation. It sends a random challenge to the keyless `GET /healthz` and accepts only an answer signed with the proxy key and the port it was asked on (`proof`), which another program on that port cannot produce, even by passing the question on to the real proxy elsewhere; the key itself is not sent. The check is made once, when the command runs. The same answer lists the proxy's `engines`. It prints nothing, and fails, when nothing proves to be the proxy, when the proxy was started without `--anthropic` (which this two-engine form needs, and the Codex form below does not), or when the shell is set for another provider (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`), which would make Claude Code ignore the base URL. `--off`, described below, needs no running proxy.
 
 Other paths Claude Code calls are forwarded to Anthropic when the request carries a login. One request without a login is also sent on: Claude Code opens every session with `HEAD /api/hello`, and from a session that presents the key in its base URL the proxy asks Anthropic the same, so its connection there is open before the first prompt. That is a request of the proxy's own, carrying the client's name and nothing else the caller sent, and it waits at most five seconds; after that the session gets the answer it got before. A request with the key in a header and no login is not found, as before.
 
