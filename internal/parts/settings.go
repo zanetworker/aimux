@@ -2,6 +2,7 @@ package parts
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -121,6 +122,47 @@ func (p PartSettings) Engine(name string) EngineView {
 		}
 	}
 	return view
+}
+
+// ProxyArgs is what the inference proxy's settings add to its start command, in a fixed order, so the same
+// settings always give the same job. Only what the file states is here: a setting left out adds nothing, and
+// the job keeps what it has. A key is handed over as its reference, never as the key.
+func (p PartSettings) ProxyArgs() []string {
+	var args []string
+	if p.Port != 0 {
+		args = append(args, "--port", strconv.Itoa(p.Port))
+	}
+	if codex, ok := p.Engines[EngineCodex]; ok {
+		if codex.ServiceTier != "" {
+			args = append(args, "--service-tier", codex.ServiceTier)
+		}
+		if codex.Binary != "" {
+			args = append(args, "--codex-command", codex.Binary)
+		}
+	}
+	if p.Engine(EngineAnthropic).On {
+		args = append(args, "--anthropic")
+	}
+	names := make([]string, 0, len(p.Engines))
+	for name := range p.Engines {
+		if name != EngineCodex && name != EngineAnthropic {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		engine := p.Engine(name)
+		if !engine.On {
+			continue
+		}
+		args = append(args, "--messages-upstream", name+"="+engine.URL)
+		if stated := p.Engines[name].Key; stated != nil {
+			if reference, err := json.Marshal(stated); err == nil {
+				args = append(args, "--messages-upstream-key", name+"="+string(reference))
+			}
+		}
+	}
+	return args
 }
 
 // Load reads the parts section of the config file at path. A missing file or section is the zero value. An

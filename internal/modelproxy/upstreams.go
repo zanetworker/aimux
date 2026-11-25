@@ -23,6 +23,7 @@ type namedUpstream struct {
 	name   string
 	engine *anthropicEngine
 	key    func(context.Context) (string, error)
+	keyAt  string // where the key is kept, in words
 
 	mu     sync.Mutex
 	cached string
@@ -39,7 +40,10 @@ var errUpstreamNeedsProxyKey = errors.New(`this model is paid for with the owner
 
 // WithMessagesUpstream adds a named upstream at address, a bare origin. key reads its key when a request needs
 // it; the proxy keeps it for a minute at most and writes it nowhere.
-func WithMessagesUpstream(name, address string, key func(context.Context) (string, error)) (HandlerOption, error) {
+//
+// keyAt says where the key is kept, in words for the owner ("the environment variable X"); empty means the
+// secret-store entry <name>-key. It is what an error names, so the owner knows what to check.
+func WithMessagesUpstream(name, address string, key func(context.Context) (string, error), keyAt string) (HandlerOption, error) {
 	if !upstreamName.MatchString(name) || name == engineCodex || name == engineAnthropic {
 		return nil, fmt.Errorf("upstream name %q: use lower-case letters, digits and hyphens, starting with a letter, and not %s or %s", name, engineCodex, engineAnthropic)
 	}
@@ -51,13 +55,16 @@ func WithMessagesUpstream(name, address string, key func(context.Context) (strin
 		// The owner's key and every conversation go there.
 		return nil, fmt.Errorf("upstream %s: an address on another machine has to be https", name)
 	}
-	engine.refusalNote = fmt.Sprintf("the upstream %s refused the proxy's key for it; check the secret-store entry %s-key", name, name)
+	if keyAt == "" {
+		keyAt = "the secret-store entry " + name + "-key"
+	}
+	engine.refusalNote = fmt.Sprintf("the upstream %s refused the proxy's key for it; check %s", name, keyAt)
 	return func(c *handlerConfig) {
 		if c.upstreams == nil {
 			c.upstreams = map[string]*namedUpstream{}
 		}
 		own := *engine // a handler sets its own proxy key on its engines
-		c.upstreams[name] = &namedUpstream{name: name, engine: &own, key: key}
+		c.upstreams[name] = &namedUpstream{name: name, engine: &own, key: key, keyAt: keyAt}
 	}, nil
 }
 
@@ -72,15 +79,20 @@ func (c *handlerConfig) upstreamNames() []string {
 }
 
 // namedModel splits a model name of the form <name>:<model> for one of the configured names. A name with no
-// prefix, a codex: name, and any name when nothing is configured are not named models: name is empty. A prefix
-// nobody knows is an error that says which there are.
+// prefix and a codex: name are not named models: name is empty. A prefix nobody knows is an error that says
+// which there are, whether or not any upstream is configured.
 func namedModel(model string, names []string) (name, rest string, err error) {
 	prefix, rest, found := strings.Cut(model, ":")
-	if !found || prefix == engineCodex || len(names) == 0 {
+	if !found || prefix == engineCodex {
 		return "", "", nil
 	}
 	if !slices.Contains(names, prefix) {
-		return "", "", fmt.Errorf("no engine is called %q here; a model can be named plainly, as codex:<model>, or as <name>:<model> for one of: %s", cutID(prefix), strings.Join(names, ", "))
+		// Never another engine's to answer: a name that was not added, or is switched off, is said to be so.
+		others := "no other engine is on"
+		if len(names) > 0 {
+			others = "or as <name>:<model> for one of: " + strings.Join(names, ", ")
+		}
+		return "", "", fmt.Errorf("no engine called %q is on here; a model can be named plainly, as codex:<model>, %s", cutID(prefix), others)
 	}
 	if rest == "" {
 		return "", "", fmt.Errorf("the model name gives the upstream %s and no model after it", prefix)
@@ -162,7 +174,7 @@ var upstreamHeaders = []string{"Accept", "Accept-Encoding", "Anthropic-Beta", "A
 func serveNamedUpstream(w http.ResponseWriter, r *http.Request, carried credentials, path string, config *handlerConfig) bool {
 	message := r.Method == http.MethodPost && r.URL.Path == "/v1/messages"
 	counting := r.Method == http.MethodPost && r.URL.Path == "/v1/messages/count_tokens"
-	if len(config.upstreams) == 0 || (!message && !counting) {
+	if !message && !counting {
 		return false
 	}
 	answerable := carried.proxyKey || (carried.own && config.anthropic != nil)
@@ -175,9 +187,12 @@ func serveNamedUpstream(w http.ResponseWriter, r *http.Request, carried credenti
 	if !ok {
 		return true
 	}
-	var request messageRequest
-	_ = json.Unmarshal(body, &request)
-	name, model, err := namedModel(request.Model, config.upstreamNames())
+	// Only the model's name is read here. Every model call passes this point, and most name no upstream.
+	var named struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &named)
+	name, model, err := namedModel(named.Model, config.upstreamNames())
 	switch {
 	case err != nil:
 		writeError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
@@ -189,6 +204,8 @@ func serveNamedUpstream(w http.ResponseWriter, r *http.Request, carried credenti
 		writeError(w, http.StatusUnauthorized, "authentication_error", errUpstreamNeedsProxyKey.Error())
 		return true
 	}
+	var request messageRequest
+	_ = json.Unmarshal(body, &request)
 	upstream := config.upstreams[name]
 	renamed, ok := renameModel(body, model)
 	if !ok || upstream.engine.holdsProxyKey(path) || upstream.engine.holdsProxyKey(r.URL.RawQuery) {
@@ -198,7 +215,7 @@ func serveNamedUpstream(w http.ResponseWriter, r *http.Request, carried credenti
 	key, err := upstream.keyNow(r.Context())
 	if err != nil {
 		// What went wrong reading it may name files and accounts; the client is told which entry is wanted.
-		writeError(w, http.StatusBadGateway, "api_error", fmt.Sprintf("the proxy has no key for %s: its secret-store entry %s-key is missing or cannot be read", name, name))
+		writeError(w, http.StatusBadGateway, "api_error", fmt.Sprintf("the proxy has no key for %s: %s is missing or cannot be read", name, upstream.keyAt))
 		return true
 	}
 	out := r.Clone(r.Context())

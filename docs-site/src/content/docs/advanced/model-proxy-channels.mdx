@@ -65,8 +65,9 @@ With it on, the proxy decides who answers from two things a request carries, nev
 | a `codex:` model | the proxy key | Codex |
 | a `codex:` model | no proxy key | nobody: 401, with the command that starts a session with the key |
 | a `<name>:` model of a named upstream (below) | the proxy key | that upstream; this row is checked first |
-| any other model | the caller's own Claude login | Anthropic |
-| any other model | the proxy key and no login | Codex, as before: the default Codex model answers |
+| a plain model name, with no prefix | the caller's own Claude login | Anthropic |
+| a plain model name, with no prefix | the proxy key and no login | Codex, as before: the default Codex model answers |
+| any other `<prefix>:` | anything | nobody: 400, saying no engine of that name is on and listing what there is |
 
 A request to Anthropic is sent to `https://api.anthropic.com` and nowhere else, with its body unchanged, and the answer comes back unchanged. The caller's login travels in `Authorization` as Claude Code sent it; the proxy does not keep it, log it or write it to the ledger. The proxy key is removed before the request leaves, so Anthropic never sees it. Redirects are not followed.
 
@@ -114,13 +115,15 @@ claude --model enmaas:claude-opus-5-5      # from a shell pointed at the proxy
 `--messages-upstream name=address` adds an engine of that name; the flag can be given more than once, and it does not need `--anthropic`. A request that names a model as `<name>:<model>` and carries the proxy key is sent to that address:
 
 - The model's name loses its prefix, and nothing else in the request body changes.
-- The key for the upstream is read from the secret-store entry `<name>-key` (on macOS, a Keychain item with that service name) and sent as `x-api-key`. The proxy keeps it for a minute at most, reads it again when the upstream refuses it, and writes it nowhere.
+- The key for the upstream is read from where it is kept, by default the secret-store entry `<name>-key` (on macOS, a Keychain item with that service name), and sent as `x-api-key`. The proxy keeps it for a minute at most, reads it again when the upstream refuses it, and writes it nowhere.
 - None of the caller's credentials go there: not the Claude login, not the proxy key, no cookie. Only the headers that say how to read the request and the answer are sent.
 - The proxy key is required, as for Codex: the upstream is paid for with the owner's key. A Claude login alone does not open it, with or without `--anthropic`.
 
 An address on another machine has to be `https`. A session reaches a named upstream from a shell pointed at the proxy with `aimux model proxy env`, which needs `--anthropic`; a proxy started without it is used as for Codex alone, with the proxy's address as the base URL and the proxy key as the API key.
 
-A missing key entry is a 502 that names the entry, and nothing is sent. When the upstream refuses the key, the caller gets a 502 that names the entry too, in the proxy's words: the upstream's own answer is not passed on, since it may repeat the key. For the same reason any other error from the upstream is read before it is passed on, and replaced when it holds the key; and a redirect from the upstream is answered with a 502, so no session is sent to an address nobody configured. The same name cannot be given twice. A prefix that is neither `codex` nor a configured name is a 400 that lists the names there are. The ledger line has the upstream's name as `aimux.engine`, the model as the client named it, and the model the upstream said answered. `/healthz` lists the name among `engines`.
+A key that is missing is a 502 that names where it was looked for (the entry `<name>-key` by default, or what `--messages-upstream-key` gave), and nothing is sent. When the upstream refuses the key, the caller gets a 502 that names where the key is kept too, in the proxy's words: the upstream's own answer is not passed on, since it may repeat the key. For the same reason any other error from the upstream is read before it is passed on, and replaced when it holds the key; and a redirect from the upstream is answered with a 502, so no session is sent to an address nobody configured. The same name cannot be given twice. A model named with a prefix that is neither `codex` nor an upstream that is on is a 400 that says so and lists what there is. That holds with no upstream configured at all, and with or without `--anthropic`: `lab:some-model` is never quietly answered by Codex or passed to Anthropic.
+
+The key is read from the entry `<name>-key` unless `--messages-upstream-key name=<reference>` says where else it is kept. The reference is JSON in the form the config file uses, such as `enmaas={"env":{"name":"ENMAAS_KEY"}}`, a Keychain item, a file or a command; it is never the key, and a key pasted there by mistake is refused without being repeated. The ledger line has the upstream's name as `aimux.engine`, the model as the client named it, and the model the upstream said answered. `/healthz` lists the name among `engines`.
 
 ## Speed
 

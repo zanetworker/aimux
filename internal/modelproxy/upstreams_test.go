@@ -40,9 +40,14 @@ func TestNamedModel(t *testing.T) {
 			t.Errorf("the error for an unknown prefix should name the ones there are: %v", err)
 		}
 	}
-	// With no named upstream, a prefix nobody knows is left for the engines to answer, as before.
-	if name, _, err := namedModel("other:x", nil); name != "" || err != nil {
+	// With no named upstream at all, a prefix nobody knows is still refused: it is never another engine's to answer.
+	if name, _, err := namedModel("other:x", nil); name != "" || err == nil || !strings.Contains(err.Error(), "codex:") {
 		t.Errorf("no upstreams: %q, %v", name, err)
+	}
+	for _, model := range []string{"codex:gpt-6.2-sol", "claude-sonnet-5-5", ""} {
+		if name, _, err := namedModel(model, nil); name != "" || err != nil {
+			t.Errorf("no upstreams, %q: %q, %v", model, name, err)
+		}
 	}
 }
 
@@ -101,7 +106,7 @@ func newGatewayProxy(t *testing.T, key func(context.Context) (string, error)) ga
 	if err != nil {
 		t.Fatal(err)
 	}
-	named, err := WithMessagesUpstream("enmaas", gateway.URL, key)
+	named, err := WithMessagesUpstream("enmaas", gateway.URL, key, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +122,7 @@ func TestWithMessagesUpstream_RefusesBadNamesAndAddresses(t *testing.T) {
 		{"En Maas", "https://gw.example"}, {"a:b", "https://gw.example"}, {"enmaas", "gw.example"}, {"enmaas", "https://gw.example/v1"},
 		{"enmaas", "http://gw.example"}, {"enmaas", "http://10.0.0.5:8080"},
 	} {
-		if _, err := WithMessagesUpstream(tc.name, tc.url, gatewayKey); err == nil {
+		if _, err := WithMessagesUpstream(tc.name, tc.url, gatewayKey, ""); err == nil {
 			t.Errorf("WithMessagesUpstream(%q, %q) = nil error", tc.name, tc.url)
 		}
 	}
@@ -221,7 +226,7 @@ func TestHandler_NamedUpstreamWithoutTheAnthropicEngine(t *testing.T) {
 		w.Header().Set("Content-Type", jsonType)
 		_, _ = w.Write(anthropicFixture(t, "message.json"))
 	})
-	named, err := WithMessagesUpstream("enmaas", gateway.URL, gatewayKey)
+	named, err := WithMessagesUpstream("enmaas", gateway.URL, gatewayKey, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +262,7 @@ func TestHandler_NamedUpstreamWithoutTheAnthropicEngine(t *testing.T) {
 
 func TestWithMessagesUpstream_PlainHTTPOnlyOnThisMachine(t *testing.T) {
 	for _, address := range []string{"https://gw.example", "http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080"} {
-		if _, err := WithMessagesUpstream("enmaas", address, gatewayKey); err != nil {
+		if _, err := WithMessagesUpstream("enmaas", address, gatewayKey, ""); err != nil {
 			t.Errorf("WithMessagesUpstream(%q) = %v", address, err)
 		}
 	}
@@ -274,7 +279,7 @@ func TestHandler_NamedUpstreamRefusalIsNotPassedOn(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"invalid key ` + r.Header.Get("X-Api-Key") + `"}`)) //nolint:gosec // G705: a stand-in that repeats the key on purpose
 	})
 	reads := 0
-	named, err := WithMessagesUpstream("enmaas", gateway.URL, func(context.Context) (string, error) { reads++; return upstreamKey, nil })
+	named, err := WithMessagesUpstream("enmaas", gateway.URL, func(context.Context) (string, error) { reads++; return upstreamKey, nil }, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +308,7 @@ func TestHandler_NamedUpstreamRefusalIsNotPassedOn(t *testing.T) {
 
 func TestHandler_NamedUpstreamAloneRefusesALoginBeforeReadingIt(t *testing.T) {
 	gateway, seen := anthropicStandIn(t, func(w http.ResponseWriter, r *http.Request) {})
-	named, err := WithMessagesUpstream("enmaas", gateway.URL, gatewayKey)
+	named, err := WithMessagesUpstream("enmaas", gateway.URL, gatewayKey, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +364,7 @@ func TestHandler_NamedUpstreamAnswersThatAreNotPassedOn(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			gateway, _ := anthropicStandIn(t, tc.answer)
-			named, err := WithMessagesUpstream("enmaas", gateway.URL, gatewayKey)
+			named, err := WithMessagesUpstream("enmaas", gateway.URL, gatewayKey, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -382,5 +387,63 @@ func TestHandler_NamedUpstreamAnswersThatAreNotPassedOn(t *testing.T) {
 				t.Errorf("the gateway's key came back to the caller")
 			}
 		})
+	}
+}
+
+// A name that is not an engine here, because it was never added or because it is switched off, is refused. It
+// is not answered by Codex or passed to Anthropic as if it were a model of theirs.
+func TestHandler_AnEngineNameNobodyKnowsIsRefused(t *testing.T) {
+	both := map[string]string{"x-api-key": testKey, "Authorization": callersLogin}
+	for name, tc := range map[string]struct {
+		headers map[string]string
+		model   string
+		want    int
+	}{
+		"the key only":           {map[string]string{"x-api-key": testKey}, "lab:some-model", http.StatusBadRequest},
+		"a login only":           {map[string]string{"Authorization": callersLogin}, "lab:some-model", http.StatusBadRequest},
+		"both":                   {both, "lab:some-model", http.StatusBadRequest},
+		"nothing at all":         {nil, "lab:some-model", http.StatusUnauthorized},
+		"codex is still codex":   {both, "codex:gpt-6.2-sol", http.StatusOK},
+		"a plain model is plain": {both, "claude-sonnet-5-5", http.StatusOK},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newTwoEngines(t) // no named upstream is configured
+			res := p.send(t, "/v1/messages", tc.model, "0b61f1d5-unknown", "hello", tc.headers)
+			if res.Code != tc.want {
+				t.Fatalf("HTTP %d: %s", res.Code, res.Body)
+			}
+			if tc.want == http.StatusBadRequest {
+				if len(p.anthropic()) != 0 || p.codexStarted() || len(p.lines(t)) != 0 {
+					t.Errorf("a refused name reached an engine or the ledger: Anthropic %d, Codex started %v, lines %d", len(p.anthropic()), p.codexStarted(), len(p.lines(t)))
+				}
+				if !strings.Contains(res.Body.String(), "lab") || !strings.Contains(res.Body.String(), "codex:") {
+					t.Errorf("the refusal should name what was asked and what there is: %s", res.Body)
+				}
+			}
+		})
+	}
+	// Without the Anthropic engine too: the proxy as it has always run.
+	plain := newLedgerProxy(t)
+	if res := plain.call(t, "lab:some-model", "", "hello", nil); res.Code != http.StatusBadRequest {
+		t.Errorf("the proxy with Codex alone: HTTP %d: %s", res.Code, res.Body)
+	}
+	if res := plain.call(t, "claude-sonnet-5-5", "", "hello", nil); res.Code != http.StatusOK {
+		t.Errorf("a plain model on the proxy with Codex alone: HTTP %d", res.Code)
+	}
+}
+
+func TestHandler_MissingUpstreamKeySaysWhereItIsKept(t *testing.T) {
+	gateway, seen := anthropicStandIn(t, func(w http.ResponseWriter, r *http.Request) {})
+	named, err := WithMessagesUpstream("enmaas", gateway.URL, func(context.Context) (string, error) { return "", errors.New("not there") }, "the environment variable ENMAAS_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, _ := newFakeBackend(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"enmaas:m1","messages":[]}`))
+	req.Header.Set("x-api-key", testKey)
+	res := httptest.NewRecorder()
+	NewHandler(backend, testKey, named).ServeHTTP(res, req)
+	if res.Code != http.StatusBadGateway || !strings.Contains(res.Body.String(), "the environment variable ENMAAS_KEY") || len(seen()) != 0 {
+		t.Fatalf("HTTP %d: %s", res.Code, res.Body)
 	}
 }
